@@ -74,6 +74,25 @@ class SkillCategory(str, Enum):
     CUSTOM   = "custom"     # 用户自定义录制的技能
 
 
+class SkillNature(str, Enum):
+    """
+    Skill 的本质类型，用于区分「模型原生能力提示」与「真实领域技能」。
+
+    model_hint   : 通过 prompt 激活模型自身已有的能力，属于输出行为/风格调整。
+                   例如步骤化输出、精简模式、严谨模式、创意写作风格等。
+                   特征：关掉这个 Skill 模型也能做到，只是不那么刻意。
+
+    domain_skill : 提供模型通常不会主动套用的专有框架、模板或领域规则。
+                   例如学术批注、合同审阅、调试分析、邮件撰写规范等。
+                   特征：Skill 注入的是特定领域的专业知识，而不只是行为偏好。
+
+    system       : 系统级功能（记忆、工具调用等），非对话内容生成类。
+    """
+    MODEL_HINT   = "model_hint"    # 模型原生能力激活/调整
+    DOMAIN_SKILL = "domain_skill"  # 真实领域专项技能
+    SYSTEM       = "system"        # 系统功能
+
+
 class VariableType(str, Enum):
     STRING  = "string"
     INTEGER = "integer"
@@ -234,6 +253,10 @@ class SkillDefinition:
     category: SkillCategory | str
     description: str
 
+    # ── 技能本质类型 ──────────────────────────────────────────────────────────
+    # 区分「模型原生能力提示」与「真实领域技能」，用于 UI 分组和用户认知
+    skill_nature: SkillNature | str = SkillNature.DOMAIN_SKILL
+
     # ── 新增：意图 & Prompt 模板 ─────────────────────────────────────────────
     intent_description: str = ""
     system_prompt_template: str = ""
@@ -376,6 +399,11 @@ class SkillDefinition:
                 if isinstance(self.category, SkillCategory)
                 else self.category
             ),
+            "skill_nature": (
+                self.skill_nature.value
+                if isinstance(self.skill_nature, SkillNature)
+                else self.skill_nature
+            ),
             "description": self.description,
             "intent_description": self.intent_description,
             "system_prompt_template": self.system_prompt_template,
@@ -454,6 +482,7 @@ class SkillDefinition:
             name=data["name"],
             icon=data.get("icon", "🔧"),
             category=data.get("category", SkillCategory.CUSTOM),
+            skill_nature=data.get("skill_nature", SkillNature.DOMAIN_SKILL),
             description=data.get("description", ""),
             intent_description=data.get("intent_description", ""),
             system_prompt_template=data.get("system_prompt_template", ""),
@@ -491,6 +520,7 @@ class SkillDefinition:
             name=legacy["name"],
             icon=legacy.get("icon", "🔧"),
             category=legacy.get("category", SkillCategory.BEHAVIOR),
+            skill_nature=legacy.get("skill_nature", SkillNature.DOMAIN_SKILL),
             description=legacy.get("description", ""),
             intent_description=legacy.get("intent_description", ""),
             system_prompt_template=legacy.get("system_prompt_template", ""),

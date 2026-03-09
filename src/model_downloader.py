@@ -24,8 +24,8 @@ from typing import Optional, Dict, List, Tuple
 if getattr(sys, "frozen", False):
     APP_ROOT = Path(sys.executable).parent
 else:
-    # model_downloader.py 位于 src/ 子目录
-    APP_ROOT = Path(__file__).parent.parent
+    here = Path(__file__).resolve().parent
+    APP_ROOT = here.parent if here.name == "src" else here
 
 SETUP_FLAG = APP_ROOT / "config" / "model_setup_done.json"
 
@@ -445,7 +445,7 @@ def run_downloader_gui(on_complete=None):
              bg=BG, fg=ACCENT).pack(anchor="w", pady=(0, 6))
 
     log_box = scrolledtext.ScrolledText(right, height=18, bg=CARD, fg=TEXT,
-                                         font=("Consolas", 8.5), relief="flat",
+                                         font=("Consolas", 9), relief="flat",
                                          state="disabled", wrap="word")
     log_box.pack(fill="both", expand=True, pady=(0, 10))
 

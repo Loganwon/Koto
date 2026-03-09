@@ -591,7 +591,7 @@ class DocumentFeedbackSystem:
                 config=types.GenerateContentConfig(**_cfg_kwargs),
             )
 
-        def _call_with_timeout(contents: str, timeout_seconds: int = 120):
+        def _call_with_timeout(contents: str, timeout_seconds: int = 240):
             import threading
             result_holder = {"response": None, "error": None}
 
@@ -648,7 +648,13 @@ class DocumentFeedbackSystem:
 
             for retry in range(max_retries):
                 try:
-                    response, err = _call_with_timeout(prompt)  # 使用默认180秒超时
+                    # 断线重试：首次立即，后续等待 3s / 6s 再试
+                    if retry > 0:
+                        _wait = 3 * retry
+                        print(f"[DocumentFeedback] ⏳ 等待{_wait}s后重试 (第{retry+1}/{max_retries}次)...")
+                        import time as _time_mod
+                        _time_mod.sleep(_wait)
+                    response, err = _call_with_timeout(prompt)  # 默认180秒超时
                     if err:
                         raise err
                     if response and response.text:
@@ -707,6 +713,16 @@ class DocumentFeedbackSystem:
                             ann["_koto_fallback_error"] = error_msg
                             ann["_koto_503"] = True  # 通知外层需要切换模型
                         return fallback
+                    # 断线/连接重置：值得重试，不降级到兜底
+                    _is_disconnect = ("Server disconnected" in error_msg
+                                      or "Connection reset" in error_msg
+                                      or "EOF occurred" in error_msg
+                                      or "ConnectionError" in error_msg
+                                      or "RemoteDisconnected" in error_msg
+                                      or "without sending a response" in error_msg)
+                    if _is_disconnect and retry < max_retries - 1:
+                        print(f"[DocumentFeedback] 🔌 第{chunk_index}段连接断开，将重试: {error_msg[:80]}")
+                        continue
                     if retry < max_retries - 1:
                         print(f"[DocumentFeedback] ⚠️ 第{chunk_index}段第{round_idx}轮失败，准备重试: {error_msg}")
                         continue
@@ -1105,106 +1121,9 @@ class DocumentFeedbackSystem:
                     if isinstance(anno, dict):
                         annotations.append(anno)
         
-        # ==================== 新增：优化策略12：图标和特殊符号优化 ====================
-        # 识别图标和特殊字符，提供优化建议
-        icon_patterns = [
-            # ●、• 等圆点符号
-            (r'[●○◆◇■□▪▫•][\s]*([^\n]{1,30})', lambda m, t: {
-                "原文片段": m.group(0)[:20],
-                "修改建议": "统一列表符号",
-                "修改后文本": f"• {m.group(1)}",
-                "理由": "建议使用统一的列表符号'•'，提升文档一致性"
-            }),
-            # → ← ↑ ↓ 等箭头符号
-            (r'[→←↑↓⇒⇐⇑⇓➔➜][\s]*([^\n]{1,30})', lambda m, t: {
-                "原文片段": m.group(0)[:20],
-                "修改建议": "优化箭头表达",
-                "修改后文本": f"→ {m.group(1)}" if m.group(0)[0] in '→⇒➔➜' else f"← {m.group(1)}",
-                "理由": "统一箭头符号样式，建议使用'→'或用文字表达"
-            }),
-            # ★ ☆ 等星号符号
-            (r'[★☆✓✔✕✖✗✘][\s]*([^\n]{1,30})', lambda m, t: {
-                "原文片段": m.group(0)[:20],
-                "修改建议": "规范特殊标记",
-                "修改后文本": f"✓ {m.group(1)}" if m.group(0)[0] in '★☆✓✔' else f"✗ {m.group(1)}",
-                "理由": "使用标准符号，提升可读性"
-            }),
-            # 数字序号后跟内容，但格式不规范
-            (r'(\d+)[\\.、。\s]{0,2}([^\n]{5,30})', lambda m, t: {
-                "原文片段": m.group(0)[:20],
-                "修改建议": "规范序号格式",
-                "修改后文本": f"{m.group(1)}. {m.group(2).strip()}",
-                "理由": "统一使用'数字.'的序号格式"
-            }),
-        ]
-        for pattern, suggest_func in icon_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)[:20]
-                if 2 <= len(text) <= 20:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
-        
-        # ==================== 新增：优化策略13：中英文混排优化 ====================
-        # 识别中英文混排，检查空格和格式
-        mixed_patterns = [
-            # 中文+英文无空格
-            (r'([\u4e00-\u9fa5])([A-Za-z]{2,})', lambda m, t: {
-                "原文片段": m.group(0),
-                "修改建议": "中英文间加空格",
-                "修改后文本": f"{m.group(1)} {m.group(2)}",
-                "理由": "中英文混排时建议加空格，提升可读性"
-            }),
-            # 英文+中文无空格
-            (r'([A-Za-z]{2,})([\u4e00-\u9fa5])', lambda m, t: {
-                "原文片段": m.group(0),
-                "修改建议": "中英文间加空格",
-                "修改后文本": f"{m.group(1)} {m.group(2)}",
-                "理由": "中英文混排时建议加空格，提升可读性"
-            }),
-            # 中文+数字无空格（某些情况）
-            (r'([\u4e00-\u9fa5])(\d{2,}[A-Za-z%]+)', lambda m, t: {
-                "原文片段": m.group(0),
-                "修改建议": "数字单位前加空格",
-                "修改后文本": f"{m.group(1)} {m.group(2)}",
-                "理由": "中文与带单位数字间建议加空格"
-            }),
-        ]
-        for pattern, suggest_func in mixed_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 2 <= len(text) <= 15:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
-        
-        # ==================== 新增：优化策略14：格式变化检测 ====================
-        # 检测HTML标记（从增强的提取中来的）
-        format_patterns = [
-            # <b>xxx</b> 粗体标记
-            (r'<b>([^<]{2,20})</b>', lambda m, t: {
-                "原文片段": m.group(1),
-                "修改建议": "检查粗体使用",
-                "修改后文本": m.group(1),
-                "理由": "此处使用了粗体强调，请确认是否必要"
-            }),
-            # <i>xxx</i> 斜体标记
-            (r'<i>([^<]{2,20})</i>', lambda m, t: {
-                "原文片段": m.group(1),
-                "修改建议": "检查斜体使用",
-                "修改后文本": m.group(1),
-                "理由": "此处使用了斜体，确认是否符合文档规范"
-            }),
-        ]
-        for pattern, suggest_func in format_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(1) if m.lastindex >= 1 else m.group(0)
-                if 2 <= len(text) <= 20:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
-        
         # ==================== 去重+均匀分布 ====================
+        # 注：策略12（图标符号）、策略13（中英文混排空格）、策略14（格式标记）
+        # 已移除——这些属于纯排版格式问题，不应通过内容批注处理。
         # 按策略分组统计，确保各类都有代表
         unique_annos = {}  # {原文片段: 完整标注}
         for anno in annotations:
@@ -1276,14 +1195,46 @@ class DocumentFeedbackSystem:
         formatted_content = self.reader.format_for_ai(doc_data)
         total_length = len(formatted_content)
         
-        # 如果文档不大，直接使用标准方法
+        # 剥离文档元数据头（# 文档分析 ... ## 文档内容...）避免头部占据第一个chunk导致AI无法集中标注正文
+        _content_marker = "## 文档内容"
+        _cpos = formatted_content.find(_content_marker)
+        if _cpos != -1:
+            _cend = formatted_content.find("\n", _cpos)
+            content_for_chunking = formatted_content[_cend + 1:].lstrip("\n")
+        else:
+            content_for_chunking = formatted_content
+
+        # 如果文档不大（含头部信息后仍在阈值内），直接单段AI标注（避免多段时连接不稳定导致部分失败）
         if total_length <= chunk_size:
-            print(f"[DocumentFeedback] 📄 文档较小({total_length}字符)，使用标准处理")
-            return self.analyze_for_annotation(file_path, user_requirement, effective_model_id)
+            print(f"[DocumentFeedback] 📄 文档较小({total_length}字符)，单段AI标注")
+            selected_model, _ = self._select_best_model(effective_model_id)
+            raw_annotations = self._analyze_chunk_for_annotations(
+                chunk=formatted_content,  # 用完整格式化文本（含元数据头），与老多段路径 chunk1 行为一致
+                doc_type=doc_data.get("type"),
+                user_requirement=user_requirement,
+                model_id=selected_model,
+                chunk_index=1,
+                total_chunks=1,
+                full_doc_context=formatted_content,
+                max_retries=2  # 单段只重试一次（总计2次），配合240s超时保证成功率
+            )
+            anno_list = [a for a in (raw_annotations or []) if not a.get("_koto_fallback_error")]
+            return {
+                "success": True,
+                "file_path": file_path,
+                "annotations": anno_list,
+                "summary": f"单段AI标注，生成{len(anno_list)}条修改建议",
+                "annotation_count": len(anno_list),
+                "chunks_processed": 1,
+                "fallback_used": False,
+                "fallback_chunk_count": 0,
+                "ai_chunk_count": 1,
+                "last_api_error": "",
+            }
 
         # 分段处理（按段落切分，保证不打断句子）
         print(f"[DocumentFeedback] 📚 文档较大({total_length}字符)，分段处理")
-        chunks = self._split_into_chunks_by_paragraphs(formatted_content, chunk_size)
+        chunks = self._split_into_chunks_by_paragraphs(content_for_chunking, chunk_size)
         
         # AI禁用时，对每个chunk应用本地兜底
         if os.getenv("KOTO_DISABLE_AI") == "1":
@@ -1512,12 +1463,13 @@ class DocumentFeedbackSystem:
             else:
                 if annotations:
                     ai_chunk_count += 1
-            # 清除内部标记键，不污染最终输出
+            # 清除内部标记键，兜底标注直接丢弃（避免低质量regex内容污染输出）
             for ann in annotations:
-                ann.pop("_koto_fallback_error", None)
                 ann.pop("_koto_503", None)
 
             for item in annotations:
+                if item.pop("_koto_fallback_error", None):
+                    continue  # 跳过兜底标注，保持输出质量
                 text = (item.get("原文片段") or "").strip()
                 if text and text not in seen_texts:
                     seen_texts.add(text)
@@ -2207,7 +2159,8 @@ class DocumentFeedbackSystem:
         effective_model_id = model_id or self.default_model_id
 
         # 第1步：分析生成标注建议（使用分段方法处理大文档）
-        chunk_size = 4000 if (self.client and os.getenv("KOTO_DISABLE_AI") != "1") else 10000
+        # chunk_size 设为 5100：利用合并单元格去重后文档通常 <5000 字符，使其整体送AI处理（避免多段分析时的随机失败）
+        chunk_size = 5100 if (self.client and os.getenv("KOTO_DISABLE_AI") != "1") else 10000
         analysis_result = self.analyze_for_annotation_chunked(
             file_path,
             user_requirement,
@@ -2306,6 +2259,29 @@ class DocumentFeedbackSystem:
         paragraphs = [p.strip() for p in formatted_content.split("\n\n") if p.strip()]
         para_count = len(paragraphs)
         
+        # 判断文档类型：简历 vs 学术文档
+        _req_lower = (user_requirement or "").lower()
+        _is_resume = any(kw in _req_lower for kw in [
+            '简历', '求职', 'resume', ' cv', '校招', '秋招', '春招', '应聘', '招聘', '面试'
+        ])
+        
+        if _is_resume:
+            persona = "你是一名资深HR简历顾问兼职场写作专家"
+            task_intro = f"请逐段审阅此简历片段（共{para_count}段），以求职竞争力为核心进行直接修改。"
+            default_req = "优化简历表达，使成果描述更量化、动词更有力、语言更精炼，突出候选人竞争优势"
+            type_specific_tips = """
+### 简历专项要求：
+- **量化成果**：能加数字就加（提升XX%、负责XX人、完成XX个）；没有数据则用具体动词描述结果。
+- **强动词开头**：每条经历用动词开头（主导/搭建/优化/实现/设计/推进），去掉"负责了解参与"这类弱动词。
+- **删冗余**：去掉"主要负责"、"参与了"、"帮助团队"等废话铺垫。
+- **保留专业术语**：技术栈名称（Python/MySQL/React等）、公司名、学校名、证书名**禁止修改**。
+- **保留原有结构**：不新增板块，不建议调整顺序，只改文字表述。"""
+        else:
+            persona = "你是一名资深学术编辑"
+            task_intro = f"请逐段审阅此{doc_type.upper()}文档片段（共{para_count}段），基于全文背景进行直接修改。"
+            default_req = "对文档进行学术润色，提升表达的专业性、准确性和连贯性"
+            type_specific_tips = ""
+        
         # 如果提供了全文背景，限制长度以免超限(保留开头结尾和目录大纲信息)
         global_ctx_prompt = ""
         if full_doc_context and len(full_doc_context) > len(formatted_content) * 1.5:
@@ -2326,7 +2302,7 @@ class DocumentFeedbackSystem:
 {full_doc_context}
 """
 
-        base_prompt = f"""你是一名资深学术编辑。请逐段审阅此{doc_type.upper()}文档片段（共{para_count}段），基于全文背景进行**直接修改**。
+        base_prompt = f"""{persona}。{task_intro}
 
 {global_ctx_prompt}
 
@@ -2334,30 +2310,36 @@ class DocumentFeedbackSystem:
 {formatted_content}
 
 ## 任务要求
-{user_requirement if user_requirement else "对文档进行学术润色，提升表达的专业性、准确性和连贯性"}
+{user_requirement if user_requirement else default_req}
+{type_specific_tips}
 
-## 🚫 重要指令：
-1. **少废话，多干活**：不要给出"建议修改..."的空洞批注，而是**直接提供修改后的文本**。
+## 🚫 绝对不处理（格式问题，请直接跳过）：
+- 中英文之间是否需要加空格（如"Python应用"不需要改成"Python 应用"）
+- 字母大小写（除明显错误的专有名词外）
+- 列表符号、编号格式（●、•、1.、①等保持原样）
+- 粗体、斜体、下划线等排版样式
+- 标点符号（除非有严重语义错误）
+- 数字与单位的间距格式
+
+## ⚠️ 重要写作指令：
+1. **少废话，多干活**：不要给出"建议修改..."的空洞批注，直接提供修改后的文本。
 2. **精准定位**：原文片段必须与文档中的文本完全一致，不要省略或修改原文。
-3. **适度修改**：只修改真正有语病、翻译腔、逻辑不通顺或生硬的地方。不要为了修改而修改。保持原意不变。
+3. **适度修改**：只修改真正有语病、翻译腔、逻辑不通顺或生硬的地方。不要为了修改而修改。
 
 ## ⚠️ 去AI味 — 必须严格遵守的语言风格：
 你改写后的文本**绝对不能有AI味**。以下是具体禁令：
 - **禁用破折号**（——）来做解释或插入语，改用逗号、括号或拆成两句。
 - **禁用引号强调**：不要用"XXX"来强调概念，直接写出来。
 - **禁用排比堆砌**：不要把三个以上并列短语排在一起，像"提升了效率、优化了流程、增强了体验"这种要砍掉。
-- **禁用以下AI高频套话**：值得注意的是、需要指出的是、总而言之、综上所述、不仅...而且...、一方面...另一方面...、从...角度来看、在...背景下、具有重要意义、发挥着关键作用、提供了有力支撑。
+- **禁用AI高频套话**：值得注意的是、综上所述、不仅...而且...、从...角度来看、具有重要意义、提供了有力支撑。
 - **少用"进行""实现""开展"等万能动词**，换成具体的动作。
-- **语言要朴实自然**，像一个有经验的人写的，不像AI生成的。读起来应该像正常人说的话，而不是机器拼出来的。
-- **句子要短**，一句话说一件事。不要把多个信息塞进一个长从句里。
+- **句子要短**，一句话说一件事。
 
 ### 示例（错误 vs 正确）：
 - ❌ "该方法在提升效率、优化流程、增强体验等方面具有重要意义"
 - ✅ "该方法能有效提升工作效率"
 - ❌ "值得注意的是，这一发现为后续研究提供了有力支撑"
 - ✅ "这一发现对后续研究有参考价值"
-- ❌ "通过对数据的深入分析——包括统计检验和回归建模——我们发现..."
-- ✅ "统计检验和回归建模的分析结果表明..."
 
 ## 标注类型
 

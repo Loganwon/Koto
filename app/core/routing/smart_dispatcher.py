@@ -71,7 +71,11 @@ class SmartDispatcher:
         "FILE_EDIT":   ["修改文件", "替换内容", "删除第几行", "edit file", "replace in file"],
         "FILE_SEARCH": ["找文件", "哪个文件", "文件在哪", "find file", "search for"],
         "CHAT":        ["你好", "是什么", "介绍一下", "tell me about", "help me understand"],
-        "SYSTEM":      ["打开微信", "截图", "系统时间", "shutdown", "关机"],
+        "SYSTEM":      ["打开微信", "启动chrome", "关闭qq", "截图", "系统时间", "shutdown", "关机",
+                    "打开steam", "打开edge", "启动vscode", "打开计算器", "关掉任务管理器",
+                    "打开加速器", "启动游戏", "打开软件", "运行程序"],
+        "AGENT":       ["发微信", "给他发消息", "设提醒", "设闹钟", "帮我买票", "订票",
+                    "提醒我", "日历安排", "浏览器打开", "自动发邮件"],
     }
 
     # 预计算特征 (字符级 n-gram)
@@ -154,6 +158,15 @@ class SmartDispatcher:
         # 金融/商品资产词 — 防止「布伦特原油价格」被短句极简通道误判为 CHAT
         "原油", "布伦特", "黄金", "白银", "铜价", "期货", "汇率", "比特币",
         "以太坊", "价格", "行情", "走势", "现价", "涨跌",
+        # 金价/油价等简写形式
+        "金价", "油价", "银价", "气价",
+        # 天气相关变体
+        "下雨", "下雪", "气温", "天气",
+        # 编程/代码关键词 — 防止「帮我写个Python排序函数」被极简通道误判为 CHAT
+        "python", "javascript", "java", "golang", "rust", "c++", "sql",
+        "函数", "算法", "脚本", "接口", "api",
+        # 时效性信号词 — 防止「目前金价」「近期AI动态」被极简通道漏判
+        "目前", "近期", "局势", "战况", "动态", "进展", "现状", "近况",
     ]
 
     @classmethod
@@ -209,6 +222,19 @@ class SmartDispatcher:
             return "CODER"
         if any(k in text_lower for k in ["查", "搜索", "价格", "天气", "新闻"]):
             return "WEB_SEARCH"
+        # 系统操作：命令动词开头 + 短输入
+        _sys_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
+        _sys_exclude = ("怎么", "如何", "什么", "文件", "网页", "网站", "思路", "方法")
+        stripped = user_input.strip()
+        if (
+            len(stripped) <= 18
+            and any(stripped.startswith(s) for s in _sys_starters)
+            and not any(k in text_lower for k in _sys_exclude)
+        ):
+            return "SYSTEM"
+        # 提醒/消息 → AGENT
+        if any(k in text_lower for k in ["提醒我", "提醒一下", "设闹钟", "设提醒", "发微信"]):
+            return "AGENT"
         # 当输入附带文件前缀 [FILE_ATTACHED:ext] 时，优先判断是编辑已有文件还是生成新文件
         # 避免 "[FILE_ATTACHED:.docx]" 中的 "docx" 直接触发 FILE_GEN 误路由
         if "[file_attached:" in text_lower:
@@ -382,6 +408,46 @@ class SmartDispatcher:
                 print(f"[SmartDispatcher] 📁 指定路径列举快速通道: '{user_input[:40]}' → FILE_SEARCH")
                 return "FILE_SEARCH", "📁 Path-Listing", context_info
 
+        # === 系统操作快速通道（打开/启动/关闭 + 应用名，不依赖 APP_ALIASES）===
+        # 命令语气、短输入、不含问句/文件/网页关键词
+        _sys_action_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
+        _sys_exclude_kws = (
+            "怎么", "如何", "什么", "为什么", "能不能", "可以吗", "怎样", "咋",
+            "文件", "网页", "网址", "url", "网站", "链接", "附件",
+            "思路", "方式", "方法", "问题", "功能",
+        )
+        _stripped = user_input.strip()
+        if (
+            len(_stripped) <= 18
+            and any(_stripped.startswith(s) for s in _sys_action_starters)
+            and not any(k in user_lower for k in _sys_exclude_kws)
+        ):
+            context_info = context_info or {}
+            context_info["routing_list"] = cls._build_routing_list(
+                similarity_scores,
+                boosts={"SYSTEM": 1.0},
+                reasons={"SYSTEM": ["rule:action_verb_direct"]}
+            )
+            print(f"[SmartDispatcher] 🖥️ 系统操作快速通道: '{_stripped}' → SYSTEM")
+            return "SYSTEM", "🖥️ Action-Direct", context_info
+
+        # === 提醒/日程/消息发送快速通道 → AGENT ===
+        _AGENT_NOTIFY_PATTERNS = [
+            r'(设置?|帮我设?)(提醒|闹钟|定时).{0,20}',
+            r'提醒我.{0,25}(点|时|分|号|日)',
+            r'(给|向).{1,8}(发|回)(微信|消息|邮件)',
+            r'(发|回)(微信|消息).{0,15}给.{1,8}',
+        ]
+        if any(re.search(p, user_input) for p in _AGENT_NOTIFY_PATTERNS):
+            context_info = context_info or {}
+            context_info["routing_list"] = cls._build_routing_list(
+                similarity_scores,
+                boosts={"AGENT": 1.0},
+                reasons={"AGENT": ["rule:agent_notify_direct"]}
+            )
+            print(f"[SmartDispatcher] 🤖 提醒/消息快速通道: '{user_input[:30]}' → AGENT")
+            return "AGENT", "🤖 Notify-Direct", context_info
+
         # === AI绘画/图片生成快速通道（在极简通道之前，防止短句被误分到 CHAT）===
         # 匹配：画/做/生成 + 一张/个/幅 + 任意内容 + 图/图片/照片；或含明确图片生成词
         _PAINTER_PATTERNS = [
@@ -418,6 +484,66 @@ class SmartDispatcher:
             )
             print(f"[SmartDispatcher] ⚡ 极简通道: '{_input_for_trivial[:20]}' → CHAT (跳过分类器)")
             return "CHAT", "⚡ Trivial", context_info
+
+        # === 天气 / 实时信息快速通道（在 Trivial 之后、模型之前，防止冷启动漏判）===
+        _WEATHER_KWS = [
+            "天气", "气温", "下雨吗", "下雨", "下雪吗", "下雪", "天气怎么样", "天气怎样",
+            "天气预报", "weather", "温度多少", "穿什么衣服",
+        ]
+        if any(k in user_lower for k in _WEATHER_KWS):
+            context_info = context_info or {}
+            context_info["routing_list"] = cls._build_routing_list(
+                similarity_scores,
+                boosts={"WEB_SEARCH": 1.0},
+                reasons={"WEB_SEARCH": ["rule:weather_direct"]}
+            )
+            print(f"[SmartDispatcher] 🌤️ 天气实时快速通道: '{user_input[:30]}' → WEB_SEARCH")
+            return "WEB_SEARCH", "🌤️ Weather-Direct", context_info
+
+        # === 代码编写快速通道（在本地模型之前，避免 koto-router 误判明确写代码请求）===
+        # 条件：含写作动词 + 编程语言/代码概念，但不是"帮我写一段自我介绍"这类纯文本
+        _CODE_WRITE_VERBS = ["帮我写", "给我写", "写一个", "写个", "实现", "编写", "开发", "编程"]
+        _CODE_CONCEPTS = [
+            "函数", "算法", "类", "接口", "脚本", "程序", "代码",
+            "排序", "查找", "递归", "遍历", "爬虫", "api", "模块",
+        ]
+        _CODE_LANGS = [
+            "python", "javascript", "java", "c++", "golang", "rust",
+            "typescript", "kotlin", "swift", "php", "ruby", "sql",
+        ]
+        _has_code_verb = any(v in user_lower for v in _CODE_WRITE_VERBS)
+        _has_code_concept = any(c in user_lower for c in _CODE_CONCEPTS)
+        _has_code_lang = any(l in user_lower for l in _CODE_LANGS)
+        if _has_code_verb and (_has_code_concept or _has_code_lang):
+            context_info = context_info or {}
+            context_info["routing_list"] = cls._build_routing_list(
+                similarity_scores,
+                boosts={"CODER": 1.0},
+                reasons={"CODER": ["rule:code_write_direct"]}
+            )
+            print(f"[SmartDispatcher] 💻 代码编写快速通道: '{user_input[:30]}' → CODER")
+            return "CODER", "💻 Code-Write-Direct", context_info
+
+        # === 时效性关键词快速通道（目前/近期/最新 + 时事主题）===
+        _REALTIME_SIGNALS = ["目前", "现在", "当前", "最新", "近期", "今日", "近况"]
+        _REALTIME_TOPIC_KWS = [
+            "新闻", "消息", "进展", "动态", "局势", "战况", "现状", "情况",
+            "比分", "结果", "成绩", "排名", "股价", "金价", "油价",
+        ]
+        _REALTIME_EXCLUDE_KWS = ["历史", "是什么", "什么是", "定义", "原理", "原因", "介绍", "解释"]
+        if (
+            any(s in user_lower for s in _REALTIME_SIGNALS)
+            and any(t in user_lower for t in _REALTIME_TOPIC_KWS)
+            and not any(e in user_lower for e in _REALTIME_EXCLUDE_KWS)
+        ):
+            context_info = context_info or {}
+            context_info["routing_list"] = cls._build_routing_list(
+                similarity_scores,
+                boosts={"WEB_SEARCH": 1.0},
+                reasons={"WEB_SEARCH": ["rule:realtime_signal"]}
+            )
+            print(f"[SmartDispatcher] ⏰ 时效信息快速通道: '{user_input[:30]}' → WEB_SEARCH")
+            return "WEB_SEARCH", "⏰ Realtime-Direct", context_info
 
         # === 数据图表/可视化快速通道（在所有模型之前，防止被误路由到 PAINTER/CHAT）===
         _CHART_KWS = [
@@ -473,6 +599,8 @@ class SmartDispatcher:
             "美元", "欧元", "日元", "英镑", "港币", "外汇", "汇率",
             "a股", "港股", "道琼斯", "纳斯达克", "标普", "上证", "深证",
             "期货", "基金", "债券", "股票",
+            # 简写形式（如「目前金价」「油价多少」）
+            "金价", "油价", "银价", "铜价",
         ]
         _PRICE_SIGNALS = [
             "价格", "现价", "报价", "行情", "走势", "涨跌", "多少钱",
@@ -759,6 +887,24 @@ class SmartDispatcher:
                 reasons={"SYSTEM": ["fallback:system"]}
             )
             return "SYSTEM", "🖥️ Fallback-System", context_info
+
+        # -- 系统命令兜底：命令动词 + 短输入（不依赖 APP_ALIASES）--
+        _fb_sys_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
+        _fb_sys_exclude = ("怎么", "如何", "什么", "文件", "网页", "网站", "思路", "方法", "功能")
+        _stripped_fb = user_input.strip()
+        if (
+            len(_stripped_fb) <= 18
+            and any(_stripped_fb.startswith(s) for s in _fb_sys_starters)
+            and not any(k in user_lower for k in _fb_sys_exclude)
+        ):
+            context_info = context_info or {}
+            context_info["routing_list"] = cls._build_routing_list(
+                similarity_scores,
+                boosts={"SYSTEM": 0.9},
+                reasons={"SYSTEM": ["fallback:action_verb"]}
+            )
+            print(f"[SmartDispatcher] 🖥️ 系统命令兜底: '{_stripped_fb}' → SYSTEM")
+            return "SYSTEM", "🖥️ Fallback-ActionVerb", context_info
 
         # -- 多步任务规划 --
         _LocalPlanner = _get_local_planner()

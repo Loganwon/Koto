@@ -35,9 +35,9 @@ _add(os.path.join(ROOT, 'app'),                     'app')
 _add(os.path.join(ROOT, 'launcher'),                'launcher')
 
 # ── 图标资源 ──
-_add(os.path.join(ROOT, 'assets', 'koto_icon.ico'), os.path.join('assets', 'koto_icon.ico'))
-_add(os.path.join(ROOT, 'assets', 'koto_icon.png'), os.path.join('assets', 'koto_icon.png'))
-_add(os.path.join(ROOT, 'assets', 'koto_icon.svg'), os.path.join('assets', 'koto_icon.svg'))
+_add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.ico'), os.path.join('assets', 'koto_icon.ico'))
+_add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.png'), os.path.join('assets', 'koto_icon.png'))
+_add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.svg'), os.path.join('assets', 'koto_icon.svg'))
 
 # ── 默认配置模板 ──
 _add(os.path.join(ROOT, 'config', 'gemini_config.env.example'),
@@ -48,9 +48,9 @@ _add(os.path.join(ROOT, 'config', 'skill_packs'),   os.path.join('config', 'skil
 _add(os.path.join(ROOT, 'config', 'skills'),        os.path.join('config', 'skills'))
 _add(os.path.join(ROOT, 'config', 'workflows'),     os.path.join('config', 'workflows'))
 
-# ── 根级别关键 Python 脚本（作为数据一同打包，供 runpy 兜底使用）──
+# ── src/ 入口脚本（作为数据一同打包，供 runpy 兜底使用）──
 for _script in ['koto_app.py', 'model_downloader.py', 'koto_setup.py', 'server.py']:
-    _add(os.path.join(ROOT, _script), '.')
+    _add(os.path.join(ROOT, 'src', _script), '.')
 
 # ── web/*.py 全部作为数据文件（动态 import 兜底）──
 _web_dir = os.path.join(ROOT, 'web')
@@ -312,14 +312,14 @@ for _pkg in _collect_pkgs:
 # ═══════════════════════════════════════════════
 
 a = Analysis(
-    ['koto_setup.py'],          # ← 新入口（含下载器向导）
+    ['src/koto_setup.py'],       # ← 新入口（含下载器向导）
     pathex=[ROOT],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[os.path.join(ROOT, 'rth_voice_fallback.py')],
+    runtime_hooks=[os.path.join(ROOT, 'src', 'rth_voice_fallback.py')],
     excludes=[
         'tkinter.test', 'unittest', 'test', 'tests',
         'setuptools', 'pip', 'distutils',
@@ -350,7 +350,7 @@ exe = EXE(
     strip=False,
     upx=False,          # UPX 容易被杀毒误报
     console=False,      # 无控制台窗口
-    icon=os.path.join(ROOT, 'assets', 'koto_icon.ico'),
+    icon=os.path.join(ROOT, 'src', 'assets', 'koto_icon.ico'),
     uac_admin=False,
 )
 

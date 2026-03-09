@@ -312,6 +312,31 @@ def copy_file():
     return jsonify({"status": "ok" if ok else "error", "message": result}), 200 if ok else 400
 
 
+@file_hub_bp.route("/open", methods=["POST"])
+def open_file():
+    """
+    用系统默认程序打开文件或文件夹。
+    Body JSON: { "path": "绝对路径" }
+    """
+    import os, subprocess, sys
+    data = request.get_json(silent=True) or {}
+    path = (data.get("path") or "").strip()
+    if not path:
+        return jsonify({"error": "缺少 path 字段"}), 400
+    if not os.path.exists(path):
+        return jsonify({"error": "文件不存在"}), 404
+    try:
+        if sys.platform == "win32":
+            os.startfile(path)  # noqa: S606
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @file_hub_bp.route("/disk", methods=["DELETE"])
 def delete_file_disk():
     """

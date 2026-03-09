@@ -54,7 +54,7 @@ class ProactiveDialogueEngine:
             "⭐ 成就解锁：连续 {days} 天使用Koto，坚持就是胜利！"
         ],
         'file_organization': [
-            "📁 发现 workspace 目录下有 {unorg anized_count} 个文件需要整理，要我帮你吗？",
+            "📁 发现 workspace 目录下有 {unorganized_count} 个文件需要整理，要我帮你吗？",
             "🗂️ 有 {duplicate_count} 个可能重复的文件，要检查一下吗？",
             "📦 系统建议将 {old_files_count} 个长期未用的文件归档。"
         ],

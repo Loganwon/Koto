@@ -12,12 +12,17 @@ _real_import = builtins.__import__
 
 # 可选二进制依赖列表：缺失时返回空 stub 而非抛异常
 # 注意：speech_recognition 这里不列出，它是纯 Python 包，应正常打包并导入
+# 注意：win32com/win32api 已打包进 _internal，不能放在此处——
+#       否则 win32com/__init__.py 会先收到一个 __path__=[] 的 stub，
+#       导致它自己的 next(iter(...__path__)) 抛出 StopIteration。
+# 注意：pyaudio/_portaudio 已打包进 _internal/pyaudio/，不能放在此处——
+#       否则 pyaudio/__init__.py 收到 stub 的 _portaudio（无 paNoError/paFloat32 等常量）
+#       会导致 PyAudio() 初始化崩溃，语音功能完全失效。
 _OPTIONAL_MODULES = {
-    'pyaudio', '_portaudio',
+    # pyaudio/_portaudio 已正常打包，移出此列表让它们正常导入
     'vosk',
     'sounddevice', 'soundfile', '_sounddevice',
     'audioop',
-    'win32com', 'win32com.client',
     'comtypes', 'comtypes.client',
     'edge_tts',
     'pytesseract',

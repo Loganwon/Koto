@@ -13,7 +13,7 @@ Set oFSO   = CreateObject("Scripting.FileSystemObject")
 
 ' 获取脚本所在目录
 sRoot = oFSO.GetParentFolderName(WScript.ScriptFullName)
-sPS1  = sRoot & "\launcher\Koto_Start.ps1"
+sPS1  = sRoot & "\Koto_Start.ps1"
 
 ' 检查 PS1 脚本存在
 If Not oFSO.FileExists(sPS1) Then

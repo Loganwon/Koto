@@ -96,6 +96,51 @@ class SkillAutoMatcher:
          "patterns": ["创意", "故事", "文案", "诗", "小说", "creative", "story", "poem"]},
         {"skill_id": "bilingual",
          "patterns": ["双语", "英文", "翻译", "术语", "bilingual", "translate", "english"]},
+        # ── 文件读取与解析 ──
+        {"skill_id": "pdf_reader",
+         "patterns": ["读取pdf", "解析pdf", "打开pdf", "pdf内容", "读pdf", "提取pdf", "read pdf", "pdf文件", "查看pdf", "分析pdf"]},
+        {"skill_id": "multi_format_reader",
+         "patterns": ["读取文件", "打开文件", "查看文件", "读文件", "解析文件", "文件内容", "read file", "打开docx", "读取docx", "读取xlsx", "读取csv"]},
+        {"skill_id": "long_doc_parser",
+         "patterns": ["长文档", "很长的文档", "长报告", "大文件", "分段读", "逐段分析", "长文章", "文章很长", "超长文件", "分块解析",
+                       "文档太长", "太长了", "太长", "分段分析", "分段", "内容太多", "文章太长"]},
+        {"skill_id": "spreadsheet_analyst",
+         "patterns": ["表格分析", "excel分析", "数据表", "分析xlsx", "分析csv", "表格数据", "统计表", "数据报表", "spreadsheet"]},
+        {"skill_id": "multi_doc_synthesis",
+         "patterns": ["对比文件", "比较文档", "多个文件", "几份文件", "综合分析", "文件对比", "compare docs", "多份文档", "整合资料", "汇总文档"]},
+        {"skill_id": "table_extractor",
+         "patterns": ["提取表格", "读取表格", "表格提取", "获取表格", "table extraction", "表格内容", "docx表格", "pdf表格",
+                       "里的表格", "里面的表格", "文档里表格", "文件里表格", "文档中的表格", "文件中表格", "提取excel表格", "读取excel表格"]},
+        # ── 文件生成 ──
+        {"skill_id": "ppt_generator_pro",
+         "patterns": ["生成ppt", "做ppt", "制作ppt", "做幻灯片", "create ppt", "make ppt", "演示文稿", "ppt文件", "幻灯片报告", "演示报告",
+                       "一份ppt", "个ppt", "份ppt", "做个ppt", "ppt演示", "生成幻灯", "ppt报告", "整理成ppt"]},
+        {"skill_id": "excel_generator_pro",
+         "patterns": ["生成excel", "做excel", "制作excel", "create excel", "make excel", "生成xlsx", "做xlsx", "制作表格文件",
+                       "做一个excel", "做个excel", "新建excel", "创建excel", "生成excel表格", "excel表格生成", "制作excel表格"]},
+        {"skill_id": "docx_generator_pro",
+         "patterns": ["生成word", "做word", "制作word", "创建docx", "create word", "生成文档", "做文档", "word文档", "生成docx"]},
+        {"skill_id": "docx_translator",
+         "patterns": ["翻译word", "翻译文档", "word翻译", "docx翻译", "translate word", "translate docx",
+                       "翻译成英文", "翻译成日文", "翻译成中文", "翻译成法文", "翻译成韩文", "翻译成德文",
+                       "文档翻译", "把word翻译", "word文件翻译", "文档翻译成", "翻译这个文档",
+                       "翻译这个word", "帮我翻译文档", "word转译", "译成英文", "译成日文",
+                       "翻译docx", "翻译这个docx", "把docx翻译"]},
+        {"skill_id": "pdf_generator_pro",
+         "patterns": ["生成pdf", "做pdf", "制作pdf", "create pdf", "导出pdf", "生成报告pdf", "pdf报告", "pdf文档"]},
+        # ── 批注类 ──
+        {"skill_id": "annotate_academic",
+         "patterns": ["学术论文", "期刊", "投稿", "论文润色", "研究报告", "英文润色", "审稿",
+                       "批注论文", "修改论文", "学术写作", "论文修改"]},
+        {"skill_id": "annotate_business",
+         "patterns": ["商务报告", "合同修改", "商务邮件", "公文批注", "商业文档", "对外报告",
+                       "商务文案批注", "合同审查", "批注商务"]},
+        {"skill_id": "annotate_code_review",
+         "patterns": ["code review", "代码审查", "代码批注", "帮我看看代码", "检查代码", "找bug",
+                       "找出bug", "review代码", "看看这段代码", "代码有没有问题"]},
+        {"skill_id": "annotate_translation",
+         "patterns": ["翻译批注", "检查翻译", "校对翻译", "对照原文", "翻译审查", "双语批注",
+                       "翻译有没有问题", "校正翻译", "润色译文", "译文批注"]},
     ]
 
     @classmethod
@@ -117,9 +162,9 @@ class SkillAutoMatcher:
 
         for skill_id, s in SkillManager._registry.items():
             applicable = s.get("task_types", [])
-            # 如果技能有 task_types 限制，过滤掉不适用的
-            if applicable and tt and tt not in applicable:
-                continue
+            # 保留所有技能作为候选——task_type 已包含在 Prompt 里，
+            # 由 Ollama 语义决定是否适合本轮，而非在目录构建时硬过滤。
+            # （原先的过滤会导致 DOC_ANNOTATE 技能在 CHAT 场景下不可见）
             desc = (
                 s.get("intent_description")
                 or s.get("description", "")

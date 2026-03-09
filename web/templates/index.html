@@ -227,13 +227,13 @@
         /* ── Skills Panel (VS Code Extension 风格) ──────────────────────── */
         .skills-panel {
             position: fixed; right: 0; top: 0;
-            width: var(--skills-panel-width, 400px); height: var(--viewport-h, 100vh);
+            width: var(--skills-panel-width, 420px); height: var(--viewport-h, 100vh);
             background: var(--bg-secondary);
             border-left: 1px solid var(--border-color);
-            box-shadow: -20px 0 40px rgba(0,0,0,0.35);
+            box-shadow: -24px 0 48px rgba(0,0,0,0.28);
             display: flex; flex-direction: column;
             transform: translateX(100%);
-            transition: transform 0.25s ease; z-index: 45;
+            transition: transform 0.22s cubic-bezier(.4,0,.2,1); z-index: 45;
         }
         .skills-panel.active { transform: translateX(0); }
         .sp-header {
@@ -281,10 +281,10 @@
             display: flex; align-items: flex-start; gap: 10px;
             padding: 10px; border-radius: 10px;
             border: 1px solid var(--border-color);
-            background: var(--bg-card); transition: border-color .15s; margin-bottom: 6px;
+            background: var(--bg-card); transition: border-color .12s, box-shadow .12s; margin-bottom: 6px;
         }
         .sp-card.enabled { border-color: rgba(99,198,255,0.35); background: rgba(99,198,255,0.04); }
-        .sp-card:hover { border-color: var(--accent-primary); }
+        .sp-card:hover { border-color: var(--accent-primary); box-shadow: 0 2px 12px rgba(99,198,255,0.1); }
         .sp-card-icon {
             font-size: 22px; line-height: 1; flex-shrink: 0;
             width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
@@ -371,6 +371,27 @@
             transition: all .15s; text-align: center;
         }
         .sp-footer-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+        .sp-active-badge {
+            display: inline-flex; align-items: center; justify-content: center;
+            background: var(--accent-primary); color: #fff;
+            font-size: 10px; font-weight: 700; border-radius: 10px;
+            padding: 1px 7px; line-height: 1.6;
+        }
+        .sp-ext-link {
+            font-size: 11px; color: var(--text-muted); text-decoration: none;
+            padding: 3px 7px; border-radius: 6px; border: 1px solid var(--border-color);
+            transition: all .15s;
+        }
+        .sp-ext-link:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+        .settings-open-panel-btn {
+            display: flex; align-items: center; justify-content: space-between;
+            width: 100%; padding: 10px 14px; margin-top: 6px;
+            border-radius: 10px; border: 1px solid var(--border-color);
+            background: var(--bg-tertiary); color: var(--text-primary);
+            font-size: 13px; cursor: pointer; transition: all .18s;
+        }
+        .settings-open-panel-btn:hover { border-color: var(--accent-primary); background: rgba(99,198,255,0.07); color: var(--accent-primary); }
+        .settings-open-panel-arrow { font-size: 16px; opacity: .6; }
         .nav-skills-btn {
             display: flex; align-items: center; gap: 8px;
             padding: 8px 12px; margin-bottom: 6px; border-radius: 10px;
@@ -411,24 +432,22 @@
         @keyframes splashSpin { to { transform: rotate(360deg); } }
         #startupSplash.hidden { opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
     </style>
-    <link rel="preconnect" href="https://cdn.bootcdn.net" crossorigin>
     <!-- Speed up: Removed Google Fonts and relying on system fonts -->
     <style>
         /* Fallback fonts */
         body { font-family: 'Noto Sans SC', 'Microsoft YaHei', 'Segoe UI', system-ui, sans-serif !important; }
         code, pre { font-family: 'JetBrains Mono', 'Consolas', 'Fira Code', monospace !important; }
     </style>
-    <!-- VS Code 风格的代码高亮主题 (BootCDN) -->
-    <link rel="preload" as="style" href="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css" onload="this.rel='stylesheet'">
+    <!-- 代码高亮（本地 vendor，离线可用） -->
+    <link rel="preload" as="style" href="{{ url_for('static', filename='vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}" onload="this.rel='stylesheet'">
     <noscript>
-        <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/styles/vs2015.min.css">
+        <link rel="stylesheet" href="{{ url_for('static', filename='vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}">
     </noscript>
-    <!-- Removed blocking google fonts -->
-    <script defer src="https://cdn.bootcdn.net/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <script defer src="https://cdn.bootcdn.net/ajax/libs/marked/12.0.0/marked.min.js"></script>
+    <script defer src="{{ url_for('static', filename='vendor/highlight.js/11.9.0/highlight.min.js') }}"></script>
+    <script defer src="{{ url_for('static', filename='vendor/marked/12.0.0/marked.min.js') }}"></script>
     <!-- KaTeX 数学公式渲染 -->
-    <link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/katex.min.css">
-    <script defer src="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.css') }}">
+    <script defer src="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.js') }}"></script>
     <!-- ── Token 使用监测嵌入式样式 ── -->
     <style>
         /* ── Token Monitor — topbar inline chip ──────────────────────── */
@@ -549,9 +568,9 @@
         }
         @keyframes tp-spin { to { transform: rotate(360deg); } }
     </style>
-    <script defer src="https://cdn.bootcdn.net/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+    <script defer src="{{ url_for('static', filename='vendor/katex/0.16.9/contrib/auto-render.min.js') }}"></script>
     <!-- Mermaid 图表渲染 -->
-    <script defer src="https://cdn.bootcdn.net/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+    <script defer src="{{ url_for('static', filename='vendor/mermaid/10.9.0/mermaid.min.js') }}"></script>
 </head>
 <body class="loading">
     <div id="startupSplash">
@@ -592,9 +611,9 @@
                     <span id="auth-user-name" style="color:var(--text-secondary);"></span>
                     <button id="auth-logout-btn" onclick="KotoAuth.logout()" style="float:right;background:none;border:none;color:var(--accent-primary);cursor:pointer;font-size:12px;" title="退出登录">退出</button>
                 </div>
-                <!-- Skill 市场入口 -->
+                <!-- Skill 库入口 -->
                 <button id="navSkillsBtn" class="nav-skills-btn" onclick="openSkillsPanel()" title="打开 Skills 面板">
-                    ✨ <span>Skills 市场</span>
+                    ✨ <span>Skills 库</span>
                 </button>
                 <div class="status-indicator" id="statusIndicator">
                     <span class="status-dot"></span>
@@ -721,7 +740,6 @@
                 <div id="chat-skill-bar" style="display:none;">
                   <span class="csb-label">✨ Skill</span>
                   <div class="csb-pills" id="csb-pills"></div>
-                  <a href="#" class="csb-manage-link" title="管理 Skill 库" onclick="openSkillsPanel(); return false;">管理</a>
                 </div>
 
                 <div class="file-preview" id="filePreview" style="display: none;">
@@ -1027,7 +1045,7 @@
                     </div>
                 </div>
 
-                <!-- Skills Section -->
+                <!-- Skills Section → redirect to dedicated panel -->
                 <div class="settings-section">
                     <h4>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1035,19 +1053,12 @@
                         </svg>
                         Skills 技能模块
                     </h4>
-                    <p class="setting-desc">启用后，该 Skill 的 Prompt 会自动注入每次对话中，调整 AI 的回复风格和行为。</p>
-
-                    <div class="skill-tabs" id="skillTabs">
-                        <button class="skill-tab active" onclick="filterSkills('all')">&#x1f4cb; 全部</button>
-                        <button class="skill-tab" onclick="filterSkills('behavior')">&#x2699;&#xfe0f; 行为</button>
-                        <button class="skill-tab" onclick="filterSkills('style')">&#x1f3a8; 风格</button>
-                        <button class="skill-tab" onclick="filterSkills('domain')">&#x1f52c; 领域</button>
-                        <button class="skill-tab" onclick="openCreateSkillModal()" style="margin-left:auto;border-style:dashed;">＋ 创建</button>
-                    </div>
-
-                    <div id="skillsList" class="skills-list">
-                        <div class="memory-empty">正在加载 Skills…</div>
-                    </div>
+                    <p class="setting-desc">通过 Skill 注入个性化 Prompt，调整 AI 的回复风格与行为模式。</p>
+                    <button class="settings-open-panel-btn" onclick="closeSettings(); openSkillsPanel()">
+                        ✨ 打开 Skill 管理面板
+                        <span class="settings-open-panel-arrow">→</span>
+                    </button>
+                    <p class="setting-hint" style="margin-top:6px;">意图绑定、触发器等高级配置仍在下方。</p>
                 </div>
 
                 <!-- Skill Intent Bindings Section -->
@@ -1417,8 +1428,14 @@
         <!-- ==================== Skills Panel (VS Code Extension 风格) ==================== -->        <aside class="skills-panel" id="skillsPanel">
             <div class="resize-handle resize-handle-skills" id="skillsResizeHandle"></div>
             <div class="sp-header">
-                <span class="sp-title">✨ Skills 市场</span>
-                <button class="close-panel" onclick="closeSkillsPanel()" title="关闭">×</button>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="sp-title">✨ Skills 库</span>
+                    <span class="sp-active-badge" id="spActiveBadge" style="display:none;"></span>
+                </div>
+                <div style="display:flex;align-items:center;gap:6px;">
+                    <a href="/skill-marketplace" target="_blank" class="sp-ext-link" title="完整管理视图">⤢ 完整视图</a>
+                    <button class="close-panel" onclick="closeSkillsPanel()" title="关闭">×</button>
+                </div>
             </div>
             <div class="sp-search-wrap">
                 <input class="sp-search" id="spSearchInput" type="text" placeholder="🔍 搜索技能名称、描述…" oninput="spSearchSkills(this.value)">
@@ -1505,7 +1522,10 @@
                 </div>
             </div>
             <div class="sp-footer">
-                <button class="sp-footer-btn" onclick="closeSkillsPanel(); openSettings()">⚙️ 高级设置 (绑定 / 触发器)</button>
+                <div style="display:flex;gap:6px;">
+                    <button class="sp-footer-btn" style="flex:1;" onclick="closeSkillsPanel(); openSettings()">⚙️ 绑定 &amp; 触发器</button>
+                    <a href="/skill-marketplace" target="_blank" class="sp-footer-btn" style="flex:1;text-align:center;text-decoration:none;">📊 导入 / 统计</a>
+                </div>
             </div>
         </aside>
 
@@ -2119,15 +2139,29 @@
             }
         }
 
+        function spUpdateActiveBadge() {
+            const badge = document.getElementById('spActiveBadge');
+            if (!badge) return;
+            const count = _spSkills.filter(s => s.enabled).length;
+            if (count > 0) {
+                badge.textContent = count + ' 激活';
+                badge.style.display = '';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
         function spRenderCards() {
             const content = document.getElementById('spContent');
             if (!content) return;
+            spUpdateActiveBadge();
             const tab = _spCurrentTab;
             const cat = _spCurrentCat;
             const q = _spCurrentSearch.toLowerCase();
             let skills = _spSkills;
             if (tab === 'library') {
-                skills = skills.filter(s => s.enabled || s.is_custom);
+                // 我的库: enabled skills + user-created (non-builtin) skills
+                skills = skills.filter(s => s.enabled || !s.is_builtin);
             }
             if (cat !== 'all') {
                 skills = skills.filter(s => s.category === cat);
@@ -2138,13 +2172,18 @@
                 );
             }
             if (!skills.length) {
-                content.innerHTML = `<div class="sp-loading">${tab === 'library' ? '尚未启用任何 Skill' : '暂无匹配结果'}</div>`;
+                if (tab === 'library') {
+                    content.innerHTML = `<div class="sp-loading" style="padding:24px 12px;line-height:1.8">
+                        尚未启用任何 Skill，也没有自定义技能。<br>
+                        <button onclick="spSwitchTab('catalog')" style="margin-top:8px;padding:5px 14px;border-radius:8px;border:1px solid var(--accent-primary);background:transparent;color:var(--accent-primary);cursor:pointer;font-size:12px;">去「全部」启用 Skill</button>
+                    </div>`;
+                } else {
+                    content.innerHTML = `<div class="sp-loading">暂无匹配结果</div>`;
+                }
                 return;
             }
-            // Group: enabled first in library mode
-            if (tab === 'library') {
-                skills = [...skills.filter(s => s.enabled), ...skills.filter(s => !s.enabled && s.is_custom)];
-            }
+            // Sort: enabled always first
+            skills = [...skills.filter(s => s.enabled), ...skills.filter(s => !s.enabled)];
             content.innerHTML = skills.map(s => `
                 <div class="sp-card ${s.enabled ? 'enabled' : ''} ${s.enabled && _spSuppressedIds.has(s.id) ? 'sp-card-suppressed' : ''}" data-sp-id="${s.id}">
                     <div class="sp-card-icon" style="${s.enabled && _spSuppressedIds.has(s.id) ? 'opacity:.5' : ''}">${s.icon || '🔧'}</div>
@@ -2179,8 +2218,10 @@
                 if (studio) { studio.style.display = 'flex'; spLoadSessionList(); }
             } else {
                 if (filterRow) filterRow.style.display = 'flex';
-                if (content) { content.style.display = 'block'; spRenderCards(); }
+                if (content) content.style.display = 'block';
                 if (studio) studio.style.display = 'none';
+                // Reload fresh data when switching to library to avoid stale enabled state
+                if (tab === 'library') { spLoadSkills(); } else { spRenderCards(); }
             }
         };
 
@@ -2207,6 +2248,7 @@
             }
             const skill = _spSkills.find(s => s.id === skillId);
             if (skill) skill.enabled = enabled;
+            spUpdateActiveBadge();
             // Delegate to main toggleSkill (handles API + main UI)
             if (typeof window.toggleSkill === 'function') {
                 await window.toggleSkill(skillId, enabled);

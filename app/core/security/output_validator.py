@@ -102,6 +102,25 @@ _REFUSAL_PATTERNS = [
 ]
 _REFUSAL_RE = [re.compile(p, re.IGNORECASE | re.UNICODE) for p in _REFUSAL_PATTERNS]
 
+# 代码替代检测：模型声称无法联网/获取实时数据，然后提供代码片段作为"替代"
+# 这种行为对用户无用且具有欺骗性，应触发 RETRY 并要求调用 web_search
+_CODE_SUBSTITUTE_PATTERN = re.compile(
+    r"(我.*?(没有|无法|不能|不支持|没有办法).{0,30}(接口|联网|实时|工具|互联网|网络访问))"
+    r".*?"
+    r"(```\s*python|import\s+(yfinance|akshare|requests|pandas|httpx)|pip\s+install)",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# 实时无能力响应检测：模型承认不知道实时信息但未调用 web_search，直接让用户自己查
+# 如：「我无法知道当前天气，建议你查天气网站」→ 触发 RETRY 并要求调用 web_search
+_REALTIME_INABILITY_PATTERN = re.compile(
+    r"(我.{0,10}(不知道|无法知道|不清楚|不了解|没有).{0,20}(当前|实时|现在|最新|今天|明天|目前).{0,20}"
+    r"(天气|温度|气温|股价|金价|价格|行情|新闻|消息|比分|结果|汇率))"
+    r"|(建议.{0,10}(你|您).{0,10}(去|上|使用|查询|搜索).{0,20}(天气|新闻|网站|app|平台|搜索引擎))"
+    r"|(你可以.{0,10}(去|上|使用|查询|搜索).{0,20}(天气|新闻|网站|app|平台))",
+    re.IGNORECASE,
+)
+
 # 截断指示词（出现在文末，说明内容可能被 token limit 截断）
 _TRUNCATION_ENDINGS = [
     "...", "…", "（未完）", "（待续）", "to be continued",
@@ -221,6 +240,40 @@ class OutputValidator:
             return ValidationResult(
                 action="RETRY",
                 text=text,
+                original_text=text,
+                reasons=reasons,
+                skill_id=skill_id,
+            )
+
+        # ── 2.5 实时数据规则：代码替代嗅探 ───────────────────────
+        # 当模型声称无法联网，却给出 Python 代码片段作为"替代"时，触发 RETRY
+        if _CODE_SUBSTITUTE_PATTERN.search(text):
+            reasons.append("模型以代码片段替代实时数据查询，要求重试并调用 web_search")
+            logger.warning("[OutputValidator] ⚠️ 检测到代码替代实时数据响应，触发 RETRY")
+            fix_prompt = (
+                "你的上一条回复提供了 Python 代码来获取数据，但这对用户没有帮助。"
+                "请直接调用 web_search 工具查询实时数据，并将结果以自然语言返回给用户。"
+            )
+            return ValidationResult(
+                action="RETRY",
+                text=fix_prompt,
+                original_text=text,
+                reasons=reasons,
+                skill_id=skill_id,
+            )
+
+        # ── 2.6 实时无能力响应检测 ────────────────────────────────
+        # 当模型承认无法获取实时信息且建议用户自己去查时，触发 RETRY 要求调用 web_search
+        if _REALTIME_INABILITY_PATTERN.search(text):
+            reasons.append("模型推脱实时数据查询（未调用 web_search），要求重试")
+            logger.warning("[OutputValidator] ⚠️ 检测到实时无能力响应，触发 RETRY")
+            fix_prompt = (
+                "你的上一条回复说无法获取实时信息并建议用户自行搜索，这对用户没有帮助。"
+                "请直接调用 web_search 工具查询，然后将结果以自然语言回答用户。"
+            )
+            return ValidationResult(
+                action="RETRY",
+                text=fix_prompt,
                 original_text=text,
                 reasons=reasons,
                 skill_id=skill_id,

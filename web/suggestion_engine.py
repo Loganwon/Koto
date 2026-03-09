@@ -12,8 +12,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from collections import Counter, defaultdict
 
-from behavior_monitor import BehaviorMonitor
-from knowledge_graph import KnowledgeGraph
+try:
+    from web.behavior_monitor import BehaviorMonitor
+except ImportError:
+    from behavior_monitor import BehaviorMonitor
+
+try:
+    from web.knowledge_graph import KnowledgeGraph
+except ImportError:
+    from knowledge_graph import KnowledgeGraph
 
 
 class SuggestionEngine:

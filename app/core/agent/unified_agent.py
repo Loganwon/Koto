@@ -84,7 +84,12 @@ class UnifiedAgent(Agent):
             "- To apply several unrelated changes to the same file: use patch_file with all patches in ONE call "
             "instead of calling replace_text multiple times.\n"
             "- write_file is ONLY for creating a new file or completely rewriting a file from scratch. "
-            "Never use write_file just to change a few lines."
+            "Never use write_file just to change a few lines.\n"
+            "## 实时数据规则（必须遵守）\n"
+            "- 当用户询问任何实时/当前/外部数据（金价、油价、汇率、天气、股票行情、新闻、最新价格等），"
+            "必须调用 web_search 工具获取真实答案。\n"
+            "- 严禁以「我没有联网接口」、「我无法获取实时数据」作为回复，也严禁生成 Python 代码片段（如 yfinance/akshare/requests）作为替代答案。\n"
+            "- 如果 web_search 工具可用，直接调用；如不可用，则明确告知用户"当前环境下网络工具不可用"。"
         )
         # v2
         self.skill_id = skill_id
@@ -292,10 +297,14 @@ class UnifiedAgent(Agent):
                                     f"({validation_retries}/{self.MAX_VALIDATION_RETRIES}): {val_result.reasons}"
                                 )
                                 # 向 LLM 追加验收失败原因，要求重新输出
-                                retry_prompt = (
-                                    f"你上一次的回答存在问题：{'; '.join(val_result.reasons)}。"
-                                    f"请重新回答，严格按照要求的格式输出。"
-                                )
+                                # 如果 validator 提供了自定义修复提示则使用它，否则用通用提示
+                                if val_result.text and val_result.text != content_text:
+                                    retry_prompt = val_result.text
+                                else:
+                                    retry_prompt = (
+                                        f"你上一次的回答存在问题：{'; '.join(val_result.reasons)}。"
+                                        f"请重新回答，严格按照要求的格式输出。"
+                                    )
                                 current_history.append({"role": "user", "content": retry_prompt})
                                 continue  # 重新进入循环
 

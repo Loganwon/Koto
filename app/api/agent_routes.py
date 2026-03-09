@@ -374,9 +374,9 @@ def _resolve_runtime_skill(
             skill_def = SkillManager.get_definition(skill_id)
             if not skill_def:
                 continue
-            applicable_types = list(getattr(skill_def, "task_types", None) or [])
-            if applicable_types and task_type and task_type.upper() not in applicable_types:
-                continue
+            # Intent bindings are user-triggered signals; skip task_type gate so that
+            # domain skills (e.g. annotate_* with task_types=["DOC_ANNOTATE"]) can
+            # still be injected when the route task_type is "CHAT".
             candidates.append(skill_def)
 
         if not candidates:

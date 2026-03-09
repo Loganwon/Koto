@@ -7,13 +7,17 @@
 import os
 import time
 from typing import List, Dict, Optional
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+try:
+    from selenium import webdriver
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.common.keys import Keys
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.chrome.options import Options
+    _SELENIUM_AVAILABLE = True
+except ImportError:
+    _SELENIUM_AVAILABLE = False
 
 
 class BrowserAutomation:
@@ -342,8 +346,10 @@ class BrowserAutomation:
 _browser_automation = None
 
 
-def get_browser_automation(headless: bool = False) -> BrowserAutomation:
-    """获取全局浏览器自动化单例"""
+def get_browser_automation(headless: bool = False) -> "BrowserAutomation":
+    """获取全局浏览器自动化单例。若 selenium 未安装则抛出 RuntimeError。"""
+    if not _SELENIUM_AVAILABLE:
+        raise RuntimeError("浏览器自动化功能不可用：请先安装 selenium 包（pip install selenium）")
     global _browser_automation
     if _browser_automation is None:
         _browser_automation = BrowserAutomation(headless=headless)

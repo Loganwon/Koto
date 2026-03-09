@@ -24,8 +24,8 @@ import sys
 from pathlib import Path
 
 # 设置环境
-# server.py 位于 src/ 子目录，APP_ROOT 指向项目根目录
-APP_ROOT = Path(__file__).parent.parent
+here = Path(__file__).resolve().parent
+APP_ROOT = here.parent if here.name == "src" else here
 os.chdir(str(APP_ROOT))
 # 项目根目录放在最前面，确保 app/ 包优先于 web/app.py
 sys.path.insert(0, str(APP_ROOT))

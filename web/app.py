@@ -1,4 +1,4 @@
-import os
+﻿import os
 import asyncio
 import re
 import json
@@ -711,42 +711,29 @@ client = _ClientProxy()
 def create_research_client():
     """创建专用于 Deep Research 的长超时客户端 (5分钟 read timeout)"""
     import httpx
+    from google.genai._api_client import HttpOptions as _HttpOptions
     proxy = get_detected_proxy()
     # 深度研究需要更长的超时时间：连接30秒，读取5分钟
     timeout_config = httpx.Timeout(300.0, connect=30.0)
-    
-    # 构建 http_options
-    http_options = {}
-    
-    # 最新的 Gemini 模型需要 v1beta API
-    http_options['api_version'] = 'v1beta'
-    
-    # 自定义 API 端点
-    if GEMINI_API_BASE:
-        http_options['base_url'] = GEMINI_API_BASE
-    
-    # 配置代理 - 通过环境变量确保被使用
+
+    # 配置代理 - 通过环境变量确保被使用（同 create_client）
     if proxy:
         os.environ["HTTP_PROXY"] = proxy
         os.environ["HTTPS_PROXY"] = proxy
-        
-    if proxy:
-        http_client = httpx.Client(
-            proxy=proxy,
-            timeout=timeout_config,
-            verify=False  # SSL verification disabled with proxy
-        )
-        http_options['httpxClient'] = http_client
-    else:
-        http_client = httpx.Client(
-            timeout=timeout_config,
-            verify=True
-        )
-        http_options['httpxClient'] = http_client
-    
+
+    # 自定义 httpx 客户端（仅用于扩展超时；代理由 env vars 接管）
+    http_client = httpx.Client(timeout=timeout_config, verify=True)
+
+    opts_kwargs = dict(
+        api_version='v1beta',
+        httpx_client=http_client,
+    )
+    if GEMINI_API_BASE:
+        opts_kwargs['base_url'] = GEMINI_API_BASE
+
     return genai.Client(
         api_key=API_KEY,
-        http_options=http_options if http_options else None
+        http_options=_HttpOptions(**opts_kwargs)
     )
 
 
@@ -1228,6 +1215,18 @@ def _initialize_background_runtime():
         except Exception as _fe:
             print(f"[FileHub] ⚠️ 文件模块初始化失败（非致命）: {_fe}")
 
+        # 初始化工作文件库（后台快速扫描桌面/文档/下载）
+        try:
+            from web.work_file_library import get_work_file_library
+            _wfl_inst = get_work_file_library()
+            if not _wfl_inst.is_indexed():
+                _wfl_inst.scan_locations()
+                print("[WorkFileLibrary] 🚀 工作文件库后台扫描已启动（桌面/文档/下载）")
+            else:
+                print(f"[WorkFileLibrary] ✅ 工作文件库已加载: {_wfl_inst.count()} 个工作文件")
+        except Exception as _wfl_e:
+            print(f"[WorkFileLibrary] ⚠️ 初始化失败（非致命）: {_wfl_e}")
+
         print(
             "[Runtime] ✅ 后台运行时已启动: "
             f"job_runner={runner is not None}, "
@@ -1384,632 +1383,11 @@ def get_model_display_name(model_id):
     return model_id
 
 
-# ================= 本地系统执行器 =================
-class LocalExecutor:
-    """
-    本地系统操作执行器 - 让 Koto 成为真正的 AI OS
-    支持：打开应用、文件操作、系统命令等
-    """
-    
-    # Windows 常用应用路径映射 (包含更多路径)
-    APP_ALIASES = {
-        # 社交通讯
-        "微信": ["WeChat", r"C:\Program Files\Tencent\WeChat\WeChat.exe", r"C:\Program Files (x86)\Tencent\WeChat\WeChat.exe"],
-        "wechat": ["WeChat", r"C:\Program Files\Tencent\WeChat\WeChat.exe", r"C:\Program Files (x86)\Tencent\WeChat\WeChat.exe"],
-        "qq": ["QQ", r"C:\Program Files\Tencent\QQ\Bin\QQ.exe", r"C:\Program Files (x86)\Tencent\QQ\Bin\QQ.exe", r"C:\Program Files\Tencent\QQNT\QQ.exe"],
-        "钉钉": ["DingTalk", "dingtalk"],
-        "飞书": ["Feishu", "Lark"],
-        "telegram": ["Telegram"],
-        "discord": ["Discord", "Update --processStart Discord.exe"],
-        
-        # 游戏平台
-        "steam": ["steam", r"C:\Program Files (x86)\Steam\steam.exe", r"C:\Program Files\Steam\steam.exe", r"D:\Steam\steam.exe"],
-        "epic": ["EpicGamesLauncher", r"C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win32\EpicGamesLauncher.exe"],
-        "战网": ["Battle.net"],
-        "wallpaper engine": ["wallpaper32", "wallpaper64", r"C:\Program Files (x86)\Steam\steamapps\common\wallpaper_engine\wallpaper32.exe"],
-        "wallpaper": ["wallpaper32", "wallpaper64"],
-        
-        # 浏览器
-        "chrome": ["chrome", r"C:\Program Files\Google\Chrome\Application\chrome.exe", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"],
-        "谷歌浏览器": ["chrome"],
-        "edge": ["msedge", r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"],
-        "firefox": ["firefox", r"C:\Program Files\Mozilla Firefox\firefox.exe"],
-        "浏览器": ["chrome", "msedge", "firefox"],
-        
-        # 开发工具
-        "vscode": ["code"],
-        "vs code": ["code"],
-        "code": ["code"],
-        "pycharm": ["pycharm64", "pycharm"],
-        "idea": ["idea64", "idea"],
-        "terminal": ["wt", "cmd", "powershell"],
-        "终端": ["wt", "cmd", "powershell"],
-        "命令行": ["cmd", "powershell"],
-        "git": ["git-bash", r"C:\Program Files\Git\git-bash.exe"],
-        
-        # 办公软件
-        "word": ["winword", "WINWORD"],
-        "excel": ["excel", "EXCEL"],
-        "ppt": ["powerpnt", "POWERPNT"],
-        "powerpoint": ["powerpnt"],
-        "outlook": ["outlook", "OUTLOOK"],
-        "记事本": ["notepad"],
-        "notepad": ["notepad"],
-        "wps": ["wps", "wpsoffice", r"C:\Users\12524\AppData\Local\Kingsoft\WPS Office\ksolaunch.exe"],
-        "wps office": ["wps", "wpsoffice", "ksolaunch"],
-        
-        # 媒体
-        "spotify": ["Spotify"],
-        "网易云": ["cloudmusic", r"C:\Program Files (x86)\Netease\CloudMusic\cloudmusic.exe", r"C:\Program Files\Netease\CloudMusic\cloudmusic.exe"],
-        "网易云音乐": ["cloudmusic", r"C:\Program Files (x86)\Netease\CloudMusic\cloudmusic.exe"],
-        "cloudmusic": ["cloudmusic", r"C:\Program Files (x86)\Netease\CloudMusic\cloudmusic.exe"],
-        "qq音乐": ["QQMusic", r"C:\Program Files (x86)\Tencent\QQMusic\QQMusic.exe"],
-        "酷狗": ["KuGou", r"C:\Program Files\KuGou\KuGou.exe"],
-        "酷我": ["KuWo"],
-        "网易音乐": ["cloudmusic"],
-        "potplayer": ["PotPlayerMini64", "PotPlayerMini", r"C:\Program Files\DAUM\PotPlayer\PotPlayerMini64.exe"],
-        "vlc": ["vlc", r"C:\Program Files\VideoLAN\VLC\vlc.exe"],
-        
-        # 系统
-        "设置": ["ms-settings:"],
-        "控制面板": ["control"],
-        "任务管理器": ["taskmgr"],
-        "计算器": ["calc"],
-        "文件管理器": ["explorer"],
-        "资源管理器": ["explorer"],
-        "画图": ["mspaint"],
-        "截图": ["snippingtool", "SnippingTool"],
-    }
-    
-    # 系统操作关键词
-    SYSTEM_KEYWORDS = [
-        "打开", "启动", "运行", "开启", "关闭", "退出", "杀死",
-        "open", "start", "launch", "run", "close", "kill", "exit",
-        "搜索", "查找", "search", "find",
-        "截图", "screenshot",
-        "音量", "亮度", "volume", "brightness",
-        "关机", "重启", "休眠", "睡眠", "shutdown", "restart", "sleep",
-    ]
-    
-    # 知识提问模式 —— 如果匹配到这些，说明用户是在**问问题**，不是在下命令
-    QUESTION_PATTERNS = [
-        "怎么", "如何", "什么办法", "什么方法", "什么意思", "什么是", "是什么",
-        "为什么", "为啥", "能不能", "可以吗", "可不可以", "怎样", "咋",
-        "一般用", "通常", "有没有", "有什么", "哪些", "哪个", "哪种",
-        "区别", "对比", "比较", "最好的", "推荐", "建议",
-        "教程", "步骤", "流程", "原理", "概念",
-        "用什么", "是啥", "啥意思", "讲讲", "说说", "介绍",
-        "how to", "what is", "why", "which", "recommend",
-        "difference between", "best way", "tutorial",
-    ]
-
-    @classmethod
-    def is_system_command(cls, text):
-        """检测是否是系统操作请求（祈使句/命令句，非知识提问）
-        
-        核心逻辑：
-        1. 必须包含动作关键词（打开/启动/关闭等）
-        2. 必须包含已知应用名或「打开+紧跟名词」的短句模式
-        3. 排除知识性提问（包含"怎么/如何/什么办法"等）
-        """
-        text_lower = text.lower().strip()
-        
-        # ——— 排除条件：知识提问不是系统命令 ———
-        if any(qp in text_lower for qp in cls.QUESTION_PATTERNS):
-            return False
-        
-        # ——— 排除条件：句子太长一般不是命令（命令通常 <20字） ———
-        if len(text_lower) > 30:
-            return False
-        
-        # ——— 必须有动作关键词 ———
-        action_keywords = [
-            "打开", "启动", "运行", "开启", "关闭", "退出", "杀死",
-            "open", "start", "launch", "close", "kill", "exit",
-            "截图", "screenshot", "关机", "重启", "休眠", "睡眠",
-            "shutdown", "restart", "sleep",
-            "时间", "几点", "日期", "几号", "星期几", "time", "date",
-            "状态", "信息", "配置", "内存", "cpu", "硬盘"
-        ]
-        has_action = any(kw in text_lower for kw in action_keywords)
-        if not has_action:
-            return False
-        
-        # ——— 必须有已知应用名 ———
-        has_app = any(app in text_lower for app in cls.APP_ALIASES.keys())
-        
-        # 或者是独立的系统操作（无需应用名）
-        standalone_commands = [
-            "截图", "screenshot", "关机", "重启", "休眠", "睡眠", 
-            "shutdown", "restart", "sleep",
-            "时间", "几点", "日期", "几号", "星期几", "time", "date",
-            "系统状态", "电脑状态", "系统信息", "电脑信息", "配置", "内存", "cpu", "硬盘"
-        ]
-        is_standalone = any(cmd in text_lower for cmd in standalone_commands)
-        
-        return has_app or is_standalone
-    
-    @classmethod
-    def extract_app_name(cls, text):
-        """从文本中提取应用名"""
-        text_lower = text.lower()
-        
-        # 泛指类别映射到具体应用
-        category_mapping = {
-            "音乐软件": ["网易云", "qq音乐", "spotify", "酷狗"],
-            "听歌软件": ["网易云", "qq音乐", "spotify", "酷狗"],
-            "浏览器": ["edge", "chrome", "firefox"],
-            "文本编辑器": ["记事本", "vscode", "notepad"],
-            "代码编辑器": ["vscode", "pycharm", "idea"],
-            "视频播放器": ["potplayer", "vlc"],
-            "聊天软件": ["微信", "qq", "钉钉"],
-            "办公软件": ["word", "excel", "ppt", "wps"]
-        }
-        
-        # 先尝试精确匹配已知应用
-        for app_name in sorted(cls.APP_ALIASES.keys(), key=len, reverse=True):
-            if app_name in text_lower:
-                return app_name
-                
-        # 尝试匹配泛指类别
-        for category, apps in category_mapping.items():
-            if category in text_lower:
-                # 检查系统中安装了哪个
-                import shutil
-                for app in apps:
-                    aliases = cls.APP_ALIASES.get(app, [app])
-                    for alias in aliases:
-                        if os.path.exists(alias) or shutil.which(alias):
-                            return app
-                # 如果都没找到绝对路径，默认返回第一个
-                return apps[0]
-        
-        # 如果没有匹配，尝试提取"打开xxx"中的xxx
-        import re
-        patterns = [
-            r'(?:打开|启动|运行|开启)\s*(?:一个|一款)?\s*(.+?)(?:\s|$|吧|呗)',
-            r'(?:open|start|launch)\s+(?:a\s+)?(.+?)(?:\s|$)',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                return match.group(1).strip()
-        
-        return None
-    
-    @classmethod
-    def find_app_in_start_menu(cls, app_name):
-        """从开始菜单查找应用"""
-        import glob
-        
-        start_menu_paths = [
-            os.path.expandvars(r"%ProgramData%\Microsoft\Windows\Start Menu\Programs"),
-            os.path.expandvars(r"%AppData%\Microsoft\Windows\Start Menu\Programs"),
-        ]
-        
-        app_name_lower = app_name.lower()
-        
-        for start_path in start_menu_paths:
-            if not os.path.exists(start_path):
-                continue
-            
-            # 搜索 .lnk 文件
-            for lnk_file in glob.glob(os.path.join(start_path, "**", "*.lnk"), recursive=True):
-                lnk_name = os.path.basename(lnk_file).lower().replace(".lnk", "")
-                if app_name_lower in lnk_name or lnk_name in app_name_lower:
-                    return lnk_file
-        
-        return None
-    
-    @classmethod
-    def find_app_smart(cls, app_name):
-        """智能查找应用 - 多种方式"""
-        import subprocess
-        import shutil
-        
-        # 1. 先检查预定义别名
-        if app_name.lower() in cls.APP_ALIASES:
-            aliases = cls.APP_ALIASES[app_name.lower()]
-            for alias in aliases:
-                # 检查是否是完整路径
-                if os.path.exists(alias):
-                    return alias
-                # 检查是否在 PATH 中
-                if shutil.which(alias):
-                    return alias
-        
-        # 2. 检查 PATH
-        if shutil.which(app_name):
-            return app_name
-        
-        # 3. 从开始菜单查找
-        lnk_path = cls.find_app_in_start_menu(app_name)
-        if lnk_path:
-            return lnk_path
-        
-        # 4. 使用 PowerShell 搜索
-        try:
-            ps_cmd = f'Get-StartApps | Where-Object {{$_.Name -like "*{app_name}*"}} | Select-Object -First 1 -ExpandProperty AppID'
-            result = subprocess.run(
-                ["powershell", "-Command", ps_cmd],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-        except:
-            pass
-        
-        return None
-    
-    @classmethod
-    def execute(cls, user_input):
-        """执行系统操作"""
-        import subprocess
-        import shutil
-        
-        text_lower = user_input.lower()
-        result = {
-            "success": False,
-            "action": "",
-            "message": "",
-            "details": ""
-        }
-        
-        # === 打开应用 ===
-        if any(kw in text_lower for kw in ["打开", "启动", "运行", "开启", "open", "start", "launch"]):
-            app_name = cls.extract_app_name(text_lower)
-            
-            if app_name:
-                # 使用智能查找
-                app_path = cls.find_app_smart(app_name)
-                
-                if app_path:
-                    try:
-                        # 特殊处理 ms-settings 等 URI
-                        if app_path.startswith("ms-"):
-                            subprocess.Popen(
-                                f'start {app_path}',
-                                shell=True,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL
-                            )
-                        # 处理 .lnk 快捷方式
-                        elif app_path.endswith(".lnk"):
-                            subprocess.Popen(
-                                f'start "" "{app_path}"',
-                                shell=True,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL
-                            )
-                        # 处理 UWP 应用 AppID
-                        elif "!" in app_path:
-                            subprocess.Popen(
-                                f'start shell:AppsFolder\\{app_path}',
-                                shell=True,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL
-                            )
-                        # 直接路径或命令
-                        elif os.path.exists(app_path):
-                            subprocess.Popen(
-                                [app_path], 
-                                shell=True,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL,
-                                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                            )
-                        else:
-                            # 使用 start 命令
-                            subprocess.Popen(
-                                f'start "" "{app_path}"',
-                                shell=True,
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL
-                            )
-                        
-                        result["success"] = True
-                        result["action"] = "open_app"
-                        result["message"] = f"✅ 已打开 {app_name}"
-                        print(f"[LocalExecutor] ✅ 成功启动应用: {app_name} - 路径: {app_path}")
-                        return result
-                    except Exception as e:
-                        result["message"] = f"❌ 打开 {app_name} 失败: {str(e)}"
-                        print(f"[LocalExecutor] ❌ 启动失败: {app_name} - 错误: {str(e)}")
-                        return result
-                
-                # 智能查找失败，尝试直接用 start 命令
-                try:
-                    subprocess.Popen(
-                        f'start "" "{app_name}"',
-                        shell=True,
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL
-                    )
-                    result["success"] = True
-                    result["action"] = "open_app"
-                    result["message"] = f"✅ 正在尝试打开 {app_name}"
-                    return result
-                except:
-                    pass
-                
-                result["message"] = f"❌ 无法打开 {app_name}，请确认已安装"
-                result["details"] = f"提示: 您可以尝试使用完整的应用名称"
-                return result
-        
-        # === 关闭应用 ===
-        if any(kw in text_lower for kw in ["关闭", "退出", "杀死", "close", "kill", "exit"]):
-            app_name = cls.extract_app_name(text_lower)
-            if app_name:
-                aliases = cls.APP_ALIASES.get(app_name, [app_name])
-                for alias in aliases:
-                    try:
-                        if sys.platform == "win32":
-                            # 提取进程名
-                            proc_name = alias.split("\\")[-1] if "\\" in alias else alias
-                            if not proc_name.endswith(".exe"):
-                                proc_name += ".exe"
-                            
-                            ret = subprocess.run(
-                                f'taskkill /IM "{proc_name}" /F',
-                                shell=True,
-                                capture_output=True,
-                                timeout=5,
-                                creationflags=subprocess.CREATE_NO_WINDOW
-                            )
-                            if ret.returncode == 0:
-                                result["success"] = True
-                                result["action"] = "close_app"
-                                result["message"] = f"✅ 已关闭 {app_name}"
-                                return result
-                    except:
-                        continue
-                
-                result["message"] = f"❌ 无法关闭 {app_name}"
-                return result
-        
-        # === 截图 ===
-        if "截图" in text_lower or "screenshot" in text_lower:
-            if sys.platform == "win32":
-                subprocess.Popen(
-                    "snippingtool",
-                    shell=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                result["success"] = True
-                result["action"] = "screenshot"
-                result["message"] = "✅ 已打开截图工具"
-                return result
-        
-        # === 搜索 ===
-        if any(kw in text_lower for kw in ["搜索", "查找", "search"]):
-            # 提取搜索内容
-            search_terms = text_lower.replace("搜索", "").replace("查找", "").replace("search", "").strip()
-            if search_terms:
-                import webbrowser
-                webbrowser.open(f"https://www.google.com/search?q={search_terms}")
-                result["success"] = True
-                result["action"] = "search"
-                result["message"] = f"✅ 正在搜索: {search_terms}"
-                return result
-        
-        # === 系统时间/日期 ===
-        if any(kw in text_lower for kw in ["时间", "几点", "日期", "几号", "星期几", "time", "date"]):
-            import datetime
-            now = datetime.datetime.now()
-            
-            weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
-            weekday_str = weekdays[now.weekday()]
-            
-            if any(kw in text_lower for kw in ["日期", "几号", "星期几", "date"]):
-                time_str = now.strftime(f"%Y年%m月%d日 {weekday_str}")
-                msg = f"📅 当前日期是：{time_str}"
-            else:
-                time_str = now.strftime(f"%Y-%m-%d %H:%M:%S {weekday_str}")
-                msg = f"🕒 当前系统时间是：{time_str}"
-                
-            result["success"] = True
-            result["action"] = "get_time"
-            result["message"] = msg
-            return result
-            
-        # === 电源操作 ===
-        if any(kw in text_lower for kw in ["关机", "重启", "休眠", "睡眠", "shutdown", "restart", "sleep"]):
-            if sys.platform == "win32":
-                if "关机" in text_lower or "shutdown" in text_lower:
-                    subprocess.Popen("shutdown /s /t 0", shell=True)
-                    msg = "✅ 正在关机..."
-                elif "重启" in text_lower or "restart" in text_lower:
-                    subprocess.Popen("shutdown /r /t 0", shell=True)
-                    msg = "✅ 正在重启..."
-                elif "休眠" in text_lower or "睡眠" in text_lower or "sleep" in text_lower:
-                    subprocess.Popen("rundll32.exe powrprof.dll,SetSuspendState 0,1,0", shell=True)
-                    msg = "✅ 正在进入休眠/睡眠状态..."
-                
-                result["success"] = True
-                result["action"] = "power_op"
-                result["message"] = msg
-                return result
-                
-        # === 系统状态/电脑状态 ===
-        if any(kw in text_lower for kw in ["系统状态", "电脑状态", "系统信息", "电脑信息", "配置", "内存", "cpu", "硬盘"]):
-            info = cls.get_system_info()
-            if info.get("success"):
-                msg = f"💻 **系统状态报告**\n\n"
-                msg += f"- **操作系统**: {info.get('system')} ({info.get('platform')})\n"
-                msg += f"- **处理器**: {info.get('processor')}\n"
-                msg += f"- **CPU 使用率**: {info.get('cpu_percent')}%\n"
-                
-                mem = info.get('memory', {})
-                msg += f"- **内存**: 已用 {mem.get('percent')}% (剩余 {mem.get('available')} / 总共 {mem.get('total')})\n"
-                
-                disk = info.get('disk', {})
-                msg += f"- **C盘**: 已用 {disk.get('percent')}% (剩余 {disk.get('free')} / 总共 {disk.get('total')})\n"
-                
-                result["success"] = True
-                result["action"] = "get_system_info"
-                result["message"] = msg
-                return result
-        
-        result["message"] = "❓ 无法识别该系统操作"
-        return result
-    
-    @classmethod
-    def get_clipboard(cls):
-        """获取剪贴板内容"""
-        try:
-            import pyperclip
-            content = pyperclip.paste()
-            return {
-                "success": True,
-                "content": content,
-                "length": len(content),
-                "message": f"✅ 已获取剪贴板内容 ({len(content)} 字符)"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "content": "",
-                "message": f"❌ 无法读取剪贴板: {str(e)}"
-            }
-    
-    @classmethod
-    def set_clipboard(cls, text):
-        """设置剪贴板内容"""
-        try:
-            import pyperclip
-            pyperclip.copy(text)
-            return {
-                "success": True,
-                "message": f"✅ 已复制到剪贴板 ({len(text)} 字符)"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"❌ 无法写入剪贴板: {str(e)}"
-            }
-    
-    @classmethod
-    def get_system_info(cls):
-        """获取系统信息"""
-        try:
-            import platform
-            import psutil
-            
-            info = {
-                "success": True,
-                "system": platform.system(),
-                "platform": platform.platform(),
-                "processor": platform.processor(),
-                "cpu_count": psutil.cpu_count(),
-                "cpu_percent": psutil.cpu_percent(interval=1),
-                "memory": {
-                    "total": f"{psutil.virtual_memory().total / (1024**3):.2f} GB",
-                    "available": f"{psutil.virtual_memory().available / (1024**3):.2f} GB",
-                    "percent": psutil.virtual_memory().percent
-                },
-                "disk": {
-                    "total": f"{psutil.disk_usage('/').total / (1024**3):.2f} GB",
-                    "free": f"{psutil.disk_usage('/').free / (1024**3):.2f} GB",
-                    "percent": psutil.disk_usage('/').percent
-                }
-            }
-            return info
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"❌ 无法获取系统信息: {str(e)}"
-            }
-    
-    @classmethod
-    def list_running_apps(cls):
-        """列出正在运行的应用"""
-        try:
-            import psutil
-            
-            apps = []
-            for proc in psutil.process_iter(['pid', 'name']):
-                try:
-                    apps.append({
-                        "name": proc.info['name'],
-                        "pid": proc.info['pid']
-                    })
-                except:
-                    continue
-            
-            return {
-                "success": True,
-                "apps": apps[:30],  # 返回前30个
-                "count": len(apps),
-                "message": f"✅ 找到 {len(apps)} 个运行中的进程"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"❌ 无法列出应用: {str(e)}"
-            }
-    
-    @classmethod
-    def open_file_or_directory(cls, path):
-        """打开文件或目录"""
-        try:
-            import subprocess
-            
-            path = os.path.expanduser(path)
-            
-            if not os.path.exists(path):
-                return {
-                    "success": False,
-                    "message": f"❌ 路径不存在: {path}"
-                }
-            
-            if os.path.isfile(path):
-                # 用默认应用打开文件
-                os.startfile(path) if sys.platform == "win32" else subprocess.Popen(['open', path])
-                return {
-                    "success": True,
-                    "message": f"✅ 已打开文件: {os.path.basename(path)}"
-                }
-            else:
-                # 在资源管理器中打开目录
-                os.startfile(path) if sys.platform == "win32" else subprocess.Popen(['open', path])
-                return {
-                    "success": True,
-                    "message": f"✅ 已打开目录: {path}"
-                }
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"❌ 无法打开: {str(e)}"
-            }
-    
-    @classmethod
-    def send_keystroke(cls, key_combination):
-        """模拟键盘快捷键"""
-        try:
-            import keyboard
-            
-            # 解析快捷键
-            keys = key_combination.split('+')
-            keys = [k.strip().lower() for k in keys]
-            
-            # 模拟快捷键
-            keyboard.hotkey(*keys)
-            
-            return {
-                "success": True,
-                "message": f"✅ 已模拟快捷键: {key_combination}"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "message": f"❌ 无法发送快捷键: {str(e)}"
-            }
-
-
+# ================= 本地系统执行器 (已迁移到 web/local_executor.py) =================
+try:
+    from web.local_executor import LocalExecutor
+except ImportError:
+    from local_executor import LocalExecutor
 # ================= 文件操作执行器 =================
 class FileOperator:
     """
@@ -2572,8 +1950,8 @@ class WebSearcher:
                         return
                 except Exception as e1:
                     print(f"[PPT-IMAGE] Imagen 4.0 失败: {e1}")
-                
-                # ③ 最后备选: Imagen 4.0 Fast
+
+                # ③ 备选: Imagen 4.0 Fast
                 try:
                     res2 = client.models.generate_images(
                         model="imagen-4.0-fast-generate-001",
@@ -2585,6 +1963,19 @@ class WebSearcher:
                         return
                 except Exception as e2:
                     print(f"[PPT-IMAGE] Imagen 4.0 Fast 也失败: {e2}")
+
+                # ④ 最终备选: Imagen 3.0（当前公开稳定版）
+                try:
+                    res3 = client.models.generate_images(
+                        model="imagen-3.0-generate-001",
+                        prompt=p,
+                        config=types.GenerateImagesConfig(number_of_images=1)
+                    )
+                    if res3.generated_images:
+                        q.put(("success", res3.generated_images[0].image.image_bytes))
+                        return
+                except Exception as e3:
+                    print(f"[PPT-IMAGE] Imagen 3.0 也失败: {e3}")
                 q.put(("fail", None))
             
             thread = threading.Thread(target=_gen_image, args=(full_prompt, result_q), daemon=True)
@@ -4347,17 +3738,32 @@ class TaskOrchestrator:
                     # Run potentially blocking generation in thread
                     fname = f"painter_{i}_{int(time.time()*1000)%1000000}.png"
                     fpath = os.path.join(images_dir, fname)
-                    res = await asyncio.to_thread(lambda: client.models.generate_images(
-                        model="imagen-4.0-generate-001",
-                        prompt=prompt,
-                        config=types.GenerateImagesConfig(number_of_images=1)
-                    ))
-                    if res and res.generated_images:
+                    _img_models = [
+                        "imagen-4.0-generate-001",
+                        "imagen-4.0-fast-generate-001",
+                        "imagen-3.0-generate-001",
+                    ]
+                    _img_res = None
+                    for _img_m in _img_models:
+                        try:
+                            _img_res = await asyncio.to_thread(lambda _m=_img_m: client.models.generate_images(
+                                model=_m,
+                                prompt=prompt,
+                                config=types.GenerateImagesConfig(number_of_images=1)
+                            ))
+                            if _img_res and _img_res.generated_images:
+                                break
+                        except Exception as _img_e:
+                            print(f"[PAINTER] {_img_m} 失败: {_img_e}")
+                            _img_res = None
+                    if _img_res and _img_res.generated_images:
                         with open(fpath, "wb") as f:
-                            f.write(res.generated_images[0].image.image_bytes)
+                            f.write(_img_res.generated_images[0].image.image_bytes)
                         image_paths.append(fpath)
                         print(f"[PAINTER] ✅ 配图 {i+1} 已生成: {fname}")
                         _report(f"✅ 配图 {i+1} 完成", fname)
+                    else:
+                        raise RuntimeError("所有图像模型均失败")
                 except Exception as img_err:
                     print(f"[PAINTER] ⚠️ 配图 {i+1} 生成失败: {img_err}")
                     _report(f"⚠️ 配图 {i+1} 失败", str(img_err))
@@ -5103,6 +4509,10 @@ class SessionManager:
         safe = "".join([c if c.isalnum() else "_" for c in name])
         filename = f"{safe}.json"
         path = os.path.join(CHAT_DIR, filename)
+        # 若同名文件已存在，加时间戳后缀避免覆盖已有会话
+        if os.path.exists(path):
+            filename = f"{safe}_{int(time.time())}.json"
+            path = os.path.join(CHAT_DIR, filename)
         with open(path, "w", encoding="utf-8") as f:
             json.dump([], f)
         return filename
@@ -5329,6 +4739,22 @@ def _start_memory_extraction(
             ShadowWatcher.observe(user_msg, ai_msg, session_name)
         except Exception as e:
             print(f"[ShadowWatcher] ⚠️ 观察失败: {e}")
+
+        # ── 3-B: ResponseEvaluator 模型自评（自动质量评分 → RatingStore）────
+        try:
+            from app.core.learning.response_evaluator import ResponseEvaluator
+            from app.core.learning.rating_store import RatingStore as _RS
+            _eval_msg_id = _RS.make_msg_id(session_name, user_msg)
+            ResponseEvaluator.evaluate_async(
+                msg_id=_eval_msg_id,
+                user_input=user_msg,
+                ai_response=ai_msg,
+                task_type=task_type,
+                session_name=session_name,
+                llm_fn=_llm_sync,
+            )
+        except Exception as e:
+            print(f"[ResponseEvaluator] ⚠️ 自评启动失败: {e}")
 
         # ── 4: MacroRecorder 宏录制（重复工作流检测）────────────────────────
         try:
@@ -6268,6 +5694,13 @@ def chat_stream():
                 task_type = "CHAT"
                 route_method = "⬇️ FILE_EDIT→CHAT"
 
+        # ── CHAT → WEB_SEARCH 安全兜底（防止天气/股价/新闻等实时查询被误分为CHAT）────
+        # 这是最后一道防线：在任务链路执行之前，重新校验是否需要联网搜索
+        if task_type == "CHAT" and WebSearcher.needs_web_search(user_input):
+            print(f"[STREAM] ⚡ CHAT→WEB_SEARCH 安全兜底触发: '{user_input[:40]}'")
+            task_type = "WEB_SEARCH"
+            route_method = "🌐 CHAT→WEB_SEARCH"
+
         # 如果有上下文信息，记录详情
         if context_info and context_info.get("is_continuation"):
             print(f"[STREAM] Context continuation: {context_info.get('related_task')}, confidence: {context_info.get('confidence')}")
@@ -6864,8 +6297,18 @@ def chat_stream():
         _active_skills = SkillManager.get_active_skill_names(task_type=task_type)
         if _active_skills:
             print(f"[STREAM] 🎯 Active Skills ({task_type}): {', '.join(_active_skills)}")
+        # 意图绑定：技能未手动开启时，按输入内容临时激活匹配的技能
+        _intent_temp_ids = []
+        try:
+            from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+            _intent_temp_ids = get_skill_binding_manager().match_intent(user_input or "")
+            if _intent_temp_ids:
+                print(f"[STREAM] 🔗 Intent-matched Skills: {', '.join(_intent_temp_ids)}")
+        except Exception:
+            pass
         system_instruction = SkillManager.inject_into_prompt(
-            system_instruction, task_type=task_type, user_input=user_input
+            system_instruction, task_type=task_type, user_input=user_input,
+            temp_skill_ids=_intent_temp_ids,
         )
     except Exception as _sk_err:
         print(f"[STREAM] ⚠️ Skills 注入失败: {_sk_err}")
@@ -7523,6 +6966,94 @@ def chat_stream():
                 # ── 📋 单文件关键字段提取（合同/发票/简历等） ──────────────────
                 _FIELDS_KWS = ["提取字段", "提取信息", "关键信息", "合同信息", "发票信息",
                                "提取关键", "解读这个", "读一下这个", "分析这个文件", "文件内容"]
+
+                # ── 🗂️ 工作文件库管理命令 ─────────────────────────────────────
+                _WFL_ADD_KWS = ["添加监控文件夹", "添加文件夹", "加入文件库", "监控这个文件夹到文件库",
+                                "把这个文件夹加入文件库", "添加到文件库"]
+                _WFL_REFRESH_KWS = ["刷新文件库", "更新文件库", "重新扫描文件库", "重建文件库"]
+                _WFL_STATUS_KWS = ["文件库状态", "文件库统计", "文件库有多少", "文件库里有什么",
+                                   "文件库概况", "查看文件库"]
+
+                if any(k in user_input for k in _WFL_ADD_KWS) and _watch_path_m:
+                    _add_path = _watch_path_m.group(1).rstrip('\\/. ')
+                    try:
+                        from web.work_file_library import get_work_file_library
+                        _wfl2 = get_work_file_library()
+                        _added = _wfl2.add_watch_folder(_add_path)
+                        if _added:
+                            yield f"data: {json.dumps({'type': 'progress', 'message': f'📂 正在扫描 {_add_path}...', 'detail': '添加到工作文件库'}, ensure_ascii=False)}\n\n"
+                            _wfl2.scan_locations(locations=[_add_path])
+                            _wfl2.wait_for_scan(timeout=15.0)
+                            _cnt = _wfl2.count()
+                            response_text = (
+                                f"✅ 已将 `{_add_path}` 添加到工作文件库并完成扫描！\n\n"
+                                f"文件库现共收录 **{_cnt}** 个工作文件。\n"
+                                "以后说「找 xxx」即可快速检索。"
+                            )
+                        else:
+                            response_text = f"❌ 添加失败，请确认路径存在: `{_add_path}`"
+                    except Exception as _wadd_e:
+                        response_text = f"❌ 添加文件夹出错: {_wadd_e}"
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+                if any(k in user_input for k in _WFL_REFRESH_KWS):
+                    try:
+                        from web.work_file_library import get_work_file_library
+                        _wfl3 = get_work_file_library()
+                        yield f"data: {json.dumps({'type': 'progress', 'message': '🔄 正在刷新工作文件库...', 'detail': '重新扫描所有位置'}, ensure_ascii=False)}\n\n"
+                        _wfl3.scan_locations(force=True)
+                        _wfl3.wait_for_scan(timeout=15.0)
+                        _st = _wfl3.get_stats()
+                        _cats_str = "、".join(f"{k} {v}个" for k, v in _st.get("categories", {}).items())
+                        response_text = (
+                            f"✅ 工作文件库已刷新！\n\n"
+                            f"共收录 **{_st['total']}** 个工作文件"
+                            + (f"（{_cats_str}）" if _cats_str else "")
+                            + "。"
+                        )
+                    except Exception as _wref_e:
+                        response_text = f"❌ 刷新文件库出错: {_wref_e}"
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+                if any(k in user_input for k in _WFL_STATUS_KWS):
+                    try:
+                        from web.work_file_library import get_work_file_library, _CATEGORY_ICONS
+                        _wfl4 = get_work_file_library()
+                        _st4 = _wfl4.get_stats()
+                        import time as _t4
+                        _ls = _st4.get("last_scan")
+                        _ls_str = _t4.strftime("%Y-%m-%d %H:%M", _t4.localtime(_ls)) if _ls else "从未扫描"
+                        response_text = f"### 🗂️ 工作文件库状态\n\n"
+                        response_text += f"- **收录总数**: {_st4['total']} 个工作文件\n"
+                        response_text += f"- **最后扫描**: {_ls_str}\n\n"
+                        if _st4.get("categories"):
+                            response_text += "**按类型分布：**\n\n"
+                            for _cat, _cnt4 in _st4["categories"].items():
+                                _icon4 = _CATEGORY_ICONS.get(_cat, "📎")
+                                response_text += f"- {_icon4} {_cat}: **{_cnt4}** 个\n"
+                        _wfs = _wfl4.list_watch_folders()
+                        _default_locs = __import__("web.work_file_library", fromlist=["_get_common_locations"])._get_common_locations()
+                        response_text += f"\n**扫描位置（{len(_default_locs) + len(_wfs)} 个）：**\n"
+                        for _loc in _default_locs:
+                            response_text += f"- `{_loc}` （默认）\n"
+                        for _wf in _wfs:
+                            response_text += f"- `{_wf['path']}` （用户添加）\n"
+                        response_text += "\n说「**刷新文件库**」可重新扫描，说「**添加监控文件夹 路径**」可扩大范围。"
+                    except Exception as _wst_e:
+                        response_text = f"❌ 获取文件库状态失败: {_wst_e}"
+                    yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
                 if any(k in user_input for k in _FIELDS_KWS) and _watch_path_m:
                     _tgt_file = _watch_path_m.group(1).rstrip('\\/. ')
                     from pathlib import Path as _FPath
@@ -7615,6 +7146,106 @@ def chat_stream():
                         total_time = time.time() - start_time
                         yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                         return
+
+                    # ── 工作文件库搜索（优先，无需全盘扫描）────────────────────
+                    # 仅当用户未明确要求全盘搜索时，先查工作文件库
+                    _EXPLICIT_FULL_DISK_KWS = [
+                        "全盘", "整个电脑", "所有磁盘", "所有文件", "全电脑", "全部磁盘",
+                        "全部文件", "全硬盘",
+                    ]
+                    _want_full_disk = any(k in user_input for k in _EXPLICIT_FULL_DISK_KWS)
+
+                    if not _want_full_disk:
+                        try:
+                            from web.work_file_library import (
+                                get_work_file_library, detect_category_from_input,
+                                _CATEGORY_ICONS,
+                            )
+                            _wfl = get_work_file_library()
+                            _wfl_query = extract_query_from_input(user_input)
+
+                            # 如果库还没数据，触发快速扫描并等待
+                            if not _wfl.is_indexed():
+                                yield f"data: {json.dumps({'type': 'progress', 'message': '📂 正在快速建立工作文件库...', 'detail': '扫描桌面、文档、下载等常用位置'}, ensure_ascii=False)}\n\n"
+                                _wfl.scan_locations()
+                                _wfl.wait_for_scan(timeout=10.0)
+
+                            # 检测用户意图的文件类型
+                            _wfl_category = detect_category_from_input(user_input)
+                            _wfl_results = _wfl.search(_wfl_query, limit=30, category=_wfl_category)
+                            _wfl_stats = _wfl.get_stats()
+
+                            if _wfl_results:
+                                # 按分类分组展示
+                                _grouped: dict = {}
+                                for _r in _wfl_results:
+                                    _grouped.setdefault(_r["category"], []).append(_r)
+
+                                response_text = (
+                                    f"📂 在文件库中找到 **{len(_wfl_results)}** 个包含「{_wfl_query}」的文件：\n\n"
+                                )
+                                for _cat, _cat_files in _grouped.items():
+                                    _icon = _CATEGORY_ICONS.get(_cat, "📎")
+                                    response_text += f"### {_icon} {_cat}（{len(_cat_files)} 个）\n\n"
+                                    response_text += "| 文件名 | 大小 | 修改时间 |\n| --- | --- | --- |\n"
+                                    for _f in _cat_files[:10]:
+                                        response_text += f"| `{_f['name']}` | {_f['size_str']} | {_f['mtime_str']} |\n"
+                                    if len(_cat_files) > 10:
+                                        response_text += f"\n_...还有 {len(_cat_files) - 10} 个同类文件_\n"
+                                    response_text += "\n"
+
+                                _cats_summary = "、".join(
+                                    f"{k} {v}个" for k, v in _wfl_stats.get("categories", {}).items()
+                                )
+                                response_text += (
+                                    f"\n---\n_文件库共收录 **{_wfl_stats['total']}** 个工作文件"
+                                    + (f"（{_cats_summary}）" if _cats_summary else "")
+                                    + "。如需搜索更多位置，说「添加监控文件夹 D:\\工作资料」_"
+                                )
+
+                                # 同步发送文件选择器事件（供前端渲染卡片）
+                                _picker_files = [
+                                    {
+                                        "path":      _r["path"],
+                                        "name":      _r["name"],
+                                        "ext":       _r["ext"],
+                                        "category":  _r["category"],
+                                        "size_str":  _r["size_str"],
+                                        "mtime_str": _r["mtime_str"],
+                                        "score":     _r["score"],
+                                    }
+                                    for _r in _wfl_results[:12]
+                                ]
+                                yield f"data: {json.dumps({'type': 'file_picker', 'query': _wfl_query, 'count': len(_wfl_results), 'files': _picker_files, 'auto_opened': False}, ensure_ascii=False)}\n\n"
+                                yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                                session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                                total_time = time.time() - start_time
+                                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                                return
+
+                            elif _wfl.is_indexed():
+                                # 库已建立但本次未找到
+                                _cats_summary = "、".join(
+                                    f"{k} {v}个" for k, v in _wfl_stats.get("categories", {}).items()
+                                )
+                                response_text = (
+                                    f"📭 工作文件库中未找到包含「{_wfl_query}」的文件。\n\n"
+                                    f"文件库当前收录了 **{_wfl_stats['total']}** 个工作文件"
+                                    + (f"（{_cats_summary}）" if _cats_summary else "")
+                                    + "。\n\n💡 提示：\n"
+                                    "- 说「**添加监控文件夹 D:\\工作资料**」可扩大搜索范围\n"
+                                    "- 说「**刷新文件库**」可重新扫描已有位置\n"
+                                    f"- 说「**全盘搜索 {_wfl_query}**」可搜索整个电脑"
+                                )
+                                yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
+                                session_manager.append_and_save(f"{session_name}.json", user_input, response_text, task="FILE_SEARCH", model_name=used_model)
+                                total_time = time.time() - start_time
+                                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                                return
+
+                        except Exception as _wfl_exc:
+                            print(f"[FILE_SEARCH] ⚠️ 工作文件库搜索出错（降级到全盘扫描）: {_wfl_exc}")
+                            # 继续走全盘扫描逻辑
 
                     # ── 全盘文件名模糊搜索 ──────────────────────────────────
                     FileScanner.ensure_loaded()
@@ -11129,6 +10760,66 @@ def chat_with_file():
         # 对 .docx/.doc 文件，使用 LLM 驱动的智能分析引擎判断用户意图
         # 不再硬编码正则，而是让分析器理解用户真实需求
         if file_ext in ['.docx', '.doc']:
+            # ── 翻译请求：最高优先级，直接走服务器端翻译管道 ──────────────
+            _TRANSLATE_KWS = ['翻译', '译成', '译为', '转成英文', '转成日文', '转成中文',
+                               'translate', '翻成', '转译']
+            _is_translate_request = any(kw in (user_input or '').lower() for kw in _TRANSLATE_KWS)
+            if _is_translate_request and locked_task != "DOC_ANNOTATE":
+                print(f"[DOCX TRANSLATE] 检测到翻译请求，启用格式保留翻译管道")
+
+                def generate_docx_translation():
+                    try:
+                        from web.docx_translator_module import translate_docx_streaming, detect_target_language
+                        target_lang = detect_target_language(user_input or '')
+                        docs_dir = os.path.join(WORKSPACE_DIR, "documents")
+                        os.makedirs(docs_dir, exist_ok=True)
+
+                        yield f"data: {json.dumps({'type': 'classification', 'task_type': 'FILE_GEN', 'task_display': '🌐 Word 文档翻译', 'route_method': '🌐 DocxTranslator', 'message': f'🎯 启动格式保留翻译 → {target_lang}'})}\n\n"
+
+                        for event in translate_docx_streaming(filepath, target_lang, client, output_dir=docs_dir):
+                            stage = event.get('stage', '')
+                            msg = event.get('message', '')
+                            progress = event.get('progress', 0)
+
+                            if stage == 'error':
+                                yield f"data: {json.dumps({'type': 'token', 'content': f'❌ 翻译失败: {msg}'})}\n\n"
+                                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
+                                return
+
+                            elif stage == 'complete':
+                                out_path = event.get('output_path', '')
+                                out_name = event.get('output_filename', os.path.basename(out_path))
+                                count = event.get('translated_count', 0)
+                                lang = event.get('target_language', target_lang)
+                                rel_path = os.path.relpath(out_path, WORKSPACE_DIR).replace('\\', '/')
+
+                                success_msg = (
+                                    f"✅ **Word 文档翻译完成！**\n\n"
+                                    f"🌐 目标语言: **{lang}**\n"
+                                    f"📝 翻译段落: **{count}** 段\n"
+                                    f"📁 文件名: **{out_name}**\n"
+                                    f"📍 位置: `workspace/documents/`\n\n"
+                                    f"格式已完整保留（字体/加粗/斜体/颜色/表格/页眉页脚）"
+                                )
+                                yield f"data: {json.dumps({'type': 'token', 'content': success_msg})}\n\n"
+                                session_manager.append_and_save(
+                                    f"{session_name}.json", user_input,
+                                    f"翻译完成 → {out_name} ({count}段, {lang})"
+                                )
+                                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [rel_path]})}\n\n"
+                                return
+
+                            else:
+                                yield f"data: {json.dumps({'type': 'progress', 'message': msg, 'detail': f'{progress}%'})}\n\n"
+
+                    except Exception as _te:
+                        import traceback as _tb
+                        print(f"[DOCX TRANSLATE] ❌ 翻译异常: {_tb.format_exc()}")
+                        yield f"data: {json.dumps({'type': 'token', 'content': f'❌ 翻译出错: {str(_te)}'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
+
+                return Response(stream_with_context(generate_docx_translation()), content_type='text/event-stream')
+
             # 标注任务优先级更高：显式标注意图或用户锁定 DOC_ANNOTATE 时，不进入智能分析引擎
             force_annotation = (locked_task == "DOC_ANNOTATE") or _should_use_annotation_system(user_input, has_file=True)
 
@@ -15197,6 +14888,11 @@ def get_trigger_system():
             notification_manager=notif_mgr,
             dialogue_engine=dialogue_eng
         )
+        # 启动后台轮询（每5分钟检查一次触发条件）
+        try:
+            _trigger_system_cache['system'].start_monitoring(check_interval=300)
+        except Exception as _tse:
+            print(f"[TriggerSystem] ⚠️ start_monitoring 失败（非致命）: {_tse}")
     return _trigger_system_cache['system']
 
 
@@ -17142,5 +16838,77 @@ def api_rag_clear():
         return jsonify({"success": ok, "message": "向量库已清空"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 用户评分接口 — 接收前端 appendRatingBar 的 5 星评分，存 RatingStore
+# 并在高评分（≥4 星）时向 ShadowTracer 写入优质样本，推动训练数据飞轮
+# ──────────────────────────────────────────────────────────────────────────────
+@app.route('/api/response/rate', methods=['POST'])
+def api_response_rate():
+    """
+    接收用户对 AI 回复的星级评分。
+
+    请求体:
+      msg_id       str   — MD5 消息指纹（由后端 done 事件下发）
+      stars        int   — 1~5 星
+      comment      str   — 可选文字反馈
+      session_name str   — 会话名
+      user_input   str   — 用户原始输入（前 500 字）
+      ai_response  str   — AI 回复文本（前 500 字）
+      task_type    str   — 任务类型，默认 CHAT
+    """
+    data = request.json or {}
+    msg_id       = data.get("msg_id", "")
+    stars        = int(data.get("stars", 0))
+    comment      = (data.get("comment") or "").strip()
+    session_name = data.get("session_name", "default")
+    user_input   = data.get("user_input", "")
+    ai_response  = data.get("ai_response", "")
+    task_type    = data.get("task_type", "CHAT")
+
+    if not (1 <= stars <= 5):
+        return jsonify({"success": False, "error": "stars 必须在 1~5 之间"}), 400
+
+    # ── 1. 存入 RatingStore ────────────────────────────────────────────────────
+    try:
+        from app.core.learning.rating_store import RatingStore
+        rs = RatingStore()
+        rs.save_user_rating(
+            msg_id=msg_id,
+            stars=stars,
+            comment=comment,
+            session_name=session_name,
+            user_input=user_input,
+            ai_response=ai_response,
+        )
+    except Exception as e:
+        print(f"[ResponseRate] ⚠️ RatingStore 保存失败: {e}")
+
+    # ── 2. 高评分（≥4 星）→ ShadowTracer 记录优质样本，推进飞轮 ──────────────
+    trace_id = None
+    if stars >= 4 and user_input and ai_response:
+        try:
+            from app.core.learning.shadow_tracer import ShadowTracer
+            trace_id = ShadowTracer.record_approved(
+                session_id=session_name,
+                user_input=user_input,
+                ai_response=ai_response,
+                skill_id=None,
+                task_type=task_type,
+                model_used="",
+                metadata={"stars": stars, "comment": comment, "source": "user_rating"},
+            )
+            print(f"[ResponseRate] ⭐ {stars}星 → ShadowTracer 记录 trace_id={trace_id}")
+        except Exception as e:
+            print(f"[ResponseRate] ⚠️ ShadowTracer 记录失败: {e}")
+
+    return jsonify({
+        "success": True,
+        "msg_id": msg_id,
+        "stars": stars,
+        "trace_id": trace_id,
+        "flywheel": trace_id is not None,
+    })
 
 

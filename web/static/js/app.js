@@ -321,6 +321,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     const theme = currentSettings?.appearance?.theme || 'light';
     applyTheme(theme);
     updateThemeSelector(theme);
+    // 应用服务器存储的缩放比例（可能与 localStorage 不一致时，服务器为准）
+    const serverZoom = parseFloat(currentSettings?.appearance?.ui_zoom || '1');
+    setUIZoom(serverZoom, true);
     
     // 2. 检查是否需要设置向导
     await checkSetupStatus();
@@ -702,13 +705,18 @@ async function createNewSession(name = null) {
         });
         
         if (response.ok) {
-            currentSession = name;
-            document.getElementById('chatTitle').textContent = name;
-            loadSessions();
-            
-            // 清空聊天区域
-            const container = document.getElementById('chatMessages');
-            container.innerHTML = '';
+            const data = await response.json();
+            if (data.success) {
+                // 使用服务端返回的真实会话标识（经过文件名安全处理），
+                // 避免后续发送消息时使用原始名称而创建出另一个空白同名会话
+                currentSession = data.session;
+                document.getElementById('chatTitle').textContent = data.session;
+                loadSessions();
+                
+                // 清空聊天区域
+                const container = document.getElementById('chatMessages');
+                container.innerHTML = '';
+            }
         }
     } catch (error) {
         console.error('Failed to create session:', error);
@@ -3368,6 +3376,12 @@ function applySettingsToUI() {
         applyLocalOnlyMode(localOnly);
     }
 
+    // Restore UI zoom from server settings (server is the source of truth)
+    const savedZoom = parseFloat(currentSettings.appearance?.ui_zoom || '1');
+    if (savedZoom && savedZoom !== 1) {
+        setUIZoom(savedZoom, true);  // true = suppress server re-save on load
+    }
+
     // Proxy settings
     const proxyEnabledEl = document.getElementById('settingProxyEnabled');
     if (proxyEnabledEl) proxyEnabledEl.checked = currentSettings.proxy?.enabled !== false;
@@ -3400,9 +3414,9 @@ function openSettings() {
     fileHubLoadStats();     // Load file registry stats
     loadShadowStatus();     // Load shadow watcher status
     document.getElementById('settingsPanel').classList.add('active');
-    // Sync zoom slider to current state
+    // Sync zoom slider to current state (suppress save - just restoring display)
     const savedZ = parseFloat(localStorage.getItem('koto.uiZoom') || '1');
-    setUIZoom(savedZ);
+    setUIZoom(savedZ, true);
 }
 
 function closeSettings() {
@@ -6498,6 +6512,8 @@ function _fhRenderFiles(files, container, showPath) {
                 <div class="fh-name">${_esc(f.name || f.path || '')}</div>
                 <div class="fh-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_esc(sub)}</div>
             </div>
+            <button onclick="_fhOpenFile(${JSON.stringify(f.path||'')})"
+                title="打开文件" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;color:var(--text-muted);">📂</button>
             <button onclick="_fhCopyPath(${JSON.stringify(f.path||'')})"
                 title="复制路径" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;color:var(--text-muted);">📋</button>
         </div>`;
@@ -6510,6 +6526,17 @@ function _fhShowCount(n, label) {
     if (!hdr || !cnt) return;
     cnt.textContent = `共 ${n} 个${label}`;
     hdr.style.display = 'flex';
+}
+
+function _fhOpenFile(path) {
+    fetch('/api/files/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path })
+    }).then(r => r.json()).then(d => {
+        if (d.status === 'ok') _showToast('已打开');
+        else _showToast('打开失败：' + (d.error || '未知错误'));
+    }).catch(() => _showToast('请求失败'));
 }
 
 function _fhCopyPath(path) {
@@ -6713,12 +6740,16 @@ async function saveCatalogScheduleWizard() {
 })();
 
 // ── UI Zoom (global font & layout scale) ─────────────────────────────────
-function setUIZoom(v) {
+function setUIZoom(v, suppressSave = false) {
     v = Math.max(0.7, Math.min(1.5, parseFloat(v) || 1));
     document.documentElement.style.zoom = v;
     // Compensate --viewport-h so 100vh-based containers don't overflow after zoom
     document.documentElement.style.setProperty('--viewport-h', (window.innerHeight / v) + 'px');
     localStorage.setItem('koto.uiZoom', v);
+    // Persist to server so the setting survives across sessions/ports/browsers
+    if (!suppressSave && typeof updateSetting === 'function') {
+        updateSetting('appearance', 'ui_zoom', v);
+    }
     const pct = Math.round(v * 100);
     const display = document.getElementById('uiZoomDisplay');
     if (display) display.textContent = pct + '%';

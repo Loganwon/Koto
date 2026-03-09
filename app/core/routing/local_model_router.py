@@ -610,7 +610,7 @@ class LocalModelRouter:
 
         if not cls._initialized:
             if not cls.init_model():
-                return None, "❌ ModelNotReady", "Local", None
+                return None, "❌ ModelNotReady", "Local", None, "normal"  # 5-tuple，匹配 SmartDispatcher 解包
 
         # 在原有分类 prompt 基础上追加 hint 生成指令
         hint_addon = """\n━━━ hint 字段━━━

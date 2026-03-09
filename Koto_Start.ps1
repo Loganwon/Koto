@@ -33,7 +33,9 @@ $KOTO_ROOT = $candidateRoots |
     Where-Object {
         (Test-Path (Join-Path $_ "koto_setup.py")) -or
         (Test-Path (Join-Path $_ "koto_app.py")) -or
-        (Test-Path (Join-Path $_ "server.py"))
+        (Test-Path (Join-Path $_ "server.py")) -or
+        (Test-Path (Join-Path $_ "src\koto_app.py")) -or
+        (Test-Path (Join-Path $_ "src\server.py"))
     } |
     Select-Object -First 1
 
@@ -141,14 +143,19 @@ function Invoke-LockCheck {
 # 孤进程清理
 # ─────────────────────────────────────────────
 function Clear-OrphanProcesses {
-    # 单次批量 WMI 查询，避免逐进程查询导致的性能问题
-    $cimProcs = Get-CimInstance Win32_Process -Filter "CommandLine LIKE '%koto_app.py%'" -ErrorAction SilentlyContinue
-    if ($cimProcs) {
-        $orphanPids = @($cimProcs | Select-Object -ExpandProperty ProcessId)
-        Write-Log "WARN" "清理孤立 Koto 进程: $($orphanPids -join ', ')..."
-        $orphanPids | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
-        Start-Sleep -Milliseconds 800
-    }
+    # 优化：单次 WMI 批量查询，避免逐进程触发 Get-CimInstance（可节省数秒）
+    try {
+        $cimProcs = Get-CimInstance Win32_Process `
+            -Filter "Name='python.exe' OR Name='pythonw.exe'" `
+            -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -and $_.CommandLine -match "koto_app\.py" }
+        if ($cimProcs) {
+            $pids = @($cimProcs | ForEach-Object { $_.ProcessId })
+            Write-Log "WARN" "清理孤立 Koto 进程: $($pids -join ', ')..."
+            $pids | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+            Start-Sleep -Milliseconds 800
+        }
+    } catch { }
 }
 
 # ─────────────────────────────────────────────
@@ -184,6 +191,20 @@ function Find-Python {
 
 function Assert-PythonVersion {
     param([string]$PythonExe)
+    # 优化：缓存版本检查结果，避免每次启动都 spawn Python 子进程
+    $cacheFile = Join-Path $LOG_DIR ".python_ver_cache"
+    try {
+        if (Test-Path $cacheFile) {
+            $cached = Get-Content $cacheFile -ErrorAction SilentlyContinue
+            # 格式: "<exe_path>|<version>"
+            if ($cached -and $cached -match "^(.+)\|(.+)$") {
+                if ($Matches[1] -eq $PythonExe) {
+                    Write-Log "INFO" "Python 版本（缓存）: $($Matches[2])  ✓"
+                    return $true
+                }
+            }
+        }
+    } catch { }
     try {
         $ver = & $PythonExe -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>&1
         if ($ver -match "^(\d+)\.(\d+)") {
@@ -193,6 +214,8 @@ function Assert-PythonVersion {
                 return $false
             }
             Write-Log "INFO" "Python 版本: $ver  ✓"
+            # 写入缓存
+            try { Set-Content -Path $cacheFile -Value "$PythonExe|$ver" -Encoding ASCII } catch { }
             return $true
         }
     } catch { }
@@ -342,23 +365,19 @@ function Start-KotoApp {
                 $proc.WaitForExit()
                 $exitCode = $proc.ExitCode
             } else {
-                # 桌面模式：等待最多 15s 确认进程健康
+                # 桌面模式：等待最多 5s 确认进程未立即崩溃（优化：原来等15s）
                 $waited = 0
-                while ($waited -lt 15) {
+                while ($waited -lt 5) {
                     Start-Sleep -Seconds 1
                     $waited++
                     if ($proc.HasExited) { break }
-                    if ($waited -eq 5) {
-                        Write-Log "OK" "Koto 进程运行稳定 (PID=$($proc.Id))，启动器可关闭"
-                    }
                 }
 
                 if (-not $proc.HasExited) {
-                    # 桌面模式：进程健康，启动器退出（Koto 继续运行）
+                    # 桌面模式：进程健康，启动器立即退出（Koto 继续运行）
                     Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
                     Set-Content -Path $LOCK_FILE -Value "$($proc.Id)" -Encoding ASCII
-                    Write-Log "OK" "Koto 正在后台运行。关闭本窗口不会停止 Koto。"
-                    Start-Sleep -Seconds 2
+                    Write-Log "OK" "Koto 正在后台运行 (PID=$($proc.Id))。关闭本窗口不会停止 Koto。"
                     exit 0
                 }
                 $exitCode = $proc.ExitCode

@@ -79,3 +79,6 @@ web/uploads/
 
 # Node modules (if any)
 node_modules/
+
+# WebView2 runtime profile
+.webview2_profile/

@@ -208,7 +208,13 @@ class DocumentReader:
                             "rows": []
                         }
                         for row in table.rows:
-                            row_data = [cell.text.strip() for cell in row.cells]
+                            # 去重：合并单元格在 python-docx 中会被多次返回（同一个对象引用）
+                            _seen = set()
+                            row_data = []
+                            for cell in row.cells:
+                                if id(cell) not in _seen:
+                                    _seen.add(id(cell))
+                                    row_data.append(cell.text.strip())
                             table_data["rows"].append(row_data)
                         tables_data.append(table_data)
 

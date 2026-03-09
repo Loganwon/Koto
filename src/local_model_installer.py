@@ -30,8 +30,8 @@ from typing import Dict, List, Optional
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).parent
 else:
-    # local_model_installer.py 位于 src/ 子目录
-    APP_DIR = Path(__file__).parent.parent
+    here = Path(__file__).resolve().parent
+    APP_DIR = here.parent if here.name == "src" else here
 
 RESULT_FILE = APP_DIR / "installed_models.json"   # 安装记录（可选）
 OLLAMA_WIN_URL = "https://ollama.com/download/OllamaSetup.exe"
