@@ -29,10 +29,19 @@ if getattr(sys, 'frozen', False):
     # - BUNDLE_DIR: 临时解压目录（用于bundled资源：web/、assets/等）
     APP_ROOT = Path(sys.executable).parent
     BUNDLE_DIR = Path(sys._MEIPASS)
+    
+    # Fix pythonnet runtime path for pywebview's EdgeChromium backend in frozen environment
+    # pythonnet needs to know where the Python runtime is located
+    _internal_py = APP_ROOT / "internal" / "py"
+    if _internal_py.exists():
+        os.environ.setdefault('PYTHONNET_PYDLL', str(_internal_py / f'python{sys.version_info.major}{sys.version_info.minor}.dll'))
+    # Alternative: Force pywebview to use EdgeChromium without pythonnet initialization issues
+    os.environ.setdefault('PYWEBVIEW_GUI', 'edgechromium')
 else:
     here = Path(__file__).resolve().parent
     APP_ROOT = here.parent if here.name == 'src' else here
     BUNDLE_DIR = APP_ROOT
+
 
 # 图标资源目录：打包模式下在 _MEIPASS/assets/，源码模式下在 src/assets/
 ASSETS_DIR = (BUNDLE_DIR if getattr(sys, 'frozen', False) else APP_ROOT / 'src') / 'assets'

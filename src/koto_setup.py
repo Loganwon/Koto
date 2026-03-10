@@ -18,10 +18,18 @@ if getattr(sys, "frozen", False):
     # PyInstaller 环境
     APP_ROOT = Path(sys.executable).parent
     BUNDLE_DIR = Path(sys._MEIPASS)
+    
+    # Fix pythonnet runtime path for pywebview's EdgeChromium backend in frozen environment
+    # This must be set before any import of webview or clr
+    _internal_py = APP_ROOT / "internal" / "py"
+    if _internal_py.exists():
+        os.environ.setdefault('PYTHONNET_PYDLL', str(_internal_py / f'python{sys.version_info.major}{sys.version_info.minor}.dll'))
+    os.environ.setdefault('PYWEBVIEW_GUI', 'edgechromium')
 else:
     here = Path(__file__).resolve().parent
     APP_ROOT = here.parent if here.name == "src" else here
     BUNDLE_DIR = APP_ROOT
+
 
 # 确保 BUNDLE_DIR（包含所有 py/资源）在导入路径最前
 if str(BUNDLE_DIR) not in sys.path:
