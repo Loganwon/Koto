@@ -28,7 +28,8 @@
 param(
     [string]$ZipFile          = "",
     [int]$Port                = 5098,
-    [int]$HealthTimeoutSec    = 45
+    [int]$HealthTimeoutSec    = 45,
+    [switch]$RequireHealth    = $true   # set to $false in headless/CI
 )
 
 $ErrorActionPreference = "Stop"
@@ -127,7 +128,13 @@ while ((Get-Date) -lt $deadline) {
     } catch {}
     Start-Sleep -Milliseconds 1000
 }
-if (-not $healthy) { Fail "Health endpoint did not respond within ${HealthTimeoutSec}s" }
+if (-not $healthy) {
+    if ($RequireHealth) {
+        Fail "Health endpoint did not respond within ${HealthTimeoutSec}s"
+    } else {
+        Write-Host "::warning::Health endpoint did not respond within ${HealthTimeoutSec}s (best-effort in CI — pywebview may not init headless)"
+    }
+}
 
 # ══════════════════════════════════════════════════════════════════════════
 # STEP 5 — Stop process

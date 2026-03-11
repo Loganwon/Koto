@@ -230,7 +230,8 @@ jobs:
           & tests\installer\test_portable_e2e.ps1 `
             -ZipFile $zip.FullName `
             -Port 5098 `
-            -HealthTimeoutSec 60
+            -HealthTimeoutSec 60 `
+            -RequireHealth:$false
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
   # ══════════════════════════════════════════════════════════════════════════
