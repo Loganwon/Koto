@@ -298,7 +298,18 @@ _collect_pkgs = [
     'langgraph',
     'speech_recognition',  # 语音识别（SpeechRecognition 包）
     'pyaudio',             # 麦克风输入（需 portaudio.dll）
+    'psutil',              # 系统/进程监控（C extension，必须 collect_all）
 ]
+
+# psutil Windows C extension — collect_all 不捡 .pyd，手动补充到 binaries
+import glob as _glob
+_psutil_pyd = _glob.glob(
+    os.path.join(ROOT, '.venv', 'Lib', 'site-packages', 'psutil', '_psutil_windows*.pyd')
+)
+_extra_binaries = []
+if _psutil_pyd:
+    for _p in _psutil_pyd:
+        _extra_binaries.append((_p, 'psutil'))
 
 for _pkg in _collect_pkgs:
     _d, _b, _h = _safe_collect(_pkg)
@@ -340,7 +351,7 @@ datas = _filter_datas(datas)
 a = Analysis(
     ['src/koto_setup.py'],       # ← 新入口（含下载器向导）
     pathex=[ROOT],
-    binaries=[],
+    binaries=_extra_binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

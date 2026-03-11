@@ -97,6 +97,45 @@ jobs:
           $exeMB = [math]::Round((Get-Item dist\Koto\Koto.exe).Length / 1MB, 1)
           Write-Host "Build OK -> dist\Koto\Koto.exe ($exeMB MB)"
 
+      - name: Smoke-test built EXE (import check)
+        shell: pwsh
+        run: |
+          # Run a Python import check inside the built _internal environment
+          # to verify all critical C extensions were bundled correctly.
+          # Uses the venv Python with sys.path pointed at _internal so it
+          # mirrors what the frozen exe sees at runtime.
+          $internalDir = Resolve-Path "dist\Koto\_internal"
+          $checkScript = @"
+import sys, os
+sys.path.insert(0, r'$internalDir')
+os.chdir(r'$internalDir')
+
+critical = [
+    'psutil', 'flask', 'flask_cors', 'requests', 'httpx',
+    'cryptography', 'jwt', 'PIL', 'lxml', 'bs4',
+    'pandas', 'numpy', 'openpyxl', 'docx', 'pptx',
+    'schedule', 'markdown', 'jieba',
+    'langchain_core', 'langgraph',
+    'google.genai',
+]
+failed = []
+for mod in critical:
+    try:
+        __import__(mod)
+    except Exception as e:
+        failed.append(f'{mod}: {e}')
+
+if failed:
+    print('::error::EXE smoke test FAILED - missing modules:')
+    for f in failed:
+        print(f'  {f}')
+    sys.exit(1)
+else:
+    print(f'Smoke test passed: all {len(critical)} critical modules importable')
+"@
+          $checkScript | .\.venv\Scripts\python.exe -
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
