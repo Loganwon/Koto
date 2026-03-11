@@ -2,14 +2,17 @@
 
 All tests use the Flask test client with no real LLM or file I/O outside tmp dirs.
 """
-from __future__ import annotations
-import json
-import pytest
 
+from __future__ import annotations
+
+import json
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def market_client(full_client):
@@ -20,6 +23,7 @@ def market_client(full_client):
 # ---------------------------------------------------------------------------
 # Catalog & library
 # ---------------------------------------------------------------------------
+
 
 class TestCatalog:
     def test_catalog_returns_200(self, market_client):
@@ -44,6 +48,7 @@ class TestCatalog:
 # Featured & search
 # ---------------------------------------------------------------------------
 
+
 class TestFeaturedAndSearch:
     def test_featured_returns_200(self, market_client):
         resp = market_client.get("/api/skillmarket/featured")
@@ -67,6 +72,7 @@ class TestFeaturedAndSearch:
 # Stats & status
 # ---------------------------------------------------------------------------
 
+
 class TestStatsAndStatus:
     def test_stats_returns_200(self, market_client):
         resp = market_client.get("/api/skillmarket/stats")
@@ -85,6 +91,7 @@ class TestStatsAndStatus:
 # Active skills
 # ---------------------------------------------------------------------------
 
+
 class TestActiveSkills:
     def test_active_returns_200(self, market_client):
         resp = market_client.get("/api/skillmarket/active")
@@ -98,6 +105,7 @@ class TestActiveSkills:
 # ---------------------------------------------------------------------------
 # Install / uninstall lifecycle
 # ---------------------------------------------------------------------------
+
 
 class TestInstallUninstall:
     def test_install_without_body_returns_4xx(self, market_client):
@@ -135,6 +143,7 @@ class TestInstallUninstall:
 # Toggle
 # ---------------------------------------------------------------------------
 
+
 class TestToggle:
     def test_toggle_nonexistent_skill_returns_4xx(self, market_client):
         resp = market_client.post(
@@ -155,6 +164,7 @@ class TestToggle:
 # ---------------------------------------------------------------------------
 # Rate
 # ---------------------------------------------------------------------------
+
 
 class TestRate:
     def test_rate_requires_rating_field(self, market_client):
@@ -183,6 +193,7 @@ class TestRate:
 # Export
 # ---------------------------------------------------------------------------
 
+
 class TestExport:
     def test_export_existing_skill_returns_2xx(self, market_client):
         resp = market_client.get("/api/skillmarket/export/concise_mode")
@@ -202,6 +213,7 @@ class TestExport:
 # ---------------------------------------------------------------------------
 # Suggest
 # ---------------------------------------------------------------------------
+
 
 class TestSuggest:
     def test_suggest_returns_200(self, market_client):

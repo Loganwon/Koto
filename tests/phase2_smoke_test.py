@@ -3,19 +3,27 @@ phase2_smoke_test.py — Phase 2 全模块烟雾测试
 ==============================================
 验证所有 Phase 2 新增/修改模块的基础功能。
 """
-import sys, os
+
+import os
+import sys
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 os.chdir(ROOT)
 
-import json, tempfile, time, traceback
+import json
+import tempfile
+import time
+import traceback
 
 PASS = []
 FAIL = []
 
+
 def ok(label):
     PASS.append(label)
     print(f"  ✅ {label}")
+
 
 def fail(label, err=None):
     FAIL.append(label)
@@ -24,6 +32,7 @@ def fail(label, err=None):
         msg += f" → {err}"
     print(msg)
 
+
 # ── 1. token_tracker 扩展 ─────────────────────────────────────────────────────
 print("\n[1] token_tracker 扩展测试")
 try:
@@ -31,6 +40,7 @@ try:
     if _web_path not in sys.path:
         sys.path.insert(0, _web_path)
     import token_tracker
+
     token_tracker.record_usage_with_skill(
         model="gemini-2.5-flash",
         prompt_tokens=100,
@@ -91,11 +101,23 @@ except Exception as e:
 print("\n[3] skill_routes Blueprint 导入测试")
 try:
     from app.api.skill_routes import skill_bp
+
     assert skill_bp.name == "skills"
     ok("skill_bp Blueprint 导入成功")
 
     # 检查所有端点已定义
-    from app.api.skill_routes import list_skills, create_skill, get_skill, update_skill, delete_skill, toggle_skill, record_from_session, export_mcp_tools, skill_stats
+    from app.api.skill_routes import (
+        create_skill,
+        delete_skill,
+        export_mcp_tools,
+        get_skill,
+        list_skills,
+        record_from_session,
+        skill_stats,
+        toggle_skill,
+        update_skill,
+    )
+
     ok("所有 CRUD 端点函数已定义 (9个)")
 except Exception as e:
     fail("skill_routes", traceback.format_exc(limit=3))
@@ -103,7 +125,12 @@ except Exception as e:
 # ── 4. LoRAPipeline ───────────────────────────────────────────────────────────
 print("\n[4] LoRAPipeline 测试")
 try:
-    from app.core.learning.lora_pipeline import LoRAPipeline, TrainingConfig, AdapterMeta, get_pipeline
+    from app.core.learning.lora_pipeline import (
+        AdapterMeta,
+        LoRAPipeline,
+        TrainingConfig,
+        get_pipeline,
+    )
 
     pipeline = get_pipeline()
     ok("get_pipeline() 单例创建成功")
@@ -122,8 +149,12 @@ try:
 
     # AdapterMeta 序列化
     meta = AdapterMeta(
-        skill_id="test", adapter_path="/tmp/adapter", base_model="qwen",
-        trained_at="2025-01-01T00:00:00", num_samples=100, num_epochs=3
+        skill_id="test",
+        adapter_path="/tmp/adapter",
+        base_model="qwen",
+        trained_at="2025-01-01T00:00:00",
+        num_samples=100,
+        num_epochs=3,
     )
     d = meta.to_dict()
     restored = AdapterMeta.from_dict(d)
@@ -165,6 +196,7 @@ except Exception as e:
 print("\n[6] learning/__init__ 导出验证")
 try:
     from app.core.learning import LoRAPipeline, ShadowTracer, TrainingConfig
+
     ok("learning.__init__ 导出 LoRAPipeline, ShadowTracer, TrainingConfig")
 except Exception as e:
     fail("learning.__init__ 导出", traceback.format_exc(limit=2))
@@ -172,7 +204,8 @@ except Exception as e:
 # ── 7. skills/__init__ 导出 ───────────────────────────────────────────────────
 print("\n[7] skills/__init__ 导出验证")
 try:
-    from app.core.skills import SkillRecorder, SkillDefinition, SkillManager
+    from app.core.skills import SkillDefinition, SkillManager, SkillRecorder
+
     ok("skills.__init__ 导出 SkillRecorder, SkillDefinition, SkillManager")
 except Exception as e:
     fail("skills.__init__ 导出", traceback.format_exc(limit=2))
@@ -193,7 +226,7 @@ except Exception as e:
     fail("web/app.py RouterDecision", traceback.format_exc(limit=2))
 
 # ── 结果摘要 ──────────────────────────────────────────────────────────────────
-print("\n" + "="*60)
+print("\n" + "=" * 60)
 total = len(PASS) + len(FAIL)
 print(f"Phase 2 烟雾测试结果: {len(PASS)}/{total} 通过")
 if FAIL:

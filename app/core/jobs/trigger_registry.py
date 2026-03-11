@@ -42,6 +42,7 @@ Koto TriggerRegistry — 统一触发器管理中心
         config={"interval_seconds": 3600},
     ))
 """
+
 from __future__ import annotations
 
 import json
@@ -59,8 +60,7 @@ logger = logging.getLogger(__name__)
 
 # ── 持久化路径 ────────────────────────────────────────────────────────────────
 _BASE = Path(
-    os.environ.get("KOTO_DB_DIR",
-                   Path(__file__).parent.parent.parent.parent / "config")
+    os.environ.get("KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config")
 )
 _TRIGGERS_FILE = _BASE / "triggers.json"
 
@@ -86,7 +86,7 @@ _RECOMMENDED_TRIGGER_PRESETS = [
         "job_type": "skill_exec",
         "job_payload": {
             "skill_id": "task_planner",
-            "query": "基于今天的待办，生成一个按优先级排序的执行计划。"
+            "query": "基于今天的待办，生成一个按优先级排序的执行计划。",
         },
         "session_id": "system",
         "enabled": False,
@@ -97,9 +97,7 @@ _RECOMMENDED_TRIGGER_PRESETS = [
         "name": "下载目录自动整理",
         "trigger_type": "interval",
         "job_type": "auto_catalog",
-        "job_payload": {
-            "source_dir": "C:/Users/Public/Downloads"
-        },
+        "job_payload": {"source_dir": "C:/Users/Public/Downloads"},
         "session_id": "system",
         "enabled": False,
         "config": {"interval_seconds": 3600},
@@ -112,7 +110,7 @@ _RECOMMENDED_TRIGGER_PRESETS = [
         "job_payload": {},
         "session_id": "system",
         "enabled": True,
-        "config": {"interval_seconds": 1800},   # 每 30 分钟检查一次
+        "config": {"interval_seconds": 1800},  # 每 30 分钟检查一次
     },
 ]
 
@@ -121,13 +119,15 @@ _RECOMMENDED_TRIGGER_PRESETS = [
 # 数据结构
 # ============================================================================
 
+
 @dataclass
 class TriggerSpec:
     """触发器配置条目。"""
+
     trigger_id: str = field(default_factory=lambda: str(uuid.uuid4())[:12])
     name: str = ""
-    trigger_type: str = "webhook"          # interval / cron / webhook / startup
-    job_type: str = ""                     # 对应 JobRunner 的 job_type
+    trigger_type: str = "webhook"  # interval / cron / webhook / startup
+    job_type: str = ""  # 对应 JobRunner 的 job_type
     job_payload: Dict[str, Any] = field(default_factory=dict)
     session_id: str = "system"
     enabled: bool = True
@@ -153,6 +153,7 @@ class TriggerSpec:
 # ============================================================================
 # TriggerRegistry
 # ============================================================================
+
 
 class TriggerRegistry:
     """
@@ -180,11 +181,10 @@ class TriggerRegistry:
         )
         self._scheduler_thread.start()
         # 延迟触发 startup 类型（等应用完全启动）
-        threading.Thread(
-            target=self._fire_startup_triggers, daemon=True
-        ).start()
-        logger.info("[TriggerRegistry] ✅ 调度器已启动，已加载 %d 个触发器",
-                    len(self._triggers))
+        threading.Thread(target=self._fire_startup_triggers, daemon=True).start()
+        logger.info(
+            "[TriggerRegistry] ✅ 调度器已启动，已加载 %d 个触发器", len(self._triggers)
+        )
 
     def stop(self):
         self._running = False
@@ -201,9 +201,7 @@ class TriggerRegistry:
         with self._lock:
             self._triggers[spec.trigger_id] = spec
         self._persist()
-        logger.info(
-            "[TriggerRegistry] 注册: %s (%s)", spec.name, spec.trigger_type
-        )
+        logger.info("[TriggerRegistry] 注册: %s (%s)", spec.name, spec.trigger_type)
         return spec
 
     def remove(self, trigger_id: str) -> bool:
@@ -233,8 +231,15 @@ class TriggerRegistry:
             spec = self._triggers.get(trigger_id)
             if not spec:
                 return None
-            allowed = {"name", "job_type", "job_payload", "session_id",
-                       "enabled", "config", "trigger_type"}
+            allowed = {
+                "name",
+                "job_type",
+                "job_payload",
+                "session_id",
+                "enabled",
+                "config",
+                "trigger_type",
+            }
             for k, v in kwargs.items():
                 if k in allowed:
                     setattr(spec, k, v)
@@ -297,6 +302,7 @@ class TriggerRegistry:
         """提交作业并更新运行记录。"""
         try:
             from app.core.jobs.job_runner import JobSpec, get_job_runner
+
             job_spec = JobSpec(
                 job_type=spec.job_type,
                 payload=spec.job_payload,
@@ -320,11 +326,15 @@ class TriggerRegistry:
             logger.error("[TriggerRegistry] 触发失败 %s: %s", spec.name, exc)
             try:
                 from app.core.ops.ops_event_bus import get_ops_bus
-                get_ops_bus().emit("scheduler_skipped", {
-                    "trigger_id": spec.trigger_id,
-                    "trigger_name": spec.name,
-                    "error": str(exc)[:200],
-                })
+
+                get_ops_bus().emit(
+                    "scheduler_skipped",
+                    {
+                        "trigger_id": spec.trigger_id,
+                        "trigger_name": spec.name,
+                        "error": str(exc)[:200],
+                    },
+                )
             except Exception:
                 pass
             return None

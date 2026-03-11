@@ -58,10 +58,17 @@ logger = logging.getLogger(__name__)
 
 # ── 可选依赖 ─────────────────────────────────────────────────────────────────
 try:
-    from langgraph.graph import StateGraph, END
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
-    from typing_extensions import TypedDict, Annotated
     import operator
+
+    from langchain_core.messages import (
+        AIMessage,
+        BaseMessage,
+        HumanMessage,
+        SystemMessage,
+    )
+    from langgraph.graph import END, StateGraph
+    from typing_extensions import Annotated, TypedDict
+
     _LG_AVAILABLE = True
 except ImportError:
     _LG_AVAILABLE = False
@@ -69,12 +76,15 @@ except ImportError:
 
 def _assert_langgraph():
     if not _LG_AVAILABLE:
-        raise ImportError("langgraph + langchain-core required. pip install langgraph langchain-core")
+        raise ImportError(
+            "langgraph + langchain-core required. pip install langgraph langchain-core"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AgentRole: 单个 Agent 的角色描述
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class AgentRole:
@@ -90,6 +100,7 @@ class AgentRole:
         input_fields  : 从 state 中读取哪些字段作为上下文（None = 全部）
         temperature   : LLM 温度（覆盖默认）
     """
+
     name: str
     display_name: str
     system_prompt: str
@@ -102,6 +113,7 @@ class AgentRole:
 # ─────────────────────────────────────────────────────────────────────────────
 # ROLES: 内置预设角色库
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class ROLES:
     """内置预设角色库（类属性，直接引用）。"""
@@ -194,6 +206,7 @@ class ROLES:
 # ─────────────────────────────────────────────────────────────────────────────
 
 if _LG_AVAILABLE:
+
     class MultiAgentState(TypedDict):
         user_input: str
         model_id: str
@@ -221,9 +234,11 @@ if _LG_AVAILABLE:
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _llm_call(model_id: str, system: str, user: str, temperature: float = 0.7) -> str:
     """单次同步 LLM 调用，返回文本。"""
     from app.core.llm.langchain_adapter import KotoLangChainLLM
+
     llm = KotoLangChainLLM(model_id=model_id, temperature=temperature)
     msgs = [SystemMessage(content=system), HumanMessage(content=user)]
     try:
@@ -253,6 +268,7 @@ def _build_context(state: "MultiAgentState", role: AgentRole) -> str:
 
 def _make_agent_node(role: AgentRole):
     """工厂函数：为给定 AgentRole 生成 LangGraph 节点函数。"""
+
     def node_fn(state: "MultiAgentState") -> Dict:
         model_id = state.get("model_id", "gemini-2.5-flash-preview-05-20")
         user_context = _build_context(state, role)
@@ -272,7 +288,10 @@ def _make_agent_node(role: AgentRole):
         }
 
         # 写入输出字段
-        if hasattr(state, "__annotations__") and role.output_field in MultiAgentState.__annotations__:
+        if (
+            hasattr(state, "__annotations__")
+            and role.output_field in MultiAgentState.__annotations__
+        ):
             update[role.output_field] = output
         else:
             extras = dict(state.get("extra_outputs", {}))
@@ -285,8 +304,11 @@ def _make_agent_node(role: AgentRole):
     return node_fn
 
 
-def _make_critic_router(critic_role: AgentRole, revise_node_name: str, next_node_name: str):
+def _make_critic_router(
+    critic_role: AgentRole, revise_node_name: str, next_node_name: str
+):
     """生成 Critic 节点后的条件路由函数。"""
+
     def router(state: "MultiAgentState") -> Literal["revise", "next", "__end__"]:
         feedback_field = critic_role.output_field
         feedback = state.get(feedback_field) or ""
@@ -303,6 +325,7 @@ def _make_critic_router(critic_role: AgentRole, revise_node_name: str, next_node
 # ─────────────────────────────────────────────────────────────────────────────
 # MultiAgentOrchestrator
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MultiAgentOrchestrator:
     """
@@ -340,6 +363,7 @@ class MultiAgentOrchestrator:
 
         if checkpointer is None:
             from app.core.agent.checkpoint_manager import get_checkpointer
+
             checkpointer = get_checkpointer()
         self._checkpointer = checkpointer
 
@@ -391,17 +415,27 @@ class MultiAgentOrchestrator:
                     # 前一个非 critic 节点
                     revise_target = self.roles[i - 1].name
 
-                next_name = self.roles[next_i].name if next_i < len(self.roles) else "finalize"
+                next_name = (
+                    self.roles[next_i].name if next_i < len(self.roles) else "finalize"
+                )
 
-                router = _make_critic_router(role, revise_target or "finalize", next_name)
-                next_map = {
-                    revise_target: revise_target,
-                    next_name: next_name,
-                } if revise_target and revise_target != next_name else {next_name: next_name}
+                router = _make_critic_router(
+                    role, revise_target or "finalize", next_name
+                )
+                next_map = (
+                    {
+                        revise_target: revise_target,
+                        next_name: next_name,
+                    }
+                    if revise_target and revise_target != next_name
+                    else {next_name: next_name}
+                )
 
                 graph.add_conditional_edges(role.name, router, next_map)
             else:
-                next_name = self.roles[next_i].name if next_i < len(self.roles) else "finalize"
+                next_name = (
+                    self.roles[next_i].name if next_i < len(self.roles) else "finalize"
+                )
                 graph.add_edge(role.name, next_name)
 
             i += 1
@@ -504,14 +538,24 @@ class MultiAgentOrchestrator:
         config = {"configurable": {"thread_id": _session}}
 
         try:
-            for event in self._graph.stream(initial_state, config=config, stream_mode="updates"):
+            for event in self._graph.stream(
+                initial_state, config=config, stream_mode="updates"
+            ):
                 for node_name, update in event.items():
                     msgs = update.get("messages", [])
                     for msg in msgs:
                         if hasattr(msg, "content") and msg.content:
-                            yield {"agent": node_name, "content": msg.content, "done": False}
+                            yield {
+                                "agent": node_name,
+                                "content": msg.content,
+                                "done": False,
+                            }
                     if update.get("final_output"):
-                        yield {"agent": "finalize", "content": update["final_output"], "done": True}
+                        yield {
+                            "agent": "finalize",
+                            "content": update["final_output"],
+                            "done": True,
+                        }
         except Exception as exc:
             logger.error(f"[MultiAgentOrchestrator] stream 失败: {exc}", exc_info=True)
             yield {"agent": "error", "content": str(exc), "done": True}

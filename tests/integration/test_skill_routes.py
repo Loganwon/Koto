@@ -5,7 +5,9 @@ Integration tests for /api/skills endpoints.
 Tests skill listing, creation, update, deletion, enable/disable, and MCP export.
 Uses the session-scoped `client` fixture from conftest.py.
 """
+
 from __future__ import annotations
+
 import pytest
 
 
@@ -73,7 +75,9 @@ class TestSkillEnable:
 @pytest.mark.integration
 class TestSkillBootstrap:
     def test_bootstrap_creates_skills(self, client):
-        data = _check(client.post("/api/skills/bindings/bootstrap", json={"force": True}))
+        data = _check(
+            client.post("/api/skills/bindings/bootstrap", json={"force": True})
+        )
         assert "success" in data or "created" in data or "ok" in data
 
 

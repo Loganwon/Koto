@@ -1,8 +1,9 @@
 """测试 FileOrganizer 的智能去重和相似文件夹合并功能。"""
-import sys
+
 import os
-import tempfile
 import shutil
+import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -44,7 +45,9 @@ def test_dedup_and_similarity():
         # Test 2: 相同内容 → 不同文件夹名（相似） → 应检测到重复
         r2 = organizer.organize_file(fb, "research/test_doc_revised")
         assert r2["success"], f"Test 2 failed: {r2}"
-        assert r2.get("skipped_duplicate"), f"Test 2: should detect duplicate, got: {r2}"
+        assert r2.get(
+            "skipped_duplicate"
+        ), f"Test 2: should detect duplicate, got: {r2}"
         print("✅ Test 2: 重复内容被检测到，跳过")
 
         # Test 3: 不同内容 → 应该成功添加到相同文件夹
@@ -55,23 +58,34 @@ def test_dedup_and_similarity():
 
         # Test 4: 检查索引去重
         idx = organizer.get_index()
-        assert idx["total_files"] == 2, f"Test 4: expected 2 entries, got {idx['total_files']}"
+        assert (
+            idx["total_files"] == 2
+        ), f"Test 4: expected 2 entries, got {idx['total_files']}"
         print("✅ Test 4: 索引只有2条记录（无重复）")
 
         # Test 5: 文件夹结构应该只有1个文件夹
         folders = organizer.list_organized_folders()
         folder_names = list(folders.keys())
         print(f"   文件夹: {folder_names}")
-        assert len(folders) == 1, f"Test 5: expected 1 folder, got {len(folders)}: {folder_names}"
+        assert (
+            len(folders) == 1
+        ), f"Test 5: expected 1 folder, got {len(folders)}: {folder_names}"
         # 应该有2个文件
         the_folder = list(folders.values())[0]
-        assert the_folder["file_count"] == 2, f"Test 5: expected 2 files, got {the_folder['file_count']}"
+        assert (
+            the_folder["file_count"] == 2
+        ), f"Test 5: expected 2 files, got {the_folder['file_count']}"
         print("✅ Test 5: 只有1个文件夹，包含2个文件")
 
         # Test 6: _is_same_file 正确比较两个不同文件
         from pathlib import Path
-        assert not organizer._is_same_file(Path(fa), Path(fc)), "Test 6: different files should not match"
-        assert organizer._is_same_file(Path(fa), Path(fb)), "Test 6: identical files should match"
+
+        assert not organizer._is_same_file(
+            Path(fa), Path(fc)
+        ), "Test 6: different files should not match"
+        assert organizer._is_same_file(
+            Path(fa), Path(fb)
+        ), "Test 6: identical files should match"
         print("✅ Test 6: _is_same_file 正确比对文件hash")
 
         print("\n🎉 所有测试通过！")

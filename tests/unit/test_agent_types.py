@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """Unit tests for app.core.agent.types dataclasses."""
+
 import logging
+
 import pytest
+
 from app.core.agent.types import AgentAction, AgentResponse, AgentStep, AgentStepType
 
 _LOGGER = "app.core.agent.types"
@@ -50,7 +53,9 @@ class TestAgentStep:
         assert "observation" not in d
 
     def test_to_dict_with_action(self):
-        action = AgentAction(tool_name="web_search", tool_args={"query": "koto"}, tool_call_id="tc-1")
+        action = AgentAction(
+            tool_name="web_search", tool_args={"query": "koto"}, tool_call_id="tc-1"
+        )
         step = AgentStep(
             step_type=AgentStepType.ACTION,
             content="Searching the web",
@@ -134,21 +139,31 @@ class TestAgentTypesLogging:
 
     def test_error_step_to_dict_logs_warning(self, caplog):
         """An ERROR step serialized via to_dict() must emit a WARNING."""
-        step = AgentStep(step_type=AgentStepType.ERROR, content="Something went wrong badly")
+        step = AgentStep(
+            step_type=AgentStepType.ERROR, content="Something went wrong badly"
+        )
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
             step.to_dict()
         warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("ERROR" in m or "Something went wrong" in m for m in warnings), warnings
+        assert any(
+            "ERROR" in m or "Something went wrong" in m for m in warnings
+        ), warnings
 
     def test_non_error_step_no_warning(self, caplog):
         """Non-ERROR steps must NOT emit a WARNING when serialized (negative test)."""
-        for step_type in (AgentStepType.THOUGHT, AgentStepType.ACTION,
-                          AgentStepType.OBSERVATION, AgentStepType.ANSWER):
+        for step_type in (
+            AgentStepType.THOUGHT,
+            AgentStepType.ACTION,
+            AgentStepType.OBSERVATION,
+            AgentStepType.ANSWER,
+        ):
             step = AgentStep(step_type=step_type, content="content")
             with caplog.at_level(logging.WARNING, logger=_LOGGER):
                 step.to_dict()
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-        assert warnings == [], f"Non-ERROR steps should not warn: {[r.message for r in warnings]}"
+        assert (
+            warnings == []
+        ), f"Non-ERROR steps should not warn: {[r.message for r in warnings]}"
 
     def test_agent_response_to_dict_logs_debug(self, caplog):
         """AgentResponse.to_dict() must emit a DEBUG log with step count."""
@@ -169,5 +184,6 @@ class TestAgentTypesLogging:
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
             step.to_dict()
         warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("connection refused" in m or "Detailed error" in m for m in warnings), warnings
-
+        assert any(
+            "connection refused" in m or "Detailed error" in m for m in warnings
+        ), warnings

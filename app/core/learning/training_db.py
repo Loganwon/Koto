@@ -46,21 +46,31 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+
 # ── 路径 ──────────────────────────────────────────────────────────────────────
 def _base_dir() -> Path:
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parents[3]
 
-_BASE  = _base_dir()
-_DB_DIR  = _BASE / "workspace" / "training_db"
+
+_BASE = _base_dir()
+_DB_DIR = _BASE / "workspace" / "training_db"
 _DB_PATH = _DB_DIR / "koto_training.db"
 _OUT_DIR = _BASE / "workspace" / "training_data"
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 VALID_TASKS = {
-    "CHAT", "CODER", "PAINTER", "FILE_GEN", "DOC_ANNOTATE",
-    "RESEARCH", "WEB_SEARCH", "FILE_SEARCH", "SYSTEM", "AGENT",
+    "CHAT",
+    "CODER",
+    "PAINTER",
+    "FILE_GEN",
+    "DOC_ANNOTATE",
+    "RESEARCH",
+    "WEB_SEARCH",
+    "FILE_SEARCH",
+    "SYSTEM",
+    "AGENT",
 }
 
 # 积累多少新样本后自动触发重建（0 = 不自动触发）
@@ -68,7 +78,7 @@ AUTO_REBUILD_THRESHOLD = 50
 
 _ROUTER_SYSTEM = (
     "你是 Koto AI 的任务路由分类器。"
-    "根据用户输入判断任务类型，严格只输出 JSON: {\"task\":\"TYPE\",\"confidence\":0.9}\n"
+    '根据用户输入判断任务类型，严格只输出 JSON: {"task":"TYPE","confidence":0.9}\n'
     "可用类型: CHAT CODER PAINTER FILE_GEN DOC_ANNOTATE RESEARCH WEB_SEARCH FILE_SEARCH SYSTEM AGENT"
 )
 
@@ -76,22 +86,24 @@ _ROUTER_SYSTEM = (
 # 数据结构
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @dataclass
 class DBSample:
     """数据库中的一条训练样本"""
-    user_input:  str
-    task_type:   str
-    confidence:  float      = 0.90
-    source:      str        = "synthetic"   # synthetic / chat_history / shadow_trace / manual
-    quality:     float      = 0.90
+
+    user_input: str
+    task_type: str
+    confidence: float = 0.90
+    source: str = "synthetic"  # synthetic / chat_history / shadow_trace / manual
+    quality: float = 0.90
     # 人工纠错字段
-    corrected_task: Optional[str] = None    # 若人工标注了正确分类，此处非空
-    corrected_by:   str           = ""      # "user" / "admin"
+    corrected_task: Optional[str] = None  # 若人工标注了正确分类，此处非空
+    corrected_by: str = ""  # "user" / "admin"
     # 元数据
-    notes:       str        = ""
+    notes: str = ""
     # 自动生成
-    sample_hash: str        = field(default="", init=False)
-    created_at:  str        = field(default="", init=False)
+    sample_hash: str = field(default="", init=False)
+    created_at: str = field(default="", init=False)
 
     def __post_init__(self):
         self.sample_hash = _hash(self.user_input)
@@ -110,15 +122,18 @@ class DBSample:
     def to_ollama_jsonl(self) -> str:
         answer = json.dumps(
             {"task": self.effective_task, "confidence": self.effective_confidence},
-            ensure_ascii=False
+            ensure_ascii=False,
         )
-        return json.dumps({
-            "messages": [
-                {"role": "system",    "content": _ROUTER_SYSTEM},
-                {"role": "user",      "content": self.user_input},
-                {"role": "assistant", "content": answer},
-            ]
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "messages": [
+                    {"role": "system", "content": _ROUTER_SYSTEM},
+                    {"role": "user", "content": self.user_input},
+                    {"role": "assistant", "content": answer},
+                ]
+            },
+            ensure_ascii=False,
+        )
 
 
 def _hash(text: str) -> str:
@@ -128,6 +143,7 @@ def _hash(text: str) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 # 数据库管理
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class TrainingDB:
     """SQLite 训练数据库管理器"""
@@ -212,7 +228,7 @@ class TrainingDB:
             with self._conn() as conn:
                 existing = conn.execute(
                     "SELECT id, quality, corrected_task FROM samples WHERE sample_hash=?",
-                    (sample.sample_hash,)
+                    (sample.sample_hash,),
                 ).fetchone()
 
                 if existing:
@@ -221,28 +237,52 @@ class TrainingDB:
                         return False, "skipped_has_correction"
                     # 仅在质量更高时更新
                     if sample.quality > existing["quality"]:
-                        conn.execute("""
+                        conn.execute(
+                            """
                             UPDATE samples SET
                                 task_type=?, confidence=?, source=?, quality=?,
                                 notes=?, updated_at=?
                             WHERE sample_hash=?
-                        """, (sample.task_type, sample.confidence, sample.source,
-                              sample.quality, sample.notes, now, sample.sample_hash))
+                        """,
+                            (
+                                sample.task_type,
+                                sample.confidence,
+                                sample.source,
+                                sample.quality,
+                                sample.notes,
+                                now,
+                                sample.sample_hash,
+                            ),
+                        )
                         return False, "updated"
                     return False, "skipped_lower_quality"
 
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO samples
                         (sample_hash, user_input, task_type, confidence, source,
                          quality, corrected_task, corrected_by, notes, created_at, updated_at)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                """, (sample.sample_hash, sample.user_input, sample.task_type,
-                      sample.confidence, sample.source, sample.quality,
-                      sample.corrected_task, sample.corrected_by, sample.notes,
-                      sample.created_at, now))
+                """,
+                    (
+                        sample.sample_hash,
+                        sample.user_input,
+                        sample.task_type,
+                        sample.confidence,
+                        sample.source,
+                        sample.quality,
+                        sample.corrected_task,
+                        sample.corrected_by,
+                        sample.notes,
+                        sample.created_at,
+                        now,
+                    ),
+                )
                 return True, "inserted"
 
-    def upsert_batch(self, samples: List[DBSample], verbose: bool = False) -> Dict[str, int]:
+    def upsert_batch(
+        self, samples: List[DBSample], verbose: bool = False
+    ) -> Dict[str, int]:
         """批量插入，返回统计"""
         counts = {"inserted": 0, "updated": 0, "skipped": 0}
         for s in samples:
@@ -254,11 +294,18 @@ class TrainingDB:
             else:
                 counts["skipped"] += 1
         if verbose:
-            print(f"  插入: {counts['inserted']}  更新: {counts['updated']}  跳过: {counts['skipped']}")
+            print(
+                f"  插入: {counts['inserted']}  更新: {counts['updated']}  跳过: {counts['skipped']}"
+            )
         return counts
 
-    def correct_label(self, user_input: str, correct_task: str,
-                      corrected_by: str = "user", notes: str = "") -> bool:
+    def correct_label(
+        self,
+        user_input: str,
+        correct_task: str,
+        corrected_by: str = "user",
+        notes: str = "",
+    ) -> bool:
         """为指定输入打上人工纠错标签（优先级最高）"""
         if correct_task not in VALID_TASKS:
             raise ValueError(f"无效任务类型: {correct_task}，可用: {VALID_TASKS}")
@@ -270,34 +317,47 @@ class TrainingDB:
                     "SELECT id FROM samples WHERE sample_hash=?", (h,)
                 ).fetchone()
                 if existing:
-                    conn.execute("""
+                    conn.execute(
+                        """
                         UPDATE samples SET
                             corrected_task=?, corrected_by=?, notes=?, updated_at=?
                         WHERE sample_hash=?
-                    """, (correct_task, corrected_by, notes, now, h))
+                    """,
+                        (correct_task, corrected_by, notes, now, h),
+                    )
                     return True
                 else:
                     # 新建一条人工标注样本
-                    s = DBSample(user_input=user_input, task_type=correct_task,
-                                 confidence=0.99, source="manual", quality=0.99,
-                                 corrected_task=correct_task, corrected_by=corrected_by,
-                                 notes=notes)
+                    s = DBSample(
+                        user_input=user_input,
+                        task_type=correct_task,
+                        confidence=0.99,
+                        source="manual",
+                        quality=0.99,
+                        corrected_task=correct_task,
+                        corrected_by=corrected_by,
+                        notes=notes,
+                    )
                     self.upsert(s)
                     return True
 
-    def log_prediction(self, user_input: str, predicted_task: str,
-                       session_id: str = "") -> int:
+    def log_prediction(
+        self, user_input: str, predicted_task: str, session_id: str = ""
+    ) -> int:
         """
         记录一次模型预测（用于后续纠错分析）。
         返回记录的 ID，用于后续调用 resolve_correction()。
         """
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self._conn() as conn:
-            cur = conn.execute("""
+            cur = conn.execute(
+                """
                 INSERT INTO pending_corrections
                     (user_input, predicted_task, session_id, created_at)
                 VALUES (?,?,?,?)
-            """, (user_input, predicted_task, session_id, now))
+            """,
+                (user_input, predicted_task, session_id, now),
+            )
             return cur.lastrowid
 
     def resolve_correction(self, correction_id: int, correct_task: Optional[str]):
@@ -310,13 +370,13 @@ class TrainingDB:
         with self._conn() as conn:
             row = conn.execute(
                 "SELECT user_input, predicted_task FROM pending_corrections WHERE id=?",
-                (correction_id,)
+                (correction_id,),
             ).fetchone()
             if not row:
                 return
             conn.execute(
                 "UPDATE pending_corrections SET correct_task=?, resolved=1 WHERE id=?",
-                (correct_task, correction_id)
+                (correct_task, correction_id),
             )
             if correct_task and correct_task != row["predicted_task"]:
                 self.correct_label(row["user_input"], correct_task, corrected_by="user")
@@ -326,11 +386,14 @@ class TrainingDB:
     def get_all_active(self, min_quality: float = 0.7) -> List[DBSample]:
         """获取所有活跃样本"""
         with self._conn() as conn:
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT * FROM samples
                 WHERE active=1 AND quality >= ?
                 ORDER BY quality DESC, created_at ASC
-            """, (min_quality,)).fetchall()
+            """,
+                (min_quality,),
+            ).fetchall()
         result = []
         for r in rows:
             s = DBSample(
@@ -344,20 +407,28 @@ class TrainingDB:
                 notes=r["notes"] or "",
             )
             s.sample_hash = r["sample_hash"]
-            s.created_at  = r["created_at"]
+            s.created_at = r["created_at"]
             result.append(s)
         return result
 
     def stats(self) -> Dict[str, Any]:
         with self._conn() as conn:
-            total   = conn.execute("SELECT COUNT(*) FROM samples WHERE active=1").fetchone()[0]
-            by_task = {r[0]: r[1] for r in conn.execute(
-                "SELECT COALESCE(corrected_task, task_type), COUNT(*) FROM samples "
-                "WHERE active=1 GROUP BY COALESCE(corrected_task, task_type)"
-            ).fetchall()}
-            by_src  = {r[0]: r[1] for r in conn.execute(
-                "SELECT source, COUNT(*) FROM samples WHERE active=1 GROUP BY source"
-            ).fetchall()}
+            total = conn.execute(
+                "SELECT COUNT(*) FROM samples WHERE active=1"
+            ).fetchone()[0]
+            by_task = {
+                r[0]: r[1]
+                for r in conn.execute(
+                    "SELECT COALESCE(corrected_task, task_type), COUNT(*) FROM samples "
+                    "WHERE active=1 GROUP BY COALESCE(corrected_task, task_type)"
+                ).fetchall()
+            }
+            by_src = {
+                r[0]: r[1]
+                for r in conn.execute(
+                    "SELECT source, COUNT(*) FROM samples WHERE active=1 GROUP BY source"
+                ).fetchall()
+            }
             corrected = conn.execute(
                 "SELECT COUNT(*) FROM samples WHERE active=1 AND corrected_task IS NOT NULL"
             ).fetchone()[0]
@@ -368,13 +439,13 @@ class TrainingDB:
                 "SELECT COUNT(*) FROM pending_corrections WHERE resolved=0"
             ).fetchone()[0]
         return {
-            "total":               total,
-            "by_task":             dict(sorted(by_task.items())),
-            "by_source":           by_src,
-            "manually_corrected":  corrected,
+            "total": total,
+            "by_task": dict(sorted(by_task.items())),
+            "by_source": by_src,
+            "manually_corrected": corrected,
             "pending_corrections": pending_corrections,
-            "last_build":          dict(last_build) if last_build else None,
-            "db_path":             str(self.db_path),
+            "last_build": dict(last_build) if last_build else None,
+            "db_path": str(self.db_path),
         }
 
     def get_unexported_count(self) -> int:
@@ -385,8 +456,9 @@ class TrainingDB:
 
     # ── 导出 ─────────────────────────────────────────────────────────────────
 
-    def export_jsonl(self, output_dir: Path = _OUT_DIR,
-                     min_quality: float = 0.7) -> Path:
+    def export_jsonl(
+        self, output_dir: Path = _OUT_DIR, min_quality: float = 0.7
+    ) -> Path:
         """导出全量 JSONL 训练文件"""
         output_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -404,14 +476,15 @@ class TrainingDB:
         with self._conn() as conn:
             conn.execute(
                 "UPDATE samples SET exported_at=? WHERE active=1 AND exported_at IS NULL",
-                (now,)
+                (now,),
             )
 
         print(f"  导出 {len(samples)} 条样本 → {out_path.name}")
         return out_path
 
-    def rebuild_koto_router(self, base_model: str = "auto",
-                             output_dir: Path = _OUT_DIR) -> bool:
+    def rebuild_koto_router(
+        self, base_model: str = "auto", output_dir: Path = _OUT_DIR
+    ) -> bool:
         """
         导出 JSONL + 生成 Modelfile + 重建 koto-router 模型。
         返回是否成功。
@@ -437,7 +510,9 @@ class TrainingDB:
         print(f"[TrainingDB] 🤖 正在基于 {base_model} 创建 koto-router...")
         result = subprocess.run(
             ["ollama", "create", "koto-router", "-f", str(mf_path)],
-            capture_output=True, text=True, timeout=180
+            capture_output=True,
+            text=True,
+            timeout=180,
         )
         success = result.returncode == 0
 
@@ -445,17 +520,27 @@ class TrainingDB:
         samples = self.get_all_active()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with self._conn() as conn:
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT INTO build_history
                     (built_at, total_samples, export_path, ollama_success, notes)
                 VALUES (?,?,?,?,?)
-            """, (now, len(samples), str(jsonl_path), int(success),
-                  f"base={base_model}"))
+            """,
+                (
+                    now,
+                    len(samples),
+                    str(jsonl_path),
+                    int(success),
+                    f"base={base_model}",
+                ),
+            )
 
         if success:
             print(f"[TrainingDB] ✅ koto-router 重建成功（{len(samples)} 条样本）")
         else:
-            print(f"[TrainingDB] ❌ koto-router 重建失败: {result.stderr.strip()[:200]}")
+            print(
+                f"[TrainingDB] ❌ koto-router 重建失败: {result.stderr.strip()[:200]}"
+            )
 
         return success
 
@@ -463,6 +548,7 @@ class TrainingDB:
 # ══════════════════════════════════════════════════════════════════════════════
 # 数据采集器
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class DataHarvester:
     """
@@ -485,7 +571,8 @@ class DataHarvester:
             for k in total:
                 total[k] += d.get(k, 0)
 
-        if verbose: print("\n[Harvester] 📥 开始采集数据...")
+        if verbose:
+            print("\n[Harvester] 📥 开始采集数据...")
 
         # 1. 合成数据
         r = self.harvest_synthetic(verbose=verbose)
@@ -500,26 +587,39 @@ class DataHarvester:
         _merge(r)
 
         if verbose:
-            print(f"[Harvester] ✅ 采集完毕 — 新增: {total['inserted']}  "
-                  f"更新: {total['updated']}  跳过: {total['skipped']}")
+            print(
+                f"[Harvester] ✅ 采集完毕 — 新增: {total['inserted']}  "
+                f"更新: {total['updated']}  跳过: {total['skipped']}"
+            )
         return total
 
     def harvest_synthetic(self, verbose: bool = True) -> Dict[str, int]:
         try:
-            from app.core.learning.synthetic_data_generator import SyntheticDataGenerator
+            from app.core.learning.synthetic_data_generator import (
+                SyntheticDataGenerator,
+            )
+
             gold = SyntheticDataGenerator.generate_all(shuffle=False)
             samples = [
-                DBSample(user_input=inp, task_type=task, confidence=conf,
-                         source="synthetic_gold", quality=0.96)
+                DBSample(
+                    user_input=inp,
+                    task_type=task,
+                    confidence=conf,
+                    source="synthetic_gold",
+                    quality=0.96,
+                )
                 for inp, task, conf in gold
             ]
             r = self.db.upsert_batch(samples, verbose=False)
             if verbose:
-                print(f"  [合成数据]   {len(samples)} 条 → "
-                      f"新增 {r['inserted']} 更新 {r['updated']} 跳过 {r['skipped']}")
+                print(
+                    f"  [合成数据]   {len(samples)} 条 → "
+                    f"新增 {r['inserted']} 更新 {r['updated']} 跳过 {r['skipped']}"
+                )
             return r
         except Exception as e:
-            if verbose: print(f"  [合成数据] ⚠️ 失败: {e}")
+            if verbose:
+                print(f"  [合成数据] ⚠️ 失败: {e}")
             return {"inserted": 0, "updated": 0, "skipped": 0}
 
     def harvest_chat_history(self, verbose: bool = True) -> Dict[str, int]:
@@ -531,6 +631,7 @@ class DataHarvester:
         _router = None
         try:
             from app.core.routing.local_model_router import LocalModelRouter
+
             _router = LocalModelRouter
         except Exception:
             pass
@@ -541,7 +642,7 @@ class DataHarvester:
                 turns = json.loads(f.read_text(encoding="utf-8"))
                 i = 0
                 while i < len(turns) - 1:
-                    u, m = turns[i], turns[i+1]
+                    u, m = turns[i], turns[i + 1]
                     i += 2
                     if u.get("role") != "user" or m.get("role") != "model":
                         continue
@@ -554,24 +655,33 @@ class DataHarvester:
                         # 尝试用路由器重新分类
                         if _router is not None:
                             try:
-                                rtask, conf_str, _ = _router.classify(user_text, timeout=5.0)
+                                rtask, conf_str, _ = _router.classify(
+                                    user_text, timeout=5.0
+                                )
                                 task = rtask if rtask in VALID_TASKS else "CHAT"
                             except Exception:
                                 task = "CHAT"
                         else:
                             task = "CHAT"
-                    samples.append(DBSample(
-                        user_input=user_text, task_type=task,
-                        confidence=0.85, source="chat_history", quality=0.80,
-                        notes=f"from:{f.stem}"
-                    ))
+                    samples.append(
+                        DBSample(
+                            user_input=user_text,
+                            task_type=task,
+                            confidence=0.85,
+                            source="chat_history",
+                            quality=0.80,
+                            notes=f"from:{f.stem}",
+                        )
+                    )
             except Exception:
                 pass
 
         r = self.db.upsert_batch(samples, verbose=False)
         if verbose:
-            print(f"  [聊天历史]   {len(samples)} 条 → "
-                  f"新增 {r['inserted']} 更新 {r['updated']} 跳过 {r['skipped']}")
+            print(
+                f"  [聊天历史]   {len(samples)} 条 → "
+                f"新增 {r['inserted']} 更新 {r['updated']} 跳过 {r['skipped']}"
+            )
         return r
 
     def harvest_shadow_traces(self, verbose: bool = True) -> Dict[str, int]:
@@ -587,25 +697,34 @@ class DataHarvester:
                 try:
                     rec = json.loads(line)
                     user_text = rec.get("user_input", "")
-                    task      = rec.get("task_type") or "CHAT"
-                    feedback  = rec.get("feedback", "")
+                    task = rec.get("task_type") or "CHAT"
+                    feedback = rec.get("feedback", "")
                     if not user_text or len(user_text) < 3:
                         continue
                     if task not in VALID_TASKS:
                         task = "CHAT"
-                    quality = 0.92 if feedback in ("thumbs_up", "workflow_complete") else 0.78
-                    samples.append(DBSample(
-                        user_input=user_text, task_type=task,
-                        confidence=0.90, source="shadow_trace", quality=quality,
-                        notes=f"feedback:{feedback}"
-                    ))
+                    quality = (
+                        0.92 if feedback in ("thumbs_up", "workflow_complete") else 0.78
+                    )
+                    samples.append(
+                        DBSample(
+                            user_input=user_text,
+                            task_type=task,
+                            confidence=0.90,
+                            source="shadow_trace",
+                            quality=quality,
+                            notes=f"feedback:{feedback}",
+                        )
+                    )
                 except Exception:
                     pass
 
         r = self.db.upsert_batch(samples, verbose=False)
         if verbose:
-            print(f"  [Shadow记录] {len(samples)} 条 → "
-                  f"新增 {r['inserted']} 更新 {r['updated']} 跳过 {r['skipped']}")
+            print(
+                f"  [Shadow记录] {len(samples)} 条 → "
+                f"新增 {r['inserted']} 更新 {r['updated']} 跳过 {r['skipped']}"
+            )
         return r
 
 
@@ -613,16 +732,26 @@ class DataHarvester:
 # 辅助函数
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def _detect_best_base_model() -> Optional[str]:
     """检测 Ollama 中最适合做底座的模型"""
     try:
         import requests
+
         resp = requests.get("http://localhost:11434/api/tags", timeout=3)
         if resp.status_code != 200:
             return None
         tags = [m["name"] for m in resp.json().get("models", [])]
-        preferred = ["qwen3:8b", "qwen3:4b", "qwen3:1.7b", "qwen2.5:7b",
-                     "qwen2.5:3b", "llama3.1:8b", "llama3.2:3b", "gemma3:4b"]
+        preferred = [
+            "qwen3:8b",
+            "qwen3:4b",
+            "qwen3:1.7b",
+            "qwen2.5:7b",
+            "qwen2.5:3b",
+            "llama3.1:8b",
+            "llama3.2:3b",
+            "gemma3:4b",
+        ]
         for p in preferred:
             if any(p in t for t in tags):
                 return p
@@ -665,6 +794,7 @@ PARAMETER num_ctx 4096
 
 _default_db: Optional[TrainingDB] = None
 
+
 def get_db() -> TrainingDB:
     global _default_db
     if _default_db is None:
@@ -694,7 +824,7 @@ def full_pipeline(verbose: bool = True) -> Dict[str, Any]:
 
     return {
         "harvest": harvest_result,
-        "stats":   s,
+        "stats": s,
         "rebuilt": rebuilt,
     }
 
@@ -713,8 +843,10 @@ def _print_stats(s: Dict[str, Any]):
     print(f"  人工纠错样本: {s['manually_corrected']} 条")
     print(f"  待解决纠错:   {s['pending_corrections']} 条")
     if s["last_build"]:
-        print(f"  上次重建: {s['last_build']['built_at']} "
-              f"({s['last_build']['total_samples']} 条)")
+        print(
+            f"  上次重建: {s['last_build']['built_at']} "
+            f"({s['last_build']['total_samples']} 条)"
+        )
     print(f"  数据库路径: {s['db_path']}")
     print(f"{'='*62}\n")
 
@@ -723,18 +855,25 @@ def _print_stats(s: Dict[str, Any]):
 # ShadowTracer 钩子（新增：每条用户交互自动记录到 DB）
 # ══════════════════════════════════════════════════════════════════════════════
 
-def auto_record_interaction(user_input: str, task_type: str,
-                            confidence: float = 0.85,
-                            feedback: Optional[str] = None):
+
+def auto_record_interaction(
+    user_input: str,
+    task_type: str,
+    confidence: float = 0.85,
+    feedback: Optional[str] = None,
+):
     """
     由 UnifiedAgent / SmartDispatcher 调用，自动将每次交互记录进数据库。
     质量由置信度和用户反馈综合决定。仅插入，不阻塞主流程（后台线程执行）。
     """
+
     def _run():
         try:
             if task_type not in VALID_TASKS or len(user_input.strip()) < 3:
                 return
-            quality = min(confidence + 0.05, 0.99) if feedback == "thumbs_up" else confidence
+            quality = (
+                min(confidence + 0.05, 0.99) if feedback == "thumbs_up" else confidence
+            )
             sample = DBSample(
                 user_input=user_input.strip(),
                 task_type=task_type,
@@ -750,7 +889,9 @@ def auto_record_interaction(user_input: str, task_type: str,
             if inserted and AUTO_REBUILD_THRESHOLD > 0:
                 unexported = db.get_unexported_count()
                 if unexported >= AUTO_REBUILD_THRESHOLD:
-                    logger.info(f"[TrainingDB] 达到自动重建阈值 ({unexported} 条)，触发重建...")
+                    logger.info(
+                        f"[TrainingDB] 达到自动重建阈值 ({unexported} 条)，触发重建..."
+                    )
                     db.rebuild_koto_router()
         except Exception as e:
             logger.debug(f"[TrainingDB] auto_record 失败（忽略）: {e}")
@@ -776,14 +917,18 @@ if __name__ == "__main__":
   python -m app.core.learning.training_db --export     # 仅导出 JSONL
   python -m app.core.learning.training_db --rebuild    # 仅重建模型
   python -m app.core.learning.training_db --correct "目前伊朗战事" WEB_SEARCH
-        """
+        """,
     )
-    parser.add_argument("--stats",   action="store_true", help="查看数据库统计")
-    parser.add_argument("--export",  action="store_true", help="导出 JSONL")
+    parser.add_argument("--stats", action="store_true", help="查看数据库统计")
+    parser.add_argument("--export", action="store_true", help="导出 JSONL")
     parser.add_argument("--rebuild", action="store_true", help="重建 koto-router")
     parser.add_argument("--harvest", action="store_true", help="仅采集数据（不重建）")
-    parser.add_argument("--correct", nargs=2, metavar=("INPUT", "TASK"),
-                        help="人工纠错: --correct '输入文本' TASK_TYPE")
+    parser.add_argument(
+        "--correct",
+        nargs=2,
+        metavar=("INPUT", "TASK"),
+        help="人工纠错: --correct '输入文本' TASK_TYPE",
+    )
     args = parser.parse_args()
 
     db = get_db()

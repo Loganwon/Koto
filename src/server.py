@@ -19,6 +19,7 @@ Koto Server Mode - 纯 Web 服务（无桌面窗口）
   LANGCHAIN_API_KEY=lsv2_...   # https://smith.langchain.com
   LANGCHAIN_PROJECT=Koto
 """
+
 import os
 import sys
 from pathlib import Path
@@ -39,6 +40,7 @@ for d in ["logs", "chats", "workspace", "config"]:
 # 加载 .env 配置
 try:
     from dotenv import load_dotenv
+
     env_file = APP_ROOT / "config" / "gemini_config.env"
     if env_file.exists():
         load_dotenv(str(env_file))
@@ -48,6 +50,7 @@ except ImportError:
 # LangSmith 可观测性初始化（可选，仅当环境变量已设置时激活）
 try:
     from app.core.monitoring.langsmith_tracer import init_langsmith
+
     init_langsmith()
 except Exception:
     pass

@@ -17,6 +17,7 @@ Koto Skill 行为训练数据生成器
     --neg       同时生成负例（不启用 Skill 时的"普通"回答，用于对比学习）
     --resume    跳过已成功生成的 Skill（追加模式）
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,6 +36,7 @@ sys.path.insert(0, str(_ROOT))
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("koto.data_gen")
 
+
 # ── 加载 Gemini API Key ───────────────────────────────────────────────────────
 def _load_api_key() -> str:
     env_file = _ROOT / "config" / "gemini_config.env"
@@ -52,7 +54,7 @@ def _load_api_key() -> str:
 # ── 加载所有 Skills ───────────────────────────────────────────────────────────
 def load_all_skills() -> List[Dict]:
     """返回内置 + 自定义 Skills 的完整列表（只加载有 prompt 的 skill）"""
-    from app.core.skills.skill_manager import SkillManager, BUILTIN_SKILLS
+    from app.core.skills.skill_manager import BUILTIN_SKILLS, SkillManager
 
     SkillManager._ensure_init()
 
@@ -67,15 +69,17 @@ def load_all_skills() -> List[Dict]:
         prompt = s.get("prompt", "").strip()
         if not prompt or s["id"] == "long_term_memory":  # 长期记忆 skill 跳过
             continue
-        skills.append({
-            "id": s["id"],
-            "name": s["name"],
-            "icon": s.get("icon", "🔧"),
-            "category": s.get("category", "behavior"),
-            "description": s.get("description", ""),
-            "prompt": prompt,
-            "task_types": s.get("task_types", []),
-        })
+        skills.append(
+            {
+                "id": s["id"],
+                "name": s["name"],
+                "icon": s.get("icon", "🔧"),
+                "category": s.get("category", "behavior"),
+                "description": s.get("description", ""),
+                "prompt": prompt,
+                "task_types": s.get("task_types", []),
+            }
+        )
 
     # 自定义 JSON
     skills_dir = _ROOT / "config" / "skills"
@@ -90,15 +94,17 @@ def load_all_skills() -> List[Dict]:
                 prompt = data.get("prompt", "").strip()
                 if not prompt:
                     continue
-                skills.append({
-                    "id": sid,
-                    "name": data.get("name", sid),
-                    "icon": data.get("icon", "🔧"),
-                    "category": data.get("category", "custom"),
-                    "description": data.get("description", ""),
-                    "prompt": prompt,
-                    "task_types": data.get("task_types", []),
-                })
+                skills.append(
+                    {
+                        "id": sid,
+                        "name": data.get("name", sid),
+                        "icon": data.get("icon", "🔧"),
+                        "category": data.get("category", "custom"),
+                        "description": data.get("description", ""),
+                        "prompt": prompt,
+                        "task_types": data.get("task_types", []),
+                    }
+                )
             except Exception as e:
                 logger.warning(f"跳过 {jf.name}: {e}")
 
@@ -107,10 +113,13 @@ def load_all_skills() -> List[Dict]:
 
 
 # ── Gemini 调用 ───────────────────────────────────────────────────────────────
-def call_gemini(api_key: str, messages: List[Dict], model: str = "gemini-2.5-flash") -> str:
+def call_gemini(
+    api_key: str, messages: List[Dict], model: str = "gemini-2.5-flash"
+) -> str:
     """简单的 Gemini HTTP 调用，返回文本响应"""
     try:
         from google import genai
+
         client = genai.Client(api_key=api_key)
         # 转为 Gemini SDK 格式
         contents = []
@@ -126,6 +135,7 @@ def call_gemini(api_key: str, messages: List[Dict], model: str = "gemini-2.5-fla
             config_kwargs["system_instruction"] = sys_instruction
 
         from google.genai import types
+
         response = client.models.generate_content(
             model=model,
             contents=contents,
@@ -160,6 +170,7 @@ _GENERATOR_SYSTEM = """\
 ]
 """
 
+
 def generate_pairs_for_skill(
     api_key: str,
     skill: Dict,
@@ -188,21 +199,21 @@ Skill 名称: {skill['name']} {skill['icon']}
             if escape_next:
                 result.append(ch)
                 escape_next = False
-            elif ch == '\\' and in_string:
+            elif ch == "\\" and in_string:
                 result.append(ch)
                 escape_next = True
             elif ch == '"':
                 in_string = not in_string
                 result.append(ch)
-            elif in_string and ch == '\n':
-                result.append('\\n')
-            elif in_string and ch == '\r':
-                result.append('\\r')
-            elif in_string and ch == '\t':
-                result.append('\\t')
+            elif in_string and ch == "\n":
+                result.append("\\n")
+            elif in_string and ch == "\r":
+                result.append("\\r")
+            elif in_string and ch == "\t":
+                result.append("\\t")
             else:
                 result.append(ch)
-        return ''.join(result)
+        return "".join(result)
 
     def _call_batch(n: int) -> List[Dict]:
         user_msg = f"""\
@@ -258,9 +269,7 @@ def build_sample(
     """将一个训练对封装成标准 JSONL 样本"""
     if negative:
         # 负例：system 中不含 Skill，用于对比学习
-        system_prompt = (
-            "你是 Koto，一个本地 AI 助手，请尽力回答用户问题。"
-        )
+        system_prompt = "你是 Koto，一个本地 AI 助手，请尽力回答用户问题。"
     else:
         # 正例：system 中包含完整 Skill 前言 + Skill prompt
         preamble = (
@@ -289,15 +298,23 @@ def build_sample(
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="Koto Skill 训练数据生成器")
-    parser.add_argument("--skills", nargs="*", default=[], help="只为指定 skill_id 生成")
+    parser.add_argument(
+        "--skills", nargs="*", default=[], help="只为指定 skill_id 生成"
+    )
     parser.add_argument("--pairs", type=int, default=12, help="每个 Skill 的训练对数量")
     parser.add_argument(
         "--output",
-        default=str(_ROOT / "config" / "training_data" / "skill_behavior_samples.jsonl"),
+        default=str(
+            _ROOT / "config" / "training_data" / "skill_behavior_samples.jsonl"
+        ),
         help="输出文件路径",
     )
-    parser.add_argument("--neg", action="store_true", default=False, help="同时生成负例")
-    parser.add_argument("--resume", action="store_true", default=False, help="追加模式（跳过已有）")
+    parser.add_argument(
+        "--neg", action="store_true", default=False, help="同时生成负例"
+    )
+    parser.add_argument(
+        "--resume", action="store_true", default=False, help="追加模式（跳过已有）"
+    )
     args = parser.parse_args()
 
     api_key = _load_api_key()
@@ -333,7 +350,9 @@ def main():
         for i, skill in enumerate(all_skills):
             sid = skill["id"]
             if sid in done_skills:
-                logger.info(f"[{i+1}/{len(all_skills)}] 跳过（已完成）: {skill['name']}")
+                logger.info(
+                    f"[{i+1}/{len(all_skills)}] 跳过（已完成）: {skill['name']}"
+                )
                 continue
 
             logger.info(f"[{i+1}/{len(all_skills)}] 生成: {skill['name']} ({sid})")
@@ -358,7 +377,10 @@ def main():
                         total_written += 1
 
                 out_f.flush()
-                logger.info(f"  ✅ {sid}: 写入 {len(pairs)} 条正例" + (f" + {len(pairs)} 条负例" if args.neg else ""))
+                logger.info(
+                    f"  ✅ {sid}: 写入 {len(pairs)} 条正例"
+                    + (f" + {len(pairs)} 条负例" if args.neg else "")
+                )
 
                 # 轻微延迟，避免触发 API 限流
                 if i < len(all_skills) - 1:

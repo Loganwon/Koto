@@ -5,11 +5,14 @@ Integration tests for /api/agent endpoints.
 Tests the agent inference endpoint with a mocked LLM provider so no real
 Gemini/Ollama calls are made.
 """
+
 from __future__ import annotations
+
 import sys
-import pytest
-from unittest.mock import MagicMock, patch
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 def _root():
@@ -27,6 +30,7 @@ def agent_client(_koto_tmp_db):
     """Flask test client with agent blueprint registered."""
     _ensure_path()
     from flask import Flask
+
     from app.api.agent_routes import agent_bp
 
     app = Flask(__name__)

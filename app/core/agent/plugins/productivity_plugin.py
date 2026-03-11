@@ -17,8 +17,8 @@ ProductivityPlugin — 补全 Koto 缺失的高优先级本地能力
 
 import logging
 import os
-import subprocess
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -27,15 +27,35 @@ from app.core.agent.base import AgentPlugin
 logger = logging.getLogger(__name__)
 
 # 工作区根目录（可通过环境变量覆盖）
-_WORKSPACE = os.environ.get("KOTO_WORKSPACE", os.path.join(os.path.dirname(__file__), "../../../../workspace"))
+_WORKSPACE = os.environ.get(
+    "KOTO_WORKSPACE", os.path.join(os.path.dirname(__file__), "../../../../workspace")
+)
 _WORKSPACE = os.path.abspath(_WORKSPACE)
 
 # shell 命令白名单（可安全执行的前缀）
 _ALLOWED_COMMANDS = {
-    "dir", "ls", "echo", "ping", "ipconfig", "ifconfig",
-    "python", "pip", "git", "curl", "wget", "cat",
-    "type", "find", "grep", "cd", "pwd", "hostname",
-    "tasklist", "ps", "netstat", "nslookup",
+    "dir",
+    "ls",
+    "echo",
+    "ping",
+    "ipconfig",
+    "ifconfig",
+    "python",
+    "pip",
+    "git",
+    "curl",
+    "wget",
+    "cat",
+    "type",
+    "find",
+    "grep",
+    "cd",
+    "pwd",
+    "hostname",
+    "tasklist",
+    "ps",
+    "netstat",
+    "nslookup",
 }
 
 
@@ -60,14 +80,14 @@ class ProductivityPlugin(AgentPlugin):
                     "properties": {
                         "path": {
                             "type": "STRING",
-                            "description": "目录路径（相对于工作区或绝对路径，默认工作区根目录）"
+                            "description": "目录路径（相对于工作区或绝对路径，默认工作区根目录）",
                         },
                         "show_hidden": {
                             "type": "BOOLEAN",
-                            "description": "是否显示隐藏文件（默认 false）"
-                        }
-                    }
-                }
+                            "description": "是否显示隐藏文件（默认 false）",
+                        },
+                    },
+                },
             },
             {
                 "name": "open_file_or_folder",
@@ -76,13 +96,10 @@ class ProductivityPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "path": {
-                            "type": "STRING",
-                            "description": "文件或文件夹路径"
-                        }
+                        "path": {"type": "STRING", "description": "文件或文件夹路径"}
                     },
-                    "required": ["path"]
-                }
+                    "required": ["path"],
+                },
             },
             {
                 "name": "shell_command",
@@ -93,28 +110,25 @@ class ProductivityPlugin(AgentPlugin):
                     "properties": {
                         "command": {
                             "type": "STRING",
-                            "description": "要执行的 shell 命令（如 'git status'、'pip list'）"
+                            "description": "要执行的 shell 命令（如 'git status'、'pip list'）",
                         },
                         "cwd": {
                             "type": "STRING",
-                            "description": "执行命令的工作目录（可选，默认工作区根目录）"
+                            "description": "执行命令的工作目录（可选，默认工作区根目录）",
                         },
                         "timeout": {
                             "type": "INTEGER",
-                            "description": "超时秒数（默认 15，最大 60）"
-                        }
+                            "description": "超时秒数（默认 15，最大 60）",
+                        },
                     },
-                    "required": ["command"]
-                }
+                    "required": ["command"],
+                },
             },
             {
                 "name": "get_clipboard_text",
                 "func": self.get_clipboard_text,
                 "description": "读取当前剪贴板中的文本内容",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {}
-                }
+                "parameters": {"type": "OBJECT", "properties": {}},
             },
             {
                 "name": "set_clipboard_text",
@@ -123,13 +137,10 @@ class ProductivityPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "text": {
-                            "type": "STRING",
-                            "description": "要写入剪贴板的文本"
-                        }
+                        "text": {"type": "STRING", "description": "要写入剪贴板的文本"}
                     },
-                    "required": ["text"]
-                }
+                    "required": ["text"],
+                },
             },
             {
                 "name": "take_screenshot",
@@ -140,10 +151,10 @@ class ProductivityPlugin(AgentPlugin):
                     "properties": {
                         "filename": {
                             "type": "STRING",
-                            "description": "保存的文件名（不含扩展名，默认按时间戳命名）"
+                            "description": "保存的文件名（不含扩展名，默认按时间戳命名）",
                         }
-                    }
-                }
+                    },
+                },
             },
             {
                 "name": "send_email",
@@ -154,27 +165,21 @@ class ProductivityPlugin(AgentPlugin):
                     "properties": {
                         "to": {
                             "type": "STRING",
-                            "description": "收件人地址（多个用逗号分隔）"
+                            "description": "收件人地址（多个用逗号分隔）",
                         },
-                        "subject": {
-                            "type": "STRING",
-                            "description": "邮件主题"
-                        },
+                        "subject": {"type": "STRING", "description": "邮件主题"},
                         "body": {
                             "type": "STRING",
-                            "description": "邮件正文（支持纯文本或 HTML）"
+                            "description": "邮件正文（支持纯文本或 HTML）",
                         },
                         "is_html": {
                             "type": "BOOLEAN",
-                            "description": "正文是否为 HTML 格式（默认 false）"
+                            "description": "正文是否为 HTML 格式（默认 false）",
                         },
-                        "cc": {
-                            "type": "STRING",
-                            "description": "抄送地址（可选）"
-                        }
+                        "cc": {"type": "STRING", "description": "抄送地址（可选）"},
                     },
-                    "required": ["to", "subject", "body"]
-                }
+                    "required": ["to", "subject", "body"],
+                },
             },
             {
                 "name": "move_file",
@@ -183,17 +188,14 @@ class ProductivityPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "source": {
-                            "type": "STRING",
-                            "description": "源文件路径"
-                        },
+                        "source": {"type": "STRING", "description": "源文件路径"},
                         "destination": {
                             "type": "STRING",
-                            "description": "目标路径（路径或新名称）"
-                        }
+                            "description": "目标路径（路径或新名称）",
+                        },
                     },
-                    "required": ["source", "destination"]
-                }
+                    "required": ["source", "destination"],
+                },
             },
             {
                 "name": "delete_file",
@@ -204,15 +206,15 @@ class ProductivityPlugin(AgentPlugin):
                     "properties": {
                         "path": {
                             "type": "STRING",
-                            "description": "要删除的文件/文件夹路径"
+                            "description": "要删除的文件/文件夹路径",
                         },
                         "confirm": {
                             "type": "BOOLEAN",
-                            "description": "必须为 true 才会执行删除（安全确认）"
-                        }
+                            "description": "必须为 true 才会执行删除（安全确认）",
+                        },
                     },
-                    "required": ["path", "confirm"]
-                }
+                    "required": ["path", "confirm"],
+                },
             },
             {
                 "name": "zip_files",
@@ -224,15 +226,15 @@ class ProductivityPlugin(AgentPlugin):
                         "paths": {
                             "type": "ARRAY",
                             "description": "要压缩的文件/文件夹路径列表",
-                            "items": {"type": "STRING"}
+                            "items": {"type": "STRING"},
                         },
                         "output_name": {
                             "type": "STRING",
-                            "description": "输出 zip 文件名（不含扩展名，默认 'archive'）"
-                        }
+                            "description": "输出 zip 文件名（不含扩展名，默认 'archive'）",
+                        },
                     },
-                    "required": ["paths"]
-                }
+                    "required": ["paths"],
+                },
             },
             {
                 "name": "unzip_file",
@@ -241,17 +243,14 @@ class ProductivityPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "zip_path": {
-                            "type": "STRING",
-                            "description": "zip 文件路径"
-                        },
+                        "zip_path": {"type": "STRING", "description": "zip 文件路径"},
                         "extract_to": {
                             "type": "STRING",
-                            "description": "解压目标目录（可选，默认在 zip 同级目录）"
-                        }
+                            "description": "解压目标目录（可选，默认在 zip 同级目录）",
+                        },
                     },
-                    "required": ["zip_path"]
-                }
+                    "required": ["zip_path"],
+                },
             },
         ]
 
@@ -280,7 +279,9 @@ class ProductivityPlugin(AgentPlugin):
                 size = "" if entry.is_dir() else f"  {entry.stat().st_size:,} bytes"
             except Exception:
                 size = ""
-            items.append(f"{'[DIR] ' if entry.is_dir() else '[FILE]'} {entry.name}{kind}{size}")
+            items.append(
+                f"{'[DIR] ' if entry.is_dir() else '[FILE]'} {entry.name}{kind}{size}"
+            )
 
         if not items:
             return f"目录为空：{target}"
@@ -296,6 +297,7 @@ class ProductivityPlugin(AgentPlugin):
             return f"已用系统默认程序打开：{target}"
         except AttributeError:
             import subprocess
+
             subprocess.Popen(["xdg-open", str(target)])
             return f"已打开：{target}"
         except Exception as exc:
@@ -345,6 +347,7 @@ class ProductivityPlugin(AgentPlugin):
     def get_clipboard_text(self) -> str:
         try:
             import pyperclip
+
             text = pyperclip.paste()
             return text if text else "(剪贴板为空)"
         except ImportError:
@@ -355,6 +358,7 @@ class ProductivityPlugin(AgentPlugin):
     def set_clipboard_text(self, text: str) -> str:
         try:
             import pyperclip
+
             pyperclip.copy(text)
             preview = text[:80] + ("..." if len(text) > 80 else "")
             return f"已写入剪贴板（{len(text)} 个字符）：{preview}"
@@ -371,6 +375,7 @@ class ProductivityPlugin(AgentPlugin):
             return "错误：需要安装 Pillow（pip install Pillow）"
 
         from datetime import datetime as _dt
+
         fname = filename or f"screenshot_{_dt.now().strftime('%Y%m%d_%H%M%S')}"
         if not fname.endswith(".png"):
             fname += ".png"
@@ -395,8 +400,8 @@ class ProductivityPlugin(AgentPlugin):
         is_html: bool = False,
         cc: str = "",
     ) -> str:
-        import smtplib
         import json as _json
+        import smtplib
         from email.mime.multipart import MIMEMultipart
         from email.mime.text import MIMEText
 
@@ -411,10 +416,18 @@ class ProductivityPlugin(AgentPlugin):
         except Exception:
             settings = {}
 
-        smtp_host = settings.get("email_smtp_host") or os.environ.get("EMAIL_SMTP_HOST", "")
-        smtp_port = int(settings.get("email_smtp_port") or os.environ.get("EMAIL_SMTP_PORT", 465))
-        smtp_user = settings.get("email_smtp_user") or os.environ.get("EMAIL_SMTP_USER", "")
-        smtp_pass = settings.get("email_smtp_pass") or os.environ.get("EMAIL_SMTP_PASS", "")
+        smtp_host = settings.get("email_smtp_host") or os.environ.get(
+            "EMAIL_SMTP_HOST", ""
+        )
+        smtp_port = int(
+            settings.get("email_smtp_port") or os.environ.get("EMAIL_SMTP_PORT", 465)
+        )
+        smtp_user = settings.get("email_smtp_user") or os.environ.get(
+            "EMAIL_SMTP_USER", ""
+        )
+        smtp_pass = settings.get("email_smtp_pass") or os.environ.get(
+            "EMAIL_SMTP_PASS", ""
+        )
         from_addr = settings.get("email_from") or smtp_user
 
         if not smtp_host or not smtp_user or not smtp_pass:
@@ -473,6 +486,7 @@ class ProductivityPlugin(AgentPlugin):
         try:
             try:
                 import send2trash
+
                 send2trash.send2trash(str(target))
                 return f"已移入回收站：{target}"
             except ImportError:

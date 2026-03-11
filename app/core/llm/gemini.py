@@ -1,7 +1,8 @@
-from typing import Any, Dict, List, Optional, Union, Generator
+import logging
 import os
 import time
-import logging
+from typing import Any, Dict, Generator, List, Optional, Union
+
 from .base import LLMProvider
 
 try:
@@ -18,7 +19,7 @@ class GeminiProvider(LLMProvider):
     """Google Gemini specific implementation of LLMProvider (google.genai SDK)"""
 
     MAX_RETRIES = 3
-    RETRY_BASE_DELAY = 2.0   # seconds
+    RETRY_BASE_DELAY = 2.0  # seconds
     RETRYABLE_STATUS_CODES = {429, 503}
 
     def __init__(self, api_key: str = None):
@@ -107,14 +108,16 @@ class GeminiProvider(LLMProvider):
                 )
                 if not is_retryable or attempt == self.MAX_RETRIES - 1:
                     raise
-                delay = self.RETRY_BASE_DELAY * (2 ** attempt)
+                delay = self.RETRY_BASE_DELAY * (2**attempt)
                 logger.warning(
                     f"Retryable error (attempt {attempt + 1}/{self.MAX_RETRIES}), "
                     f"retrying in {delay:.1f}s: {exc}"
                 )
                 time.sleep(delay)
 
-    def get_token_count(self, prompt: Union[str, List[Dict[str, Any]]], model: str) -> int:
+    def get_token_count(
+        self, prompt: Union[str, List[Dict[str, Any]]], model: str
+    ) -> int:
         if not self.client:
             return 0
         try:
@@ -137,14 +140,18 @@ class GeminiProvider(LLMProvider):
                     types.FunctionDeclaration(
                         name=tool.get("name"),
                         description=tool.get("description") or "",
-                        parameters_json_schema=self._normalize_schema(tool.get("parameters") or {}),
+                        parameters_json_schema=self._normalize_schema(
+                            tool.get("parameters") or {}
+                        ),
                     )
                 )
             elif isinstance(tool, types.Tool):
                 formatted_tools.append(tool)
 
         if function_declarations:
-            formatted_tools.append(types.Tool(function_declarations=function_declarations))
+            formatted_tools.append(
+                types.Tool(function_declarations=function_declarations)
+            )
 
         return formatted_tools or None
 
@@ -245,7 +252,9 @@ class GeminiProvider(LLMProvider):
         if usage_metadata:
             usage = {
                 "prompt_tokens": getattr(usage_metadata, "prompt_token_count", 0),
-                "completion_tokens": getattr(usage_metadata, "candidates_token_count", 0),
+                "completion_tokens": getattr(
+                    usage_metadata, "candidates_token_count", 0
+                ),
             }
 
         return {

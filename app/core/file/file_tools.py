@@ -17,6 +17,7 @@ FileToolsPlugin — Agent 文件能力插件
     from app.core.file.file_tools import register_file_tools
     register_file_tools(tool_registry_instance)
 """
+
 from __future__ import annotations
 
 import json
@@ -24,8 +25,8 @@ import logging
 import os
 import re
 import shutil
-import zipfile
 import tarfile
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -155,7 +156,10 @@ class FileToolsPlugin(AgentPlugin):
                     "type": "OBJECT",
                     "properties": {
                         "path": {"type": "STRING", "description": "文件的绝对路径"},
-                        "new_name": {"type": "STRING", "description": "新的文件名（含扩展名，如 报告_v2.docx）"},
+                        "new_name": {
+                            "type": "STRING",
+                            "description": "新的文件名（含扩展名，如 报告_v2.docx）",
+                        },
                     },
                     "required": ["path", "new_name"],
                 },
@@ -167,9 +171,18 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "source_path": {"type": "STRING", "description": "源文件的绝对路径"},
-                        "dest_dir": {"type": "STRING", "description": "目标目录的绝对路径"},
-                        "new_name": {"type": "STRING", "description": "可选，移动后重命名文件"},
+                        "source_path": {
+                            "type": "STRING",
+                            "description": "源文件的绝对路径",
+                        },
+                        "dest_dir": {
+                            "type": "STRING",
+                            "description": "目标目录的绝对路径",
+                        },
+                        "new_name": {
+                            "type": "STRING",
+                            "description": "可选，移动后重命名文件",
+                        },
                     },
                     "required": ["source_path", "dest_dir"],
                 },
@@ -181,9 +194,18 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "source_path": {"type": "STRING", "description": "源文件的绝对路径"},
-                        "dest_dir": {"type": "STRING", "description": "目标目录的绝对路径"},
-                        "new_name": {"type": "STRING", "description": "可选，副本的文件名"},
+                        "source_path": {
+                            "type": "STRING",
+                            "description": "源文件的绝对路径",
+                        },
+                        "dest_dir": {
+                            "type": "STRING",
+                            "description": "目标目录的绝对路径",
+                        },
+                        "new_name": {
+                            "type": "STRING",
+                            "description": "可选，副本的文件名",
+                        },
                     },
                     "required": ["source_path", "dest_dir"],
                 },
@@ -198,8 +220,14 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "path": {"type": "STRING", "description": "要删除的文件绝对路径"},
-                        "use_trash": {"type": "BOOLEAN", "description": "是否送入回收站，默认 true"},
+                        "path": {
+                            "type": "STRING",
+                            "description": "要删除的文件绝对路径",
+                        },
+                        "use_trash": {
+                            "type": "BOOLEAN",
+                            "description": "是否送入回收站，默认 true",
+                        },
                     },
                     "required": ["path"],
                 },
@@ -213,9 +241,18 @@ class FileToolsPlugin(AgentPlugin):
                     "type": "OBJECT",
                     "properties": {
                         "path": {"type": "STRING", "description": "目录的绝对路径"},
-                        "show_hidden": {"type": "BOOLEAN", "description": "是否显示隐藏文件，默认 false"},
-                        "filter_ext": {"type": "STRING", "description": "可选，仅显示该扩展名的文件，如 .pdf"},
-                        "sort_by": {"type": "STRING", "description": "排序字段：name（默认）/ size / mtime"},
+                        "show_hidden": {
+                            "type": "BOOLEAN",
+                            "description": "是否显示隐藏文件，默认 false",
+                        },
+                        "filter_ext": {
+                            "type": "STRING",
+                            "description": "可选，仅显示该扩展名的文件，如 .pdf",
+                        },
+                        "sort_by": {
+                            "type": "STRING",
+                            "description": "排序字段：name（默认）/ size / mtime",
+                        },
                     },
                     "required": ["path"],
                 },
@@ -228,7 +265,10 @@ class FileToolsPlugin(AgentPlugin):
                     "type": "OBJECT",
                     "properties": {
                         "path": {"type": "STRING", "description": "要展示的根目录路径"},
-                        "max_depth": {"type": "INTEGER", "description": "最大展开层数，默认 3"},
+                        "max_depth": {
+                            "type": "INTEGER",
+                            "description": "最大展开层数，默认 3",
+                        },
                     },
                     "required": ["path"],
                 },
@@ -240,8 +280,14 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "path": {"type": "STRING", "description": "要分析的目录绝对路径"},
-                        "top_n": {"type": "INTEGER", "description": "返回占用最大的前 N 个子目录，默认 10"},
+                        "path": {
+                            "type": "STRING",
+                            "description": "要分析的目录绝对路径",
+                        },
+                        "top_n": {
+                            "type": "INTEGER",
+                            "description": "返回占用最大的前 N 个子目录，默认 10",
+                        },
                     },
                     "required": ["path"],
                 },
@@ -253,9 +299,18 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "path": {"type": "STRING", "description": "可选，扫描的目录路径；省略则查 Koto 文件库"},
-                        "min_size_mb": {"type": "NUMBER", "description": "最小文件大小（MB），默认 10"},
-                        "limit": {"type": "INTEGER", "description": "最多返回条数，默认 20"},
+                        "path": {
+                            "type": "STRING",
+                            "description": "可选，扫描的目录路径；省略则查 Koto 文件库",
+                        },
+                        "min_size_mb": {
+                            "type": "NUMBER",
+                            "description": "最小文件大小（MB），默认 10",
+                        },
+                        "limit": {
+                            "type": "INTEGER",
+                            "description": "最多返回条数，默认 20",
+                        },
                     },
                     "required": [],
                 },
@@ -267,8 +322,14 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "days_old": {"type": "INTEGER", "description": "超过多少天未修改视为旧文件，默认 180"},
-                        "limit": {"type": "INTEGER", "description": "最多返回条数，默认 20"},
+                        "days_old": {
+                            "type": "INTEGER",
+                            "description": "超过多少天未修改视为旧文件，默认 180",
+                        },
+                        "limit": {
+                            "type": "INTEGER",
+                            "description": "最多返回条数，默认 20",
+                        },
                     },
                     "required": [],
                 },
@@ -284,11 +345,26 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "directory": {"type": "STRING", "description": "目标目录绝对路径"},
-                        "pattern": {"type": "STRING", "description": "正则匹配模式（作用于文件名）"},
-                        "replacement": {"type": "STRING", "description": "替换后的文件名模板，支持 \\1 等反向引用"},
-                        "file_filter": {"type": "STRING", "description": "可选，只处理该扩展名的文件，如 .jpg"},
-                        "dry_run": {"type": "BOOLEAN", "description": "是否预演（true = 只显示变更不执行），默认 true"},
+                        "directory": {
+                            "type": "STRING",
+                            "description": "目标目录绝对路径",
+                        },
+                        "pattern": {
+                            "type": "STRING",
+                            "description": "正则匹配模式（作用于文件名）",
+                        },
+                        "replacement": {
+                            "type": "STRING",
+                            "description": "替换后的文件名模板，支持 \\1 等反向引用",
+                        },
+                        "file_filter": {
+                            "type": "STRING",
+                            "description": "可选，只处理该扩展名的文件，如 .jpg",
+                        },
+                        "dry_run": {
+                            "type": "BOOLEAN",
+                            "description": "是否预演（true = 只显示变更不执行），默认 true",
+                        },
                     },
                     "required": ["directory", "pattern", "replacement"],
                 },
@@ -302,9 +378,18 @@ class FileToolsPlugin(AgentPlugin):
                     "properties": {
                         "source_dir": {"type": "STRING", "description": "来源目录"},
                         "dest_dir": {"type": "STRING", "description": "目标目录"},
-                        "category": {"type": "STRING", "description": "可选，文件类别过滤（文档/图片/视频/音频/代码/压缩包）"},
-                        "file_filter": {"type": "STRING", "description": "可选，扩展名过滤，如 .pdf"},
-                        "dry_run": {"type": "BOOLEAN", "description": "预演模式，默认 true"},
+                        "category": {
+                            "type": "STRING",
+                            "description": "可选，文件类别过滤（文档/图片/视频/音频/代码/压缩包）",
+                        },
+                        "file_filter": {
+                            "type": "STRING",
+                            "description": "可选，扩展名过滤，如 .pdf",
+                        },
+                        "dry_run": {
+                            "type": "BOOLEAN",
+                            "description": "预演模式，默认 true",
+                        },
                     },
                     "required": ["source_dir", "dest_dir"],
                 },
@@ -323,7 +408,10 @@ class FileToolsPlugin(AgentPlugin):
                             "type": "STRING",
                             "description": "保留策略：newest（默认，保留最新修改）/ oldest / shortest_path",
                         },
-                        "dry_run": {"type": "BOOLEAN", "description": "预演模式，默认 true"},
+                        "dry_run": {
+                            "type": "BOOLEAN",
+                            "description": "预演模式，默认 true",
+                        },
                     },
                     "required": [],
                 },
@@ -341,7 +429,10 @@ class FileToolsPlugin(AgentPlugin):
                             "items": {"type": "STRING"},
                             "description": "要压缩的文件或目录路径列表",
                         },
-                        "output_path": {"type": "STRING", "description": "输出 zip 文件的绝对路径（含文件名）"},
+                        "output_path": {
+                            "type": "STRING",
+                            "description": "输出 zip 文件的绝对路径（含文件名）",
+                        },
                     },
                     "required": ["sources", "output_path"],
                 },
@@ -353,8 +444,14 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "archive_path": {"type": "STRING", "description": "压缩档绝对路径"},
-                        "dest_dir": {"type": "STRING", "description": "解压目标目录（省略则解压到档案所在目录）"},
+                        "archive_path": {
+                            "type": "STRING",
+                            "description": "压缩档绝对路径",
+                        },
+                        "dest_dir": {
+                            "type": "STRING",
+                            "description": "解压目标目录（省略则解压到档案所在目录）",
+                        },
                     },
                     "required": ["archive_path"],
                 },
@@ -370,9 +467,18 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "action": {"type": "STRING", "description": "操作：add / remove / list / clear / list_all / files_by_tag"},
-                        "path": {"type": "STRING", "description": "文件路径（list_all / files_by_tag 时可省略）"},
-                        "tag": {"type": "STRING", "description": "标签名称（action=files_by_tag 时作为查询条件）"},
+                        "action": {
+                            "type": "STRING",
+                            "description": "操作：add / remove / list / clear / list_all / files_by_tag",
+                        },
+                        "path": {
+                            "type": "STRING",
+                            "description": "文件路径（list_all / files_by_tag 时可省略）",
+                        },
+                        "tag": {
+                            "type": "STRING",
+                            "description": "标签名称（action=files_by_tag 时作为查询条件）",
+                        },
                     },
                     "required": ["action"],
                 },
@@ -384,8 +490,14 @@ class FileToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "action": {"type": "STRING", "description": "操作：add / remove / list"},
-                        "path": {"type": "STRING", "description": "文件路径（list 时可省略）"},
+                        "action": {
+                            "type": "STRING",
+                            "description": "操作：add / remove / list",
+                        },
+                        "path": {
+                            "type": "STRING",
+                            "description": "文件路径（list 时可省略）",
+                        },
                     },
                     "required": ["action"],
                 },
@@ -399,7 +511,10 @@ class FileToolsPlugin(AgentPlugin):
                     "type": "OBJECT",
                     "properties": {
                         "path": {"type": "STRING", "description": "文件绝对路径"},
-                        "focus": {"type": "STRING", "description": "可选，告诉 LLM 重点关注哪方面（如关键结论）"},
+                        "focus": {
+                            "type": "STRING",
+                            "description": "可选，告诉 LLM 重点关注哪方面（如关键结论）",
+                        },
                     },
                     "required": ["path"],
                 },
@@ -430,13 +545,15 @@ class FileToolsPlugin(AgentPlugin):
 
         results = []
         for e in entries:
-            results.append({
-                "path": e.path,
-                "name": e.name,
-                "category": e.category,
-                "size_kb": round(e.size_bytes / 1024, 1),
-                "snippet": e.snippet,
-            })
+            results.append(
+                {
+                    "path": e.path,
+                    "name": e.name,
+                    "category": e.category,
+                    "size_kb": round(e.size_bytes / 1024, 1),
+                    "snippet": e.snippet,
+                }
+            )
 
         # 如果 FileRegistry 结果不足，再尝试调用 FileScanner 补充
         if len(results) < limit:
@@ -474,7 +591,11 @@ class FileToolsPlugin(AgentPlugin):
 
         # 先尝试从 FileRegistry 缓存的 content_preview 读取（快速）
         try:
-            from app.core.file.file_registry import get_file_registry, _extract_text_preview
+            from app.core.file.file_registry import (
+                _extract_text_preview,
+                get_file_registry,
+            )
+
             reg = get_file_registry()
             entry = reg.get_by_path(str(p))
             if entry and entry.content_preview:
@@ -487,6 +608,7 @@ class FileToolsPlugin(AgentPlugin):
         # 直接提取
         try:
             from app.core.file.file_registry import _extract_text_preview
+
             content = _extract_text_preview(str(p), max_chars=max_chars)
             if content:
                 suffix = "…（已截断）" if len(content) >= max_chars else ""
@@ -531,6 +653,7 @@ class FileToolsPlugin(AgentPlugin):
 
         # 先确保文件在 FileRegistry 中
         from app.core.file.file_registry import get_file_registry
+
         reg = get_file_registry()
         entry = reg.register(str(p), source="manual", extract_content=True)
 
@@ -540,12 +663,19 @@ class FileToolsPlugin(AgentPlugin):
         # 尝试调用 FileOrganizer
         try:
             import importlib
+
             organizer_mod = importlib.import_module("web.file_organizer")
             FileOrganizer = getattr(organizer_mod, "FileOrganizer", None)
             if FileOrganizer:
                 organizer = FileOrganizer()
-                result = organizer.organize_file(source_path, category_hint=category_hint)
-                final_path = result.get("final_path", source_path) if isinstance(result, dict) else source_path
+                result = organizer.organize_file(
+                    source_path, category_hint=category_hint
+                )
+                final_path = (
+                    result.get("final_path", source_path)
+                    if isinstance(result, dict)
+                    else source_path
+                )
                 # 更新注册表中的路径（如果被移动）
                 if final_path != source_path and Path(final_path).exists():
                     reg.delete(source_path)
@@ -554,7 +684,11 @@ class FileToolsPlugin(AgentPlugin):
                     f"整理完成：{p.name}\n"
                     f"  类别: {entry.category}\n"
                     f"  最终路径: {final_path}\n"
-                    + (f"  操作: {result.get('action', '')}" if isinstance(result, dict) else "")
+                    + (
+                        f"  操作: {result.get('action', '')}"
+                        if isinstance(result, dict)
+                        else ""
+                    )
                 )
         except Exception as e:
             logger.debug(f"[FileTools] FileOrganizer 不可用，仅完成注册: {e}")
@@ -588,6 +722,7 @@ class FileToolsPlugin(AgentPlugin):
             return f"重命名失败：{e}"
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             if not reg.update_path(path, str(new_path)):
                 reg.register(str(new_path), source="rename")
@@ -617,6 +752,7 @@ class FileToolsPlugin(AgentPlugin):
             return f"移动失败：{e}"
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             if not reg.update_path(str(src), str(new_path)):
                 reg.register(str(new_path), source="move")
@@ -646,6 +782,7 @@ class FileToolsPlugin(AgentPlugin):
             return f"复制失败：{e}"
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             reg.register(str(new_path), source="copy")
             reg.log_op("copy", str(src), str(new_path))
@@ -664,6 +801,7 @@ class FileToolsPlugin(AgentPlugin):
             if use_trash:
                 try:
                     import send2trash
+
                     send2trash.send2trash(str(p))
                 except ImportError:
                     # 降级：永久删除但给出提示
@@ -675,6 +813,7 @@ class FileToolsPlugin(AgentPlugin):
             return f"删除失败：{e}"
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             reg.delete(path)
             reg.log_op("delete", path, meta={"trash": use_trash})
@@ -702,16 +841,22 @@ class FileToolsPlugin(AgentPlugin):
         for child in d.iterdir():
             if not show_hidden and child.name.startswith("."):
                 continue
-            if filter_ext and child.is_file() and child.suffix.lower() != filter_ext.lower():
+            if (
+                filter_ext
+                and child.is_file()
+                and child.suffix.lower() != filter_ext.lower()
+            ):
                 continue
             try:
                 stat = child.stat()
-                items.append({
-                    "name": child.name,
-                    "type": "目录" if child.is_dir() else "文件",
-                    "size_bytes": stat.st_size if child.is_file() else 0,
-                    "mtime": stat.st_mtime,
-                })
+                items.append(
+                    {
+                        "name": child.name,
+                        "type": "目录" if child.is_dir() else "文件",
+                        "size_bytes": stat.st_size if child.is_file() else 0,
+                        "mtime": stat.st_mtime,
+                    }
+                )
             except Exception:
                 continue
         if sort_by == "size":
@@ -723,10 +868,13 @@ class FileToolsPlugin(AgentPlugin):
         if not items:
             return f"目录为空：{path}"
         import datetime
+
         lines = [f"📁 {path}  （共 {len(items)} 项）\n"]
         for it in items:
             icon = "📁" if it["type"] == "目录" else "📄"
-            sz = f"  {round(it['size_bytes']/1024,1)} KB" if it["type"] == "文件" else ""
+            sz = (
+                f"  {round(it['size_bytes']/1024,1)} KB" if it["type"] == "文件" else ""
+            )
             mt = datetime.datetime.fromtimestamp(it["mtime"]).strftime("%Y-%m-%d %H:%M")
             lines.append(f"  {icon} {it['name']}{sz}  [{mt}]")
         return "\n".join(lines)
@@ -743,12 +891,16 @@ class FileToolsPlugin(AgentPlugin):
             if depth > max_depth:
                 return
             try:
-                children = sorted(directory.iterdir(), key=lambda c: (c.is_file(), c.name.lower()))
+                children = sorted(
+                    directory.iterdir(), key=lambda c: (c.is_file(), c.name.lower())
+                )
             except PermissionError:
                 return
             for i, child in enumerate(children):
                 connector = "└── " if i == len(children) - 1 else "├── "
-                lines.append(f"{prefix}{connector}{child.name}" + ("/" if child.is_dir() else ""))
+                lines.append(
+                    f"{prefix}{connector}{child.name}" + ("/" if child.is_dir() else "")
+                )
                 if child.is_dir():
                     extension = "    " if i == len(children) - 1 else "│   "
                     _walk(child, prefix + extension, depth + 1)
@@ -762,6 +914,7 @@ class FileToolsPlugin(AgentPlugin):
         if not root.exists() or not root.is_dir():
             return f"错误：目录不存在 → {path}"
         top_n = min(max(1, int(top_n)), 50)
+
         # 计算总大小
         def _dir_size(d: Path) -> int:
             total = 0
@@ -793,9 +946,9 @@ class FileToolsPlugin(AgentPlugin):
         sub_sizes.sort(key=lambda x: x[1], reverse=True)
 
         def _fmt(b: int) -> str:
-            if b >= 1024 ** 3:
+            if b >= 1024**3:
                 return f"{b/1024**3:.2f} GB"
-            if b >= 1024 ** 2:
+            if b >= 1024**2:
                 return f"{b/1024**2:.2f} MB"
             return f"{b/1024:.1f} KB"
 
@@ -832,14 +985,17 @@ class FileToolsPlugin(AgentPlugin):
             results = results[:limit]
         else:
             from app.core.file.file_registry import get_file_registry
-            entries = get_file_registry().list_large_files(min_bytes=min_bytes, limit=limit)
+
+            entries = get_file_registry().list_large_files(
+                min_bytes=min_bytes, limit=limit
+            )
             results = [(e.path, e.size_bytes) for e in entries]
 
         if not results:
             return f"未找到大于 {min_size_mb} MB 的文件。"
 
         def _fmt(b: int) -> str:
-            if b >= 1024 ** 3:
+            if b >= 1024**3:
                 return f"{b/1024**3:.2f} GB"
             return f"{b/1024**2:.2f} MB"
 
@@ -851,9 +1007,11 @@ class FileToolsPlugin(AgentPlugin):
     def find_old_files(self, days_old: int = 180, limit: int = 20) -> str:
         """在 Koto 文件库中查找长期未修改的旧文件。"""
         import datetime
+
         days_old = min(max(1, int(days_old)), 3650)
         limit = min(max(1, int(limit)), 100)
         from app.core.file.file_registry import get_file_registry
+
         entries = get_file_registry().list_old_files(days_old=days_old, limit=limit)
         if not entries:
             return f"Koto 文件库中没有超过 {days_old} 天未修改的文件记录。"
@@ -897,7 +1055,9 @@ class FileToolsPlugin(AgentPlugin):
         if not candidates:
             return "没有符合条件的文件需要重命名。"
 
-        lines = [f"{'[预演] ' if dry_run else ''}批量重命名 {len(candidates)} 个文件：\n"]
+        lines = [
+            f"{'[预演] ' if dry_run else ''}批量重命名 {len(candidates)} 个文件：\n"
+        ]
         errors = []
         for src, new_name in candidates:
             new_path = src.parent / new_name
@@ -909,6 +1069,7 @@ class FileToolsPlugin(AgentPlugin):
                 try:
                     src.rename(new_path)
                     from app.core.file.file_registry import get_file_registry
+
                     reg = get_file_registry()
                     if not reg.update_path(str(src), str(new_path)):
                         reg.register(str(new_path), source="rename")
@@ -940,7 +1101,18 @@ class FileToolsPlugin(AgentPlugin):
 
         _EXT_CAT: Dict[str, str] = {}
         _CAT_EXTS = {
-            "文档": {".doc", ".docx", ".pdf", ".txt", ".md", ".ppt", ".pptx", ".xls", ".xlsx", ".csv"},
+            "文档": {
+                ".doc",
+                ".docx",
+                ".pdf",
+                ".txt",
+                ".md",
+                ".ppt",
+                ".pptx",
+                ".xls",
+                ".xlsx",
+                ".csv",
+            },
             "图片": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".heic"},
             "视频": {".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm"},
             "音频": {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a"},
@@ -964,7 +1136,9 @@ class FileToolsPlugin(AgentPlugin):
         if not candidates:
             return "没有符合条件的文件。"
 
-        lines = [f"{'[预演] ' if dry_run else ''}批量移动 {len(candidates)} 个文件 → {dest_dir}\n"]
+        lines = [
+            f"{'[预演] ' if dry_run else ''}批量移动 {len(candidates)} 个文件 → {dest_dir}\n"
+        ]
         errors = []
         for src in sorted(candidates):
             new_path = Path(dest_dir) / src.name
@@ -976,6 +1150,7 @@ class FileToolsPlugin(AgentPlugin):
                 try:
                     shutil.move(str(src), str(new_path))
                     from app.core.file.file_registry import get_file_registry
+
                     reg = get_file_registry()
                     if not reg.update_path(str(src), str(new_path)):
                         reg.register(str(new_path), source="move")
@@ -997,13 +1172,16 @@ class FileToolsPlugin(AgentPlugin):
     ) -> str:
         """清理重复文件。"""
         from app.core.file.file_registry import get_file_registry
+
         reg = get_file_registry()
         groups = reg.get_duplicates()
         if not groups:
             return "Koto 文件库中没有检测到重复文件。"
 
         keep_strategy = keep_strategy.strip().lower()
-        lines = [f"{'[预演] ' if dry_run else ''}重复文件清理（保留策略：{keep_strategy}）\n"]
+        lines = [
+            f"{'[预演] ' if dry_run else ''}重复文件清理（保留策略：{keep_strategy}）\n"
+        ]
         total_to_remove = 0
         total_freed = 0
 
@@ -1027,16 +1205,21 @@ class FileToolsPlugin(AgentPlugin):
                         if p.exists():
                             try:
                                 import send2trash
+
                                 send2trash.send2trash(str(p))
                             except ImportError:
                                 p.unlink()
                         reg.delete(e.path)
-                        reg.log_op("delete", e.path, meta={"reason": "duplicate", "trash": True})
+                        reg.log_op(
+                            "delete",
+                            e.path,
+                            meta={"reason": "duplicate", "trash": True},
+                        )
                     except Exception as ex:
                         lines.append(f"    ❌ 删除失败: {ex}")
 
         def _fmt(b: int) -> str:
-            return f"{b/1024**2:.2f} MB" if b >= 1024 ** 2 else f"{b/1024:.1f} KB"
+            return f"{b/1024**2:.2f} MB" if b >= 1024**2 else f"{b/1024:.1f} KB"
 
         lines.append(
             f"\n合计：{len(groups)} 组重复，{total_to_remove} 个副本，"
@@ -1080,6 +1263,7 @@ class FileToolsPlugin(AgentPlugin):
         size_kb = round(out.stat().st_size / 1024, 1)
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             reg.register(str(out), source="manual")
             reg.log_op("compress", str(sources), str(out))
@@ -1110,6 +1294,7 @@ class FileToolsPlugin(AgentPlugin):
         registered = 0
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             for child in dest.rglob("*"):
                 if child.is_file():
@@ -1130,6 +1315,7 @@ class FileToolsPlugin(AgentPlugin):
     ) -> str:
         """管理文件标签。"""
         from app.core.file.file_registry import get_file_registry
+
         reg = get_file_registry()
         action = action.strip().lower()
 
@@ -1183,6 +1369,7 @@ class FileToolsPlugin(AgentPlugin):
     def manage_favorite(self, action: str, path: str = "") -> str:
         """管理收藏夹。"""
         from app.core.file.file_registry import get_file_registry
+
         reg = get_file_registry()
         action = action.strip().lower()
 
@@ -1221,6 +1408,7 @@ class FileToolsPlugin(AgentPlugin):
         # 提取文本内容
         try:
             from app.core.file.file_registry import _extract_text_preview
+
             content = _extract_text_preview(str(p), max_chars=6000)
         except Exception as e:
             return f"内容提取失败：{e}"
@@ -1235,6 +1423,7 @@ class FileToolsPlugin(AgentPlugin):
         )
         try:
             from app.core.llm.gemini import GeminiProvider
+
             llm = GeminiProvider()
             resp = llm.generate_content(
                 prompt=prompt,
@@ -1244,9 +1433,12 @@ class FileToolsPlugin(AgentPlugin):
             text = ""
             if isinstance(resp, dict):
                 text = (
-                    resp.get("text") or
-                    resp.get("content") or
-                    resp.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                    resp.get("text")
+                    or resp.get("content")
+                    or resp.get("candidates", [{}])[0]
+                    .get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "")
                 )
             if not text:
                 text = str(resp)
@@ -1259,6 +1451,7 @@ class FileToolsPlugin(AgentPlugin):
     def undo_last_op(self) -> str:
         """撤销上一次文件操作。"""
         from app.core.file.file_registry import get_file_registry
+
         reg = get_file_registry()
         op = reg.pop_last_undoable_op()
         if not op:
@@ -1282,7 +1475,9 @@ class FileToolsPlugin(AgentPlugin):
                 if p.exists():
                     shutil.move(str(p), src)
                     reg.update_path(dst, src)
-                    return f"✅ 已撤销移动：{Path(dst).name} 已还原到 {Path(src).parent}"
+                    return (
+                        f"✅ 已撤销移动：{Path(dst).name} 已还原到 {Path(src).parent}"
+                    )
                 return f"撤销失败：文件不存在 → {dst}"
 
             elif op_type == "copy" and dst:
@@ -1312,6 +1507,7 @@ class FileToolsPlugin(AgentPlugin):
     def _scanner_fallback(query: str, limit: int) -> List[Dict[str, Any]]:
         """尝试通过 FileScanner 补充搜索结果。"""
         import importlib
+
         scanner_mod = importlib.import_module("web.file_scanner")
         FileScanner = getattr(scanner_mod, "FileScanner", None)
         if not FileScanner:
@@ -1322,19 +1518,22 @@ class FileToolsPlugin(AgentPlugin):
         for item in (raw if isinstance(raw, list) else []):
             path = item.get("path") or item.get("file_path") or ""
             if path:
-                results.append({
-                    "path": path,
-                    "name": Path(path).name,
-                    "category": item.get("category", "其他"),
-                    "size_kb": item.get("size_kb", 0),
-                    "snippet": item.get("snippet", ""),
-                })
+                results.append(
+                    {
+                        "path": path,
+                        "name": Path(path).name,
+                        "category": item.get("category", "其他"),
+                        "size_kb": item.get("size_kb", 0),
+                        "snippet": item.get("snippet", ""),
+                    }
+                )
         return results
 
 
 # ============================================================================
 # 便捷注册函数
 # ============================================================================
+
 
 def register_file_tools(registry: Any):
     """

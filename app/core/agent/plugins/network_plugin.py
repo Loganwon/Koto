@@ -27,17 +27,14 @@ class NetworkPlugin(AgentPlugin):
                 "name": "http_get",
                 "func": self.http_get,
                 "description": "Perform an HTTP GET request and return status code plus "
-                               "the first 2000 characters of the response body.",
+                "the first 2000 characters of the response body.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "url": {
-                            "type": "STRING",
-                            "description": "The URL to fetch."
-                        }
+                        "url": {"type": "STRING", "description": "The URL to fetch."}
                     },
-                    "required": ["url"]
-                }
+                    "required": ["url"],
+                },
             },
             {
                 "name": "http_post",
@@ -46,37 +43,34 @@ class NetworkPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "url": {
-                            "type": "STRING",
-                            "description": "The URL to post to."
-                        },
+                        "url": {"type": "STRING", "description": "The URL to post to."},
                         "body": {
                             "type": "STRING",
-                            "description": "JSON string to send as the request body."
-                        }
+                            "description": "JSON string to send as the request body.",
+                        },
                     },
-                    "required": ["url", "body"]
-                }
+                    "required": ["url", "body"],
+                },
             },
             {
                 "name": "parse_html",
                 "func": self.parse_html,
                 "description": "Fetch a web page and extract elements matching a CSS selector. "
-                               "Returns up to 10 matched elements.",
+                "Returns up to 10 matched elements.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "url": {
                             "type": "STRING",
-                            "description": "The URL of the web page."
+                            "description": "The URL of the web page.",
                         },
                         "selector": {
                             "type": "STRING",
-                            "description": "CSS selector, e.g. 'h2', 'a.link', '#main p'."
-                        }
+                            "description": "CSS selector, e.g. 'h2', 'a.link', '#main p'.",
+                        },
                     },
-                    "required": ["url", "selector"]
-                }
+                    "required": ["url", "selector"],
+                },
             },
         ]
 
@@ -87,6 +81,7 @@ class NetworkPlugin(AgentPlugin):
         """Fetch a URL and return the response."""
         try:
             import requests
+
             resp = requests.get(url, timeout=15, headers={"User-Agent": "Koto/1.0"})
             return (
                 f"Status: {resp.status_code}\n"
@@ -101,16 +96,14 @@ class NetworkPlugin(AgentPlugin):
         """POST JSON to a URL."""
         try:
             import json as _json
+
             import requests
+
             data = _json.loads(body)
             resp = requests.post(
-                url, json=data, timeout=15,
-                headers={"User-Agent": "Koto/1.0"}
+                url, json=data, timeout=15, headers={"User-Agent": "Koto/1.0"}
             )
-            return (
-                f"Status: {resp.status_code}\n"
-                f"{resp.text[:2000]}"
-            )
+            return f"Status: {resp.status_code}\n" f"{resp.text[:2000]}"
         except Exception as exc:
             return f"HTTP POST error: {exc}"
 

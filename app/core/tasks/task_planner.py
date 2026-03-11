@@ -35,8 +35,8 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -50,28 +50,30 @@ logger = logging.getLogger(__name__)
 # 枚举 & 数据类
 # ============================================================================
 
+
 class StepStatus(str, Enum):
-    PENDING   = "pending"
-    READY     = "ready"       # 依赖已满足，可执行
-    RUNNING   = "running"
-    WAITING   = "waiting"     # 等待人工确认
+    PENDING = "pending"
+    READY = "ready"  # 依赖已满足，可执行
+    RUNNING = "running"
+    WAITING = "waiting"  # 等待人工确认
     COMPLETED = "completed"
-    FAILED    = "failed"
-    SKIPPED   = "skipped"     # 因上游失败被跳过
+    FAILED = "failed"
+    SKIPPED = "skipped"  # 因上游失败被跳过
 
 
 @dataclass
 class PlanStep:
     """DAG 中的一个执行步骤。"""
-    name: str                              # 唯一名称（同一 Plan 内）
-    description: str                       # 对用户可见的描述
-    step_type: str = "generic"             # 用于选择执行器（"llm"/"code"/"file"/"ppt"…）
+
+    name: str  # 唯一名称（同一 Plan 内）
+    description: str  # 对用户可见的描述
+    step_type: str = "generic"  # 用于选择执行器（"llm"/"code"/"file"/"ppt"…）
     input_data: Dict[str, Any] = field(default_factory=dict)
     depends_on: List[str] = field(default_factory=list)  # 依赖的步骤名列表
-    require_approval: bool = False         # 执行前需要人工确认
+    require_approval: bool = False  # 执行前需要人工确认
     max_retries: int = 2
     timeout_seconds: int = 120
-    allow_failure: bool = False            # True = 本步失败不阻塞后续步骤
+    allow_failure: bool = False  # True = 本步失败不阻塞后续步骤
 
     # 运行时字段（不参与 dict 初始化）
     step_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
@@ -90,7 +92,11 @@ class PlanStep:
 
     @property
     def is_terminal(self) -> bool:
-        return self.status in (StepStatus.COMPLETED, StepStatus.FAILED, StepStatus.SKIPPED)
+        return self.status in (
+            StepStatus.COMPLETED,
+            StepStatus.FAILED,
+            StepStatus.SKIPPED,
+        )
 
     @property
     def elapsed_seconds(self) -> Optional[float]:
@@ -109,12 +115,15 @@ class PlanStep:
 @dataclass
 class Plan:
     """多步骤执行计划（DAG）。"""
+
     task_id: str
     original_request: str
     steps: List[PlanStep] = field(default_factory=list)
     context: Dict[str, Any] = field(default_factory=dict)
-    status: str = "planning"               # planning / running / completed / failed
-    created_at: str = field(default_factory=lambda: datetime.now().isoformat(timespec="milliseconds"))
+    status: str = "planning"  # planning / running / completed / failed
+    created_at: str = field(
+        default_factory=lambda: datetime.now().isoformat(timespec="milliseconds")
+    )
 
     # ── 步骤操作 ──────────────────────────────────────────────────────────────
 
@@ -129,9 +138,10 @@ class Plan:
     def ready_steps(self) -> List[PlanStep]:
         """返回当前所有「依赖已满足 + 未开始」的步骤。"""
         completed_names: Set[str] = {
-            s.name for s in self.steps
+            s.name
+            for s in self.steps
             if s.status in (StepStatus.COMPLETED, StepStatus.SKIPPED)
-               or (s.allow_failure and s.status == StepStatus.FAILED)
+            or (s.allow_failure and s.status == StepStatus.FAILED)
         }
         result = []
         for step in self.steps:
@@ -146,15 +156,15 @@ class Plan:
 
     def has_blocking_failure(self) -> bool:
         return any(
-            s.status == StepStatus.FAILED and not s.allow_failure
-            for s in self.steps
+            s.status == StepStatus.FAILED and not s.allow_failure for s in self.steps
         )
 
     def progress_percent(self) -> int:
         if not self.steps:
             return 0
         completed = sum(
-            1 for s in self.steps
+            1
+            for s in self.steps
             if s.status in (StepStatus.COMPLETED, StepStatus.SKIPPED)
         )
         return int(completed / len(self.steps) * 100)
@@ -175,6 +185,7 @@ class Plan:
 # 内置规划模板
 # ============================================================================
 
+
 class PlanTemplates:
     """
     内置规划模板，覆盖常见任务类型。
@@ -185,50 +196,90 @@ class PlanTemplates:
     def research_and_report(task_id: str, request: str) -> Plan:
         """研究 + 报告生成模板"""
         plan = Plan(task_id=task_id, original_request=request)
-        plan.add_step(PlanStep(
-            name="research",
-            description="收集相关信息与资料",
-            step_type="llm",
-            expected_output="结构化研究摘要",
-        ))
-        plan.add_step(PlanStep(
-            name="outline",
-            description="生成报告大纲",
-            step_type="llm",
-            depends_on=["research"],
-            expected_output="Markdown 大纲",
-            require_approval=False,
-        ))
-        plan.add_step(PlanStep(
-            name="write",
-            description="撰写完整报告内容",
-            step_type="llm",
-            depends_on=["outline"],
-            expected_output="完整报告文本",
-            timeout_seconds=180,
-        ))
-        plan.add_step(PlanStep(
-            name="export",
-            description="导出为文档文件",
-            step_type="file",
-            depends_on=["write"],
-            expected_output="文件路径",
-        ))
+        plan.add_step(
+            PlanStep(
+                name="research",
+                description="收集相关信息与资料",
+                step_type="llm",
+                expected_output="结构化研究摘要",
+            )
+        )
+        plan.add_step(
+            PlanStep(
+                name="outline",
+                description="生成报告大纲",
+                step_type="llm",
+                depends_on=["research"],
+                expected_output="Markdown 大纲",
+                require_approval=False,
+            )
+        )
+        plan.add_step(
+            PlanStep(
+                name="write",
+                description="撰写完整报告内容",
+                step_type="llm",
+                depends_on=["outline"],
+                expected_output="完整报告文本",
+                timeout_seconds=180,
+            )
+        )
+        plan.add_step(
+            PlanStep(
+                name="export",
+                description="导出为文档文件",
+                step_type="file",
+                depends_on=["write"],
+                expected_output="文件路径",
+            )
+        )
         return plan
 
     @staticmethod
     def data_pipeline(task_id: str, request: str) -> Plan:
         """数据处理流水线模板"""
         plan = Plan(task_id=task_id, original_request=request)
-        plan.add_step(PlanStep(name="load",     description="加载/读取数据源",   step_type="file"))
-        plan.add_step(PlanStep(name="validate", description="验证数据质量",       step_type="code", depends_on=["load"]))
-        plan.add_step(PlanStep(name="transform",description="数据清洗与转换",     step_type="code", depends_on=["validate"]))
-        plan.add_step(PlanStep(name="analyze",  description="执行分析计算",       step_type="code", depends_on=["transform"]))
-        plan.add_step(PlanStep(name="report",   description="生成分析报告/图表",  step_type="llm",  depends_on=["analyze"]))
+        plan.add_step(
+            PlanStep(name="load", description="加载/读取数据源", step_type="file")
+        )
+        plan.add_step(
+            PlanStep(
+                name="validate",
+                description="验证数据质量",
+                step_type="code",
+                depends_on=["load"],
+            )
+        )
+        plan.add_step(
+            PlanStep(
+                name="transform",
+                description="数据清洗与转换",
+                step_type="code",
+                depends_on=["validate"],
+            )
+        )
+        plan.add_step(
+            PlanStep(
+                name="analyze",
+                description="执行分析计算",
+                step_type="code",
+                depends_on=["transform"],
+            )
+        )
+        plan.add_step(
+            PlanStep(
+                name="report",
+                description="生成分析报告/图表",
+                step_type="llm",
+                depends_on=["analyze"],
+            )
+        )
         return plan
 
     @staticmethod
-    def multi_step_task(task_id: str, request: str, steps: List[Dict[str, Any]]) -> Plan:
+    def multi_step_task(
+        task_id: str, request: str, steps: List[Dict[str, Any]]
+    ) -> Plan:
         """
         从 LLM 返回的步骤列表动态构建 Plan。
 
@@ -241,22 +292,25 @@ class PlanTemplates:
         """
         plan = Plan(task_id=task_id, original_request=request)
         for s in steps:
-            plan.add_step(PlanStep(
-                name=s.get("name", f"step_{uuid.uuid4().hex[:4]}"),
-                description=s.get("description", ""),
-                step_type=s.get("step_type", "llm"),
-                depends_on=s.get("depends_on", []),
-                require_approval=s.get("require_approval", False),
-                allow_failure=s.get("allow_failure", False),
-                timeout_seconds=s.get("timeout_seconds", 120),
-                expected_output=s.get("expected_output", ""),
-            ))
+            plan.add_step(
+                PlanStep(
+                    name=s.get("name", f"step_{uuid.uuid4().hex[:4]}"),
+                    description=s.get("description", ""),
+                    step_type=s.get("step_type", "llm"),
+                    depends_on=s.get("depends_on", []),
+                    require_approval=s.get("require_approval", False),
+                    allow_failure=s.get("allow_failure", False),
+                    timeout_seconds=s.get("timeout_seconds", 120),
+                    expected_output=s.get("expected_output", ""),
+                )
+            )
         return plan
 
 
 # ============================================================================
 # TaskPlanner
 # ============================================================================
+
 
 class TaskPlanner:
     """
@@ -317,7 +371,9 @@ class TaskPlanner:
             if start >= 0 and end > start:
                 steps_data = json.loads(content[start:end])
                 if isinstance(steps_data, list) and steps_data:
-                    return PlanTemplates.multi_step_task(task_id, user_input, steps_data)
+                    return PlanTemplates.multi_step_task(
+                        task_id, user_input, steps_data
+                    )
         except Exception as e:
             logger.warning(f"[TaskPlanner] LLM 规划失败（回退单步）: {e}")
 
@@ -325,11 +381,13 @@ class TaskPlanner:
         return Plan(
             task_id=task_id,
             original_request=user_input,
-            steps=[PlanStep(
-                name="execute",
-                description="直接执行用户请求",
-                step_type="llm",
-            )]
+            steps=[
+                PlanStep(
+                    name="execute",
+                    description="直接执行用户请求",
+                    step_type="llm",
+                )
+            ],
         )
 
     # ── 执行 ──────────────────────────────────────────────────────────────────
@@ -372,7 +430,11 @@ class TaskPlanner:
             if not ready:
                 if plan.has_blocking_failure():
                     plan.status = "failed"
-                    yield {"event": "plan_failed", "task_id": plan.task_id, "reason": "blocking_step_failed"}
+                    yield {
+                        "event": "plan_failed",
+                        "task_id": plan.task_id,
+                        "reason": "blocking_step_failed",
+                    }
                     self._publish_plan_event(plan, "plan_failed", "计划因步骤失败中止")
                     return
                 # 没有就绪步骤也没有失败 → 所有步骤已处理完
@@ -386,9 +448,7 @@ class TaskPlanner:
                     return
 
                 # 收集依赖输出作为上下文
-                step_ctx = {
-                    dep: results.get(dep) for dep in step.depends_on
-                }
+                step_ctx = {dep: results.get(dep) for dep in step.depends_on}
                 step_ctx.update(plan.context)
 
                 # 人工确认
@@ -409,7 +469,11 @@ class TaskPlanner:
                 step.status = StepStatus.RUNNING
                 step.started_at = datetime.now().isoformat(timespec="milliseconds")
                 self._publish_step_event(plan.task_id, step, "step_start")
-                yield {"event": "step_start", "step": step.to_dict(), "progress": plan.progress_percent()}
+                yield {
+                    "event": "step_start",
+                    "step": step.to_dict(),
+                    "progress": plan.progress_percent(),
+                }
 
                 success = False
                 while step.retry_count <= step.max_retries:
@@ -417,7 +481,9 @@ class TaskPlanner:
                         result = executor_fn(step, step_ctx)
                         step.result = result
                         step.status = StepStatus.COMPLETED
-                        step.completed_at = datetime.now().isoformat(timespec="milliseconds")
+                        step.completed_at = datetime.now().isoformat(
+                            timespec="milliseconds"
+                        )
                         results[step.name] = result
                         success = True
                         break
@@ -428,9 +494,11 @@ class TaskPlanner:
                             logger.warning(
                                 f"[TaskPlanner] 步骤 {step.name} 失败，第 {step.retry_count} 次重试: {e}"
                             )
-                            time.sleep(min(2 ** step.retry_count, 30))
+                            time.sleep(min(2**step.retry_count, 30))
                         else:
-                            logger.error(f"[TaskPlanner] 步骤 {step.name} 最终失败: {e}")
+                            logger.error(
+                                f"[TaskPlanner] 步骤 {step.name} 最终失败: {e}"
+                            )
 
                 if success:
                     self._publish_step_event(plan.task_id, step, "step_done")
@@ -441,7 +509,9 @@ class TaskPlanner:
                     }
                 else:
                     step.status = StepStatus.FAILED
-                    step.completed_at = datetime.now().isoformat(timespec="milliseconds")
+                    step.completed_at = datetime.now().isoformat(
+                        timespec="milliseconds"
+                    )
                     self._publish_step_event(plan.task_id, step, "step_failed")
                     yield {
                         "event": "step_failed",
@@ -458,7 +528,9 @@ class TaskPlanner:
         else:
             plan.status = "completed"
 
-        self._publish_plan_event(plan, "plan_done", f"计划{plan.status}！共 {len(plan.steps)} 步")
+        self._publish_plan_event(
+            plan, "plan_done", f"计划{plan.status}！共 {len(plan.steps)} 步"
+        )
         yield {
             "event": "plan_done",
             "task_id": plan.task_id,
@@ -475,7 +547,8 @@ class TaskPlanner:
         while changed:
             changed = False
             skip_names = {
-                s.name for s in plan.steps
+                s.name
+                for s in plan.steps
                 if s.status in (StepStatus.FAILED, StepStatus.SKIPPED)
             }
             for s in plan.steps:
@@ -487,30 +560,36 @@ class TaskPlanner:
     @staticmethod
     def _publish_step_event(task_id: str, step: PlanStep, event_type: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=task_id,
-                event_type=event_type,
-                step_type=step.step_type.upper(),
-                message=step.description,
-                progress=step.retry_count,
-                detail={"step_name": step.name, "status": step.status.value},
-            ))
+            bus.publish(
+                ProgressEvent(
+                    task_id=task_id,
+                    event_type=event_type,
+                    step_type=step.step_type.upper(),
+                    message=step.description,
+                    progress=step.retry_count,
+                    detail={"step_name": step.name, "status": step.status.value},
+                )
+            )
         except Exception:
             pass
 
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=plan.task_id,
-                event_type=event_type,
-                status=plan.status,
-                message=message,
-                progress=plan.progress_percent(),
-            ))
+            bus.publish(
+                ProgressEvent(
+                    task_id=plan.task_id,
+                    event_type=event_type,
+                    status=plan.status,
+                    message=message,
+                    progress=plan.progress_percent(),
+                )
+            )
         except Exception:
             pass

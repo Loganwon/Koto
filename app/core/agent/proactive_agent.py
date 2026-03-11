@@ -13,6 +13,7 @@ Koto ProactiveAgent — 主动交互决策引擎
 
 队列消息存储在内存中（重启清空），可选持久化到 config/proactive_queue.json。
 """
+
 from __future__ import annotations
 
 import json
@@ -44,6 +45,7 @@ _COOLDOWN_HOURS = {
 # 消息数据结构
 # ============================================================================
 
+
 def _make_msg(
     msg_type: str,
     content: str,
@@ -67,6 +69,7 @@ def _make_msg(
 # ============================================================================
 # ProactiveAgent
 # ============================================================================
+
 
 class ProactiveAgent:
     """
@@ -102,6 +105,7 @@ class ProactiveAgent:
         llm_fn: callable(prompt:str) -> str  （可选，用于 LLM 生成内容）
         """
         from app.core.monitoring.shadow_watcher import get_shadow_watcher
+
         watcher = get_shadow_watcher()
         if not watcher.enabled:
             return
@@ -139,7 +143,8 @@ class ProactiveAgent:
         _priority_order = {"high": 0, "medium": 1, "low": 2}
         with self._q_lock:
             valid = [
-                m for m in self._queue
+                m
+                for m in self._queue
                 if not m.get("dismissed")
                 and datetime.fromisoformat(m["expires_at"]) > now
             ]
@@ -167,9 +172,7 @@ class ProactiveAgent:
 
     # ── 消息构建 ──────────────────────────────────────────────────────────────
 
-    def _build_greeting(
-        self, obs: Dict, now: datetime, llm_fn=None
-    ) -> Optional[Dict]:
+    def _build_greeting(self, obs: Dict, now: datetime, llm_fn=None) -> Optional[Dict]:
         last_seen_str = obs.get("last_seen")
         if not last_seen_str:
             return None
@@ -206,7 +209,9 @@ class ProactiveAgent:
         elif streak >= 3:
             content = f"👋 {time_str}！你已经连续使用 Koto {streak} 天了，继续保持！"
         elif top_topic:
-            content = f"👋 {time_str}！上次我们聊到了「{top_topic}」，今天还有相关的问题吗？"
+            content = (
+                f"👋 {time_str}！上次我们聊到了「{top_topic}」，今天还有相关的问题吗？"
+            )
         else:
             content = f"👋 {time_str}！有什么我可以帮你的吗？"
 
@@ -227,18 +232,21 @@ class ProactiveAgent:
             except Exception:
                 pass  # fallback to template
 
-        return _make_msg("greeting", content, priority="low",
-                         triggered_by="time_gap", ttl_hours=8)
+        return _make_msg(
+            "greeting", content, priority="low", triggered_by="time_gap", ttl_hours=8
+        )
 
-    def _build_follow_up(
-        self, open_tasks: List[Dict], llm_fn=None
-    ) -> Optional[Dict]:
+    def _build_follow_up(self, open_tasks: List[Dict], llm_fn=None) -> Optional[Dict]:
         if not open_tasks:
             return None
         # 优先选择：多次提到但未完成（revisited_at 存在且 done=False）
-        revisited = [t for t in open_tasks if t.get("revisited_at") and not t.get("done")]
+        revisited = [
+            t for t in open_tasks if t.get("revisited_at") and not t.get("done")
+        ]
         if revisited:
-            task = sorted(revisited, key=lambda t: t.get("revisited_at", ""), reverse=True)[0]
+            task = sorted(
+                revisited, key=lambda t: t.get("revisited_at", ""), reverse=True
+            )[0]
             prefix = "📌 你多次提到"
         else:
             task = sorted(open_tasks, key=lambda t: t.get("mentioned_at", ""))[0]
@@ -262,15 +270,14 @@ class ProactiveAgent:
                 pass
 
         return _make_msg(
-            "follow_up", content,
+            "follow_up",
+            content,
             priority="medium",
             triggered_by=f"open_task:{task['id']}",
             ttl_hours=24,
         )
 
-    def _build_suggestion(
-        self, obs: Dict, llm_fn=None
-    ) -> Optional[Dict]:
+    def _build_suggestion(self, obs: Dict, llm_fn=None) -> Optional[Dict]:
         # 优先使用近期话题（近7天），再 fallback 到近30天或全时段
         recent_topics = (
             obs.get("recent_topics_7d")
@@ -288,20 +295,26 @@ class ProactiveAgent:
         if top_topic:
             content = f"💡 你经常使用 Koto 处理「{top_topic}」相关任务，要不要让我整理一份最佳实践？"
         elif top_phrase:
-            content = f"💡 我注意到你经常需要「{top_phrase}」，要不要创建一个快捷 Skill？"
+            content = (
+                f"💡 我注意到你经常需要「{top_phrase}」，要不要创建一个快捷 Skill？"
+            )
         else:
             return None
 
-        return _make_msg("suggestion", content, priority="low",
-                         triggered_by=f"topic:{top_topic}", ttl_hours=48)
+        return _make_msg(
+            "suggestion",
+            content,
+            priority="low",
+            triggered_by=f"topic:{top_topic}",
+            ttl_hours=48,
+        )
 
     def _build_failed_retry(
         self, failed_tasks: List[Dict], llm_fn=None
     ) -> Optional[Dict]:
         """针对 AI 之前未能完成的请求，主动提出换个方式再试。"""
         eligible = [
-            f for f in failed_tasks
-            if not f.get("retried") and not f.get("resolved")
+            f for f in failed_tasks if not f.get("retried") and not f.get("resolved")
         ]
         if not eligible:
             return None
@@ -325,7 +338,8 @@ class ProactiveAgent:
                 pass
 
         return _make_msg(
-            "failed_retry", content,
+            "failed_retry",
+            content,
             priority="medium",
             triggered_by=f"failed_task:{task['id']}",
             ttl_hours=48,
@@ -345,7 +359,8 @@ class ProactiveAgent:
             # Trim expired / dismissed first
             now = datetime.now()
             self._queue = [
-                m for m in self._queue
+                m
+                for m in self._queue
                 if not m.get("dismissed")
                 and datetime.fromisoformat(m["expires_at"]) > now
             ]
@@ -354,7 +369,9 @@ class ProactiveAgent:
             self._queue.append(msg)
             self._last_type_time[msg["type"]] = datetime.now()
         self._save_queue()
-        logger.info("[ProactiveAgent] 新消息入队: [%s] %s", msg["type"], msg["content"][:40])
+        logger.info(
+            "[ProactiveAgent] 新消息入队: [%s] %s", msg["type"], msg["content"][:40]
+        )
 
     def _save_queue(self):
         try:
@@ -375,9 +392,11 @@ class ProactiveAgent:
                     # Drop already-expired entries on load
                     now = datetime.now()
                     self._queue = [
-                        m for m in data
+                        m
+                        for m in data
                         if not m.get("dismissed")
-                        and datetime.fromisoformat(m.get("expires_at", "2000-01-01")) > now
+                        and datetime.fromisoformat(m.get("expires_at", "2000-01-01"))
+                        > now
                     ]
             except Exception as exc:
                 logger.debug("[ProactiveAgent] 队列加载失败: %s", exc)

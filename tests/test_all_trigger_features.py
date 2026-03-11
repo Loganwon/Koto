@@ -24,21 +24,21 @@ def run_test(script_name, description):
     print(f"\n🧪 运行: {description}")
     print(f"   脚本: {script_name}")
     print("-" * 80)
-    
+
     try:
         result = subprocess.run(
             [sys.executable, script_name],
             capture_output=False,
-            cwd=Path(__file__).parent
+            cwd=Path(__file__).parent,
         )
-        
+
         if result.returncode == 0:
             print(f"\n✅ {description} - 成功\n")
             return True
         else:
             print(f"\n❌ {description} - 失败 (错误码: {result.returncode})\n")
             return False
-    
+
     except Exception as e:
         print(f"\n❌ 无法运行 {description}: {e}\n")
         return False
@@ -47,7 +47,7 @@ def run_test(script_name, description):
 def main():
     """主程序"""
     print_header("Koto 触发器参数编辑功能 - 完整验证套件")
-    
+
     print("""
 本脚本将运行以下测试:
 
@@ -67,41 +67,32 @@ def main():
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     """)
-    
+
     results = {}
-    
+
     # 1. 基础功能测试
-    results['basic'] = run_test(
-        'test_trigger_params.py',
-        '基础功能测试'
-    )
-    
+    results["basic"] = run_test("test_trigger_params.py", "基础功能测试")
+
     # 2. 集成测试
-    results['integration'] = run_test(
-        'test_trigger_params_integration.py',
-        '集成测试'
-    )
-    
+    results["integration"] = run_test("test_trigger_params_integration.py", "集成测试")
+
     # 3. 最终报告
     print_header("最终实现报告")
     print("生成完整的实现总结报告...\n")
-    run_test(
-        'TRIGGER_IMPLEMENTATION_FINAL_REPORT.py',
-        '最终报告'
-    )
-    
+    run_test("TRIGGER_IMPLEMENTATION_FINAL_REPORT.py", "最终报告")
+
     # 总结结果
     print_header("测试总结")
-    
+
     print("测试结果:")
     print(f"  {'基础功能测试':<30} {'✅ 通过' if results['basic'] else '❌ 失败'}")
     print(f"  {'集成测试':<30} {'✅ 通过' if results['integration'] else '❌ 失败'}")
-    
+
     passed = sum(1 for v in results.values() if v)
     total = len(results)
-    
+
     print(f"\n{'总计':<30} {passed}/{total} 测试通过")
-    
+
     if passed == total:
         print("""
         ╔════════════════════════════════════════════════════════════╗
@@ -131,7 +122,7 @@ def main():
         需要帮助? 参考 TRIGGER_DOCUMENTATION_INDEX.md
         """)
         sys.exit(1)
-    
+
     print("\n" + "=" * 80)
     print("后续步骤:")
     print("=" * 80)
@@ -158,7 +149,7 @@ def main():
     print("\n✨ 测试完成！祝你使用愉快！\n")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
@@ -167,5 +158,6 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"\n❌ 发生错误: {e}\n")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """Unit tests for app.core.llm.base.LLMProvider abstract interface."""
+
 import logging
+
 import pytest
+
 from app.core.llm.base import LLMProvider
 
 _LOGGER = "app.core.llm.base"
@@ -9,11 +12,14 @@ _LOGGER = "app.core.llm.base"
 
 def _make_provider(**overrides):
     """Factory: returns a minimal concrete LLMProvider subclass."""
+
     class _Provider(LLMProvider):
         def generate_content(self, prompt, model, **kwargs):
             return {"content": str(prompt)}
+
         def get_token_count(self, prompt, model):
             return 1
+
     return _Provider()
 
 
@@ -41,8 +47,15 @@ class TestLLMProviderAbstract:
 
     def test_concrete_subclass_can_be_instantiated(self):
         class MockProvider(LLMProvider):
-            def generate_content(self, prompt, model, system_instruction=None,
-                                  tools=None, stream=False, **kwargs):
+            def generate_content(
+                self,
+                prompt,
+                model,
+                system_instruction=None,
+                tools=None,
+                stream=False,
+                **kwargs,
+            ):
                 return {"content": f"Response to: {prompt}", "model": model}
 
             def get_token_count(self, prompt, model):
@@ -100,7 +113,9 @@ class TestLLMProviderLogging:
         with caplog.at_level(logging.DEBUG, logger=_LOGGER):
             provider._log_request("hello world", model="test-model")
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
-        assert any("test-model" in m and "LLMProvider" in m for m in debug_msgs), debug_msgs
+        assert any(
+            "test-model" in m and "LLMProvider" in m for m in debug_msgs
+        ), debug_msgs
 
     def test_log_response_ok_emits_debug(self, caplog):
         """_log_response() on success must emit a DEBUG log."""
@@ -118,8 +133,11 @@ class TestLLMProviderLogging:
         warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
         assert any("test-model" in m and "ERROR" in m for m in warnings), warnings
         # Must NOT emit a DEBUG "OK" record for the same call
-        ok_debug = [r.message for r in caplog.records
-                    if r.levelno == logging.DEBUG and "OK" in r.message]
+        ok_debug = [
+            r.message
+            for r in caplog.records
+            if r.levelno == logging.DEBUG and "OK" in r.message
+        ]
         assert ok_debug == [], f"Should not emit DEBUG OK on error: {ok_debug}"
 
     def test_log_request_no_warning(self, caplog):
@@ -128,5 +146,6 @@ class TestLLMProviderLogging:
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
             provider._log_request(["msg1", "msg2"], model="gemini-pro")
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-        assert warnings == [], f"Unexpected warnings in _log_request: {[r.message for r in warnings]}"
-
+        assert (
+            warnings == []
+        ), f"Unexpected warnings in _log_request: {[r.message for r in warnings]}"

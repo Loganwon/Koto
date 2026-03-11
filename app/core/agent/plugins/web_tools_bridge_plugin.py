@@ -30,6 +30,7 @@ class WebToolsBridgePlugin(AgentPlugin):
     def get_tools(self) -> List[Dict[str, Any]]:
         try:
             from web.tool_registry import ToolRegistry as WebRegistry
+
             web_reg = WebRegistry()
         except Exception as exc:
             logger.warning(f"[WebToolsBridgePlugin] 无法加载 web/tool_registry: {exc}")
@@ -41,12 +42,14 @@ class WebToolsBridgePlugin(AgentPlugin):
             # 转换 JSON Schema (lowercase types) → Gemini 格式 (uppercase TYPE)
             converted_params = _convert_schema(raw_params)
 
-            tools.append({
-                "name": tool_name,
-                "func": _make_wrapper(web_reg, tool_name),
-                "description": tool_info.get("description", ""),
-                "parameters": converted_params,
-            })
+            tools.append(
+                {
+                    "name": tool_name,
+                    "func": _make_wrapper(web_reg, tool_name),
+                    "description": tool_info.get("description", ""),
+                    "parameters": converted_params,
+                }
+            )
 
         logger.info(f"[WebToolsBridgePlugin] 桥接了 {len(tools)} 个 web 层工具")
         return tools
@@ -55,12 +58,12 @@ class WebToolsBridgePlugin(AgentPlugin):
 # ─── 辅助函数 ─────────────────────────────────────────────────────────────────
 
 _TYPE_MAP = {
-    "string":  "STRING",
+    "string": "STRING",
     "integer": "INTEGER",
-    "number":  "NUMBER",
+    "number": "NUMBER",
     "boolean": "BOOLEAN",
-    "array":   "ARRAY",
-    "object":  "OBJECT",
+    "array": "ARRAY",
+    "object": "OBJECT",
 }
 
 
@@ -87,10 +90,12 @@ def _make_wrapper(registry, tool_name: str):
     创建一个闭包，将调用转发到 web ToolRegistry.execute()，
     并将返回的 dict 规范化为字符串（agent loop 要求 str 结果）。
     """
+
     def _wrapper(**kwargs):
         result = registry.execute(tool_name, kwargs)
         if isinstance(result, dict):
             import json
+
             return json.dumps(result, ensure_ascii=False, default=str)
         return str(result)
 

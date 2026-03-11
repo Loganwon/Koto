@@ -10,17 +10,17 @@ Local Model Installer  —  本地 AI 模型安装器
     pyinstaller local_model_installer.spec
 """
 
-import os
-import sys
 import json
+import os
 import platform
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -33,7 +33,7 @@ else:
     here = Path(__file__).resolve().parent
     APP_DIR = here.parent if here.name == "src" else here
 
-RESULT_FILE = APP_DIR / "installed_models.json"   # 安装记录（可选）
+RESULT_FILE = APP_DIR / "installed_models.json"  # 安装记录（可选）
 OLLAMA_WIN_URL = "https://ollama.com/download/OllamaSetup.exe"
 
 # ─────────────────────────────────────────────────────────────
@@ -41,101 +41,119 @@ OLLAMA_WIN_URL = "https://ollama.com/download/OllamaSetup.exe"
 # ─────────────────────────────────────────────────────────────
 MODEL_CATALOG: List[Dict] = [
     {
-        "tag":     "gemma3:1b",
-        "name":    "Gemma 3 1B",
-        "badge":   "超轻量",
-        "vram":    1.5, "ram": 4,  "size_gb": 0.8,
-        "tier":    "ultralight",
-        "desc":    "极低资源，适合 4 GB 以下内存，速度最快",
+        "tag": "gemma3:1b",
+        "name": "Gemma 3 1B",
+        "badge": "超轻量",
+        "vram": 1.5,
+        "ram": 4,
+        "size_gb": 0.8,
+        "tier": "ultralight",
+        "desc": "极低资源，适合 4 GB 以下内存，速度最快",
     },
     {
-        "tag":     "llama3.2:3b",
-        "name":    "LLaMA 3.2 3B",
-        "badge":   "轻量",
-        "vram":    2.5, "ram": 6,  "size_gb": 2.0,
-        "tier":    "light",
-        "desc":    "6–8 GB 内存，流畅度与效果兼顾，日常任务优选",
+        "tag": "llama3.2:3b",
+        "name": "LLaMA 3.2 3B",
+        "badge": "轻量",
+        "vram": 2.5,
+        "ram": 6,
+        "size_gb": 2.0,
+        "tier": "light",
+        "desc": "6–8 GB 内存，流畅度与效果兼顾，日常任务优选",
     },
     {
-        "tag":     "gemma3:4b",
-        "name":    "Gemma 3 4B",
-        "badge":   "标准",
-        "vram":    3.5, "ram": 8,  "size_gb": 3.3,
-        "tier":    "standard",
-        "desc":    "8 GB+ 内存，效果优秀，推荐大多数用户",
+        "tag": "gemma3:4b",
+        "name": "Gemma 3 4B",
+        "badge": "标准",
+        "vram": 3.5,
+        "ram": 8,
+        "size_gb": 3.3,
+        "tier": "standard",
+        "desc": "8 GB+ 内存，效果优秀，推荐大多数用户",
     },
     {
-        "tag":     "qwen2.5:7b",
-        "name":    "Qwen 2.5 7B",
-        "badge":   "中文强化",
-        "vram":    6.0, "ram": 12, "size_gb": 4.7,
-        "tier":    "powerful",
-        "desc":    "12 GB+ 内存，中文理解出色，复杂任务首选",
+        "tag": "qwen2.5:7b",
+        "name": "Qwen 2.5 7B",
+        "badge": "中文强化",
+        "vram": 6.0,
+        "ram": 12,
+        "size_gb": 4.7,
+        "tier": "powerful",
+        "desc": "12 GB+ 内存，中文理解出色，复杂任务首选",
     },
     {
-        "tag":     "llama3.1:8b",
-        "name":    "LLaMA 3.1 8B",
-        "badge":   "高性能",
-        "vram":    7.0, "ram": 16, "size_gb": 5.0,
-        "tier":    "highend",
-        "desc":    "16 GB 内存 / NVIDIA 8 GB 显卡，综合能力强",
+        "tag": "llama3.1:8b",
+        "name": "LLaMA 3.1 8B",
+        "badge": "高性能",
+        "vram": 7.0,
+        "ram": 16,
+        "size_gb": 5.0,
+        "tier": "highend",
+        "desc": "16 GB 内存 / NVIDIA 8 GB 显卡，综合能力强",
     },
     {
-        "tag":     "qwen2.5:14b",
-        "name":    "Qwen 2.5 14B",
-        "badge":   "旗舰",
-        "vram":   10.0, "ram": 24, "size_gb": 9.0,
-        "tier":    "flagship",
-        "desc":    "24 GB+ 内存 / NVIDIA 12 GB+ 显卡，旗舰体验",
+        "tag": "qwen2.5:14b",
+        "name": "Qwen 2.5 14B",
+        "badge": "旗舰",
+        "vram": 10.0,
+        "ram": 24,
+        "size_gb": 9.0,
+        "tier": "flagship",
+        "desc": "24 GB+ 内存 / NVIDIA 12 GB+ 显卡，旗舰体验",
     },
     {
-        "tag":     "gemma3:12b",
-        "name":    "Gemma 3 12B",
-        "badge":   "旗舰",
-        "vram":   10.0, "ram": 24, "size_gb": 8.1,
-        "tier":    "flagship",
-        "desc":    "24 GB+ 内存 / NVIDIA 12 GB+ 显卡，谷歌旗舰",
+        "tag": "gemma3:12b",
+        "name": "Gemma 3 12B",
+        "badge": "旗舰",
+        "vram": 10.0,
+        "ram": 24,
+        "size_gb": 8.1,
+        "tier": "flagship",
+        "desc": "24 GB+ 内存 / NVIDIA 12 GB+ 显卡，谷歌旗舰",
     },
 ]
 
 TIER_COLOR = {
     "ultralight": "#b2bec3",
-    "light":      "#fdcb6e",
-    "standard":   "#55efc4",
-    "powerful":   "#74b9ff",
-    "highend":    "#a29bfe",
-    "flagship":   "#fd79a8",
+    "light": "#fdcb6e",
+    "standard": "#55efc4",
+    "powerful": "#74b9ff",
+    "highend": "#a29bfe",
+    "flagship": "#fd79a8",
 }
+
 
 # ─────────────────────────────────────────────────────────────
 #  系统检测
 # ─────────────────────────────────────────────────────────────
 def get_system_info() -> Dict:
     info = {
-        "cpu":             platform.processor() or platform.machine(),
-        "cpu_cores":       os.cpu_count() or 1,
-        "ram_gb":          0.0,
-        "free_disk_gb":    0.0,
-        "gpu_name":        "未检测到独立显卡",
-        "gpu_vram_gb":     0.0,
-        "has_nvidia":      False,
-        "has_amd":         False,
-        "has_intel_gpu":   False,
-        "ollama_installed":False,
-        "ollama_running":  False,
-        "installed_models":[],
+        "cpu": platform.processor() or platform.machine(),
+        "cpu_cores": os.cpu_count() or 1,
+        "ram_gb": 0.0,
+        "free_disk_gb": 0.0,
+        "gpu_name": "未检测到独立显卡",
+        "gpu_vram_gb": 0.0,
+        "has_nvidia": False,
+        "has_amd": False,
+        "has_intel_gpu": False,
+        "ollama_installed": False,
+        "ollama_running": False,
+        "installed_models": [],
     }
 
     # RAM（优先 psutil，备用 wmic）
     try:
         import psutil
-        info["ram_gb"]       = round(psutil.virtual_memory().total / 1024**3, 1)
-        info["free_disk_gb"] = round(psutil.disk_usage(str(APP_DIR)).free  / 1024**3, 1)
+
+        info["ram_gb"] = round(psutil.virtual_memory().total / 1024**3, 1)
+        info["free_disk_gb"] = round(psutil.disk_usage(str(APP_DIR)).free / 1024**3, 1)
     except Exception:
         try:
             r = subprocess.run(
                 ["wmic", "computersystem", "get", "TotalPhysicalMemory"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             nums = [l.strip() for l in r.stdout.splitlines() if l.strip().isdigit()]
@@ -146,7 +164,9 @@ def get_system_info() -> Dict:
         try:
             r = subprocess.run(
                 ["wmic", "logicaldisk", "get", "FreeSpace,DeviceID"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True,
+                text=True,
+                timeout=5,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             drive = APP_DIR.anchor.rstrip("\\")  # e.g. "C:"
@@ -163,17 +183,22 @@ def get_system_info() -> Dict:
     # NVIDIA GPU
     try:
         r = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=8,
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         if r.returncode == 0 and r.stdout.strip():
             parts = r.stdout.strip().split(",")
             if len(parts) >= 2:
-                info["gpu_name"]     = parts[0].strip()
-                info["gpu_vram_gb"]  = round(float(parts[1].strip()) / 1024, 1)
-                info["has_nvidia"]   = True
+                info["gpu_name"] = parts[0].strip()
+                info["gpu_vram_gb"] = round(float(parts[1].strip()) / 1024, 1)
+                info["has_nvidia"] = True
     except Exception:
         pass
 
@@ -181,24 +206,34 @@ def get_system_info() -> Dict:
     if not info["has_nvidia"] and platform.system() == "Windows":
         try:
             r = subprocess.run(
-                ["wmic", "path", "win32_VideoController",
-                 "get", "Name,AdapterRAM", "/format:csv"],
-                capture_output=True, text=True, timeout=8,
+                [
+                    "wmic",
+                    "path",
+                    "win32_VideoController",
+                    "get",
+                    "Name,AdapterRAM",
+                    "/format:csv",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=8,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             for line in r.stdout.strip().splitlines():
                 low = line.lower()
                 parts = line.split(",")
                 if "amd" in low or "radeon" in low:
-                    info["gpu_name"]   = parts[-1].strip() if parts else "AMD GPU"
+                    info["gpu_name"] = parts[-1].strip() if parts else "AMD GPU"
                     try:
                         info["gpu_vram_gb"] = round(int(parts[-2].strip()) / 1024**3, 1)
                     except Exception:
                         pass
                     info["has_amd"] = True
                     break
-                elif "intel" in low and any(k in low for k in ("hd", "uhd", "iris", "arc")):
-                    info["gpu_name"]   = parts[-1].strip() if parts else "Intel GPU"
+                elif "intel" in low and any(
+                    k in low for k in ("hd", "uhd", "iris", "arc")
+                ):
+                    info["gpu_name"] = parts[-1].strip() if parts else "Intel GPU"
                     try:
                         info["gpu_vram_gb"] = round(int(parts[-2].strip()) / 1024**3, 1)
                     except Exception:
@@ -221,11 +256,13 @@ def get_system_info() -> Dict:
         try:
             r = subprocess.run(
                 ["ollama", "list"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             lines = r.stdout.strip().splitlines()
-            for line in lines[1:]:   # skip header
+            for line in lines[1:]:  # skip header
                 parts = line.split()
                 if parts:
                     info["installed_models"].append(parts[0])
@@ -236,10 +273,10 @@ def get_system_info() -> Dict:
 
 
 def recommend_models(info: Dict) -> List[Dict]:
-    ram   = info["ram_gb"]
-    vram  = info["gpu_vram_gb"]
-    eff   = max(ram, vram * 1.5)
-    out   = [m for m in MODEL_CATALOG if eff >= m["ram"] or vram >= m["vram"]]
+    ram = info["ram_gb"]
+    vram = info["gpu_vram_gb"]
+    eff = max(ram, vram * 1.5)
+    out = [m for m in MODEL_CATALOG if eff >= m["ram"] or vram >= m["vram"]]
     return out or [MODEL_CATALOG[0]]
 
 
@@ -250,9 +287,15 @@ def recommend_models(info: Dict) -> List[Dict]:
 # Windows 上 Ollama 常见安装路径（安装后 PATH 不会立刻刷新，需手动探测）
 _OLLAMA_SEARCH_PATHS = [
     Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe",
-    Path(os.environ.get("PROGRAMFILES",  "")) / "Ollama" / "ollama.exe",
+    Path(os.environ.get("PROGRAMFILES", "")) / "Ollama" / "ollama.exe",
     Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Ollama" / "ollama.exe",
-    Path("C:/Users") / os.environ.get("USERNAME", "") / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe",
+    Path("C:/Users")
+    / os.environ.get("USERNAME", "")
+    / "AppData"
+    / "Local"
+    / "Programs"
+    / "Ollama"
+    / "ollama.exe",
 ]
 
 
@@ -294,7 +337,8 @@ def start_ollama(log_cb=None) -> bool:
             log_cb("🔄 正在启动 Ollama 服务...")
         subprocess.Popen(
             [exe, "serve"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         for _ in range(30):
@@ -318,8 +362,11 @@ def pull_model(tag: str, prog_cb=None, log_cb=None) -> bool:
     try:
         proc = subprocess.Popen(
             [exe, "pull", tag],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         for line in proc.stdout:
@@ -348,7 +395,9 @@ def save_result(tag: str):
             "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
             "ollama_endpoint": "http://127.0.0.1:11434",
         }
-        RESULT_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        RESULT_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     except Exception:
         pass
 
@@ -358,18 +407,19 @@ def save_result(tag: str):
 # ─────────────────────────────────────────────────────────────
 def run_gui():
     import tkinter as tk
-    from tkinter import ttk, messagebox, scrolledtext, font as tkfont
+    from tkinter import font as tkfont
+    from tkinter import messagebox, scrolledtext, ttk
 
     # ── 主题常量 ──
-    BG       = "#0d1117"
-    PANEL    = "#161b22"
-    BORDER   = "#30363d"
-    ACCENT   = "#2ea043"
-    ACCENT2  = "#388bfd"
-    TEXT     = "#e6edf3"
-    MUTED    = "#8b949e"
-    RED      = "#f85149"
-    YELLOW   = "#d29922"
+    BG = "#0d1117"
+    PANEL = "#161b22"
+    BORDER = "#30363d"
+    ACCENT = "#2ea043"
+    ACCENT2 = "#388bfd"
+    TEXT = "#e6edf3"
+    MUTED = "#8b949e"
+    RED = "#f85149"
+    YELLOW = "#d29922"
     WIN_W, WIN_H = 900, 640
 
     root = tk.Tk()
@@ -380,34 +430,39 @@ def run_gui():
 
     # 居中
     root.update_idletasks()
-    x = (root.winfo_screenwidth()  - WIN_W) // 2
+    x = (root.winfo_screenwidth() - WIN_W) // 2
     y = (root.winfo_screenheight() - WIN_H) // 2
     root.geometry(f"{WIN_W}x{WIN_H}+{x}+{y}")
 
     # ── 字体 ──
-    F_TITLE  = ("Segoe UI", 18, "bold")
-    F_HEAD   = ("Segoe UI", 11, "bold")
+    F_TITLE = ("Segoe UI", 18, "bold")
+    F_HEAD = ("Segoe UI", 11, "bold")
     F_NORMAL = ("Segoe UI", 10)
-    F_SMALL  = ("Segoe UI", 9)
-    F_MONO   = ("Consolas", 9)
+    F_SMALL = ("Segoe UI", 9)
+    F_MONO = ("Consolas", 9)
 
     # ── ttk 样式 ──
     style = ttk.Style()
     style.theme_use("default")
-    style.configure("TProgressbar",
-                    troughcolor=PANEL, background=ACCENT,
-                    thickness=6, borderwidth=0)
+    style.configure(
+        "TProgressbar", troughcolor=PANEL, background=ACCENT, thickness=6, borderwidth=0
+    )
     style.configure("Dark.TFrame", background=BG)
 
     # ─────────── 顶部标题栏 ───────────
     header = tk.Frame(root, bg=PANEL, height=56)
     header.pack(fill="x")
     header.pack_propagate(False)
-    tk.Label(header, text="⚡  本地 AI 模型安装器",
-             font=("Segoe UI", 14, "bold"), bg=PANEL, fg=TEXT).pack(
-        side="left", padx=24, pady=0)
-    version_lbl = tk.Label(header, text="v2.0  ·  零依赖独立版",
-                            font=F_SMALL, bg=PANEL, fg=MUTED)
+    tk.Label(
+        header,
+        text="⚡  本地 AI 模型安装器",
+        font=("Segoe UI", 14, "bold"),
+        bg=PANEL,
+        fg=TEXT,
+    ).pack(side="left", padx=24, pady=0)
+    version_lbl = tk.Label(
+        header, text="v2.0  ·  零依赖独立版", font=F_SMALL, bg=PANEL, fg=MUTED
+    )
     version_lbl.pack(side="right", padx=24)
 
     # ─────────── 步骤指示器 ───────────
@@ -421,13 +476,13 @@ def run_gui():
     STEP_LABELS = ["①  检测硬件", "②  选择模型", "③  安装下载", "④  完成"]
     step_lbls: List[tk.Label] = []
     for i, txt in enumerate(STEP_LABELS):
-        lbl = tk.Label(steps_frame, text=txt, font=F_SMALL,
-                       bg=BG, fg=MUTED, padx=18)
+        lbl = tk.Label(steps_frame, text=txt, font=F_SMALL, bg=BG, fg=MUTED, padx=18)
         lbl.pack(side="left")
         step_lbls.append(lbl)
         if i < len(STEP_LABELS) - 1:
-            tk.Label(steps_frame, text="›", font=("Segoe UI", 10),
-                     bg=BG, fg=BORDER).pack(side="left")
+            tk.Label(
+                steps_frame, text="›", font=("Segoe UI", 10), bg=BG, fg=BORDER
+            ).pack(side="left")
 
     def set_step(idx: int):
         for i, lbl in enumerate(step_lbls):
@@ -459,7 +514,7 @@ def run_gui():
     pages["detect"] = p1
 
     # 左右分割
-    p1_left  = tk.Frame(p1, bg=BG, width=420)
+    p1_left = tk.Frame(p1, bg=BG, width=420)
     p1_left.pack(side="left", fill="both", padx=(24, 12), pady=20)
     p1_left.pack_propagate(False)
 
@@ -467,12 +522,24 @@ def run_gui():
     p1_right.pack(side="right", fill="both", expand=True, padx=(12, 24), pady=20)
 
     # 检测结果卡片
-    tk.Label(p1_left, text="系统信息", font=F_HEAD, bg=BG, fg=TEXT).pack(anchor="w", pady=(0, 8))
+    tk.Label(p1_left, text="系统信息", font=F_HEAD, bg=BG, fg=TEXT).pack(
+        anchor="w", pady=(0, 8)
+    )
     hw_card = tk.Frame(p1_left, bg=PANEL, bd=0, relief="flat")
     hw_card.pack(fill="x")
-    hw_text = tk.Text(hw_card, height=12, bg=PANEL, fg=TEXT,
-                      font=F_MONO, relief="flat", state="disabled",
-                      padx=14, pady=12, wrap="word", cursor="arrow")
+    hw_text = tk.Text(
+        hw_card,
+        height=12,
+        bg=PANEL,
+        fg=TEXT,
+        font=F_MONO,
+        relief="flat",
+        state="disabled",
+        padx=14,
+        pady=12,
+        wrap="word",
+        cursor="arrow",
+    )
     hw_text.pack(fill="x")
 
     def hw_set(txt: str):
@@ -485,37 +552,69 @@ def run_gui():
 
     # Ollama 状态
     tk.Label(p1_left, text="Ollama 状态", font=F_HEAD, bg=BG, fg=TEXT).pack(
-        anchor="w", pady=(16, 6))
+        anchor="w", pady=(16, 6)
+    )
     ollama_card = tk.Frame(p1_left, bg=PANEL, bd=0)
     ollama_card.pack(fill="x")
-    ollama_lbl = tk.Label(ollama_card, text="检测中...",
-                           font=F_NORMAL, bg=PANEL, fg=MUTED,
-                           padx=14, pady=10, anchor="w", justify="left")
+    ollama_lbl = tk.Label(
+        ollama_card,
+        text="检测中...",
+        font=F_NORMAL,
+        bg=PANEL,
+        fg=MUTED,
+        padx=14,
+        pady=10,
+        anchor="w",
+        justify="left",
+    )
     ollama_lbl.pack(fill="x")
 
     # 右侧：已安装模型
     tk.Label(p1_right, text="已安装模型", font=F_HEAD, bg=BG, fg=TEXT).pack(
-        anchor="w", pady=(0, 8))
+        anchor="w", pady=(0, 8)
+    )
     installed_card = tk.Frame(p1_right, bg=PANEL)
     installed_card.pack(fill="both", expand=True)
     installed_inner = tk.Frame(installed_card, bg=PANEL)
     installed_inner.pack(fill="both", expand=True, padx=14, pady=12)
-    installed_lbl = tk.Label(installed_inner, text="检测中...",
-                              font=F_MONO, bg=PANEL, fg=MUTED,
-                              anchor="nw", justify="left", wraplength=360)
+    installed_lbl = tk.Label(
+        installed_inner,
+        text="检测中...",
+        font=F_MONO,
+        bg=PANEL,
+        fg=MUTED,
+        anchor="nw",
+        justify="left",
+        wraplength=360,
+    )
     installed_lbl.pack(anchor="nw")
 
     # 底部按钮
     p1_btn = tk.Frame(p1, bg=BG)
     p1_btn.place(relx=1.0, rely=1.0, anchor="se", x=-24, y=-18)
-    p1_rescan_btn = tk.Button(p1_btn, text="重新检测",
-                               font=F_NORMAL, bg=PANEL, fg=MUTED,
-                               relief="flat", padx=16, pady=7, cursor="hand2")
+    p1_rescan_btn = tk.Button(
+        p1_btn,
+        text="重新检测",
+        font=F_NORMAL,
+        bg=PANEL,
+        fg=MUTED,
+        relief="flat",
+        padx=16,
+        pady=7,
+        cursor="hand2",
+    )
     p1_rescan_btn.pack(side="left", padx=(0, 8))
-    p1_next_btn = tk.Button(p1_btn, text="下一步  →",
-                             font=("Segoe UI", 10, "bold"),
-                             bg=ACCENT2, fg="white",
-                             relief="flat", padx=22, pady=7, cursor="hand2")
+    p1_next_btn = tk.Button(
+        p1_btn,
+        text="下一步  →",
+        font=("Segoe UI", 10, "bold"),
+        bg=ACCENT2,
+        fg="white",
+        relief="flat",
+        padx=22,
+        pady=7,
+        cursor="hand2",
+    )
     p1_next_btn.pack(side="left")
 
     # ═══════════════════════════════════════════
@@ -526,10 +625,12 @@ def run_gui():
 
     p2_top = tk.Frame(p2, bg=BG)
     p2_top.pack(fill="x", padx=24, pady=(20, 8))
-    tk.Label(p2_top, text="选择要安装的模型",
-             font=F_HEAD, bg=BG, fg=TEXT).pack(side="left")
-    rec_hint = tk.Label(p2_top, text="✦ 标记为根据您的硬件自动推荐",
-                        font=F_SMALL, bg=BG, fg=MUTED)
+    tk.Label(p2_top, text="选择要安装的模型", font=F_HEAD, bg=BG, fg=TEXT).pack(
+        side="left"
+    )
+    rec_hint = tk.Label(
+        p2_top, text="✦ 标记为根据您的硬件自动推荐", font=F_SMALL, bg=BG, fg=MUTED
+    )
     rec_hint.pack(side="right")
 
     # 模型列表区
@@ -548,12 +649,12 @@ def run_gui():
         ordered = list(reversed(candidates))
 
         canvas = tk.Canvas(p2_list_frame, bg=BG, highlightthickness=0)
-        scrollbar = tk.Scrollbar(p2_list_frame, orient="vertical",
-                                  command=canvas.yview, bg=PANEL)
+        scrollbar = tk.Scrollbar(
+            p2_list_frame, orient="vertical", command=canvas.yview, bg=PANEL
+        )
         scroll_frame = tk.Frame(canvas, bg=BG)
         scroll_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
@@ -568,7 +669,7 @@ def run_gui():
 
         for m in ordered:
             is_installed = m["tag"] in installed_tags
-            is_rec = m == ordered[0]   # 最高规格推荐
+            is_rec = m == ordered[0]  # 最高规格推荐
             color = TIER_COLOR.get(m["tier"], MUTED)
 
             card = tk.Frame(scroll_frame, bg=PANEL, pady=0)
@@ -590,8 +691,10 @@ def run_gui():
                 text=m["name"],
                 variable=selected_model,
                 value=m["tag"],
-                bg=PANEL, fg=color,
-                activebackground=PANEL, activeforeground=color,
+                bg=PANEL,
+                fg=color,
+                activebackground=PANEL,
+                activeforeground=color,
                 selectcolor=BG,
                 font=("Segoe UI", 10, "bold"),
                 cursor="hand2",
@@ -609,31 +712,57 @@ def run_gui():
                 badge_color = YELLOW
             else:
                 badge_color = MUTED
-            tk.Label(title_row, text=f"  {badge_txt}",
-                     font=F_SMALL, bg=PANEL, fg=badge_color).pack(side="left", padx=4)
+            tk.Label(
+                title_row, text=f"  {badge_txt}", font=F_SMALL, bg=PANEL, fg=badge_color
+            ).pack(side="left", padx=4)
 
             # 规格行
-            spec_txt = (f"内存需求: {m['ram']} GB  ·  "
-                        f"下载大小: ~{m['size_gb']} GB  ·  "
-                        f"显存需求: {m['vram']} GB")
-            tk.Label(inner, text=spec_txt, font=F_SMALL, bg=PANEL, fg=MUTED,
-                     anchor="w").pack(fill="x")
+            spec_txt = (
+                f"内存需求: {m['ram']} GB  ·  "
+                f"下载大小: ~{m['size_gb']} GB  ·  "
+                f"显存需求: {m['vram']} GB"
+            )
+            tk.Label(
+                inner, text=spec_txt, font=F_SMALL, bg=PANEL, fg=MUTED, anchor="w"
+            ).pack(fill="x")
 
             # 描述
-            tk.Label(inner, text=m["desc"], font=F_SMALL, bg=PANEL, fg=TEXT,
-                     anchor="w", justify="left").pack(fill="x")
+            tk.Label(
+                inner,
+                text=m["desc"],
+                font=F_SMALL,
+                bg=PANEL,
+                fg=TEXT,
+                anchor="w",
+                justify="left",
+            ).pack(fill="x")
 
     # 底部按钮
     p2_btn = tk.Frame(p2, bg=BG)
     p2_btn.place(relx=1.0, rely=1.0, anchor="se", x=-24, y=-18)
-    p2_back_btn = tk.Button(p2_btn, text="← 返回",
-                             font=F_NORMAL, bg=PANEL, fg=MUTED,
-                             relief="flat", padx=16, pady=7, cursor="hand2")
+    p2_back_btn = tk.Button(
+        p2_btn,
+        text="← 返回",
+        font=F_NORMAL,
+        bg=PANEL,
+        fg=MUTED,
+        relief="flat",
+        padx=16,
+        pady=7,
+        cursor="hand2",
+    )
     p2_back_btn.pack(side="left", padx=(0, 8))
-    p2_install_btn = tk.Button(p2_btn, text="▶  开始安装",
-                                font=("Segoe UI", 10, "bold"),
-                                bg=ACCENT, fg="white",
-                                relief="flat", padx=22, pady=7, cursor="hand2")
+    p2_install_btn = tk.Button(
+        p2_btn,
+        text="▶  开始安装",
+        font=("Segoe UI", 10, "bold"),
+        bg=ACCENT,
+        fg="white",
+        relief="flat",
+        padx=22,
+        pady=7,
+        cursor="hand2",
+    )
     p2_install_btn.pack(side="left")
 
     # ═══════════════════════════════════════════
@@ -642,7 +771,7 @@ def run_gui():
     p3 = tk.Frame(content, bg=BG)
     pages["install"] = p3
 
-    p3_left  = tk.Frame(p3, bg=BG, width=340)
+    p3_left = tk.Frame(p3, bg=BG, width=340)
     p3_left.pack(side="left", fill="y", padx=(24, 12), pady=20)
     p3_left.pack_propagate(False)
 
@@ -651,15 +780,16 @@ def run_gui():
 
     # 左侧：当前步骤状态
     tk.Label(p3_left, text="安装步骤", font=F_HEAD, bg=BG, fg=TEXT).pack(
-        anchor="w", pady=(0, 12))
+        anchor="w", pady=(0, 12)
+    )
 
     INSTALL_STEPS = [
-        ("check_ollama",   "检查 Ollama"),
+        ("check_ollama", "检查 Ollama"),
         ("install_ollama", "安装 Ollama"),
-        ("start_ollama",   "启动服务"),
+        ("start_ollama", "启动服务"),
         ("download_model", "下载模型"),
-        ("create_router",  "创建路由模型"),
-        ("verify",         "验证安装"),
+        ("create_router", "创建路由模型"),
+        ("verify", "验证安装"),
     ]
     step_vars: Dict[str, tk.StringVar] = {}
     step_icon_lbls: Dict[str, tk.Label] = {}
@@ -669,8 +799,15 @@ def run_gui():
         row.pack(fill="x", pady=3)
         var = tk.StringVar(value="○")
         step_vars[key] = var
-        icon_lbl = tk.Label(row, textvariable=var, font=("Segoe UI", 11),
-                             bg=BG, fg=MUTED, width=2, anchor="w")
+        icon_lbl = tk.Label(
+            row,
+            textvariable=var,
+            font=("Segoe UI", 11),
+            bg=BG,
+            fg=MUTED,
+            width=2,
+            anchor="w",
+        )
         icon_lbl.pack(side="left")
         step_icon_lbls[key] = icon_lbl
         tk.Label(row, text=label, font=F_NORMAL, bg=BG, fg=MUTED).pack(side="left")
@@ -678,25 +815,34 @@ def run_gui():
     def set_istep(key: str, state: str):
         """state: 'wait' | 'running' | 'done' | 'error'"""
         cfg = {
-            "wait":    ("○",  MUTED),
-            "running": ("◎",  YELLOW),
-            "done":    ("✓",  ACCENT),
-            "error":   ("✗",  RED),
+            "wait": ("○", MUTED),
+            "running": ("◎", YELLOW),
+            "done": ("✓", ACCENT),
+            "error": ("✗", RED),
         }
         ico, col = cfg.get(state, ("○", MUTED))
+
         def _do():
             step_vars[key].set(ico)
             step_icon_lbls[key].config(fg=col)
+
         root.after(0, _do)
 
     # 进度条 & 标签
     prog_lbl_var = tk.StringVar(value="等待开始...")
-    tk.Label(p3_left, textvariable=prog_lbl_var,
-             font=F_SMALL, bg=BG, fg=MUTED,
-             wraplength=300, justify="left").pack(anchor="w", pady=(20, 4))
+    tk.Label(
+        p3_left,
+        textvariable=prog_lbl_var,
+        font=F_SMALL,
+        bg=BG,
+        fg=MUTED,
+        wraplength=300,
+        justify="left",
+    ).pack(anchor="w", pady=(20, 4))
     prog_var = tk.DoubleVar(value=0)
-    prog_bar = ttk.Progressbar(p3_left, variable=prog_var,
-                                maximum=100, length=290, mode="determinate")
+    prog_bar = ttk.Progressbar(
+        p3_left, variable=prog_var, maximum=100, length=290, mode="determinate"
+    )
     prog_bar.pack(anchor="w")
     pct_lbl = tk.Label(p3_left, text="0%", font=F_SMALL, bg=BG, fg=MUTED)
     pct_lbl.pack(anchor="w", pady=(2, 0))
@@ -709,17 +855,31 @@ def run_gui():
 
     # 右侧：日志
     tk.Label(p3_right, text="实时日志", font=F_HEAD, bg=BG, fg=TEXT).pack(
-        anchor="w", pady=(0, 6))
+        anchor="w", pady=(0, 6)
+    )
     log_box = scrolledtext.ScrolledText(
-        p3_right, bg=PANEL, fg=TEXT, font=F_MONO,
-        relief="flat", state="disabled", wrap="word",
-        padx=12, pady=10,
+        p3_right,
+        bg=PANEL,
+        fg=TEXT,
+        font=F_MONO,
+        relief="flat",
+        state="disabled",
+        wrap="word",
+        padx=12,
+        pady=10,
     )
     log_box.pack(fill="both", expand=True)
 
     p3_cancel_btn = tk.Button(
-        p3, text="取消", font=F_NORMAL, bg=PANEL, fg=RED,
-        relief="flat", padx=16, pady=7, cursor="hand2",
+        p3,
+        text="取消",
+        font=F_NORMAL,
+        bg=PANEL,
+        fg=RED,
+        relief="flat",
+        padx=16,
+        pady=7,
+        cursor="hand2",
     )
     p3_cancel_btn.place(relx=1.0, rely=1.0, anchor="se", x=-24, y=-18)
     _cancel = threading.Event()
@@ -731,6 +891,7 @@ def run_gui():
             log_box.insert("end", msg + "\n")
             log_box.see("end")
             log_box.config(state="disabled")
+
         root.after(0, _do)
 
     # ═══════════════════════════════════════════
@@ -742,53 +903,76 @@ def run_gui():
     p4_inner = tk.Frame(p4, bg=BG)
     p4_inner.place(relx=0.5, rely=0.45, anchor="center")
 
-    done_icon = tk.Label(p4_inner, text="✅", font=("Segoe UI Emoji", 54),
-                          bg=BG, fg=ACCENT)
+    done_icon = tk.Label(
+        p4_inner, text="✅", font=("Segoe UI Emoji", 54), bg=BG, fg=ACCENT
+    )
     done_icon.pack(pady=(0, 12))
-    done_title = tk.Label(p4_inner, text="安装成功！",
-                           font=("Segoe UI", 22, "bold"), bg=BG, fg=TEXT)
+    done_title = tk.Label(
+        p4_inner, text="安装成功！", font=("Segoe UI", 22, "bold"), bg=BG, fg=TEXT
+    )
     done_title.pack()
-    done_tag_lbl = tk.Label(p4_inner, text="",
-                             font=("Segoe UI", 12), bg=BG, fg=MUTED)
+    done_tag_lbl = tk.Label(p4_inner, text="", font=("Segoe UI", 12), bg=BG, fg=MUTED)
     done_tag_lbl.pack(pady=(4, 20))
 
     # 使用说明
     usage_card = tk.Frame(p4_inner, bg=PANEL, bd=0)
     usage_card.pack(fill="x", ipadx=20, ipady=14)
-    usage_title = tk.Label(usage_card, text="如何使用这个模型",
-                            font=F_HEAD, bg=PANEL, fg=TEXT)
+    usage_title = tk.Label(
+        usage_card, text="如何使用这个模型", font=F_HEAD, bg=PANEL, fg=TEXT
+    )
     usage_title.pack(anchor="w", padx=16, pady=(10, 6))
-    usage_text = tk.Text(usage_card, height=5, bg=PANEL, fg=MUTED,
-                          font=F_MONO, relief="flat", state="disabled",
-                          padx=14, pady=0, wrap="word", cursor="arrow")
+    usage_text = tk.Text(
+        usage_card,
+        height=5,
+        bg=PANEL,
+        fg=MUTED,
+        font=F_MONO,
+        relief="flat",
+        state="disabled",
+        padx=14,
+        pady=0,
+        wrap="word",
+        cursor="arrow",
+    )
     usage_text.pack(fill="x", padx=4, pady=(0, 10))
 
     def set_done_info(tag: str):
         done_tag_lbl.config(text=f"已安装模型：{tag}")
         usage_text.config(state="normal")
         usage_text.delete("1.0", "end")
-        usage_text.insert("end",
+        usage_text.insert(
+            "end",
             f"在终端中测试：\n"
             f"  ollama run {tag}\n\n"
             f"API 端点（供 Koto / 其他程序调用）：\n"
-            f"  http://127.0.0.1:11434  （Ollama 默认端口）"
+            f"  http://127.0.0.1:11434  （Ollama 默认端口）",
         )
         usage_text.config(state="disabled")
 
     p4_close_btn = tk.Button(
-        p4_inner, text="关闭安装器",
+        p4_inner,
+        text="关闭安装器",
         font=("Segoe UI", 11, "bold"),
-        bg=ACCENT2, fg="white", relief="flat",
-        padx=28, pady=10, cursor="hand2",
+        bg=ACCENT2,
+        fg="white",
+        relief="flat",
+        padx=28,
+        pady=10,
+        cursor="hand2",
         command=root.destroy,
     )
     p4_close_btn.pack(pady=(20, 0))
 
     p4_more_btn = tk.Button(
-        p4_inner, text="安装更多模型",
+        p4_inner,
+        text="安装更多模型",
         font=F_NORMAL,
-        bg=PANEL, fg=MUTED, relief="flat",
-        padx=16, pady=7, cursor="hand2",
+        bg=PANEL,
+        fg=MUTED,
+        relief="flat",
+        padx=16,
+        pady=7,
+        cursor="hand2",
     )
     p4_more_btn.pack(pady=(8, 0))
 
@@ -809,11 +993,20 @@ def run_gui():
         gpu_line = f"显卡  : {info['gpu_name']}"
         if info["gpu_vram_gb"] > 0:
             gpu_line += f"  ({info['gpu_vram_gb']} GB)"
-        accel = ("✅ CUDA 加速可用"   if info["has_nvidia"]    else
-                 "⚠️  AMD ROCm（实验）" if info["has_amd"]       else
-                 "ℹ️  仅 CPU 推理"     if info["has_intel_gpu"] else
-                 "ℹ️  仅 CPU 推理（无独立 GPU）")
-        disk  = f"{info['free_disk_gb']} GB 可用" if info["free_disk_gb"] > 0 else "未知"
+        accel = (
+            "✅ CUDA 加速可用"
+            if info["has_nvidia"]
+            else (
+                "⚠️  AMD ROCm（实验）"
+                if info["has_amd"]
+                else (
+                    "ℹ️  仅 CPU 推理"
+                    if info["has_intel_gpu"]
+                    else "ℹ️  仅 CPU 推理（无独立 GPU）"
+                )
+            )
+        )
+        disk = f"{info['free_disk_gb']} GB 可用" if info["free_disk_gb"] > 0 else "未知"
         hw_str = (
             f"处理器: {info['cpu'][:42]}\n"
             f"核心数: {info['cpu_cores']} 核\n"
@@ -828,13 +1021,13 @@ def run_gui():
         # Ollama 状态
         if info["ollama_installed"] and info["ollama_running"]:
             ollama_msg = "✅  已安装，服务运行中"
-            ollama_fg  = ACCENT
+            ollama_fg = ACCENT
         elif info["ollama_installed"]:
             ollama_msg = "⚠️  已安装，服务未运行（将自动启动）"
-            ollama_fg  = YELLOW
+            ollama_fg = YELLOW
         else:
             ollama_msg = "⚠️  未安装 — 点击「下一步」将自动下载安装"
-            ollama_fg  = YELLOW
+            ollama_fg = YELLOW
         root.after(0, lambda: ollama_lbl.config(text=ollama_msg, fg=ollama_fg))
 
         # 已安装模型
@@ -842,12 +1035,19 @@ def run_gui():
             inst_str = "\n".join(f"  • {t}" for t in info["installed_models"])
         else:
             inst_str = "（暂无已安装模型）"
-        root.after(0, lambda: installed_lbl.config(text=inst_str, fg=TEXT if info["installed_models"] else MUTED))
+        root.after(
+            0,
+            lambda: installed_lbl.config(
+                text=inst_str, fg=TEXT if info["installed_models"] else MUTED
+            ),
+        )
 
         # 候选模型（过滤磁盘空间不足的）
         cands = recommend_models(info)
         if info["free_disk_gb"] > 0:
-            cands = [m for m in cands if info["free_disk_gb"] >= m["size_gb"] + 1.0] or [MODEL_CATALOG[0]]
+            cands = [
+                m for m in cands if info["free_disk_gb"] >= m["size_gb"] + 1.0
+            ] or [MODEL_CATALOG[0]]
         _candidates.clear()
         _candidates.extend(cands)
 
@@ -892,7 +1092,8 @@ def run_gui():
         log("🔍 检查 Ollama 安装状态...")
         has_ollama = shutil.which("ollama") is not None
         set_istep("check_ollama", "done")
-        if cancelled(): return
+        if cancelled():
+            return
 
         # ── 2. 安装 Ollama ──
         if not has_ollama:
@@ -901,16 +1102,24 @@ def run_gui():
             log(f"📥 下载 Ollama: {OLLAMA_WIN_URL}")
             setup_path = APP_DIR / "OllamaSetup_tmp.exe"
             try:
+
                 def _hook(blk, bsz, tot):
                     if tot > 0 and not _cancel.is_set():
                         pct = 5 + int(blk * bsz / tot * 22)
-                        set_prog(min(pct, 27), f"下载 Ollama... {min(pct-5,22)*100//22}%")
+                        set_prog(
+                            min(pct, 27), f"下载 Ollama... {min(pct-5,22)*100//22}%"
+                        )
+
                 urllib.request.urlretrieve(OLLAMA_WIN_URL, str(setup_path), _hook)
-                if cancelled(): return
+                if cancelled():
+                    return
                 log("✅ Ollama 下载完成，正在静默安装...")
                 set_prog(28, "安装 Ollama...")
-                subprocess.run([str(setup_path), "/S"], timeout=180,
-                               creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.run(
+                    [str(setup_path), "/S"],
+                    timeout=180,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
                 time.sleep(4)
                 set_istep("install_ollama", "done")
                 log("✅ Ollama 安装完成")
@@ -928,12 +1137,15 @@ def run_gui():
                 set_istep("install_ollama", "error")
                 log(f"❌ 自动安装失败: {e}")
                 log("👉 请手动访问 https://ollama.com/download 安装后重试")
-                root.after(0, lambda: messagebox.showerror(
-                    "安装失败",
-                    "无法自动安装 Ollama。\n\n"
-                    "请手动访问 https://ollama.com/download\n"
-                    "安装后重新运行本程序。",
-                ))
+                root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "安装失败",
+                        "无法自动安装 Ollama。\n\n"
+                        "请手动访问 https://ollama.com/download\n"
+                        "安装后重新运行本程序。",
+                    ),
+                )
                 root.after(0, lambda: p2_install_btn.config(state="normal"))
                 root.after(0, lambda: p2_back_btn.config(state="normal"))
                 return
@@ -943,7 +1155,8 @@ def run_gui():
             _find_ollama_exe()  # 确保路径已加入 PATH
             set_prog(28)
 
-        if cancelled(): return
+        if cancelled():
+            return
 
         # ── 3. 启动服务 ──
         set_istep("start_ollama", "running")
@@ -951,14 +1164,19 @@ def run_gui():
         ok = start_ollama(log_cb=log)
         if not ok:
             set_istep("start_ollama", "error")
-            root.after(0, lambda: messagebox.showerror(
-                "启动失败", "无法启动 Ollama 服务。\n请重启后重试。"))
+            root.after(
+                0,
+                lambda: messagebox.showerror(
+                    "启动失败", "无法启动 Ollama 服务。\n请重启后重试。"
+                ),
+            )
             root.after(0, lambda: p2_install_btn.config(state="normal"))
             root.after(0, lambda: p2_back_btn.config(state="normal"))
             return
         set_istep("start_ollama", "done")
         set_prog(38)
-        if cancelled(): return
+        if cancelled():
+            return
 
         # ── 4. 拉取模型 ──
         set_istep("download_model", "running")
@@ -978,7 +1196,8 @@ def run_gui():
             return
         set_istep("download_model", "done")
         set_prog(92)
-        if cancelled(): return
+        if cancelled():
+            return
 
         # ── 5. 创建 koto-router 本地路由模型 ──
         set_istep("create_router", "running")
@@ -998,13 +1217,17 @@ PARAMETER num_ctx 4096
 """.format(base=tag)
         try:
             import tempfile
+
             _mf = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".Modelfile", delete=False, encoding="utf-8")
+                mode="w", suffix=".Modelfile", delete=False, encoding="utf-8"
+            )
             _mf.write(_ROUTER_MODELFILE)
             _mf.close()
             _r = subprocess.run(
                 ["ollama", "create", "koto-router", "-f", _mf.name],
-                capture_output=True, text=True, timeout=120
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             try:
                 os.unlink(_mf.name)
@@ -1015,13 +1238,17 @@ PARAMETER num_ctx 4096
                 log("✅ koto-router 路由模型创建成功")
             else:
                 set_istep("create_router", "error")
-                log("⚠️ koto-router 创建失败（不影响基本使用）: {}".format(
-                    _r.stderr.strip()[:120]))
+                log(
+                    "⚠️ koto-router 创建失败（不影响基本使用）: {}".format(
+                        _r.stderr.strip()[:120]
+                    )
+                )
         except Exception as _e:
             set_istep("create_router", "error")
             log("⚠️ koto-router 创建跳过: {}".format(_e))
         set_prog(96)
-        if cancelled(): return
+        if cancelled():
+            return
 
         # ── 6. 验证 ──
         set_istep("verify", "running")
@@ -1049,7 +1276,7 @@ PARAMETER num_ctx 4096
             messagebox.showerror(
                 "磁盘空间不足",
                 f"安装 {tag}（约 {model_size:.1f} GB）需要至少 {model_size+1:.1f} GB 空余空间，\n"
-                f"当前可用：{free:.1f} GB。\n\n请释放磁盘空间后重试。"
+                f"当前可用：{free:.1f} GB。\n\n请释放磁盘空间后重试。",
             )
             return
         set_step(2)
@@ -1059,11 +1286,13 @@ PARAMETER num_ctx 4096
         threading.Thread(target=_do_install, args=(tag,), daemon=True).start()
 
     p2_install_btn.config(command=start_install)
-    p4_more_btn.config(command=lambda: (
-        set_step(1),
-        build_model_list(_candidates, _sys_info.get("installed_models", [])),
-        show_page("select"),
-    ))
+    p4_more_btn.config(
+        command=lambda: (
+            set_step(1),
+            build_model_list(_candidates, _sys_info.get("installed_models", [])),
+            show_page("select"),
+        )
+    )
 
     # ─────────────────────────────────────────────────────────
     #  启动

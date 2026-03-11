@@ -18,6 +18,7 @@ GoalManager — 长期委托任务管理器
   research      持续信息收集
   custom        用户自定义目标
 """
+
 from __future__ import annotations
 
 import json
@@ -37,7 +38,11 @@ logger = logging.getLogger(__name__)
 
 # ── 默认 DB 路径（与 TaskLedger 同库文件）──────────────────────────────────
 _DEFAULT_DB_PATH = str(
-    Path(os.environ.get("KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"))
+    Path(
+        os.environ.get(
+            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+        )
+    )
     / "koto_checkpoints.sqlite"
 )
 
@@ -50,13 +55,14 @@ _manager_lock = threading.Lock()
 # 枚举 & 数据类
 # ============================================================================
 
+
 class GoalStatus(str, Enum):
-    DRAFT         = "draft"           # 刚创建，尚未激活
-    ACTIVE        = "active"          # Koto 主动追踪中
-    WAITING_USER  = "waiting_user"    # 需要用户补充信息
-    PAUSED        = "paused"          # 用户手动暂停
-    COMPLETED     = "completed"       # 目标达成
-    FAILED        = "failed"          # 失败且不再重试
+    DRAFT = "draft"  # 刚创建，尚未激活
+    ACTIVE = "active"  # Koto 主动追踪中
+    WAITING_USER = "waiting_user"  # 需要用户补充信息
+    PAUSED = "paused"  # 用户手动暂停
+    COMPLETED = "completed"  # 目标达成
+    FAILED = "failed"  # 失败且不再重试
 
 
 TERMINAL_STATUSES = {GoalStatus.COMPLETED, GoalStatus.FAILED}
@@ -64,10 +70,10 @@ TERMINAL_STATUSES = {GoalStatus.COMPLETED, GoalStatus.FAILED}
 # 各类别的默认检查间隔（分钟）
 _DEFAULT_INTERVALS: Dict[str, int] = {
     "price_watch": 120,
-    "reminder":    30,
-    "file_task":   60,
-    "research":    180,
-    "custom":      60,
+    "reminder": 30,
+    "file_task": 60,
+    "research": 180,
+    "custom": 60,
 }
 
 
@@ -76,35 +82,38 @@ def _now_iso() -> str:
 
 
 def _minutes_later(minutes: int) -> str:
-    return (datetime.now() + timedelta(minutes=minutes)).isoformat(timespec="milliseconds")
+    return (datetime.now() + timedelta(minutes=minutes)).isoformat(
+        timespec="milliseconds"
+    )
 
 
 @dataclass
 class GoalTask:
     """一条长期委托目标。"""
+
     goal_id: str
     title: str
-    user_goal: str                       # 用户原始描述
-    category: str = "custom"            # price_watch / reminder / file_task / research / custom
+    user_goal: str  # 用户原始描述
+    category: str = "custom"  # price_watch / reminder / file_task / research / custom
 
     status: GoalStatus = GoalStatus.DRAFT
-    priority: str = "normal"            # urgent / high / normal / low
+    priority: str = "normal"  # urgent / high / normal / low
 
-    created_at: str  = field(default_factory=_now_iso)
-    updated_at: str  = field(default_factory=_now_iso)
-    due_at: Optional[str]         = None  # 截止时间
-    next_check_at: Optional[str]  = None  # 下次自动检查时间
-    check_interval_minutes: int   = 60
+    created_at: str = field(default_factory=_now_iso)
+    updated_at: str = field(default_factory=_now_iso)
+    due_at: Optional[str] = None  # 截止时间
+    next_check_at: Optional[str] = None  # 下次自动检查时间
+    check_interval_minutes: int = 60
 
-    requires_confirmation: bool   = False  # 高风险动作前是否先向用户确认
+    requires_confirmation: bool = False  # 高风险动作前是否先向用户确认
 
-    context_snapshot: str = "{}"   # JSON：保存任务上下文（进度、中间数据等）
-    last_result: Optional[str] = None      # 最近一次执行的摘要
-    progress_summary: Optional[str] = None # 总体进展摘要
+    context_snapshot: str = "{}"  # JSON：保存任务上下文（进度、中间数据等）
+    last_result: Optional[str] = None  # 最近一次执行的摘要
+    progress_summary: Optional[str] = None  # 总体进展摘要
 
     total_runs: int = 0
     session_id: Optional[str] = None
-    run_on_activate: bool = True   # 激活后是否立即触发首次检查
+    run_on_activate: bool = True  # 激活后是否立即触发首次检查
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)
@@ -124,13 +133,14 @@ class GoalTask:
 @dataclass
 class GoalRun:
     """每次执行记录（一个 GoalTask 可对应多次 GoalRun）。"""
-    run_id: str           = field(default_factory=lambda: str(uuid.uuid4()))
-    goal_id: str          = ""
-    started_at: str       = field(default_factory=_now_iso)
+
+    run_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    goal_id: str = ""
+    started_at: str = field(default_factory=_now_iso)
     finished_at: Optional[str] = None
-    outcome: str          = "pending"   # success / partial / failed / waiting_user / pending
-    summary: str          = ""
-    tool_calls_json: str  = "[]"        # JSON list of tool call names
+    outcome: str = "pending"  # success / partial / failed / waiting_user / pending
+    summary: str = ""
+    tool_calls_json: str = "[]"  # JSON list of tool call names
     linked_task_id: Optional[str] = None  # TaskLedger task_id（如有）
 
     def to_dict(self) -> Dict[str, Any]:
@@ -146,6 +156,7 @@ class GoalRun:
 # ============================================================================
 # GoalManager
 # ============================================================================
+
 
 class GoalManager:
     """
@@ -324,9 +335,15 @@ class GoalManager:
             logger.warning(f"[GoalManager] 无法激活终态目标 {goal_id[:8]}")
             return False
 
-        next_check = _now_iso() if goal.run_on_activate else _minutes_later(goal.check_interval_minutes)
+        next_check = (
+            _now_iso()
+            if goal.run_on_activate
+            else _minutes_later(goal.check_interval_minutes)
+        )
         self._update(goal_id, status=GoalStatus.ACTIVE, next_check_at=next_check)
-        logger.info(f"[GoalManager] 激活目标 {goal_id[:8]} «{goal.title}»，首次检查: {next_check[:19]}")
+        logger.info(
+            f"[GoalManager] 激活目标 {goal_id[:8]} «{goal.title}»，首次检查: {next_check[:19]}"
+        )
         return True
 
     def pause(self, goal_id: str) -> bool:
@@ -410,9 +427,11 @@ class GoalManager:
         else:
             new_status = GoalStatus.ACTIVE  # partial/failed → stay active, retry later
 
-        next_check = _minutes_later(goal.check_interval_minutes) if (
-            reschedule and new_status == GoalStatus.ACTIVE
-        ) else None
+        next_check = (
+            _minutes_later(goal.check_interval_minutes)
+            if (reschedule and new_status == GoalStatus.ACTIVE)
+            else None
+        )
 
         self._update(
             goal_id,
@@ -432,20 +451,37 @@ class GoalManager:
             """INSERT INTO koto_goal_runs
                (run_id, goal_id, started_at, outcome, summary, tool_calls_json, linked_task_id)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (run.run_id, run.goal_id, run.started_at, run.outcome,
-             run.summary, run.tool_calls_json, run.linked_task_id),
+            (
+                run.run_id,
+                run.goal_id,
+                run.started_at,
+                run.outcome,
+                run.summary,
+                run.tool_calls_json,
+                run.linked_task_id,
+            ),
         )
         self._conn.commit()
         return run
 
-    def finish_run(self, run_id: str, outcome: str, summary: str,
-                   tool_calls: Optional[List[str]] = None) -> bool:
+    def finish_run(
+        self,
+        run_id: str,
+        outcome: str,
+        summary: str,
+        tool_calls: Optional[List[str]] = None,
+    ) -> bool:
         self._conn.execute(
             """UPDATE koto_goal_runs
                SET finished_at=?, outcome=?, summary=?, tool_calls_json=?
                WHERE run_id=?""",
-            (_now_iso(), outcome, summary[:2000],
-             json.dumps(tool_calls or [], ensure_ascii=False), run_id),
+            (
+                _now_iso(),
+                outcome,
+                summary[:2000],
+                json.dumps(tool_calls or [], ensure_ascii=False),
+                run_id,
+            ),
         )
         self._conn.commit()
         return True
@@ -490,20 +526,25 @@ class GoalManager:
         logger.info(f"[GoalManager] 发现 {len(due)} 个待检查目标")
         for goal in due:
             # 立即将 next_check_at 拨到未来，防止重复触发
-            self._update(goal.goal_id, next_check_at=_minutes_later(goal.check_interval_minutes))
+            self._update(
+                goal.goal_id, next_check_at=_minutes_later(goal.check_interval_minutes)
+            )
             self._submit_goal_job(goal)
 
     def _submit_goal_job(self, goal: GoalTask):
         """将目标检查任务提交给 JobRunner；失败时降级到直接执行线程。"""
         try:
-            from app.core.jobs.job_runner import get_job_runner, JobSpec
+            from app.core.jobs.job_runner import JobSpec, get_job_runner
+
             runner = get_job_runner()
-            runner.submit(JobSpec(
-                job_type="goal_check",
-                payload={"goal_id": goal.goal_id},
-                session_id=goal.session_id or "",
-                metadata={"goal_title": goal.title},
-            ))
+            runner.submit(
+                JobSpec(
+                    job_type="goal_check",
+                    payload={"goal_id": goal.goal_id},
+                    session_id=goal.session_id or "",
+                    metadata={"goal_title": goal.title},
+                )
+            )
         except Exception as e:
             logger.warning(f"[GoalManager] JobRunner 不可用，降级执行: {e}")
             threading.Thread(
@@ -548,8 +589,8 @@ class GoalManager:
         )
 
         # 懒加载 UnifiedAgent，避免循环依赖
-        from app.core.agent.unified_agent import UnifiedAgent
         from app.core.agent.tool_registry import ToolRegistry
+        from app.core.agent.unified_agent import UnifiedAgent
         from app.core.llm.gemini import get_gemini_client
 
         llm = get_gemini_client()
@@ -584,11 +625,26 @@ class GoalManager:
                 total_runs, session_id, run_on_activate)
                VALUES
                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (g.goal_id, g.title, g.user_goal, g.category, g.status.value,
-             g.priority, g.created_at, g.updated_at, g.due_at, g.next_check_at,
-             g.check_interval_minutes, int(g.requires_confirmation),
-             g.context_snapshot, g.last_result, g.progress_summary,
-             g.total_runs, g.session_id, int(g.run_on_activate)),
+            (
+                g.goal_id,
+                g.title,
+                g.user_goal,
+                g.category,
+                g.status.value,
+                g.priority,
+                g.created_at,
+                g.updated_at,
+                g.due_at,
+                g.next_check_at,
+                g.check_interval_minutes,
+                int(g.requires_confirmation),
+                g.context_snapshot,
+                g.last_result,
+                g.progress_summary,
+                g.total_runs,
+                g.session_id,
+                int(g.run_on_activate),
+            ),
         )
         self._conn.commit()
 
@@ -596,7 +652,7 @@ class GoalManager:
         if not kwargs:
             return
         kwargs["updated_at"] = _now_iso()
-        
+
         # 把 GoalStatus enum 转成字符串
         if "status" in kwargs and isinstance(kwargs["status"], GoalStatus):
             kwargs["status"] = kwargs["status"].value
@@ -611,15 +667,20 @@ class GoalManager:
         d["status"] = GoalStatus(d["status"])
         d["requires_confirmation"] = bool(d["requires_confirmation"])
         d["run_on_activate"] = bool(d["run_on_activate"])
-        return GoalTask(**{k: v for k, v in d.items() if k in GoalTask.__dataclass_fields__})
+        return GoalTask(
+            **{k: v for k, v in d.items() if k in GoalTask.__dataclass_fields__}
+        )
 
     def _row_to_run(self, row: sqlite3.Row) -> GoalRun:
-        return GoalRun(**{k: v for k, v in dict(row).items() if k in GoalRun.__dataclass_fields__})
+        return GoalRun(
+            **{k: v for k, v in dict(row).items() if k in GoalRun.__dataclass_fields__}
+        )
 
 
 # ============================================================================
 # 单例访问
 # ============================================================================
+
 
 def get_goal_manager(db_path: Optional[str] = None) -> GoalManager:
     global _manager_instance

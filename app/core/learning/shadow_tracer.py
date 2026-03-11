@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from app.core.security.pii_filter import PIIFilter, PIIConfig
+from app.core.security.pii_filter import PIIConfig, PIIFilter
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +57,17 @@ logger = logging.getLogger(__name__)
 # 枚举 / 事件
 # ══════════════════════════════════════════════════════════════════
 
+
 class TraceEvent:
     """由外部监听的事件常量"""
-    TRAINING_READY = "training_ready"   # Skill 积累数量达到阈值
+
+    TRAINING_READY = "training_ready"  # Skill 积累数量达到阈值
 
 
 # ══════════════════════════════════════════════════════════════════
 # 数据结构
 # ══════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class TraceRecord:
@@ -85,6 +88,7 @@ class TraceRecord:
         timestamp    : ISO8601 UTC 时间戳
         metadata     : 额外元数据（工具调用记录等）
     """
+
     trace_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     session_id: str = ""
     skill_id: Optional[str] = None
@@ -96,7 +100,9 @@ class TraceRecord:
     model_used: str = ""
     latency_ms: Optional[int] = None
     timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        default_factory=lambda: datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
     )
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -107,6 +113,7 @@ class TraceRecord:
 # ══════════════════════════════════════════════════════════════════
 # 核心：ShadowTracer
 # ══════════════════════════════════════════════════════════════════
+
 
 class ShadowTracer:
     """
@@ -120,7 +127,7 @@ class ShadowTracer:
     """
 
     recording_enabled: bool = True
-    shadow_threshold: int = 5   # 每积累 5 条即触发一次训练（可按需调整）
+    shadow_threshold: int = 5  # 每积累 5 条即触发一次训练（可按需调整）
 
     # PII 过滤配置（关闭 IP 过滤，保留语义；其他全开）
     _pii_config = PIIConfig(mask_ip=False, log_stats=False)
@@ -133,7 +140,8 @@ class ShadowTracer:
     def _traces_dir(cls) -> Path:
         """shadow_traces 目录（workspace/shadow_traces/）"""
         import sys
-        if getattr(sys, 'frozen', False):
+
+        if getattr(sys, "frozen", False):
             project_root = Path(sys.executable).parent
         else:
             here = Path(__file__).resolve()
@@ -393,7 +401,9 @@ class ShadowTracer:
                     except Exception:
                         data = {}
                 data[key] = data.get(key, 0) + 1
-                mf.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+                mf.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
                 return data[key]
         except Exception as e:
             logger.warning(f"[ShadowTracer] manifest 更新失败: {e}")
@@ -408,7 +418,9 @@ class ShadowTracer:
             if mf.exists():
                 data = json.loads(mf.read_text(encoding="utf-8"))
             data[key] = value
-            mf.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            mf.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except Exception as e:
             logger.warning(f"[ShadowTracer] manifest 设置失败: {e}")
 
@@ -424,6 +436,3 @@ class ShadowTracer:
                 listener(TraceEvent.TRAINING_READY, skill_id, count)
             except Exception as e:
                 logger.warning(f"[ShadowTracer] 事件监听器异常: {e}")
-
-
-

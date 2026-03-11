@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """Unit tests for app.core.security.output_validator.OutputValidator."""
+
 import logging
+
 import pytest
+
 from app.core.security.output_validator import OutputValidator, ValidationResult
 
 _LOGGER = "app.core.security.output_validator"
@@ -61,7 +64,9 @@ class TestOutputValidatorPassCases:
         assert result.action == "PASS"
 
     def test_english_normal_text_passes(self):
-        result = OutputValidator.validate("Here is a comprehensive answer to your question.")
+        result = OutputValidator.validate(
+            "Here is a comprehensive answer to your question."
+        )
         assert result.action == "PASS"
 
 
@@ -81,14 +86,18 @@ class TestOutputValidatorRefusal:
 
     def test_refusal_only_matches_start_of_text(self):
         # A sentence mentioning "cannot" in the middle should pass
-        result = OutputValidator.validate("The system cannot be accessed because it is offline.")
+        result = OutputValidator.validate(
+            "The system cannot be accessed because it is offline."
+        )
         assert result.action == "PASS"
 
 
 @pytest.mark.unit
 class TestOutputValidatorTruncation:
     def test_ellipsis_ending_triggers_warn(self):
-        result = OutputValidator.validate("This is an answer that seems to be cut off...")
+        result = OutputValidator.validate(
+            "This is an answer that seems to be cut off..."
+        )
         assert result.action == "WARN"
 
     def test_chinese_truncation_triggers_warn(self):
@@ -108,7 +117,9 @@ class TestOutputValidatorLeaks:
         assert result.is_blocked
 
     def test_system_instruction_leak_triggers_block(self):
-        result = OutputValidator.validate("system_instruction: You are a helpful assistant.")
+        result = OutputValidator.validate(
+            "system_instruction: You are a helpful assistant."
+        )
         assert result.action == "BLOCK"
 
     def test_system_tag_triggers_block(self):
@@ -134,8 +145,11 @@ class TestOutputValidatorSkillId:
     def test_skill_id_does_not_crash_without_manager(self, monkeypatch):
         """Even if SkillManager is unavailable, validate should not raise."""
         import app.core.security.output_validator as mod
+
         monkeypatch.setattr(
-            mod, "_LEAK_RE", [],
+            mod,
+            "_LEAK_RE",
+            [],
             raising=False,
         )
         result = OutputValidator.validate(
@@ -154,15 +168,21 @@ class TestOutputValidatorLogging:
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
             OutputValidator.validate("用户的手机是 <<手机号-1>>，请联系")
         warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("泄露" in m or "BLOCK" in m or "leak" in m.lower() for m in warnings), warnings
+        assert any(
+            "泄露" in m or "BLOCK" in m or "leak" in m.lower() for m in warnings
+        ), warnings
 
     def test_pass_emits_no_warning(self, caplog):
         """A clean PASS must NOT emit any WARNING or higher (negative test)."""
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
-            result = OutputValidator.validate("这是一段正常的 AI 回复，内容准确、完整。")
+            result = OutputValidator.validate(
+                "这是一段正常的 AI 回复，内容准确、完整。"
+            )
         assert result.action == "PASS"
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-        assert warnings == [], f"Unexpected warnings on PASS: {[r.message for r in warnings]}"
+        assert (
+            warnings == []
+        ), f"Unexpected warnings on PASS: {[r.message for r in warnings]}"
 
     def test_empty_input_no_warning(self, caplog):
         """Empty input triggers RETRY but must NOT emit a WARNING (negative test)."""
@@ -170,7 +190,9 @@ class TestOutputValidatorLogging:
             result = OutputValidator.validate("")
         assert result.action == "RETRY"
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-        assert warnings == [], f"Unexpected warnings for empty input: {[r.message for r in warnings]}"
+        assert (
+            warnings == []
+        ), f"Unexpected warnings for empty input: {[r.message for r in warnings]}"
 
     def test_refusal_logs_info(self, caplog):
         """Model refusal must emit an INFO log."""
@@ -186,7 +208,9 @@ class TestOutputValidatorLogging:
             result = OutputValidator.validate("答案如下，详情请见下文...")
         assert result.action == "WARN"
         info_msgs = [r.message for r in caplog.records if r.levelno == logging.INFO]
-        assert any("truncation" in m.lower() or "WARN" in m for m in info_msgs), info_msgs
+        assert any(
+            "truncation" in m.lower() or "WARN" in m for m in info_msgs
+        ), info_msgs
 
     def test_repetition_logs_info(self, caplog):
         """Repeated-line detection must emit an INFO log."""
@@ -194,7 +218,9 @@ class TestOutputValidatorLogging:
             result = OutputValidator.validate("重复的内容\n" * 6)
         assert result.action == "RETRY"
         info_msgs = [r.message for r in caplog.records if r.levelno == logging.INFO]
-        assert any("repetition" in m.lower() or "重复" in m for m in info_msgs), info_msgs
+        assert any(
+            "repetition" in m.lower() or "重复" in m for m in info_msgs
+        ), info_msgs
 
     def test_code_substitute_logs_warning(self, caplog):
         """Code-substitute detection must emit a WARNING."""
@@ -203,4 +229,3 @@ class TestOutputValidatorLogging:
             OutputValidator.validate(text)
         warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
         assert any("代码替代" in m or "RETRY" in m for m in warnings), warnings
-

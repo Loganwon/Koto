@@ -114,6 +114,33 @@ jobs:
           Compress-Archive -Path "dist\Koto_Portable\*" -DestinationPath "dist\$zipName" -CompressionLevel Optimal
           Write-Host "Created: dist\$zipName"
 
+      - name: Run installer E2E test
+        shell: pwsh
+        run: |
+          $setup = Get-Item "dist\Koto_v*_Setup.exe" | Select-Object -First 1
+          if (-not $setup) { Write-Host "::error::Setup EXE not found"; exit 1 }
+          Write-Host "Testing installer: $($setup.FullName)"
+          & tests\installer\test_installer_e2e.ps1 `
+            -SetupExe $setup.FullName `
+            -TestInstallDir "$env:LOCALAPPDATA\KotoCI_Build" `
+            -Port 5099 `
+            -HealthTimeoutSec 60 `
+            -RequireHealth:$false
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
+      - name: Run portable E2E test
+        shell: pwsh
+        run: |
+          $zip = Get-Item "dist\Koto_v*_Windows.zip" | Select-Object -First 1
+          if (-not $zip) { Write-Host "::warning::ZIP not found, skipping portable test"; exit 0 }
+          Write-Host "Testing portable: $($zip.FullName)"
+          & tests\installer\test_portable_e2e.ps1 `
+            -ZipFile $zip.FullName `
+            -Port 5098 `
+            -HealthTimeoutSec 60 `
+            -RequireHealth:$false
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

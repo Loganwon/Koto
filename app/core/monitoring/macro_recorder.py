@@ -28,6 +28,7 @@
 ────
     config/macro_suggestions.json
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -45,10 +46,12 @@ logger = logging.getLogger(__name__)
 
 # ── 路径 ─────────────────────────────────────────────────────────────────────
 
+
 def _get_base_dir() -> Path:
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         return Path(sys.executable).parent
     return Path(__file__).resolve().parents[3]
+
 
 _BASE_DIR = _get_base_dir()
 _CONFIG_DIR = _BASE_DIR / "config"
@@ -56,77 +59,103 @@ _SUGGESTIONS_FILE = _CONFIG_DIR / "macro_suggestions.json"
 
 # ── 配置常量 ──────────────────────────────────────────────────────────────────
 
-REPEAT_THRESHOLD    = 3     # 重复多少次触发建议
-WINDOW_SIZE         = 60    # 滚动窗口大小（最近 N 次对话轮次）
-SIMILARITY_THRESHOLD = 0.35 # Jaccard 相似度阈值（视为"相同意图"的边界）
-COOLDOWN_MIN_TURNS  = 15    # 触发建议后间隔多少次对话才能再次检测同类
+REPEAT_THRESHOLD = 3  # 重复多少次触发建议
+WINDOW_SIZE = 60  # 滚动窗口大小（最近 N 次对话轮次）
+SIMILARITY_THRESHOLD = 0.35  # Jaccard 相似度阈值（视为"相同意图"的边界）
+COOLDOWN_MIN_TURNS = 15  # 触发建议后间隔多少次对话才能再次检测同类
 
 # ── 动作关键词表 ──────────────────────────────────────────────────────────────
 # 格式：(匹配词, 规范化标签)
 
 _ACTION_KEYWORDS: List[Tuple[str, str]] = [
     # 文本/写作
-    ("总结",   "总结"),
-    ("摘要",   "总结"),
-    ("概括",   "总结"),
+    ("总结", "总结"),
+    ("摘要", "总结"),
+    ("概括", "总结"),
     ("summarize", "总结"),
-    ("翻译",   "翻译"),
+    ("翻译", "翻译"),
     ("translate", "翻译"),
-    ("写",     "写作"),
-    ("撰写",   "写作"),
-    ("起草",   "写作"),
-    ("生成",   "生成"),
-    ("创作",   "写作"),
+    ("写", "写作"),
+    ("撰写", "写作"),
+    ("起草", "写作"),
+    ("生成", "生成"),
+    ("创作", "写作"),
     # 分析
-    ("分析",   "分析"),
-    ("比较",   "比较"),
-    ("对比",   "比较"),
-    ("评估",   "评估"),
-    ("评价",   "评估"),
+    ("分析", "分析"),
+    ("比较", "比较"),
+    ("对比", "比较"),
+    ("评估", "评估"),
+    ("评价", "评估"),
     ("research", "研究"),
-    ("研究",   "研究"),
+    ("研究", "研究"),
     # 代码
-    ("代码",   "代码"),
-    ("编程",   "代码"),
-    ("调试",   "调试"),
-    ("debug",  "调试"),
-    ("修复",   "修复"),
-    ("bug",    "调试"),
-    ("重构",   "重构"),
-    ("优化",   "优化"),
+    ("代码", "代码"),
+    ("编程", "代码"),
+    ("调试", "调试"),
+    ("debug", "调试"),
+    ("修复", "修复"),
+    ("bug", "调试"),
+    ("重构", "重构"),
+    ("优化", "优化"),
     ("optimize", "优化"),
-    ("test",   "测试"),
-    ("测试",   "测试"),
+    ("test", "测试"),
+    ("测试", "测试"),
     # 数据/文件
-    ("整理",   "整理"),
+    ("整理", "整理"),
     ("格式化", "格式化"),
-    ("提取",   "提取"),
-    ("解析",   "提取"),
-    ("查找",   "搜索"),
-    ("搜索",   "搜索"),
+    ("提取", "提取"),
+    ("解析", "提取"),
+    ("查找", "搜索"),
+    ("搜索", "搜索"),
     ("search", "搜索"),
-    ("清洗",   "数据处理"),
-    ("处理",   "数据处理"),
+    ("清洗", "数据处理"),
+    ("处理", "数据处理"),
     # 解释/学习
-    ("解释",   "解释"),
-    ("举例",   "解释"),
-    ("说明",   "解释"),
-    ("理解",   "解释"),
-    ("教",     "教学"),
+    ("解释", "解释"),
+    ("举例", "解释"),
+    ("说明", "解释"),
+    ("理解", "解释"),
+    ("教", "教学"),
     ("explain", "解释"),
     # 审阅
-    ("检查",   "检查"),
-    ("校对",   "校对"),
-    ("审阅",   "审阅"),
+    ("检查", "检查"),
+    ("校对", "校对"),
+    ("审阅", "审阅"),
     ("review", "审阅"),
 ]
 
 # 对象关键词（增强指纹区分度）
 _OBJECT_KEYWORDS: List[str] = [
-    "文件", "文档", "pdf", "ppt", "excel", "csv", "表格", "报告",
-    "邮件", "代码", "函数", "class", "api", "接口", "数据", "图片",
-    "视频", "网页", "文章", "论文", "合同", "方案", "计划",
-    "笔记", "列表", "项目", "需求", "规格", "日志", "配置",
+    "文件",
+    "文档",
+    "pdf",
+    "ppt",
+    "excel",
+    "csv",
+    "表格",
+    "报告",
+    "邮件",
+    "代码",
+    "函数",
+    "class",
+    "api",
+    "接口",
+    "数据",
+    "图片",
+    "视频",
+    "网页",
+    "文章",
+    "论文",
+    "合同",
+    "方案",
+    "计划",
+    "笔记",
+    "列表",
+    "项目",
+    "需求",
+    "规格",
+    "日志",
+    "配置",
 ]
 
 # 构建 {匹配词 → 标签} 字典（供 O(1) 查找）
@@ -137,21 +166,32 @@ _ACTION_MAP: Dict[str, str] = {kw: label for kw, label in _ACTION_KEYWORDS}
 # 数据结构
 # ══════════════════════════════════════════════════════════════════
 
+
 class MacroSuggestion:
     """一个宏建议条目，可序列化为 JSON。"""
 
     __slots__ = (
-        "id", "status", "fingerprint", "task_type",
-        "actions", "objects", "sample_messages",
-        "detected_count", "suggested_name", "suggested_desc",
-        "created_at", "dismissed_at", "confirmed_at", "skill_id",
+        "id",
+        "status",
+        "fingerprint",
+        "task_type",
+        "actions",
+        "objects",
+        "sample_messages",
+        "detected_count",
+        "suggested_name",
+        "suggested_desc",
+        "created_at",
+        "dismissed_at",
+        "confirmed_at",
+        "skill_id",
     )
 
     def __init__(
         self,
         *,
         id: str,
-        status: str = "pending",      # pending / confirmed / dismissed
+        status: str = "pending",  # pending / confirmed / dismissed
         fingerprint: str,
         task_type: str,
         actions: List[str],
@@ -165,37 +205,37 @@ class MacroSuggestion:
         confirmed_at: Optional[str] = None,
         skill_id: Optional[str] = None,
     ):
-        self.id             = id
-        self.status         = status
-        self.fingerprint    = fingerprint
-        self.task_type      = task_type
-        self.actions        = actions
-        self.objects        = objects
+        self.id = id
+        self.status = status
+        self.fingerprint = fingerprint
+        self.task_type = task_type
+        self.actions = actions
+        self.objects = objects
         self.sample_messages = sample_messages
         self.detected_count = detected_count
         self.suggested_name = suggested_name
         self.suggested_desc = suggested_desc
-        self.created_at     = created_at
-        self.dismissed_at   = dismissed_at
-        self.confirmed_at   = confirmed_at
-        self.skill_id       = skill_id
+        self.created_at = created_at
+        self.dismissed_at = dismissed_at
+        self.confirmed_at = confirmed_at
+        self.skill_id = skill_id
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "id":             self.id,
-            "status":         self.status,
-            "fingerprint":    self.fingerprint,
-            "task_type":      self.task_type,
-            "actions":        self.actions,
-            "objects":        self.objects,
+            "id": self.id,
+            "status": self.status,
+            "fingerprint": self.fingerprint,
+            "task_type": self.task_type,
+            "actions": self.actions,
+            "objects": self.objects,
             "sample_messages": self.sample_messages,
             "detected_count": self.detected_count,
             "suggested_name": self.suggested_name,
             "suggested_desc": self.suggested_desc,
-            "created_at":     self.created_at,
-            "dismissed_at":   self.dismissed_at,
-            "confirmed_at":   self.confirmed_at,
-            "skill_id":       self.skill_id,
+            "created_at": self.created_at,
+            "dismissed_at": self.dismissed_at,
+            "confirmed_at": self.confirmed_at,
+            "skill_id": self.skill_id,
         }
 
     @classmethod
@@ -220,7 +260,15 @@ class MacroSuggestion:
 
 class _TurnRecord:
     """一次对话轮次的轻量记录（只存在内存中）。"""
-    __slots__ = ("fingerprint", "task_type", "actions", "objects", "user_msg", "turn_at")
+
+    __slots__ = (
+        "fingerprint",
+        "task_type",
+        "actions",
+        "objects",
+        "user_msg",
+        "turn_at",
+    )
 
     def __init__(
         self,
@@ -232,16 +280,17 @@ class _TurnRecord:
         turn_at: str,
     ):
         self.fingerprint = fingerprint
-        self.task_type   = task_type
-        self.actions     = actions
-        self.objects     = objects
-        self.user_msg    = user_msg
-        self.turn_at     = turn_at
+        self.task_type = task_type
+        self.actions = actions
+        self.objects = objects
+        self.user_msg = user_msg
+        self.turn_at = turn_at
 
 
 # ══════════════════════════════════════════════════════════════════
 # MacroRecorder — 核心引擎（单例）
 # ══════════════════════════════════════════════════════════════════
+
 
 class MacroRecorder:
     """
@@ -254,10 +303,10 @@ class MacroRecorder:
 
     def __init__(self):
         self._lock = threading.Lock()
-        self._window: List[_TurnRecord]     = []   # 滚动窗口
+        self._window: List[_TurnRecord] = []  # 滚动窗口
         self._suggestions: List[MacroSuggestion] = []
-        self._seen_fps: Set[str]             = set()  # 已建议/忽略的指纹
-        self._cooldown: Dict[str, int]       = {}   # fp → remaining_turns_before_recheck
+        self._seen_fps: Set[str] = set()  # 已建议/忽略的指纹
+        self._cooldown: Dict[str, int] = {}  # fp → remaining_turns_before_recheck
         self._enabled = True
         self._load()
 
@@ -274,7 +323,9 @@ class MacroRecorder:
     # ── 公开 API ──────────────────────────────────────────────────────────────
 
     @classmethod
-    def record_turn(cls, user_msg: str, task_type: str = "CHAT", session_id: str = "default"):
+    def record_turn(
+        cls, user_msg: str, task_type: str = "CHAT", session_id: str = "default"
+    ):
         """主入口：AI 响应完成后异步调用，零阻塞。"""
         rec = cls.get()
         if not rec._enabled:
@@ -295,7 +346,7 @@ class MacroRecorder:
         with self._lock:
             for s in self._suggestions:
                 if s.id == suggestion_id and s.status == "pending":
-                    s.status       = "dismissed"
+                    s.status = "dismissed"
                     s.dismissed_at = _now_iso()
                     self._seen_fps.add(s.fingerprint)
                     self._save()
@@ -310,8 +361,11 @@ class MacroRecorder:
         """
         with self._lock:
             target = next(
-                (s for s in self._suggestions
-                 if s.id == suggestion_id and s.status == "pending"),
+                (
+                    s
+                    for s in self._suggestions
+                    if s.id == suggestion_id and s.status == "pending"
+                ),
                 None,
             )
             if target is None:
@@ -320,12 +374,14 @@ class MacroRecorder:
         try:
             skill_id = self._create_skill(target, skill_name)
             with self._lock:
-                target.status       = "confirmed"
+                target.status = "confirmed"
                 target.confirmed_at = _now_iso()
-                target.skill_id     = skill_id
+                target.skill_id = skill_id
                 self._seen_fps.add(target.fingerprint)
                 self._save()
-            logger.info(f"[MacroRecorder] ✅ 宏已固化为 Skill: {skill_name} ({skill_id})")
+            logger.info(
+                f"[MacroRecorder] ✅ 宏已固化为 Skill: {skill_name} ({skill_id})"
+            )
             return skill_id
         except Exception as exc:
             logger.error(f"[MacroRecorder] confirm 创建 Skill 失败: {exc}")
@@ -340,7 +396,7 @@ class MacroRecorder:
             if not actions:
                 return  # 纯闲聊，无可识别意图
 
-            fp      = _make_fingerprint(task_type, actions, objects)
+            fp = _make_fingerprint(task_type, actions, objects)
             now_iso = _now_iso()
 
             turn = _TurnRecord(
@@ -403,7 +459,7 @@ class MacroRecorder:
             if t.task_type != task_type:
                 continue
             # 优先比较动作集合（动作重叠度高则认为是同类工作流）
-            action_sim  = _jaccard(set(t.actions), set(actions))
+            action_sim = _jaccard(set(t.actions), set(actions))
             combined_sim = _jaccard(set(t.actions + t.objects), current_set)
             sim = max(action_sim, combined_sim)
             if sim >= SIMILARITY_THRESHOLD:
@@ -418,30 +474,30 @@ class MacroRecorder:
 
         all_actions = sorted({a for t in matching for a in t.actions})
         all_objects = sorted({o for t in matching for o in t.objects})
-        samples     = [t.user_msg for t in matching[-3:]]
+        samples = [t.user_msg for t in matching[-3:]]
 
         name, desc = _suggest_name_desc(task_type, all_actions, all_objects)
         return MacroSuggestion(
-            id              = str(uuid.uuid4())[:8],
-            fingerprint     = current_fp,
-            task_type       = task_type,
-            actions         = all_actions,
-            objects         = all_objects,
-            sample_messages = samples,
-            detected_count  = len(matching),
-            suggested_name  = name,
-            suggested_desc  = desc,
-            created_at      = _now_iso(),
+            id=str(uuid.uuid4())[:8],
+            fingerprint=current_fp,
+            task_type=task_type,
+            actions=all_actions,
+            objects=all_objects,
+            sample_messages=samples,
+            detected_count=len(matching),
+            suggested_name=name,
+            suggested_desc=desc,
+            created_at=_now_iso(),
         )
 
     def _create_skill(self, sug: MacroSuggestion, skill_name: str) -> str:
         """根据 MacroSuggestion 创建并注册 SkillDefinition。"""
-        from app.core.skills.skill_schema import SkillDefinition, SkillCategory
         from app.core.skills.skill_manager import SkillManager
+        from app.core.skills.skill_schema import SkillCategory, SkillDefinition
 
-        skill_id     = "macro_" + sug.id
-        actions_str  = "、".join(sug.actions) if sug.actions else "处理"
-        objects_str  = "、".join(sug.objects) if sug.objects else "内容"
+        skill_id = "macro_" + sug.id
+        actions_str = "、".join(sug.actions) if sug.actions else "处理"
+        objects_str = "、".join(sug.objects) if sug.objects else "内容"
 
         # 构建 system prompt 片段
         prompt = (
@@ -455,17 +511,17 @@ class MacroRecorder:
             prompt += f"  {i}. {msg}\n"
 
         skill_def = SkillDefinition(
-            id                    = skill_id,
-            name                  = skill_name,
-            icon                  = "🎯",
-            category              = SkillCategory.WORKFLOW,
-            description           = sug.suggested_desc,
-            intent_description    = f"用户想要{actions_str}相关的{objects_str}",
-            system_prompt_template = prompt,
-            task_types            = [sug.task_type] if sug.task_type else [],
-            author                = "user",
-            tags                  = ["macro", "自动录制"] + sug.actions[:2],
-            enabled               = True,
+            id=skill_id,
+            name=skill_name,
+            icon="🎯",
+            category=SkillCategory.WORKFLOW,
+            description=sug.suggested_desc,
+            intent_description=f"用户想要{actions_str}相关的{objects_str}",
+            system_prompt_template=prompt,
+            task_types=[sug.task_type] if sug.task_type else [],
+            author="user",
+            tags=["macro", "自动录制"] + sug.actions[:2],
+            enabled=True,
         )
         SkillManager.register_custom(skill_def)
         return skill_id
@@ -476,7 +532,7 @@ class MacroRecorder:
         try:
             _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             data = {
-                "suggestions":       [s.to_dict() for s in self._suggestions],
+                "suggestions": [s.to_dict() for s in self._suggestions],
                 "seen_fingerprints": list(self._seen_fps),
             }
             _SUGGESTIONS_FILE.write_text(
@@ -491,8 +547,7 @@ class MacroRecorder:
             if _SUGGESTIONS_FILE.exists():
                 raw = json.loads(_SUGGESTIONS_FILE.read_text(encoding="utf-8"))
                 self._suggestions = [
-                    MacroSuggestion.from_dict(d)
-                    for d in raw.get("suggestions", [])
+                    MacroSuggestion.from_dict(d) for d in raw.get("suggestions", [])
                 ]
                 self._seen_fps = set(raw.get("seen_fingerprints", []))
         except Exception as exc:
@@ -500,6 +555,7 @@ class MacroRecorder:
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

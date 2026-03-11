@@ -23,13 +23,70 @@ logger = logging.getLogger(__name__)
 
 # ── Minimal Chinese / English stopwords ────────────────────────────────────
 _STOPWORDS: Set[str] = {
-    "的", "了", "是", "在", "和", "与", "我", "你", "他", "她", "它",
-    "我们", "你们", "他们", "这", "那", "有", "被", "把", "对", "将",
-    "a", "an", "the", "is", "are", "was", "were", "be", "been",
-    "i", "you", "he", "she", "it", "we", "they", "this", "that",
-    "for", "in", "on", "at", "to", "of", "and", "or", "but",
-    "what", "who", "how", "when", "where", "which", "why",
-    "帮我", "帮", "请", "请问", "什么", "哪些", "怎么", "怎样", "如何",
+    "的",
+    "了",
+    "是",
+    "在",
+    "和",
+    "与",
+    "我",
+    "你",
+    "他",
+    "她",
+    "它",
+    "我们",
+    "你们",
+    "他们",
+    "这",
+    "那",
+    "有",
+    "被",
+    "把",
+    "对",
+    "将",
+    "a",
+    "an",
+    "the",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "i",
+    "you",
+    "he",
+    "she",
+    "it",
+    "we",
+    "they",
+    "this",
+    "that",
+    "for",
+    "in",
+    "on",
+    "at",
+    "to",
+    "of",
+    "and",
+    "or",
+    "but",
+    "what",
+    "who",
+    "how",
+    "when",
+    "where",
+    "which",
+    "why",
+    "帮我",
+    "帮",
+    "请",
+    "请问",
+    "什么",
+    "哪些",
+    "怎么",
+    "怎样",
+    "如何",
 }
 
 # Minimum entity length to consider
@@ -59,7 +116,7 @@ def _extract_entities(text: str) -> List[str]:
             len(tok) >= _MIN_ENTITY_LEN
             and not tok.isdigit()
             and tok.lower() not in _STOPWORDS
-            and re.search(r'[\u4e00-\u9fffA-Za-z]', tok)
+            and re.search(r"[\u4e00-\u9fffA-Za-z]", tok)
             and tok not in visited
         ):
             seen.append(tok)
@@ -73,12 +130,14 @@ def _get_kg():
     """Lazily load KnowledgeGraph — avoids circular imports."""
     try:
         import sys
+
         # Try web context first
         if "knowledge_graph" in sys.modules:
             mod = sys.modules["knowledge_graph"]
         else:
             try:
                 import importlib
+
                 mod = importlib.import_module("web.knowledge_graph")
             except ImportError:
                 mod = importlib.import_module("knowledge_graph")
@@ -197,8 +256,8 @@ class GraphRAGService:
             if not isinstance(t, dict):
                 continue
             subj = str(t.get("subject", "")).strip()
-            rel  = str(t.get("relation", "")).strip()
-            obj  = str(t.get("object",  "")).strip()
+            rel = str(t.get("relation", "")).strip()
+            obj = str(t.get("object", "")).strip()
             conf = float(t.get("confidence", 0.8))
             if subj and rel and obj:
                 ok = kg.add_triple(

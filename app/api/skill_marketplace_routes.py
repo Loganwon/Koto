@@ -30,6 +30,7 @@
   POST   /api/skillmarket/rate/<id>         对 Skill 评分（本地统计）
   GET    /api/skillmarket/stats             全局使用统计
 """
+
 from __future__ import annotations
 
 import io
@@ -50,11 +51,15 @@ marketplace_bp = Blueprint("skillmarket", __name__, url_prefix="/api/skillmarket
 
 # ── 路径常量 ──────────────────────────────────────────────────────────────────
 import sys as _sys
-_BASE_DIR = (Path(_sys.executable).parent if getattr(_sys, 'frozen', False)
-             else Path(__file__).resolve().parents[2])   # project root
-_SKILLS_DIR   = _BASE_DIR / "config" / "skills"
+
+_BASE_DIR = (
+    Path(_sys.executable).parent
+    if getattr(_sys, "frozen", False)
+    else Path(__file__).resolve().parents[2]
+)  # project root
+_SKILLS_DIR = _BASE_DIR / "config" / "skills"
 _RATINGS_FILE = _BASE_DIR / "config" / "skill_ratings.json"
-_PACKS_DIR    = _BASE_DIR / "config" / "skill_packs"
+_PACKS_DIR = _BASE_DIR / "config" / "skill_packs"
 
 _SKILLS_DIR.mkdir(parents=True, exist_ok=True)
 _PACKS_DIR.mkdir(parents=True, exist_ok=True)
@@ -63,18 +68,25 @@ _PACKS_DIR.mkdir(parents=True, exist_ok=True)
 # ── 懒加载辅助 ────────────────────────────────────────────────────────────────
 def _sm():
     from app.core.skills.skill_manager import SkillManager
+
     return SkillManager
 
+
 def _schema():
-    from app.core.skills.skill_schema import SkillDefinition, InputVariable, OutputSpec
+    from app.core.skills.skill_schema import InputVariable, OutputSpec, SkillDefinition
+
     return SkillDefinition, InputVariable, OutputSpec
+
 
 def _auto_builder():
     from app.core.skills.skill_auto_builder import SkillAutoBuilder, SkillPackager
+
     return SkillAutoBuilder, SkillPackager
+
 
 def _recorder():
     from app.core.skills.skill_recorder import SkillRecorder
+
     return SkillRecorder
 
 
@@ -87,8 +99,12 @@ def _load_ratings() -> Dict[str, Any]:
             pass
     return {}
 
+
 def _save_ratings(data: Dict):
-    _RATINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _RATINGS_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
 
 def _get_skill_rating(skill_id: str) -> Dict:
     ratings = _load_ratings()
@@ -99,10 +115,7 @@ def _get_skill_rating(skill_id: str) -> Dict:
 def _enrich_skill(skill_dict: Dict, is_builtin: bool = False) -> Dict:
     skill_id = skill_dict.get("id", "")
     rating = _get_skill_rating(skill_id)
-    is_installed = (
-        is_builtin
-        or (_SKILLS_DIR / f"{skill_id}.json").exists()
-    )
+    is_installed = is_builtin or (_SKILLS_DIR / f"{skill_id}.json").exists()
     return {
         **skill_dict,
         "is_builtin": is_builtin,
@@ -116,6 +129,7 @@ def _enrich_skill(skill_dict: Dict, is_builtin: bool = False) -> Dict:
 # GET /api/skillmarket/catalog
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @marketplace_bp.route("/catalog", methods=["GET"])
 def get_catalog():
     """
@@ -126,10 +140,10 @@ def get_catalog():
       tag         - 按标签过滤（可多次传入）
       author      - 按作者过滤
     """
-    category_filter    = request.args.get("category", "").strip().lower()
-    nature_filter      = request.args.get("skill_nature", "").strip().lower()
-    tag_filter         = request.args.getlist("tag")
-    author_filter      = request.args.get("author", "").strip().lower()
+    category_filter = request.args.get("category", "").strip().lower()
+    nature_filter = request.args.get("skill_nature", "").strip().lower()
+    tag_filter = request.args.getlist("tag")
+    author_filter = request.args.get("author", "").strip().lower()
 
     try:
         sm = _sm()
@@ -143,7 +157,9 @@ def get_catalog():
             # 同步启用状态
             leg = sm._registry.get(skill_id, {})
             d["enabled"] = leg.get("enabled", skill_def.enabled)
-            all_skills.append(_enrich_skill(d, is_builtin=(d.get("author") == "builtin")))
+            all_skills.append(
+                _enrich_skill(d, is_builtin=(d.get("author") == "builtin"))
+            )
 
         # 安全过滤
         result = []
@@ -163,16 +179,20 @@ def get_catalog():
         # 按性质+分类排序：model_hint 先，domain_skill 后；同性质内按 category 顺序
         nature_order = {"model_hint": 0, "domain_skill": 1, "system": 2}
         cat_order = {"behavior": 0, "style": 1, "domain": 2, "workflow": 3, "custom": 4}
-        result.sort(key=lambda x: (
-            nature_order.get(x.get("skill_nature", ""), 9),
-            cat_order.get(x.get("category", ""), 99),
-        ))
+        result.sort(
+            key=lambda x: (
+                nature_order.get(x.get("skill_nature", ""), 9),
+                cat_order.get(x.get("category", ""), 99),
+            )
+        )
 
-        return jsonify({
-            "success": True,
-            "total": len(result),
-            "skills": result,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "total": len(result),
+                "skills": result,
+            }
+        )
     except Exception as e:
         logger.exception("[skillmarket/catalog]")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -181,6 +201,7 @@ def get_catalog():
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skillmarket/library
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/library", methods=["GET"])
 def get_library():
@@ -196,11 +217,13 @@ def get_library():
             except Exception as e:
                 logger.warning(f"[library] 解析 {skill_file.name} 失败: {e}")
 
-        return jsonify({
-            "success": True,
-            "total": len(skills),
-            "skills": skills,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "total": len(skills),
+                "skills": skills,
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -211,10 +234,17 @@ def get_library():
 
 # 精选推荐列表（静态配置 + 动态评分加权）
 _FEATURED_IDS = [
-    "step_by_step", "teaching_mode", "strict_mode",
-    "code_best_practices", "creative_writing", "concise_mode",
-    "professional_tone", "emoji_assist", "data_analysis",
+    "step_by_step",
+    "teaching_mode",
+    "strict_mode",
+    "code_best_practices",
+    "creative_writing",
+    "concise_mode",
+    "professional_tone",
+    "emoji_assist",
+    "data_analysis",
 ]
+
 
 @marketplace_bp.route("/featured", methods=["GET"])
 def get_featured():
@@ -240,6 +270,7 @@ def get_featured():
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skillmarket/search
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/search", methods=["GET"])
 def search_skills():
@@ -281,7 +312,9 @@ def search_skills():
         for r in results:
             r.pop("_score", None)
 
-        return jsonify({"success": True, "query": q, "total": len(results), "skills": results})
+        return jsonify(
+            {"success": True, "query": q, "total": len(results), "skills": results}
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -289,6 +322,7 @@ def search_skills():
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/auto-build
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/auto-build", methods=["POST"])
 def auto_build():
@@ -331,8 +365,7 @@ def auto_build():
         SkillAutoBuilder, SkillPackager = _auto_builder()
         personalize = bool(data.get("personalize", True))
         personalization_context = (
-            SkillAutoBuilder.load_personalization_context()
-            if personalize else None
+            SkillAutoBuilder.load_personalization_context() if personalize else None
         )
         personalization_applied = personalize and bool(
             (personalization_context or {}).get("communication_style")
@@ -341,8 +374,14 @@ def auto_build():
 
         # 检查是否有手动维度覆盖
         manual_dims = {
-            "formality", "verbosity", "empathy", "structure",
-            "creativity", "positivity", "proactivity", "humor",
+            "formality",
+            "verbosity",
+            "empathy",
+            "structure",
+            "creativity",
+            "positivity",
+            "proactivity",
+            "humor",
         }
         has_manual = any(k in data for k in manual_dims)
 
@@ -399,19 +438,29 @@ def auto_build():
             try:
                 SkillRecorder.save_and_register(skill, overwrite=overwrite)
             except FileExistsError:
-                return jsonify({
-                    "success": False,
-                    "error": f"Skill '{skill.id}' 已存在，传 overwrite:true 覆盖",
-                    "skill_id": skill.id,
-                }), 409
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": f"Skill '{skill.id}' 已存在，传 overwrite:true 覆盖",
+                            "skill_id": skill.id,
+                        }
+                    ),
+                    409,
+                )
 
-        return jsonify({
-            "success": True,
-            "skill_id": skill.id,
-            "skill": skill.to_dict(),
-            "saved": data.get("save", True),
-            "personalization_applied": personalization_applied,
-        }), 201
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "skill_id": skill.id,
+                    "skill": skill.to_dict(),
+                    "saved": data.get("save", True),
+                    "personalization_applied": personalization_applied,
+                }
+            ),
+            201,
+        )
 
     except Exception as e:
         logger.exception("[skillmarket/auto-build]")
@@ -421,6 +470,7 @@ def auto_build():
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/preview-prompt
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/preview-prompt", methods=["POST"])
 def preview_prompt():
@@ -436,8 +486,7 @@ def preview_prompt():
         SkillAutoBuilder, _ = _auto_builder()
         personalize = bool(data.get("personalize", True))
         personalization_context = (
-            SkillAutoBuilder.load_personalization_context()
-            if personalize else None
+            SkillAutoBuilder.load_personalization_context() if personalize else None
         )
         personalization_applied = personalize and bool(
             (personalization_context or {}).get("communication_style")
@@ -458,7 +507,13 @@ def preview_prompt():
             personalize=personalize,
             personalization_context=personalization_context,
         )
-        return jsonify({"success": True, "personalization_applied": personalization_applied, **result})
+        return jsonify(
+            {
+                "success": True,
+                "personalization_applied": personalization_applied,
+                **result,
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -466,6 +521,7 @@ def preview_prompt():
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/from-session
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/from-session", methods=["POST"])
 def from_session():
@@ -496,19 +552,31 @@ def from_session():
         if data.get("save", True):
             SkillRecorder = _recorder()
             try:
-                SkillRecorder.save_and_register(skill, overwrite=data.get("overwrite", False))
+                SkillRecorder.save_and_register(
+                    skill, overwrite=data.get("overwrite", False)
+                )
             except FileExistsError:
-                return jsonify({
-                    "success": False,
-                    "error": f"Skill '{skill.id}' 已存在，传 overwrite:true 覆盖",
-                }), 409
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "error": f"Skill '{skill.id}' 已存在，传 overwrite:true 覆盖",
+                        }
+                    ),
+                    409,
+                )
 
-        return jsonify({
-            "success": True,
-            "skill_id": skill.id,
-            "skill": skill.to_dict(),
-            "source_session": session_id,
-        }), 201
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "skill_id": skill.id,
+                    "skill": skill.to_dict(),
+                    "source_session": session_id,
+                }
+            ),
+            201,
+        )
 
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 404
@@ -520,6 +588,7 @@ def from_session():
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/install
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/install", methods=["POST"])
 def install_skill():
@@ -540,12 +609,23 @@ def install_skill():
             skill = SkillDefinition.from_dict(data)
             overwrite = data.pop("_overwrite", False)
             sid = SkillRecorder.save_and_register(skill, overwrite=overwrite)
-            return jsonify({"success": True, "skill_id": sid, "skill": skill.to_dict()}), 201
+            return (
+                jsonify({"success": True, "skill_id": sid, "skill": skill.to_dict()}),
+                201,
+            )
 
         # 方式 2：文件上传
         file = request.files.get("file")
         if not file:
-            return jsonify({"success": False, "error": "需要提供 JSON body 或上传 .kotosk 文件"}), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "需要提供 JSON body 或上传 .kotosk 文件",
+                    }
+                ),
+                400,
+            )
 
         filename = file.filename or ""
         if not filename.endswith(".kotosk"):
@@ -572,12 +652,17 @@ def install_skill():
             except Exception as e:
                 errors.append(f"'{skill.id}' 失败: {e}")
 
-        return jsonify({
-            "success": True,
-            "manifest": manifest,
-            "installed": installed,
-            "skipped_errors": errors,
-        }), 201
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "manifest": manifest,
+                    "installed": installed,
+                    "skipped_errors": errors,
+                }
+            ),
+            201,
+        )
 
     except Exception as e:
         logger.exception("[skillmarket/install]")
@@ -588,6 +673,7 @@ def install_skill():
 # POST /api/skillmarket/uninstall/<id>
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @marketplace_bp.route("/uninstall/<skill_id>", methods=["POST", "DELETE"])
 def uninstall_skill(skill_id: str):
     """卸载自定义 Skill（内置 Skill 不可删除）"""
@@ -597,10 +683,15 @@ def uninstall_skill(skill_id: str):
     # 检查是否内置
     skill_def = sm._def_registry.get(skill_id)
     if skill_def and getattr(skill_def, "author", "") == "builtin":
-        return jsonify({
-            "success": False,
-            "error": "内置 Skill 不可卸载，可以禁用它",
-        }), 400
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "内置 Skill 不可卸载，可以禁用它",
+                }
+            ),
+            400,
+        )
 
     skill_file = _SKILLS_DIR / f"{skill_id}.json"
     if not skill_file.exists():
@@ -618,6 +709,7 @@ def uninstall_skill(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/toggle/<id>
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/toggle/<skill_id>", methods=["POST"])
 def toggle_skill(skill_id: str):
@@ -637,7 +729,9 @@ def toggle_skill(skill_id: str):
         try:
             d = json.loads(skill_file.read_text(encoding="utf-8"))
             d["enabled"] = enabled
-            skill_file.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+            skill_file.write_text(
+                json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         except Exception as e:
             logger.warning(f"[toggle] 同步文件失败: {e}")
 
@@ -647,6 +741,7 @@ def toggle_skill(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # PUT /api/skillmarket/edit/<id>
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/edit/<skill_id>", methods=["PUT"])
 def edit_skill(skill_id: str):
@@ -660,10 +755,15 @@ def edit_skill(skill_id: str):
 
     skill_def = sm._def_registry.get(skill_id)
     if skill_def and getattr(skill_def, "author", "") == "builtin":
-        return jsonify({
-            "success": False,
-            "error": "内置 Skill 不可直接修改。请先使用「克隆」功能创建副本",
-        }), 400
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "内置 Skill 不可直接修改。请先使用「克隆」功能创建副本",
+                }
+            ),
+            400,
+        )
 
     skill_file = _SKILLS_DIR / f"{skill_id}.json"
     if not skill_file.exists():
@@ -674,9 +774,17 @@ def edit_skill(skill_id: str):
         existing = json.loads(skill_file.read_text(encoding="utf-8"))
 
         editable = [
-            "name", "description", "icon", "system_prompt_template",
-            "prompt", "tags", "input_variables", "output_spec",
-            "intent_description", "task_types", "bound_tools",
+            "name",
+            "description",
+            "icon",
+            "system_prompt_template",
+            "prompt",
+            "tags",
+            "input_variables",
+            "output_spec",
+            "intent_description",
+            "task_types",
+            "bound_tools",
         ]
         changed = False
         for field in editable:
@@ -685,10 +793,15 @@ def edit_skill(skill_id: str):
                 changed = True
 
         if not changed:
-            return jsonify({"success": False, "error": "请提供至少一个可更新的字段"}), 400
+            return (
+                jsonify({"success": False, "error": "请提供至少一个可更新的字段"}),
+                400,
+            )
 
         existing["updated_at"] = datetime.now(timezone.utc).isoformat()
-        skill_file.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+        skill_file.write_text(
+            json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
         # 重新注册到 SkillManager
         SkillDefinition, _, _ = _schema()
@@ -704,6 +817,7 @@ def edit_skill(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/duplicate/<id>
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/duplicate/<skill_id>", methods=["POST"])
 def duplicate_skill(skill_id: str):
@@ -724,16 +838,18 @@ def duplicate_skill(skill_id: str):
 
     try:
         import copy
+
         new_def = copy.deepcopy(skill_def)
         new_def.name = new_name
         new_def.author = new_author
 
         # 生成新 ID（防止与原始冲突）
         from app.core.skills.skill_auto_builder import _make_skill_id
+
         base_id = _make_skill_id(new_name)
         new_id = base_id
         counter = 1
-        while (sm._def_registry.get(new_id) or (_SKILLS_DIR / f"{new_id}.json").exists()):
+        while sm._def_registry.get(new_id) or (_SKILLS_DIR / f"{new_id}.json").exists():
             new_id = f"{base_id}_{counter}"
             counter += 1
         new_def.id = new_id
@@ -742,7 +858,12 @@ def duplicate_skill(skill_id: str):
         SkillRecorder = _recorder()
         SkillRecorder.save_and_register(new_def, overwrite=False)
 
-        return jsonify({"success": True, "new_skill_id": new_id, "skill": new_def.to_dict()}), 201
+        return (
+            jsonify(
+                {"success": True, "new_skill_id": new_id, "skill": new_def.to_dict()}
+            ),
+            201,
+        )
     except Exception as e:
         logger.exception("[skillmarket/duplicate]")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -751,6 +872,7 @@ def duplicate_skill(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skillmarket/export/<id>
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/export/<skill_id>", methods=["GET"])
 def export_skill(skill_id: str):
@@ -799,6 +921,7 @@ def export_skill(skill_id: str):
 # GET /api/skillmarket/export-pack
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @marketplace_bp.route("/export-pack", methods=["GET"])
 def export_pack():
     """
@@ -812,7 +935,12 @@ def export_pack():
     ids_list = [i.strip() for i in ids_list if i.strip()]
 
     if not ids_list:
-        return jsonify({"success": False, "error": "请通过 ids 或 ids[] 指定要导出的 Skill ID"}), 400
+        return (
+            jsonify(
+                {"success": False, "error": "请通过 ids 或 ids[] 指定要导出的 Skill ID"}
+            ),
+            400,
+        )
 
     sm = _sm()
     sm._ensure_init()
@@ -827,7 +955,16 @@ def export_pack():
             missing.append(sid)
 
     if not skills_to_pack:
-        return jsonify({"success": False, "error": "未找到任何指定的 Skill", "missing": missing}), 404
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "未找到任何指定的 Skill",
+                    "missing": missing,
+                }
+            ),
+            404,
+        )
 
     try:
         _, SkillPackager = _auto_builder()
@@ -836,7 +973,9 @@ def export_pack():
         ) as tmp:
             tmp_path = tmp.name
 
-        pack_name = request.args.get("pack_name", f"koto-skill-pack-{len(skills_to_pack)}")
+        pack_name = request.args.get(
+            "pack_name", f"koto-skill-pack-{len(skills_to_pack)}"
+        )
         SkillPackager.pack(
             skills=skills_to_pack,
             output_path=tmp_path,
@@ -859,6 +998,7 @@ def export_pack():
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/import
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/import", methods=["POST"])
 def import_pack():
@@ -899,14 +1039,16 @@ def import_pack():
             except Exception as e:
                 errors_list.append({"id": skill.id, "error": str(e)})
 
-        return jsonify({
-            "success": True,
-            "manifest": manifest,
-            "installed": installed,
-            "skipped": skipped,
-            "errors": errors_list,
-            "total": len(skills),
-        })
+        return jsonify(
+            {
+                "success": True,
+                "manifest": manifest,
+                "installed": installed,
+                "skipped": skipped,
+                "errors": errors_list,
+                "total": len(skills),
+            }
+        )
     except Exception as e:
         logger.exception("[skillmarket/import]")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -915,6 +1057,7 @@ def import_pack():
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/rate/<id>
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/rate/<skill_id>", methods=["POST"])
 def rate_skill(skill_id: str):
@@ -930,23 +1073,27 @@ def rate_skill(skill_id: str):
     try:
         ratings = _load_ratings()
         entry = ratings.get(skill_id, {"avg": 0.0, "count": 0, "votes": []})
-        entry["votes"].append({
-            "score": score,
-            "comment": data.get("comment", ""),
-            "ts": datetime.now(timezone.utc).isoformat(),
-        })
+        entry["votes"].append(
+            {
+                "score": score,
+                "comment": data.get("comment", ""),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         total = sum(v["score"] for v in entry["votes"])
         entry["count"] = len(entry["votes"])
         entry["avg"] = round(total / entry["count"], 2)
         ratings[skill_id] = entry
         _save_ratings(ratings)
 
-        return jsonify({
-            "success": True,
-            "skill_id": skill_id,
-            "avg": entry["avg"],
-            "count": entry["count"],
-        })
+        return jsonify(
+            {
+                "success": True,
+                "skill_id": skill_id,
+                "avg": entry["avg"],
+                "count": entry["count"],
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -954,6 +1101,7 @@ def rate_skill(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skillmarket/stats
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/stats", methods=["GET"])
 def get_stats():
@@ -989,16 +1137,18 @@ def get_stats():
                 sum(v.get("avg", 0) for v in ratings.values()) / len(ratings), 2
             )
 
-        return jsonify({
-            "success": True,
-            "total_skills": total,
-            "builtin_skills": builtin_count,
-            "custom_skills": custom_count,
-            "enabled_skills": enabled_count,
-            "by_category": by_category,
-            "avg_rating": avg_rating,
-            "rated_count": len(ratings),
-        })
+        return jsonify(
+            {
+                "success": True,
+                "total_skills": total,
+                "builtin_skills": builtin_count,
+                "custom_skills": custom_count,
+                "enabled_skills": enabled_count,
+                "by_category": by_category,
+                "avg_rating": avg_rating,
+                "rated_count": len(ratings),
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1006,6 +1156,7 @@ def get_stats():
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skillmarket/suggest   —   智能 Skill 推荐
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/suggest", methods=["GET"])
 def suggest_skills():
@@ -1037,12 +1188,14 @@ def suggest_skills():
             top_k=top_k,
             exclude_enabled=(not include_enabled),
         )
-        return jsonify({
-            "success": True,
-            "query": q,
-            "count": len(suggestions),
-            "suggestions": suggestions,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "query": q,
+                "count": len(suggestions),
+                "suggestions": suggestions,
+            }
+        )
     except Exception as e:
         logger.exception("[skillmarket/suggest]")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1051,6 +1204,7 @@ def suggest_skills():
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skillmarket/check-conflicts/<id>   —   冲突检测
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/check-conflicts/<skill_id>", methods=["GET"])
 def check_conflicts(skill_id: str):
@@ -1075,6 +1229,7 @@ def check_conflicts(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/validate-response   —   对 AI 回复做 Skill OutputSpec 验收
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/validate-response", methods=["POST"])
 def validate_response():
@@ -1110,6 +1265,7 @@ def validate_response():
 # GET /api/skillmarket/status   —   Skill 库状态摘要（供 UI 面板使用）
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @marketplace_bp.route("/status", methods=["GET"])
 def skill_status():
     """
@@ -1133,11 +1289,13 @@ _ROLLBACK_DIR.mkdir(parents=True, exist_ok=True)
 
 def _compare_versions(v1: str, v2: str) -> int:
     """简单版本比较：v1 > v2 → 1；== → 0；< → -1。"""
+
     def _parts(v: str):
         try:
             return [int(x) for x in v.strip().lstrip("v").split(".")]
         except Exception:
             return [0]
+
     for a, b in zip(_parts(v1), _parts(v2)):
         if a > b:
             return 1
@@ -1150,6 +1308,7 @@ def _compare_versions(v1: str, v2: str) -> int:
 # POST /api/skillmarket/check-updates
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @marketplace_bp.route("/check-updates", methods=["POST"])
 def check_updates():
     """
@@ -1157,8 +1316,8 @@ def check_updates():
     对每个有 update_url 字段的 Skill，发起 HTTPS GET 获取最新 manifest，
     对比版本号后返回有更新的列表。
     """
-    import urllib.request
     import ssl
+    import urllib.request
 
     sm = _sm()
     sm._ensure_init()
@@ -1185,28 +1344,33 @@ def check_updates():
             remote_version = remote.get("version", "0.0.0")
             current_version = getattr(skill_def, "version", "0.0.0") or "0.0.0"
             if _compare_versions(remote_version, current_version) > 0:
-                updates_available.append({
-                    "skill_id": skill_id,
-                    "name": skill_def.name,
-                    "current_version": current_version,
-                    "latest_version": remote_version,
-                    "update_url": update_url,
-                    "changelog": remote.get("changelog", ""),
-                })
+                updates_available.append(
+                    {
+                        "skill_id": skill_id,
+                        "name": skill_def.name,
+                        "current_version": current_version,
+                        "latest_version": remote_version,
+                        "update_url": update_url,
+                        "changelog": remote.get("changelog", ""),
+                    }
+                )
         except Exception as exc:
             errors.append({"skill_id": skill_id, "error": str(exc)})
 
-    return jsonify({
-        "success": True,
-        "updates_available": len(updates_available),
-        "updates": updates_available,
-        "errors": errors,
-    })
+    return jsonify(
+        {
+            "success": True,
+            "updates_available": len(updates_available),
+            "updates": updates_available,
+            "errors": errors,
+        }
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/update/<id>
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/update/<skill_id>", methods=["POST"])
 def update_skill(skill_id: str):
@@ -1214,8 +1378,8 @@ def update_skill(skill_id: str):
     从 update_url 拉取最新版本并安装（先备份当前版本以支持回滚）。
     Body (可选): { "force": true }
     """
-    import urllib.request
     import ssl
+    import urllib.request
 
     sm = _sm()
     sm._ensure_init()
@@ -1248,11 +1412,13 @@ def update_skill(skill_id: str):
         current_version = getattr(skill_def, "version", "0.0.0") or "0.0.0"
 
         if not force and _compare_versions(remote_version, current_version) <= 0:
-            return jsonify({
-                "success": True,
-                "updated": False,
-                "message": f"当前已是最新版本 ({current_version})",
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "updated": False,
+                    "message": f"当前已是最新版本 ({current_version})",
+                }
+            )
 
         # 备份当前版本
         skill_file = _SKILLS_DIR / f"{skill_id}.json"
@@ -1267,13 +1433,15 @@ def update_skill(skill_id: str):
         SkillDefinition, _, _ = _schema()
         sm.register_custom(SkillDefinition.from_dict(remote_data))
 
-        return jsonify({
-            "success": True,
-            "updated": True,
-            "skill_id": skill_id,
-            "from_version": current_version,
-            "to_version": remote_version,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "updated": True,
+                "skill_id": skill_id,
+                "from_version": current_version,
+                "to_version": remote_version,
+            }
+        )
     except Exception as exc:
         logger.exception("[skillmarket/update/%s]", skill_id)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -1282,6 +1450,7 @@ def update_skill(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skillmarket/rollback/<id>
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/rollback/<skill_id>", methods=["POST"])
 def rollback_skill(skill_id: str):
@@ -1307,11 +1476,16 @@ def rollback_skill(skill_id: str):
         match = _ROLLBACK_DIR / f"{skill_id}_v{target_version}.json"
         if not match.exists():
             available = [b.stem.split("_v", 1)[-1] for b in backups]
-            return jsonify({
-                "success": False,
-                "error": f"未找到版本 {target_version} 的备份",
-                "available_versions": available,
-            }), 404
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"未找到版本 {target_version} 的备份",
+                        "available_versions": available,
+                    }
+                ),
+                404,
+            )
         backup_file = match
     else:
         backup_file = backups[0]
@@ -1331,12 +1505,14 @@ def rollback_skill(skill_id: str):
         SkillDefinition, _, _ = _schema()
         sm.register_custom(SkillDefinition.from_dict(backup_data))
 
-        return jsonify({
-            "success": True,
-            "skill_id": skill_id,
-            "rolled_back_to": backup_data.get("version", "unknown"),
-            "previous_version": current_version,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "skill_id": skill_id,
+                "rolled_back_to": backup_data.get("version", "unknown"),
+                "previous_version": current_version,
+            }
+        )
     except Exception as exc:
         logger.exception("[skillmarket/rollback/%s]", skill_id)
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -1350,12 +1526,14 @@ def rollback_history(skill_id: str):
     for b in backups:
         try:
             d = json.loads(b.read_text(encoding="utf-8"))
-            result.append({
-                "version": d.get("version", "unknown"),
-                "backup_file": b.name,
-                "updated_at": d.get("updated_at", ""),
-                "name": d.get("name", skill_id),
-            })
+            result.append(
+                {
+                    "version": d.get("version", "unknown"),
+                    "backup_file": b.name,
+                    "updated_at": d.get("updated_at", ""),
+                    "name": d.get("name", skill_id),
+                }
+            )
         except Exception:
             result.append({"backup_file": b.name, "error": "无法解析"})
     return jsonify({"skill_id": skill_id, "backups": result})
@@ -1364,6 +1542,7 @@ def rollback_history(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skillmarket/dependencies/<id>
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/dependencies/<skill_id>", methods=["GET"])
 def get_dependencies(skill_id: str):
@@ -1399,6 +1578,7 @@ def get_dependencies(skill_id: str):
 # POST /api/skillmarket/verify/<id>
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @marketplace_bp.route("/verify/<skill_id>", methods=["POST"])
 def verify_skill(skill_id: str):
     """
@@ -1415,9 +1595,17 @@ def verify_skill(skill_id: str):
         return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
 
     data_body = request.get_json(silent=True) or {}
-    allowed_permissions = set(data_body.get("allowed_permissions", [
-        "file_read", "network", "clipboard", "agent_call",
-    ]))
+    allowed_permissions = set(
+        data_body.get(
+            "allowed_permissions",
+            [
+                "file_read",
+                "network",
+                "clipboard",
+                "agent_call",
+            ],
+        )
+    )
 
     results = []
     passed = True
@@ -1428,49 +1616,62 @@ def verify_skill(skill_id: str):
     if min_ver:
         koto_ver = "1.0.0"  # 当前 Koto 版本占位
         ok = _compare_versions(koto_ver, min_ver) >= 0
-        results.append({
-            "check": "koto_version",
-            "passed": ok,
-            "detail": f"要求 >= {min_ver}，当前 {koto_ver}",
-        })
+        results.append(
+            {
+                "check": "koto_version",
+                "passed": ok,
+                "detail": f"要求 >= {min_ver}，当前 {koto_ver}",
+            }
+        )
         if not ok:
             passed = False
 
     # 2. 依赖状态
-    for dep_id in (getattr(skill_def, "dependencies", None) or []):
+    for dep_id in getattr(skill_def, "dependencies", None) or []:
         dep = sm._def_registry.get(dep_id)
         dep_enabled = dep and sm._registry.get(dep_id, {}).get("enabled", dep.enabled)
         ok = bool(dep_enabled)
-        results.append({
-            "check": f"dependency:{dep_id}",
-            "passed": ok,
-            "detail": "已安装并启用" if ok else ("未安装" if not dep else "已安装但未启用"),
-        })
+        results.append(
+            {
+                "check": f"dependency:{dep_id}",
+                "passed": ok,
+                "detail": (
+                    "已安装并启用"
+                    if ok
+                    else ("未安装" if not dep else "已安装但未启用")
+                ),
+            }
+        )
         if not ok:
             passed = False
 
     # 3. 权限检查
-    for perm in (getattr(skill_def, "permissions", None) or []):
+    for perm in getattr(skill_def, "permissions", None) or []:
         ok = perm in allowed_permissions
-        results.append({
-            "check": f"permission:{perm}",
-            "passed": ok,
-            "detail": "在允许列表内" if ok else f"权限 '{perm}' 未授权",
-        })
+        results.append(
+            {
+                "check": f"permission:{perm}",
+                "passed": ok,
+                "detail": "在允许列表内" if ok else f"权限 '{perm}' 未授权",
+            }
+        )
         if not ok:
             passed = False
 
-    return jsonify({
-        "success": True,
-        "skill_id": skill_id,
-        "verified": passed,
-        "checks": results,
-    })
+    return jsonify(
+        {
+            "success": True,
+            "skill_id": skill_id,
+            "verified": passed,
+            "checks": results,
+        }
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skillmarket/sessions  —  列出可用的对话会话（供创作工坊使用）
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/sessions", methods=["GET"])
 def list_sessions():
@@ -1482,13 +1683,19 @@ def list_sessions():
     sessions = []
 
     if chats_dir.exists():
-        for chat_file in sorted(chats_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        for chat_file in sorted(
+            chats_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+        ):
             try:
                 data = json.loads(chat_file.read_text(encoding="utf-8"))
                 session_id = chat_file.stem
 
                 # 支持多种 JSON 结构
-                messages = data if isinstance(data, list) else data.get("messages", data.get("history", []))
+                messages = (
+                    data
+                    if isinstance(data, list)
+                    else data.get("messages", data.get("history", []))
+                )
                 msg_count = len(messages) if isinstance(messages, list) else 0
 
                 # 取首条用户消息作为标题预览
@@ -1502,28 +1709,33 @@ def list_sessions():
                                 title = str(content)[:60]
                                 break
 
-                sessions.append({
-                    "session_id": session_id,
-                    "title": title,
-                    "message_count": msg_count,
-                    "updated_at": datetime.fromtimestamp(
-                        chat_file.stat().st_mtime
-                    ).strftime("%Y-%m-%d %H:%M"),
-                    "file_name": chat_file.name,
-                })
+                sessions.append(
+                    {
+                        "session_id": session_id,
+                        "title": title,
+                        "message_count": msg_count,
+                        "updated_at": datetime.fromtimestamp(
+                            chat_file.stat().st_mtime
+                        ).strftime("%Y-%m-%d %H:%M"),
+                        "file_name": chat_file.name,
+                    }
+                )
             except Exception as e:
                 logger.debug(f"[sessions] 跳过 {chat_file.name}: {e}")
 
-    return jsonify({
-        "success": True,
-        "total": len(sessions),
-        "sessions": sessions,
-    })
+    return jsonify(
+        {
+            "success": True,
+            "total": len(sessions),
+            "sessions": sessions,
+        }
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skillmarket/active  —  返回当前已激活的 Skill 列表（供聊天 UI 使用）
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @marketplace_bp.route("/active", methods=["GET"])
 def get_active_skills():
@@ -1546,23 +1758,35 @@ def get_active_skills():
             if skill_id in HIDDEN_FROM_PILL_BAR:
                 continue
             if s.get("enabled", False):
-                active.append({
-                    "id": skill_id,
-                    "name": s.get("name", skill_id),
-                    "icon": s.get("icon", "🔧"),
-                    "category": s.get("category", "custom"),
-                    "description": s.get("description", ""),
-                    "has_template": bool(s.get("template_path") or
-                        (_BASE_DIR / "config" / "skill_templates" / skill_id / "template.docx").exists()),
-                    "suppressed": skill_id in suppressed_ids,
-                })
+                active.append(
+                    {
+                        "id": skill_id,
+                        "name": s.get("name", skill_id),
+                        "icon": s.get("icon", "🔧"),
+                        "category": s.get("category", "custom"),
+                        "description": s.get("description", ""),
+                        "has_template": bool(
+                            s.get("template_path")
+                            or (
+                                _BASE_DIR
+                                / "config"
+                                / "skill_templates"
+                                / skill_id
+                                / "template.docx"
+                            ).exists()
+                        ),
+                        "suppressed": skill_id in suppressed_ids,
+                    }
+                )
 
-        return jsonify({
-            "success": True,
-            "count": len(active),
-            "skills": active,
-            "conflicts": conflicts,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "count": len(active),
+                "skills": active,
+                "conflicts": conflicts,
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1577,18 +1801,22 @@ def get_skill_conflicts():
         task_type = request.args.get("task_type")
         sm = _sm()
         conflicts = sm.check_conflicts(task_type=task_type)
-        return jsonify({
-            "success": True,
-            "conflict_count": len(conflicts),
-            "conflicts": conflicts,
-            "summary": (
-                f"检测到 {len(conflicts)} 处冲突：" +
-                "；".join(
-                    f"「{c['winner_name']}」抑制「{c['loser_name']}」"
-                    for c in conflicts
-                ) if conflicts else "当前无冲突"
-            ),
-        })
+        return jsonify(
+            {
+                "success": True,
+                "conflict_count": len(conflicts),
+                "conflicts": conflicts,
+                "summary": (
+                    f"检测到 {len(conflicts)} 处冲突："
+                    + "；".join(
+                        f"「{c['winner_name']}」抑制「{c['loser_name']}」"
+                        for c in conflicts
+                    )
+                    if conflicts
+                    else "当前无冲突"
+                ),
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1598,7 +1826,7 @@ def get_skill_conflicts():
 # ══════════════════════════════════════════════════════════════════════════════
 
 _TMPL_ROOT = _BASE_DIR / "config" / "skill_templates"
-_TMPL_OUT  = _BASE_DIR / "config" / "skill_template_outputs"
+_TMPL_OUT = _BASE_DIR / "config" / "skill_template_outputs"
 
 ALLOWED_TMPL_EXTENSIONS = {".docx"}
 MAX_TMPL_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -1635,7 +1863,12 @@ def upload_skill_template():
 
         ext = Path(f.filename).suffix.lower()
         if ext not in ALLOWED_TMPL_EXTENSIONS:
-            return jsonify({"success": False, "error": f"仅支持 .docx 格式，不接受 {ext}"}), 400
+            return (
+                jsonify(
+                    {"success": False, "error": f"仅支持 .docx 格式，不接受 {ext}"}
+                ),
+                400,
+            )
 
         # 读取并校验大小
         data = f.read()
@@ -1650,6 +1883,7 @@ def upload_skill_template():
 
         # 解析字段
         from app.core.skills.template_engine import TemplateEngine
+
         fields = TemplateEngine.parse_fields(tmpl_path)
         preview = TemplateEngine.get_raw_text(tmpl_path)
 
@@ -1661,7 +1895,8 @@ def upload_skill_template():
                 Path("config") / "skill_templates" / skill_id / "template.docx"
             )
             sm._registry[skill_id]["bound_tools"] = list(
-                set(sm._registry[skill_id].get("bound_tools", [])) | {"fill_skill_template", "get_template_fields"}
+                set(sm._registry[skill_id].get("bound_tools", []))
+                | {"fill_skill_template", "get_template_fields"}
             )
             sm._save_states_to_settings()
 
@@ -1674,19 +1909,22 @@ def upload_skill_template():
                     Path("config") / "skill_templates" / skill_id / "template.docx"
                 )
                 sdata["bound_tools"] = list(
-                    set(sdata.get("bound_tools", [])) | {"fill_skill_template", "get_template_fields"}
+                    set(sdata.get("bound_tools", []))
+                    | {"fill_skill_template", "get_template_fields"}
                 )
                 with open(skill_json, "w", encoding="utf-8") as fp:
                     json.dump(sdata, fp, ensure_ascii=False, indent=2)
 
         logger.info(f"[templates/upload] skill={skill_id} fields={fields}")
-        return jsonify({
-            "success": True,
-            "skill_id": skill_id,
-            "fields": fields,
-            "field_count": len(fields),
-            "template_preview": preview[:800],
-        })
+        return jsonify(
+            {
+                "success": True,
+                "skill_id": skill_id,
+                "fields": fields,
+                "field_count": len(fields),
+                "template_preview": preview[:800],
+            }
+        )
     except Exception as e:
         logger.error(f"[templates/upload] {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1702,20 +1940,31 @@ def get_skill_template_info(skill_id: str):
     try:
         tmpl_path = _TMPL_ROOT / skill_id / "template.docx"
         if not tmpl_path.exists():
-            return jsonify({"success": False, "has_template": False,
-                            "message": "该 Skill 尚未绑定 Word 模板"}), 200
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "has_template": False,
+                        "message": "该 Skill 尚未绑定 Word 模板",
+                    }
+                ),
+                200,
+            )
 
         from app.core.skills.template_engine import TemplateEngine
+
         fields = TemplateEngine.parse_fields(tmpl_path)
         preview = TemplateEngine.get_raw_text(tmpl_path)
-        return jsonify({
-            "success": True,
-            "has_template": True,
-            "skill_id": skill_id,
-            "fields": fields,
-            "field_count": len(fields),
-            "template_preview": preview[:800],
-        })
+        return jsonify(
+            {
+                "success": True,
+                "has_template": True,
+                "skill_id": skill_id,
+                "fields": fields,
+                "field_count": len(fields),
+                "template_preview": preview[:800],
+            }
+        )
     except Exception as e:
         logger.error(f"[templates/info] {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -1747,7 +1996,8 @@ def delete_skill_template(skill_id: str):
                 sdata = json.load(fp)
             sdata.pop("template_path", None)
             sdata["bound_tools"] = [
-                t for t in sdata.get("bound_tools", [])
+                t
+                for t in sdata.get("bound_tools", [])
                 if t not in {"fill_skill_template", "get_template_fields"}
             ]
             with open(skill_json, "w", encoding="utf-8") as fp:
@@ -1782,4 +2032,3 @@ def download_template_output(skill_id: str, filename: str):
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
-

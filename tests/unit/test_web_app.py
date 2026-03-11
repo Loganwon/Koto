@@ -2,19 +2,23 @@
 
 Pure string-logic function — no mocks needed.
 """
+
 from __future__ import annotations
+
 import pytest
 
 
 @pytest.fixture(scope="module")
 def is_failure():
     from web.app import Utils
+
     return Utils.is_failure_output
 
 
 # ---------------------------------------------------------------------------
 # Empty / None / blank inputs
 # ---------------------------------------------------------------------------
+
 
 class TestEmptyInputs:
     def test_none_returns_true(self, is_failure):
@@ -34,6 +38,7 @@ class TestEmptyInputs:
 # Emoji / Chinese failure markers
 # ---------------------------------------------------------------------------
 
+
 class TestFailureMarkers:
     def test_starts_with_x_emoji_returns_true(self, is_failure):
         assert is_failure("❌ Operation failed") is True
@@ -49,19 +54,23 @@ class TestFailureMarkers:
 # Chinese no-internet phrases
 # ---------------------------------------------------------------------------
 
+
 class TestChineseNoInternetPhrases:
-    @pytest.mark.parametrize("phrase", [
-        "没有直接联网",
-        "无法直接联网",
-        "无法联网",
-        "没有联网",
-        "不能联网",
-        "没有实时",
-        "无法获取实时",
-        "不能获取实时",
-        "没有访问互联网",
-        "无法访问互联网",
-    ])
+    @pytest.mark.parametrize(
+        "phrase",
+        [
+            "没有直接联网",
+            "无法直接联网",
+            "无法联网",
+            "没有联网",
+            "不能联网",
+            "没有实时",
+            "无法获取实时",
+            "不能获取实时",
+            "没有访问互联网",
+            "无法访问互联网",
+        ],
+    )
     def test_phrase_returns_true(self, is_failure, phrase):
         assert is_failure(f"很遗憾，我{phrase}所以无法回答。") is True
 
@@ -70,16 +79,20 @@ class TestChineseNoInternetPhrases:
 # English no-internet phrases
 # ---------------------------------------------------------------------------
 
+
 class TestEnglishNoInternetPhrases:
-    @pytest.mark.parametrize("phrase", [
-        "i don't have access to the internet",
-        "i cannot access the internet",
-        "i'm unable to access the internet",
-        "no internet access",
-        "i don't have real-time",
-        "i cannot browse",
-        "i can't browse",
-    ])
+    @pytest.mark.parametrize(
+        "phrase",
+        [
+            "i don't have access to the internet",
+            "i cannot access the internet",
+            "i'm unable to access the internet",
+            "no internet access",
+            "i don't have real-time",
+            "i cannot browse",
+            "i can't browse",
+        ],
+    )
     def test_phrase_returns_true(self, is_failure, phrase):
         assert is_failure(f"Sorry, {phrase} to answer your question.") is True
 
@@ -88,15 +101,19 @@ class TestEnglishNoInternetPhrases:
         assert is_failure("I CANNOT BROWSE the internet for that.") is True
 
     def test_phrase_embedded_in_longer_text(self, is_failure):
-        assert is_failure(
-            "As an AI language model, I cannot browse external websites. "
-            "Please try a search engine."
-        ) is True
+        assert (
+            is_failure(
+                "As an AI language model, I cannot browse external websites. "
+                "Please try a search engine."
+            )
+            is True
+        )
 
 
 # ---------------------------------------------------------------------------
 # Valid / normal outputs that should return False
 # ---------------------------------------------------------------------------
+
 
 class TestValidOutputs:
     def test_normal_text_returns_false(self, is_failure):

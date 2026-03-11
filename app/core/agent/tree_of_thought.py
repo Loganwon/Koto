@@ -99,9 +99,11 @@ _CRITIC_SYSTEM = """你是一位内容质量评审专家（ToT Critic）。
 # 数据类
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class ThoughtBranch:
     """单条思考分支的产出。"""
+
     branch_id: int
     label: str
     content: str
@@ -115,6 +117,7 @@ class ThoughtBranch:
 @dataclass
 class ToTResult:
     """TreeOfThought.run() 的最终结果。"""
+
     winner: ThoughtBranch
     all_branches: List[ThoughtBranch] = field(default_factory=list)
     total_elapsed_sec: float = 0.0
@@ -124,6 +127,7 @@ class ToTResult:
 # ─────────────────────────────────────────────────────────────────────────────
 # 核心引擎
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TreeOfThought:
     """
@@ -163,8 +167,11 @@ class TreeOfThought:
     def _llm_call(self, system: str, user: str, temperature: float = 0.7) -> str:
         """同步 LLM 调用，返回文本。"""
         try:
+            from langchain_core.messages import HumanMessage  # type: ignore
+            from langchain_core.messages import SystemMessage
+
             from app.core.llm.langchain_adapter import KotoLangChainLLM
-            from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore
+
             llm = KotoLangChainLLM(model_id=self.model_id, temperature=temperature)
             msgs = [SystemMessage(content=system), HumanMessage(content=user)]
             resp = llm.invoke(msgs)
@@ -220,7 +227,9 @@ class TreeOfThought:
         branches_text = ""
         for b in branches:
             if not b.error and b.content:
-                branches_text += f"\n\n---\n【分支 {b.branch_id}——{b.label}】\n{b.content[:3000]}"
+                branches_text += (
+                    f"\n\n---\n【分支 {b.branch_id}——{b.label}】\n{b.content[:3000]}"
+                )
 
         if not branches_text.strip():
             logger.warning("[ToT] 所有分支均失败，无法评估")
@@ -233,15 +242,22 @@ class TreeOfThought:
 
         try:
             # 使用评估模型（可能与生成模型不同）
+            from langchain_core.messages import HumanMessage  # type: ignore
+            from langchain_core.messages import SystemMessage
+
             from app.core.llm.langchain_adapter import KotoLangChainLLM
-            from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore
+
             llm = KotoLangChainLLM(model_id=self.evaluator_model, temperature=0.2)
-            msgs = [SystemMessage(content=_CRITIC_SYSTEM), HumanMessage(content=user_msg)]
+            msgs = [
+                SystemMessage(content=_CRITIC_SYSTEM),
+                HumanMessage(content=user_msg),
+            ]
             resp = llm.invoke(msgs)
             raw = resp.content if hasattr(resp, "content") else str(resp)
 
             # 解析 JSON
             import json
+
             # 提取第一个完整 JSON 对象
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if not match:
@@ -295,7 +311,9 @@ class TreeOfThought:
         _t0 = time.time()
         base_system = system_instruction or _get_base_system(task_type)
 
-        logger.info(f"[ToT] 启动 | task={task_type} | branches={self.n_branches} | model={self.model_id}")
+        logger.info(
+            f"[ToT] 启动 | task={task_type} | branches={self.n_branches} | model={self.model_id}"
+        )
 
         # ── Step 1: 并行展开分支 ────────────────────────────────────────────
         branches: List[ThoughtBranch] = []
@@ -376,7 +394,9 @@ class TreeOfThought:
         try:
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = {
-                    executor.submit(self._generate_branch, user_input, p, base_system): p
+                    executor.submit(
+                        self._generate_branch, user_input, p, base_system
+                    ): p
                     for p in self.perspectives
                 }
                 for fut in as_completed(futures, timeout=self.timeout_sec):
@@ -466,6 +486,7 @@ def _get_base_system(task_type: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # 便捷工厂函数
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def create_tot(
     task_type: str = "RESEARCH",

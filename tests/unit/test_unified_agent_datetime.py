@@ -3,6 +3,7 @@
 Verifies that the current local time is prepended to system_instruction
 on every call to run(), so cloud models always receive temporal context.
 """
+
 from __future__ import annotations
 
 import re
@@ -14,7 +15,6 @@ import pytest
 
 from app.core.agent.types import AgentStep, AgentStepType
 from app.core.agent.unified_agent import UnifiedAgent
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,26 +71,26 @@ class TestDatetimeInjection:
         """System instruction sent to LLM must start with a datetime line."""
         agent = _make_agent()
         instruction = _run_and_capture_instruction(agent)
-        assert _DATETIME_PATTERN.search(instruction), (
-            f"Expected datetime prefix in instruction, got: {instruction[:200]!r}"
-        )
+        assert _DATETIME_PATTERN.search(
+            instruction
+        ), f"Expected datetime prefix in instruction, got: {instruction[:200]!r}"
 
     def test_datetime_prefix_is_first_line(self):
         """The datetime prefix must appear at the very beginning of the instruction."""
         agent = _make_agent()
         instruction = _run_and_capture_instruction(agent)
-        assert instruction.startswith("当前本地时间："), (
-            f"Instruction should start with datetime prefix, got: {instruction[:100]!r}"
-        )
+        assert instruction.startswith(
+            "当前本地时间："
+        ), f"Instruction should start with datetime prefix, got: {instruction[:100]!r}"
 
     def test_original_instruction_preserved_after_prefix(self):
         """Custom system_instruction content must still be present after the prefix."""
         custom = "You are a specialized assistant for tests."
         agent = _make_agent(system_instruction=custom)
         instruction = _run_and_capture_instruction(agent)
-        assert custom in instruction, (
-            "Original system instruction was lost after datetime injection."
-        )
+        assert (
+            custom in instruction
+        ), "Original system instruction was lost after datetime injection."
 
     def test_weekday_label_is_correct(self):
         """The injected weekday label must match the frozen datetime's weekday."""
@@ -102,9 +102,9 @@ class TestDatetimeInjection:
             mock_dt.now.return_value = fixed_dt
             instruction = _run_and_capture_instruction(agent)
 
-        assert expected_weekday in instruction, (
-            f"Expected weekday '{expected_weekday}' in instruction, got: {instruction[:200]!r}"
-        )
+        assert (
+            expected_weekday in instruction
+        ), f"Expected weekday '{expected_weekday}' in instruction, got: {instruction[:200]!r}"
 
     def test_date_and_time_values_are_correct(self):
         """The injected date/time string must match the frozen datetime."""
@@ -116,9 +116,9 @@ class TestDatetimeInjection:
             mock_dt.now.return_value = fixed_dt
             instruction = _run_and_capture_instruction(agent)
 
-        assert expected_str in instruction, (
-            f"Expected '{expected_str}' in instruction, got: {instruction[:200]!r}"
-        )
+        assert (
+            expected_str in instruction
+        ), f"Expected '{expected_str}' in instruction, got: {instruction[:200]!r}"
 
     def test_datetime_refreshed_on_each_call(self):
         """Each call to run() must inject a fresh datetime, not a cached one."""
@@ -132,13 +132,17 @@ class TestDatetimeInjection:
             mock_dt.now.return_value = dt1
             for _ in agent.run(input_text="first call"):
                 break
-            instr1 = agent.llm.generate_content.call_args.kwargs.get("system_instruction", "")
+            instr1 = agent.llm.generate_content.call_args.kwargs.get(
+                "system_instruction", ""
+            )
 
         with patch("app.core.agent.unified_agent.datetime") as mock_dt:
             mock_dt.now.return_value = dt2
             for _ in agent.run(input_text="second call"):
                 break
-            instr2 = agent.llm.generate_content.call_args.kwargs.get("system_instruction", "")
+            instr2 = agent.llm.generate_content.call_args.kwargs.get(
+                "system_instruction", ""
+            )
 
         assert "10:00" in instr1, f"First call: expected 10:00 in {instr1[:100]!r}"
         assert "11:30" in instr2, f"Second call: expected 11:30 in {instr2[:100]!r}"

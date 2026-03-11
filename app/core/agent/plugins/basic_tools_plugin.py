@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Any, Dict, List
+
 from app.core.agent.base import AgentPlugin
+
 
 class BasicToolsPlugin(AgentPlugin):
     @property
@@ -16,7 +18,7 @@ class BasicToolsPlugin(AgentPlugin):
             {
                 "name": "get_current_time",
                 "func": self.get_current_time,
-                "description": "Returns the current date and time."
+                "description": "Returns the current date and time.",
             },
             {
                 "name": "calculate",
@@ -26,11 +28,14 @@ class BasicToolsPlugin(AgentPlugin):
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "expression": {"type": "STRING", "description": "Mathematical expression to evaluate (e.g. '2 + 2')"}
+                        "expression": {
+                            "type": "STRING",
+                            "description": "Mathematical expression to evaluate (e.g. '2 + 2')",
+                        }
                     },
-                    "required": ["expression"]
-                }
-            }
+                    "required": ["expression"],
+                },
+            },
         ]
 
     def get_current_time(self) -> str:
@@ -44,7 +49,7 @@ class BasicToolsPlugin(AgentPlugin):
             allowed_chars = set("0123456789+-*/(). ")
             if not all(c in allowed_chars for c in expression):
                 return "Error: Expression contains invalid characters. Only numbers and basic operators (+-*/) are allowed."
-            
+
             # eval is dangerous, but this is a local desktop app for personal use, and we have basic sanitation
             result = eval(expression, {"__builtins__": None}, {})
             return str(result)

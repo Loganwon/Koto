@@ -36,6 +36,7 @@ Koto SkillTriggerBinding — 技能触发器绑定层
         intent_patterns=["简短", "快速", "简洁", "一句话"],
     )
 """
+
 from __future__ import annotations
 
 import json
@@ -68,22 +69,61 @@ _RECOMMENDED_INTENT_BINDINGS = [
         "skill_id": "step_by_step",
         "patterns": [
             # 明确要求步骤
-            "一步一步", "分步骤", "详细步骤", "步骤说明", "分步说明",
+            "一步一步",
+            "分步骤",
+            "详细步骤",
+            "步骤说明",
+            "分步说明",
             # 流程/操作类
-            "操作流程", "操作步骤", "操作方法", "操作指南", "操作说明",
-            "安装步骤", "配置步骤", "部署步骤", "设置步骤", "配置方法",
+            "操作流程",
+            "操作步骤",
+            "操作方法",
+            "操作指南",
+            "操作说明",
+            "安装步骤",
+            "配置步骤",
+            "部署步骤",
+            "设置步骤",
+            "配置方法",
             # 「如何」系列
-            "如何安装", "如何配置", "如何部署", "如何设置", "如何使用",
-            "如何操作", "如何完成", "如何实现", "如何修复", "如何解决",
+            "如何安装",
+            "如何配置",
+            "如何部署",
+            "如何设置",
+            "如何使用",
+            "如何操作",
+            "如何完成",
+            "如何实现",
+            "如何修复",
+            "如何解决",
             # 「怎么」系列
-            "怎么安装", "怎么配置", "怎么使用", "怎么操作", "怎么做",
-            "怎样安装", "怎样配置", "怎样使用", "怎样做",
+            "怎么安装",
+            "怎么配置",
+            "怎么使用",
+            "怎么操作",
+            "怎么做",
+            "怎样安装",
+            "怎样配置",
+            "怎样使用",
+            "怎样做",
             # 流程/流程图
-            "工作流程", "业务流程", "完整流程", "处理流程", "操作流",
+            "工作流程",
+            "业务流程",
+            "完整流程",
+            "处理流程",
+            "操作流",
             # 排查类
-            "故障排查", "问题排查", "如何排查", "怎么排查", "排查思路",
+            "故障排查",
+            "问题排查",
+            "如何排查",
+            "怎么排查",
+            "排查思路",
             # 学习类
-            "从零开始", "零基础", "新手入门", "快速上手", "入门教程",
+            "从零开始",
+            "零基础",
+            "新手入门",
+            "快速上手",
+            "入门教程",
         ],
         "auto_disable_after_turns": 3,
     },
@@ -125,21 +165,47 @@ _RECOMMENDED_INTENT_BINDINGS = [
     # ── 文件/工作区 ──
     {
         "skill_id": "workspace_context",
-        "patterns": ["当前目录", "项目结构", "我的项目", "工程目录", "工作目录",
-                     "这个项目", "目录结构", "项目里有哪些"],
+        "patterns": [
+            "当前目录",
+            "项目结构",
+            "我的项目",
+            "工程目录",
+            "工作目录",
+            "这个项目",
+            "目录结构",
+            "项目里有哪些",
+        ],
         "auto_disable_after_turns": 3,
     },
     {
         "skill_id": "archive_assistant",
-        "patterns": ["整理文件", "归档文件", "清理下载", "整理文件夹", "整理桌面",
-                     "文件夹整理", "自动分类文件"],
+        "patterns": [
+            "整理文件",
+            "归档文件",
+            "清理下载",
+            "整理文件夹",
+            "整理桌面",
+            "文件夹整理",
+            "自动分类文件",
+        ],
         "auto_disable_after_turns": 1,
     },
     # ── 高价值商业 Workflow ──
     {
         "skill_id": "email_composer",
-        "patterns": ["写邮件", "帮我写邮件", "邮件正文", "回复邮件", "邮件草稿",
-                     "起草邮件", "客户邮件", "一封邮件", "封邮件", "封邮", "邮件范文"],
+        "patterns": [
+            "写邮件",
+            "帮我写邮件",
+            "邮件正文",
+            "回复邮件",
+            "邮件草稿",
+            "起草邮件",
+            "客户邮件",
+            "一封邮件",
+            "封邮件",
+            "封邮",
+            "邮件范文",
+        ],
         "auto_disable_after_turns": 1,
     },
     {
@@ -149,50 +215,109 @@ _RECOMMENDED_INTENT_BINDINGS = [
     },
     {
         "skill_id": "negotiation_assist",
-        "patterns": ["谈判", "砍价", "商务谈判", "谈条件", "价格谈判", "谈判话术",
-                     "谈判策略", "谈判技巧"],
+        "patterns": [
+            "谈判",
+            "砍价",
+            "商务谈判",
+            "谈条件",
+            "价格谈判",
+            "谈判话术",
+            "谈判策略",
+            "谈判技巧",
+        ],
         "auto_disable_after_turns": 2,
     },
     {
         "skill_id": "root_cause",
-        "patterns": ["根因分析", "根本原因", "问题溯源", "rca", "故障复盘",
-                     "追溯问题", "为什么会发生"],
+        "patterns": [
+            "根因分析",
+            "根本原因",
+            "问题溯源",
+            "rca",
+            "故障复盘",
+            "追溯问题",
+            "为什么会发生",
+        ],
         "auto_disable_after_turns": 1,
     },
     {
         "skill_id": "brainstorm",
-        "patterns": ["头脑风暴", "想法发散", "帮我想想", "有什么方案", "想点子",
-                     "有哪些思路", "集思广益"],
+        "patterns": [
+            "头脑风暴",
+            "想法发散",
+            "帮我想想",
+            "有什么方案",
+            "想点子",
+            "有哪些思路",
+            "集思广益",
+        ],
         "auto_disable_after_turns": 2,
     },
     {
         "skill_id": "pros_cons",
-        "patterns": ["优缺点", "利弊分析", "正反两面", "帮我比较", "方案对比",
-                     "权衡利弊", "做决策"],
+        "patterns": [
+            "优缺点",
+            "利弊分析",
+            "正反两面",
+            "帮我比较",
+            "方案对比",
+            "权衡利弊",
+            "做决策",
+        ],
         "auto_disable_after_turns": 1,
     },
     {
         "skill_id": "contract_reviewer",
-        "patterns": ["审合同", "看合同", "合同条款", "合同风险", "审核合同",
-                     "合同有没有问题", "协议审查"],
+        "patterns": [
+            "审合同",
+            "看合同",
+            "合同条款",
+            "合同风险",
+            "审核合同",
+            "合同有没有问题",
+            "协议审查",
+        ],
         "auto_disable_after_turns": 1,
     },
     {
         "skill_id": "interview_prep",
-        "patterns": ["面试准备", "面试题", "帮我准备面试", "模拟面试", "面试技巧",
-                     "面试常见问题", "面试自我介绍"],
+        "patterns": [
+            "面试准备",
+            "面试题",
+            "帮我准备面试",
+            "模拟面试",
+            "面试技巧",
+            "面试常见问题",
+            "面试自我介绍",
+        ],
         "auto_disable_after_turns": 2,
     },
     {
         "skill_id": "social_copy",
-        "patterns": ["朋友圈文案", "小红书文案", "社媒文案", "营销文案", "推广文案",
-                     "抖音文案", "种草文案", "公众号文案"],
+        "patterns": [
+            "朋友圈文案",
+            "小红书文案",
+            "社媒文案",
+            "营销文案",
+            "推广文案",
+            "抖音文案",
+            "种草文案",
+            "公众号文案",
+        ],
         "auto_disable_after_turns": 1,
     },
     {
         "skill_id": "prompt_engineer",
-        "patterns": ["写prompt", "优化prompt", "提示词", "写提示词", "提示词优化",
-                     "system prompt", "如何写prompt", "ai提示词"],
+        "patterns": [
+            "写prompt",
+            "优化prompt",
+            "提示词",
+            "写提示词",
+            "提示词优化",
+            "system prompt",
+            "如何写prompt",
+            "ai提示词",
+        ],
         "auto_disable_after_turns": 2,
     },
 ]
@@ -202,23 +327,25 @@ _RECOMMENDED_INTENT_BINDINGS = [
 # 数据结构
 # ============================================================================
 
+
 @dataclass
 class SkillBinding:
     """一条技能绑定记录。"""
+
     binding_id: str = field(default_factory=lambda: str(uuid.uuid4())[:12])
     skill_id: str = ""
-    binding_type: str = "trigger"       # trigger / intent / file_event
-    mode: str = "execute"               # inject / execute
+    binding_type: str = "trigger"  # trigger / intent / file_event
+    mode: str = "execute"  # inject / execute
 
     # trigger 绑定
-    trigger_type: str = ""              # interval / cron / webhook / startup
+    trigger_type: str = ""  # interval / cron / webhook / startup
     trigger_config: Dict[str, Any] = field(default_factory=dict)
-    trigger_id: Optional[str] = None   # TriggerRegistry 中的 trigger_id，自动生成
+    trigger_id: Optional[str] = None  # TriggerRegistry 中的 trigger_id，自动生成
     job_payload: Dict[str, Any] = field(default_factory=dict)
 
     # intent 绑定
     intent_patterns: List[str] = field(default_factory=list)
-    auto_disable_after_turns: int = 3   # 自动注入的最大轮次
+    auto_disable_after_turns: int = 3  # 自动注入的最大轮次
 
     # file_event 绑定
     watch_path: str = ""
@@ -241,6 +368,7 @@ class SkillBinding:
 # ============================================================================
 # SkillBindingManager
 # ============================================================================
+
 
 class SkillBindingManager:
     """
@@ -300,7 +428,8 @@ class SkillBindingManager:
             binding.trigger_id = trig_spec.trigger_id
             logger.info(
                 "[SkillBinding] 技能 %s 已绑定 trigger %s",
-                skill_id, trig_spec.trigger_id[:8],
+                skill_id,
+                trig_spec.trigger_id[:8],
             )
         except Exception as exc:
             logger.warning("[SkillBinding] 注册触发器失败: %s", exc)
@@ -340,6 +469,7 @@ class SkillBindingManager:
 
         try:
             from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
         except Exception as exc:
             logger.warning("[SkillBinding] 初始化推荐绑定失败: %s", exc)
@@ -362,7 +492,9 @@ class SkillBindingManager:
                 skipped.append(skill_id)
                 continue
 
-            patterns = [pattern.strip() for pattern in preset["patterns"] if pattern.strip()]
+            patterns = [
+                pattern.strip() for pattern in preset["patterns"] if pattern.strip()
+            ]
             preset_key = (skill_id, tuple(sorted(p.lower() for p in patterns)))
 
             # Exact match exists and not forcing → skip
@@ -437,6 +569,7 @@ class SkillBindingManager:
         if binding.trigger_id:
             try:
                 from app.core.jobs.trigger_registry import get_trigger_registry
+
                 get_trigger_registry().remove(binding.trigger_id)
             except Exception:
                 pass
@@ -475,9 +608,7 @@ class SkillBindingManager:
             for d in data:
                 b = SkillBinding.from_dict(d)
                 self._bindings[b.binding_id] = b
-            logger.info(
-                "[SkillBinding] 加载 %d 条技能绑定", len(self._bindings)
-            )
+            logger.info("[SkillBinding] 加载 %d 条技能绑定", len(self._bindings))
         except Exception as exc:
             logger.warning("[SkillBinding] 加载失败: %s", exc)
 

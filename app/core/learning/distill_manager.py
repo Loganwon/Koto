@@ -20,6 +20,7 @@ distill_manager.py — 蒸馏训练任务管理器
     # 列出所有任务
     jobs = mgr.list_jobs()
 """
+
 from __future__ import annotations
 
 import json
@@ -36,15 +37,17 @@ logger = logging.getLogger(__name__)
 
 # ── 状态枚举 ──────────────────────────────────────────────────────────────────
 
+
 class JobStatus:
-    QUEUED    = "queued"
-    RUNNING   = "running"
-    DONE      = "done"
-    FAILED    = "failed"
+    QUEUED = "queued"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
     CANCELLED = "cancelled"
 
 
 # ── 任务数据结构 ───────────────────────────────────────────────────────────────
+
 
 @dataclass
 class TrainingJob:
@@ -72,11 +75,12 @@ class TrainingJob:
 
     def add_log(self, msg: str) -> None:
         self.logs.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
-        if len(self.logs) > 500:          # 保留最近 500 条
+        if len(self.logs) > 500:  # 保留最近 500 条
             self.logs = self.logs[-500:]
 
 
 # ── 管理器 ────────────────────────────────────────────────────────────────────
+
 
 class DistillManager:
     """训练任务队列 + 进度追踪单例。"""
@@ -85,10 +89,10 @@ class DistillManager:
     _lock = threading.Lock()
 
     def __init__(self) -> None:
-        self._jobs: Dict[str, TrainingJob] = {}               # job_id → job
-        self._queues: Dict[str, queue.Queue] = {}             # job_id → event queue
+        self._jobs: Dict[str, TrainingJob] = {}  # job_id → job
+        self._queues: Dict[str, queue.Queue] = {}  # job_id → event queue
         self._worker_thread: Optional[threading.Thread] = None
-        self._task_queue: queue.Queue = queue.Queue()         # 待训练的 job_id
+        self._task_queue: queue.Queue = queue.Queue()  # 待训练的 job_id
         self._start_worker()
 
     @classmethod
@@ -114,9 +118,13 @@ class DistillManager:
         """
         # 防止重复提交
         for job in self._jobs.values():
-            if (job.skill_id == skill_id
-                    and job.status in (JobStatus.QUEUED, JobStatus.RUNNING)):
-                logger.info(f"[DistillManager] skill={skill_id} 已有进行中的任务 {job.job_id}")
+            if job.skill_id == skill_id and job.status in (
+                JobStatus.QUEUED,
+                JobStatus.RUNNING,
+            ):
+                logger.info(
+                    f"[DistillManager] skill={skill_id} 已有进行中的任务 {job.job_id}"
+                )
                 return job.job_id
 
         job_id = str(uuid.uuid4())[:8]
@@ -141,7 +149,9 @@ class DistillManager:
         jobs = list(self._jobs.values())
         if skill_id:
             jobs = [j for j in jobs if j.skill_id == skill_id]
-        return [j.to_dict() for j in sorted(jobs, key=lambda j: j.created_at, reverse=True)]
+        return [
+            j.to_dict() for j in sorted(jobs, key=lambda j: j.created_at, reverse=True)
+        ]
 
     def cancel(self, job_id: str) -> bool:
         """取消排队中的任务（运行中的任务无法取消）。"""
@@ -156,7 +166,9 @@ class DistillManager:
 
     # ── SSE 流 ────────────────────────────────────────────────────────────────
 
-    def stream_progress(self, job_id: str, timeout: float = 7200.0) -> Generator[str, None, None]:
+    def stream_progress(
+        self, job_id: str, timeout: float = 7200.0
+    ) -> Generator[str, None, None]:
         """
         生成器：产出 SSE 格式的进度事件字符串，直到任务结束或超时。
 
@@ -181,12 +193,20 @@ class DistillManager:
             try:
                 evt = q.get(timeout=2.0)
                 yield f"data: {json.dumps(evt)}\n\n"
-                if evt.get("status") in (JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELLED):
+                if evt.get("status") in (
+                    JobStatus.DONE,
+                    JobStatus.FAILED,
+                    JobStatus.CANCELLED,
+                ):
                     break
             except queue.Empty:
                 # 心跳（保持连接）
                 yield f": ping\n\n"
-                if job.status in (JobStatus.DONE, JobStatus.FAILED, JobStatus.CANCELLED):
+                if job.status in (
+                    JobStatus.DONE,
+                    JobStatus.FAILED,
+                    JobStatus.CANCELLED,
+                ):
                     break
 
     # ── 内部：Worker ──────────────────────────────────────────────────────────
@@ -220,8 +240,8 @@ class DistillManager:
         self._push_event(job.job_id, "running", {"msg": "训练开始", "pct": 0})
 
         def _progress_cb(info: Dict[str, Any]) -> None:
-            msg  = info.get("msg", "")
-            pct  = info.get("pct", job.pct)
+            msg = info.get("msg", "")
+            pct = info.get("pct", job.pct)
             loss = info.get("loss")
             step = info.get("step", job.current_step)
             job.pct = pct
@@ -229,12 +249,15 @@ class DistillManager:
             if loss is not None:
                 job.current_loss = loss
             job.add_log(msg)
-            self._push_event(job.job_id, "progress", {
-                "msg": msg, "pct": pct, "step": step, "loss": loss
-            })
+            self._push_event(
+                job.job_id,
+                "progress",
+                {"msg": msg, "pct": pct, "step": step, "loss": loss},
+            )
 
         try:
             from app.core.learning.lora_pipeline import LoRAPipeline, TrainingConfig
+
             cfg = TrainingConfig.detect_and_build()
             if job.config_override:
                 for k, v in job.config_override.items():
@@ -249,13 +272,13 @@ class DistillManager:
             )
 
             # 写回结果
-            job.num_samples  = result.get("num_samples", 0)
-            job.eval_loss    = result.get("eval_loss")
+            job.num_samples = result.get("num_samples", 0)
+            job.eval_loss = result.get("eval_loss")
             job.adapter_path = result.get("adapter_path")
-            job.base_model   = result.get("base_model", cfg.base_model)
-            job.duration_s   = result.get("duration_s", 0)
-            job.skeleton     = result.get("skeleton", False)
-            job.pct          = 100.0
+            job.base_model = result.get("base_model", cfg.base_model)
+            job.duration_s = result.get("duration_s", 0)
+            job.skeleton = result.get("skeleton", False)
+            job.pct = 100.0
 
             if result.get("success"):
                 # 自动注册适配器
@@ -267,16 +290,22 @@ class DistillManager:
                         eval_loss=job.eval_loss,
                     )
                 job.status = JobStatus.DONE
-                job.add_log(f"✅ 训练完成  loss={job.eval_loss}  samples={job.num_samples}")
-                self._push_event(job.job_id, "done", {
-                    "status": JobStatus.DONE,
-                    "msg": f"训练完成  loss={job.eval_loss}",
-                    "pct": 100,
-                    "adapter_path": job.adapter_path,
-                    "eval_loss": job.eval_loss,
-                    "duration_s": job.duration_s,
-                    "skeleton": job.skeleton,
-                })
+                job.add_log(
+                    f"✅ 训练完成  loss={job.eval_loss}  samples={job.num_samples}"
+                )
+                self._push_event(
+                    job.job_id,
+                    "done",
+                    {
+                        "status": JobStatus.DONE,
+                        "msg": f"训练完成  loss={job.eval_loss}",
+                        "pct": 100,
+                        "adapter_path": job.adapter_path,
+                        "eval_loss": job.eval_loss,
+                        "duration_s": job.duration_s,
+                        "skeleton": job.skeleton,
+                    },
+                )
             else:
                 raise RuntimeError(result.get("error", "训练返回 success=False"))
 
@@ -285,11 +314,15 @@ class DistillManager:
             job.error = str(e)
             job.add_log(f"❌ 训练失败: {e}")
             logger.error(f"[DistillManager] job={job.job_id} 失败: {e}", exc_info=True)
-            self._push_event(job.job_id, "failed", {
-                "status": JobStatus.FAILED,
-                "msg": f"训练失败: {e}",
-                "pct": job.pct,
-            })
+            self._push_event(
+                job.job_id,
+                "failed",
+                {
+                    "status": JobStatus.FAILED,
+                    "msg": f"训练失败: {e}",
+                    "pct": job.pct,
+                },
+            )
         finally:
             job.finished_at = time.strftime("%Y-%m-%dT%H:%M:%S")
 

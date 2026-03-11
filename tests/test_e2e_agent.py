@@ -3,7 +3,9 @@ E2E Test — 真实 Gemini API 端到端测试
 验证 UnifiedAgent 完整 ReAct 循环:
   LLM 调用 → 工具选择 → 工具执行 → 观察 → 最终回答
 """
-import os, sys
+
+import os
+import sys
 
 # 添加项目根目录到路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -71,10 +73,15 @@ def run_test(label, query):
 
 
 # --- Test 1: calculate (tool call expected) ---
-t1 = run_test("Calculate with tool", "Please calculate 42 * 17 using the calculate tool.")
+t1 = run_test(
+    "Calculate with tool", "Please calculate 42 * 17 using the calculate tool."
+)
 
 # --- Test 2: get_current_time (tool call expected) ---
-t2 = run_test("Current time with tool", "What is the current date and time? Use the get_current_time tool.")
+t2 = run_test(
+    "Current time with tool",
+    "What is the current date and time? Use the get_current_time tool.",
+)
 
 # --- Test 3: simple chat (no tool call expected) ---
 t3 = run_test("Simple chat (no tools)", "Hi Koto, what's your name?")

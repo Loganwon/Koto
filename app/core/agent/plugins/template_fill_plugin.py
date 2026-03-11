@@ -26,11 +26,13 @@ from app.core.agent.base import AgentPlugin
 logger = logging.getLogger(__name__)
 
 import sys as _sys
+
 _BASE_DIR = (
-    Path(_sys.executable).parent if getattr(_sys, "frozen", False)
-    else Path(__file__).resolve().parents[4]   # project root
+    Path(_sys.executable).parent
+    if getattr(_sys, "frozen", False)
+    else Path(__file__).resolve().parents[4]  # project root
 )
-_TMPL_DIR   = _BASE_DIR / "config" / "skill_templates"
+_TMPL_DIR = _BASE_DIR / "config" / "skill_templates"
 _OUTPUT_DIR = _BASE_DIR / "config" / "skill_template_outputs"
 
 
@@ -59,11 +61,11 @@ class TemplateFillPlugin(AgentPlugin):
                     "properties": {
                         "skill_id": {
                             "type": "STRING",
-                            "description": "Skill 的唯一标识符（如 meeting_minutes）"
+                            "description": "Skill 的唯一标识符（如 meeting_minutes）",
                         }
                     },
-                    "required": ["skill_id"]
-                }
+                    "required": ["skill_id"],
+                },
             },
             {
                 "name": "fill_skill_template",
@@ -77,20 +79,20 @@ class TemplateFillPlugin(AgentPlugin):
                     "properties": {
                         "skill_id": {
                             "type": "STRING",
-                            "description": "Skill 的唯一标识符"
+                            "description": "Skill 的唯一标识符",
                         },
                         "values": {
                             "type": "OBJECT",
                             "description": (
                                 "字段名 → 填写内容 的键值对。"
                                 "键必须与 get_template_fields 返回的字段名匹配。"
-                                "示例：{\"日期\": \"2026-03-08\", \"参会人员\": \"张三、李四\"}"
-                            )
-                        }
+                                '示例：{"日期": "2026-03-08", "参会人员": "张三、李四"}'
+                            ),
+                        },
                     },
-                    "required": ["skill_id", "values"]
-                }
-            }
+                    "required": ["skill_id", "values"],
+                },
+            },
         ]
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -102,20 +104,27 @@ class TemplateFillPlugin(AgentPlugin):
         try:
             tmpl_path = self._get_template_path(skill_id)
             if not tmpl_path:
-                return json.dumps({
-                    "success": False,
-                    "error": f"Skill '{skill_id}' 没有绑定 Word 模板，或模板文件不存在。"
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Skill '{skill_id}' 没有绑定 Word 模板，或模板文件不存在。",
+                    },
+                    ensure_ascii=False,
+                )
 
             from app.core.skills.template_engine import TemplateEngine
+
             fields = TemplateEngine.parse_fields(tmpl_path)
-            return json.dumps({
-                "success": True,
-                "skill_id": skill_id,
-                "fields": fields,
-                "field_count": len(fields),
-                "message": f"模板包含 {len(fields)} 个待填写字段：{', '.join(fields)}"
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "skill_id": skill_id,
+                    "fields": fields,
+                    "field_count": len(fields),
+                    "message": f"模板包含 {len(fields)} 个待填写字段：{', '.join(fields)}",
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.error(f"[TemplateFillPlugin] get_template_fields error: {e}")
             return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
@@ -125,20 +134,26 @@ class TemplateFillPlugin(AgentPlugin):
         try:
             tmpl_path = self._get_template_path(skill_id)
             if not tmpl_path:
-                return json.dumps({
-                    "success": False,
-                    "error": f"Skill '{skill_id}' 没有绑定 Word 模板，或模板文件不存在。"
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": f"Skill '{skill_id}' 没有绑定 Word 模板，或模板文件不存在。",
+                    },
+                    ensure_ascii=False,
+                )
 
             # 若 values 是 str（LLM 有时传 JSON 字符串），先尝试解析
             if isinstance(values, str):
                 try:
                     values = json.loads(values)
                 except json.JSONDecodeError:
-                    return json.dumps({
-                        "success": False,
-                        "error": "values 参数格式错误，必须是 JSON 对象"
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": False,
+                            "error": "values 参数格式错误，必须是 JSON 对象",
+                        },
+                        ensure_ascii=False,
+                    )
 
             from app.core.skills.template_engine import TemplateEngine
 
@@ -154,23 +169,28 @@ class TemplateFillPlugin(AgentPlugin):
             result_path = TemplateEngine.fill(tmpl_path, values, out_path)
 
             # 构建前端可访问的下载 URL
-            download_url = f"/api/skillmarket/templates/{skill_id}/output/{result_path.name}"
+            download_url = (
+                f"/api/skillmarket/templates/{skill_id}/output/{result_path.name}"
+            )
 
             warning = ""
             if missing:
                 warning = f"  注意：以下字段未填写，保留了占位符：{', '.join(missing)}"
 
-            return json.dumps({
-                "success": True,
-                "skill_id": skill_id,
-                "file_name": result_path.name,
-                "download_url": download_url,
-                "filled_fields": list(values.keys()),
-                "missing_fields": missing,
-                "message": (
-                    f"Word 文档已生成！[点击下载]({download_url})\n{warning}"
-                ).strip()
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "success": True,
+                    "skill_id": skill_id,
+                    "file_name": result_path.name,
+                    "download_url": download_url,
+                    "filled_fields": list(values.keys()),
+                    "missing_fields": missing,
+                    "message": (
+                        f"Word 文档已生成！[点击下载]({download_url})\n{warning}"
+                    ).strip(),
+                },
+                ensure_ascii=False,
+            )
 
         except Exception as e:
             logger.error(f"[TemplateFillPlugin] fill_skill_template error: {e}")
@@ -190,6 +210,7 @@ class TemplateFillPlugin(AgentPlugin):
         # 从 SkillManager registry 读取 template_path
         try:
             from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
             skill = SkillManager._registry.get(skill_id)
             if skill and skill.get("template_path"):

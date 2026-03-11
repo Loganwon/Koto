@@ -22,6 +22,7 @@ Koto Jobs API Blueprint
   DELETE /api/jobs/triggers/<trigger_id>    — 删除触发器
   POST   /api/jobs/triggers/<trigger_id>/fire — 手动触发
 """
+
 from __future__ import annotations
 
 import json
@@ -36,6 +37,7 @@ job_bp = Blueprint("jobs", __name__, url_prefix="/api/jobs")
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
 
 def _ok(data=None, **kw):
     body = {"ok": True}
@@ -52,6 +54,7 @@ def _err(msg: str, code: int = 400):
 # ============================================================================
 # 作业 CRUD
 # ============================================================================
+
 
 @job_bp.post("")
 def create_job():
@@ -111,7 +114,7 @@ def list_jobs():
       limit     — 每页数量（默认 50，最大 200）
       offset    — 分页偏移
     """
-    from app.core.tasks.task_ledger import get_ledger, TaskStatus
+    from app.core.tasks.task_ledger import TaskStatus, get_ledger
 
     ledger = get_ledger()
     status_raw = request.args.get("status")
@@ -134,7 +137,9 @@ def list_jobs():
     tasks = tasks[:limit]
 
     total = ledger.count(source="job_runner", status=status)
-    return _ok(data=[t.to_dict() for t in tasks], total=total, limit=limit, offset=offset)
+    return _ok(
+        data=[t.to_dict() for t in tasks], total=total, limit=limit, offset=offset
+    )
 
 
 @job_bp.get("/<task_id>")
@@ -154,8 +159,8 @@ def get_job(task_id: str):
 @job_bp.get("/<task_id>/stream")
 def stream_job(task_id: str):
     """SSE 实时进度流（复用 ProgressBus）。"""
-    from app.core.tasks.task_ledger import get_ledger
     from app.core.tasks.progress_bus import get_progress_bus
+    from app.core.tasks.task_ledger import get_ledger
 
     if not get_ledger().get(task_id):
         return _err("作业不存在", 404)
@@ -203,17 +208,15 @@ def resume_job(task_id: str):
 @job_bp.post("/<task_id>/retry")
 def retry_job(task_id: str):
     """将 failed / cancelled 作业重新入队。"""
-    from app.core.tasks.task_ledger import get_ledger, TaskStatus
     from app.core.jobs.job_runner import JobSpec, get_job_runner
+    from app.core.tasks.task_ledger import TaskStatus, get_ledger
 
     ledger = get_ledger()
     task = ledger.get(task_id)
     if not task:
         return _err("作业不存在", 404)
     if task.status not in (TaskStatus.FAILED, TaskStatus.CANCELLED):
-        return _err(
-            f"只能重试 failed/cancelled 作业，当前状态: {task.status.value}"
-        )
+        return _err(f"只能重试 failed/cancelled 作业，当前状态: {task.status.value}")
 
     meta = json.loads(task.metadata or "{}")
     job_type = meta.get("job_type") or task.task_type
@@ -249,6 +252,7 @@ def retry_job(task_id: str):
 # ============================================================================
 # 触发器 CRUD
 # ============================================================================
+
 
 @job_bp.get("/triggers")
 def list_triggers():

@@ -14,6 +14,7 @@ Koto Shadow Routes — 影子追踪 REST API
   POST /api/shadow/tick             — 手动触发一次主动检查（测试用）
   POST /api/shadow/reset            — 清空观察数据
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,17 +40,21 @@ def _err(msg: str, code: int = 400):
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _get_watcher():
     from app.core.monitoring.shadow_watcher import get_shadow_watcher
+
     return get_shadow_watcher()
 
 
 def _get_agent():
     from app.core.agent.proactive_agent import get_proactive_agent
+
     return get_proactive_agent()
 
 
 # ── 端点 ──────────────────────────────────────────────────────────────────────
+
 
 @shadow_bp.get("/status")
 def shadow_status():
@@ -57,19 +62,23 @@ def shadow_status():
     try:
         obs = _get_watcher().get_observations()
         topics = sorted(obs.get("topics", {}).items(), key=lambda x: -x[1])[:5]
-        phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])[:5]
+        phrases = sorted(obs.get("recurring_phrases", {}).items(), key=lambda x: -x[1])[
+            :5
+        ]
         open_tasks = _get_watcher().get_open_tasks()
         pending = _get_agent().pending()
-        return _ok({
-            "enabled": obs.get("enabled", True),
-            "total_observations": obs.get("total_observations", 0),
-            "last_seen": obs.get("last_seen"),
-            "streak_days": obs.get("streak", {}).get("days", 0),
-            "top_topics": [{"topic": k, "count": v} for k, v in topics],
-            "top_phrases": [{"phrase": k, "count": v} for k, v in phrases],
-            "open_tasks_count": len(open_tasks),
-            "pending_messages": len(pending),
-        })
+        return _ok(
+            {
+                "enabled": obs.get("enabled", True),
+                "total_observations": obs.get("total_observations", 0),
+                "last_seen": obs.get("last_seen"),
+                "streak_days": obs.get("streak", {}).get("days", 0),
+                "top_topics": [{"topic": k, "count": v} for k, v in topics],
+                "top_phrases": [{"phrase": k, "count": v} for k, v in phrases],
+                "open_tasks_count": len(open_tasks),
+                "pending_messages": len(pending),
+            }
+        )
     except Exception as exc:
         logger.exception("[shadow/status] error")
         return _err(str(exc), 500)
@@ -153,8 +162,9 @@ def shadow_tick():
         # 尝试获取 LLM 函数（可选）
         llm_fn = None
         try:
-            from web.app import client
             from google.genai import types as _types
+
+            from web.app import client
 
             def _llm(prompt: str) -> str:
                 resp = client.models.generate_content(

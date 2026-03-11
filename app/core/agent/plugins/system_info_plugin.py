@@ -27,46 +27,31 @@ class SystemInfoPlugin(AgentPlugin):
                 "name": "query_cpu_status",
                 "func": self.query_cpu_status,
                 "description": "Query current CPU usage, core count, and frequency.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {}
-                }
+                "parameters": {"type": "OBJECT", "properties": {}},
             },
             {
                 "name": "query_memory_status",
                 "func": self.query_memory_status,
                 "description": "Query current memory and swap usage.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {}
-                }
+                "parameters": {"type": "OBJECT", "properties": {}},
             },
             {
                 "name": "query_disk_usage",
                 "func": self.query_disk_usage,
                 "description": "Query disk usage across mounted drives.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {}
-                }
+                "parameters": {"type": "OBJECT", "properties": {}},
             },
             {
                 "name": "query_network_status",
                 "func": self.query_network_status,
                 "description": "Query current network interfaces and connection status.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {}
-                }
+                "parameters": {"type": "OBJECT", "properties": {}},
             },
             {
                 "name": "query_python_env",
                 "func": self.query_python_env,
                 "description": "Query current Python runtime/environment details.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {}
-                }
+                "parameters": {"type": "OBJECT", "properties": {}},
             },
             {
                 "name": "list_running_apps",
@@ -77,19 +62,16 @@ class SystemInfoPlugin(AgentPlugin):
                     "properties": {
                         "top_n": {
                             "type": "INTEGER",
-                            "description": "How many processes to return."
+                            "description": "How many processes to return.",
                         }
-                    }
-                }
+                    },
+                },
             },
             {
                 "name": "get_system_warnings",
                 "func": self.get_system_warnings,
                 "description": "Return system health warnings if resource usage is high.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {}
-                }
+                "parameters": {"type": "OBJECT", "properties": {}},
             },
         ]
 

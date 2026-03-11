@@ -2,19 +2,23 @@
 
 Resets the singleton between tests and mocks ShadowWatcher + file I/O.
 """
-from __future__ import annotations
-from datetime import datetime, timedelta
-import json
-import pytest
 
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Fixture: isolated ProactiveAgent singleton + file I/O
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def reset_proactive_agent(tmp_path, monkeypatch):
     from app.core.agent import proactive_agent as pa_module
+
     # Reset singleton
     pa_module.ProactiveAgent._instance = None
     # Redirect queue file to tmp_path
@@ -27,6 +31,7 @@ def reset_proactive_agent(tmp_path, monkeypatch):
 @pytest.fixture()
 def agent():
     from app.core.agent.proactive_agent import ProactiveAgent
+
     return ProactiveAgent.get()
 
 
@@ -34,9 +39,11 @@ def agent():
 # Singleton pattern
 # ---------------------------------------------------------------------------
 
+
 class TestSingleton:
     def test_get_returns_same_instance(self):
         from app.core.agent.proactive_agent import ProactiveAgent
+
         a = ProactiveAgent.get()
         b = ProactiveAgent.get()
         assert a is b
@@ -48,6 +55,7 @@ class TestSingleton:
 # ---------------------------------------------------------------------------
 # add_reminder()
 # ---------------------------------------------------------------------------
+
 
 class TestAddReminder:
     def test_add_reminder_shows_in_pending(self, agent):
@@ -75,6 +83,7 @@ class TestAddReminder:
 # pending() – sorting and filtering
 # ---------------------------------------------------------------------------
 
+
 class TestPending:
     def test_pending_sorted_by_priority(self, agent):
         agent.add_reminder("low task", priority="low")
@@ -83,10 +92,14 @@ class TestPending:
         msgs = agent.pending()
         priorities = [m["priority"] for m in msgs]
         order = {"high": 0, "medium": 1, "low": 2}
-        assert all(order[priorities[i]] <= order[priorities[i + 1]] for i in range(len(priorities) - 1))
+        assert all(
+            order[priorities[i]] <= order[priorities[i + 1]]
+            for i in range(len(priorities) - 1)
+        )
 
     def test_expired_messages_excluded(self, agent):
         from app.core.agent.proactive_agent import _make_msg
+
         expired = _make_msg("reminder", "old reminder", priority="high", ttl_hours=0)
         # Back-date expires_at to the past
         past = (datetime.now() - timedelta(hours=1)).isoformat()
@@ -109,6 +122,7 @@ class TestPending:
 # ---------------------------------------------------------------------------
 # dismiss()
 # ---------------------------------------------------------------------------
+
 
 class TestDismiss:
     def test_dismiss_removes_message_from_pending(self, agent):
@@ -135,6 +149,7 @@ class TestDismiss:
 # ---------------------------------------------------------------------------
 # tick() – message generation
 # ---------------------------------------------------------------------------
+
 
 class TestTick:
     def test_tick_runs_without_error(self, agent, mocker):
@@ -181,7 +196,9 @@ class TestTick:
         agent.tick(llm_fn=None)
         count_after_first = len([m for m in agent.pending() if m["type"] == "greeting"])
         agent.tick(llm_fn=None)
-        count_after_second = len([m for m in agent.pending() if m["type"] == "greeting"])
+        count_after_second = len(
+            [m for m in agent.pending() if m["type"] == "greeting"]
+        )
         assert count_after_second == count_after_first
 
 
@@ -189,11 +206,20 @@ class TestTick:
 # Queue message structure
 # ---------------------------------------------------------------------------
 
+
 class TestMessageStructure:
     def test_message_has_required_fields(self, agent):
         agent.add_reminder("structure test")
         msg = agent.pending()[0]
-        for field in ("id", "type", "content", "priority", "created_at", "expires_at", "dismissed"):
+        for field in (
+            "id",
+            "type",
+            "content",
+            "priority",
+            "created_at",
+            "expires_at",
+            "dismissed",
+        ):
             assert field in msg, f"Missing field: {field}"
 
     def test_message_id_is_string(self, agent):
@@ -209,9 +235,11 @@ class TestMessageStructure:
 # Logging assertions
 # ---------------------------------------------------------------------------
 
+
 class TestProactiveAgentLogging:
     def test_no_error_logs_on_normal_add_reminder(self, agent, caplog):
         import logging
+
         with caplog.at_level(logging.ERROR, logger="app.core.agent.proactive_agent"):
             agent.add_reminder("all good")
         error_logs = [r for r in caplog.records if r.levelno >= logging.ERROR]

@@ -68,13 +68,14 @@ logger = logging.getLogger(__name__)
 # 枚举类型
 # ══════════════════════════════════════════════════════════════════
 
+
 class SkillCategory(str, Enum):
-    BEHAVIOR = "behavior"   # 改变 AI 回答行为（步骤化、严谨模式等）
-    STYLE    = "style"      # 改变输出风格（文风、emoji 等）
-    DOMAIN   = "domain"     # 专业领域能力（代码、法律、金融等）
-    WORKFLOW = "workflow"   # 复合型任务流（多步骤、多工具编排）
-    MEMORY   = "memory"     # 记忆增强：跨会话长期记忆注入
-    CUSTOM   = "custom"     # 用户自定义录制的技能
+    BEHAVIOR = "behavior"  # 改变 AI 回答行为（步骤化、严谨模式等）
+    STYLE = "style"  # 改变输出风格（文风、emoji 等）
+    DOMAIN = "domain"  # 专业领域能力（代码、法律、金融等）
+    WORKFLOW = "workflow"  # 复合型任务流（多步骤、多工具编排）
+    MEMORY = "memory"  # 记忆增强：跨会话长期记忆注入
+    CUSTOM = "custom"  # 用户自定义录制的技能
 
 
 class SkillNature(str, Enum):
@@ -91,32 +92,34 @@ class SkillNature(str, Enum):
 
     system       : 系统级功能（记忆、工具调用等），非对话内容生成类。
     """
-    MODEL_HINT   = "model_hint"    # 模型原生能力激活/调整
+
+    MODEL_HINT = "model_hint"  # 模型原生能力激活/调整
     DOMAIN_SKILL = "domain_skill"  # 真实领域专项技能
-    SYSTEM       = "system"        # 系统功能
+    SYSTEM = "system"  # 系统功能
 
 
 class VariableType(str, Enum):
-    STRING  = "string"
+    STRING = "string"
     INTEGER = "integer"
-    NUMBER  = "number"
+    NUMBER = "number"
     BOOLEAN = "boolean"
-    ARRAY   = "array"
-    OBJECT  = "object"
+    ARRAY = "array"
+    OBJECT = "object"
 
 
 class OutputFormat(str, Enum):
-    MARKDOWN  = "markdown"
-    PLAIN     = "plain"
-    JSON      = "json"
-    TABLE     = "table"     # Markdown 表格
-    CODE      = "code"      # 代码块
-    ANY       = "any"
+    MARKDOWN = "markdown"
+    PLAIN = "plain"
+    JSON = "json"
+    TABLE = "table"  # Markdown 表格
+    CODE = "code"  # 代码块
+    ANY = "any"
 
 
 # ══════════════════════════════════════════════════════════════════
 # 子结构
 # ══════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class InputVariable:
@@ -124,14 +127,15 @@ class InputVariable:
     Skill 的一个输入参数定义。
     对应 MCP Tool 的 inputSchema.properties 中的一个字段。
     """
+
     name: str
     type: VariableType | str = VariableType.STRING
     description: str = ""
     required: bool = True
     default: Any = None
-    example: Optional[str] = None           # 示例值（用于文档和训练）
+    example: Optional[str] = None  # 示例值（用于文档和训练）
     # JSON Schema 附加约束（可选）
-    enum: Optional[List[Any]] = None        # 枚举约束
+    enum: Optional[List[Any]] = None  # 枚举约束
     min_length: Optional[int] = None
     max_length: Optional[int] = None
     minimum: Optional[float] = None
@@ -140,7 +144,11 @@ class InputVariable:
     def to_json_schema_property(self) -> Dict[str, Any]:
         """生成 JSON Schema 格式的属性描述（用于 MCP inputSchema）"""
         prop: Dict[str, Any] = {
-            "type": str(self.type.value) if isinstance(self.type, VariableType) else self.type,
+            "type": (
+                str(self.type.value)
+                if isinstance(self.type, VariableType)
+                else self.type
+            ),
             "description": self.description,
         }
         if self.enum:
@@ -163,6 +171,7 @@ class OutputSpec:
     """
     Skill 期望的输出格式约束，供 Verification Layer 验收使用。
     """
+
     format: OutputFormat | str = OutputFormat.ANY
     # 输出文本中必须包含的字符串列表（简单规则校验）
     must_contain: List[str] = field(default_factory=list)
@@ -199,10 +208,14 @@ class OutputSpec:
         for token in self.must_not_contain:
             if token in text:
                 reason = f"输出包含禁止内容: '{token}'"
-                logger.warning("[OutputSpec] validate() blocked forbidden content: %s", reason)
+                logger.warning(
+                    "[OutputSpec] validate() blocked forbidden content: %s", reason
+                )
                 return False, reason
 
-        fmt = self.format.value if isinstance(self.format, OutputFormat) else self.format
+        fmt = (
+            self.format.value if isinstance(self.format, OutputFormat) else self.format
+        )
         if fmt == "json" and self.required_json_keys:
             try:
                 obj = json.loads(text)
@@ -227,6 +240,7 @@ class OutputSpec:
 # ══════════════════════════════════════════════════════════════════
 # 核心：SkillDefinition
 # ══════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class SkillDefinition:
@@ -288,13 +302,15 @@ class SkillDefinition:
     # ── 原有字段（保留向后兼容）─────────────────────────────────────────────
     task_types: List[str] = field(default_factory=list)
     enabled: bool = False
-    prompt: str = ""         # 旧版直接注入片段，新版用 render_prompt() 替代
+    prompt: str = ""  # 旧版直接注入片段，新版用 render_prompt() 替代
 
     # ── 元数据 ───────────────────────────────────────────────────────────────
     version: str = "1.0.0"
     author: str = "builtin"
     created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        default_factory=lambda: datetime.now(timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
     )
     tags: List[str] = field(default_factory=list)
 
@@ -333,7 +349,6 @@ class SkillDefinition:
 
     # ── 方法 ─────────────────────────────────────────────────────────────────
 
-
     def render_prompt(self, variables: Optional[Dict[str, Any]] = None) -> str:
         """
         将 system_prompt_template 中的 {variable} 占位符替换为实际值。
@@ -351,7 +366,11 @@ class SkillDefinition:
         try:
             return template.format(**variables)
         except KeyError as e:
-            logger.warning("[SkillDefinition] render_prompt() missing variable %s for skill=%s", e, self.id)
+            logger.warning(
+                "[SkillDefinition] render_prompt() missing variable %s for skill=%s",
+                e,
+                self.id,
+            )
             return template
 
     def to_mcp_tool(self) -> Dict[str, Any]:
@@ -371,7 +390,11 @@ class SkillDefinition:
 
         参考: https://spec.modelcontextprotocol.io/specification/server/tools/
         """
-        logger.debug("[SkillDefinition] to_mcp_tool() skill=%s input_variables=%d", self.id, len(self.input_variables))
+        logger.debug(
+            "[SkillDefinition] to_mcp_tool() skill=%s input_variables=%d",
+            self.id,
+            len(self.input_variables),
+        )
         properties: Dict[str, Any] = {}
         required_fields: List[str] = []
 
@@ -428,7 +451,9 @@ class SkillDefinition:
             "input_variables": [
                 {
                     "name": v.name,
-                    "type": v.type.value if isinstance(v.type, VariableType) else v.type,
+                    "type": (
+                        v.type.value if isinstance(v.type, VariableType) else v.type
+                    ),
                     "description": v.description,
                     "required": v.required,
                     "default": v.default,
@@ -548,7 +573,9 @@ class SkillDefinition:
             bound_tools=[],
             task_types=legacy.get("task_types", []),
             enabled=legacy.get("enabled", False),
-            prompt=legacy.get("prompt", ""),  # 保留旧版 prompt，render_prompt() 会降级使用
+            prompt=legacy.get(
+                "prompt", ""
+            ),  # 保留旧版 prompt，render_prompt() 会降级使用
             version="1.0.0",
             author="builtin",
             tags=[legacy.get("category", "")],
@@ -561,6 +588,7 @@ class SkillDefinition:
 # ══════════════════════════════════════════════════════════════════
 # 便捷工厂函数
 # ══════════════════════════════════════════════════════════════════
+
 
 def make_simple_skill(
     id: str,

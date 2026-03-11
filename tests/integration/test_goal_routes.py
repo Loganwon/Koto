@@ -6,7 +6,9 @@ Tests goal creation, listing, stats, single goal retrieval, update,
 lifecycle transitions (activate/pause/resume/complete/delete).
 Uses the full_client fixture from conftest.py.
 """
+
 from __future__ import annotations
+
 import pytest
 
 

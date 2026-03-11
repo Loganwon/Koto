@@ -34,7 +34,7 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 _initialized = False
-_status: str = "disabled"   # disabled | active | error
+_status: str = "disabled"  # disabled | active | error
 
 
 def init_langsmith() -> str:
@@ -69,6 +69,7 @@ def init_langsmith() -> str:
     try:
         # 验证 langsmith 包（langchain-core 已包含 tracer）
         import langsmith  # type: ignore
+
         client = langsmith.Client(api_key=api_key)
         logger.info(
             f"[LangSmith] ✅ Tracing 已激活\n"
@@ -122,6 +123,7 @@ def add_feedback(
         return False
     try:
         import langsmith  # type: ignore
+
         client = langsmith.Client()
         client.create_feedback(
             run_id=run_id,

@@ -1,0 +1,41 @@
+{
+  "id": "test_market_skill_001",
+  "name": "Test Market Skill",
+  "icon": "🔧",
+  "category": "custom",
+  "skill_nature": "domain_skill",
+  "description": "A skill for marketplace integration testing",
+  "intent_description": "",
+  "system_prompt_template": "",
+  "input_variables": [],
+  "output_spec": {
+    "format": "any",
+    "must_contain": [],
+    "must_not_contain": [],
+    "min_chars": null,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": ""
+  },
+  "bound_tools": [],
+  "task_types": [
+    "CHAT"
+  ],
+  "enabled": false,
+  "prompt": "",
+  "version": "1.0.0",
+  "author": "user",
+  "created_at": "",
+  "tags": [
+    "test"
+  ],
+  "priority": 50,
+  "conflict_with": [],
+  "examples": [],
+  "compatibility": {},
+  "dependencies": [],
+  "permissions": [],
+  "update_url": "",
+  "publisher": "user",
+  "default_triggers": []
+}

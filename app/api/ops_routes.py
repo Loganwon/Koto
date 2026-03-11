@@ -14,6 +14,7 @@ Koto Ops REST API — /api/ops
   POST /api/ops/remediation/<name>/toggle  — 启用/禁用某条规则
   POST /api/ops/gc              — 手动触发 GC（调试用）
 """
+
 from __future__ import annotations
 
 import gc
@@ -30,6 +31,7 @@ ops_bp = Blueprint("ops", __name__, url_prefix="/api/ops")
 
 # ── 健康 / 就绪 ───────────────────────────────────────────────────────────────
 
+
 @ops_bp.route("/health", methods=["GET"])
 def health():
     """
@@ -38,6 +40,7 @@ def health():
     """
     try:
         from app.core.ops.health_snapshot import get_health_snapshot
+
         snap = get_health_snapshot().collect()
         code = 503 if snap["status"] == "unhealthy" else 200
         return jsonify(snap), code
@@ -54,15 +57,20 @@ def readiness():
     """
     try:
         from app.core.ops.health_snapshot import get_health_snapshot
+
         ready = get_health_snapshot().is_ready()
         if ready:
-            return jsonify({"ready": True, "timestamp": datetime.now().isoformat()}), 200
+            return (
+                jsonify({"ready": True, "timestamp": datetime.now().isoformat()}),
+                200,
+            )
         return jsonify({"ready": False, "timestamp": datetime.now().isoformat()}), 503
     except Exception as exc:
         return jsonify({"ready": False, "error": str(exc)}), 503
 
 
 # ── 指标 ──────────────────────────────────────────────────────────────────────
+
 
 @ops_bp.route("/metrics", methods=["GET"])
 def metrics():
@@ -71,7 +79,8 @@ def metrics():
 
     # 作业统计
     try:
-        from app.core.tasks.task_ledger import get_ledger, TaskStatus
+        from app.core.tasks.task_ledger import TaskStatus, get_ledger
+
         ledger = get_ledger()
         data["jobs"] = {
             "running": ledger.count(status=TaskStatus.RUNNING),
@@ -86,6 +95,7 @@ def metrics():
     # 调度器触发器统计
     try:
         from app.core.jobs.trigger_registry import get_trigger_registry
+
         triggers = get_trigger_registry().list_all()
         data["triggers"] = {
             "total": len(triggers),
@@ -99,6 +109,7 @@ def metrics():
     # 运维事件统计
     try:
         from app.core.ops.ops_event_bus import get_ops_bus
+
         data["ops_events"] = get_ops_bus().get_stats()
     except Exception as exc:
         data["ops_events"] = {"error": str(exc)}
@@ -108,6 +119,7 @@ def metrics():
 
 
 # ── 运维事件（Incidents）─────────────────────────────────────────────────────
+
 
 @ops_bp.route("/incidents", methods=["GET"])
 def incidents():
@@ -124,24 +136,30 @@ def incidents():
 
     try:
         from app.core.ops.ops_event_bus import get_ops_bus
+
         events = get_ops_bus().get_recent(n)
         if severity_filter:
             events = [e for e in events if e.severity == severity_filter]
         if type_filter:
             events = [e for e in events if e.event_type == type_filter]
-        return jsonify({
-            "count": len(events),
-            "events": [
+        return (
+            jsonify(
                 {
-                    "event_type": e.event_type,
-                    "severity": e.severity,
-                    "source": e.source,
-                    "timestamp": e.timestamp,
-                    "detail": e.detail,
+                    "count": len(events),
+                    "events": [
+                        {
+                            "event_type": e.event_type,
+                            "severity": e.severity,
+                            "source": e.source,
+                            "timestamp": e.timestamp,
+                            "detail": e.detail,
+                        }
+                        for e in events
+                    ],
                 }
-                for e in events
-            ],
-        }), 200
+            ),
+            200,
+        )
     except Exception as exc:
         logger.error("[ops/incidents] %s", exc)
         return jsonify({"error": str(exc)}), 500
@@ -149,30 +167,37 @@ def incidents():
 
 # ── 调度器状态 ────────────────────────────────────────────────────────────────
 
+
 @ops_bp.route("/triggers/status", methods=["GET"])
 def triggers_status():
     """触发器调度器状态概览。"""
     try:
         from app.core.jobs.trigger_registry import get_trigger_registry
+
         reg = get_trigger_registry()
         triggers = reg.list_all()
-        return jsonify({
-            "scheduler_running": reg._running,
-            "trigger_count": len(triggers),
-            "triggers": [
+        return (
+            jsonify(
                 {
-                    "trigger_id": t.trigger_id,
-                    "name": t.name,
-                    "type": t.trigger_type,
-                    "job_type": t.job_type,
-                    "enabled": t.enabled,
-                    "run_count": t.run_count,
-                    "last_run": t.last_run,
-                    "last_error": t.last_error,
+                    "scheduler_running": reg._running,
+                    "trigger_count": len(triggers),
+                    "triggers": [
+                        {
+                            "trigger_id": t.trigger_id,
+                            "name": t.name,
+                            "type": t.trigger_type,
+                            "job_type": t.job_type,
+                            "enabled": t.enabled,
+                            "run_count": t.run_count,
+                            "last_run": t.last_run,
+                            "last_error": t.last_error,
+                        }
+                        for t in triggers
+                    ],
                 }
-                for t in triggers
-            ],
-        }), 200
+            ),
+            200,
+        )
     except Exception as exc:
         logger.error("[ops/triggers/status] %s", exc)
         return jsonify({"error": str(exc)}), 500
@@ -180,11 +205,13 @@ def triggers_status():
 
 # ── 自愈规则 ──────────────────────────────────────────────────────────────────
 
+
 @ops_bp.route("/remediation", methods=["GET"])
 def list_remediation():
     """列出所有自愈规则及其执行统计。"""
     try:
         from app.core.ops.remediation_policy import get_remediation_policy
+
         rules = get_remediation_policy().list_rules()
         return jsonify({"rules": rules}), 200
     except Exception as exc:
@@ -199,6 +226,7 @@ def toggle_remediation(name: str):
     """
     try:
         from app.core.ops.remediation_policy import get_remediation_policy
+
         body = request.get_json(silent=True) or {}
         enabled = bool(body.get("enabled", True))
         get_remediation_policy().enable_rule(name, enabled)
@@ -209,9 +237,14 @@ def toggle_remediation(name: str):
 
 # ── 手动 GC（调试工具）───────────────────────────────────────────────────────
 
+
 @ops_bp.route("/gc", methods=["POST"])
 def manual_gc():
     """手动触发 Python GC（仅用于调试）。"""
     collected = gc.collect()
-    return jsonify({"collected_objects": collected,
-                    "timestamp": datetime.now().isoformat()}), 200
+    return (
+        jsonify(
+            {"collected_objects": collected, "timestamp": datetime.now().isoformat()}
+        ),
+        200,
+    )

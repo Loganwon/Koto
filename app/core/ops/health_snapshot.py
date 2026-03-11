@@ -19,6 +19,7 @@ Koto HealthSnapshot — 统一健康视图
   GET /api/ops/metrics       — 详细指标 JSON
   GET /api/ops/incidents     — 最新运维事件列表
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,8 +31,8 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # 健康状态等级
-_HEALTHY   = "healthy"
-_DEGRADED  = "degraded"
+_HEALTHY = "healthy"
+_DEGRADED = "degraded"
 _UNHEALTHY = "unhealthy"
 
 
@@ -128,17 +129,15 @@ class HealthSnapshot:
             "timestamp": datetime.now().isoformat(timespec="milliseconds"),
             "checks": checks,
             "issues": issues,
-            "summary": (
-                "所有系统正常" if not issues
-                else "; ".join(issues[:3])
-            ),
+            "summary": ("所有系统正常" if not issues else "; ".join(issues[:3])),
         }
 
     # ── 单项检查 ──────────────────────────────────────────────────────────────
 
     def _check_job_queue(self) -> Dict:
         try:
-            from app.core.tasks.task_ledger import get_ledger, TaskStatus
+            from app.core.tasks.task_ledger import TaskStatus, get_ledger
+
             ledger = get_ledger()
             running = ledger.count(status=TaskStatus.RUNNING, source="job_runner")
             failed_recent = ledger.count(status=TaskStatus.FAILED, source="job_runner")
@@ -151,19 +150,32 @@ class HealthSnapshot:
             if pending > 50:
                 status = _DEGRADED
                 msg = f"积压任务数过多: {pending}"
-            return {"status": status, "message": msg,
-                    "value": {"running": running, "pending": pending, "failed": failed_recent}}
+            return {
+                "status": status,
+                "message": msg,
+                "value": {
+                    "running": running,
+                    "pending": pending,
+                    "failed": failed_recent,
+                },
+            }
         except Exception as exc:
-            return {"status": _DEGRADED, "message": f"任务台账不可用: {exc}", "value": {}}
+            return {
+                "status": _DEGRADED,
+                "message": f"任务台账不可用: {exc}",
+                "value": {},
+            }
 
     def _check_model(self) -> Dict:
         """检查主模型 API 可用性（仅检查配置是否存在，不发真实请求）。"""
         try:
             import os
+
             api_key = os.environ.get("GEMINI_API_KEY", "")
             if not api_key:
                 # 尝试从配置文件读取
                 from pathlib import Path
+
                 env_path = Path("config/gemini_config.env")
                 if env_path.exists():
                     for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -184,6 +196,7 @@ class HealthSnapshot:
         """检查本地 Ollama 服务是否可达。"""
         try:
             import urllib.request
+
             req = urllib.request.Request(
                 "http://localhost:11434/api/tags",
                 headers={"User-Agent": "koto-healthcheck"},
@@ -202,6 +215,7 @@ class HealthSnapshot:
     def _check_scheduler(self) -> Dict:
         try:
             from app.core.jobs.trigger_registry import get_trigger_registry
+
             reg = get_trigger_registry()
             triggers = reg.list_all()
             enabled = [t for t in triggers if t.enabled]
@@ -210,14 +224,22 @@ class HealthSnapshot:
             status = _DEGRADED if errored else _HEALTHY
             if errored:
                 msg = f"{len(errored)} 个触发器最近出错"
-            return {"status": status, "message": msg,
-                    "value": {"total": len(triggers), "enabled": len(enabled), "errored": len(errored)}}
+            return {
+                "status": status,
+                "message": msg,
+                "value": {
+                    "total": len(triggers),
+                    "enabled": len(enabled),
+                    "errored": len(errored),
+                },
+            }
         except Exception as exc:
             return {"status": _DEGRADED, "message": f"调度器不可用: {exc}", "value": {}}
 
     def _check_skills(self) -> Dict:
         try:
             from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
             total = len(SkillManager._def_registry)
             enabled = sum(
@@ -234,6 +256,7 @@ class HealthSnapshot:
     def _check_ops_events(self) -> Dict:
         try:
             from app.core.ops.ops_event_bus import get_ops_bus
+
             bus = get_ops_bus()
             recent = bus.get_recent(50)
             errors = [e for e in recent if e.severity in ("error", "critical")]
@@ -249,13 +272,22 @@ class HealthSnapshot:
                     "message": f"最近有 {len(errors)} 条错误事件",
                     "value": {"recent_errors": len(errors)},
                 }
-            return {"status": _HEALTHY, "message": "无异常运维事件", "value": {"recent_errors": 0}}
+            return {
+                "status": _HEALTHY,
+                "message": "无异常运维事件",
+                "value": {"recent_errors": 0},
+            }
         except Exception as exc:
-            return {"status": _HEALTHY, "message": "OpsEventBus 尚未初始化", "value": {}}
+            return {
+                "status": _HEALTHY,
+                "message": "OpsEventBus 尚未初始化",
+                "value": {},
+            }
 
     def _check_resources(self) -> Dict:
         try:
             import psutil
+
             cpu = psutil.cpu_percent(interval=0.1)
             mem = psutil.virtual_memory()
             mem_pct = mem.percent
@@ -273,7 +305,11 @@ class HealthSnapshot:
                 "value": {"cpu_pct": cpu, "mem_pct": mem_pct},
             }
         except ImportError:
-            return {"status": _HEALTHY, "message": "psutil 未安装（跳过资源检查）", "value": {}}
+            return {
+                "status": _HEALTHY,
+                "message": "psutil 未安装（跳过资源检查）",
+                "value": {},
+            }
         except Exception as exc:
             return {"status": _HEALTHY, "message": str(exc), "value": {}}
 

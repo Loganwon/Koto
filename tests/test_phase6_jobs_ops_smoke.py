@@ -10,6 +10,7 @@ before importing the runtime modules. It validates:
 3. Ops health/metrics endpoints respond
 4. A manual trigger fire path returns a task id
 """
+
 from __future__ import annotations
 
 import os
@@ -28,9 +29,9 @@ def build_app() -> Flask:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from app.api.skill_routes import skill_bp
     from app.api.job_routes import job_bp
     from app.api.ops_routes import ops_bp
+    from app.api.skill_routes import skill_bp
 
     app.register_blueprint(skill_bp)
     app.register_blueprint(job_bp)
@@ -100,7 +101,9 @@ def main() -> int:
                 "enabled": True,
             },
         )
-        assert webhook_trigger.status_code == 201, webhook_trigger.get_data(as_text=True)
+        assert webhook_trigger.status_code == 201, webhook_trigger.get_data(
+            as_text=True
+        )
         trigger_id = webhook_trigger.get_json()["data"]["trigger_id"]
 
         resp = client.post(f"/api/jobs/triggers/{trigger_id}/fire")

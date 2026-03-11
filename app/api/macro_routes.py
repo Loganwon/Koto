@@ -11,6 +11,7 @@ macro_routes.py — 宏录制主动建议 API
   POST /api/macro/dismiss/<id>      用户忽略建议
   GET  /api/macro/history           全部建议（调试用）
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,8 +25,10 @@ macro_bp = Blueprint("macro", __name__, url_prefix="/api/macro")
 
 # ── 辅助 ──────────────────────────────────────────────────────────────────────
 
+
 def _get_recorder():
     from app.core.monitoring.macro_recorder import get_macro_recorder
+
     return get_macro_recorder()
 
 
@@ -45,6 +48,7 @@ def _err(msg: str, code: int = 400):
 # GET /api/macro/pending
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @macro_bp.get("/pending")
 def macro_pending():
     """返回所有 status='pending' 的宏建议（前端每次响应后轻量轮询）。"""
@@ -60,6 +64,7 @@ def macro_pending():
 # POST /api/macro/confirm/<id>
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @macro_bp.post("/confirm/<suggestion_id>")
 def macro_confirm(suggestion_id: str):
     """
@@ -72,7 +77,7 @@ def macro_confirm(suggestion_id: str):
         { "ok": true, "data": { "skill_id": "macro_xxxx" } }
     """
     try:
-        body       = request.get_json(force=True, silent=True) or {}
+        body = request.get_json(force=True, silent=True) or {}
         skill_name = (body.get("name") or "").strip()
 
         if not skill_name:
@@ -94,6 +99,7 @@ def macro_confirm(suggestion_id: str):
 # POST /api/macro/dismiss/<id>
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @macro_bp.post("/dismiss/<suggestion_id>")
 def macro_dismiss(suggestion_id: str):
     """用户忽略宏建议（不再就此模式打扰）。"""
@@ -111,11 +117,12 @@ def macro_dismiss(suggestion_id: str):
 # GET /api/macro/history
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @macro_bp.get("/history")
 def macro_history():
     """全部宏建议（含已确认/已忽略），供调试面板查看。"""
     try:
-        recorder  = _get_recorder()
+        recorder = _get_recorder()
         with recorder._lock:
             all_items = [s.to_dict() for s in recorder._suggestions]
         return _ok(all_items)

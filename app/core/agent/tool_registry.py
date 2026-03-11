@@ -6,26 +6,34 @@ from app.core.agent.base import AgentPlugin
 
 logger = logging.getLogger(__name__)
 
+
 class ToolRegistry:
     """
     Manages tools and plugins for the agent.
     Provides tool definitions for LLMs and executes tool calls.
     """
+
     def __init__(self):
         self._tools: Dict[str, Callable] = {}
         self._tool_definitions: List[Dict[str, Any]] = []
         self._plugins: Dict[str, AgentPlugin] = {}
 
-    def register_tool(self, name: str, func: Callable, description: Optional[str] = None, parameters: Optional[Dict] = None):
+    def register_tool(
+        self,
+        name: str,
+        func: Callable,
+        description: Optional[str] = None,
+        parameters: Optional[Dict] = None,
+    ):
         """
         Register a single tool function.
         """
         # Avoid duplicate registration
         if name in self._tools:
             logger.warning(f"Tool {name} is already registered. Updating definition.")
-            
+
         self._tools[name] = func
-        
+
         definition = {
             "name": name,
             "description": description or func.__doc__ or "No description provided.",
@@ -35,9 +43,11 @@ class ToolRegistry:
             definition["parameters"] = parameters
         else:
             definition["parameters"] = self._generate_schema(func)
-        
+
         # Update definition in list
-        self._tool_definitions = [t for t in self._tool_definitions if t["name"] != name]
+        self._tool_definitions = [
+            t for t in self._tool_definitions if t["name"] != name
+        ]
         self._tool_definitions.append(definition)
         logger.debug(f"Registered tool: {name}")
 
@@ -47,20 +57,22 @@ class ToolRegistry:
         """
         self._plugins[plugin.name] = plugin
         tools = plugin.get_tools()
-        
+
         for tool_def in tools:
             name = tool_def.get("name")
             func = tool_def.get("func")
-            
+
             if not name or not func:
-                logger.warning(f"Plugin {plugin.name} provided invalid tool definition: {tool_def}")
+                logger.warning(
+                    f"Plugin {plugin.name} provided invalid tool definition: {tool_def}"
+                )
                 continue
-                
+
             self.register_tool(
                 name=name,
                 func=func,
                 description=tool_def.get("description"),
-                parameters=tool_def.get("parameters")
+                parameters=tool_def.get("parameters"),
             )
         logger.info(f"Registered plugin: {plugin.name} with {len(tools)} tools")
 
@@ -77,7 +89,7 @@ class ToolRegistry:
         func = self._tools.get(tool_name)
         if not func:
             raise ValueError(f"Tool '{tool_name}' not found.")
-        
+
         try:
             # Simply pass as kwargs. The function must handle them.
             return func(**tool_args)
@@ -98,17 +110,17 @@ class ToolRegistry:
             type_hints = get_type_hints(func)
         except Exception:
             type_hints = {}
-        
+
         properties = {}
         required = []
-        
+
         for param_name, param in sig.parameters.items():
             if param_name in ("self", "cls"):
                 continue
-            
+
             # Start with default type string
             json_type = "STRING"
-            
+
             # Map Python types to JSON schema types
             hint = type_hints.get(param_name)
             if hint:
@@ -119,19 +131,13 @@ class ToolRegistry:
                 elif hint is bool:
                     json_type = "BOOLEAN"
                 elif hint is list or getattr(hint, "__origin__", None) is list:
-                     json_type = "ARRAY"
+                    json_type = "ARRAY"
                 elif hint is dict or getattr(hint, "__origin__", None) is dict:
-                     json_type = "OBJECT"
-            
-            properties[param_name] = {
-                "type": json_type
-            }
-            
+                    json_type = "OBJECT"
+
+            properties[param_name] = {"type": json_type}
+
             if param.default == inspect.Parameter.empty:
                 required.append(param_name)
-                
-        return {
-            "type": "OBJECT",
-            "properties": properties,
-            "required": required
-        }
+
+        return {"type": "OBJECT", "properties": properties, "required": required}

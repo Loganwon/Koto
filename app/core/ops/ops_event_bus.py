@@ -31,6 +31,7 @@ Koto OpsEventBus — 运维事件总线
         "reason": "API timeout",
     })
 """
+
 from __future__ import annotations
 
 import logging
@@ -50,13 +51,14 @@ _HISTORY_MAX = 500
 @dataclass
 class OpsEvent:
     """一条运维事件记录。"""
+
     event_type: str
     detail: Dict[str, Any]
-    severity: str = "info"      # info / warning / error / critical
+    severity: str = "info"  # info / warning / error / critical
     timestamp: str = field(
         default_factory=lambda: datetime.now().isoformat(timespec="milliseconds")
     )
-    source: str = "system"      # 发出方标识
+    source: str = "system"  # 发出方标识
 
     def to_dict(self) -> Dict:
         return {
@@ -106,6 +108,7 @@ class OpsEventBus:
             handlers += list(self._handlers.get("*", []))
 
         if handlers:
+
             def _dispatch():
                 for h in handlers:
                     try:
@@ -117,7 +120,9 @@ class OpsEventBus:
 
         # 高严重度事件直接写日志
         if severity in ("error", "critical"):
-            logger.error("[OpsEvent] %s | %s | %s", severity.upper(), event_type, detail)
+            logger.error(
+                "[OpsEvent] %s | %s | %s", severity.upper(), event_type, detail
+            )
         elif severity == "warning":
             logger.warning("[OpsEvent] %s | %s", event_type, detail)
         else:
@@ -195,22 +200,26 @@ def _setup_default_subscriptions(bus: OpsEventBus):
     def _alert_handler(event: OpsEvent):
         try:
             from app.core.monitoring.alert_manager import get_alert_manager
+
             am = get_alert_manager()
-            am.process_event({
-                "event_type": event.event_type,
-                "severity": _map_severity(event.severity),
-                "description": str(event.detail),
-                "metric_name": event.event_type,
-                "metric_value": 1,
-                "threshold": 1,
-                "timestamp": event.timestamp,
-            })
+            am.process_event(
+                {
+                    "event_type": event.event_type,
+                    "severity": _map_severity(event.severity),
+                    "description": str(event.detail),
+                    "metric_name": event.event_type,
+                    "metric_value": 1,
+                    "threshold": 1,
+                    "timestamp": event.timestamp,
+                }
+            )
         except Exception:
             pass
 
     def _remediation_handler(event: OpsEvent):
         try:
             from app.core.ops.remediation_policy import get_remediation_policy
+
             get_remediation_policy().handle(event)
         except Exception:
             pass
@@ -221,6 +230,9 @@ def _setup_default_subscriptions(bus: OpsEventBus):
 
 def _map_severity(koto_sev: str) -> str:
     """将 OpsEvent severity 映射到 AlertManager 的 severity。"""
-    return {"info": "low", "warning": "medium", "error": "high", "critical": "high"}.get(
-        koto_sev, "medium"
-    )
+    return {
+        "info": "low",
+        "warning": "medium",
+        "error": "high",
+        "critical": "high",
+    }.get(koto_sev, "medium")

@@ -6,8 +6,11 @@ Tests file listing/search, stats, recent files, and error cases.
 Avoids filesystem-heavy operations that require specific paths.
 Uses the full_client fixture from conftest.py.
 """
+
 from __future__ import annotations
+
 import io
+
 import pytest
 
 

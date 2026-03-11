@@ -62,9 +62,9 @@ AI 回复：
 """
 
 
-_MIN_RESPONSE_LEN = 10           # 过短的回复不值得评分
-_EVAL_MODEL       = "gemini-2.0-flash-lite"  # 快速、便宜
-_MAX_INPUT_CHARS  = 1200         # 截断避免长度超限
+_MIN_RESPONSE_LEN = 10  # 过短的回复不值得评分
+_EVAL_MODEL = "gemini-2.0-flash-lite"  # 快速、便宜
+_MAX_INPUT_CHARS = 1200  # 截断避免长度超限
 
 
 class ResponseEvaluator:
@@ -120,8 +120,8 @@ class ResponseEvaluator:
                 return None
 
         scores = {
-            "accuracy":        float(data.get("accuracy",        0.5)),
-            "helpfulness":     float(data.get("helpfulness",     0.5)),
+            "accuracy": float(data.get("accuracy", 0.5)),
+            "helpfulness": float(data.get("helpfulness", 0.5)),
             "personalization": float(data.get("personalization", 0.5)),
             "task_completion": float(data.get("task_completion", 0.5)),
         }
@@ -133,6 +133,7 @@ class ResponseEvaluator:
 
         try:
             from app.core.learning.rating_store import get_rating_store
+
             rs = get_rating_store()
             rs.save_model_eval(
                 msg_id=msg_id,
@@ -143,8 +144,12 @@ class ResponseEvaluator:
             )
             overall = sum(
                 scores[d] * w
-                for d, w in {"accuracy": 0.35, "helpfulness": 0.30,
-                             "personalization": 0.20, "task_completion": 0.15}.items()
+                for d, w in {
+                    "accuracy": 0.35,
+                    "helpfulness": 0.30,
+                    "personalization": 0.20,
+                    "task_completion": 0.15,
+                }.items()
             )
             logger.info(
                 f"[Evaluator] ✅ {msg_id[:8]}… overall={overall:.2f}"
@@ -182,8 +187,9 @@ class ResponseEvaluator:
 
         def _run():
             try:
-                cls._do_eval(msg_id, user_input, ai_response,
-                             task_type, session_name, llm_fn)
+                cls._do_eval(
+                    msg_id, user_input, ai_response, task_type, session_name, llm_fn
+                )
             except Exception as e:
                 logger.debug(f"[Evaluator] thread error: {e}")
 

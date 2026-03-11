@@ -33,6 +33,7 @@ Koto WorkflowRuntime — 统一工作流执行入口
         payload={"workflow_id": "daily_report", "user_input": "Q1 汇报"},
     ))
 """
+
 from __future__ import annotations
 
 import logging
@@ -58,7 +59,7 @@ class WorkflowRuntime:
         workflow_id: str,
         user_input: str = "",
         variables: Optional[Dict[str, Any]] = None,
-        task_ctx=None,          # Optional[JobContext]
+        task_ctx=None,  # Optional[JobContext]
         session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -82,9 +83,7 @@ class WorkflowRuntime:
             return lg_result
 
         # ── 降级到步骤式执行 ───────────────────────────────────────────────────
-        step_result = self._execute_steps(
-            workflow_id, user_input, variables, task_ctx
-        )
+        step_result = self._execute_steps(workflow_id, user_input, variables, task_ctx)
         step_result["workflow_type"] = "step_based"
         return step_result
 
@@ -99,7 +98,10 @@ class WorkflowRuntime:
     ) -> Optional[Dict[str, Any]]:
         """尝试 LangGraph 执行，返回 None 表示不适用或执行失败需降级。"""
         try:
-            from app.core.workflow.langgraph_workflow import WorkflowEngine, _LG_AVAILABLE
+            from app.core.workflow.langgraph_workflow import (
+                _LG_AVAILABLE,
+                WorkflowEngine,
+            )
 
             if not _LG_AVAILABLE:
                 return None
@@ -196,9 +198,7 @@ class WorkflowRuntime:
         except Exception:
             pass
 
-        output = "\n\n".join(
-            f"[{r['step']}]\n{r['result']}" for r in results
-        )
+        output = "\n\n".join(f"[{r['step']}]\n{r['result']}" for r in results)
         return {
             "output": output,
             "file_path": None,
@@ -226,7 +226,7 @@ class WorkflowRuntime:
 
         if step_type in ("agent", "tool", "ai"):
             try:
-                from app.api.agent_routes import get_agent, AgentStepType
+                from app.api.agent_routes import AgentStepType, get_agent
 
                 agent = get_agent()
                 final_answer = ""
@@ -241,11 +241,10 @@ class WorkflowRuntime:
             skill_id = config.get("skill_id", "")
             try:
                 from app.core.skills.skill_manager import SkillManager
+
                 sk = SkillManager.get_definition(skill_id)
-                augmented = (
-                    f"{sk.system_prompt_template}\n\n{prompt}" if sk else prompt
-                )
-                from app.api.agent_routes import get_agent, AgentStepType
+                augmented = f"{sk.system_prompt_template}\n\n{prompt}" if sk else prompt
+                from app.api.agent_routes import AgentStepType, get_agent
 
                 agent = get_agent()
                 for step in agent.run(input_text=augmented, history=[]):
@@ -295,7 +294,10 @@ class WorkflowRuntime:
         注：仅 LangGraph 工作流支持流式输出；步骤式工作流不支持。
         """
         try:
-            from app.core.workflow.langgraph_workflow import WorkflowEngine, _LG_AVAILABLE
+            from app.core.workflow.langgraph_workflow import (
+                _LG_AVAILABLE,
+                WorkflowEngine,
+            )
 
             if not _LG_AVAILABLE:
                 yield {"node": "error", "content": "LangGraph 不可用", "done": True}

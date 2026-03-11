@@ -5,7 +5,9 @@ Integration tests for /api/jobs trigger endpoints.
 Tests trigger templates, bootstrap, listing, toggle (PATCH), create, and delete.
 Uses the session-scoped `client` fixture from conftest.py.
 """
+
 from __future__ import annotations
+
 import pytest
 
 

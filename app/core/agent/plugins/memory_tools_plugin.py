@@ -123,7 +123,11 @@ class MemoryToolsPlugin(AgentPlugin):
     def memory_save(self, content: str, category: str = "user_fact") -> str:
         """Save a memory."""
         valid_categories = {
-            "user_fact", "preference", "topic_summary", "decision", "reminder"
+            "user_fact",
+            "preference",
+            "topic_summary",
+            "decision",
+            "reminder",
         }
         category = category if category in valid_categories else "user_fact"
         try:
@@ -145,10 +149,7 @@ class MemoryToolsPlugin(AgentPlugin):
             if mgr is None:
                 return "[context_recall] ⚠️ 记忆系统未可用"
             hits = mgr.search_memories(topic, limit=4)
-            summaries = [
-                h for h in hits
-                if h.get("category") == "session_summary"
-            ]
+            summaries = [h for h in hits if h.get("category") == "session_summary"]
             if not summaries:
                 # Fall back to any hit
                 summaries = hits[:3]
@@ -167,6 +168,7 @@ class MemoryToolsPlugin(AgentPlugin):
         """Lazily load MemoryManager without circular imports."""
         try:
             import sys
+
             # Try web.app.get_memory_manager (runtime context)
             if "web.app" in sys.modules:
                 fn = getattr(sys.modules["web.app"], "get_memory_manager", None)

@@ -18,9 +18,11 @@ Koto Goal Management API
   DELETE /api/goals/<goal_id>              — 删除目标
   GET    /api/goals/<goal_id>/runs         — 查询目标所有执行记录
 """
+
 from __future__ import annotations
 
 import logging
+
 from flask import Blueprint, jsonify, request
 
 from app.core.goal.goal_manager import GoalStatus, get_goal_manager
@@ -31,6 +33,7 @@ goal_bp = Blueprint("goals", __name__)
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
 
 def _ok(data=None, **kwargs):
     body = {"ok": True}
@@ -47,6 +50,7 @@ def _err(message: str, code: int = 400):
 # ============================================================================
 # 路由
 # ============================================================================
+
 
 @goal_bp.post("")
 def create_goal():
@@ -120,8 +124,11 @@ def list_goals():
             return _err(f"无效状态: {status_raw}")
 
     goals = gm.list_goals(
-        status=status, category=category, session_id=session_id,
-        limit=limit, offset=offset,
+        status=status,
+        category=category,
+        session_id=session_id,
+        limit=limit,
+        offset=offset,
     )
     return _ok([g.to_dict() for g in goals], total=len(goals))
 
@@ -163,8 +170,13 @@ def update_goal(goal_id: str):
 
     data = request.get_json(silent=True) or {}
     allowed = {
-        "title", "user_goal", "category", "priority",
-        "due_at", "check_interval_minutes", "requires_confirmation",
+        "title",
+        "user_goal",
+        "category",
+        "priority",
+        "due_at",
+        "check_interval_minutes",
+        "requires_confirmation",
     }
     updates = {k: v for k, v in data.items() if k in allowed}
     if not updates:
@@ -244,7 +256,9 @@ def confirm_goal(goal_id: str):
     ctx = goal.get_context()
     ctx["user_confirmation"] = user_reply
     ctx.pop("waiting_reason", None)
-    gm._update(goal_id, context_snapshot=__import__("json").dumps(ctx, ensure_ascii=False))
+    gm._update(
+        goal_id, context_snapshot=__import__("json").dumps(ctx, ensure_ascii=False)
+    )
     gm.activate(goal_id)
     return _ok(gm.get(goal_id).to_dict())
 

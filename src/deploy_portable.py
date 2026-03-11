@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import argparse
 import os
-import stat
 import shutil
+import stat
 import time
 from pathlib import Path
-
 
 # __file__ 在 src/ 下，所以需要 .parent.parent 回到项目根目录
 _HERE = Path(__file__).resolve().parent
@@ -85,8 +84,8 @@ def create_launchers(output_dir: Path, include_installer: bool) -> None:
         output_dir / "Start_Koto.bat",
         "@echo off\n"
         "setlocal\n"
-        "cd /d \"%~dp0\"\n"
-        "start \"\" \"%~dp0Koto.exe\"\n"
+        'cd /d "%~dp0"\n'
+        'start "" "%~dp0Koto.exe"\n'
         "endlocal\n",
     )
 
@@ -94,12 +93,12 @@ def create_launchers(output_dir: Path, include_installer: bool) -> None:
         output_dir / "Stop_Koto.bat",
         "@echo off\n"
         "setlocal EnableDelayedExpansion\n"
-        "cd /d \"%~dp0\"\n"
-        "set \"LOCK_FILE=%~dp0.koto.lock\"\n"
-        "if exist \"%LOCK_FILE%\" (\n"
-        "  set /p LOCKED_PID=<\"%LOCK_FILE%\"\n"
-        "  if defined LOCKED_PID if not \"!LOCKED_PID!\"==\"starting\" taskkill /F /PID !LOCKED_PID! >nul 2>&1\n"
-        "  del /F \"%LOCK_FILE%\" >nul 2>&1\n"
+        'cd /d "%~dp0"\n'
+        'set "LOCK_FILE=%~dp0.koto.lock"\n'
+        'if exist "%LOCK_FILE%" (\n'
+        '  set /p LOCKED_PID=<"%LOCK_FILE%"\n'
+        '  if defined LOCKED_PID if not "!LOCKED_PID!"=="starting" taskkill /F /PID !LOCKED_PID! >nul 2>&1\n'
+        '  del /F "%LOCK_FILE%" >nul 2>&1\n'
         ")\n"
         "taskkill /F /IM Koto.exe >nul 2>&1\n"
         "endlocal\n",
@@ -109,8 +108,8 @@ def create_launchers(output_dir: Path, include_installer: bool) -> None:
         install_content = (
             "@echo off\n"
             "setlocal\n"
-            "cd /d \"%~dp0\"\n"
-            "start \"\" \"%~dp0LocalModelInstaller.exe\"\n"
+            'cd /d "%~dp0"\n'
+            'start "" "%~dp0LocalModelInstaller.exe"\n'
             "endlocal\n"
         )
     else:
@@ -129,7 +128,9 @@ def build_portable_bundle(output_dir: Path, strict_installer: bool) -> None:
 
     installer_path = find_local_installer()
     if strict_installer and installer_path is None:
-        raise FileNotFoundError("未找到 LocalModelInstaller.exe，请先构建本地模型安装器")
+        raise FileNotFoundError(
+            "未找到 LocalModelInstaller.exe，请先构建本地模型安装器"
+        )
 
     ensure_clean_output(output_dir)
     shutil.copytree(APP_BUILD_DIR, output_dir, dirs_exist_ok=True)

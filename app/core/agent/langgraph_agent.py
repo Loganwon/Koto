@@ -52,14 +52,21 @@ logger = logging.getLogger(__name__)
 
 # ── LangGraph / LangChain 可选依赖 ─────────────────────────────────────────
 try:
-    from langgraph.graph import StateGraph, END
-    from langgraph.checkpoint.memory import MemorySaver
-    from langchain_core.messages import (
-        AIMessage, HumanMessage, SystemMessage, ToolMessage, BaseMessage
-    )
-    from langchain_core.tools import BaseTool, tool as lc_tool
-    from typing_extensions import TypedDict, Annotated
     import operator
+
+    from langchain_core.messages import (
+        AIMessage,
+        BaseMessage,
+        HumanMessage,
+        SystemMessage,
+        ToolMessage,
+    )
+    from langchain_core.tools import BaseTool
+    from langchain_core.tools import tool as lc_tool
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.graph import END, StateGraph
+    from typing_extensions import Annotated, TypedDict
+
     _LG_AVAILABLE = True
 except ImportError:
     _LG_AVAILABLE = False
@@ -78,6 +85,7 @@ def _assert_langgraph():
 # ─────────────────────────────────────────────────────────────────────────────
 
 if _LG_AVAILABLE:
+
     class AgentState(TypedDict):
         messages: Annotated[List[BaseMessage], operator.add]  # message 累积追加
         # ── Koto-specific 字段 ────────────────────────────────────────────────
@@ -86,8 +94,8 @@ if _LG_AVAILABLE:
         session_id: Optional[str]
         steps_taken: int
         validation_retries: int
-        pii_mask_result: Optional[Any]       # PIIMaskResult 实例
-        original_input: str                  # 原始 (未脱敏) 的 user input
+        pii_mask_result: Optional[Any]  # PIIMaskResult 实例
+        original_input: str  # 原始 (未脱敏) 的 user input
         final_answer: Optional[str]
         error: Optional[str]
 
@@ -100,8 +108,14 @@ MAX_STEPS = 15
 MAX_VAL_RETRIES = 1
 
 
-def _make_nodes(llm, registry, system_instruction: str, enable_pii: bool,
-                enable_validation: bool, restore_pii: bool):
+def _make_nodes(
+    llm,
+    registry,
+    system_instruction: str,
+    enable_pii: bool,
+    enable_validation: bool,
+    restore_pii: bool,
+):
     """闭包工厂：生成绑定了 llm / registry 的节点函数。"""
 
     # ── 工具映射（name → callable）────────────────────────────────────────
@@ -153,15 +167,21 @@ def _make_nodes(llm, registry, system_instruction: str, enable_pii: bool,
             t_id = tc.get("id", t_name)
             try:
                 result = registry.execute(t_name, t_args)
-                result_str = json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
+                result_str = (
+                    json.dumps(result, ensure_ascii=False)
+                    if not isinstance(result, str)
+                    else result
+                )
             except Exception as exc:
                 result_str = f"[工具错误] {t_name}: {exc}"
                 logger.warning(f"[LangGraphAgent] 工具 {t_name} 执行失败: {exc}")
 
-            tool_messages.append(ToolMessage(
-                tool_call_id=t_id,
-                content=result_str,
-            ))
+            tool_messages.append(
+                ToolMessage(
+                    tool_call_id=t_id,
+                    content=result_str,
+                )
+            )
 
         return {"messages": tool_messages}
 
@@ -186,13 +206,16 @@ def _make_nodes(llm, registry, system_instruction: str, enable_pii: bool,
         if enable_validation:
             try:
                 from app.core.security.output_validator import OutputValidator
+
                 val_result = OutputValidator.validate(
                     text=content,
                     skill_id=skill_id,
                     original_prompt=original_input,
                 )
                 if val_result.is_blocked:
-                    logger.warning(f"[LangGraphAgent] 输出被安全护栏拦截: {val_result.reasons}")
+                    logger.warning(
+                        f"[LangGraphAgent] 输出被安全护栏拦截: {val_result.reasons}"
+                    )
                     return {
                         "final_answer": val_result.text,
                         "error": "OUTPUT_BLOCKED",
@@ -226,7 +249,10 @@ def _make_nodes(llm, registry, system_instruction: str, enable_pii: bool,
 
 # ── 路由函数 ─────────────────────────────────────────────────────────────────
 
-def _route_after_reason(state: "AgentState") -> Literal["call_tools", "validate", "__end__"]:
+
+def _route_after_reason(
+    state: "AgentState",
+) -> Literal["call_tools", "validate", "__end__"]:
     """reason 节点后的路由：有工具调用 → call_tools；否则 → validate。"""
     if state.get("error"):
         return END
@@ -246,6 +272,7 @@ def _route_after_validate(state: "AgentState") -> Literal["reason", "__end__"]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Graph Builder
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def build_graph(
     registry,
@@ -325,6 +352,7 @@ def build_graph(
     if checkpointer is None:
         # 优先使用 SqliteSaver（持久化），回退 MemorySaver
         from app.core.agent.checkpoint_manager import get_checkpointer
+
         checkpointer = get_checkpointer()
     return graph.compile(checkpointer=checkpointer)
 
@@ -332,6 +360,7 @@ def build_graph(
 # ─────────────────────────────────────────────────────────────────────────────
 # High-level LangGraphAgent wrapper（兼容 UnifiedAgent 接口）
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class LangGraphAgent:
     """
@@ -406,6 +435,7 @@ class LangGraphAgent:
         if self.enable_pii:
             try:
                 from app.core.security.pii_filter import PIIFilter
+
                 mask_result = PIIFilter.mask(input_text)
                 if mask_result.has_pii:
                     safe_input = mask_result.masked_text
@@ -417,7 +447,7 @@ class LangGraphAgent:
 
         # ── 历史消息转 LangChain Messages ───────────────────────────────────
         messages: List[BaseMessage] = []
-        for h in (history or []):
+        for h in history or []:
             role = h.get("role", "user")
             content = h.get("content", "")
             if role == "user":
@@ -473,15 +503,20 @@ class LangGraphAgent:
         }
 
         try:
-            for event in self._graph.stream(state, config=config, stream_mode="updates"):
+            for event in self._graph.stream(
+                state, config=config, stream_mode="updates"
+            ):
                 for node_name, node_update in event.items():
                     msgs = node_update.get("messages", [])
                     for msg in msgs:
                         if isinstance(msg, AIMessage):
                             if msg.tool_calls:
                                 for tc in msg.tool_calls:
-                                    yield {"type": "tool_call", "content": tc["name"],
-                                           "args": tc.get("args", {})}
+                                    yield {
+                                        "type": "tool_call",
+                                        "content": tc["name"],
+                                        "args": tc.get("args", {}),
+                                    }
                             elif msg.content:
                                 yield {"type": "token", "content": msg.content}
                         elif isinstance(msg, ToolMessage):

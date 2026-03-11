@@ -11,11 +11,11 @@ Koto Interactive Planner
 同时提供基于新引擎的 InteractivePlanner.create_plan() 通用入口。
 """
 
-from typing import Any, Dict, Generator, List, Optional
 import json
 import logging
 import uuid
 from dataclasses import dataclass, field
+from typing import Any, Dict, Generator, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +24,17 @@ logger = logging.getLogger(__name__)
 # 旧数据类（向后兼容）
 # ============================================================================
 
+
 @dataclass
 class TaskPlanStep:
     step_id: int
-    step_type: str  # "research", "outline", "content_gen", "image_gen", "review", "assembly"
+    step_type: (
+        str  # "research", "outline", "content_gen", "image_gen", "review", "assembly"
+    )
     description: str
     input_data: Dict[str, Any] = field(default_factory=dict)
     expected_output: str = ""
-    status: str = "pending"   # pending, running, completed, failed
+    status: str = "pending"  # pending, running, completed, failed
     result: Optional[Any] = None
 
 
@@ -47,6 +50,7 @@ class TaskPlan:
 # ============================================================================
 # InteractivePlanner — 通用规划门面
 # ============================================================================
+
 
 class InteractivePlanner:
     """
@@ -140,12 +144,15 @@ class InteractivePlanner:
         else:
             # auto: 单步占位，实际执行通过 create_plan_with_llm 升级
             from app.core.tasks.task_planner import Plan, PlanStep
+
             plan = Plan(task_id=_tid, original_request=user_input)
-            plan.add_step(PlanStep(
-                name="execute",
-                description=user_input[:100],
-                step_type="llm",
-            ))
+            plan.add_step(
+                PlanStep(
+                    name="execute",
+                    description=user_input[:100],
+                    step_type="llm",
+                )
+            )
             return plan
 
     @staticmethod
@@ -168,6 +175,7 @@ class InteractivePlanner:
             app.core.tasks.task_planner.Plan
         """
         from app.core.tasks.task_planner import TaskPlanner
+
         _tid = task_id or str(uuid.uuid4())
         planner = TaskPlanner()
         return planner.plan_with_llm(_tid, user_input, llm_provider, model_id=model_id)
@@ -192,6 +200,7 @@ class InteractivePlanner:
             步骤事件字典 {"event": "step_done"|"step_failed"|"plan_done", ...}
         """
         from app.core.tasks.task_planner import TaskPlanner
+
         planner = TaskPlanner()
         yield from planner.execute_plan(
             plan,
@@ -212,14 +221,16 @@ class InteractivePlanner:
         prev_name: Optional[str] = None
         for s in old_plan.steps:
             name = s.step_type or f"step_{s.step_id}"
-            new_plan.add_step(PlanStep(
-                name=name,
-                description=s.description,
-                step_type=s.step_type,
-                input_data=s.input_data,
-                expected_output=s.expected_output,
-                depends_on=[prev_name] if prev_name else [],
-            ))
+            new_plan.add_step(
+                PlanStep(
+                    name=name,
+                    description=s.description,
+                    step_type=s.step_type,
+                    input_data=s.input_data,
+                    expected_output=s.expected_output,
+                    depends_on=[prev_name] if prev_name else [],
+                )
+            )
             prev_name = name
         return new_plan
 
@@ -228,15 +239,19 @@ class InteractivePlanner:
         """将新 Plan 对象转换为旧 TaskPlan（向后兼容）。"""
         steps = []
         for idx, s in enumerate(new_plan.steps, start=1):
-            steps.append(TaskPlanStep(
-                step_id=idx,
-                step_type=s.step_type,
-                description=s.description,
-                input_data=s.input_data,
-                expected_output=s.expected_output,
-                status=s.status.value if hasattr(s.status, "value") else str(s.status),
-                result=s.result,
-            ))
+            steps.append(
+                TaskPlanStep(
+                    step_id=idx,
+                    step_type=s.step_type,
+                    description=s.description,
+                    input_data=s.input_data,
+                    expected_output=s.expected_output,
+                    status=(
+                        s.status.value if hasattr(s.status, "value") else str(s.status)
+                    ),
+                    result=s.result,
+                )
+            )
         return TaskPlan(
             task_id=new_plan.task_id,
             original_request=new_plan.original_request,

@@ -2,22 +2,26 @@
 
 All tests mock SkillManager and Ollama so no real LLM or file I/O is needed.
 """
-from __future__ import annotations
-import pytest
 
+from __future__ import annotations
+
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_matcher():
     from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+
     return SkillAutoMatcher
 
 
 # ---------------------------------------------------------------------------
 # match() – basic contract
 # ---------------------------------------------------------------------------
+
 
 class TestMatchContract:
     def test_returns_list(self, mocker):
@@ -32,11 +36,14 @@ class TestMatchContract:
         matcher = _get_matcher()
         mocker.patch.object(matcher, "_has_active_skills_for_task", return_value=False)
         many_skills = [{"id": f"skill_{i}", "description": "x"} for i in range(10)]
-        mocker.patch.object(matcher, "_build_skill_catalog", return_value=(many_skills, "catalog text"))
+        mocker.patch.object(
+            matcher, "_build_skill_catalog", return_value=(many_skills, "catalog text")
+        )
         mocker.patch.object(matcher, "_match_with_local_model", return_value=None)
         # _match_with_patterns already caps at 3; simulate its normal capped return
         mocker.patch.object(
-            matcher, "_match_with_patterns",
+            matcher,
+            "_match_with_patterns",
             return_value=["skill_0", "skill_1", "skill_2"],
         )
         result = matcher.match("some long input covering everything", task_type="CHAT")
@@ -69,6 +76,7 @@ class TestMatchContract:
 # _match_with_patterns() – pattern-based fallback
 # ---------------------------------------------------------------------------
 
+
 class TestMatchWithPatterns:
     def test_returns_matching_skill_ids(self, mocker):
         matcher = _get_matcher()
@@ -91,7 +99,10 @@ class TestMatchWithPatterns:
     def test_respects_max_skills_limit(self, mocker):
         matcher = _get_matcher()
         # Build candidates with many skills that would match
-        candidates = [{"id": entry["skill_id"], "description": ""} for entry in matcher._PATTERN_MAP]
+        candidates = [
+            {"id": entry["skill_id"], "description": ""}
+            for entry in matcher._PATTERN_MAP
+        ]
         # Input that might trigger many patterns
         text = " ".join(entry["patterns"][0] for entry in matcher._PATTERN_MAP[:10])
         result = matcher._match_with_patterns(text, candidates)
@@ -102,18 +113,24 @@ class TestMatchWithPatterns:
 # _has_active_skills_for_task() – checks SkillManager
 # ---------------------------------------------------------------------------
 
+
 class TestHasActiveSkillsForTask:
     def test_returns_false_when_skill_manager_raises(self, mocker):
         from app.core.skills.skill_manager import SkillManager
-        mocker.patch.object(SkillManager, "_ensure_init", side_effect=RuntimeError("no db"))
+
+        mocker.patch.object(
+            SkillManager, "_ensure_init", side_effect=RuntimeError("no db")
+        )
         matcher = _get_matcher()
         assert matcher._has_active_skills_for_task("CHAT") is False
 
     def test_returns_false_when_no_enabled_skills(self, mocker):
         from app.core.skills.skill_manager import SkillManager
+
         mocker.patch.object(SkillManager, "_ensure_init")
         mocker.patch.object(
-            SkillManager, "_registry",
+            SkillManager,
+            "_registry",
             {"skill_a": {"enabled": False, "task_types": ["CHAT"]}},
             create=True,
         )
@@ -122,9 +139,11 @@ class TestHasActiveSkillsForTask:
 
     def test_returns_true_when_enabled_skill_matches_task_type(self, mocker):
         from app.core.skills.skill_manager import SkillManager
+
         mocker.patch.object(SkillManager, "_ensure_init")
         mocker.patch.object(
-            SkillManager, "_registry",
+            SkillManager,
+            "_registry",
             {"skill_a": {"enabled": True, "task_types": ["CHAT"]}},
             create=True,
         )
@@ -136,20 +155,33 @@ class TestHasActiveSkillsForTask:
 # Ollama fallback behaviour
 # ---------------------------------------------------------------------------
 
+
 class TestOllamaFallback:
     def test_falls_back_to_patterns_when_ollama_returns_none(self, mocker):
         matcher = _get_matcher()
         mocker.patch.object(matcher, "_has_active_skills_for_task", return_value=False)
-        mocker.patch.object(matcher, "_build_skill_catalog", return_value=([{"id": "concise_mode", "description": "x"}], "catalog"))
+        mocker.patch.object(
+            matcher,
+            "_build_skill_catalog",
+            return_value=([{"id": "concise_mode", "description": "x"}], "catalog"),
+        )
         mocker.patch.object(matcher, "_match_with_local_model", return_value=None)
-        mocker.patch.object(matcher, "_match_with_patterns", return_value=["concise_mode"])
+        mocker.patch.object(
+            matcher, "_match_with_patterns", return_value=["concise_mode"]
+        )
         result = matcher.match("be brief please")
         assert result == ["concise_mode"]
 
     def test_uses_ollama_result_when_available(self, mocker):
         matcher = _get_matcher()
         mocker.patch.object(matcher, "_has_active_skills_for_task", return_value=False)
-        mocker.patch.object(matcher, "_build_skill_catalog", return_value=([{"id": "step_by_step", "description": "steps"}], "catalog"))
-        mocker.patch.object(matcher, "_match_with_local_model", return_value=["step_by_step"])
+        mocker.patch.object(
+            matcher,
+            "_build_skill_catalog",
+            return_value=([{"id": "step_by_step", "description": "steps"}], "catalog"),
+        )
+        mocker.patch.object(
+            matcher, "_match_with_local_model", return_value=["step_by_step"]
+        )
         result = matcher.match("explain it step by step")
         assert "step_by_step" in result

@@ -21,10 +21,11 @@ Koto Task Management API Routes
 from __future__ import annotations
 
 import logging
+
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
-from app.core.tasks.task_ledger import TaskStatus, get_ledger
 from app.core.tasks.progress_bus import get_progress_bus
+from app.core.tasks.task_ledger import TaskStatus, get_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ task_bp = Blueprint("tasks", __name__)
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
 
 def _ok(data=None, **kwargs):
     body = {"ok": True}
@@ -48,6 +50,7 @@ def _err(message: str, code: int = 400):
 # ============================================================================
 # 路由
 # ============================================================================
+
 
 @task_bp.get("")
 def list_tasks():
@@ -161,14 +164,17 @@ def interrupt_task(task_id: str):
     try:
         bus = get_progress_bus()
         from app.core.tasks.progress_bus import ProgressEvent
-        bus.publish(ProgressEvent(
-            task_id=task_id,
-            session_id=task.session_id,
-            event_type="interrupt",
-            status=TaskStatus.WAITING.value,
-            message=f"任务已暂停等待确认：{reason}",
-            progress=0,
-        ))
+
+        bus.publish(
+            ProgressEvent(
+                task_id=task_id,
+                session_id=task.session_id,
+                event_type="interrupt",
+                status=TaskStatus.WAITING.value,
+                message=f"任务已暂停等待确认：{reason}",
+                progress=0,
+            )
+        )
     except Exception:
         pass
 
@@ -198,14 +204,17 @@ def resume_task(task_id: str):
         try:
             bus = get_progress_bus()
             from app.core.tasks.progress_bus import ProgressEvent
-            bus.publish(ProgressEvent(
-                task_id=task_id,
-                session_id=task.session_id,
-                event_type="resume",
-                status=TaskStatus.RUNNING.value,
-                message="用户已确认，任务恢复执行",
-                progress=0,
-            ))
+
+            bus.publish(
+                ProgressEvent(
+                    task_id=task_id,
+                    session_id=task.session_id,
+                    event_type="resume",
+                    status=TaskStatus.RUNNING.value,
+                    message="用户已确认，任务恢复执行",
+                    progress=0,
+                )
+            )
         except Exception:
             pass
         return _ok(message="任务已恢复执行")

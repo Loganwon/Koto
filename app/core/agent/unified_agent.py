@@ -1,38 +1,48 @@
+import json
 import logging
 import time
-import json
 import uuid
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from app.core.agent.base import Agent
 from app.core.agent.tool_registry import ToolRegistry
-from app.core.agent.types import AgentStep, AgentStepType, AgentAction, AgentResponse
+from app.core.agent.types import AgentAction, AgentResponse, AgentStep, AgentStepType
 from app.core.llm.base import LLMProvider
 
 
 # ── 任务管理子系统（懒加载，避免循环依赖和启动开销）──────────────────────────
 def _get_task_ledger():
     from app.core.tasks.task_ledger import get_ledger
+
     return get_ledger()
 
+
 def _get_progress_bus():
-    from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+    from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
     return get_progress_bus(), ProgressEvent
+
 
 # ── 阶段一护栏模块（懒加载，避免启动时开销）──────────────────────────
 def _get_pii_filter():
-    from app.core.security.pii_filter import PIIFilter, PIIConfig
+    from app.core.security.pii_filter import PIIConfig, PIIFilter
+
     return PIIFilter, PIIConfig
+
 
 def _get_output_validator():
     from app.core.security.output_validator import OutputValidator
+
     return OutputValidator
+
 
 def _get_shadow_tracer():
     from app.core.learning.shadow_tracer import ShadowTracer
+
     return ShadowTracer
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +58,13 @@ class UnifiedAgent(Agent):
     - 输出质量验收：最终答案经 OutputValidator 检查，必要时触发重试或格式化
     - Shadow Tracing 接口：通过 report_feedback() 触发影子记录
     """
-    
+
     MAX_STEPS = 15
     # 输出验收最大重试次数（RETRY action 触发时）
     MAX_VALIDATION_RETRIES = 1
-    
+
     def __init__(
-        self, 
+        self,
         llm_provider: LLMProvider,
         tool_registry: Optional[ToolRegistry] = None,
         model_id: str = "gemini-3-flash-preview",
@@ -103,16 +113,19 @@ class UnifiedAgent(Agent):
         if use_tool_router:
             try:
                 from app.core.routing.tool_router import get_tool_router
+
                 self._tool_router = get_tool_router(max_tools=tool_router_max)
             except Exception as _e:
-                logger.warning(f"[UnifiedAgent] ToolRouter 初始化失败（降级为全量）: {_e}")
+                logger.warning(
+                    f"[UnifiedAgent] ToolRouter 初始化失败（降级为全量）: {_e}"
+                )
                 self._tool_router = None
         else:
             self._tool_router = None
 
     def run(
-        self, 
-        input_text: str, 
+        self,
+        input_text: str,
         history: Optional[List[Dict]] = None,
         session_id: Optional[str] = None,
         # 运行时可覆盖 skill_id / task_type
@@ -150,20 +163,33 @@ class UnifiedAgent(Agent):
         except Exception as _ledger_err:
             logger.debug(f"[UnifiedAgent] TaskLedger 初始化跳过: {_ledger_err}")
 
-        def _pub(step_type: str, content: str, tool_name=None, tool_args=None,
-                 observation=None, progress: int = 0):
+        def _pub(
+            step_type: str,
+            content: str,
+            tool_name=None,
+            tool_args=None,
+            observation=None,
+            progress: int = 0,
+        ):
             """向 TaskLedger 追加步骤并广播到 ProgressBus。"""
             try:
                 if _ledger:
                     _ledger.add_step(
-                        _task_id, step_type=step_type, content=content,
-                        tool_name=tool_name, tool_args=tool_args,
+                        _task_id,
+                        step_type=step_type,
+                        content=content,
+                        tool_name=tool_name,
+                        tool_args=tool_args,
                         observation=observation,
                     )
                 _bus, _EvtCls = _get_progress_bus()
                 _bus.publish_step(
-                    _task_id, _session_id, step_type,
-                    content[:300], progress=progress, tool_name=tool_name,
+                    _task_id,
+                    _session_id,
+                    step_type,
+                    content[:300],
+                    progress=progress,
+                    tool_name=tool_name,
                 )
             except Exception:
                 pass
@@ -202,6 +228,7 @@ class UnifiedAgent(Agent):
             _auto_skill_ids: list = []
             try:
                 from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+
                 _auto_skill_ids = SkillAutoMatcher.match(
                     user_input=safe_input,
                     task_type=_task_type or "CHAT",
@@ -223,7 +250,9 @@ class UnifiedAgent(Agent):
 
             # 显式 skill_id 允许在单次请求中强制注入一个未启用的技能。
             if _skill_id:
-                runtime_state = getattr(SkillManager, "_registry", {}).get(_skill_id, {})
+                runtime_state = getattr(SkillManager, "_registry", {}).get(
+                    _skill_id, {}
+                )
                 runtime_enabled = bool(runtime_state.get("enabled", False))
                 runtime_skill = SkillManager.get_definition(_skill_id)
                 if runtime_skill and not runtime_enabled:
@@ -240,7 +269,9 @@ class UnifiedAgent(Agent):
 
         # ── 注入本地时间（每次请求动态注入，确保模型感知当前时间）──────────────
         _now = datetime.now()
-        _weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][_now.weekday()]
+        _weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
+            _now.weekday()
+        ]
         _time_prefix = (
             f"当前本地时间：{_now.strftime('%Y年%m月%d日 %H:%M')}（{_weekday}）\n\n"
         )
@@ -262,16 +293,15 @@ class UnifiedAgent(Agent):
                     model=self.model_id,
                     system_instruction=_effective_instruction,
                     tools=tools_def if tools_def else None,
-                    stream=False
+                    stream=False,
                 )
-                
+
                 content_text = response.get("content", "")
                 tool_calls = response.get("tool_calls", [])
-                
+
                 if content_text:
                     yield AgentStep(
-                        step_type=AgentStepType.THOUGHT, 
-                        content=content_text
+                        step_type=AgentStepType.THOUGHT, content=content_text
                     )
                     _pub("THOUGHT", content_text)
                     current_history.append({"role": "model", "content": content_text})
@@ -294,12 +324,17 @@ class UnifiedAgent(Agent):
                                 yield AgentStep(
                                     step_type=AgentStepType.ANSWER,
                                     content=val_result.text,
-                                    metadata={"validation_action": "BLOCK",
-                                              "reasons": val_result.reasons}
+                                    metadata={
+                                        "validation_action": "BLOCK",
+                                        "reasons": val_result.reasons,
+                                    },
                                 )
                                 return
 
-                            elif val_result.needs_retry and validation_retries < self.MAX_VALIDATION_RETRIES:
+                            elif (
+                                val_result.needs_retry
+                                and validation_retries < self.MAX_VALIDATION_RETRIES
+                            ):
                                 validation_retries += 1
                                 logger.info(
                                     f"[UnifiedAgent] 🔄 输出质量不合格，触发重试 "
@@ -314,7 +349,9 @@ class UnifiedAgent(Agent):
                                         f"你上一次的回答存在问题：{'; '.join(val_result.reasons)}。"
                                         f"请重新回答，严格按照要求的格式输出。"
                                     )
-                                current_history.append({"role": "user", "content": retry_prompt})
+                                current_history.append(
+                                    {"role": "user", "content": retry_prompt}
+                                )
                                 continue  # 重新进入循环
 
                             else:
@@ -330,7 +367,11 @@ class UnifiedAgent(Agent):
 
                     # ── 3. PII 还原 ──────────────────────────────────
                     final_answer = validated_text
-                    if self.restore_pii_in_output and mask_result and mask_result.has_pii:
+                    if (
+                        self.restore_pii_in_output
+                        and mask_result
+                        and mask_result.has_pii
+                    ):
                         try:
                             final_answer = mask_result.restore(validated_text)
                         except Exception as e:
@@ -346,45 +387,58 @@ class UnifiedAgent(Agent):
                             "task_type": _task_type,
                             "pii_masked": mask_result.has_pii if mask_result else False,
                             "task_id": _task_id,
-                        }
+                        },
                     )
                     _pub("ANSWER", (final_answer or "")[:500], progress=100)
                     try:
                         if _ledger:
-                            _ledger.mark_completed(_task_id, result_summary=(final_answer or "")[:500])
+                            _ledger.mark_completed(
+                                _task_id, result_summary=(final_answer or "")[:500]
+                            )
                     except Exception:
                         pass
                     break
-                
+
                 # ── 取消 / 打断检查（在工具调用前）──────────────────────────────
                 try:
                     if _ledger:
                         if _ledger.is_cancel_requested(_task_id):
-                            logger.info(f"[UnifiedAgent] ✖ 任务 {_task_id[:8]} 收到取消请求")
+                            logger.info(
+                                f"[UnifiedAgent] ✖ 任务 {_task_id[:8]} 收到取消请求"
+                            )
                             _ledger.mark_cancelled(_task_id)
                             yield AgentStep(
                                 step_type=AgentStepType.ERROR,
-                                content="任务已被用户取消"
+                                content="任务已被用户取消",
                             )
                             return
                         if _ledger.is_interrupt_requested(_task_id):
                             import time as _time_mod
-                            logger.info(f"[UnifiedAgent] ⏸ 任务 {_task_id[:8]} 打断，等待恢复")
+
+                            logger.info(
+                                f"[UnifiedAgent] ⏸ 任务 {_task_id[:8]} 打断，等待恢复"
+                            )
                             yield AgentStep(
                                 step_type=AgentStepType.THOUGHT,
-                                content="⏸ 任务已暂停，等待用户确认后继续..."
+                                content="⏸ 任务已暂停，等待用户确认后继续...",
                             )
                             # 阻塞直到解除打断或取消（最多等 5 分钟）
                             _wait_start = _time_mod.monotonic()
                             while _ledger.is_interrupt_requested(_task_id):
                                 if _time_mod.monotonic() - _wait_start > 300:
                                     _ledger.mark_cancelled(_task_id)
-                                    yield AgentStep(step_type=AgentStepType.ERROR, content="等待超时，任务已取消")
+                                    yield AgentStep(
+                                        step_type=AgentStepType.ERROR,
+                                        content="等待超时，任务已取消",
+                                    )
                                     return
                                 _time_mod.sleep(1)
                             if _ledger.is_cancel_requested(_task_id):
                                 _ledger.mark_cancelled(_task_id)
-                                yield AgentStep(step_type=AgentStepType.ERROR, content="任务已被用户取消")
+                                yield AgentStep(
+                                    step_type=AgentStepType.ERROR,
+                                    content="任务已被用户取消",
+                                )
                                 return
                 except Exception as _ctrl_err:
                     logger.debug(f"[UnifiedAgent] 控制检查跳过: {_ctrl_err}")
@@ -396,22 +450,22 @@ class UnifiedAgent(Agent):
                     tool_args = tool_call.get("args", {})
 
                     action_obj = AgentAction(
-                        tool_name=tool_name,
-                        tool_args=tool_args,
-                        tool_call_id=None
+                        tool_name=tool_name, tool_args=tool_args, tool_call_id=None
                     )
                     yield AgentStep(
                         step_type=AgentStepType.ACTION,
                         content=f"Calling tool: {tool_name}",
-                        action=action_obj
+                        action=action_obj,
                     )
-                    _pub("ACTION", f"Calling tool: {tool_name}",
-                         tool_name=tool_name, tool_args=tool_args)
-                    current_history.append({
-                        "role": "model",
-                        "content": "",
-                        "tool_calls": [tool_call]
-                    })
+                    _pub(
+                        "ACTION",
+                        f"Calling tool: {tool_name}",
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                    )
+                    current_history.append(
+                        {"role": "model", "content": "", "tool_calls": [tool_call]}
+                    )
 
                 # 2. 并行执行所有工具（多工具时可大幅减少等待时间）
                 def _exec_one(tc):
@@ -424,50 +478,56 @@ class UnifiedAgent(Agent):
 
                 if len(tool_calls) > 1:
                     observations: Dict[str, str] = {}
-                    with ThreadPoolExecutor(max_workers=min(len(tool_calls), 6)) as _pool:
-                        _futures = {_pool.submit(_exec_one, tc): tc for tc in tool_calls}
+                    with ThreadPoolExecutor(
+                        max_workers=min(len(tool_calls), 6)
+                    ) as _pool:
+                        _futures = {
+                            _pool.submit(_exec_one, tc): tc for tc in tool_calls
+                        }
                         for _fut in as_completed(_futures):
                             _n, _obs = _fut.result()
                             observations[_n] = _obs
-                    logger.debug(
-                        f"[UnifiedAgent] ⚡ {len(tool_calls)} 个工具并行完成"
-                    )
+                    logger.debug(f"[UnifiedAgent] ⚡ {len(tool_calls)} 个工具并行完成")
                     for tool_call in tool_calls:
                         _n = tool_call.get("name")
                         observation = observations.get(_n, "Error: result missing")
                         yield AgentStep(
                             step_type=AgentStepType.OBSERVATION,
                             content=observation,
-                            observation=observation
+                            observation=observation,
                         )
-                        _pub("OBSERVATION", observation[:500],
-                             tool_name=_n, observation=observation[:500])
-                        current_history.append({
-                            "role": "function",
-                            "name": _n,
-                            "content": observation
-                        })
+                        _pub(
+                            "OBSERVATION",
+                            observation[:500],
+                            tool_name=_n,
+                            observation=observation[:500],
+                        )
+                        current_history.append(
+                            {"role": "function", "name": _n, "content": observation}
+                        )
                 else:
                     # 单工具直接执行
                     _n, observation = _exec_one(tool_calls[0])
                     yield AgentStep(
                         step_type=AgentStepType.OBSERVATION,
                         content=observation,
-                        observation=observation
+                        observation=observation,
                     )
-                    _pub("OBSERVATION", observation[:500],
-                         tool_name=_n, observation=observation[:500])
-                    current_history.append({
-                        "role": "function",
-                        "name": _n,
-                        "content": observation
-                    })
-            
+                    _pub(
+                        "OBSERVATION",
+                        observation[:500],
+                        tool_name=_n,
+                        observation=observation[:500],
+                    )
+                    current_history.append(
+                        {"role": "function", "name": _n, "content": observation}
+                    )
+
             except Exception as e:
                 logger.error(f"Agent loop error: {e}", exc_info=True)
                 yield AgentStep(
                     step_type=AgentStepType.ERROR,
-                    content=f"An error occurred: {str(e)}"
+                    content=f"An error occurred: {str(e)}",
                 )
                 _pub("ERROR", str(e))
                 try:

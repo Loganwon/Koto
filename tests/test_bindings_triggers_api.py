@@ -16,6 +16,7 @@ Covers:
  10. Create custom trigger   (POST /api/jobs/triggers)
  11. Delete trigger          (DELETE /api/jobs/triggers/<id>)
 """
+
 from __future__ import annotations
 
 import os
@@ -38,8 +39,8 @@ def build_app() -> Flask:
 
     app = Flask(__name__)
 
-    from app.api.skill_routes import skill_bp
     from app.api.job_routes import job_bp
+    from app.api.skill_routes import skill_bp
 
     app.register_blueprint(skill_bp)
     app.register_blueprint(job_bp)
@@ -50,6 +51,7 @@ def build_app() -> Flask:
 # Test helpers
 # ---------------------------------------------------------------------------
 
+
 def _check(resp, ok_status=(200, 201)):
     body = resp.get_data(as_text=True)
     assert resp.status_code in ok_status, f"HTTP {resp.status_code}: {body[:300]}"
@@ -59,6 +61,7 @@ def _check(resp, ok_status=(200, 201)):
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_bindings_bootstrap(client):
     """Bootstrap seeds all 9 recommended intent bindings."""
@@ -91,7 +94,10 @@ def test_create_custom_intent_binding(client):
     """Create a new intent binding for 'concise_mode' with custom patterns."""
     resp = client.post(
         "/api/skills/concise_mode/bindings/intent",
-        json={"patterns": ["请简短回答", "一行内", "极简"], "auto_disable_after_turns": 1},
+        json={
+            "patterns": ["请简短回答", "一行内", "极简"],
+            "auto_disable_after_turns": 1,
+        },
     )
     data = _check(resp, ok_status=(201,))
     assert data["success"], data
@@ -105,18 +111,22 @@ def test_create_custom_intent_binding(client):
 def test_toggle_binding(client, binding_id):
     """Disable then re-enable a binding."""
     # disable
-    data = _check(client.post(
-        f"/api/skills/bindings/{binding_id}/toggle",
-        json={"enabled": False},
-    ))
+    data = _check(
+        client.post(
+            f"/api/skills/bindings/{binding_id}/toggle",
+            json={"enabled": False},
+        )
+    )
     assert data["success"], data
     assert data["binding"]["enabled"] is False
 
     # re-enable
-    data = _check(client.post(
-        f"/api/skills/bindings/{binding_id}/toggle",
-        json={"enabled": True},
-    ))
+    data = _check(
+        client.post(
+            f"/api/skills/bindings/{binding_id}/toggle",
+            json={"enabled": True},
+        )
+    )
     assert data["binding"]["enabled"] is True
     print(f"  toggle binding OK: {binding_id}")
 
@@ -192,13 +202,16 @@ def test_toggle_trigger(client):
 
 def test_create_and_delete_custom_trigger(client):
     """Create a webhook trigger and then delete it."""
-    resp = client.post("/api/jobs/triggers", json={
-        "name": "测试 Webhook 触发器",
-        "trigger_type": "webhook",
-        "job_type": "agent_query",
-        "job_payload": {"query": "ping"},
-        "enabled": False,
-    })
+    resp = client.post(
+        "/api/jobs/triggers",
+        json={
+            "name": "测试 Webhook 触发器",
+            "trigger_type": "webhook",
+            "job_type": "agent_query",
+            "job_payload": {"query": "ping"},
+            "enabled": False,
+        },
+    )
     data = _check(resp, ok_status=(201,))
     assert data["ok"], data
     tid = data["data"]["trigger_id"]
@@ -219,6 +232,7 @@ def test_create_and_delete_custom_trigger(client):
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     tmp = tempfile.mkdtemp(prefix="koto_api_test_")

@@ -35,7 +35,11 @@ logger = logging.getLogger(__name__)
 
 # ── 默认路径（与 CheckpointManager 同库文件）────────────────────────────────
 _DEFAULT_DB_PATH = str(
-    Path(os.environ.get("KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"))
+    Path(
+        os.environ.get(
+            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+        )
+    )
     / "koto_checkpoints.sqlite"
 )
 
@@ -48,28 +52,30 @@ _ledger_lock = threading.Lock()
 # 枚举 & 数据类
 # ============================================================================
 
+
 class TaskStatus(str, Enum):
-    PENDING    = "pending"      # 已创建，未开始
-    RUNNING    = "running"      # 执行中
-    WAITING    = "waiting"      # 等待人工确认（Human-in-loop）
-    COMPLETED  = "completed"    # 成功完成
-    FAILED     = "failed"       # 执行失败
-    CANCELLED  = "cancelled"    # 被取消
-    RETRYING   = "retrying"     # 重试中
+    PENDING = "pending"  # 已创建，未开始
+    RUNNING = "running"  # 执行中
+    WAITING = "waiting"  # 等待人工确认（Human-in-loop）
+    COMPLETED = "completed"  # 成功完成
+    FAILED = "failed"  # 执行失败
+    CANCELLED = "cancelled"  # 被取消
+    RETRYING = "retrying"  # 重试中
 
 
 @dataclass
 class TaskRecord:
     """任务台账条目（对应 koto_tasks 表的一行）"""
+
     task_id: str
     session_id: str
     user_input: str
     status: TaskStatus = TaskStatus.PENDING
 
     # 分类/来源
-    task_type: Optional[str] = None       # "agent"/"ppt"/"code"/"scheduler"…
+    task_type: Optional[str] = None  # "agent"/"ppt"/"code"/"scheduler"…
     skill_id: Optional[str] = None
-    source: str = "agent"                 # 发起来源
+    source: str = "agent"  # 发起来源
 
     # 时间戳
     created_at: str = field(default_factory=lambda: _now_iso())
@@ -78,14 +84,14 @@ class TaskRecord:
 
     # 执行情况
     step_count: int = 0
-    tool_calls: int = 0                   # 累计工具调用次数
+    tool_calls: int = 0  # 累计工具调用次数
     retry_count: int = 0
     error: Optional[str] = None
     result_summary: Optional[str] = None  # 最终答案的前 500 字
 
     # 控制标志
-    interrupt_requested: bool = False     # 外部要求暂停（Human-in-loop）
-    cancel_requested: bool = False        # 外部要求取消
+    interrupt_requested: bool = False  # 外部要求暂停（Human-in-loop）
+    cancel_requested: bool = False  # 外部要求取消
 
     # 额外元数据（JSON 字符串存储）
     metadata: str = "{}"
@@ -117,13 +123,14 @@ class TaskRecord:
 @dataclass
 class StepRecord:
     """单步骤记录（对应 koto_task_steps 表的一行）"""
+
     step_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     task_id: str = ""
     step_index: int = 0
-    step_type: str = ""           # THOUGHT / ACTION / OBSERVATION / ANSWER / ERROR
+    step_type: str = ""  # THOUGHT / ACTION / OBSERVATION / ANSWER / ERROR
     content: str = ""
     tool_name: Optional[str] = None
-    tool_args: Optional[str] = None   # JSON str
+    tool_args: Optional[str] = None  # JSON str
     observation: Optional[str] = None
     created_at: str = field(default_factory=lambda: _now_iso())
 
@@ -135,6 +142,7 @@ class StepRecord:
 # 工具函数
 # ============================================================================
 
+
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="milliseconds")
 
@@ -142,6 +150,7 @@ def _now_iso() -> str:
 # ============================================================================
 # TaskLedger
 # ============================================================================
+
 
 class TaskLedger:
     """
@@ -278,7 +287,9 @@ class TaskLedger:
             },
         )
         self._conn.commit()
-        logger.debug(f"[TaskLedger] 创建任务 {task.task_id[:8]} session={session_id[:8]}")
+        logger.debug(
+            f"[TaskLedger] 创建任务 {task.task_id[:8]} session={session_id[:8]}"
+        )
         return task
 
     def get(self, task_id: str, include_steps: bool = False) -> Optional[TaskRecord]:
@@ -299,14 +310,16 @@ class TaskLedger:
         d["interrupt_requested"] = bool(d["interrupt_requested"])
         d["cancel_requested"] = bool(d["cancel_requested"])
         d.pop("steps", None)
-        return TaskRecord(**{k: v for k, v in d.items() if k in TaskRecord.__dataclass_fields__})
+        return TaskRecord(
+            **{k: v for k, v in d.items() if k in TaskRecord.__dataclass_fields__}
+        )
 
     def list_tasks(
         self,
         session_id: Optional[str] = None,
         status: Optional[TaskStatus] = None,
         source: Optional[str] = None,
-        date_from: Optional[str] = None,   # ISO 日期前缀，如 "2026-03-04"
+        date_from: Optional[str] = None,  # ISO 日期前缀，如 "2026-03-04"
         limit: int = 50,
         offset: int = 0,
     ) -> List[TaskRecord]:
@@ -361,13 +374,13 @@ class TaskLedger:
             return
         sets = ", ".join(f"{k} = ?" for k in kwargs)
         vals = list(kwargs.values()) + [task_id]
-        self._conn.execute(
-            f"UPDATE koto_tasks SET {sets} WHERE task_id = ?", vals
-        )
+        self._conn.execute(f"UPDATE koto_tasks SET {sets} WHERE task_id = ?", vals)
         self._conn.commit()
 
     def mark_running(self, task_id: str):
-        self._update_fields(task_id, status=TaskStatus.RUNNING.value, started_at=_now_iso())
+        self._update_fields(
+            task_id, status=TaskStatus.RUNNING.value, started_at=_now_iso()
+        )
         self._notify_status_change(task_id, TaskStatus.RUNNING)
 
     def mark_completed(self, task_id: str, result_summary: Optional[str] = None):
@@ -518,25 +531,21 @@ class TaskLedger:
     def get_stats(self, date_from: Optional[str] = None) -> Dict[str, Any]:
         """返回任务运行统计摘要。"""
         where = f"WHERE created_at >= '{date_from}'" if date_from else ""
-        rows = self._conn.execute(
-            f"""
+        rows = self._conn.execute(f"""
             SELECT status, COUNT(*) AS cnt
             FROM koto_tasks {where}
             GROUP BY status
-            """
-        ).fetchall()
+            """).fetchall()
         by_status = {r["status"]: r["cnt"] for r in rows}
         total = sum(by_status.values())
-        avg_row = self._conn.execute(
-            f"""
+        avg_row = self._conn.execute(f"""
             SELECT AVG(
                 (JULIANDAY(COALESCE(completed_at, datetime('now'))) - JULIANDAY(started_at)) * 86400
             ) AS avg_sec
             FROM koto_tasks
             {where}
             WHERE started_at IS NOT NULL
-            """
-        ).fetchone()
+            """).fetchone()
         return {
             "total": total,
             "by_status": by_status,
@@ -547,9 +556,7 @@ class TaskLedger:
 
     def purge_old(self, keep_days: int = 30):
         """删除超过 keep_days 天的已完成/已取消任务及其步骤。"""
-        cutoff = datetime.now().replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff_iso = cutoff.isoformat()
         self._conn.execute(
             """
@@ -578,29 +585,32 @@ class TaskLedger:
     def _notify_status_change(self, task_id: str, new_status: TaskStatus):
         """当状态变化时，尝试通知 ProgressBus（懒加载，避免循环依赖）。"""
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             bus = get_progress_bus()
             task = self.get(task_id)
-            bus.publish(ProgressEvent(
-                task_id=task_id,
-                session_id=task.session_id if task else "",
-                event_type="status_change",
-                status=new_status.value,
-                message=f"任务状态：{new_status.value}",
-                progress=_STATUS_PROGRESS.get(new_status, 0),
-            ))
+            bus.publish(
+                ProgressEvent(
+                    task_id=task_id,
+                    session_id=task.session_id if task else "",
+                    event_type="status_change",
+                    status=new_status.value,
+                    message=f"任务状态：{new_status.value}",
+                    progress=_STATUS_PROGRESS.get(new_status, 0),
+                )
+            )
         except Exception as e:
             logger.debug(f"[TaskLedger] _notify_status_change 跳过: {e}")
 
 
 # 状态对应默认进度值
 _STATUS_PROGRESS: Dict[TaskStatus, int] = {
-    TaskStatus.PENDING:   0,
-    TaskStatus.RUNNING:   10,
-    TaskStatus.WAITING:   50,
-    TaskStatus.RETRYING:  30,
+    TaskStatus.PENDING: 0,
+    TaskStatus.RUNNING: 10,
+    TaskStatus.WAITING: 50,
+    TaskStatus.RETRYING: 30,
     TaskStatus.COMPLETED: 100,
-    TaskStatus.FAILED:    0,
+    TaskStatus.FAILED: 0,
     TaskStatus.CANCELLED: 0,
 }
 
@@ -608,6 +618,7 @@ _STATUS_PROGRESS: Dict[TaskStatus, int] = {
 # ============================================================================
 # 单例访问
 # ============================================================================
+
 
 def get_ledger(db_path: Optional[str] = None) -> TaskLedger:
     """返回全局 TaskLedger 单例（线程安全）。"""

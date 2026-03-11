@@ -3,12 +3,16 @@
 """
 Shared pytest fixtures for Koto test suite.
 """
+
 from __future__ import annotations
+
 import os
 import sys
 import tempfile
 from pathlib import Path
+
 import pytest
+
 
 def _root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -29,8 +33,9 @@ def app(_koto_tmp_db):
         sys.path.insert(0, str(root))
 
     from flask import Flask
-    from app.api.skill_routes import skill_bp
+
     from app.api.job_routes import job_bp
+    from app.api.skill_routes import skill_bp
 
     application = Flask(__name__)
     application.register_blueprint(skill_bp)
@@ -58,6 +63,7 @@ def binding_id(client):
 
 # ── Full-app fixture (all blueprints) ────────────────────────────────────────
 
+
 @pytest.fixture(scope="session")
 def full_app(_koto_tmp_db):
     """Flask app with ALL blueprints registered — used by integration tests."""
@@ -66,14 +72,15 @@ def full_app(_koto_tmp_db):
         sys.path.insert(0, str(root))
 
     from flask import Flask
-    from app.api.skill_routes import skill_bp
-    from app.api.job_routes import job_bp
-    from app.api.task_routes import task_bp
-    from app.api.goal_routes import goal_bp
-    from app.api.ops_routes import ops_bp
-    from app.api.file_hub_routes import file_hub_bp
+
     from app.api.agent_routes import agent_bp
+    from app.api.file_hub_routes import file_hub_bp
+    from app.api.goal_routes import goal_bp
+    from app.api.job_routes import job_bp
+    from app.api.ops_routes import ops_bp
     from app.api.skill_marketplace_routes import marketplace_bp
+    from app.api.skill_routes import skill_bp
+    from app.api.task_routes import task_bp
 
     application = Flask(__name__)
     application.register_blueprint(skill_bp)
@@ -81,10 +88,10 @@ def full_app(_koto_tmp_db):
     application.register_blueprint(ops_bp)
     application.register_blueprint(marketplace_bp)
     # Blueprints without built-in url_prefix need it provided here
-    application.register_blueprint(task_bp,     url_prefix="/api/tasks")
-    application.register_blueprint(goal_bp,     url_prefix="/api/goals")
+    application.register_blueprint(task_bp, url_prefix="/api/tasks")
+    application.register_blueprint(goal_bp, url_prefix="/api/goals")
     application.register_blueprint(file_hub_bp, url_prefix="/api/files")
-    application.register_blueprint(agent_bp,    url_prefix="/api/agent")
+    application.register_blueprint(agent_bp, url_prefix="/api/agent")
     application.config["TESTING"] = True
     return application
 
@@ -118,4 +125,3 @@ def tmp_workspace(tmp_path):
     os.environ["KOTO_WORKSPACE"] = str(ws)
     yield ws
     os.environ.pop("KOTO_WORKSPACE", None)
-

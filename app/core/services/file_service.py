@@ -5,14 +5,14 @@
 包含: 读写、编辑、复制/移动/删除、目录管理、元数据查询、智能文件查找
 """
 
+import fnmatch
+import logging
 import os
 import re
-import fnmatch
 import shutil
-import logging
-from typing import Dict, List, Any, Optional
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,12 @@ class FileService:
 
     # 不允许写入/删除的系统保护路径（Windows）
     _PROTECTED_DIRS = {
-        "windows", "system32", "syswow64", "program files",
-        "program files (x86)", "system volume information",
+        "windows",
+        "system32",
+        "syswow64",
+        "program files",
+        "program files (x86)",
+        "system volume information",
     }
 
     def __init__(self, workspace_dir: str = None, backup_enabled: bool = True):
@@ -33,7 +37,9 @@ class FileService:
             backup_enabled: 是否自动备份（修改前创建 .bak）
         """
         if workspace_dir is None:
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            project_root = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            )
             workspace_dir = os.path.join(project_root, "workspace")
 
         self.workspace_dir = Path(workspace_dir)
@@ -72,7 +78,10 @@ class FileService:
                 try:
                     content = path.read_text(encoding=encoding)
                     if max_chars and len(content) > max_chars:
-                        content = content[:max_chars] + f"\n...[已截断，共 {len(content)} 字符]"
+                        content = (
+                            content[:max_chars]
+                            + f"\n...[已截断，共 {len(content)} 字符]"
+                        )
                     lines = content.splitlines()
                     return {
                         "success": True,
@@ -104,7 +113,13 @@ class FileService:
             logger.warning(f"备份失败: {e}")
             return None
 
-    def write_file(self, file_path: str, content: str, encoding: str = "utf-8", create_backup: bool = True) -> Dict[str, Any]:
+    def write_file(
+        self,
+        file_path: str,
+        content: str,
+        encoding: str = "utf-8",
+        create_backup: bool = True,
+    ) -> Dict[str, Any]:
         """写入文件（覆盖）"""
         try:
             if not self.is_safe_path(file_path):
@@ -127,7 +142,9 @@ class FileService:
         except Exception as e:
             return {"success": False, "error": f"写入失败: {str(e)}"}
 
-    def append_text(self, file_path: str, text: str, newline_before: bool = True) -> Dict[str, Any]:
+    def append_text(
+        self, file_path: str, text: str, newline_before: bool = True
+    ) -> Dict[str, Any]:
         """在文件末尾追加文本"""
         try:
             path = Path(file_path)
@@ -135,14 +152,24 @@ class FileService:
                 return {"success": False, "error": "拒绝写入系统保护目录"}
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "a", encoding="utf-8") as f:
-                if newline_before and path.stat().st_size > 0 if path.exists() else False:
+                if (
+                    newline_before and path.stat().st_size > 0
+                    if path.exists()
+                    else False
+                ):
                     f.write("\n")
                 f.write(text)
-            return {"success": True, "path": str(path.resolve()), "size": path.stat().st_size}
+            return {
+                "success": True,
+                "path": str(path.resolve()),
+                "size": path.stat().st_size,
+            }
         except Exception as e:
             return {"success": False, "error": f"追加失败: {str(e)}"}
 
-    def replace_text(self, file_path: str, old_text: str, new_text: str) -> Dict[str, Any]:
+    def replace_text(
+        self, file_path: str, old_text: str, new_text: str
+    ) -> Dict[str, Any]:
         """替换文件中的文本"""
         res = self.read_file(file_path)
         if not res["success"]:
@@ -158,7 +185,9 @@ class FileService:
             result["replacements"] = count
         return result
 
-    def insert_line(self, file_path: str, line_number: int, text: str, mode: str = "after") -> Dict[str, Any]:
+    def insert_line(
+        self, file_path: str, line_number: int, text: str, mode: str = "after"
+    ) -> Dict[str, Any]:
         """
         在指定行号插入文本。
         mode: 'after'（行后）或 'before'（行前）
@@ -171,7 +200,10 @@ class FileService:
         encoding = res["encoding"]
         idx = line_number - 1
         if idx < 0 or idx > len(lines):
-            return {"success": False, "error": f"行号 {line_number} 超出范围（共 {len(lines)} 行）"}
+            return {
+                "success": False,
+                "error": f"行号 {line_number} 超出范围（共 {len(lines)} 行）",
+            }
         insert_text = text if text.endswith("\n") else text + "\n"
         if mode == "before":
             lines.insert(idx, insert_text)
@@ -179,7 +211,9 @@ class FileService:
             lines.insert(idx + 1, insert_text)
         return self.write_file(file_path, "".join(lines), encoding=encoding)
 
-    def delete_lines(self, file_path: str, start_line: int, end_line: int = None) -> Dict[str, Any]:
+    def delete_lines(
+        self, file_path: str, start_line: int, end_line: int = None
+    ) -> Dict[str, Any]:
         """
         删除指定行范围（包含两端）。
         end_line 默认等于 start_line（只删一行）。
@@ -193,14 +227,19 @@ class FileService:
             end_line = start_line
         s, e = start_line - 1, end_line - 1
         if s < 0 or e >= len(lines) or s > e:
-            return {"success": False, "error": f"行号范围 {start_line}-{end_line} 无效（共 {len(lines)} 行）"}
-        del lines[s:e + 1]
+            return {
+                "success": False,
+                "error": f"行号范围 {start_line}-{end_line} 无效（共 {len(lines)} 行）",
+            }
+        del lines[s : e + 1]
         result = self.write_file(file_path, "".join(lines), encoding=encoding)
         if result["success"]:
             result["deleted_lines"] = e - s + 1
         return result
 
-    def patch_file(self, file_path: str, patches: List[Dict[str, str]]) -> Dict[str, Any]:
+    def patch_file(
+        self, file_path: str, patches: List[Dict[str, str]]
+    ) -> Dict[str, Any]:
         """
         批量替换：一次读写完成多处文本替换，比多次调用 replace_text 更高效。
 
@@ -253,7 +292,10 @@ class FileService:
             if not path.exists():
                 return {"success": False, "error": f"文件不存在: {file_path}"}
             if not path.is_file():
-                return {"success": False, "error": "路径不是文件，请用 delete_directory 删除目录"}
+                return {
+                    "success": False,
+                    "error": "路径不是文件，请用 delete_directory 删除目录",
+                }
             backup_path = self._create_backup(path)
             path.unlink()
             return {
@@ -265,7 +307,9 @@ class FileService:
         except Exception as e:
             return {"success": False, "error": f"删除失败: {str(e)}"}
 
-    def copy_file(self, source: str, destination: str, overwrite: bool = False) -> Dict[str, Any]:
+    def copy_file(
+        self, source: str, destination: str, overwrite: bool = False
+    ) -> Dict[str, Any]:
         """复制文件"""
         try:
             if not self.is_safe_path(destination):
@@ -279,7 +323,10 @@ class FileService:
             if dst.is_dir():
                 dst = dst / src.name
             if dst.exists() and not overwrite:
-                return {"success": False, "error": f"目标文件已存在: {dst}（使用 overwrite=true 强制覆盖）"}
+                return {
+                    "success": False,
+                    "error": f"目标文件已存在: {dst}（使用 overwrite=true 强制覆盖）",
+                }
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
             return {
@@ -292,7 +339,9 @@ class FileService:
         except Exception as e:
             return {"success": False, "error": f"复制失败: {str(e)}"}
 
-    def move_file(self, source: str, destination: str, overwrite: bool = False) -> Dict[str, Any]:
+    def move_file(
+        self, source: str, destination: str, overwrite: bool = False
+    ) -> Dict[str, Any]:
         """移动文件（跨盘符使用 copy+delete）"""
         try:
             if not self.is_safe_path(source):
@@ -328,7 +377,10 @@ class FileService:
                 return {"success": False, "error": f"文件不存在: {file_path}"}
             # 禁止路径分隔符（防止隐式移动）
             if "/" in new_name or "\\" in new_name:
-                return {"success": False, "error": "新名称不能包含路径分隔符，请用 move_file 移动文件"}
+                return {
+                    "success": False,
+                    "error": "新名称不能包含路径分隔符，请用 move_file 移动文件",
+                }
             new_path = path.parent / new_name
             if new_path.exists():
                 return {"success": False, "error": f"目标名称已存在: {new_name}"}
@@ -373,8 +425,12 @@ class FileService:
                 "is_dir": path.is_dir(),
                 "size": stat.st_size,
                 "size_human": self._human_size(stat.st_size),
-                "created": datetime.fromtimestamp(stat.st_ctime).strftime("%Y-%m-%d %H:%M:%S"),
-                "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "created": datetime.fromtimestamp(stat.st_ctime).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                "modified": datetime.fromtimestamp(stat.st_mtime).strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
                 "parent": str(path.parent.resolve()),
             }
             if path.is_dir():
@@ -389,8 +445,13 @@ class FileService:
         except Exception as e:
             return {"success": False, "error": f"获取文件信息失败: {str(e)}"}
 
-    def list_directory(self, directory: str, recursive: bool = False,
-                       max_items: int = 100, include_dirs: bool = True) -> Dict[str, Any]:
+    def list_directory(
+        self,
+        directory: str,
+        recursive: bool = False,
+        max_items: int = 100,
+        include_dirs: bool = True,
+    ) -> Dict[str, Any]:
         """列出目录内容，包含完整路径、大小、修改时间等元数据"""
         try:
             path = Path(directory)
@@ -407,15 +468,21 @@ class FileService:
                     continue
                 try:
                     stat = p.stat()
-                    items.append({
-                        "name": p.name,
-                        "path": str(p.resolve()),
-                        "type": "dir" if p.is_dir() else "file",
-                        "size": stat.st_size if p.is_file() else None,
-                        "size_human": self._human_size(stat.st_size) if p.is_file() else None,
-                        "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                        "suffix": p.suffix.lower() if p.is_file() else None,
-                    })
+                    items.append(
+                        {
+                            "name": p.name,
+                            "path": str(p.resolve()),
+                            "type": "dir" if p.is_dir() else "file",
+                            "size": stat.st_size if p.is_file() else None,
+                            "size_human": (
+                                self._human_size(stat.st_size) if p.is_file() else None
+                            ),
+                            "modified": datetime.fromtimestamp(stat.st_mtime).strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            ),
+                            "suffix": p.suffix.lower() if p.is_file() else None,
+                        }
+                    )
                     count += 1
                     if count >= max_items:
                         break
@@ -463,6 +530,7 @@ class FileService:
             # --- 尝试使用 FileScanner 索引 ---
             try:
                 from web.file_scanner import FileScanner
+
                 if FileScanner.is_indexed():
                     scanner_results = FileScanner.search(
                         query=query,
@@ -480,7 +548,11 @@ class FileService:
                         }
                         # 过滤文件类型
                         if file_type:
-                            ext = file_type if file_type.startswith(".") else f".{file_type}"
+                            ext = (
+                                file_type
+                                if file_type.startswith(".")
+                                else f".{file_type}"
+                            )
                             if not r.get("path", "").lower().endswith(ext.lower()):
                                 continue
                         results.append(entry)
@@ -516,8 +588,14 @@ class FileService:
                 ext_filter = file_type if file_type.startswith(".") else f".{file_type}"
 
             skips = {
-                "node_modules", ".git", "__pycache__", ".venv", "venv",
-                "site-packages", "AppData", "$Recycle.Bin",
+                "node_modules",
+                ".git",
+                "__pycache__",
+                ".venv",
+                "venv",
+                "site-packages",
+                "AppData",
+                "$Recycle.Bin",
             }
 
             seen = set()
@@ -542,11 +620,21 @@ class FileService:
                     # 关键词匹配（所有词都要包含）
                     if not all(kw in name_lower for kw in keywords):
                         # 尝试模糊匹配
-                        if not any(fnmatch.fnmatch(name_lower, f"*{kw}*") for kw in keywords):
+                        if not any(
+                            fnmatch.fnmatch(name_lower, f"*{kw}*") for kw in keywords
+                        ):
                             # 内容搜索
-                            if search_content and p.suffix.lower() in {".txt", ".md", ".py", ".js", ".csv"}:
+                            if search_content and p.suffix.lower() in {
+                                ".txt",
+                                ".md",
+                                ".py",
+                                ".js",
+                                ".csv",
+                            }:
                                 try:
-                                    text = p.read_text(encoding="utf-8", errors="ignore")
+                                    text = p.read_text(
+                                        encoding="utf-8", errors="ignore"
+                                    )
                                     if not any(kw in text.lower() for kw in keywords):
                                         continue
                                 except Exception:
@@ -557,14 +645,18 @@ class FileService:
                     try:
                         stat = p.stat()
                         seen.add(str(p))
-                        results.append({
-                            "name": p.name,
-                            "path": str(p.resolve()),
-                            "size_human": self._human_size(stat.st_size),
-                            "modified": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                            "suffix": p.suffix.lower(),
-                            "source": "scan",
-                        })
+                        results.append(
+                            {
+                                "name": p.name,
+                                "path": str(p.resolve()),
+                                "size_human": self._human_size(stat.st_size),
+                                "modified": datetime.fromtimestamp(
+                                    stat.st_mtime
+                                ).strftime("%Y-%m-%d %H:%M:%S"),
+                                "suffix": p.suffix.lower(),
+                                "source": "scan",
+                            }
+                        )
                     except (PermissionError, OSError):
                         continue
 
@@ -583,7 +675,9 @@ class FileService:
         except Exception as e:
             return {"success": False, "error": f"文件查找失败: {str(e)}"}
 
-    def restore_backup(self, backup_file: str, restore_to: str = None) -> Dict[str, Any]:
+    def restore_backup(
+        self, backup_file: str, restore_to: str = None
+    ) -> Dict[str, Any]:
         """从备份文件恢复（restore_to 为空则恢复到原路径）"""
         try:
             backup_path = Path(backup_file)
@@ -614,16 +708,24 @@ class FileService:
         try:
             if not self.backup_dir.exists():
                 return {"success": True, "backups": [], "count": 0}
-            backups = sorted(self.backup_dir.glob("*.bak"), key=lambda p: p.stat().st_mtime, reverse=True)
+            backups = sorted(
+                self.backup_dir.glob("*.bak"),
+                key=lambda p: p.stat().st_mtime,
+                reverse=True,
+            )
             items = []
             for b in backups:
                 stat = b.stat()
-                items.append({
-                    "name": b.name,
-                    "path": str(b.resolve()),
-                    "size_human": self._human_size(stat.st_size),
-                    "created": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
-                })
+                items.append(
+                    {
+                        "name": b.name,
+                        "path": str(b.resolve()),
+                        "size_human": self._human_size(stat.st_size),
+                        "created": datetime.fromtimestamp(stat.st_mtime).strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
+                    }
+                )
             return {"success": True, "backups": items, "count": len(items)}
         except Exception as e:
             return {"success": False, "error": f"列备份失败: {str(e)}"}
@@ -641,9 +743,13 @@ class FileService:
         return f"{n:.1f} PB"
 
     # 兼容旧接口
-    def list_files(self, directory: str, recursive: bool = False, max_files: int = 50) -> Dict[str, Any]:
+    def list_files(
+        self, directory: str, recursive: bool = False, max_files: int = 50
+    ) -> Dict[str, Any]:
         """[兼容旧接口] 列出目录文件名"""
-        result = self.list_directory(directory, recursive=recursive, max_items=max_files, include_dirs=False)
+        result = self.list_directory(
+            directory, recursive=recursive, max_items=max_files, include_dirs=False
+        )
         if result["success"]:
             result["files"] = [item["name"] for item in result.get("items", [])]
         return result

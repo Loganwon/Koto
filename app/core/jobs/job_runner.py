@@ -21,6 +21,7 @@ Koto JobRunner — 后台作业执行器
     runner = get_job_runner()
     runner.register_handler("my_type", lambda ctx: do_something(ctx))
 """
+
 from __future__ import annotations
 
 import json
@@ -40,9 +41,11 @@ logger = logging.getLogger(__name__)
 # 数据结构
 # ============================================================================
 
+
 @dataclass
 class JobSpec:
     """描述一个待提交的作业。"""
+
     job_type: str
     payload: Dict[str, Any] = field(default_factory=dict)
     session_id: str = ""
@@ -65,11 +68,12 @@ class JobContext:
             ctx.step("ANSWER", result[:200], progress=100)
             return result[:500]
     """
+
     task_id: str
     session_id: str
     payload: Dict[str, Any]
-    ledger: Any     # TaskLedger
-    bus: Any        # ProgressBus
+    ledger: Any  # TaskLedger
+    bus: Any  # ProgressBus
 
     def is_cancelled(self) -> bool:
         """供处理器轮询：外部是否已请求取消。"""
@@ -120,6 +124,7 @@ class JobContext:
 # ============================================================================
 # JobRunner
 # ============================================================================
+
 
 class JobRunner:
     """
@@ -187,6 +192,7 @@ class JobRunner:
         返回 task_id，作为后续查询/控制的唯一标识。
         """
         from app.core.tasks.task_ledger import get_ledger
+
         ledger = get_ledger()
 
         # 将 payload 序列化为 user_input（TaskLedger 的文本字段）
@@ -225,8 +231,8 @@ class JobRunner:
                 logger.error("[JobRunner] dispatch 异常: %s", exc)
 
     def _run_job(self, task_id: str, spec: JobSpec):
-        from app.core.tasks.task_ledger import get_ledger
         from app.core.tasks.progress_bus import get_progress_bus
+        from app.core.tasks.task_ledger import get_ledger
 
         ledger = get_ledger()
         bus = get_progress_bus()
@@ -261,13 +267,13 @@ class JobRunner:
                 max_retries = meta.get("max_retries", 0)
                 if task.retry_count < max_retries:
                     ledger.increment_retries(task_id)
-                    delay = min(60, 2 ** task.retry_count)
-                    logger.info(
-                        "[JobRunner] %ds 后重试 task_id=%s", delay, task_id[:8]
-                    )
+                    delay = min(60, 2**task.retry_count)
+                    logger.info("[JobRunner] %ds 后重试 task_id=%s", delay, task_id[:8])
+
                     def _requeue(_tid=task_id, _spec=spec, _delay=delay):
                         time.sleep(_delay)
                         self._queue.put((5, time.time(), _tid, _spec))
+
                     threading.Thread(target=_requeue, daemon=True).start()
                     return
 
@@ -276,11 +282,15 @@ class JobRunner:
             # 发布运维事件
             try:
                 from app.core.ops.ops_event_bus import get_ops_bus
-                get_ops_bus().emit("job_failed", {
-                    "task_id": task_id,
-                    "job_type": spec.job_type,
-                    "error": str(exc)[:300],
-                })
+
+                get_ops_bus().emit(
+                    "job_failed",
+                    {
+                        "task_id": task_id,
+                        "job_type": spec.job_type,
+                        "error": str(exc)[:300],
+                    },
+                )
             except Exception:
                 pass
 
@@ -288,7 +298,8 @@ class JobRunner:
         """启动时将上次未完成的 PENDING 作业重新入队（崩溃恢复）。"""
         time.sleep(5)
         try:
-            from app.core.tasks.task_ledger import get_ledger, TaskStatus
+            from app.core.tasks.task_ledger import TaskStatus, get_ledger
+
             ledger = get_ledger()
             stale = ledger.list_tasks(
                 status=TaskStatus.PENDING, source="job_runner", limit=100
@@ -312,9 +323,7 @@ class JobRunner:
                     metadata=meta,
                 )
                 self._queue.put((5, time.time(), task.task_id, spec))
-                logger.info(
-                    "[JobRunner] 恢复挂起任务 task_id=%s", task.task_id[:8]
-                )
+                logger.info("[JobRunner] 恢复挂起任务 task_id=%s", task.task_id[:8])
         except Exception as exc:
             logger.warning("[JobRunner] 崩溃恢复失败: %s", exc)
 
@@ -343,6 +352,7 @@ def get_job_runner() -> JobRunner:
 # 内置处理器
 # ============================================================================
 
+
 def _register_builtin_handlers(runner: JobRunner):
     runner.register_handler("agent_query", _handle_agent_query)
     runner.register_handler("workflow", _handle_workflow)
@@ -362,10 +372,12 @@ def _handle_agent_query(ctx: JobContext) -> Optional[str]:
 
     try:
         from app.api.agent_routes import get_agent
+
         agent = get_agent()
         final_answer = ""
         for step in agent.run(input_text=query, history=history):
             from app.api.agent_routes import AgentStepType
+
             step_data = step.to_dict()
             ctx.step(
                 step_data.get("step_type", "THOUGHT"),
@@ -393,6 +405,7 @@ def _handle_workflow(ctx: JobContext) -> Optional[str]:
     ctx.step("THOUGHT", f"启动工作流: {workflow_id or '(auto-detect)'}", progress=5)
     try:
         from app.core.workflow.workflow_runtime import WorkflowRuntime
+
         rt = WorkflowRuntime()
         result = rt.execute(
             workflow_id=workflow_id,
@@ -413,6 +426,7 @@ def _handle_auto_catalog(ctx: JobContext) -> Optional[str]:
     ctx.step("THOUGHT", f"自动整理: {source_dir or '默认目录'}", progress=5)
     try:
         from web.auto_catalog_scheduler import AutoCatalogWorker  # type: ignore
+
         worker = AutoCatalogWorker(source_dir=source_dir or None)
         result = worker.run_once()
         summary = str(result)[:300] if result else "整理完成"
@@ -432,6 +446,7 @@ def _handle_skill_exec(ctx: JobContext) -> Optional[str]:
     ctx.step("THOUGHT", f"加载技能 {skill_id}", progress=5)
     try:
         from app.core.skills.skill_manager import SkillManager
+
         skill_def = SkillManager.get_definition(skill_id)
         if skill_def:
             base_prompt = skill_def.system_prompt_template or ""
@@ -440,10 +455,12 @@ def _handle_skill_exec(ctx: JobContext) -> Optional[str]:
         ctx.step("ACTION", f"调用 agent (skill={skill_id})", progress=20)
 
         from app.api.agent_routes import get_agent
+
         agent = get_agent()
         final_answer = ""
         for step in agent.run(input_text=query, history=[]):
             from app.api.agent_routes import AgentStepType
+
             if step.step_type == AgentStepType.ANSWER:
                 final_answer = step.content or ""
 
@@ -460,8 +477,9 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
         # 尝试获取 LLM 函数（非必须）
         llm_fn = None
         try:
-            from web.app import client
             from google.genai import types as _types
+
+            from web.app import client
 
             def _llm(prompt: str) -> str:
                 resp = client.models.generate_content(
@@ -478,6 +496,7 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
             pass
 
         from app.core.agent.proactive_agent import get_proactive_agent
+
         agent = get_proactive_agent()
         agent.tick(llm_fn=llm_fn)
         pending = agent.pending()

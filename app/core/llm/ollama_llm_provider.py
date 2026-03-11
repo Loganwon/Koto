@@ -25,13 +25,14 @@ Usage
         ...
     )
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import os
-import urllib.request
 import urllib.error
+import urllib.request
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from app.core.llm.base import LLMProvider
@@ -58,6 +59,7 @@ _SKILL_BLOCK_MARKER = "## 🎯 当前激活的 Skills"
 # Format helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _to_ollama_messages(
     prompt: Union[str, List[Dict[str, Any]]],
     system_instruction: Optional[str],
@@ -72,7 +74,7 @@ def _to_ollama_messages(
         messages.append({"role": "user", "content": prompt})
         return messages
 
-    for msg in (prompt or []):
+    for msg in prompt or []:
         role = msg.get("role", "user")
         if role == "model":
             role = "assistant"
@@ -97,18 +99,21 @@ def _to_ollama_tools(tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
     for t in tools:
         if not isinstance(t, dict) or not t.get("name"):
             continue
-        result.append({
-            "type": "function",
-            "function": {
-                "name": t["name"],
-                "description": t.get("description", ""),
-                "parameters": t.get("parameters") or {
-                    "type": "object",
-                    "properties": {},
-                    "required": [],
+        result.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "parameters": t.get("parameters")
+                    or {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
                 },
-            },
-        })
+            }
+        )
     return result or None
 
 
@@ -145,7 +150,9 @@ def _raw_post(
     """Single HTTP POST.  Non-stream → dict.  Stream → generator of delta str."""
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        url, data=data, method="POST",
+        url,
+        data=data,
+        method="POST",
         headers={"Content-Type": "application/json"},
     )
 
@@ -186,6 +193,7 @@ def _stream_deltas(req: urllib.request.Request) -> Generator[str, None, None]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Provider
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class OllamaLLMProvider(LLMProvider):
     """
@@ -279,7 +287,9 @@ class OllamaLLMProvider(LLMProvider):
         payload = {**payload, "stream": True}
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
-            url, data=data, method="POST",
+            url,
+            data=data,
+            method="POST",
             headers={"Content-Type": "application/json"},
         )
         for delta in _stream_deltas(req):

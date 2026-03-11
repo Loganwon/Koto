@@ -20,8 +20,8 @@ ToolRouter — 动态工具子集选择器
   • data           → 数据处理、分析
 """
 
-import re
 import logging
+import re
 from typing import Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -32,52 +32,91 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 TOOL_CATEGORIES: Dict[str, Set[str]] = {
     "communication": {
-        "send_wechat_message", "read_wechat_message",
+        "send_wechat_message",
+        "read_wechat_message",
         "send_email",
         "notify_user",
     },
     "calendar": {
-        "add_calendar_event", "list_calendar_events", "delete_calendar_event",
-        "add_reminder", "list_reminders", "cancel_reminder",
-        "get_current_datetime", "get_current_time",
+        "add_calendar_event",
+        "list_calendar_events",
+        "delete_calendar_event",
+        "add_reminder",
+        "list_reminders",
+        "cancel_reminder",
+        "get_current_datetime",
+        "get_current_time",
     },
     "search": {
-        "web_search", "search_local_files",
+        "web_search",
+        "search_local_files",
         "get_12306_ticket_url",
     },
     "browser": {
-        "open_url", "browser_get_page_info", "browser_click",
-        "browser_input_text", "browser_screenshot", "browser_get_text",
+        "open_url",
+        "browser_get_page_info",
+        "browser_click",
+        "browser_input_text",
+        "browser_screenshot",
+        "browser_get_text",
     },
     "files": {
-        "read_file", "write_file", "read_document", "generate_document",
-        "analyze_excel_data", "convert_file",
-        "list_directory", "open_file_or_folder",
-        "move_file", "delete_file", "zip_files", "unzip_file",
+        "read_file",
+        "write_file",
+        "read_document",
+        "generate_document",
+        "analyze_excel_data",
+        "convert_file",
+        "list_directory",
+        "open_file_or_folder",
+        "move_file",
+        "delete_file",
+        "zip_files",
+        "unzip_file",
         # 精准编辑工具（优先于 write_file 全量覆盖）
-        "replace_text", "patch_file", "insert_line", "delete_lines", "append_text",
-        "list_backups", "restore_backup",
+        "replace_text",
+        "patch_file",
+        "insert_line",
+        "delete_lines",
+        "append_text",
+        "list_backups",
+        "restore_backup",
     },
     "system": {
-        "open_application", "open_file_or_folder",
-        "take_screenshot", "notify_user",
-        "get_clipboard_text", "set_clipboard_text",
-        "read_clipboard", "search_clipboard",
+        "open_application",
+        "open_file_or_folder",
+        "take_screenshot",
+        "notify_user",
+        "get_clipboard_text",
+        "set_clipboard_text",
+        "read_clipboard",
+        "search_clipboard",
         "shell_command",
-        "query_cpu_status", "query_memory_status",
-        "query_disk_usage", "query_network_status",
-        "query_python_env", "list_running_apps",
+        "query_cpu_status",
+        "query_memory_status",
+        "query_disk_usage",
+        "query_network_status",
+        "query_python_env",
+        "list_running_apps",
     },
     "code": {
-        "run_python_code", "shell_command",
-        "generate_script", "run_script",
+        "run_python_code",
+        "shell_command",
+        "generate_script",
+        "run_script",
         # 代码文件精准编辑
-        "replace_text", "patch_file", "insert_line", "delete_lines",
-        "read_file", "write_file",
+        "replace_text",
+        "patch_file",
+        "insert_line",
+        "delete_lines",
+        "read_file",
+        "write_file",
     },
     "data": {
-        "analyze_excel_data", "calculate",
-        "process_csv", "process_json",
+        "analyze_excel_data",
+        "calculate",
+        "process_csv",
+        "process_json",
         "run_python_code",
     },
 }
@@ -88,31 +127,39 @@ _INTENT_RULES: List[tuple] = [
     (r"微信|wechat|发消息|发送消息|聊天记录", "communication"),
     (r"邮件|email|mail|发邮件", "communication"),
     (r"通知|提醒我|remind me", "communication"),
-
     # calendar
-    (r"日程|calendar|会议|约会|安排|提醒|schedule|reminder|几点|明天|后天|下周", "calendar"),
+    (
+        r"日程|calendar|会议|约会|安排|提醒|schedule|reminder|几点|明天|后天|下周",
+        "calendar",
+    ),
     (r"今天|现在几点|当前时间|几号|日期", "calendar"),
-
     # search
-    (r"搜索|查询|查一下|查找|search|google|网上找|百度|信息|新闻|价格|天气|汇率|股价|12306|车票|火车"
-     r"|金价|油价|银价|黄金|白银|铜价|行情|期货|现货|实时|最新价|今日价|当前价|涨跌|走势|比特币|以太坊", "search"),
-
+    (
+        r"搜索|查询|查一下|查找|search|google|网上找|百度|信息|新闻|价格|天气|汇率|股价|12306|车票|火车"
+        r"|金价|油价|银价|黄金|白银|铜价|行情|期货|现货|实时|最新价|今日价|当前价|涨跌|走势|比特币|以太坊",
+        "search",
+    ),
     # browser
     (r"浏览器|打开网页|网址|url|点击|浏览|网站|webpage|browser", "browser"),
-
     # files
-    (r"文件|文档|word|excel|pdf|ppt|表格|读取|写入|保存|创建文件|下载|上传|解压|压缩|zip", "files"),
+    (
+        r"文件|文档|word|excel|pdf|ppt|表格|读取|写入|保存|创建文件|下载|上传|解压|压缩|zip",
+        "files",
+    ),
     (r"目录|文件夹|folder|directory|列出文件|ls |dir ", "files"),
-    (r"修改文件|编辑文件|替换|批注|注释|改一下|改这里|更新文件|patch|edit file|replace in", "files"),
+    (
+        r"修改文件|编辑文件|替换|批注|注释|改一下|改这里|更新文件|patch|edit file|replace in",
+        "files",
+    ),
     (r"插入行|删除行|追加内容|append to|insert line|delete line", "files"),
-
     # system
-    (r"截图|screenshot|剪贴板|clipboard|打开应用|open app|命令行|cmd|powershell|shell", "system"),
+    (
+        r"截图|screenshot|剪贴板|clipboard|打开应用|open app|命令行|cmd|powershell|shell",
+        "system",
+    ),
     (r"cpu|内存|memory|磁盘|disk|进程|process|系统状态|系统信息|system info", "system"),
-
     # code
     (r"运行代码|执行代码|python|脚本|run code|代码|编程|计算|eval", "code"),
-
     # data
     (r"分析数据|统计|数据处理|数据分析|aggregat|sum|count|average|均值|汇总", "data"),
 ]

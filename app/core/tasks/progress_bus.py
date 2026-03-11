@@ -38,6 +38,7 @@ _bus_lock = threading.Lock()
 # 数据类
 # ============================================================================
 
+
 @dataclass
 class ProgressEvent:
     """
@@ -51,16 +52,19 @@ class ProgressEvent:
       "resume"         — 从暂停恢复
       "error"          — 发生错误
     """
+
     task_id: str
     session_id: str = ""
-    event_type: str = "progress"       # 见上方 event_type 可选值
-    status: str = ""                   # TaskStatus value
+    event_type: str = "progress"  # 见上方 event_type 可选值
+    status: str = ""  # TaskStatus value
     message: str = ""
-    progress: int = 0                  # 0-100
-    step_type: Optional[str] = None    # THOUGHT / ACTION / OBSERVATION / ANSWER / ERROR
-    tool_name: Optional[str] = None    # 若 step_type=ACTION，工具名
+    progress: int = 0  # 0-100
+    step_type: Optional[str] = None  # THOUGHT / ACTION / OBSERVATION / ANSWER / ERROR
+    tool_name: Optional[str] = None  # 若 step_type=ACTION，工具名
     detail: Optional[Dict[str, Any]] = None
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat(timespec="milliseconds"))
+    timestamp: str = field(
+        default_factory=lambda: datetime.now().isoformat(timespec="milliseconds")
+    )
 
     def to_sse(self, event_name: str = "progress") -> str:
         """格式化为 SSE 消息文本（两个换行结尾）。"""
@@ -74,6 +78,7 @@ class ProgressEvent:
 # ============================================================================
 # ProgressBus
 # ============================================================================
+
 
 class ProgressBus:
     """
@@ -161,16 +166,18 @@ class ProgressBus:
         detail: Optional[Dict[str, Any]] = None,
     ):
         """便捷方法：发布一个 Agent 步骤事件。"""
-        self.publish(ProgressEvent(
-            task_id=task_id,
-            session_id=session_id,
-            event_type="step",
-            step_type=step_type,
-            message=content[:300],
-            progress=progress,
-            tool_name=tool_name,
-            detail=detail,
-        ))
+        self.publish(
+            ProgressEvent(
+                task_id=task_id,
+                session_id=session_id,
+                event_type="step",
+                step_type=step_type,
+                message=content[:300],
+                progress=progress,
+                tool_name=tool_name,
+                detail=detail,
+            )
+        )
 
     # ── SSE 流 ────────────────────────────────────────────────────────────────
 
@@ -269,12 +276,14 @@ class ProgressBus:
 
     def cleanup(self, task_id: str, delay: float = 10.0):
         """延迟清理某任务的订阅和历史（给客户端时间接收最后事件）。"""
+
         def _do_cleanup():
             time.sleep(delay)
             with self._lock:
                 self._history.pop(task_id, None)
                 self._sse_queues.pop(task_id, None)
                 self._callbacks.pop(task_id, None)
+
         threading.Thread(target=_do_cleanup, daemon=True).start()
 
     def active_tasks(self) -> List[str]:
@@ -286,6 +295,7 @@ class ProgressBus:
 # ============================================================================
 # 单例访问
 # ============================================================================
+
 
 def get_progress_bus() -> ProgressBus:
     """返回全局 ProgressBus 单例（线程安全）。"""

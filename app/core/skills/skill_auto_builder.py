@@ -49,6 +49,7 @@
         domain="general",    # 专业领域
     )
 """
+
 from __future__ import annotations
 
 import json
@@ -64,7 +65,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_base_dir() -> Path:
-    if getattr(_sys, 'frozen', False):
+    if getattr(_sys, "frozen", False):
         return Path(_sys.executable).parent
     return Path(__file__).resolve().parents[3]
 
@@ -76,15 +77,15 @@ _BASE_DIR = _get_base_dir()
 # ══════════════════════════════════════════════════════════════════
 
 STYLE_DIMENSIONS = [
-    "formality",    # 语气正式程度  0=口语/随意  1=严肃/正式
-    "verbosity",    # 详细程度      0=极简  1=非常详细
-    "empathy",      # 共情程度      0=客观中立  1=温暖感同身受
-    "structure",    # 结构化程度    0=散文自由  1=高度结构化
-    "creativity",   # 创意程度      0=保守务实  1=创意发散
-    "technicality", # 技术深度      0=通俗易懂  1=专业技术
-    "positivity",   # 积极程度      0=中性/批判  1=积极鼓励
+    "formality",  # 语气正式程度  0=口语/随意  1=严肃/正式
+    "verbosity",  # 详细程度      0=极简  1=非常详细
+    "empathy",  # 共情程度      0=客观中立  1=温暖感同身受
+    "structure",  # 结构化程度    0=散文自由  1=高度结构化
+    "creativity",  # 创意程度      0=保守务实  1=创意发散
+    "technicality",  # 技术深度      0=通俗易懂  1=专业技术
+    "positivity",  # 积极程度      0=中性/批判  1=积极鼓励
     "proactivity",  # 主动建议程度  0=被动回答  1=主动发散
-    "humor",        # 幽默程度      0=严肃  1=幽默风趣
+    "humor",  # 幽默程度      0=严肃  1=幽默风趣
     "conciseness",  # 简洁程度      0=冗长  1=精炼（与 verbosity 反向）
 ]
 
@@ -92,18 +93,19 @@ STYLE_DIMENSIONS = [
 @dataclass
 class StyleProfile:
     """10 维风格评分（0.0 ~ 1.0）"""
-    formality:    float = 0.5
-    verbosity:    float = 0.5
-    empathy:      float = 0.5
-    structure:    float = 0.5
-    creativity:   float = 0.3
+
+    formality: float = 0.5
+    verbosity: float = 0.5
+    empathy: float = 0.5
+    structure: float = 0.5
+    creativity: float = 0.3
     technicality: float = 0.3
-    positivity:   float = 0.6
-    proactivity:  float = 0.4
-    humor:        float = 0.2
-    conciseness:  float = 0.5
-    domain:       str   = "general"   # 专业领域标签
-    language:     str   = "zh"        # 语言偏好
+    positivity: float = 0.6
+    proactivity: float = 0.4
+    humor: float = 0.2
+    conciseness: float = 0.5
+    domain: str = "general"  # 专业领域标签
+    language: str = "zh"  # 语言偏好
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -172,21 +174,33 @@ _KEYWORD_SIGNALS: List[Tuple[str, str, float, float]] = [
 ]
 
 _DOMAIN_KEYWORDS: Dict[str, List[str]] = {
-    "coding":       ["代码", "编程", "开发", "python", "java", "javascript", "算法", "bug", "debug", "API"],
-    "writing":      ["写作", "文章", "文案", "创作", "故事", "编辑", "润色", "排版"],
-    "research":     ["研究", "分析", "调研", "文献", "论文", "学术", "数据", "统计"],
-    "finance":      ["金融", "投资", "股票", "理财", "基金", "会计", "财务", "经济"],
-    "legal":        ["法律", "合同", "条款", "法规", "诉讼", "律师", "合规"],
-    "medical":      ["医疗", "健康", "病症", "药物", "治疗", "医生", "诊断"],
-    "education":    ["教育", "教学", "学习", "课程", "辅导", "知识", "老师", "学生"],
-    "marketing":    ["营销", "推广", "文案", "品牌", "广告", "用户", "转化", "SEO"],
+    "coding": [
+        "代码",
+        "编程",
+        "开发",
+        "python",
+        "java",
+        "javascript",
+        "算法",
+        "bug",
+        "debug",
+        "API",
+    ],
+    "writing": ["写作", "文章", "文案", "创作", "故事", "编辑", "润色", "排版"],
+    "research": ["研究", "分析", "调研", "文献", "论文", "学术", "数据", "统计"],
+    "finance": ["金融", "投资", "股票", "理财", "基金", "会计", "财务", "经济"],
+    "legal": ["法律", "合同", "条款", "法规", "诉讼", "律师", "合规"],
+    "medical": ["医疗", "健康", "病症", "药物", "治疗", "医生", "诊断"],
+    "education": ["教育", "教学", "学习", "课程", "辅导", "知识", "老师", "学生"],
+    "marketing": ["营销", "推广", "文案", "品牌", "广告", "用户", "转化", "SEO"],
     "productivity": ["效率", "工作", "任务", "管理", "日程", "流程", "优化"],
-    "lifestyle":    ["生活", "健身", "饮食", "旅行", "情感", "关系", "心理"],
+    "lifestyle": ["生活", "健身", "饮食", "旅行", "情感", "关系", "心理"],
 }
 
 # ══════════════════════════════════════════════════════════════════
 # 风格分析器
 # ══════════════════════════════════════════════════════════════════
+
 
 class StyleAnalyzer:
     """
@@ -224,15 +238,14 @@ class StyleAnalyzer:
         return StyleProfile(**profile_kwargs)
 
     @classmethod
-    def analyze_conversation(cls, turns: List[Dict[str, str]], role: str = "assistant") -> StyleProfile:
+    def analyze_conversation(
+        cls, turns: List[Dict[str, str]], role: str = "assistant"
+    ) -> StyleProfile:
         """
         从对话历史中提取 AI 回复的风格。
         仅分析 role='assistant' 的消息。
         """
-        ai_texts = [
-            t["text"] for t in turns
-            if t.get("role") in (role, "ai", "model")
-        ]
+        ai_texts = [t["text"] for t in turns if t.get("role") in (role, "ai", "model")]
         if not ai_texts:
             return StyleProfile()
         combined = "\n".join(ai_texts[:20])  # 最多取 20 条
@@ -253,6 +266,7 @@ class StyleAnalyzer:
 # ══════════════════════════════════════════════════════════════════
 # Prompt 合成器
 # ══════════════════════════════════════════════════════════════════
+
 
 class PromptSynthesizer:
     """
@@ -365,21 +379,23 @@ class PromptSynthesizer:
     }
 
     _DOMAIN_CONTEXTS = {
-        "coding":       "你擅长软件开发和编程，能解决技术问题、审查代码、设计架构。",
-        "writing":      "你是写作专家，擅长各类文体写作、编辑润色和创意表达。",
-        "research":     "你具备严谨的研究分析能力，善于收集整理信息、批判性思考。",
-        "finance":      "你熟悉金融和投资领域，能提供理性、专业的财务分析建议（非投资建议）。",
-        "legal":        "你了解法律基础知识，能协助理解法律文本和条款（非法律建议，如需具体意见请咨询律师）。",
-        "medical":      "你了解医疗和健康知识，能提供一般性健康信息（非医疗建议，如有疑问请就医）。",
-        "education":    "你是有耐心的教育者，善于用恰当的方式解释知识，引导学习理解。",
-        "marketing":    "你熟悉营销和品牌建设，能帮助制定推广策略和创作吸引人的文案。",
+        "coding": "你擅长软件开发和编程，能解决技术问题、审查代码、设计架构。",
+        "writing": "你是写作专家，擅长各类文体写作、编辑润色和创意表达。",
+        "research": "你具备严谨的研究分析能力，善于收集整理信息、批判性思考。",
+        "finance": "你熟悉金融和投资领域，能提供理性、专业的财务分析建议（非投资建议）。",
+        "legal": "你了解法律基础知识，能协助理解法律文本和条款（非法律建议，如需具体意见请咨询律师）。",
+        "medical": "你了解医疗和健康知识，能提供一般性健康信息（非医疗建议，如有疑问请就医）。",
+        "education": "你是有耐心的教育者，善于用恰当的方式解释知识，引导学习理解。",
+        "marketing": "你熟悉营销和品牌建设，能帮助制定推广策略和创作吸引人的文案。",
         "productivity": "你专注于工作效率和流程优化，帮助用户管理时间、任务和项目。",
-        "lifestyle":    "你关注生活品质和个人成长，提供实用的生活建议和情感支持。",
-        "general":      "你是一个全能助手，善于处理各种类型的问题和任务。",
+        "lifestyle": "你关注生活品质和个人成长，提供实用的生活建议和情感支持。",
+        "general": "你是一个全能助手，善于处理各种类型的问题和任务。",
     }
 
     @classmethod
-    def synthesize(cls, profile: StyleProfile, name: str, description: str = "") -> Tuple[str, str]:
+    def synthesize(
+        cls, profile: StyleProfile, name: str, description: str = ""
+    ) -> Tuple[str, str]:
         """
         根据 StyleProfile 合成 (system_prompt_template, intent_description)。
         返回 (prompt, intent_desc) 元组。
@@ -387,7 +403,9 @@ class PromptSynthesizer:
         blocks: List[str] = []
 
         # 1. 身份设定
-        domain_ctx = cls._DOMAIN_CONTEXTS.get(profile.domain, cls._DOMAIN_CONTEXTS["general"])
+        domain_ctx = cls._DOMAIN_CONTEXTS.get(
+            profile.domain, cls._DOMAIN_CONTEXTS["general"]
+        )
         if description:
             blocks.append(f"你是「{name}」。{description}")
         else:
@@ -440,7 +458,9 @@ class PromptSynthesizer:
             humor_block = pick(cls._HUMOR_BLOCKS, profile.humor)
             behavior_items.append(f"**幽默风格**：{humor_block}")
 
-        blocks.append(behavior_header + "\n\n".join(f"- {item}" for item in behavior_items))
+        blocks.append(
+            behavior_header + "\n\n".join(f"- {item}" for item in behavior_items)
+        )
 
         # 3. 输入变量提示（模板中的占位符支持）
         blocks.append(
@@ -450,12 +470,22 @@ class PromptSynthesizer:
         system_prompt = "\n".join(blocks)
 
         # 4. 生成 intent_description
-        formality_desc = "正式" if profile.formality > 0.65 else ("随意" if profile.formality < 0.35 else "自然")
-        verbosity_desc = "详细" if profile.verbosity > 0.65 else ("简短" if profile.verbosity < 0.35 else "适中")
-        empathy_desc = "温暖共情" if profile.empathy > 0.65 else ("理性客观" if profile.empathy < 0.35 else "平衡")
-        intent_desc = (
-            f"用户需要以 {formality_desc}、{verbosity_desc}、{empathy_desc} 的方式回应的场景。"
+        formality_desc = (
+            "正式"
+            if profile.formality > 0.65
+            else ("随意" if profile.formality < 0.35 else "自然")
         )
+        verbosity_desc = (
+            "详细"
+            if profile.verbosity > 0.65
+            else ("简短" if profile.verbosity < 0.35 else "适中")
+        )
+        empathy_desc = (
+            "温暖共情"
+            if profile.empathy > 0.65
+            else ("理性客观" if profile.empathy < 0.35 else "平衡")
+        )
+        intent_desc = f"用户需要以 {formality_desc}、{verbosity_desc}、{empathy_desc} 的方式回应的场景。"
         if description:
             intent_desc = f"{description}。" + intent_desc
 
@@ -465,6 +495,7 @@ class PromptSynthesizer:
 # ══════════════════════════════════════════════════════════════════
 # Skill 打包器（.kotosk 格式）
 # ══════════════════════════════════════════════════════════════════
+
 
 class SkillPackager:
     """
@@ -483,7 +514,7 @@ class SkillPackager:
     @classmethod
     def pack(
         cls,
-        skills: List[Any],       # List[SkillDefinition]
+        skills: List[Any],  # List[SkillDefinition]
         output_path: str,
         pack_name: str = "",
         author: str = "user",
@@ -494,8 +525,8 @@ class SkillPackager:
         打包多个 Skill 为 .kotosk 文件。
         返回输出文件路径。
         """
-        import zipfile
         import tempfile
+        import zipfile
         from datetime import datetime, timezone
 
         if not output_path.endswith(".kotosk"):
@@ -512,9 +543,14 @@ class SkillPackager:
         }
 
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+            zf.writestr(
+                "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2)
+            )
             for skill in skills:
-                zf.writestr(f"skills/{skill.id}.json", json.dumps(skill.to_dict(), ensure_ascii=False, indent=2))
+                zf.writestr(
+                    f"skills/{skill.id}.json",
+                    json.dumps(skill.to_dict(), ensure_ascii=False, indent=2),
+                )
             if readme:
                 zf.writestr("README.md", readme)
 
@@ -530,6 +566,7 @@ class SkillPackager:
 
         def _get_schema():
             from app.core.skills.skill_schema import SkillDefinition
+
             return SkillDefinition
 
         SkillDefinition = _get_schema()
@@ -553,13 +590,16 @@ class SkillPackager:
                     except Exception as e:
                         logger.warning(f"[SkillPackager] 解析 {name} 失败: {e}")
 
-        logger.info(f"[SkillPackager] 解包完成: {len(skills)} 个 Skill from {kotosk_path}")
+        logger.info(
+            f"[SkillPackager] 解包完成: {len(skills)} 个 Skill from {kotosk_path}"
+        )
         return manifest, skills
 
     @classmethod
     def get_manifest(cls, kotosk_path: str) -> Dict:
         """只读取 manifest，不解析 skill 定义（用于快速预览）"""
         import zipfile
+
         with zipfile.ZipFile(kotosk_path, "r") as zf:
             if "manifest.json" in zf.namelist():
                 return json.loads(zf.read("manifest.json").decode("utf-8"))
@@ -569,6 +609,7 @@ class SkillPackager:
 # ══════════════════════════════════════════════════════════════════
 # 主入口：SkillAutoBuilder
 # ══════════════════════════════════════════════════════════════════
+
 
 class SkillAutoBuilder:
     """
@@ -608,7 +649,11 @@ class SkillAutoBuilder:
         Returns:
             SkillDefinition
         """
-        from app.core.skills.skill_schema import SkillDefinition, InputVariable, OutputSpec
+        from app.core.skills.skill_schema import (
+            InputVariable,
+            OutputSpec,
+            SkillDefinition,
+        )
 
         context = personalization_context or {}
         if personalize and not context:
@@ -616,13 +661,17 @@ class SkillAutoBuilder:
 
         effective_description = description
         if context:
-            effective_description = cls._build_effective_description(description, context)
+            effective_description = cls._build_effective_description(
+                description, context
+            )
 
         profile = StyleAnalyzer.analyze_text(effective_description)
         if context:
             profile = cls._apply_profile_bias(profile, context)
 
-        prompt, intent_desc = PromptSynthesizer.synthesize(profile, name, effective_description)
+        prompt, intent_desc = PromptSynthesizer.synthesize(
+            profile, name, effective_description
+        )
 
         skill_id = _make_skill_id(name)
         auto_tags = tags or [profile.domain, category]
@@ -687,7 +736,11 @@ class SkillAutoBuilder:
         Returns:
             SkillDefinition（AI 生成或规则降级）
         """
-        from app.core.skills.skill_schema import SkillDefinition, InputVariable, OutputSpec
+        from app.core.skills.skill_schema import (
+            InputVariable,
+            OutputSpec,
+            SkillDefinition,
+        )
 
         skill_id = _make_skill_id(name)
         auto_tags = tags or [category]
@@ -698,7 +751,9 @@ class SkillAutoBuilder:
 
         effective_description = description
         if context:
-            effective_description = cls._build_effective_description(description, context)
+            effective_description = cls._build_effective_description(
+                description, context
+            )
 
         # 尝试 AI 生成
         ai_prompt = cls._generate_prompt_with_ai(name, effective_description, model)
@@ -708,7 +763,9 @@ class SkillAutoBuilder:
             profile = StyleAnalyzer.analyze_text(effective_description)
             if context:
                 profile = cls._apply_profile_bias(profile, context)
-            _, intent_desc = PromptSynthesizer.synthesize(profile, name, effective_description)
+            _, intent_desc = PromptSynthesizer.synthesize(
+                profile, name, effective_description
+            )
 
             return SkillDefinition(
                 id=skill_id,
@@ -720,9 +777,13 @@ class SkillAutoBuilder:
                 system_prompt_template=ai_prompt,
                 prompt=ai_prompt,
                 input_variables=[
-                    InputVariable(name="input", description="用户输入的内容", required=True)
+                    InputVariable(
+                        name="input", description="用户输入的内容", required=True
+                    )
                 ],
-                output_spec=OutputSpec(format="any", description=f"以「{name}」风格回答"),
+                output_spec=OutputSpec(
+                    format="any", description=f"以「{name}」风格回答"
+                ),
                 task_types=["CHAT"],
                 enabled=enabled,
                 version="1.0.0",
@@ -746,7 +807,9 @@ class SkillAutoBuilder:
             )
 
     @classmethod
-    def _generate_prompt_with_ai(cls, name: str, description: str, model: str) -> Optional[str]:
+    def _generate_prompt_with_ai(
+        cls, name: str, description: str, model: str
+    ) -> Optional[str]:
         """
         调用 Gemini API 生成 system_prompt_template。
         成功返回 prompt 字符串，失败返回 None。
@@ -822,7 +885,7 @@ class SkillAutoBuilder:
             raw = json.load(f)
 
         history = raw if isinstance(raw, list) else raw.get("history", [])
-        turns = _normalize_turns(history)[-max_turns * 2:]
+        turns = _normalize_turns(history)[-max_turns * 2 :]
 
         profile = StyleAnalyzer.analyze_conversation(turns)
         if description:
@@ -830,15 +893,28 @@ class SkillAutoBuilder:
             desc_profile = StyleAnalyzer.analyze_text(description)
             # 取两者加权平均（对话权重更高）
             for dim in STYLE_DIMENSIONS:
-                setattr(profile, dim, round(
-                    getattr(profile, dim) * 0.6 + getattr(desc_profile, dim) * 0.4, 2
-                ))
-            profile.domain = desc_profile.domain if desc_profile.domain != "general" else profile.domain
+                setattr(
+                    profile,
+                    dim,
+                    round(
+                        getattr(profile, dim) * 0.6 + getattr(desc_profile, dim) * 0.4,
+                        2,
+                    ),
+                )
+            profile.domain = (
+                desc_profile.domain
+                if desc_profile.domain != "general"
+                else profile.domain
+            )
 
         final_desc = description or f"从会话 {session_id} 中提取的交流风格"
         prompt, intent_desc = PromptSynthesizer.synthesize(profile, name, final_desc)
 
-        from app.core.skills.skill_schema import SkillDefinition, InputVariable, OutputSpec
+        from app.core.skills.skill_schema import (
+            InputVariable,
+            OutputSpec,
+            SkillDefinition,
+        )
 
         return SkillDefinition(
             id=_make_skill_id(name),
@@ -886,7 +962,11 @@ class SkillAutoBuilder:
         通过精细旋钮配置生成 SkillDefinition。
         所有维度参数范围 0.0 ~ 1.0。
         """
-        from app.core.skills.skill_schema import SkillDefinition, InputVariable, OutputSpec
+        from app.core.skills.skill_schema import (
+            InputVariable,
+            OutputSpec,
+            SkillDefinition,
+        )
 
         profile = StyleProfile(
             formality=formality,
@@ -908,14 +988,22 @@ class SkillAutoBuilder:
         effective_description = description
         if context:
             if description:
-                effective_description = cls._build_effective_description(description, context)
+                effective_description = cls._build_effective_description(
+                    description, context
+                )
                 desc_profile = StyleAnalyzer.analyze_text(effective_description)
                 for dim in STYLE_DIMENSIONS:
                     cur = getattr(profile, dim)
-                    setattr(profile, dim, round(cur * 0.75 + getattr(desc_profile, dim) * 0.25, 2))
+                    setattr(
+                        profile,
+                        dim,
+                        round(cur * 0.75 + getattr(desc_profile, dim) * 0.25, 2),
+                    )
             profile = cls._apply_profile_bias(profile, context)
 
-        prompt, intent_desc = PromptSynthesizer.synthesize(profile, name, effective_description)
+        prompt, intent_desc = PromptSynthesizer.synthesize(
+            profile, name, effective_description
+        )
 
         return SkillDefinition(
             id=_make_skill_id(name),
@@ -974,7 +1062,9 @@ class SkillAutoBuilder:
 
         effective_description = description
         if context and description:
-            effective_description = cls._build_effective_description(description, context)
+            effective_description = cls._build_effective_description(
+                description, context
+            )
 
         # 若传入 description，用于补充分析
         if effective_description:
@@ -987,7 +1077,9 @@ class SkillAutoBuilder:
         if context:
             profile = cls._apply_profile_bias(profile, context)
 
-        prompt, intent_desc = PromptSynthesizer.synthesize(profile, name, effective_description)
+        prompt, intent_desc = PromptSynthesizer.synthesize(
+            profile, name, effective_description
+        )
         return {
             "system_prompt": prompt,
             "intent_description": intent_desc,
@@ -1011,8 +1103,12 @@ class SkillAutoBuilder:
             profile_path = _BASE_DIR / "config" / "user_profile.json"
             if profile_path.exists():
                 profile_data = json.loads(profile_path.read_text(encoding="utf-8"))
-                context["communication_style"] = profile_data.get("communication_style", {}) or {}
-                context["technical_background"] = profile_data.get("technical_background", {}) or {}
+                context["communication_style"] = (
+                    profile_data.get("communication_style", {}) or {}
+                )
+                context["technical_background"] = (
+                    profile_data.get("technical_background", {}) or {}
+                )
                 context["preferences"] = profile_data.get("preferences", {}) or {}
         except Exception as e:
             logger.debug(f"[SkillAutoBuilder] 读取 user_profile 失败: {e}")
@@ -1025,9 +1121,14 @@ class SkillAutoBuilder:
                     pref_items = [
                         str(it.get("content", "")).strip()
                         for it in raw
-                        if str(it.get("category", "")).lower() in (
-                            "preference", "user_preference", "user_profile", "project_info"
-                        ) and str(it.get("content", "")).strip()
+                        if str(it.get("category", "")).lower()
+                        in (
+                            "preference",
+                            "user_preference",
+                            "user_profile",
+                            "project_info",
+                        )
+                        and str(it.get("content", "")).strip()
                     ]
                     context["memory_hints"] = pref_items[:max_memories]
         except Exception as e:
@@ -1036,7 +1137,9 @@ class SkillAutoBuilder:
         return context
 
     @classmethod
-    def _build_effective_description(cls, description: str, context: Dict[str, Any]) -> str:
+    def _build_effective_description(
+        cls, description: str, context: Dict[str, Any]
+    ) -> str:
         """将用户描述与本地偏好上下文拼接，增强风格识别命中率。"""
         extra_parts: List[str] = []
 
@@ -1084,7 +1187,9 @@ class SkillAutoBuilder:
         return description + "\n\n" + "\n".join(extra_parts)
 
     @classmethod
-    def _apply_profile_bias(cls, profile: StyleProfile, context: Dict[str, Any]) -> StyleProfile:
+    def _apply_profile_bias(
+        cls, profile: StyleProfile, context: Dict[str, Any]
+    ) -> StyleProfile:
         """根据 user_profile 对 StyleProfile 做温和偏置，避免覆盖用户显式输入。"""
         comm = context.get("communication_style") or {}
 
@@ -1120,9 +1225,11 @@ class SkillAutoBuilder:
 # 工具函数
 # ══════════════════════════════════════════════════════════════════
 
+
 def _make_skill_id(name: str) -> str:
     """生成 URL 安全的 skill id"""
     import hashlib
+
     slug = re.sub(r"[^\w\u4e00-\u9fff]", "_", name.lower().strip())
     slug = re.sub(r"_+", "_", slug).strip("_")
     return slug or f"skill_{hashlib.md5(name.encode()).hexdigest()[:8]}"
@@ -1139,8 +1246,7 @@ def _normalize_turns(history: List[Dict]) -> List[Dict[str, str]]:
             parts = entry["parts"]
             if isinstance(parts, list):
                 text = " ".join(
-                    p.get("text", p) if isinstance(p, dict) else str(p)
-                    for p in parts
+                    p.get("text", p) if isinstance(p, dict) else str(p) for p in parts
                 )
         if text:
             turns.append({"role": role, "text": str(text)})

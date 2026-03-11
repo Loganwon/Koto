@@ -35,40 +35,43 @@ logger = logging.getLogger(__name__)
 # ── 路径 ─────────────────────────────────────────────────────────────────────
 import sys as _sys
 
+
 def _base_dir() -> Path:
     if getattr(_sys, "frozen", False):
         return Path(_sys.executable).parent
     return Path(__file__).resolve().parents[3]
 
-_BASE          = _base_dir()
-_MEMORY_PATH   = _BASE / "config" / "memory.json"
-_PROFILE_PATH  = _BASE / "config" / "user_profile.json"
+
+_BASE = _base_dir()
+_MEMORY_PATH = _BASE / "config" / "memory.json"
+_PROFILE_PATH = _BASE / "config" / "user_profile.json"
 
 # ── 常量 ─────────────────────────────────────────────────────────────────────
-_MIN_MEMORY_CONFIDENCE = 0.70    # 低于此置信度的记忆不转为训练样本
-_MIN_MEMORY_LEN        = 10     # 过短的记忆跳过
-_MAX_PROBE_SAMPLES     = 60     # 探针样本上限（防止过拟合）
+_MIN_MEMORY_CONFIDENCE = 0.70  # 低于此置信度的记忆不转为训练样本
+_MIN_MEMORY_LEN = 10  # 过短的记忆跳过
+_MAX_PROBE_SAMPLES = 60  # 探针样本上限（防止过拟合）
 
 _ROUTER_SYSTEM = (
     "你是 Koto AI 的任务路由分类器。"
-    "根据用户输入判断任务类型，严格只输出 JSON: {\"task\":\"TYPE\",\"confidence\":0.9}\n"
+    '根据用户输入判断任务类型，严格只输出 JSON: {"task":"TYPE","confidence":0.9}\n'
     "可用类型: CHAT CODER PAINTER FILE_GEN DOC_ANNOTATE RESEARCH WEB_SEARCH FILE_SEARCH SYSTEM AGENT"
 )
 
 # 知识探针：测试模型能否正确回忆用户信息
 _PROBE_QA_TEMPLATES: List[tuple] = [
     # (category, question_template, answer_template)
-    ("user_fact",    "你还记得我的职业或背景吗？",      "根据我们之前的对话，{content}"),
-    ("preference",  "我有什么偏好或习惯是你需要注意的？", "你之前提到过，{content}"),
-    ("decision",    "我们之前达成了什么重要决定？",     "你做出了一个决定：{content}"),
-    ("reminder",    "有什么我请你记住的事情吗？",       "你让我记住：{content}"),
-    ("topic_summary","我们最近讨论过什么重要话题？",    "我们讨论过：{content}"),
+    ("user_fact", "你还记得我的职业或背景吗？", "根据我们之前的对话，{content}"),
+    ("preference", "我有什么偏好或习惯是你需要注意的？", "你之前提到过，{content}"),
+    ("decision", "我们之前达成了什么重要决定？", "你做出了一个决定：{content}"),
+    ("reminder", "有什么我请你记住的事情吗？", "你让我记住：{content}"),
+    ("topic_summary", "我们最近讨论过什么重要话题？", "我们讨论过：{content}"),
 ]
 
 _CATEGORY_TO_TEMPLATE = {t[0]: t for t in _PROBE_QA_TEMPLATES}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class MemoryToTraining:
     """记忆 → 训练样本的转换器（所有方法为 classmethods / staticmethods）。"""
@@ -215,7 +218,7 @@ class MemoryToTraining:
             if used >= _MAX_PROBE_SAMPLES:
                 break
 
-            content  = str(mem.get("content", "")).strip()
+            content = str(mem.get("content", "")).strip()
             category = str(mem.get("category", "user_fact")).strip()
             conf_raw = mem.get("confidence")
             # confidence 可能嵌在 metadata
@@ -226,22 +229,26 @@ class MemoryToTraining:
             if len(content) < _MIN_MEMORY_LEN or confidence < _MIN_MEMORY_CONFIDENCE:
                 continue
 
-            tmpl = _CATEGORY_TO_TEMPLATE.get(category, _CATEGORY_TO_TEMPLATE.get("user_fact"))
+            tmpl = _CATEGORY_TO_TEMPLATE.get(
+                category, _CATEGORY_TO_TEMPLATE.get("user_fact")
+            )
             if tmpl is None:
                 continue
             _, question, answer_tmpl = tmpl
 
             answer = answer_tmpl.format(content=content)
 
-            samples.append({
-                "system":    personalized_sys,
-                "user":      question,
-                "assistant": answer,
-                "task_type": "CHAT",
-                "source":    "memory_probe",
-                "quality":   min(1.0, confidence * 1.05),  # 轻微上浮奖励
-                "metadata":  {"memory_category": category, "confidence": confidence},
-            })
+            samples.append(
+                {
+                    "system": personalized_sys,
+                    "user": question,
+                    "assistant": answer,
+                    "task_type": "CHAT",
+                    "source": "memory_probe",
+                    "quality": min(1.0, confidence * 1.05),  # 轻微上浮奖励
+                    "metadata": {"memory_category": category, "confidence": confidence},
+                }
+            )
             used += 1
 
         return samples
@@ -257,6 +264,7 @@ class MemoryToTraining:
         """
         try:
             from app.core.learning.rating_store import get_rating_store
+
             rs = get_rating_store()
             rows = rs.get_high_quality_samples(min_combined=min_combined)
         except Exception as e:
@@ -272,19 +280,21 @@ class MemoryToTraining:
             if len(ui) < 5 or len(ar) < 15:
                 continue
 
-            samples.append({
-                "system":    personalized_sys,
-                "user":      ui,
-                "assistant": ar,
-                "task_type": str(row.get("task_type", "CHAT")),
-                "source":    "rated_dialogue",
-                "quality":   float(row.get("combined_score", 0.75)),
-                "metadata":  {
-                    "stars":         row.get("stars"),
-                    "model_overall": row.get("model_overall"),
-                    "msg_id":        row.get("msg_id"),
-                },
-            })
+            samples.append(
+                {
+                    "system": personalized_sys,
+                    "user": ui,
+                    "assistant": ar,
+                    "task_type": str(row.get("task_type", "CHAT")),
+                    "source": "rated_dialogue",
+                    "quality": float(row.get("combined_score", 0.75)),
+                    "metadata": {
+                        "stars": row.get("stars"),
+                        "model_overall": row.get("model_overall"),
+                        "msg_id": row.get("msg_id"),
+                    },
+                }
+            )
 
         return samples
 
@@ -296,6 +306,7 @@ class MemoryToTraining:
         system 字段携带了真实用户画像，使本地模型学会「有上下文的回复」。
         """
         import sys
+
         _base = _base_dir()
         shadow_dir = _base / "workspace" / "shadow_traces"
         if not shadow_dir.exists():
@@ -320,22 +331,26 @@ class MemoryToTraining:
                 continue
             try:
                 lines = trace_file.read_text(encoding="utf-8").splitlines()
-                for line in lines[-30:]:   # 最近 30 条
+                for line in lines[-30:]:  # 最近 30 条
                     rec = json.loads(line)
                     ui = str(rec.get("user_input", "")).strip()
                     ar = str(rec.get("ai_response", "")).strip()
                     if len(ui) < 5 or len(ar) < 20:
                         continue
-                    samples.append({
-                        "system":    personalized_sys,
-                        "user":      ui,
-                        "assistant": ar,
-                        "task_type": str(rec.get("task_type", "CHAT")),
-                        "source":    "profile_style",
-                        "quality":   0.82,
-                        "metadata":  {"skill_id": rec.get("skill_id")},
-                    })
+                    samples.append(
+                        {
+                            "system": personalized_sys,
+                            "user": ui,
+                            "assistant": ar,
+                            "task_type": str(rec.get("task_type", "CHAT")),
+                            "source": "profile_style",
+                            "quality": 0.82,
+                            "metadata": {"skill_id": rec.get("skill_id")},
+                        }
+                    )
             except Exception as e:
-                logger.debug(f"[MemToTrain] style trace read failed ({trace_file.name}): {e}")
+                logger.debug(
+                    f"[MemToTrain] style trace read failed ({trace_file.name}): {e}"
+                )
 
         return samples

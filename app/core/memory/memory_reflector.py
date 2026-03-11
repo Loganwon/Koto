@@ -128,18 +128,17 @@ class MemoryReflector:
         for m in memories:
             if not isinstance(m, dict):
                 continue
-            content    = str(m.get("content", "")).strip()
-            category   = str(m.get("category", "user_fact")).strip()
+            content = str(m.get("content", "")).strip()
+            category = str(m.get("category", "user_fact")).strip()
             confidence = float(m.get("confidence", 0.0))
-            if (
-                len(content) >= _MIN_CONTENT_LEN
-                and confidence >= _MIN_CONFIDENCE
-            ):
-                valid.append({
-                    "content":    content,
-                    "category":   category,
-                    "confidence": confidence,
-                })
+            if len(content) >= _MIN_CONTENT_LEN and confidence >= _MIN_CONFIDENCE:
+                valid.append(
+                    {
+                        "content": content,
+                        "category": category,
+                        "confidence": confidence,
+                    }
+                )
         return valid
 
     @staticmethod
@@ -182,11 +181,18 @@ class MemoryReflector:
             if not isinstance(t, dict):
                 continue
             subj = str(t.get("subject", "")).strip()
-            rel  = str(t.get("relation", "")).strip()
-            obj  = str(t.get("object", "")).strip()
+            rel = str(t.get("relation", "")).strip()
+            obj = str(t.get("object", "")).strip()
             conf = float(t.get("confidence", 0.0))
             if subj and rel and obj and conf >= _MIN_TRIPLE_CONFIDENCE:
-                valid.append({"subject": subj, "relation": rel, "object": obj, "confidence": conf})
+                valid.append(
+                    {
+                        "subject": subj,
+                        "relation": rel,
+                        "object": obj,
+                        "confidence": conf,
+                    }
+                )
         return valid
 
     @staticmethod
@@ -216,7 +222,11 @@ class MemoryReflector:
                         category=mem["category"],
                         source="memory_reflector",
                         metadata={
-                            "tags": [f"session:{session_name}", f"task:{task_type}", "auto_reflect"],
+                            "tags": [
+                                f"session:{session_name}",
+                                f"task:{task_type}",
+                                "auto_reflect",
+                            ],
                             "confidence": mem["confidence"],
                         },
                     )
@@ -232,6 +242,7 @@ class MemoryReflector:
         # 3-A: Extract triples for Graph RAG
         try:
             from app.core.services.graph_rag_service import GraphRAGService
+
             triples = MemoryReflector._extract_triples(user_msg, ai_msg, llm_fn)
             if triples:
                 n = GraphRAGService.add_triples_from_llm(
@@ -263,8 +274,12 @@ class MemoryReflector:
         def _worker():
             try:
                 cls._do_reflect(
-                    user_msg, ai_msg, task_type, session_name,
-                    get_memory_fn, llm_fn,
+                    user_msg,
+                    ai_msg,
+                    task_type,
+                    session_name,
+                    get_memory_fn,
+                    llm_fn,
                 )
             except Exception as e:
                 logger.debug(f"[Reflector] background thread error: {e}")

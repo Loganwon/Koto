@@ -44,8 +44,8 @@
 
 from __future__ import annotations
 
-import re
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════
 # 结果类型
 # ══════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class ValidationResult:
@@ -68,7 +69,8 @@ class ValidationResult:
         reasons      : 触发该 action 的原因列表
         skill_id     : 对应的 Skill ID（如果有）
     """
-    action: str          # PASS | WARN | REFORMAT | RETRY | BLOCK
+
+    action: str  # PASS | WARN | REFORMAT | RETRY | BLOCK
     text: str
     original_text: str
     reasons: List[str] = field(default_factory=list)
@@ -123,18 +125,24 @@ _REALTIME_INABILITY_PATTERN = re.compile(
 
 # 截断指示词（出现在文末，说明内容可能被 token limit 截断）
 _TRUNCATION_ENDINGS = [
-    "...", "…", "（未完）", "（待续）", "to be continued",
-    "（下文省略", "（以下略", "\n—",
+    "...",
+    "…",
+    "（未完）",
+    "（待续）",
+    "to be continued",
+    "（下文省略",
+    "（以下略",
+    "\n—",
 ]
 
 # 内部 Prompt 泄露检测词（如果 LLM 把 system prompt 回显了）
 _INTERNAL_LEAK_PATTERNS = [
-    r"<<[^>]{2,30}>>",          # PII 占位符未被还原
+    r"<<[^>]{2,30}>>",  # PII 占位符未被还原
     r"\[SYSTEM\]",
     r"system_instruction",
     r"System Prompt:",
-    r"\[INST\]",                 # llama 格式
-    r"<\|im_start\|>",           # chatml 格式
+    r"\[INST\]",  # llama 格式
+    r"<\|im_start\|>",  # chatml 格式
 ]
 _LEAK_RE = [re.compile(p, re.IGNORECASE) for p in _INTERNAL_LEAK_PATTERNS]
 
@@ -146,6 +154,7 @@ _REPETITION_THRESHOLD = 4
 # 格式化器（REFORMAT 时使用）
 # ══════════════════════════════════════════════════════════════════
 
+
 class _Formatter:
     """本地轻量格式化器，将纯文本转换为要求格式"""
 
@@ -153,8 +162,10 @@ class _Formatter:
     def to_markdown_list(text: str) -> str:
         """将纯文本段落转换为 Markdown 无序列表"""
         lines = [l.strip() for l in text.strip().split("\n") if l.strip()]
-        return "\n".join(f"- {line}" if not line.startswith(("-", "*", "#")) else line
-                         for line in lines)
+        return "\n".join(
+            f"- {line}" if not line.startswith(("-", "*", "#")) else line
+            for line in lines
+        )
 
     @staticmethod
     def to_markdown_table(text: str) -> str:
@@ -187,6 +198,7 @@ class _Formatter:
 # 核心：OutputValidator
 # ══════════════════════════════════════════════════════════════════
 
+
 class OutputValidator:
     """
     静态验收器。所有方法均为类方法，无需实例化。
@@ -210,7 +222,11 @@ class OutputValidator:
         Returns:
             ValidationResult 对象
         """
-        logger.debug("[OutputValidator] validate() text_len=%d skill_id=%s", len(text) if text else 0, skill_id)
+        logger.debug(
+            "[OutputValidator] validate() text_len=%d skill_id=%s",
+            len(text) if text else 0,
+            skill_id,
+        )
 
         if not text or not text.strip():
             logger.debug("[OutputValidator] action=RETRY reason=empty_input")
@@ -239,7 +255,10 @@ class OutputValidator:
 
         # ── 2. 完整性检测：模型拒绝 ────────────────────────────────
         if cls._is_refusal(text):
-            logger.info("[OutputValidator] action=RETRY reason=refusal text_preview=%.50r", text[:50])
+            logger.info(
+                "[OutputValidator] action=RETRY reason=refusal text_preview=%.50r",
+                text[:50],
+            )
             reasons.append("模型拒绝执行请求")
             return ValidationResult(
                 action="RETRY",
@@ -253,7 +272,9 @@ class OutputValidator:
         # 当模型声称无法联网，却给出 Python 代码片段作为"替代"时，触发 RETRY
         if _CODE_SUBSTITUTE_PATTERN.search(text):
             reasons.append("模型以代码片段替代实时数据查询，要求重试并调用 web_search")
-            logger.warning("[OutputValidator] ⚠️ 检测到代码替代实时数据响应，触发 RETRY")
+            logger.warning(
+                "[OutputValidator] ⚠️ 检测到代码替代实时数据响应，触发 RETRY"
+            )
             fix_prompt = (
                 "你的上一条回复提供了 Python 代码来获取数据，但这对用户没有帮助。"
                 "请直接调用 web_search 工具查询实时数据，并将结果以自然语言返回给用户。"
@@ -299,7 +320,10 @@ class OutputValidator:
         # ── 4. 完整性检测：异常重复 ─────────────────────────────────
         repetition_reason = cls._check_repetition(text)
         if repetition_reason:
-            logger.info("[OutputValidator] action=RETRY reason=repetition: %s", repetition_reason)
+            logger.info(
+                "[OutputValidator] action=RETRY reason=repetition: %s",
+                repetition_reason,
+            )
             reasons.append(repetition_reason)
             return ValidationResult(
                 action="RETRY",
@@ -316,7 +340,9 @@ class OutputValidator:
                 action, formatted_text, spec_reason = format_result
                 reasons.append(spec_reason)
                 if action == "REFORMAT":
-                    logger.info(f"[OutputValidator] 🔧 自动格式化 [{skill_id}]: {spec_reason}")
+                    logger.info(
+                        f"[OutputValidator] 🔧 自动格式化 [{skill_id}]: {spec_reason}"
+                    )
                 return ValidationResult(
                     action=action,
                     text=formatted_text,
@@ -366,6 +392,7 @@ class OutputValidator:
             return None
         # 检查最常见行的重复次数
         from collections import Counter
+
         counts = Counter(lines)
         most_common, count = counts.most_common(1)[0]
         if count >= _REPETITION_THRESHOLD:
@@ -373,15 +400,14 @@ class OutputValidator:
         return None
 
     @classmethod
-    def _validate_skill_spec(
-        cls, text: str, skill_id: str
-    ) -> Optional[tuple]:
+    def _validate_skill_spec(cls, text: str, skill_id: str) -> Optional[tuple]:
         """
         使用 SkillManager 中该 Skill 的 OutputSpec 验收，
         返回 (action, text, reason) 或 None（表示通过）
         """
         try:
             from app.core.skills.skill_manager import SkillManager
+
             passed, reason = SkillManager.validate_output(skill_id, text)
             if passed:
                 return None

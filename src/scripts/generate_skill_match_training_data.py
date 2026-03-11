@@ -41,6 +41,7 @@ Options
 --append         追加到现有输出文件（默认覆盖）
 --resume         跳过已在输出文件中出现的 Skill
 """
+
 import argparse
 import json
 import os
@@ -53,35 +54,87 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
+
 # ── 技能元数据（来自 SkillManager） ──────────────────────────────────────────
 def _load_skill_catalog() -> list[dict]:
     """从 SkillManager 加载完整技能目录（包含自定义 Skill）。"""
     try:
         from app.core.skills.skill_manager import SkillManager
+
         SkillManager._ensure_init()
         catalog = []
         for sid, s in SkillManager._registry.items():
             desc = s.get("intent_description") or s.get("description", "")
-            catalog.append({
-                "id": sid,
-                "name": s.get("name", sid),
-                "description": desc,
-                "task_types": s.get("task_types", []),
-                "category": s.get("category", ""),
-            })
+            catalog.append(
+                {
+                    "id": sid,
+                    "name": s.get("name", sid),
+                    "description": desc,
+                    "task_types": s.get("task_types", []),
+                    "category": s.get("category", ""),
+                }
+            )
         return catalog
     except Exception as e:
         print(f"[警告] SkillManager 加载失败，使用内置列表: {e}")
         # 内置备用列表（子集）
         return [
-            {"id": "step_by_step",       "name": "步骤化输出",  "description": "教程/流程类问题", "task_types": [], "category": "behavior"},
-            {"id": "concise_mode",        "name": "精简模式",    "description": "快速查询/简短回答", "task_types": ["CHAT"], "category": "behavior"},
-            {"id": "teaching_mode",       "name": "教学模式",    "description": "通俗讲解复杂概念", "task_types": ["CHAT", "RESEARCH"], "category": "behavior"},
-            {"id": "code_best_practices", "name": "代码最佳实践","description": "写高质量代码", "task_types": ["CODER", "CHAT"], "category": "domain"},
-            {"id": "security_aware",      "name": "安全意识",    "description": "安全/漏洞/加密类", "task_types": ["CODER", "SYSTEM", "CHAT"], "category": "domain"},
-            {"id": "professional_tone",   "name": "专业语气",    "description": "报告/邮件/正式文档", "task_types": ["CHAT", "FILE_GEN", "RESEARCH"], "category": "style"},
-            {"id": "research_depth",      "name": "深度研究",    "description": "系统性深入分析", "task_types": ["CHAT", "RESEARCH"], "category": "domain"},
-            {"id": "task_planner",        "name": "任务规划",    "description": "计划/路线图/任务拆解", "task_types": [], "category": "domain"},
+            {
+                "id": "step_by_step",
+                "name": "步骤化输出",
+                "description": "教程/流程类问题",
+                "task_types": [],
+                "category": "behavior",
+            },
+            {
+                "id": "concise_mode",
+                "name": "精简模式",
+                "description": "快速查询/简短回答",
+                "task_types": ["CHAT"],
+                "category": "behavior",
+            },
+            {
+                "id": "teaching_mode",
+                "name": "教学模式",
+                "description": "通俗讲解复杂概念",
+                "task_types": ["CHAT", "RESEARCH"],
+                "category": "behavior",
+            },
+            {
+                "id": "code_best_practices",
+                "name": "代码最佳实践",
+                "description": "写高质量代码",
+                "task_types": ["CODER", "CHAT"],
+                "category": "domain",
+            },
+            {
+                "id": "security_aware",
+                "name": "安全意识",
+                "description": "安全/漏洞/加密类",
+                "task_types": ["CODER", "SYSTEM", "CHAT"],
+                "category": "domain",
+            },
+            {
+                "id": "professional_tone",
+                "name": "专业语气",
+                "description": "报告/邮件/正式文档",
+                "task_types": ["CHAT", "FILE_GEN", "RESEARCH"],
+                "category": "style",
+            },
+            {
+                "id": "research_depth",
+                "name": "深度研究",
+                "description": "系统性深入分析",
+                "task_types": ["CHAT", "RESEARCH"],
+                "category": "domain",
+            },
+            {
+                "id": "task_planner",
+                "name": "任务规划",
+                "description": "计划/路线图/任务拆解",
+                "task_types": [],
+                "category": "domain",
+            },
         ]
 
 
@@ -120,17 +173,22 @@ def _fix_json_newlines(s: str) -> str:
 
 
 def _call_gemini(api_key: str, prompt: str, model: str = "gemini-2.5-flash") -> str:
-    import urllib.request, urllib.error
+    import urllib.error
+    import urllib.request
+
     url = (
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model}:generateContent?key={api_key}"
     )
-    body = json.dumps({
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.9, "maxOutputTokens": 8192},
-    }).encode("utf-8")
-    req = urllib.request.Request(url, data=body,
-                                  headers={"Content-Type": "application/json"})
+    body = json.dumps(
+        {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.9, "maxOutputTokens": 8192},
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"}
+    )
     with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -139,7 +197,7 @@ def _call_gemini(api_key: str, prompt: str, model: str = "gemini-2.5-flash") -> 
 # ── 提示词构建 ─────────────────────────────────────────────────────────────────
 _CATALOG_SYSTEM = (
     "你是 Koto Skill 匹配引擎。根据任务类型和用户消息，从候选技能列表中选出 "
-    "0-3 个最合适的技能 ID。严格只输出 JSON 数组，如 [\"step_by_step\"] 或 []，"
+    '0-3 个最合适的技能 ID。严格只输出 JSON 数组，如 ["step_by_step"] 或 []，'
     "禁止任何额外文字。"
 )
 
@@ -180,9 +238,12 @@ def _generate_match_samples(
     total = num_positive + num_negative
 
     catalog_for_prompt = json.dumps(
-        [{"id": s["id"], "name": s["name"], "description": s["description"]}
-         for s in catalog],
-        ensure_ascii=False, indent=2
+        [
+            {"id": s["id"], "name": s["name"], "description": s["description"]}
+            for s in catalog
+        ],
+        ensure_ascii=False,
+        indent=2,
     )
 
     prompt = f"""你是训练数据生成器，为 Koto Skill 匹配模型生成训练样本。
@@ -236,29 +297,31 @@ def _generate_match_samples(
         # 构建 catalog text for this task_type
         catalog_text = _build_catalog_text(catalog, task_type)
 
-        samples.append({
-            "messages": [
-                {"role": "system", "content": _CATALOG_SYSTEM},
-                {
-                    "role": "user",
-                    "content": (
-                        f"任务类型: {task_type}\n"
-                        f"用户消息: {user_input}\n\n"
-                        f"候选技能列表:\n{catalog_text}"
-                    ),
+        samples.append(
+            {
+                "messages": [
+                    {"role": "system", "content": _CATALOG_SYSTEM},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"任务类型: {task_type}\n"
+                            f"用户消息: {user_input}\n\n"
+                            f"候选技能列表:\n{catalog_text}"
+                        ),
+                    },
+                    {
+                        "role": "assistant",
+                        "content": json.dumps(expected, ensure_ascii=False),
+                    },
+                ],
+                # 元数据（不进入训练，仅供检查）
+                "_meta": {
+                    "skill_id": skill_id,
+                    "task_type": task_type,
+                    "is_positive": skill_id in expected,
                 },
-                {
-                    "role": "assistant",
-                    "content": json.dumps(expected, ensure_ascii=False),
-                },
-            ],
-            # 元数据（不进入训练，仅供检查）
-            "_meta": {
-                "skill_id": skill_id,
-                "task_type": task_type,
-                "is_positive": skill_id in expected,
-            },
-        })
+            }
+        )
 
     return samples
 
@@ -266,9 +329,13 @@ def _generate_match_samples(
 # ── 主程序 ────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="生成 Skill 匹配训练数据")
-    parser.add_argument("--output", default="config/training_data/skill_match_samples.jsonl")
-    parser.add_argument("--pairs", type=int, default=10, help="每个 Skill 生成几条正样本")
-    parser.add_argument("--neg",   type=int, default=3,  help="每个 Skill 生成几条负样本")
+    parser.add_argument(
+        "--output", default="config/training_data/skill_match_samples.jsonl"
+    )
+    parser.add_argument(
+        "--pairs", type=int, default=10, help="每个 Skill 生成几条正样本"
+    )
+    parser.add_argument("--neg", type=int, default=3, help="每个 Skill 生成几条负样本")
     parser.add_argument("--skills", nargs="+", help="仅为指定 Skill ID 生成")
     parser.add_argument("--append", action="store_true", help="追加到现有文件")
     parser.add_argument("--resume", action="store_true", help="跳过已生成的 Skill")
@@ -312,7 +379,9 @@ def main():
     if args.resume:
         target_skills = [s for s in target_skills if s["id"] not in already_done]
 
-    print(f"🎯 待生成: {len(target_skills)} 个 Skill × {args.pairs} 正样本 + {args.neg} 负样本")
+    print(
+        f"🎯 待生成: {len(target_skills)} 个 Skill × {args.pairs} 正样本 + {args.neg} 负样本"
+    )
 
     mode = "a" if args.append or args.resume else "w"
     total_written = 0
@@ -321,10 +390,16 @@ def main():
     with open(output_path, mode, encoding="utf-8") as f:
         for i, skill in enumerate(target_skills, 1):
             skill_id = skill["id"]
-            print(f"\n[{i}/{len(target_skills)}] 生成 {skill_id} ({skill['name']})...", end="", flush=True)
+            print(
+                f"\n[{i}/{len(target_skills)}] 生成 {skill_id} ({skill['name']})...",
+                end="",
+                flush=True,
+            )
             try:
                 samples = _generate_match_samples(
-                    api_key, skill, catalog,
+                    api_key,
+                    skill,
+                    catalog,
                     num_positive=args.pairs,
                     num_negative=args.neg,
                 )

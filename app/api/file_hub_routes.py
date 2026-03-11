@@ -49,6 +49,7 @@ FileHub REST API — /api/files
   GET  /api/files/op-log          操作日志
   POST /api/files/undo            撤销上一次操作
 """
+
 from __future__ import annotations
 
 import logging
@@ -65,6 +66,7 @@ file_hub_bp = Blueprint("file_hub", __name__)
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
 
+
 @file_hub_bp.route("/pick-folder", methods=["GET"])
 def pick_folder():
     """弹出系统原生「选择文件夹」对话框，返回所选路径。
@@ -77,6 +79,7 @@ def pick_folder():
         try:
             import tkinter as tk
             from tkinter import filedialog
+
             root = tk.Tk()
             root.withdraw()
             root.attributes("-topmost", True)
@@ -97,17 +100,21 @@ def pick_folder():
         return jsonify({"ok": False, "cancelled": True})
     return jsonify({"ok": True, "path": result["path"]})
 
+
 def _reg():
     from app.core.file.file_registry import get_file_registry
+
     return get_file_registry()
 
 
 def _watcher():
     from app.core.file.file_watcher import get_file_watcher
+
     return get_file_watcher()
 
 
 # ── 端点 ─────────────────────────────────────────────────────────────────────
+
 
 @file_hub_bp.route("/search", methods=["GET"])
 def search_files():
@@ -123,18 +130,22 @@ def search_files():
     if not q and not category:
         # 无条件时返回最近文件
         entries = _reg().list_recent(days=30, limit=limit)
-        return jsonify({
-            "query": "",
-            "total": len(entries),
-            "results": [e.to_dict(include_preview=False) for e in entries],
-        })
+        return jsonify(
+            {
+                "query": "",
+                "total": len(entries),
+                "results": [e.to_dict(include_preview=False) for e in entries],
+            }
+        )
 
     entries = _reg().search(q or "", category=category, limit=limit)
-    return jsonify({
-        "query": q,
-        "total": len(entries),
-        "results": [e.to_dict(include_preview=False) for e in entries],
-    })
+    return jsonify(
+        {
+            "query": q,
+            "total": len(entries),
+            "results": [e.to_dict(include_preview=False) for e in entries],
+        }
+    )
 
 
 @file_hub_bp.route("/register", methods=["POST"])
@@ -172,6 +183,7 @@ def file_stats():
 
     # 补充 source 分布
     import sqlite3
+
     conn = _reg()._conn
     source_rows = conn.execute(
         "SELECT source, COUNT(*) as cnt FROM koto_file_registry GROUP BY source"
@@ -192,24 +204,27 @@ def recent_files():
     limit = min(max(1, int(request.args.get("limit", 20))), 100)
 
     entries = _reg().list_recent(days=days, category=category, limit=limit)
-    return jsonify({
-        "days": days,
-        "total": len(entries),
-        "files": [e.to_dict() for e in entries],
-    })
+    return jsonify(
+        {
+            "days": days,
+            "total": len(entries),
+            "files": [e.to_dict() for e in entries],
+        }
+    )
 
 
 @file_hub_bp.route("/duplicates", methods=["GET"])
 def duplicate_files():
     """返回内容相同（hash 相同）的文件组。"""
     groups = _reg().get_duplicates()
-    return jsonify({
-        "total_groups": len(groups),
-        "groups": [
-            [e.to_dict(include_preview=False) for e in grp]
-            for grp in groups
-        ],
-    })
+    return jsonify(
+        {
+            "total_groups": len(groups),
+            "groups": [
+                [e.to_dict(include_preview=False) for e in grp] for grp in groups
+            ],
+        }
+    )
 
 
 @file_hub_bp.route("/scan-dir", methods=["POST"])
@@ -228,11 +243,13 @@ def scan_directory():
         return jsonify({"error": f"目录不存在: {directory}"}), 404
 
     count = _watcher().scan_once(directory)
-    return jsonify({
-        "status": "ok",
-        "directory": directory,
-        "registered": count,
-    })
+    return jsonify(
+        {
+            "status": "ok",
+            "directory": directory,
+            "registered": count,
+        }
+    )
 
 
 @file_hub_bp.route("/<file_id>", methods=["GET"])
@@ -259,8 +276,10 @@ def remove_file(file_id: str):
 
 # ── 文件操作端点 ──────────────────────────────────────────────────────────────
 
+
 def _tools():
     from app.core.file.file_tools import FileToolsPlugin
+
     return FileToolsPlugin()
 
 
@@ -277,7 +296,9 @@ def rename_file():
         return jsonify({"error": "缺少 path 或 new_name 字段"}), 400
     result = _tools().rename_file(path, new_name)
     ok = result.startswith("✅")
-    return jsonify({"status": "ok" if ok else "error", "message": result}), 200 if ok else 400
+    return jsonify({"status": "ok" if ok else "error", "message": result}), (
+        200 if ok else 400
+    )
 
 
 @file_hub_bp.route("/move", methods=["POST"])
@@ -293,7 +314,9 @@ def move_file():
         return jsonify({"error": "缺少 source_path 或 dest_dir 字段"}), 400
     result = _tools().move_file(source_path, dest_dir, data.get("new_name") or "")
     ok = result.startswith("✅")
-    return jsonify({"status": "ok" if ok else "error", "message": result}), 200 if ok else 400
+    return jsonify({"status": "ok" if ok else "error", "message": result}), (
+        200 if ok else 400
+    )
 
 
 @file_hub_bp.route("/copy", methods=["POST"])
@@ -309,7 +332,9 @@ def copy_file():
         return jsonify({"error": "缺少 source_path 或 dest_dir 字段"}), 400
     result = _tools().copy_file(source_path, dest_dir, data.get("new_name") or "")
     ok = result.startswith("✅")
-    return jsonify({"status": "ok" if ok else "error", "message": result}), 200 if ok else 400
+    return jsonify({"status": "ok" if ok else "error", "message": result}), (
+        200 if ok else 400
+    )
 
 
 @file_hub_bp.route("/open", methods=["POST"])
@@ -318,7 +343,10 @@ def open_file():
     用系统默认程序打开文件或文件夹。
     Body JSON: { "path": "绝对路径" }
     """
-    import os, subprocess, sys
+    import os
+    import subprocess
+    import sys
+
     data = request.get_json(silent=True) or {}
     path = (data.get("path") or "").strip()
     if not path:
@@ -350,7 +378,9 @@ def delete_file_disk():
     use_trash = bool(data.get("use_trash", True))
     result = _tools().delete_file(path, use_trash=use_trash)
     ok = result.startswith("✅")
-    return jsonify({"status": "ok" if ok else "error", "message": result}), 200 if ok else 400
+    return jsonify({"status": "ok" if ok else "error", "message": result}), (
+        200 if ok else 400
+    )
 
 
 @file_hub_bp.route("/compress", methods=["POST"])
@@ -366,7 +396,9 @@ def compress_files():
         return jsonify({"error": "缺少 sources 或 output_path 字段"}), 400
     result = _tools().compress_files(sources, output_path)
     ok = result.startswith("✅")
-    return jsonify({"status": "ok" if ok else "error", "message": result}), 200 if ok else 400
+    return jsonify({"status": "ok" if ok else "error", "message": result}), (
+        200 if ok else 400
+    )
 
 
 @file_hub_bp.route("/extract", methods=["POST"])
@@ -381,10 +413,13 @@ def extract_archive():
         return jsonify({"error": "缺少 archive_path 字段"}), 400
     result = _tools().extract_archive(archive_path, data.get("dest_dir") or "")
     ok = result.startswith("✅")
-    return jsonify({"status": "ok" if ok else "error", "message": result}), 200 if ok else 400
+    return jsonify({"status": "ok" if ok else "error", "message": result}), (
+        200 if ok else 400
+    )
 
 
 # ── 直接浏览目录（返回结构化文件列表，无需注册） ─────────────────────────────
+
 
 @file_hub_bp.route("/browse", methods=["GET"])
 def browse_directory():
@@ -396,8 +431,8 @@ def browse_directory():
       q         = 文件名关键词过滤（可选）
       limit     = 最多返回条数（默认 200，最大 1000）
     """
-    import os
     import mimetypes
+    import os
 
     path = (request.args.get("path") or "").strip()
     if not path:
@@ -415,21 +450,61 @@ def browse_directory():
 
     # 分类规则
     _EXT_MAP = {
-        ".pdf": "文档", ".doc": "文档", ".docx": "文档", ".txt": "文档",
-        ".md": "文档", ".xls": "文档", ".xlsx": "文档", ".ppt": "文档",
-        ".pptx": "文档", ".odt": "文档", ".rtf": "文档", ".csv": "文档",
-        ".jpg": "图片", ".jpeg": "图片", ".png": "图片", ".gif": "图片",
-        ".bmp": "图片", ".svg": "图片", ".webp": "图片", ".ico": "图片",
-        ".mp4": "视频", ".avi": "视频", ".mov": "视频", ".mkv": "视频",
-        ".wmv": "视频", ".flv": "视频", ".webm": "视频",
-        ".mp3": "音频", ".wav": "音频", ".flac": "音频", ".aac": "音频",
-        ".ogg": "音频", ".m4a": "音频",
-        ".py": "代码", ".js": "代码", ".ts": "代码", ".java": "代码",
-        ".c": "代码", ".cpp": "代码", ".cs": "代码", ".go": "代码",
-        ".rs": "代码", ".html": "代码", ".css": "代码", ".json": "代码",
-        ".xml": "代码", ".sh": "代码", ".bat": "代码", ".ps1": "代码",
-        ".zip": "压缩包", ".rar": "压缩包", ".7z": "压缩包", ".tar": "压缩包",
-        ".gz": "压缩包", ".bz2": "压缩包",
+        ".pdf": "文档",
+        ".doc": "文档",
+        ".docx": "文档",
+        ".txt": "文档",
+        ".md": "文档",
+        ".xls": "文档",
+        ".xlsx": "文档",
+        ".ppt": "文档",
+        ".pptx": "文档",
+        ".odt": "文档",
+        ".rtf": "文档",
+        ".csv": "文档",
+        ".jpg": "图片",
+        ".jpeg": "图片",
+        ".png": "图片",
+        ".gif": "图片",
+        ".bmp": "图片",
+        ".svg": "图片",
+        ".webp": "图片",
+        ".ico": "图片",
+        ".mp4": "视频",
+        ".avi": "视频",
+        ".mov": "视频",
+        ".mkv": "视频",
+        ".wmv": "视频",
+        ".flv": "视频",
+        ".webm": "视频",
+        ".mp3": "音频",
+        ".wav": "音频",
+        ".flac": "音频",
+        ".aac": "音频",
+        ".ogg": "音频",
+        ".m4a": "音频",
+        ".py": "代码",
+        ".js": "代码",
+        ".ts": "代码",
+        ".java": "代码",
+        ".c": "代码",
+        ".cpp": "代码",
+        ".cs": "代码",
+        ".go": "代码",
+        ".rs": "代码",
+        ".html": "代码",
+        ".css": "代码",
+        ".json": "代码",
+        ".xml": "代码",
+        ".sh": "代码",
+        ".bat": "代码",
+        ".ps1": "代码",
+        ".zip": "压缩包",
+        ".rar": "压缩包",
+        ".7z": "压缩包",
+        ".tar": "压缩包",
+        ".gz": "压缩包",
+        ".bz2": "压缩包",
     }
 
     files = []
@@ -438,7 +513,13 @@ def browse_directory():
             walker = os.walk(p)
         else:
             # Non-recursive: just list direct children
-            walker = [(str(p), [d.name for d in p.iterdir() if d.is_dir()], [f.name for f in p.iterdir() if f.is_file()])]
+            walker = [
+                (
+                    str(p),
+                    [d.name for d in p.iterdir() if d.is_dir()],
+                    [f.name for f in p.iterdir() if f.is_file()],
+                )
+            ]
 
         for dirpath, _dirs, filenames in walker:
             for fname in filenames:
@@ -449,13 +530,15 @@ def browse_directory():
                     stat = fpath.stat()
                     ext = fpath.suffix.lower()
                     cat = _EXT_MAP.get(ext, "其他")
-                    files.append({
-                        "name": fname,
-                        "path": str(fpath),
-                        "category": cat,
-                        "size_bytes": stat.st_size,
-                        "mtime": stat.st_mtime,
-                    })
+                    files.append(
+                        {
+                            "name": fname,
+                            "path": str(fpath),
+                            "category": cat,
+                            "size_bytes": stat.st_size,
+                            "mtime": stat.st_mtime,
+                        }
+                    )
                 except OSError:
                     continue
                 if len(files) >= limit:
@@ -468,16 +551,19 @@ def browse_directory():
     # Sort by mtime desc
     files.sort(key=lambda f: f["mtime"], reverse=True)
 
-    return jsonify({
-        "ok": True,
-        "path": path,
-        "recursive": recursive,
-        "total": len(files),
-        "files": files,
-    })
+    return jsonify(
+        {
+            "ok": True,
+            "path": path,
+            "recursive": recursive,
+            "total": len(files),
+            "files": files,
+        }
+    )
 
 
 # ── 目录 / 磁盘端点 ───────────────────────────────────────────────────────────
+
 
 @file_hub_bp.route("/list-dir", methods=["GET"])
 def list_directory():
@@ -491,7 +577,9 @@ def list_directory():
     show_hidden = request.args.get("show_hidden", "false").lower() == "true"
     filter_ext = request.args.get("filter_ext") or ""
     sort_by = request.args.get("sort_by") or "name"
-    result = _tools().list_directory(path, show_hidden=show_hidden, filter_ext=filter_ext, sort_by=sort_by)
+    result = _tools().list_directory(
+        path, show_hidden=show_hidden, filter_ext=filter_ext, sort_by=sort_by
+    )
     return jsonify({"path": path, "result": result})
 
 
@@ -549,6 +637,7 @@ def old_files():
 
 
 # ── 批量操作端点 ──────────────────────────────────────────────────────────────
+
 
 @file_hub_bp.route("/batch-rename", methods=["POST"])
 def batch_rename():
@@ -610,6 +699,7 @@ def cleanup_duplicates():
 
 
 # ── 标签端点 ──────────────────────────────────────────────────────────────────
+
 
 @file_hub_bp.route("/tags", methods=["GET"])
 def list_all_tags():
@@ -675,6 +765,7 @@ def remove_file_tag(file_id: str, tag: str):
 
 # ── 收藏端点 ──────────────────────────────────────────────────────────────────
 
+
 @file_hub_bp.route("/favorites", methods=["GET"])
 def list_favorites():
     """列出所有收藏的文件路径。"""
@@ -721,6 +812,7 @@ def remove_favorite():
 
 # ── 智能 / 日志端点 ───────────────────────────────────────────────────────────
 
+
 @file_hub_bp.route("/summarize", methods=["POST"])
 def summarize_file():
     """
@@ -753,4 +845,3 @@ def undo_last_op():
     result = _tools().undo_last_op()
     ok = result.startswith("✅")
     return jsonify({"status": "ok" if ok else "info", "message": result})
-

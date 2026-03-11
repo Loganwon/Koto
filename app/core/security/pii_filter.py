@@ -46,8 +46,8 @@
 
 from __future__ import annotations
 
-import re
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -58,18 +58,20 @@ logger = logging.getLogger(__name__)
 # 配置
 # ══════════════════════════════════════════════════════════════════
 
+
 @dataclass
 class PIIConfig:
     """PII 检测器开关，所有选项默认开启"""
-    mask_phone: bool = True          # 中国大陆手机号
-    mask_landline: bool = True       # 固定电话
-    mask_id_card: bool = True        # 身份证号
-    mask_bank_card: bool = True      # 银行卡号
-    mask_email: bool = True          # 电子邮箱
-    mask_ip: bool = False            # IPv4（技术场景可能需要，默认关闭）
-    mask_name: bool = True           # 中文姓名（启发式，前接称谓词）
-    mask_address: bool = True        # 家庭住址模式
-    mask_passport: bool = True       # 护照/港澳证件号
+
+    mask_phone: bool = True  # 中国大陆手机号
+    mask_landline: bool = True  # 固定电话
+    mask_id_card: bool = True  # 身份证号
+    mask_bank_card: bool = True  # 银行卡号
+    mask_email: bool = True  # 电子邮箱
+    mask_ip: bool = False  # IPv4（技术场景可能需要，默认关闭）
+    mask_name: bool = True  # 中文姓名（启发式，前接称谓词）
+    mask_address: bool = True  # 家庭住址模式
+    mask_passport: bool = True  # 护照/港澳证件号
     # 用户自定义敏感词（精确词组，不是正则）
     custom_keywords: List[str] = field(default_factory=list)
     # 是否在日志中输出 mask 统计（不输出原始内容）
@@ -85,46 +87,48 @@ _RULES: List[Tuple[str, str, int]] = [
     # ─── 手机号 ───────────────────────────────────────────────────
     # 匹配：1[3-9] + 9位，前后为非数字边界
     ("手机号", r"(?<!\d)1[3-9]\d{9}(?!\d)", 0),
-
     # ─── 固定电话 ─────────────────────────────────────────────────
     # 0xx-xxxxxxxx 或 (0xx)xxxxxxxx
     ("固话", r"(?<!\d)0\d{2,3}[-\s]?\d{7,8}(?!\d)", 0),
-
     # ─── 身份证 ───────────────────────────────────────────────────
     # 18位：前17位数字 + 最后一位数字或X
-    ("身份证", r"(?<!\d)[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?!\d)", 0),
-
+    (
+        "身份证",
+        r"(?<!\d)[1-9]\d{5}(?:18|19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[\dXx](?!\d)",
+        0,
+    ),
     # ─── 银行卡 ───────────────────────────────────────────────────
     # 16-19位连续数字（非身份证覆盖区域）
     ("银行卡", r"(?<!\d)\d{16,19}(?!\d)", 0),
-
     # ─── 电子邮箱 ─────────────────────────────────────────────────
     ("邮箱", r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", 0),
-
     # ─── IPv4 地址 ────────────────────────────────────────────────
-    ("IP地址",
-     r"(?<!\d)(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)(?!\d)",
-     0),
-
+    (
+        "IP地址",
+        r"(?<!\d)(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)(?!\d)",
+        0,
+    ),
     # ─── 中文姓名 ─────────────────────────────────────────────────
     # 启发式：称谓词 + 2-4个中文字符
     # 称谓词: 叫/是/给/向/找/告诉/通知/联系/发给/转发给/cc/抄送
-    ("姓名",
-     r"(?:叫|是|给|向|找|告诉|通知|联系|发给|转发给|抄送|cc)[：:：\s]*"
-     r"([\u4e00-\u9fa5]{2,4})(?=[，。！？\s「」【】]|$)",
-     re.UNICODE),
-
+    (
+        "姓名",
+        r"(?:叫|是|给|向|找|告诉|通知|联系|发给|转发给|抄送|cc)[：:：\s]*"
+        r"([\u4e00-\u9fa5]{2,4})(?=[，。！？\s「」【】]|$)",
+        re.UNICODE,
+    ),
     # ─── 家庭住址 ─────────────────────────────────────────────────
     # 省/市/区/街道/路/号/楼 组合模式，至少包含2个地址单元
-    ("地址",
-     r"[\u4e00-\u9fa5]{2,6}(?:省|自治区)"
-     r"[\u4e00-\u9fa5]{2,8}(?:市|地区|自治州)"
-     r"[\u4e00-\u9fa5]{0,8}(?:区|县|旗)"
-     r"[\u4e00-\u9fa5]{0,20}(?:街道|镇|乡)"
-     r"[\u4e00-\u9fa5]{0,20}(?:路|街|大道|大街|巷|弄)"
-     r"\d{0,6}号?[\u4e00-\u9fa5]{0,10}",
-     re.UNICODE),
-
+    (
+        "地址",
+        r"[\u4e00-\u9fa5]{2,6}(?:省|自治区)"
+        r"[\u4e00-\u9fa5]{2,8}(?:市|地区|自治州)"
+        r"[\u4e00-\u9fa5]{0,8}(?:区|县|旗)"
+        r"[\u4e00-\u9fa5]{0,20}(?:街道|镇|乡)"
+        r"[\u4e00-\u9fa5]{0,20}(?:路|街|大道|大街|巷|弄)"
+        r"\d{0,6}号?[\u4e00-\u9fa5]{0,10}",
+        re.UNICODE,
+    ),
     # ─── 护照/港澳证件 ────────────────────────────────────────────
     # 护照: E + 8位字母数字  |  港澳通行证: H/M + 10位
     ("证件号", r"[EeHhMm][a-zA-Z0-9]{7,9}", 0),
@@ -133,13 +137,13 @@ _RULES: List[Tuple[str, str, int]] = [
 # 构建 config 开关映射: label → 配置字段名
 _LABEL_TO_CONFIG: Dict[str, str] = {
     "手机号": "mask_phone",
-    "固话":   "mask_landline",
+    "固话": "mask_landline",
     "身份证": "mask_id_card",
     "银行卡": "mask_bank_card",
-    "邮箱":   "mask_email",
+    "邮箱": "mask_email",
     "IP地址": "mask_ip",
-    "姓名":   "mask_name",
-    "地址":   "mask_address",
+    "姓名": "mask_name",
+    "地址": "mask_address",
     "证件号": "mask_passport",
 }
 
@@ -147,6 +151,7 @@ _LABEL_TO_CONFIG: Dict[str, str] = {
 # ══════════════════════════════════════════════════════════════════
 # 结果类型
 # ══════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class MaskResult:
@@ -160,6 +165,7 @@ class MaskResult:
         stats       : {label: 触发次数}
         has_pii     : 是否检测到任何 PII
     """
+
     masked_text: str
     original_text: str
     mask_map: Dict[str, str]
@@ -173,7 +179,9 @@ class MaskResult:
         """将 mask 占位符替换回原始值"""
         result = text
         # 按占位符长度降序替换，避免子串歧义
-        for placeholder, original in sorted(self.mask_map.items(), key=lambda x: -len(x[0])):
+        for placeholder, original in sorted(
+            self.mask_map.items(), key=lambda x: -len(x[0])
+        ):
             result = result.replace(placeholder, original)
         return result
 
@@ -181,6 +189,7 @@ class MaskResult:
 # ══════════════════════════════════════════════════════════════════
 # 核心：PIIFilter
 # ══════════════════════════════════════════════════════════════════
+
 
 class PIIFilter:
     """
@@ -195,8 +204,7 @@ class PIIFilter:
     def _get_compiled(cls) -> List[Tuple[str, re.Pattern]]:
         if cls._compiled is None:
             cls._compiled = [
-                (label, re.compile(pattern, flags))
-                for label, pattern, flags in _RULES
+                (label, re.compile(pattern, flags)) for label, pattern, flags in _RULES
             ]
         return cls._compiled
 
@@ -297,4 +305,5 @@ class PIIFilter:
         """返回添加了自定义关键词的新 config（不可变操作）"""
         new_keywords = list(config.custom_keywords) + [keyword]
         from dataclasses import replace as dc_replace
+
         return dc_replace(config, custom_keywords=new_keywords)

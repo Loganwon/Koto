@@ -37,6 +37,7 @@ try:
     )
     from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
     from langchain_core.tools import BaseTool
+
     _LANGCHAIN_AVAILABLE = True
 except ImportError:
     _LANGCHAIN_AVAILABLE = False
@@ -55,7 +56,10 @@ def _assert_langchain():
 # Message conversion helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _lc_messages_to_koto(messages: List["BaseMessage"]) -> tuple[List[Dict], Optional[str]]:
+
+def _lc_messages_to_koto(
+    messages: List["BaseMessage"],
+) -> tuple[List[Dict], Optional[str]]:
     """
     将 LangChain BaseMessage 列表转换为 Koto history 格式。
     返回: (history_list, system_instruction)
@@ -72,11 +76,13 @@ def _lc_messages_to_koto(messages: List["BaseMessage"]) -> tuple[List[Dict], Opt
             history.append({"role": "model", "content": msg.content})
         elif isinstance(msg, ToolMessage):
             # 工具返回结果作为 function_response
-            history.append({
-                "role": "tool",
-                "tool_call_id": msg.tool_call_id,
-                "content": msg.content,
-            })
+            history.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": msg.tool_call_id,
+                    "content": msg.content,
+                }
+            )
         else:
             # 其他消息类型降级处理
             history.append({"role": "user", "content": str(msg.content)})
@@ -88,12 +94,18 @@ def _koto_tools_to_lc(lc_tools: Sequence["BaseTool"]) -> List[Dict]:
     """将 LangChain BaseTool 列表转换为 Koto ToolRegistry 格式所期望的 JSON schema。"""
     defs = []
     for tool in lc_tools:
-        schema = tool.args_schema.schema() if tool.args_schema else {"type": "object", "properties": {}}
-        defs.append({
-            "name": tool.name,
-            "description": tool.description,
-            "parameters": schema,
-        })
+        schema = (
+            tool.args_schema.schema()
+            if tool.args_schema
+            else {"type": "object", "properties": {}}
+        )
+        defs.append(
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": schema,
+            }
+        )
     return defs
 
 
@@ -102,6 +114,7 @@ def _koto_tools_to_lc(lc_tools: Sequence["BaseTool"]) -> List[Dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 if _LANGCHAIN_AVAILABLE:
+
     class KotoLangChainLLM(BaseChatModel):
         """
         LangChain-compatible ChatModel backed by Koto's GeminiProvider.
@@ -126,13 +139,23 @@ if _LANGCHAIN_AVAILABLE:
         class Config:
             arbitrary_types_allowed = True
 
-        def __init__(self, model_id: str = "gemini-2.5-flash-preview-05-20",
-                     temperature: float = 0.7, max_tokens: int = 8192, **kwargs):
+        def __init__(
+            self,
+            model_id: str = "gemini-2.5-flash-preview-05-20",
+            temperature: float = 0.7,
+            max_tokens: int = 8192,
+            **kwargs,
+        ):
             _assert_langchain()
-            super().__init__(model_id=model_id, temperature=temperature,
-                             max_tokens=max_tokens, **kwargs)
+            super().__init__(
+                model_id=model_id,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **kwargs,
+            )
             # 延迟初始化 GeminiProvider
             from app.core.llm.gemini import GeminiProvider
+
             object.__setattr__(self, "_koto_provider", GeminiProvider())
 
         @property
@@ -234,15 +257,17 @@ if _LANGCHAIN_AVAILABLE:
                 if isinstance(t, dict):
                     raw_tools.append(t)
                 else:
-                    raw_tools.append({
-                        "name": t.name,
-                        "description": t.description,
-                        "parameters": (
-                            t.args_schema.schema()
-                            if t.args_schema
-                            else {"type": "object", "properties": {}}
-                        ),
-                    })
+                    raw_tools.append(
+                        {
+                            "name": t.name,
+                            "description": t.description,
+                            "parameters": (
+                                t.args_schema.schema()
+                                if t.args_schema
+                                else {"type": "object", "properties": {}}
+                            ),
+                        }
+                    )
             return self.bind(tools=raw_tools, **kwargs)
 
 else:

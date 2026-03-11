@@ -40,12 +40,21 @@ logger = logging.getLogger(__name__)
 
 # ── 可选依赖 ─────────────────────────────────────────────────────────────────
 try:
-    from langgraph.graph import StateGraph, END
-    from langgraph.types import Send  # v1.x: Send moved from langgraph.graph to langgraph.types
-    from langgraph.checkpoint.memory import MemorySaver
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
-    from typing_extensions import TypedDict, Annotated
     import operator
+
+    from langchain_core.messages import (
+        AIMessage,
+        BaseMessage,
+        HumanMessage,
+        SystemMessage,
+    )
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.graph import END, StateGraph
+    from langgraph.types import (  # v1.x: Send moved from langgraph.graph to langgraph.types
+        Send,
+    )
+    from typing_extensions import Annotated, TypedDict
+
     _LG_AVAILABLE = True
 except ImportError:
     _LG_AVAILABLE = False
@@ -64,12 +73,13 @@ def _assert_langgraph():
 # ─────────────────────────────────────────────────────────────────────────────
 
 if _LG_AVAILABLE:
+
     class WorkflowState(TypedDict):
         # 用户输入与上下文
         user_input: str
         workflow: str
         session_id: str
-        registry: Any             # ToolRegistry（不持久化，runtime 注入）
+        registry: Any  # ToolRegistry（不持久化，runtime 注入）
         model_id: str
 
         # 中间产物
@@ -94,8 +104,10 @@ if _LG_AVAILABLE:
 # Shared node factory
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _get_llm(model_id: str = "gemini-2.5-flash-preview-05-20"):
     from app.core.llm.langchain_adapter import KotoLangChainLLM
+
     return KotoLangChainLLM(model_id=model_id)
 
 
@@ -121,6 +133,7 @@ def _llm_call(
 # ─────────────────────────────────────────────────────────────────────────────
 # Workflow: research_and_document
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _build_research_document_graph(checkpointer=None):
     """研究 → 生成文档 工作流。"""
@@ -195,10 +208,13 @@ def _build_research_document_graph(checkpointer=None):
         registry = state.get("registry")
         if registry:
             try:
-                result = registry.execute("generate_word_doc", {
-                    "title": state["user_input"][:50],
-                    "content": final_content,
-                })
+                result = registry.execute(
+                    "generate_word_doc",
+                    {
+                        "title": state["user_input"][:50],
+                        "content": final_content,
+                    },
+                )
                 if isinstance(result, dict):
                     file_path = result.get("file_path")
                 elif isinstance(result, str):
@@ -230,6 +246,7 @@ def _build_research_document_graph(checkpointer=None):
 # ─────────────────────────────────────────────────────────────────────────────
 # Workflow: multi_agent_ppt (Researcher → Writer → Critic → Revise)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _build_multi_agent_ppt_graph(checkpointer=None):
     """
@@ -287,17 +304,22 @@ def _build_multi_agent_ppt_graph(checkpointer=None):
                 "用 [DECISION: PASS] 或 [DECISION: REVISE] 标记决策。"
             ),
             user=(
-                f"主题：{state['user_input']}\n\n"
-                f"PPT 草稿：{state['draft_content']}"
+                f"主题：{state['user_input']}\n\n" f"PPT 草稿：{state['draft_content']}"
             ),
         )
         revision_needed = "DECISION: REVISE" in feedback.upper()
-        logger.info(f"[WorkflowEngine][multi_agent_ppt] Critic 决策: {'REVISE' if revision_needed else 'PASS'}")
+        logger.info(
+            f"[WorkflowEngine][multi_agent_ppt] Critic 决策: {'REVISE' if revision_needed else 'PASS'}"
+        )
         return {
             "critic_feedback": feedback,
             "revision_needed": revision_needed,
             "steps": state.get("steps", []) + ["critic"],
-            "messages": [AIMessage(content=f"[Critic] {'需要修改' if revision_needed else '内容通过'}")],
+            "messages": [
+                AIMessage(
+                    content=f"[Critic] {'需要修改' if revision_needed else '内容通过'}"
+                )
+            ],
         }
 
     def node_revise(state: "WorkflowState") -> Dict:
@@ -330,10 +352,13 @@ def _build_multi_agent_ppt_graph(checkpointer=None):
 
         if registry:
             try:
-                result = registry.execute("generate_ppt", {
-                    "title": state["user_input"][:50],
-                    "content_json": content,
-                })
+                result = registry.execute(
+                    "generate_ppt",
+                    {
+                        "title": state["user_input"][:50],
+                        "content_json": content,
+                    },
+                )
                 if isinstance(result, dict):
                     file_path = result.get("file_path")
                 elif isinstance(result, str):
@@ -399,12 +424,14 @@ class WorkflowEngine:
         "multi_agent_ppt": _build_multi_agent_ppt_graph,
     }
 
-    def __init__(self, model_id: str = "gemini-2.5-flash-preview-05-20",
-                 checkpointer=None):
+    def __init__(
+        self, model_id: str = "gemini-2.5-flash-preview-05-20", checkpointer=None
+    ):
         _assert_langgraph()
         self.model_id = model_id
         if checkpointer is None:
             from app.core.agent.checkpoint_manager import get_checkpointer
+
             checkpointer = get_checkpointer()
         self._checkpointer = checkpointer
         self._graphs: Dict[str, Any] = {}
@@ -473,7 +500,9 @@ class WorkflowEngine:
                 "error": result.get("error"),
             }
         except Exception as exc:
-            logger.error(f"[WorkflowEngine] 工作流 {workflow} 执行失败: {exc}", exc_info=True)
+            logger.error(
+                f"[WorkflowEngine] 工作流 {workflow} 执行失败: {exc}", exc_info=True
+            )
             return {
                 "output": "",
                 "file_path": None,
@@ -518,14 +547,24 @@ class WorkflowEngine:
         config = {"configurable": {"thread_id": _session}}
 
         try:
-            for event in graph.stream(initial_state, config=config, stream_mode="updates"):
+            for event in graph.stream(
+                initial_state, config=config, stream_mode="updates"
+            ):
                 for node_name, update in event.items():
                     msgs = update.get("messages", [])
                     for msg in msgs:
                         if hasattr(msg, "content") and msg.content:
-                            yield {"node": node_name, "content": msg.content, "done": False}
+                            yield {
+                                "node": node_name,
+                                "content": msg.content,
+                                "done": False,
+                            }
                     if update.get("output"):
-                        yield {"node": node_name, "content": update["output"], "done": True}
+                        yield {
+                            "node": node_name,
+                            "content": update["output"],
+                            "done": True,
+                        }
         except Exception as exc:
             logger.error(f"[WorkflowEngine] stream 失败: {exc}", exc_info=True)
             yield {"node": "error", "content": str(exc), "done": True}
@@ -547,12 +586,15 @@ class WorkflowEngine:
         text = user_input.lower()
 
         # PPT 专用多 Agent 工作流
-        if task_type == "FILE_GEN" and any(k in text for k in ["ppt", "幻灯片", "演示文稿", "汇报"]):
+        if task_type == "FILE_GEN" and any(
+            k in text for k in ["ppt", "幻灯片", "演示文稿", "汇报"]
+        ):
             return "multi_agent_ppt"
 
         # 研究 + 文档
         if task_type in ("RESEARCH", "FILE_GEN") and any(
-            k in text for k in ["研究", "分析", "报告", "调研", "深入", "word", "pdf", "文档"]
+            k in text
+            for k in ["研究", "分析", "报告", "调研", "深入", "word", "pdf", "文档"]
         ):
             return "research_and_document"
 

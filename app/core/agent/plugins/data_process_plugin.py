@@ -5,8 +5,8 @@ DataProcessPlugin — 数据加载、分析、保存
 适配 UnifiedAgent 插件体系。
 """
 
-import os
 import json
+import os
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
@@ -29,58 +29,58 @@ class DataProcessPlugin(AgentPlugin):
                 "name": "load_data",
                 "func": self.load_data,
                 "description": "Load a tabular data file and return shape, columns, and a preview. "
-                               "Supports .csv, .xlsx, .xls, .json.",
+                "Supports .csv, .xlsx, .xls, .json.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "filepath": {
                             "type": "STRING",
-                            "description": "Path to the data file."
+                            "description": "Path to the data file.",
                         }
                     },
-                    "required": ["filepath"]
-                }
+                    "required": ["filepath"],
+                },
             },
             {
                 "name": "query_data",
                 "func": self.query_data,
                 "description": "Load a data file and run a pandas query/expression on it. "
-                               "Returns the first 20 result rows.",
+                "Returns the first 20 result rows.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "filepath": {
                             "type": "STRING",
-                            "description": "Path to the data file."
+                            "description": "Path to the data file.",
                         },
                         "expression": {
                             "type": "STRING",
                             "description": "A pandas expression to evaluate on the DataFrame 'df', "
-                                           "e.g. \"df[df['age'] > 30].describe()\"."
-                        }
+                            "e.g. \"df[df['age'] > 30].describe()\".",
+                        },
                     },
-                    "required": ["filepath", "expression"]
-                }
+                    "required": ["filepath", "expression"],
+                },
             },
             {
                 "name": "save_data",
                 "func": self.save_data,
                 "description": "Save data (provided as JSON rows) to a file. "
-                               "Supports .csv, .xlsx, .json output.",
+                "Supports .csv, .xlsx, .json output.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "filepath": {
                             "type": "STRING",
-                            "description": "Destination file path."
+                            "description": "Destination file path.",
                         },
                         "data_json": {
                             "type": "STRING",
-                            "description": "JSON string of records (list of dicts)."
-                        }
+                            "description": "JSON string of records (list of dicts).",
+                        },
                     },
-                    "required": ["filepath", "data_json"]
-                }
+                    "required": ["filepath", "data_json"],
+                },
             },
         ]
 
@@ -118,7 +118,9 @@ class DataProcessPlugin(AgentPlugin):
         """Load data and evaluate a pandas expression."""
         try:
             df = self._load_df(filepath)
-            result = eval(expression, {"__builtins__": {}}, {"df": df, "pd": __import__("pandas")})
+            result = eval(
+                expression, {"__builtins__": {}}, {"df": df, "pd": __import__("pandas")}
+            )
             if hasattr(result, "to_string"):
                 return str(result.head(20).to_string())
             return str(result)

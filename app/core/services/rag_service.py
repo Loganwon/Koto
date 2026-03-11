@@ -52,7 +52,11 @@ logger = logging.getLogger(__name__)
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 _DEFAULT_INDEX_DIR = str(
-    Path(os.environ.get("KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"))
+    Path(
+        os.environ.get(
+            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+        )
+    )
     / "rag_index"
 )
 
@@ -71,6 +75,7 @@ def get_rag_service(index_dir: Optional[str] = None) -> "RAGService":
 # ─────────────────────────────────────────────────────────────────────────────
 # Embedding 工厂
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _get_embeddings(prefer_local: bool = False):
     """
@@ -92,6 +97,7 @@ def _get_embeddings(prefer_local: bool = False):
         if api_key:
             try:
                 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
                 emb = GoogleGenerativeAIEmbeddings(
                     model="models/text-embedding-004",
                     google_api_key=api_key,
@@ -99,11 +105,14 @@ def _get_embeddings(prefer_local: bool = False):
                 logger.info("[RAGService] 嵌入模型: Google text-embedding-004")
                 return emb
             except Exception as exc:
-                logger.warning(f"[RAGService] Google Embeddings 初始化失败: {exc}，尝试本地模型")
+                logger.warning(
+                    f"[RAGService] Google Embeddings 初始化失败: {exc}，尝试本地模型"
+                )
 
     # 本地 fallback
     try:
         from langchain_community.embeddings import HuggingFaceEmbeddings
+
         emb = HuggingFaceEmbeddings(
             model_name="all-MiniLM-L6-v2",
             model_kwargs={"device": "cpu"},
@@ -124,6 +133,7 @@ def _get_embeddings(prefer_local: bool = False):
 # RAGService
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class RAGService:
     """
     Koto 向量检索服务。
@@ -138,9 +148,9 @@ class RAGService:
         stats()                  : 索引统计信息
     """
 
-    CHUNK_SIZE = 800        # 每块字符数（中文约 400 tokens）
-    CHUNK_OVERLAP = 100     # 块间重叠（保留上下文连续性）
-    DEFAULT_K = 5           # 默认检索 top-k
+    CHUNK_SIZE = 800  # 每块字符数（中文约 400 tokens）
+    CHUNK_OVERLAP = 100  # 块间重叠（保留上下文连续性）
+    DEFAULT_K = 5  # 默认检索 top-k
 
     def __init__(
         self,
@@ -157,7 +167,9 @@ class RAGService:
         self._prefer_local = prefer_local_embeddings
         self._metadata_path = self.index_dir / "metadata.json"
         self._index_path = str(self.index_dir / "faiss_index")
-        self._bm25_cache: Optional[Tuple] = None  # (BM25Okapi, docs_list)，文档变动时失效
+        self._bm25_cache: Optional[Tuple] = (
+            None  # (BM25Okapi, docs_list)，文档变动时失效
+        )
 
         if auto_load:
             self.load()
@@ -174,8 +186,8 @@ class RAGService:
 
     def _split_text(self, text: str, source: str = "text") -> List[Any]:
         """将文本分块，返回 LangChain Document 对象列表。"""
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
         from langchain_core.documents import Document
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
 
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.CHUNK_SIZE,
@@ -188,7 +200,11 @@ class RAGService:
         return [
             Document(
                 page_content=chunk,
-                metadata={"source": source, "chunk_index": i, "indexed_at": int(time.time())},
+                metadata={
+                    "source": source,
+                    "chunk_index": i,
+                    "indexed_at": int(time.time()),
+                },
             )
             for i, chunk in enumerate(chunks)
         ]
@@ -198,35 +214,47 @@ class RAGService:
     def _load_file_docs(self, file_path: str) -> List[Any]:
         """根据文件类型自动选择 LangChain loader。"""
         from pathlib import Path
+
         ext = Path(file_path).suffix.lower()
 
         try:
             if ext == ".pdf":
                 from langchain_community.document_loaders import PyPDFLoader
+
                 loader = PyPDFLoader(file_path)
             elif ext in (".docx", ".doc"):
                 from langchain_community.document_loaders import Docx2txtLoader
+
                 loader = Docx2txtLoader(file_path)
             elif ext in (".txt", ".md", ".markdown"):
                 from langchain_community.document_loaders import TextLoader
+
                 loader = TextLoader(file_path, encoding="utf-8")
             elif ext == ".csv":
                 from langchain_community.document_loaders import CSVLoader
+
                 loader = CSVLoader(file_path)
             elif ext == ".json":
                 from langchain_community.document_loaders import JSONLoader
+
                 loader = JSONLoader(file_path, jq_schema=".", text_content=False)
             else:
                 # 通用文本加载
                 from langchain_community.document_loaders import TextLoader
-                loader = TextLoader(file_path, encoding="utf-8", autodetect_encoding=True)
+
+                loader = TextLoader(
+                    file_path, encoding="utf-8", autodetect_encoding=True
+                )
 
             return loader.load()
         except Exception as exc:
-            logger.warning(f"[RAGService] 文件加载失败 ({file_path}): {exc}，尝试纯文本读取")
+            logger.warning(
+                f"[RAGService] 文件加载失败 ({file_path}): {exc}，尝试纯文本读取"
+            )
             try:
                 text = Path(file_path).read_text(encoding="utf-8", errors="ignore")
                 from langchain_core.documents import Document
+
                 return [Document(page_content=text, metadata={"source": file_path})]
             except Exception as exc2:
                 raise RuntimeError(f"无法加载文件 {file_path}: {exc2}") from exc2
@@ -264,7 +292,9 @@ class RAGService:
         chunks = self._split_text(text, source=source)
         return self._add_documents(chunks)
 
-    def index_directory(self, dir_path: str, extensions: Optional[List[str]] = None) -> Dict[str, int]:
+    def index_directory(
+        self, dir_path: str, extensions: Optional[List[str]] = None
+    ) -> Dict[str, int]:
         """
         递归索引目录下的所有文件。
 
@@ -293,6 +323,7 @@ class RAGService:
             return 0
         try:
             from langchain_community.vectorstores import FAISS
+
             if self._vectorstore is None:
                 self._vectorstore = FAISS.from_documents(docs, self.embeddings)
             else:
@@ -322,7 +353,9 @@ class RAGService:
         try:
             from rank_bm25 import BM25Okapi  # type: ignore
         except ImportError:
-            logger.debug("[RAGService] rank_bm25 未安装，BM25 不可用（pip install rank-bm25）")
+            logger.debug(
+                "[RAGService] rank_bm25 未安装，BM25 不可用（pip install rank-bm25）"
+            )
             self._bm25_cache = (None, [])
             return None, []
 
@@ -345,7 +378,7 @@ class RAGService:
             def _tok(text: str) -> List[str]:
                 """空格分割 + 字符 bigram，兼容中英文混合文本。"""
                 words = text.split()
-                bigrams = [text[j:j + 2] for j in range(len(text) - 1)]
+                bigrams = [text[j : j + 2] for j in range(len(text) - 1)]
                 return words + bigrams
 
             tokenized = [_tok(d.page_content) for d in docs]
@@ -392,20 +425,26 @@ class RAGService:
         bm25_hits: List[Dict[str, Any]] = []
         bm25_idx, all_docs = self._build_bm25()
         if bm25_idx is not None and all_docs:
+
             def _tok(t: str) -> List[str]:
-                return t.split() + [t[j:j + 2] for j in range(len(t) - 1)]
+                return t.split() + [t[j : j + 2] for j in range(len(t) - 1)]
+
             try:
                 scores = bm25_idx.get_scores(_tok(query))
-                top_indices = sorted(range(len(scores)), key=lambda i: -scores[i])[:fetch_k]
+                top_indices = sorted(range(len(scores)), key=lambda i: -scores[i])[
+                    :fetch_k
+                ]
                 for rank, idx in enumerate(top_indices):
                     if scores[idx] > 0:
                         doc = all_docs[idx]
-                        bm25_hits.append({
-                            "content": doc.page_content,
-                            "source": doc.metadata.get("source", "unknown"),
-                            "score": float(scores[idx]),
-                            "chunk_index": doc.metadata.get("chunk_index", 0),
-                        })
+                        bm25_hits.append(
+                            {
+                                "content": doc.page_content,
+                                "source": doc.metadata.get("source", "unknown"),
+                                "score": float(scores[idx]),
+                                "chunk_index": doc.metadata.get("chunk_index", 0),
+                            }
+                        )
             except Exception as bm25_err:
                 logger.debug(f"[RAGService] BM25 检索异常: {bm25_err}")
 
@@ -429,6 +468,7 @@ class RAGService:
         # ── Step 4: Cross-Encoder 精排（可选，需 sentence-transformers）────────────
         try:
             from sentence_transformers import CrossEncoder  # type: ignore
+
             if len(candidates) > 1:
                 _ce = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
                 pairs = [(query, c["content"]) for c in candidates]
@@ -472,18 +512,20 @@ class RAGService:
             return []
 
         try:
-            results_with_scores = self._vectorstore.similarity_search_with_relevance_scores(
-                query, k=k
+            results_with_scores = (
+                self._vectorstore.similarity_search_with_relevance_scores(query, k=k)
             )
             chunks = []
             for doc, score in results_with_scores:
                 if score >= score_threshold:
-                    chunks.append({
-                        "content": doc.page_content,
-                        "source": doc.metadata.get("source", "unknown"),
-                        "score": round(float(score), 4),
-                        "chunk_index": doc.metadata.get("chunk_index", 0),
-                    })
+                    chunks.append(
+                        {
+                            "content": doc.page_content,
+                            "source": doc.metadata.get("source", "unknown"),
+                            "score": round(float(score), 4),
+                            "chunk_index": doc.metadata.get("chunk_index", 0),
+                        }
+                    )
             return chunks
         except Exception as exc:
             logger.error(f"[RAGService] 检索失败: {exc}")
@@ -528,8 +570,9 @@ class RAGService:
         context = "\n\n".join(context_parts)
 
         # 调用 LLM
+        from langchain_core.messages import HumanMessage, SystemMessage
+
         from app.core.llm.langchain_adapter import KotoLangChainLLM
-        from langchain_core.messages import SystemMessage, HumanMessage
 
         llm = KotoLangChainLLM(model_id=model_id)
         system = (
@@ -543,7 +586,9 @@ class RAGService:
         user_msg = f"【知识库上下文】\n{context}\n\n【用户问题】\n{question}"
 
         try:
-            resp = llm.invoke([SystemMessage(content=system), HumanMessage(content=user_msg)])
+            resp = llm.invoke(
+                [SystemMessage(content=system), HumanMessage(content=user_msg)]
+            )
             answer = resp.content if hasattr(resp, "content") else str(resp)
         except Exception as exc:
             answer = f"[RAG 答案生成失败] {exc}"
@@ -571,8 +616,12 @@ class RAGService:
                 "saved_at": int(time.time()),
                 "index_path": self._index_path,
             }
-            self._metadata_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
-            logger.debug(f"[RAGService] 索引已保存 → {self._index_path} ({self._doc_count} chunks)")
+            self._metadata_path.write_text(
+                json.dumps(meta, ensure_ascii=False, indent=2)
+            )
+            logger.debug(
+                f"[RAGService] 索引已保存 → {self._index_path} ({self._doc_count} chunks)"
+            )
             return True
         except Exception as exc:
             logger.error(f"[RAGService] 保存失败: {exc}")
@@ -584,6 +633,7 @@ class RAGService:
             return False
         try:
             from langchain_community.vectorstores import FAISS
+
             self._vectorstore = FAISS.load_local(
                 self._index_path,
                 self.embeddings,

@@ -26,13 +26,13 @@
     mcp_tools = SkillManager.list_mcp_tools()
 """
 
-import os
 import json
 import logging
-from typing import Optional, List, Dict
+import os
 from pathlib import Path
+from typing import Dict, List, Optional
 
-from app.core.skills.skill_schema import SkillDefinition, OutputSpec
+from app.core.skills.skill_schema import OutputSpec, SkillDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,6 @@ logger = logging.getLogger(__name__)
 #   enabled      : 默认启用状态
 # ───────────────────────────────────────────────────────────────────────────────
 BUILTIN_SKILLS: List[Dict] = [
-
     # ── 行为类 ────────────────────────────────────────────────────────────────
     {
         "id": "step_by_step",
@@ -172,7 +171,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 风格类 ────────────────────────────────────────────────────────────────
     {
         "id": "professional_tone",
@@ -240,7 +238,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 领域类 ────────────────────────────────────────────────────────────────
     {
         "id": "code_best_practices",
@@ -294,7 +291,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 领域增强 ──────────────────────────────────────────────────────────────
     {
         "id": "writing_assistant",
@@ -378,7 +374,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 专项文档批注技能 ──────────────────────────────────────────────────────
     {
         "id": "annotate_academic",
@@ -461,7 +456,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 专项调试技能 ──────────────────────────────────────────────────────────
     {
         "id": "debug_python",
@@ -553,7 +547,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 记忆类 ────────────────────────────────────────────────────────────────
     {
         "id": "long_term_memory",
@@ -563,14 +556,12 @@ BUILTIN_SKILLS: List[Dict] = [
         "skill_nature": "system",
         "description": "跨会话记住用户偏好、项目背景和习惯，无需每次重复说明。通过「记忆」管理页面增删查看已存记忆。",
         "task_types": [],  # 所有任务类型均生效
-        "prompt": "",      # prompt 由 inject_into_prompt 动态注入，此处留空
-        "enabled": True,   # 默认开启，替代旧版设置里的独立开关
+        "prompt": "",  # prompt 由 inject_into_prompt 动态注入，此处留空
+        "enabled": True,  # 默认开启，替代旧版设置里的独立开关
     },
-
     # ══════════════════════════════════════════════════════════════════════════
     # ── 办公工作流类 ──────────────────────────────────────────────────────────
     # ══════════════════════════════════════════════════════════════════════════
-
     # ── 邮件 / 沟通 ───────────────────────────────────────────────────────────
     {
         "id": "email_composer",
@@ -666,7 +657,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 沟通表达类 ────────────────────────────────────────────────────────────
     {
         "id": "feedback_polisher",
@@ -711,7 +701,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 分析决策类 ────────────────────────────────────────────────────────────
     {
         "id": "pros_cons",
@@ -781,7 +770,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 文档处理类 ────────────────────────────────────────────────────────────
     {
         "id": "contract_reviewer",
@@ -849,7 +837,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 项目管理类 ────────────────────────────────────────────────────────────
     {
         "id": "risk_register",
@@ -892,7 +879,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 数据与量化类 ──────────────────────────────────────────────────────────
     {
         "id": "kpi_designer",
@@ -940,7 +926,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 学习与个人成长类 ──────────────────────────────────────────────────────
     {
         "id": "learning_roadmap",
@@ -987,7 +972,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ── 创意与策略类 ──────────────────────────────────────────────────────────
     {
         "id": "brainstorm",
@@ -1058,7 +1042,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ─────────── 文件读取与解析类 Skills ───────────
     {
         "id": "pdf_reader",
@@ -1075,9 +1058,9 @@ BUILTIN_SKILLS: List[Dict] = [
             "\n**工具调用规范：**\n"
             "1. **路径已知** → 直接调用 `read_file_snippet(path, max_chars=8000)` 读取前 8000 字\n"
             "   - 返回内容若末尾带 `...` 说明被截断，文件有更多内容\n"
-            "   - 截断时：再调用 `summarize_file(path, focus=\"用户的具体问题\")` 获取针对性摘要\n"
-            "2. **路径未知** → 先调用 `find_file(query=\"文件名关键词\", category=\"document\", limit=5)` 定位文件\n"
-            "3. **超长文档（>10页）** → 优先用 `summarize_file(path, focus=\"...\")` 而非全文读取\n"
+            '   - 截断时：再调用 `summarize_file(path, focus="用户的具体问题")` 获取针对性摘要\n'
+            '2. **路径未知** → 先调用 `find_file(query="文件名关键词", category="document", limit=5)` 定位文件\n'
+            '3. **超长文档（>10页）** → 优先用 `summarize_file(path, focus="...")` 而非全文读取\n'
             "\n**边界情况处理：**\n"
             "- 若读取内容乱码（全是`?????`）→ 提示用户该 PDF 可能是扫描件无法直接提取文字\n"
             "- 若返回内容极短或空白 → 提示 PDF 可能加密或损坏，建议用户手动检查\n"
@@ -1122,8 +1105,8 @@ BUILTIN_SKILLS: List[Dict] = [
             "            print(shape.text.strip())\n"
             "```\n"
             "\n**通用规则：**\n"
-            "- 路径不确定时先调用 `find_file(query=\"文件名\", limit=5)` 定位\n"
-            "- 文件过长时改用 `summarize_file(path, focus=\"用户问题\")` 获取摘要\n"
+            '- 路径不确定时先调用 `find_file(query="文件名", limit=5)` 定位\n'
+            '- 文件过长时改用 `summarize_file(path, focus="用户问题")` 获取摘要\n'
             "- 读取失败时告知用户具体失败原因（文件不存在/格式不对/编码问题）"
         ),
         "enabled": False,
@@ -1150,9 +1133,9 @@ BUILTIN_SKILLS: List[Dict] = [
             "\n"
             "2. **针对性摘要**（按需多次调用，每次聚焦不同维度）：\n"
             "   ```\n"
-            "   summarize_file(path, focus=\"文档的核心结论和主要观点\")\n"
-            "   summarize_file(path, focus=\"具体的数据、统计和事实\")\n"
-            "   summarize_file(path, focus=\"风险、问题和注意事项\")\n"
+            '   summarize_file(path, focus="文档的核心结论和主要观点")\n'
+            '   summarize_file(path, focus="具体的数据、统计和事实")\n'
+            '   summarize_file(path, focus="风险、问题和注意事项")\n'
             "   ```\n"
             "\n"
             "3. **综合整理**：将多次摘要的结果合并，用结构化格式呈现\n"
@@ -1221,7 +1204,7 @@ BUILTIN_SKILLS: List[Dict] = [
             "   read_file_snippet(file2_path, 5000)\n"
             "   # ... 重复直到所有文件读完\n"
             "   ```\n"
-            "   如果某个文件过长 → 改用 `summarize_file(path, focus=\"与其他文件对比的核心内容\")`\n"
+            '   如果某个文件过长 → 改用 `summarize_file(path, focus="与其他文件对比的核心内容")`\n'
             "\n"
             "2. **构建对比矩阵** — 读完所有文件后，按以下维度对比：\n"
             "   - 🟢 **共同点**：各文档都提到的核心内容\n"
@@ -1237,7 +1220,6 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
-
     # ─────────── 文件生成类 Skills ───────────
     {
         "id": "ppt_generator_pro",
@@ -1310,12 +1292,12 @@ BUILTIN_SKILLS: List[Dict] = [
             "\n"
             "wb = openpyxl.Workbook()\n"
             "ws = wb.active\n"
-            "ws.title = \"数据表\"\n"
+            'ws.title = "数据表"\n'
             "\n"
             "# === 标题行样式 ===\n"
-            "headers = [\"列名1\", \"列名2\", \"列名3\"]  # 按实际需求替换\n"
-            "header_fill = PatternFill(start_color=\"1F4E79\", end_color=\"1F4E79\", fill_type=\"solid\")\n"
-            "header_font = Font(bold=True, color=\"FFFFFF\", size=12)\n"
+            'headers = ["列名1", "列名2", "列名3"]  # 按实际需求替换\n'
+            'header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")\n'
+            'header_font = Font(bold=True, color="FFFFFF", size=12)\n'
             "border = Border(left=Side(style='thin'), right=Side(style='thin'),\n"
             "                top=Side(style='thin'), bottom=Side(style='thin'))\n"
             "for col_i, h in enumerate(headers, 1):\n"
@@ -1325,9 +1307,9 @@ BUILTIN_SKILLS: List[Dict] = [
             "\n"
             "# === 数据行 ===\n"
             "data = [\n"
-            "    # [\"值1\", \"值2\", \"值3\"],  # 按实际数据填充\n"
+            '    # ["值1", "值2", "值3"],  # 按实际数据填充\n'
             "]\n"
-            "alt_fill = PatternFill(start_color=\"EBF3FB\", end_color=\"EBF3FB\", fill_type=\"solid\")\n"
+            'alt_fill = PatternFill(start_color="EBF3FB", end_color="EBF3FB", fill_type="solid")\n'
             "for row_i, row in enumerate(data, 2):\n"
             "    for col_i, val in enumerate(row, 1):\n"
             "        c = ws.cell(row_i, col_i, val)\n"
@@ -1554,23 +1536,29 @@ BUILTIN_SKILLS: List[Dict] = [
 # 所有合法的 category 和 task_type
 SKILL_CATEGORIES = {
     "behavior": "⚙️ 行为",
-    "style":    "🎨 风格",
-    "domain":   "🔬 领域",
+    "style": "🎨 风格",
+    "domain": "🔬 领域",
     "workflow": "🔄 工作流",
-    "memory":   "🧠 记忆",
-    "custom":   "🛠️ 自定义",
+    "memory": "🧠 记忆",
+    "custom": "🛠️ 自定义",
 }
 
 # skill_nature 枚举及其 UI 说明
 SKILL_NATURE_LABELS = {
-    "model_hint":   "💬 模型行为调整",   # 通过 prompt 激活模型原生能力
-    "domain_skill": "🔧 领域专项技能",   # 注入领域知识/专有模板
-    "system":       "⚙️ 系统功能",       # 记忆/工具等系统级功能
+    "model_hint": "💬 模型行为调整",  # 通过 prompt 激活模型原生能力
+    "domain_skill": "🔧 领域专项技能",  # 注入领域知识/专有模板
+    "system": "⚙️ 系统功能",  # 记忆/工具等系统级功能
 }
 
 ALL_TASK_TYPES = [
-    "CHAT", "CODER", "RESEARCH", "FILE_GEN",
-    "SYSTEM", "AGENT", "WEB_SEARCH", "PAINTER",
+    "CHAT",
+    "CODER",
+    "RESEARCH",
+    "FILE_GEN",
+    "SYSTEM",
+    "AGENT",
+    "WEB_SEARCH",
+    "PAINTER",
     "DOC_ANNOTATE",
 ]
 
@@ -1584,8 +1572,8 @@ class SkillManager:
     - 新增：register_custom / list_mcp_tools / load_custom_skills_dir
     """
 
-    _registry: Dict[str, Dict] = {}               # id → 旧版 skill dict（向后兼容）
-    _def_registry: Dict[str, SkillDefinition] = {} # id → 新版 SkillDefinition（v2）
+    _registry: Dict[str, Dict] = {}  # id → 旧版 skill dict（向后兼容）
+    _def_registry: Dict[str, SkillDefinition] = {}  # id → 新版 SkillDefinition（v2）
     _initialized: bool = False
 
     # ── 初始化 ─────────────────────────────────────────────────────────────────
@@ -1609,7 +1597,8 @@ class SkillManager:
     def _settings_path(cls) -> Path:
         """返回 config/user_settings.json 的绝对路径"""
         import sys
-        if getattr(sys, 'frozen', False):
+
+        if getattr(sys, "frozen", False):
             # 打包模式：config/ 紧邻 Koto.exe，不在 _internal/ 里
             project_root = Path(sys.executable).parent
         else:
@@ -1679,37 +1668,41 @@ class SkillManager:
             seen_ids.add(sid)
             s = cls._registry.get(sid, skill)
             builtin_prompt = skill["prompt"]
-            result.append({
-                "id": s["id"],
-                "name": s["name"],
-                "icon": s["icon"],
-                "category": s["category"],
-                "skill_nature": s.get("skill_nature", "domain_skill"),
-                "description": s["description"],
-                "task_types": s["task_types"],
-                "enabled": s["enabled"],
-                "has_custom_prompt": s.get("prompt") != builtin_prompt,
-                "prompt": s["prompt"],
-                "is_builtin": True,
-            })
+            result.append(
+                {
+                    "id": s["id"],
+                    "name": s["name"],
+                    "icon": s["icon"],
+                    "category": s["category"],
+                    "skill_nature": s.get("skill_nature", "domain_skill"),
+                    "description": s["description"],
+                    "task_types": s["task_types"],
+                    "enabled": s["enabled"],
+                    "has_custom_prompt": s.get("prompt") != builtin_prompt,
+                    "prompt": s["prompt"],
+                    "is_builtin": True,
+                }
+            )
 
         # 自定义 Skill（不在内置列表中的）
         for skill_id, s in cls._registry.items():
             if skill_id in seen_ids:
                 continue
-            result.append({
-                "id": s["id"],
-                "name": s["name"],
-                "icon": s["icon"],
-                "category": s["category"],
-                "description": s["description"],
-                "task_types": s["task_types"],
-                "enabled": s["enabled"],
-                "skill_nature": s.get("skill_nature", "domain_skill"),
-                "has_custom_prompt": False,
-                "prompt": s.get("prompt", ""),
-                "is_builtin": False,
-            })
+            result.append(
+                {
+                    "id": s["id"],
+                    "name": s["name"],
+                    "icon": s["icon"],
+                    "category": s["category"],
+                    "description": s["description"],
+                    "task_types": s["task_types"],
+                    "enabled": s["enabled"],
+                    "skill_nature": s.get("skill_nature", "domain_skill"),
+                    "has_custom_prompt": False,
+                    "prompt": s.get("prompt", ""),
+                    "is_builtin": False,
+                }
+            )
 
         return result
 
@@ -1767,14 +1760,14 @@ class SkillManager:
         seen_pairs: set = set()
 
         enabled_skills = {
-            sid: s for sid, s in cls._registry.items()
-            if s.get("enabled", False)
+            sid: s for sid, s in cls._registry.items() if s.get("enabled", False)
         }
         # 筛选适用于当前 task_type 的
         if task_type:
             tt = task_type.upper()
             enabled_skills = {
-                sid: s for sid, s in enabled_skills.items()
+                sid: s
+                for sid, s in enabled_skills.items()
                 if not s.get("task_types") or tt in s.get("task_types", [])
             }
 
@@ -1798,19 +1791,21 @@ class SkillManager:
                     winner, loser = other, s
                     winner_id, loser_id = conflict_id, skill_id
 
-                conflicts.append({
-                    "winner_id":   winner_id,
-                    "winner_name": winner.get("name", winner_id),
-                    "winner_priority": winner.get("priority", 50),
-                    "loser_id":    loser_id,
-                    "loser_name":  loser.get("name", loser_id),
-                    "loser_priority": loser.get("priority", 50),
-                    "reason": (
-                        f"「{winner.get('name', winner_id)}」优先级({winner.get('priority', 50)}) "
-                        f"≥「{loser.get('name', loser_id)}」优先级({loser.get('priority', 50)})，"
-                        f"后者 prompt 在本次请求中被抑制"
-                    ),
-                })
+                conflicts.append(
+                    {
+                        "winner_id": winner_id,
+                        "winner_name": winner.get("name", winner_id),
+                        "winner_priority": winner.get("priority", 50),
+                        "loser_id": loser_id,
+                        "loser_name": loser.get("name", loser_id),
+                        "loser_priority": loser.get("priority", 50),
+                        "reason": (
+                            f"「{winner.get('name', winner_id)}」优先级({winner.get('priority', 50)}) "
+                            f"≥「{loser.get('name', loser_id)}」优先级({loser.get('priority', 50)})，"
+                            f"后者 prompt 在本次请求中被抑制"
+                        ),
+                    }
+                )
         return conflicts
 
     @classmethod
@@ -1847,8 +1842,7 @@ class SkillManager:
         # ── 预计算冲突：找出所有因冲突被抑制的 skill_id ────────────────────
         suppressed_ids: set = set()
         all_enabled = {
-            sid: s for sid, s in cls._registry.items()
-            if s.get("enabled", False)
+            sid: s for sid, s in cls._registry.items() if s.get("enabled", False)
         }
         for sid, s in all_enabled.items():
             pri_a = s.get("priority", 50)
@@ -1888,13 +1882,18 @@ class SkillManager:
                 continue
 
             applicable_types = s.get("task_types", [])
-            if applicable_types and task_type and task_type.upper() not in applicable_types:
+            if (
+                applicable_types
+                and task_type
+                and task_type.upper() not in applicable_types
+            ):
                 continue
 
             # ── 长期记忆 skill：动态从 MemoryManager 检索相关记忆并注入 ────────
             if skill_id == "long_term_memory":
                 try:
                     from web.memory_manager import MemoryManager
+
                     _mm = MemoryManager()
                     ctx = _mm.get_context_string(user_input or "")
                     if ctx.strip():
@@ -1917,18 +1916,27 @@ class SkillManager:
             tmpl_path_rel = s.get("template_path")
             if tmpl_path_rel:
                 try:
-                    from pathlib import Path as _Path
                     import sys as _sys
+                    from pathlib import Path as _Path
+
                     _base = (
-                        _Path(_sys.executable).parent if getattr(_sys, "frozen", False)
+                        _Path(_sys.executable).parent
+                        if getattr(_sys, "frozen", False)
                         else _Path(__file__).resolve().parents[3]
                     )
                     tmpl_abs = _base / tmpl_path_rel
                     if not tmpl_abs.exists():
                         # 也尝试约定路径
-                        tmpl_abs = _base / "config" / "skill_templates" / skill_id / "template.docx"
+                        tmpl_abs = (
+                            _base
+                            / "config"
+                            / "skill_templates"
+                            / skill_id
+                            / "template.docx"
+                        )
                     if tmpl_abs.exists():
                         from app.core.skills.template_engine import TemplateEngine
+
                         fields = TemplateEngine.parse_fields(tmpl_abs)
                         preview = TemplateEngine.get_raw_text(tmpl_abs)
                         tmpl_prompt = TemplateEngine.build_agent_prompt(
@@ -1961,10 +1969,16 @@ class SkillManager:
         # 组装注入块：记忆优先放在 skills 前面
         result = base_instruction
         if memory_block:
-            result = result + "\n\n─────────────────────────────────────────" + memory_block
+            result = (
+                result + "\n\n─────────────────────────────────────────" + memory_block
+            )
         if active_prompts:
             separator = "\n\n─────────────────────────────────────────"
-            skills_block = separator + "\n## 🎯 当前激活的 Skills（用户自定义行为）\n" + "\n".join(active_prompts)
+            skills_block = (
+                separator
+                + "\n## 🎯 当前激活的 Skills（用户自定义行为）\n"
+                + "\n".join(active_prompts)
+            )
             result = result + skills_block
         if auto_prompts:
             separator = "\n\n─────────────────────────────────────────"
@@ -1989,7 +2003,11 @@ class SkillManager:
             if not s.get("enabled", False):
                 continue
             applicable_types = s.get("task_types", [])
-            if applicable_types and task_type and task_type.upper() not in applicable_types:
+            if (
+                applicable_types
+                and task_type
+                and task_type.upper() not in applicable_types
+            ):
                 continue
             names.append(s["name"])
         return names
@@ -2083,7 +2101,9 @@ class SkillManager:
 
         # 持久化到 config/skills/{id}.json
         cls._persist_custom_skill(skill_def)
-        logger.info(f"[SkillManager] ✅ 注册自定义 Skill: {skill_def.id} (v{skill_def.version})")
+        logger.info(
+            f"[SkillManager] ✅ 注册自定义 Skill: {skill_def.id} (v{skill_def.version})"
+        )
         return True
 
     @classmethod
@@ -2104,13 +2124,17 @@ class SkillManager:
             existing_keys = {
                 (
                     binding.trigger_type,
-                    json.dumps(binding.trigger_config or {}, sort_keys=True, ensure_ascii=False),
+                    json.dumps(
+                        binding.trigger_config or {}, sort_keys=True, ensure_ascii=False
+                    ),
                 )
                 for binding in existing
             }
 
             for trigger in default_triggers:
-                trigger_type = (trigger.get("trigger_type") or trigger.get("type") or "").strip()
+                trigger_type = (
+                    trigger.get("trigger_type") or trigger.get("type") or ""
+                ).strip()
                 trigger_config = trigger.get("config") or {}
                 if not trigger_type:
                     continue
@@ -2127,7 +2151,8 @@ class SkillManager:
                     trigger_type=trigger_type,
                     trigger_config=trigger_config,
                     mode=trigger.get("mode", "execute"),
-                    job_payload=trigger.get("job_payload") or {
+                    job_payload=trigger.get("job_payload")
+                    or {
                         "skill_id": skill_def.id,
                         "query": trigger.get("query") or f"执行技能: {skill_def.name}",
                     },
@@ -2213,7 +2238,10 @@ class SkillManager:
         result = {}
         for skill_id, skill_def in cls._def_registry.items():
             legacy = cls._registry.get(skill_id, {})
-            if legacy.get("enabled", skill_def.enabled) and skill_def.intent_description:
+            if (
+                legacy.get("enabled", skill_def.enabled)
+                and skill_def.intent_description
+            ):
                 result[skill_id] = skill_def.intent_description
         return result
 
@@ -2283,7 +2311,7 @@ class SkillManager:
             # 精确短语匹配加权
             for phrase_len in (4, 3, 2):
                 for i in range(len(user_lower) - phrase_len + 1):
-                    phrase = user_lower[i:i + phrase_len]
+                    phrase = user_lower[i : i + phrase_len]
                     if phrase in combined:
                         score += phrase_len * 0.5
                         break
@@ -2297,21 +2325,27 @@ class SkillManager:
             if score > 0:
                 reason = "与「{name}」相关：{r}".format(
                     name=skill_def.name,
-                    r="、".join(dict.fromkeys(matched_reasons))[:50] if matched_reasons else "语义相关",
-                )
-                scores.append({
-                    "id": skill_id,
-                    "name": skill_def.name,
-                    "icon": skill_def.icon,
-                    "description": skill_def.description,
-                    "score": round(score, 2),
-                    "reason": reason,
-                    "category": (
-                        skill_def.category.value
-                        if hasattr(skill_def.category, "value")
-                        else skill_def.category
+                    r=(
+                        "、".join(dict.fromkeys(matched_reasons))[:50]
+                        if matched_reasons
+                        else "语义相关"
                     ),
-                })
+                )
+                scores.append(
+                    {
+                        "id": skill_id,
+                        "name": skill_def.name,
+                        "icon": skill_def.icon,
+                        "description": skill_def.description,
+                        "score": round(score, 2),
+                        "reason": reason,
+                        "category": (
+                            skill_def.category.value
+                            if hasattr(skill_def.category, "value")
+                            else skill_def.category
+                        ),
+                    }
+                )
 
         # 按得分降序排列，取 top_k
         scores.sort(key=lambda x: x["score"], reverse=True)
@@ -2331,9 +2365,9 @@ class SkillManager:
     ]
     # 软冲突（警告但不阻止）
     _SOFT_CONFLICTS: Dict[str, List[str]] = {
-        "concise_mode":  ["step_by_step", "teaching_mode", "proactive_suggestions"],
-        "step_by_step":  ["concise_mode"],
-        "strict_mode":   ["creative_writing", "emoji_assist"],
+        "concise_mode": ["step_by_step", "teaching_mode", "proactive_suggestions"],
+        "step_by_step": ["concise_mode"],
+        "strict_mode": ["creative_writing", "emoji_assist"],
         "creative_writing": ["strict_mode", "professional_tone", "data_analysis"],
         "professional_tone": ["creative_writing"],
     }
@@ -2357,7 +2391,8 @@ class SkillManager:
 
         # 当前已启用集合
         enabled_ids = {
-            sid for sid, s in cls._registry.items()
+            sid
+            for sid, s in cls._registry.items()
             if s.get("enabled", False) and sid != skill_id
         }
 
@@ -2370,11 +2405,13 @@ class SkillManager:
                 if other_id in enabled_ids:
                     other_def = cls._def_registry.get(other_id)
                     other_name = other_def.name if other_def else other_id
-                    hard.append({
-                        "id": other_id,
-                        "name": other_name,
-                        "reason": f"「{this_name}」声明与「{other_name}」不兼容",
-                    })
+                    hard.append(
+                        {
+                            "id": other_id,
+                            "name": other_name,
+                            "reason": f"「{this_name}」声明与「{other_name}」不兼容",
+                        }
+                    )
 
         # 内置硬冲突规则
         hard_ids = {h["id"] for h in hard}
@@ -2385,11 +2422,13 @@ class SkillManager:
                     if other_id in enabled_ids and other_id not in hard_ids:
                         other_def = cls._def_registry.get(other_id)
                         other_name = other_def.name if other_def else other_id
-                        hard.append({
-                            "id": other_id,
-                            "name": other_name,
-                            "reason": f"「{this_name}」与「{other_name}」行为相反，同时启用会产生矛盾",
-                        })
+                        hard.append(
+                            {
+                                "id": other_id,
+                                "name": other_name,
+                                "reason": f"「{this_name}」与「{other_name}」行为相反，同时启用会产生矛盾",
+                            }
+                        )
                         hard_ids.add(other_id)
 
         # 软冲突检测
@@ -2398,11 +2437,13 @@ class SkillManager:
             if other_id in enabled_ids and other_id not in hard_ids:
                 other_def = cls._def_registry.get(other_id)
                 other_name = other_def.name if other_def else other_id
-                soft.append({
-                    "id": other_id,
-                    "name": other_name,
-                    "reason": f"与「{other_name}」可能存在风格不一致，建议选其一",
-                })
+                soft.append(
+                    {
+                        "id": other_id,
+                        "name": other_name,
+                        "reason": f"与「{other_name}」可能存在风格不一致，建议选其一",
+                    }
+                )
 
         return {
             "has_conflict": bool(hard) or bool(soft),
@@ -2447,8 +2488,10 @@ class SkillManager:
             # 若 OutputSpec 约束为空（默认），跳过
             spec = skill_def.output_spec
             has_constraint = (
-                spec.must_contain or spec.must_not_contain
-                or spec.min_chars or spec.max_chars
+                spec.must_contain
+                or spec.must_not_contain
+                or spec.min_chars
+                or spec.max_chars
                 or spec.required_json_keys
             )
             if not has_constraint:
@@ -2457,12 +2500,14 @@ class SkillManager:
             passed, reason = spec.validate(text)
             if not passed:
                 all_passed = False
-            results.append({
-                "skill_id": skill_id,
-                "skill_name": skill_def.name,
-                "passed": passed,
-                "reason": reason,
-            })
+            results.append(
+                {
+                    "skill_id": skill_id,
+                    "skill_name": skill_def.name,
+                    "passed": passed,
+                    "reason": reason,
+                }
+            )
 
         return {"all_passed": all_passed, "results": results}
 
@@ -2478,7 +2523,9 @@ class SkillManager:
         cls._ensure_init()
         total = len(cls._def_registry)
         enabled = sum(1 for s in cls._registry.values() if s.get("enabled", False))
-        builtin_count = sum(1 for s in cls._def_registry.values() if s.author == "builtin")
+        builtin_count = sum(
+            1 for s in cls._def_registry.values() if s.author == "builtin"
+        )
         custom_count = total - builtin_count
         active_names = cls.get_active_skill_names()
 

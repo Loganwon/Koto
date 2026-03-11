@@ -6,7 +6,9 @@ Tests health snapshot, readiness probe, metrics, incidents listing,
 triggers status, and GC endpoint.
 Uses the full_client fixture from conftest.py.
 """
+
 from __future__ import annotations
+
 import pytest
 
 

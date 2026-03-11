@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 """Unit tests for app.core.skills.skill_schema types."""
+
 import logging
+
 import pytest
+
 from app.core.skills.skill_schema import (
     InputVariable,
     OutputFormat,
@@ -53,7 +56,9 @@ class TestSkillNature:
 class TestVariableType:
     def test_all_types_exist(self):
         values = {v.value for v in VariableType}
-        assert {"string", "integer", "number", "boolean", "array", "object"}.issubset(values)
+        assert {"string", "integer", "number", "boolean", "array", "object"}.issubset(
+            values
+        )
 
 
 @pytest.mark.unit
@@ -66,7 +71,9 @@ class TestInputVariable:
         assert var.type == VariableType.STRING
 
     def test_optional_variable(self):
-        var = InputVariable(name="length", type=VariableType.INTEGER, required=False, default=300)
+        var = InputVariable(
+            name="length", type=VariableType.INTEGER, required=False, default=300
+        )
         assert var.required is False
         assert var.default == 300
 
@@ -82,7 +89,9 @@ class TestInputVariable:
         assert prop["enum"] == ["fast", "slow"]
 
     def test_to_json_schema_property_with_constraints(self):
-        var = InputVariable(name="count", type=VariableType.INTEGER, minimum=1.0, maximum=100.0)
+        var = InputVariable(
+            name="count", type=VariableType.INTEGER, minimum=1.0, maximum=100.0
+        )
         prop = var.to_json_schema_property()
         assert prop["minimum"] == 1.0
         assert prop["maximum"] == 100.0
@@ -148,12 +157,16 @@ class TestOutputSpec:
         assert passed
 
     def test_validate_json_format_pass(self):
-        spec = OutputSpec(format=OutputFormat.JSON, required_json_keys=["name", "value"])
+        spec = OutputSpec(
+            format=OutputFormat.JSON, required_json_keys=["name", "value"]
+        )
         passed, _ = spec.validate('{"name": "test", "value": 42}')
         assert passed
 
     def test_validate_json_format_missing_key(self):
-        spec = OutputSpec(format=OutputFormat.JSON, required_json_keys=["name", "value"])
+        spec = OutputSpec(
+            format=OutputFormat.JSON, required_json_keys=["name", "value"]
+        )
         passed, reason = spec.validate('{"name": "test"}')
         assert not passed
         assert "value" in reason
@@ -182,7 +195,9 @@ class TestSkillDefinition:
     def test_with_input_variables(self):
         vars_ = [
             InputVariable(name="doc", description="Document text"),
-            InputVariable(name="length", type=VariableType.INTEGER, required=False, default=300),
+            InputVariable(
+                name="length", type=VariableType.INTEGER, required=False, default=300
+            ),
         ]
         skill = _make_skill(input_variables=vars_)
         assert len(skill.input_variables) == 2
@@ -193,7 +208,9 @@ class TestSkillDefinition:
         assert skill.render_prompt() == "You are a helpful assistant."
 
     def test_render_prompt_with_variables(self):
-        skill = _make_skill(system_prompt_template="Summarize {document} in {max_length} words.")
+        skill = _make_skill(
+            system_prompt_template="Summarize {document} in {max_length} words."
+        )
         rendered = skill.render_prompt({"document": "my doc", "max_length": 100})
         assert "my doc" in rendered
         assert "100" in rendered
@@ -205,8 +222,15 @@ class TestSkillDefinition:
 
     def test_to_mcp_tool_structure(self):
         vars_ = [
-            InputVariable(name="document", description="Text to summarize", required=True),
-            InputVariable(name="max_length", type=VariableType.INTEGER, required=False, default=300),
+            InputVariable(
+                name="document", description="Text to summarize", required=True
+            ),
+            InputVariable(
+                name="max_length",
+                type=VariableType.INTEGER,
+                required=False,
+                default=300,
+            ),
         ]
         skill = _make_skill(
             id="summarize_doc",
@@ -234,7 +258,9 @@ class TestSkillDefinition:
         assert "required" not in tool["inputSchema"]
 
     def test_to_mcp_tool_koto_meta(self):
-        skill = _make_skill(task_types=["CHAT", "DOC_ANNOTATE"], bound_tools=["web_search"])
+        skill = _make_skill(
+            task_types=["CHAT", "DOC_ANNOTATE"], bound_tools=["web_search"]
+        )
         tool = skill.to_mcp_tool()
         meta = tool["_koto_meta"]
         assert meta["task_types"] == ["CHAT", "DOC_ANNOTATE"]
@@ -256,12 +282,16 @@ class TestSkillSchemaLogging:
 
     def test_render_prompt_missing_var_logs_warning(self, caplog):
         """render_prompt() with a missing variable must emit a WARNING."""
-        skill = _make_skill(system_prompt_template="Hello {name}, your score is {score}")
+        skill = _make_skill(
+            system_prompt_template="Hello {name}, your score is {score}"
+        )
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
             result = skill.render_prompt({"name": "Alice"})  # 'score' is missing
         assert result == "Hello {name}, your score is {score}"  # unchanged
         warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("missing variable" in m.lower() or "render_prompt" in m for m in warnings), warnings
+        assert any(
+            "missing variable" in m.lower() or "render_prompt" in m for m in warnings
+        ), warnings
 
     def test_render_prompt_all_vars_no_warning(self, caplog):
         """render_prompt() with all variables supplied must NOT emit a WARNING (negative)."""
@@ -269,7 +299,9 @@ class TestSkillSchemaLogging:
         with caplog.at_level(logging.WARNING, logger=_LOGGER):
             skill.render_prompt({"name": "Bob"})
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
-        assert warnings == [], f"Should not warn when all vars provided: {[r.message for r in warnings]}"
+        assert (
+            warnings == []
+        ), f"Should not warn when all vars provided: {[r.message for r in warnings]}"
 
     def test_to_mcp_tool_logs_debug(self, caplog):
         """to_mcp_tool() must emit a DEBUG log with the skill id."""
@@ -286,7 +318,9 @@ class TestSkillSchemaLogging:
             passed, reason = spec.validate("No heading here")
         assert not passed
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
-        assert any("OutputSpec" in m and ("validate" in m or "##" in m) for m in debug_msgs), debug_msgs
+        assert any(
+            "OutputSpec" in m and ("validate" in m or "##" in m) for m in debug_msgs
+        ), debug_msgs
 
     def test_output_spec_validate_pass_no_log(self, caplog):
         """OutputSpec.validate() on success must NOT emit any log record (negative)."""
@@ -294,7 +328,9 @@ class TestSkillSchemaLogging:
         with caplog.at_level(logging.DEBUG, logger=_LOGGER):
             passed, _ = spec.validate("## This has a heading")
         assert passed
-        assert caplog.records == [], f"Unexpected logs on pass: {[r.message for r in caplog.records]}"
+        assert (
+            caplog.records == []
+        ), f"Unexpected logs on pass: {[r.message for r in caplog.records]}"
 
     def test_output_spec_forbidden_content_logs_warning(self, caplog):
         """OutputSpec.validate() when must_not_contain is violated must emit a WARNING."""
@@ -303,15 +339,21 @@ class TestSkillSchemaLogging:
             passed, reason = spec.validate("This is CONFIDENTIAL data")
         assert not passed
         warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("forbidden" in m.lower() or "CONFIDENTIAL" in m or "OutputSpec" in m
-                   for m in warnings), warnings
+        assert any(
+            "forbidden" in m.lower() or "CONFIDENTIAL" in m or "OutputSpec" in m
+            for m in warnings
+        ), warnings
 
     def test_from_dict_logs_debug(self, caplog):
         """from_dict() must emit a DEBUG log with the skill id being loaded."""
-        data = {"id": "my_skill", "name": "My Skill", "icon": "🔧", "category": "custom",
-                "description": "test"}
+        data = {
+            "id": "my_skill",
+            "name": "My Skill",
+            "icon": "🔧",
+            "category": "custom",
+            "description": "test",
+        }
         with caplog.at_level(logging.DEBUG, logger=_LOGGER):
             SkillDefinition.from_dict(data)
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
         assert any("from_dict" in m and "my_skill" in m for m in debug_msgs), debug_msgs
-

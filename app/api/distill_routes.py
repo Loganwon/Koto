@@ -21,8 +21,8 @@ GET    /api/distill/adapters          列出已注册的 LoRA 适配器
 from __future__ import annotations
 
 import json
-import os
 import logging
+import os
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
@@ -40,6 +40,7 @@ def _get_manager():
     global _manager
     if _manager is None:
         from app.core.learning.distill_manager import DistillManager
+
         _manager = DistillManager.instance()
     return _manager
 
@@ -47,6 +48,7 @@ def _get_manager():
 # ═══════════════════════════════════════════════════════════════════
 #  POST /api/distill/submit
 # ═══════════════════════════════════════════════════════════════════
+
 
 @distill_bp.route("/submit", methods=["POST"])
 def submit_training():
@@ -92,6 +94,7 @@ def submit_training():
 #  GET /api/distill/jobs
 # ═══════════════════════════════════════════════════════════════════
 
+
 @distill_bp.route("/jobs", methods=["GET"])
 def list_jobs():
     """
@@ -111,6 +114,7 @@ def list_jobs():
 #  GET /api/distill/jobs/<job_id>
 # ═══════════════════════════════════════════════════════════════════
 
+
 @distill_bp.route("/jobs/<job_id>", methods=["GET"])
 def get_job(job_id: str):
     """查询单个任务的详细状态和训练 log。"""
@@ -124,6 +128,7 @@ def get_job(job_id: str):
 #  POST /api/distill/jobs/<job_id>/cancel
 # ═══════════════════════════════════════════════════════════════════
 
+
 @distill_bp.route("/jobs/<job_id>/cancel", methods=["POST"])
 def cancel_job(job_id: str):
     """取消仍在排队中的任务（运行中的任务无法中途取消）。"""
@@ -133,12 +138,18 @@ def cancel_job(job_id: str):
     job = _get_manager().get_job(job_id)
     if not job:
         return jsonify({"error": f"job '{job_id}' not found"}), 404
-    return jsonify({"success": False, "message": f"Cannot cancel job in status '{job.status}'"}), 409
+    return (
+        jsonify(
+            {"success": False, "message": f"Cannot cancel job in status '{job.status}'"}
+        ),
+        409,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════
 #  GET /api/distill/stream/<job_id>  (SSE)
 # ═══════════════════════════════════════════════════════════════════
+
 
 @distill_bp.route("/stream/<job_id>", methods=["GET"])
 def stream_progress(job_id: str):
@@ -151,6 +162,7 @@ def stream_progress(job_id: str):
 
     流结束条件：任务状态变为 done / failed / cancelled，或 2 小时超时。
     """
+
     def _generate():
         try:
             yield from _get_manager().stream_progress(job_id, timeout=7200.0)
@@ -165,7 +177,7 @@ def stream_progress(job_id: str):
         mimetype="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",   # 关闭 Nginx 缓冲，保证 SSE 实时推送
+            "X-Accel-Buffering": "no",  # 关闭 Nginx 缓冲，保证 SSE 实时推送
         },
     )
 
@@ -173,6 +185,7 @@ def stream_progress(job_id: str):
 # ═══════════════════════════════════════════════════════════════════
 #  GET /api/distill/adapters
 # ═══════════════════════════════════════════════════════════════════
+
 
 @distill_bp.route("/adapters", methods=["GET"])
 def list_adapters():
@@ -182,9 +195,13 @@ def list_adapters():
     """
     try:
         import glob
+
         base = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "config", "adapters",
+            os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            ),
+            "config",
+            "adapters",
         )
         adapters = []
         for path in sorted(glob.glob(os.path.join(base, "*.json"))):

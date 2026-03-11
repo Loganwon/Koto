@@ -14,13 +14,14 @@ skill_routes.py — Skill CRUD & MCP 导出 API Blueprint
   GET    /api/skills/mcp              以 MCP 工具格式导出所有启用的 Skill
   GET    /api/skills/stats            每个 Skill 的调用成本统计
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import os
-from pathlib import Path
 import sys as _sys
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from flask import Blueprint, jsonify, request
@@ -33,7 +34,7 @@ skill_bp = Blueprint("skills", __name__, url_prefix="/api/skills")
 
 
 def _get_base_dir() -> Path:
-    if getattr(_sys, 'frozen', False):
+    if getattr(_sys, "frozen", False):
         return Path(_sys.executable).parent
     return Path(__file__).resolve().parents[2]
 
@@ -44,43 +45,52 @@ _SKILLS_DIR = str(_BASE_DIR / "config" / "skills")
 
 # ── 懒加载辅助 ────────────────────────────────────────────────────────────────
 
+
 def _sm():
     from app.core.skills.skill_manager import SkillManager
+
     return SkillManager
 
 
 def _schema():
-    from app.core.skills.skill_schema import SkillDefinition, InputVariable, OutputSpec
+    from app.core.skills.skill_schema import InputVariable, OutputSpec, SkillDefinition
+
     return SkillDefinition, InputVariable, OutputSpec
 
 
 def _recorder():
     from app.core.skills.skill_recorder import SkillRecorder
+
     return SkillRecorder
 
 
 def _binding_manager():
     from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+
     return get_skill_binding_manager()
 
 
 def _tracer():
     from app.core.learning.shadow_tracer import ShadowTracer
+
     return ShadowTracer
 
 
 def _token_tracker():
     import sys
+
     _wb = str(_BASE_DIR / "web")
     if _wb not in sys.path:
         sys.path.insert(0, _wb)
     import token_tracker
+
     return token_tracker
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skills  —  列出所有 Skill
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @skill_bp.route("", methods=["GET"])
 def list_skills():
@@ -96,14 +106,20 @@ def list_skills():
 
     try:
         sm = _sm()
-        all_skills = sm.list_skills()  # 返回 List[Dict]，含 name/category/icon/enabled 等 UI 字段
+        all_skills = (
+            sm.list_skills()
+        )  # 返回 List[Dict]，含 name/category/icon/enabled 等 UI 字段
 
         # 过滤
         result = []
         for s in all_skills:
             if tag_filter and not any(t in s.get("tags", []) for t in tag_filter):
                 continue
-            if search and search not in s.get("name", "").lower() and search not in s.get("description", "").lower():
+            if (
+                search
+                and search not in s.get("name", "").lower()
+                and search not in s.get("description", "").lower()
+            ):
                 continue
             if enabled_filter == "true" and not s.get("enabled", False):
                 continue
@@ -111,11 +127,13 @@ def list_skills():
                 continue
             result.append(s)
 
-        return jsonify({
-            "success": True,
-            "count": len(result),
-            "skills": result,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "count": len(result),
+                "skills": result,
+            }
+        )
     except Exception as e:
         logger.error(f"[skills] list error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -124,6 +142,7 @@ def list_skills():
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skills  —  创建自定义 Skill
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @skill_bp.route("", methods=["POST"])
 def create_skill():
@@ -150,7 +169,9 @@ def create_skill():
         # 构建输入变量
         raw_inputs = data.get("input_variables", [])
         if not raw_inputs:
-            raw_inputs = [{"name": "input", "description": "用户输入", "required": True}]
+            raw_inputs = [
+                {"name": "input", "description": "用户输入", "required": True}
+            ]
         input_vars = [
             InputVariable(
                 name=iv.get("name", "input"),
@@ -171,6 +192,7 @@ def create_skill():
 
         # Skill ID
         from app.core.skills.skill_recorder import _make_skill_id
+
         skill_id = data.get("id") or _make_skill_id(name)
 
         sd = SkillDefinition(
@@ -183,11 +205,14 @@ def create_skill():
             author=data.get("author", "user"),
             tags=data.get("tags", ["general"]),
             input_variables=input_vars,
-            system_prompt_template=data.get("system_prompt", f"你是一个专注于「{name}」任务的 AI 助手。"),
+            system_prompt_template=data.get(
+                "system_prompt", f"你是一个专注于「{name}」任务的 AI 助手。"
+            ),
             output_spec=out_spec,
         )
 
         from app.core.skills.skill_recorder import SkillRecorder
+
         sid = SkillRecorder.save_and_register(sd, overwrite=False)
         return jsonify({"success": True, "skill_id": sid, "skill": sd.to_dict()}), 201
 
@@ -202,18 +227,21 @@ def create_skill():
 # GET /api/skills/mcp  —  MCP 工具导出（注意：路由顺序在 <id> 之前）
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @skill_bp.route("/mcp", methods=["GET"])
 def export_mcp_tools():
     """导出所有启用 Skill 的 MCP 兼容工具描述列表。"""
     try:
         sm = _sm()
         tools = sm.list_mcp_tools()  # 只返回启用的
-        return jsonify({
-            "success": True,
-            "schema_version": "1.0",
-            "tools": tools,
-            "count": len(tools),
-        })
+        return jsonify(
+            {
+                "success": True,
+                "schema_version": "1.0",
+                "tools": tools,
+                "count": len(tools),
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -221,6 +249,7 @@ def export_mcp_tools():
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skills/stats  —  每 Skill 的成本统计
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @skill_bp.route("/stats", methods=["GET"])
 def skill_stats():
@@ -255,13 +284,17 @@ def skill_stats():
 # GET /api/skills/<id>  —  获取单个 Skill
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @skill_bp.route("/<skill_id>", methods=["GET"])
 def get_skill(skill_id: str):
     try:
         sm = _sm()
         sd = sm.get_definition(skill_id)
         if sd is None:
-            return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
+            return (
+                jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
+                404,
+            )
         return jsonify({"success": True, "skill": sd.to_dict()})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -270,6 +303,7 @@ def get_skill(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # PUT /api/skills/<id>  —  更新 Skill
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @skill_bp.route("/<skill_id>", methods=["PUT"])
 def update_skill(skill_id: str):
@@ -281,15 +315,32 @@ def update_skill(skill_id: str):
     skill_file = os.path.join(_SKILLS_DIR, f"{skill_id}.json")
 
     if not os.path.exists(skill_file):
-        return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在或非自定义 Skill"}), 404
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Skill '{skill_id}' 不存在或非自定义 Skill",
+                }
+            ),
+            404,
+        )
 
     try:
         with open(skill_file, "r", encoding="utf-8") as f:
             existing = json.load(f)
 
         # 允许更新的字段
-        updatable = ["name", "description", "system_prompt", "tags", "input_variables",
-                     "output_spec", "examples", "enabled", "author"]
+        updatable = [
+            "name",
+            "description",
+            "system_prompt",
+            "tags",
+            "input_variables",
+            "output_spec",
+            "examples",
+            "enabled",
+            "author",
+        ]
         for field in updatable:
             if field in data:
                 existing[field] = data[field]
@@ -312,11 +363,20 @@ def update_skill(skill_id: str):
 # DELETE /api/skills/<id>  —  删除 Skill（仅自定义）
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @skill_bp.route("/<skill_id>", methods=["DELETE"])
 def delete_skill(skill_id: str):
     skill_file = os.path.join(_SKILLS_DIR, f"{skill_id}.json")
     if not os.path.exists(skill_file):
-        return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在或非自定义 Skill"}), 404
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Skill '{skill_id}' 不存在或非自定义 Skill",
+                }
+            ),
+            404,
+        )
 
     try:
         os.remove(skill_file)
@@ -335,6 +395,7 @@ def delete_skill(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skills/<id>/enable  —  启用 / 禁用 Skill
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @skill_bp.route("/<skill_id>/enable", methods=["POST"])
 def toggle_skill(skill_id: str):
@@ -363,6 +424,7 @@ def toggle_skill(skill_id: str):
 # POST /api/skills/<id>/record  —  从会话自动提取 Skill
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @skill_bp.route("/<skill_id>/toggle", methods=["POST"])
 def toggle_skill_v2(skill_id: str):
     """
@@ -375,7 +437,10 @@ def toggle_skill_v2(skill_id: str):
         sm = _sm()
         ok = sm.set_enabled(skill_id, enabled)
         if not ok:
-            return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
+            return (
+                jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
+                404,
+            )
         return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -393,7 +458,10 @@ def save_skill_prompt(skill_id: str):
         sm = _sm()
         ok = sm.update_prompt(skill_id, prompt)
         if not ok:
-            return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
+            return (
+                jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
+                404,
+            )
         return jsonify({"success": True, "skill_id": skill_id})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -408,7 +476,10 @@ def reset_skill_prompt(skill_id: str):
         sm = _sm()
         ok = sm.reset_prompt(skill_id)
         if not ok:
-            return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
+            return (
+                jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
+                404,
+            )
         return jsonify({"success": True, "skill_id": skill_id})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -447,14 +518,25 @@ def record_from_session(skill_id: str):
         sd.id = skill_id
 
         saved_id = SkillRecorder.save_and_register(sd, overwrite=overwrite)
-        return jsonify({
-            "success": True,
-            "skill_id": saved_id,
-            "skill": sd.to_dict(),
-            "source_session": session_id,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "skill_id": saved_id,
+                "skill": sd.to_dict(),
+                "source_session": session_id,
+            }
+        )
     except FileExistsError as e:
-        return jsonify({"success": False, "error": str(e), "hint": "传 overwrite:true 强制覆盖"}), 409
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": str(e),
+                    "hint": "传 overwrite:true 强制覆盖",
+                }
+            ),
+            409,
+        )
     except ValueError as e:
         return jsonify({"success": False, "error": str(e)}), 404
     except Exception as e:
@@ -465,6 +547,7 @@ def record_from_session(skill_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skills/bindings  —  列出技能绑定
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 @skill_bp.route("/bindings", methods=["GET"])
 def list_bindings():
@@ -477,11 +560,13 @@ def list_bindings():
             skill_id=skill_id,
             binding_type=binding_type,
         )
-        return jsonify({
-            "success": True,
-            "count": len(bindings),
-            "bindings": [binding.to_dict() for binding in bindings],
-        })
+        return jsonify(
+            {
+                "success": True,
+                "count": len(bindings),
+                "bindings": [binding.to_dict() for binding in bindings],
+            }
+        )
     except Exception as e:
         logger.error(f"[skills/bindings] list error: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
@@ -505,6 +590,7 @@ def bootstrap_bindings():
 # POST /api/skills/<id>/bindings/intent  —  创建意图绑定
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @skill_bp.route("/<skill_id>/bindings/intent", methods=["POST"])
 def bind_skill_intent(skill_id: str):
     """创建一个基于关键词匹配的技能意图绑定。"""
@@ -517,7 +603,10 @@ def bind_skill_intent(skill_id: str):
     try:
         sm = _sm()
         if not sm.get_definition(skill_id):
-            return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
+            return (
+                jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
+                404,
+            )
 
         binding = _binding_manager().bind_intent(
             skill_id=skill_id,
@@ -534,6 +623,7 @@ def bind_skill_intent(skill_id: str):
 # POST /api/skills/<id>/bindings/trigger  —  创建触发器绑定
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @skill_bp.route("/<skill_id>/bindings/trigger", methods=["POST"])
 def bind_skill_trigger(skill_id: str):
     """创建一个调度触发器绑定，并同步注册到 TriggerRegistry。"""
@@ -545,7 +635,10 @@ def bind_skill_trigger(skill_id: str):
     try:
         sm = _sm()
         if not sm.get_definition(skill_id):
-            return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
+            return (
+                jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
+                404,
+            )
 
         binding = _binding_manager().bind_trigger(
             skill_id=skill_id,
@@ -565,6 +658,7 @@ def bind_skill_trigger(skill_id: str):
 # POST /api/skills/bindings/<id>/toggle  —  启用 / 禁用绑定
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @skill_bp.route("/bindings/<binding_id>/toggle", methods=["POST"])
 def toggle_binding(binding_id: str):
     data = request.json or {}
@@ -574,11 +668,16 @@ def toggle_binding(binding_id: str):
         manager = _binding_manager()
         binding = manager.get(binding_id)
         if not binding:
-            return jsonify({"success": False, "error": f"Binding '{binding_id}' 不存在"}), 404
+            return (
+                jsonify({"success": False, "error": f"Binding '{binding_id}' 不存在"}),
+                404,
+            )
 
         manager.enable(binding_id, enabled)
         updated = manager.get(binding_id)
-        return jsonify({"success": True, "binding": updated.to_dict() if updated else None})
+        return jsonify(
+            {"success": True, "binding": updated.to_dict() if updated else None}
+        )
     except Exception as e:
         logger.error(f"[skills/bindings/toggle] error: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500
@@ -588,12 +687,16 @@ def toggle_binding(binding_id: str):
 # DELETE /api/skills/bindings/<id>  —  删除绑定
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 @skill_bp.route("/bindings/<binding_id>", methods=["DELETE"])
 def delete_binding(binding_id: str):
     try:
         removed = _binding_manager().remove(binding_id)
         if not removed:
-            return jsonify({"success": False, "error": f"Binding '{binding_id}' 不存在"}), 404
+            return (
+                jsonify({"success": False, "error": f"Binding '{binding_id}' 不存在"}),
+                404,
+            )
         return jsonify({"success": True, "deleted": binding_id})
     except Exception as e:
         logger.error(f"[skills/bindings/delete] error: {e}", exc_info=True)

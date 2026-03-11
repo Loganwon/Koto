@@ -40,10 +40,12 @@ logger = logging.getLogger(__name__)
 # ── 路径 ─────────────────────────────────────────────────────────────────────
 import sys as _sys
 
+
 def _base_dir() -> Path:
     if getattr(_sys, "frozen", False):
         return Path(_sys.executable).parent
     return Path(__file__).resolve().parents[3]
+
 
 _DB_PATH = _base_dir() / "workspace" / "rating_store" / "ratings.db"
 
@@ -52,8 +54,8 @@ _STAR_TO_QUALITY = {1: 0.0, 2: 0.25, 3: 0.55, 4: 0.82, 5: 1.0}
 
 # 模型自评维度权重
 _EVAL_WEIGHTS = {
-    "accuracy":        0.35,
-    "helpfulness":     0.30,
+    "accuracy": 0.35,
+    "helpfulness": 0.30,
     "personalization": 0.20,
     "task_completion": 0.15,
 }
@@ -144,7 +146,8 @@ class RatingStore:
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock:
             with self._conn() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO user_ratings
                         (msg_id, stars, comment, session_name, user_input, ai_response, task_type, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -152,8 +155,18 @@ class RatingStore:
                         stars=excluded.stars,
                         comment=excluded.comment,
                         created_at=excluded.created_at
-                """, (msg_id, stars, comment, session_name,
-                      user_input[:2000], ai_response[:2000], task_type, now))
+                """,
+                    (
+                        msg_id,
+                        stars,
+                        comment,
+                        session_name,
+                        user_input[:2000],
+                        ai_response[:2000],
+                        task_type,
+                        now,
+                    ),
+                )
         logger.info(f"[RatingStore] ⭐ user_rating saved: {msg_id[:8]}… stars={stars}")
         return True
 
@@ -166,13 +179,12 @@ class RatingStore:
         reasoning: str = "",
     ) -> bool:
         """保存模型自评分（各维度 0.0~1.0 + 加权 overall）。"""
-        overall = sum(
-            scores.get(dim, 0.0) * w for dim, w in _EVAL_WEIGHTS.items()
-        )
+        overall = sum(scores.get(dim, 0.0) * w for dim, w in _EVAL_WEIGHTS.items())
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock:
             with self._conn() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO model_evals
                         (msg_id, accuracy, helpfulness, personalization,
                          task_completion, overall, reasoning, session_name, task_type, created_at)
@@ -183,17 +195,23 @@ class RatingStore:
                         task_completion=excluded.task_completion,
                         overall=excluded.overall, reasoning=excluded.reasoning,
                         created_at=excluded.created_at
-                """, (
-                    msg_id,
-                    scores.get("accuracy",        0.0),
-                    scores.get("helpfulness",      0.0),
-                    scores.get("personalization",  0.0),
-                    scores.get("task_completion",  0.0),
-                    overall,
-                    reasoning[:1000],
-                    session_name, task_type, now,
-                ))
-        logger.info(f"[RatingStore] 🤖 model_eval saved: {msg_id[:8]}… overall={overall:.2f}")
+                """,
+                    (
+                        msg_id,
+                        scores.get("accuracy", 0.0),
+                        scores.get("helpfulness", 0.0),
+                        scores.get("personalization", 0.0),
+                        scores.get("task_completion", 0.0),
+                        overall,
+                        reasoning[:1000],
+                        session_name,
+                        task_type,
+                        now,
+                    ),
+                )
+        logger.info(
+            f"[RatingStore] 🤖 model_eval saved: {msg_id[:8]}… overall={overall:.2f}"
+        )
         return True
 
     # ── 查询 ─────────────────────────────────────────────────────────────────
@@ -234,7 +252,8 @@ class RatingStore:
         """
         rows: List[Dict[str, Any]] = []
         with self._conn() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT
                     ur.msg_id,
                     ur.stars,
@@ -253,7 +272,9 @@ class RatingStore:
                 JOIN model_evals me ON ur.msg_id = me.msg_id
                 ORDER BY (ur.stars * 0.55 + me.overall * 0.45) DESC
                 LIMIT ?
-            """, (limit,))
+            """,
+                (limit,),
+            )
             for row in cursor.fetchall():
                 d = dict(row)
                 user_q = _STAR_TO_QUALITY.get(d["stars"], 0.0)
@@ -271,7 +292,8 @@ class RatingStore:
         """低分样本 — 用于负例分析或人工重标。"""
         rows: List[Dict[str, Any]] = []
         with self._conn() as conn:
-            cursor = conn.execute("""
+            cursor = conn.execute(
+                """
                 SELECT ur.msg_id, ur.stars, ur.comment, ur.user_input,
                        ur.ai_response, ur.task_type, me.overall AS model_overall
                 FROM user_ratings ur
@@ -279,11 +301,15 @@ class RatingStore:
                 WHERE ur.stars <= 2
                 ORDER BY ur.stars ASC, me.overall ASC
                 LIMIT ?
-            """, (limit,))
+            """,
+                (limit,),
+            )
             for row in cursor.fetchall():
                 d = dict(row)
                 user_q = _STAR_TO_QUALITY.get(d["stars"], 0.0)
-                d["combined_score"] = round(user_q * 0.55 + d["model_overall"] * 0.45, 4)
+                d["combined_score"] = round(
+                    user_q * 0.55 + d["model_overall"] * 0.45, 4
+                )
                 if d["combined_score"] <= max_combined:
                     rows.append(d)
         return rows
@@ -308,12 +334,12 @@ class RatingStore:
 
         return {
             "user_ratings": {
-                "total":     ur_row["n"],
+                "total": ur_row["n"],
                 "avg_stars": round(ur_row["avg_stars"] or 0, 2),
                 "distribution": {str(r["stars"]): r["cnt"] for r in dist},
             },
             "model_evals": {
-                "total":       me_row["n"],
+                "total": me_row["n"],
                 "avg_overall": round(me_row["avg_overall"] or 0, 3),
             },
             "high_quality_paired": hq["n"],

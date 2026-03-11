@@ -1,26 +1,34 @@
-from flask import Blueprint, request, jsonify, Response, stream_with_context
 import json
-import os
 import logging
+import os
 import time
+
+from flask import Blueprint, Response, jsonify, request, stream_with_context
+
 from app.core.agent.factory import create_agent
 from app.core.agent.types import AgentStepType
 
 logger = logging.getLogger(__name__)
 
-agent_bp = Blueprint('agent', __name__)
+agent_bp = Blueprint("agent", __name__)
+
 
 # ── v2 护栏模块（懒加载）──────────────────────────────────────────────────────
 def _lazy_pii():
     from app.core.security.pii_filter import PIIFilter
+
     return PIIFilter
+
 
 def _lazy_validator():
     from app.core.security.output_validator import OutputValidator
+
     return OutputValidator
+
 
 def _lazy_tracer():
     from app.core.learning.shadow_tracer import ShadowTracer
+
     return ShadowTracer
 
 
@@ -28,14 +36,19 @@ def _make_eval_llm_fn():
     """后台自评用 LLM 函数（复用 Agent 的 Gemini provider，不另起连接）。"""
     try:
         _a = get_agent()
+
         def _fn(prompt: str) -> str:
             try:
                 r = _a.llm_provider.generate_content(
-                    prompt, model="gemini-2.0-flash-lite",
-                    max_tokens=512, temperature=0.1)
+                    prompt,
+                    model="gemini-2.0-flash-lite",
+                    max_tokens=512,
+                    temperature=0.1,
+                )
                 return r.get("content", "") if isinstance(r, dict) else str(r)
             except Exception:
                 return ""
+
         return _fn
     except Exception:
         return lambda _: ""
@@ -43,17 +56,30 @@ def _make_eval_llm_fn():
 
 # ── 503 / 连接故障 → 本地模型兜底 ────────────────────────────────────────────
 
+
 def _is_service_unavailable_error(text: str) -> bool:
     """检测是否为 503 / 网络连接故障，用于判断是否启用本地模型兜底。"""
     t = (text or "").lower()
-    return any(sig in t for sig in (
-        "503", "service unavailable", "unavailable", "overloaded",
-        "connection error", "timed out", "timeout", "resource_exhausted",
-        "high demand", "serviceunavailable",
-    ))
+    return any(
+        sig in t
+        for sig in (
+            "503",
+            "service unavailable",
+            "unavailable",
+            "overloaded",
+            "connection error",
+            "timed out",
+            "timeout",
+            "resource_exhausted",
+            "high demand",
+            "serviceunavailable",
+        )
+    )
 
 
-def _build_skill_system_instruction(user_input: str = "", task_type: str = "CHAT") -> str:
+def _build_skill_system_instruction(
+    user_input: str = "", task_type: str = "CHAT"
+) -> str:
     """
     构建注入了当前激活 Skills 的系统指令。
     供本地模型兜底路径使用，确保本地模型也能理解并遵循用户启用的 Skill。
@@ -65,15 +91,21 @@ def _build_skill_system_instruction(user_input: str = "", task_type: str = "CHAT
     )
     try:
         from app.core.skills.skill_manager import SkillManager
+
         # 自动匹配补充：当用户没有手动启用 Skill 时推荐合适的临时 Skill
         _auto_ids: list = []
         try:
             from app.core.skills.skill_auto_matcher import SkillAutoMatcher
-            _auto_ids = SkillAutoMatcher.match(user_input=user_input, task_type=task_type)
+
+            _auto_ids = SkillAutoMatcher.match(
+                user_input=user_input, task_type=task_type
+            )
         except Exception:
             pass
         return SkillManager.inject_into_prompt(
-            _base, task_type=task_type, user_input=user_input,
+            _base,
+            task_type=task_type,
+            user_input=user_input,
             temp_skill_ids=_auto_ids,
         )
     except Exception as _e:
@@ -88,8 +120,9 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
     当前激活的 Skills 会注入到系统指令中，本地模型与云端模型行为保持一致。
     """
     try:
-        from app.core.routing.local_model_router import LocalModelRouter
         import requests as _req
+
+        from app.core.routing.local_model_router import LocalModelRouter
 
         if not LocalModelRouter.is_ollama_available():
             logger.info("[fallback] 本地 Ollama 不可用，跳过兜底")
@@ -99,7 +132,7 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
             logger.info("[fallback] 本地模型初始化失败，跳过兜底")
             return None, None
 
-        model_name = getattr(LocalModelRouter, '_model_name', None)
+        model_name = getattr(LocalModelRouter, "_model_name", None)
         if not model_name:
             return None, None
 
@@ -110,6 +143,7 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
         active_skill_names = []
         try:
             from app.core.skills.skill_manager import SkillManager
+
             active_skill_names = SkillManager.get_active_skill_names()
         except Exception:
             pass
@@ -118,12 +152,16 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
 
         # ── 构建对话历史（过滤掉系统快照等噪音） ────────────────────────────
         messages = [{"role": "system", "content": system_instruction}]
-        for msg in (history or []):
+        for msg in history or []:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if role == "model":
                 role = "assistant"
-            if role in ("user", "assistant") and content and not content.startswith("Session context:"):
+            if (
+                role in ("user", "assistant")
+                and content
+                and not content.startswith("Session context:")
+            ):
                 messages.append({"role": role, "content": content})
         messages.append({"role": "user", "content": user_message})
 
@@ -158,11 +196,14 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
 # ------------------------------------------------------------------
 _CHATS_DIR = None
 
+
 def _get_chats_dir() -> str:
     """Lazily resolve chats/ directory (same as web/app.py uses)."""
     global _CHATS_DIR
     if _CHATS_DIR is None:
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        project_root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
         _CHATS_DIR = os.path.join(project_root, "chats")
         os.makedirs(_CHATS_DIR, exist_ok=True)
     return _CHATS_DIR
@@ -323,7 +364,15 @@ def _build_snapshot_context_text(session_state: dict) -> str:
     lines = [
         "Session context: latest local system snapshot (may be stale, use tools if needed):"
     ]
-    for key in ["cpu", "memory", "disk", "network", "python_env", "processes", "warnings"]:
+    for key in [
+        "cpu",
+        "memory",
+        "disk",
+        "network",
+        "python_env",
+        "processes",
+        "warnings",
+    ]:
         item = snapshot.get(key)
         if not item:
             continue
@@ -344,6 +393,7 @@ def _build_snapshot_context_text(session_state: dict) -> str:
 # ------------------------------------------------------------------
 _agent_instance = None
 
+
 def get_agent():
     global _agent_instance
     if _agent_instance is None:
@@ -361,8 +411,8 @@ def _resolve_runtime_skill(
         return explicit_skill_id, [explicit_skill_id]
 
     try:
-        from app.core.skills.skill_trigger_binding import get_skill_binding_manager
         from app.core.skills.skill_manager import SkillManager
+        from app.core.skills.skill_trigger_binding import get_skill_binding_manager
 
         matched_ids = get_skill_binding_manager().match_intent(user_input or "")
         if not matched_ids:
@@ -423,22 +473,23 @@ def _run_agent_collect(
         "steps": steps_payload,
     }
 
-@agent_bp.route('/chat', methods=['POST'])
+
+@agent_bp.route("/chat", methods=["POST"])
 def chat():
     data = request.json
-    message = data.get('message')
-    session_id = data.get('session_id') or data.get('session', '')
-    history = data.get('history') or _load_history(session_id)
-    model_id = data.get('model', 'gemini-3-flash-preview')
-    skill_id = data.get('skill_id')          # v2: 关联的 Skill ID
-    task_type = data.get('task_type')         # v2: 任务分类
-    
+    message = data.get("message")
+    session_id = data.get("session_id") or data.get("session", "")
+    history = data.get("history") or _load_history(session_id)
+    model_id = data.get("model", "gemini-3-flash-preview")
+    skill_id = data.get("skill_id")  # v2: 关联的 Skill ID
+    task_type = data.get("task_type")  # v2: 任务分类
+
     # Phase3: load system state snapshot and inject into history
     session_state = _load_session_state(session_id)
     snapshot_ctx = _build_snapshot_context_text(session_state)
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
-    
+
     if not message:
         return jsonify({"error": "Message is required"}), 400
 
@@ -485,7 +536,9 @@ def chat():
 
             # ── 503 / 连接故障：本地模型兜底 ────────────────────────────────
             _error_steps = [s for s in collected_steps if s.get("step_type") == "error"]
-            if _error_steps and _is_service_unavailable_error(_error_steps[-1].get("content", "")):
+            if _error_steps and _is_service_unavailable_error(
+                _error_steps[-1].get("content", "")
+            ):
                 logger.warning("[chat] 检测到云端连接故障（503），尝试本地模型兜底")
                 _notice = {
                     "step_type": "thought",
@@ -498,9 +551,13 @@ def chat():
                     final_answer = _local_ans
                     used_local_fallback = True
                     local_fallback_model = _local_mod
-                    logger.info(f"[chat] 本地模型兜底成功（{_local_mod}），响应长度: {len(_local_ans)}")
+                    logger.info(
+                        f"[chat] 本地模型兜底成功（{_local_mod}），响应长度: {len(_local_ans)}"
+                    )
                 else:
-                    final_answer = "⚠️ 云端服务暂时不可用（503），本地模型也无法访问，请稍后重试。"
+                    final_answer = (
+                        "⚠️ 云端服务暂时不可用（503），本地模型也无法访问，请稍后重试。"
+                    )
 
             # ── v2: 输出质量验收 ──────────────────────────────────────────────
             validated_answer = final_answer
@@ -561,21 +618,26 @@ def chat():
             yield f"data: {json.dumps({'type': 'task_final', 'data': task_payload}, ensure_ascii=False)}\n\n"
 
             # Persist turn to disk + phase3 state snapshot
-            _save_history(session_id, message, display_answer or '[Agent task completed]')
-            merged_state = _merge_system_snapshot_from_steps(session_state, collected_steps)
+            _save_history(
+                session_id, message, display_answer or "[Agent task completed]"
+            )
+            merged_state = _merge_system_snapshot_from_steps(
+                session_state, collected_steps
+            )
             _save_session_state(session_id, merged_state)
 
             # ── 后台自评分（数据飞轮: model_eval 通道）────────────────────────
             if display_answer and not used_local_fallback:
                 try:
-                    from app.core.learning.response_evaluator import ResponseEvaluator
                     from app.core.learning.rating_store import RatingStore
+                    from app.core.learning.response_evaluator import ResponseEvaluator
+
                     ResponseEvaluator.evaluate_async(
-                        msg_id=RatingStore.make_msg_id(session_id or '', message or ''),
+                        msg_id=RatingStore.make_msg_id(session_id or "", message or ""),
                         user_input=message,
                         ai_response=display_answer,
-                        task_type=task_type or 'CHAT',
-                        session_name=session_id or '',
+                        task_type=task_type or "CHAT",
+                        session_name=session_id or "",
                         llm_fn=_make_eval_llm_fn(),
                     )
                 except Exception as _ee:
@@ -618,9 +680,10 @@ def chat():
                     return
             yield f"data: {json.dumps({'type': 'error', 'data': {'error': _err_str}}, ensure_ascii=False)}\n\n"
 
-    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
-@agent_bp.route('/tools', methods=['GET'])
+
+@agent_bp.route("/tools", methods=["GET"])
 def list_tools():
     """List available tools for the agent."""
     agent = get_agent()
@@ -628,16 +691,16 @@ def list_tools():
     return jsonify(definitions)
 
 
-@agent_bp.route('/process', methods=['POST'])
+@agent_bp.route("/process", methods=["POST"])
 def process_compat():
     """Phase2 compatibility endpoint for legacy AdaptiveAgent clients."""
     data = request.json or {}
-    user_request = data.get('request', '')
-    session_id = data.get('session_id') or data.get('session', '')
-    skill_id = data.get('skill_id')
-    task_type = data.get('task_type')
-    context = data.get('context', {})
-    history = context.get('history', []) if isinstance(context, dict) else []
+    user_request = data.get("request", "")
+    session_id = data.get("session_id") or data.get("session", "")
+    skill_id = data.get("skill_id")
+    task_type = data.get("task_type")
+    context = data.get("context", {})
+    history = context.get("history", []) if isinstance(context, dict) else []
 
     # Phase3: load and inject system state snapshot
     session_state = _load_session_state(session_id)
@@ -663,7 +726,9 @@ def process_compat():
         task["skill_id"] = skill_id
         task["auto_skill_ids"] = auto_skill_ids
         task["task_type"] = task_type
-        merged_state = _merge_system_snapshot_from_steps(session_state, task.get("steps", []))
+        merged_state = _merge_system_snapshot_from_steps(
+            session_state, task.get("steps", [])
+        )
         _save_session_state(session_id, merged_state)
         return jsonify({"success": True, "task": task})
     except Exception as exc:
@@ -671,17 +736,19 @@ def process_compat():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-@agent_bp.route('/process-stream', methods=['POST'])
+@agent_bp.route("/process-stream", methods=["POST"])
 def process_stream_compat():
     """Phase2 compatibility SSE endpoint for legacy AdaptiveAgent clients. (v2 PII + validation)"""
     data = request.json or {}
-    user_request = data.get('request', '')
-    session_id = data.get('session_id') or data.get('session', '')
-    skill_id = data.get('skill_id')
-    task_type = data.get('task_type')
-    context = data.get('context', {})
+    user_request = data.get("request", "")
+    session_id = data.get("session_id") or data.get("session", "")
+    skill_id = data.get("skill_id")
+    task_type = data.get("task_type")
+    context = data.get("context", {})
     # Prefer explicit history from request, fall back to disk
-    history = (context.get('history', []) if isinstance(context, dict) else []) or _load_history(session_id)
+    history = (
+        context.get("history", []) if isinstance(context, dict) else []
+    ) or _load_history(session_id)
 
     # Phase3: load and inject system state snapshot
     session_state = _load_session_state(session_id)
@@ -737,8 +804,12 @@ def process_stream_compat():
 
             # ── 503 / 连接故障：本地模型兜底 ────────────────────────────────
             _error_steps = [s for s in collected_steps if s.get("step_type") == "error"]
-            if _error_steps and _is_service_unavailable_error(_error_steps[-1].get("content", "")):
-                logger.warning("[process-stream] 检测到云端连接故障（503），尝试本地模型兜底")
+            if _error_steps and _is_service_unavailable_error(
+                _error_steps[-1].get("content", "")
+            ):
+                logger.warning(
+                    "[process-stream] 检测到云端连接故障（503），尝试本地模型兜底"
+                )
                 _notice = {
                     "step_type": "thought",
                     "content": "⚠️ 云端服务暂时不可用，正在切换到本地模型处理您的请求...",
@@ -752,7 +823,9 @@ def process_stream_compat():
                     local_fallback_model = _local_mod
                     logger.info(f"[process-stream] 本地模型兜底成功（{_local_mod}）")
                 else:
-                    raw_final = "⚠️ 云端服务暂时不可用（503），本地模型也无法访问，请稍后重试。"
+                    raw_final = (
+                        "⚠️ 云端服务暂时不可用（503），本地模型也无法访问，请稍后重试。"
+                    )
 
             # ── 输出校验 ─────────────────────────────────────────
             latency_ms = int((time.time() - t0) * 1000)
@@ -810,21 +883,28 @@ def process_stream_compat():
             yield f"data: {json.dumps({'type': 'task_final', 'data': task_payload}, ensure_ascii=False)}\n\n"
 
             # Persist turn to disk + phase3 state snapshot
-            _save_history(session_id, user_request, final_answer or '[Agent task completed]')
-            merged_state = _merge_system_snapshot_from_steps(session_state, collected_steps)
+            _save_history(
+                session_id, user_request, final_answer or "[Agent task completed]"
+            )
+            merged_state = _merge_system_snapshot_from_steps(
+                session_state, collected_steps
+            )
             _save_session_state(session_id, merged_state)
 
             # ── 后台自评分（数据飞轮: model_eval 通道）────────────────────────
             if final_answer and not used_local_fallback:
                 try:
-                    from app.core.learning.response_evaluator import ResponseEvaluator
                     from app.core.learning.rating_store import RatingStore
+                    from app.core.learning.response_evaluator import ResponseEvaluator
+
                     ResponseEvaluator.evaluate_async(
-                        msg_id=RatingStore.make_msg_id(session_id or '', user_request or ''),
+                        msg_id=RatingStore.make_msg_id(
+                            session_id or "", user_request or ""
+                        ),
                         user_input=user_request,
                         ai_response=final_answer,
-                        task_type=task_type or 'CHAT',
-                        session_name=session_id or '',
+                        task_type=task_type or "CHAT",
+                        session_name=session_id or "",
                         llm_fn=_make_eval_llm_fn(),
                     )
                 except Exception as _ee:
@@ -865,7 +945,7 @@ def process_stream_compat():
                     return
             yield f"data: {json.dumps({'type': 'error', 'data': {'error': _err_str}}, ensure_ascii=False)}\n\n"
 
-    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
 # ======================================================================
@@ -874,21 +954,23 @@ def process_stream_compat():
 # These were originally defined directly in web/app.py.
 # ======================================================================
 
+
 def _get_legacy_agent():
     """Try to import the old agent_loop singleton."""
     try:
         from agent_loop import get_agent_loop
+
         return get_agent_loop()
     except Exception:
         return None
 
 
-@agent_bp.route('/confirm', methods=['POST'])
+@agent_bp.route("/confirm", methods=["POST"])
 def agent_confirm():
     """User confirmation callback (legacy compat)."""
     data = request.json or {}
-    session = data.get('session', '')
-    confirmed = data.get('confirmed', False)
+    session = data.get("session", "")
+    confirmed = data.get("confirmed", False)
 
     agent = _get_legacy_agent()
     if agent is None:
@@ -901,12 +983,12 @@ def agent_confirm():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-@agent_bp.route('/choice', methods=['POST'])
+@agent_bp.route("/choice", methods=["POST"])
 def agent_choice():
     """User choice callback (legacy compat)."""
     data = request.json or {}
-    session = data.get('session', '')
-    selected = data.get('selected', '')
+    session = data.get("session", "")
+    selected = data.get("selected", "")
 
     agent = _get_legacy_agent()
     if agent is None:
@@ -919,15 +1001,15 @@ def agent_choice():
         return jsonify({"success": False, "error": str(exc)}), 500
 
 
-@agent_bp.route('/plan', methods=['POST'])
+@agent_bp.route("/plan", methods=["POST"])
 def agent_plan():
     """Multi-step planning endpoint — uses UnifiedAgent ReAct loop with an
     explicit planning system instruction."""
     data = request.json or {}
-    user_request = data.get('request', '')
-    session_name = data.get('session', '')
-    context = data.get('context', {})
-    history = context.get('history', []) if isinstance(context, dict) else []
+    user_request = data.get("request", "")
+    session_name = data.get("session", "")
+    context = data.get("context", {})
+    history = context.get("history", []) if isinstance(context, dict) else []
 
     if not user_request:
         return jsonify({"success": False, "error": "缺少请求内容"}), 400
@@ -976,21 +1058,21 @@ def agent_plan():
             # Restore original instruction
             agent.base_system_instruction = original_instruction
 
-    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
-@agent_bp.route('/optimize', methods=['POST'])
+@agent_bp.route("/optimize", methods=["POST"])
 def agent_optimize():
     """Phase4: System performance optimization advisor.
-    
+
     Analyzes current system metrics and provides actionable optimization
     recommendations in a single turn.
     """
     data = request.json or {}
-    user_request = data.get('request') or "Analyze my system and suggest optimizations"
-    session_id = data.get('session_id') or data.get('session', '')
-    context = data.get('context', {})
-    history = context.get('history', []) if isinstance(context, dict) else []
+    user_request = data.get("request") or "Analyze my system and suggest optimizations"
+    session_id = data.get("session_id") or data.get("session", "")
+    context = data.get("context", {})
+    history = context.get("history", []) if isinstance(context, dict) else []
 
     # Phase3: load and inject system state snapshot
     session_state = _load_session_state(session_id)
@@ -1037,8 +1119,14 @@ def agent_optimize():
             yield f"data: {json.dumps({'type': 'task_final', 'data': task_payload}, ensure_ascii=False)}\n\n"
 
             # Persist turn to disk + phase3 state snapshot
-            _save_history(session_id, user_request, final_answer or '[Optimization analysis completed]')
-            merged_state = _merge_system_snapshot_from_steps(session_state, collected_steps)
+            _save_history(
+                session_id,
+                user_request,
+                final_answer or "[Optimization analysis completed]",
+            )
+            merged_state = _merge_system_snapshot_from_steps(
+                session_state, collected_steps
+            )
             _save_session_state(session_id, merged_state)
         except Exception as exc:
             logger.exception("/optimize failed")
@@ -1047,234 +1135,273 @@ def agent_optimize():
             # Restore original instruction
             agent.base_system_instruction = original_instruction
 
-    return Response(stream_with_context(generate()), mimetype='text/event-stream')
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
 # ------------------------------------------------------------------
 # Phase 4b: Monitoring Control Endpoints
 # ------------------------------------------------------------------
 
-@agent_bp.route('/monitor/start', methods=['POST'])
+
+@agent_bp.route("/monitor/start", methods=["POST"])
 def start_monitoring():
     """Start background system monitoring."""
     try:
         from app.core.monitoring.system_event_monitor import get_system_event_monitor
-        
+
         data = request.get_json() or {}
-        check_interval = data.get('check_interval', 30)
-        
+        check_interval = data.get("check_interval", 30)
+
         monitor = get_system_event_monitor(check_interval=check_interval)
-        
+
         if monitor.is_running():
-            return jsonify({
-                "status": "already_running",
-                "message": "System monitoring is already active",
-                "check_interval": monitor.check_interval
-            })
-        
+            return jsonify(
+                {
+                    "status": "already_running",
+                    "message": "System monitoring is already active",
+                    "check_interval": monitor.check_interval,
+                }
+            )
+
         monitor.start()
-        
-        return jsonify({
-            "status": "success",
-            "message": "System monitoring started",
-            "check_interval": monitor.check_interval
-        })
+
+        return jsonify(
+            {
+                "status": "success",
+                "message": "System monitoring started",
+                "check_interval": monitor.check_interval,
+            }
+        )
     except Exception as e:
         logger.error(f"Error starting monitoring: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to start monitoring: {str(e)}"
-        }), 500
+        return (
+            jsonify(
+                {"status": "error", "message": f"Failed to start monitoring: {str(e)}"}
+            ),
+            500,
+        )
 
 
-@agent_bp.route('/monitor/stop', methods=['POST'])
+@agent_bp.route("/monitor/stop", methods=["POST"])
 def stop_monitoring():
     """Stop background system monitoring."""
     try:
         from app.core.monitoring.system_event_monitor import get_system_event_monitor
-        
+
         monitor = get_system_event_monitor()
-        
+
         if not monitor.is_running():
-            return jsonify({
-                "status": "not_running",
-                "message": "System monitoring is not currently active"
-            })
-        
+            return jsonify(
+                {
+                    "status": "not_running",
+                    "message": "System monitoring is not currently active",
+                }
+            )
+
         monitor.stop()
-        
-        return jsonify({
-            "status": "success",
-            "message": "System monitoring stopped"
-        })
+
+        return jsonify({"status": "success", "message": "System monitoring stopped"})
     except Exception as e:
         logger.error(f"Error stopping monitoring: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to stop monitoring: {str(e)}"
-        }), 500
+        return (
+            jsonify(
+                {"status": "error", "message": f"Failed to stop monitoring: {str(e)}"}
+            ),
+            500,
+        )
 
 
-@agent_bp.route('/monitor/status', methods=['GET'])
+@agent_bp.route("/monitor/status", methods=["GET"])
 def monitoring_status():
     """Get current monitoring status and event summary."""
     try:
         from app.core.monitoring.system_event_monitor import get_system_event_monitor
-        
+
         monitor = get_system_event_monitor()
-        
-        return jsonify({
-            "status": "success",
-            "monitoring_active": monitor.is_running(),
-            "check_interval": monitor.check_interval if monitor.is_running() else None,
-            "health": monitor.get_summary(),
-            "recent_events": monitor.get_events(limit=5)
-        })
+
+        return jsonify(
+            {
+                "status": "success",
+                "monitoring_active": monitor.is_running(),
+                "check_interval": (
+                    monitor.check_interval if monitor.is_running() else None
+                ),
+                "health": monitor.get_summary(),
+                "recent_events": monitor.get_events(limit=5),
+            }
+        )
     except Exception as e:
         logger.error(f"Error getting monitoring status: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to get status: {str(e)}"
-        }), 500
+        return (
+            jsonify({"status": "error", "message": f"Failed to get status: {str(e)}"}),
+            500,
+        )
 
 
-@agent_bp.route('/monitor/events', methods=['GET'])
+@agent_bp.route("/monitor/events", methods=["GET"])
 def get_monitoring_events():
     """Get detected anomalies from monitoring."""
     try:
         from app.core.monitoring.system_event_monitor import get_system_event_monitor
-        
-        limit = request.args.get('limit', 20, type=int)
-        event_type = request.args.get('event_type', None, type=str)
-        
+
+        limit = request.args.get("limit", 20, type=int)
+        event_type = request.args.get("event_type", None, type=str)
+
         monitor = get_system_event_monitor()
         events = monitor.get_events(limit=limit, event_type=event_type)
-        
-        return jsonify({
-            "status": "success",
-            "anomaly_count": len(events),
-            "anomalies": events,
-            "monitoring_active": monitor.is_running()
-        })
+
+        return jsonify(
+            {
+                "status": "success",
+                "anomaly_count": len(events),
+                "anomalies": events,
+                "monitoring_active": monitor.is_running(),
+            }
+        )
     except Exception as e:
         logger.error(f"Error getting events: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to get events: {str(e)}"
-        }), 500
+        return (
+            jsonify({"status": "error", "message": f"Failed to get events: {str(e)}"}),
+            500,
+        )
 
 
-@agent_bp.route('/monitor/clear', methods=['POST'])
+@agent_bp.route("/monitor/clear", methods=["POST"])
 def clear_monitoring_events():
     """Clear recorded anomalies from monitoring log."""
     try:
         from app.core.monitoring.system_event_monitor import get_system_event_monitor
-        
+
         monitor = get_system_event_monitor()
         count = monitor.clear_events()
-        
-        return jsonify({
-            "status": "success",
-            "message": f"Cleared {count} events from monitoring log"
-        })
+
+        return jsonify(
+            {
+                "status": "success",
+                "message": f"Cleared {count} events from monitoring log",
+            }
+        )
     except Exception as e:
         logger.error(f"Error clearing events: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to clear events: {str(e)}"
-        }), 500
+        return (
+            jsonify(
+                {"status": "error", "message": f"Failed to clear events: {str(e)}"}
+            ),
+            500,
+        )
 
 
 # ------------------------------------------------------------------
 # Phase 4c: Script Generation Endpoints
 # ------------------------------------------------------------------
 
-@agent_bp.route('/generate-script', methods=['POST'])
+
+@agent_bp.route("/generate-script", methods=["POST"])
 def generate_fix_script():
     """Generate an executable script to fix a detected system issue."""
     try:
-        from app.core.agent.plugins.script_generation_plugin import ScriptGenerationPlugin
-        
+        from app.core.agent.plugins.script_generation_plugin import (
+            ScriptGenerationPlugin,
+        )
+
         data = request.get_json() or {}
-        issue_type = data.get('issue_type')
-        
+        issue_type = data.get("issue_type")
+
         if not issue_type:
-            return jsonify({
-                "status": "error",
-                "message": "Missing required parameter: issue_type"
-            }), 400
-        
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Missing required parameter: issue_type",
+                    }
+                ),
+                400,
+            )
+
         plugin = ScriptGenerationPlugin()
         result = plugin.generate_fix_script(
             issue_type=issue_type,
-            process_name=data.get('process_name'),
-            service_name=data.get('service_name'),
-            min_gb=data.get('min_gb', 5)
+            process_name=data.get("process_name"),
+            service_name=data.get("service_name"),
+            min_gb=data.get("min_gb", 5),
         )
-        
+
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error generating script: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to generate script: {str(e)}"
-        }), 500
+        return (
+            jsonify(
+                {"status": "error", "message": f"Failed to generate script: {str(e)}"}
+            ),
+            500,
+        )
 
 
-@agent_bp.route('/generate-script/list', methods=['GET'])
+@agent_bp.route("/generate-script/list", methods=["GET"])
 def list_available_scripts():
     """List available fix script templates."""
     try:
-        from app.core.agent.plugins.script_generation_plugin import ScriptGenerationPlugin
-        
+        from app.core.agent.plugins.script_generation_plugin import (
+            ScriptGenerationPlugin,
+        )
+
         plugin = ScriptGenerationPlugin()
         result = plugin.list_available_scripts()
-        
+
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error listing scripts: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to list scripts: {str(e)}"
-        }), 500
+        return (
+            jsonify(
+                {"status": "error", "message": f"Failed to list scripts: {str(e)}"}
+            ),
+            500,
+        )
 
 
-@agent_bp.route('/generate-script/save', methods=['POST'])
+@agent_bp.route("/generate-script/save", methods=["POST"])
 def save_generated_script():
     """Save a generated script to workspace."""
     try:
-        from app.core.agent.plugins.script_generation_plugin import ScriptGenerationPlugin
-        
+        from app.core.agent.plugins.script_generation_plugin import (
+            ScriptGenerationPlugin,
+        )
+
         data = request.get_json() or {}
-        script_content = data.get('script_content')
-        filename = data.get('filename')
-        
+        script_content = data.get("script_content")
+        filename = data.get("filename")
+
         if not script_content or not filename:
-            return jsonify({
-                "status": "error",
-                "message": "Missing required parameters: script_content, filename"
-            }), 400
-        
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "message": "Missing required parameters: script_content, filename",
+                    }
+                ),
+                400,
+            )
+
         plugin = ScriptGenerationPlugin()
         result = plugin.save_script_to_file(
-            script_content=script_content,
-            filename=filename
+            script_content=script_content, filename=filename
         )
-        
+
         return jsonify(result)
     except Exception as e:
         logger.error(f"Error saving script: {e}", exc_info=True)
-        return jsonify({
-            "status": "error",
-            "message": f"Failed to save script: {str(e)}"
-        }), 500
+        return (
+            jsonify({"status": "error", "message": f"Failed to save script: {str(e)}"}),
+            500,
+        )
 
 
 # ══════════════════════════════════════════════════════════════════
 # v2 新增：用户反馈 / 影子记录 / 成本面板 API
 # ══════════════════════════════════════════════════════════════════
 
-@agent_bp.route('/feedback', methods=['POST'])
+
+@agent_bp.route("/feedback", methods=["POST"])
 def submit_feedback():
     """
     用户反馈端点 — 触发 ShadowTracer 影子记录。
@@ -1306,7 +1433,12 @@ def submit_feedback():
     latency_ms = data.get("latency_ms")
 
     if not user_input and not ai_response:
-        return jsonify({"success": False, "error": "user_input 或 ai_response 不能同时为空"}), 400
+        return (
+            jsonify(
+                {"success": False, "error": "user_input 或 ai_response 不能同时为空"}
+            ),
+            400,
+        )
 
     trace_id = None
     try:
@@ -1333,25 +1465,28 @@ def submit_feedback():
             )
         elif feedback_type == "thumbs_down":
             # 负面反馈不计入影子记录，仅日志
-            logger.info(
-                f"[feedback] 👎 负面反馈 session={session_id} skill={skill_id}"
-            )
+            logger.info(f"[feedback] 👎 负面反馈 session={session_id} skill={skill_id}")
         else:
-            return jsonify({"success": False, "error": f"未知反馈类型: {feedback_type}"}), 400
+            return (
+                jsonify({"success": False, "error": f"未知反馈类型: {feedback_type}"}),
+                400,
+            )
 
     except Exception as e:
         logger.error(f"[feedback] 记录失败: {e}")
         return jsonify({"success": False, "error": str(e), "recorded": False}), 500
 
-    return jsonify({
-        "success": True,
-        "trace_id": trace_id,
-        "recorded": trace_id is not None,
-        "feedback_type": feedback_type,
-    })
+    return jsonify(
+        {
+            "success": True,
+            "trace_id": trace_id,
+            "recorded": trace_id is not None,
+            "feedback_type": feedback_type,
+        }
+    )
 
 
-@agent_bp.route('/feedback/stats', methods=['GET'])
+@agent_bp.route("/feedback/stats", methods=["GET"])
 def feedback_stats():
     """
     返回各 Skill 的影子记录统计。
@@ -1368,18 +1503,20 @@ def feedback_stats():
         counts = ShadowTracer.get_counts()
         threshold = ShadowTracer.shadow_threshold
         ready = [k for k, v in counts.items() if v >= threshold]
-        return jsonify({
-            "counts": counts,
-            "threshold": threshold,
-            "skills_ready_for_training": ready,
-            "recording_enabled": ShadowTracer.recording_enabled,
-        })
+        return jsonify(
+            {
+                "counts": counts,
+                "threshold": threshold,
+                "skills_ready_for_training": ready,
+                "recording_enabled": ShadowTracer.recording_enabled,
+            }
+        )
     except Exception as e:
         logger.error(f"[feedback/stats] 错误: {e}")
         return jsonify({"error": str(e)}), 500
 
 
-@agent_bp.route('/feedback/settings', methods=['POST'])
+@agent_bp.route("/feedback/settings", methods=["POST"])
 def feedback_settings():
     """
     更新影子记录设置。
@@ -1395,11 +1532,13 @@ def feedback_settings():
             t = int(data["threshold"])
             if 10 <= t <= 10000:
                 ShadowTracer.shadow_threshold = t
-        return jsonify({
-            "success": True,
-            "recording_enabled": ShadowTracer.recording_enabled,
-            "threshold": ShadowTracer.shadow_threshold,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "recording_enabled": ShadowTracer.recording_enabled,
+                "threshold": ShadowTracer.shadow_threshold,
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -1408,7 +1547,8 @@ def feedback_settings():
 # 成本 & 性能透明面板 API
 # ──────────────────────────────────────────────────────────────────
 
-@agent_bp.route('/stats/cost', methods=['GET'])
+
+@agent_bp.route("/stats/cost", methods=["GET"])
 def cost_stats():
     """
     返回成本与性能统计面板数据。
@@ -1429,12 +1569,19 @@ def cost_stats():
     try:
         # 导入 token_tracker
         try:
-            import sys, os as _os
-            _wb = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(
-                _os.path.abspath(__file__)))), "web")
+            import os as _os
+            import sys
+
+            _wb = _os.path.join(
+                _os.path.dirname(
+                    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+                ),
+                "web",
+            )
             if _wb not in sys.path:
                 sys.path.insert(0, _wb)
             import token_tracker
+
             token_stats = token_tracker.get_stats()
         except Exception as _te:
             logger.warning(f"[cost_stats] token_tracker 不可用: {_te}")
@@ -1451,6 +1598,7 @@ def cost_stats():
         local_compute = {}
         try:
             import psutil
+
             local_compute = {
                 "cpu_percent": psutil.cpu_percent(interval=0.1),
                 "memory_used_mb": round(psutil.virtual_memory().used / 1024 / 1024),
@@ -1493,7 +1641,8 @@ def cost_stats():
 # 硬件检测 & 本地模型推荐 API
 # ──────────────────────────────────────────────────────────────────
 
-@agent_bp.route('/hardware', methods=['GET'])
+
+@agent_bp.route("/hardware", methods=["GET"])
 def hardware_info():
     """
     检测当前设备硬件配置并返回本地模型训练/推理推荐。
@@ -1520,10 +1669,14 @@ def hardware_info():
     gpu_info = {"name": "Unknown", "vram_gb": 0.0, "available": False}
     try:
         result = subprocess.run(
-            ["nvidia-smi",
-             "--query-gpu=name,memory.total",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=5
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         if result.returncode == 0:
             lines = [l.strip() for l in result.stdout.strip().splitlines() if l.strip()]
@@ -1540,8 +1693,9 @@ def hardware_info():
     ram_gb = 0.0
     try:
         import psutil
+
         cpu_cores = psutil.cpu_count(logical=False) or 0
-        ram_gb = round(psutil.virtual_memory().total / (1024 ** 3), 1)
+        ram_gb = round(psutil.virtual_memory().total / (1024**3), 1)
     except Exception:
         pass
 
@@ -1593,37 +1747,42 @@ def hardware_info():
     training_cfg = {}
     try:
         from app.core.learning.lora_pipeline import TrainingConfig
+
         cfg = TrainingConfig.for_hardware(vram_gb=vram, ram_gb=ram_gb)
         training_cfg = cfg.to_dict()
     except Exception as e:
         logger.warning(f"[hardware] TrainingConfig 加载失败: {e}")
 
-    return jsonify({
-        "gpu": gpu_info,
-        "cpu": {"cores": cpu_cores},
-        "ram_gb": ram_gb,
-        "recommended": {
-            "training_model": train_model,
-            "inference_model": infer_model,
-            "gguf_size_estimate": gguf_est,
-            "tier": tier,
-            "training_config": training_cfg,
-            "can_train": tier != "cpu_only",
-            "notes": notes,
+    return jsonify(
+        {
+            "gpu": gpu_info,
+            "cpu": {"cores": cpu_cores},
+            "ram_gb": ram_gb,
+            "recommended": {
+                "training_model": train_model,
+                "inference_model": infer_model,
+                "gguf_size_estimate": gguf_est,
+                "tier": tier,
+                "training_config": training_cfg,
+                "can_train": tier != "cpu_only",
+                "notes": notes,
+            },
         }
-    })
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 蒸馏训练管理 API
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def _lazy_distill():
     from app.core.learning.distill_manager import DistillManager
+
     return DistillManager.instance()
 
 
-@agent_bp.route('/distill/train', methods=['POST'])
+@agent_bp.route("/distill/train", methods=["POST"])
 def distill_train():
     """
     POST /api/agent/distill/train
@@ -1643,7 +1802,7 @@ def distill_train():
         return jsonify({"error": "skill_id 必填"}), 400
 
     config_override = data.get("config_override") or {}
-    dataset_path    = data.get("dataset_path")
+    dataset_path = data.get("dataset_path")
 
     mgr = _lazy_distill()
     job_id = mgr.submit(
@@ -1652,16 +1811,18 @@ def distill_train():
         dataset_path=dataset_path,
     )
     job = mgr.get_job(job_id)
-    return jsonify({
-        "job_id": job_id,
-        "skill_id": skill_id,
-        "status": job.status if job else "queued",
-        "message": "训练任务已提交，使用 GET /api/agent/distill/jobs/{job_id} 查询进度",
-        "stream_url": f"/api/agent/distill/jobs/{job_id}/stream",
-    })
+    return jsonify(
+        {
+            "job_id": job_id,
+            "skill_id": skill_id,
+            "status": job.status if job else "queued",
+            "message": "训练任务已提交，使用 GET /api/agent/distill/jobs/{job_id} 查询进度",
+            "stream_url": f"/api/agent/distill/jobs/{job_id}/stream",
+        }
+    )
 
 
-@agent_bp.route('/distill/jobs', methods=['GET'])
+@agent_bp.route("/distill/jobs", methods=["GET"])
 def distill_list_jobs():
     """
     GET /api/agent/distill/jobs[?skill_id=xxx]
@@ -1673,7 +1834,7 @@ def distill_list_jobs():
     return jsonify({"jobs": jobs, "count": len(jobs)})
 
 
-@agent_bp.route('/distill/jobs/<job_id>', methods=['GET'])
+@agent_bp.route("/distill/jobs/<job_id>", methods=["GET"])
 def distill_job_status(job_id: str):
     """
     GET /api/agent/distill/jobs/<job_id>
@@ -1686,7 +1847,7 @@ def distill_job_status(job_id: str):
     return jsonify(job.to_dict())
 
 
-@agent_bp.route('/distill/jobs/<job_id>/stream', methods=['GET'])
+@agent_bp.route("/distill/jobs/<job_id>/stream", methods=["GET"])
 def distill_job_stream(job_id: str):
     """
     GET /api/agent/distill/jobs/<job_id>/stream
@@ -1696,6 +1857,7 @@ def distill_job_stream(job_id: str):
     结束事件: data: {"event":"done","pct":100,"eval_loss":0.18,"adapter_path":"..."}
     """
     from flask import Response, stream_with_context
+
     mgr = _lazy_distill()
     job = mgr.get_job(job_id)
     if not job:
@@ -1711,7 +1873,7 @@ def distill_job_stream(job_id: str):
     )
 
 
-@agent_bp.route('/distill/jobs/<job_id>/cancel', methods=['POST'])
+@agent_bp.route("/distill/jobs/<job_id>/cancel", methods=["POST"])
 def distill_cancel_job(job_id: str):
     """
     POST /api/agent/distill/jobs/<job_id>/cancel
@@ -1724,7 +1886,7 @@ def distill_cancel_job(job_id: str):
     return jsonify({"error": "任务不存在或正在运行中，无法取消", "job_id": job_id}), 400
 
 
-@agent_bp.route('/distill/prerequisites', methods=['GET'])
+@agent_bp.route("/distill/prerequisites", methods=["GET"])
 def distill_prerequisites():
     """
     GET /api/agent/distill/prerequisites
@@ -1732,15 +1894,22 @@ def distill_prerequisites():
     """
     try:
         from app.core.learning.lora_pipeline import LoRAPipeline
+
         pipeline = LoRAPipeline()
         all_ok, missing = pipeline.check_prerequisites()
-        return jsonify({
-            "ready": all_ok,
-            "missing": missing,
-            "install_cmd": (
-                "pip install peft transformers datasets accelerate trl bitsandbytes\n"
-                "pip install torch --index-url https://download.pytorch.org/whl/cu126"
-            ) if not all_ok else None,
-        })
+        return jsonify(
+            {
+                "ready": all_ok,
+                "missing": missing,
+                "install_cmd": (
+                    (
+                        "pip install peft transformers datasets accelerate trl bitsandbytes\n"
+                        "pip install torch --index-url https://download.pytorch.org/whl/cu126"
+                    )
+                    if not all_ok
+                    else None
+                ),
+            }
+        )
     except Exception as e:
         return jsonify({"ready": False, "error": str(e)}), 500

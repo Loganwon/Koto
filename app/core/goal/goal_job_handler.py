@@ -5,6 +5,7 @@ goal_job_handler — 向 JobRunner 注册 goal_check 处理器
 当 GoalManager 后台循环发现待检查目标时，会向 JobRunner 提交
 job_type="goal_check" 的作业，由本模块中的处理器负责执行。
 """
+
 from __future__ import annotations
 
 import json
@@ -38,7 +39,7 @@ def _handle_goal_check(ctx) -> Optional[str]:
     if not goal_id:
         return "❌ goal_check: 缺少 goal_id"
 
-    from app.core.goal.goal_manager import get_goal_manager, GoalStatus
+    from app.core.goal.goal_manager import GoalStatus, get_goal_manager
 
     gm = get_goal_manager()
     goal = gm.get(goal_id)
@@ -74,8 +75,8 @@ def _handle_goal_check(ctx) -> Optional[str]:
     result_text = ""
     tool_call_names = []
     try:
-        from app.core.agent.unified_agent import UnifiedAgent
         from app.core.agent.tool_registry import ToolRegistry
+        from app.core.agent.unified_agent import UnifiedAgent
         from app.core.llm.gemini import get_gemini_client
 
         llm = get_gemini_client()
@@ -90,10 +91,18 @@ def _handle_goal_check(ctx) -> Optional[str]:
 
         answer_parts = []
         for step in agent.run(prompt, session_id=goal.session_id or goal_id):
-            step_type = step.step_type.value if hasattr(step.step_type, "value") else str(step.step_type)
+            step_type = (
+                step.step_type.value
+                if hasattr(step.step_type, "value")
+                else str(step.step_type)
+            )
             if step_type == "ACTION" and step.content:
                 tool_call_names.append(step.content[:80])
-                ctx.step("ACTION", step.content[:200], tool_name=getattr(step, "tool_name", None))
+                ctx.step(
+                    "ACTION",
+                    step.content[:200],
+                    tool_name=getattr(step, "tool_name", None),
+                )
             elif step_type == "ANSWER":
                 answer_parts.append(step.content)
                 ctx.step("ANSWER", step.content[:200], progress=90)
@@ -126,7 +135,9 @@ def _handle_goal_check(ctx) -> Optional[str]:
         ctx.step("THOUGHT", f"⏸️ 等待用户: {waiting_reason}", progress=80)
 
     # ── 完成 GoalRun ──────────────────────────────────────────────────────────
-    gm.finish_run(run.run_id, outcome=outcome, summary=summary, tool_calls=tool_call_names)
+    gm.finish_run(
+        run.run_id, outcome=outcome, summary=summary, tool_calls=tool_call_names
+    )
 
     # ── 更新 GoalTask ─────────────────────────────────────────────────────────
     if outcome == "completed":
@@ -136,7 +147,9 @@ def _handle_goal_check(ctx) -> Optional[str]:
     else:
         new_ctx = dict(g_ctx)
         new_ctx["progress_summary"] = summary[:500]
-        gm.update_from_run(goal_id, run_outcome=outcome, summary=summary, new_context=new_ctx)
+        gm.update_from_run(
+            goal_id, run_outcome=outcome, summary=summary, new_context=new_ctx
+        )
 
     ctx.step("ANSWER", f"✅ 目标追踪完成: {summary[:150]}", progress=100)
     return summary[:500]

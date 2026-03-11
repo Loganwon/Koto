@@ -5,7 +5,9 @@ Integration tests for /api/tasks endpoints.
 Tests task listing, stats, individual task retrieval, cancel, and delete.
 Uses the full_client fixture from conftest.py (all blueprints registered).
 """
+
 from __future__ import annotations
+
 import pytest
 
 

@@ -28,6 +28,7 @@ FileRegistry — Koto 统一文件元数据注册表
   indexed_at        首次入库时间
   updated_at        最近更新时间
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -46,7 +47,11 @@ logger = logging.getLogger(__name__)
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 _DEFAULT_DB_PATH = str(
-    Path(os.environ.get("KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"))
+    Path(
+        os.environ.get(
+            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+        )
+    )
     / "koto_checkpoints.sqlite"
 )
 
@@ -57,16 +62,63 @@ _registry_lock = threading.Lock()
 # ── 文件分类表 ────────────────────────────────────────────────────────────────
 _EXT_CATEGORY: Dict[str, str] = {}
 for _cat, _exts in {
-    "文档": {".doc", ".docx", ".pdf", ".txt", ".md", ".rtf", ".odt",
-              ".wps", ".ppt", ".pptx", ".odp", ".xls", ".xlsx", ".ods",
-              ".csv", ".html", ".htm", ".epub"},
-    "图片": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg",
-              ".tif", ".tiff", ".heic"},
+    "文档": {
+        ".doc",
+        ".docx",
+        ".pdf",
+        ".txt",
+        ".md",
+        ".rtf",
+        ".odt",
+        ".wps",
+        ".ppt",
+        ".pptx",
+        ".odp",
+        ".xls",
+        ".xlsx",
+        ".ods",
+        ".csv",
+        ".html",
+        ".htm",
+        ".epub",
+    },
+    "图片": {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".webp",
+        ".svg",
+        ".tif",
+        ".tiff",
+        ".heic",
+    },
     "视频": {".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v"},
     "音频": {".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".wma"},
-    "代码": {".py", ".js", ".ts", ".java", ".c", ".cpp", ".cs", ".go",
-              ".rs", ".php", ".rb", ".swift", ".sh", ".bat", ".ps1",
-              ".json", ".xml", ".yaml", ".yml", ".sql", ".css"},
+    "代码": {
+        ".py",
+        ".js",
+        ".ts",
+        ".java",
+        ".c",
+        ".cpp",
+        ".cs",
+        ".go",
+        ".rs",
+        ".php",
+        ".rb",
+        ".swift",
+        ".sh",
+        ".bat",
+        ".ps1",
+        ".json",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".sql",
+        ".css",
+    },
     "压缩包": {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".tgz"},
 }.items():
     for _e in _exts:
@@ -103,9 +155,29 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
     ext = Path(path).suffix.lower()
     try:
         # 纯文本类
-        if ext in {".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml",
-                   ".html", ".htm", ".py", ".js", ".ts", ".sql", ".sh",
-                   ".bat", ".ps1", ".cs", ".java", ".go", ".rs", ".css"}:
+        if ext in {
+            ".txt",
+            ".md",
+            ".csv",
+            ".json",
+            ".xml",
+            ".yaml",
+            ".yml",
+            ".html",
+            ".htm",
+            ".py",
+            ".js",
+            ".ts",
+            ".sql",
+            ".sh",
+            ".bat",
+            ".ps1",
+            ".cs",
+            ".java",
+            ".go",
+            ".rs",
+            ".css",
+        }:
             for enc in ("utf-8", "gbk", "latin-1"):
                 try:
                     text = Path(path).read_text(encoding=enc)
@@ -117,6 +189,7 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
         if ext == ".pdf":
             try:
                 import PyPDF2
+
                 with open(path, "rb") as f:
                     reader = PyPDF2.PdfReader(f)
                     parts = []
@@ -129,6 +202,7 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
         if ext == ".docx":
             try:
                 from docx import Document
+
                 doc = Document(path)
                 return "\n".join(p.text for p in doc.paragraphs)[:max_chars]
             except Exception:
@@ -137,6 +211,7 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
         if ext in {".xlsx", ".xls"}:
             try:
                 import openpyxl
+
                 wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
                 rows = []
                 ws = wb.active
@@ -157,6 +232,7 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
 # 数据类
 # ============================================================================
 
+
 @dataclass
 class FileEntry:
     file_id: str
@@ -167,7 +243,7 @@ class FileEntry:
     file_hash: str
     size_bytes: int
     mtime: float
-    source: str                      # manual / scanner / organizer / upload / watcher
+    source: str  # manual / scanner / organizer / upload / watcher
     content_preview: str = ""
     origin_session_id: Optional[str] = None
     origin_goal_id: Optional[str] = None
@@ -189,6 +265,7 @@ class FileEntry:
 # ============================================================================
 # FileRegistry
 # ============================================================================
+
 
 class FileRegistry:
     """
@@ -360,9 +437,15 @@ class FileRegistry:
             # 插入
             file_id = str(uuid.uuid4())
             entry = FileEntry(
-                file_id=file_id, path=path, name=name, ext=ext,
-                category=category, file_hash=fhash, size_bytes=size,
-                mtime=mtime, source=source,
+                file_id=file_id,
+                path=path,
+                name=name,
+                ext=ext,
+                category=category,
+                file_hash=fhash,
+                size_bytes=size,
+                mtime=mtime,
+                source=source,
                 content_preview=content_preview,
                 origin_session_id=session_id,
                 origin_goal_id=goal_id,
@@ -373,13 +456,27 @@ class FileRegistry:
                     source, content_preview, origin_session_id, origin_goal_id,
                     indexed_at, updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (entry.file_id, entry.path, entry.name, entry.ext, entry.category,
-                 entry.file_hash, entry.size_bytes, entry.mtime, entry.source,
-                 entry.content_preview, entry.origin_session_id, entry.origin_goal_id,
-                 entry.indexed_at, entry.updated_at),
+                (
+                    entry.file_id,
+                    entry.path,
+                    entry.name,
+                    entry.ext,
+                    entry.category,
+                    entry.file_hash,
+                    entry.size_bytes,
+                    entry.mtime,
+                    entry.source,
+                    entry.content_preview,
+                    entry.origin_session_id,
+                    entry.origin_goal_id,
+                    entry.indexed_at,
+                    entry.updated_at,
+                ),
             )
             self._conn.commit()
-            logger.debug(f"[FileRegistry] 注册文件 {name} [{category}] hash={fhash[:8]}")
+            logger.debug(
+                f"[FileRegistry] 注册文件 {name} [{category}] hash={fhash[:8]}"
+            )
             return entry
 
     def batch_register(
@@ -393,7 +490,9 @@ class FileRegistry:
         for path in paths:
             try:
                 existing = self.get_by_path(path)
-                entry = self.register(path, source=source, extract_content=extract_content)
+                entry = self.register(
+                    path, source=source, extract_content=extract_content
+                )
                 if entry:
                     if existing:
                         updated += 1
@@ -419,11 +518,9 @@ class FileRegistry:
 
     def get_duplicates(self) -> List[List[FileEntry]]:
         """返回内容相同（hash 相同）的文件组列表。"""
-        rows = self._conn.execute(
-            """SELECT file_hash FROM koto_file_registry
+        rows = self._conn.execute("""SELECT file_hash FROM koto_file_registry
                WHERE file_hash != ''
-               GROUP BY file_hash HAVING COUNT(*) > 1"""
-        ).fetchall()
+               GROUP BY file_hash HAVING COUNT(*) > 1""").fetchall()
         groups = []
         for row in rows:
             dup_rows = self._conn.execute(
@@ -459,7 +556,10 @@ class FileRegistry:
             ).fetchall()
             for row in fts_rows:
                 entry = self._row_to_entry(row)
-                if self._filter_ok(entry, category, source) and entry.file_id not in seen_ids:
+                if (
+                    self._filter_ok(entry, category, source)
+                    and entry.file_id not in seen_ids
+                ):
                     results.append(entry)
                     seen_ids.add(entry.file_id)
         except Exception as e:
@@ -497,6 +597,7 @@ class FileRegistry:
     ) -> List[FileEntry]:
         """列出最近 N 天索引的文件。"""
         from datetime import timedelta
+
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
         clauses = ["indexed_at >= ?"]
         params: List[Any] = [cutoff]
@@ -510,7 +611,9 @@ class FileRegistry:
         ).fetchall()
         return [self._row_to_entry(r) for r in rows]
 
-    def count(self, category: Optional[str] = None, source: Optional[str] = None) -> int:
+    def count(
+        self, category: Optional[str] = None, source: Optional[str] = None
+    ) -> int:
         clauses, params = [], []
         if category:
             clauses.append("category = ?")
@@ -529,8 +632,10 @@ class FileRegistry:
             "SELECT category, COUNT(*) as cnt, SUM(size_bytes) as total_size "
             "FROM koto_file_registry GROUP BY category"
         ).fetchall()
-        by_cat = {r["category"]: {"count": r["cnt"], "size_bytes": r["total_size"] or 0}
-                  for r in rows}
+        by_cat = {
+            r["category"]: {"count": r["cnt"], "size_bytes": r["total_size"] or 0}
+            for r in rows
+        }
         total = sum(v["count"] for v in by_cat.values())
         return {"total": total, "by_category": by_cat}
 
@@ -554,7 +659,8 @@ class FileRegistry:
                 "UPDATE koto_file_tags SET path=? WHERE path=?", (new_path, old_path)
             )
             self._conn.execute(
-                "UPDATE koto_file_favorites SET path=? WHERE path=?", (new_path, old_path)
+                "UPDATE koto_file_favorites SET path=? WHERE path=?",
+                (new_path, old_path),
             )
         self._conn.commit()
         return rows > 0
@@ -703,7 +809,9 @@ class FileRegistry:
 
     # ── 磁盘分析辅助 ─────────────────────────────────────────────────────────
 
-    def list_large_files(self, min_bytes: int = 10 * 1024 * 1024, limit: int = 20) -> List[FileEntry]:
+    def list_large_files(
+        self, min_bytes: int = 10 * 1024 * 1024, limit: int = 20
+    ) -> List[FileEntry]:
         """返回注册表中大于 min_bytes 字节的文件，按大小降序。"""
         rows = self._conn.execute(
             "SELECT * FROM koto_file_registry WHERE size_bytes >= ? ORDER BY size_bytes DESC LIMIT ?",
@@ -733,7 +841,9 @@ class FileRegistry:
         return " ".join(f'"{w}"' for w in words)
 
     @staticmethod
-    def _filter_ok(entry: FileEntry, category: Optional[str], source: Optional[str]) -> bool:
+    def _filter_ok(
+        entry: FileEntry, category: Optional[str], source: Optional[str]
+    ) -> bool:
         if category and entry.category != category:
             return False
         if source and entry.source != source:
@@ -742,12 +852,15 @@ class FileRegistry:
 
     def _row_to_entry(self, row: sqlite3.Row) -> FileEntry:
         d = dict(row)
-        return FileEntry(**{k: v for k, v in d.items() if k in FileEntry.__dataclass_fields__})
+        return FileEntry(
+            **{k: v for k, v in d.items() if k in FileEntry.__dataclass_fields__}
+        )
 
 
 # ============================================================================
 # 单例访问
 # ============================================================================
+
 
 def get_file_registry(db_path: Optional[str] = None) -> FileRegistry:
     global _registry_instance

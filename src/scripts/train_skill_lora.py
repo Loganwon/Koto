@@ -27,6 +27,7 @@ Koto Skill LoRA 微调训练脚本
     Qwen3-4B  QLoRA(4bit) → ~5  GB VRAM
     Qwen3-1.7B QLoRA(4bit)→ ~3  GB VRAM
 """
+
 from __future__ import annotations
 
 import argparse
@@ -52,6 +53,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("koto.train")
 
+
 # ── 可选依赖检测 ───────────────────────────────────────────────────────────────
 def _check_deps() -> Dict[str, bool]:
     deps = {}
@@ -68,7 +70,9 @@ def _check_deps() -> Dict[str, bool]:
 def load_training_data(path: Path) -> List[Dict]:
     """加载 JSONL 训练数据，过滤空样本"""
     if not path.exists():
-        raise FileNotFoundError(f"训练数据不存在: {path}\n请先运行: python scripts/generate_skill_training_data.py")
+        raise FileNotFoundError(
+            f"训练数据不存在: {path}\n请先运行: python scripts/generate_skill_training_data.py"
+        )
 
     samples = []
     with open(path, "r", encoding="utf-8") as f:
@@ -94,7 +98,9 @@ def format_as_chat(sample: Dict, tokenizer: Any) -> str:
         messages.append({"role": "system", "content": sample["system"]})
     messages.append({"role": "user", "content": sample["user"]})
     messages.append({"role": "assistant", "content": sample["assistant"]})
-    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+    return tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=False
+    )
 
 
 # ── 主训练流程 ─────────────────────────────────────────────────────────────────
@@ -111,10 +117,10 @@ def train(args: argparse.Namespace):
         sys.exit(1)
 
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
-    from peft import LoraConfig, get_peft_model, TaskType
-    from trl import SFTTrainer, SFTConfig
     from datasets import Dataset
+    from peft import LoraConfig, TaskType, get_peft_model
+    from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
+    from trl import SFTConfig, SFTTrainer
 
     # ── 设备检测 ──────────────────────────────────────────────────────────────
     if torch.cuda.is_available():
@@ -134,7 +140,9 @@ def train(args: argparse.Namespace):
     samples = load_training_data(data_path)
 
     if len(samples) < 10:
-        logger.error(f"训练数据太少（{len(samples)} 条），至少需要 10 条。请先运行数据生成器。")
+        logger.error(
+            f"训练数据太少（{len(samples)} 条），至少需要 10 条。请先运行数据生成器。"
+        )
         sys.exit(1)
 
     # 数据分割 (90% 训练 / 10% 验证)
@@ -169,8 +177,9 @@ def train(args: argparse.Namespace):
 
     if args.qlora and device == "cuda":
         try:
-            from transformers import BitsAndBytesConfig
             import bitsandbytes  # noqa: F401
+            from transformers import BitsAndBytesConfig
+
             bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_use_double_quant=True,
@@ -198,8 +207,13 @@ def train(args: argparse.Namespace):
         lora_alpha=args.lora_rank * 2,
         lora_dropout=0.05,
         target_modules=[
-            "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
         ],
         bias="none",
         inference_mode=False,
@@ -229,7 +243,7 @@ def train(args: argparse.Namespace):
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
-        report_to="none",          # 不上传 wandb/tensorboard
+        report_to="none",  # 不上传 wandb/tensorboard
         dataloader_num_workers=0,  # Windows 兼容
         max_seq_length=args.max_seq_len,
         dataset_text_field="text",
@@ -291,7 +305,9 @@ def train(args: argparse.Namespace):
     logger.info(f"     model = PeftModel.from_pretrained(base, '{final_dir}')")
     logger.info("     model.merge_and_unload().save_pretrained('models/koto-merged')")
     logger.info("  2. 转为 GGUF：llama.cpp convert_hf_to_gguf.py models/koto-merged")
-    logger.info("  3. ollama create koto-qwen3-finetuned -f models/Modelfile.koto-qwen3")
+    logger.info(
+        "  3. ollama create koto-qwen3-finetuned -f models/Modelfile.koto-qwen3"
+    )
     logger.info("=" * 60)
 
 
@@ -299,24 +315,32 @@ def train(args: argparse.Namespace):
 def main():
     parser = argparse.ArgumentParser(description="Koto Skill LoRA 微调训练")
     parser.add_argument(
-        "--model", default="Qwen/Qwen3-1.7B",
-        help="HuggingFace 模型名称（默认 Qwen/Qwen3-1.7B，显存不足时用小模型）"
+        "--model",
+        default="Qwen/Qwen3-1.7B",
+        help="HuggingFace 模型名称（默认 Qwen/Qwen3-1.7B，显存不足时用小模型）",
     )
     parser.add_argument(
         "--data",
-        default=str(_ROOT / "config" / "training_data" / "skill_behavior_samples.jsonl"),
-        help="训练数据路径"
+        default=str(
+            _ROOT / "config" / "training_data" / "skill_behavior_samples.jsonl"
+        ),
+        help="训练数据路径",
     )
     parser.add_argument(
-        "--output", default=str(_ROOT / "models" / "koto_skill_lora"),
-        help="LoRA 适配器输出目录"
+        "--output",
+        default=str(_ROOT / "models" / "koto_skill_lora"),
+        help="LoRA 适配器输出目录",
     )
     parser.add_argument("--epochs", type=int, default=3, help="训练轮次")
     parser.add_argument("--batch-size", type=int, default=2, help="每批样本数")
     parser.add_argument("--lr", type=float, default=2e-4, help="学习率")
-    parser.add_argument("--lora-rank", type=int, default=16, help="LoRA rank（越大越强但越慢）")
+    parser.add_argument(
+        "--lora-rank", type=int, default=16, help="LoRA rank（越大越强但越慢）"
+    )
     parser.add_argument("--max-seq-len", type=int, default=2048, help="最大序列长度")
-    parser.add_argument("--qlora", action="store_true", help="启用 QLoRA 4-bit 量化（需 bitsandbytes）")
+    parser.add_argument(
+        "--qlora", action="store_true", help="启用 QLoRA 4-bit 量化（需 bitsandbytes）"
+    )
     args = parser.parse_args()
 
     # 确保日志目录存在

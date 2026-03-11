@@ -21,6 +21,7 @@ FileWatcher — Koto 目录轮询监控器
     }
   }
 """
+
 from __future__ import annotations
 
 import json
@@ -38,8 +39,16 @@ _DEFAULT_SETTINGS_PATH = str(
 )
 
 _DEFAULT_SKIP_EXTS: Set[str] = {
-    ".tmp", ".part", ".crdownload", ".download",
-    ".~lock", ".swp", ".lnk", ".db", ".db-shm", ".db-wal",
+    ".tmp",
+    ".part",
+    ".crdownload",
+    ".download",
+    ".~lock",
+    ".swp",
+    ".lnk",
+    ".db",
+    ".db-shm",
+    ".db-wal",
 }
 
 _watcher_instance: Optional["FileWatcher"] = None
@@ -130,7 +139,9 @@ class FileWatcher:
             target=self._loop, daemon=True, name="koto-file-watcher"
         )
         self._thread.start()
-        logger.info(f"[FileWatcher] 🚀 启动，监控 {len(self.watch_dirs)} 个目录，interval={self.interval}s")
+        logger.info(
+            f"[FileWatcher] 🚀 启动，监控 {len(self.watch_dirs)} 个目录，interval={self.interval}s"
+        )
 
     def stop(self):
         if not self._running:
@@ -205,10 +216,20 @@ class FileWatcher:
             try:
                 ext = Path(path_str).suffix.lower()
                 extract = ext in {
-                    ".txt", ".md", ".pdf", ".docx", ".xlsx",
-                    ".py", ".js", ".json", ".csv", ".html"
+                    ".txt",
+                    ".md",
+                    ".pdf",
+                    ".docx",
+                    ".xlsx",
+                    ".py",
+                    ".js",
+                    ".json",
+                    ".csv",
+                    ".html",
                 }
-                entry = reg.register(path_str, source="watcher", extract_content=extract)
+                entry = reg.register(
+                    path_str, source="watcher", extract_content=extract
+                )
                 # Phase 1-C: 对 category 为"其他"的文件，用 FileAnalyzer 异步回填分类
                 if entry and entry.category == "其他":
                     self._enrich_category_async(path_str)
@@ -217,8 +238,11 @@ class FileWatcher:
 
         # 检测并移除已删除的文件
         with self._lock:
-            deleted = [p for p in list(self._snapshot.keys())
-                       if p not in current_paths and not Path(p).exists()]
+            deleted = [
+                p
+                for p in list(self._snapshot.keys())
+                if p not in current_paths and not Path(p).exists()
+            ]
         for path_str in deleted:
             try:
                 reg.delete(path_str)
@@ -258,9 +282,11 @@ class FileWatcher:
 
     def _enrich_category_async(self, path_str: str):
         """后台调用 FileAnalyzer 对"其他"类文件回填行业分类，写回 category 字段。"""
+
         def _run():
             try:
                 from app.core.file.file_registry import get_file_registry
+
                 try:
                     from web.file_analyzer import FileAnalyzer
                 except ImportError:
@@ -274,18 +300,26 @@ class FileWatcher:
                 reg = get_file_registry()
                 reg._conn.execute(
                     "UPDATE koto_file_registry SET category=?, updated_at=? WHERE path=?",
-                    (industry, __import__("datetime").datetime.now().isoformat(timespec="milliseconds"), path_str),
+                    (
+                        industry,
+                        __import__("datetime")
+                        .datetime.now()
+                        .isoformat(timespec="milliseconds"),
+                        path_str,
+                    ),
                 )
                 reg._conn.commit()
                 logger.debug(f"[FileWatcher] 分类回填 {name} → {industry}")
             except Exception as e:
                 logger.debug(f"[FileWatcher] 分类回填失败 {path_str}: {e}")
+
         threading.Thread(target=_run, daemon=True).start()
 
 
 # ============================================================================
 # 单例访问
 # ============================================================================
+
 
 def get_file_watcher(settings_path: Optional[str] = None) -> FileWatcher:
     global _watcher_instance

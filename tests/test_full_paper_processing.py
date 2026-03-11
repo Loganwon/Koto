@@ -5,10 +5,10 @@
 Full Integration Test - Process Academic Paper with Real LLM
 """
 
-import os
-import sys
 import asyncio
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Dict
 
@@ -16,25 +16,26 @@ from typing import Dict
 web_dir = Path(__file__).parent / "web"
 sys.path.insert(0, str(web_dir))
 
-from web.intelligent_document_analyzer import IntelligentDocumentAnalyzer
 from web.document_reader import DocumentReader
+from web.intelligent_document_analyzer import IntelligentDocumentAnalyzer
 
 
 class RealLLMClient:
     """真实LLM客户端包装器"""
-    
+
     def __init__(self, api_key=None):
         """
         初始化真实LLM客户端
-        
+
         Args:
             api_key: Gemini API密钥（可选）
         """
-        self.api_key = api_key or os.getenv('GEMINI_API_KEY')
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.use_mock = False
-        
+
         try:
             import google.generativeai as genai
+
             if self.api_key:
                 genai.configure(api_key=self.api_key)
                 self.client = genai.GenerativeModel("gemini-1.5-flash-preview")
@@ -46,38 +47,39 @@ class RealLLMClient:
         except Exception as e:
             print(f"⚠️  Gemini初始化失败: {str(e)}，将使用Mock LLM")
             self.use_mock = True
-    
+
     async def chat(self, prompt: str, model_name: str = None, stream: bool = False):
         """
         调用LLM生成内容
-        
+
         Args:
             prompt: 提示词
             model_name: 模型名称（可选，此处忽略）
             stream: 是否流式输出（此处忽略）
-            
+
         Returns:
             {'content': 生成的文本}
         """
         if self.use_mock:
             return await self._mock_response(prompt)
-        
+
         try:
             import google.generativeai as genai
+
             response = self.client.generate_content(prompt)
             if response and response.text:
-                return {'content': response.text}
+                return {"content": response.text}
             else:
-                return {'content': '[无响应]'}
+                return {"content": "[无响应]"}
         except Exception as e:
             print(f"LLM调用失败: {str(e)}")
-            return {'content': f'[错误: {str(e)}]'}
-    
+            return {"content": f"[错误: {str(e)}]"}
+
     async def _mock_response(self, prompt: str) -> Dict:
         """生成Mock响应"""
         if "摘要" in prompt or "abstract" in prompt.lower():
             return {
-                'content': """本研究系统探讨了人工智能算法在现代社会中的形式主义危机。
+                "content": """本研究系统探讨了人工智能算法在现代社会中的形式主义危机。
 
 研究背景与目的：随着人工智能技术的快速发展，算法已经深度嵌入到社会的各个领域，包括信息推荐、司法判决、和就业筛选等。然而，当前存在一种广泛的"算法形式主义"现象——对算法的盲目崇拜和过度依赖，将其视为客观、中立的工具，而忽视了其背后的价值预设和社会影响。这种现象引发了本研究对"数字之眼的危机"的深入思考。
 
@@ -87,10 +89,10 @@ class RealLLMClient:
 
 研究结论与局限：本研究的贡献在于从批判视角全面阐释了算法形式主义的危害，为算法规制和技术伦理提供了理论基础。同时，研究也存在一定局限，如对技术解决方案的深入讨论不足，这将是未来研究的重点。"""
             }
-        
+
         elif "引言" in prompt or "introduction" in prompt.lower():
             return {
-                'content': """一、核心问题与研究背景
+                "content": """一、核心问题与研究背景
 当代社会已进入"算法时代"。从搜索引擎决定我们看到什么信息，到推荐系统塑造我们的消费选择，再到AI系统参与司法判决、入学评估等重大决策，算法已经成为社会运行的重要基础设施。然而，与这种广泛应用相伴随的是一种普遍的"算法迷思"：人们往往将算法视为客观、中立、科学的工具，相信数据和程序能够消除人类的偏见。这种信念构成了"算法形式主义"——一种对算法形式化方法的绝对化信仰，认为任何问题都可以通过算法化解决。本研究正是对这一现象的深入批判。
 
 二、文章的论证架构
@@ -107,10 +109,10 @@ class RealLLMClient:
 三、研究的理论与实践意义
 本研究的意义体现在两个层面。理论层面，我们为当代信息社会的算法危机提供了系统的哲学批判和社会学分析，丰富了技术伦理的理论资源。实践层面，本研究为政策制定者、技术设计者和社会公众提供了认识算法、规制算法、驾驭算法的理论基础。当算法已然成为社会的关键基础设施时，对其形式主义倾向的深入反思，不仅是学术问题，更是涉及社会未来走向的重大现实问题。"""
             }
-        
+
         elif "结论" in prompt or "conclusion" in prompt.lower():
             return {
-                'content': """第一、算法形式主义的根源与本质（第二章的核心发现）
+                "content": """第一、算法形式主义的根源与本质（第二章的核心发现）
 本研究从认识论的高度指出，算法形式主义根植于现代理性传统中的还原主义思维。这种思维模式试图将复杂的社会现实转化为可计算的数据结构，通过形式化的运算规则来生成决策。然而，这一过程本身就是对现实的简化和扭曲。第二章的深入分析表明，任何算法化过程都不是"纯技术"的，而是必然包含设计者的价值选择、对历史的诠释，以及对未来的想象。
 
 第二、算法形式主义的社会表现与实践后果（第三章的核心发现）
@@ -142,97 +144,99 @@ class RealLLMClient:
 第六、最后的思考
 算法形式主义的危机，归根结底是现代性危机在新时代的一种新的表现形式。它体现了技术理性对人文价值的威胁，权力的隐形化对民主的威胁，形式化思维对社会复杂性的威胁。但值得乐观的是，这一危机的识别本身就蕴含着改变的可能。每一次对算法的批判性反思，每一次人文关怀的坚守，每一次对民主问责的实践，都是在逐步纠正"数字之眼"的焦距，使其逐步适应人类社会的真实需要。本研究希望能够为这一漫长而必要的过程提供理论的支撑和实践的启蒙。"""
             }
-        
+
         # 其他类型的默认响应
-        return {
-            'content': '[Mock response] ' + prompt[:100] + '...'
-        }
+        return {"content": "[Mock response] " + prompt[:100] + "..."}
 
 
 async def test_full_paper_processing():
     """完整论文处理测试"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("完整论文处理集成测试")
-    print("="*70)
-    
+    print("=" * 70)
+
     # 文件路径
-    doc_path = Path(__file__).parent / "web" / "uploads" / "数字之眼的危机^L7算法的形式主义危机(1).docx"
+    doc_path = (
+        Path(__file__).parent
+        / "web"
+        / "uploads"
+        / "数字之眼的危机^L7算法的形式主义危机(1).docx"
+    )
     output_dir = Path(__file__).parent / "workspace" / "documents"
-    
+
     if not doc_path.exists():
         print(f"❌ 文档不存在: {doc_path}")
         return False
-    
+
     print(f"\n📄 文档: {doc_path.name}")
     print(f"📁 输出目录: {output_dir}")
-    
+
     # 用户请求 - 使用用户的原始需求
     user_input = "写一段摘要，300-400字，包含研究背景、方法、结果、结论；重新改善引言，让其与文章主体架构相符；改善结论，overcap整篇文章内容"
-    
+
     print(f"\n📝 用户请求:")
     print(f"   {user_input}")
-    
+
     # 创建LLM客户端
     llm_client = RealLLMClient()
-    
+
     # 创建分析器
     analyzer = IntelligentDocumentAnalyzer(llm_client)
-    
+
     # 准备输出目录
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     print(f"\n⏳ 开始处理...\n")
-    
+
     try:
         event_list = []
-        
+
         async for event in analyzer.process_document_revision_streaming(
-            str(doc_path),
-            user_input,
-            str(output_dir)
+            str(doc_path), user_input, str(output_dir)
         ):
             event_list.append(event)
-            
-            stage = event.get('stage', 'unknown')
-            progress = event.get('progress', 0)
-            message = event.get('message', '')
-            
+
+            stage = event.get("stage", "unknown")
+            progress = event.get("progress", 0)
+            message = event.get("message", "")
+
             # 格式化输出
-            status_bar = '█' * (progress // 5) + '░' * (20 - progress // 5)
+            status_bar = "█" * (progress // 5) + "░" * (20 - progress // 5)
             print(f"[{status_bar}] {progress:3}% | {stage.upper():15} | {message}")
-            
-            if stage == 'complete':
-                result = event.get('result', {})
+
+            if stage == "complete":
+                result = event.get("result", {})
                 print(f"\n✅ 处理完成！")
                 print(f"   输出文件: {result.get('output_file', 'Unknown')}")
                 print(f"   任务数: {result.get('tasks_completed', 0)}")
                 print(f"   修订部分: {', '.join(result.get('revisions', []))}")
-        
+
         return True
-    
+
     except Exception as e:
         print(f"\n❌ 处理失败: {str(e)}")
         import traceback
+
         traceback.print_exc()
         return False
 
 
 async def main():
     """主函数"""
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("智能文档分析引擎 - 完整集成测试")
-    print("="*70)
-    
+    print("=" * 70)
+
     result = await test_full_paper_processing()
-    
-    print("\n" + "="*70)
+
+    print("\n" + "=" * 70)
     if result:
         print("✅ 处理成功！")
         print("\n下一步：在Koto中上传Word文档并使用相同的请求进行真实测试")
     else:
         print("❌ 处理失败")
-    print("="*70)
+    print("=" * 70)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())

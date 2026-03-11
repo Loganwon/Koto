@@ -15,6 +15,7 @@ lora_pipeline.py — Koto LoRA 蒸馏训练流水线（生产级实装）
   pip install peft transformers datasets accelerate trl bitsandbytes
   pip install torch --index-url https://download.pytorch.org/whl/cu126
 """
+
 from __future__ import annotations
 
 import json
@@ -29,8 +30,9 @@ logger = logging.getLogger(__name__)
 
 # ── 路径 ──────────────────────────────────────────────────────────────────────
 
-_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
+_BASE_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 _SHADOW_DIR = os.path.join(_BASE_DIR, "workspace", "shadow_traces")
 _DATASET_DIR = os.path.join(_BASE_DIR, "workspace", "lora_datasets")
 _ADAPTER_DIR = os.path.join(_BASE_DIR, "config", "adapters")
@@ -38,6 +40,7 @@ _CHECKPOINT_DIR = os.path.join(_BASE_DIR, "workspace", "lora_checkpoints")
 
 
 # ── 数据结构 ──────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class TrainingConfig:
@@ -47,30 +50,38 @@ class TrainingConfig:
     使用 Qwen3-8B（≈ Qwen2.5-14B 能力，128K 上下文，混合思维模式）。
     使用 TrainingConfig.for_hardware() 自动适配其他设备。
     """
+
     # ── 模型选择 ─────────────────────────────────────────────────────────────
     # RTX 4090 24GB: Qwen3-8B ≈ Qwen2.5-14B 能力，128K 上下文，混合思维模式
     # 比 Qwen2.5-7B 强一代，fp16 LoRA 完全无压力
     base_model: str = "Qwen/Qwen3-8B"
 
     # ── LoRA 超参 ────────────────────────────────────────────────────────────
-    lora_r: int = 16                                   # 4090 可用更高 rank
+    lora_r: int = 16  # 4090 可用更高 rank
     lora_alpha: int = 32
     lora_dropout: float = 0.05
     target_modules: List[str] = field(
-        default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj",
-                                  "gate_proj", "up_proj", "down_proj"]
+        default_factory=lambda: [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj",
+        ]
     )
 
     # ── 训练超参 ─────────────────────────────────────────────────────────────
     num_epochs: int = 3
-    per_device_train_batch_size: int = 8               # 4090 显存够，大 batch
+    per_device_train_batch_size: int = 8  # 4090 显存够，大 batch
     gradient_accumulation_steps: int = 2
     learning_rate: float = 2e-4
-    max_seq_length: int = 1024                         # 更长上下文
+    max_seq_length: int = 1024  # 更长上下文
     warmup_steps: int = 20
     save_steps: int = 50
-    fp16: bool = True                                  # 4090 bf16/fp16 极快
-    use_4bit: bool = False                             # 24GB 无需 4-bit 量化
+    fp16: bool = True  # 4090 bf16/fp16 极快
+    use_4bit: bool = False  # 24GB 无需 4-bit 量化
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -92,43 +103,53 @@ class TrainingConfig:
         if vram_gb >= 20:
             return cls(
                 base_model="Qwen/Qwen3-8B",
-                lora_r=16, lora_alpha=32,
+                lora_r=16,
+                lora_alpha=32,
                 per_device_train_batch_size=8,
-                max_seq_length=2048,     # Qwen3-8B 支持 128K，训练用 2K 足够
-                fp16=True, use_4bit=False,
+                max_seq_length=2048,  # Qwen3-8B 支持 128K，训练用 2K 足够
+                fp16=True,
+                use_4bit=False,
             )
         elif vram_gb >= 10:
             return cls(
                 base_model="Qwen/Qwen3-4B",
-                lora_r=16, lora_alpha=32,
+                lora_r=16,
+                lora_alpha=32,
                 per_device_train_batch_size=4,
                 max_seq_length=2048,
-                fp16=True, use_4bit=False,
+                fp16=True,
+                use_4bit=False,
             )
         elif vram_gb >= 6:
             return cls(
                 base_model="Qwen/Qwen3-1.7B",
-                lora_r=8, lora_alpha=16,
+                lora_r=8,
+                lora_alpha=16,
                 per_device_train_batch_size=4,
                 max_seq_length=1024,
-                fp16=True, use_4bit=False,
+                fp16=True,
+                use_4bit=False,
             )
         elif vram_gb >= 4:
             return cls(
                 base_model="Qwen/Qwen3-0.6B",
-                lora_r=8, lora_alpha=16,
+                lora_r=8,
+                lora_alpha=16,
                 per_device_train_batch_size=2,
                 max_seq_length=512,
-                fp16=False, use_4bit=True,
+                fp16=False,
+                use_4bit=True,
             )
         else:  # CPU only
             return cls(
                 base_model="Qwen/Qwen3-0.6B",
-                lora_r=4, lora_alpha=8,
+                lora_r=4,
+                lora_alpha=8,
                 per_device_train_batch_size=1,
                 gradient_accumulation_steps=8,
                 max_seq_length=256,
-                fp16=False, use_4bit=True,
+                fp16=False,
+                use_4bit=True,
             )
 
     @classmethod
@@ -139,19 +160,32 @@ class TrainingConfig:
         """
         vram_gb = 0.0
         try:
-            import subprocess, re
+            import re
+            import subprocess
+
             result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=5
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.total",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.returncode == 0:
-                vram_mb = max(int(x.strip()) for x in result.stdout.strip().splitlines() if x.strip().isdigit())
+                vram_mb = max(
+                    int(x.strip())
+                    for x in result.stdout.strip().splitlines()
+                    if x.strip().isdigit()
+                )
                 vram_gb = vram_mb / 1024
         except Exception:
             pass
 
         import psutil
-        ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+
+        ram_gb = psutil.virtual_memory().total / (1024**3)
 
         cfg = cls.for_hardware(vram_gb=vram_gb, ram_gb=ram_gb)
         logger.info(
@@ -164,6 +198,7 @@ class TrainingConfig:
 @dataclass
 class AdapterMeta:
     """注册到 config/adapters/ 的适配器元数据"""
+
     skill_id: str
     adapter_path: str
     base_model: str
@@ -183,6 +218,7 @@ class AdapterMeta:
 
 
 # ── 主类 ──────────────────────────────────────────────────────────────────────
+
 
 class LoRAPipeline:
     """
@@ -251,6 +287,7 @@ class LoRAPipeline:
         # 检查 CUDA
         try:
             import torch
+
             cuda_available = torch.cuda.is_available()
             cuda_ver = torch.version.cuda or "N/A"
             logger.info(f"[LoRAPipeline] CUDA 可用: {cuda_available}  版本: {cuda_ver}")
@@ -324,8 +361,8 @@ class LoRAPipeline:
             converted = [
                 {
                     "messages": [
-                        {"role": "system",    "content": sys_msg},
-                        {"role": "user",      "content": r.get("user_input", "")},
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": r.get("user_input", "")},
                         {"role": "assistant", "content": r.get("ai_response", "")},
                     ]
                 }
@@ -347,8 +384,8 @@ class LoRAPipeline:
                 {
                     "conversations": [
                         {"from": "system", "value": sys_msg},
-                        {"from": "human",  "value": r.get("user_input", "")},
-                        {"from": "gpt",    "value": r.get("ai_response", "")},
+                        {"from": "human", "value": r.get("user_input", "")},
+                        {"from": "gpt", "value": r.get("ai_response", "")},
                     ]
                 }
                 for r in records
@@ -399,7 +436,11 @@ class LoRAPipeline:
         }
         """
         if self._active_trainings.get(skill_id):
-            return {"success": False, "error": f"skill '{skill_id}' 正在训练中，请稍后重试", "skill_id": skill_id}
+            return {
+                "success": False,
+                "error": f"skill '{skill_id}' 正在训练中，请稍后重试",
+                "skill_id": skill_id,
+            }
 
         t0 = time.time()
         self._active_trainings[skill_id] = True
@@ -426,7 +467,9 @@ class LoRAPipeline:
 
             # ── 尝试真实训练 ───────────────────────────────────────────────
             try:
-                return self._run_real_training(skill_id, dataset_path, cfg, t0, progress_cb)
+                return self._run_real_training(
+                    skill_id, dataset_path, cfg, t0, progress_cb
+                )
             except ImportError as ie:
                 logger.warning(
                     f"[LoRAPipeline] 依赖未安装，骨架模式运行: {ie}\n"
@@ -436,7 +479,9 @@ class LoRAPipeline:
                 return self._skeleton_response(skill_id, dataset_path, t0)
 
         except Exception as e:
-            logger.error(f"[LoRAPipeline] 训练失败 skill={skill_id}: {e}", exc_info=True)
+            logger.error(
+                f"[LoRAPipeline] 训练失败 skill={skill_id}: {e}", exc_info=True
+            )
             return {
                 "success": False,
                 "skill_id": skill_id,
@@ -449,7 +494,9 @@ class LoRAPipeline:
         finally:
             self._active_trainings.pop(skill_id, None)
 
-    def _skeleton_response(self, skill_id: str, dataset_path: str, t0: float) -> Dict[str, Any]:
+    def _skeleton_response(
+        self, skill_id: str, dataset_path: str, t0: float
+    ) -> Dict[str, Any]:
         """依赖缺失时的骨架占位响应。"""
         try:
             with open(dataset_path, "r", encoding="utf-8") as f:
@@ -474,7 +521,11 @@ class LoRAPipeline:
         }
 
     def _run_real_training(
-        self, skill_id: str, dataset_path: str, cfg: TrainingConfig, t0: float,
+        self,
+        skill_id: str,
+        dataset_path: str,
+        cfg: TrainingConfig,
+        t0: float,
         progress_cb: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Dict[str, Any]:
         """
@@ -499,8 +550,9 @@ class LoRAPipeline:
         )
         from trl import SFTConfig, SFTTrainer
 
-        def _report(msg: str, step: int = 0, loss: Optional[float] = None,
-                    pct: float = 0.0) -> None:
+        def _report(
+            msg: str, step: int = 0, loss: Optional[float] = None, pct: float = 0.0
+        ) -> None:
             logger.info(f"[LoRAPipeline] {msg}")
             if progress_cb:
                 try:
@@ -509,7 +561,9 @@ class LoRAPipeline:
                     pass
 
         _report(f"🚀 开始 Qwen3 LoRA 蒸馏训练  skill={skill_id}", pct=0)
-        _report(f"基座模型: {cfg.base_model}  rank={cfg.lora_r}  fp16={cfg.fp16}", pct=1)
+        _report(
+            f"基座模型: {cfg.base_model}  rank={cfg.lora_r}  fp16={cfg.fp16}", pct=1
+        )
 
         adapter_path = os.path.join(_CHECKPOINT_DIR, skill_id, "lora_adapter")
         os.makedirs(adapter_path, exist_ok=True)
@@ -520,10 +574,12 @@ class LoRAPipeline:
         _report(f"数据集加载完成: {num_samples} 条样本", pct=5)
 
         # ── 2. 分词器 ──────────────────────────────────────────────────────
-        tokenizer = AutoTokenizer.from_pretrained(cfg.base_model, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(
+            cfg.base_model, trust_remote_code=True
+        )
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.padding_side = "right"   # SFTTrainer 推荐 right-padding
+        tokenizer.padding_side = "right"  # SFTTrainer 推荐 right-padding
         _report("分词器加载完成", pct=8)
 
         # ── 3. 格式化函数（Qwen3 apply_chat_template）─────────────────────
@@ -547,7 +603,10 @@ class LoRAPipeline:
         else:
             # alpaca 兼容：拼接 instruction + output
             def _format_alpaca(s):
-                return {"text": f"### Instruction:\n{s.get('instruction','')}\n\n### Response:\n{s.get('output','')}"}
+                return {
+                    "text": f"### Instruction:\n{s.get('instruction','')}\n\n### Response:\n{s.get('output','')}"
+                }
+
             formatted_ds = raw_ds.map(_format_alpaca, num_proc=1)
             text_field = "text"
 
@@ -561,6 +620,7 @@ class LoRAPipeline:
         if cfg.use_4bit:
             try:
                 import bitsandbytes  # noqa: F401
+
                 bnb_config = BitsAndBytesConfig(
                     load_in_4bit=True,
                     bnb_4bit_use_double_quant=True,
@@ -577,7 +637,7 @@ class LoRAPipeline:
 
         _report("正在加载基座模型（可能需要 1-3 分钟）…", pct=15)
         model = AutoModelForCausalLM.from_pretrained(cfg.base_model, **load_kwargs)
-        model.config.use_cache = False           # 训练时关闭 KV cache
+        model.config.use_cache = False  # 训练时关闭 KV cache
         model.enable_input_require_grads()
         _report("模型加载完成", pct=30)
 
@@ -589,7 +649,7 @@ class LoRAPipeline:
             lora_dropout=cfg.lora_dropout,
             target_modules=cfg.target_modules,
             bias="none",
-            init_lora_weights="gaussian",   # 比默认 kaiming 收敛更平稳
+            init_lora_weights="gaussian",  # 比默认 kaiming 收敛更平稳
         )
 
         # ── 6. 实时 loss 回调 ──────────────────────────────────────────────
@@ -597,11 +657,19 @@ class LoRAPipeline:
             def __init__(self):
                 self._total_steps = 0
 
-            def on_train_begin(self, args, state: TrainerState, control: TrainerControl, **kw):
+            def on_train_begin(
+                self, args, state: TrainerState, control: TrainerControl, **kw
+            ):
                 self._total_steps = state.max_steps or 1
 
-            def on_log(self, args, state: TrainerState, control: TrainerControl,
-                       logs: Optional[Dict] = None, **kw):
+            def on_log(
+                self,
+                args,
+                state: TrainerState,
+                control: TrainerControl,
+                logs: Optional[Dict] = None,
+                **kw,
+            ):
                 if logs and "loss" in logs:
                     pct = min(30 + int(state.global_step / self._total_steps * 65), 95)
                     _report(
@@ -622,13 +690,13 @@ class LoRAPipeline:
             save_steps=cfg.save_steps,
             logging_steps=5,
             fp16=cfg.fp16 and not cfg.use_4bit,
-            bf16=False,                     # RTX 4090 支持，但 fp16 更快
+            bf16=False,  # RTX 4090 支持，但 fp16 更快
             report_to="none",
-            dataloader_num_workers=0,       # Windows 兼容
+            dataloader_num_workers=0,  # Windows 兼容
             remove_unused_columns=True,
             max_seq_length=cfg.max_seq_length,
             dataset_text_field=text_field,
-            packing=False,                  # 不 pack，保持对话边界清晰
+            packing=False,  # 不 pack，保持对话边界清晰
             save_total_limit=2,
             load_best_model_at_end=False,
         )
@@ -713,7 +781,9 @@ class LoRAPipeline:
             if not fname.endswith(".json"):
                 continue
             try:
-                with open(os.path.join(_ADAPTER_DIR, fname), "r", encoding="utf-8") as f:
+                with open(
+                    os.path.join(_ADAPTER_DIR, fname), "r", encoding="utf-8"
+                ) as f:
                     result.append(AdapterMeta.from_dict(json.load(f)))
             except Exception:
                 pass
@@ -770,9 +840,13 @@ class LoRAPipeline:
                 )
                 logger.info(f"[LoRAPipeline] ✅ 自动训练+注册完成 skill={skill_id}")
             else:
-                logger.error(f"[LoRAPipeline] ❌ 自动训练失败 skill={skill_id}: {result.get('error')}")
+                logger.error(
+                    f"[LoRAPipeline] ❌ 自动训练失败 skill={skill_id}: {result.get('error')}"
+                )
         except Exception as e:
-            logger.error(f"[LoRAPipeline] 自动训练异常 skill={skill_id}: {e}", exc_info=True)
+            logger.error(
+                f"[LoRAPipeline] 自动训练异常 skill={skill_id}: {e}", exc_info=True
+            )
 
 
 # ── 模块级单例 ────────────────────────────────────────────────────────────────

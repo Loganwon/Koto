@@ -24,8 +24,8 @@ import shutil
 import socket
 import subprocess
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Generator, Iterator, List, Optional
 
@@ -39,8 +39,10 @@ _STARTUP_TIMEOUT = 30  # 等待 Ollama 启动的最长秒数
 # Gemini 响应兼容结构（让 web/app.py 的代码无需修改）
 # ════════════════════════════════════════════════════════════════════════
 
+
 class _OllamaPart:
     """模拟 Gemini types.Part"""
+
     def __init__(self, text: str = ""):
         self.text = text
         self.function_call = None
@@ -50,6 +52,7 @@ class _OllamaPart:
 
 class _OllamaContent:
     """模拟 Gemini types.Content"""
+
     def __init__(self, role: str, text: str):
         self.role = role
         self.parts = [_OllamaPart(text=text)]
@@ -57,6 +60,7 @@ class _OllamaContent:
 
 class _OllamaCandidate:
     """模拟 Gemini types.Candidate"""
+
     def __init__(self, text: str):
         self.content = _OllamaContent("model", text)
         self.finish_reason = "STOP"
@@ -66,6 +70,7 @@ class _OllamaCandidate:
 
 class _OllamaUsageMetadata:
     """模拟 Gemini types.UsageMetadata"""
+
     def __init__(self, prompt_tokens: int = 0, completion_tokens: int = 0):
         self.prompt_token_count = prompt_tokens
         self.candidates_token_count = completion_tokens
@@ -80,6 +85,7 @@ class OllamaResponse:
       response.candidates[0].content.parts[0].text
       response.usage_metadata
     """
+
     def __init__(self, text: str, prompt_tokens: int = 0, completion_tokens: int = 0):
         self._text = text
         self.candidates = [_OllamaCandidate(text)]
@@ -101,6 +107,7 @@ class OllamaStreamChunk:
       chunk.text
       chunk.candidates[0].content.parts[0].text
     """
+
     def __init__(self, delta: str):
         self._delta = delta
         self.candidates = [_OllamaCandidate(delta)]
@@ -114,6 +121,7 @@ class OllamaStreamChunk:
 # ════════════════════════════════════════════════════════════════════════
 # Contents / Config 格式转换
 # ════════════════════════════════════════════════════════════════════════
+
 
 def _extract_text_from_part(part: Any) -> str:
     """从 Gemini Part 对象/字典中提取纯文本"""
@@ -241,6 +249,7 @@ def _extract_config_params(config: Any) -> Dict[str, Any]:
 # Ollama 服务管理
 # ════════════════════════════════════════════════════════════════════════
 
+
 def _is_ollama_running(base_url: str = _OLLAMA_BASE_URL) -> bool:
     """检测 Ollama 是否正在运行"""
     try:
@@ -265,9 +274,7 @@ def _start_ollama_if_needed(base_url: str = _OLLAMA_BASE_URL) -> bool:
     logger.info("[OllamaProvider] 正在启动 Ollama 服务...")
     try:
         creationflags = (
-            subprocess.CREATE_NO_WINDOW
-            if platform.system() == "Windows"
-            else 0
+            subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
         )
         subprocess.Popen(
             ["ollama", "serve"],
@@ -290,6 +297,7 @@ def _start_ollama_if_needed(base_url: str = _OLLAMA_BASE_URL) -> bool:
 # ════════════════════════════════════════════════════════════════════════
 # HTTP 调用（不依赖 requests 库，使用 urllib 以保证打包兼容性）
 # ════════════════════════════════════════════════════════════════════════
+
 
 def _ollama_chat(
     model: str,
@@ -361,6 +369,7 @@ def _stream_ollama_response(req: urllib.request.Request) -> Generator[str, None,
 # ════════════════════════════════════════════════════════════════════════
 # Gemini 兼容代理
 # ════════════════════════════════════════════════════════════════════════
+
 
 class OllamaModelsProxy:
     """
@@ -456,6 +465,7 @@ class OllamaModelsProxy:
             payload["options"] = options
 
         import urllib.request as _ureq
+
         data = json.dumps(payload).encode("utf-8")
         req = _ureq.Request(
             url,
@@ -485,9 +495,11 @@ class OllamaModelsProxy:
 
     def __getattr__(self, name: str):
         """对 count_tokens 等未实现方法返回假实现，避免崩溃"""
+
         def _stub(*args, **kwargs):
             logger.debug(f"[OllamaProvider] models.{name}() 未实现，返回空响应")
             return None
+
         return _stub
 
 
@@ -512,6 +524,7 @@ class OllamaClientProxy:
 # 工厂函数
 # ════════════════════════════════════════════════════════════════════════
 
+
 def create_ollama_client(
     model_tag: Optional[str] = None,
     base_url: str = _OLLAMA_BASE_URL,
@@ -524,7 +537,9 @@ def create_ollama_client(
         model_tag = _resolve_model_from_settings()
 
     if not model_tag:
-        raise ValueError("未指定 Ollama 模型，且 user_settings.json 中未配置 local_model")
+        raise ValueError(
+            "未指定 Ollama 模型，且 user_settings.json 中未配置 local_model"
+        )
 
     return OllamaClientProxy(model_tag=model_tag, base_url=base_url)
 
@@ -534,6 +549,7 @@ def _resolve_model_from_settings() -> Optional[str]:
     try:
         # 兼容打包/开发两种路径
         import sys
+
         if getattr(sys, "frozen", False):
             root = Path(sys.executable).parent
         else:
@@ -556,6 +572,7 @@ def get_local_model_info() -> Dict[str, Any]:
     """
     try:
         import sys
+
         if getattr(sys, "frozen", False):
             root = Path(sys.executable).parent
         else:

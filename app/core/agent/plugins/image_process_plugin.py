@@ -33,39 +33,39 @@ class ImageProcessPlugin(AgentPlugin):
                     "properties": {
                         "filepath": {
                             "type": "STRING",
-                            "description": "Path to the image file."
+                            "description": "Path to the image file.",
                         }
                     },
-                    "required": ["filepath"]
-                }
+                    "required": ["filepath"],
+                },
             },
             {
                 "name": "image_resize",
                 "func": self.image_resize,
                 "description": "Resize an image to the specified width and height. "
-                               "Saves the result to output_path (or adds '_resized' suffix).",
+                "Saves the result to output_path (or adds '_resized' suffix).",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "filepath": {
                             "type": "STRING",
-                            "description": "Path to the source image."
+                            "description": "Path to the source image.",
                         },
                         "width": {
                             "type": "INTEGER",
-                            "description": "Target width in pixels."
+                            "description": "Target width in pixels.",
                         },
                         "height": {
                             "type": "INTEGER",
-                            "description": "Target height in pixels."
+                            "description": "Target height in pixels.",
                         },
                         "output_path": {
                             "type": "STRING",
-                            "description": "Optional output path. If omitted, '_resized' is appended to the filename."
-                        }
+                            "description": "Optional output path. If omitted, '_resized' is appended to the filename.",
+                        },
                     },
-                    "required": ["filepath", "width", "height"]
-                }
+                    "required": ["filepath", "width", "height"],
+                },
             },
             {
                 "name": "image_convert",
@@ -76,19 +76,19 @@ class ImageProcessPlugin(AgentPlugin):
                     "properties": {
                         "filepath": {
                             "type": "STRING",
-                            "description": "Path to the source image."
+                            "description": "Path to the source image.",
                         },
                         "target_format": {
                             "type": "STRING",
-                            "description": "Target format, e.g. 'PNG', 'JPEG', 'WEBP', 'BMP'."
+                            "description": "Target format, e.g. 'PNG', 'JPEG', 'WEBP', 'BMP'.",
                         },
                         "output_path": {
                             "type": "STRING",
-                            "description": "Optional output path."
-                        }
+                            "description": "Optional output path.",
+                        },
                     },
-                    "required": ["filepath", "target_format"]
-                }
+                    "required": ["filepath", "target_format"],
+                },
             },
         ]
 
@@ -99,6 +99,7 @@ class ImageProcessPlugin(AgentPlugin):
         """Return metadata about an image."""
         try:
             from PIL import Image
+
             img = Image.open(filepath)
             return (
                 f"Format: {img.format}\n"
@@ -109,10 +110,13 @@ class ImageProcessPlugin(AgentPlugin):
             return f"Error reading image info: {exc}"
 
     @staticmethod
-    def image_resize(filepath: str, width: int, height: int, output_path: str = "") -> str:
+    def image_resize(
+        filepath: str, width: int, height: int, output_path: str = ""
+    ) -> str:
         """Resize an image."""
         try:
             from PIL import Image
+
             img = Image.open(filepath)
             resized = img.resize((int(width), int(height)))
             if not output_path:
@@ -129,11 +133,18 @@ class ImageProcessPlugin(AgentPlugin):
         """Convert an image to another format."""
         try:
             from PIL import Image
+
             img = Image.open(filepath)
             fmt = target_format.upper()
             if not output_path:
                 base, _ = os.path.splitext(filepath)
-                ext_map = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp", "BMP": ".bmp", "GIF": ".gif"}
+                ext_map = {
+                    "JPEG": ".jpg",
+                    "PNG": ".png",
+                    "WEBP": ".webp",
+                    "BMP": ".bmp",
+                    "GIF": ".gif",
+                }
                 ext = ext_map.get(fmt, f".{fmt.lower()}")
                 output_path = f"{base}_converted{ext}"
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)

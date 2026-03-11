@@ -5,10 +5,10 @@ SystemToolsPlugin — Python 代码执行 & 包管理
 适配 UnifiedAgent 插件体系。
 """
 
-import os
-import sys
-import subprocess
 import importlib
+import os
+import subprocess
+import sys
 import traceback
 from typing import Any, Dict, List
 
@@ -32,17 +32,17 @@ class SystemToolsPlugin(AgentPlugin):
                 "name": "python_exec",
                 "func": self.python_exec,
                 "description": "Execute a Python code snippet and return the printed output. "
-                               "Use `print()` to expose results.",
+                "Use `print()` to expose results.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "code": {
                             "type": "STRING",
-                            "description": "Python source code to execute."
+                            "description": "Python source code to execute.",
                         }
                     },
-                    "required": ["code"]
-                }
+                    "required": ["code"],
+                },
             },
             {
                 "name": "pip_install",
@@ -53,27 +53,27 @@ class SystemToolsPlugin(AgentPlugin):
                     "properties": {
                         "packages": {
                             "type": "STRING",
-                            "description": "Comma-separated package names, e.g. 'pandas,numpy'."
+                            "description": "Comma-separated package names, e.g. 'pandas,numpy'.",
                         }
                     },
-                    "required": ["packages"]
-                }
+                    "required": ["packages"],
+                },
             },
             {
                 "name": "pip_check",
                 "func": self.pip_check,
                 "description": "Check if Python packages are importable. "
-                               "Returns a list of missing packages.",
+                "Returns a list of missing packages.",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
                         "packages": {
                             "type": "STRING",
-                            "description": "Comma-separated package names to check."
+                            "description": "Comma-separated package names to check.",
                         }
                     },
-                    "required": ["packages"]
-                }
+                    "required": ["packages"],
+                },
             },
         ]
 
@@ -84,8 +84,8 @@ class SystemToolsPlugin(AgentPlugin):
     @staticmethod
     def python_exec(code: str) -> str:
         """Execute Python code in a restricted namespace and capture stdout."""
-        import io
         import contextlib
+        import io
 
         stdout_capture = io.StringIO()
         exec_globals: Dict[str, Any] = {"__builtins__": __builtins__}
@@ -108,7 +108,7 @@ class SystemToolsPlugin(AgentPlugin):
 
         results: List[str] = []
         for pkg in pkg_list:
-            if getattr(sys, 'frozen', False):
+            if getattr(sys, "frozen", False):
                 results.append(f"❌ {pkg}: 打包版不支持安装新包，请联系开发者。")
                 continue
             try:

@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """Unit tests for app.core.security.pii_filter.PIIFilter."""
+
 import logging
+
 import pytest
-from app.core.security.pii_filter import PIIConfig, PIIFilter, MaskResult
+
+from app.core.security.pii_filter import MaskResult, PIIConfig, PIIFilter
 
 _LOGGER = "app.core.security.pii_filter"
 
@@ -121,12 +124,18 @@ class TestPIISelectiveConfig:
 
     def test_mask_only_phone_and_email(self):
         config = PIIConfig(
-            mask_phone=True, mask_email=True,
-            mask_id_card=False, mask_bank_card=False,
-            mask_name=False, mask_address=False,
-            mask_passport=False, mask_landline=False,
+            mask_phone=True,
+            mask_email=True,
+            mask_id_card=False,
+            mask_bank_card=False,
+            mask_name=False,
+            mask_address=False,
+            mask_passport=False,
+            mask_landline=False,
         )
-        result = PIIFilter.mask("手机：13812345678 邮箱：x@y.com 证件：110101199001011234", config=config)
+        result = PIIFilter.mask(
+            "手机：13812345678 邮箱：x@y.com 证件：110101199001011234", config=config
+        )
         assert "13812345678" not in result.masked_text
         assert "x@y.com" not in result.masked_text
         assert "110101199001011234" in result.masked_text
@@ -189,8 +198,11 @@ class TestPIIFilterLogging:
         """When no PII is present, the stats INFO log must NOT be emitted (negative)."""
         with caplog.at_level(logging.INFO, logger=_LOGGER):
             PIIFilter.mask("The weather today is nice.")
-        info_msgs = [r.message for r in caplog.records
-                     if r.levelno == logging.INFO and "脱敏统计" in r.message]
+        info_msgs = [
+            r.message
+            for r in caplog.records
+            if r.levelno == logging.INFO and "脱敏统计" in r.message
+        ]
         assert info_msgs == [], f"Unexpected INFO log: {info_msgs}"
 
     def test_log_stats_false_suppresses_info(self, caplog):
@@ -198,8 +210,11 @@ class TestPIIFilterLogging:
         cfg = PIIConfig(log_stats=False)
         with caplog.at_level(logging.INFO, logger=_LOGGER):
             PIIFilter.mask("手机号是13812345678", config=cfg)
-        suppressed = [r.message for r in caplog.records
-                      if r.levelno == logging.INFO and "脱敏统计" in r.message]
+        suppressed = [
+            r.message
+            for r in caplog.records
+            if r.levelno == logging.INFO and "脱敏统计" in r.message
+        ]
         assert suppressed == [], f"log_stats=False should suppress info: {suppressed}"
 
     def test_empty_text_logs_debug_skip(self, caplog):
@@ -207,7 +222,9 @@ class TestPIIFilterLogging:
         with caplog.at_level(logging.DEBUG, logger=_LOGGER):
             PIIFilter.mask("")
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
-        assert any("skip" in m.lower() or "empty" in m.lower() for m in debug_msgs), debug_msgs
+        assert any(
+            "skip" in m.lower() or "empty" in m.lower() for m in debug_msgs
+        ), debug_msgs
         warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
         assert warnings == [], f"Unexpected warnings for empty input: {warnings}"
 
@@ -217,12 +234,15 @@ class TestPIIFilterLogging:
         with caplog.at_level(logging.DEBUG, logger=_LOGGER):
             PIIFilter.restore(result.masked_text, result.mask_map)
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
-        assert any("restore" in m.lower() or "placeholder" in m.lower() for m in debug_msgs), debug_msgs
+        assert any(
+            "restore" in m.lower() or "placeholder" in m.lower() for m in debug_msgs
+        ), debug_msgs
 
     def test_no_pii_emits_debug_not_info(self, caplog):
         """Clean text must produce a DEBUG (not INFO) 'no PII detected' log."""
         with caplog.at_level(logging.DEBUG, logger=_LOGGER):
             PIIFilter.mask("Hello, this is a clean message.")
         debug_msgs = [r.message for r in caplog.records if r.levelno == logging.DEBUG]
-        assert any("no PII" in m or "no pii" in m.lower() for m in debug_msgs), debug_msgs
-
+        assert any(
+            "no PII" in m or "no pii" in m.lower() for m in debug_msgs
+        ), debug_msgs

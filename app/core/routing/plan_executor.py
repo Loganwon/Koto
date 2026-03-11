@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 # Context Store
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class ContextStore:
     """步骤间结果共享仓库。"""
 
@@ -70,6 +71,7 @@ class ContextStore:
             return text
         try:
             import sys
+
             _app_mod = sys.modules.get("web.app") or sys.modules.get("app")
             _client = getattr(_app_mod, "client", None) if _app_mod else None
             _types_mod = sys.modules.get("google.genai.types")
@@ -102,6 +104,7 @@ class ContextStore:
 # Topological Sort
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _topo_sort(steps: List[Dict]) -> List[Dict]:
     """
     对步骤列表按 depends_on 做拓扑排序。
@@ -116,7 +119,7 @@ def _topo_sort(steps: List[Dict]) -> List[Dict]:
 
     for s in steps:
         sid = s.get("id", 0)
-        for dep in (s.get("depends_on") or []):
+        for dep in s.get("depends_on") or []:
             if dep in id_map:
                 adj[dep].append(sid)
                 in_degree[sid] = in_degree.get(sid, 0) + 1
@@ -141,6 +144,7 @@ def _topo_sort(steps: List[Dict]) -> List[Dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Enriched Input Builder
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _build_enriched_input(step: Dict, store: ContextStore) -> str:
     """
@@ -169,6 +173,7 @@ def _build_enriched_input(step: Dict, store: ContextStore) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # PlanExecutor
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class PlanExecutor:
     """
@@ -246,16 +251,24 @@ class PlanExecutor:
             "final_output": final_output,
             "saved_files": self.saved_files,
             "step_results": self.step_results,
-            "context_snapshot": {k: (str(v)[:200] if not isinstance(v, str) else v[:200])
-                                 for k, v in self.store.as_legacy_context().items()
-                                 if k not in ("original_input", "user_input")},
+            "context_snapshot": {
+                k: (str(v)[:200] if not isinstance(v, str) else v[:200])
+                for k, v in self.store.as_legacy_context().items()
+                if k not in ("original_input", "user_input")
+            },
         }
 
     # ─── Private helpers ─────────────────────────────────────────────────────
 
     async def _run_with_retry(
-        self, handler, step: Dict, enriched_input: str,
-        task_type: str, output_key: str, idx: int, total: int
+        self,
+        handler,
+        step: Dict,
+        enriched_input: str,
+        task_type: str,
+        output_key: str,
+        idx: int,
+        total: int,
     ) -> Dict:
         last_result = {"success": False, "error": "未执行", "output": ""}
         for attempt in range(self.max_retry + 1):
@@ -292,8 +305,10 @@ class PlanExecutor:
         task_type = step.get("task_type", "STEP")
         self.store.put(f"{task_type}_result", result)
         step_id = step.get("id", len(self.step_results) + 1)
-        self.store.put(f"step_{step_id}_output",
-                       result.get("output") or result.get("content") or "")
+        self.store.put(
+            f"step_{step_id}_output",
+            result.get("output") or result.get("content") or "",
+        )
         self.step_results.append({"step": step, "result": result})
 
     def _merge_outputs(self) -> str:
@@ -330,7 +345,9 @@ class PlanExecutor:
             "task_type": step.get("task_type", ""),
             "description": step.get("description", ""),
             "success": success,
-            "output_preview": (result.get("output") or result.get("content") or "")[:120],
+            "output_preview": (result.get("output") or result.get("content") or "")[
+                :120
+            ],
             "error": result.get("error") if not success else None,
         }
 
@@ -338,6 +355,7 @@ class PlanExecutor:
 # ─────────────────────────────────────────────────────────────────────────────
 # Handler Factory (在 app.py 中用于构建 handlers dict)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def build_handlers_from_orchestrator(orchestrator_cls, context: Dict) -> Dict[str, Any]:
     """
@@ -380,12 +398,12 @@ def build_handlers_from_orchestrator(orchestrator_cls, context: Dict) -> Dict[st
 
     return {
         "WEB_SEARCH": _web_search,
-        "RESEARCH":   _research,
-        "FILE_GEN":   _file_gen,
-        "PAINTER":    _painter,
-        "CODER":      _coder,
-        "SYSTEM":     _system,
-        "AGENT":      _agent,
+        "RESEARCH": _research,
+        "FILE_GEN": _file_gen,
+        "PAINTER": _painter,
+        "CODER": _coder,
+        "SYSTEM": _system,
+        "AGENT": _agent,
         # CHAT 直接返回 user_input（步骤本身在其他路由中完成）
         "CHAT": lambda si, ctx, step=None: _async_return(
             {"success": True, "output": si}

@@ -9,6 +9,7 @@ skill_recorder.py — 从对话自动提取 SkillDefinition
   SkillRecorder.from_text(user_input, ai_response, skill_name, description)
   SkillRecorder.save_and_register(skill_def)
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_base_dir() -> Path:
-    if getattr(_sys, 'frozen', False):
+    if getattr(_sys, "frozen", False):
         return Path(_sys.executable).parent
     return Path(__file__).resolve().parents[3]
 
@@ -39,17 +40,21 @@ _SKILLS_DIR = str(_BASE_DIR / "config" / "skills")
 
 # ── 懒加载 SkillDefinition ────────────────────────────────────────────────────
 
+
 def _get_skill_schema():
-    from app.core.skills.skill_schema import SkillDefinition, InputVariable, OutputSpec
+    from app.core.skills.skill_schema import InputVariable, OutputSpec, SkillDefinition
+
     return SkillDefinition, InputVariable, OutputSpec
 
 
 def _get_skill_manager():
     from app.core.skills.skill_manager import SkillManager
+
     return SkillManager
 
 
 # ── 对话加载 ─────────────────────────────────────────────────────────────────
+
 
 def _load_chat_history(session_id: str) -> List[Dict[str, str]]:
     """
@@ -88,8 +93,7 @@ def _extract_turns(history: List[Dict[str, str]]) -> List[Dict[str, str]]:
             parts = entry["parts"]
             if isinstance(parts, list):
                 text = " ".join(
-                    p.get("text", p) if isinstance(p, dict) else str(p)
-                    for p in parts
+                    p.get("text", p) if isinstance(p, dict) else str(p) for p in parts
                 )
         if text:
             turns.append({"role": role, "text": str(text)})
@@ -155,6 +159,7 @@ def _make_skill_id(name: str) -> str:
 
 # ── 核心类 ────────────────────────────────────────────────────────────────────
 
+
 class SkillRecorder:
     """
     从对话 / 文本片段提取标准化 SkillDefinition。
@@ -190,7 +195,7 @@ class SkillRecorder:
 
         turns = _extract_turns(history)
         # 取最近的 max_turns 轮（成对）
-        recent = turns[-max_turns * 2:] if len(turns) > max_turns * 2 else turns
+        recent = turns[-max_turns * 2 :] if len(turns) > max_turns * 2 else turns
 
         # 找最后一对 user-assistant
         user_text = ""
@@ -203,13 +208,7 @@ class SkillRecorder:
             if user_text and ai_text:
                 break
 
-        examples = [
-            {
-                "user_input": t["text"]
-                for t in recent
-                if t["role"] == "user"
-            }
-        ]
+        examples = [{"user_input": t["text"] for t in recent if t["role"] == "user"}]
         # 改用列表推导更清晰
         example_pairs = cls._build_example_pairs(recent, max_turns)
 
@@ -269,7 +268,9 @@ class SkillRecorder:
             SkillManager.register_custom(skill_def)
             logger.info(f"[skill_recorder] 已注册 Skill: {skill_def.id}")
         except Exception as e:
-            logger.warning(f"[skill_recorder] SkillManager 注册失败（已保存到磁盘）: {e}")
+            logger.warning(
+                f"[skill_recorder] SkillManager 注册失败（已保存到磁盘）: {e}"
+            )
 
         return skill_def.id
 
@@ -284,7 +285,9 @@ class SkillRecorder:
         i = 0
         while i < len(turns) - 1 and len(pairs) < max_pairs:
             if turns[i]["role"] == "user" and turns[i + 1]["role"] == "assistant":
-                pairs.append({"input": turns[i]["text"], "output": turns[i + 1]["text"]})
+                pairs.append(
+                    {"input": turns[i]["text"], "output": turns[i + 1]["text"]}
+                )
                 i += 2
             else:
                 i += 1

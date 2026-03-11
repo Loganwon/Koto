@@ -9,8 +9,8 @@ koto_setup.py — Koto 启动入口（带首次设置向导）
 """
 
 import os
-import sys
 import runpy
+import sys
 from pathlib import Path
 
 # ── 路径配置 ──────────────────────────────────────────
@@ -18,13 +18,19 @@ if getattr(sys, "frozen", False):
     # PyInstaller 环境
     APP_ROOT = Path(sys.executable).parent
     BUNDLE_DIR = Path(sys._MEIPASS)
-    
+
     # Fix pythonnet runtime path for pywebview's EdgeChromium backend in frozen environment
     # This must be set before any import of webview or clr
     _internal_py = APP_ROOT / "internal" / "py"
     if _internal_py.exists():
-        os.environ.setdefault('PYTHONNET_PYDLL', str(_internal_py / f'python{sys.version_info.major}{sys.version_info.minor}.dll'))
-    os.environ.setdefault('PYWEBVIEW_GUI', 'edgechromium')
+        os.environ.setdefault(
+            "PYTHONNET_PYDLL",
+            str(
+                _internal_py
+                / f"python{sys.version_info.major}{sys.version_info.minor}.dll"
+            ),
+        )
+    os.environ.setdefault("PYWEBVIEW_GUI", "edgechromium")
 else:
     here = Path(__file__).resolve().parent
     APP_ROOT = here.parent if here.name == "src" else here
@@ -42,7 +48,10 @@ for _d in ["logs", "chats", "config", "workspace"]:
     (APP_ROOT / _d).mkdir(parents=True, exist_ok=True)
 
 # 图标资源目录：打包模式下在 _MEIPASS/assets/，源码模式下在 src/assets/
-ASSETS_DIR = (BUNDLE_DIR if getattr(sys, 'frozen', False) else APP_ROOT / 'src') / 'assets'
+ASSETS_DIR = (
+    BUNDLE_DIR if getattr(sys, "frozen", False) else APP_ROOT / "src"
+) / "assets"
+
 
 # ── API 密钥配置向导 ───────────────────────────────────
 def _show_api_setup_wizard(initial_status: str = "") -> dict:
@@ -57,15 +66,15 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     root.resizable(False, False)
 
     # ── 颜色常量 ──
-    BG      = "#05080f"
-    BG2     = "#0b111d"
-    BG3     = "#111a2a"
-    ACCENT  = "#63c6ff"
-    TEXT    = "#e8eefc"
-    TEXT2   = "#9fb3d1"
-    BORDER  = "#1e2d45"
+    BG = "#05080f"
+    BG2 = "#0b111d"
+    BG3 = "#111a2a"
+    ACCENT = "#63c6ff"
+    TEXT = "#e8eefc"
+    TEXT2 = "#9fb3d1"
+    BORDER = "#1e2d45"
     SUCCESS = "#76f7d4"
-    DANGER  = "#ef6b6b"
+    DANGER = "#ef6b6b"
 
     root.configure(bg=BG)
 
@@ -91,13 +100,13 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
         pass
 
     # ── Fonts ──
-    f_title  = tkfont.Font(family="Microsoft YaHei UI", size=16, weight="bold")
-    f_sub    = tkfont.Font(family="Microsoft YaHei UI", size=10)
-    f_label  = tkfont.Font(family="Microsoft YaHei UI", size=9, weight="bold")
-    f_input  = tkfont.Font(family="Consolas", size=11)
-    f_hint   = tkfont.Font(family="Microsoft YaHei UI", size=8)
-    f_btn    = tkfont.Font(family="Microsoft YaHei UI", size=10, weight="bold")
-    f_step   = tkfont.Font(family="Microsoft YaHei UI", size=8)
+    f_title = tkfont.Font(family="Microsoft YaHei UI", size=16, weight="bold")
+    f_sub = tkfont.Font(family="Microsoft YaHei UI", size=10)
+    f_label = tkfont.Font(family="Microsoft YaHei UI", size=9, weight="bold")
+    f_input = tkfont.Font(family="Consolas", size=11)
+    f_hint = tkfont.Font(family="Microsoft YaHei UI", size=8)
+    f_btn = tkfont.Font(family="Microsoft YaHei UI", size=10, weight="bold")
+    f_step = tkfont.Font(family="Microsoft YaHei UI", size=8)
 
     # ── 顶部品牌区 ──
     top = tk.Frame(root, bg=BG2, height=90)
@@ -117,8 +126,14 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     # ── 步骤说明 ──
     steps_frame = tk.Frame(body, bg=BG3, padx=12, pady=10)
     steps_frame.pack(fill="x", pady=(0, 16))
-    tk.Label(steps_frame, text="如何获取 Gemini API 密钥：",
-             font=f_step, bg=BG3, fg=TEXT2, anchor="w").pack(fill="x")
+    tk.Label(
+        steps_frame,
+        text="如何获取 Gemini API 密钥：",
+        font=f_step,
+        bg=BG3,
+        fg=TEXT2,
+        anchor="w",
+    ).pack(fill="x")
     steps = [
         "① 访问  https://aistudio.google.com/apikey",
         "② 登录 Google 账号",
@@ -126,51 +141,98 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
         "④ 复制密钥粘贴到下方输入框",
     ]
     for s in steps:
-        tk.Label(steps_frame, text=s, font=f_step, bg=BG3,
-                 fg=TEXT2, anchor="w").pack(fill="x", pady=1)
+        tk.Label(steps_frame, text=s, font=f_step, bg=BG3, fg=TEXT2, anchor="w").pack(
+            fill="x", pady=1
+        )
 
     # ── API Key 输入 ──
-    tk.Label(body, text="Gemini API 密钥  *", font=f_label,
-             bg=BG, fg=ACCENT, anchor="w").pack(fill="x", pady=(0, 4))
+    tk.Label(
+        body, text="Gemini API 密钥  *", font=f_label, bg=BG, fg=ACCENT, anchor="w"
+    ).pack(fill="x", pady=(0, 4))
 
     key_var = tk.StringVar()
     key_frame = tk.Frame(body, bg=BORDER, padx=1, pady=1)
     key_frame.pack(fill="x", pady=(0, 4))
     key_inner = tk.Frame(key_frame, bg=BG2)
     key_inner.pack(fill="x")
-    key_entry = tk.Entry(key_inner, textvariable=key_var, font=f_input,
-                         bg=BG2, fg=TEXT, insertbackground=ACCENT,
-                         relief="flat", show="•", bd=8)
+    key_entry = tk.Entry(
+        key_inner,
+        textvariable=key_var,
+        font=f_input,
+        bg=BG2,
+        fg=TEXT,
+        insertbackground=ACCENT,
+        relief="flat",
+        show="•",
+        bd=8,
+    )
     key_entry.pack(fill="x")
 
     # 显示/隐藏密钥
     show_var = tk.BooleanVar(value=False)
+
     def toggle_show():
         key_entry.config(show="" if show_var.get() else "•")
-    tk.Checkbutton(body, text="显示密钥", variable=show_var,
-                   command=toggle_show, font=f_hint,
-                   bg=BG, fg=TEXT2, activebackground=BG,
-                   activeforeground=TEXT, selectcolor=BG3,
-                   relief="flat", bd=0).pack(anchor="w", pady=(0, 12))
+
+    tk.Checkbutton(
+        body,
+        text="显示密钥",
+        variable=show_var,
+        command=toggle_show,
+        font=f_hint,
+        bg=BG,
+        fg=TEXT2,
+        activebackground=BG,
+        activeforeground=TEXT,
+        selectcolor=BG3,
+        relief="flat",
+        bd=0,
+    ).pack(anchor="w", pady=(0, 12))
 
     # ── 自定义 API 端点（可选）──
-    tk.Label(body, text="自定义 API 端点（可选，中转代理用）", font=f_label,
-             bg=BG, fg=TEXT2, anchor="w").pack(fill="x", pady=(0, 4))
+    tk.Label(
+        body,
+        text="自定义 API 端点（可选，中转代理用）",
+        font=f_label,
+        bg=BG,
+        fg=TEXT2,
+        anchor="w",
+    ).pack(fill="x", pady=(0, 4))
     base_var = tk.StringVar()
     base_frame = tk.Frame(body, bg=BORDER, padx=1, pady=1)
     base_frame.pack(fill="x", pady=(0, 4))
     base_inner = tk.Frame(base_frame, bg=BG2)
     base_inner.pack(fill="x")
-    tk.Entry(base_inner, textvariable=base_var, font=f_input,
-             bg=BG2, fg=TEXT, insertbackground=ACCENT,
-             relief="flat", bd=8).pack(fill="x")
-    tk.Label(body, text="例: https://your-proxy.com/v1beta",
-             font=f_hint, bg=BG, fg=TEXT2, anchor="w").pack(fill="x", pady=(0, 14))
+    tk.Entry(
+        base_inner,
+        textvariable=base_var,
+        font=f_input,
+        bg=BG2,
+        fg=TEXT,
+        insertbackground=ACCENT,
+        relief="flat",
+        bd=8,
+    ).pack(fill="x")
+    tk.Label(
+        body,
+        text="例: https://your-proxy.com/v1beta",
+        font=f_hint,
+        bg=BG,
+        fg=TEXT2,
+        anchor="w",
+    ).pack(fill="x", pady=(0, 14))
 
     # ── 状态提示 ──
     status_var = tk.StringVar(value="")
-    status_lbl = tk.Label(body, textvariable=status_var, font=f_hint,
-                          bg=BG, fg=DANGER, anchor="w", wraplength=420)
+    status_lbl = tk.Label(
+        body,
+        textvariable=status_var,
+        font=f_hint,
+        bg=BG,
+        fg=DANGER,
+        anchor="w",
+        wraplength=420,
+    )
     status_lbl.pack(fill="x", pady=(0, 8))
 
     # 如果携带了初始状态（例如：密钥失效提示），立即显示
@@ -202,8 +264,8 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
 
     def _save():
         raw_key = key_var.get().strip()
-        base    = base_var.get().strip()
-        result["key"]  = raw_key
+        base = base_var.get().strip()
+        result["key"] = raw_key
         result["base"] = base
         status_var.set("✅ 保存成功，正在启动…")
         status_lbl.config(fg=SUCCESS)
@@ -227,22 +289,52 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
             status_var.set(msg or "❌ 密钥验证失败")
             status_lbl.config(fg=DANGER)
 
-    cancel_btn = tk.Button(btn_row, text="跳过", font=f_btn,
-                           bg=BG3, fg=TEXT2, activebackground=BORDER,
-                           relief="flat", bd=0, padx=18, pady=10,
-                           cursor="hand2", command=on_cancel)
+    cancel_btn = tk.Button(
+        btn_row,
+        text="跳过",
+        font=f_btn,
+        bg=BG3,
+        fg=TEXT2,
+        activebackground=BORDER,
+        relief="flat",
+        bd=0,
+        padx=18,
+        pady=10,
+        cursor="hand2",
+        command=on_cancel,
+    )
     cancel_btn.pack(side="left")
 
-    test_btn = tk.Button(btn_row, text="测试密钥", font=f_btn,
-                         bg=BG3, fg=TEXT2, activebackground=BORDER,
-                         relief="flat", bd=0, padx=14, pady=10,
-                         cursor="hand2", command=on_test)
+    test_btn = tk.Button(
+        btn_row,
+        text="测试密钥",
+        font=f_btn,
+        bg=BG3,
+        fg=TEXT2,
+        activebackground=BORDER,
+        relief="flat",
+        bd=0,
+        padx=14,
+        pady=10,
+        cursor="hand2",
+        command=on_test,
+    )
     test_btn.pack(side="left", padx=(8, 0))
 
-    confirm_btn = tk.Button(btn_row, text="保存并启动  →", font=f_btn,
-                            bg=ACCENT, fg="#05080f", activebackground="#4db8f0",
-                            relief="flat", bd=0, padx=18, pady=10,
-                            cursor="hand2", command=on_confirm)
+    confirm_btn = tk.Button(
+        btn_row,
+        text="保存并启动  →",
+        font=f_btn,
+        bg=ACCENT,
+        fg="#05080f",
+        activebackground="#4db8f0",
+        relief="flat",
+        bd=0,
+        padx=18,
+        pady=10,
+        cursor="hand2",
+        command=on_confirm,
+    )
     confirm_btn.pack(side="right")
 
     # Enter 键确认
@@ -304,9 +396,12 @@ def _validate_api_key(key: str, base: str = "") -> tuple:
     """向 Gemini 服务器发送轻量请求验证密钥，返回 (ok: bool, msg: str)。
     超时 8 秒，网络异常时返回 (False, ⚠️ 提示) 而不是 (False, ❌ 无效)。"""
     try:
-        import urllib.request
         import urllib.error
-        base_url = (base.strip() or "https://generativelanguage.googleapis.com").rstrip("/")
+        import urllib.request
+
+        base_url = (base.strip() or "https://generativelanguage.googleapis.com").rstrip(
+            "/"
+        )
         url = f"{base_url}/v1beta/models?key={key}"
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=8) as r:
@@ -350,6 +445,7 @@ def _run_setup_if_needed():
             _write_gemini_config(res["key"], res.get("base", ""))
             # 写入 setup_done 标志（同时兼容 model_downloader 的检测）
             import json
+
             flag = APP_ROOT / "config" / "model_setup_done.json"
             flag.write_text(json.dumps({"done": True, "version": 1}), encoding="utf-8")
         # 用户点「跳过」或关闭窗口 → 允许继续启动（功能受限，但不卡死）
@@ -383,7 +479,7 @@ def _prompt_local_model_if_needed():
     try:
         _s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         _s.settimeout(0.5)
-        _ollama_up = (_s.connect_ex(("127.0.0.1", 11434)) == 0)
+        _ollama_up = _s.connect_ex(("127.0.0.1", 11434)) == 0
         _s.close()
     except Exception:
         _ollama_up = False
@@ -392,7 +488,11 @@ def _prompt_local_model_if_needed():
         # Ollama 已在运行，标记为已提示，直接跳过
         try:
             import json as _json
-            prompt_flag.write_text(_json.dumps({"prompted": True, "skipped": "ollama_running"}), encoding="utf-8")
+
+            prompt_flag.write_text(
+                _json.dumps({"prompted": True, "skipped": "ollama_running"}),
+                encoding="utf-8",
+            )
         except Exception:
             pass
         return
@@ -427,14 +527,16 @@ def _prompt_local_model_if_needed():
         tk.Label(
             dialog,
             text="是否安装本地 AI 模型助手？",
-            bg="#05080f", fg="#e8eefc",
+            bg="#05080f",
+            fg="#e8eefc",
             font=("Microsoft YaHei UI", 13, "bold"),
         ).pack(pady=(22, 6))
 
         tk.Label(
             dialog,
             text="本地模型可加速任务分类，无需联网即可运行。\n需额外下载约 2–8 GB 模型文件。\n（可随时在 Koto 设置中安装或卸载）",
-            bg="#05080f", fg="#9fb3d1",
+            bg="#05080f",
+            fg="#9fb3d1",
             font=("Microsoft YaHei UI", 10),
             justify="center",
         ).pack(pady=(0, 18))
@@ -451,17 +553,33 @@ def _prompt_local_model_if_needed():
             dialog.destroy()
 
         tk.Button(
-            btn_frame, text="立即安装", command=_on_install,
-            bg="#1a6fcf", fg="#ffffff", activebackground="#2280e8",
+            btn_frame,
+            text="立即安装",
+            command=_on_install,
+            bg="#1a6fcf",
+            fg="#ffffff",
+            activebackground="#2280e8",
             font=("Microsoft YaHei UI", 10, "bold"),
-            relief="flat", bd=0, padx=18, pady=6, cursor="hand2",
+            relief="flat",
+            bd=0,
+            padx=18,
+            pady=6,
+            cursor="hand2",
         ).pack(side="left", padx=(0, 12))
 
         tk.Button(
-            btn_frame, text="稍后再说", command=_on_skip,
-            bg="#1a2540", fg="#9fb3d1", activebackground="#243055",
+            btn_frame,
+            text="稍后再说",
+            command=_on_skip,
+            bg="#1a2540",
+            fg="#9fb3d1",
+            activebackground="#243055",
             font=("Microsoft YaHei UI", 10),
-            relief="flat", bd=0, padx=18, pady=6, cursor="hand2",
+            relief="flat",
+            bd=0,
+            padx=18,
+            pady=6,
+            cursor="hand2",
         ).pack(side="left")
 
         dialog.protocol("WM_DELETE_WINDOW", _on_skip)
@@ -470,6 +588,7 @@ def _prompt_local_model_if_needed():
         # 写入已提示标志（无论选择如何，避免重复弹窗）
         import json as _json
         import subprocess as _subprocess
+
         prompt_flag.write_text(
             _json.dumps({"prompted": True, "action": _chosen["action"]}),
             encoding="utf-8",
@@ -505,6 +624,7 @@ def main():
         os.chdir(str(APP_ROOT))
         try:
             import koto_app
+
             koto_app.main()
         except Exception as e:
             # 崩溃时写日志并弹窗
@@ -516,6 +636,7 @@ def main():
             try:
                 import tkinter as tk
                 from tkinter import messagebox
+
                 _root = tk.Tk()
                 _root.withdraw()
                 messagebox.showerror("Koto 启动失败", err_msg)
@@ -530,6 +651,7 @@ if __name__ == "__main__":
     # 子进程会重新执行冻结的 exe。freeze_support() 检测到子进程标志后立即接管
     # 并退出，防止子进程再次执行 main() 打开新 Koto 窗口。
     import multiprocessing
+
     multiprocessing.freeze_support()
 
     # ── Step 2: Windows 全局 Mutex 单实例锁 ──────────────────────────────────
@@ -541,6 +663,7 @@ if __name__ == "__main__":
         try:
             import ctypes
             import ctypes.wintypes
+
             # 创建全局命名互斥量（不拥有它，只检测是否已存在）
             _MUTEX_NAME = "Global\\KotoMainWindowMutex_v1"
             _mutex_handle = ctypes.windll.kernel32.CreateMutexW(None, True, _MUTEX_NAME)
@@ -551,12 +674,14 @@ if __name__ == "__main__":
                 # 尝试激活已有窗口
                 try:
                     import win32gui
+
                     def _find_koto_window(hwnd, extra):
                         title = win32gui.GetWindowText(hwnd)
                         if "Koto" in title and win32gui.IsWindowVisible(hwnd):
                             win32gui.SetForegroundWindow(hwnd)
                             return False
                         return True
+
                     win32gui.EnumWindows(_find_koto_window, None)
                 except Exception:
                     pass

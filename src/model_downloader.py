@@ -6,19 +6,19 @@ Koto 本地模型下载器
 第一次运行时自动弹出，之后可从设置入口重新运行
 """
 
-import os
-import sys
 import json
-import subprocess
-import threading
+import os
 import platform
-import time
 import shutil
 import socket
-import urllib.request
+import subprocess
+import sys
+import threading
+import time
 import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Optional, Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # ───────── 路径解析 ─────────
 if getattr(sys, "frozen", False):
@@ -94,6 +94,7 @@ OLLAMA_INSTALL_URL_WIN = "https://ollama.com/download/OllamaSetup.exe"
 # 系统检测
 # ───────────────────────────────────────────
 
+
 def get_system_info() -> Dict:
     """检测系统硬件信息"""
     info: Dict = {
@@ -115,26 +116,38 @@ def get_system_info() -> Dict:
     # RAM
     try:
         import psutil
-        info["ram_gb"] = round(psutil.virtual_memory().total / (1024 ** 3), 1)
-        info["free_disk_gb"] = round(psutil.disk_usage(str(APP_ROOT)).free / (1024 ** 3), 1)
+
+        info["ram_gb"] = round(psutil.virtual_memory().total / (1024**3), 1)
+        info["free_disk_gb"] = round(
+            psutil.disk_usage(str(APP_ROOT)).free / (1024**3), 1
+        )
     except Exception:
         try:
             result = subprocess.run(
                 ["wmic", "computersystem", "get", "TotalPhysicalMemory"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
-            lines = [l.strip() for l in result.stdout.splitlines() if l.strip().isdigit()]
+            lines = [
+                l.strip() for l in result.stdout.splitlines() if l.strip().isdigit()
+            ]
             if lines:
-                info["ram_gb"] = round(int(lines[0]) / (1024 ** 3), 1)
+                info["ram_gb"] = round(int(lines[0]) / (1024**3), 1)
         except Exception:
             pass
 
     # NVIDIA GPU via nvidia-smi
     try:
         result = subprocess.run(
-            ["nvidia-smi", "--query-gpu=name,memory.total",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=8
+            [
+                "nvidia-smi",
+                "--query-gpu=name,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=8,
         )
         if result.returncode == 0 and result.stdout.strip():
             parts = result.stdout.strip().split(",")
@@ -149,9 +162,17 @@ def get_system_info() -> Dict:
     if not info["has_nvidia"] and platform.system() == "Windows":
         try:
             result = subprocess.run(
-                ["wmic", "path", "win32_VideoController", "get",
-                 "Name,AdapterRAM", "/format:csv"],
-                capture_output=True, text=True, timeout=8
+                [
+                    "wmic",
+                    "path",
+                    "win32_VideoController",
+                    "get",
+                    "Name,AdapterRAM",
+                    "/format:csv",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=8,
             )
             for line in result.stdout.strip().splitlines():
                 low = line.lower()
@@ -160,17 +181,19 @@ def get_system_info() -> Dict:
                     info["gpu_name"] = parts[-1].strip() if parts else "AMD GPU"
                     try:
                         vram = int(parts[-2].strip())
-                        info["gpu_vram_gb"] = round(vram / (1024 ** 3), 1)
+                        info["gpu_vram_gb"] = round(vram / (1024**3), 1)
                     except Exception:
                         pass
                     info["has_amd"] = True
                     break
-                elif "intel" in low and ("hd" in low or "uhd" in low or "iris" in low or "arc" in low):
+                elif "intel" in low and (
+                    "hd" in low or "uhd" in low or "iris" in low or "arc" in low
+                ):
                     parts = line.split(",")
                     info["gpu_name"] = parts[-1].strip() if parts else "Intel GPU"
                     try:
                         vram = int(parts[-2].strip())
-                        info["gpu_vram_gb"] = round(vram / (1024 ** 3), 1)
+                        info["gpu_vram_gb"] = round(vram / (1024**3), 1)
                     except Exception:
                         info["gpu_vram_gb"] = 0.0
                     info["has_intel_gpu"] = True
@@ -211,6 +234,7 @@ def recommend_models(info: Dict) -> List[Dict]:
 # Ollama 操作
 # ───────────────────────────────────────────
 
+
 def is_ollama_running() -> bool:
     try:
         sock = socket.create_connection(("127.0.0.1", 11434), timeout=2)
@@ -231,7 +255,9 @@ def start_ollama_server(log_callback=None) -> bool:
             ["ollama", "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0,
+            creationflags=(
+                subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+            ),
         )
         for _ in range(30):
             time.sleep(1)
@@ -253,8 +279,12 @@ def pull_model(tag: str, progress_callback=None, log_callback=None) -> bool:
             ["ollama", "pull", tag],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
-            creationflags=subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            creationflags=(
+                subprocess.CREATE_NO_WINDOW if platform.system() == "Windows" else 0
+            ),
         )
         for line in proc.stdout:
             line = line.strip()
@@ -319,10 +349,11 @@ def is_setup_done() -> bool:
 # Tkinter GUI
 # ───────────────────────────────────────────
 
+
 def run_downloader_gui(on_complete=None):
     """运行模型下载器 GUI（阻塞直到关闭）"""
     import tkinter as tk
-    from tkinter import ttk, messagebox, scrolledtext
+    from tkinter import messagebox, scrolledtext, ttk
 
     ACCENT = "#5865F2"
     BG = "#1a1a2e"
@@ -348,10 +379,16 @@ def run_downloader_gui(on_complete=None):
     hdr = tk.Frame(root, bg=ACCENT, height=56)
     hdr.pack(fill="x")
     hdr.pack_propagate(False)
-    tk.Label(hdr, text="🗾  Koto 言 - 本地模型设置", font=("Segoe UI", 16, "bold"),
-             bg=ACCENT, fg="white").pack(side="left", padx=20, pady=12)
-    tk.Label(hdr, text="仅需设置一次", font=("Segoe UI", 10),
-             bg=ACCENT, fg="#ccc").pack(side="right", padx=20)
+    tk.Label(
+        hdr,
+        text="🗾  Koto 言 - 本地模型设置",
+        font=("Segoe UI", 16, "bold"),
+        bg=ACCENT,
+        fg="white",
+    ).pack(side="left", padx=20, pady=12)
+    tk.Label(
+        hdr, text="仅需设置一次", font=("Segoe UI", 10), bg=ACCENT, fg="#ccc"
+    ).pack(side="right", padx=20)
 
     # ─── 主体两栏 ───
     body = tk.Frame(root, bg=BG)
@@ -365,16 +402,26 @@ def run_downloader_gui(on_complete=None):
     right.pack(side="right", fill="both", expand=True)
 
     # ─── 左：系统信息 ───
-    tk.Label(left, text="系统检测", font=("Segoe UI", 11, "bold"),
-             bg=BG, fg=ACCENT).pack(anchor="w", pady=(0, 6))
+    tk.Label(
+        left, text="系统检测", font=("Segoe UI", 11, "bold"), bg=BG, fg=ACCENT
+    ).pack(anchor="w", pady=(0, 6))
 
     info_frame = tk.Frame(left, bg=CARD, relief="flat", bd=0)
     info_frame.pack(fill="x", pady=(0, 12))
 
-    sysinfo_text = tk.Text(info_frame, height=9, width=42,
-                            bg=CARD, fg=TEXT, font=("Consolas", 9),
-                            relief="flat", state="disabled", wrap="word",
-                            padx=10, pady=8)
+    sysinfo_text = tk.Text(
+        info_frame,
+        height=9,
+        width=42,
+        bg=CARD,
+        fg=TEXT,
+        font=("Consolas", 9),
+        relief="flat",
+        state="disabled",
+        wrap="word",
+        padx=10,
+        pady=8,
+    )
     sysinfo_text.pack(fill="x")
 
     def update_sysinfo(txt: str):
@@ -386,8 +433,9 @@ def run_downloader_gui(on_complete=None):
     update_sysinfo("⏳ 正在检测系统...")
 
     # ─── 左：模型选择 ───
-    tk.Label(left, text="推荐模型", font=("Segoe UI", 11, "bold"),
-             bg=BG, fg=ACCENT).pack(anchor="w", pady=(0, 6))
+    tk.Label(
+        left, text="推荐模型", font=("Segoe UI", 11, "bold"), bg=BG, fg=ACCENT
+    ).pack(anchor="w", pady=(0, 6))
 
     model_list_frame = tk.Frame(left, bg=BG)
     model_list_frame.pack(fill="both", expand=True)
@@ -412,49 +460,78 @@ def run_downloader_gui(on_complete=None):
             row = tk.Frame(model_list_frame, bg=CARD, pady=4, padx=8)
             row.pack(fill="x", pady=3)
             rb = tk.Radiobutton(
-                row, text=m["name"],
-                variable=selected_model, value=m["tag"],
-                bg=CARD, fg=tier_color,
+                row,
+                text=m["name"],
+                variable=selected_model,
+                value=m["tag"],
+                bg=CARD,
+                fg=tier_color,
                 selectcolor=BG,
-                activebackground=CARD, activeforeground=tier_color,
+                activebackground=CARD,
+                activeforeground=tier_color,
                 font=("Segoe UI", 9, "bold"),
             )
             rb.pack(anchor="w")
-            tk.Label(row, text=f"  {m['desc']}\n  下载大小: ~{m['size_gb']} GB | 需内存: {m['ram']} GB",
-                     bg=CARD, fg="#aaa", font=("Segoe UI", 8), justify="left",
-                     wraplength=330).pack(anchor="w")
+            tk.Label(
+                row,
+                text=f"  {m['desc']}\n  下载大小: ~{m['size_gb']} GB | 需内存: {m['ram']} GB",
+                bg=CARD,
+                fg="#aaa",
+                font=("Segoe UI", 8),
+                justify="left",
+                wraplength=330,
+            ).pack(anchor="w")
             _radio_buttons.append(rb)
 
         # 仅使用云端 Gemini API
         sep = tk.Frame(model_list_frame, bg=CARD, pady=4, padx=8)
         sep.pack(fill="x", pady=3)
         rb_skip = tk.Radiobutton(
-            sep, text="☁️  仅使用 Gemini 云端 API（不下载本地模型）",
-            variable=selected_model, value="__cloud__",
-            bg=CARD, fg="#74b9ff",
+            sep,
+            text="☁️  仅使用 Gemini 云端 API（不下载本地模型）",
+            variable=selected_model,
+            value="__cloud__",
+            bg=CARD,
+            fg="#74b9ff",
             selectcolor=BG,
-            activebackground=CARD, activeforeground="#74b9ff",
+            activebackground=CARD,
+            activeforeground="#74b9ff",
             font=("Segoe UI", 9),
         )
         rb_skip.pack(anchor="w")
-        tk.Label(sep, text="  需要网络 + Gemini API Key，功能完整无限制",
-                 bg=CARD, fg="#aaa", font=("Segoe UI", 8)).pack(anchor="w")
+        tk.Label(
+            sep,
+            text="  需要网络 + Gemini API Key，功能完整无限制",
+            bg=CARD,
+            fg="#aaa",
+            font=("Segoe UI", 8),
+        ).pack(anchor="w")
 
     # ─── 右：日志 & 进度 ───
-    tk.Label(right, text="安装日志", font=("Segoe UI", 11, "bold"),
-             bg=BG, fg=ACCENT).pack(anchor="w", pady=(0, 6))
+    tk.Label(
+        right, text="安装日志", font=("Segoe UI", 11, "bold"), bg=BG, fg=ACCENT
+    ).pack(anchor="w", pady=(0, 6))
 
-    log_box = scrolledtext.ScrolledText(right, height=18, bg=CARD, fg=TEXT,
-                                         font=("Consolas", 9), relief="flat",
-                                         state="disabled", wrap="word")
+    log_box = scrolledtext.ScrolledText(
+        right,
+        height=18,
+        bg=CARD,
+        fg=TEXT,
+        font=("Consolas", 9),
+        relief="flat",
+        state="disabled",
+        wrap="word",
+    )
     log_box.pack(fill="both", expand=True, pady=(0, 10))
 
     prog_var = tk.DoubleVar(value=0)
     prog_label = tk.StringVar(value="等待开始...")
-    tk.Label(right, textvariable=prog_label, bg=BG, fg=TEXT,
-             font=("Segoe UI", 9)).pack(anchor="w")
-    prog_bar = ttk.Progressbar(right, variable=prog_var, maximum=100, length=340,
-                                mode="determinate")
+    tk.Label(right, textvariable=prog_label, bg=BG, fg=TEXT, font=("Segoe UI", 9)).pack(
+        anchor="w"
+    )
+    prog_bar = ttk.Progressbar(
+        right, variable=prog_var, maximum=100, length=340, mode="determinate"
+    )
     prog_bar.pack(fill="x", pady=(2, 0))
     style = ttk.Style()
     style.theme_use("default")
@@ -466,6 +543,7 @@ def run_downloader_gui(on_complete=None):
             log_box.insert("end", msg + "\n")
             log_box.see("end")
             log_box.config(state="disabled")
+
         root.after(0, _do)
 
     def set_prog(val: float, label: str = ""):
@@ -477,18 +555,33 @@ def run_downloader_gui(on_complete=None):
     btn_frame = tk.Frame(root, bg=BG)
     btn_frame.pack(fill="x", padx=18, pady=12)
 
-    btn_start = tk.Button(btn_frame, text="▶  开始安装", font=("Segoe UI", 11, "bold"),
-                           bg=ACCENT, fg="white", relief="flat",
-                           padx=28, pady=8, cursor="hand2")
+    btn_start = tk.Button(
+        btn_frame,
+        text="▶  开始安装",
+        font=("Segoe UI", 11, "bold"),
+        bg=ACCENT,
+        fg="white",
+        relief="flat",
+        padx=28,
+        pady=8,
+        cursor="hand2",
+    )
     btn_start.pack(side="right", padx=(8, 0))
 
-    btn_skip = tk.Button(btn_frame, text="跳过，稍后设置", font=("Segoe UI", 10),
-                          bg="#555", fg=TEXT, relief="flat",
-                          padx=16, pady=8, cursor="hand2")
+    btn_skip = tk.Button(
+        btn_frame,
+        text="跳过，稍后设置",
+        font=("Segoe UI", 10),
+        bg="#555",
+        fg=TEXT,
+        relief="flat",
+        padx=16,
+        pady=8,
+        cursor="hand2",
+    )
     btn_skip.pack(side="right")
 
-    status_label = tk.Label(btn_frame, text="", bg=BG, fg=GREEN,
-                             font=("Segoe UI", 10))
+    status_label = tk.Label(btn_frame, text="", bg=BG, fg=GREEN, font=("Segoe UI", 10))
     status_label.pack(side="left")
 
     # ─── 后台检测系统 ───
@@ -513,10 +606,17 @@ def run_downloader_gui(on_complete=None):
         else:
             accel_hint = "  ℹ️  无独立显卡 — 仅 CPU 推理\n"
 
-        ollama_line = ("✅ Ollama 已安装" if info["ollama_installed"]
-                       else "⚠️  Ollama 未安装（将自动安装）")
+        ollama_line = (
+            "✅ Ollama 已安装"
+            if info["ollama_installed"]
+            else "⚠️  Ollama 未安装（将自动安装）"
+        )
 
-        disk_line = f"可用磁盘: {info['free_disk_gb']} GB" if info["free_disk_gb"] > 0 else "可用磁盘: 未知"
+        disk_line = (
+            f"可用磁盘: {info['free_disk_gb']} GB"
+            if info["free_disk_gb"] > 0
+            else "可用磁盘: 未知"
+        )
 
         txt = (
             f"CPU:  {info['cpu'][:38]}\n"
@@ -533,10 +633,17 @@ def run_downloader_gui(on_complete=None):
         candidates = recommend_models(info)
         # 磁盘空间不足时过滤模型
         if info["free_disk_gb"] > 0:
-            candidates = [m for m in candidates if info["free_disk_gb"] >= m["size_gb"] + 1.0] or [MODEL_CATALOG[0]]
+            candidates = [
+                m for m in candidates if info["free_disk_gb"] >= m["size_gb"] + 1.0
+            ] or [MODEL_CATALOG[0]]
         root.after(0, lambda: populate_models(candidates))
-        root.after(0, lambda: log(f"✅ 系统检测完成 — 内存 {info['ram_gb']} GB，"
-                                    f"推荐 {len(candidates)} 个可用模型"))
+        root.after(
+            0,
+            lambda: log(
+                f"✅ 系统检测完成 — 内存 {info['ram_gb']} GB，"
+                f"推荐 {len(candidates)} 个可用模型"
+            ),
+        )
 
     threading.Thread(target=_detect_thread, daemon=True).start()
 
@@ -553,8 +660,12 @@ def run_downloader_gui(on_complete=None):
             set_prog(100, "云端模式无需下载")
             save_setup_result("__cloud__", mode="cloud")
             _completed[0] = True
-            root.after(0, lambda: status_label.config(
-                text="✅ 设置完成！正在启动 Koto...", fg=GREEN))
+            root.after(
+                0,
+                lambda: status_label.config(
+                    text="✅ 设置完成！正在启动 Koto...", fg=GREEN
+                ),
+            )
             root.after(0, lambda: btn_start.config(state="disabled"))
             time.sleep(1.5)
             root.after(0, root.destroy)
@@ -583,18 +694,18 @@ def run_downloader_gui(on_complete=None):
             set_prog(10, "下载 Ollama 安装程序...")
             installer_path = APP_ROOT / "config" / "OllamaSetup.exe"
             try:
+
                 def _reporthook(count, block_size, total_size):
                     if total_size > 0:
                         pct = 10 + int(count * block_size / total_size * 20)
                         set_prog(min(pct, 30), f"下载 Ollama... {min(pct-10,20)*5}%")
+
                 urllib.request.urlretrieve(
-                    OLLAMA_INSTALL_URL_WIN, str(installer_path), _reporthook)
+                    OLLAMA_INSTALL_URL_WIN, str(installer_path), _reporthook
+                )
                 log("✅ 下载完成，正在静默安装 Ollama...")
                 set_prog(32, "安装 Ollama...")
-                result = subprocess.run(
-                    [str(installer_path), "/S"],
-                    timeout=120
-                )
+                result = subprocess.run([str(installer_path), "/S"], timeout=120)
                 if result.returncode != 0:
                     log("⚠️  安装程序返回非零，尝试继续...")
                 set_prog(38, "等待 Ollama 就绪...")
@@ -602,12 +713,15 @@ def run_downloader_gui(on_complete=None):
             except Exception as e:
                 log(f"❌ 自动安装失败: {e}")
                 log("📌 请手动从 https://ollama.com/download 安装 Ollama 后重试")
-                root.after(0, lambda: messagebox.showerror(
-                    "安装失败",
-                    "无法自动安装 Ollama。\n"
-                    "请手动访问 https://ollama.com/download 下载安装，\n"
-                    "然后重新运行本设置程序。"
-                ))
+                root.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "安装失败",
+                        "无法自动安装 Ollama。\n"
+                        "请手动访问 https://ollama.com/download 下载安装，\n"
+                        "然后重新运行本设置程序。",
+                    ),
+                )
                 root.after(0, lambda: btn_start.config(state="normal"))
                 return
 
@@ -645,8 +759,10 @@ def run_downloader_gui(on_complete=None):
         log(f"✅ 模型 {tag} 安装成功")
         log("🚀 正在启动 Koto...")
         _completed[0] = True
-        root.after(0, lambda: status_label.config(
-            text="✅ 安装完成！正在启动 Koto...", fg=GREEN))
+        root.after(
+            0,
+            lambda: status_label.config(text="✅ 安装完成！正在启动 Koto...", fg=GREEN),
+        )
         root.after(0, lambda: btn_start.config(state="disabled"))
         time.sleep(1.5)
         root.after(0, root.destroy)
@@ -660,7 +776,7 @@ def run_downloader_gui(on_complete=None):
         if messagebox.askyesno(
             "跳过设置",
             "跳过后 Koto 将以云端模式运行（需要 API Key）。\n"
-            "您可以在设置中随时配置本地模型。\n\n确定要跳过吗？"
+            "您可以在设置中随时配置本地模型。\n\n确定要跳过吗？",
         ):
             save_setup_result("__cloud__", mode="cloud")
             _completed[0] = True

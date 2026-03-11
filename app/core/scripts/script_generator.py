@@ -6,14 +6,15 @@ Supports PowerShell (Windows) and Bash (Linux/Mac).
 """
 
 import logging
-from typing import Dict, List, Any, Optional
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class ScriptType(Enum):
     """Script types."""
+
     POWERSHELL = "powershell"
     BASH = "bash"
 
@@ -29,11 +30,13 @@ class ScriptGenerator:
     - Restarting services
     - Updating system
     """
-    
+
     def __init__(self, script_type: ScriptType = ScriptType.POWERSHELL):
         self.script_type = script_type
-        
-    def generate_kill_process_script(self, process_name: str, pid: Optional[int] = None) -> str:
+
+    def generate_kill_process_script(
+        self, process_name: str, pid: Optional[int] = None
+    ) -> str:
         """Generate script to kill a high-memory process."""
         if self.script_type == ScriptType.POWERSHELL:
             if pid:
@@ -67,7 +70,7 @@ echo "Stopping {process_name}..."
 pkill -9 {process_name.split('.')[0]} 2>/dev/null || true
 echo "All instances stopped."
 """
-    
+
     def generate_clear_disk_space_script(self, min_gb: int = 5) -> str:
         """Generate script to clear disk space."""
         if self.script_type == ScriptType.POWERSHELL:
@@ -115,7 +118,7 @@ sudo rm -rf /var/tmp/* 2>/dev/null || true
 
 echo "Disk cleanup completed. Free up at least {min_gb}GB."
 """
-    
+
     def generate_restart_service_script(self, service_name: str) -> str:
         """Generate script to restart a service."""
         if self.script_type == ScriptType.POWERSHELL:
@@ -144,7 +147,7 @@ else
     exit 1
 fi
 """
-    
+
     def generate_memory_cleanup_script(self) -> str:
         """Generate script to optimize memory usage."""
         if self.script_type == ScriptType.POWERSHELL:
@@ -181,7 +184,7 @@ fi
 
 echo "Memory optimization completed."
 """
-    
+
     def generate_check_disk_health_script(self) -> str:
         """Generate script to check disk health."""
         if self.script_type == ScriptType.POWERSHELL:
@@ -222,30 +225,34 @@ done
 
 echo "Disk health check completed."
 """
-    
+
     def generate_fix_script(self, issue_type: str, **kwargs) -> Dict[str, Any]:
         """
         Generate an appropriate fix script based on issue type.
-        
+
         Args:
             issue_type: Type of issue ('cpu_high', 'memory_high', 'disk_full', etc.)
             **kwargs: Additional parameters for the script
-            
+
         Returns:
             Dict with script content, description, and execution info
         """
         scripts = {}
-        
+
         if issue_type == "cpu_high":
-            scripts["cpu_high"] = self._generate_cpu_fix(process_name=kwargs.get("process_name"))
+            scripts["cpu_high"] = self._generate_cpu_fix(
+                process_name=kwargs.get("process_name")
+            )
         elif issue_type == "memory_high":
             scripts["memory_high"] = self.generate_memory_cleanup_script()
         elif issue_type == "disk_full":
-            scripts["disk_full"] = self.generate_clear_disk_space_script(min_gb=kwargs.get("min_gb", 5))
+            scripts["disk_full"] = self.generate_clear_disk_space_script(
+                min_gb=kwargs.get("min_gb", 5)
+            )
         elif issue_type == "process_memory_high":
             scripts["process_memory_high"] = self.generate_kill_process_script(
                 process_name=kwargs.get("process_name", "process"),
-                pid=kwargs.get("pid")
+                pid=kwargs.get("pid"),
             )
         elif issue_type == "service_restart":
             scripts["service_restart"] = self.generate_restart_service_script(
@@ -254,14 +261,11 @@ echo "Disk health check completed."
         elif issue_type == "disk_health":
             scripts["disk_health"] = self.generate_check_disk_health_script()
         else:
-            return {
-                "status": "error",
-                "message": f"Unknown issue type: {issue_type}"
-            }
-        
+            return {"status": "error", "message": f"Unknown issue type: {issue_type}"}
+
         script_content = scripts[issue_type]
         extension = ".ps1" if self.script_type == ScriptType.POWERSHELL else ".sh"
-        
+
         return {
             "status": "success",
             "issue_type": issue_type,
@@ -270,9 +274,9 @@ echo "Disk health check completed."
             "filename": f"fix_{issue_type}{extension}",
             "description": self._get_script_description(issue_type),
             "run_command": self._get_run_command(extension),
-            "requires_admin": self._requires_admin(issue_type)
+            "requires_admin": self._requires_admin(issue_type),
         }
-    
+
     def _generate_cpu_fix(self, process_name: Optional[str] = None, **kwargs) -> str:
         """Generate CPU high usage fix script."""
         if self.script_type == ScriptType.POWERSHELL:
@@ -311,7 +315,7 @@ echo "Finding CPU-consuming processes..."
 ps aux --sort=-%cpu | head -6
 echo "Please identify and kill the problematic process: kill -9 <PID>"
 """
-    
+
     def _get_script_description(self, issue_type: str) -> str:
         """Get human-readable script description."""
         descriptions = {
@@ -323,20 +327,15 @@ echo "Please identify and kill the problematic process: kill -9 <PID>"
             "disk_health": "Checks disk space and health status",
         }
         return descriptions.get(issue_type, "Fix script for detected issue")
-    
+
     def _get_run_command(self, extension: str) -> str:
         """Get command to run the script."""
         if extension == ".ps1":
             return "Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process; .\\<filename>"
         else:
             return "bash <filename>"
-    
+
     def _requires_admin(self, issue_type: str) -> bool:
         """Check if script requires admin privileges."""
-        admin_required = [
-            "disk_full",
-            "memory_high",
-            "disk_health",
-            "service_restart"
-        ]
+        admin_required = ["disk_full", "memory_high", "disk_health", "service_restart"]
         return issue_type in admin_required

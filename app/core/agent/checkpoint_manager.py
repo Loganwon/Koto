@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 _DEFAULT_DB_PATH = str(
-    Path(os.environ.get("KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"))
+    Path(
+        os.environ.get(
+            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+        )
+    )
     / "koto_checkpoints.sqlite"
 )
 
@@ -65,6 +69,7 @@ def get_checkpointer(db_path: Optional[str] = None) -> Any:
     # 1. 尝试 SqliteSaver（推荐）
     try:
         from langgraph.checkpoint.sqlite import SqliteSaver
+
         # 确保目录存在
         Path(path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -81,10 +86,13 @@ def get_checkpointer(db_path: Optional[str] = None) -> Any:
             "  安装命令: pip install langgraph-checkpoint-sqlite"
         )
     except Exception as exc:
-        logger.warning(f"[CheckpointManager] SqliteSaver 初始化失败: {exc}，回退到 MemorySaver")
+        logger.warning(
+            f"[CheckpointManager] SqliteSaver 初始化失败: {exc}，回退到 MemorySaver"
+        )
 
     # 2. 回退 MemorySaver
     from langgraph.checkpoint.memory import MemorySaver
+
     saver = MemorySaver()
     _checkpointer_instance = saver
     _checkpointer_type = "memory"
@@ -107,6 +115,7 @@ def reset_checkpointer():
 def _get_sqlite_conn(db_path: str):
     """创建带 WAL 模式的 SQLite 连接（多线程安全）。"""
     import sqlite3
+
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -116,6 +125,7 @@ def _get_sqlite_conn(db_path: str):
 # ─────────────────────────────────────────────────────────────────────────────
 # CheckpointManager: 高层管理 API
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class CheckpointManager:
     """
@@ -141,12 +151,20 @@ class CheckpointManager:
             results = []
             for snap in history:
                 meta = snap.metadata or {}
-                results.append({
-                    "checkpoint_id": snap.config.get("configurable", {}).get("checkpoint_id", ""),
-                    "step": meta.get("step", 0),
-                    "source": meta.get("source", ""),
-                    "writes": list(meta.get("writes", {}).keys()) if meta.get("writes") else [],
-                })
+                results.append(
+                    {
+                        "checkpoint_id": snap.config.get("configurable", {}).get(
+                            "checkpoint_id", ""
+                        ),
+                        "step": meta.get("step", 0),
+                        "source": meta.get("source", ""),
+                        "writes": (
+                            list(meta.get("writes", {}).keys())
+                            if meta.get("writes")
+                            else []
+                        ),
+                    }
+                )
             return results
         except Exception as exc:
             logger.warning(f"[CheckpointManager] list_checkpoints 失败: {exc}")
@@ -163,6 +181,7 @@ class CheckpointManager:
 
         try:
             from langgraph.checkpoint.sqlite import SqliteSaver
+
             cp = get_checkpointer()
             # SqliteSaver v1.x 支持通过 conn 直接删除
             if hasattr(cp, "conn"):
@@ -195,9 +214,12 @@ class CheckpointManager:
                 cp = get_checkpointer()
                 if hasattr(cp, "conn"):
                     # 检查 checkpoints 表是否存在
-                    tables = {r[0] for r in cp.conn.execute(
-                        "SELECT name FROM sqlite_master WHERE type='table'"
-                    ).fetchall()}
+                    tables = {
+                        r[0]
+                        for r in cp.conn.execute(
+                            "SELECT name FROM sqlite_master WHERE type='table'"
+                        ).fetchall()
+                    }
                     if "checkpoints" in tables:
                         row = cp.conn.execute(
                             "SELECT COUNT(DISTINCT thread_id), COUNT(*) FROM checkpoints"

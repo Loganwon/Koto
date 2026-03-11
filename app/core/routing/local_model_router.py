@@ -1,14 +1,15 @@
-import time
-import socket
 import json
-import requests
+import socket
+import time
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import List, Optional
 
+import requests
 
 # ══════════════════════════════════════════════════════════════════
 # RouterDecision — 结构化路由决策（v2）
 # ══════════════════════════════════════════════════════════════════
+
 
 @dataclass
 class RouterDecision:
@@ -29,6 +30,7 @@ class RouterDecision:
     latency_ms      : 本地路由耗时（毫秒）
     params          : 额外路由参数（如目标 Skill 的变量预填值）
     """
+
     task_type: str = "CHAT"
     skill_id: Optional[str] = None
     forward_to_cloud: bool = True
@@ -51,32 +53,32 @@ class RouterDecision:
 class LocalModelRouter:
     """
     使用本地 Ollama 模型进行任务分类（可选功能）
-    
+
     - 如果安装了 Ollama + Qwen，使用本地模型（更快、更准）
     - 如果没有安装，自动降级到 SmartDispatcher（纯规则+语料匹配）
     - 对用户透明，不影响正常使用
     """
-    
+
     _initialized = False
     _model_name = None
     _available = None  # 缓存可用性状态
-    _check_time = 0    # 上次检查时间
-    
+    _check_time = 0  # 上次检查时间
+
     # 推荐的快速模型（按优先级排序）
     OLLAMA_MODELS = [
-        "koto-router",       # ★★ Koto 专用路由器（基于 qwen3:8b 微调，针对 Koto 任务分类）
-        "qwen3:8b",          # ★ 最佳中英文能力，RTX 4090 流畅运行
-        "qwen3:4b",          # 快速备选
-        "qwen3:1.7b",        # 轻量备选
-        "qwen2.5:7b",        # 旧版但质量好
-        "qwen2.5:3b",        # 旧版快速
-        "qwen2.5:1.5b",      # 旧版轻量
-        "llama3.2:3b",       # 英文为主
+        "koto-router",  # ★★ Koto 专用路由器（基于 qwen3:8b 微调，针对 Koto 任务分类）
+        "qwen3:8b",  # ★ 最佳中英文能力，RTX 4090 流畅运行
+        "qwen3:4b",  # 快速备选
+        "qwen3:1.7b",  # 轻量备选
+        "qwen2.5:7b",  # 旧版但质量好
+        "qwen2.5:3b",  # 旧版快速
+        "qwen2.5:1.5b",  # 旧版轻量
+        "llama3.2:3b",  # 英文为主
     ]
-    
+
     # 分类 Prompt（固定 JSON 格式，确保输出一致）
     # Qwen3 支持 /no_think 模式，跳过思考直接输出，加速分类
-    CLASSIFY_PROMPT = '''/no_think
+    CLASSIFY_PROMPT = """/no_think
 你是任务分类器。严格只输出 JSON，不输出任何其他内容。
 
 ━━━ 任务类型定义 ━━━
@@ -345,72 +347,79 @@ class LocalModelRouter:
 
 只输出 JSON：
 {{"task":"...","confidence":0.0-1.0,"complexity":"normal"|"complex"}}
-'''
+"""
 
     @classmethod
     def is_ollama_available(cls) -> bool:
         """检查 Ollama 是否可用（带缓存，避免频繁检测）"""
         import os
+
         # 云端模式下禁用 Ollama（云服务器没有本地 GPU）
-        if os.environ.get('KOTO_DEPLOY_MODE') == 'cloud':
+        if os.environ.get("KOTO_DEPLOY_MODE") == "cloud":
             cls._available = False
             return False
-        
+
         # 缓存 30 秒
         if cls._available is not None and (time.time() - cls._check_time) < 30:
             return cls._available
-        
+
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(0.1)
-            result = sock.connect_ex(('127.0.0.1', 11434))
+            result = sock.connect_ex(("127.0.0.1", 11434))
             sock.close()
-            cls._available = (result == 0)
+            cls._available = result == 0
             cls._check_time = time.time()
             return cls._available
         except:
             cls._available = False
             cls._check_time = time.time()
             return False
-    
+
     @classmethod
     def init_model(cls, model_name: str = None) -> bool:
         """初始化本地模型（静默失败，不影响使用）"""
         if cls._initialized and cls._model_name:
             return True
-        
+
         if not cls.is_ollama_available():
             # 静默返回，不打印错误（避免刷屏）
             return False
-        
+
         # 获取已安装的模型
         try:
             resp = requests.get("http://localhost:11434/api/tags", timeout=2)
             if resp.status_code != 200:
                 return False
-            installed = [m['name'].split(':')[0] + ':' + m['name'].split(':')[1] if ':' in m['name'] else m['name'] 
-                        for m in resp.json().get('models', [])]
+            installed = [
+                (
+                    m["name"].split(":")[0] + ":" + m["name"].split(":")[1]
+                    if ":" in m["name"]
+                    else m["name"]
+                )
+                for m in resp.json().get("models", [])
+            ]
         except:
             return False
-        
+
         if not installed:
             return False
-        
+
         # 选择可用的最快模型
         target_model = model_name
         if not target_model:
             for m in cls.OLLAMA_MODELS:
-                base_name = m.split(':')[0]
+                base_name = m.split(":")[0]
                 if any(base_name in im for im in installed):
                     for im in installed:
                         if base_name in im:
                             target_model = im
                             break
                     break
-        
+
         if not target_model:
             return False
-        
+
         cls._model_name = target_model
         cls._initialized = True
         print(f"[LocalModelRouter] ✅ 使用本地模型: {target_model}")
@@ -478,6 +487,7 @@ class LocalModelRouter:
 
             if strip_think and content:
                 import re as _re
+
                 content = _re.sub(r"<think>[\s\S]*?</think>", "", content).strip()
 
             return content, None
@@ -491,18 +501,18 @@ class LocalModelRouter:
     def classify(cls, user_input: str, timeout: float = 4.0) -> tuple:
         """
         使用本地 Ollama 模型分类任务
-        
+
         返回: (task_type, confidence_str, source) 或 (None, reason, source)
         """
         start = time.time()
-        
+
         # 确保模型可用
         if not cls._initialized:
             if not cls.init_model():
                 return None, "❌ ModelNotReady", "Local"
-        
+
         prompt = cls.CLASSIFY_PROMPT
-        
+
         try:
             resp = requests.post(
                 "http://localhost:11434/api/chat",
@@ -518,16 +528,16 @@ class LocalModelRouter:
                     "options": {
                         "temperature": 0.0,
                         "num_predict": 80,
-                    }
+                    },
                 },
-                timeout=timeout
+                timeout=timeout,
             )
-            
+
             latency = (time.time() - start) * 1000
-            
+
             if resp.status_code != 200:
                 return None, f"❌ API Error {resp.status_code}", "Local"
-            
+
             data_json = resp.json()
             raw = (data_json.get("message", {}) or {}).get("content", "")
             if not raw:
@@ -535,26 +545,51 @@ class LocalModelRouter:
             raw = (raw or "").strip()
             # 剥离 Qwen3 / koto-router 的 <think>...</think> 思考块
             import re as _re_think
-            raw = _re_think.sub(r'<think>[\s\S]*?</think>', '', raw).strip()
-            valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH", "CODER", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT", "FILE_SEARCH"]
+
+            raw = _re_think.sub(r"<think>[\s\S]*?</think>", "", raw).strip()
+            valid_tasks = [
+                "PAINTER",
+                "FILE_GEN",
+                "DOC_ANNOTATE",
+                "RESEARCH",
+                "CODER",
+                "SYSTEM",
+                "AGENT",
+                "WEB_SEARCH",
+                "CHAT",
+                "FILE_SEARCH",
+            ]
 
             # 解析 JSON 输出
             task_type = None
             confidence = 0.0
             # 任务别名映射（兼容模型可能输出的英文别名）
             _TASK_ALIASES = {
-                "DRAW": "PAINTER", "IMAGE": "PAINTER", "ART": "PAINTER", "GENERATE_IMAGE": "PAINTER",
-                "SEARCH": "WEB_SEARCH", "WEB": "WEB_SEARCH",
-                "CODE": "CODER", "CODING": "CODER", "PROGRAM": "CODER",
-                "FILE": "FILE_GEN", "GENERATE": "FILE_GEN",
-                "ANNOTATE": "DOC_ANNOTATE", "EDIT_DOC": "DOC_ANNOTATE",
-                "FIND_FILE": "FILE_SEARCH", "FIND": "FILE_SEARCH",
-                "EXECUTE": "SYSTEM", "OS": "SYSTEM",
-                "AUTO": "AGENT", "AUTOMATION": "AGENT",
-                "DEEP_RESEARCH": "RESEARCH", "ANALYZE": "RESEARCH",
+                "DRAW": "PAINTER",
+                "IMAGE": "PAINTER",
+                "ART": "PAINTER",
+                "GENERATE_IMAGE": "PAINTER",
+                "SEARCH": "WEB_SEARCH",
+                "WEB": "WEB_SEARCH",
+                "CODE": "CODER",
+                "CODING": "CODER",
+                "PROGRAM": "CODER",
+                "FILE": "FILE_GEN",
+                "GENERATE": "FILE_GEN",
+                "ANNOTATE": "DOC_ANNOTATE",
+                "EDIT_DOC": "DOC_ANNOTATE",
+                "FIND_FILE": "FILE_SEARCH",
+                "FIND": "FILE_SEARCH",
+                "EXECUTE": "SYSTEM",
+                "OS": "SYSTEM",
+                "AUTO": "AGENT",
+                "AUTOMATION": "AGENT",
+                "DEEP_RESEARCH": "RESEARCH",
+                "ANALYZE": "RESEARCH",
             }
             try:
                 import json as _json
+
                 data = _json.loads(raw)
                 task_type = str(data.get("task", "")).strip().upper()
                 confidence = float(data.get("confidence", 0.0))
@@ -576,12 +611,18 @@ class LocalModelRouter:
                             confidence = 0.5
                             break
 
-            if task_type in valid_tasks and "|" not in task_type and 0.0 <= confidence <= 1.0 and confidence >= 0.45:
+            if (
+                task_type in valid_tasks
+                and "|" not in task_type
+                and 0.0 <= confidence <= 1.0
+                and confidence >= 0.45
+            ):
                 conf_str = f"🤖 Local {confidence:.2f} ({latency:.0f}ms)"
                 print(f"[LocalModelRouter] {task_type} {conf_str}")
                 # ── 自动记录到训练数据库（后台，不阻塞）──────────────────────
                 try:
                     from app.core.learning.training_db import auto_record_interaction
+
                     auto_record_interaction(user_input, task_type, confidence)
                 except Exception:
                     pass
@@ -589,7 +630,7 @@ class LocalModelRouter:
             else:
                 print(f"[LocalModelRouter] 无法解析结果: {raw[:80]}")
                 return None, f"⚠️ ParseError", "Local"
-                
+
         except requests.exceptions.Timeout:
             return None, f"⏱️ Timeout ({timeout}s)", "Local"
         except Exception as e:
@@ -610,7 +651,13 @@ class LocalModelRouter:
 
         if not cls._initialized:
             if not cls.init_model():
-                return None, "❌ ModelNotReady", "Local", None, "normal"  # 5-tuple，匹配 SmartDispatcher 解包
+                return (
+                    None,
+                    "❌ ModelNotReady",
+                    "Local",
+                    None,
+                    "normal",
+                )  # 5-tuple，匹配 SmartDispatcher 解包
 
         # 在原有分类 prompt 基础上追加 hint 生成指令
         hint_addon = """\n━━━ hint 字段━━━
@@ -635,8 +682,7 @@ class LocalModelRouter:
 {{"task":"...","confidence":0.0-1.0,"hint":"..."或null,"complexity":"normal"|"complex"}}"""
 
         extended_prompt = cls.CLASSIFY_PROMPT.replace(
-            '只输出 JSON：\n{{"task":"...","confidence":0.0-1.0}}',
-            hint_addon
+            '只输出 JSON：\n{{"task":"...","confidence":0.0-1.0}}', hint_addon
         )
         # 安全检查：若替换未生效（格式差异），则直接追加
         if extended_prompt == cls.CLASSIFY_PROMPT:
@@ -657,9 +703,9 @@ class LocalModelRouter:
                     "options": {
                         "temperature": 0.0,
                         "num_predict": 200,  # 比 classify() 多，允许输出 hint
-                    }
+                    },
                 },
-                timeout=timeout
+                timeout=timeout,
             )
 
             latency = (time.time() - start) * 1000
@@ -676,20 +722,42 @@ class LocalModelRouter:
             raw = (raw or "").strip()
             # 剥离 Qwen3 / koto-router 的 <think>...</think> 思考块
             import re as _re_think2
-            raw = _re_think2.sub(r'<think>[\s\S]*?</think>', '', raw).strip()
 
-            valid_tasks = ["PAINTER", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH",
-                           "CODER", "SYSTEM", "AGENT", "WEB_SEARCH", "CHAT", "FILE_SEARCH"]
+            raw = _re_think2.sub(r"<think>[\s\S]*?</think>", "", raw).strip()
+
+            valid_tasks = [
+                "PAINTER",
+                "FILE_GEN",
+                "DOC_ANNOTATE",
+                "RESEARCH",
+                "CODER",
+                "SYSTEM",
+                "AGENT",
+                "WEB_SEARCH",
+                "CHAT",
+                "FILE_SEARCH",
+            ]
             _TASK_ALIASES2 = {
-                "DRAW": "PAINTER", "IMAGE": "PAINTER", "ART": "PAINTER",
-                "SEARCH": "WEB_SEARCH", "WEB": "WEB_SEARCH",
-                "CODE": "CODER", "CODING": "CODER", "PROGRAM": "CODER",
-                "FILE": "FILE_GEN", "GENERATE": "FILE_GEN",
-                "ANNOTATE": "DOC_ANNOTATE", "EDIT_DOC": "DOC_ANNOTATE",
-                "FIND_FILE": "FILE_SEARCH", "FIND": "FILE_SEARCH",
-                "EXECUTE": "SYSTEM", "OS": "SYSTEM",
-                "AUTO": "AGENT", "AUTOMATION": "AGENT",
-                "DEEP_RESEARCH": "RESEARCH", "ANALYZE": "RESEARCH",
+                "DRAW": "PAINTER",
+                "IMAGE": "PAINTER",
+                "ART": "PAINTER",
+                "SEARCH": "WEB_SEARCH",
+                "WEB": "WEB_SEARCH",
+                "CODE": "CODER",
+                "CODING": "CODER",
+                "PROGRAM": "CODER",
+                "FILE": "FILE_GEN",
+                "GENERATE": "FILE_GEN",
+                "ANNOTATE": "DOC_ANNOTATE",
+                "EDIT_DOC": "DOC_ANNOTATE",
+                "FIND_FILE": "FILE_SEARCH",
+                "FIND": "FILE_SEARCH",
+                "EXECUTE": "SYSTEM",
+                "OS": "SYSTEM",
+                "AUTO": "AGENT",
+                "AUTOMATION": "AGENT",
+                "DEEP_RESEARCH": "RESEARCH",
+                "ANALYZE": "RESEARCH",
             }
 
             task_type = None
@@ -698,6 +766,7 @@ class LocalModelRouter:
             complexity = "normal"
             try:
                 import json as _json
+
                 data = _json.loads(raw)
                 task_type = str(data.get("task", "")).strip().upper()
                 task_type = _TASK_ALIASES2.get(task_type, task_type)
@@ -722,9 +791,15 @@ class LocalModelRouter:
                             confidence = 0.5
                             break
 
-            if task_type in valid_tasks and 0.0 <= confidence <= 1.0 and confidence >= 0.45:
+            if (
+                task_type in valid_tasks
+                and 0.0 <= confidence <= 1.0
+                and confidence >= 0.45
+            ):
                 conf_str = f"🤖 Local+Hint {confidence:.2f} ({latency:.0f}ms)"
-                print(f"[LocalModelRouter] classify_with_hint → {task_type} complexity={complexity} | hint={'yes' if hint else 'none'} {conf_str}")
+                print(
+                    f"[LocalModelRouter] classify_with_hint → {task_type} complexity={complexity} | hint={'yes' if hint else 'none'} {conf_str}"
+                )
                 return task_type, conf_str, "Local", hint, complexity
             else:
                 # 解析失败，降级
@@ -743,14 +818,14 @@ class LocalModelRouter:
 
     # 用于响应生成的模型（按偏好排序，比分类模型可以更大）
     OLLAMA_RESPONSE_MODELS = [
-        "qwen3:8b",          # ★ 最佳，中英文流畅
-        "qwen3:4b",          # 快速备选
-        "qwen2.5:7b",        # 旧版质量好
-        "qwen2.5:3b",        # 旧版快速
+        "qwen3:8b",  # ★ 最佳，中英文流畅
+        "qwen3:4b",  # 快速备选
+        "qwen2.5:7b",  # 旧版质量好
+        "qwen2.5:3b",  # 旧版快速
         "llama3.2:3b",
     ]
 
-    _response_model = None   # 用于生成的模型（可能比分类模型大）
+    _response_model = None  # 用于生成的模型（可能比分类模型大）
     _response_model_inited = False
 
     @classmethod
@@ -765,7 +840,7 @@ class LocalModelRouter:
             resp = requests.get("http://localhost:11434/api/tags", timeout=2)
             if resp.status_code != 200:
                 return False
-            installed = [m['name'] for m in resp.json().get('models', [])]
+            installed = [m["name"] for m in resp.json().get("models", [])]
         except Exception:
             return False
 
@@ -774,7 +849,7 @@ class LocalModelRouter:
 
         # 优先选择更大的生成模型
         for want in cls.OLLAMA_RESPONSE_MODELS:
-            base = want.split(':')[0]
+            base = want.split(":")[0]
             for im in installed:
                 if base in im:
                     cls._response_model = im
@@ -793,32 +868,103 @@ class LocalModelRouter:
     # 原则：本地小模型可以回答"是什么/简介"类，但技术深度问题需要云端质量
     _TECHNICAL_CHAT_SIGNALS = [
         # 编程语言核心概念
-        "装饰器", "闭包", "协程", "异步", "并发", "同步锁", "线程安全",
-        "虚拟机", "编译器", "解释器", "lambda", "生成器", "迭代器", "元类",
-        "依赖注入", "设计模式", "单例", "工厂模式", "代理模式", "观察者",
-        "多态", "继承", "封装", "抽象类", "接口", "泛型", "反射",
+        "装饰器",
+        "闭包",
+        "协程",
+        "异步",
+        "并发",
+        "同步锁",
+        "线程安全",
+        "虚拟机",
+        "编译器",
+        "解释器",
+        "lambda",
+        "生成器",
+        "迭代器",
+        "元类",
+        "依赖注入",
+        "设计模式",
+        "单例",
+        "工厂模式",
+        "代理模式",
+        "观察者",
+        "多态",
+        "继承",
+        "封装",
+        "抽象类",
+        "接口",
+        "泛型",
+        "反射",
         # Git/版本控制
-        "rebase", "cherry-pick", "git bisect", "git stash", "squash",
+        "rebase",
+        "cherry-pick",
+        "git bisect",
+        "git stash",
+        "squash",
         # DevOps/基础设施
-        "dockerfile", "kubernetes", "k8s", "nginx", "kafka", "rabbitmq",
-        "redis", "elasticsearch", "pipeline", "ci/cd", "devops",
+        "dockerfile",
+        "kubernetes",
+        "k8s",
+        "nginx",
+        "kafka",
+        "rabbitmq",
+        "redis",
+        "elasticsearch",
+        "pipeline",
+        "ci/cd",
+        "devops",
         # CS基础
-        "算法复杂度", "时间复杂度", "空间复杂度", "二叉树", "平衡树",
-        "哈希冲突", "动态规划", "贪心算法", "回溯算法", "bfs", "dfs",
-        "图论", "最短路径", "拓扑排序",
+        "算法复杂度",
+        "时间复杂度",
+        "空间复杂度",
+        "二叉树",
+        "平衡树",
+        "哈希冲突",
+        "动态规划",
+        "贪心算法",
+        "回溯算法",
+        "bfs",
+        "dfs",
+        "图论",
+        "最短路径",
+        "拓扑排序",
         # 网络/协议
-        "tcp握手", "tcp/ip", "http2", "websocket", "oauth", "jwt",
-        "ssl/tls", "dns解析", "cdn原理", "负载均衡",
+        "tcp握手",
+        "tcp/ip",
+        "http2",
+        "websocket",
+        "oauth",
+        "jwt",
+        "ssl/tls",
+        "dns解析",
+        "cdn原理",
+        "负载均衡",
         # 系统原理
-        "内存管理", "垃圾回收", "gc算法", "进程调度", "死锁", "race condition",
-        "缓存一致性", "分布式事务", "cap定理",
+        "内存管理",
+        "垃圾回收",
+        "gc算法",
+        "进程调度",
+        "死锁",
+        "race condition",
+        "缓存一致性",
+        "分布式事务",
+        "cap定理",
         # 机器学习/AI
-        "梯度下降", "反向传播", "注意力机制", "transformer", "embedding",
-        "卷积神经网络", "过拟合", "正则化", "batch normalization",
+        "梯度下降",
+        "反向传播",
+        "注意力机制",
+        "transformer",
+        "embedding",
+        "卷积神经网络",
+        "过拟合",
+        "正则化",
+        "batch normalization",
     ]
 
     @classmethod
-    def is_simple_query(cls, user_input: str, task_type: str, history: list = None) -> bool:
+    def is_simple_query(
+        cls, user_input: str, task_type: str, history: list = None
+    ) -> bool:
         """
         判断是否可以直接用本地模型回答（跳过云端）。
 
@@ -849,9 +995,27 @@ class LocalModelRouter:
 
         # 需要实时数据的关键词 → 必须联网
         realtime_kw = [
-            "今天", "现在", "最新", "实时", "天气", "股价", "汇率",
-            "新闻", "热点", "价格", "多少钱", "涨", "跌", "比赛",
-            "成绩", "排名", "选举", "疫情", "航班", "火车票", "高铁",
+            "今天",
+            "现在",
+            "最新",
+            "实时",
+            "天气",
+            "股价",
+            "汇率",
+            "新闻",
+            "热点",
+            "价格",
+            "多少钱",
+            "涨",
+            "跌",
+            "比赛",
+            "成绩",
+            "排名",
+            "选举",
+            "疫情",
+            "航班",
+            "火车票",
+            "高铁",
         ]
         if any(kw in text for kw in realtime_kw):
             return False
@@ -861,20 +1025,34 @@ class LocalModelRouter:
             return False
 
         # 需要长篇深度输出的关键词 → 云模型质量更好
-        deep_kw = ["深入", "深度分析", "系统性", "全面分析", "写一篇", "写一份", "完整报告", "论文"]
+        deep_kw = [
+            "深入",
+            "深度分析",
+            "系统性",
+            "全面分析",
+            "写一篇",
+            "写一份",
+            "完整报告",
+            "论文",
+        ]
         if any(kw in text for kw in deep_kw):
             return False
 
         # 涉及代码生成意图 → 云模型更可靠；纯概念解释可以本地
         code_gen_kw = ["帮我写", "写一个", "帮我实现", "debug", "修改这段代码"]
-        has_code_ctx = any(k in tl for k in ["代码", "函数", "脚本", "python", "java", "javascript", "bug"])
+        has_code_ctx = any(
+            k in tl
+            for k in ["代码", "函数", "脚本", "python", "java", "javascript", "bug"]
+        )
         if has_code_ctx and any(kw in text for kw in code_gen_kw):
             return False
 
         return True
 
     @classmethod
-    def generate_plan(cls, user_input: str, task_type: str, timeout: float = 3.0) -> list:
+    def generate_plan(
+        cls, user_input: str, task_type: str, timeout: float = 3.0
+    ) -> list:
         """
         并联模式：在云端模型首包响应前，用本地模型生成任务执行计划步骤。
         设计为与云端模型 **并发执行**，填充首包等待的"死区"，
@@ -917,7 +1095,10 @@ class LocalModelRouter:
                     "model": cls._model_name,
                     "messages": [
                         {"role": "system", "content": PLAN_PROMPT},
-                        {"role": "user", "content": f"输入: {repr(user_input[:200])} 类型: {task_type}"},
+                        {
+                            "role": "user",
+                            "content": f"输入: {repr(user_input[:200])} 类型: {task_type}",
+                        },
                     ],
                     "stream": False,
                     "format": "json",
@@ -925,9 +1106,9 @@ class LocalModelRouter:
                     "options": {
                         "temperature": 0.3,
                         "num_predict": 150,
-                    }
+                    },
                 },
-                timeout=timeout
+                timeout=timeout,
             )
             if resp.status_code != 200:
                 return []
@@ -944,12 +1125,17 @@ class LocalModelRouter:
             return []
 
     @classmethod
-    def generate_stream(cls, user_input: str, history: list = None,
-                        system_instruction: str = None, timeout: float = 30.0):
+    def generate_stream(
+        cls,
+        user_input: str,
+        history: list = None,
+        system_instruction: str = None,
+        timeout: float = 30.0,
+    ):
         """
         使用本地 Ollama 模型流式生成响应。
         当前激活的 Skills 会自动注入到系统指令中（若调用方未提供 system_instruction）。
-        
+
         Returns: generator of text chunks, or None if unavailable
         """
         if not cls._init_response_model():
@@ -970,24 +1156,33 @@ class LocalModelRouter:
             )
             try:
                 from app.core.skills.skill_manager import SkillManager
+
                 # AutoMatcher + BindingManager 双路径合并
                 _temp_ids: list = []
                 try:
                     from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+
                     _temp_ids = SkillAutoMatcher.match(
                         user_input=user_input or "", task_type="CHAT"
                     )
                 except Exception:
                     pass
                 try:
-                    from app.core.skills.skill_trigger_binding import get_skill_binding_manager
-                    _binding_ids = get_skill_binding_manager().match_intent(user_input or "")
+                    from app.core.skills.skill_trigger_binding import (
+                        get_skill_binding_manager,
+                    )
+
+                    _binding_ids = get_skill_binding_manager().match_intent(
+                        user_input or ""
+                    )
                     if _binding_ids:
                         _temp_ids = list(dict.fromkeys(_temp_ids + _binding_ids))
                 except Exception:
                     pass
                 sys_prompt = SkillManager.inject_into_prompt(
-                    _base, task_type="CHAT", user_input=user_input,
+                    _base,
+                    task_type="CHAT",
+                    user_input=user_input,
                     temp_skill_ids=_temp_ids,
                 )
             except Exception:
@@ -999,7 +1194,11 @@ class LocalModelRouter:
         if history:
             recent = history[-8:]  # 最多 4 轮
             for turn in recent:
-                role = "assistant" if turn.get("role") == "model" else turn.get("role", "user")
+                role = (
+                    "assistant"
+                    if turn.get("role") == "model"
+                    else turn.get("role", "user")
+                )
                 parts_text = " ".join(turn.get("parts", []))
                 if parts_text.strip():
                     messages.append({"role": role, "content": parts_text[:500]})
@@ -1017,15 +1216,16 @@ class LocalModelRouter:
                         "options": {
                             "temperature": 0.7,
                             "num_predict": 2048,
-                        }
+                        },
                     },
                     stream=True,
-                    timeout=timeout
+                    timeout=timeout,
                 )
                 if resp.status_code != 200:
                     return
 
                 import re as _re
+
                 _in_think = False
                 _think_buf = ""
                 for line in resp.iter_lines():
@@ -1041,7 +1241,7 @@ class LocalModelRouter:
                                 if _in_think:
                                     end_idx = _think_buf.find("</think>")
                                     if end_idx >= 0:
-                                        _think_buf = _think_buf[end_idx + 8:]
+                                        _think_buf = _think_buf[end_idx + 8 :]
                                         _in_think = False
                                     else:
                                         _think_buf = ""  # 仍在思考中，丢弃
@@ -1052,7 +1252,7 @@ class LocalModelRouter:
                                         before = _think_buf[:start_idx]
                                         if before:
                                             yield before
-                                        _think_buf = _think_buf[start_idx + 7:]
+                                        _think_buf = _think_buf[start_idx + 7 :]
                                         _in_think = True
                                     else:
                                         # 没有 think 标签，直接输出
@@ -1140,6 +1340,7 @@ class LocalModelRouter:
         if include_skill_routing:
             try:
                 from app.core.skills.skill_manager import SkillManager
+
                 # 查找活跃 Skill 中 task_types 包含当前分类的第一个
                 for sid, sdef in SkillManager._def_registry.items():
                     legacy = SkillManager._registry.get(sid, {})
@@ -1147,7 +1348,10 @@ class LocalModelRouter:
                         continue
                     if task_type in (sdef.task_types or []):
                         # 优先选有 intent_description 的 Skill（更精准）
-                        if sdef.intent_description and sdef.intent_description in user_input:
+                        if (
+                            sdef.intent_description
+                            and sdef.intent_description in user_input
+                        ):
                             skill_id = sid
                             break
                         elif skill_id is None:

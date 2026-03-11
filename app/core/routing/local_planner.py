@@ -1,17 +1,24 @@
 import json
 import re
+
 from app.core.routing.local_model_router import LocalModelRouter
+
 
 class LocalPlanner:
     """Local planner/controller using Ollama for multi-step task planning."""
 
     # ── 允许的任务类型 ─────────────────────────────────────────────────────────
     ALLOWED_TASKS = {
-        "WEB_SEARCH", "RESEARCH", "FILE_GEN", "PAINTER",
-        "CODER", "SYSTEM", "AGENT",
+        "WEB_SEARCH",
+        "RESEARCH",
+        "FILE_GEN",
+        "PAINTER",
+        "CODER",
+        "SYSTEM",
+        "AGENT",
     }
 
-    PLAN_PROMPT = '''你是一个多步任务规划器，只输出 JSON。
+    PLAN_PROMPT = """你是一个多步任务规划器，只输出 JSON。
 
 允许的任务类型（只从这里选）：
 - WEB_SEARCH : 联网搜索获取最新信息
@@ -58,9 +65,9 @@ class LocalPlanner:
 
 只输出 JSON:
 {{"use_planner":true|false,"steps":[{{"id":1,"task":"...","input":"...","description":"...","output_key":"...","depends_on":[],"context_keys":[]}}]}}
-'''
+"""
 
-    CHECK_PROMPT = '''你是任务进度检查器，只输出 JSON。
+    CHECK_PROMPT = """你是任务进度检查器，只输出 JSON。
 
 输入包含:
 - 用户需求
@@ -70,18 +77,56 @@ class LocalPlanner:
 
 只输出 JSON:
 {{"status":"complete|partial|failed","summary":"...","next_actions":["..."]}}
-'''
+"""
 
     @classmethod
     def can_plan(cls, user_input: str) -> bool:
         """是否值得尝试多步规划（宽松版，用于兜底触发）"""
         text = user_input.lower()
-        multi_markers = ["并", "然后", "再", "同时", "先", "之后", "并且", "接着", "完成后", "最后"]
-        search_markers = ["收集", "查询", "搜索", "查", "搜", "最新", "资料", "信息", "数据", "研究"]
-        output_markers = ["ppt", "报告", "文档", "word", "pdf", "表格", "excel", "总结", "代码", "图表"]
-        if any(m in text for m in multi_markers) and (any(s in text for s in search_markers) or any(o in text for o in output_markers)):
+        multi_markers = [
+            "并",
+            "然后",
+            "再",
+            "同时",
+            "先",
+            "之后",
+            "并且",
+            "接着",
+            "完成后",
+            "最后",
+        ]
+        search_markers = [
+            "收集",
+            "查询",
+            "搜索",
+            "查",
+            "搜",
+            "最新",
+            "资料",
+            "信息",
+            "数据",
+            "研究",
+        ]
+        output_markers = [
+            "ppt",
+            "报告",
+            "文档",
+            "word",
+            "pdf",
+            "表格",
+            "excel",
+            "总结",
+            "代码",
+            "图表",
+        ]
+        if any(m in text for m in multi_markers) and (
+            any(s in text for s in search_markers)
+            or any(o in text for o in output_markers)
+        ):
             return True
-        if any(s in text for s in search_markers) and any(o in text for o in output_markers):
+        if any(s in text for s in search_markers) and any(
+            o in text for o in output_markers
+        ):
             return True
         return False
 
@@ -95,16 +140,28 @@ class LocalPlanner:
         if len(text) < 15:
             return False
         # 明确的先后连接词
-        explicit_seq = ["先.*再", "先.*然后", "首先.*然后", "收集.*生成", "查询.*生成",
-                        "查.*做成", "搜.*整理", "研究.*写", "分析.*制作"]
+        explicit_seq = [
+            "先.*再",
+            "先.*然后",
+            "首先.*然后",
+            "收集.*生成",
+            "查询.*生成",
+            "查.*做成",
+            "搜.*整理",
+            "研究.*写",
+            "分析.*制作",
+        ]
         import re
+
         for pattern in explicit_seq:
             if re.search(pattern, text):
                 return True
         # 查询词 + 输出格式词（更严格）
         strong_search = ["搜索", "查询", "收集最新", "研究最新", "调研"]
         strong_output = ["ppt", "word", "excel", "pdf", "报告", "表格文档", "分析报告"]
-        if any(s in text for s in strong_search) and any(o in text for o in strong_output):
+        if any(s in text for s in strong_search) and any(
+            o in text for o in strong_output
+        ):
             return True
         return False
 
@@ -169,15 +226,17 @@ class LocalPlanner:
             if not isinstance(context_keys, list):
                 context_keys = []
             output_key = s.get("output_key") or f"step_{step_id}_output"
-            cleaned.append({
-                "id": step_id,
-                "task_type": task,
-                "description": s.get("description", ""),
-                "input": s.get("input", ""),
-                "output_key": output_key,
-                "depends_on": depends_on,
-                "context_keys": context_keys,
-            })
+            cleaned.append(
+                {
+                    "id": step_id,
+                    "task_type": task,
+                    "description": s.get("description", ""),
+                    "input": s.get("input", ""),
+                    "output_key": output_key,
+                    "depends_on": depends_on,
+                    "context_keys": context_keys,
+                }
+            )
 
         return {"use_planner": use_planner and len(cleaned) > 0, "steps": cleaned}
 
@@ -190,19 +249,21 @@ class LocalPlanner:
         try:
             # 延迟导入，避免循环依赖
             import importlib
+
             _genai = importlib.import_module("google.genai")
             _types = importlib.import_module("google.genai.types")
 
             # 从 app.py 获取共享 client（通过 sys.modules 避免循环 import）
             import sys
+
             _app_module = sys.modules.get("web.app") or sys.modules.get("app")
             _client = getattr(_app_module, "client", None) if _app_module else None
             if _client is None:
                 return None
 
             cloud_prompt = (
-                cls.PLAN_PROMPT.format(input=user_input[:600]) +
-                "\n\n注意：如果任务不需要多步，请直接输出 {\"use_planner\": false, \"steps\": []}"
+                cls.PLAN_PROMPT.format(input=user_input[:600])
+                + '\n\n注意：如果任务不需要多步，请直接输出 {"use_planner": false, "steps": []}'
             )
 
             resp = _client.models.generate_content(
@@ -213,34 +274,58 @@ class LocalPlanner:
                     response_mime_type="application/json",
                     temperature=0.1,
                     max_output_tokens=600,
-                )
+                ),
             )
             raw = resp.text or ""
             result = cls._parse_plan_json(raw)
             if result:
-                print(f"[LocalPlanner] ✅ Cloud fallback 规划成功: {len(result.get('steps', []))} 步")
+                print(
+                    f"[LocalPlanner] ✅ Cloud fallback 规划成功: {len(result.get('steps', []))} 步"
+                )
             return result
         except Exception as e:
             print(f"[LocalPlanner] ⚠️ Cloud fallback 规划失败: {e}")
             return None
 
     @classmethod
-    def self_check(cls, user_input: str, steps: list, results: list, timeout: float = 4.0) -> dict:
+    def self_check(
+        cls, user_input: str, steps: list, results: list, timeout: float = 4.0
+    ) -> dict:
         """对执行结果进行自检"""
         try:
             if not LocalModelRouter.is_ollama_available():
-                return {"status": "complete", "summary": "(本地模型不可用，跳过自检)", "next_actions": []}
+                return {
+                    "status": "complete",
+                    "summary": "(本地模型不可用，跳过自检)",
+                    "next_actions": [],
+                }
 
             if not LocalModelRouter.init_model():
-                return {"status": "complete", "summary": "(本地模型不可用，跳过自检)", "next_actions": []}
+                return {
+                    "status": "complete",
+                    "summary": "(本地模型不可用，跳过自检)",
+                    "next_actions": [],
+                }
 
             summary_lines = []
             for i, (s, r) in enumerate(zip(steps, results), start=1):
                 ok = r.get("success") if isinstance(r, dict) else False
-                out = (r.get("output") or r.get("error") or "")[:120] if isinstance(r, dict) else ""
-                summary_lines.append(f"步骤{i}: {s.get('task_type')} - {'OK' if ok else 'FAIL'} - {out}")
+                out = (
+                    (r.get("output") or r.get("error") or "")[:120]
+                    if isinstance(r, dict)
+                    else ""
+                )
+                summary_lines.append(
+                    f"步骤{i}: {s.get('task_type')} - {'OK' if ok else 'FAIL'} - {out}"
+                )
 
-            prompt = cls.CHECK_PROMPT + "\n用户需求:\n" + user_input + "\n\n执行摘要:\n" + "\n".join(summary_lines)
+            prompt = (
+                cls.CHECK_PROMPT
+                + "\n用户需求:\n"
+                + user_input
+                + "\n\n执行摘要:\n"
+                + "\n".join(summary_lines)
+            )
 
             raw, err = LocalModelRouter.call_ollama_chat(
                 messages=[
@@ -252,7 +337,11 @@ class LocalPlanner:
                 timeout=timeout,
             )
             if err:
-                return {"status": "partial", "summary": "(自检失败)", "next_actions": []}
+                return {
+                    "status": "partial",
+                    "summary": "(自检失败)",
+                    "next_actions": [],
+                }
 
             try:
                 check = json.loads(raw)
@@ -260,7 +349,11 @@ class LocalPlanner:
                     return {
                         "status": check.get("status", "partial"),
                         "summary": check.get("summary", ""),
-                        "next_actions": check.get("next_actions", []) if isinstance(check.get("next_actions", []), list) else []
+                        "next_actions": (
+                            check.get("next_actions", [])
+                            if isinstance(check.get("next_actions", []), list)
+                            else []
+                        ),
                     }
             except Exception:
                 pass
