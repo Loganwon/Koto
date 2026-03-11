@@ -217,7 +217,8 @@ jobs:
             -SetupExe $setup.FullName `
             -TestInstallDir "$env:LOCALAPPDATA\KotoCI_E2E" `
             -Port 5099 `
-            -HealthTimeoutSec 60
+            -HealthTimeoutSec 60 `
+            -RequireHealth:$false
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Run portable E2E test

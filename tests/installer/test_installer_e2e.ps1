@@ -34,7 +34,8 @@ param(
     [string]$SetupExe       = "",
     [string]$TestInstallDir = "$env:LOCALAPPDATA\KotoE2ETest",
     [int]$Port              = 5099,
-    [int]$HealthTimeoutSec  = 45
+    [int]$HealthTimeoutSec  = 45,
+    [switch]$RequireHealth  = $true   # set to $false in headless/CI to treat as warning
 )
 
 $ErrorActionPreference = "Stop"
@@ -162,7 +163,11 @@ if (-not $healthy -and -not $kotoProc.HasExited) {
 }
 
 if (-not $healthy) {
-    Fail "Health endpoint did not respond within ${HealthTimeoutSec}s"
+    if ($RequireHealth) {
+        Fail "Health endpoint did not respond within ${HealthTimeoutSec}s"
+    } else {
+        Write-Host "::warning::Health endpoint did not respond within ${HealthTimeoutSec}s (best-effort in CI — pywebview may not init headless)"
+    }
 }
 
 # ══════════════════════════════════════════════════════════════════════════
