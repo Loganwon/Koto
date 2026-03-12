@@ -3,12 +3,12 @@
 Tests cover: tool registration, deduplication, schema generation,
 execution with timeout enforcement, plugin registration, and error cases.
 """
+
 from __future__ import annotations
 
 import time
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -124,7 +124,9 @@ class TestTimeout:
 
     def test_fast_tool_completes_within_timeout(self):
         reg = _get_registry()
-        reg.register_tool("fast", lambda: 42, parameters={"type": "object", "properties": {}})
+        reg.register_tool(
+            "fast", lambda: 42, parameters={"type": "object", "properties": {}}
+        )
         result = reg.execute("fast", {})
         assert result == 42
 
