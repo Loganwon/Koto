@@ -10,18 +10,18 @@ Local Model Installer  —  本地 AI 模型安装器
     pyinstaller local_model_installer.spec
 """
 
-import os
-import re
-import sys
 import json
+import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -520,7 +520,8 @@ def save_result(tag: str):
 # ─────────────────────────────────────────────────────────────
 def run_gui():
     import tkinter as tk
-    from tkinter import ttk, messagebox, scrolledtext, font as tkfont
+    from tkinter import font as tkfont
+    from tkinter import messagebox, scrolledtext, ttk
 
     # ── 主题常量 ──
     BG = "#0d1117"
