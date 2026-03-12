@@ -1,6 +1,6 @@
-﻿import threading
-import hashlib
+﻿import hashlib
 import json
+import threading
 from collections import OrderedDict
 
 # google.genai.types 延迟到 classify() 内部加载，避免启动时加载 (~4.7s)

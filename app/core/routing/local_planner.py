@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+
 from app.core.routing.local_model_router import LocalModelRouter
 
 logger = logging.getLogger(__name__)
@@ -486,8 +487,8 @@ class LocalPlanner:
     def _replan_with_cloud(cls, prompt: str, user_input: str) -> dict:
         """Cloud fallback for replan()."""
         try:
-            import sys
             import importlib
+            import sys
 
             _types = importlib.import_module("google.genai.types")
             _app_module = sys.modules.get("web.app") or sys.modules.get("app")

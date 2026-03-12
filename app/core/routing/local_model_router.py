@@ -1,9 +1,10 @@
-import time
-import socket
 import json
-import requests
+import socket
+import time
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import List, Optional
+
+import requests
 
 # ══════════════════════════════════════════════════════════════════
 # RouterDecision — 结构化路由决策（v2）

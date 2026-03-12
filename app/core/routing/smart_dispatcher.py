@@ -1,6 +1,6 @@
-from typing import Dict, Any, Tuple, List, Optional
-import time
 import re
+import time
+from typing import Any, Dict, List, Optional, Tuple
 
 # 延迟导入 - 这些模块仅在运行时方法调用时加载，避免启动时加载 google.genai (~4.7s) 和 requests (~0.5s)
 # from app.core.routing.local_model_router import LocalModelRouter
