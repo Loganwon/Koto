@@ -40,18 +40,19 @@ logger = logging.getLogger(__name__)
 
 # ── 可选依赖 ─────────────────────────────────────────────────────────────────
 try:
-    from langgraph.graph import StateGraph, END
-    from langgraph.types import (
-        Send,
-    )  # v1.x: Send moved from langgraph.graph to langgraph.types
+    import operator
+
     from langchain_core.messages import (
         AIMessage,
+        BaseMessage,
         HumanMessage,
         SystemMessage,
-        BaseMessage,
     )
-    from typing_extensions import TypedDict, Annotated
-    import operator
+    from langgraph.graph import END, StateGraph
+    from langgraph.types import (  # v1.x: Send moved from langgraph.graph to langgraph.types
+        Send,
+    )
+    from typing_extensions import Annotated, TypedDict
 
     _LG_AVAILABLE = True
 except ImportError:

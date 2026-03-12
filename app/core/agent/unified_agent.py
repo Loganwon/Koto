@@ -1,14 +1,14 @@
+import json
 import logging
 import time
-import json
 import uuid
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from app.core.agent.base import Agent
 from app.core.agent.tool_registry import ToolRegistry
-from app.core.agent.types import AgentStep, AgentStepType, AgentAction, AgentResponse
+from app.core.agent.types import AgentAction, AgentResponse, AgentStep, AgentStepType
 from app.core.llm.base import LLMProvider
 
 
@@ -20,14 +20,14 @@ def _get_task_ledger():
 
 
 def _get_progress_bus():
-    from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+    from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
 
     return get_progress_bus(), ProgressEvent
 
 
 # ── 阶段一护栏模块（懒加载，避免启动时开销）──────────────────────────
 def _get_pii_filter():
-    from app.core.security.pii_filter import PIIFilter, PIIConfig
+    from app.core.security.pii_filter import PIIConfig, PIIFilter
 
     return PIIFilter, PIIConfig
 

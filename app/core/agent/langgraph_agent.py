@@ -52,18 +52,20 @@ logger = logging.getLogger(__name__)
 
 # ── LangGraph / LangChain 可选依赖 ─────────────────────────────────────────
 try:
-    from langgraph.graph import StateGraph, END
-    from langgraph.checkpoint.memory import MemorySaver
+    import operator
+
     from langchain_core.messages import (
         AIMessage,
+        BaseMessage,
         HumanMessage,
         SystemMessage,
         ToolMessage,
-        BaseMessage,
     )
-    from langchain_core.tools import BaseTool, tool as lc_tool
-    from typing_extensions import TypedDict, Annotated
-    import operator
+    from langchain_core.tools import BaseTool
+    from langchain_core.tools import tool as lc_tool
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.graph import END, StateGraph
+    from typing_extensions import Annotated, TypedDict
 
     _LG_AVAILABLE = True
 except ImportError:
