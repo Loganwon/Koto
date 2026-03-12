@@ -42,7 +42,7 @@ _SKILLS_DIR = str(_BASE_DIR / "config" / "skills")
 
 
 def _get_skill_schema():
-    from app.core.skills.skill_schema import SkillDefinition, InputVariable, OutputSpec
+    from app.core.skills.skill_schema import InputVariable, OutputSpec, SkillDefinition
 
     return SkillDefinition, InputVariable, OutputSpec
 

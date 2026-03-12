@@ -26,13 +26,13 @@
     mcp_tools = SkillManager.list_mcp_tools()
 """
 
-import os
 import json
 import logging
-from typing import Optional, List, Dict
+import os
 from pathlib import Path
+from typing import Dict, List, Optional
 
-from app.core.skills.skill_schema import SkillDefinition, OutputSpec
+from app.core.skills.skill_schema import OutputSpec, SkillDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -1982,8 +1982,8 @@ class SkillManager:
             tmpl_path_rel = s.get("template_path")
             if tmpl_path_rel:
                 try:
-                    from pathlib import Path as _Path
                     import sys as _sys
+                    from pathlib import Path as _Path
 
                     _base = (
                         _Path(_sys.executable).parent

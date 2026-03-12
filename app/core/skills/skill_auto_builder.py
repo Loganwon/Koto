@@ -608,8 +608,8 @@ class SkillPackager:
         打包多个 Skill 为 .kotosk 文件。
         返回输出文件路径。
         """
-        import zipfile
         import tempfile
+        import zipfile
         from datetime import datetime, timezone
 
         if not output_path.endswith(".kotosk"):
@@ -733,9 +733,9 @@ class SkillAutoBuilder:
             SkillDefinition
         """
         from app.core.skills.skill_schema import (
-            SkillDefinition,
             InputVariable,
             OutputSpec,
+            SkillDefinition,
         )
 
         context = personalization_context or {}
@@ -821,9 +821,9 @@ class SkillAutoBuilder:
             SkillDefinition（AI 生成或规则降级）
         """
         from app.core.skills.skill_schema import (
-            SkillDefinition,
             InputVariable,
             OutputSpec,
+            SkillDefinition,
         )
 
         skill_id = _make_skill_id(name)
@@ -1029,9 +1029,9 @@ class SkillAutoBuilder:
         prompt, intent_desc = PromptSynthesizer.synthesize(profile, name, final_desc)
 
         from app.core.skills.skill_schema import (
-            SkillDefinition,
             InputVariable,
             OutputSpec,
+            SkillDefinition,
         )
 
         return SkillDefinition(
@@ -1082,9 +1082,9 @@ class SkillAutoBuilder:
         所有维度参数范围 0.0 ~ 1.0。
         """
         from app.core.skills.skill_schema import (
-            SkillDefinition,
             InputVariable,
             OutputSpec,
+            SkillDefinition,
         )
 
         profile = StyleProfile(
