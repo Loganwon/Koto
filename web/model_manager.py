@@ -14,9 +14,9 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import time
-import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -27,76 +27,76 @@ logger = logging.getLogger(__name__)
 # 必须能力 (required=True) 的维度：模型不满足则直接排除。
 TASK_REQUIREMENTS: Dict[str, Dict[str, Any]] = {
     "CHAT": {
-        "speed":       8,
-        "quality":     6,
-        "context":     4,
-        "reasoning":   4,
-        "multimodal":  False,   # 不强制要求
-        "image_gen":   False,
-        "grounding":   False,
+        "speed": 8,
+        "quality": 6,
+        "context": 4,
+        "reasoning": 4,
+        "multimodal": False,  # 不强制要求
+        "image_gen": False,
+        "grounding": False,
         "function_calling": False,
     },
     "CODER": {
-        "speed":       4,
-        "quality":     9,
-        "reasoning":   9,
-        "context":     8,
+        "speed": 4,
+        "quality": 9,
+        "reasoning": 9,
+        "context": 8,
         "function_calling": True,  # 必须支持
-        "multimodal":  False,
-        "image_gen":   False,
-        "grounding":   False,
+        "multimodal": False,
+        "image_gen": False,
+        "grounding": False,
     },
     "WEB_SEARCH": {
-        "speed":       7,
-        "quality":     6,
-        "grounding":   True,       # 必须支持
-        "multimodal":  False,
-        "image_gen":   False,
+        "speed": 7,
+        "quality": 6,
+        "grounding": True,  # 必须支持
+        "multimodal": False,
+        "image_gen": False,
         "function_calling": False,
     },
     "VISION": {
-        "speed":       7,
-        "quality":     7,
-        "multimodal":  True,       # 必须支持
-        "image_gen":   False,
-        "grounding":   False,
+        "speed": 7,
+        "quality": 7,
+        "multimodal": True,  # 必须支持
+        "image_gen": False,
+        "grounding": False,
         "function_calling": False,
     },
     "RESEARCH": {
-        "speed":       1,
-        "quality":     10,
-        "reasoning":   10,
-        "context":     10,
-        "grounding":   True,
+        "speed": 1,
+        "quality": 10,
+        "reasoning": 10,
+        "context": 10,
+        "grounding": True,
         "function_calling": False,
-        "image_gen":   False,
-        "multimodal":  False,
+        "image_gen": False,
+        "multimodal": False,
     },
     "FILE_GEN": {
-        "speed":       5,
-        "quality":     8,
-        "context":     8,
+        "speed": 5,
+        "quality": 8,
+        "context": 8,
         "function_calling": True,
-        "multimodal":  False,
-        "image_gen":   False,
-        "grounding":   False,
+        "multimodal": False,
+        "image_gen": False,
+        "grounding": False,
     },
     "PAINTER": {
-        "image_gen":   True,       # 必须支持
-        "quality":     8,
-        "speed":       5,
-        "multimodal":  False,
-        "grounding":   False,
+        "image_gen": True,  # 必须支持
+        "quality": 8,
+        "speed": 5,
+        "multimodal": False,
+        "grounding": False,
         "function_calling": False,
     },
     "AGENT": {
-        "speed":       7,
+        "speed": 7,
         "function_calling": True,  # 必须支持
-        "reasoning":   8,
-        "multimodal":  True,
-        "context":     6,
-        "image_gen":   False,
-        "grounding":   False,
+        "reasoning": 8,
+        "multimodal": True,
+        "context": 6,
+        "image_gen": False,
+        "grounding": False,
     },
 }
 
@@ -111,104 +111,170 @@ LOCAL_EXECUTOR_TASKS = {"SYSTEM", "FILE_OP"}
 KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     # ── Gemini 3.x ──────────────────────────────────────────────
     "gemini-3-pro-preview": {
-        "provider": "gemini", "tier": 9,
-        "speed": 4,  "quality": 10, "reasoning": 10,
-        "context": 10, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 9,
+        "speed": 4,
+        "quality": 10,
+        "reasoning": 10,
+        "context": 10,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": True,
         "display": "Gemini 3.0 Pro 🚀",
         "strengths": ["推理", "代码", "分析", "复杂任务"],
     },
     "gemini-3-flash-preview": {
-        "provider": "gemini", "tier": 7,
-        "speed": 9,  "quality": 7,  "reasoning": 7,
-        "context": 7, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 7,
+        "speed": 9,
+        "quality": 7,
+        "reasoning": 7,
+        "context": 7,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": True,
         "display": "Gemini 3.0 Flash ⚡",
         "strengths": ["快速", "对话", "多模态"],
     },
     "gemini-3.1-flash-image-preview": {
-        "provider": "gemini", "tier": 7,
-        "speed": 7,  "quality": 8,  "reasoning": 5,
-        "context": 5, "multimodal": True, "function_calling": False,
-        "grounding": False, "image_gen": True,
+        "provider": "gemini",
+        "tier": 7,
+        "speed": 7,
+        "quality": 8,
+        "reasoning": 5,
+        "context": 5,
+        "multimodal": True,
+        "function_calling": False,
+        "grounding": False,
+        "image_gen": True,
         "interactions_only": False,
         "display": "Gemini 3.1 Flash Image 🎨",
         "strengths": ["图像生成", "多模态"],
     },
     # ── Gemini 2.5 ──────────────────────────────────────────────
     "gemini-2.5-pro-preview": {
-        "provider": "gemini", "tier": 8,
-        "speed": 4,  "quality": 9,  "reasoning": 9,
-        "context": 9, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 8,
+        "speed": 4,
+        "quality": 9,
+        "reasoning": 9,
+        "context": 9,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": False,
         "display": "Gemini 2.5 Pro 🎯",
         "strengths": ["推理", "代码", "分析"],
     },
     "gemini-2.5-flash-preview": {
-        "provider": "gemini", "tier": 6,
-        "speed": 8,  "quality": 7,  "reasoning": 6,
-        "context": 7, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 6,
+        "speed": 8,
+        "quality": 7,
+        "reasoning": 6,
+        "context": 7,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": False,
         "display": "Gemini 2.5 Flash Preview 🌐",
         "strengths": ["联网搜索", "grounding", "快速"],
     },
     "gemini-2.5-flash": {
-        "provider": "gemini", "tier": 6,
-        "speed": 8,  "quality": 7,  "reasoning": 6,
-        "context": 7, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 6,
+        "speed": 8,
+        "quality": 7,
+        "reasoning": 6,
+        "context": 7,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": False,
         "display": "Gemini 2.5 Flash 🌐",
         "strengths": ["联网搜索", "grounding", "快速"],
     },
     # ── Deep Research ────────────────────────────────────────────
     "deep-research-pro-preview-12-2025": {
-        "provider": "gemini", "tier": 10,
-        "speed": 1,  "quality": 10, "reasoning": 10,
-        "context": 10, "multimodal": False, "function_calling": False,
-        "grounding": True, "image_gen": False,
-        "interactions_only": False,
+        "provider": "gemini",
+        "tier": 10,
+        "speed": 1,
+        "quality": 10,
+        "reasoning": 10,
+        "context": 10,
+        "multimodal": False,
+        "function_calling": False,
+        "grounding": True,
+        "image_gen": False,
+        "interactions_only": True,
         "display": "Deep Research Pro 🔬",
         "strengths": ["深度研究", "学术分析", "综合报告"],
     },
     # ── Gemini 2.0 ──────────────────────────────────────────────
     "gemini-2.0-flash-exp": {
-        "provider": "gemini", "tier": 5,
-        "speed": 9,  "quality": 6,  "reasoning": 6,
-        "context": 6, "multimodal": True, "function_calling": True,
-        "grounding": False, "image_gen": True,
+        "provider": "gemini",
+        "tier": 5,
+        "speed": 9,
+        "quality": 6,
+        "reasoning": 6,
+        "context": 6,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": False,
+        "image_gen": True,
         "interactions_only": False,
         "display": "Gemini 2.0 Flash Exp 🧪",
         "strengths": ["实验功能", "图像生成"],
     },
     "gemini-2.0-flash": {
-        "provider": "gemini", "tier": 5,
-        "speed": 9,  "quality": 6,  "reasoning": 6,
-        "context": 6, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 5,
+        "speed": 9,
+        "quality": 6,
+        "reasoning": 6,
+        "context": 6,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": False,
         "display": "Gemini 2.0 Flash ⚡",
         "strengths": ["快速", "多模态"],
     },
     # ── Gemini 1.5 ──────────────────────────────────────────────
     "gemini-1.5-pro": {
-        "provider": "gemini", "tier": 6,
-        "speed": 4,  "quality": 8,  "reasoning": 8,
-        "context": 10, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 6,
+        "speed": 4,
+        "quality": 8,
+        "reasoning": 8,
+        "context": 10,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": False,
         "display": "Gemini 1.5 Pro 📚",
         "strengths": ["长上下文", "推理", "多模态"],
     },
     "gemini-1.5-flash": {
-        "provider": "gemini", "tier": 4,
-        "speed": 9,  "quality": 5,  "reasoning": 5,
-        "context": 8, "multimodal": True, "function_calling": True,
-        "grounding": True, "image_gen": False,
+        "provider": "gemini",
+        "tier": 4,
+        "speed": 9,
+        "quality": 5,
+        "reasoning": 5,
+        "context": 8,
+        "multimodal": True,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
         "interactions_only": False,
         "display": "Gemini 1.5 Flash ⚡",
         "strengths": ["快速", "经济"],
@@ -219,19 +285,45 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
 # 用于从未见过的新模型名称中推断能力
 _INFER_RULES: List[Tuple[str, Dict[str, Any]]] = [
     # 图像生成类
-    (r"imagen",          {"image_gen": True, "multimodal": True, "grounding": False, "function_calling": False}),
+    (
+        r"imagen",
+        {
+            "image_gen": True,
+            "multimodal": True,
+            "grounding": False,
+            "function_calling": False,
+        },
+    ),
     (r"image.*gen|gen.*image", {"image_gen": True}),
     (r"image.*preview|flash.*image", {"image_gen": True, "multimodal": True}),
     # 深度研究
-    (r"deep.?research",  {"grounding": True, "reasoning": 10, "context": 10, "speed": 1, "tier_bonus": 3}),
+    (
+        r"deep.?research",
+        {
+            "grounding": True,
+            "reasoning": 10,
+            "context": 10,
+            "speed": 1,
+            "tier_bonus": 3,
+        },
+    ),
     # Pro 系列能力更强
-    (r"\bpro\b",         {"quality": 9, "reasoning": 9, "context": 9, "speed": 4, "tier_bonus": 2}),
+    (
+        r"\bpro\b",
+        {"quality": 9, "reasoning": 9, "context": 9, "speed": 4, "tier_bonus": 2},
+    ),
     # Flash 系列速度优先
-    (r"\bflash\b",       {"speed": 9, "quality": 6, "tier_bonus": 0}),
+    (r"\bflash\b", {"speed": 9, "quality": 6, "tier_bonus": 0}),
     # Ultra 最高能力
-    (r"\bultra\b",       {"quality": 10, "reasoning": 10, "context": 10, "speed": 3, "tier_bonus": 4}),
+    (
+        r"\bultra\b",
+        {"quality": 10, "reasoning": 10, "context": 10, "speed": 3, "tier_bonus": 4},
+    ),
     # Nano/Micro 轻量
-    (r"\bnano\b|\bmicro\b", {"speed": 10, "quality": 4, "reasoning": 3, "tier_bonus": -2}),
+    (
+        r"\bnano\b|\bmicro\b",
+        {"speed": 10, "quality": 4, "reasoning": 3, "tier_bonus": -2},
+    ),
     # 多模态
     (r"vision|multimodal", {"multimodal": True}),
     # 联网
@@ -239,8 +331,9 @@ _INFER_RULES: List[Tuple[str, Dict[str, Any]]] = [
     # 实验版本
     (r"\bexp\b|\bexperimental\b", {"tier_bonus": -1}),
     # Preview
-    (r"\bpreview\b",     {"tier_bonus": 1}),
+    (r"\bpreview\b", {"tier_bonus": 1}),
 ]
+
 
 # 版本号 → tier 基底分
 def _version_to_tier_base(model_name: str) -> int:
@@ -260,20 +353,20 @@ def infer_capabilities(model_id: str) -> Dict[str, Any]:
     """
     name = model_id.lower()
     caps: Dict[str, Any] = {
-        "provider":        "gemini" if "gemini" in name or "palm" in name else "unknown",
-        "tier":            _version_to_tier_base(name),
-        "speed":           7,
-        "quality":         7,
-        "reasoning":       7,
-        "context":         7,
-        "multimodal":      False,
+        "provider": "gemini" if "gemini" in name or "palm" in name else "unknown",
+        "tier": _version_to_tier_base(name),
+        "speed": 7,
+        "quality": 7,
+        "reasoning": 7,
+        "context": 7,
+        "multimodal": False,
         "function_calling": True,
-        "grounding":       False,
-        "image_gen":       False,
+        "grounding": False,
+        "image_gen": False,
         "interactions_only": False,
-        "display":         model_id,
-        "strengths":       [],
-        "_inferred":       True,      # 标记为自动推断
+        "display": model_id,
+        "strengths": [],
+        "_inferred": True,  # 标记为自动推断
     }
     tier_bonus = 0
     for pattern, updates in _INFER_RULES:
@@ -301,7 +394,7 @@ def score_model_for_task(caps: Dict[str, Any], task: str) -> float:
         model_val = caps.get(dim)
         if isinstance(requirement, bool):
             if requirement and not model_val:
-                return -1.0          # 硬性排除
+                return -1.0  # 硬性排除
             # 不需要该能力 → 不加分也不扣分
         elif isinstance(requirement, (int, float)):
             # 数值型：越接近需求，评分越高；超出上限不额外加分
@@ -327,17 +420,17 @@ class ModelManager:
     后续调用直接返回缓存，直到 TTL 到期。
     """
 
-    DEFAULT_CACHE_TTL = 6 * 3600   # 6 小时
-    FAST_RETRY_AFTER  = 300        # API 失败后 5 分钟内不重试
+    DEFAULT_CACHE_TTL = 6 * 3600  # 6 小时
+    FAST_RETRY_AFTER = 300  # API 失败后 5 分钟内不重试
 
     def __init__(self, client, cache_ttl: int = DEFAULT_CACHE_TTL):
-        self._client        = client
-        self._cache_ttl     = cache_ttl
-        self._cached_map:   Optional[Dict[str, str]] = None
-        self._cached_caps:  Dict[str, Dict[str, Any]] = {}   # model_id → caps
+        self._client = client
+        self._cache_ttl = cache_ttl
+        self._cached_map: Optional[Dict[str, str]] = None
+        self._cached_caps: Dict[str, Dict[str, Any]] = {}  # model_id → caps
         self._available_ids: List[str] = []
-        self._last_refresh  = 0.0
-        self._last_fail_ts  = 0.0
+        self._last_refresh = 0.0
+        self._last_fail_ts = 0.0
 
     # ── 公共接口 ─────────────────────────────────────────────────────────────
 
@@ -353,7 +446,10 @@ class ModelManager:
         优先读缓存，过期后自动刷新；API 失败则保留上次缓存或使用静态默认值。
         """
         now = time.time()
-        if self._cached_map is not None and (now - self._last_refresh) < self._cache_ttl:
+        if (
+            self._cached_map is not None
+            and (now - self._last_refresh) < self._cache_ttl
+        ):
             return self._cached_map
         # 失败冷却期内不重试
         if self._last_fail_ts and (now - self._last_fail_ts) < self.FAST_RETRY_AFTER:
@@ -366,25 +462,27 @@ class ModelManager:
         返回当前可用模型列表，每个元素包含 id / display / tier / caps 等信息。
         供前端展示或调试用。
         """
-        self.get_model_map()   # 触发一次刷新（如有必要）
+        self.get_model_map()  # 触发一次刷新（如有必要）
         result = []
         for mid in self._available_ids:
             caps = self._cached_caps.get(mid, {})
-            result.append({
-                "id":       mid,
-                "display":  caps.get("display", mid),
-                "tier":     caps.get("tier", 5),
-                "provider": caps.get("provider", "gemini"),
-                "strengths": caps.get("strengths", []),
-                "capabilities": {
-                    "multimodal":       caps.get("multimodal", False),
-                    "image_gen":        caps.get("image_gen", False),
-                    "grounding":        caps.get("grounding", False),
-                    "function_calling": caps.get("function_calling", False),
-                    "interactions_only": caps.get("interactions_only", False),
-                    "_inferred":        caps.get("_inferred", False),
-                },
-            })
+            result.append(
+                {
+                    "id": mid,
+                    "display": caps.get("display", mid),
+                    "tier": caps.get("tier", 5),
+                    "provider": caps.get("provider", "gemini"),
+                    "strengths": caps.get("strengths", []),
+                    "capabilities": {
+                        "multimodal": caps.get("multimodal", False),
+                        "image_gen": caps.get("image_gen", False),
+                        "grounding": caps.get("grounding", False),
+                        "function_calling": caps.get("function_calling", False),
+                        "interactions_only": caps.get("interactions_only", False),
+                        "_inferred": caps.get("_inferred", False),
+                    },
+                }
+            )
         return sorted(result, key=lambda x: x["tier"], reverse=True)
 
     def get_model_map_with_scores(self) -> Dict[str, Dict[str, Any]]:
@@ -396,12 +494,14 @@ class ModelManager:
         for task, model_id in model_map.items():
             caps = self._cached_caps.get(model_id, {})
             out[task] = {
-                "model_id":   model_id,
-                "display":    caps.get("display", model_id),
-                "tier":       caps.get("tier", 0),
-                "score":      score_model_for_task(caps, task) if caps else 0,
-                "provider":   caps.get("provider", "local" if model_id == "local-executor" else "gemini"),
-                "_inferred":  caps.get("_inferred", False),
+                "model_id": model_id,
+                "display": caps.get("display", model_id),
+                "tier": caps.get("tier", 0),
+                "score": score_model_for_task(caps, task) if caps else 0,
+                "provider": caps.get(
+                    "provider", "local" if model_id == "local-executor" else "gemini"
+                ),
+                "_inferred": caps.get("_inferred", False),
             }
         return out
 
@@ -409,23 +509,52 @@ class ModelManager:
         """返回必须走 Interactions API 的模型集合。"""
         self.get_model_map()
         return {
-            mid for mid, caps in self._cached_caps.items()
+            mid
+            for mid, caps in self._cached_caps.items()
             if caps.get("interactions_only", False)
         }
 
     def get_fallback_model(self) -> str:
-        """返回最适合做通用降级的模型（支持 generate_content，速度快）。"""
+        """返回最适合做通用降级的模型（支持 generate_content，速度快、稳定可用）。"""
         self.get_model_map()
+        # 优先选用已知稳定的 Flash 模型，避免 pro-preview 等访问受限的模型
+        _PREFERRED_FALLBACKS = [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-preview",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+        ]
+        for mid in _PREFERRED_FALLBACKS:
+            caps = self._cached_caps.get(mid)
+            if (
+                caps
+                and not caps.get("interactions_only", False)
+                and not caps.get("image_gen", False)
+            ):
+                return mid
+        # 兜底：按 tier+speed 排序，但排除 preview/exp 等访问受限模型
         candidates = [
-            (mid, caps) for mid, caps in self._cached_caps.items()
+            (mid, caps)
+            for mid, caps in self._cached_caps.items()
             if not caps.get("interactions_only", False)
             and not caps.get("image_gen", False)
             and mid != "local-executor"
+            and "preview" not in mid
+            and "-exp" not in mid
         ]
         if not candidates:
+            candidates = [
+                (mid, caps)
+                for mid, caps in self._cached_caps.items()
+                if not caps.get("interactions_only", False)
+                and not caps.get("image_gen", False)
+                and mid != "local-executor"
+            ]
+        if not candidates:
             return "gemini-2.5-flash"
-        # 选 tier 最高但速度也不太慢的
-        best = max(candidates, key=lambda x: x[1].get("tier", 0) + x[1].get("speed", 0) * 0.3)
+        best = max(
+            candidates, key=lambda x: x[1].get("tier", 0) + x[1].get("speed", 0) * 0.3
+        )
         return best[0]
 
     def refresh(self) -> Dict[str, str]:
@@ -486,8 +615,12 @@ class ModelManager:
         过滤掉 embedding、音频等纯特殊用途模型。
         """
         exclude_keywords = {"embedding", "aqa", "tts", "speech", "whisper"}
-        include_actions  = {"generateContent", "generate_content",
-                            "streamGenerateContent", "generateImages"}
+        include_actions = {
+            "generateContent",
+            "generate_content",
+            "streamGenerateContent",
+            "generateImages",
+        }
 
         model_ids: List[str] = []
         try:
@@ -496,7 +629,11 @@ class ModelManager:
             for model in page:
                 raw_name = getattr(model, "name", "") or ""
                 # 标准化 ID：去掉 "models/" 前缀
-                mid = raw_name.removeprefix("models/") if raw_name.startswith("models/") else raw_name
+                mid = (
+                    raw_name.removeprefix("models/")
+                    if raw_name.startswith("models/")
+                    else raw_name
+                )
                 if not mid:
                     continue
                 # 过滤纯嵌入等不可用于生成的模型
@@ -511,7 +648,11 @@ class ModelManager:
             # 部分 SDK 版本 list() 不接受 config 参数
             for model in self._client.models.list():
                 raw_name = getattr(model, "name", "") or ""
-                mid = raw_name.removeprefix("models/") if raw_name.startswith("models/") else raw_name
+                mid = (
+                    raw_name.removeprefix("models/")
+                    if raw_name.startswith("models/")
+                    else raw_name
+                )
                 if not mid:
                     continue
                 if any(kw in mid.lower() for kw in exclude_keywords):
@@ -535,16 +676,16 @@ class ModelManager:
 
     def _select_best(self, task: str, model_ids: List[str]) -> Optional[str]:
         """从提供的模型列表中，为指定任务选出得分最高的模型。"""
-        best_id    = None
+        best_id = None
         best_score = -1.0
         for mid in model_ids:
-            caps  = self._cached_caps.get(mid)
+            caps = self._cached_caps.get(mid)
             if not caps:
                 continue
             sc = score_model_for_task(caps, task)
             if sc > best_score:
                 best_score = sc
-                best_id    = mid
+                best_id = mid
         return best_id
 
     def _preload_static_caps(self):
@@ -557,16 +698,22 @@ class ModelManager:
     def _static_default_map() -> Dict[str, str]:
         """API 不可用时的静态兜底映射（与原 MODEL_MAP 保持一致）。"""
         defaults = {
-            "CHAT":       "gemini-3-flash-preview",
-            "CODER":      "gemini-3-pro-preview",
+            "CHAT": "gemini-3-flash-preview",
+            "CODER": "gemini-3-pro-preview",
             "WEB_SEARCH": "gemini-2.5-flash",
-            "VISION":     "gemini-3-flash-preview",
-            "RESEARCH":   "deep-research-pro-preview-12-2025",
-            "FILE_GEN":   "gemini-3-flash-preview",
-            "PAINTER":    "gemini-3.1-flash-image-preview",
-            "AGENT":      "gemini-3-flash-preview",
-            "SYSTEM":     "local-executor",
-            "FILE_OP":    "local-executor",
+            "VISION": "gemini-3-flash-preview",
+            "RESEARCH": "gemini-2.5-pro-preview",
+            "FILE_GEN": "gemini-3-flash-preview",
+            "FILE_GEN_COMPLEX": "gemini-3-pro-preview",
+            "DOC_ANNOTATE": "gemini-3-flash-preview",
+            "DOC_ANNOTATE_COMPLEX": "gemini-3-pro-preview",
+            "CODER_COMPLEX": "gemini-3-pro-preview",
+            "MULTI_STEP": "gemini-3-pro-preview",
+            "PAINTER": "gemini-3.1-flash-image-preview",
+            "AGENT": "gemini-3-flash-preview",
+            "SYSTEM": "local-executor",
+            "FILE_OP": "local-executor",
+            "COMPLEX": "gemini-3-pro-preview",
         }
         return defaults
 
