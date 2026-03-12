@@ -86,40 +86,31 @@ class DocGenPlugin(AgentPlugin):
                 "}"
             ),
             "properties": {
-                "title": {
-                    "type": "STRING",
-                    "description": "文档标题（必填）"
-                },
-                "author": {
-                    "type": "STRING",
-                    "description": "作者名称，默认为 Koto AI"
-                },
-                "subject": {
-                    "type": "STRING",
-                    "description": "文档主题/副标题"
-                },
+                "title": {"type": "STRING", "description": "文档标题（必填）"},
+                "author": {"type": "STRING", "description": "作者名称，默认为 Koto AI"},
+                "subject": {"type": "STRING", "description": "文档主题/副标题"},
                 "style_preset": {
                     "type": "STRING",
-                    "description": "样式预设：professional / academic / minimal / colorful"
+                    "description": "样式预设：professional / academic / minimal / colorful",
                 },
                 "sections": {
                     "type": "ARRAY",
-                    "description": "文档内容块数组，每个元素含 content_type / content / level / caption"
+                    "description": "文档内容块数组，每个元素含 content_type / content / level / caption",
                 },
                 "excel_sheets": {
                     "type": "ARRAY",
-                    "description": "（Excel 专用）多 Sheet 定义数组"
+                    "description": "（Excel 专用）多 Sheet 定义数组",
                 },
                 "output_filename": {
                     "type": "STRING",
-                    "description": "输出文件名（不含扩展名），留空则自动生成"
+                    "description": "输出文件名（不含扩展名），留空则自动生成",
                 },
                 "pptx_layout": {
                     "type": "STRING",
-                    "description": "（PPT 专用）幻灯片比例：widescreen（16:9）或 standard（4:3）"
+                    "description": "（PPT 专用）幻灯片比例：widescreen（16:9）或 standard（4:3）",
                 },
             },
-            "required": ["title", "sections"]
+            "required": ["title", "sections"],
         }
 
         return [
@@ -177,6 +168,7 @@ class DocGenPlugin(AgentPlugin):
 
     def _get_service(self):
         from app.core.services.doc_gen_service import DocGenService
+
         return DocGenService()
 
     def _parse_doc_data(self, doc_data: Any) -> Dict:
@@ -193,80 +185,107 @@ class DocGenPlugin(AgentPlugin):
     def create_word_document(self, doc_data: Any) -> str:
         """生成 Word .docx 文档，返回文件路径和下载链接的 JSON 字符串。"""
         try:
-            data   = self._parse_doc_data(doc_data)
-            svc    = self._get_service()
+            data = self._parse_doc_data(doc_data)
+            svc = self._get_service()
             from app.core.services.doc_gen_service import DocGenService
-            req    = DocGenService.build_request(data)
-            path   = svc.generate_word(req)
-            return json.dumps({
-                "status": "success",
-                "format": "docx",
-                "file_path": path,
-                "download_url": _to_download_url(path),
-                "message": f"✅ Word 文档已生成：{Path(path).name}",
-            }, ensure_ascii=False)
+
+            req = DocGenService.build_request(data)
+            path = svc.generate_word(req)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "format": "docx",
+                    "file_path": path,
+                    "download_url": _to_download_url(path),
+                    "message": f"✅ Word 文档已生成：{Path(path).name}",
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.exception("[DocGenPlugin] create_word_document 失败")
-            return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
+            return json.dumps(
+                {"status": "error", "message": str(e)}, ensure_ascii=False
+            )
 
     def create_pdf_document(self, doc_data: Any) -> str:
         """生成 PDF 文档，返回文件路径和下载链接的 JSON 字符串。"""
         try:
-            data   = self._parse_doc_data(doc_data)
-            svc    = self._get_service()
+            data = self._parse_doc_data(doc_data)
+            svc = self._get_service()
             from app.core.services.doc_gen_service import DocGenService
-            req    = DocGenService.build_request(data)
-            path   = svc.generate_pdf(req)
-            return json.dumps({
-                "status": "success",
-                "format": "pdf",
-                "file_path": path,
-                "download_url": _to_download_url(path),
-                "message": f"✅ PDF 文档已生成：{Path(path).name}",
-            }, ensure_ascii=False)
+
+            req = DocGenService.build_request(data)
+            path = svc.generate_pdf(req)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "format": "pdf",
+                    "file_path": path,
+                    "download_url": _to_download_url(path),
+                    "message": f"✅ PDF 文档已生成：{Path(path).name}",
+                },
+                ensure_ascii=False,
+            )
         except ImportError:
-            return json.dumps({
-                "status": "error",
-                "message": "reportlab 未安装，请运行: pip install reportlab>=4.0.0",
-            }, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "status": "error",
+                    "message": "reportlab 未安装，请运行: pip install reportlab>=4.0.0",
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.exception("[DocGenPlugin] create_pdf_document 失败")
-            return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
+            return json.dumps(
+                {"status": "error", "message": str(e)}, ensure_ascii=False
+            )
 
     def create_excel_report(self, doc_data: Any) -> str:
         """生成 Excel .xlsx 报表，返回文件路径和下载链接的 JSON 字符串。"""
         try:
-            data   = self._parse_doc_data(doc_data)
-            svc    = self._get_service()
+            data = self._parse_doc_data(doc_data)
+            svc = self._get_service()
             from app.core.services.doc_gen_service import DocGenService
-            req    = DocGenService.build_request(data)
-            path   = svc.generate_excel(req)
-            return json.dumps({
-                "status": "success",
-                "format": "xlsx",
-                "file_path": path,
-                "download_url": _to_download_url(path),
-                "message": f"✅ Excel 报表已生成：{Path(path).name}",
-            }, ensure_ascii=False)
+
+            req = DocGenService.build_request(data)
+            path = svc.generate_excel(req)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "format": "xlsx",
+                    "file_path": path,
+                    "download_url": _to_download_url(path),
+                    "message": f"✅ Excel 报表已生成：{Path(path).name}",
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.exception("[DocGenPlugin] create_excel_report 失败")
-            return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
+            return json.dumps(
+                {"status": "error", "message": str(e)}, ensure_ascii=False
+            )
 
     def create_presentation(self, doc_data: Any) -> str:
         """生成 PowerPoint .pptx，返回文件路径和下载链接的 JSON 字符串。"""
         try:
-            data   = self._parse_doc_data(doc_data)
-            svc    = self._get_service()
+            data = self._parse_doc_data(doc_data)
+            svc = self._get_service()
             from app.core.services.doc_gen_service import DocGenService
-            req    = DocGenService.build_request(data)
-            path   = svc.generate_presentation(req)
-            return json.dumps({
-                "status": "success",
-                "format": "pptx",
-                "file_path": path,
-                "download_url": _to_download_url(path),
-                "message": f"✅ PowerPoint 已生成：{Path(path).name}",
-            }, ensure_ascii=False)
+
+            req = DocGenService.build_request(data)
+            path = svc.generate_presentation(req)
+            return json.dumps(
+                {
+                    "status": "success",
+                    "format": "pptx",
+                    "file_path": path,
+                    "download_url": _to_download_url(path),
+                    "message": f"✅ PowerPoint 已生成：{Path(path).name}",
+                },
+                ensure_ascii=False,
+            )
         except Exception as e:
             logger.exception("[DocGenPlugin] create_presentation 失败")
-            return json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
+            return json.dumps(
+                {"status": "error", "message": str(e)}, ensure_ascii=False
+            )
