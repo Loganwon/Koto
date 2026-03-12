@@ -862,7 +862,8 @@ PARAMETER num_ctx 4096
 
 def register_training_routes(app):
     """将训练数据 API 注册到 Flask app"""
-    from flask import jsonify, request as flask_request
+    from flask import jsonify
+    from flask import request as flask_request
 
     @app.route("/api/training/build", methods=["POST"])
     def training_build():
@@ -917,7 +918,7 @@ def register_training_routes(app):
         也接受不带 msg_id 的请求（此时自动计算 msg_id）。
         """
         try:
-            from app.core.learning.rating_store import get_rating_store, RatingStore
+            from app.core.learning.rating_store import RatingStore, get_rating_store
 
             data = flask_request.json or {}
             stars = int(data.get("stars", 0))
