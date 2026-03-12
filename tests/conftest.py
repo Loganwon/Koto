@@ -6,6 +6,10 @@ Shared pytest fixtures for Koto test suite.
 
 from __future__ import annotations
 
+# phase2_smoke_test.py is a standalone script (calls sys.exit at module level)
+# and must not be collected by pytest.
+collect_ignore = ["phase2_smoke_test.py"]
+
 import os
 import sys
 import tempfile

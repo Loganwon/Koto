@@ -96,3 +96,7 @@ node_modules/
 
 # WebView2 runtime profile
 .webview2_profile/
+
+# pytest local temp dirs
+.pytest_tmp/
+.pytest_cache_local/
