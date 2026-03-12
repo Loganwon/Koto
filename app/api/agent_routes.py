@@ -1,10 +1,8 @@
+from flask import Blueprint, request, jsonify, Response, stream_with_context
 import json
-import logging
 import os
+import logging
 import time
-
-from flask import Blueprint, Response, jsonify, request, stream_with_context
-
 from app.core.agent.factory import create_agent
 from app.core.agent.types import AgentStepType
 
@@ -120,9 +118,8 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
     当前激活的 Skills 会注入到系统指令中，本地模型与云端模型行为保持一致。
     """
     try:
-        import requests as _req
-
         from app.core.routing.local_model_router import LocalModelRouter
+        import requests as _req
 
         if not LocalModelRouter.is_ollama_available():
             logger.info("[fallback] 本地 Ollama 不可用，跳过兜底")
@@ -432,8 +429,8 @@ def _resolve_runtime_skill(
         return explicit_skill_id, [explicit_skill_id]
 
     try:
-        from app.core.skills.skill_manager import SkillManager
         from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+        from app.core.skills.skill_manager import SkillManager
 
         matched_ids = get_skill_binding_manager().match_intent(user_input or "")
         if not matched_ids:
@@ -650,8 +647,8 @@ def chat():
             # ── 后台自评分（数据飞轮: model_eval 通道）────────────────────────
             if display_answer and not used_local_fallback:
                 try:
-                    from app.core.learning.rating_store import RatingStore
                     from app.core.learning.response_evaluator import ResponseEvaluator
+                    from app.core.learning.rating_store import RatingStore
 
                     ResponseEvaluator.evaluate_async(
                         msg_id=RatingStore.make_msg_id(session_id or "", message or ""),
@@ -915,8 +912,8 @@ def process_stream_compat():
             # ── 后台自评分（数据飞轮: model_eval 通道）────────────────────────
             if final_answer and not used_local_fallback:
                 try:
-                    from app.core.learning.rating_store import RatingStore
                     from app.core.learning.response_evaluator import ResponseEvaluator
+                    from app.core.learning.rating_store import RatingStore
 
                     ResponseEvaluator.evaluate_async(
                         msg_id=RatingStore.make_msg_id(
@@ -1590,8 +1587,7 @@ def cost_stats():
     try:
         # 导入 token_tracker
         try:
-            import os as _os
-            import sys
+            import sys, os as _os
 
             _wb = _os.path.join(
                 _os.path.dirname(

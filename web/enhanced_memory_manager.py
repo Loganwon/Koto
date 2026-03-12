@@ -17,11 +17,11 @@ import numpy as np
 
 class UserProfile:
     """用户画像：综合理解用户特征"""
-    
+
     def __init__(self, profile_path: str = "config/user_profile.json"):
         self.profile_path = profile_path
         self.profile = self._load_or_create()
-    
+
     @staticmethod
     def _deep_merge(base: Dict, override: Dict) -> Dict:
         """深度合并：以 base 为完整默认结构，override 中的值覆盖 base，但不删除 base 的键"""
@@ -41,29 +41,25 @@ class UserProfile:
                 "preferred_language": "zh-CN",
                 "formality": "casual",
                 "emoji_usage": True,
-                "code_style": "concise"
+                "code_style": "concise",
             },
             "technical_background": {
                 "programming_languages": [],
                 "experience_level": "intermediate",
                 "domains": [],
-                "tools": []
+                "tools": [],
             },
             "work_patterns": {
                 "frequent_topics": {},
                 "typical_tasks": [],
-                "last_active": None
+                "last_active": None,
             },
-            "preferences": {
-                "likes": [],
-                "dislikes": [],
-                "habits": []
-            },
+            "preferences": {"likes": [], "dislikes": [], "habits": []},
             "metadata": {
                 "created_at": datetime.now().isoformat(),
                 "total_interactions": 0,
-                "last_updated": datetime.now().isoformat()
-            }
+                "last_updated": datetime.now().isoformat(),
+            },
         }
 
     def _load_or_create(self) -> Dict:
@@ -71,127 +67,141 @@ class UserProfile:
         default = self._default_profile()
         if os.path.exists(self.profile_path):
             try:
-                with open(self.profile_path, 'r', encoding='utf-8') as f:
+                with open(self.profile_path, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
                 # 深度合并：用已有数据覆盖默认值，但确保所有必需键都存在
                 return self._deep_merge(default, loaded)
             except Exception as e:
                 print(f"[UserProfile] 加载失败，使用默认画像: {e}")
         return default
-    
+
     def save(self):
         """保存用户画像"""
         try:
             os.makedirs(os.path.dirname(self.profile_path), exist_ok=True)
-            with open(self.profile_path, 'w', encoding='utf-8') as f:
+            with open(self.profile_path, "w", encoding="utf-8") as f:
                 json.dump(self.profile, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[UserProfile] 保存失败: {e}")
-    
+
     def update_from_extraction(self, extracted_info: Dict):
         """从LLM提取的信息更新画像"""
         try:
             # 更新技术背景
             if "programming_languages" in extracted_info:
                 for lang in extracted_info["programming_languages"]:
-                    if lang not in self.profile["technical_background"]["programming_languages"]:
-                        self.profile["technical_background"]["programming_languages"].append(lang)
-            
+                    if (
+                        lang
+                        not in self.profile["technical_background"][
+                            "programming_languages"
+                        ]
+                    ):
+                        self.profile["technical_background"][
+                            "programming_languages"
+                        ].append(lang)
+
             # 更新工具偏好
             if "tools" in extracted_info:
                 for tool in extracted_info["tools"]:
                     if tool not in self.profile["technical_background"]["tools"]:
                         self.profile["technical_background"]["tools"].append(tool)
-            
+
             # 更新领域
             if "domains" in extracted_info:
                 for domain in extracted_info["domains"]:
                     if domain not in self.profile["technical_background"]["domains"]:
                         self.profile["technical_background"]["domains"].append(domain)
-            
+
             # 更新偏好
             if "likes" in extracted_info:
                 for item in extracted_info["likes"]:
                     if item not in self.profile["preferences"]["likes"]:
                         self.profile["preferences"]["likes"].append(item)
-            
+
             if "dislikes" in extracted_info:
                 for item in extracted_info["dislikes"]:
                     if item not in self.profile["preferences"]["dislikes"]:
                         self.profile["preferences"]["dislikes"].append(item)
-            
+
             # 更新沟通风格
             if "communication_style" in extracted_info:
-                self.profile["communication_style"].update(extracted_info["communication_style"])
-            
+                self.profile["communication_style"].update(
+                    extracted_info["communication_style"]
+                )
+
             # 更新元数据
             self.profile["metadata"]["last_updated"] = datetime.now().isoformat()
             self.profile["metadata"]["total_interactions"] += 1
-            
+
             self.save()
-            
+
         except Exception as e:
             print(f"[UserProfile] 更新失败: {e}")
-    
+
     def increment_topic(self, topic: str):
         """增加话题计数"""
         topics = self.profile.get("work_patterns", {}).setdefault("frequent_topics", {})
         topics[topic] = topics.get(topic, 0) + 1
         self.save()
-    
+
     def to_context_string(self) -> str:
         """转换为LLM上下文字符串"""
         lines = ["\n[用户画像]"]
-        
+
         # 沟通风格
         style = self.profile.get("communication_style", {})
-        lines.append(f"• 回复风格：{style.get('preferred_detail_level','moderate')}详细度，{style.get('formality','casual')}语气")
-        if style.get('code_style'):
+        lines.append(
+            f"• 回复风格：{style.get('preferred_detail_level','moderate')}详细度，{style.get('formality','casual')}语气"
+        )
+        if style.get("code_style"):
             lines.append(f"• 代码风格：{style['code_style']}")
-        
+
         # 技术背景
         tech = self.profile.get("technical_background", {})
         if tech.get("programming_languages"):
             lines.append(f"• 编程语言：{', '.join(tech['programming_languages'][:5])}")
         if tech.get("experience_level"):
             lines.append(f"• 经验水平：{tech['experience_level']}")
-        
+
         # 偏好
         prefs = self.profile.get("preferences", {})
         if prefs.get("likes"):
             lines.append(f"• 喜欢：{', '.join(prefs['likes'][:3])}")
         if prefs.get("dislikes"):
             lines.append(f"• 不喜欢：{', '.join(prefs['dislikes'][:3])}")
-        
+
         # 常用话题
         topics = self.profile["work_patterns"].get("frequent_topics", {})
         if topics:
             top_topics = sorted(topics.items(), key=lambda x: x[1], reverse=True)[:3]
             lines.append(f"• 常见话题：{', '.join([t[0] for t in top_topics])}")
-        
+
         return "\n".join(lines) + "\n"
-    
+
     def get_brief_summary(self) -> str:
         """获取简短总结"""
         tech = self.profile.get("technical_background", {})
         langs = tech.get("programming_languages", [])[:2]
         level = tech.get("experience_level", "intermediate")
-        
+
         return f"{level}级别开发者" + (f"，熟悉{'/'.join(langs)}" if langs else "")
 
 
 # ── 记忆生命周期管理（GC）常量 ──────────────────────────────────────────────────
-_GC_STALE_DAYS: int = 90        # 未被访问的自动提取记忆超过此天数将被清理
+_GC_STALE_DAYS: int = 90  # 未被访问的自动提取记忆超过此天数将被清理
 _GC_MAX_PER_CATEGORY: int = 150  # 单类别记忆条数上限（超出时保留最新 + 用户手动）
 
 
 class EnhancedMemoryManager:
     """增强的记忆管理器"""
-    
-    def __init__(self, memory_path: str = "config/memory.json", 
-                 profile_path: str = "config/user_profile.json",
-                 summary_path: str = "config/memory_summaries.json",
-                 vector_path: str = "config/memory_vectors.json"):
+
+    def __init__(
+        self,
+        memory_path: str = "config/memory.json",
+        profile_path: str = "config/user_profile.json",
+        summary_path: str = "config/memory_summaries.json",
+        vector_path: str = "config/memory_vectors.json",
+    ):
         self.memory_path = memory_path
         self.summary_path = summary_path
         self.vector_path = vector_path
@@ -206,7 +216,7 @@ class EnhancedMemoryManager:
         self._load()
         self._load_summaries()
         self._load_vectors()
-        
+
         print(f"[EnhancedMemory] ✅ 记庆系统已启动")
         print(f"[EnhancedMemory] 📊 当前记庆数：{len(self.memories)}")
         print(f"[EnhancedMemory] 🧠 向量记庆数：{len(self.vector_memories)}")
@@ -220,17 +230,17 @@ class EnhancedMemoryManager:
         """加载记忆"""
         if os.path.exists(self.memory_path):
             try:
-                with open(self.memory_path, 'r', encoding='utf-8') as f:
+                with open(self.memory_path, "r", encoding="utf-8") as f:
                     self.memories = json.load(f)
             except Exception as e:
                 print(f"[EnhancedMemory] 加载失败: {e}")
                 self.memories = []
-    
+
     def _save(self):
         """保存记忆"""
         try:
             os.makedirs(os.path.dirname(self.memory_path), exist_ok=True)
-            with open(self.memory_path, 'w', encoding='utf-8') as f:
+            with open(self.memory_path, "w", encoding="utf-8") as f:
                 json.dump(self.memories, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[EnhancedMemory] 保存失败: {e}")
@@ -239,7 +249,7 @@ class EnhancedMemoryManager:
         """加载对话摘要"""
         if os.path.exists(self.summary_path):
             try:
-                with open(self.summary_path, 'r', encoding='utf-8') as f:
+                with open(self.summary_path, "r", encoding="utf-8") as f:
                     self.summaries = json.load(f)
             except Exception as e:
                 print(f"[EnhancedMemory] 摘要加载失败: {e}")
@@ -249,7 +259,7 @@ class EnhancedMemoryManager:
         """保存对话摘要"""
         try:
             os.makedirs(os.path.dirname(self.summary_path), exist_ok=True)
-            with open(self.summary_path, 'w', encoding='utf-8') as f:
+            with open(self.summary_path, "w", encoding="utf-8") as f:
                 json.dump(self.summaries, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[EnhancedMemory] 摘要保存失败: {e}")
@@ -258,7 +268,7 @@ class EnhancedMemoryManager:
         """加载向量记忆"""
         if os.path.exists(self.vector_path):
             try:
-                with open(self.vector_path, 'r', encoding='utf-8') as f:
+                with open(self.vector_path, "r", encoding="utf-8") as f:
                     self.vector_memories = json.load(f)
             except Exception as e:
                 print(f"[EnhancedMemory] 向量加载失败: {e}")
@@ -268,7 +278,7 @@ class EnhancedMemoryManager:
         """保存向量记忆"""
         try:
             os.makedirs(os.path.dirname(self.vector_path), exist_ok=True)
-            with open(self.vector_path, 'w', encoding='utf-8') as f:
+            with open(self.vector_path, "w", encoding="utf-8") as f:
                 json.dump(self.vector_memories, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"[EnhancedMemory] 向量保存失败: {e}")
@@ -290,12 +300,15 @@ class EnhancedMemoryManager:
         if self._memory_rag is None:
             try:
                 from app.core.services.rag_service import RAGService
+
                 self._memory_rag = RAGService(
                     index_dir="config/memory_rag_index",
                     auto_load=True,
                 )
-                print(f"[EnhancedMemory] 🧠 记庆 FAISS 索引已加载 "
-                      f"({self._memory_rag.stats().get('doc_count', 0)} chunks)")
+                print(
+                    f"[EnhancedMemory] 🧠 记庆 FAISS 索引已加载 "
+                    f"({self._memory_rag.stats().get('doc_count', 0)} chunks)"
+                )
             except Exception as e:
                 print(f"[EnhancedMemory] ⚠️  FAISS 记庆索引初始化失败: {e}")
                 self._memory_rag = False  # 哨兵局量：不再重试
@@ -310,6 +323,7 @@ class EnhancedMemoryManager:
         if not self.memories:
             return
         import threading
+
         def _rebuild():
             try:
                 rag = self._get_memory_rag()
@@ -318,7 +332,9 @@ class EnhancedMemoryManager:
                 stats = rag.stats()
                 if stats.get("initialized") and stats.get("doc_count", 0) > 0:
                     return  # 已有索引，无需重建
-                print(f"[EnhancedMemory] 🔨 首次构建记庆向量索引（{len(self.memories)} 条）...")
+                print(
+                    f"[EnhancedMemory] 🔨 首次构建记庆向量索引（{len(self.memories)} 条）..."
+                )
                 for m in self.memories:
                     content = (m.get("content") or "").strip()
                     mem_id = m.get("id", 0)
@@ -327,8 +343,9 @@ class EnhancedMemoryManager:
                 print(f"[EnhancedMemory] ✅ 记庆向量索引构建完成")
             except Exception as e:
                 print(f"[EnhancedMemory] ⚠️  记庆向量索引重建失败: {e}")
+
         threading.Thread(target=_rebuild, daemon=True).start()
-    
+
     def _is_duplicate(self, content: str, threshold: float = 0.85) -> bool:
         """检查是否与已有记忆重复（Jaccard相似度）"""
         content_lower = content.lower().strip()
@@ -353,6 +370,7 @@ class EnhancedMemoryManager:
     def run_gc(self) -> None:
         """异步启动记忆生命周期 GC（不阻塞主线程）。"""
         import threading
+
         threading.Thread(target=self._gc_stale, daemon=True).start()
 
     def _gc_stale(self) -> int:
@@ -418,8 +436,13 @@ class EnhancedMemoryManager:
             )
         return total
 
-    def add_memory(self, content: str, category: str = "user_preference",
-                   source: str = "user", metadata: Optional[Dict] = None) -> Optional[Dict]:
+    def add_memory(
+        self,
+        content: str,
+        category: str = "user_preference",
+        source: str = "user",
+        metadata: Optional[Dict] = None,
+    ) -> Optional[Dict]:
         """添加记忆（含去重检查）"""
         content = (content or "").strip()
         if not content:
@@ -438,7 +461,7 @@ class EnhancedMemoryManager:
             "created_at": datetime.now().isoformat(),
             "use_count": 0,
             "last_accessed": datetime.now().isoformat(),
-            "metadata": metadata or {}
+            "metadata": metadata or {},
         }
 
         self.memories.append(item)
@@ -454,13 +477,12 @@ class EnhancedMemoryManager:
 
         # 同步写入向量记庆（原有 numpy 路径）
         self.add_vector_memory(
-            content=item["content"],
-            metadata={"category": category, "source": source}
+            content=item["content"], metadata={"category": category, "source": source}
         )
 
         print(f"[EnhancedMemory] ➕ 新记忆: {content[:50]}...")
         return item
-    
+
     def _build_extraction_prompt(self, user_msg: str, ai_msg: str) -> str:
         """构建记忆提取Prompt（精炼版）"""
         return (
@@ -501,19 +523,31 @@ class EnhancedMemoryManager:
         }
         for lang, keywords in lang_keywords.items():
             if any(kw in user_lower for kw in keywords):
-                if lang not in self.user_profile.profile["technical_background"]["programming_languages"]:
-                    extracted["profile_updates"].setdefault("programming_languages", []).append(lang)
+                if (
+                    lang
+                    not in self.user_profile.profile["technical_background"][
+                        "programming_languages"
+                    ]
+                ):
+                    extracted["profile_updates"].setdefault(
+                        "programming_languages", []
+                    ).append(lang)
 
         if any(w in user_lower for w in ["喜欢", "prefer", "倾向", "更喜欢"]):
             if "简洁" in user_lower or "简单" in user_lower:
-                extracted["profile_updates"]["communication_style"] = {"preferred_detail_level": "brief"}
+                extracted["profile_updates"]["communication_style"] = {
+                    "preferred_detail_level": "brief"
+                }
 
         if extracted["profile_updates"]:
             self.user_profile.update_from_extraction(extracted["profile_updates"])
-            print(f"[EnhancedMemory] 🔄 关键词学习：{list(extracted['profile_updates'].keys())}")
+            print(
+                f"[EnhancedMemory] 🔄 关键词学习：{list(extracted['profile_updates'].keys())}"
+            )
 
-    def auto_extract_from_conversation(self, user_msg: str, ai_msg: str,
-                                       history: Optional[List] = None) -> Dict:
+    def auto_extract_from_conversation(
+        self, user_msg: str, ai_msg: str, history: Optional[List] = None
+    ) -> Dict:
         """从对话中自动提取记忆，LLM优先，关键词降级"""
         extracted = {"memories": [], "profile_updates": {}}
 
@@ -532,17 +566,32 @@ class EnhancedMemoryManager:
                 for mem in data.get("memories_to_save", []):
                     content = (mem.get("content") or "").strip()
                     if content and len(content) > 5 and not self._is_duplicate(content):
-                        self.add_memory(content, category=mem.get("category", "general"), source="extraction")
+                        self.add_memory(
+                            content,
+                            category=mem.get("category", "general"),
+                            source="extraction",
+                        )
                         extracted["memories"].append(content)
 
                 # 更新用户画像
-                for key in ["programming_languages", "tools", "domains", "likes", "dislikes", "communication_style"]:
+                for key in [
+                    "programming_languages",
+                    "tools",
+                    "domains",
+                    "likes",
+                    "dislikes",
+                    "communication_style",
+                ]:
                     if data.get(key):
                         extracted["profile_updates"][key] = data[key]
 
                 if extracted["profile_updates"]:
-                    self.user_profile.update_from_extraction(extracted["profile_updates"])
-                    print(f"[EnhancedMemory] 🔄 LLM学习：{list(extracted['profile_updates'].keys())}")
+                    self.user_profile.update_from_extraction(
+                        extracted["profile_updates"]
+                    )
+                    print(
+                        f"[EnhancedMemory] 🔄 LLM学习：{list(extracted['profile_updates'].keys())}"
+                    )
 
             except (json.JSONDecodeError, Exception) as e:
                 print(f"[EnhancedMemory] ⚠️  LLM提取失败，降级关键词: {e}")
@@ -563,7 +612,9 @@ class EnhancedMemoryManager:
                 lines.append(f"{role}: {content[:240]}")
         return "\n".join(lines)
 
-    def get_or_update_summary(self, session_name: str, history: List[Dict], max_turns: int = 20) -> str:
+    def get_or_update_summary(
+        self, session_name: str, history: List[Dict], max_turns: int = 20
+    ) -> str:
         """生成或更新对话摘要（滑动窗口外）"""
         if not session_name or not history:
             return ""
@@ -617,8 +668,7 @@ class EnhancedMemoryManager:
         if not summary:
             return
         self.add_vector_memory(
-            content=summary,
-            metadata={"session": session_name, "category": "summary"}
+            content=summary, metadata={"session": session_name, "category": "summary"}
         )
 
     def add_vector_memory(self, content: str, metadata: Optional[Dict] = None):
@@ -671,16 +721,22 @@ class EnhancedMemoryManager:
                         if src.startswith("mem_"):
                             try:
                                 mem_id = int(src.split("_", 1)[1])
-                                matched = next((m for m in self.memories if m["id"] == mem_id), None)
+                                matched = next(
+                                    (m for m in self.memories if m["id"] == mem_id),
+                                    None,
+                                )
                             except (ValueError, IndexError):
                                 pass
                         if matched is None:
                             # 根据内容匹配回单原始记庆对象
                             hit_content = hit.get("content", "")
                             matched = next(
-                                (m for m in self.memories
-                                 if m.get("content", "").strip() in hit_content
-                                 or hit_content in m.get("content", "")),
+                                (
+                                    m
+                                    for m in self.memories
+                                    if m.get("content", "").strip() in hit_content
+                                    or hit_content in m.get("content", "")
+                                ),
                                 None,
                             )
                         if matched and matched not in results:
@@ -709,9 +765,10 @@ class EnhancedMemoryManager:
         except Exception as e:
             print(f"[EnhancedMemory] 向量检索失败: {e}")
             return []
-    
-    def search_memories(self, query: str, limit: int = 5,
-                        boost_categories: Optional[List[str]] = None) -> List[Dict]:
+
+    def search_memories(
+        self, query: str, limit: int = 5, boost_categories: Optional[List[str]] = None
+    ) -> List[Dict]:
         """搜索相关记忆（置信度感知 + 类别优先 + 关键词匹配）"""
         if not query:
             return []
@@ -768,9 +825,13 @@ class EnhancedMemoryManager:
             self._save()
 
         return results
-    
-    def get_context_string(self, user_input: str, session_name: Optional[str] = None,
-                           history: Optional[List] = None) -> str:
+
+    def get_context_string(
+        self,
+        user_input: str,
+        session_name: Optional[str] = None,
+        history: Optional[List] = None,
+    ) -> str:
         """
         三层记忆注入：
           L1 用户画像（全量注入，稳定偏好）
@@ -816,25 +877,25 @@ class EnhancedMemoryManager:
                 lines.append(f"\n[历史对话摘要]\n{summary}")
 
         return "\n".join(lines) if lines else ""
-    
+
     def get_all_memories(self) -> List[Dict]:
         """获取所有记忆"""
         return sorted(self.memories, key=lambda x: x["created_at"], reverse=True)
-    
+
     def delete_memory(self, memory_id: int) -> bool:
         """删除记忆"""
         initial_len = len(self.memories)
         self.memories = [m for m in self.memories if m["id"] != memory_id]
-        
+
         if len(self.memories) < initial_len:
             self._save()
             return True
         return False
-    
+
     def get_profile(self) -> Dict:
         """获取用户画像"""
         return self.user_profile.profile
-    
+
     def update_profile_manually(self, updates: Dict):
         """手动更新用户画像"""
         self.user_profile.profile.update(updates)
@@ -850,24 +911,23 @@ if __name__ == "__main__":
     print("=" * 60)
     print("  增强记忆管理器测试")
     print("=" * 60)
-    
+
     mgr = EnhancedMemoryManager()
-    
+
     # 测试添加记忆
     mgr.add_memory("用户喜欢简洁的代码，不要太多注释", category="user_preference")
     mgr.add_memory("项目名称：Koto AI助手", category="project_info")
-    
+
     # 测试自动提取
     mgr.auto_extract_from_conversation(
-        "我在用Python开发一个Web应用",
-        "好的，我可以帮你..."
+        "我在用Python开发一个Web应用", "好的，我可以帮你..."
     )
-    
+
     # 测试搜索
     results = mgr.search_memories("代码")
     print(f"\n搜索结果：{len(results)} 条")
-    
+
     # 显示用户画像
     print(mgr.user_profile.to_context_string())
-    
+
     print("\n✅ 测试完成")
