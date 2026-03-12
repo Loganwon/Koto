@@ -277,10 +277,10 @@ class _WordGenerator:
     def generate(self, req: DocGenRequest, output_path: Path) -> None:
         try:
             from docx import Document
-            from docx.shared import Pt, RGBColor, Inches, Cm
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
             from docx.enum.table import WD_TABLE_ALIGNMENT
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
             from docx.oxml.ns import qn
+            from docx.shared import Cm, Inches, Pt, RGBColor
         except ImportError as e:
             raise ImportError(f"python-docx 未安装: {e}")
 
@@ -507,23 +507,23 @@ class _PdfGenerator:
 
     def generate(self, req: DocGenRequest, output_path: Path) -> None:
         try:
-            from reportlab.lib.pagesizes import A4
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.units import cm
             from reportlab.lib import colors
+            from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+            from reportlab.lib.units import cm
             from reportlab.platypus import (
-                SimpleDocTemplate,
+                HRFlowable,
+                ListFlowable,
+                ListItem,
+                PageBreak,
                 Paragraph,
+                Preformatted,
+                SimpleDocTemplate,
                 Spacer,
                 Table,
                 TableStyle,
-                PageBreak,
-                HRFlowable,
-                Preformatted,
-                ListFlowable,
-                ListItem,
             )
-            from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
         except ImportError as e:
             raise ImportError(
                 f"reportlab 未安装: {e}\n" "请运行: pip install reportlab>=4.0.0"
@@ -789,7 +789,7 @@ class _ExcelGenerator:
     def _apply_header_style(
         self, ws, row_idx: int, col_count: int, preset: Dict, bg_rgb, fg_rgb
     ) -> None:
-        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
         thick_border = Border(
             bottom=Side(style="medium"),
@@ -812,7 +812,7 @@ class _ExcelGenerator:
     def generate(self, req: DocGenRequest, output_path: Path) -> None:
         try:
             import openpyxl
-            from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+            from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
             from openpyxl.utils import get_column_letter
         except ImportError as e:
             raise ImportError(f"openpyxl 未安装: {e}")
@@ -1032,10 +1032,9 @@ class _PptxGenerator:
     def generate(self, req: DocGenRequest, output_path: Path) -> None:
         try:
             from pptx import Presentation
-            from pptx.util import Inches, Pt, Emu
             from pptx.dml.color import RGBColor
             from pptx.enum.text import PP_ALIGN
-            from pptx.util import Inches, Pt
+            from pptx.util import Emu, Inches, Pt
         except ImportError as e:
             raise ImportError(f"python-pptx 未安装: {e}")
 
