@@ -1,5 +1,5 @@
-import logging
 import os
+import logging
 from typing import Optional
 
 # 所有重型导入延迟到工厂函数内部，避免启动时加载 google.genai (~4.7s)
@@ -29,12 +29,12 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     Returns:
         配置好的 ToolRegistry 实例。
     """
+    from app.core.agent.tool_registry import ToolRegistry
     from app.core.agent.plugins.basic_tools_plugin import BasicToolsPlugin
     from app.core.agent.plugins.file_editor_plugin import FileEditorPlugin
     from app.core.agent.plugins.search_plugin import SearchPlugin
-    from app.core.agent.plugins.system_info_plugin import SystemInfoPlugin
     from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
-    from app.core.agent.tool_registry import ToolRegistry
+    from app.core.agent.plugins.system_info_plugin import SystemInfoPlugin
 
     registry = ToolRegistry()
 
@@ -64,20 +64,20 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
         return registry
 
     # ── 全量插件（仅 UnifiedAgent 使用） ───────────────────────────────
-    from app.core.agent.plugins.alerting_plugin import AlertingPlugin
-    from app.core.agent.plugins.auto_remediation_plugin import AutoRemediationPlugin
-    from app.core.agent.plugins.configuration_plugin import ConfigurationPlugin
     from app.core.agent.plugins.data_process_plugin import DataProcessPlugin
-    from app.core.agent.plugins.image_process_plugin import ImageProcessPlugin
     from app.core.agent.plugins.network_plugin import NetworkPlugin
+    from app.core.agent.plugins.image_process_plugin import ImageProcessPlugin
     from app.core.agent.plugins.performance_analysis_plugin import (
         PerformanceAnalysisPlugin,
     )
-    from app.core.agent.plugins.script_generation_plugin import ScriptGenerationPlugin
     from app.core.agent.plugins.system_event_monitoring_plugin import (
         SystemEventMonitoringPlugin,
     )
+    from app.core.agent.plugins.script_generation_plugin import ScriptGenerationPlugin
+    from app.core.agent.plugins.alerting_plugin import AlertingPlugin
+    from app.core.agent.plugins.auto_remediation_plugin import AutoRemediationPlugin
     from app.core.agent.plugins.trend_analysis_plugin import TrendAnalysisPlugin
+    from app.core.agent.plugins.configuration_plugin import ConfigurationPlugin
 
     registry.register_plugin(DataProcessPlugin())
     registry.register_plugin(NetworkPlugin())
@@ -101,6 +101,7 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # ── 文档生成工具（Word / PDF / Excel / PPT） ──────────────────────
     try:
         from app.core.agent.plugins.doc_gen_plugin import DocGenPlugin
+
         registry.register_plugin(DocGenPlugin())
     except Exception as _e:
         logger.debug(f"[_build_registry] DocGenPlugin 跳过: {_e}")
@@ -118,8 +119,8 @@ def create_agent(
          TaskLedger 记录、ShadowTracer 异步学习。
     所有重型依赖均在此函数内懒加载，不影响启动速度。
     """
-    from app.core.agent.unified_agent import UnifiedAgent
     from app.core.llm.gemini import GeminiProvider
+    from app.core.agent.unified_agent import UnifiedAgent
 
     usage_api_key = _resolve_api_key(api_key)
     if not usage_api_key:
@@ -145,8 +146,8 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
     但底层 LLM 为本地 Ollama 模型，无需 API Key。
     Skills 通过 UnifiedAgent.run() 中的 inject_into_prompt() 自动注入。
     """
-    from app.core.agent.unified_agent import UnifiedAgent
     from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+    from app.core.agent.unified_agent import UnifiedAgent
     from app.core.routing.local_model_router import LocalModelRouter
 
     if not model:
@@ -236,7 +237,7 @@ def create_multi_agent(
 
     需要安装：pip install langgraph langchain-core langchain-google-genai
     """
-    from app.core.agent.multi_agent import ROLES, MultiAgentOrchestrator
+    from app.core.agent.multi_agent import MultiAgentOrchestrator, ROLES
 
     _key = _resolve_api_key(api_key)
     if _key:
