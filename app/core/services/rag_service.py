@@ -205,8 +205,8 @@ class RAGService:
 
     def _split_text(self, text: str, source: str = "text") -> List[Any]:
         """将文本分块，返回 LangChain Document 对象列表。"""
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
         from langchain_core.documents import Document
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
 
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.CHUNK_SIZE,
@@ -579,8 +579,9 @@ class RAGService:
         context = "\n\n".join(context_parts)
 
         # 调用 LLM
+        from langchain_core.messages import HumanMessage, SystemMessage
+
         from app.core.llm.langchain_adapter import KotoLangChainLLM
-        from langchain_core.messages import SystemMessage, HumanMessage
 
         llm = KotoLangChainLLM(model_id=model_id)
         system = (

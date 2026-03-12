@@ -5,12 +5,13 @@
 为 PPT 制作提供 "生辰大哥" (AI生成) 或 "网上找图" (Web Search) 的能力
 """
 
+import base64
 import os
 import time
-import requests
-import base64
-from typing import Optional, List, Dict
 from pathlib import Path
+from typing import Dict, List, Optional
+
+import requests
 
 # 尝试导入 web_searcher，如果失败则在方法内部导入
 try:

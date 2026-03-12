@@ -3,9 +3,9 @@ Koto Settings Manager
 用户设置管理模块 - 支持自定义存储路径和应用配置
 """
 
+import json
 import os
 import sys
-import json
 from pathlib import Path
 
 # 默认设置文件位置

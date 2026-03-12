@@ -1,15 +1,15 @@
-﻿import os
-import asyncio
-import re
+﻿import asyncio
+import base64
+import importlib.util
 import json
-import time
-import threading
+import mimetypes
+import os
+import re
+import shutil
 import subprocess
 import sys
-import mimetypes
-import importlib.util
-import base64
-import shutil
+import threading
+import time
 from datetime import datetime
 
 # 确保 web/ 目录在模块搜索路径中（通过 koto_app.py 启动时需要）
@@ -17,18 +17,18 @@ _web_dir = os.path.dirname(os.path.abspath(__file__))
 if _web_dir not in sys.path:
     sys.path.append(_web_dir)
 
+from dotenv import load_dotenv
 from flask import (
     Flask,
+    Response,
+    jsonify,
     render_template,
     request,
-    jsonify,
-    send_from_directory,
-    Response,
-    stream_with_context,
     send_file,
+    send_from_directory,
+    stream_with_context,
 )
 from flask_cors import CORS
-from dotenv import load_dotenv
 
 # Import new routing modules
 from app.core.routing import SmartDispatcher
@@ -41,20 +41,20 @@ agent_bp = None  # 延迟加载，见下方蓝图注册区
 
 # ================= 并行执行系统导入 =================
 try:
+    from parallel_api import register_parallel_api
     from parallel_executor import (
-        Task,
-        TaskType,
         Priority,
+        Task,
         TaskStatus,
+        TaskType,
+        cancel_task,
+        get_next_task,
         get_queue_manager,
         get_resource_manager,
         get_task_monitor,
         submit_task,
-        get_next_task,
-        cancel_task,
     )
     from task_dispatcher import get_scheduler, start_dispatcher, stop_dispatcher
-    from parallel_api import register_parallel_api
 
     PARALLEL_SYSTEM_ENABLED = True
 except ImportError as e:
@@ -183,24 +183,24 @@ def get_ppt_system():
     if "loaded" not in _ppt_system_cache:
         print("[LAZY_IMPORT] 加载PPT多模型生成系统...")
         try:
-            from web.ppt_master import PPTMasterOrchestrator, PPTBlueprint
-            from web.ppt_synthesizer import PPTSynthesizer
+            from web.ppt_master import PPTBlueprint, PPTMasterOrchestrator
             from web.ppt_pipeline import (
                 PPTGenerationPipeline,
                 PPTGenerationTaskHandler,
                 format_ppt_generation_result,
             )
+            from web.ppt_synthesizer import PPTSynthesizer
 
             print("[PPT_SYSTEM] ✅ 多模型PPT生成系统已加载")
         except ImportError:
             try:
-                from ppt_master import PPTMasterOrchestrator, PPTBlueprint
-                from ppt_synthesizer import PPTSynthesizer
+                from ppt_master import PPTBlueprint, PPTMasterOrchestrator
                 from ppt_pipeline import (
                     PPTGenerationPipeline,
                     PPTGenerationTaskHandler,
                     format_ppt_generation_result,
                 )
+                from ppt_synthesizer import PPTSynthesizer
 
                 print("[PPT_SYSTEM] ✅ 多模型PPT生成系统已加载（相对导入）")
             except ImportError:
@@ -1366,9 +1366,9 @@ def _initialize_background_runtime():
     try:
         time.sleep(1)
 
-        from app.core.ops.ops_event_bus import get_ops_bus
         from app.core.jobs.job_runner import get_job_runner
         from app.core.jobs.trigger_registry import get_trigger_registry
+        from app.core.ops.ops_event_bus import get_ops_bus
         from app.core.skills.skill_trigger_binding import get_skill_binding_manager
 
         get_ops_bus()
@@ -1378,8 +1378,8 @@ def _initialize_background_runtime():
 
         # 初始化 GoalManager 并注册 goal_check 处理器
         try:
-            from app.core.goal.goal_manager import get_goal_manager
             from app.core.goal.goal_job_handler import register_goal_handler
+            from app.core.goal.goal_manager import get_goal_manager
 
             _gm = get_goal_manager()
             register_goal_handler(runner)
@@ -1423,8 +1423,8 @@ def _initialize_background_runtime():
 
         # 注册 ShadowTracer 阈值 → DistillManager 自动提交训练（数据飞轮闭环）
         try:
-            from app.core.learning.shadow_tracer import ShadowTracer, TraceEvent
             from app.core.learning.distill_manager import DistillManager
+            from app.core.learning.shadow_tracer import ShadowTracer, TraceEvent
 
             def _on_training_ready(event: str, skill_id: str, count: int):
                 if event == TraceEvent.TRAINING_READY:
@@ -1481,12 +1481,14 @@ settings_manager = SettingsManager()
 # 新模型上线后自动感知，TTL 缓存每 6 小时刷新一次。
 
 try:
-    from web.model_manager import ModelManager, KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
+    from web.model_manager import KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
+    from web.model_manager import ModelManager
 
     _model_manager_available = True
 except ImportError:
     try:
-        from model_manager import ModelManager, KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
+        from model_manager import KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
+        from model_manager import ModelManager
 
         _model_manager_available = True
     except ImportError:
@@ -1963,8 +1965,8 @@ class FileOperator:
     def watch_directory(cls, directory, callback=None, patterns=None):
         """监听目录变化并触发回调"""
         try:
-            from watchdog.observers import Observer
             from watchdog.events import FileSystemEventHandler
+            from watchdog.observers import Observer
 
             if patterns is None:
                 patterns = ["*.txt", "*.pdf", "*.docx", "*.xlsx", "*.csv"]
@@ -2282,8 +2284,8 @@ class WebSearcher:
         从幻灯片标题中挑选最适合配图的 2-3 页，生成高质量配图。
         返回: [{"slide_index": int, "image_path": str}, ...]
         """
-        import threading
         import queue as _queue
+        import threading
 
         if not slide_titles:
             return []
@@ -3740,7 +3742,7 @@ class TaskOrchestrator:
 
         # 1. 规划阶段 (Planning Phase)
         try:
-            from web.ppt_master import PPTContentPlanner, PPTBlueprint
+            from web.ppt_master import PPTBlueprint, PPTContentPlanner
 
             # 初始化规划器
             planner = PPTContentPlanner(ai_client=client, model_name="gemini-2.5-flash")
@@ -4381,10 +4383,10 @@ class TaskOrchestrator:
                     try:
                         from openpyxl import Workbook
                         from openpyxl.styles import (
-                            Font,
-                            PatternFill,
                             Alignment,
                             Border,
+                            Font,
+                            PatternFill,
                             Side,
                         )
                         from openpyxl.utils import get_column_letter
@@ -5724,8 +5726,8 @@ def _start_memory_extraction(
 
         # ── 3-B: ResponseEvaluator 模型自评（自动质量评分 → RatingStore）────
         try:
-            from app.core.learning.response_evaluator import ResponseEvaluator
             from app.core.learning.rating_store import RatingStore as _RS
+            from app.core.learning.response_evaluator import ResponseEvaluator
 
             _eval_msg_id = _RS.make_msg_id(session_name, user_msg)
             ResponseEvaluator.evaluate_async(
@@ -5894,8 +5896,8 @@ class KotoBrain:
                 # 如果有输入图片（图像编辑模式）- 使用代码方式处理
                 if file_data:
                     # 保存上传的图片到 workspace
-                    import tempfile
                     import subprocess
+                    import tempfile
 
                     temp_img_path = os.path.join(
                         WORKSPACE_DIR, "images", f"input_{int(time.time())}.jpg"
@@ -5981,7 +5983,8 @@ class KotoBrain:
                         print(f"[IMAGE_EDIT] Executing script: {temp_script}")
                         if getattr(sys, "frozen", False):
                             # 打包模式：sys.executable 是 Koto.exe，不能用来运行脚本，改为进程内 exec()
-                            import io as _io, contextlib as _ctx
+                            import contextlib as _ctx
+                            import io as _io
 
                             _out, _err, _rc = _io.StringIO(), _io.StringIO(), 0
                             try:
@@ -7340,13 +7343,13 @@ def chat_stream():
                 saved_files = []
 
                 # ── 使用 PlanExecutor 执行（支持拓扑排序 + 依赖注入）──────────────
-                from app.core.routing.plan_executor import (
-                    PlanExecutor as _PlanExecutor,
-                    build_handlers_from_orchestrator as _build_handlers,
-                )
-
                 import queue as _queue_mod
                 import threading as _threading_mod
+
+                from app.core.routing.plan_executor import PlanExecutor as _PlanExecutor
+                from app.core.routing.plan_executor import (
+                    build_handlers_from_orchestrator as _build_handlers,
+                )
 
                 # 构建 handlers（将 TaskOrchestrator 各方法包装成 PlanExecutor 接口）
                 _handlers = _build_handlers(TaskOrchestrator, context)
@@ -8733,8 +8736,8 @@ def chat_stream():
                 if any(k in user_input for k in _WFL_STATUS_KWS):
                     try:
                         from web.work_file_library import (
-                            get_work_file_library,
                             _CATEGORY_ICONS,
+                            get_work_file_library,
                         )
 
                         _wfl4 = get_work_file_library()
@@ -8788,15 +8791,13 @@ def chat_stream():
                     yield f"data: {json.dumps({'type': 'progress', 'message': f'📋 正在解读 {_fp.name}...', 'detail': '提取关键字段'}, ensure_ascii=False)}\n\n"
                     try:
                         try:
+                            from web.file_fields_extractor import extract_fields as _ef
                             from web.file_fields_extractor import (
-                                extract_fields as _ef,
                                 fields_to_markdown as _fm,
                             )
                         except ImportError:
-                            from file_fields_extractor import (
-                                extract_fields as _ef,
-                                fields_to_markdown as _fm,
-                            )
+                            from file_fields_extractor import extract_fields as _ef
+                            from file_fields_extractor import fields_to_markdown as _fm
                         _ana = get_file_analyzer()
                         _content = _ana._extract_content(str(_fp))
                         _fields = _ef(_fp.name, _content, _fp.suffix.lower())
@@ -8947,9 +8948,9 @@ def chat_stream():
                     if not _want_full_disk:
                         try:
                             from web.work_file_library import (
-                                get_work_file_library,
-                                detect_category_from_input,
                                 _CATEGORY_ICONS,
+                                detect_category_from_input,
+                                get_work_file_library,
                             )
 
                             _wfl = get_work_file_library()
@@ -9266,8 +9267,9 @@ def chat_stream():
                 os.makedirs(_stream_docs_dir, exist_ok=True)
                 if _dw_ext != ".docx":
                     try:
-                        from web.doc_converter import convert_to_docx
                         import tempfile as _tmpdw
+
+                        from web.doc_converter import convert_to_docx
 
                         _dw_conv_dir = _tmpdw.mkdtemp(prefix="koto_dw_")
                         _dw_conv_path, _ = convert_to_docx(
@@ -11617,8 +11619,8 @@ def chat_stream():
                 ]
 
                 # 使用线程 + 超时来调用API（带重试）
-                import threading
                 import tempfile
+                import threading
 
                 for model_attempt, current_model in enumerate(file_gen_models):
                     if response_text and not response_text.startswith("❌"):
@@ -11792,7 +11794,8 @@ def chat_stream():
                         try:
                             if getattr(sys, "frozen", False):
                                 # 打包模式：进程内 exec() 执行，避免启动新 Koto 窗口
-                                import io as _io, contextlib as _ctx
+                                import contextlib as _ctx
+                                import io as _io
 
                                 _out, _err, _rc = _io.StringIO(), _io.StringIO(), 0
                                 try:
@@ -12685,8 +12688,8 @@ def chat_stream():
 @app.route("/api/chat/file", methods=["POST"])
 def chat_with_file():
     """处理文件上传和聊天请求"""
-    from web.file_processor import process_uploaded_file
     from web.document_generator import save_docx, save_pdf, to_workspace_rel
+    from web.file_processor import process_uploaded_file
 
     def _strip_code_blocks(text: str) -> str:
         if not text:
@@ -12922,8 +12925,9 @@ def chat_with_file():
                     # 2. 调用 PPT 生成管道
                     yield f"data: {json.dumps({'type': 'progress', 'message': '🎨 正在设计 PPT 结构...', 'detail': '基于多个文件内容'})}\n\n"
 
-                    from web.ppt_pipeline import PPTGenerationPipeline
                     import asyncio
+
+                    from web.ppt_pipeline import PPTGenerationPipeline
 
                     # 构造增强后的 Prompt
                     enhanced_prompt = f"{user_input}\n\n【参考资料】\n基于以下文件生成的 PPT:\n{context_text}"
@@ -12939,9 +12943,9 @@ def chat_with_file():
                     ai_client = get_client()
                     pipeline = PPTGenerationPipeline(ai_client=ai_client)
 
+                    import queue
                     import threading
                     import traceback
-                    import queue
 
                     pipeline_timeout_sec = 300
                     start_ts = time.time()
@@ -13318,8 +13322,9 @@ def chat_with_file():
                         _batch_file_ext = file_ext
                         if _batch_file_ext != ".docx":
                             try:
-                                from web.doc_converter import convert_to_docx as _btc
                                 import tempfile as _bttmp
+
+                                from web.doc_converter import convert_to_docx as _btc
 
                                 _bt_tmp = _bttmp.mkdtemp(prefix="koto_bt_")
                                 _bt_conv, _ = _btc(_batch_filepath, output_dir=_bt_tmp)
@@ -13642,8 +13647,8 @@ def chat_with_file():
                 def generate_docx_translation():
                     try:
                         from web.docx_translator_module import (
-                            translate_docx_streaming,
                             detect_target_language,
+                            translate_docx_streaming,
                         )
 
                         target_lang = detect_target_language(user_input or "")
@@ -14258,8 +14263,9 @@ def chat_with_file():
                 import asyncio
                 import queue
                 import threading
-                from web.app import TaskOrchestrator
                 import time as _time
+
+                from web.app import TaskOrchestrator
 
                 _start = _time.time()
 
@@ -15847,8 +15853,9 @@ def add_reminder():
     请求体: {"title": str, "message": str, "time": ISO8601, "seconds": int}
     - 传 time (ISO 时间) 或 seconds (相对秒数) 任选其一
     """
-    from reminder_manager import get_reminder_manager
     from datetime import datetime
+
+    from reminder_manager import get_reminder_manager
 
     data = request.json or {}
     title = data.get("title") or "提醒"
@@ -15901,8 +15908,9 @@ def add_calendar_event():
     """新增日程并自动创建本地提醒
     请求体: {"title": str, "description": str, "start": ISO8601, "end": ISO8601?, "remind_before_minutes": int?}
     """
-    from calendar_manager import get_calendar_manager
     from datetime import datetime
+
+    from calendar_manager import get_calendar_manager
 
     data = request.json or {}
     title = data.get("title") or "日程"
@@ -16130,8 +16138,9 @@ def browser_search():
 @app.route("/api/browser/screenshot", methods=["POST"])
 def browser_screenshot():
     """截图"""
-    from browser_automation import get_browser_automation
     import os
+
+    from browser_automation import get_browser_automation
 
     filename = request.json.get("filename", f"screenshot_{int(time.time())}.png")
     file_path = os.path.join(WORKSPACE_DIR, "images", filename)
@@ -16274,6 +16283,7 @@ def voice_listen():
 def voice_stream():
     """流式语音识别 - Vosk 本地离线，实时返回部分/最终结果（SSE）"""
     import json as _json
+
     from flask import Response, stream_with_context
 
     @stream_with_context
@@ -18094,9 +18104,9 @@ if __name__ == "__main__":
     def start_background_services():
         time.sleep(1)  # 延迟1秒后启动后台服务
         try:
+            from auto_catalog_scheduler import get_auto_catalog_scheduler
             from clipboard_manager import get_clipboard_manager
             from task_scheduler import get_task_scheduler
-            from auto_catalog_scheduler import get_auto_catalog_scheduler
 
             # 启动剪贴板监控
             clipboard_manager = get_clipboard_manager()
@@ -20306,8 +20316,8 @@ def api_rag_stats():
 def api_rag_clear():
     """清空 RAG 向量库（删除所有索引数据）。"""
     try:
-        from app.core.services.rag_service import get_rag_service, _rag_instance
         import app.core.services.rag_service as _rag_mod
+        from app.core.services.rag_service import _rag_instance, get_rag_service
 
         rag = get_rag_service()
         ok = rag.clear()

@@ -197,8 +197,9 @@ def shadow_tick():
         # 尝试获取 LLM 函数（可选）
         llm_fn = None
         try:
-            from web.app import client
             from google.genai import types as _types
+
+            from web.app import client
 
             def _llm(prompt: str) -> str:
                 resp = client.models.generate_content(
