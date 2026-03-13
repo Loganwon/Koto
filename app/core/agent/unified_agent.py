@@ -9,6 +9,7 @@ from typing import Any, Dict, Generator, List, Optional, Union
 from app.core.agent.base import Agent
 from app.core.agent.tool_registry import ToolRegistry
 from app.core.agent.types import AgentAction, AgentResponse, AgentStep, AgentStepType
+from app.core.config_defaults import DEFAULT_MODEL
 from app.core.llm.base import LLMProvider
 
 
@@ -221,7 +222,7 @@ class UnifiedAgent(Agent):
                         ),
                     }
                 ],
-                model="gemini-2.0-flash-lite",
+                model=DEFAULT_MODEL,
                 system_instruction=(
                     "你是文本压缩专家。只输出压缩后的内容，不添加任何说明或前缀。"
                 ),

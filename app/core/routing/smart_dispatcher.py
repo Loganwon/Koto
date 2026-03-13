@@ -1,6 +1,9 @@
+import logging
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 # 延迟导入 - 这些模块仅在运行时方法调用时加载，避免启动时加载 google.genai (~4.7s) 和 requests (~0.5s)
 # from app.core.routing.local_model_router import LocalModelRouter
@@ -1193,7 +1196,9 @@ class SmartDispatcher:
                     boosts={"DOC_ANNOTATE": 1.0},
                     reasons={"DOC_ANNOTATE": ["rule:doc_annotate"]},
                 )
-                print(f"[SmartDispatcher] 📄 检测到 Word 文档标注请求: {file_ext}")
+                logger.info(
+                    f"[SmartDispatcher] 📄 检测到 Word 文档标注请求: {file_ext}"
+                )
                 return "DOC_ANNOTATE", "📄 Doc-Annotate", context_info
             elif has_edit_intent and file_ext in [".md", ".txt"]:
                 context_info = {"complexity": "complex", "is_multi_step_task": True}
@@ -1206,7 +1211,7 @@ class SmartDispatcher:
                     boosts={"MULTI_STEP": 1.0},
                     reasons={"MULTI_STEP": ["rule:doc_workflow"]},
                 )
-                print(f"[SmartDispatcher] 📄 检测到文件编辑请求: {file_ext}")
+                logger.info(f"[SmartDispatcher] 📄 检测到文件编辑请求: {file_ext}")
                 return "MULTI_STEP", "📄 Doc-Workflow", context_info
 
         # === 快速通道: 超短输入（用去前缀的原始文本判断）===
@@ -1231,7 +1236,7 @@ class SmartDispatcher:
                     boosts={"FILE_SEARCH": 1.0},
                     reasons={"FILE_SEARCH": ["rule:path_listing"]},
                 )
-                print(
+                logger.info(
                     f"[SmartDispatcher] 📁 指定路径列举快速通道: '{user_input[:40]}' → FILE_SEARCH"
                 )
                 return "FILE_SEARCH", "📁 Path-Listing", context_info
@@ -1250,7 +1255,9 @@ class SmartDispatcher:
                 boosts={"SYSTEM": 1.0},
                 reasons={"SYSTEM": ["rule:action_verb_direct"]},
             )
-            print(f"[SmartDispatcher] 🖥️ 系统操作快速通道: '{_stripped}' → SYSTEM")
+            logger.info(
+                f"[SmartDispatcher] 🖥️ 系统操作快速通道: '{_stripped}' → SYSTEM"
+            )
             return "SYSTEM", "🖥️ Action-Direct", context_info
 
         # === 提醒/日程/消息发送快速通道 → AGENT ===
@@ -1261,7 +1268,7 @@ class SmartDispatcher:
                 boosts={"AGENT": 1.0},
                 reasons={"AGENT": ["rule:agent_notify_direct"]},
             )
-            print(
+            logger.info(
                 f"[SmartDispatcher] 🤖 提醒/消息快速通道: '{user_input[:30]}' → AGENT"
             )
             return "AGENT", "🤖 Notify-Direct", context_info
@@ -1278,7 +1285,7 @@ class SmartDispatcher:
                     boosts={"PAINTER": 1.0},
                     reasons={"PAINTER": ["rule:image_gen"]},
                 )
-                print(
+                logger.info(
                     f"[SmartDispatcher] 🎨 图片生成快速通道: '{user_input[:30]}' → PAINTER"
                 )
                 return "PAINTER", "🎨 Image-Direct", context_info
@@ -1292,7 +1299,7 @@ class SmartDispatcher:
                 boosts={"CHAT": 1.0},
                 reasons={"CHAT": ["rule:trivial"]},
             )
-            print(
+            logger.info(
                 f"[SmartDispatcher] ⚡ 极简通道: '{_input_for_trivial[:20]}' → CHAT (跳过分类器)"
             )
             return "CHAT", "⚡ Trivial", context_info
@@ -1305,7 +1312,7 @@ class SmartDispatcher:
                 boosts={"WEB_SEARCH": 1.0},
                 reasons={"WEB_SEARCH": ["rule:weather_direct"]},
             )
-            print(
+            logger.info(
                 f"[SmartDispatcher] 🌤️ 天气实时快速通道: '{user_input[:30]}' → WEB_SEARCH"
             )
             return "WEB_SEARCH", "🌤️ Weather-Direct", context_info
@@ -1322,7 +1329,9 @@ class SmartDispatcher:
                 boosts={"CODER": 1.0},
                 reasons={"CODER": ["rule:code_write_direct"]},
             )
-            print(f"[SmartDispatcher] 💻 代码编写快速通道: '{user_input[:30]}' → CODER")
+            logger.info(
+                f"[SmartDispatcher] 💻 代码编写快速通道: '{user_input[:30]}' → CODER"
+            )
             return "CODER", "💻 Code-Write-Direct", context_info
 
         # === 时效性关键词快速通道（目前/近期/最新 + 时事主题）===
@@ -1337,7 +1346,7 @@ class SmartDispatcher:
                 boosts={"WEB_SEARCH": 1.0},
                 reasons={"WEB_SEARCH": ["rule:realtime_signal"]},
             )
-            print(
+            logger.info(
                 f"[SmartDispatcher] ⏰ 时效信息快速通道: '{user_input[:30]}' → WEB_SEARCH"
             )
             return "WEB_SEARCH", "⏰ Realtime-Direct", context_info
@@ -1351,7 +1360,7 @@ class SmartDispatcher:
                 boosts={"CODER": 1.0},
                 reasons={"CODER": ["rule:chart_viz"]},
             )
-            print(
+            logger.info(
                 f"[SmartDispatcher] 📊 图表可视化快速通道: '{user_input[:30]}' → CODER"
             )
             return "CODER", "📊 Chart-Direct", context_info
@@ -1372,7 +1381,7 @@ class SmartDispatcher:
                 boosts={"WEB_SEARCH": 1.0},
                 reasons={"WEB_SEARCH": ["rule:travel_query"]},
             )
-            print(
+            logger.info(
                 f"[SmartDispatcher] 🌐 出行查询快速通道: '{user_input[:30]}' → WEB_SEARCH"
             )
             return "WEB_SEARCH", "🌐 Travel-Query", context_info
@@ -1389,7 +1398,7 @@ class SmartDispatcher:
                 boosts={"WEB_SEARCH": 1.0},
                 reasons={"WEB_SEARCH": ["rule:financial_price"]},
             )
-            print(
+            logger.info(
                 f"[SmartDispatcher] 💹 金融价格快速通道: '{user_input[:30]}' → WEB_SEARCH"
             )
             return "WEB_SEARCH", "💹 Price-Direct", context_info
@@ -1417,12 +1426,12 @@ class SmartDispatcher:
                         boosts={"MULTI_STEP": 1.0},
                         reasons={"MULTI_STEP": ["preempt:local_planner"]},
                     )
-                    print(
+                    logger.info(
                         f"[SmartDispatcher] 🧭 多步抢先规划成功: {len(_early_plan['steps'])} 步 → MULTI_STEP"
                     )
                     return "MULTI_STEP", "🧭 Preempt-Plan", context_info
         except Exception as _pe:
-            print(f"[SmartDispatcher] ⚠️ 多步抢先规划异常（跳过）: {_pe}")
+            logger.info(f"[SmartDispatcher] ⚠️ 多步抢先规划异常（跳过）: {_pe}")
 
         # === 本地 Ollama 路由（优先信号，低置信再回退规则） ===
         # classify_with_hint() 同时返回任务分类 + skill_prompt + complexity，实现「本地理解意图 → 生成执行指令 → 云端模型执行」
@@ -1493,20 +1502,20 @@ class SmartDispatcher:
                         boosts={"WEB_SEARCH": 0.95},
                         reasons={"WEB_SEARCH": ["local_override:ticket_query"]},
                     )
-                    print(f"[SmartDispatcher] 🌐 票务查询 → WEB_SEARCH")
+                    logger.info(f"[SmartDispatcher] 🌐 票务查询 → WEB_SEARCH")
                     return "WEB_SEARCH", "🌐 Ticket-Query", context_info
 
             # DOC_ANNOTATE 需要文件附件（编辑已有文档）；FILE_GEN 是生成新文件，无需附件
             if local_task == "DOC_ANNOTATE":
                 has_file = file_context and file_context.get("has_file")
                 if not has_file:
-                    print(
+                    logger.info(
                         f"[SmartDispatcher] ⚠️ 本地模型返回 DOC_ANNOTATE 但无文件上下文，跳过"
                     )
                     pass
                 else:
                     if not local_confident:
-                        print(
+                        logger.info(
                             f"[SmartDispatcher] ⚠️ 本地模型低置信度({local_conf_value:.2f})，回退规则判断"
                         )
                         pass
@@ -1538,17 +1547,17 @@ class SmartDispatcher:
                         context_info["skill_prompt"] = local_hint
                     if local_complexity == "complex":
                         context_info["complexity"] = "complex"
-                    print(
+                    logger.info(
                         f"[SmartDispatcher] 📄 本地模型 FILE_GEN 意图确认: '{user_input[:30]}'"
                     )
                     return "FILE_GEN", f"{local_confidence}", context_info
                 else:
-                    print(
+                    logger.info(
                         f"[SmartDispatcher] ⚠️ 本地模型返回 FILE_GEN 但{'无生成意图' if not _has_file_gen_intent else '低置信度'}，继续评估"
                     )
             else:
                 if not local_confident:
-                    print(
+                    logger.info(
                         f"[SmartDispatcher] ⚠️ 本地模型低置信度({local_conf_value:.2f})，回退规则判断"
                     )
                 else:
@@ -1569,7 +1578,7 @@ class SmartDispatcher:
         # 放在关键词规则之前，用语义理解而非关键词匹配来判断任务
         if not local_task or not local_confident:
             if client:
-                print(
+                logger.info(
                     f"[SmartDispatcher] 🌐 本地模型{'不可用' if not local_task else f'低置信({local_conf_value:.2f})'}，尝试在线 AI 路由..."
                 )
                 ai_task, ai_confidence, ai_source, ai_hint = (
@@ -1583,7 +1592,7 @@ class SmartDispatcher:
                     if ai_task == "DOC_ANNOTATE":
                         has_file = file_context and file_context.get("has_file")
                         if not has_file:
-                            print(
+                            logger.info(
                                 f"[SmartDispatcher] ⚠️ AI路由返回 DOC_ANNOTATE，但无文件附件，降级 CHAT"
                             )
                             ai_task = "CHAT"
@@ -1593,7 +1602,7 @@ class SmartDispatcher:
                             w in user_lower for w in cls._AI_FILE_GEN_OUTPUT_KWS
                         )
                         if not has_file and not _ai_has_output_intent:
-                            print(
+                            logger.info(
                                 f"[SmartDispatcher] ⚠️ AI路由返回 FILE_GEN，但无文件且无生成意图，降级 CHAT"
                             )
                             ai_task = "CHAT"
@@ -1606,13 +1615,13 @@ class SmartDispatcher:
                     )
                     if ai_hint:
                         context_info["skill_prompt"] = ai_hint
-                    print(
+                    logger.info(
                         f"[SmartDispatcher] ✅ AI路由决策: {ai_task} ({ai_confidence}) hint={'yes' if ai_hint else 'no'}"
                     )
                     return ai_task, f"{ai_confidence} ({latency:.0f}ms)", context_info
 
         # === 关键词兜底规则（仅在本地模型+在线模型都无法判断时触发） ===
-        print(f"[SmartDispatcher] ⚠️ 模型路由均未成功，回退关键词兜底规则...")
+        logger.info(f"[SmartDispatcher] ⚠️ 模型路由均未成功，回退关键词兜底规则...")
 
         # -- 附件文档标注 (需要 file_context 支撑，不纯靠关键词) --
         if file_context and file_context.get("has_file"):
@@ -1640,7 +1649,7 @@ class SmartDispatcher:
                 boosts={"FILE_GEN": 1.0},
                 reasons={"FILE_GEN": ["fallback:ppt_direct"]},
             )
-            print(f"[SmartDispatcher] 🎯 PPT 请求直通 FILE_GEN")
+            logger.info(f"[SmartDispatcher] 🎯 PPT 请求直通 FILE_GEN")
             return "FILE_GEN", "📄 PPT-Direct", context_info
 
         # -- 文档/报告生成直通 (Word/PDF/Excel 等明确输出格式 + 动作意图，不含PPT已有规则) --
@@ -1654,7 +1663,7 @@ class SmartDispatcher:
                 boosts={"FILE_GEN": 1.0},
                 reasons={"FILE_GEN": ["fallback:doc_gen_direct"]},
             )
-            print(
+            logger.info(
                 f"[SmartDispatcher] 📄 文档生成请求直通 FILE_GEN: '{user_input[:30]}'"
             )
             return "FILE_GEN", "📄 DocGen-Direct", context_info
@@ -1667,7 +1676,7 @@ class SmartDispatcher:
                 boosts={"FILE_SEARCH": 1.0},
                 reasons={"FILE_SEARCH": ["rule:disk_file_search"]},
             )
-            print(f"[SmartDispatcher] 🔍 文件搜索/全盘扫描直通 FILE_SEARCH")
+            logger.info(f"[SmartDispatcher] 🔍 文件搜索/全盘扫描直通 FILE_SEARCH")
             return "FILE_SEARCH", "🔍 FileSearch-Direct", context_info
 
         # -- 系统命令 --
@@ -1693,7 +1702,7 @@ class SmartDispatcher:
                 boosts={"SYSTEM": 0.9},
                 reasons={"SYSTEM": ["fallback:action_verb"]},
             )
-            print(f"[SmartDispatcher] 🖥️ 系统命令兜底: '{_stripped_fb}' → SYSTEM")
+            logger.info(f"[SmartDispatcher] 🖥️ 系统命令兜底: '{_stripped_fb}' → SYSTEM")
             return "SYSTEM", "🖥️ Fallback-ActionVerb", context_info
 
         # -- 多步任务规划 --

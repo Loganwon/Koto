@@ -20,7 +20,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install lint tools
-        run: pip install flake8 black isort
+        run: pip install flake8 black isort bandit
 
       - name: Run flake8
         run: flake8 src/ app/ tests/ --count --show-source --statistics
@@ -30,6 +30,9 @@ jobs:
 
       - name: Check import order (isort)
         run: isort --check-only --profile black src/ app/ tests/
+
+      - name: Security scan (bandit)
+        run: bandit -r app/ src/ -ll -q
 
   test:
     name: Test
@@ -78,8 +81,16 @@ jobs:
             tests/test_trigger_params_integration.py \
             tests/test_unified_agent.py \
             -v --tb=short -q \
-            --cov=app --cov-report=term-missing \
-            --cov-fail-under=20
+            --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
+            --cov-fail-under=40
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 14
 
   docker:
     name: Docker Build

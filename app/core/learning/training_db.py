@@ -294,7 +294,7 @@ class TrainingDB:
             else:
                 counts["skipped"] += 1
         if verbose:
-            print(
+            logger.info(
                 f"  插入: {counts['inserted']}  更新: {counts['updated']}  跳过: {counts['skipped']}"
             )
         return counts
@@ -479,7 +479,7 @@ class TrainingDB:
                 (now,),
             )
 
-        print(f"  导出 {len(samples)} 条样本 → {out_path.name}")
+        logger.info(f"  导出 {len(samples)} 条样本 → {out_path.name}")
         return out_path
 
     def rebuild_koto_router(
@@ -489,13 +489,13 @@ class TrainingDB:
         导出 JSONL + 生成 Modelfile + 重建 koto-router 模型。
         返回是否成功。
         """
-        print("\n[TrainingDB] 🔧 开始重建 koto-router...")
+        logger.info("\n[TrainingDB] 🔧 开始重建 koto-router...")
 
         # 检测可用底座模型
         if base_model == "auto":
             base_model = _detect_best_base_model()
         if not base_model:
-            print("[TrainingDB] ⚠️ Ollama 未运行或无可用模型，跳过重建")
+            logger.info("[TrainingDB] ⚠️ Ollama 未运行或无可用模型，跳过重建")
             return False
 
         # 导出 JSONL
@@ -507,7 +507,7 @@ class TrainingDB:
         mf_path.write_text(modelfile_content, encoding="utf-8")
 
         # 运行 ollama create
-        print(f"[TrainingDB] 🤖 正在基于 {base_model} 创建 koto-router...")
+        logger.info(f"[TrainingDB] 🤖 正在基于 {base_model} 创建 koto-router...")
         result = subprocess.run(
             ["ollama", "create", "koto-router", "-f", str(mf_path)],
             capture_output=True,
@@ -536,9 +536,11 @@ class TrainingDB:
             )
 
         if success:
-            print(f"[TrainingDB] ✅ koto-router 重建成功（{len(samples)} 条样本）")
+            logger.info(
+                f"[TrainingDB] ✅ koto-router 重建成功（{len(samples)} 条样本）"
+            )
         else:
-            print(
+            logger.error(
                 f"[TrainingDB] ❌ koto-router 重建失败: {result.stderr.strip()[:200]}"
             )
 
@@ -572,7 +574,7 @@ class DataHarvester:
                 total[k] += d.get(k, 0)
 
         if verbose:
-            print("\n[Harvester] 📥 开始采集数据...")
+            logger.info("\n[Harvester] 📥 开始采集数据...")
 
         # 1. 合成数据
         r = self.harvest_synthetic(verbose=verbose)
@@ -587,7 +589,7 @@ class DataHarvester:
         _merge(r)
 
         if verbose:
-            print(
+            logger.info(
                 f"[Harvester] ✅ 采集完毕 — 新增: {total['inserted']}  "
                 f"更新: {total['updated']}  跳过: {total['skipped']}"
             )
@@ -612,14 +614,14 @@ class DataHarvester:
             ]
             r = self.db.upsert_batch(samples, verbose=False)
             if verbose:
-                print(
+                logger.info(
                     f"  [合成数据]   {len(samples)} 条 → "
                     f"新增 {r['inserted']} 更新 {r['updated']} 跳过 {r['skipped']}"
                 )
             return r
         except Exception as e:
             if verbose:
-                print(f"  [合成数据] ⚠️ 失败: {e}")
+                logger.error(f"  [合成数据] ⚠️ 失败: {e}")
             return {"inserted": 0, "updated": 0, "skipped": 0}
 
     def harvest_chat_history(self, verbose: bool = True) -> Dict[str, int]:
@@ -678,7 +680,7 @@ class DataHarvester:
 
         r = self.db.upsert_batch(samples, verbose=False)
         if verbose:
-            print(
+            logger.info(
                 f"  [聊天历史]   {len(samples)} 条 → "
                 f"新增 {r['inserted']} 更新 {r['updated']} 跳过 {r['skipped']}"
             )
@@ -721,7 +723,7 @@ class DataHarvester:
 
         r = self.db.upsert_batch(samples, verbose=False)
         if verbose:
-            print(
+            logger.info(
                 f"  [Shadow记录] {len(samples)} 条 → "
                 f"新增 {r['inserted']} 更新 {r['updated']} 跳过 {r['skipped']}"
             )
@@ -813,25 +815,25 @@ def full_pipeline(verbose: bool = True) -> Dict[str, Any]:
 
 
 def _print_stats(s: Dict[str, Any]):
-    print(f"\n{'='*62}")
-    print(f"  Koto 训练数据库统计  (总计: {s['total']} 条)")
-    print(f"{'='*62}")
+    logger.info(f"\n{'='*62}")
+    logger.info(f"  Koto 训练数据库统计  (总计: {s['total']} 条)")
+    logger.info(f"{'='*62}")
     for task, count in s["by_task"].items():
         bar = "█" * (count // 3)
-        print(f"  {task:<15} {count:>4} 条  {bar}")
-    print(f"{'─'*62}")
-    print(f"  来源分布:")
+        logger.info(f"  {task:<15} {count:>4} 条  {bar}")
+    logger.info(f"{'─'*62}")
+    logger.info(f"  来源分布:")
     for src, count in s["by_source"].items():
-        print(f"    {src:<25} {count:>4} 条")
-    print(f"  人工纠错样本: {s['manually_corrected']} 条")
-    print(f"  待解决纠错:   {s['pending_corrections']} 条")
+        logger.info(f"    {src:<25} {count:>4} 条")
+    logger.info(f"  人工纠错样本: {s['manually_corrected']} 条")
+    logger.info(f"  待解决纠错:   {s['pending_corrections']} 条")
     if s["last_build"]:
-        print(
+        logger.info(
             f"  上次重建: {s['last_build']['built_at']} "
             f"({s['last_build']['total_samples']} 条)"
         )
-    print(f"  数据库路径: {s['db_path']}")
-    print(f"{'='*62}\n")
+    logger.info(f"  数据库路径: {s['db_path']}")
+    logger.info(f"{'='*62}\n")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -919,10 +921,10 @@ if __name__ == "__main__":
     if args.correct:
         text, task = args.correct
         if task not in VALID_TASKS:
-            print(f"❌ 无效任务类型: {task}\n可用: {sorted(VALID_TASKS)}")
+            logger.info(f"❌ 无效任务类型: {task}\n可用: {sorted(VALID_TASKS)}")
             sys.exit(1)
         ok = db.correct_label(text, task, corrected_by="user")
-        print(f"✅ 已标注: '{text[:50]}' → {task}")
+        logger.info(f"✅ 已标注: '{text[:50]}' → {task}")
         sys.exit(0)
 
     if args.stats:
@@ -936,7 +938,7 @@ if __name__ == "__main__":
 
     if args.export:
         p = db.export_jsonl()
-        print(f"✅ 已导出: {p}")
+        logger.info(f"✅ 已导出: {p}")
         sys.exit(0)
 
     if args.rebuild:

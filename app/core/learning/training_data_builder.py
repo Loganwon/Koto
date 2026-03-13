@@ -173,27 +173,31 @@ class TrainingDataBuilder:
             chat_samples = cls._load_chat_history()
             samples.extend(chat_samples)
             if verbose:
-                print(f"[TrainingBuilder] 📁 聊天历史: {len(chat_samples)} 条")
+                logger.info(f"[TrainingBuilder] 📁 聊天历史: {len(chat_samples)} 条")
 
         # ─── 2. Shadow Traces（用户认可的高质量样本）─────────────────────
         if include_shadow:
             shadow_samples = cls._load_shadow_traces()
             samples.extend(shadow_samples)
             if verbose:
-                print(f"[TrainingBuilder] 👤 Shadow Traces: {len(shadow_samples)} 条")
+                logger.info(
+                    f"[TrainingBuilder] 👤 Shadow Traces: {len(shadow_samples)} 条"
+                )
 
         # ─── 3. 合成数据（规则生成任务路由示例）─────────────────────────
         if include_synthetic:
             synth_samples = cls._generate_synthetic_routing_samples()
             samples.extend(synth_samples)
             if verbose:
-                print(f"[TrainingBuilder] 🔧 合成路由样本: {len(synth_samples)} 条")
+                logger.info(
+                    f"[TrainingBuilder] 🔧 合成路由样本: {len(synth_samples)} 条"
+                )
 
             # 合成行为示例：教模型在通用对话中不主动提及系统信息
             behavior_samples = cls._generate_synthetic_chat_samples()
             samples.extend(behavior_samples)
             if verbose:
-                print(
+                logger.info(
                     f"[TrainingBuilder] 🎯 合成行为样本（减少系统信息提及）: {len(behavior_samples)} 条"
                 )
 
@@ -217,7 +221,7 @@ class TrainingDataBuilder:
                     )
             except Exception as _me:
                 if verbose:
-                    print(f"[TrainingBuilder] ⚠️ 记忆桥接跳过: {_me}")
+                    logger.info(f"[TrainingBuilder] ⚠️ 记忆桥接跳过: {_me}")
 
         # ─── 5. 文件分类样本（catalog 归纳时生成）────────────────────────
         import json as _json_td
@@ -250,16 +254,18 @@ class TrainingDataBuilder:
                         except Exception:
                             pass
                 if verbose:
-                    print(f"[TrainingBuilder] 📄 文件分类样本: {_classify_count} 条")
+                    logger.info(
+                        f"[TrainingBuilder] 📄 文件分类样本: {_classify_count} 条"
+                    )
             except Exception as _ce:
                 if verbose:
-                    print(f"[TrainingBuilder] ⚠️ 文件分类样本加载失败: {_ce}")
+                    logger.error(f"[TrainingBuilder] ⚠️ 文件分类样本加载失败: {_ce}")
 
         # ─── 过滤 ──────────────────────────────────────────────────────────
         samples = [s for s in samples if s.quality >= min_quality]
         samples = cls._deduplicate(samples)
         if verbose:
-            print(f"[TrainingBuilder] ✅ 去重后总计: {len(samples)} 条")
+            logger.info(f"[TrainingBuilder] ✅ 去重后总计: {len(samples)} 条")
 
         # ─── 分组输出 ─────────────────────────────────────────────────────
         routing_samples = [s for s in samples if s.system == _ROUTER_SYSTEM]
@@ -297,8 +303,8 @@ class TrainingDataBuilder:
         )
 
         if verbose:
-            print(f"[TrainingBuilder] 📊 统计: {stats}")
-            print(f"[TrainingBuilder] 💾 输出目录: {_out}")
+            logger.info(f"[TrainingBuilder] 📊 统计: {stats}")
+            logger.info(f"[TrainingBuilder] 💾 输出目录: {_out}")
 
         # ─── 自动推送到 Ollama（如可用）───────────────────────────────────
         cls._push_to_ollama_if_available(routing_file, full_file, verbose=verbose)
@@ -715,7 +721,7 @@ class TrainingDataBuilder:
             models = [m["name"] for m in resp.json().get("models", [])]
         except Exception:
             if verbose:
-                print("[TrainingBuilder] ℹ️ Ollama 未运行，跳过 Modelfile 生成")
+                logger.info("[TrainingBuilder] ℹ️ Ollama 未运行，跳过 Modelfile 生成")
             return
 
         # 找到可用的基底模型（动态评分选择）
@@ -730,7 +736,7 @@ class TrainingDataBuilder:
             base_model = models[0]
         if not base_model:
             if verbose:
-                print("[TrainingBuilder] ⚠️ Ollama 无可用模型，跳过")
+                logger.info("[TrainingBuilder] ⚠️ Ollama 无可用模型，跳过")
             return
 
         # 生成 Modelfile
@@ -765,10 +771,12 @@ PARAMETER num_ctx 4096
         )
 
         if verbose:
-            print(f"[TrainingBuilder] 🤖 Ollama 已运行，检测到模型: {base_model}")
-            print(f"[TrainingBuilder] 📄 Modelfile 已生成: {modelfile_path}")
-            print(f"[TrainingBuilder] ▶️ 运行 {train_script} 创建 koto-router 模型")
-            print(f"[TrainingBuilder] 📊 路由训练数据: {routing_file}")
+            logger.info(f"[TrainingBuilder] 🤖 Ollama 已运行，检测到模型: {base_model}")
+            logger.info(f"[TrainingBuilder] 📄 Modelfile 已生成: {modelfile_path}")
+            logger.info(
+                f"[TrainingBuilder] ▶️ 运行 {train_script} 创建 koto-router 模型"
+            )
+            logger.info(f"[TrainingBuilder] 📊 路由训练数据: {routing_file}")
 
     # ══════════════════════════════════════════════════════════════════
     # 工具方法
@@ -1021,7 +1029,7 @@ def register_training_routes(app):
             }
         )
 
-    print("[TrainingAPI] ✅ 训练数据 API 已注册: /api/training/*")
+    logger.info("[TrainingAPI] ✅ 训练数据 API 已注册: /api/training/*")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1043,7 +1051,7 @@ if __name__ == "__main__":
         min_quality=args.min_quality,
         verbose=True,
     )
-    print(f"\n✅ 完成！训练数据已保存到: {result['full_file']}")
-    print(f"   路由样本: {result['stats']['routing_samples']} 条")
-    print(f"   对话样本: {result['stats']['chat_samples']} 条")
-    print(f"   合计:     {result['stats']['total']} 条")
+    logger.info(f"\n✅ 完成！训练数据已保存到: {result['full_file']}")
+    logger.info(f"   路由样本: {result['stats']['routing_samples']} 条")
+    logger.info(f"   对话样本: {result['stats']['chat_samples']} 条")
+    logger.info(f"   合计:     {result['stats']['total']} 条")

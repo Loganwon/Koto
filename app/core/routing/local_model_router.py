@@ -1,10 +1,13 @@
 import json
+import logging
 import socket
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════
 # RouterDecision — 结构化路由决策（v2）
@@ -439,7 +442,7 @@ class LocalModelRouter:
 
         cls._model_name = target_model
         cls._initialized = True
-        print(f"[LocalModelRouter] ✅ 使用本地模型: {target_model}")
+        logger.info(f"[LocalModelRouter] ✅ 使用本地模型: {target_model}")
         return True
 
     # ══════════════════════════════════════════════════════════════════
@@ -722,7 +725,7 @@ class LocalModelRouter:
                 and confidence >= 0.45
             ):
                 conf_str = f"🤖 Local {confidence:.2f} ({latency:.0f}ms)"
-                print(f"[LocalModelRouter] {task_type} {conf_str}")
+                logger.info(f"[LocalModelRouter] {task_type} {conf_str}")
                 # ── 自动记录到训练数据库（后台，不阻塞）──────────────────────
                 try:
                     from app.core.learning.training_db import auto_record_interaction
@@ -732,13 +735,13 @@ class LocalModelRouter:
                     pass
                 return task_type, conf_str, "Local"
             else:
-                print(f"[LocalModelRouter] 无法解析结果: {raw[:80]}")
+                logger.info(f"[LocalModelRouter] 无法解析结果: {raw[:80]}")
                 return None, f"⚠️ ParseError", "Local"
 
         except requests.exceptions.Timeout:
             return None, f"⏱️ Timeout ({timeout}s)", "Local"
         except Exception as e:
-            print(f"[LocalModelRouter] 错误: {e}")
+            logger.error(f"[LocalModelRouter] 错误: {e}")
             return None, f"❌ Error", "Local"
 
     @classmethod
@@ -901,7 +904,7 @@ class LocalModelRouter:
                 and confidence >= 0.45
             ):
                 conf_str = f"🤖 Local+Hint {confidence:.2f} ({latency:.0f}ms)"
-                print(
+                logger.info(
                     f"[LocalModelRouter] classify_with_hint → {task_type} complexity={complexity} | hint={'yes' if hint else 'none'} {conf_str}"
                 )
                 return task_type, conf_str, "Local", hint, complexity
@@ -914,7 +917,7 @@ class LocalModelRouter:
             task, conf, src = cls.classify(user_input, timeout=timeout)
             return task, conf, src, None, "normal"
         except Exception as e:
-            print(f"[LocalModelRouter] classify_with_hint 错误: {e}")
+            logger.error(f"[LocalModelRouter] classify_with_hint 错误: {e}")
             task, conf, src = cls.classify(user_input, timeout=timeout)
             return task, conf, src, None, "normal"
 
@@ -951,7 +954,7 @@ class LocalModelRouter:
                 if im.split(":")[0].lower() == base:
                     cls._response_model = im
                     cls._response_model_inited = True
-                    print(f"[LocalModelRouter] ✅ 响应生成模型: {im}")
+                    logger.info(f"[LocalModelRouter] ✅ 响应生成模型: {im}")
                     return True
 
         # 2) 动态评分回退：对所有已安装模型打分，选最佳对话模型
@@ -959,7 +962,7 @@ class LocalModelRouter:
         if best:
             cls._response_model = best
             cls._response_model_inited = True
-            print(f"[LocalModelRouter] ✅ 响应生成模型（动态选择）: {best}")
+            logger.info(f"[LocalModelRouter] ✅ 响应生成模型（动态选择）: {best}")
             return True
 
         # 3) 最终回退到路由分类模型
@@ -1226,7 +1229,9 @@ class LocalModelRouter:
                 return [str(s).strip() for s in steps if str(s).strip()][:5]
             return []
         except Exception as e:
-            print(f"[LocalModelRouter] generate_plan 静默失败: {type(e).__name__}")
+            logger.error(
+                f"[LocalModelRouter] generate_plan 静默失败: {type(e).__name__}"
+            )
             return []
 
     @classmethod
@@ -1374,7 +1379,7 @@ class LocalModelRouter:
                     except Exception:
                         continue
             except Exception as e:
-                print(f"[LocalModelRouter] 流式生成错误: {e}")
+                logger.error(f"[LocalModelRouter] 流式生成错误: {e}")
 
         return _stream()
 

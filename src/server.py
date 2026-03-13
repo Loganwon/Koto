@@ -37,6 +37,11 @@ sys.path.append(str(APP_ROOT / "web"))
 for d in ["logs", "chats", "workspace", "config"]:
     os.makedirs(APP_ROOT / d, exist_ok=True)
 
+# 初始化集中式日志（在其他模块导入之前）
+from app.core.logging_setup import setup_logging  # noqa: E402
+
+setup_logging(log_dir=str(APP_ROOT / "logs"))
+
 # 加载 .env 配置
 try:
     from dotenv import load_dotenv

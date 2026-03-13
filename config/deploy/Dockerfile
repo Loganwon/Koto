@@ -26,17 +26,22 @@ COPY config/gemini_config.env.example config/gemini_config.env
 # 创建必要目录
 RUN mkdir -p logs chats workspace config
 
+# 非 root 用户运行（安全加固）
+RUN useradd -m -u 1000 koto && chown -R koto:koto /app
+
 # 环境变量
 ENV PYTHONUNBUFFERED=1
 ENV KOTO_PORT=5000
 ENV KOTO_AUTH_ENABLED=true
 ENV KOTO_DEPLOY_MODE=cloud
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+# 健康检查（start-period 延长以等待 gunicorn 完全启动）
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:5000/api/ping')" || exit 1
 
 EXPOSE 5000
+
+USER koto
 
 # 生产启动（gunicorn）
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "120", "server:app"]

@@ -7,6 +7,7 @@ from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from app.core.agent.factory import create_agent
 from app.core.agent.types import AgentStepType
+from app.core.config_defaults import DEFAULT_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ def _make_eval_llm_fn():
             try:
                 r = _a.llm_provider.generate_content(
                     prompt,
-                    model="gemini-2.0-flash-lite",
+                    model=DEFAULT_MODEL,
                     max_tokens=512,
                     temperature=0.1,
                 )
@@ -1658,7 +1659,8 @@ def cost_stats():
         try:
             ShadowTracer = _lazy_tracer()
             trace_counts = ShadowTracer.get_counts()
-        except Exception:
+        except Exception as _e:
+            logger.debug("[stats] trace_counts fetch failed: %s", _e)
             trace_counts = {}
 
         # 本地算力估算（简单 psutil）
