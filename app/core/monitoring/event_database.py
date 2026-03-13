@@ -272,61 +272,60 @@ class EventDatabase:
             event_type = event_data.get("event_type", "unknown").lower()
 
             conn = self._get_conn()  # reuse per-thread connection (called under self.lock)
-                # Get or create daily record
-                cursor = conn.execute(
-                    "SELECT id FROM event_stats WHERE date = ?", (date_str,)
+            # Get or create daily record
+            cursor = conn.execute(
+                "SELECT id FROM event_stats WHERE date = ?", (date_str,)
+            )
+            row = cursor.fetchone()
+
+            if row:
+                # Update existing
+                stat_id = row[0]
+                update_col = f"{severity}_count"
+
+                conn.execute(
+                    f"""
+                    UPDATE event_stats
+                    SET total_events = total_events + 1,
+                        {update_col} = {update_col} + 1
+                    WHERE id = ?
+                """,
+                    (stat_id,),
                 )
-                row = cursor.fetchone()
+            else:
+                # Create new
+                severity_dict = {
+                    "high": 1 if severity == "high" else 0,
+                    "medium": 1 if severity == "medium" else 0,
+                    "low": 1 if severity == "low" else 0,
+                }
 
-                if row:
-                    # Update existing
-                    stat_id = row[0]
-                    update_col = f"{severity}_count"
-                    type_col = f"{event_type}_count"
+                type_dict = {
+                    "cpu": 1 if "cpu" in event_type else 0,
+                    "memory": 1 if "memory" in event_type else 0,
+                    "disk": 1 if "disk" in event_type else 0,
+                }
 
-                    conn.execute(
-                        f"""
-                        UPDATE event_stats
-                        SET total_events = total_events + 1,
-                            {update_col} = {update_col} + 1
-                        WHERE id = ?
-                    """,
-                        (stat_id,),
-                    )
-                else:
-                    # Create new
-                    severity_dict = {
-                        "high": 1 if severity == "high" else 0,
-                        "medium": 1 if severity == "medium" else 0,
-                        "low": 1 if severity == "low" else 0,
-                    }
+                conn.execute(
+                    """
+                    INSERT INTO event_stats (
+                        date, total_events, high_count, medium_count, low_count,
+                        cpu_count, memory_count, disk_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        date_str,
+                        1,
+                        severity_dict["high"],
+                        severity_dict["medium"],
+                        severity_dict["low"],
+                        type_dict["cpu"],
+                        type_dict["memory"],
+                        type_dict["disk"],
+                    ),
+                )
 
-                    type_dict = {
-                        "cpu": 1 if "cpu" in event_type else 0,
-                        "memory": 1 if "memory" in event_type else 0,
-                        "disk": 1 if "disk" in event_type else 0,
-                    }
-
-                    conn.execute(
-                        """
-                        INSERT INTO event_stats (
-                            date, total_events, high_count, medium_count, low_count,
-                            cpu_count, memory_count, disk_count
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                        (
-                            date_str,
-                            1,
-                            severity_dict["high"],
-                            severity_dict["medium"],
-                            severity_dict["low"],
-                            type_dict["cpu"],
-                            type_dict["memory"],
-                            type_dict["disk"],
-                        ),
-                    )
-
-                conn.commit()
+            conn.commit()
         except Exception as e:
             logger.error(f"Error updating daily stats: {e}")
 
