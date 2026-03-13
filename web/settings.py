@@ -3,9 +3,11 @@ Koto Settings Manager
 用户设置管理模块 - 支持自定义存储路径和应用配置
 """
 
+import atexit
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 # 默认设置文件位置
@@ -54,12 +56,33 @@ class SettingsManager:
 
     _instance = None
     _settings = None
+    _dirty = False
+    _flush_timer: "threading.Timer | None" = None
+    _lock = threading.Lock()
+    _FLUSH_DELAY = 2.0  # seconds to wait before flushing dirty writes to disk
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._load_settings()
+            atexit.register(cls._instance.flush)
         return cls._instance
+
+    def _schedule_flush(self):
+        """Cancel any pending timer and schedule a new flush in _FLUSH_DELAY seconds."""
+        if self._flush_timer is not None:
+            self._flush_timer.cancel()
+        self._flush_timer = threading.Timer(self._FLUSH_DELAY, self.flush)
+        self._flush_timer.daemon = True
+        self._flush_timer.start()
+
+    def flush(self):
+        """Write to disk now if dirty, then clear the dirty flag."""
+        with self._lock:
+            if not self._dirty:
+                return True
+            self._dirty = False
+        return self._save_settings()
 
     def _load_settings(self):
         """加载设置"""
@@ -107,18 +130,24 @@ class SettingsManager:
         return None
 
     def set(self, category, key, value):
-        """设置单个值"""
+        """设置单个值 — marks dirty and schedules a batched flush."""
         if category not in self._settings:
             self._settings[category] = {}
         self._settings[category][key] = value
-        return self._save_settings()
+        with self._lock:
+            self._dirty = True
+        self._schedule_flush()
+        return True
 
     def update(self, category, values):
-        """更新一个分类的多个值"""
+        """更新一个分类的多个值 — marks dirty and schedules a batched flush."""
         if category not in self._settings:
             self._settings[category] = {}
         self._settings[category].update(values)
-        return self._save_settings()
+        with self._lock:
+            self._dirty = True
+        self._schedule_flush()
+        return True
 
     def get_all(self):
         """获取所有设置"""

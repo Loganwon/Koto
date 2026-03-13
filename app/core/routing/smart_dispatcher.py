@@ -52,6 +52,21 @@ class SmartDispatcher:
         "client": None,
     }
 
+    # LRU result cache: keyed by MD5(user_input), stores full analyze() return tuple.
+    # Routing is deterministic for same text, so no TTL needed.
+    _route_cache: "OrderedDict" = None
+    _route_cache_max = 128
+    _route_cache_lock = None
+
+    @classmethod
+    def _get_route_cache(cls):
+        if cls._route_cache is None:
+            from collections import OrderedDict
+            import threading as _threading
+            cls._route_cache = OrderedDict()
+            cls._route_cache_lock = _threading.Lock()
+        return cls._route_cache, cls._route_cache_lock
+
     @classmethod
     def configure(
         cls, local_executor, context_analyzer, web_searcher, model_map, client
@@ -1112,7 +1127,21 @@ class SmartDispatcher:
 
         返回: (task_type, confidence_info, context_info)
         """
+        import hashlib as _hashlib
         start_time = time.time()
+
+        # Cache lookup — skip for requests with file_context (state may differ)
+        if not file_context:
+            cache_key = _hashlib.md5(user_input.encode()).hexdigest()[:16]
+            cache, lock = cls._get_route_cache()
+            with lock:
+                if cache_key in cache:
+                    cache.move_to_end(cache_key)
+                    return cache[cache_key]
+        else:
+            cache_key = None
+            cache = None
+            lock = None
 
         # Get dependencies
         LocalExecutor = cls._get_dep("LocalExecutor")
@@ -1761,7 +1790,14 @@ class SmartDispatcher:
 
         context_info = context_info or {}
         context_info["routing_list"] = base_routing_list
-        return "CHAT", f"💬 Default ({latency:.1f}ms)", context_info
+        result = ("CHAT", f"💬 Default ({latency:.1f}ms)", context_info)
+        if cache_key and cache is not None and lock is not None:
+            with lock:
+                cache[cache_key] = result
+                cache.move_to_end(cache_key)
+                if len(cache) > cls._route_cache_max:
+                    cache.popitem(last=False)
+        return result
 
     @classmethod
     def get_model_for_task(cls, task_type, has_image=False, complexity="normal"):

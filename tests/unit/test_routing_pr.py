@@ -26,10 +26,10 @@ class TestAIRouterCacheType:
 
         assert isinstance(AIRouter._cache, OrderedDict)
 
-    def test_cache_max_size_is_100(self):
+    def test_cache_max_size_is_256(self):
         from app.core.routing.ai_router import AIRouter
 
-        assert AIRouter._cache_max_size == 100
+        assert AIRouter._cache_max_size == 256
 
 
 # ---------------------------------------------------------------------------
@@ -52,24 +52,26 @@ class TestAIRouterLRUEviction:
         from app.core.routing.ai_router import AIRouter
 
         cache = AIRouter._cache
-        for i in range(101):
+        max_size = AIRouter._cache_max_size
+        for i in range(max_size + 1):
             key = f"key{i}"
             cache[key] = f"val{i}"
             cache.move_to_end(key)
-            if len(cache) > AIRouter._cache_max_size:
+            if len(cache) > max_size:
                 cache.popitem(last=False)
 
-        assert len(cache) == 100
+        assert len(cache) == max_size
         assert "key0" not in cache, "oldest entry must be evicted"
-        assert "key100" in cache, "newest entry must be retained"
+        assert f"key{max_size}" in cache, "newest entry must be retained"
 
     def test_move_to_end_changes_eviction_order(self):
-        """Accessing key1 should protect it from being the next eviction victim."""
+        """Accessing k0 should protect it from being the next eviction victim."""
         from app.core.routing.ai_router import AIRouter
 
         cache = AIRouter._cache
+        max_size = AIRouter._cache_max_size
         # Fill to exactly max_size
-        for i in range(100):
+        for i in range(max_size):
             key = f"k{i}"
             cache[key] = i
             cache.move_to_end(key)
@@ -80,7 +82,7 @@ class TestAIRouterLRUEviction:
         # Add one more entry, triggering eviction of the new oldest (k1)
         cache["k_new"] = "new"
         cache.move_to_end("k_new")
-        if len(cache) > AIRouter._cache_max_size:
+        if len(cache) > max_size:
             cache.popitem(last=False)
 
         assert "k0" in cache, "touched entry should survive eviction"

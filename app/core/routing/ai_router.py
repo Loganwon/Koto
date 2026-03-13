@@ -44,12 +44,13 @@ class AIRouter:
 
 只输出类型名称，如: CHAT"""
 
-    # 缓存最近的分类结果（OrderedDict 实现标准 LRU 淡汰）
+    # LRU cache for classification results — expanded to 256 and protected by a lock
     _cache: "OrderedDict" = OrderedDict()
-    _cache_max_size = 100
+    _cache_max_size = 256
+    _cache_lock = threading.Lock()
 
     @classmethod
-    def classify(cls, client, user_input: str, timeout: float = 3.0) -> tuple:
+    def classify(cls, client, user_input: str, timeout: float = 2.0) -> tuple:
         """
         使用 AI 模型分类任务
 
@@ -64,13 +65,14 @@ class AIRouter:
         - source: "AI" 或 "Cache"
         """
 
-        # 检查缓存
+        # Check cache (thread-safe)
         cache_key = hashlib.md5(user_input.encode()).hexdigest()[:16]
-        if cache_key in cls._cache:
-            cls._cache.move_to_end(cache_key)  # 更新访问顺序
-            cached = cls._cache[cache_key]
-            print(f"[AIRouter] Cache hit: {cached}")
-            return cached[0], cached[1], "Cache"
+        with cls._cache_lock:
+            if cache_key in cls._cache:
+                cls._cache.move_to_end(cache_key)
+                cached = cls._cache[cache_key]
+                print(f"[AIRouter] Cache hit: {cached}")
+                return cached[0], cached[1], "Cache"
 
         try:
             result_holder = {"task": None, "error": None}
@@ -119,8 +121,8 @@ class AIRouter:
             thread.join(timeout=timeout)
 
             if thread.is_alive():
-                print(f"[AIRouter] Timeout after {timeout}s")
-                return None, "Timeout", "AI"
+                print(f"[AIRouter] Timeout after {timeout}s, falling back to CHAT")
+                return "CHAT", "Timeout-fallback", "AI"
 
             if result_holder["error"]:
                 print(f"[AIRouter] Error: {result_holder['error']}")
@@ -128,11 +130,12 @@ class AIRouter:
 
             task = result_holder["task"]
             if task:
-                # 写入缓存，淡汰最久未使用的条目（LRU）
-                cls._cache[cache_key] = (task, "🤖 AI")
-                cls._cache.move_to_end(cache_key)
-                if len(cls._cache) > cls._cache_max_size:
-                    cls._cache.popitem(last=False)
+                # Write to cache (thread-safe LRU eviction)
+                with cls._cache_lock:
+                    cls._cache[cache_key] = (task, "🤖 AI")
+                    cls._cache.move_to_end(cache_key)
+                    if len(cls._cache) > cls._cache_max_size:
+                        cls._cache.popitem(last=False)
 
                 print(f"[AIRouter] Classified as: {task}")
                 return task, "🤖 AI", "AI"

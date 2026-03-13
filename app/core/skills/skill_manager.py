@@ -1640,6 +1640,7 @@ class SkillManager:
 
     _registry: Dict[str, Dict] = {}  # id → 旧版 skill dict（向后兼容）
     _def_registry: Dict[str, SkillDefinition] = {}  # id → 新版 SkillDefinition（v2）
+    _builtin_prompt_index: Dict[str, str] = {}  # id → original built-in prompt (O(1) lookup)
     _initialized: bool = False
 
     # ── 初始化 ─────────────────────────────────────────────────────────────────
@@ -1649,6 +1650,7 @@ class SkillManager:
             return
         cls._registry = {}
         cls._def_registry = {}
+        cls._builtin_prompt_index = {s["id"]: s["prompt"] for s in BUILTIN_SKILLS}
         for skill in BUILTIN_SKILLS:
             s = dict(skill)  # shallow copy
             cls._registry[s["id"]] = s
@@ -1706,9 +1708,7 @@ class SkillManager:
             for skill_id, skill in cls._registry.items():
                 state: Dict = {"enabled": skill["enabled"]}
                 # 如果有自定义 prompt，也保存
-                builtin_prompt = next(
-                    (s["prompt"] for s in BUILTIN_SKILLS if s["id"] == skill_id), None
-                )
+                builtin_prompt = cls._builtin_prompt_index.get(skill_id)
                 if skill["prompt"] != builtin_prompt:
                     state["prompt_override"] = skill["prompt"]
                 skills_state[skill_id] = state
@@ -1799,9 +1799,7 @@ class SkillManager:
         cls._ensure_init()
         if skill_id not in cls._registry:
             return False
-        builtin_prompt = next(
-            (s["prompt"] for s in BUILTIN_SKILLS if s["id"] == skill_id), None
-        )
+        builtin_prompt = cls._builtin_prompt_index.get(skill_id)
         if builtin_prompt is not None:
             cls._registry[skill_id]["prompt"] = builtin_prompt
             cls._save_states_to_settings()

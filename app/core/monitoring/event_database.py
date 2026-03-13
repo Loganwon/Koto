@@ -8,6 +8,7 @@ Enables historical analysis and long-term tracking.
 import json
 import logging
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
@@ -27,7 +28,16 @@ class EventDatabase:
     def __init__(self):
         """Initialize database with schema."""
         self.lock = Lock()
+        self._local = threading.local()  # per-thread persistent connection
         self._ensure_db_exists()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        """Return a persistent per-thread SQLite connection."""
+        if not getattr(self._local, "conn", None):
+            conn = sqlite3.connect(str(self.DB_PATH), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            self._local.conn = conn
+        return self._local.conn
 
     def _ensure_db_exists(self) -> None:
         """Create database and tables if they don't exist."""
@@ -108,31 +118,31 @@ class EventDatabase:
         """
         with self.lock:
             try:
-                with sqlite3.connect(str(self.DB_PATH)) as conn:
-                    cursor = conn.execute(
-                        """
+                conn = self._get_conn()
+                cursor = conn.execute(
+                    """
                         INSERT INTO events (
                             timestamp, event_type, severity, metric_name,
                             metric_value, threshold, description, data_json
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                        (
-                            event_data.get("timestamp"),
-                            event_data.get("event_type"),
-                            event_data.get("severity"),
-                            event_data.get("metric_name"),
-                            event_data.get("metric_value"),
-                            event_data.get("threshold"),
-                            event_data.get("description"),
-                            json.dumps(event_data),
-                        ),
-                    )
-                    conn.commit()
+                    (
+                        event_data.get("timestamp"),
+                        event_data.get("event_type"),
+                        event_data.get("severity"),
+                        event_data.get("metric_name"),
+                        event_data.get("metric_value"),
+                        event_data.get("threshold"),
+                        event_data.get("description"),
+                        json.dumps(event_data),
+                    ),
+                )
+                conn.commit()
 
-                    # Update daily stats
-                    self._update_daily_stats(event_data)
+                # Update daily stats
+                self._update_daily_stats(event_data)
 
-                    return cursor.lastrowid
+                return cursor.lastrowid
             except Exception as e:
                 logger.error(f"Error saving event: {e}")
                 return -1
@@ -160,46 +170,46 @@ class EventDatabase:
         """
         with self.lock:
             try:
-                with sqlite3.connect(str(self.DB_PATH)) as conn:
-                    conn.row_factory = sqlite3.Row
+                conn = self._get_conn()
+                conn.row_factory = sqlite3.Row
 
                     # Build query
-                    query = "SELECT * FROM events WHERE 1=1"
-                    params = []
+                query = "SELECT * FROM events WHERE 1=1"
+                params = []
 
                     # Add time filter
-                    cutoff = (datetime.now() - timedelta(hours=hours_back)).isoformat()
-                    query += " AND timestamp > ?"
-                    params.append(cutoff)
+                cutoff = (datetime.now() - timedelta(hours=hours_back)).isoformat()
+                query += " AND timestamp > ?"
+                params.append(cutoff)
 
                     # Add type filter
-                    if event_type:
-                        query += " AND event_type = ?"
-                        params.append(event_type)
+                if event_type:
+                    query += " AND event_type = ?"
+                    params.append(event_type)
 
                     # Add severity filter
-                    if severity:
-                        query += " AND severity = ?"
-                        params.append(severity)
+                if severity:
+                    query += " AND severity = ?"
+                    params.append(severity)
 
                     # Order and limit
-                    query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
-                    params.extend([limit, offset])
+                query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
 
-                    cursor = conn.execute(query, params)
-                    events = []
+                cursor = conn.execute(query, params)
+                events = []
 
-                    for row in cursor.fetchall():
-                        event_dict = dict(row)
+                for row in cursor.fetchall():
+                    event_dict = dict(row)
                         # Try to parse data_json for additional fields
-                        try:
-                            if event_dict.get("data_json"):
-                                event_dict["data"] = json.loads(event_dict["data_json"])
-                        except json.JSONDecodeError:
-                            pass
-                        events.append(event_dict)
+                    try:
+                        if event_dict.get("data_json"):
+                            event_dict["data"] = json.loads(event_dict["data_json"])
+                    except json.JSONDecodeError:
+                        pass
+                    events.append(event_dict)
 
-                    return events
+                return events
             except Exception as e:
                 logger.error(f"Error querying events: {e}")
                 return []
@@ -216,36 +226,35 @@ class EventDatabase:
         """
         with self.lock:
             try:
-                with sqlite3.connect(str(self.DB_PATH)) as conn:
-                    conn.row_factory = sqlite3.Row
+                conn = self._get_conn()
+                conn.row_factory = sqlite3.Row
 
-                    cutoff = (datetime.now() - timedelta(days=days_back)).date()
+                cutoff = (datetime.now() - timedelta(days=days_back)).date()
 
-                    cursor = conn.execute(
-                        "SELECT * FROM event_stats WHERE date >= ? ORDER BY date DESC",
-                        (str(cutoff),),
-                    )
+                cursor = conn.execute(
+                    "SELECT * FROM event_stats WHERE date >= ? ORDER BY date DESC",
+                    (str(cutoff),),
+                )
 
-                    stats = []
-                    total_events = 0
-                    severity_breakdown = {"high": 0, "medium": 0, "low": 0}
-                    type_breakdown = {}
+                stats = []
+                total_events = 0
+                severity_breakdown = {"high": 0, "medium": 0, "low": 0}
 
-                    for row in cursor.fetchall():
-                        stat_dict = dict(row)
-                        stats.append(stat_dict)
-                        total_events += stat_dict["total_events"]
-                        severity_breakdown["high"] += stat_dict["high_count"]
-                        severity_breakdown["medium"] += stat_dict["medium_count"]
-                        severity_breakdown["low"] += stat_dict["low_count"]
+                for row in cursor.fetchall():
+                    stat_dict = dict(row)
+                    stats.append(stat_dict)
+                    total_events += stat_dict["total_events"]
+                    severity_breakdown["high"] += stat_dict["high_count"]
+                    severity_breakdown["medium"] += stat_dict["medium_count"]
+                    severity_breakdown["low"] += stat_dict["low_count"]
 
-                    return {
-                        "days": days_back,
-                        "total_events": total_events,
-                        "daily_stats": stats,
-                        "severity_breakdown": severity_breakdown,
-                        "avg_daily": total_events / days_back if days_back > 0 else 0,
-                    }
+                return {
+                    "days": days_back,
+                    "total_events": total_events,
+                    "daily_stats": stats,
+                    "severity_breakdown": severity_breakdown,
+                    "avg_daily": total_events / days_back if days_back > 0 else 0,
+                }
             except Exception as e:
                 logger.error(f"Error getting stats: {e}")
                 return {}
@@ -262,7 +271,7 @@ class EventDatabase:
             severity = event_data.get("severity", "low").lower()
             event_type = event_data.get("event_type", "unknown").lower()
 
-            with sqlite3.connect(str(self.DB_PATH)) as conn:
+            conn = self._get_conn()  # reuse per-thread connection (called under self.lock)
                 # Get or create daily record
                 cursor = conn.execute(
                     "SELECT id FROM event_stats WHERE date = ?", (date_str,)
@@ -331,22 +340,22 @@ class EventDatabase:
         """Save a remediation action for an event."""
         with self.lock:
             try:
-                with sqlite3.connect(str(self.DB_PATH)) as conn:
-                    cursor = conn.execute(
-                        """
+                conn = self._get_conn()
+                cursor = conn.execute(
+                    """
                         INSERT INTO remediation_actions (
                             event_id, action_type, status, result_json
                         ) VALUES (?, ?, ?, ?)
                     """,
-                        (
-                            event_id,
-                            action_type,
-                            status,
-                            json.dumps(result) if result else None,
-                        ),
-                    )
-                    conn.commit()
-                    return cursor.lastrowid
+                    (
+                        event_id,
+                        action_type,
+                        status,
+                        json.dumps(result) if result else None,
+                    ),
+                )
+                conn.commit()
+                return cursor.lastrowid
             except Exception as e:
                 logger.error(f"Error saving remediation action: {e}")
                 return -1
@@ -357,18 +366,18 @@ class EventDatabase:
         """Update remediation action status."""
         with self.lock:
             try:
-                with sqlite3.connect(str(self.DB_PATH)) as conn:
-                    conn.execute(
-                        """
+                conn = self._get_conn()
+                conn.execute(
+                    """
                         UPDATE remediation_actions
                         SET status = ?, executed_at = CURRENT_TIMESTAMP,
                             result_json = ?
                         WHERE id = ?
                     """,
-                        (status, json.dumps(result) if result else None, action_id),
-                    )
-                    conn.commit()
-                    return True
+                    (status, json.dumps(result) if result else None, action_id),
+                )
+                conn.commit()
+                return True
             except Exception as e:
                 logger.error(f"Error updating remediation status: {e}")
                 return False
@@ -386,13 +395,12 @@ class EventDatabase:
         with self.lock:
             try:
                 cutoff = (datetime.now() - timedelta(days=days_old)).isoformat()
-
-                with sqlite3.connect(str(self.DB_PATH)) as conn:
-                    cursor = conn.execute(
-                        "DELETE FROM events WHERE timestamp < ?", (cutoff,)
-                    )
-                    conn.commit()
-                    return cursor.rowcount
+                conn = self._get_conn()
+                cursor = conn.execute(
+                    "DELETE FROM events WHERE timestamp < ?", (cutoff,)
+                )
+                conn.commit()
+                return cursor.rowcount
             except Exception as e:
                 logger.error(f"Error clearing old events: {e}")
                 return 0
