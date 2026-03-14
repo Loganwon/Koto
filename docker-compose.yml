@@ -1,0 +1,29 @@
+version: "3.9"
+
+services:
+  koto:
+    build:
+      context: .
+      dockerfile: config/deploy/Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - KOTO_DEPLOY_MODE=${KOTO_DEPLOY_MODE:-local}
+      - KOTO_JWT_SECRET=${KOTO_JWT_SECRET:-}
+      - KOTO_LOG_LEVEL=${KOTO_LOG_LEVEL:-INFO}
+      - KOTO_LOG_FORMAT=${KOTO_LOG_FORMAT:-text}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./workspace:/app/workspace
+      - ./chats:/app/chats
+      - ./config:/app/config
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

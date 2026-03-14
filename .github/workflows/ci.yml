@@ -65,6 +65,11 @@ jobs:
           pip install -r config/requirements.txt
           pip install pytest pytest-mock pytest-cov
 
+      - name: CVE scan (pip-audit)
+        run: |
+          pip install pip-audit
+          pip-audit --desc || true
+
       - name: Run tests
         env:
           PYTHONPATH: .

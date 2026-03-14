@@ -2,6 +2,7 @@
 import base64
 import importlib.util
 import json
+import logging
 import mimetypes
 import os
 import re
@@ -10,7 +11,9 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime
+from pathlib import Path
 
 # 确保 web/ 目录在模块搜索路径中（通过 koto_app.py 启动时需要）
 _web_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +24,7 @@ from dotenv import load_dotenv
 from flask import (
     Flask,
     Response,
+    g,
     jsonify,
     render_template,
     request,
@@ -29,6 +33,7 @@ from flask import (
     stream_with_context,
 )
 from flask_cors import CORS
+from werkzeug.utils import secure_filename as _secure_filename
 
 # Import new routing modules
 from app.core.routing import SmartDispatcher
@@ -1118,6 +1123,14 @@ def stream_with_keepalive(
 
 
 app = Flask(__name__)
+
+# Read app version from VERSION file
+try:
+    APP_VERSION = (
+        (Path(__file__).parent.parent / "VERSION").read_text(encoding="utf-8").strip()
+    )
+except Exception:
+    APP_VERSION = "unknown"
 # 静态资源缓存，减少重复加载
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
 # ✅ 允许最大 20MB 请求体（语音 base64 约 1-5MB，留足余量）
@@ -1129,6 +1142,53 @@ if os.environ.get("KOTO_DEPLOY_MODE") == "cloud" and _cors_origins == "*":
     # 云模式默认只允许自身站点（同源），可通过环境变量覆盖
     _cors_origins = os.environ.get("KOTO_SITE_URL", "*")
 CORS(app, origins=_cors_origins)
+
+_app_logger = logging.getLogger("koto.app")
+
+
+# ── Request ID middleware ─────────────────────────────────────────────────────
+@app.before_request
+def _assign_request_id():
+    """Assign a correlation ID to every request (read from header or generate)."""
+    g.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+
+
+@app.after_request
+def _attach_request_id(response):
+    """Attach the correlation ID to every outgoing response."""
+    if hasattr(g, "request_id"):
+        response.headers["X-Request-ID"] = g.request_id
+    return response
+
+
+def _error_response(message: str, status: int = 400, details=None):
+    """Return a standardized JSON error envelope."""
+    body = {"error": message, "status": status}
+    if details:
+        body["details"] = details
+    if hasattr(g, "request_id"):
+        body["request_id"] = g.request_id
+    return jsonify(body), status
+
+
+# ── Global error handlers (return JSON, not HTML) ────────────────────────────
+@app.errorhandler(404)
+def _handle_404(exc):
+    return _error_response("Not found", 404)
+
+
+@app.errorhandler(405)
+def _handle_405(exc):
+    return _error_response("Method not allowed", 405)
+
+
+@app.errorhandler(500)
+def _handle_500(exc):
+    _app_logger.exception(
+        "Unhandled server error [request_id=%s]", getattr(g, "request_id", "-")
+    )
+    return _error_response("Internal server error", 500)
+
 
 # ================= 用户认证系统 =================
 try:
@@ -13121,10 +13181,9 @@ def chat_with_file():
             if not file or not file.filename:
                 return None
 
-            filename = file.filename
+            filename = _secure_filename(file.filename) or f"upload_{uuid.uuid4().hex}"
             filepath = os.path.join(UPLOAD_DIR, filename)
             file.save(filepath)
-            print(f"[FILE UPLOAD] 文件已保存: {filename} -> {filepath}")
             file_type = file.mimetype or file.content_type or ""
             file_ext = os.path.splitext(filename)[1].lower()
 
@@ -13604,10 +13663,9 @@ def chat_with_file():
     file = files[0]
 
     # Save uploaded file
-    filename = file.filename
+    filename = _secure_filename(file.filename) or f"upload_{uuid.uuid4().hex}"
     filepath = os.path.join(UPLOAD_DIR, filename)
     file.save(filepath)
-    print(f"[FILE UPLOAD] 文件已保存: {filename} -> {filepath}")
     file_type = file.mimetype or file.content_type or ""
     file_ext = os.path.splitext(filename)[1].lower()
 
@@ -14743,6 +14801,7 @@ def ping():
                 "status": "ok",
                 "latency": latency,
                 "ollama": LocalDispatcher.is_ollama_running(),
+                "version": APP_VERSION,
             }
         )
     except Exception as e:
@@ -14752,7 +14811,20 @@ def ping():
 @app.route("/api/health", methods=["GET"])
 def health():
     """轻量健康检查（不触发模型调用）"""
-    return jsonify({"status": "ok", "time": time.time()})
+    return jsonify({"status": "ok", "time": time.time(), "version": APP_VERSION})
+
+
+@app.route("/api/info", methods=["GET"])
+def api_info():
+    """Application metadata endpoint."""
+    return jsonify(
+        {
+            "version": APP_VERSION,
+            "deploy_mode": os.environ.get("KOTO_DEPLOY_MODE", "local"),
+            "auth_enabled": os.environ.get("KOTO_AUTH_ENABLED", "false").lower()
+            == "true",
+        }
+    )
 
 
 @app.route("/api/v1/models", methods=["GET"])

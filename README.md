@@ -53,6 +53,37 @@ python koto_app.py
 
 打开浏览器访问 `http://localhost:5000`
 
+### Docker Compose (local dev)
+
+```bash
+# Copy env template and fill in API keys
+cp config/gemini_config.env.example .env
+docker compose up
+```
+
+---
+
+## Developer Setup
+
+After cloning, install dev tools and set up pre-commit hooks:
+
+```bash
+pip install -r config/requirements.txt
+pip install pre-commit
+pre-commit install
+```
+
+### Common commands (Makefile)
+
+```bash
+make dev          # Start local server
+make test         # Run tests with coverage
+make lint         # flake8 + bandit
+make format       # isort + black
+make build        # PyInstaller build
+make audit        # CVE scan with pip-audit
+```
+
 ---
 
 ## 云端部署（让他人通过网址使用）
