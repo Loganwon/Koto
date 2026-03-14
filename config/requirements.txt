@@ -12,6 +12,9 @@ psutil>=5.9.0
 markdown>=3.5.0
 gunicorn>=22.0.0           # 生产环境 WSGI 服务器
 python-json-logger>=2.0.7  # Structured JSON logging (KOTO_LOG_FORMAT=json)
+sentry-sdk[flask]>=2.0.0   # Error tracking (set SENTRY_DSN to enable)
+prometheus-flask-exporter>=0.23.0  # Metrics endpoint at /metrics
+flasgger>=0.9.7             # Swagger UI at /apidocs/ (set SWAGGER_ENABLED=true)
 
 # ── Document Processing ──
 python-docx>=1.0.0

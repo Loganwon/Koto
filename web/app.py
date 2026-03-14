@@ -1145,6 +1145,73 @@ CORS(app, origins=_cors_origins)
 
 _app_logger = logging.getLogger("koto.app")
 
+# ── Sentry error tracking (no-op if SENTRY_DSN not set) ──────────────────────
+_sentry_dsn = os.environ.get("SENTRY_DSN", "")
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            integrations=[FlaskIntegration()],
+            release=APP_VERSION,
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_RATE", "0.1")),
+            send_default_pii=False,
+        )
+        _app_logger.info("Sentry error tracking enabled (release=%s)", APP_VERSION)
+    except ImportError:
+        _app_logger.warning("SENTRY_DSN set but sentry-sdk not installed; skipping")
+
+# ── Prometheus metrics (/metrics) ────────────────────────────────────────────
+try:
+    from prometheus_flask_exporter import PrometheusMetrics
+
+    _metrics_token = os.environ.get("METRICS_TOKEN", "")
+    _prometheus = PrometheusMetrics(app, group_by="endpoint")
+    _prometheus.info("koto_app_info", "Koto application info", version=APP_VERSION)
+
+    if _metrics_token:
+        # Require Bearer token to scrape /metrics
+        @app.before_request
+        def _guard_metrics():
+            if request.path == "/metrics":
+                auth = request.headers.get("Authorization", "")
+                if auth != f"Bearer {_metrics_token}":
+                    return _error_response("Unauthorized", 401)
+
+    _app_logger.info("Prometheus metrics enabled at /metrics")
+except ImportError:
+    _app_logger.debug("prometheus-flask-exporter not installed; /metrics disabled")
+
+# ── Swagger / OpenAPI docs (gated by SWAGGER_ENABLED=true) ───────────────────
+if os.environ.get("SWAGGER_ENABLED", "false").lower() == "true":
+    try:
+        from flasgger import Swagger
+
+        _swagger_template = {
+            "swagger": "2.0",
+            "info": {
+                "title": "Koto API",
+                "description": "Koto AI assistant REST API",
+                "version": APP_VERSION,
+            },
+            "basePath": "/",
+            "schemes": ["http", "https"],
+            "securityDefinitions": {
+                "Bearer": {
+                    "type": "apiKey",
+                    "name": "Authorization",
+                    "in": "header",
+                    "description": "JWT token: `Bearer <token>`",
+                }
+            },
+        }
+        Swagger(app, template=_swagger_template)
+        _app_logger.info("Swagger UI enabled at /apidocs/")
+    except ImportError:
+        _app_logger.debug("flasgger not installed; Swagger UI disabled")
+
 
 # ── Request ID middleware ─────────────────────────────────────────────────────
 @app.before_request
@@ -6641,6 +6708,33 @@ def delete_session(session_name):
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
+    """Send a chat message and get a response (non-streaming).
+    ---
+    tags: [Chat]
+    security:
+      - Bearer: []
+    parameters:
+      - in: body
+        name: body
+        schema:
+          required: [session, message]
+          properties:
+            session: {type: string, description: Session/conversation name}
+            message: {type: string, description: User message}
+            locked_model: {type: string, default: auto}
+            locked_task: {type: string}
+    responses:
+      200:
+        description: AI response
+        schema:
+          properties:
+            response: {type: string}
+            model: {type: string}
+      400:
+        description: Missing session or message
+      500:
+        description: Internal error
+    """
     data = request.json
     session_name = data.get("session")
     user_input = data.get("message", "")
@@ -14792,6 +14886,25 @@ def get_ppt_session(session_id):
 
 @app.route("/api/ping", methods=["GET"])
 def ping():
+    """Check connectivity and LLM API reachability.
+    ---
+    tags: [Health]
+    responses:
+      200:
+        description: LLM API reachable
+        schema:
+          properties:
+            status: {type: string, example: ok}
+            latency: {type: number, description: LLM API roundtrip ms}
+            ollama: {type: boolean}
+            version: {type: string}
+      200:
+        description: LLM API unreachable
+        schema:
+          properties:
+            status: {type: string, example: error}
+            error: {type: string}
+    """
     start = time.time()
     try:
         client.models.get(model=MODEL_MAP["CHAT"])
@@ -14810,13 +14923,35 @@ def ping():
 
 @app.route("/api/health", methods=["GET"])
 def health():
-    """轻量健康检查（不触发模型调用）"""
+    """Lightweight health check (no model call).
+    ---
+    tags: [Health]
+    responses:
+      200:
+        description: App is healthy
+        schema:
+          properties:
+            status: {type: string, example: ok}
+            time: {type: number, description: Unix timestamp}
+            version: {type: string}
+    """
     return jsonify({"status": "ok", "time": time.time(), "version": APP_VERSION})
 
 
 @app.route("/api/info", methods=["GET"])
 def api_info():
-    """Application metadata endpoint."""
+    """Application metadata and configuration info.
+    ---
+    tags: [Health]
+    responses:
+      200:
+        description: App metadata
+        schema:
+          properties:
+            version: {type: string}
+            deploy_mode: {type: string, enum: [local, cloud]}
+            auth_enabled: {type: boolean}
+    """
     return jsonify(
         {
             "version": APP_VERSION,

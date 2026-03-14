@@ -28,23 +28,31 @@ logger = logging.getLogger(__name__)
 # ── 配置 ──
 AUTH_ENABLED = os.environ.get("KOTO_AUTH_ENABLED", "false").lower() == "true"
 DEPLOY_MODE = os.environ.get("KOTO_DEPLOY_MODE", "local")
-_jwt_secret_env = os.environ.get("KOTO_JWT_SECRET", "")
 
-if not _jwt_secret_env:
-    if DEPLOY_MODE == "cloud":
-        raise RuntimeError(
-            "KOTO_JWT_SECRET environment variable must be set in cloud/production mode. "
-            'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
-        )
-    else:
-        # Local dev: generate ephemeral secret (tokens invalidate on restart — acceptable for local)
+
+def _validate_jwt_secret() -> str:
+    """Read and validate KOTO_JWT_SECRET. Returns the secret to use.
+
+    Raises:
+        RuntimeError: In cloud mode when KOTO_JWT_SECRET is not set.
+    """
+    secret = os.environ.get("KOTO_JWT_SECRET", "")
+    if not secret:
+        if os.environ.get("KOTO_DEPLOY_MODE", "local") == "cloud":
+            raise RuntimeError(
+                "KOTO_JWT_SECRET environment variable must be set in cloud/production mode. "
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+        # Local dev: generate ephemeral secret (tokens invalidate on restart — acceptable locally)
         logger.warning(
             "[auth] KOTO_JWT_SECRET not set — generating ephemeral secret. "
             "All tokens will invalidate on restart. Set KOTO_JWT_SECRET for persistent sessions."
         )
-        _jwt_secret_env = secrets.token_hex(32)
+        secret = secrets.token_hex(32)
+    return secret
 
-JWT_SECRET = _jwt_secret_env
+
+JWT_SECRET = _validate_jwt_secret()
 JWT_EXPIRY_HOURS = int(os.environ.get("KOTO_JWT_EXPIRY_HOURS", "72"))
 USERS_FILE = os.environ.get("KOTO_USERS_FILE", "config/users.json")
 MAX_DAILY_REQUESTS = int(os.environ.get("KOTO_MAX_DAILY_REQUESTS", "100"))
@@ -257,7 +265,35 @@ def register_auth_routes(app):
 
     @app.route("/api/auth/login", methods=["POST"])
     def auth_login():
-        """用户登录"""
+        """User login — returns JWT token.
+        ---
+        tags: [Auth]
+        parameters:
+          - in: body
+            name: credentials
+            schema:
+              required: [email, password]
+              properties:
+                email: {type: string, format: email}
+                password: {type: string, format: password}
+        responses:
+          200:
+            description: Login successful
+            schema:
+              properties:
+                success: {type: boolean}
+                token: {type: string}
+                user:
+                  properties:
+                    user_id: {type: string}
+                    email: {type: string}
+                    name: {type: string}
+                    plan: {type: string}
+          401:
+            description: Invalid credentials
+          429:
+            description: Rate limit exceeded
+        """
         if not AUTH_ENABLED:
             return jsonify(
                 {
