@@ -1,4 +1,4 @@
-﻿name: Build & Release Koto
+name: Build & Release Koto
 
 # ─── 触发条件 ───────────────────────────────────────────────────────────────
 # 1. 推送版本标签（如 v1.2.0）→ 自动构建 + 创建 GitHub Release
@@ -50,7 +50,7 @@ jobs:
           Write-Host "Building Koto version: $v"
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~\AppData\Local\pip\Cache
           key: ${{ runner.os }}-pip-${{ hashFiles('config/requirements.txt') }}
