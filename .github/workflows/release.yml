@@ -1,4 +1,4 @@
-﻿name: Build & Release Koto
+name: Build & Release Koto
 
 # ─── 触发条件 ───────────────────────────────────────────────────────────────
 # 1. 推送版本标签（如 v1.2.0）→ 自动构建 + 创建 GitHub Release
@@ -259,7 +259,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         id: meta
         with:
           images: ghcr.io/${{ github.repository }}
