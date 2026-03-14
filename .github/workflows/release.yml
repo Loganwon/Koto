@@ -50,7 +50,7 @@ jobs:
           Write-Host "Building Koto version: $v"
 
       - name: Cache pip
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~\AppData\Local\pip\Cache
           key: ${{ runner.os }}-pip-${{ hashFiles('config/requirements.txt') }}
