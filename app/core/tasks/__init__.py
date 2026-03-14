@@ -27,6 +27,7 @@ from .task_planner import (
     TaskPlanner,
     PlanStep,
     StepStatus,
+    StepResult,
     Plan,
 )
 
@@ -44,5 +45,6 @@ __all__ = [
     "TaskPlanner",
     "PlanStep",
     "StepStatus",
+    "StepResult",
     "Plan",
 ]
