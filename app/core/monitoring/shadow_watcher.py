@@ -259,6 +259,7 @@ def _default_obs() -> Dict[str, Any]:
         "recurring_phrases": {},   # {phrase: count}  — 高频请求动作短语，触发 Skill 建议
         "hourly_task_type": {},    # {"9": {"代码": 3, "分析": 1}} — 时段×任务交叉
         "corrections": 0,          # 用户修正 AI 次数（质量信号）
+        "recent_snippets": [],     # 最近 20 条对话摘要 [{user, ai, ts}]（截断至 120 字，供影子消息引用）
     }
 
 
@@ -357,6 +358,11 @@ class ShadowWatcher:
                     return dict(t)
         return None
 
+    def get_recent_snippets(self, n: int = 6) -> List[Dict]:
+        """返回最近 n 条对话摘要（user + ai 各自截断至 120 字），供影子消息生成时引用。"""
+        with self._obs_lock:
+            return list(self._obs.get("recent_snippets", []))[-n:]
+
     def dismiss_task(self, task_id: str):
         with self._obs_lock:
             for t in self._obs.get("open_tasks", []):
@@ -434,6 +440,17 @@ class ShadowWatcher:
                 # 工作会话统计
                 wp = self._obs.setdefault("work_pattern", {})
                 wp["sessions_last_30d"] = wp.get("sessions_last_30d", 0) + 1
+
+                # 对话摘要片段（保留最近 20 条，截断至 120 字，供影子消息生成引用）
+                snippets = self._obs.setdefault("recent_snippets", [])
+                snippets.append({
+                    "user": user_msg[:120],
+                    "ai": ai_msg[:120],
+                    "ts": now.isoformat(timespec="seconds"),
+                    "session": session_id,
+                })
+                if len(snippets) > 20:
+                    snippets[:] = snippets[-20:]
 
             # 会话轮次计数（无需持锁）
             _session_ex = self._inc_session_exchanges(session_id)

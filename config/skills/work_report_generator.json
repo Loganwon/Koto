@@ -2,7 +2,7 @@
   "id": "work_report_generator",
   "name": "工作汇报生成",
   "icon": "📋",
-  "category": "domain",
+  "category": "workflow",
   "description": "根据用户描述或工作记录，自动生成结构完整、语言正式的日报/周报/月报，可输出为 Word 或 Markdown",
   "intent_description": "用户说「帮我写日报/周报/月报」「把今天的工作整理一下」「生成汇报材料」或描述了工作内容需要整理成报告时",
   "output_spec": {
@@ -91,5 +91,18 @@
     "写日报",
     "日报",
     "写报告"
-  ]
+  ],
+
+  "plan_template": [
+    "1. 识别报告类型（日报/周报/月报）和覆盖时间范围",
+    "2. 可选：list_recent_files + memory_search 自动汇总工作内容",
+    "3. 提炼「本期完成」：用具体数字替换模糊描述（完成N项/处理N份/提升N%）",
+    "4. 梳理「问题&风险」：blocking 项用⚠️标注，未解决问题注明原因",
+    "5. 规划「下期计划」：与上期问题形成呼应，有明确可交付成果",
+    "6. 输出后询问保存格式：write_file(report_YYYYMMDD.docx 或 .md)"
+  ],
+
+  "tool_orchestration": "• 用户直接描述工作内容 → 直接生成报告，不调用工具\n• 用户希望自动汇总 →\n  · list_recent_files(days=7/30) 扫描工作文件变动\n  · memory_search('本周完成/本月完成/今日工作') 补充记忆中的工作记录\n• 识别报告类型（日报=简洁/周报=标准/月报=详细）→ 调整详略程度\n• 数字化原则：用「完成 N 个功能」「处理 N 份文件」而非「完成了很多工作」\n• 生成后询问保存：write_file(report_YYYYMMDD.docx) 或 .md，默认 .md",
+
+  "react_protocol": "light"
 }

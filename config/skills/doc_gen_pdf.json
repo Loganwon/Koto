@@ -45,5 +45,17 @@
     "正式文件",
     "归档",
     "文件生成"
-  ]
+  ],
+
+  "plan_template": [
+    "1. 确认 PDF 用途（对外发布/存档/合规提交/打印分发）",
+    "2. 评估内容适合直接生成 PDF 还是先生成 Word 再转换",
+    "3. 规划文档结构（章节/页眉页脚/封面/附录）",
+    "4. 整理内容后调用 create_pdf_document 工具",
+    "5. 告知用户文件名/下载链接，说明文档结构"
+  ],
+
+  "tool_orchestration": "• 用户要求正式 PDF（报告/合规/说明书）→ 调用 create_pdf_document 工具\n• 已有 Word 文档需转 PDF → convert_file(word_path, target_format='pdf')\n• 内容包含复杂排版（多栏/精确页眉页脚）→ 先生成 Word 再转 PDF 效果更佳\n• 用户要求打印格式 → 在参数中指定页边距（标准 2.5cm）和页眉页脚内容\n• PDF 需要附件/多文档合并 → 逐个 create_pdf_document 再合并",
+
+  "react_protocol": "light"
 }

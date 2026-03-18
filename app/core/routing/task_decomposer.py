@@ -1,3 +1,6 @@
+from typing import Optional
+
+
 class TaskDecomposer:
     """
     分解复杂任务为多个子任务
@@ -269,3 +272,42 @@ class TaskDecomposer:
             subtasks.append(subtask)
 
         return subtasks
+
+    @classmethod
+    def suggest_multiagent_preset(cls, compound_info: dict) -> Optional[str]:
+        """
+        根据复合任务分析结果，建议使用哪个 MultiAgentOrchestrator 预置管线。
+
+        返回值:
+            "content"  — 内容创作型（研究 → 写作 → Critic → 修订）
+            "code"     — 代码生成型（研究 → 编码 → 审查 → 修订）
+            "analysis" — 数据分析型（研究 → 分析 → Critic → 修订）
+            None       — 不适合走多 Agent 管线，使用默认单 Agent 流程
+        """
+        if not compound_info.get("is_compound"):
+            return None
+
+        pattern = compound_info.get("pattern") or ""
+        primary = (compound_info.get("primary_task") or "").upper()
+        secondary = [s.upper() for s in (compound_info.get("secondary_tasks") or [])]
+
+        # 代码相关
+        if primary in ("CODER", "CODE") or "CODE" in secondary:
+            return "code"
+
+        # 研究 + 数据 / 分析类
+        if pattern in ("research_and_document",) or primary in ("RESEARCH",):
+            if any(k in secondary for k in ("FILE_GEN", "PAINTER")):
+                return "analysis"
+            return "content"
+
+        # 搜索 + 文档 → 内容管线
+        if pattern in ("search_and_document", "discuss_and_document"):
+            return "content"
+
+        # 文档工作流 → 内容管线
+        if pattern == "document_workflow":
+            return "content"
+
+        # 默认：内容管线兜底
+        return "content"

@@ -53,6 +53,7 @@ class JobSpec:
     max_retries: int = 0
     timeout_seconds: float = 300.0
     metadata: Optional[Dict[str, Any]] = None
+    priority: int = 1  # TaskPriority 整数值（0=低/1=正常/2=高/3=紧急），数值越大越优先
 
 
 @dataclass
@@ -198,12 +199,16 @@ class JobRunner:
         # 将 payload 序列化为 user_input（TaskLedger 的文本字段）
         user_input_str = json.dumps(spec.payload, ensure_ascii=False)[:1000]
 
+        # 优先级映射：数值越大越优先。PriorityQueue 用最小堆，故用负数表示高优先
+        _priority_int = max(0, min(3, int(spec.priority)))
+
         task = ledger.create(
             session_id=spec.session_id or "system",
             user_input=user_input_str,
             task_type=spec.job_type,
             skill_id=spec.skill_id,
             source="job_runner",
+            priority=_priority_int,
             metadata={
                 "job_type": spec.job_type,
                 "max_retries": spec.max_retries,
@@ -212,9 +217,11 @@ class JobRunner:
             },
         )
 
-        self._queue.put((5, time.time(), task.task_id, spec))
+        # PriorityQueue 最小堆：用 (3 - priority) 保证高优先级先出队
+        self._queue.put((3 - _priority_int, time.time(), task.task_id, spec))
         logger.info(
-            "[JobRunner] 作业入队 task_id=%s type=%s", task.task_id[:8], spec.job_type
+            "[JobRunner] 作业入队 task_id=%s type=%s priority=%d",
+            task.task_id[:8], spec.job_type, _priority_int,
         )
         return task.task_id
 
@@ -320,9 +327,11 @@ class JobRunner:
                     skill_id=task.skill_id,
                     max_retries=meta.get("max_retries", 0),
                     timeout_seconds=meta.get("timeout_seconds", 300.0),
+                    priority=getattr(task, "priority", 1),
                     metadata=meta,
                 )
-                self._queue.put((5, time.time(), task.task_id, spec))
+                _p = max(0, min(3, int(spec.priority)))
+                self._queue.put((3 - _p, time.time(), task.task_id, spec))
                 logger.info("[JobRunner] 恢复挂起任务 task_id=%s", task.task_id[:8])
         except Exception as exc:
             logger.warning("[JobRunner] 崩溃恢复失败: %s", exc)

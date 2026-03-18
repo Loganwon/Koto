@@ -58,11 +58,25 @@ class UnifiedAgent(Agent):
     - PII 脱敏护栏：input 发往云端前自动掩码，answer 返回后还原
     - 输出质量验收：最终答案经 OutputValidator 检查，必要时触发重试或格式化
     - Shadow Tracing 接口：通过 report_feedback() 触发影子记录
+
+    v5 新增
+    ───────
+    - 模型升级重试（Model Escalation）：LLM 连接/配额错误时自动切换到更强模型重试
     """
 
     MAX_STEPS = 15
     # 输出验收最大重试次数（RETRY action 触发时）
     MAX_VALIDATION_RETRIES = 1
+    # LLM 错误后最多尝试几个升级模型（0 = 不升级，直接失败）
+    MAX_ESCALATION_STEPS = 2
+
+    # 升级链：按强度升序排列，优先尝试同系列快速模型，再升到 Pro
+    _ESCALATION_CHAIN = [
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+    ]
     
     def __init__(
         self,
@@ -233,6 +247,9 @@ class UnifiedAgent(Agent):
 
         final_answer: Optional[str] = None
         validation_retries = 0
+        # v5: 当前生效模型（可因升级而变化）和升级计数器
+        _active_model_id = self.model_id
+        _escalation_count = 0
         # P0: 记录本次会话中 LLM 原生调用的 skill_* 工具（不含用户手动激活的 skill）
         _native_skill_calls: list = []
 
@@ -404,25 +421,23 @@ class UnifiedAgent(Agent):
                     logger.debug("[UnifiedAgent] executor_tools 过滤跳过: %s", _ste)
 
             try:
-                # 使用 ModelFallbackExecutor：首选 self.model_id，失败时自动降级
+                # 使用 ModelFallbackExecutor：首选 _active_model_id，失败时自动降级
                 try:
                     from app.core.llm.model_fallback import get_fallback_executor
                     _executor = get_fallback_executor()
                     response = _executor.generate_with_fallback(
                         provider=self.llm,
                         prompt=current_history,
-                        preferred_model=self.model_id,
+                        preferred_model=_active_model_id,
                         task_type=_task_type or self.task_type or "CHAT",
                         system_instruction=_effective_instruction,
                         tools=tools_def if tools_def else None,
                         stream=False,
                     )
-                    # 如果执行器选了不同的模型，同步更新当前 model_id
-                    # （不修改 self.model_id，避免影响外部状态）
                 except ImportError:
                     response = self.llm.generate_content(
                         prompt=current_history,
-                        model=self.model_id,
+                        model=_active_model_id,
                         system_instruction=_effective_instruction,
                         tools=tools_def if tools_def else None,
                         stream=False,
@@ -745,15 +760,51 @@ class UnifiedAgent(Agent):
                     })
             
             except Exception as e:
+                err_msg = str(e)
                 logger.error(f"Agent loop error: {e}", exc_info=True)
+
+                # ── v5: 模型升级重试 ──────────────────────────────────────────
+                # 对于 LLM 调用错误（配额、模型不可用等），尝试升级到更强模型
+                _is_llm_error = any(
+                    kw in err_msg.lower()
+                    for kw in ("quota", "rate_limit", "overloaded", "not found",
+                               "unavailable", "model", "429", "503", "404")
+                )
+                if _is_llm_error and _escalation_count < self.MAX_ESCALATION_STEPS:
+                    # 从升级链中找下一个比当前更强的模型
+                    try:
+                        _current_idx = self._ESCALATION_CHAIN.index(_active_model_id)
+                    except ValueError:
+                        _current_idx = -1
+                    _next_candidates = self._ESCALATION_CHAIN[_current_idx + 1:]
+                    _next_model = _next_candidates[0] if _next_candidates else None
+                    if _next_model and _next_model != _active_model_id:
+                        _escalation_count += 1
+                        logger.warning(
+                            f"[UnifiedAgent] ⬆ 模型升级重试 "
+                            f"{_active_model_id} → {_next_model} "
+                            f"({_escalation_count}/{self.MAX_ESCALATION_STEPS})"
+                        )
+                        _active_model_id = _next_model
+                        _pub(
+                            "THOUGHT",
+                            f"⬆ 切换到更强模型 {_next_model} 重试...",
+                        )
+                        try:
+                            if _ledger:
+                                _ledger.increment_retries(_task_id)
+                        except Exception:
+                            pass
+                        continue  # 重新进入循环，使用升级后的模型
+
                 yield AgentStep(
                     step_type=AgentStepType.ERROR,
-                    content=f"An error occurred: {str(e)}",
+                    content=f"An error occurred: {err_msg}",
                 )
-                _pub("ERROR", str(e))
+                _pub("ERROR", err_msg)
                 try:
                     if _ledger:
-                        _ledger.mark_failed(_task_id, error=str(e))
+                        _ledger.mark_failed(_task_id, error=err_msg)
                 except Exception:
                     pass
                 break

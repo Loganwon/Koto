@@ -1742,6 +1742,7 @@ class SkillManager:
                     "has_custom_prompt": s.get("prompt") != builtin_prompt,
                     "prompt": s["prompt"],
                     "is_builtin": True,
+                    "ui_config": cls._get_ui_config_dict(sid),
                 }
             )
 
@@ -1762,10 +1763,61 @@ class SkillManager:
                     "has_custom_prompt": False,
                     "prompt": s.get("prompt", ""),
                     "is_builtin": False,
+                    "ui_config": cls._get_ui_config_dict(skill_id),
                 }
             )
 
         return result
+
+    @classmethod
+    def _get_ui_config_dict(cls, skill_id: str) -> dict:
+        """返回某个 Skill 的 ui_config dict，若无则返回空 dict"""
+        skill_def = cls._def_registry.get(skill_id)
+        if skill_def and hasattr(skill_def, "ui_config") and skill_def.ui_config:
+            return skill_def.ui_config.to_dict()
+        return {}
+
+    @classmethod
+    def get_active_ui_config(cls) -> dict:
+        """
+        合并所有已启用 Skill 的 ui_config，返回最终生效的 UI 配置。
+
+        多个 Skill 同时启用时，按优先级（priority 字段降序）依次合并，
+        后加载的 Skill 的非空字段覆盖先加载的。
+        返回格式:
+          {
+            "has_ui": bool,
+            "config": { ...SkillUIConfig 的完整字段... },
+            "sources": ["skill_id1", "skill_id2"]  # 贡献了 UI 配置的 Skill
+          }
+        """
+        cls._ensure_init()
+        from app.core.skills.skill_schema import SkillUIConfig as _UIConfig
+
+        # 收集已启用且有 ui_config 的 Skill，按 priority 降序
+        active_with_ui = []
+        for skill_id, s in cls._registry.items():
+            if not s.get("enabled", False):
+                continue
+            skill_def = cls._def_registry.get(skill_id)
+            if not skill_def:
+                continue
+            if not hasattr(skill_def, "ui_config") or skill_def.ui_config.is_empty():
+                continue
+            active_with_ui.append((skill_def.priority, skill_id, skill_def.ui_config))
+
+        if not active_with_ui:
+            return {"has_ui": False, "config": _UIConfig().to_dict(), "sources": []}
+
+        # 按优先级升序排列（priority 高的最后覆盖，优先生效）
+        active_with_ui.sort(key=lambda x: x[0])
+        merged = _UIConfig()
+        sources = []
+        for _, skill_id, ui_cfg in active_with_ui:
+            merged = merged.merge(ui_cfg)
+            sources.append(skill_id)
+
+        return {"has_ui": True, "config": merged.to_dict(), "sources": sources}
 
     @classmethod
     def set_enabled(cls, skill_id: str, enabled: bool) -> bool:
@@ -1998,6 +2050,55 @@ class SkillManager:
                         "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
                         + "\n".join(f"{i+1}. {step}" for i, step in enumerate(pt))
                     )
+
+                # ── tool_orchestration：工具调用条件决策树 ──────────────────
+                toi = (
+                    getattr(skill_def, "tool_orchestration", None)
+                    if skill_def else None
+                ) or s.get("tool_orchestration", "")
+                if toi:
+                    p = p + "\n\n### 🔧 工具调用策略（根据输入动态选择）\n" + toi
+
+                # ── react_protocol：ReAct 执行循环 ─────────────────────────
+                rp = (
+                    getattr(skill_def, "react_protocol", None)
+                    if skill_def else None
+                ) or s.get("react_protocol", "")
+                if rp == "light":
+                    p = p + (
+                        "\n\n> 💭 **执行规则**：每次调用工具前，先一句话说明调用原因；"
+                        "观察结果后，明确下一步决策；达到目标后直接输出答案，不再调用工具。"
+                    )
+                elif rp == "full":
+                    p = p + (
+                        "\n\n### 🔄 执行循环协议（ReAct）\n"
+                        "每轮处理遵循以下循环，直到任务完成：\n"
+                        "1. **思考 (Thought)**：分析当前信息，判断下一步最优操作\n"
+                        "2. **行动 (Action)**：选择工具并说明调用理由（一句话）\n"
+                        "3. **观察 (Observation)**：解读工具返回结果，提取关键信息\n"
+                        "4. **→ 重复** 直到信息充足，输出最终答案\n\n"
+                        "**约束**：\n"
+                        "- 不要重复调用结果相同的工具（浪费 token）\n"
+                        "- 工具返回空/出错时，换一个工具或策略，不要原样重试\n"
+                        "- 达到目标后，直接输出答案，不再调用工具"
+                    )
+
+                # ── multi_model_hint：多模型协作建议 ──────────────────────
+                mmh = (
+                    getattr(skill_def, "multi_model_hint", None)
+                    if skill_def else None
+                ) or s.get("multi_model_hint", "")
+                if mmh:
+                    p = p + "\n\n### 🤝 多模型协作建议\n" + mmh
+
+                # ── handoff_context：下游交接上下文说明 ───────────────────
+                hc = (
+                    getattr(skill_def, "handoff_context", None)
+                    if skill_def else None
+                ) or s.get("handoff_context", "")
+                if hc:
+                    p = p + "\n\n### 📤 向下游传递的数据（供后续技能使用）\n" + hc
+
                 active_prompts.append(p)
 
             _inject_skill_count += 1
@@ -2065,6 +2166,31 @@ class SkillManager:
                     p = p + (
                         "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
                         + "\n".join(f"{i+1}. {step}" for i, step in enumerate(pt))
+                    )
+                # 临时 skill 也注入工具编排和 ReAct 协议
+                toi = getattr(skill_def, "tool_orchestration", None) if skill_def else None
+                if not toi and skill_def:
+                    toi = s.get("tool_orchestration", "")
+                if toi:
+                    p = p + "\n\n### 🔧 工具调用策略（根据输入动态选择）\n" + toi
+                rp = getattr(skill_def, "react_protocol", None) if skill_def else ""
+                if rp == "light":
+                    p = p + (
+                        "\n\n> 💭 **执行规则**：每次调用工具前，先一句话说明调用原因；"
+                        "观察结果后，明确下一步决策；达到目标后直接输出答案，不再调用工具。"
+                    )
+                elif rp == "full":
+                    p = p + (
+                        "\n\n### 🔄 执行循环协议（ReAct）\n"
+                        "每轮处理遵循以下循环，直到任务完成：\n"
+                        "1. **思考 (Thought)**：分析当前信息，判断下一步最优操作\n"
+                        "2. **行动 (Action)**：选择工具并说明调用理由（一句话）\n"
+                        "3. **观察 (Observation)**：解读工具返回结果，提取关键信息\n"
+                        "4. **→ 重复** 直到信息充足，输出最终答案\n\n"
+                        "**约束**：\n"
+                        "- 不要重复调用结果相同的工具（浪费 token）\n"
+                        "- 工具返回空/出错时，换一个工具或策略，不要原样重试\n"
+                        "- 达到目标后，直接输出答案，不再调用工具"
                     )
                 auto_prompts.append(p)
                 logger.debug(f"[SkillManager] 🤖 临时注入 Auto-Skill: {skill_id}")
@@ -2322,7 +2448,7 @@ class SkillManager:
                 return
             for skill_file in skills_dir.glob("*.json"):
                 try:
-                    with open(skill_file, "r", encoding="utf-8") as f:
+                    with open(skill_file, "r", encoding="utf-8-sig") as f:
                         data = json.load(f)
                     skill_def = SkillDefinition.from_dict(data)
                     if skill_def.id in cls._def_registry:
@@ -2345,6 +2471,18 @@ class SkillManager:
                             if reg_entry:
                                 reg_entry["prompt"] = skill_def.render_prompt()
                                 reg_entry["plan_template"] = skill_def.plan_template
+                        # ── v3 动态编排字段 ─────────────────────────────────
+                        if skill_def.tool_orchestration:
+                            existing.tool_orchestration = skill_def.tool_orchestration
+                        if skill_def.react_protocol:
+                            existing.react_protocol = skill_def.react_protocol
+                        if skill_def.multi_model_hint:
+                            existing.multi_model_hint = skill_def.multi_model_hint
+                        if skill_def.handoff_context:
+                            existing.handoff_context = skill_def.handoff_context
+                        # ── UI 定制配置 ────────────────────────────────────
+                        if hasattr(skill_def, "ui_config") and not skill_def.ui_config.is_empty():
+                            existing.ui_config = skill_def.ui_config
                         logger.debug(f"[SkillManager] 合并自定义增强字段到内置 Skill: {skill_def.id}")
                     else:
                         cls._def_registry[skill_def.id] = skill_def

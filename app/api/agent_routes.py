@@ -2041,3 +2041,215 @@ def distill_prerequisites():
         )
     except Exception as e:
         return jsonify({"ready": False, "error": str(e)}), 500
+
+
+# ──────────────────────────────────────────────────────────────────
+# Multi-Agent Pipeline API
+# POST /api/agent/multi-run        — 同步多 Agent 管线执行
+# POST /api/agent/multi-run/stream — SSE 流式多 Agent 管线执行
+# ──────────────────────────────────────────────────────────────────
+
+
+@agent_bp.route("/multi-run", methods=["POST"])
+def multi_run():
+    """
+    启动多 Agent 协作管线（同步，等待全部完成后返回）。
+
+    请求体 (JSON):
+        user_input    (str, 必填)  — 用户任务描述
+        preset        (str, 可选)  — "content" | "code" | "analysis"，默认 "content"
+        model_id      (str, 可选)  — 使用的模型，默认 gemini-3-flash-preview
+        max_revisions (int, 可选)  — Critic 最大修订次数，默认 1
+        session_id    (str, 可选)  — 会话 ID（留空自动生成）
+        roles         (list, 可选) — 自定义角色定义列表（会覆盖 preset）
+            每项格式: {
+                "name": str, "display_name": str, "system_prompt": str,
+                "output_field": str, "is_critic": bool (默认 false),
+                "temperature": float (默认 0.7), "model_id": str (可选)
+            }
+
+    响应:
+        { "session_id": str, "output": str, "steps": [...], "error": str|null }
+    """
+    try:
+        from app.core.agent.multi_agent import (
+            AgentRole,
+            MultiAgentOrchestrator,
+            ROLES,
+        )
+
+        body = request.get_json(silent=True) or {}
+        user_input = (body.get("user_input") or "").strip()
+        if not user_input:
+            return jsonify({"error": "user_input is required"}), 400
+
+        preset = (body.get("preset") or "content").lower()
+        model_id = body.get("model_id") or "gemini-3-flash-preview"
+        max_revisions = int(body.get("max_revisions", 1))
+        session_id = body.get("session_id") or None
+        custom_roles_raw = body.get("roles")
+
+        # 构建角色列表
+        if custom_roles_raw and isinstance(custom_roles_raw, list):
+            roles = []
+            for rd in custom_roles_raw:
+                if not isinstance(rd, dict):
+                    continue
+                if not rd.get("name") or not rd.get("system_prompt"):
+                    continue
+                roles.append(
+                    AgentRole(
+                        name=str(rd["name"]),
+                        display_name=str(rd.get("display_name", rd["name"])),
+                        system_prompt=str(rd["system_prompt"]),
+                        output_field=str(rd.get("output_field", rd["name"] + "_output")),
+                        is_critic=bool(rd.get("is_critic", False)),
+                        temperature=float(rd.get("temperature", 0.7)),
+                        model_id=rd.get("model_id") or None,
+                    )
+                )
+            if not roles:
+                return jsonify({"error": "No valid roles provided"}), 400
+            orch = MultiAgentOrchestrator(
+                roles=roles, model_id=model_id, max_revisions=max_revisions
+            )
+        elif preset == "code":
+            orch = MultiAgentOrchestrator.preset_code_pipeline(
+                model_id=model_id, max_revisions=max_revisions
+            )
+        elif preset == "analysis":
+            orch = MultiAgentOrchestrator.preset_analysis_pipeline(
+                model_id=model_id, max_revisions=max_revisions
+            )
+        else:
+            orch = MultiAgentOrchestrator.preset_content_pipeline(
+                model_id=model_id, max_revisions=max_revisions
+            )
+
+        result = orch.run(user_input=user_input, session_id=session_id)
+
+        # ── TaskLedger 追踪 ────────────────────────────────────────────────
+        try:
+            from app.core.tasks.task_ledger import TaskPriority, get_ledger
+
+            ledger = get_ledger()
+            task_rec = ledger.create(
+                session_id=session_id or result.get("state", {}).get("session_id", "multi_agent"),
+                user_input=user_input[:500],
+                task_type="multi_agent",
+                source="multi_agent_api",
+                metadata={"preset": preset, "steps": result.get("steps", [])},
+                priority=TaskPriority.NORMAL,
+            )
+            if result.get("error"):
+                ledger.mark_failed(task_rec.task_id, result["error"][:500])
+            else:
+                ledger.mark_completed(task_rec.task_id, result_summary=(result.get("output") or "")[:200])
+        except Exception as _te:
+            logger.debug("[multi_run] TaskLedger 记录失败（非致命）: %s", _te)
+
+        return jsonify(result), 200
+
+    except Exception as exc:
+        logger.error("[multi_run] 执行失败: %s", exc, exc_info=True)
+        return jsonify({"error": str(exc), "output": "", "steps": []}), 500
+
+
+@agent_bp.route("/multi-run/stream", methods=["POST"])
+def multi_run_stream():
+    """
+    Multi-Agent 管线 SSE 流式执行。
+    每个 Agent 节点完成时推送一条 event: data JSON。
+
+    请求体与 POST /api/agent/multi-run 相同。
+
+    SSE 事件格式:
+        data: {"agent": "researcher", "content": "...", "done": false}
+        data: {"agent": "finalize",   "content": "...", "done": true}
+    """
+    try:
+        from app.core.agent.multi_agent import (
+            AgentRole,
+            MultiAgentOrchestrator,
+            ROLES,
+        )
+
+        body = request.get_json(silent=True) or {}
+        user_input = (body.get("user_input") or "").strip()
+        if not user_input:
+            return jsonify({"error": "user_input is required"}), 400
+
+        preset = (body.get("preset") or "content").lower()
+        model_id = body.get("model_id") or "gemini-3-flash-preview"
+        max_revisions = int(body.get("max_revisions", 1))
+        session_id = body.get("session_id") or None
+
+        if preset == "code":
+            orch = MultiAgentOrchestrator.preset_code_pipeline(
+                model_id=model_id, max_revisions=max_revisions
+            )
+        elif preset == "analysis":
+            orch = MultiAgentOrchestrator.preset_analysis_pipeline(
+                model_id=model_id, max_revisions=max_revisions
+            )
+        else:
+            orch = MultiAgentOrchestrator.preset_content_pipeline(
+                model_id=model_id, max_revisions=max_revisions
+            )
+
+        import json as _json
+
+        def _generate():
+            try:
+                for event in orch.stream(user_input=user_input, session_id=session_id):
+                    yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
+            except Exception as exc:
+                err_event = {"agent": "error", "content": str(exc), "done": True}
+                yield f"data: {_json.dumps(err_event, ensure_ascii=False)}\n\n"
+
+        from flask import Response
+
+        return Response(
+            _generate(),
+            mimetype="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    except Exception as exc:
+        logger.error("[multi_run_stream] 失败: %s", exc, exc_info=True)
+        return jsonify({"error": str(exc)}), 500
+
+
+@agent_bp.route("/multi-run/graph", methods=["GET"])
+def multi_run_graph():
+    """
+    返回多 Agent 管线的 Mermaid 图结构（可视化调试）。
+
+    查询参数:
+        preset  — "content" | "code" | "analysis"（默认 content）
+
+    响应:
+        { "mermaid": "graph TD\\n  ..." }
+    """
+    try:
+        from app.core.agent.multi_agent import MultiAgentOrchestrator
+
+        preset = (request.args.get("preset") or "content").lower()
+        model_id = request.args.get("model_id") or "gemini-3-flash-preview"
+
+        if preset == "code":
+            orch = MultiAgentOrchestrator.preset_code_pipeline(model_id=model_id)
+        elif preset == "analysis":
+            orch = MultiAgentOrchestrator.preset_analysis_pipeline(model_id=model_id)
+        else:
+            orch = MultiAgentOrchestrator.preset_content_pipeline(model_id=model_id)
+
+        mermaid = orch.get_graph_mermaid()
+        return jsonify({"preset": preset, "mermaid": mermaid}), 200
+
+    except Exception as exc:
+        logger.error("[multi_run_graph] 失败: %s", exc, exc_info=True)
+        return jsonify({"error": str(exc)}), 500

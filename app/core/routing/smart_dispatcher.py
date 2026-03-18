@@ -1023,22 +1023,10 @@ class SmartDispatcher:
         elif isinstance(local_confidence, (int, float)):
             local_conf_value = float(local_confidence)
 
-        # === 离线兜底：本地 Ollama 路由（云端不可用时的后备）===
-        # 仅在没有 API 密钥或网络不通时触发
+        # === 离线兜底 / 在线决策分支 ===
         if not client:
-            print(f"[SmartDispatcher] 🔌 云端不可用，尝试本地 Ollama 路由...")
-            local_task, local_confidence, local_source, local_hint, local_complexity = _get_local_model_router().classify_with_hint(user_input, timeout=4.5)
-            local_conf_value = 0.0
-            if isinstance(local_confidence, str):
-                m = re.search(r"(\d+\.\d+)", local_confidence)
-                if m:
-                    try:
-                        local_conf_value = float(m.group(1))
-                    except Exception:
-                        local_conf_value = 0.0
-            elif isinstance(local_confidence, (int, float)):
-                local_conf_value = float(local_confidence)
-
+            # 云端不可用：直接使用已获取的本地路由结果（不重复调用）
+            print(f"[SmartDispatcher] 🔌 云端不可用，使用本地 Ollama 路由结果...")
             local_confident = local_conf_value >= 0.70
             if local_task and local_confident:
                 context_info = context_info or {}
@@ -1051,8 +1039,50 @@ class SmartDispatcher:
                 if local_complexity == "complex" and local_task != "CHAT":
                     context_info["complexity"] = "complex"
                 return local_task, f"{local_confidence}", context_info
+        else:
+            # 云端可用：本地高置信直接采纳；低置信调用 AIRouter 仲裁
+            local_confident = local_conf_value >= 0.72
+            if local_task and local_confident:
+                # 本地路由置信足够，直接采纳（省去 AIRouter 一次额外 API 调用）
+                context_info = context_info or {}
+                context_info["routing_list"] = cls._build_routing_list(
+                    similarity_scores, boosts={local_task: local_conf_value},
+                    reasons={local_task: ["local_model_high_conf"]}
+                )
+                if local_hint:
+                    context_info["skill_prompt"] = local_hint
+                if local_complexity == "complex" and local_task != "CHAT":
+                    context_info["complexity"] = "complex"
+                print(f"[SmartDispatcher] ✅ 本地路由高置信采纳: {local_task} ({local_conf_value:.2f})")
+                return local_task, f"{local_confidence}", context_info
 
-        # === 关键词兜底规则（云端和本地模型都无法判断时触发）===
+            # 本地置信低（<0.72）→ 调用 AIRouter 仲裁（云端轻量分类，超时 2s）
+            if cls.USE_AI_ROUTER:
+                try:
+                    from app.core.routing.ai_router import AIRouter
+                    ai_task, ai_conf, ai_source = AIRouter.classify(
+                        client, user_input, timeout=2.0
+                    )
+                    if ai_task:
+                        context_info = context_info or {}
+                        context_info["routing_list"] = cls._build_routing_list(
+                            similarity_scores, boosts={ai_task: 0.85},
+                            reasons={ai_task: ["ai_router_arbitration"]}
+                        )
+                        # 本地模型生成的执行 hint 更精准，优先保留
+                        if local_hint:
+                            context_info["skill_prompt"] = local_hint
+                        if local_complexity == "complex" and ai_task != "CHAT":
+                            context_info["complexity"] = "complex"
+                        print(
+                            f"[SmartDispatcher] 🤖 AIRouter 仲裁采纳: {ai_task} "
+                            f"(local={local_task}/{local_conf_value:.2f})"
+                        )
+                        return ai_task, f"🤖 AIRouter {ai_conf}", context_info
+                except Exception as _air_err:
+                    print(f"[SmartDispatcher] ⚠️ AIRouter 仲裁失败: {_air_err}")
+
+        # === 关键词兜底规则（所有模型路由均未产生高置信结果时触发）===
         print(f"[SmartDispatcher] ⚠️ 模型路由均未成功，回退关键词兜底规则...")
 
         # -- 附件文档标注 (需要 file_context 支撑，不纯靠关键词) --
@@ -1176,6 +1206,12 @@ class SmartDispatcher:
                 "is_multi_step_task": True,
                 "multi_step_info": compound_info,
             }
+            try:
+                _ma_preset = _get_task_decomposer().suggest_multiagent_preset(compound_info)
+                if _ma_preset:
+                    context_info["multiagent_preset"] = _ma_preset
+            except Exception:
+                pass
             context_info["routing_list"] = base_routing_list
             return "MULTI_STEP", "🔄 Fallback-MultiStep", context_info
 
