@@ -1,0 +1,27 @@
+﻿Koto — Proprietary Software License
+Copyright (C) 2024-2026 Koto AI Assistant. All rights reserved.
+
+NOTICE: This software and its source code are proprietary and confidential.
+Unauthorized copying, reproduction, redistribution, modification, or use of
+this software, in whole or in part, without express written permission from
+the copyright holder is strictly prohibited.
+
+PERMITTED USES:
+  - Personal, non-commercial use for evaluation purposes only.
+  - Fork or clone for the purpose of submitting pull requests to the
+    official repository (https://github.com/Loganwon/Koto).
+
+PROHIBITED USES:
+  - Commercial use, resale, or SaaS/hosted offering of any kind.
+  - Rebranding, white-labeling, or presenting this software as your own.
+  - Redistribution of source code or binaries to third parties.
+  - Incorporating this code into another product, open-source or proprietary.
+
+For commercial licensing inquiries, contact the author via GitHub.
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES,
+OR OTHER LIABILITY ARISING FROM THE USE OF THIS SOFTWARE.
+
+Violation of these terms automatically terminates any rights granted herein
+and may result in civil and/or criminal penalties under applicable law.

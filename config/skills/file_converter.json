@@ -2,7 +2,7 @@
   "id": "file_converter",
   "name": "文件格式转换",
   "icon": "🔄",
-  "category": "domain",
+  "category": "workflow",
   "description": "将任意文件转换为另一种格式：PDF/Word/TXT/Markdown/Excel/CSV/PPT/图片互转",
   "intent_description": "用户提到「转换」「转成」「导出为」「另存为」某种格式，或上传文件后要求改变格式时",
   "output_spec": {
@@ -83,5 +83,8 @@
       "output": "PDF → Excel 直接转换目前**不支持**（需要 OCR 和表格识别技术）。\n\n有两种替代方案：\n\n**方案 A — PDF → TXT → 手动整理（快速）**\n1. `convert_file(file_path=\"...\", target_format=\"txt\")` 提取文字\n2. 把文本内容粘贴给我，我帮你整理成 Excel 表格格式\n\n**方案 B — 描述 PDF 中的表格内容（推荐）**\n将 PDF 中的表格数据告诉我，我直接生成 `.xlsx` 文件\n\n需要哪种方案？",
       "note": "不支持的转换：明确说明替代方案"
     }
-  ]
+  ],
+  "tool_orchestration": "• 用户提供单文件路径 → convert_file(file_path, target_format) 直接执行\n• 用户提供目录路径 → find_files(pattern='*.docx') 批量列出，逐一转换\n• 请求 PDF→Excel → 明确提示不支持，给出替代方案（extract_text → 整理 → doc_gen_excel）\n• 输入格式为图片（.jpg/.png）→ ocr_image(path) 提取文字，再转写为目标格式\n• 转换后文件 > 原始文件 3 倍 → 提示用户确认分辨率/质量设置\n• 批量转换 > 20 个文件 → 先列预览清单，用户确认后执行",
+  "react_protocol": "light",
+  "chains_to": ["pdf_table_extractor", "doc_gen_excel", "article_extractor"]
 }

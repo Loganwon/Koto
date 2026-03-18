@@ -62,5 +62,13 @@
     "4. 检查请求体：字段类型、必填项、枚举值格式",
     "5. 检查网络层：超时配置、重试策略（5xx才重试）",
     "6. 输出诊断报告：问题定位 + curl隔离命令 + 排序修复步骤"
-  ]
+  ],
+
+  "tool_orchestration": "• 用户提供了代码片段（requests/axios/fetch）→ 分析请求 URL、headers、body，不调用工具\n• 用户提供了错误信息/状态码 → 通过状态码快速分诊\n  · 4xx → 构造最小 curl 脱敏隔离命令，排除客户端代码影响\n  · 5xx → 指导用户查服务端日志；不猜测服务端实现\n  · CORS 错误 → 要求提供 Network 面板 OPTIONS preflight 的完整 response headers\n• 涉及 JWT 认证 → 输出 jwt.io 解码步骤，分析 exp/aud/iss 字段\n• 用户提供多个 curl/代码对比 → 逐步分析差异，找出唯一不一致点\n• 需要验证修复 → 给出能直接粘贴终端运行的 curl 命令；不调用 execute_python",
+
+  "react_protocol": "full",
+
+  "multi_model_hint": "• 常见 4xx 认证问题 → 快速模型即可\n• 涉及 OAuth2/SAML/JWT 复杂认证链、微服务间 mTLS → 优先高推理能力模型\n• MultiAgent 分工：节点1=复现命令生成（快速模型），节点2=根因分析+修复方案（强推理模型）",
+
+  "handoff_context": "下游 doc_gen_word 可用的字段：\n- api_endpoint: 问题接口的 URL（脱敏后）\n- error_summary: 一句话根因说明\n- fix_steps: 有序修复步骤列表（字符串数组）\n- curl_command: 复现用的 curl 命令（脱敏）"
 }

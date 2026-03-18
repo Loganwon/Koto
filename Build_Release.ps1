@@ -23,6 +23,7 @@
 param(
     [switch]$SkipBuild,
     [switch]$Incremental,   # 增量构建：不加 --clean，保留上次缓存（只改了 .py 时快很多）
+    [switch]$Protected,     # 保护模式：先 Cython 编译核心模块，发布包中不含 .py 源码
     [string]$Version = ""
 )
 
@@ -65,6 +66,28 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 }
 if ([string]::IsNullOrWhiteSpace($Version)) { $Version = Get-Date -Format "yyyy.MM.dd" }
 Write-OK "版本号: $Version"
+
+# ─── 步骤 0（可选）：Cython 编译核心模块 ─────────
+if ($Protected) {
+    $BUILD_CYTHON = Join-Path $REPO_ROOT "build_cython.py"
+    Write-Step "步骤 0/4  Cython 编译核心模块（Protected 模式）"
+    if (-not (Test-Path $BUILD_CYTHON)) {
+        Write-Fail "找不到 build_cython.py，请确认文件存在于根目录"
+        exit 1
+    }
+    # 检查 Cython 是否已安装
+    $cythonCheck = & $PYTHON -c "import Cython" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Step "  安装 Cython..."
+        & (Join-Path $REPO_ROOT ".venv\Scripts\pip.exe") install cython | Out-Null
+    }
+    & $PYTHON $BUILD_CYTHON build_ext --inplace
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Cython 编译失败"
+        exit 1
+    }
+    Write-OK "核心模块编译完成（.pyd 已生成）"
+}
 
 # ─── 步骤 1：PyInstaller 构建 ─────────────────
 if (-not $SkipBuild) {

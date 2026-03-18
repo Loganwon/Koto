@@ -88,5 +88,11 @@
     "批量生成文档",
     "模板填充",
     "word template"
-  ]
+  ],
+
+  "tool_orchestration": "• 读取 Word 模板 → read_docx_paragraphs(template_path) 提取所有 {{占位符}}\n  · 告知用户：检测到 N 个占位符，展示完整清单，确认是否符合预期\n• 数据来源 →\n  · Excel/CSV 数据文件 → load_data(data_path) 读取填充数据\n  · 用户口述/粘贴数据 → 直接建立占位符映射，不调用工具\n  · 自动匹配（忽略大小写/空格/括号差异）；匹配不确定 → 明确询问，绝不猜测\n• 单份生成 → write_file(output.docx) 写出\n• 批量生成（N 行数据 = N 份文档）→ create_directory(output_dir) + 逐行 write_file(doc_N.docx)\n• 完成汇报：成功生成 N 份，剩余未填充占位符 K 个（列出清单，标注页码）",
+
+  "react_protocol": "light",
+
+  "handoff_context": "下游 doc_gen_word 可用的字段：\n- output_dir: 生成文件目录路径\n- generated_count: 成功生成的文件数量\n- unfilled_placeholders: 未替换的占位符列表（可用于后续补充生成）\n- template_path: 原始模板路径（用于后续修改重新生成）"
 }

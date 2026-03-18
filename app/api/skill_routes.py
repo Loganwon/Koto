@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import sys as _sys
 from pathlib import Path
@@ -140,6 +141,45 @@ def list_skills():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# GET /api/skills/active-ui-config  —  返回当前激活 Skill 的合并 UI 配置
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@skill_bp.route("/active-ui-config", methods=["GET"])
+def get_active_ui_config():
+    """
+    返回当前所有已启用 Skill 的合并 UI 配置。
+    前端用来实现 Skill UI 主题切换、背景特效、占位符变更等。
+
+    响应:
+    {
+      "success": true,
+      "has_ui": bool,
+      "config": {
+        "theme": str,
+        "css_vars": { "--var-name": "value", ... },
+        "input_placeholder": str,
+        "welcome_text": str,
+        "overlay_effect": str,
+        "title_text": str,
+        "subtitle_text": str,
+        "assistant_prefix": str,
+        "font_style": str,
+        "hide_skill_bar": bool
+      },
+      "sources": ["skill_id1", ...]
+    }
+    """
+    try:
+        sm = _sm()
+        result = sm.get_active_ui_config()
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        logger.error(f"[skills] active-ui-config error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skills  —  创建自定义 Skill
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -246,38 +286,140 @@ def export_mcp_tools():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _compute_perf_score(
+    rating_avg: Optional[float],
+    approved: int,
+    total_calls: int,
+) -> float:
+    """综合性能得分（0-10），用于排行榜排序。"""
+    # 评分分量：0-5 → 0-4 分
+    rating_score = ((rating_avg or 3.0) / 5.0) * 4.0
+    # 采纳比率分量：approved/max(calls,1) → 0-3 分
+    adopt_ratio = approved / max(total_calls, 1)
+    adopt_score = min(adopt_ratio * 3.0, 3.0)
+    # 调用量对数分量：log10(calls+1) → 0-3 分（1000次调用满分）
+    call_score = min(math.log10(total_calls + 1) / 3.0 * 3.0, 3.0)
+    return round(rating_score + adopt_score + call_score, 3)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
-# GET /api/skills/stats  —  每 Skill 的成本统计
-# ══════════════════════════════════════════════════════════════════════════════
+# GET /api/skills/stats  —  每 Skill 的综合性能分析
 
 
 @skill_bp.route("/stats", methods=["GET"])
 def skill_stats():
-    """聚合 token 成本 + 影子记录数量 per skill。"""
+    """
+    综合 Skill 性能分析：token 成本 + 用户评分 + 影子记录数量 per skill。
+
+    Query params:
+      sort    — 排序字段 (rating | calls | cost | approved)，默认 rating
+      order   — asc / desc，默认 desc
+      min_calls — 最少调用次数过滤（默认 0，不过滤）
+    """
+    sort_field = request.args.get("sort", "rating")
+    order = request.args.get("order", "desc").lower()
+    min_calls = int(request.args.get("min_calls", 0))
+
+    # ── 1. Token 成本统计 ─────────────────────────────────────────────────────
+    token_stats: dict = {}
     try:
         tt = _token_tracker()
         token_stats = tt.get_skill_stats()
+    except Exception:
+        pass
 
-        try:
-            tracer = _tracer()
-            trace_counts = tracer.get_counts()
-        except Exception:
-            trace_counts = {}
+    # ── 2. 影子记录数量 ───────────────────────────────────────────────────────
+    trace_counts: dict = {}
+    try:
+        tracer = _tracer()
+        trace_counts = tracer.get_counts()
+    except Exception:
+        pass
 
-        merged = {}
-        all_ids = set(list(token_stats.keys()) + list(trace_counts.keys()))
-        for sid in all_ids:
-            ts = token_stats.get(sid, {})
-            merged[sid] = {
-                "total_calls": ts.get("total_calls", 0),
-                "total_tokens": ts.get("total_tokens", 0),
-                "cost_cny": ts.get("cost_cny", 0.0),
-                "approved_traces": trace_counts.get(sid, 0),
+    # ── 3. 用户评分（从 skill_ratings.json 读取）──────────────────────────────
+    ratings: dict = {}
+    try:
+        ratings_path = _BASE_DIR / "config" / "skill_ratings.json"
+        if ratings_path.exists():
+            raw = json.loads(ratings_path.read_text(encoding="utf-8"))
+            for sid, val in raw.items():
+                if isinstance(val, dict):
+                    ratings[sid] = {
+                        "avg": round(float(val.get("avg", 0)), 2),
+                        "count": int(val.get("count", 0)),
+                    }
+    except Exception:
+        pass
+
+    # ── 4. Skill 元数据（名称 / 类别）────────────────────────────────────────
+    skill_meta: dict = {}
+    try:
+        sm = _sm()
+        for s in sm.list_skills():
+            skill_meta[s["id"]] = {
+                "name": s.get("name", s["id"]),
+                "icon": s.get("icon", ""),
+                "category": s.get("category", ""),
+                "enabled": s.get("enabled", False),
             }
+    except Exception:
+        pass
 
-        return jsonify({"success": True, "stats": merged})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    # ── 5. 合并 ──────────────────────────────────────────────────────────────
+    all_ids = set(
+        list(token_stats.keys())
+        + list(trace_counts.keys())
+        + list(ratings.keys())
+        + list(skill_meta.keys())
+    )
+    merged = {}
+    for sid in all_ids:
+        ts = token_stats.get(sid, {})
+        r = ratings.get(sid, {})
+        meta = skill_meta.get(sid, {})
+        total_calls = int(ts.get("total_calls", 0))
+        if total_calls < min_calls:
+            continue
+        merged[sid] = {
+            # 身份信息
+            "skill_id": sid,
+            "name": meta.get("name", sid),
+            "icon": meta.get("icon", ""),
+            "category": meta.get("category", ""),
+            "enabled": meta.get("enabled", False),
+            # 使用量
+            "total_calls": total_calls,
+            "total_tokens": int(ts.get("total_tokens", 0)),
+            "cost_cny": round(float(ts.get("cost_cny", 0.0)), 4),
+            # 质量
+            "approved_traces": int(trace_counts.get(sid, 0)),
+            "rating_avg": r.get("avg", None),
+            "rating_count": r.get("count", 0),
+            # 综合得分（归一化 0-10：评分×2 + 采纳比率×3 + 调用量对数×2）
+            "_score": _compute_perf_score(
+                rating_avg=r.get("avg"),
+                approved=int(trace_counts.get(sid, 0)),
+                total_calls=total_calls,
+            ),
+        }
+
+    # ── 6. 排序 ──────────────────────────────────────────────────────────────
+    _sort_key_map = {
+        "rating": lambda x: (x[1].get("rating_avg") or 0),
+        "calls": lambda x: x[1].get("total_calls", 0),
+        "cost": lambda x: x[1].get("cost_cny", 0),
+        "approved": lambda x: x[1].get("approved_traces", 0),
+        "score": lambda x: x[1].get("_score", 0),
+    }
+    _key_fn = _sort_key_map.get(sort_field, _sort_key_map["rating"])
+    sorted_items = sorted(merged.items(), key=_key_fn, reverse=(order == "desc"))
+
+    result = [v for _, v in sorted_items]
+    # 移除内部评分字段
+    for item in result:
+        item.pop("_score", None)
+
+    return jsonify({"success": True, "count": len(result), "analytics": result})
 
 
 # ══════════════════════════════════════════════════════════════════════════════

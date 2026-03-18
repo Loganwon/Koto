@@ -2,7 +2,7 @@
   "id": "archive_assistant",
   "name": "文件归档助手",
   "icon": "🗂️",
-  "category": "behavior",
+  "category": "workflow",
   "description": "智能文件整理：分析下载/桌面/工作目录，按行业（财务/技术/学术等）自动分类归档，生成整理清单",
   "intent_description": "用户想要整理、归档、归纳文件夹，或清理下载目录、桌面文件，或询问如何自动管理文件",
   "system_prompt_template": "",
@@ -65,5 +65,7 @@
     "4. 生成归档预览计划（类别 + 路径 + 文件数）",
     "5. 等待用户确认后触发后台 auto_catalog 任务实际执行",
     "6. 任务完成后汇报：移动数量 + 跳过（重复）数量 + 生成 report.md 路径"
-  ]
+  ],
+
+  "tool_orchestration": "• list_directory(path) + find_files(path, recursive=True) 扫描目标目录\n  · 统计文件类型分布（.xlsx/.pdf/.docx/图片/代码/压缩包等）\n  · 识别命名规律和日期信息（文件名/修改时间）\n• 生成归档计划 → 展示「类别 → 目标路径 → 文件数」预览，等待用户确认\n• 用户选择或确认归档规则（按类型/按年月日期/按关键词/按项目名）\n• create_directory 建立目标目录结构（不提前创建，确认后才创建）\n• 大批量（> 50 文件）→ 分批执行，每批完成后汇报进度\n• 命名冲突 → 询问处理策略（跳过/重命名加后缀/覆盖），不默认覆盖\n• 完成汇报：移动 N 个文件，跳过 K 个，生成归档报告 report.md"
 }

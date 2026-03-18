@@ -87,31 +87,6 @@ class StepResult:
 
 
 @dataclass
-class StepResult:
-    """
-    步骤执行结果的结构化封装。
-
-    规划层通过 ``summary`` / ``key_facts`` 向后续步骤传递精炼的上下文，
-    避免将完整原始输出直接填入 prompt（大幅降低 token 消耗）。
-    ``replan_hint`` 允许执行层在发现计划偏差时向规划层反馈再规划信号。
-    """
-    full_output: str                    # 完整原始输出（保留备查）
-    summary: str = ""                   # 压缩摘要（≤300 字），用于后续步骤的上下文注入
-    key_facts: List[str] = field(default_factory=list)  # 提炼出的关键事实列表
-    replan_hint: str = ""               # 非空时触发再规划："后续步骤应改为…"
-    structured: Optional[Dict[str, Any]] = None  # 可选结构化数据（JSON）
-
-    def context_text(self) -> str:
-        """生成适合注入到后续步骤 prompt 的精简上下文文本。"""
-        parts: List[str] = []
-        if self.summary:
-            parts.append(self.summary)
-        if self.key_facts:
-            parts.append("关键事实：" + "；".join(self.key_facts[:5]))
-        return "\n".join(parts) or self.full_output[:500]
-
-
-@dataclass
 class PlanStep:
     """DAG 中的一个执行步骤。"""
 
@@ -124,13 +99,6 @@ class PlanStep:
     max_retries: int = 2
     timeout_seconds: int = 120
     allow_failure: bool = False  # True = 本步失败不阻塞后续步骤
-
-    # ── 规划层填充的执行指导（v2 新增，均有默认值保持向后兼容） ────────────────
-    executor_prompt: str = ""              # 执行器应使用的具体指令（替代模糊的 description）
-    context_keys: List[str] = field(default_factory=list)  # 明确声明需要哪些上游结果（空=所有依赖）
-    result_schema: str = ""               # 预期输出格式描述，用于引导执行器和验收
-    success_criteria: str = ""            # 判断本步成功的标准
-    suggested_tools: List[str] = field(default_factory=list)  # 建议执行器使用的工具名列表
 
     # ── 规划层填充的执行指导（v2 新增，均有默认值保持向后兼容） ────────────────
     executor_prompt: str = ""              # 执行器应使用的具体指令（替代模糊的 description）
@@ -1015,91 +983,4 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
             )
         except Exception:
             pass
-        """递归将依赖 failed_name 的步骤设为 SKIPPED。"""
-        changed = True
-        while changed:
-            changed = False
-            skip_names = {
-                s.name for s in plan.steps
-                if s.status in (StepStatus.FAILED, StepStatus.SKIPPED)
-            }
-            for s in plan.steps:
-                if s.status == StepStatus.PENDING:
-                    if any(dep in skip_names for dep in s.depends_on):
-                        s.status = StepStatus.SKIPPED
-                        changed = True
 
-    @staticmethod
-    def _publish_step_event(task_id: str, step: PlanStep, event_type: str):
-        try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
-            bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=task_id,
-                event_type=event_type,
-                step_type=step.step_type.upper(),
-                message=step.description,
-                progress=step.retry_count,
-                detail={"step_name": step.name, "status": step.status.value},
-            ))
-        except Exception:
-            pass
-
-    @staticmethod
-    def _publish_plan_event(plan: Plan, event_type: str, message: str):
-        try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
-            bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=plan.task_id,
-                event_type=event_type,
-                status=plan.status,
-                message=message,
-                progress=plan.progress_percent(),
-            ))
-        except Exception:
-            pass
-        """递归将依赖 failed_name 的步骤设为 SKIPPED。"""
-        changed = True
-        while changed:
-            changed = False
-            skip_names = {
-                s.name for s in plan.steps
-                if s.status in (StepStatus.FAILED, StepStatus.SKIPPED)
-            }
-            for s in plan.steps:
-                if s.status == StepStatus.PENDING:
-                    if any(dep in skip_names for dep in s.depends_on):
-                        s.status = StepStatus.SKIPPED
-                        changed = True
-
-    @staticmethod
-    def _publish_step_event(task_id: str, step: PlanStep, event_type: str):
-        try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
-            bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=task_id,
-                event_type=event_type,
-                step_type=step.step_type.upper(),
-                message=step.description,
-                progress=step.retry_count,
-                detail={"step_name": step.name, "status": step.status.value},
-            ))
-        except Exception:
-            pass
-
-    @staticmethod
-    def _publish_plan_event(plan: Plan, event_type: str, message: str):
-        try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
-            bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=plan.task_id,
-                event_type=event_type,
-                status=plan.status,
-                message=message,
-                progress=plan.progress_percent(),
-            ))
-        except Exception:
-            pass

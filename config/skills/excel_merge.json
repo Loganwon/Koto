@@ -89,5 +89,13 @@
     "合并两个",
     "excel文件合并",
     "合并xlsx"
-  ]
+  ],
+
+  "tool_orchestration": "• 用户提供多个文件路径 → 逐个 load_data(path)，检查列结构兼容性\n  · 列名完全一致 → 纵向拼接（concat/append），告知总行数变化\n  · 有共同唯一键列 → 横向关联（merge on key）；询问 join 类型（inner/left/outer）\n  · 列名冲突 → 询问：前缀区分（文件A_列名/文件B_列名）还是指定保留哪方\n• 关联时统计主键重叠率；未匹配行 > 10% → 警告，展示未匹配样本，询问是否继续\n• 完成 → save_data(merged_output.xlsx)，可选添加来源文件列\n• 输出摘要：合并前 N 文件共 M 行 → 合并后 K 行（含/排除不匹配 X 行）",
+
+  "react_protocol": "light",
+
+  "chains_to": ["excel_analyst", "data_cleaner"],
+
+  "handoff_context": "下游 excel_analyst 可用的字段：\n- merged_file: 合并结果文件路径\n- merge_type: 合并方式（concat/inner_join/left_join/outer_join）\n- total_rows: 合并后总行数\n- unmatched_rows: 未匹配行数（如有）"
 }
