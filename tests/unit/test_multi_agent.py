@@ -122,15 +122,16 @@ class TestLlmCall:
         assert result == "LLM output"
 
     @patch(_LLM_CLS)
-    def test_returns_error_string_on_failure(self, mock_cls):
+    def test_raises_on_failure(self, mock_cls):
+        import pytest
         from app.core.agent.multi_agent import _llm_call
 
         mock_llm = Mock()
         mock_llm.invoke = Mock(side_effect=ConnectionError("timeout"))
         mock_cls.return_value = mock_llm
 
-        result = _llm_call("model-id", "system", "user", 0.7)
-        assert "错误" in result or "timeout" in result
+        with pytest.raises(ConnectionError, match="timeout"):
+            _llm_call("model-id", "system", "user", 0.7)
 
 
 class TestBuildContext:
