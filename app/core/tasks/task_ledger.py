@@ -220,7 +220,6 @@ class TaskLedger:
     CREATE INDEX IF NOT EXISTS idx_koto_tasks_session  ON koto_tasks(session_id);
     CREATE INDEX IF NOT EXISTS idx_koto_tasks_status   ON koto_tasks(status);
     CREATE INDEX IF NOT EXISTS idx_koto_tasks_created  ON koto_tasks(created_at);
-    CREATE INDEX IF NOT EXISTS idx_koto_tasks_priority ON koto_tasks(priority);
 
     CREATE TABLE IF NOT EXISTS koto_task_steps (
         step_id     TEXT PRIMARY KEY,
@@ -254,9 +253,10 @@ class TaskLedger:
 
     def _init_schema(self):
         self._conn.executescript(self._DDL)
-        # 迁移旧表：追加可能不存在的列
+        # 迁移旧表：追加可能不存在的列和索引
         _migrations = [
             "ALTER TABLE koto_tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 1",
+            "CREATE INDEX IF NOT EXISTS idx_koto_tasks_priority ON koto_tasks(priority)",
         ]
         for sql in _migrations:
             try:
