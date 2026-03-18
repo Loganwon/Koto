@@ -55,22 +55,49 @@ BUILTIN_SKILLS: List[Dict] = [
         "icon": "🪜",
         "category": "behavior",
         "skill_nature": "model_hint",
-        "description": "在执行任务时主动向用户汇报当前进展（正在做第几步、做什么），让用户随时掌握任务进度",
-        "intent_description": "用户希望了解任务执行进度，或任务较复杂需要分阶段处理时（如代码生成、分析、调研等）",
+        "description": "将回答拆解为带编号的清晰步骤，自动适配操作/排查/决策等不同场景",
+        "intent_description": "用户需要操作指南、安装配置步骤、故障排查流程、学习路径或任何有先后顺序的内容",
         "task_types": [],
         "prompt": (
-            "\n\n## 🪜 行为要求：步骤化输出（进度汇报）"
-            "\n\n**核心原则：边做边汇报进度，而非把答案格式化为步骤列表。**"
-            "\n\n在处理任务的过程中，每当推进到一个新阶段，主动用一句话告诉用户当前正在做什么，例如："
-            "\n- 「📌 第 1 步：正在理解需求…」"
-            "\n- 「📌 第 2 步：正在分析代码结构…」"
-            "\n- 「📌 第 3 步：正在生成实现方案…」"
-            "\n\n**规则**"
-            "\n- 进度提示放在对应阶段的**输出之前**，一句话即可，不要冗长"
-            "\n- 进度编号反映真实进展顺序，不要预先列出所有步骤再统一执行"
-            "\n- 最终结论/答案本身的格式**不受约束**——根据内容自然呈现，不强制分步"
-            "\n- 若任务简单（单次即可完成），无需汇报进度，直接给出答案"
-            "\n- 进度汇报使用「📌 第 N 步」前缀，与正文内容视觉区分"
+            "\n\n## 🪜 行为要求：步骤化输出"
+            "\n\n**第一步：判断是否适合步骤化（必须检查）**"
+            "\n- ✅ 适用：操作流程、安装配置、故障排查、学习路径、多阶段决策"
+            "\n- ❌ 不适用：单一事实、词汇定义、是/否判断、简单数值计算、情感回应"
+            "\n  → 不适用时，直接给出结论，不要强行加编号。"
+            "\n\n**操作 / 教程类问题 — 标准格式**"
+            "\n```"
+            "\n📋 【前提条件】（无则省略）"
+            "\n- 所需工具 / 权限 / 基础知识"
+            "\n"
+            "\n步骤 1：[简洁动词短语，说明目标]"
+            "\n  ▸ 操作：（每步限 1-3 个动作；内容复杂时用子步骤 1.1 / 1.2 展开）"
+            "\n  ▸ 预期结果：（完成操作后应看到或得到什么）"
+            "\n  ⚠️ 注意：（仅在有易错点或风险时写，否则省略）"
+            "\n"
+            "\n步骤 2：…"
+            "\n（依此格式直到流程完成）"
+            "\n"
+            "\n✅ 完成验证：[如何确认全部步骤执行成功的具体指标]"
+            "\n🔁 常见失败处理：[最高频的失败场景及对应排查方向]"
+            "\n```"
+            "\n\n**故障排查 / 调试类问题 — 四步诊断格式**"
+            "\n（当用户问题含「报错/异常/失败/不正常/bug/无法」等关键词时优先用此格式）"
+            "\n```"
+            "\n步骤 1：🔍 定位问题"
+            "\n  ▸ 从错误信息/现象出发，排除明显原因，缩小范围"
+            "\n步骤 2：🧪 验证假设"
+            "\n  ▸ 给出能快速确认根因的最小测试命令 / 操作"
+            "\n步骤 3：🔧 应用修复"
+            "\n  ▸ 针对根本原因的最小改动方案（附代码块如适用）"
+            "\n步骤 4：✅ 验证修复"
+            "\n  ▸ 执行后应看到的成功信号"
+            "\n```"
+            "\n\n**格式规则**"
+            "\n- 步骤编号用阿拉伯数字（1、2、3），禁止「首先/其次/然后/最后」等过渡词"
+            "\n- 步骤描述用主动语态动词开头（「点击 X」而非「X 需要被点击」）"
+            "\n- 代码独占代码块，不嵌在普通段落行内"
+            "\n- 理想步骤数量 3-6 步；超过 7 步时将流程拆为「阶段」再细分"
+            "\n- 全部完成后不要再写「总结一下以上步骤…」重复内容"
         ),
         "enabled": False,
     },
@@ -1095,12 +1122,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要读取或查看各种类型的文件，需要解析文件内容",
         "task_types": ["RESEARCH", "FILE_GEN", "CHAT", "DOC_ANNOTATE"],
         "priority": 61,
-        "executor_tools": [
-            "read_file_snippet",
-            "find_file",
-            "summarize_file",
-            "list_directory",
-        ],
+        "executor_tools": ["read_file_snippet", "find_file", "summarize_file", "list_directory"],
         "plan_template": [
             "识别文件扩展名确定读取策略",
             "路径不确定时用 find_file 定位文件",
@@ -1720,6 +1742,7 @@ class SkillManager:
                     "has_custom_prompt": s.get("prompt") != builtin_prompt,
                     "prompt": s["prompt"],
                     "is_builtin": True,
+                    "ui_config": cls._get_ui_config_dict(sid),
                 }
             )
 
@@ -1740,10 +1763,61 @@ class SkillManager:
                     "has_custom_prompt": False,
                     "prompt": s.get("prompt", ""),
                     "is_builtin": False,
+                    "ui_config": cls._get_ui_config_dict(skill_id),
                 }
             )
 
         return result
+
+    @classmethod
+    def _get_ui_config_dict(cls, skill_id: str) -> dict:
+        """返回某个 Skill 的 ui_config dict，若无则返回空 dict"""
+        skill_def = cls._def_registry.get(skill_id)
+        if skill_def and hasattr(skill_def, "ui_config") and skill_def.ui_config:
+            return skill_def.ui_config.to_dict()
+        return {}
+
+    @classmethod
+    def get_active_ui_config(cls) -> dict:
+        """
+        合并所有已启用 Skill 的 ui_config，返回最终生效的 UI 配置。
+
+        多个 Skill 同时启用时，按优先级（priority 字段降序）依次合并，
+        后加载的 Skill 的非空字段覆盖先加载的。
+        返回格式:
+          {
+            "has_ui": bool,
+            "config": { ...SkillUIConfig 的完整字段... },
+            "sources": ["skill_id1", "skill_id2"]  # 贡献了 UI 配置的 Skill
+          }
+        """
+        cls._ensure_init()
+        from app.core.skills.skill_schema import SkillUIConfig as _UIConfig
+
+        # 收集已启用且有 ui_config 的 Skill，按 priority 降序
+        active_with_ui = []
+        for skill_id, s in cls._registry.items():
+            if not s.get("enabled", False):
+                continue
+            skill_def = cls._def_registry.get(skill_id)
+            if not skill_def:
+                continue
+            if not hasattr(skill_def, "ui_config") or skill_def.ui_config.is_empty():
+                continue
+            active_with_ui.append((skill_def.priority, skill_id, skill_def.ui_config))
+
+        if not active_with_ui:
+            return {"has_ui": False, "config": _UIConfig().to_dict(), "sources": []}
+
+        # 按优先级升序排列（priority 高的最后覆盖，优先生效）
+        active_with_ui.sort(key=lambda x: x[0])
+        merged = _UIConfig()
+        sources = []
+        for _, skill_id, ui_cfg in active_with_ui:
+            merged = merged.merge(ui_cfg)
+            sources.append(skill_id)
+
+        return {"has_ui": True, "config": merged.to_dict(), "sources": sources}
 
     @classmethod
     def set_enabled(cls, skill_id: str, enabled: bool) -> bool:
@@ -1948,8 +2022,7 @@ class SkillManager:
             if _inject_skill_count >= cls._MAX_ACTIVE_INJECT:
                 logger.debug(
                     "[SkillManager] 注入上限 (%d) 已达，跳过低优先级 Skill: %s",
-                    cls._MAX_ACTIVE_INJECT,
-                    skill_id,
+                    cls._MAX_ACTIVE_INJECT, skill_id,
                 )
                 continue
 
@@ -1969,13 +2042,63 @@ class SkillManager:
             if p:
                 # 注入 plan_template（仅在 prompt 中尚未包含执行步骤时追加，避免重复）
                 pt = (
-                    getattr(skill_def, "plan_template", None) if skill_def else None
-                ) or s.get("plan_template", [])
+                    (getattr(skill_def, "plan_template", None) if skill_def else None)
+                    or s.get("plan_template", [])
+                )
                 if pt and "执行步骤" not in p:
                     p = p + (
                         "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
                         + "\n".join(f"{i+1}. {step}" for i, step in enumerate(pt))
                     )
+
+                # ── tool_orchestration：工具调用条件决策树 ──────────────────
+                toi = (
+                    getattr(skill_def, "tool_orchestration", None)
+                    if skill_def else None
+                ) or s.get("tool_orchestration", "")
+                if toi:
+                    p = p + "\n\n### 🔧 工具调用策略（根据输入动态选择）\n" + toi
+
+                # ── react_protocol：ReAct 执行循环 ─────────────────────────
+                rp = (
+                    getattr(skill_def, "react_protocol", None)
+                    if skill_def else None
+                ) or s.get("react_protocol", "")
+                if rp == "light":
+                    p = p + (
+                        "\n\n> 💭 **执行规则**：每次调用工具前，先一句话说明调用原因；"
+                        "观察结果后，明确下一步决策；达到目标后直接输出答案，不再调用工具。"
+                    )
+                elif rp == "full":
+                    p = p + (
+                        "\n\n### 🔄 执行循环协议（ReAct）\n"
+                        "每轮处理遵循以下循环，直到任务完成：\n"
+                        "1. **思考 (Thought)**：分析当前信息，判断下一步最优操作\n"
+                        "2. **行动 (Action)**：选择工具并说明调用理由（一句话）\n"
+                        "3. **观察 (Observation)**：解读工具返回结果，提取关键信息\n"
+                        "4. **→ 重复** 直到信息充足，输出最终答案\n\n"
+                        "**约束**：\n"
+                        "- 不要重复调用结果相同的工具（浪费 token）\n"
+                        "- 工具返回空/出错时，换一个工具或策略，不要原样重试\n"
+                        "- 达到目标后，直接输出答案，不再调用工具"
+                    )
+
+                # ── multi_model_hint：多模型协作建议 ──────────────────────
+                mmh = (
+                    getattr(skill_def, "multi_model_hint", None)
+                    if skill_def else None
+                ) or s.get("multi_model_hint", "")
+                if mmh:
+                    p = p + "\n\n### 🤝 多模型协作建议\n" + mmh
+
+                # ── handoff_context：下游交接上下文说明 ───────────────────
+                hc = (
+                    getattr(skill_def, "handoff_context", None)
+                    if skill_def else None
+                ) or s.get("handoff_context", "")
+                if hc:
+                    p = p + "\n\n### 📤 向下游传递的数据（供后续技能使用）\n" + hc
+
                 active_prompts.append(p)
 
             _inject_skill_count += 1
@@ -2044,6 +2167,31 @@ class SkillManager:
                         "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
                         + "\n".join(f"{i+1}. {step}" for i, step in enumerate(pt))
                     )
+                # 临时 skill 也注入工具编排和 ReAct 协议
+                toi = getattr(skill_def, "tool_orchestration", None) if skill_def else None
+                if not toi and skill_def:
+                    toi = s.get("tool_orchestration", "")
+                if toi:
+                    p = p + "\n\n### 🔧 工具调用策略（根据输入动态选择）\n" + toi
+                rp = getattr(skill_def, "react_protocol", None) if skill_def else ""
+                if rp == "light":
+                    p = p + (
+                        "\n\n> 💭 **执行规则**：每次调用工具前，先一句话说明调用原因；"
+                        "观察结果后，明确下一步决策；达到目标后直接输出答案，不再调用工具。"
+                    )
+                elif rp == "full":
+                    p = p + (
+                        "\n\n### 🔄 执行循环协议（ReAct）\n"
+                        "每轮处理遵循以下循环，直到任务完成：\n"
+                        "1. **思考 (Thought)**：分析当前信息，判断下一步最优操作\n"
+                        "2. **行动 (Action)**：选择工具并说明调用理由（一句话）\n"
+                        "3. **观察 (Observation)**：解读工具返回结果，提取关键信息\n"
+                        "4. **→ 重复** 直到信息充足，输出最终答案\n\n"
+                        "**约束**：\n"
+                        "- 不要重复调用结果相同的工具（浪费 token）\n"
+                        "- 工具返回空/出错时，换一个工具或策略，不要原样重试\n"
+                        "- 达到目标后，直接输出答案，不再调用工具"
+                    )
                 auto_prompts.append(p)
                 logger.debug(f"[SkillManager] 🤖 临时注入 Auto-Skill: {skill_id}")
 
@@ -2095,7 +2243,8 @@ class SkillManager:
         if synergy_lines:
             separator = "\n\n─────────────────────────────────────────"
             synergy_block = (
-                separator + "\n## 🔗 协同工作说明\n"
+                separator
+                + "\n## 🔗 协同工作说明\n"
                 "以下技能正在协同发挥作用，请在回答中体现它们的互补关系，"
                 "不要重复描述各自的工作流程，而是以整体视角输出统一的结果：\n"
                 + "\n".join(synergy_lines)
@@ -2299,7 +2448,7 @@ class SkillManager:
                 return
             for skill_file in skills_dir.glob("*.json"):
                 try:
-                    with open(skill_file, "r", encoding="utf-8") as f:
+                    with open(skill_file, "r", encoding="utf-8-sig") as f:
                         data = json.load(f)
                     skill_def = SkillDefinition.from_dict(data)
                     if skill_def.id in cls._def_registry:
@@ -2322,9 +2471,19 @@ class SkillManager:
                             if reg_entry:
                                 reg_entry["prompt"] = skill_def.render_prompt()
                                 reg_entry["plan_template"] = skill_def.plan_template
-                        logger.debug(
-                            f"[SkillManager] 合并自定义增强字段到内置 Skill: {skill_def.id}"
-                        )
+                        # ── v3 动态编排字段 ─────────────────────────────────
+                        if skill_def.tool_orchestration:
+                            existing.tool_orchestration = skill_def.tool_orchestration
+                        if skill_def.react_protocol:
+                            existing.react_protocol = skill_def.react_protocol
+                        if skill_def.multi_model_hint:
+                            existing.multi_model_hint = skill_def.multi_model_hint
+                        if skill_def.handoff_context:
+                            existing.handoff_context = skill_def.handoff_context
+                        # ── UI 定制配置 ────────────────────────────────────
+                        if hasattr(skill_def, "ui_config") and not skill_def.ui_config.is_empty():
+                            existing.ui_config = skill_def.ui_config
+                        logger.debug(f"[SkillManager] 合并自定义增强字段到内置 Skill: {skill_def.id}")
                     else:
                         cls._def_registry[skill_def.id] = skill_def
                         entry = {

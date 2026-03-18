@@ -68,5 +68,8 @@
     "langchain-sql",
     "text2sql"
   ],
-  "executor_tools": []
+  "executor_tools": [],
+  "tool_orchestration": "• 用户用自然语言描述查询 → 直接生成 SQL，不调用工具\n• 用户提供了 schema DDL 或字段描述 → 解析后生成精准 SQL\n• 用户贴了慢查询/EXPLAIN 输出 → 分析执行计划中的全表扫描/index miss，给出索引建议\n• 涉及 N+1 问题 → 改写为 JOIN 或子查询，估算性能提升\n• 生成涉及 DELETE/UPDATE/DROP → 必须加 WHERE 子句，提醒用户 DRY RUN 验证\n• 用户询问大批量操作 → 给出 COPY/LOAD DATA/bulk_insert 分片方案",
+  "react_protocol": "light",
+  "chains_to": ["doc_gen_excel", "work_report_generator"]
 }

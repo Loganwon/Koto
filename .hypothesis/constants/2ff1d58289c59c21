@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\tree_of_thought.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.2, 0.5, 0.65, 0.7, 0.85, 200.0, 120, 6000, 'Critic 未返回有效 JSON', 'FILE_GEN', 'RESEARCH', '[ToT] 所有分支均失败，无法评估', '[ToT] 所有分支均失败，无法选出赢家', '\\{.*\\}', 'branch_id', 'content', 'critique', 'directive', 'done', 'elapsed', 'error', 'evaluate', 'evaluations', 'expand', 'generating', 'id', 'label', 'message', 'model', 'n_branches', 'preview', 'reason', 'score', 'scoring', 'select', 'stage', 'start', 'status', 'temperature', 'winner_id', 'winner_label', '…', '✓', '✗', '分析视角', '创意视角', '批判视角', '（自动长度评分）']

@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\basic_tools_plugin.py
+# hypothesis_version: 6.151.9
+
+['%Y-%m-%d %H:%M:%S', 'BasicTools', 'OBJECT', 'STRING', '__builtins__', 'abs', 'calculate', 'description', 'eval', 'expression', 'float', 'func', 'get_current_time', 'int', 'max', 'min', 'name', 'parameters', 'properties', 'required', 'round', 'sum', 'type']

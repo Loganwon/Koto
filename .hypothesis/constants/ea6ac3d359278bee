@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\analytics\trend_analyzer.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.1, 0.3, 0.6, 0.9, 100, 'High CPU Usage Trend', 'No events to analyze', 'TrendAnalyzer', 'above', 'analysis_timestamp', 'avg_cpu', 'avg_disk', 'avg_events_per_hour', 'avg_memory', 'below', 'comparisons', 'count', 'cpu', 'cpu_usage', 'current', 'current_value', 'difference', 'disk', 'disk_usage', 'error', 'event_type', 'event_types', 'frequency', 'high', 'historical_avg', 'issue', 'medium', 'memory', 'memory_usage', 'message', 'percentage', 'predictions', 'recommendation', 'risk_level', 'severity', 'severity_breakdown', 'status', 'threading', 'time_window_hours', 'timestamp', 'top_trends', 'total_events', 'total_risk_count', 'unknown', 'warnings']

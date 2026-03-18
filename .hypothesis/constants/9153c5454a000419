@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\auto_remediation_plugin.py
+# hypothesis_version: 6.151.9
+
+['By Status:\n', 'INTEGER', 'OBJECT', 'Reason for rejection', 'STRING', 'action_id', 'action_type', 'approved_at', 'by_status', 'description', 'event_id', 'executed_at', 'fix_script', 'func', 'low', 'name', 'parameters', 'properties', 'reason', 'required', 'result', 'risk_level', 'type']

@@ -1,0 +1,107 @@
+# QUICK CODE REFERENCE - Key Source Locations in app.py
+
+## FILE LOCATIONS BY CLASS AND METHOD
+
+### FileOperator (Lines 2198-2560)
+- Class definition: Line 2198
+- is_file_operation(): Line 2252-2255
+- _is_folder_organize_intent(): Line 2258-2265
+- _extract_path_from_text(): Line 2268-2283
+- execute(): Line 2286-2495 (complex method with 5 main branches)
+- get_file_metadata(): Line 2535-2559
+- watch_directory(): Line 2498-2532
+
+### WebSearcher (Lines 2563-2850+)
+- Class definition: Line 2563
+- WEB_KEYWORDS constant: Lines 2570-2623 (50+ keywords)
+- needs_web_search(): Line 2626-2663
+  - must_search_patterns: Lines 2637-2651 (11 regex patterns)
+- _detect_query_type(): Line 2666-2718
+- _build_search_context(): Line 2721-2762
+
+### ContextAnalyzer (Lines 3428-4022+)
+- Class definition: Line 3428
+- TASK_SIGNATURES: Lines 3440-3534 (5 task type configs)
+- CONTINUATION_PATTERNS: Lines 3537-3647 (6 pattern types)
+- extract_entities(): Line 3650-3715
+- build_context_summary(): Line 3718-3786
+- analyze_context(): Line 3855-4021 (comprehensive RAG logic)
+- build_rag_prompt(): Line 3789-3852
+
+### Utils (Lines 5471-5750+)
+- Class definition: Line 5471
+- _PACKAGE_ALLOWLIST: Lines 5472-5492 (12 allowed packages)
+- sanitize_string(): Line 5495-5498
+- is_failure_output(): Line 5501-5527
+  - no_internet_phrases: Lines 5508-5526 (26 phrases)
+- detect_required_packages(): Line 5616-5638
+- adapt_prompt_to_markdown(): Line 5553-5576
+- quick_self_check(): Line 5579-5613
+
+### SessionManager (Lines 5927-6072)
+- Class definition: Line 5927
+- __init__(): Line 5928-5929
+- list_sessions(): Line 5931-5941
+- load(): Line 5943-5955
+- load_full(): Line 5957-5967
+- _trim_history(): Line 5969-5976 (helper, max 20 turns)
+- create(): Line 5978-5988
+- save(): Line 5990-5993
+- delete(): Line 6062-6071
+- append_and_save(): Line 5995-6012 (important for history)
+- append_user_early(): Line 6014-6024
+- update_last_model_response(): Line 6026-6043
+- add_message(): Line 6045-6060
+
+---
+
+## CRITICAL CONSTANTS TO MOCK IN TESTS:
+
+Global Variables Used:
+- CHAT_DIR: Directory for saving session files
+- WORKSPACE_DIR: Default working directory for files
+- client: Gemini API client instance (for web search & self-check)
+- _app_logger: Logger instance
+
+Imports to Check:
+- watchdog.events & watchdog.observers (for watch_directory)
+- json: For SessionManager JSON operations
+- os: File path operations
+- re: Regex pattern matching
+- importlib.util: Package detection
+
+---
+
+## CRITICAL TESTING CONSIDERATIONS:
+
+1. FileOperator.execute():
+   - Path extraction order matters (quoted → Windows → Unix)
+   - File content truncation at 10000 chars
+   - Folder organize creates FolderCatalogOrganizer object
+   - Must mock os.path.isdir, os.path.exists, open()
+
+2. WebSearcher.needs_web_search():
+   - 11 regex patterns evaluated BEFORE keyword check
+   - All patterns use re.IGNORECASE
+   - Travel patterns are very specific (dates, routes, times)
+   - Must test all pattern types
+
+3. ContextAnalyzer.analyze_context():
+   - History must be >= 2 turns to detect continuation
+   - Input length limits affect pattern matching
+   - Task type mismatch zeros out confidence score
+   - New topic indicators reduce weight by 80%
+   - Final confidence capped at 1.0, minimum 0.5 to be continuation
+
+4. Utils.is_failure_output():
+   - Empty string returns True (failure)
+   - 26 specific phrases checked (case-insensitive)
+   - "❌" emoji is failure indicator
+   - Chinese words: "失败", "错误" trigger failure
+
+5. SessionManager:
+   - Session filenames sanitized (alphanumeric + underscores only)
+   - Timestamp collision handling: adds epoch time to duplicate names
+   - History trimmed to max 20 turns for model context
+   - Full history preserved on disk, trimmed only for model input
+   - UTF-8 with ensure_ascii=False preserves Chinese characters

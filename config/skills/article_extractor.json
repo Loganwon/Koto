@@ -102,5 +102,11 @@
     "自动填表"
   ],
   "chains_to": ["doc_gen_excel", "doc_gen_word", "doc_summarizer"],
-  "synergizes_with": ["word_template_filler", "excel_form_filler", "doc_summarizer"]
+  "synergizes_with": ["word_template_filler", "excel_form_filler", "doc_summarizer"],
+
+  "tool_orchestration": "• 单文档路径 →\n  · .docx/.doc → read_docx_paragraphs(path) 提取段落结构\n  · .pdf/.txt → read_file(path) 读取文本内容\n• 多文档批量 → find_files(pattern) 列出文件列表，逐个 read_file/read_docx_paragraphs\n• 用户提供提取模板（Word/Excel/字段列表）→ load_data(template) 获取目标字段清单\n  · 精确匹配字段标签（如 '发布日期:'）→ 直接提取\n  · 语义推断（'publication date' ≈ 日期格式字符串在文首位置）→ 提取后标注推断依据\n  · 无法确认的字段 → 标注\"未找到\"，绝不猜测填入\n• 提取完成 → save_data(result.xlsx) 或 write_file(result.docx) 按模板格式输出\n• 汇报：成功提取 N/M 个字段（N=已填 M=总字段），附无法识别字段清单",
+
+  "react_protocol": "light",
+
+  "handoff_context": "下游 doc_gen_excel 可用的字段：\n- extracted_data: [{字段名: 值}] 结构化提取结果列表\n- source_files: 提取来源文件路径列表\n- missing_fields: 未能提取的字段名列表\n- confidence_notes: 低置信度提取项的说明（字段名: 推断依据）"
 }

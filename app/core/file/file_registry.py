@@ -228,6 +228,104 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
     return ""
 
 
+def _extract_text_full(path: str, max_chars: int = 200_000) -> str:
+    """
+    提取文件完整文本内容（不限页数、不限行数），用于全文作为 LLM 上下文。
+
+    与 _extract_text_preview 的区别：
+      - PDF：读取全部页面（而非前 8 页），每页加页码标注
+      - DOCX：按文档流顺序提取段落 + 表格单元格（财务表格完整保留）
+      - XLSX：读取所有 Sheet 的所有行（而非前 200 行）
+      - 文本类：全文读取
+      - max_chars 上限 200,000 字符（约 15 万字 / 150K tokens）
+    """
+    max_chars = min(max(1_000, int(max_chars)), 200_000)
+    ext = Path(path).suffix.lower()
+    try:
+        # ── 纯文本类 ─────────────────────────────────────────────────────────
+        if ext in {
+            ".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml",
+            ".html", ".htm", ".py", ".js", ".ts", ".sql", ".sh",
+            ".bat", ".ps1", ".cs", ".java", ".go", ".rs", ".css",
+        }:
+            for enc in ("utf-8", "gbk", "latin-1"):
+                try:
+                    return Path(path).read_text(encoding=enc)[:max_chars]
+                except UnicodeDecodeError:
+                    continue
+            return ""
+
+        # ── PDF：读取全部页面 ─────────────────────────────────────────────────
+        if ext == ".pdf":
+            try:
+                import PyPDF2
+
+                parts = []
+                with open(path, "rb") as f:
+                    reader = PyPDF2.PdfReader(f)
+                    total = len(reader.pages)
+                    for i, page in enumerate(reader.pages, 1):
+                        text = page.extract_text() or ""
+                        if text.strip():
+                            parts.append(f"--- 第 {i}/{total} 页 ---\n{text}")
+                return "\n".join(parts)[:max_chars]
+            except Exception:
+                return ""
+
+        # ── DOCX：段落 + 表格（按文档流顺序） ────────────────────────────────
+        if ext == ".docx":
+            try:
+                from docx import Document
+                from docx.table import Table
+                from docx.text.paragraph import Paragraph
+
+                doc = Document(path)
+                parts = []
+                for block in doc.element.body:
+                    tag = block.tag.split("}")[-1] if "}" in block.tag else block.tag
+                    if tag == "p":
+                        para = Paragraph(block, doc)
+                        text = para.text.strip()
+                        if text:
+                            parts.append(text)
+                    elif tag == "tbl":
+                        tbl = Table(block, doc)
+                        for row in tbl.rows:
+                            cells = [c.text.strip() for c in row.cells]
+                            if any(cells):
+                                parts.append("\t".join(cells))
+                return "\n".join(parts)[:max_chars]
+            except Exception:
+                # fallback：仅段落
+                try:
+                    from docx import Document
+                    doc = Document(path)
+                    return "\n".join(p.text for p in doc.paragraphs)[:max_chars]
+                except Exception:
+                    return ""
+
+        # ── XLSX/XLS：全部 Sheet，全部行 ─────────────────────────────────────
+        if ext in {".xlsx", ".xls"}:
+            try:
+                import openpyxl
+
+                wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+                parts = []
+                for sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    parts.append(f"=== Sheet: {sheet_name} ===")
+                    for row in ws.iter_rows(values_only=True):
+                        if any(c is not None for c in row):
+                            parts.append("\t".join(str(c or "") for c in row))
+                return "\n".join(parts)[:max_chars]
+            except Exception:
+                return ""
+
+    except Exception:
+        pass
+    return ""
+
+
 # ============================================================================
 # 数据类
 # ============================================================================

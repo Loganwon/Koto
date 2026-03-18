@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\llm\gemini.py
+# hypothesis_version: 6.151.9
+
+[0.7, 0.95, 2.0, 30.0, 90.0, 300.0, 429, 503, 8192, 80000, '15', '30', '429', '503', 'API_KEY', 'GEMINI_API_KEY', 'GEMINI_CALL_TIMEOUT', 'GOOGLE_API_KEY', 'RESOURCE_EXHAUSTED', 'args', 'assistant', 'cancelled', 'candidates', 'completed', 'completion_tokens', 'content', 'description', 'failed', 'finish_reason', 'function', 'function_call', 'function_response', 'id', 'max_tokens', 'model', 'name', 'object', 'outputs', 'parameters', 'parts', 'prompt_token_count', 'prompt_tokens', 'properties', 'required', 'response', 'response_mime_type', 'role', 'status', 'status_code', 'stop', 'temperature', 'text', 'text/plain', 'tool', 'tool_calls', 'top_k', 'top_p', 'type', 'unknown_tool', 'usage', 'usage_metadata', 'user', 'v1beta', '助手', '用户']

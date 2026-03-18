@@ -83,5 +83,11 @@
     "批量生成表格",
     "自动填表",
     "form filler"
-  ]
+  ],
+
+  "tool_orchestration": "• 读取模板结构 → load_data(template_path, read_structure=True)，列出所有字段/列头/表单控件\n  · 告知用户：检测到 N 个字段（附清单），确认是否符合预期\n• 数据来源 →\n  · Excel/CSV 数据文件 → load_data(data_path) 加载\n  · 用户口述数据 → 直接建立字段映射，不调用 load_data\n  · 自动匹配字段（精确 > 去除空格/大小写 > 相似度匹配）\n  · 匹配置信度 < 80% 的字段 → 列出疑问清单，由用户确认，绝不猜测\n• 单行模式（1 条记录）→ write_file 或 save_data 写出单份文件\n• 批量模式（N 行数据）→ 询问：N 个独立文件 还是 1 个多 sheet 汇总文件\n• 完成汇报：成功填写 N 行/份，未匹配字段 K 个（列出清单，由用户后续处理）",
+
+  "react_protocol": "light",
+
+  "handoff_context": "下游 excel_analyst 可用的字段：\n- output_path: 填写后的文件路径\n- filled_fields: 成功填写的字段列表\n- unfilled_fields: 未匹配字段列表（可能需要手动补充）\n- row_count: 填写的记录数"
 }

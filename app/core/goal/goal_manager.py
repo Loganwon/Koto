@@ -533,6 +533,28 @@ class GoalManager:
 
     def _submit_goal_job(self, goal: GoalTask):
         """将目标检查任务提交给 JobRunner；失败时降级到直接执行线程。"""
+        # 字符串优先级 → TaskPriority int
+        _PRIORITY_MAP = {"urgent": 3, "high": 2, "normal": 1, "low": 0}
+        _priority_int = _PRIORITY_MAP.get(goal.priority, 1)
+
+        # 在 TaskLedger 创建对应的 TaskRecord，便于跨系统追踪
+        linked_task_id: Optional[str] = None
+        try:
+            from app.core.tasks.task_ledger import TaskPriority, get_ledger
+
+            ledger = get_ledger()
+            task_rec = ledger.create(
+                session_id=goal.session_id or "goal_manager",
+                user_input=goal.user_goal[:500],
+                task_type="goal_check",
+                source="goal_manager",
+                metadata={"goal_id": goal.goal_id, "goal_title": goal.title},
+                priority=_priority_int,
+            )
+            linked_task_id = task_rec.task_id
+        except Exception as e:
+            logger.debug(f"[GoalManager] TaskLedger 记录失败（非致命）: {e}")
+
         try:
             from app.core.jobs.job_runner import JobSpec, get_job_runner
 
@@ -542,7 +564,8 @@ class GoalManager:
                     job_type="goal_check",
                     payload={"goal_id": goal.goal_id},
                     session_id=goal.session_id or "",
-                    metadata={"goal_title": goal.title},
+                    metadata={"goal_title": goal.title, "linked_task_id": linked_task_id},
+                    priority=_priority_int,
                 )
             )
         except Exception as e:

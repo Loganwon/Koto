@@ -383,13 +383,16 @@ class ProactiveAgent:
             except Exception:
                 pass
 
-        return _make_msg(
+        msg = _make_msg(
             "follow_up",
             content,
             priority="medium",
             triggered_by=f"open_task:{task['id']}",
             ttl_hours=24,
         )
+        # 挂上原始任务文本，前端回复时作为 shadow_context 传给 AI
+        msg["task_text"] = task_text
+        return msg
 
     def _build_suggestion(self, obs: Dict, llm_fn=None) -> Optional[Dict]:
         # 优先使用近期话题（近7天），再 fallback 到近30天或全时段

@@ -106,5 +106,11 @@
     "output_keys":  [
                         "analysis_result",
                         "chart_data"
-                    ]
+                    ],
+
+    "tool_orchestration": "• 用户提供文件路径（.xlsx/.csv） → read_file(path) 加载数据\n  · 加载后先 describe_data() 获取字段摘要，再决定后续步骤\n  · describe_data 返回字段列表 → 识别：数值列/日期列/分类列/ID列\n  · 发现日期列 + 数值列同时存在 → analyze_trends() 自动计算趋势\n  · 用户提出特定筛选或聚合需求 → query_data(expression) 直接响应\n  · 分析完成后用户要保存结果 → save_data(output_path)\n• 用户直接粘贴了少量数据（≤20行）→ 直接在上下文中分析，无需调用 read_file\n• 数据超过 1000 行 → 先 describe_data 摘要，询问用户是否需要深入某个维度\n  · 用户指定维度 → 针对该维度 query_data，而不是全量分析",
+
+    "react_protocol": "light",
+
+    "multi_model_hint": "• 字段推断 / 异常值检测 / 简单统计摘要 → 快速本地模型即可，减少延迟\n• 复杂洞察生成（趋势解读/多维相关性/商业建议文字） → 优先较强推理模型\n• MultiAgentOrchestrator 推荐分工：\n  - 节点 1（数据准备）：load_data → describe_data → query_data → 输出 structured_summary\n  - 节点 2（分析报告）：接收 structured_summary，生成洞察和建议文字\n• 节点间传递的关键字段：\n  - structured_summary: {columns, row_count, numeric_stats, top_categories, anomalies}\n  - chart_data: [{type, x, y, title}] （供 chart_analyst 技能直接消费）"
 }

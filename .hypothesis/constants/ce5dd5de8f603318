@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\search_plugin.py
+# hypothesis_version: 6.151.9
+
+['WebSearch', 'description', 'func', 'name', 'success', 'web_search']

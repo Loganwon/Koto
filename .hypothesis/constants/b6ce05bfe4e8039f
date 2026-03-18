@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\api\task_routes.py
+# hypothesis_version: 6.151.9
+
+[200, 300, 400, 404, '/<task_id>', '/<task_id>/cancel', '/<task_id>/interrupt', '/<task_id>/resume', '/<task_id>/stream', '/purge', '/stats', 'Cache-Control', 'Connection', 'X-Accel-Buffering', 'approved', 'data', 'date_from', 'deleted', 'error', 'false', 'human_in_loop', 'interrupt', 'keep-alive', 'keep_days', 'limit', 'no', 'no-cache', 'offset', 'ok', 'reason', 'replay', 'resume', 'session_id', 'source', 'status', 'steps', 'tasks', 'text/event-stream', 'timeout', 'true', '任务不存在', '任务已删除', '任务已恢复执行', '任务已进入等待确认状态', '任务正在执行中，请先取消再删除', '取消请求已发送，执行线程将在下一步时停止', '用户已确认，任务恢复执行', '用户拒绝确认，任务已取消']

@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\data_process_plugin.py
+# hypothesis_version: 6.151.9
+
+[0.0, 1.5, 2.5, 100, 1000, '\n### 分布与统计', '\n### 分组分析', '\n### 数据质量', '\n### 时间趋势', '\n### 规模考量', ' |', '## Missing Values', '## Numeric Summary', '### 整体概况', '### 期间环比增长', '### 近期走势（最近 5 个周期）', ', ', '.', '.csv', '.json', '.xls', '.xlsx', 'D', 'DataProcess', 'ME', 'None.', 'OBJECT', 'QE', 'STRING', 'W', '__builtins__', 'analyze_trends', 'category', 'coerce', 'data_json', 'date', 'date_col', 'describe_data', 'description', 'df', 'eval', 'expression', 'filepath', 'freq', 'func', 'load_data', 'month', 'name', 'nan', 'number', 'object', 'parameters', 'properties', 'query_data', 'records', 'required', 'save_data', 'suggest_questions', 'time', 'to_string', 'type', 'value_col', 'week', 'year', '上升📈', '下降📉', '中等波动', '低波动', '周', '季度', '平稳➡️', '日', '日期', '时间', '月', '高波动']

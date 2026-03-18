@@ -85,5 +85,13 @@
                         ],
     "output_keys":  [
                         "test_code"
-                    ]
+                    ],
+
+    "tool_orchestration": "• 用户提供源文件路径 → read_file(path) 读取被测代码\n  · 存在外部依赖（HTTP/DB/文件/时间）→ 先规划 mock/patch 策略，再生成测试\n  · 存在 async 函数 → 生成 @pytest.mark.asyncio 套件\n  · 代码较长 → read_file_snippet 只读包含目标函数的片段\n• 用户粘贴了函数代码 → 直接分析，无需 read_file\n  · 无类型注解 → 从 docstring/参数名/返回值推断类型，补充类型假设注释\n• 测试文件已存在 → read_file(test_path) 检查已有测试，补充缺失场景，不重复生成\n• 生成后需要验证可运行性 → execute_python(pytest --collect-only 命令)，如有 import 错误则修复",
+
+    "react_protocol": "full",
+
+    "multi_model_hint": "• 简单函数（纯函数/无依赖）→ 快速模型即可\n• 复杂异步/并发/多继承场景 → 优先高推理能力模型确保 mock 策略正确\n• MultiAgent 分工：节点1=分析被测代码（强推理），节点2=生成测试代码（快速代码模型）\n• 传递字段：function_contracts（输入/输出/异常契约）/ mock_plan（依赖替换策略）",
+
+    "handoff_context": "下游 git_commit_helper 可用的字段：\n- test_file_path: 生成的测试文件路径\n- functions_covered: 覆盖的函数名列表\n- test_count: 生成的测试用例数量\n- commit_scope: 对应的模块名（用于 commit scope）"
 }

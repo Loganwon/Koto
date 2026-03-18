@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\db\migration_manager.py
+# hypothesis_version: 6.151.9
+
+['.py', 'Applied: %s', 'Migration failed: %s', '_', 'upgrade']

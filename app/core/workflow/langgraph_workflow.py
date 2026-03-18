@@ -117,7 +117,7 @@ def _llm_call(
     user: str,
     history: Optional[List[BaseMessage]] = None,
 ) -> str:
-    """辅助函数：单次 LLM 调用，返回文本。"""
+    """辅助函数：单次 LLM 调用，返回文本。失败时抛出异常，不返回错误字符串。"""
     msgs = [SystemMessage(content=system)]
     if history:
         msgs.extend(history)
@@ -127,7 +127,7 @@ def _llm_call(
         return resp.content if hasattr(resp, "content") else str(resp)
     except Exception as exc:
         logger.error(f"[WorkflowEngine] LLM 调用失败: {exc}")
-        return f"[错误] {exc}"
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────

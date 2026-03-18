@@ -1,0 +1,13 @@
+{
+  "default_account": "test@example.com",
+  "accounts": {
+    "test@example.com": {
+      "password": "fake",
+      "smtp_server": "smtp.example.com",
+      "smtp_port": 587,
+      "imap_server": "imap.example.com",
+      "imap_port": 993,
+      "use_ssl": true
+    }
+  }
+}

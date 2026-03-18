@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\goal\goal_job_handler.py
+# hypothesis_version: 6.151.9
+
+[100, 200, 500, ':', 'ACTION', 'ANSWER', 'STATUS:COMPLETED', 'STATUS:WAITING_USER', 'THOUGHT', 'completed', 'goal_check', 'goal_id', 'progress_summary', 'success', 'tool_name', 'value', 'waiting_user', '需要用户补充信息', '（未获得明确答案）', '（首次执行）', '🎉 目标已完成']

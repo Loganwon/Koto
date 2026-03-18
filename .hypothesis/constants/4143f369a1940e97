@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\monitoring\event_database.py
+# hypothesis_version: 6.151.9
+
+[100, ' AND event_type = ?', ' AND severity = ?', ' AND timestamp > ?', 'T', 'avg_daily', 'conn', 'cpu', 'daily_stats', 'data', 'data_json', 'days', 'description', 'disk', 'event_type', 'high', 'high_count', 'low', 'low_count', 'medium', 'medium_count', 'memory', 'metric_name', 'metric_value', 'monitoring_events.db', 'pending', 'severity', 'severity_breakdown', 'threshold', 'timestamp', 'total_events', 'unknown']

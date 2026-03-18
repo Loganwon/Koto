@@ -64,5 +64,11 @@
     "预算vs实际", "核对数据"
   ],
   "chains_to": ["excel_analyst", "doc_gen_excel"],
-  "synergizes_with": ["data_cleaner", "financial_table_mapper", "excel_merge"]
+  "synergizes_with": ["data_cleaner", "financial_table_mapper", "excel_merge"],
+
+  "tool_orchestration": "• 用户提供两个文件路径 → 分别 load_data(path1), load_data(path2)\n  · 自动识别主键列（同名唯一键 > 复合唯一键 > 行索引），告知用户所用主键\n  · 列名差异 → 列出不一致列名，询问映射关系（如 '销售额' = 'revenue'）\n• 对比前格式标准化 → 统一日期/数字格式，避免格式差异造成虚假变更\n• 逐行对比分类：仅新增行（绿）/ 仅删除行（红）/ 修改行（黄，含旧值→新值）/ 无变化\n• 变化超过 30% 行 → 主动警告：确认两文件确实是同一数据源的不同版本\n• save_data(diff_report.xlsx) → 含颜色标注 sheet + 差异摘要 sheet（含修改额/变化率）",
+
+  "react_protocol": "light",
+
+  "handoff_context": "下游 excel_analyst 可用的字段：\n- diff_file: 差异报告文件路径\n- added_count / deleted_count / modified_count: 各类差异行数\n- key_column: 对比所用主键列名\n- major_changes: 变化率最高的前 5 列（供重点关注）"
 }

@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\remediation\remediation_manager.py
+# hypothesis_version: 6.151.9
+
+[0.5, 'action_type', 'approval_reason', 'approved', 'approved_at', 'by_status', 'created_at', 'description', 'event_id', 'executed_at', 'executing', 'failed', 'id', 'low', 'pending', 'rejected', 'rejection_reason', 'result', 'risk_level', 'status', 'success', 'timestamp', 'total_actions']

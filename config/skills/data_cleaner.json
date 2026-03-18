@@ -63,5 +63,11 @@
     "数据清洗", "清理数据", "去重", "格式混乱", "空值处理", "脏数据",
     "日期格式统一", "数据整理", "异常值", "data cleaning", "标准化数据"
   ],
-  "synergizes_with": ["excel_analyst", "excel_merge", "financial_table_mapper", "article_extractor"]
+  "synergizes_with": ["excel_analyst", "excel_merge", "financial_table_mapper", "article_extractor"],
+
+  "tool_orchestration": "• 用户提供文件路径 → load_data(path) → describe_data() 探查数据结构\n  · 空值率 > 10% 的列 → 暂停，展示样本，询问处理策略（删除行/均值填充/插值/标记 MISSING）\n  · 发现重复行 → 询问去重依据（全字段/关键字段/保留最新记录）\n  · 日期格式混乱 → 展示格式样本（如 '2024/01/01' vs 'Jan 1, 2024'），确认目标格式\n• 影响 > 5% 行的任何操作 → 必须先展示「预览」，等待用户确认，禁止静默执行\n• 逐步执行顺序：去重 → 格式统一 → 缺失填充 → 异常值标注（每步汇报计数）\n• 完成后 → save_data(cleaned_FILENAME.xlsx, include_log_sheet=True) 含操作日志 sheet\n• 输出摘要：原始 N 行 → 清洗后 M 行，共执行 K 类操作，释放 X% 的脏数据",
+
+  "react_protocol": "light",
+
+  "handoff_context": "下游 excel_analyst 可用的字段：\n- output_file: 清洗后文件路径\n- column_types: 各列识别后的类型（数值/日期/分类/文本/ID）\n- cleaning_log: 操作摘要列表（{操作类型, 影响行数}）\n- anomaly_columns: 标注了异常值的列名列表（供分析时特别关注）"
 }

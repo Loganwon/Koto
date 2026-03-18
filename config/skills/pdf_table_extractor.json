@@ -69,5 +69,11 @@
     "报价单提取", "招股书数据", "table extraction"
   ],
   "chains_to": ["financial_table_mapper", "data_cleaner", "excel_analyst"],
-  "synergizes_with": ["article_extractor", "financial_table_mapper", "data_cleaner"]
+  "synergizes_with": ["article_extractor", "financial_table_mapper", "data_cleaner"],
+
+  "tool_orchestration": "• 用户提供 PDF 路径 → convert_file(path, target_format='excel') 提取所有表格\n  · 提取结果非空 → load_data(result) 验证表格结构完整性\n  · 提取结果为空/乱码 → 告知可能是扫描件/图片 PDF，建议 OCR 路径（Acrobat/在线服务）\n  · 多页 PDF → 检测首页/末页是否跨页表格（末行无分隔线/首行无表头）→ 自动合并\n• 合并单元格 → 展开填充被合并值，在备注列记录原始合并范围\n• 多张表格 → 每张表分配独立 sheet → save_data(extracted_FILENAME.xlsx)\n• 汇报：识别到 N 张表，总计 M 行，跨页合并了 K 处，识别质量警告 J 条",
+
+  "react_protocol": "light",
+
+  "handoff_context": "下游 financial_table_mapper 可用的字段：\n- excel_file: 提取结果文件路径\n- table_count: 识别到的表格数量\n- table_names: 每张 sheet 的推断名称（如'利润表'/'资产负债表'）\n- quality_notes: 识别质量问题列表（合并单元格/跨页合并/可能的OCR错误位置）"
 }

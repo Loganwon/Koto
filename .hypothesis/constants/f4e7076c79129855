@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\langgraph_agent.py
+# hypothesis_version: 6.151.9
+
+['AgentState', 'MAX_STEPS_EXCEEDED', 'OUTPUT_BLOCKED', '__end__', 'answer', 'args', 'assistant', 'call_tools', 'configurable', 'content', 'error', 'final_answer', 'has_pii', 'id', 'messages', 'model', 'name', 'original_input', 'pii_mask_result', 'reason', 'role', 'session_id', 'skill_id', 'steps_taken', 'stream_mode', 'task_type', 'thread_id', 'token', 'tool_call', 'tool_result', 'type', 'updates', 'user', 'validate', 'validation_retries', '⚠️ 任务超出最大推理步数，已中止。']

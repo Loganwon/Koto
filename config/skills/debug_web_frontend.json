@@ -63,5 +63,13 @@
     "4. CSS问题用DevTools Computed面板验证最终样式",
     "5. 输出精确修复代码（diff格式）",
     "6. 给出DevTools验证步骤"
-  ]
+  ],
+
+  "tool_orchestration": "• 用户提供控制台报错文字 → 按错误层次分类直接分析，不调用工具\n  · TypeError/ReferenceError → JS 运行时层，分析作用域/空值/异步时序\n  · React hook 错误 → 检查 hook 调用顺序、useEffect 依赖、闭包陷阱\n  · Vue warning → 检查 ref.value 遗漏、reactive 解构、v-model 绑定\n• 用户提供组件文件路径 → read_file_snippet(path) 读取组件代码后分析\n  · React 组件 → 检查 hook 依赖、key 属性、Strict Mode 双调用\n  · Vue 组件 → 检查 options/composition API 混用、响应式解构\n• 纯 CSS 布局问题 → 不调工具，直接分析 specificity/flex/grid/z-index\n• 性能问题（白屏/长任务/卡顿）→ 建议切换到 debug_performance skill\n• 需要验证修复 → 提供 DevTools Step-by-Step 验证步骤，不使用 execute_python",
+
+  "react_protocol": "full",
+
+  "multi_model_hint": "• 简单 TypeError/undefined 报错 → 快速模型即可\n• React/Vue 复杂渲染问题（并发模式/Suspense/服务端渲染异步）→ 优先高推理模型\n• TypeScript 类型系统深层错误（泛型/条件类型/类型推断失效）→ 高推理模型更准确\n• 节点间可传递字段：component_name / error_layer / fix_snippet",
+
+  "handoff_context": "下游 write_unit_tests 可用的字段：\n- component_file: 出问题的组件文件路径\n- bug_scenario: 触发 bug 的用户操作描述（用于生成 E2E 场景）\n- fix_snippet: 修复代码片段\n- edge_cases: 已识别边界条件列表（空 props/异步竞争/条件渲染等）"
 }

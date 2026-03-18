@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\scripts\script_generator.py
+# hypothesis_version: 6.151.9
+
+['.ps1', '.sh', 'bash', 'bash <filename>', 'cpu_high', 'description', 'disk_full', 'disk_health', 'error', 'filename', 'issue_type', 'memory_high', 'message', 'min_gb', 'pid', 'powershell', 'process', 'process_memory_high', 'process_name', 'requires_admin', 'run_command', 'script', 'script_type', 'service', 'service_name', 'service_restart', 'status', 'success']

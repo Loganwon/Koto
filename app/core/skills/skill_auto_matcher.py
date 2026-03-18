@@ -36,9 +36,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
-from typing import List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,23 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────────────────
 _MATCH_TIMEOUT = 8.0
 _MAX_AUTO_SKILLS = 3  # 单次最多自动注入的 Skill 数量
+
+# 低评分阈值：平均评分低于此值的 Skill 在自动匹配时被降权（不直接排除）
+_LOW_RATING_THRESHOLD = 2.5
+# 高评分加成系数（avg=5.0 时最多 +20% Jaccard 得分）
+_HIGH_RATING_BOOST = 0.2
+# 默认未评分 Skill 的虚拟平均分（中性）
+_DEFAULT_RATING = 3.0
+
+# 互斥 Skill 对：同时匹配到两个互斥 Skill 时，丢弃评分较低的那个
+# 格式：frozenset({skill_id_a, skill_id_b})
+_CONFLICT_PAIRS: List[frozenset] = [
+    frozenset({"concise_mode", "research_depth"}),
+    frozenset({"professional_tone", "casual_style"}),
+    frozenset({"strict_format", "freeform_output"}),
+    frozenset({"translation_zh2en", "translation_en2zh"}),
+    frozenset({"code_reviewer", "code_generator"}) ,
+]
 
 
 class SkillAutoMatcher:
@@ -71,135 +90,26 @@ class SkillAutoMatcher:
 
     # ── 规则兜底：意图关键词 → Skill ID ──────────────────────────────────────
     _PATTERN_MAP: List[dict] = [
-        {
-            "skill_id": "concise_mode",
-            "patterns": [
-                "简短",
-                "简洁",
-                "一句话",
-                "快速说",
-                "长话短说",
-                "总结一下",
-                "brief",
-                "concise",
-                "short",
-            ],
-        },
-        {
-            "skill_id": "step_by_step",
-            "patterns": [
-                "一步一步",
-                "分步骤",
-                "操作流程",
-                "详细步骤",
-                "怎么做",
-                "如何做",
-                "请教我",
-                "step by step",
-                "step-by-step",
-            ],
-        },
-        {
-            "skill_id": "teaching_mode",
-            "patterns": [
-                "教我",
-                "讲解",
-                "通俗解释",
-                "像老师一样",
-                "我没学过",
-                "能解释一下",
-                "浅显",
-                "explain",
-                "teach me",
-            ],
-        },
-        {
-            "skill_id": "professional_tone",
-            "patterns": [
-                "正式一点",
-                "专业一点",
-                "商务语气",
-                "写邮件",
-                "汇报",
-                "报告",
-                "formal",
-                "professional",
-            ],
-        },
-        {
-            "skill_id": "writing_assistant",
-            "patterns": [
-                "润色",
-                "改写",
-                "优化表达",
-                "重写",
-                "整理成文",
-                "polish",
-                "rewrite",
-            ],
-        },
-        {
-            "skill_id": "code_best_practices",
-            "patterns": [
-                "写代码",
-                "重构",
-                "代码优化",
-                "最佳实践",
-                "写个函数",
-                "实现一下",
-                "best practice",
-            ],
-        },
-        {
-            "skill_id": "security_aware",
-            "patterns": [
-                "安全",
-                "风险",
-                "漏洞",
-                "加密",
-                "权限",
-                "注入",
-                "security",
-                "vulnerability",
-            ],
-        },
-        {
-            "skill_id": "research_depth",
-            "patterns": [
-                "深入分析",
-                "深度研究",
-                "详细分析",
-                "全面比较",
-                "in-depth",
-                "comprehensive",
-            ],
-        },
-        {
-            "skill_id": "task_planner",
-            "patterns": [
-                "计划",
-                "安排",
-                "待办",
-                "路线图",
-                "拆解任务",
-                "里程碑",
-                "plan",
-                "roadmap",
-                "todo",
-            ],
-        },
-        {
-            "skill_id": "data_analysis",
-            "patterns": [
-                "数据分析",
-                "统计",
-                "图表",
-                "可视化",
-                "趋势",
-                "data analysis",
-                "visualization",
-            ],
-        },
+        {"skill_id": "concise_mode",
+         "patterns": ["简短", "简洁", "一句话", "快速说", "长话短说", "总结一下", "brief", "concise", "short"]},
+        {"skill_id": "step_by_step",
+         "patterns": ["一步一步", "分步骤", "操作流程", "详细步骤", "怎么做", "如何做", "请教我", "step by step", "step-by-step"]},
+        {"skill_id": "teaching_mode",
+         "patterns": ["教我", "讲解", "通俗解释", "像老师一样", "我没学过", "能解释一下", "浅显", "explain", "teach me"]},
+        {"skill_id": "professional_tone",
+         "patterns": ["正式一点", "专业一点", "商务语气", "写邮件", "汇报", "报告", "formal", "professional"]},
+        {"skill_id": "writing_assistant",
+         "patterns": ["润色", "改写", "优化表达", "重写", "整理成文", "polish", "rewrite"]},
+        {"skill_id": "code_best_practices",
+         "patterns": ["写代码", "重构", "代码优化", "最佳实践", "写个函数", "实现一下", "best practice"]},
+        {"skill_id": "security_aware",
+         "patterns": ["安全", "风险", "漏洞", "加密", "权限", "注入", "security", "vulnerability"]},
+        {"skill_id": "research_depth",
+         "patterns": ["深入分析", "深度研究", "详细分析", "全面比较", "in-depth", "comprehensive"]},
+        {"skill_id": "task_planner",
+         "patterns": ["计划", "安排", "待办", "路线图", "拆解任务", "里程碑", "plan", "roadmap", "todo"]},
+        {"skill_id": "data_analysis",
+         "patterns": ["数据分析", "统计", "图表", "可视化", "趋势", "data analysis", "visualization"]},
         # ── 专项调试技能（必须在 debug_python 前，避免被截胡）──
         {
             "skill_id": "debug_api",
@@ -713,317 +623,119 @@ class SkillAutoMatcher:
             ],
         },
         # ── 高价值 Workflow Skills（商业场景）──
-        {
-            "skill_id": "email_writer",
-            "patterns": [
-                "写邮件",
-                "帮我写邮件",
-                "邮件正文",
-                "回复邮件",
-                "发邮件",
-                "邮件模板",
-                "起草邮件",
-                "邮件草稿",
-                "write email",
-                "draft email",
-                "compose email",
-                "客户邮件",
-                "商务邮件正文",
-                "邮件内容",
-                "一封邮件",
-                "封邮件",
-                "封邮",
-                "邮件怎么写",
-                "邮件范文",
-                "商务邮件",
-                "邮件内容",
-                "写封邮",
-                "邮件撰写",
-            ],
-        },
-        {
-            "skill_id": "meeting_notes",
-            "patterns": [
-                "会议纪要",
-                "整理会议",
-                "会议记录",
-                "会议总结",
-                "帮我整理会议",
-                "meeting minutes",
-                "会议内容整理",
-                "讨论要点",
-                "会议梳理",
-                "开会记录",
-            ],
-        },
-        {
-            "skill_id": "work_report_generator",
-            "patterns": [
-                "写报告",
-                "帮我写报告",
-                "生成报告",
-                "撰写报告",
-                "分析报告",
-                "工作报告",
-                "项目报告",
-                "write report",
-                "报告模板",
-                "报告正文",
-            ],
-        },
-        {
-            "skill_id": "negotiation_assist",
-            "patterns": [
-                "谈判",
-                "砍价",
-                "商务谈判",
-                "谈条件",
-                "价格谈判",
-                "谈合同",
-                "negotiation",
-                "谈判策略",
-                "谈判话术",
-                "如何谈判",
-                "谈判技巧",
-                "应对客户压价",
-                "合同谈判",
-            ],
-        },
-        {
-            "skill_id": "root_cause",
-            "patterns": [
-                "根因分析",
-                "根本原因",
-                "问题溯源",
-                "问题根因",
-                "rca",
-                "root cause",
-                "为什么会发生",
-                "找原因",
-                "故障分析",
-                "复盘原因",
-                "追溯问题",
-            ],
-        },
-        {
-            "skill_id": "brainstorm",
-            "patterns": [
-                "头脑风暴",
-                "想法发散",
-                "创意方案",
-                "帮我想想",
-                "有什么方案",
-                "brainstorm",
-                "idea generation",
-                "ideation",
-                "想点子",
-                "创意发想",
-                "有哪些思路",
-                "集思广益",
-                "发散思维",
-            ],
-        },
-        {
-            "skill_id": "pros_cons",
-            "patterns": [
-                "优缺点",
-                "利弊",
-                "对比分析",
-                "pros and cons",
-                "pros cons",
-                "利弊分析",
-                "正反两面",
-                "做决策",
-                "帮我比较",
-                "方案对比",
-                "权衡利弊",
-                "好处和坏处",
-                "分析利弊",
-            ],
-        },
-        {
-            "skill_id": "okr_builder",
-            "patterns": [
-                "okr",
-                "目标设定",
-                "kpi制定",
-                "关键结果",
-                "key results",
-                "帮我写okr",
-                "制定目标",
-                "季度目标",
-                "年度目标",
-                "okr拆解",
-            ],
-        },
-        {
-            "skill_id": "sprint_planner",
-            "patterns": [
-                "sprint",
-                "迭代计划",
-                "sprint计划",
-                "冲刺计划",
-                "敏捷开发",
-                "sprint planning",
-                "迭代安排",
-                "排期",
-                "里程碑计划",
-                "发版计划",
-            ],
-        },
-        {
-            "skill_id": "contract_reviewer",
-            "patterns": [
-                "审合同",
-                "合同审查",
-                "看合同",
-                "合同条款",
-                "合同风险",
-                "contract review",
-                "审核合同",
-                "合同有没有问题",
-                "帮我看合同",
-                "协议审查",
-                "甲乙方条款",
-                "合同",
-                "协议条款",
-                "关于合同",
-                "合同内容",
-            ],
-        },
-        {
-            "skill_id": "sop_writer",
-            "patterns": [
-                "sop",
-                "标准操作",
-                "操作规范",
-                "流程文档",
-                "写流程",
-                "standard operating procedure",
-                "制作sop",
-                "操作手册",
-                "流程规范",
-                "作业指导书",
-                "操作说明书",
-            ],
-        },
-        {
-            "skill_id": "interview_prep",
-            "patterns": [
-                "面试准备",
-                "面试题",
-                "帮我准备面试",
-                "interview prep",
-                "interview questions",
-                "模拟面试",
-                "面试技巧",
-                "hr面试",
-                "技术面试",
-                "面试常见问题",
-                "面试自我介绍",
-                "面试问答",
-            ],
-        },
-        {
-            "skill_id": "learning_guide",
-            "patterns": [
-                "学习路线",
-                "学习路径",
-                "学习计划",
-                "learning roadmap",
-                "learning path",
-                "如何学习",
-                "从哪里开始学",
-                "入门到精通",
-                "学习大纲",
-                "技能树",
-                "怎么系统学习",
-                "自学方案",
-            ],
-        },
-        {
-            "skill_id": "survey_designer",
-            "patterns": [
-                "问卷设计",
-                "设计问卷",
-                "调查问卷",
-                "问卷模板",
-                "survey design",
-                "做问卷",
-                "设计调研",
-                "用户调研问卷",
-                "满意度调查",
-                "问卷怎么写",
-            ],
-        },
-        {
-            "skill_id": "kpi_designer",
-            "patterns": [
-                "kpi设计",
-                "设计kpi",
-                "绩效指标",
-                "kpi指标",
-                "考核指标",
-                "kpi framework",
-                "绩效考核设计",
-                "设计绩效",
-                "评估指标",
-                "kpi体系",
-            ],
-        },
-        {
-            "skill_id": "social_copy",
-            "patterns": [
-                "朋友圈文案",
-                "小红书文案",
-                "社媒文案",
-                "微博文案",
-                "社交媒体文案",
-                "social media copy",
-                "营销文案",
-                "推广文案",
-                "写文案",
-                "广告文案",
-                "抖音文案",
-                "种草文案",
-                "公众号文案",
-            ],
-        },
-        {
-            "skill_id": "feedback_polisher",
-            "patterns": [
-                "优化反馈",
-                "改写反馈",
-                "润色反馈",
-                "更委婉",
-                "表达得更好",
-                "feedback polish",
-                "说得好听一点",
-                "更有建设性",
-                "温和地表达",
-                "批评怎么说",
-                "如何给反馈",
-                "建设性意见",
-            ],
-        },
-        {
-            "skill_id": "prompt_refiner",
-            "patterns": [
-                "写prompt",
-                "优化prompt",
-                "prompt工程",
-                "提示词",
-                "prompt engineering",
-                "写提示词",
-                "提示词优化",
-                "system prompt",
-                "如何写prompt",
-                "prompt设计",
-                "指令优化",
-                "ai提示词",
-            ],
-        },
+        {"skill_id": "email_writer",
+         "patterns": ["写邮件", "帮我写邮件", "邮件正文", "回复邮件", "发邮件", "邮件模板",
+                       "起草邮件", "邮件草稿", "write email", "draft email", "compose email",
+                       "客户邮件", "商务邮件正文", "邮件内容",
+                       "一封邮件", "封邮件", "封邮", "邮件怎么写", "邮件范文",
+                       "商务邮件", "邮件内容", "写封邮", "邮件撰写"]},
+        {"skill_id": "meeting_notes",
+         "patterns": ["会议纪要", "整理会议", "会议记录", "会议总结", "帮我整理会议",
+                       "meeting minutes", "会议内容整理", "讨论要点", "会议梳理", "开会记录"]},
+        {"skill_id": "work_report_generator",
+         "patterns": ["写报告", "帮我写报告", "生成报告", "撰写报告", "分析报告",
+                       "工作报告", "项目报告", "write report", "报告模板", "报告正文"]},
+        {"skill_id": "negotiation_assist",
+         "patterns": ["谈判", "砍价", "商务谈判", "谈条件", "价格谈判", "谈合同",
+                       "negotiation", "谈判策略", "谈判话术", "如何谈判", "谈判技巧",
+                       "应对客户压价", "合同谈判"]},
+        {"skill_id": "root_cause",
+         "patterns": ["根因分析", "根本原因", "问题溯源", "问题根因", "rca", "root cause",
+                       "为什么会发生", "找原因", "故障分析", "复盘原因", "追溯问题"]},
+        {"skill_id": "brainstorm",
+         "patterns": ["头脑风暴", "想法发散", "创意方案", "帮我想想", "有什么方案",
+                       "brainstorm", "idea generation", "ideation", "想点子", "创意发想",
+                       "有哪些思路", "集思广益", "发散思维"]},
+        {"skill_id": "pros_cons",
+         "patterns": ["优缺点", "利弊", "对比分析", "pros and cons", "pros cons",
+                       "利弊分析", "正反两面", "做决策", "帮我比较", "方案对比",
+                       "权衡利弊", "好处和坏处", "分析利弊"]},
+        {"skill_id": "okr_builder",
+         "patterns": ["okr", "目标设定", "kpi制定", "关键结果", "key results",
+                       "帮我写okr", "制定目标", "季度目标", "年度目标", "okr拆解"]},
+        {"skill_id": "sprint_planner",
+         "patterns": ["sprint", "迭代计划", "sprint计划", "冲刺计划", "敏捷开发",
+                       "sprint planning", "迭代安排", "排期", "里程碑计划", "发版计划"]},
+        {"skill_id": "contract_reviewer",
+         "patterns": ["审合同", "合同审查", "看合同", "合同条款", "合同风险",
+                       "contract review", "审核合同", "合同有没有问题", "帮我看合同",
+                       "协议审查", "甲乙方条款",
+                       "合同", "协议条款", "关于合同", "合同内容"]},
+        {"skill_id": "sop_writer",
+         "patterns": ["sop", "标准操作", "操作规范", "流程文档", "写流程",
+                       "standard operating procedure", "制作sop", "操作手册", "流程规范",
+                       "作业指导书", "操作说明书"]},
+        {"skill_id": "interview_prep",
+         "patterns": ["面试准备", "面试题", "帮我准备面试", "interview prep", "interview questions",
+                       "模拟面试", "面试技巧", "hr面试", "技术面试", "面试常见问题",
+                       "面试自我介绍", "面试问答"]},
+        {"skill_id": "learning_guide",
+         "patterns": ["学习路线", "学习路径", "学习计划", "learning roadmap", "learning path",
+                       "如何学习", "从哪里开始学", "入门到精通", "学习大纲", "技能树",
+                       "怎么系统学习", "自学方案"]},
+        {"skill_id": "survey_designer",
+         "patterns": ["问卷设计", "设计问卷", "调查问卷", "问卷模板", "survey design",
+                       "做问卷", "设计调研", "用户调研问卷", "满意度调查", "问卷怎么写"]},
+        {"skill_id": "kpi_designer",
+         "patterns": ["kpi设计", "设计kpi", "绩效指标", "kpi指标", "考核指标",
+                       "kpi framework", "绩效考核设计", "设计绩效", "评估指标", "kpi体系"]},
+        {"skill_id": "social_copy",
+         "patterns": ["朋友圈文案", "小红书文案", "社媒文案", "微博文案", "社交媒体文案",
+                       "social media copy", "营销文案", "推广文案", "写文案", "广告文案",
+                       "抖音文案", "种草文案", "公众号文案"]},
+        {"skill_id": "feedback_polisher",
+         "patterns": ["优化反馈", "改写反馈", "润色反馈", "更委婉", "表达得更好",
+                       "feedback polish", "说得好听一点", "更有建设性", "温和地表达",
+                       "批评怎么说", "如何给反馈", "建设性意见"]},
+        {"skill_id": "prompt_refiner",
+         "patterns": ["写prompt", "优化prompt", "prompt工程", "提示词", "prompt engineering",
+                       "写提示词", "提示词优化", "system prompt", "如何写prompt",
+                       "prompt设计", "指令优化", "ai提示词"]},
     ]
+
+    # ── Skill 评分缓存 ─────────────────────────────────────────────────────────
+    _ratings_cache: Optional[Dict[str, float]] = None
+    _ratings_path: Optional[str] = None
+
+    @classmethod
+    def _get_ratings_path(cls) -> str:
+        if cls._ratings_path is None:
+            cls._ratings_path = str(
+                Path(
+                    os.environ.get(
+                        "KOTO_DB_DIR",
+                        Path(__file__).parent.parent.parent.parent / "config",
+                    )
+                )
+                / "skill_ratings.json"
+            )
+        return cls._ratings_path
+
+    @classmethod
+    def _load_ratings(cls) -> Dict[str, float]:
+        """懒加载并缓存 skill_ratings.json 中的平均评分。每次调用会检测文件变更。"""
+        path = cls._get_ratings_path()
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            return {
+                skill_id: float(v.get("avg", _DEFAULT_RATING))
+                for skill_id, v in data.items()
+                if isinstance(v, dict)
+            }
+        except Exception:
+            return {}
+
+    @classmethod
+    def _rating_for(cls, skill_id: str) -> float:
+        """返回 skill_id 的平均评分，未评分时返回默认值 _DEFAULT_RATING。"""
+        if cls._ratings_cache is None:
+            cls._ratings_cache = cls._load_ratings()
+        return cls._ratings_cache.get(skill_id, _DEFAULT_RATING)
+
+    @classmethod
+    def _refresh_ratings(cls):
+        """强制刷新评分缓存（Skill 被用户评分后调用）。"""
+        cls._ratings_cache = cls._load_ratings()
 
     @classmethod
     def _build_skill_catalog(cls, task_type: str) -> tuple[List[dict], str]:
@@ -1105,7 +817,7 @@ class SkillAutoMatcher:
 
         def _ngrams(text: str) -> set:
             t = text.lower().replace(" ", "")
-            return {t[i : i + n] for i in range(max(0, len(t) - n + 1))}
+            return {t[i:i + n] for i in range(max(0, len(t) - n + 1))}
 
         input_ng = _ngrams(user_input[:300])
         if not input_ng:
@@ -1124,7 +836,11 @@ class SkillAutoMatcher:
                 continue
             jaccard = len(input_ng & desc_ng) / union
             if jaccard >= threshold:
-                scored.append((jaccard, c["id"]))
+                # 融入用户评分：avg 5.0 → +20% 加成；avg 1.0 → -20% 惩罚
+                rating = cls._rating_for(c["id"])
+                rating_factor = 1.0 + _HIGH_RATING_BOOST * (rating - _DEFAULT_RATING) / (_DEFAULT_RATING - 1)
+                adjusted = jaccard * max(0.5, rating_factor)
+                scored.append((adjusted, c["id"]))
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [sid for _, sid in scored[:_MAX_AUTO_SKILLS]]
@@ -1156,7 +872,6 @@ class SkillAutoMatcher:
         # 2. SkillDefinition.trigger_keywords（持久化在 JSON 的自定义 Skill）
         try:
             from app.core.skills.skill_manager import SkillManager
-
             SkillManager._ensure_init()
             for sid, skill_def in SkillManager._def_registry.items():
                 if sid not in candidate_ids or sid in matched_set:
@@ -1286,6 +1001,9 @@ class SkillAutoMatcher:
 
         candidate_ids = {c["id"] for c in candidates}
 
+        # ── 刷新评分缓存（每次 match 调用时重新加载评分，确保实时性） ───────
+        cls._ratings_cache = cls._load_ratings()
+
         # ── 如果已有活跃领域 Skill，跳过自动匹配（避免重复注入） ─────────────
         if not force and cls._has_active_skills_for_task(task_type):
             logger.debug(f"[AutoMatcher] 用户已启用域 Skill，跳过自动匹配")
@@ -1296,21 +1014,39 @@ class SkillAutoMatcher:
             user_input, task_type, catalog_text, candidate_ids
         )
         if model_result is not None:
-            return cls._expand_with_synergy(model_result, user_input, candidate_ids)
+            ranked = cls._rank_by_rating(model_result)
+            expanded = cls._expand_with_synergy(ranked, user_input, candidate_ids)
+            return cls._detect_conflicts(expanded)
 
         # ── n-gram 语义相似度中间层（Ollama 不可用时，比纯关键词更泛化）─────
         ngram_result = cls._match_with_intent_ngram(user_input, candidates)
         if ngram_result:
-            logger.info(f"[AutoMatcher] 🔤 n-gram 匹配: {task_type} → {ngram_result}")
-            return cls._expand_with_synergy(ngram_result, user_input, candidate_ids)
+            logger.info(
+                f"[AutoMatcher] 🔤 n-gram 匹配: {task_type} → {ngram_result}"
+            )
+            expanded = cls._expand_with_synergy(ngram_result, user_input, candidate_ids)
+            return cls._detect_conflicts(expanded)
 
         # ── 最终兜底：精确关键词规则 ────────────────────────────────────────
         pattern_result = cls._match_with_patterns(user_input, candidates)
         if pattern_result:
-            logger.info(f"[AutoMatcher] 📋 规则匹配: {task_type} → {pattern_result}")
-            return cls._expand_with_synergy(pattern_result, user_input, candidate_ids)
+            ranked = cls._rank_by_rating(pattern_result)
+            logger.info(
+                f"[AutoMatcher] 📋 规则匹配: {task_type} → {ranked}"
+            )
+            expanded = cls._expand_with_synergy(ranked, user_input, candidate_ids)
+            return cls._detect_conflicts(expanded)
 
         return []
+
+    @classmethod
+    def _rank_by_rating(cls, skill_ids: List[str]) -> List[str]:
+        """对已匹配的 skill_id 列表按用户评分降序重排，低评分 Skill 排在后面。"""
+        return sorted(
+            skill_ids,
+            key=lambda sid: cls._rating_for(sid),
+            reverse=True,
+        )
 
     @classmethod
     def _expand_with_synergy(
@@ -1331,7 +1067,6 @@ class SkillAutoMatcher:
 
         try:
             from app.core.skills.skill_manager import SkillManager
-
             SkillManager._ensure_init()
         except Exception:
             return matched_ids
@@ -1375,9 +1110,42 @@ class SkillAutoMatcher:
                 if score_ok:
                     result.append(partner_id)
                     result_set.add(partner_id)
-                    logger.debug("[AutoMatcher] 🔗 协同扩展: %s → +%s", sid, partner_id)
+                    logger.debug(
+                        "[AutoMatcher] 🔗 协同扩展: %s → +%s", sid, partner_id
+                    )
 
         return result
+
+    @classmethod
+    def _detect_conflicts(cls, skill_ids: List[str]) -> List[str]:
+        """
+        检测并消除互斥 Skill 冲突。
+
+        对 ``_CONFLICT_PAIRS`` 中每一个互斥对，若两个 Skill 都出现在
+        ``skill_ids`` 中，则丢弃评分较低的那个（评分相同时保留排列在前的）。
+
+        返回已剔除冲突项后的新列表，顺序与原列表一致。
+        """
+        if len(skill_ids) < 2:
+            return skill_ids
+
+        to_remove: set = set()
+        for pair in _CONFLICT_PAIRS:
+            present = [sid for sid in skill_ids if sid in pair]
+            if len(present) < 2:
+                continue
+            # 保留评分较高的，移除评分较低的
+            keep = max(present, key=lambda sid: cls._rating_for(sid))
+            for sid in present:
+                if sid != keep:
+                    to_remove.add(sid)
+                    logger.info(
+                        "[AutoMatcher] ⚡ 冲突检测：移除 %s（与 %s 互斥，评分更低）",
+                        sid,
+                        keep,
+                    )
+
+        return [sid for sid in skill_ids if sid not in to_remove]
 
     @classmethod
     def describe_matched(cls, skill_ids: List[str]) -> str:

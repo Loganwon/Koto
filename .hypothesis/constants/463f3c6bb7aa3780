@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\alerting_plugin.py
+# hypothesis_version: 6.151.9
+
+['ARRAY', 'Alert Rules:\n\n', 'AlertingPlugin', 'INTEGER', 'Name of rule to test', 'No alerts in history', 'OBJECT', 'STRING', 'add_webhook_alert', 'alert_channels', 'create_alert_rule', 'description', 'disable_alert_rule', 'email', 'enable_alert_rule', 'event_type', 'event_types', 'func', 'get_alert_history', 'get_alert_rules', 'limit', 'log', 'metric_name', 'metric_value', 'min_severity', 'name', 'parameters', 'properties', 'recipients', 'required', 'rule_name', 'sender_email', 'sender_password', 'severity', 'smtp_port', 'smtp_server', 'test_alert_rule', 'test_metric', 'threshold', 'timestamp', 'type', 'webhook', 'webhook_name', 'webhook_url']

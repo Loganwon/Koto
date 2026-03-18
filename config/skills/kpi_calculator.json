@@ -66,5 +66,11 @@
     "KPI计算", "经营指标", "盈利能力分析", "财务比率"
   ],
   "chains_to": ["excel_analyst", "doc_gen_excel", "work_report_generator"],
-  "synergizes_with": ["financial_table_mapper", "data_diff_checker", "excel_analyst"]
+  "synergizes_with": ["financial_table_mapper", "data_diff_checker", "excel_analyst"],
+
+  "tool_orchestration": "• 用户提供财务报表文件 → load_data(path) → 识别报表类型\n  · 资产负债表 → 计算：流动比率/速动比率/资产负债率/ROE/ROA/净资产收益率\n  · 利润表 → 计算：毛利率/净利率/营收增速/期间费用率（销管研）/EBITDA\n  · 现金流量表 → 计算：自由现金流/经营活动净额占净利润比/现金覆盖率\n  · 多表同时存在 → 全量计算，并给出综合评估\n• 单期数据 → 输出绝对值 + 中国 A 股行业均值参考区间\n• 多期数据（≥ 2 期）→ 自动计算同比/环比趋势，标注上升↑/下降↓/稳定→\n• 指标超出警戒范围 → 标注 ⚠️ 并说明风险含义\n• 可选生成报告 → query_data 聚合数据后 save_data(kpi_report.xlsx) 含指标明细",
+
+  "react_protocol": "light",
+
+  "multi_model_hint": "• 标准财务比率计算 → 快速模型即可（数学运算准确性更重要）\n• 需要行业对标解释、多期趋势深层洞察、风险预警解读 → 优先较强推理模型\n• MultiAgent 分工：节点1=数据提取+计算（精确模型），节点2=洞察解读+报告（推理模型）\n• 传递字段：kpi_values（{指标名: 数值}）/ period_list / report_type"
 }

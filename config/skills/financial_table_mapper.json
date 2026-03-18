@@ -96,5 +96,11 @@
     "balance sheet template"
   ],
   "chains_to": ["excel_analyst", "doc_gen_excel"],
-  "synergizes_with": ["article_extractor", "excel_form_filler", "excel_analyst"]
+  "synergizes_with": ["article_extractor", "excel_form_filler", "excel_analyst"],
+
+  "tool_orchestration": "• 读取源文件 →\n  · .docx/.doc → read_docx_paragraphs(path) 提取段落/表格\n  · .xlsx/.csv → load_data(path)\n• 识别报表类型（资产负债表/利润表/现金流量表/非标准合并报表）\n  · 识别科目命名体系：旧准则 CAS / CAS 2017 / IFRS / 行业特殊科目名\n• 字段映射策略（按优先级）：\n  1. 精确匹配科目名 → 直接填写\n  2. 同义科目（'营业收入' = '营业总收入' = 'Operating Revenue'）→ 标注映射路径\n  3. 合并科目（需拆分或合并）→ 列出拆/合规则，询问用户确认\n  4. 找不到对应科目 → 纳入「未映射字段清单」，由用户补充\n• 单位检测：自动识别元/万元/亿元 → 换算至目标模板单位，注明换算比例\n• save_data(mapped_output.xlsx) 写出，附字段映射摘要 sheet",
+
+  "react_protocol": "light",
+
+  "multi_model_hint": "• 标准科目映射 → 快速模型即可\n• 非标准合并报表/特殊行业科目（银行/保险/政府会计）→ 优先高推理模型\n• MultiAgent 建议：节点1=源数据解析，节点2=映射+换算，节点3=质检（合计行核对）"
 }

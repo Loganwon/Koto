@@ -1,0 +1,625 @@
+═════════════════════════════════════════════════════════════════════════════════
+                       KOTO - EXECUTIVE SUMMARY
+                     Core Systems Analysis & Architecture
+═════════════════════════════════════════════════════════════════════════════════
+
+OVERVIEW
+────────
+Koto is a sophisticated multi-modal AI assistant with desktop, web, and cloud 
+deployment capabilities. Core architecture combines:
+  • LLM Provider abstraction with automatic fallback
+  • Unified agent framework with 24 specialized plugins
+  • Hybrid routing (AI + local algorithms)
+  • Privacy-preserving PII filtering
+  • Output quality validation
+  • Multi-deployment support (PyWebView, Docker, PyInstaller)
+
+KEY METRICS
+───────────
+  • Plugins: 24 (13 core + full, 5 optional)
+  • Task Types: 30+ (CHAT, CODER, PAINTER, RESEARCH, etc.)
+  • Fallback Chains: 14 task-specific model chains
+  • LLM Providers: 2 (Gemini + Ollama)
+  • Agent Types: 3 (UnifiedAgent, LangGraphAgent, MultiAgentOrchestrator)
+  • Security Detectors: 9 PII types
+  • Validation Checks: 8 output quality checks
+  • Deployment Modes: 3 (Desktop, Server, Docker)
+
+
+TIER-1: LLM PROVIDER SYSTEM
+═══════════════════════════════════════════════════════════════════════════════
+
+PURPOSE
+  Provides unified interface to multiple LLM backends with automatic fallback
+  and retry logic.
+
+ABC: LLMProvider
+  generate_content(prompt, model, system_instruction, tools, stream) 
+    → Dict{content, tool_calls, usage} | Generator
+
+IMPLEMENTATIONS
+  ┌─ GeminiProvider ────────────────────────────────────────────────────┐
+  │ • Uses google.genai.Client SDK                                     │
+  │ • Retry: 3 attempts with exponential backoff (2s base, 429/503)    │
+  │ • Special Interactions API path for deep-research models           │
+  │ • Tool format: google.genai.types.FunctionDeclaration              │
+  │ • Streaming support with token-level granularity                   │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ OllamaLLMProvider ─────────────────────────────────────────────────┐
+  │ • Local models via Ollama OpenAI-compatible API                    │
+  │ • Tool format: OpenAI-compatible (supports qwen3, llama3.1, etc.)  │
+  │ • Auto-injects Koto Skills into system prompt                      │
+  │ • No API key required, runs locally                                │
+  └─────────────────────────────────────────────────────────────────────┘
+
+FALLBACK MECHANISM (ModelFallbackExecutor)
+  Strategy: Task-specific fallback chains with circuit breaker
+  
+  Example (CODER task):
+    1st attempt: gemini-3.1-pro-preview
+      ↓ (if "model not found" error)
+    2nd attempt: gemini-3-pro-preview
+      ↓ (if "model not found" error)
+    3rd attempt: gemini-2.5-pro-preview
+      ↓ (if "model not found" error)
+    [fallback continues...]
+  
+  Circuit Breaker: After N consecutive cascading failures, exponentially
+                   back off (5s → 10s → 20s → ... → 120s max)
+
+FACTORY (factory.py)
+  • create_agent() - Full UnifiedAgent [Gemini backend]
+  • create_local_agent() - UnifiedAgent [Ollama backend]
+  • create_langgraph_agent() - StateGraph agent [Gemini backend]
+  • create_multi_agent() - Multi-role orchestrator [Gemini backend]
+
+FILES
+  • app/core/llm/base.py - ABC definition
+  • app/core/llm/gemini.py - GeminiProvider (415 lines)
+  • app/core/llm/ollama_llm_provider.py - OllamaLLMProvider
+  • app/core/llm/model_fallback.py - Fallback executor (346 lines)
+  • app/core/agent/factory.py - Agent factory (300 lines)
+
+
+TIER-2: AGENT SYSTEM
+═══════════════════════════════════════════════════════════════════════════════
+
+PURPOSE
+  Core agent loop implementation with plugin architecture for extensibility
+
+ABC: Agent
+  run(input_text, context) → Union[AgentResponse, Generator[AgentStep]]
+
+IMPLEMENTATIONS
+
+  ┌─ UnifiedAgent (41KB) ──────────────────────────────────────────────┐
+  │ Main agent loop (ReAct while-loop, max 15 steps):                 │
+  │   1. Reason & Plan  - LLM decides action                           │
+  │   2. Tool Decision  - Check if tools needed                        │
+  │   3. Execute Tools  - Call tools with ThreadPoolExecutor (60s/tool)│
+  │   4. Validate       - OutputValidator checks response              │
+  │   5. Respond        - Return final answer to user                  │
+  │                                                                    │
+  │ Features:                                                           │
+  │   ✓ PII demasking (input → mask → send to cloud → unmask output) │
+  │   ✓ Output validation (refusal, truncation, leak detection)       │
+  │   ✓ Tool routing (filters tools based on task type)               │
+  │   ✓ Shadow learning (async feedback collection)                   │
+  │   ✓ Skill injection (automated)                                   │
+  │                                                                    │
+  │ Configuration:                                                      │
+  │   MAX_STEPS = 15                                                   │
+  │   MAX_VALIDATION_RETRIES = 1                                       │
+  │   enable_pii_filter = True                                         │
+  │   enable_output_validation = True                                  │
+  │   use_tool_router = True                                           │
+  │   tool_router_max = 20 (show top 20 tools to LLM)                 │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ LangGraphAgent ────────────────────────────────────────────────────┐
+  │ StateGraph-based ReAct (LangGraph requirement)                     │
+  │   • Nodes: reason → call_tools → validate → respond               │
+  │   • MemorySaver checkpoints for multi-turn conversations          │
+  │   • Preserves PII filter + output validation                       │
+  │   • Streaming support with token-level granularity                 │
+  │   • Requires: langgraph, langchain-core, langchain-google-genai   │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ MultiAgentOrchestrator ───────────────────────────────────────────┐
+  │ Multi-role collaboration (Researcher → Writer → Critic)           │
+  │   • Role: RESEARCHER - Deep analysis                              │
+  │   • Role: WRITER - Draft content                                  │
+  │   • Role: CRITIC - Review & feedback                              │
+  │   • Role: REVISE - Refinement loop                                │
+  │                                                                    │
+  │ Topologies:                                                         │
+  │   • sequential - Linear pipeline                                   │
+  │   • critic_loop - Writer → Critic feedback → Revision (iterative)│
+  │   • parallel - All agents run simultaneously                       │
+  └─────────────────────────────────────────────────────────────────────┘
+
+PLUGIN SYSTEM
+
+Base Class: AgentPlugin (ABC, base.py)
+  Properties:
+    • name: str
+    • description: str
+  Methods:
+    • get_tools() → List[Dict{name, description, func, parameters}]
+
+Registration: ToolRegistry.register_plugin(plugin)
+  1. Calls plugin.get_tools()
+  2. Validates each tool has 'name' and 'func'
+  3. Auto-generates JSON schema from function signature
+  4. Registers with LLM for function calling
+
+24 Plugins (24 files in app/core/agent/plugins/):
+  
+  Core (Always Loaded):
+    1. BasicToolsPlugin - Common utilities
+    2. FileEditorPlugin - File operations (read/write/edit)
+    3. SearchPlugin - Web/local search
+    4. SystemToolsPlugin - System operations
+    5. SystemInfoPlugin - System status
+
+  Optional (Try-Catch):
+    6. MemoryToolsPlugin - Long-term memory management (P2 Priority)
+    7. ProductivityPlugin - Calendar/tasks/reminders
+    8. WebToolsBridgePlugin - Browser automation
+
+  Full Suite (UnifiedAgent):
+    9. AlertingPlugin - Create alerts/notifications
+   10. AnnotationPlugin - Document annotation
+   11. AutoRemediationPlugin - Auto-fix issues
+   12. ChartVisionPlugin - Vision analysis for charts
+   13. ConfigurationPlugin - System configuration
+   14. DataProcessPlugin - Data transformation/cleaning
+   15. DocGenPlugin - Document generation
+   16. FileConverterPlugin - Format conversion
+   17. ImageProcessPlugin - Image manipulation
+   18. NetworkPlugin - Network operations
+   19. PerformanceAnalysisPlugin - Performance metrics
+   20. ScriptGenerationPlugin - Code generation
+   21. SystemEventMonitoringPlugin - Event monitoring
+   22. TemplateFillPlugin - Word template filling
+   23. TrendAnalysisPlugin - Trend detection
+   24. SkillToolsPlugin - Skill adapter (auto-injects all active Skills)
+
+Tool Registry (ToolRegistry)
+  Methods:
+    • register_tool(name, func, description, parameters)
+    • register_plugin(plugin)
+    • get_definitions() → JSON schemas for LLM
+    • execute(tool_name, tool_args) → Result with 60s timeout
+    • _generate_schema(func) → Auto JSON schema from function
+
+FILES
+  • app/core/agent/base.py - ABC definitions
+  • app/core/agent/unified_agent.py - Main agent (41KB)
+  • app/core/agent/langgraph_agent.py - StateGraph agent
+  • app/core/agent/multi_agent.py - Multi-agent orchestrator
+  • app/core/agent/tool_registry.py - Tool registry (157 lines)
+  • app/core/agent/factory.py - Agent factory (300 lines)
+  • app/core/agent/plugins/*.py - 24 plugin implementations
+
+
+TIER-3: ROUTING/DISPATCH SYSTEM
+═══════════════════════════════════════════════════════════════════════════════
+
+PURPOSE
+  Analyze user input and intelligently route to appropriate task type and tools
+
+COMPONENTS
+
+  ┌─ SmartDispatcher ──────────────────────────────────────────────────┐
+  │ Hybrid routing strategy:                                           │
+  │   1st: Try AI-based classification (fast, smart)                   │
+  │   2nd: Fall back to local algorithms (reliable, deterministic)    │
+  │   3rd: Return cached result (if same query seen before)           │
+  │                                                                    │
+  │ Cache: LRU with 128 entries max, thread-safe                      │
+  │ USE_AI_ROUTER: Boolean toggle                                     │
+  │ Task corpus: 30+ task types with example prompts                  │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ IntentAnalyzer ────────────────────────────────────────────────────┐
+  │ Rewrites ambiguous multi-turn inputs to standalone instructions:  │
+  │                                                                    │
+  │ Input (ambiguous):   "继续上一个任务"                              │
+  │ Output (clear):      "[Reconstructed previous task with updates]" │
+  │                                                                    │
+  │ Detects & rewrites:                                                │
+  │   • Repeat patterns - "再做一遍", "重复任务"                        │
+  │   • Pronouns - "那个", "这个", "上一个"                             │
+  │   • Modifications - "继续", "改成", "优化一下"                      │
+  │   • References - "第3点", "其中第二步"                              │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ AIRouter ─────────────────────────────────────────────────────────┐
+  │ Fast AI-based task classification (2s timeout)                    │
+  │   Model: gemini-2.0-flash-lite                                     │
+  │   Cache: 100 entries LRU                                           │
+  │   Returns: (task_type, confidence, source)                         │
+  │                                                                    │
+  │ 14 Task Types (+ disambiguation rules):                           │
+  │   • PAINTER - Generate AI art/images                              │
+  │   • FILE_GEN - Create Word/PDF/Excel/PPT                          │
+  │   • DOC_ANNOTATE - Annotate/proofread documents                   │
+  │   • RESEARCH - Deep systematic analysis                           │
+  │   • CODER - Code/programming/data visualization                   │
+  │   • FILE_SEARCH - Find files on disk                              │
+  │   • SYSTEM - Open/close applications                              │
+  │   • AGENT - Execute operations (message/reminder/buy tickets)     │
+  │   • WEB_SEARCH - Real-time data (weather/stocks/news)            │
+  │   • CHAT - General conversation                                   │
+  │   (+ COMPLEX, MULTI_STEP, VISION, FILE_OP, FILE_EDIT)            │
+  │                                                                    │
+  │ Special Rules (key distinctions):                                 │
+  │   • "作图" → CODER not PAINTER (data chart vs AI art)             │
+  │   • "帮我找文件" → FILE_SEARCH not SYSTEM (find file, not app)    │
+  │   • "深入研究" → RESEARCH not CHAT (systematic vs casual)         │
+  │   • "帮我买票" → AGENT not WEB_SEARCH (action vs information)     │
+  └─────────────────────────────────────────────────────────────────────┘
+
+Other Components:
+  • LocalModelRouter - Manages local Ollama model initialization
+  • TaskClassifier - Non-AI task classification (local algorithms)
+  • TaskDecomposer - Breaks complex tasks into subtasks
+  • LocalPlanner - Creates execution plans
+  • ToolRouter - Filters available tools based on task type
+  • PlanExecutor - Executes task plans sequentially
+
+FILES
+  • app/core/routing/smart_dispatcher.py - Main dispatcher
+  • app/core/routing/intent_analyzer.py - Intent rewriting
+  • app/core/routing/ai_router.py - AI-based classification
+  • app/core/routing/task_classifier.py - Local classification
+  • app/core/routing/task_decomposer.py - Task decomposition
+  • app/core/routing/local_planner.py - Planning
+
+
+TIER-4: SECURITY SYSTEM
+═══════════════════════════════════════════════════════════════════════════════
+
+PURPOSE
+  1. Protect user privacy by masking PII before sending to cloud
+  2. Ensure output quality and security
+
+COMPONENTS
+
+  ┌─ PIIFilter (pii_filter.py) ────────────────────────────────────────┐
+  │ Local privacy-preserving masking (zero network calls)             │
+  │ Thread-safe static class                                          │
+  │                                                                    │
+  │ Method: mask(text, config) → MaskResult                           │
+  │   • Scans with pre-compiled regex                                 │
+  │   • Replaces matches with <<label-N>> placeholders               │
+  │   • Returns {masked_text, mask_map, stats}                        │
+  │                                                                    │
+  │ Method: restore(masked_text, mask_map) → str                      │
+  │   • Replaces placeholders with original values                    │
+  │   • Called when LLM response returns                              │
+  │                                                                    │
+  │ Detectors (9 types, regex-based):                                │
+  │   1. 手机号 (China mobile) - 1[3-9]\d{9}                          │
+  │   2. 固话 (Landline) - 0\d{2,3}[-\s]?\d{7,8}                     │
+  │   3. 身份证 (ID card) - 18-digit with region/date validation     │
+  │   4. 银行卡 (Bank card) - 16-19 consecutive digits               │
+  │   5. 邮箱 (Email) - Standard email regex                         │
+  │   6. IP地址 (IPv4) - 4 octets (disabled by default)             │
+  │   7. 姓名 (Chinese name) - Heuristic with 9 prefix words         │
+  │   8. 地址 (Address) - Province/city/district/street pattern      │
+  │   9. 证件号 (Passport/HK/Macau) - E/H/M + 7-9 alphanumeric      │
+  │                                                                    │
+  │ Example:                                                           │
+  │   Input:  "请给张伟发消息，电话13812345678，邮箱z@qq.com"       │
+  │   Output: "请给<<姓名-1>>发消息，电话<<手机号-1>>，邮箱<<邮箱-1>>"│
+  │   Map:    {<<姓名-1>>: "张伟", <<手机号-1>>: "13812345678", ...} │
+  │                                                                    │
+  │ Configuration: PIIConfig                                          │
+  │   • mask_phone, mask_landline, mask_id_card, mask_bank_card      │
+  │   • mask_email, mask_ip, mask_name, mask_address, mask_passport  │
+  │   • custom_keywords: List[str] for user-defined sensitive words  │
+  │   • log_stats: bool for logging statistics                        │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ OutputValidator (output_validator.py) ────────────────────────────┐
+  │ Quality assurance on LLM responses                                │
+  │                                                                    │
+  │ Method: validate(text, skill_id, original_prompt) → ValidationResult│
+  │   Action: "PASS" | "WARN" | "REFORMAT" | "RETRY" | "BLOCK"      │
+  │                                                                    │
+  │ 8-Check Validation Pipeline:                                      │
+  │   1. Refusal Detection                                            │
+  │      • Patterns: "I cannot", "我无法", "作为AI我不能"            │
+  │   2. Code Substitute Detection                                    │
+  │      • Claims inability then provides Python code                 │
+  │   3. Realtime Inability                                           │
+  │      • Admits no real-time data but doesn't call web_search      │
+  │   4. Truncation Detection                                         │
+  │      • Ends with "...", "（未完）", "to be continued"            │
+  │   5. Internal Leak Detection                                      │
+  │      • PII placeholders leaked, system prompt exposed             │
+  │   6. Repetition Detection                                         │
+  │      • Same sentence repeated >4 times                            │
+  │   7. Format Checking (if skill_id)                               │
+  │      • Validates against OutputSpec                               │
+  │   8. Completeness Checking                                        │
+  │      • Not empty, above minimum length                            │
+  │                                                                    │
+  │ Actions & Recovery:                                               │
+  │   • PASS - All OK, return directly                                │
+  │   • WARN - Minor issues (too short), log but return              │
+  │   • REFORMAT - Format wrong → auto-format locally (markdown)     │
+  │   • RETRY - Quality issues → re-request (max 1 retry)            │
+  │   • BLOCK - Security issues → stop, report error                 │
+  └─────────────────────────────────────────────────────────────────────┘
+
+FILES
+  • app/core/security/pii_filter.py - PII masking (310 lines)
+  • app/core/security/output_validator.py - Output validation (300+ lines)
+
+
+TIER-5: DEPLOYMENT
+═════════════════════════════════════════════════════════════════════════════════
+
+PURPOSE
+  Multiple deployment paths: Desktop, Web/Server, Cloud (Docker)
+
+DEPLOYMENT MODES
+
+  ┌─ Desktop App (src/koto_app.py) ────────────────────────────────────┐
+  │ Technology: Flask backend + PyWebView native window               │
+  │ Platform: Windows x64 (main target)                               │
+  │                                                                    │
+  │ Architecture:                                                      │
+  │   • Backend: Flask server on 127.0.0.1:5000 (or 5001 fallback)   │
+  │   • Frontend: PyWebView EdgeChromium native window                │
+  │   • Communication: HTTP API calls from JS to Flask               │
+  │   • No console window (clean user experience)                     │
+  │                                                                    │
+  │ File Structure (Frozen by PyInstaller):                           │
+  │   • APP_ROOT: exe directory (persistent: chats/, config/, ...)   │
+  │   • BUNDLE_DIR: _MEIPASS (bundled: web/, assets/)                │
+  │                                                                    │
+  │ Features:                                                           │
+  │   ✓ Graceful shutdown (atexit/signal handlers)                    │
+  │   ✓ Startup timeout: 10s (configurable)                          │
+  │   ✓ Crash detection & logging (faulthandler)                     │
+  │   ✓ Dual output (console + log file)                             │
+  │   ✓ Port binding with fallback                                    │
+  │   ✓ PythonNET runtime fixes for EdgeChromium                      │
+  │                                                                    │
+  │ Environment:                                                       │
+  │   • KOTO_HOST = 127.0.0.1                                         │
+  │   • KOTO_PORT = 5000                                              │
+  │   • KOTO_FALLBACK_PORT = 5001                                     │
+  │   • KOTO_STARTUP_TIMEOUT_SEC = 10                                 │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ Web/Server Mode (src/server.py) ──────────────────────────────────┐
+  │ Technology: Pure Flask ASGI/WSGI (no desktop UI)                 │
+  │ Deployment: VPS, Railway, Heroku, custom servers                 │
+  │                                                                    │
+  │ Launch:                                                             │
+  │   Dev:  python server.py                    (Flask dev server)    │
+  │   Prod: gunicorn -w 2 -b 0.0.0.0:5000 server:app               │
+  │                                                                    │
+  │ Environment Variables:                                            │
+  │   • KOTO_PORT - Service port                                      │
+  │   • KOTO_AUTH_ENABLED - JWT-based authentication                 │
+  │   • KOTO_JWT_SECRET - JWT signing key                             │
+  │   • KOTO_MAX_DAILY_REQUESTS - Rate limiting                       │
+  │   • KOTO_DEPLOY_MODE - "local" or "cloud"                        │
+  │   • LANGCHAIN_TRACING_V2 - LangSmith observability               │
+  │   • GEMINI_API_KEY - Gemini API key                               │
+  │                                                                    │
+  │ Startup Sequence:                                                 │
+  │   1. Load .env from config/gemini_config.env                      │
+  │   2. Validate configuration (src/config_validator.py)            │
+  │   3. Initialize logging (app/core/logging_setup.py)              │
+  │   4. Initialize LangSmith (if enabled)                           │
+  │   5. Load Flask app (web/app.py)                                 │
+  │   6. Start gunicorn/Flask server                                 │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ Docker Deployment (config/deploy/Dockerfile) ──────────────────────┐
+  │ Multi-stage production build                                     │
+  │ Target: Cloud deployments (AWS, GCP, Azure, etc.)               │
+  │                                                                    │
+  │ Configuration:                                                     │
+  │   • Base: python:3.11-slim                                        │
+  │   • Dependencies: build-essential, libxml2-dev, libxslt1-dev     │
+  │   • Non-root: koto (uid 1000) - security best practice          │
+  │   • Port: 5000                                                     │
+  │                                                                    │
+  │ Environment:                                                       │
+  │   • PYTHONUNBUFFERED=1 - Real-time logging                        │
+  │   • KOTO_PORT=5000                                                │
+  │   • KOTO_AUTH_ENABLED=true - Production security                 │
+  │   • KOTO_DEPLOY_MODE=cloud                                        │
+  │                                                                    │
+  │ Healthcheck:                                                       │
+  │   GET /api/ping every 30s                                         │
+  │                                                                    │
+  │ Production Start:                                                 │
+  │   gunicorn --bind 0.0.0.0:5000 --workers 2 --threads 4          │
+  │            --timeout 120 server:app                              │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  ┌─ PyInstaller Packaging (koto.spec) ────────────────────────────────┐
+  │ Windows x64 standalone executable                                │
+  │ Entry: koto_setup.py (first-run setup wizard)                   │
+  │ Mode: Directory (fast launch, fewer AV false positives)         │
+  │                                                                    │
+  │ Bundled Assets:                                                    │
+  │   • web/templates/, web/static/ - Frontend                        │
+  │   • app/ - Python packages                                        │
+  │   • assets/ - Icons (.ico, .png, .svg)                           │
+  │   • config/skills/, config/workflows/                            │
+  │   • src/koto_app.py, server.py, koto_setup.py, model_downloader │
+  │                                                                    │
+  │ Hidden Imports (prevent runtime import errors):                  │
+  │   • tkinter (GUI model downloader)                                │
+  │   • flask, flask_cors, werkzeug                                   │
+  │   • google.genai, google.ai.generativelanguage                   │
+  │   • langchain, langgraph (if installed)                          │
+  │   • requests, urllib3, httpx                                      │
+  │                                                                    │
+  │ Excludes: pytest, tests, __pycache__, torch, tensorflow          │
+  └─────────────────────────────────────────────────────────────────────┘
+
+FILES
+  • src/koto_app.py - Desktop app (Flask + PyWebView)
+  • src/server.py - Web/server mode
+  • config/deploy/Dockerfile - Docker config
+  • koto.spec - PyInstaller spec
+  • local_model_installer.spec - Model downloader spec
+  • Makefile - Build automation
+
+
+═════════════════════════════════════════════════════════════════════════════════
+                             ARCHITECTURE DIAGRAM
+═════════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          USER INTERACTION LAYER                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │   Desktop    │  │    Web UI    │  │  Mobile API  │  │  Slack Bot   │  │
+│  │  PyWebView   │  │   Flask      │  │  REST API    │  │  (Future)    │  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
+└─────────┼──────────────────┼──────────────────┼──────────────────┼───────────┘
+          │                  │                  │                  │
+          └──────────────────┼──────────────────┼──────────────────┘
+                             │ HTTP
+                   ┌─────────▼──────────┐
+                   │   Flask Web Server  │
+                   │  (web/app.py)       │
+                   └─────────┬───────────┘
+                             │
+          ┌──────────────────┼──────────────────┐
+          │                  │                  │
+          ▼                  ▼                  ▼
+    ┌─────────────┐  ┌──────────────┐  ┌────────────────┐
+    │   Security  │  │   Routing    │  │ Task Execution │
+    │   Layer     │  │   System     │  │                │
+    │             │  │              │  │                │
+    │ • PIIFilter │  │ • SmartDisp  │  │ • UnifiedAgent │
+    │ • OutputVal │  │ • AIRouter   │  │ • LangGraphAgt │
+    │             │  │ • IntentAnal │  │ • MultiAgent   │
+    └──────┬──────┘  └──────┬───────┘  └────────┬───────┘
+           │                │                   │
+           └────────────────┼───────────────────┘
+                            │
+                  ┌─────────▼──────────┐
+                  │  Agent Framework   │
+                  │                    │
+                  │ • ToolRegistry (24 plugins)
+                  │ • Skill Manager    │
+                  │ • Plugin System    │
+                  └─────────┬──────────┘
+                            │
+          ┌─────────────────┼──────────────────┐
+          │                 │                  │
+          ▼                 ▼                  ▼
+    ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+    │ LLM Provider │  │ Tool Executor│  │ Skill Engine │
+    │              │  │              │  │              │
+    │ • GeminiLLM  │  │ • FileEditor │  │ • 100+ skills│
+    │ • OllamaLLM  │  │ • WebSearch  │  │              │
+    │ • Fallback   │  │ • SystemInfo │  │              │
+    │   Chain      │  │ • 20+ more   │  │              │
+    └──────┬───────┘  └──────┬───────┘  └────────┬─────┘
+           │                 │                   │
+           └─────────────────┼───────────────────┘
+                             │
+          ┌──────────────────┼──────────────────┐
+          │                  │                  │
+          ▼                  ▼                  ▼
+    ┌────────────┐    ┌────────────┐    ┌────────────┐
+    │   Gemini   │    │  Ollama    │    │   Local    │
+    │   Cloud    │    │   Local    │    │   Tools    │
+    │   API      │    │   Models   │    │   (System) │
+    └────────────┘    └────────────┘    └────────────┘
+
+
+═════════════════════════════════════════════════════════════════════════════════
+                              COMPONENT LOCATIONS
+═════════════════════════════════════════════════════════════════════════════════
+
+app/core/llm/
+  ├─ base.py ......................... LLMProvider (ABC)
+  ├─ gemini.py ....................... GeminiProvider
+  ├─ ollama_llm_provider.py .......... OllamaLLMProvider
+  ├─ ollama_provider.py ............. OllamaProvider (legacy)
+  ├─ model_fallback.py .............. ModelFallbackExecutor (fallback chain)
+  └─ langchain_adapter.py ........... LangChain integration
+
+app/core/agent/
+  ├─ base.py ......................... Agent (ABC), AgentPlugin (ABC)
+  ├─ unified_agent.py ............... UnifiedAgent (main agent)
+  ├─ langgraph_agent.py ............. LangGraphAgent (StateGraph)
+  ├─ multi_agent.py ................. MultiAgentOrchestrator
+  ├─ tool_registry.py ............... ToolRegistry
+  ├─ factory.py ...................... Agent factory functions
+  ├─ checkpoint_manager.py .......... Checkpoint management
+  ├─ types.py ....................... AgentResponse, AgentStep, AgentAction
+  ├─ proactive_agent.py ............ Proactive agent variant
+  ├─ tree_of_thought.py ............ Tree-of-thought reasoning
+  └─ plugins/ ........................ 24 plugin implementations
+      ├─ alerting_plugin.py
+      ├─ annotation_plugin.py
+      ├─ auto_remediation_plugin.py
+      ├─ basic_tools_plugin.py
+      ├─ chart_vision_plugin.py
+      ├─ configuration_plugin.py
+      ├─ data_process_plugin.py
+      ├─ doc_gen_plugin.py
+      ├─ file_converter_plugin.py
+      ├─ file_editor_plugin.py
+      ├─ image_process_plugin.py
+      ├─ memory_tools_plugin.py
+      ├─ network_plugin.py
+      ├─ performance_analysis_plugin.py
+      ├─ productivity_plugin.py
+      ├─ script_generation_plugin.py
+      ├─ search_plugin.py
+      ├─ skill_tools_plugin.py
+      ├─ system_event_monitoring_plugin.py
+      ├─ system_info_plugin.py
+      ├─ system_tools_plugin.py
+      ├─ template_fill_plugin.py
+      ├─ trend_analysis_plugin.py
+      └─ web_tools_bridge_plugin.py
+
+app/core/routing/
+  ├─ smart_dispatcher.py ............ SmartDispatcher (main router)
+  ├─ intent_analyzer.py ............. IntentAnalyzer (multi-turn rewriting)
+  ├─ ai_router.py ................... AIRouter (AI-based classification)
+  ├─ task_classifier.py ............. TaskClassifier (local classification)
+  ├─ task_decomposer.py ............. TaskDecomposer
+  ├─ local_planner.py ............... LocalPlanner
+  ├─ local_model_router.py .......... LocalModelRouter (Ollama)
+  ├─ tool_router.py ................. ToolRouter (tool filtering)
+  └─ plan_executor.py ............... PlanExecutor
+
+app/core/security/
+  ├─ pii_filter.py .................. PIIFilter (PII masking)
+  └─ output_validator.py ............ OutputValidator (quality checks)
+
+src/
+  ├─ koto_app.py .................... Desktop app (PyWebView)
+  ├─ server.py ...................... Web server mode
+  ├─ koto_setup.py .................. First-run setup wizard
+  ├─ model_downloader.py ............ Model downloader (Tkinter GUI)
+  ├─ config_validator.py ............ Configuration validation
+  └─ local_model_installer.py ....... Local model installer
+
+config/
+  └─ deploy/
+      └─ Dockerfile .................. Docker production config
+
+koto.spec ........................... PyInstaller spec (main)
+local_model_installer.spec ......... PyInstaller spec (model downloader)
+

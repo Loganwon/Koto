@@ -92,5 +92,9 @@
                         ],
     "output_keys":  [
                         "commit_message"
-                    ]
+                    ],
+
+    "tool_orchestration": "• 用户提供了 git diff 输出 → 直接分析改动内容，判断 type 和 scope\n• 用户描述了改动（无 diff）→ 直接构造提交消息，询问是否需要 diff 辅助\n• 改动跨多个模块/文件 → 询问是否拆分为多个 commit（Conventional Commits 推荐单一职责）\n• 包含 breaking change → footer 加 BREAKING CHANGE: 说明影响范围\n• 关联 issue/PR → footer 加 Closes #N 或 Refs #N\n• 仅需提交消息 → 不调用任何工具，直接输出 conventional commits 格式\n• 用户不确定 type → 提供 2-3 个备选方案并说明选择理由",
+
+    "react_protocol": "light"
 }

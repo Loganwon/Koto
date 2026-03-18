@@ -63,6 +63,14 @@ class TaskStatus(str, Enum):
     RETRYING = "retrying"  # 重试中
 
 
+class TaskPriority(int, Enum):
+    """任务优先级（数值越大越优先）。"""
+    LOW = 0     # 低优先级（后台任务）
+    NORMAL = 1  # 默认
+    HIGH = 2    # 高优先级（用户主动触发）
+    URGENT = 3  # 紧急（立即执行）
+
+
 @dataclass
 class TaskRecord:
     """任务台账条目（对应 koto_tasks 表的一行）"""
@@ -88,6 +96,9 @@ class TaskRecord:
     retry_count: int = 0
     error: Optional[str] = None
     result_summary: Optional[str] = None  # 最终答案的前 500 字
+
+    # 优先级
+    priority: int = 1  # TaskPriority 整数值（0=低/1=正常/2=高/3=紧急）
 
     # 控制标志
     interrupt_requested: bool = False  # 外部要求暂停（Human-in-loop）
@@ -203,6 +214,7 @@ class TaskLedger:
         result_summary    TEXT,
         interrupt_requested INTEGER NOT NULL DEFAULT 0,
         cancel_requested    INTEGER NOT NULL DEFAULT 0,
+        priority          INTEGER NOT NULL DEFAULT 1,
         metadata          TEXT NOT NULL DEFAULT '{}'
     );
     CREATE INDEX IF NOT EXISTS idx_koto_tasks_session  ON koto_tasks(session_id);
@@ -241,6 +253,16 @@ class TaskLedger:
 
     def _init_schema(self):
         self._conn.executescript(self._DDL)
+        # 迁移旧表：追加可能不存在的列和索引
+        _migrations = [
+            "ALTER TABLE koto_tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 1",
+            "CREATE INDEX IF NOT EXISTS idx_koto_tasks_priority ON koto_tasks(priority)",
+        ]
+        for sql in _migrations:
+            try:
+                self._conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # 列已存在，忽略
         self._conn.commit()
 
     # ── 任务 CRUD ─────────────────────────────────────────────────────────────
@@ -253,6 +275,7 @@ class TaskLedger:
         skill_id: Optional[str] = None,
         source: str = "agent",
         metadata: Optional[Dict[str, Any]] = None,
+        priority: int = TaskPriority.NORMAL,
     ) -> TaskRecord:
         """创建新任务记录，返回 TaskRecord 对象。"""
         task = TaskRecord(
@@ -262,6 +285,7 @@ class TaskLedger:
             task_type=task_type,
             skill_id=skill_id,
             source=source,
+            priority=int(priority),
             metadata=json.dumps(metadata or {}, ensure_ascii=False),
         )
         self._conn.execute(
@@ -269,10 +293,10 @@ class TaskLedger:
             INSERT INTO koto_tasks
               (task_id, session_id, user_input, status, task_type, skill_id,
                source, created_at, step_count, tool_calls, retry_count,
-               interrupt_requested, cancel_requested, metadata)
+               interrupt_requested, cancel_requested, priority, metadata)
             VALUES
               (:task_id, :session_id, :user_input, :status, :task_type, :skill_id,
-               :source, :created_at, 0, 0, 0, 0, 0, :metadata)
+               :source, :created_at, 0, 0, 0, 0, 0, :priority, :metadata)
             """,
             {
                 "task_id": task.task_id,
@@ -283,6 +307,7 @@ class TaskLedger:
                 "skill_id": task.skill_id,
                 "source": task.source,
                 "created_at": task.created_at,
+                "priority": task.priority,
                 "metadata": task.metadata,
             },
         )
@@ -320,10 +345,12 @@ class TaskLedger:
         status: Optional[TaskStatus] = None,
         source: Optional[str] = None,
         date_from: Optional[str] = None,  # ISO 日期前缀，如 "2026-03-04"
+        priority: Optional[int] = None,
+        order_by: str = "created_at",  # "created_at" | "priority"
         limit: int = 50,
         offset: int = 0,
     ) -> List[TaskRecord]:
-        """多条件查询任务列表，按创建时间倒序。"""
+        """多条件查询任务列表。order_by='priority' 时按优先级降序+创建时间排序。"""
         clauses, params = [], []
         if session_id:
             clauses.append("session_id = ?")
@@ -337,10 +364,18 @@ class TaskLedger:
         if date_from:
             clauses.append("created_at >= ?")
             params.append(date_from)
+        if priority is not None:
+            clauses.append("priority = ?")
+            params.append(int(priority))
 
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        order = (
+            "priority DESC, created_at ASC"
+            if order_by == "priority"
+            else "created_at DESC"
+        )
         rows = self._conn.execute(
-            f"SELECT * FROM koto_tasks {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            f"SELECT * FROM koto_tasks {where} ORDER BY {order} LIMIT ? OFFSET ?",
             params + [limit, offset],
         ).fetchall()
         return [self._row_to_record(r) for r in rows]
@@ -429,6 +464,11 @@ class TaskLedger:
             (TaskStatus.RETRYING.value, task_id),
         )
         self._conn.commit()
+
+    def set_priority(self, task_id: str, priority: int):
+        """更新任务优先级（0=低/1=正常/2=高/3=紧急）。"""
+        self._update_fields(task_id, priority=int(priority))
+        logger.info(f"[TaskLedger] 优先级更新 task={task_id[:8]} → {priority}")
 
     # ── 中断 / 取消控制 ───────────────────────────────────────────────────────
 

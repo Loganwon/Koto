@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\system_tools_plugin.py
+# hypothesis_version: 6.151.9
+
+[300, ' | ', ',', '-m', 'No packages checked.', 'OBJECT', 'STRING', 'SystemTools', '_', '__bases__', '__builtins__', '__class__', '__closure__', '__code__', '__globals__', '__import__', '__mro__', '__subclasses__', 'breakpoint', 'code', 'compile', 'ctypes', 'delattr', 'description', 'eval', 'exec', 'exit', 'frozen', 'func', 'getattr', 'globals', 'input', 'install', 'locals', 'memoryview', 'multiprocessing', 'name', 'open', 'os', 'packages', 'parameters', 'pathlib', 'pip', 'pip_check', 'pip_install', 'properties', 'python_exec', 'quit', 'required', 'setattr', 'shutil', 'signal', 'socket', 'subprocess', 'sys', 'threading', 'type', 'vars']

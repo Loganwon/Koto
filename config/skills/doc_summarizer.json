@@ -2,7 +2,7 @@
     "id":  "doc_summarizer",
     "name":  "文档速读摘要",
     "icon":  "📑",
-    "category":  "domain",
+    "category":  "workflow",
     "description":  "上传任意 PDF/Word/Excel/TXT，生成结构化摘要：核心观点、关键数据、待办事项",
     "intent_description":  "用户上传或提到文档时，需要快速了解内容要点、生成摘要或提炼关键信息",
     "system_prompt_template":  "",
@@ -93,5 +93,9 @@
                         ],
     "output_keys":  [
                         "summary_text"
-                    ]
+                    ],
+
+    "tool_orchestration": "• 用户提供单文件路径 → read_file(path) 读取内容\n  · 文件 > 50KB → summarize_file(path, focus='核心观点/关键数据/行动项') 分段摘要\n  · .docx → read_docx_paragraphs(path) 保留标题层次结构\n• 多文件批量 → find_files(pattern) 列出文件，逐个 read_file，摘要后整合\n• 识别文档类型（报告/论文/合同/会议记录/新闻/技术文档）→ 匹配对应摘要模板\n• 多份相似文档 → 额外生成对比维度表（各文档立场/核心数据差异/结论差异）\n• 完成后询问是否保存 → write_file(摘要_YYYYMMDD.md)",
+
+    "react_protocol": "light"
 }

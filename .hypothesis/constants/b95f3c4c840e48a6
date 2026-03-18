@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\api\job_routes.py
+# hypothesis_version: 6.151.9
+
+[200, 201, 202, 300, 400, 404, 500, '/<task_id>', '/<task_id>/cancel', '/<task_id>/resume', '/<task_id>/retry', '/<task_id>/stream', '/api/jobs', '/triggers', '/triggers/bootstrap', '/triggers/templates', 'Cache-Control', 'X-Accel-Buffering', 'action', 'api', 'cancel_requested', 'config', 'data', 'enabled', 'error', 'force', 'job_payload', 'job_runner', 'job_type', 'job_type 不能为空', 'jobs', 'limit', 'max_retries', 'metadata', 'name', 'no', 'no-cache', 'offset', 'ok', 'payload', 'raw', 'removed', 'requeued', 'resumed', 'session_id', 'status', 'steps', 'system', 'task_id', 'text/event-stream', 'timeout_seconds', 'trigger_id', 'trigger_type', '{}', '作业不存在', '无法确定 job_type，无法重试', '触发器不存在', '触发器已禁用']

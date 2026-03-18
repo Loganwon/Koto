@@ -66,5 +66,13 @@
     "4. 给出优化方案（按预期收益排序），每个方案附代码示例",
     "5. 说明效果验证方法（计时代码/EXPLAIN/DevTools）",
     "6. 按工期分类：快速见效（<1天）vs 需要重构（>3天）"
-  ]
+  ],
+
+  "tool_orchestration": "• 用户提供代码路径 → read_file_snippet(path, max_chars=6000) 读取后识别热点\n  · 循环内含数据库调用 → 优先 N+1 分析，给出 select_related/prefetch 方案\n  · 嵌套循环处理大数据 → 分析算法复杂度（O notation），给出 hash/sort 替代\n  · 代码较长被截断 → 仅重读包含热点函数的片段\n• 用户提供了 profiling 输出/cProfile/SQL 慢查询日志 → 直接分析，无需重新 profiling\n• 用户只说\"慢\" → 先询问：前端/接口/脚本？数据量多少？慢多久？\n• 需要验证优化方案 → execute_python(timeit 或 cProfile 对比代码)\n  · Python 内存问题 → execute_python(tracemalloc 分析代码)",
+
+  "react_protocol": "full",
+
+  "multi_model_hint": "• 症状明确（如 N+1 SQL）→ 快速模型即可\n• 复杂内存泄漏/GC 调优/并发锁争用 → 优先高推理能力模型（Gemini 2.5 Pro）\n• MultiAgent 分工：分析节点=强推理模型（定位瓶颈），代码重写节点=快速模型（生成优化代码）\n• 节点间传递字段：bottleneck_type / hotspot_location / estimated_gain",
+
+  "handoff_context": "下游 write_unit_tests 可用的字段：\n- hot_function: 热点函数签名（名称/参数/返回类型）\n- optimization_approach: 优化方案关键词（N+1/cache/async/algorithm）\n- benchmark_baseline: 优化前基准数值（ms/MB）\n- benchmark_target: 优化后预期数值"
 }

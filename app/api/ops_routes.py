@@ -266,3 +266,145 @@ def manual_gc():
         ),
         200,
     )
+
+
+# ── 全局统计汇总（任务 / 目标 / 作业 / 技能）─────────────────────────────────
+
+
+@ops_bp.route("/system/stats", methods=["GET"])
+def system_stats():
+    """
+    聚合 TaskLedger / GoalManager / JobRunner / SkillRatings 的全局统计。
+
+    返回结构::
+
+        {
+          "tasks":  { "total": N, "by_status": {...}, "by_priority": {...}, "high_priority_pending": [...] },
+          "goals":  { "total": N, "active": N, "completed": N, "failed": N, "by_category": {...} },
+          "jobs":   { "queue_size": N, "worker_count": N },
+          "skills": { "total_rated": N, "avg_rating": F, "top5": [...] },
+          "timestamp": "..."
+        }
+    """
+    result: Dict[str, Any] = {}
+
+    # ── 任务统计 ──────────────────────────────────────────────────────────────
+    try:
+        from app.core.tasks.task_ledger import TaskPriority, TaskStatus, get_ledger
+
+        ledger = get_ledger()
+
+        by_status: Dict[str, int] = {}
+        for st in TaskStatus:
+            cnt = ledger.count(status=st)
+            if cnt:
+                by_status[st.value] = cnt
+        total_tasks = sum(by_status.values())
+
+        by_priority: Dict[str, int] = {}
+        for label, pval in (("low", 0), ("normal", 1), ("high", 2), ("urgent", 3)):
+            cnt = ledger.count(priority=pval)
+            if cnt:
+                by_priority[label] = cnt
+
+        # 最多列出 5 条高/紧急 pending 任务供仪表板展示
+        high_prio_pending = []
+        try:
+            rows = ledger.list_tasks(
+                status=TaskStatus.PENDING,
+                priority=TaskPriority.HIGH,
+                order_by="priority",
+                limit=5,
+            )
+            high_prio_pending = [
+                {
+                    "task_id": t.task_id[:8],
+                    "task_type": t.task_type or "agent",
+                    "priority": t.priority,
+                    "input": (t.user_input or "")[:60],
+                }
+                for t in rows
+            ]
+        except Exception:
+            pass
+
+        result["tasks"] = {
+            "total": total_tasks,
+            "by_status": by_status,
+            "by_priority": by_priority,
+            "high_priority_pending": high_prio_pending,
+        }
+    except Exception as exc:
+        result["tasks"] = {"error": str(exc)}
+
+    # ── 目标统计 ──────────────────────────────────────────────────────────────
+    try:
+        from app.core.goal.goal_manager import GoalStatus, get_goal_manager
+
+        gm = get_goal_manager()
+        total_goals = gm.count()
+        by_category: Dict[str, int] = {}
+        for goal in gm.list_goals(limit=200):
+            by_category[goal.category] = by_category.get(goal.category, 0) + 1
+
+        result["goals"] = {
+            "total": total_goals,
+            "active": gm.count(status=GoalStatus.ACTIVE),
+            "waiting_user": gm.count(status=GoalStatus.WAITING_USER),
+            "paused": gm.count(status=GoalStatus.PAUSED),
+            "completed": gm.count(status=GoalStatus.COMPLETED),
+            "failed": gm.count(status=GoalStatus.FAILED),
+            "by_category": by_category,
+        }
+    except Exception as exc:
+        result["goals"] = {"error": str(exc)}
+
+    # ── 作业队列统计 ──────────────────────────────────────────────────────────
+    try:
+        from app.core.jobs.job_runner import get_job_runner
+
+        runner = get_job_runner()
+        result["jobs"] = {
+            "queue_size": runner._queue.qsize(),
+            "worker_count": runner._max_workers,
+        }
+    except Exception as exc:
+        result["jobs"] = {"error": str(exc)}
+
+    # ── 技能评分统计 ──────────────────────────────────────────────────────────
+    try:
+        import json
+        from pathlib import Path
+
+        ratings_path = (
+            Path(__file__).parent.parent.parent / "config" / "skill_ratings.json"
+        )
+        ratings: Dict[str, Any] = {}
+        if ratings_path.exists():
+            with open(ratings_path, encoding="utf-8") as f:
+                ratings = json.load(f)
+
+        rated_skills = []
+        for sid, rdata in ratings.items():
+            if isinstance(rdata, dict):
+                avg = rdata.get("avg", 0.0)
+                n = rdata.get("n", 0)
+            else:
+                avg = float(rdata)
+                n = 1
+            rated_skills.append({"skill_id": sid, "avg_rating": round(avg, 2), "n": n})
+
+        rated_skills.sort(key=lambda x: x["avg_rating"], reverse=True)
+        all_ratings = [s["avg_rating"] for s in rated_skills if s["n"] > 0]
+        overall_avg = round(sum(all_ratings) / len(all_ratings), 2) if all_ratings else 0.0
+
+        result["skills"] = {
+            "total_rated": len(rated_skills),
+            "avg_rating": overall_avg,
+            "top5": rated_skills[:5],
+        }
+    except Exception as exc:
+        result["skills"] = {"error": str(exc)}
+
+    result["timestamp"] = datetime.now().isoformat(timespec="milliseconds")
+    return jsonify(result), 200
