@@ -707,12 +707,18 @@ class DocumentFeedbackSystem:
                         continue
                 except Exception as e:
                     error_msg = str(e)[:120]
-                    # 503/UNAVAILABLE：模型过载，继续用同一模型重试毫无意义，直接返回兜底
+                    # 503/UNAVAILABLE：模型过载，先等待后重试一次，仍失败再返回兜底
                     _is_503 = ("503" in error_msg or "UNAVAILABLE" in error_msg
                                or "overloaded" in error_msg.lower()
                                or "high demand" in error_msg.lower())
                     if _is_503:
-                        logger.info(f"[DocumentFeedback] ⚡ 第{chunk_index}段 503过载，跳过重试: {error_msg[:80]}")
+                        if retry < max_retries - 1:
+                            _wait = 10 * (retry + 1)  # 10s, 20s …
+                            logger.info(f"[DocumentFeedback] ⚡ 第{chunk_index}段 503过载，等待{_wait}s后重试: {error_msg[:80]}")
+                            import time as _time_mod
+                            _time_mod.sleep(_wait)
+                            continue
+                        logger.info(f"[DocumentFeedback] ⚡ 第{chunk_index}段 503过载（已重试{max_retries}次），返回兜底: {error_msg[:80]}")
                         fallback = self._fallback_annotations_from_chunk(chunk)
                         for ann in fallback:
                             ann["_koto_fallback_error"] = error_msg
@@ -1474,10 +1480,16 @@ class DocumentFeedbackSystem:
                         and any(a.get("_koto_503") for a in annotations)):
                     _probed_switch = self._probe_working_model(selected_model)
                     if _probed_switch and _probed_switch != selected_model:
-                        logger.info(f"[DocumentFeedback] 🔄 503触发切换: {selected_model} → {_probed_switch}")
+                        logger.info(f"[DocumentFeedback] 🔄 503触发切换: {selected_model} → {_probed_switch}，将重新处理本段")
                         selected_model = _probed_switch
                         model_note = f"模型: {selected_model}（运行中自动从503过载模型切换）"
-                    _model_switched = True  # 无论成功与否只切换一次
+                        # 把当前段重新推回队列头，用新模型再跑一次
+                        queue.appendleft(chunk)
+                        processed -= 1  # 抵消本次 processed+=1，保持计数准确
+                        fallback_chunk_count -= 1  # 本段还没真正兜底，撤回计数
+                        _model_switched = True
+                        continue
+                    _model_switched = True  # 探测失败或模型未变，不再重试
             else:
                 if annotations:
                     ai_chunk_count += 1
