@@ -11,11 +11,7 @@
     "session_id": "system",
     "enabled": true,
     "config": {},
-<<<<<<< Updated upstream
     "last_run": "2026-03-20T16:36:04.931",
-=======
-    "last_run": "2026-03-17T20:09:50.095",
->>>>>>> Stashed changes
     "run_count": 72,
     "last_error": null,
     "created_at": "2026-03-07T22:09:01.473"
@@ -54,13 +50,8 @@
     "config": {
       "interval_seconds": 3600
     },
-<<<<<<< Updated upstream
     "last_run": "2026-03-20T16:08:01.388",
     "run_count": 37,
-=======
-    "last_run": "2026-03-17T20:09:42.105",
-    "run_count": 38,
->>>>>>> Stashed changes
     "last_error": null,
     "created_at": "2026-03-07T22:09:01.474"
   },
@@ -77,13 +68,8 @@
     "config": {
       "interval_seconds": 1800
     },
-<<<<<<< Updated upstream
     "last_run": "2026-03-20T16:38:11.954",
     "run_count": 61,
-=======
-    "last_run": "2026-03-17T20:09:42.105",
-    "run_count": 64,
->>>>>>> Stashed changes
     "last_error": null,
     "created_at": "2026-03-09T00:13:33.001"
   }
