@@ -26,8 +26,8 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Threshold at which we summarize old turns (rough token estimate)
-# Lowered to 12K so long sessions compress earlier, reducing prompt bloat
-_MAX_HISTORY_TOKENS: int = 12_000
+# Gemini 2.5+ supports 1M context window; compress only when truly large
+_MAX_HISTORY_TOKENS: int = 80_000
 # How many recent turns to ALWAYS keep verbatim (model + user pairs)
 _RECENT_KEEP: int = 10
 # Minimum turns before we even consider compressing

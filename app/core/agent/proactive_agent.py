@@ -178,17 +178,26 @@ class ProactiveAgent:
         return valid
 
     def dismiss(self, msg_id: str):
+        dismissed_type: str | None = None
         with self._q_lock:
             for m in self._queue:
                 if m["id"] == msg_id:
                     m["dismissed"] = True
+                    dismissed_type = m.get("type")
                     break
+            # Extend cooldown to prevent immediate regeneration after dismiss
+            if dismissed_type:
+                self._last_type_time[dismissed_type] = datetime.now()
         self._save_queue()
 
     def dismiss_all(self):
         with self._q_lock:
             for m in self._queue:
                 m["dismissed"] = True
+                # Extend cooldown for each dismissed type
+                msg_type = m.get("type")
+                if msg_type:
+                    self._last_type_time[msg_type] = datetime.now()
         self._save_queue()
 
     def add_reminder(self, content: str, priority: str = "high"):
@@ -648,7 +657,7 @@ class ProactiveAgent:
                     encoding="utf-8",
                 )
         except Exception as exc:
-            logger.debug("[ProactiveAgent] 队列保存失败: %s", exc)
+            logger.warning("[ProactiveAgent] 队列保存失败: %s", exc)
 
     def _load_queue(self):
         if _QUEUE_FILE.exists():

@@ -97,36 +97,59 @@ class MemoryRouter:
                 except Exception as e:
                     logger.debug(f"[MemoryRouter] Profile layer error: {e}")
 
-            # ── Layer 2: Long-term memory semantic search ─────────────────────
+            # ── Layer 2: Long-term memory — vector + keyword merged ───────────
             try:
-                search_fn = getattr(mgr, "search_memories", None)
-                if search_fn and query:
-                    _boost = _TASK_CUBE_MAP.get(task_type, [])
-                    hits = (
-                        search_fn(
-                            query,
-                            limit=_MEMORY_K,
-                            boost_categories=_boost or None,
-                        )
-                        or []
-                    )
-                    if hits:
-                        lines = []
-                        for h in hits:
-                            cat = h.get("category", "?")
-                            content = (h.get("content") or "").strip()
-                            if content:
-                                # 单条记忆截断至 150 字符，防止超长条目撑大 system_instruction
-                                content_short = (
-                                    content[:150] + "…"
-                                    if len(content) > 150
-                                    else content
-                                )
-                                lines.append(f"  [{cat}] {content_short}")
-                        if lines:
-                            parts.append(
-                                "[长期记忆 — 与本次对话相关]\n" + "\n".join(lines)
+                _boost = _TASK_CUBE_MAP.get(task_type, [])
+                hits: list = []
+                seen_ids: set = set()
+
+                # 2a. Vector search (FAISS hybrid via search_vector_memories)
+                vec_fn = getattr(mgr, "search_vector_memories", None)
+                if vec_fn and query:
+                    try:
+                        for h in (vec_fn(query, limit=_MEMORY_K) or []):
+                            mid = h.get("id")
+                            if mid not in seen_ids:
+                                seen_ids.add(mid)
+                                hits.append(h)
+                    except Exception as _ve:
+                        logger.debug(f"[MemoryRouter] Vector search error: {_ve}")
+
+                # 2b. Keyword/scoring search — fills up to _MEMORY_K slots
+                kw_fn = getattr(mgr, "search_memories", None)
+                if kw_fn and query and len(hits) < _MEMORY_K:
+                    try:
+                        for h in (
+                            kw_fn(
+                                query,
+                                limit=_MEMORY_K,
+                                boost_categories=_boost or None,
                             )
+                            or []
+                        ):
+                            mid = h.get("id")
+                            if mid not in seen_ids:
+                                seen_ids.add(mid)
+                                hits.append(h)
+                                if len(hits) >= _MEMORY_K:
+                                    break
+                    except Exception as _ke:
+                        logger.debug(f"[MemoryRouter] Keyword search error: {_ke}")
+
+                if hits:
+                    lines = []
+                    for h in hits[:_MEMORY_K]:
+                        cat = h.get("category", "?")
+                        content = (h.get("content") or "").strip()
+                        if content:
+                            content_short = (
+                                content[:150] + "…" if len(content) > 150 else content
+                            )
+                            lines.append(f"  [{cat}] {content_short}")
+                    if lines:
+                        parts.append(
+                            "[长期记忆 — 与本次对话相关]\n" + "\n".join(lines)
+                        )
             except Exception as e:
                 logger.debug(f"[MemoryRouter] Memory search layer error: {e}")
 

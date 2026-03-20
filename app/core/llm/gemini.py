@@ -93,12 +93,35 @@ class GeminiProvider(LLMProvider):
             contents = self._format_prompt(prompt)
 
             if stream:
-                response_iter = self.client.models.generate_content_stream(
-                    model=model,
-                    contents=contents,
-                    config=config,
-                )
-                return self._stream_generator(response_iter)
+                last_stream_exc = None
+                for _stream_attempt in range(self.MAX_RETRIES):
+                    try:
+                        response_iter = self.client.models.generate_content_stream(
+                            model=model,
+                            contents=contents,
+                            config=config,
+                        )
+                        return self._stream_generator(response_iter)
+                    except Exception as _se:
+                        last_stream_exc = _se
+                        _se_str = str(_se)
+                        _se_retryable = (
+                            "SSL" in _se_str
+                            or "UNEXPECTED_EOF" in _se_str
+                            or "RemoteDisconnected" in _se_str
+                            or "ConnectionReset" in _se_str
+                            or "429" in _se_str
+                            or "503" in _se_str
+                        )
+                        if not _se_retryable or _stream_attempt == self.MAX_RETRIES - 1:
+                            raise
+                        _delay = self.RETRY_BASE_DELAY * (2 ** _stream_attempt)
+                        logger.warning(
+                            f"Stream connect error (attempt {_stream_attempt + 1}/{self.MAX_RETRIES}), "
+                            f"retrying in {_delay:.1f}s: {_se}"
+                        )
+                        time.sleep(_delay)
+                raise last_stream_exc  # unreachable but satisfies type checker
 
             # Non-streaming with retry for transient errors
             return self._call_with_retry(model, contents, config)
@@ -143,6 +166,12 @@ class GeminiProvider(LLMProvider):
                     or "429" in exc_str
                     or "503" in exc_str
                     or "RESOURCE_EXHAUSTED" in exc_str
+                    # Transient SSL / network drops
+                    or "SSL" in exc_str
+                    or "UNEXPECTED_EOF" in exc_str
+                    or "RemoteDisconnected" in exc_str
+                    or "ConnectionReset" in exc_str
+                    or "ConnectionError" in exc_str
                 )
                 if not is_retryable or attempt == self.MAX_RETRIES - 1:
                     raise
@@ -156,14 +185,23 @@ class GeminiProvider(LLMProvider):
     def get_token_count(
         self, prompt: Union[str, List[Dict[str, Any]]], model: str
     ) -> int:
-        if not self.client:
+        if not self.client or not types:
             return 0
         try:
-            # google.genai currently doesn't guarantee count_tokens across all endpoints;
-            # keep safe fallback.
-            return 0
+            if isinstance(prompt, str):
+                contents = [types.Content(role="user", parts=[types.Part(text=prompt)])]
+            else:
+                # Already in contents-list format
+                contents = prompt  # type: ignore[assignment]
+            response = self.client.models.count_tokens(
+                model=model,
+                contents=contents,
+            )
+            return int(getattr(response, "total_tokens", 0))
         except Exception:
-            return 0
+            # Fallback: conservative char-based estimate
+            text = prompt if isinstance(prompt, str) else str(prompt)
+            return max(1, len(text) // 3)
 
     def _format_tools(self, tools: Optional[List[Any]]) -> Optional[List[Any]]:
         if not tools or not types:

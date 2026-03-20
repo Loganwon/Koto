@@ -150,6 +150,32 @@ _LEAK_RE = [re.compile(p, re.IGNORECASE) for p in _INTERNAL_LEAK_PATTERNS]
 # 异常重复检测：同一句话重复超过 N 次
 _REPETITION_THRESHOLD = 4
 
+# 有害内容检测模式 — 仅捕获明确的危险操作指引（武器/入侵/伪造）
+# 使用高精度匹配，减少误报
+_HARMFUL_PATTERNS = [
+    # 武器/爆炸物/毒品制作步骤
+    (
+        r"(详细|具体|步骤|方法|教程|配方).{0,15}(制作|合成|提炼|配制).{0,30}"
+        r"(炸弹|爆炸物|雷管|手枪|毒药|神经毒素|致命毒物|生化武器)",
+        re.DOTALL,
+    ),
+    # 非法入侵系统的可执行指南（包含具体命令/代码场景）
+    (
+        r"(以下|下面|这里).{0,10}(代码|命令|脚本|步骤|方法).{0,20}"
+        r"(入侵|渗透进|绕过鉴权|提权).{0,20}(服务器|生产系统|数据库|后台)",
+        re.DOTALL,
+    ),
+    # 伪造身份证件/货币
+    (
+        r"(详细|具体|步骤|教程|方法).{0,10}(伪造|仳制|制作假).{0,15}"
+        r"(护照|身份证|驾照|銀行卡|人民币|美元|货币)",
+        re.DOTALL,
+    ),
+]
+_HARMFUL_RE = [
+    re.compile(pat, flags | re.IGNORECASE) for pat, flags in _HARMFUL_PATTERNS
+]
+
 
 # ══════════════════════════════════════════════════════════════════
 # 格式化器（REFORMAT 时使用）
@@ -378,7 +404,17 @@ class OutputValidator:
                 reasons=leak_reasons,
                 skill_id=skill_id,
             )
-
+        # ── 1.5 安全检测：有害内容指引 ─────────────────────────
+        harmful_reasons = cls._check_harmful(text)
+        if harmful_reasons:
+            logger.warning(f"[OutputValidator] 🚨 检测到有害内容: {harmful_reasons}")
+            return ValidationResult(
+                action="BLOCK",
+                text="⚠️ 回复包含有害内容指引，已被安全策略拦截。",
+                original_text=text,
+                reasons=harmful_reasons,
+                skill_id=skill_id,
+            )
         # ── 2. 完整性检测：模型拒绝 ────────────────────────────────
         if cls._is_refusal(text):
             logger.info(
@@ -510,6 +546,15 @@ class OutputValidator:
         for pattern in _LEAK_RE:
             if pattern.search(text):
                 reasons.append(f"响应包含内部标记: {pattern.pattern}")
+        return reasons
+
+    @classmethod
+    def _check_harmful(cls, text: str) -> List[str]:
+        """检测响应中明确的有害操作指引（武器/入侵/伪造）"""
+        reasons = []
+        for pattern in _HARMFUL_RE:
+            if pattern.search(text):
+                reasons.append(f"响应包含有害内容指引: {pattern.pattern[:50]}...")
         return reasons
 
     @classmethod

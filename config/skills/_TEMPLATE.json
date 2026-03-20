@@ -127,5 +127,69 @@
 
   "plan_template": [],
   "executor_tools": [],
-  "entry_point": null
+  "entry_point": null,
+
+  "_permissions_comment": [
+    "====================================================================",
+    "  permissions — Skill 权限系统（可选）",
+    "====================================================================",
+    "声明此 Skill 需要哪些额外权限。Koto 会在用户首次启用时提示授权。",
+    "未授权的权限不会生效。可选权限：",
+    "  ui_style       : 修改聊天界面主题色、背景 CSS（风险：低）",
+    "  ui_interactive : 添加交互控件（按钮、快速回复、浮动面板）（风险：低）",
+    "  notifications  : 发出系统通知提醒（风险：中）",
+    "  clipboard_read : 读取剪贴板内容（风险：中）",
+    "  clipboard_write: 写入剪贴板（风险：低）",
+    "  storage        : 在本地存储数据（风险：高）",
+    "  autorun        : 在无用户输入时自动执行（风险：中）",
+    "示例：[\"ui_interactive\", \"clipboard_write\"]"
+  ],
+  "permissions": [],
+
+  "_ui_extensions_comment": [
+    "====================================================================",
+    "  ui_extensions — UI 交互扩展（需要 ui_interactive 权限）",
+    "====================================================================",
+    "为聊天界面添加交互控件。需在 permissions 中声明 'ui_interactive' 且用户已授权。",
+    "",
+    "action_buttons  : 输入框上方的快捷操作按钮行",
+    "  每个按钮字段：",
+    "    id        : 唯一ID（小写+下划线）",
+    "    label     : 按钮显示文字",
+    "    message   : 点击后自动发送的消息（与 action 二选一）",
+    "    action    : 内置动作 ID（当前仅支持 'open_floating_widget'）",
+    "    variant   : 样式，可选 default | primary | danger",
+    "    tooltip   : 鼠标悬停提示文字",
+    "",
+    "quick_replies   : AI 回复后自动显示的快速回复芯片列表（字符串数组）",
+    "",
+    "floating_widget : 可拖动的浮动小面板",
+    "  type     : 面板类型，可选：",
+    "               dice_roller  骰子（RPG/游戏）",
+    "               timer        倒计时/计时器",
+    "               notes        便签（会话期间暂存）",
+    "               calculator   计算器",
+    "               word_counter 字数统计",
+    "               color_picker 颜色选择器",
+    "  title    : 面板标题",
+    "  position : 初始位置 bottom-right | bottom-left | top-right | top-left"
+  ],
+  "ui_extensions": {
+    "action_buttons": [
+      {
+        "id": "example_btn",
+        "label": "示例按钮",
+        "message": "发送这句话给 AI",
+        "variant": "default",
+        "tooltip": "点击后自动发送消息"
+      }
+    ],
+    "quick_replies": ["好的", "再来一个", "不对，重新来"],
+    "floating_widget": {
+      "type": "dice_roller",
+      "title": "骰子",
+      "position": "bottom-right"
+    }
+  }
 }
+

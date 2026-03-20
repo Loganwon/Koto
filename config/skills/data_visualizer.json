@@ -1,0 +1,78 @@
+{
+  "id": "data_visualizer",
+  "name": "数据可视化代码",
+  "icon": "📊",
+  "category": "domain",
+  "description": "根据用户描述的数据和展示需求，生成可直接运行的 Python（matplotlib/seaborn/plotly）或 ECharts/D3.js 可视化代码",
+  "intent_description": "用户说「帮我画图」「可视化这份数据」「生成图表代码」「用plotly画一个」「数据怎么展示」「图表代码」",
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [
+      "```python",
+      "import"
+    ],
+    "must_not_contain": [],
+    "min_chars": 200,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "可直接运行的可视化代码 + 所需安装命令 + 自定义说明"
+  },
+  "bound_tools": [
+    "read_file"
+  ],
+  "executor_tools": [
+    "read_file"
+  ],
+  "task_types": [
+    "CODER",
+    "CHAT"
+  ],
+  "priority": 68,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## 📊 领域要求：数据可视化代码生成\n\n你是一名数据科学工程师，精通 Python 可视化生态（matplotlib/seaborn/plotly/bokeh）和前端图表库（ECharts/D3.js）。\n\n### 选择图表类型的规则（先判断再生成）\n\n| 数据特征 | 推荐图表 | 次选 |\n|---------|---------|------|\n| 比较不同类别的值 | 条形图（Bar） | 雷达图 |\n| 展示趋势/时序变化 | 折线图（Line） | 面积图 |\n| 展示比例/构成 | 饼图/环形图（Pie/Donut） | 堆叠条形图 |\n| 展示分布 | 直方图（Histogram） | 箱线图（Boxplot）|\n| 两变量相关性 | 散点图（Scatter） | 热力图 |\n| 多维度分析 | 气泡图/平行坐标 | 雷达图 |\n| 地理数据 | Choropleth 地图 | 散点地图 |\n\n### 默认库选择\n- **pandas 数据分析场景** → `plotly.express`（交互式，Jupyter/Web 友好）\n- **学术/报告导出** → `matplotlib` + `seaborn`（矢量图导出）\n- **前端集成** → `ECharts`（中文生态最好）\n- **用户未指定** → 默认 `plotly.express`\n\n### 代码质量要求\n1. 代码必须包含**示例数据**（用 pandas DataFrame 构造），让用户可以直接运行\n2. 标注**数据替换位置**（`# TODO: 替换为你的实际数据`）\n3. 包含图表标题、坐标轴标签、图例（中文标注）\n4. 包含 `pip install` 命令\n5. 复杂图表提供**一个精简版**和**一个完整美化版**\n\n### 约束\n- 不要生成无法运行的伪代码\n- 示例数据要贴近用户描述的真实场景\n- 对较复杂的图表（如子图/双轴），加注释说明关键参数含义",
+  "examples": [
+    {
+      "input": "帮我画一个每月销售额趋势图，有三条线：今年、去年、目标值。用plotly",
+      "output": "## 📊 每月销售额趋势图（Plotly 交互版）\n\n**安装依赖**\n```bash\npip install plotly pandas\n```\n\n```python\nimport pandas as pd\nimport plotly.graph_objects as go\n\n# ─── 数据区域（替换为你的实际数据）─────────────────────────────\n# TODO: 将下面的数据替换为你的真实数值\nmonths = ['1月','2月','3月','4月','5月','6月',\n          '7月','8月','9月','10月','11月','12月']\n\ndata = {\n    '今年': [82, 91, 104, 98, 115, 128, 140, 136, 152, 165, 158, 180],\n    '去年': [70, 80,  88, 85,  95, 102, 110, 118, 130, 125, 140, 155],\n    '目标': [90, 95, 100,105, 110, 120, 130, 135, 145, 155, 160, 170],\n}\ndf = pd.DataFrame(data, index=months)\n# ──────────────────────────────────────────────────────────────\n\nfig = go.Figure()\n\n# 今年：实线，较粗\nfig.add_trace(go.Scatter(\n    x=months, y=df['今年'],\n    mode='lines+markers',\n    name='今年实际',\n    line=dict(color='#2196F3', width=3),\n    marker=dict(size=8)\n))\n\n# 去年：虚线\nfig.add_trace(go.Scatter(\n    x=months, y=df['去年'],\n    mode='lines+markers',\n    name='去年同期',\n    line=dict(color='#9E9E9E', width=2, dash='dash')\n))\n\n# 目标：点线，橙色\nfig.add_trace(go.Scatter(\n    x=months, y=df['目标'],\n    mode='lines',\n    name='目标值',\n    line=dict(color='#FF9800', width=2, dash='dot')\n))\n\nfig.update_layout(\n    title=dict(text='月度销售额趋势（今年 vs 去年 vs 目标）', font=dict(size=18)),\n    xaxis_title='月份',\n    yaxis_title='销售额（万元）',  # TODO: 替换单位\n    legend=dict(x=0.01, y=0.99),\n    hovermode='x unified',        # 悬浮时显示同一月份所有数值\n    plot_bgcolor='white',\n    height=500,\n)\n\n# 添加网格线\nfig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#F0F0F0')\nfig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#F0F0F0')\n\nfig.show()\n# 保存为 HTML（可发给别人打开）\n# fig.write_html('sales_trend.html')\n# 保存为图片（需安装 kaleido: pip install kaleido）\n# fig.write_image('sales_trend.png', scale=2)\n```\n\n**自定义说明**：\n- `width=3` → 今年线更粗，视觉上更突出\n- `hovermode='x unified'` → 悬浮时三条线同时显示，方便对比\n- 末尾注释说明了保存方式（HTML/PNG）",
+      "note": "包含示例数据/TODO标注/注释说明/导出代码，可直接运行"
+    }
+  ],
+  "plan_template": [
+    "1. 根据数据特征选择合适图表类型",
+    "2. 选择库（plotly/matplotlib/echarts）",
+    "3. 构造贴合场景的示例数据",
+    "4. 生成完整可运行代码（带TODO标注替换位置）",
+    "5. 说明关键参数含义和自定义方法"
+  ],
+  "trigger_keywords": [
+    "画图",
+    "图表",
+    "可视化",
+    "plotly",
+    "matplotlib",
+    "seaborn",
+    "echarts",
+    "数据图",
+    "生成图表",
+    "折线图",
+    "柱状图",
+    "饼图",
+    "散点图",
+    "热力图",
+    "visualization",
+    "chart",
+    "帮我出个图"
+  ],
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-19T00:00:00Z",
+  "tags": [
+    "data-viz",
+    "plotly",
+    "matplotlib",
+    "charts",
+    "python"
+  ],
+  "source_inspiration": "OpenAI GPT Store Top 1 — Data Analyst（最高使用量类别）"
+}

@@ -235,17 +235,24 @@ if _LG_AVAILABLE:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# 按 (model_id, temperature) 缓存 LLM 实例，避免每次节点调用都重建
+_llm_cache: Dict[tuple, Any] = {}
+
+
 def _llm_call(model_id: str, system: str, user: str, temperature: float = 0.7) -> str:
-    """单次同步 LLM 调用，返回文本。"""
+    """单次同步 LLM 调用，返回文本。同一 (model_id, temperature) 复用同一 LLM 实例。"""
     from app.core.llm.langchain_adapter import KotoLangChainLLM
 
-    llm = KotoLangChainLLM(model_id=model_id, temperature=temperature)
+    cache_key = (model_id, temperature)
+    if cache_key not in _llm_cache:
+        _llm_cache[cache_key] = KotoLangChainLLM(model_id=model_id, temperature=temperature)
+    llm = _llm_cache[cache_key]
     msgs = [SystemMessage(content=system), HumanMessage(content=user)]
     try:
         resp = llm.invoke(msgs)
         return resp.content if hasattr(resp, "content") else str(resp)
     except Exception as exc:
-        logger.error(f"[MultiAgent] LLM call failed: {exc}")
+        logger.error("[MultiAgent] LLM call failed: %s", exc)
         return f"[错误] {exc}"
 
 
@@ -258,10 +265,10 @@ def _build_context(state: "MultiAgentState", role: AgentRole) -> str:
         fields = ["research_result", "draft", "critic_feedback", "code", "analysis"]
 
     parts = [f"用户需求：{state['user_input']}"]
-    for f in fields:
-        val = state.get(f) or state.get("extra_outputs", {}).get(f)
+    for field_key in fields:
+        val = state.get(field_key) or state.get("extra_outputs", {}).get(field_key)
         if val:
-            label = f.replace("_", " ").title()
+            label = field_key.replace("_", " ").title()
             parts.append(f"\n---\n{label}：\n{val}")
     return "\n".join(parts)
 
@@ -287,11 +294,12 @@ def _make_agent_node(role: AgentRole):
             "messages": [AIMessage(content=f"[{role.display_name}] 完成")],
         }
 
-        # 写入输出字段
-        if (
-            hasattr(state, "__annotations__")
-            and role.output_field in MultiAgentState.__annotations__
-        ):
+        # Critic 循环：revise 节点每次被调用都递增修订计数，防止无限循环
+        if "revise" in role.name.lower():
+            update["revision_count"] = state.get("revision_count", 0) + 1
+
+        # 写入输出字段（state 运行时是 dict，直接检查 TypedDict annotations）
+        if role.output_field in MultiAgentState.__annotations__:
             update[role.output_field] = output
         else:
             extras = dict(state.get("extra_outputs", {}))
@@ -373,84 +381,107 @@ class MultiAgentOrchestrator:
         """自动从 roles 列表构建 StateGraph。"""
         graph = StateGraph(MultiAgentState)
 
-        # ── 注册所有节点 ─────────────────────────────────────────────────────
+        # revise 节点集合：名称含 "revise" 且非 critic
+        revise_names = {
+            r.name for r in self.roles if "revise" in r.name.lower() and not r.is_critic
+        }
+
+        # ── 注册所有 Agent 节点 ───────────────────────────────────────────────
         for role in self.roles:
             graph.add_node(role.name, _make_agent_node(role))
 
-        # ── 添加 finalize 节点（设置 final_output）────────────────────────────
+        # ── finalize 节点：收集最终输出 ──────────────────────────────────────
+        _roles_snapshot = list(self.roles)  # 闭包捕获，避免引用可变列表
+
         def node_finalize(state: "MultiAgentState") -> Dict:
-            # 按优先级查找最终输出
-            for field in ["draft", "code", "analysis"]:
-                val = state.get(field)
+            # 优先级字段（最常见的写作/代码/分析输出）
+            for priority_field in ["draft", "code", "analysis"]:
+                if val := state.get(priority_field):
+                    return {"final_output": val}
+            # 按角色逆序查找（最后执行的角色输出优先）
+            for r in reversed(_roles_snapshot):
+                val = state.get(r.output_field) or state.get("extra_outputs", {}).get(r.output_field)
                 if val:
                     return {"final_output": val}
-            # fallback: last extra_output
+            # 兜底：extra_outputs 最后一项
             extras = state.get("extra_outputs", {})
             if extras:
                 return {"final_output": list(extras.values())[-1]}
             return {"final_output": ""}
 
         graph.add_node("finalize", node_finalize)
-
-        # ── 构建边 ────────────────────────────────────────────────────────────
-        non_critic_roles = [r for r in self.roles if not r.is_critic]
-        critic_roles = [r for r in self.roles if r.is_critic]
-
-        # 设置入口节点
         graph.set_entry_point(self.roles[0].name)
 
-        i = 0
-        while i < len(self.roles):
-            role = self.roles[i]
-            next_i = i + 1
-
-            if role.is_critic:
-                # 找 revise 目标（前一个节点，或显式 revise role）
-                revise_target = None
-                for r in self.roles:
-                    if "revise" in r.name.lower() and not r.is_critic:
-                        revise_target = r.name
+        # ── 构建边 ────────────────────────────────────────────────────────────
+        for i, role in enumerate(self.roles):
+            if role.name in revise_names:
+                # Revise → 向前找最近的 critic，形成循环
+                critic_target = "finalize"
+                for j in range(i - 1, -1, -1):
+                    if self.roles[j].is_critic:
+                        critic_target = self.roles[j].name
                         break
-                if revise_target is None and i > 0:
-                    # 前一个非 critic 节点
-                    revise_target = self.roles[i - 1].name
+                graph.add_edge(role.name, critic_target)
 
-                next_name = (
-                    self.roles[next_i].name if next_i < len(self.roles) else "finalize"
+            elif role.is_critic:
+                # 优先使用显式 revise 节点，否则回退到前一个非 critic 节点
+                revise_target = next(
+                    (r.name for r in self.roles if r.name in revise_names), None
                 )
+                if revise_target is None:
+                    for j in range(i - 1, -1, -1):
+                        if not self.roles[j].is_critic:
+                            revise_target = self.roles[j].name
+                            break
+
+                # PASS → 跳过所有 revise 节点，连到下一个普通节点（或 finalize）
+                pass_dest = "finalize"
+                for j in range(i + 1, len(self.roles)):
+                    if self.roles[j].name not in revise_names:
+                        pass_dest = self.roles[j].name
+                        break
 
                 router = _make_critic_router(
-                    role, revise_target or "finalize", next_name
+                    role, revise_target or "finalize", pass_dest
                 )
-                next_map = (
-                    {
-                        revise_target: revise_target,
-                        next_name: next_name,
-                    }
-                    if revise_target and revise_target != next_name
-                    else {next_name: next_name}
-                )
+                dest_map: Dict[str, str] = {pass_dest: pass_dest}
+                if revise_target and revise_target != pass_dest:
+                    dest_map[revise_target] = revise_target
+                graph.add_conditional_edges(role.name, router, dest_map)
 
-                graph.add_conditional_edges(role.name, router, next_map)
             else:
+                # 普通节点 → 顺序连接到下一个节点
                 next_name = (
-                    self.roles[next_i].name if next_i < len(self.roles) else "finalize"
+                    self.roles[i + 1].name if i + 1 < len(self.roles) else "finalize"
                 )
                 graph.add_edge(role.name, next_name)
 
-            i += 1
-
-        # revise 节点回到 critic
-        for role in self.roles:
-            if "revise" in role.name.lower() and not role.is_critic:
-                # find a critic that comes AFTER this revise in the roles list
-                for critic in critic_roles:
-                    graph.add_edge(role.name, critic.name)
-                    break
-
         graph.add_edge("finalize", END)
-
         return graph.compile(checkpointer=self._checkpointer)
+
+    def _make_initial_state(
+        self, user_input: str, session_id: str, model_id: str
+    ) -> Dict[str, Any]:
+        """构建初始 Graph 状态，供 run() 和 stream() 共用。"""
+        return {
+            "user_input": user_input,
+            "model_id": model_id,
+            "session_id": session_id,
+            "research_result": None,
+            "draft": None,
+            "critic_feedback": None,
+            "review_feedback": None,
+            "code": None,
+            "analysis": None,
+            "extra_outputs": {},
+            "revision_count": 0,
+            "max_revisions": self.max_revisions,
+            "revision_target": None,
+            "messages": [],
+            "steps": [],
+            "final_output": None,
+            "error": None,
+        }
 
     def run(
         self,
@@ -472,27 +503,7 @@ class MultiAgentOrchestrator:
         _assert_langgraph()
         _session = session_id or f"ma-{int(time.time())}"
         _model = model_id or self.model_id
-
-        initial_state: Dict[str, Any] = {
-            "user_input": user_input,
-            "model_id": _model,
-            "session_id": _session,
-            "research_result": None,
-            "draft": None,
-            "critic_feedback": None,
-            "review_feedback": None,
-            "code": None,
-            "analysis": None,
-            "extra_outputs": {},
-            "revision_count": 0,
-            "max_revisions": self.max_revisions,
-            "revision_target": None,
-            "messages": [],
-            "steps": [],
-            "final_output": None,
-            "error": None,
-        }
-
+        initial_state = self._make_initial_state(user_input, _session, _model)
         config = {"configurable": {"thread_id": _session}}
 
         try:
@@ -514,27 +525,7 @@ class MultiAgentOrchestrator:
         """
         _assert_langgraph()
         _session = session_id or f"ma-{int(time.time())}"
-
-        initial_state: Dict[str, Any] = {
-            "user_input": user_input,
-            "model_id": self.model_id,
-            "session_id": _session,
-            "research_result": None,
-            "draft": None,
-            "critic_feedback": None,
-            "review_feedback": None,
-            "code": None,
-            "analysis": None,
-            "extra_outputs": {},
-            "revision_count": 0,
-            "max_revisions": self.max_revisions,
-            "revision_target": None,
-            "messages": [],
-            "steps": [],
-            "final_output": None,
-            "error": None,
-        }
-
+        initial_state = self._make_initial_state(user_input, _session, self.model_id)
         config = {"configurable": {"thread_id": _session}}
 
         try:

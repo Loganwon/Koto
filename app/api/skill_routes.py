@@ -88,6 +88,127 @@ def _token_tracker():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# GET /api/skills/active-ui-config  —  获取当前激活 Skill 的 UI 配置合并结果
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@skill_bp.route("/active-ui-config", methods=["GET"])
+def get_active_ui_config():
+    """返回所有已启用且含有 ui_config / ui_extensions 的 Skill 合并后的 UI 配置。"""
+    sm = _sm()
+    result = sm.get_active_ui_config()
+    return jsonify({"success": True, **result})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GET  /api/skills/<id>/permissions       — 查询 Skill 的权限状态
+# POST /api/skills/<id>/permissions       — 授予权限
+# DELETE /api/skills/<id>/permissions     — 撤销权限
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@skill_bp.route("/<skill_id>/permissions", methods=["GET"])
+def get_skill_permissions(skill_id: str):
+    """返回该 Skill 所需权限及当前授权状态。"""
+    try:
+        from app.core.skills.skill_permissions import SkillPermissionManager, PERMISSION_META
+
+        sm = _sm()
+        skill = sm.get_definition(skill_id)
+        if not skill:
+            return jsonify({"success": False, "error": "Skill not found"}), 404
+
+        required = list(getattr(skill, "permissions", None) or [])
+        granted = SkillPermissionManager.get_granted(skill_id)
+        missing = SkillPermissionManager.get_missing(skill_id, required)
+
+        perms_info = []
+        for perm in required:
+            meta = PERMISSION_META.get(perm, {})
+            perms_info.append({
+                "id": perm,
+                "label": meta.get("label", perm),
+                "description": meta.get("description", ""),
+                "risk": meta.get("risk", "unknown"),
+                "granted": perm in granted,
+            })
+
+        return jsonify({
+            "success": True,
+            "skill_id": skill_id,
+            "required": required,
+            "granted": granted,
+            "missing": missing,
+            "permissions": perms_info,
+        })
+    except Exception as e:
+        logger.error(f"[skills] get permissions error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@skill_bp.route("/<skill_id>/permissions", methods=["POST"])
+def grant_skill_permissions(skill_id: str):
+    """为 Skill 授予指定权限列表。Body: {\"permissions\": [\"ui_interactive\", ...]}"""
+    try:
+        from app.core.skills.skill_permissions import SkillPermissionManager, PERMISSION_META
+
+        body = request.get_json(silent=True) or {}
+        perms = body.get("permissions", [])
+        if not isinstance(perms, list):
+            return jsonify({"success": False, "error": "permissions must be a list"}), 400
+
+        unknown = [p for p in perms if p not in PERMISSION_META]
+        if unknown:
+            return jsonify({"success": False, "error": f"Unknown permissions: {unknown}"}), 400
+
+        sm = _sm()
+        skill = sm.get_definition(skill_id)
+        if not skill:
+            return jsonify({"success": False, "error": "Skill not found"}), 404
+
+        for perm in perms:
+            SkillPermissionManager.grant(skill_id, perm)
+
+        return jsonify({
+            "success": True,
+            "skill_id": skill_id,
+            "granted": SkillPermissionManager.get_granted(skill_id),
+        })
+    except Exception as e:
+        logger.error(f"[skills] grant permissions error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@skill_bp.route("/<skill_id>/permissions", methods=["DELETE"])
+def revoke_skill_permissions(skill_id: str):
+    """撤销 Skill 的指定权限列表。Body: {\"permissions\": [\"ui_interactive\", ...]}"""
+    try:
+        from app.core.skills.skill_permissions import SkillPermissionManager
+
+        body = request.get_json(silent=True) or {}
+        perms = body.get("permissions", [])
+        if not isinstance(perms, list):
+            return jsonify({"success": False, "error": "permissions must be a list"}), 400
+
+        sm = _sm()
+        skill = sm.get_definition(skill_id)
+        if not skill:
+            return jsonify({"success": False, "error": "Skill not found"}), 404
+
+        for perm in perms:
+            SkillPermissionManager.revoke(skill_id, perm)
+
+        return jsonify({
+            "success": True,
+            "skill_id": skill_id,
+            "granted": SkillPermissionManager.get_granted(skill_id),
+        })
+    except Exception as e:
+        logger.error(f"[skills] revoke permissions error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # GET /api/skills  —  列出所有 Skill
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -368,6 +489,9 @@ def update_skill(skill_id: str):
             "examples",
             "enabled",
             "author",
+            "ui_config",
+            "ui_extensions",
+            "permissions",
         ]
         for field in updatable:
             if field in data:
@@ -443,6 +567,13 @@ def toggle_skill(skill_id: str):
         existing["enabled"] = bool(enabled)
         with open(skill_file, "w", encoding="utf-8") as f:
             json.dump(existing, f, ensure_ascii=False, indent=2)
+        try:
+            from app.core.hooks.hook_manager import get_hook_manager, HookContext
+            get_hook_manager().fire_on_skill_change(
+                skill_id, bool(enabled), HookContext(task_type="skill_toggle", skill_id=skill_id)
+            )
+        except Exception:
+            pass
         return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -469,6 +600,13 @@ def toggle_skill_v2(skill_id: str):
                 jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
                 404,
             )
+        try:
+            from app.core.hooks.hook_manager import get_hook_manager, HookContext
+            get_hook_manager().fire_on_skill_change(
+                skill_id, enabled, HookContext(task_type="skill_toggle", skill_id=skill_id)
+            )
+        except Exception:
+            pass
         return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -728,4 +866,195 @@ def delete_binding(binding_id: str):
         return jsonify({"success": True, "deleted": binding_id})
     except Exception as e:
         logger.error(f"[skills/bindings/delete] error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# POST /api/skills/usage  —  记录 Skill 使用（前端发起）
+# GET  /api/skills/recommendations  —  按使用量返回推荐 Skill 列表
+# POST /api/skills/ask-koto  —  让 Koto 为指定任务推荐合适的 Skill
+# ══════════════════════════════════════════════════════════════════════════════
+
+import threading as _threading
+import time as _time
+
+_USAGE_FILE = _BASE_DIR / "config" / "skill_usage_log.json"
+_usage_lock = _threading.Lock()
+
+
+def _load_usage() -> Dict:
+    try:
+        if _USAGE_FILE.exists():
+            return json.loads(_USAGE_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _save_usage(data: Dict) -> None:
+    try:
+        _USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _USAGE_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(_USAGE_FILE)
+    except Exception as e:
+        logger.warning(f"[skills/usage] save error: {e}")
+
+
+@skill_bp.route("/usage", methods=["POST"])
+def record_skill_usage():
+    """
+    前端在每次发消息时调用，记录当前激活的 Skill 使用事件。
+    请求体: { "skill_ids": ["id1", "id2"], "session_id": "..." }
+    """
+    data = request.get_json(silent=True) or {}
+    skill_ids = data.get("skill_ids", [])
+    session_id = data.get("session_id", "")
+    if not isinstance(skill_ids, list) or not skill_ids:
+        return jsonify({"success": True, "recorded": 0})
+
+    now = int(_time.time())
+    with _usage_lock:
+        usage = _load_usage()
+        for sid in skill_ids:
+            if not isinstance(sid, str) or not sid:
+                continue
+            entry = usage.setdefault(sid, {"total": 0, "last_used": 0, "events": []})
+            entry["total"] = entry.get("total", 0) + 1
+            entry["last_used"] = now
+            # 只保留最近 200 条事件，避免文件无限增大
+            events = entry.get("events", [])
+            events.append({"ts": now, "session": session_id})
+            entry["events"] = events[-200:]
+        _save_usage(usage)
+
+    return jsonify({"success": True, "recorded": len(skill_ids)})
+
+
+@skill_bp.route("/recommendations", methods=["GET"])
+def get_skill_recommendations():
+    """
+    返回推荐 Skill 列表。
+    策略：最近使用 + 使用频率综合排序，融合当前所有可用 Skill 信息。
+    查询参数: limit (默认 8)
+    """
+    limit = min(int(request.args.get("limit", 8)), 30)
+    try:
+        sm = _sm()
+        all_skills = sm.list_skills()
+        skill_map = {s["id"]: s for s in all_skills if not s.get("skill_nature") == "system"}
+
+        with _usage_lock:
+            usage = _load_usage()
+
+        now = _time.time()
+        # 计算每个 skill 的推荐得分: 频率 * 衰减
+        scored = []
+        for skill_id, info in usage.items():
+            if skill_id not in skill_map:
+                continue
+            total = info.get("total", 0)
+            last_used = info.get("last_used", 0)
+            age_days = (now - last_used) / 86400.0 if last_used else 9999
+            # 半衰期 30 天
+            decay = 0.5 ** (age_days / 30.0)
+            score = total * decay
+            scored.append((skill_id, score))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        top_ids = [s[0] for s in scored[:limit]]
+
+        # 补全未使用过的高评分 skill（精选列表），凑满 limit 个
+        _POPULAR_FALLBACK = [
+            "step_by_step", "concise_mode", "code_best_practices",
+            "professional_tone", "teaching_mode", "deep_think",
+        ]
+        for fid in _POPULAR_FALLBACK:
+            if len(top_ids) >= limit:
+                break
+            if fid in skill_map and fid not in top_ids:
+                top_ids.append(fid)
+
+        result = [skill_map[sid] for sid in top_ids if sid in skill_map]
+        return jsonify({"success": True, "skills": result, "total": len(result)})
+    except Exception as e:
+        logger.error(f"[skills/recommendations] error: {e}", exc_info=True)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@skill_bp.route("/ask-koto", methods=["POST"])
+def ask_koto_recommend():
+    """
+    让 Koto（LLM）根据用户描述的任务，从所有可用 Skill 中挑选最合适的几个。
+    请求体: { "task": "帮我分析一份财务报表" }
+    返回: { "success": true, "skills": [...], "reasoning": "..." }
+    """
+    data = request.get_json(silent=True) or {}
+    task = (data.get("task") or "").strip()
+    if not task:
+        return jsonify({"success": False, "error": "task 不能为空"}), 400
+
+    try:
+        sm = _sm()
+        all_skills = [
+            s for s in sm.list_skills()
+            if not s.get("skill_nature") == "system"
+        ]
+
+        # 构建 Skill 目录摘要给 LLM
+        skill_catalog = "\n".join(
+            f"- [{s['id']}] {s.get('icon','🔧')} {s['name']}: {s.get('description','')}"
+            for s in all_skills
+        )
+
+        prompt = f"""你是 Koto 的 Skill 顾问。用户描述了一个任务，请从下面的 Skill 列表中挑选最合适的 1-4 个 Skill。
+
+## 用户任务
+{task}
+
+## 可用 Skill 列表（格式：[id] 图标 名称: 描述）
+{skill_catalog}
+
+## 要求
+1. 只选真正有帮助的 Skill，不要凑数
+2. 以 JSON 格式输出，结构如下（只输出 JSON，不要其他文字）：
+{{
+  "skill_ids": ["id1", "id2"],
+  "reasoning": "简短说明为什么选这几个（≤60字）"
+}}"""
+
+        from app.core.llm.gemini import GeminiProvider
+        client = GeminiProvider()
+        raw = client.generate_content(
+            prompt=prompt,
+            model="gemini-2.0-flash",
+            temperature=0.2,
+            max_tokens=400,
+        )
+        text = raw.get("text", "") if isinstance(raw, dict) else str(raw)
+        text = text.strip()
+        # 去掉可能的 ```json 包裹
+        import re
+        if text.startswith("```"):
+            text = re.sub(r"^```[\w]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text.strip())
+
+        parsed = json.loads(text)
+        recommended_ids = [str(i) for i in (parsed.get("skill_ids") or []) if i]
+        reasoning = str(parsed.get("reasoning") or "")
+
+        skill_map = {s["id"]: s for s in all_skills}
+        skills_out = [skill_map[sid] for sid in recommended_ids if sid in skill_map]
+
+        return jsonify({
+            "success": True,
+            "skills": skills_out,
+            "reasoning": reasoning,
+        })
+
+    except json.JSONDecodeError as e:
+        logger.warning(f"[skills/ask-koto] LLM 输出解析失败: {e}")
+        return jsonify({"success": False, "error": "AI 返回格式异常，请重试"}), 500
+    except Exception as e:
+        logger.error(f"[skills/ask-koto] error: {e}", exc_info=True)
         return jsonify({"success": False, "error": str(e)}), 500

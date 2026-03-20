@@ -908,6 +908,83 @@ class SkillAutoMatcher:
             return None
 
     @classmethod
+    def _match_with_gemini(
+        cls,
+        user_input: str,
+        task_type: str,
+        catalog_text: str,
+        candidate_ids: set,
+    ) -> Optional[List[str]]:
+        """
+        使用 GeminiProvider 做语义 Skill 匹配，作为 Ollama 不可用时的云端语义层。
+        比 n-gram/关键词更准确，且无需本地 Ollama 进程。
+        Returns None 如果 Gemini 不可用或调用失败。
+        """
+        try:
+            from app.core.llm.gemini import GeminiProvider
+
+            provider = GeminiProvider()
+            if not provider.client:
+                return None
+
+            prompt = (
+                f"你是 Koto Skill 匹配引擎。根据任务类型和用户消息，"
+                f"从候选技能列表中选出 0-{_MAX_AUTO_SKILLS} 个最合适的技能 ID。\n"
+                f"规则：只在技能能明显改善本次回答时才选；不要凑数；"
+                f"严格只输出 JSON 数组，例如 [\"step_by_step\"] 或 []，禁止任何额外文字。\n\n"
+                f"任务类型: {task_type}\n"
+                f"用户消息: {user_input[:500]}\n\n"
+                f"候选技能列表:\n{catalog_text}\n\n"
+                f"输出 JSON 数组:"
+            )
+
+            start = time.time()
+            resp = provider.generate_content(
+                prompt=prompt,
+                model="gemini-2.0-flash",  # 快模型，够用
+                stream=False,
+                max_tokens=80,
+            )
+            latency = time.time() - start
+
+            text = ""
+            if isinstance(resp, dict):
+                text = (resp.get("text") or "").strip()
+            if not text:
+                return None
+
+            # 移除 markdown 代码块
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text).strip()
+
+            if not text.startswith("["):
+                m = re.search(r"\[.*?\]", text, re.DOTALL)
+                text = m.group() if m else "[]"
+
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                logger.debug(f"[AutoMatcher] Gemini JSON 解析失败: {text!r}")
+                return None
+
+            if not isinstance(parsed, list):
+                return None
+
+            valid = [
+                sid for sid in parsed if isinstance(sid, str) and sid in candidate_ids
+            ][:_MAX_AUTO_SKILLS]
+
+            logger.info(
+                f"[AutoMatcher] ☁️ Gemini 匹配 ({latency:.2f}s): "
+                f"{task_type} → {valid}"
+            )
+            return valid
+
+        except Exception as e:
+            logger.debug(f"[AutoMatcher] Gemini 调用异常: {e}")
+            return None
+
+    @classmethod
     def match(
         cls,
         user_input: str,
@@ -916,6 +993,12 @@ class SkillAutoMatcher:
     ) -> List[str]:
         """
         自动匹配本轮对话最适合的 Skill ID 列表（临时注入，不修改持久状态）。
+
+        匹配优先级（由高到低）：
+        1. 本地模型（Ollama Qwen3）— 快、私密
+        2. Gemini 云端语义分类 — Ollama 不可用时顶替
+        3. n-gram 字符相似度 — 无网络时的语义层
+        4. 关键词规则兜底
 
         参数
         ----
@@ -939,14 +1022,21 @@ class SkillAutoMatcher:
             logger.debug(f"[AutoMatcher] 用户已启用域 Skill，跳过自动匹配")
             return []
 
-        # ── 优先尝试本地模型匹配 ────────────────────────────────────────────
+        # ── 1. 优先尝试本地模型匹配（快、私密）─────────────────────────────
         model_result = cls._match_with_local_model(
             user_input, task_type, catalog_text, candidate_ids
         )
         if model_result is not None:
             return cls._expand_with_synergy(model_result, user_input, candidate_ids)
 
-        # ── n-gram 语义相似度中间层（Ollama 不可用时，比纯关键词更泛化）─────
+        # ── 2. Gemini 云端语义匹配（Ollama 不可用时顶替）────────────────────
+        gemini_result = cls._match_with_gemini(
+            user_input, task_type, catalog_text, candidate_ids
+        )
+        if gemini_result is not None:
+            return cls._expand_with_synergy(gemini_result, user_input, candidate_ids)
+
+        # ── 3. n-gram 语义相似度中间层（离线降级）───────────────────────────
         ngram_result = cls._match_with_intent_ngram(user_input, candidates)
         if ngram_result:
             logger.info(
@@ -954,7 +1044,7 @@ class SkillAutoMatcher:
             )
             return cls._expand_with_synergy(ngram_result, user_input, candidate_ids)
 
-        # ── 最终兜底：精确关键词规则 ────────────────────────────────────────
+        # ── 4. 最终兜底：精确关键词规则 ─────────────────────────────────────
         pattern_result = cls._match_with_patterns(user_input, candidates)
         if pattern_result:
             logger.info(

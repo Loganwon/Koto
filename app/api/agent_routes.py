@@ -78,6 +78,36 @@ def _is_service_unavailable_error(text: str) -> bool:
     )
 
 
+# ── 隐私路由：含高敏感内容时强制走本地模型 ───────────────────────────────────
+import re as _re
+
+_PRIVACY_PATTERNS = (
+    # API Key / Token / Password 赋值
+    _re.compile(
+        r'(password|passwd|secret|api[_\s-]?key|access[_\s-]?token|private[_\s-]?key'
+        r'|credential|auth[_\s-]?token|bearer)[s]?\s*[:=]\s*\S{6,}',
+        _re.IGNORECASE,
+    ),
+    # OpenAI / Anthropic / HuggingFace 等常见 Key 前缀
+    _re.compile(r'\b(sk-|sk-ant-|hf_|AIzaSy)[A-Za-z0-9_\-]{16,}', _re.IGNORECASE),
+    # 中国居民身份证（18 位，末位可为 X）
+    _re.compile(r'\b\d{17}[\dXx]\b'),
+    # 银行卡 / 信用卡（13-19 位纯数字，允许空格或连字符分隔）
+    _re.compile(r'\b(?:\d[ \-]?){13,19}\d\b'),
+    # 手机号（中国大陆，1 开头 11 位）
+    _re.compile(r'\b1[3-9]\d{9}\b'),
+    # 密码/私钥块
+    _re.compile(r'-----BEGIN\s+(RSA |EC )?PRIVATE KEY-----', _re.IGNORECASE),
+)
+
+
+def _is_privacy_sensitive(text: str) -> bool:
+    """返回 True 表示文本含高度敏感信息，应强制走本地模型。"""
+    if not text:
+        return False
+    return any(pat.search(text) for pat in _PRIVACY_PATTERNS)
+
+
 def _build_skill_system_instruction(
     user_input: str = "", task_type: str = "CHAT"
 ) -> str:
@@ -614,22 +644,43 @@ def chat():
         local_fallback_model = None
         _t_start = time.time()
         try:
-            for step in agent.run(
-                input_text=safe_message,
-                history=history,
-                session_id=session_id,
-                skill_id=skill_id,
-                task_type=task_type,
-                system_context=_system_context,
-            ):
-                step_data = step.to_dict()
-                collected_steps.append(step_data)
-                if step.step_type == AgentStepType.ANSWER:
-                    final_answer = step.content or ""
-                yield f"data: {json.dumps({'type': 'agent_step', 'data': step_data}, ensure_ascii=False)}\n\n"
+            # ── 隐私路由：高敏感内容强制走本地模型，不上云 ──────────────────
+            _privacy_routed = False
+            if _is_privacy_sensitive(safe_message):
+                logger.info("[chat] 🔒 检测到高敏感内容，强制使用本地模型（隐私路由）")
+                _priv_ans, _priv_mod = _local_model_fallback(safe_message, history)
+                if _priv_ans:
+                    _notice = {
+                        "step_type": "thought",
+                        "content": "🔒 检测到敏感信息，已启用隐私保护模式（本地模型处理，不上传云端）",
+                        "metadata": {"source": "privacy_routing"},
+                    }
+                    yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
+                    used_local_fallback = True
+                    local_fallback_model = _priv_mod
+                    final_answer = _priv_ans
+                    _privacy_routed = True
+                else:
+                    # 本地不可用时 fall-through 到云端（已经过 PII 脱敏）
+                    logger.warning("[chat] 隐私路由：本地模型不可用，继续走云端（已 PII 脱敏）")
 
-            if not final_answer and collected_steps:
-                final_answer = collected_steps[-1].get("content", "")
+            if not _privacy_routed:
+                for step in agent.run(
+                    input_text=safe_message,
+                    history=history,
+                    session_id=session_id,
+                    skill_id=skill_id,
+                    task_type=task_type,
+                    system_context=_system_context,
+                ):
+                    step_data = step.to_dict()
+                    collected_steps.append(step_data)
+                    if step.step_type == AgentStepType.ANSWER:
+                        final_answer = step.content or ""
+                    yield f"data: {json.dumps({'type': 'agent_step', 'data': step_data}, ensure_ascii=False)}\n\n"
+
+                if not final_answer and collected_steps:
+                    final_answer = collected_steps[-1].get("content", "")
 
             # ── 503 / 连接故障：本地模型兜底 ────────────────────────────────
             _error_steps = [s for s in collected_steps if s.get("step_type") == "error"]
@@ -660,17 +711,47 @@ def chat():
             validated_answer = final_answer
             validation_action = "PASS"
             try:
-                if final_answer and not used_local_fallback:
+                if final_answer:
                     OutputValidator = _lazy_validator()
+                    # 本地备用模型：只做泄露/有害内容检测，跳过实时数据/格式/LLM质量检测
                     val = OutputValidator.validate(
                         text=final_answer,
-                        skill_id=skill_id,
-                        original_prompt=message,
+                        skill_id=skill_id if not used_local_fallback else None,
+                        original_prompt=message if not used_local_fallback else None,
                     )
                     validation_action = val.action
                     if val.is_blocked:
                         validated_answer = val.text
                         logger.warning(f"[chat] 🚫 输出被拦截: {val.reasons}")
+                    elif val.needs_retry and not used_local_fallback:
+                        # 本地备用回复不触发重试（本地模型重试无意义）
+                        logger.warning(f"[chat] ⟳ 输出质量不合格，触发重试: {val.reasons}")
+                        _retry_input = val.text if val.text != final_answer else safe_message
+                        _retry_steps: list = []
+                        _retry_answer = ""
+                        try:
+                            for _rs in agent.run(
+                                input_text=_retry_input,
+                                history=history,
+                                session_id=session_id,
+                                skill_id=skill_id,
+                                task_type=task_type,
+                                system_context=_system_context,
+                            ):
+                                _retry_steps.append(_rs.to_dict())
+                                if _rs.step_type == AgentStepType.ANSWER:
+                                    _retry_answer = _rs.content or ""
+                        except Exception as _re:
+                            logger.warning(f"[chat] 重试执行异常: {_re}")
+                        if not _retry_answer and _retry_steps:
+                            _retry_answer = _retry_steps[-1].get("content", "")
+                        if _retry_answer:
+                            validated_answer = _retry_answer
+                            collected_steps.extend(_retry_steps)
+                            logger.info(f"[chat] ✓ 重试成功，新响应长度: {len(_retry_answer)}")
+                        else:
+                            validated_answer = final_answer  # 重试失败，保留原始响应
+                            logger.warning("[chat] 重试未返回有效响应，保留原始结果")
                     else:
                         validated_answer = val.text
             except Exception as _ve:
@@ -784,6 +865,21 @@ def chat():
                 yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
                 _local_ans, _local_mod = _local_model_fallback(safe_message, history)
                 if _local_ans:
+                    # 异常路径：对本地模型回复做 BLOCK 检测
+                    try:
+                        OutputValidator = _lazy_validator()
+                        _lv = OutputValidator.validate(text=_local_ans)
+                        if _lv.is_blocked:
+                            logger.warning(f"[chat] 🚫 本地模型异常路径输出被拦截: {_lv.reasons}")
+                        _local_ans = _lv.text
+                    except Exception:
+                        pass
+                    # PII 还原
+                    if mask_result and mask_result.has_pii:
+                        try:
+                            _local_ans = mask_result.restore(_local_ans)
+                        except Exception:
+                            pass
                     _lm = _local_mod or "本地模型"
                     _display = (
                         f"🔄 **[本地模型回复]** 云端服务不可用，"
@@ -840,16 +936,36 @@ def process_compat():
 
     skill_id, auto_skill_ids = _resolve_runtime_skill(user_request, skill_id, task_type)
 
+    # ── 路由级 PII 脱敏 ─────────────────────────────────────────
+    _proc_mask = None
+    _proc_safe_request = user_request
+    try:
+        PIIFilter = _lazy_pii()
+        _proc_mask = PIIFilter.mask(user_request)
+        if _proc_mask.has_pii:
+            _proc_safe_request = _proc_mask.masked_text
+            logger.info(f"[process] PII 脱敏 {_proc_mask.stats}")
+    except Exception as _pe:
+        logger.warning(f"[process] PII 过滤器异常（跳过）: {_pe}")
+
     try:
         agent = get_agent()
         task = _run_agent_collect(
             agent,
-            user_request,
+            _proc_safe_request,
             history=history,
             session_id=session_id,
             skill_id=skill_id,
             task_type=task_type,
         )
+        # ── PII 还原 ────────────────────────────────────────────
+        if _proc_mask and _proc_mask.has_pii:
+            try:
+                _r = task.get("result", "")
+                if _r:
+                    task["result"] = _proc_mask.restore(_r)
+            except Exception:
+                pass
         task["skill_id"] = skill_id
         task["auto_skill_ids"] = auto_skill_ids
         task["task_type"] = task_type
@@ -958,16 +1074,49 @@ def process_stream_compat():
             latency_ms = int((time.time() - t0) * 1000)
             validation_action = "PASS"
             try:
-                if not used_local_fallback:
+                if raw_final:
                     OutputValidator = _lazy_validator()
+                    # 本地备用模型：只做泄露/有害内容检测，跳过实时数据/格式/LLM质量检测
                     val_result = OutputValidator.validate(
                         raw_final,
-                        skill_id=skill_id,
-                        original_prompt=user_request,
+                        skill_id=skill_id if not used_local_fallback else None,
+                        original_prompt=user_request if not used_local_fallback else None,
                     )
                     validation_action = val_result.action
                     if validation_action == "BLOCK":
                         raw_final = "[内容被安全策略拦截，请调整您的请求]"
+                    elif validation_action == "RETRY" and not used_local_fallback:
+                        logger.warning(
+                            f"[process-stream] ⟳ 输出质量不合格，触发重试: {val_result.reasons}"
+                        )
+                        _retry_input = (
+                            val_result.text if val_result.text != raw_final else safe_request
+                        )
+                        _retry_steps: list = []
+                        _retry_answer = ""
+                        try:
+                            for _rs in agent.run(
+                                input_text=_retry_input,
+                                history=history,
+                                session_id=session_id,
+                                skill_id=skill_id,
+                                task_type=task_type,
+                            ):
+                                _retry_steps.append(_rs.to_dict())
+                                if _rs.step_type == AgentStepType.ANSWER:
+                                    _retry_answer = _rs.content or ""
+                        except Exception as _re:
+                            logger.warning(f"[process-stream] 重试执行异常: {_re}")
+                        if not _retry_answer and _retry_steps:
+                            _retry_answer = _retry_steps[-1].get("content", "")
+                        if _retry_answer:
+                            raw_final = _retry_answer
+                            collected_steps.extend(_retry_steps)
+                            logger.info(
+                                f"[process-stream] ✓ 重试成功，新响应长度: {len(_retry_answer)}"
+                            )
+                        else:
+                            logger.warning("[process-stream] 重试未返回有效响应，保留原始结果")
                     elif validation_action in ("WARN", "REFORMAT"):
                         raw_final = val_result.text or raw_final
             except Exception as _ve:
@@ -1050,6 +1199,22 @@ def process_stream_compat():
                 yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
                 _local_ans, _local_mod = _local_model_fallback(safe_request, history)
                 if _local_ans:
+                    # 异常路径：对本地模型回复做 BLOCK 检测 + PII 还原
+                    try:
+                        OutputValidator = _lazy_validator()
+                        _lv = OutputValidator.validate(text=_local_ans)
+                        if _lv.is_blocked:
+                            logger.warning(
+                                f"[process-stream] 🚫 本地模型异常路径输出被拦截: {_lv.reasons}"
+                            )
+                        _local_ans = _lv.text
+                    except Exception:
+                        pass
+                    if mask_result and mask_result.has_pii:
+                        try:
+                            _local_ans = mask_result.restore(_local_ans)
+                        except Exception:
+                            pass
                     _lm = _local_mod or "本地模型"
                     _display = (
                         f"🔄 **[本地模型回复]** 云端服务不可用，"

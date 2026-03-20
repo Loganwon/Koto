@@ -1,0 +1,135 @@
+# -*- coding: utf-8 -*-
+"""
+Koto LLM Provider Factory
+==========================
+Single entry point to get the appropriate LLMProvider based on:
+  1. Explicit `provider` argument ("gemini" | "openai" | "anthropic" | "ollama")
+  2. `model` prefix  (gpt-* → openai, claude-* → anthropic, gemini-* / default → gemini)
+  3. Available API keys in environment
+
+Usage:
+    from app.core.llm.provider_factory import get_llm_provider
+
+    provider = get_llm_provider()                        # auto-detect
+    provider = get_llm_provider(provider="openai")       # force OpenAI
+    provider = get_llm_provider(model="claude-3-7-sonnet-20250219")  # infer from model
+"""
+from __future__ import annotations
+
+import logging
+import os
+from typing import Optional
+
+from .base import LLMProvider
+
+logger = logging.getLogger(__name__)
+
+
+# ── Provider registry ─────────────────────────────────────────────────────────
+
+def _load_gemini() -> LLMProvider:
+    from .gemini import GeminiProvider
+    return GeminiProvider()
+
+
+def _load_openai() -> LLMProvider:
+    from .openai_provider import OpenAIProvider
+    return OpenAIProvider()
+
+
+def _load_anthropic() -> LLMProvider:
+    from .anthropic_provider import AnthropicProvider
+    return AnthropicProvider()
+
+
+def _load_ollama() -> LLMProvider:
+    try:
+        from .ollama_llm_provider import OllamaLLMProvider
+        return OllamaLLMProvider()
+    except ImportError:
+        from .ollama_provider import OllamaClientProxy  # type: ignore
+        return OllamaClientProxy()  # type: ignore
+
+
+_LOADERS = {
+    "gemini": _load_gemini,
+    "openai": _load_openai,
+    "anthropic": _load_anthropic,
+    "ollama": _load_ollama,
+}
+
+# Model-name prefix → provider name
+_MODEL_PREFIX_MAP = (
+    ("gpt-",       "openai"),
+    ("o1",         "openai"),
+    ("o3",         "openai"),
+    ("o4",         "openai"),
+    ("claude-",    "anthropic"),
+    ("gemini-",    "gemini"),
+    ("deep-research", "gemini"),
+    ("llama",      "ollama"),
+    ("qwen",       "ollama"),
+    ("mistral",    "ollama"),
+    ("phi",        "ollama"),
+)
+
+
+def get_llm_provider(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+) -> LLMProvider:
+    """
+    Return an initialised LLMProvider.
+
+    Selection logic (highest to lowest priority):
+    1. `provider` argument (explicit override)
+    2. `model` string prefix
+    3. Available API keys: OPENAI_API_KEY → ANTHROPIC_API_KEY → GEMINI_API_KEY → ollama
+    """
+    # 1. Explicit provider name
+    if provider:
+        name = provider.lower().strip()
+        if name in _LOADERS:
+            return _LOADERS[name]()
+        logger.warning(f"[ProviderFactory] Unknown provider '{provider}', falling back to auto-detect")
+
+    # 2. Infer from model name prefix
+    if model:
+        m = model.lower()
+        for prefix, pname in _MODEL_PREFIX_MAP:
+            if m.startswith(prefix):
+                return _LOADERS[pname]()
+
+    # 3. Auto-detect from available keys
+    if os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY") or os.getenv("GOOGLE_API_KEY"):
+        return _load_gemini()
+    if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
+        return _load_openai()
+    if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
+        return _load_anthropic()
+
+    # 4. Last resort: Ollama (local, no key needed)
+    logger.warning("[ProviderFactory] No cloud API keys found, trying local Ollama")
+    return _load_ollama()
+
+
+def list_available_providers() -> list[str]:
+    """Return names of providers whose API keys are present in the environment."""
+    available = []
+    if os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY") or os.getenv("GOOGLE_API_KEY"):
+        available.append("gemini")
+    if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
+        available.append("openai")
+    if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
+        available.append("anthropic")
+    # Ollama is always potentially available (check runtime)
+    try:
+        import socket
+        s = socket.socket()
+        s.settimeout(0.3)
+        if s.connect_ex(("127.0.0.1", 11434)) == 0:
+            available.append("ollama")
+        s.close()
+    except Exception:
+        pass
+    return available

@@ -1,0 +1,72 @@
+{
+  "id": "code_explainer",
+  "name": "代码阅读理解",
+  "icon": "🔍",
+  "category": "domain",
+  "description": "深度解读任意代码片段：逐行注释、设计意图分析、调用链梳理、复杂度评估",
+  "intent_description": "用户希望理解一段代码：「这段代码是什么意思」「帮我看看这个函数」「这个逻辑怎么跑的」「解释一下」",
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [
+      "##",
+      "```"
+    ],
+    "must_not_contain": [],
+    "min_chars": 200,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "结构化代码解读：总体说明 + 逐步拆解 + 设计亮点/坑点 + 改进建议"
+  },
+  "bound_tools": [
+    "read_file"
+  ],
+  "executor_tools": [
+    "read_file"
+  ],
+  "task_types": [
+    "CODER",
+    "CHAT"
+  ],
+  "priority": 75,
+  "conflict_with": [],
+  "enabled": false,
+  "prompt": "\n\n## 🔍 领域要求：代码阅读理解\n\n你是一名资深代码审阅专家，擅长让非作者的人快速读懂复杂代码，并发现潜在问题。\n\n### 解读框架（按此顺序输出）\n\n**① 一句话总结**\n「这段代码做的事情是：___，输入是 ___，输出是 ___。」\n\n**② 逐块拆解**\n将代码分为 2-6 个逻辑块，每块给一个「小标题 + 2-3 行说明」：\n- 说明这一块在做什么\n- 为什么这样写（设计意图）\n- 如果有算法/模式，指出名称（如：双指针、观察者模式、尾递归优化）\n\n**③ 关键变量/参数速查**\n用表格列出重要变量：\n| 变量名 | 类型 | 含义 | 何时改变 |\n\n**④ 调用链/数据流**\n用 `→` 或伪代码描述主要的数据流转或调用顺序（复杂代码才需要）。\n\n**⑤ 值得注意的点**\n- 🌟 亮点：巧妙的地方（性能优化、优雅的抽象等）\n- ⚠️ 风险：潜在的 bug、边界情况未处理、性能陷阱\n- 💡 改进：可选的优化方向（不强求，顺手提）\n\n### 约束\n- **不要**逐行把代码翻译成中文伪代码——那没有任何价值\n- **要**解释「为什么」而不只是「是什么」\n- 如果代码涉及框架/库（如 React hooks、SQLAlchemy ORM），说明框架层面的行为\n- 对明显的安全问题（SQL 注入、eval、硬编码密码）直接用 ⛔ 标注",
+  "examples": [
+    {
+      "input": "帮我解释这段代码：\ndef retry(max_attempts=3, delay=1.0, backoff=2.0):\n    def decorator(func):\n        @functools.wraps(func)\n        def wrapper(*args, **kwargs):\n            attempt, wait = 0, delay\n            while attempt < max_attempts:\n                try:\n                    return func(*args, **kwargs)\n                except Exception as e:\n                    attempt += 1\n                    if attempt >= max_attempts:\n                        raise\n                    time.sleep(wait)\n                    wait *= backoff\n        return wrapper\n    return decorator",
+      "output": "## 🔍 代码解读：`retry` 装饰器\n\n**一句话总结**：这是一个**带指数退避的重试装饰器**，输入是最大重试次数/初始等待/退避倍数，给任意函数加上「失败后自动重试」能力。\n\n---\n\n### 逐块拆解\n\n**① 三层嵌套结构**\n```\nretry(参数)       ← 工厂函数，返回装饰器\n  └─ decorator(func)  ← 装饰器，接收被包装的函数\n        └─ wrapper(...)  ← 实际运行时调用的替换函数\n```\n这是 Python 中「带参数的装饰器」的标准写法。\n\n**② 重试循环（核心逻辑）**\n```python\nwhile attempt < max_attempts:\n    try:\n        return func(...)  # 正常返回即跳出循环\n    except Exception:\n        attempt += 1\n        if attempt >= max_attempts: raise  # 最后一次失败才真正抛出\n        time.sleep(wait)\n        wait *= backoff  # 等待时间指数增长\n```\n- `return func(...)` 成功时直接返回，不会继续循环\n- 最后一次失败用 `raise`（无参数）重新抛出原始异常，保留完整 traceback\n\n**③ 指数退避（Exponential Backoff）**\n每次失败后等待时间翻倍：`1s → 2s → 4s → ...`\n这是分布式系统中处理临时故障（网络抖动、限流）的标准策略，来自 AWS/GCP 的最佳实践。\n\n---\n\n### 关键变量速查\n| 变量 | 含义 | 初始值 | 何时变化 |\n|------|------|--------|----------|\n| `attempt` | 已尝试次数 | 0 | 每次失败 +1 |\n| `wait` | 当前等待秒数 | `delay` | 每次失败后 `×backoff` |\n\n---\n\n### 值得注意的点\n🌟 **亮点**：`@functools.wraps(func)` 保留了原函数的 `__name__`、`__doc__`，调试友好。\n\n⚠️ **风险**：捕获了所有 `Exception`——如果某些异常（如 `ValueError` 参数错误）不该重试，应改为只捕获特定异常类型（如 `requests.Timeout`）。\n\n💡 **改进**：可增加 `exceptions=(Exception,)` 参数，让调用方指定哪些异常才触发重试。",
+      "note": "三层嵌套讲清楚，指数退避点名，functools.wraps 亮点不漏"
+    }
+  ],
+  "plan_template": [
+    "1. 识别代码语言和上下文（框架、领域）",
+    "2. 一句话总结整体功能",
+    "3. 分 2-6 块逐步拆解（为什么 > 是什么）",
+    "4. 列关键变量速查表",
+    "5. 标注亮点 / 风险 / 改进建议"
+  ],
+  "trigger_keywords": [
+    "解释代码",
+    "这段代码",
+    "帮我看看代码",
+    "代码什么意思",
+    "explain code",
+    "what does this code do",
+    "代码逻辑",
+    "看懂代码",
+    "读代码",
+    "代码解读",
+    "这个函数是干嘛的"
+  ],
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-03-19T00:00:00Z",
+  "tags": [
+    "code",
+    "explain",
+    "review",
+    "learning",
+    "anthropic-prompt-library"
+  ],
+  "source_inspiration": "Anthropic Prompt Library #1 — Code Explainer (最高访问量)"
+}

@@ -1416,10 +1416,20 @@ class FileToolsPlugin(AgentPlugin):
             return f"无法提取文本内容（文件类型：{p.suffix}），无法生成摘要。"
         # 调用 LLM
         focus_hint = f"\n请重点关注：{focus}" if focus else ""
+        # ── PII 脱敏：防止文件中的个人信息上传至云端 LLM ────────────
+        _mask_result = None
+        safe_content = content
+        try:
+            from app.core.security.pii_filter import PIIFilter
+            _mask_result = PIIFilter.mask(content)
+            if _mask_result.has_pii:
+                safe_content = _mask_result.masked_text
+        except Exception:
+            pass
         prompt = (
             f"请对以下文件内容生成一段简洁的中文摘要（3-5 句话），涵盖主要信息点。{focus_hint}\n\n"
             f"文件名：{p.name}\n\n"
-            f"内容：\n{content}"
+            f"内容：\n{safe_content}"
         )
         try:
             from app.core.llm.gemini import GeminiProvider
@@ -1442,6 +1452,24 @@ class FileToolsPlugin(AgentPlugin):
                 )
             if not text:
                 text = str(resp)
+            # ── 输出验收：有害内容/泄露检测 + PII 还原 ───────────
+            try:
+                from app.core.security.output_validator import OutputValidator
+                _val = OutputValidator.validate(text=text)
+                if _val.is_blocked:
+                    import logging as _log
+                    _log.getLogger(__name__).warning(
+                        "[summarize_file] 输出被拦截: %s", _val.reasons
+                    )
+                    return "⚠️ 摘要内容被安全策略拦截。"
+                text = _val.text
+            except Exception:
+                pass
+            if _mask_result and _mask_result.has_pii:
+                try:
+                    text = _mask_result.restore(text)
+                except Exception:
+                    pass
             return f"📄 {p.name}\n\n{text.strip()}"
         except Exception as e:
             return f"LLM 摘要失败（{e}），以下为原始内容片段：\n\n{content[:500]}"

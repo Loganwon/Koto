@@ -1,0 +1,23 @@
+{
+  "_comment": "Koto ContextProvider 模板 — 复制并重命名（去掉 .example 后缀）即可激活",
+  "_doc": "每个 JSON 文件定义一个 '上下文块'，会被注入到 Koto 的系统提示中",
+
+  "id": "my_context_block",
+  "name": "我的背景信息",
+  "enabled": true,
+
+  "priority": 10,
+  "_priority_doc": "数字越小越靠前注入，默认 10",
+
+  "inject_mode": "system",
+  "_inject_mode_doc": "system = 追加到系统提示末尾（默认）; header = 插入到系统提示开头",
+
+  "task_types": [],
+  "_task_types_doc": "限定哪些任务类型才注入，留空 [] 表示始终注入。可选值: chat, summary, search, code, ...",
+
+  "template_vars": {},
+  "_template_vars_doc": "自定义变量，在 content 中用 {变量名} 引用。也可从 config/user_profile.json 中自动读取变量",
+
+  "content": "## 关于我\n\n在回答我的问题时，请记住以下背景信息：\n\n- 我是一个软件开发者，熟悉 Python 和 JavaScript\n- 我偏好简洁直接的回答，不需要过多解释基础概念\n- 我的时区是 UTC+8（北京时间）\n- 如果我问代码问题，优先提供可直接运行的示例\n",
+  "_content_doc": "支持 Markdown 格式，支持 {变量名} 模板替换。变量来源：template_vars 字段 + user_profile.json"
+}

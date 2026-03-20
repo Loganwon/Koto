@@ -1,0 +1,18 @@
+{
+  "id": "user_background",
+  "name": "用户背景信息",
+  "enabled": false,
+  "_enabled_doc": "改为 true 即可激活此上下文块",
+
+  "priority": 5,
+  "inject_mode": "header",
+  "task_types": [],
+
+  "content": "## 用户背景\n\n- 姓名或称呼：{name}\n- 职业：{occupation}\n- 常用语言：中文\n- 特别偏好：{preferences}\n",
+
+  "template_vars": {
+    "name": "用户",
+    "occupation": "未设置",
+    "preferences": "简洁、有帮助的回答"
+  }
+}

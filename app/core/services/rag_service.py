@@ -100,7 +100,8 @@ def _get_embeddings(prefer_local: bool = False):
 
     优先级：
       1. Google text-embedding-004（需要 GEMINI_API_KEY，效果最佳）
-      2. sentence-transformers all-MiniLM-L6-v2（本地，~90MB，无需 API）
+      2. BAAI/bge-m3（本地，多语言 SOTA，1024 维，中文远优于 MiniLM）
+      3. sentence-transformers all-MiniLM-L6-v2（兜底，英文优化，384 维）
 
     参数:
         prefer_local: True = 跳过 Google，直接使用本地模型
@@ -126,7 +127,47 @@ def _get_embeddings(prefer_local: bool = False):
                     f"[RAGService] Google Embeddings 初始化失败: {exc}，尝试本地模型"
                 )
 
-    # 本地 fallback
+    # 本地模型优先顺序：BGE-M3（多语言 SOTA）→ MiniLM（兜底）
+    try:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+
+        # BGE-M3: 多语言 SOTA，1024 维，中英双语质量远超 MiniLM
+        # 首次使用自动下载 (~570MB)；之后从本地缓存加载
+        emb = HuggingFaceEmbeddings(
+            model_name="BAAI/bge-m3",
+            model_kwargs={"device": "cpu"},
+            encode_kwargs={"normalize_embeddings": True},
+        )
+        logger.info("[RAGService] 嵌入模型: BAAI/bge-m3 (本地, 多语言 SOTA)")
+        return emb
+    except Exception as bge_exc:
+        logger.warning(f"[RAGService] BGE-M3 加载失败: {bge_exc}，尝试 Ollama Embeddings")
+
+    # 本地模型优先顺序第三层：Ollama 原生 Embeddings API（sentence-transformers 未安装时备用）
+    try:
+        import socket as _sock_mod
+        _s = _sock_mod.socket()
+        _s.settimeout(0.4)
+        _ollama_up = _s.connect_ex(("127.0.0.1", 11434)) == 0
+        _s.close()
+        if _ollama_up:
+            from langchain_community.embeddings import OllamaEmbeddings  # type: ignore
+            _OLLAMA_EMBED_MODELS = [
+                "nomic-embed-text",    # 768 维，多语言，体积小
+                "mxbai-embed-large",   # 1024 维，英文 SOTA
+                "bge-m3",              # 若用户手动 pull 了 BGE-M3
+            ]
+            for _em in _OLLAMA_EMBED_MODELS:
+                try:
+                    emb = OllamaEmbeddings(model=_em)
+                    emb.embed_query("test")  # 快速验活
+                    logger.info(f"[RAGService] 嵌入模型: Ollama/{_em} (本地，API)")
+                    return emb
+                except Exception:
+                    continue
+    except Exception as _oe:
+        logger.debug(f"[RAGService] Ollama Embeddings 跳过: {_oe}")
+
     try:
         from langchain_community.embeddings import HuggingFaceEmbeddings
 
@@ -135,13 +176,13 @@ def _get_embeddings(prefer_local: bool = False):
             model_kwargs={"device": "cpu"},
             encode_kwargs={"normalize_embeddings": True},
         )
-        logger.info("[RAGService] 嵌入模型: HuggingFace all-MiniLM-L6-v2 (本地)")
+        logger.info("[RAGService] 嵌入模型: HuggingFace all-MiniLM-L6-v2 (兜底)")
         return emb
     except Exception as exc:
         raise RuntimeError(
             f"[RAGService] 无法加载嵌入模型。\n"
             f"请安装：pip install langchain-google-genai（云端）\n"
-            f"或：pip install sentence-transformers（本地）\n"
+            f"或：pip install sentence-transformers（本地，含 BGE-M3）\n"
             f"错误: {exc}"
         ) from exc
 
@@ -471,18 +512,31 @@ class RAGService:
         candidates = [c["doc"] for c in candidates]
 
         # ── Step 4: Cross-Encoder 精排（可选，需 sentence-transformers）────────────
+        # 优先 bge-reranker-v2-m3（中英双语 SOTA），降级到 ms-marco（英文兜底）
+        _RERANKER_MODELS = [
+            "BAAI/bge-reranker-v2-m3",          # 多语言 SOTA，推荐
+            "cross-encoder/ms-marco-MiniLM-L-6-v2",  # 英文兜底
+        ]
         try:
             from sentence_transformers import CrossEncoder  # type: ignore
 
             if len(candidates) > 1:
-                _ce = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-                pairs = [(query, c["content"]) for c in candidates]
-                ce_scores = _ce.predict(pairs)
-                for doc, ce_s in zip(candidates, ce_scores):
-                    doc["_ce"] = float(ce_s)
-                candidates.sort(key=lambda d: d.get("_ce", 0.0), reverse=True)
-                for doc in candidates:
-                    doc.pop("_ce", None)
+                _ce = None
+                for _rm in _RERANKER_MODELS:
+                    try:
+                        _ce = CrossEncoder(_rm)
+                        logger.debug(f"[RAGService] reranker: {_rm}")
+                        break
+                    except Exception:
+                        continue
+                if _ce is not None:
+                    pairs = [(query, c["content"]) for c in candidates]
+                    ce_scores = _ce.predict(pairs)
+                    for doc, ce_s in zip(candidates, ce_scores):
+                        doc["_ce"] = float(ce_s)
+                    candidates.sort(key=lambda d: d.get("_ce", 0.0), reverse=True)
+                    for doc in candidates:
+                        doc.pop("_ce", None)
         except Exception:
             pass  # Cross-Encoder 不可用：维持 RRF 顺序
 
@@ -554,7 +608,7 @@ class RAGService:
                 "context_used": bool,    # 是否找到相关上下文
             }
         """
-        chunks = self.retrieve(question, k=k, score_threshold=score_threshold)
+        chunks = self.hybrid_retrieve(question, k=k)
 
         if not chunks:
             # 索引为空或无匹配 → 直接提示 LLM（无 RAG 上下文）

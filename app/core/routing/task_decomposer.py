@@ -8,7 +8,16 @@ class TaskDecomposer:
       1. WEB_SEARCH: 查询黄金价格历史数据
       2. FILE_GEN: 基于数据生成 Excel/Word 表格
       3. 返回完整的文件和数据
+
+    检测优先级（由快到慢）：
+      1. 关键词规则（无 LLM 开销，最快）
+      2. Gemini 语义检测（关键词未命中时启用，更准确）
     """
+
+    _VALID_TASK_TYPES = frozenset({
+        "CHAT", "CODER", "RESEARCH", "WEB_SEARCH", "FILE_GEN",
+        "PAINTER", "MULTI_STEP", "SYSTEM", "DOC_WORKFLOW",
+    })
 
     # 定义常见的任务组合模式
     TASK_PATTERNS = {
@@ -242,6 +251,12 @@ class TaskDecomposer:
             # 如果检测到是复合任务但不匹配具体模式，还是记录为复合
             result["secondary_tasks"] = ["FILE_GEN"]  # 默认最后生成文档
 
+        # ── LLM 语义增强（仅当关键词检测无结果时）─────────────────────────
+        if not result["is_compound"] and len(user_input.strip()) >= 20:
+            llm_result = cls._detect_with_llm(user_input, initial_task)
+            if llm_result and llm_result.get("is_compound"):
+                return llm_result
+
         return result
 
     @classmethod
@@ -269,3 +284,90 @@ class TaskDecomposer:
             subtasks.append(subtask)
 
         return subtasks
+
+    @classmethod
+    def _detect_with_llm(cls, user_input: str, initial_task: str) -> dict | None:
+        """
+        使用 Gemini 语义分析复合任务，当关键词规则无法覆盖时启用。
+        仅在 keyword 路径返回 is_compound=False 时调用，避免不必要开销。
+
+        返回与 detect_compound_task() 格式相同的 dict，或 None（调用失败时）。
+        """
+        import json
+        import logging
+
+        _log = logging.getLogger(__name__)
+
+        _PROMPT = (
+            "你是任务分解引擎。分析用户请求是否包含需要按顺序执行的多个不同步骤。\n\n"
+            "可用任务类型（只能用这些）:\n"
+            "  CHAT: 普通对话、问答\n"
+            "  CODER: 写代码、调试\n"
+            "  RESEARCH: 深度分析、写报告（不需要实时搜索）\n"
+            "  WEB_SEARCH: 搜索实时信息、价格、新闻\n"
+            "  FILE_GEN: 生成文件（Word/Excel/PPT/PDF）\n"
+            "  PAINTER: 生成图片\n"
+            "  SYSTEM: 控制系统、打开应用\n\n"
+            "如果是单步任务，返回: {\"is_compound\": false}\n"
+            "如果是多步任务（必须是真正需要先后执行的不同操作），返回:\n"
+            "{\n"
+            "  \"is_compound\": true,\n"
+            "  \"primary_task\": \"<第一步任务类型>\",\n"
+            "  \"secondary_tasks\": [\"<第二步类型>\"],\n"
+            "  \"pattern\": \"search_and_document | research_and_document | other\",\n"
+            "  \"subtasks\": [\n"
+            "    {\"task_type\": \"<类型>\", \"description\": \"<一句话描述>\", "
+            "\"input\": \"<输入说明>\", \"expected_output\": \"<期望输出>\"},\n"
+            "    ...\n"
+            "  ]\n"
+            "}\n\n"
+            "只输出合法 JSON，不要任何额外解释。\n\n"
+            f"用户请求: {user_input[:400]}"
+        )
+
+        try:
+            from app.core.llm.gemini import GeminiProvider
+
+            provider = GeminiProvider()
+            if not provider.client:
+                return None
+
+            resp = provider.generate_content(
+                prompt=_PROMPT,
+                model="gemini-2.0-flash",
+                stream=False,
+                max_tokens=400,
+            )
+            text = (resp.get("text") or "").strip() if isinstance(resp, dict) else ""
+            if not text:
+                return None
+
+            # 提取 JSON
+            import re
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text).strip()
+            if not text.startswith("{"):
+                m = re.search(r"\{.*\}", text, re.DOTALL)
+                text = m.group() if m else ""
+            if not text:
+                return None
+
+            data = json.loads(text)
+            if not isinstance(data, dict) or not data.get("is_compound"):
+                return None
+
+            # 校验 task_type 合法性
+            subtasks = data.get("subtasks", [])
+            for st in subtasks:
+                if st.get("task_type") not in cls._VALID_TASK_TYPES:
+                    st["task_type"] = "CHAT"
+
+            _log.info(
+                f"[TaskDecomposer] 🤖 LLM 分解: '{user_input[:50]}' → "
+                f"{[s.get('task_type') for s in subtasks]}"
+            )
+            return data
+
+        except Exception as exc:
+            _log.debug(f"[TaskDecomposer] LLM 分解失败: {exc}")
+            return None
