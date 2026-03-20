@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Koto 文档对比</title>
+  <script src="{{ url_for('static', filename='vendor/tailwindcss/tailwind-play-cdn.js') }}"></script>
+  <script src="{{ url_for('static', filename='vendor/marked/12.0.0/marked.min.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/font-awesome/6.0.0/css/all.min.css') }}" />
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f1f5f9; }
+
+    /* ── 拖拽区 ── */
+    .drop-zone { border: 2px dashed #cbd5e1; transition: all .2s; }
+    .drop-zone.drag-over { border-color: #6366f1; background: #eef2ff; }
+
+    /* ── diff 高亮 ── */
+    .diff-equal   { background: transparent; padding: 2px 4px; }
+    .diff-insert  { background: #dcfce7; color: #166534; padding: 2px 4px; border-left: 3px solid #22c55e; }
+    .diff-delete  { background: #fee2e2; color: #991b1b; padding: 2px 4px;
+                    text-decoration: line-through; border-left: 3px solid #ef4444; }
+    .diff-replace-old { background: #fef3c7; color: #92400e; padding: 2px 4px;
+                        text-decoration: line-through; border-left: 3px solid #f59e0b; }
+    .diff-replace-new { background: #fef9c3; color: #713f12; padding: 2px 4px;
+                        border-left: 3px solid #eab308; }
+    .diff-line { font-family: 'Consolas', 'Courier New', monospace; font-size: 13px;
+                 white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
+
+    /* ── AI panel ── */
+    #aiPanel .prose h2 { font-size: 1rem; font-weight: 700; margin-top: 1rem; }
+    .cursor-blink::after { content: '▋'; animation: blink .8s step-end infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ── 文件标签 ── */
+    .file-badge { background: #e0e7ff; color: #3730a3; }
+
+    /* ── 进度条 ── */
+    .progress-bar { background: linear-gradient(90deg, #6366f1, #8b5cf6);
+                    transition: width .3s; }
+
+    /* ── 选项卡 ── */
+    .tab-btn.active { border-bottom: 2px solid #6366f1; color: #6366f1; }
+  </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+  <!-- ── Header ── -->
+  <header class="bg-white border-b border-gray-200 flex items-center px-5 py-3 gap-3 flex-shrink-0">
+    <a href="/" class="text-gray-400 hover:text-gray-600 text-sm">
+      <i class="fa-solid fa-house"></i>
+    </a>
+    <span class="text-gray-300">/</span>
+    <h1 class="font-bold text-gray-800 text-lg flex items-center gap-2">
+      <i class="fa-solid fa-code-compare text-indigo-500"></i> 多文档对比
+    </h1>
+    <div class="ml-auto flex items-center gap-2 text-sm text-gray-500">
+      <span>分析重点：</span>
+      <select id="focusSelect" class="border border-gray-200 rounded px-2 py-1 text-sm text-gray-700">
+        <option value="general">综合对比</option>
+        <option value="argument">论点分析</option>
+        <option value="data">数据差异</option>
+        <option value="structure">结构对比</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- ── Main ── -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- ── 左栏：文件管理 ── -->
+    <aside class="w-72 bg-white border-r border-gray-200 flex flex-col flex-shrink-0">
+      <div class="p-4 border-b border-gray-100">
+        <h2 class="font-semibold text-gray-700 mb-3 flex items-center gap-2">
+          <i class="fa-solid fa-folder-open text-indigo-400"></i> 对比文件
+          <span id="fileCountBadge" class="ml-auto text-xs font-normal text-gray-400">0 / 5</span>
+        </h2>
+
+        <!-- 拖拽上传区 -->
+        <div id="dropZone"
+             class="drop-zone rounded-xl p-5 text-center cursor-pointer hover:bg-indigo-50 transition"
+             onclick="document.getElementById('fileInput').click()">
+          <i class="fa-solid fa-cloud-arrow-up text-3xl text-indigo-300 mb-2 block"></i>
+          <p class="text-sm text-gray-500">点击或拖拽文件到此处</p>
+          <p class="text-xs text-gray-400 mt-1">PDF · DOCX · TXT · MD · XLSX · PPTX</p>
+          <input id="fileInput" type="file" class="hidden" multiple
+                 accept=".pdf,.docx,.doc,.txt,.md,.markdown,.xlsx,.xls,.pptx,.ppt">
+        </div>
+      </div>
+
+      <!-- 文件列表 -->
+      <div id="fileList" class="flex-1 overflow-y-auto p-3 space-y-2"></div>
+
+      <!-- 操作按钮 -->
+      <div class="p-4 border-t border-gray-100 space-y-2">
+        <button id="btnCompare"
+                onclick="runCompare()"
+                class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40
+                       text-white rounded-lg text-sm font-medium transition flex items-center
+                       justify-center gap-2"
+                disabled>
+          <i class="fa-solid fa-magnifying-glass-chart"></i> 文本 Diff 对比
+        </button>
+        <button id="btnAI"
+                onclick="runAIAnalysis()"
+                class="w-full py-2 bg-violet-600 hover:bg-violet-700 disabled:opacity-40
+                       text-white rounded-lg text-sm font-medium transition flex items-center
+                       justify-center gap-2"
+                disabled>
+          <i class="fa-solid fa-wand-magic-sparkles"></i> AI 语义分析
+        </button>
+        <button onclick="clearAll()"
+                class="w-full py-1.5 text-gray-400 hover:text-red-500 text-xs transition">
+          <i class="fa-solid fa-trash-can mr-1"></i> 清空全部
+        </button>
+      </div>
+    </aside>
+
+    <!-- ── 右侧主区 ── -->
+    <main class="flex-1 flex flex-col overflow-hidden">
+
+      <!-- 统计概览条 -->
+      <div id="statsBar" class="hidden bg-white border-b border-gray-200 px-5 py-2 flex
+                                 items-center gap-4 text-sm flex-shrink-0">
+        <span class="text-gray-500">平均相似度</span>
+        <div class="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div id="simBar" class="progress-bar h-full rounded-full" style="width:0%"></div>
+        </div>
+        <span id="simValue" class="font-semibold text-indigo-600">-</span>
+        <span class="mx-2 text-gray-200">|</span>
+        <span id="statAdds" class="text-green-600">+0 行</span>
+        <span id="statDels" class="text-red-500">-0 行</span>
+        <span id="statMods" class="text-yellow-600">~0 处</span>
+        <span class="mx-2 text-gray-200">|</span>
+        <span id="statMostSim" class="text-gray-500 text-xs"></span>
+      </div>
+
+      <!-- 模式 Tabs -->
+      <div class="bg-white border-b border-gray-200 px-5 flex items-center gap-4 text-sm
+                  flex-shrink-0" id="modeTabs">
+        <button class="tab-btn active py-3 text-gray-600 hover:text-indigo-600 transition"
+                data-tab="diff" onclick="switchTab('diff')">
+          <i class="fa-solid fa-file-code mr-1"></i> 文本 Diff
+        </button>
+        <button class="tab-btn py-3 text-gray-600 hover:text-indigo-600 transition"
+                data-tab="ai" onclick="switchTab('ai')">
+          <i class="fa-solid fa-robot mr-1"></i> AI 语义分析
+        </button>
+      </div>
+
+      <!-- ── Diff 视图 ── -->
+      <div id="tabDiff" class="flex-1 overflow-hidden flex flex-col">
+        <!-- 文档对选择器（2+个文档时显示） -->
+        <div id="pairSelector"
+             class="hidden bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center
+                    gap-3 text-sm flex-shrink-0">
+          <span class="text-gray-500">查看对比：</span>
+          <div id="pairBtns" class="flex gap-2 flex-wrap"></div>
+        </div>
+
+        <!-- 空状态 -->
+        <div id="diffEmpty"
+             class="flex-1 flex flex-col items-center justify-center text-gray-300">
+          <i class="fa-solid fa-code-compare text-6xl mb-4"></i>
+          <p class="text-lg">上传 2+ 个文件并点击「文本 Diff 对比」</p>
+        </div>
+
+        <!-- Diff 内容区（双栏并排） -->
+        <div id="diffContent" class="hidden flex-1 overflow-hidden flex">
+          <!-- 文档 A -->
+          <div class="flex-1 flex flex-col overflow-hidden border-r border-gray-200">
+            <div id="headerA"
+                 class="file-badge px-3 py-1.5 text-xs font-semibold flex items-center gap-2">
+              <i class="fa-regular fa-file-lines"></i>
+              <span id="labelA">文档 A</span>
+            </div>
+            <div id="panelA" class="flex-1 overflow-y-auto p-3 text-sm space-y-0.5"></div>
+          </div>
+          <!-- 文档 B -->
+          <div class="flex-1 flex flex-col overflow-hidden">
+            <div id="headerB"
+                 class="file-badge px-3 py-1.5 text-xs font-semibold flex items-center gap-2">
+              <i class="fa-regular fa-file-lines"></i>
+              <span id="labelB">文档 B</span>
+            </div>
+            <div id="panelB" class="flex-1 overflow-y-auto p-3 text-sm space-y-0.5"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── AI 分析视图 ── -->
+      <div id="tabAI" class="hidden flex-1 overflow-hidden flex flex-col">
+        <!-- 空状态 -->
+        <div id="aiEmpty"
+             class="flex-1 flex flex-col items-center justify-center text-gray-300">
+          <i class="fa-solid fa-wand-magic-sparkles text-6xl mb-4"></i>
+          <p class="text-lg">上传 2+ 个文件并点击「AI 语义分析」</p>
+        </div>
+        <!-- AI 输出 -->
+        <div id="aiContent" class="hidden flex-1 overflow-y-auto p-6">
+          <div id="aiPanel"
+               class="prose prose-sm max-w-4xl mx-auto bg-white rounded-2xl p-6 shadow-sm
+                      border border-gray-100 text-gray-800 leading-relaxed min-h-48">
+          </div>
+          <div id="aiThinking"
+               class="hidden mt-4 flex items-center gap-2 text-indigo-500 text-sm
+                      justify-center">
+            <span class="animate-spin"><i class="fa-solid fa-circle-notch"></i></span>
+            AI 正在分析中…
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+//  状态
+// ─────────────────────────────────────────────────────────────────────────────
+const MAX_FILES = 5;
+let uploadedFiles = [];   // [{file_id, filename, size}]
+let compareResult = null; // compare_multiple() 的返回值
+let currentPairIdx = 0;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  文件上传
+// ─────────────────────────────────────────────────────────────────────────────
+const dropZone  = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  handleFiles(Array.from(e.dataTransfer.files));
+});
+fileInput.addEventListener('change', e => {
+  handleFiles(Array.from(e.target.files));
+  fileInput.value = '';
+});
+
+async function handleFiles(files) {
+  for (const file of files) {
+    if (uploadedFiles.length >= MAX_FILES) {
+      alert(`最多支持 ${MAX_FILES} 个文件`);
+      break;
+    }
+    await uploadFile(file);
+  }
+  updateUI();
+}
+
+async function uploadFile(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const itemId = 'upload_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  addFileItem(itemId, file.name, file.size, 'uploading');
+
+  try {
+    const res  = await fetch('/api/compare/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.success) {
+      uploadedFiles.push({ file_id: data.file_id, filename: data.filename, size: data.size, itemId });
+      setFileItemStatus(itemId, 'done');
+    } else {
+      setFileItemStatus(itemId, 'error', data.error);
+    }
+  } catch (e) {
+    setFileItemStatus(itemId, 'error', e.message);
+  }
+}
+
+function addFileItem(itemId, name, size, status) {
+  const list = document.getElementById('fileList');
+  const div = document.createElement('div');
+  div.id = itemId;
+  div.className = 'flex items-center gap-2 p-2 bg-gray-50 rounded-lg border border-gray-200 group';
+
+  const icon = extIcon(name);
+  div.innerHTML = `
+    <i class="${icon} text-indigo-400 text-sm flex-shrink-0"></i>
+    <div class="flex-1 min-w-0">
+      <p class="text-xs font-medium text-gray-800 truncate">${escHtml(name)}</p>
+      <p class="text-xs text-gray-400">${formatSize(size)}</p>
+    </div>
+    <span class="status-icon text-sm">${statusIcon(status)}</span>
+    <button onclick="removeFile('${itemId}')"
+            class="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400
+                   transition text-xs ml-1">
+      <i class="fa-solid fa-xmark"></i>
+    </button>`;
+  list.appendChild(div);
+}
+
+function setFileItemStatus(itemId, status, msg) {
+  const el = document.getElementById(itemId);
+  if (!el) return;
+  el.querySelector('.status-icon').innerHTML = statusIcon(status, msg);
+}
+
+function removeFile(itemId) {
+  uploadedFiles = uploadedFiles.filter(f => f.itemId !== itemId);
+  document.getElementById(itemId)?.remove();
+  updateUI();
+}
+
+function clearAll() {
+  uploadedFiles = [];
+  document.getElementById('fileList').innerHTML = '';
+  compareResult = null;
+  document.getElementById('diffEmpty').classList.remove('hidden');
+  document.getElementById('diffContent').classList.add('hidden');
+  document.getElementById('aiEmpty').classList.remove('hidden');
+  document.getElementById('aiContent').classList.add('hidden');
+  document.getElementById('statsBar').classList.add('hidden');
+  updateUI();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Diff 对比
+// ─────────────────────────────────────────────────────────────────────────────
+async function runCompare() {
+  if (uploadedFiles.length < 2) return;
+  setBtnLoading(true);
+
+  try {
+    const res = await fetch('/api/compare/multi', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_ids: uploadedFiles.map(f => f.file_id),
+        output_format: 'inline_json',
+      }),
+    });
+    const data = await res.json();
+    if (!data.success) { alert(data.error || '对比失败'); return; }
+
+    compareResult = data;
+    renderStats(data.global_stats, data.matrix);
+    buildPairButtons(data.matrix, data.files);
+    showPair(0);
+    switchTab('diff');
+
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  } finally {
+    setBtnLoading(false);
+  }
+}
+
+function renderStats(stats, matrix) {
+  document.getElementById('statsBar').classList.remove('hidden');
+  const sim = stats.avg_similarity;
+  document.getElementById('simBar').style.width = sim + '%';
+  document.getElementById('simValue').textContent = sim + '%';
+
+  // 汇总加减改
+  let adds = 0, dels = 0, mods = 0;
+  matrix.forEach(p => {
+    adds += p.changes.additions.count;
+    dels += p.changes.deletions.count;
+    mods += p.changes.modifications.count;
+  });
+  document.getElementById('statAdds').textContent = `+${adds} 行`;
+  document.getElementById('statDels').textContent = `-${dels} 行`;
+  document.getElementById('statMods').textContent = `~${mods} 处`;
+
+  if (stats.most_similar) {
+    document.getElementById('statMostSim').textContent =
+      `最相似: ${stats.most_similar.pair} (${stats.most_similar.similarity}%)`;
+  }
+}
+
+function buildPairButtons(matrix, files) {
+  const sel = document.getElementById('pairSelector');
+  const btns = document.getElementById('pairBtns');
+  btns.innerHTML = '';
+  if (matrix.length <= 1) { sel.classList.add('hidden'); return; }
+  sel.classList.remove('hidden');
+
+  matrix.forEach((pair, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'px-2 py-0.5 rounded text-xs border transition';
+    btn.textContent = `${pair.doc_a.name} vs ${pair.doc_b.name}`;
+    btn.onclick = () => showPair(idx);
+    btn.id = `pairBtn_${idx}`;
+    btns.appendChild(btn);
+  });
+  highlightPairBtn(0);
+}
+
+function showPair(idx) {
+  if (!compareResult) return;
+  const matrix = compareResult.matrix;
+  const files  = compareResult.files;
+  if (idx >= matrix.length) return;
+  currentPairIdx = idx;
+
+  const pair = matrix[idx];
+  document.getElementById('labelA').textContent = pair.doc_a.name;
+  document.getElementById('labelB').textContent = pair.doc_b.name;
+
+  renderDiffPanels(pair.diff, pair.doc_a.name, pair.doc_b.name);
+  highlightPairBtn(idx);
+
+  document.getElementById('diffEmpty').classList.add('hidden');
+  document.getElementById('diffContent').classList.remove('hidden');
+}
+
+function highlightPairBtn(idx) {
+  document.querySelectorAll('[id^="pairBtn_"]').forEach((btn, i) => {
+    btn.className = i === idx
+      ? 'px-2 py-0.5 rounded text-xs border bg-indigo-100 border-indigo-300 text-indigo-700'
+      : 'px-2 py-0.5 rounded text-xs border border-gray-200 text-gray-600 hover:bg-gray-100';
+  });
+}
+
+function renderDiffPanels(diffBlocks, nameA, nameB) {
+  const panelA = document.getElementById('panelA');
+  const panelB = document.getElementById('panelB');
+  panelA.innerHTML = '';
+  panelB.innerHTML = '';
+
+  if (!Array.isArray(diffBlocks)) {
+    panelA.innerHTML = `<pre class="text-xs text-gray-600 whitespace-pre-wrap">${escHtml(String(diffBlocks))}</pre>`;
+    return;
+  }
+
+  diffBlocks.forEach(block => {
+    const { type, lines_a, lines_b } = block;
+
+    if (type === 'equal') {
+      const count = lines_a.length;
+      if (count > 6) {
+        appendCollapsible(panelA, lines_a, 'equal');
+        appendCollapsible(panelB, lines_a, 'equal');
+      } else {
+        lines_a.forEach(l => appendLine(panelA, l, 'equal'));
+        lines_a.forEach(l => appendLine(panelB, l, 'equal'));
+      }
+    } else if (type === 'insert') {
+      lines_b.forEach(() => appendLine(panelA, '', 'placeholder'));
+      lines_b.forEach(l => appendLine(panelB, l, 'insert'));
+    } else if (type === 'delete') {
+      lines_a.forEach(l => appendLine(panelA, l, 'delete'));
+      lines_a.forEach(() => appendLine(panelB, '', 'placeholder'));
+    } else if (type === 'replace') {
+      lines_a.forEach(l => appendLine(panelA, l, 'replace-old'));
+      lines_b.forEach(l => appendLine(panelB, l, 'replace-new'));
+      // pad shorter side
+      const diff = lines_a.length - lines_b.length;
+      if (diff > 0)
+        for (let i = 0; i < diff; i++) appendLine(panelB, '', 'placeholder');
+      else if (diff < 0)
+        for (let i = 0; i < -diff; i++) appendLine(panelA, '', 'placeholder');
+    }
+  });
+
+  // 同步滚动
+  syncScroll(panelA, panelB);
+}
+
+function appendLine(container, text, cls) {
+  const div = document.createElement('div');
+  div.className = 'diff-line ' + diffClass(cls);
+  div.textContent = text || ' ';
+  container.appendChild(div);
+}
+
+function appendCollapsible(container, lines, cls) {
+  const SHOW = 2;
+  lines.slice(0, SHOW).forEach(l => appendLine(container, l, cls));
+  const details = document.createElement('details');
+  details.className = 'my-0.5';
+  const summary = document.createElement('summary');
+  summary.className = 'text-xs text-gray-400 cursor-pointer select-none pl-1';
+  summary.textContent = `  ··· ${lines.length - SHOW * 2} 行相同内容（点击展开） ···`;
+  details.appendChild(summary);
+  const inner = document.createElement('div');
+  lines.slice(SHOW, lines.length - SHOW).forEach(l => appendLine(inner, l, cls));
+  details.appendChild(inner);
+  container.appendChild(details);
+  lines.slice(-SHOW).forEach(l => appendLine(container, l, cls));
+}
+
+function diffClass(cls) {
+  const map = {
+    'equal':       'diff-equal',
+    'insert':      'diff-insert',
+    'delete':      'diff-delete',
+    'replace-old': 'diff-replace-old',
+    'replace-new': 'diff-replace-new',
+    'placeholder': 'bg-gray-50 text-gray-50',
+  };
+  return map[cls] || '';
+}
+
+let _syncActive = false;
+function syncScroll(a, b) {
+  a.onscroll = () => { if (!_syncActive) { _syncActive=true; b.scrollTop=a.scrollTop; _syncActive=false; } };
+  b.onscroll = () => { if (!_syncActive) { _syncActive=true; a.scrollTop=b.scrollTop; _syncActive=false; } };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  AI 语义分析（SSE）
+// ─────────────────────────────────────────────────────────────────────────────
+async function runAIAnalysis() {
+  if (uploadedFiles.length < 2) return;
+  setAIBtnLoading(true);
+  switchTab('ai');
+
+  const panel   = document.getElementById('aiPanel');
+  const thinking = document.getElementById('aiThinking');
+  const aiContent = document.getElementById('aiContent');
+  const aiEmpty   = document.getElementById('aiEmpty');
+
+  panel.innerHTML = '';
+  panel.classList.add('cursor-blink');
+  thinking.classList.remove('hidden');
+  aiEmpty.classList.add('hidden');
+  aiContent.classList.remove('hidden');
+
+  const focus = document.getElementById('focusSelect').value;
+  let buffer = '';
+
+  try {
+    const res = await fetch('/api/compare/ai-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_ids: uploadedFiles.map(f => f.file_id),
+        focus,
+      }),
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const text = decoder.decode(value, { stream: true });
+      const lines = text.split('\n');
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const msg = JSON.parse(line.slice(6));
+          if (msg.error) {
+            panel.innerHTML = `<div class="text-red-500">❌ ${escHtml(msg.error)}</div>`;
+            break;
+          }
+          if (msg.chunk) {
+            buffer += msg.chunk;
+            panel.innerHTML = marked.parse(buffer);
+          }
+          if (msg.done) {
+            panel.classList.remove('cursor-blink');
+            thinking.classList.add('hidden');
+          }
+        } catch {}
+      }
+    }
+  } catch (e) {
+    panel.innerHTML = `<div class="text-red-500">❌ 请求失败: ${escHtml(e.message)}</div>`;
+  } finally {
+    panel.classList.remove('cursor-blink');
+    thinking.classList.add('hidden');
+    setAIBtnLoading(false);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Tab 切换
+// ─────────────────────────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  document.getElementById('tabDiff').classList.toggle('hidden', tab !== 'diff');
+  document.getElementById('tabAI').classList.toggle('hidden',  tab !== 'ai');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  UI helpers
+// ─────────────────────────────────────────────────────────────────────────────
+function updateUI() {
+  const n = uploadedFiles.length;
+  document.getElementById('fileCountBadge').textContent = `${n} / ${MAX_FILES}`;
+  const canCompare = n >= 2;
+  document.getElementById('btnCompare').disabled = !canCompare;
+  document.getElementById('btnAI').disabled = !canCompare;
+}
+
+function setBtnLoading(loading) {
+  const btn = document.getElementById('btnCompare');
+  btn.disabled = loading;
+  btn.innerHTML = loading
+    ? '<i class="fa-solid fa-circle-notch animate-spin"></i> 对比中…'
+    : '<i class="fa-solid fa-magnifying-glass-chart"></i> 文本 Diff 对比';
+}
+
+function setAIBtnLoading(loading) {
+  const btn = document.getElementById('btnAI');
+  btn.disabled = loading;
+  btn.innerHTML = loading
+    ? '<i class="fa-solid fa-circle-notch animate-spin"></i> 分析中…'
+    : '<i class="fa-solid fa-wand-magic-sparkles"></i> AI 语义分析';
+}
+
+function statusIcon(status, msg) {
+  if (status === 'uploading')
+    return '<span class="text-indigo-400 animate-spin"><i class="fa-solid fa-circle-notch"></i></span>';
+  if (status === 'done')
+    return '<span class="text-green-500"><i class="fa-solid fa-circle-check"></i></span>';
+  return `<span class="text-red-400" title="${escHtml(msg||'')}"><i class="fa-solid fa-triangle-exclamation"></i></span>`;
+}
+
+function extIcon(name) {
+  const ext = name.split('.').pop().toLowerCase();
+  const map = {
+    pdf: 'fa-regular fa-file-pdf',
+    docx: 'fa-regular fa-file-word', doc: 'fa-regular fa-file-word',
+    xlsx: 'fa-regular fa-file-excel', xls: 'fa-regular fa-file-excel',
+    pptx: 'fa-regular fa-file-powerpoint', ppt: 'fa-regular fa-file-powerpoint',
+    txt:  'fa-regular fa-file-lines',
+    md:   'fa-brands fa-markdown',
+  };
+  return map[ext] || 'fa-regular fa-file';
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+</script>
+</body>
+</html>

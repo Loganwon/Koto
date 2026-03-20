@@ -105,9 +105,29 @@
         function add(t, x) {
             const d = document.createElement('div');
             d.className = 'm ' + t;
-            d.innerHTML = x.replace(/\n/g, '<br>');
+            // 安全渲染：用 textContent 避免 XSS，手动处理换行
+            (x || '').split('\n').forEach((line, i) => {
+                if (i > 0) d.appendChild(document.createElement('br'));
+                d.appendChild(document.createTextNode(line));
+            });
             document.getElementById('c').appendChild(d);
             d.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function loadHistory() {
+            try {
+                const r = await fetch('/api/sessions/MiniKoto_Quick');
+                if (!r.ok) return;
+                const data = await r.json();
+                const history = data.history || [];
+                const recent = history.slice(-10);
+                for (const msg of recent) {
+                    if (msg.role === 'user') add('u', msg.content || '');
+                    else if (msg.role === 'assistant' || msg.role === 'model') add('a', msg.content || '');
+                }
+                const c = document.getElementById('c');
+                c.scrollTop = c.scrollHeight;
+            } catch (e) { /* 无历史时静默忽略 */ }
         }
         
         function typ(s) {
@@ -126,8 +146,13 @@
         
         async function ask() {
             const q = document.getElementById('q');
+            const send = document.querySelector('.send');
             const m = q.value.trim();
             if (!m) return;
+            // 防止重复发送
+            q.disabled = true;
+            send.disabled = true;
+            send.textContent = '…';
             q.value = '';
             add('u', m);
             typ(1);
@@ -142,11 +167,16 @@
                     const d = await r.json();
                     add('a', d.response || '...');
                 } else {
-                    add('a', '请求失败');
+                    add('s', '⚠ 请求失败');
                 }
             } catch (e) {
                 typ(0);
                 add('s', '⚠ 连接失败');
+            } finally {
+                q.disabled = false;
+                send.disabled = false;
+                send.textContent = '➤';
+                q.focus();
             }
         }
         
@@ -285,28 +315,31 @@
         }
         
         async function go() {
-            if (window.pywebview && window.pywebview.api && window.pywebview.api.switch_to_full) {
-                await pywebview.api.switch_to_full();
-            } else {
-                // 优化的跳转流程
-                document.body.style.transition = 'opacity 0.15s ease-out';
-                document.body.style.opacity = '0';
-                
-                // 预加载标准版页面
-                const link = document.createElement('link');
-                link.rel = 'prefetch';
-                link.href = '/';
-                document.head.appendChild(link);
-                
-                setTimeout(() => {
-                    window.location.href = '/';
-                }, 150);
+            try {
+                const r = await fetch('/api/window/switch-to-full', { method: 'POST' });
+                const d = await r.json();
+                if (d.success) return;
+            } catch (e1) {
+                console.warn('switch_to_full HTTP 调用失败，尝试 pywebview API 降级:', e1);
             }
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.switch_to_full) {
+                try {
+                    await pywebview.api.switch_to_full();
+                    return;
+                } catch (e2) {
+                    console.warn('switch_to_full JS bridge 失败，尝试 URL 降级:', e2);
+                }
+            }
+            // 末级降级：URL 跳转（浏览器访问场景）
+            document.body.style.transition = 'opacity 0.15s ease-out';
+            document.body.style.opacity = '0';
+            setTimeout(() => { window.location.href = '/'; }, 150);
         }
         
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('q').focus();
-            
+            // 加载历史消息
+            loadHistory();
             // 页面加载时淡入动画
             if (document.body.style.opacity === '0') {
                 setTimeout(() => {

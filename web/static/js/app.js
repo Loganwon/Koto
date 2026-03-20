@@ -313,10 +313,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 2. 检查是否需要设置向导
     await checkSetupStatus();
     
-    // 3. 加载会话和状态
-    loadSessions();
+    // 3. \u52a0\u8f7d\u4f1a\u8bdd\u548c\u72b6\u6001
+    await loadSessions();
     checkStatus();
     initCapabilityButtons();
+    renderWelcomeScreen();
     
     // 4. 加载模型设置（从已加载的 currentSettings 中提取，无需重复请求）
     if (currentSettings?.ai) {
@@ -529,10 +530,21 @@ async function loadSessions() {
     try {
         const response = await fetch('/api/sessions');
         const data = await response.json();
-        renderSessions(data.sessions);
+        window._allSessions = data.sessions || [];
+        const q = document.getElementById('sessionSearchInput');
+        const query = q ? q.value.trim() : '';
+        renderSessions(query ? window._allSessions.filter(s => s.toLowerCase().includes(query.toLowerCase())) : window._allSessions);
     } catch (error) {
         console.error('Failed to load sessions:', error);
     }
+}
+
+function filterSessions(query) {
+    const all = window._allSessions || [];
+    const filtered = query.trim()
+        ? all.filter(s => s.toLowerCase().includes(query.trim().toLowerCase()))
+        : all;
+    renderSessions(filtered);
 }
 
 function renderSessions(sessions) {
@@ -541,8 +553,8 @@ function renderSessions(sessions) {
     if (sessions.length === 0) {
         container.innerHTML = `
             <div style="text-align: center; padding: 20px; color: var(--text-muted);">
-                <p>No chats yet</p>
-                <p style="font-size: 12px; margin-top: 8px;">Click "New Chat" to start</p>
+                <p>\u6682\u65e0\u5bf9\u8bdd</p>
+                <p style="font-size: 12px; margin-top: 8px;">\u70b9\u51fb\u201c+ \u65b0\u5bf9\u8bdd\u201d\u5f00\u59cb</p>
             </div>
         `;
         return;
@@ -555,8 +567,8 @@ function renderSessions(sessions) {
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
             <span class="session-name">${escapeHtml(session)}</span>
-            <button class="session-rename-btn" data-session="${escapeHtml(session)}" onclick="renameSession(this.dataset.session, event)" title="重命名对话">✎</button>
-            <button class="session-delete-btn" data-session="${escapeHtml(session)}" onclick="deleteSession(this.dataset.session, event)" title="删除对话">✕</button>
+            <button class="session-rename-btn" data-session="${escapeHtml(session)}" onclick="renameSession(this.dataset.session, event)" title="\u91cd\u547d\u540d\u5bf9\u8bdd">\u270e</button>
+            <button class="session-delete-btn" data-session="${escapeHtml(session)}" onclick="deleteSession(this.dataset.session, event)" title="\u5220\u9664\u5bf9\u8bdd">\u2715</button>
         </div>
     `).join('');
 
@@ -602,16 +614,46 @@ function goToWelcome() {
     
     // 显示欢迎页面
     const container = document.getElementById('chatMessages');
-    document.getElementById('welcomeScreen').style.display = 'block';
-    
+    const ws = document.getElementById('welcomeScreen');
+    if (ws) ws.style.display = 'block';
+
     // 清除聊天消息，只保留欢迎页
-    const messages = container.querySelectorAll('.message');
-    messages.forEach(msg => msg.remove());
+    container.querySelectorAll('.message, .chat-date-sep').forEach(msg => msg.remove());
+
+    // \u6e32\u67d3\u4e2a\u6027\u5316\u6b22\u8fce\u5c4f\u5e55
+    renderWelcomeScreen();
     
-    // 取消任务锁定
+    // \u53d6\u6d88\u4efb\u52a1\u9501\u5b9a
     lockedTaskType = null;
     document.querySelectorAll('.capability').forEach(c => c.classList.remove('selected'));
     updateTaskIndicator(null);
+}
+
+function renderWelcomeScreen() {
+    // 时间问候语
+    const h = new Date().getHours();
+    const greeting = h < 5 ? '夜深了，还在呢🌙' : h < 12 ? '早上好，有什么需要帮忙？☀️' : h < 18 ? '下午好，有什么需要帮忙？' : '晚上好，有什么需要帮忙？🌟';
+    const greetEl = document.getElementById('welcomeGreeting');
+    if (greetEl) greetEl.textContent = greeting;
+}
+
+function _renderWelcomeScreen_unused() {
+    // \u6700\u8fd1\u5bf9\u8bdd — removed per user request
+    const sessions = window._allSessions || [];
+    const recentSec = document.getElementById('welcomeRecent');
+    const recentList = document.getElementById('welcomeRecentList');
+    if (recentSec && recentList && sessions.length > 0) {
+        const recent = sessions.slice(0, 5);
+        recentList.innerHTML = recent.map(s => `
+            <button class="welcome-recent-item" onclick="selectSession('${s.replace(/'/g, "\\'")}')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+                <span>${s.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>
+            </button>
+        `).join('');
+        recentSec.style.display = 'block';
+    } else if (recentSec) {
+        recentSec.style.display = 'none';
+    }
 }
 
 async function selectSession(sessionName) {
@@ -851,8 +893,10 @@ async function deleteSession(sessionName, event) {
                 currentSession = null;
                 document.getElementById('chatTitle').textContent = '选择或创建对话';
                 const container = document.getElementById('chatMessages');
-                const welcomeEl = document.getElementById('welcomeScreen');
-                container.innerHTML = welcomeEl ? welcomeEl.outerHTML : '';
+                container.querySelectorAll('.message, .chat-date-sep').forEach(el => el.remove());
+                const ws = document.getElementById('welcomeScreen');
+                if (ws) ws.style.display = 'block';
+                renderWelcomeScreen();
             }
             
             console.log(`[DELETE] 已删除话题 ${sessionName}，UI 实时更新`);
@@ -947,42 +991,63 @@ async function renameSession(sessionName, event) {
 // ================= Chat =================
 function renderChatHistory(history) {
     const container = document.getElementById('chatMessages');
-    
+    const ws = document.getElementById('welcomeScreen');
+
     if (history.length === 0) {
-        container.innerHTML = `
-            <div class="welcome-screen">
-                <div class="welcome-logo">言</div>
-                <h2>Start chatting</h2>
-                <p>Send a message to begin the conversation</p>
-            </div>
-        `;
+        // Preserve #welcomeScreen — just clear stale messages and reveal it
+        container.querySelectorAll('.message, .chat-date-sep').forEach(el => el.remove());
+        if (ws) ws.style.display = 'block';
+        renderWelcomeScreen();
         return;
     }
-    
-    container.innerHTML = '';
-    
+
+    // Hide welcome screen, clear prior messages (keep #welcomeScreen in DOM)
+    if (ws) ws.style.display = 'none';
+    container.querySelectorAll('.message, .chat-date-sep').forEach(el => el.remove());
+
+    let lastDateLabel = '';
+
     for (let i = 0; i < history.length; i += 2) {
         const userMsg = history[i];
         const assistantMsg = history[i + 1];
-        
+
+        // Date separator
+        const ts = userMsg && userMsg.timestamp ? userMsg.timestamp : null;
+        if (ts) {
+            const d = new Date(ts);
+            if (!Number.isNaN(d.getTime())) {
+                const today = new Date();
+                const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+                const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+                let label;
+                if (sameDay(d, today)) label = '\u4eca\u5929';
+                else if (sameDay(d, yesterday)) label = '\u6628\u5929';
+                else label = `${d.getFullYear() === today.getFullYear() ? '' : d.getFullYear() + ' \u5e74'}${d.getMonth()+1} \u6708 ${d.getDate()} \u65e5`;
+                if (label !== lastDateLabel) {
+                    lastDateLabel = label;
+                    const sep = document.createElement('div');
+                    sep.className = 'chat-date-sep';
+                    sep.textContent = label;
+                    container.appendChild(sep);
+                }
+            }
+        }
+
         if (userMsg) {
-            container.innerHTML += renderMessage('user', userMsg.parts[0], {
+            container.insertAdjacentHTML('beforeend', renderMessage('user', userMsg.parts[0], {
                 timestamp: userMsg.timestamp
-            });
+            }));
         }
         if (assistantMsg) {
-            // 跳过未完成的占位符回复
             const msgText = assistantMsg.parts ? assistantMsg.parts[0] : '';
-            if (msgText === '⏳ 处理中...') {
-                // 显示为中断/未完成状态
+            if (msgText === '\u23f3 \u5904\u7406\u4e2d...') {
                 const meta = {
                     task: assistantMsg.task,
                     model: assistantMsg.model_name,
                     timestamp: assistantMsg.timestamp
                 };
-                container.innerHTML += renderMessage('assistant', '⚠️ *此任务未完成（可能因断连或崩溃中断）*', meta);
+                container.insertAdjacentHTML('beforeend', renderMessage('assistant', '\u26a0\ufe0f *\u6b64\u4efb\u52a1\u672a\u5b8c\u6210\uff08\u53ef\u80fd\u56e0\u65ad\u8fde\u6216\u5d29\u6e83\u4e2d\u65ad\uff09*', meta));
             } else {
-                // 提取 meta 信息（包括图片、任务类型等）
                 const meta = {
                     task: assistantMsg.task,
                     model: assistantMsg.model_name,
@@ -991,12 +1056,9 @@ function renderChatHistory(history) {
                     time: assistantMsg.time,
                     timestamp: assistantMsg.timestamp
                 };
-                const msgHtml = renderMessage('assistant', assistantMsg.parts[0], meta);
-                container.innerHTML += msgHtml;
-                
-                // 渲染图片容器
+                container.insertAdjacentHTML('beforeend', renderMessage('assistant', assistantMsg.parts[0], meta));
+
                 if (meta.images && meta.images.length > 0) {
-                    // 延迟以确保DOM已更新
                     setTimeout(() => {
                         const containers = container.querySelectorAll('[id^="images-"]');
                         containers.forEach(c => renderImagesInContainer(c.id));
@@ -1005,10 +1067,9 @@ function renderChatHistory(history) {
             }
         }
     }
-    
+
     scrollToBottomForce();
     highlightCode();
-    // 渲染 Mermaid 图表（历史消息中可能包含）
     setTimeout(() => renderMermaidBlocks(), 100);
 }
 
@@ -1196,18 +1257,26 @@ function renderMessage(role, content, meta = {}) {
     
     const actionBar = `
         <div class="message-actions">
-            ${role === 'assistant' ? `<button class="msg-action-btn" onclick="copyMessageText(this)" title="复制回复">
+            ${role === 'assistant' ? `<button class="msg-action-btn" onclick="copyMessageText(this)" title="\u590d\u5236\u56de\u590d">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                复制
+                \u590d\u5236
             </button>` : ''}
-            ${role === 'user' ? `<button class="msg-action-btn" onclick="resendMessage(this)" title="重新发送">
+            ${role === 'assistant' ? `<button class="msg-action-btn" onclick="regenMessage(this)" title="\u91cd\u65b0\u751f\u6210">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 .49-3.35"></path></svg>
-                重发
+                \u91cd\u751f\u6210
+            </button>` : ''}
+            ${role === 'user' ? `<button class="msg-action-btn" onclick="editUserMessage(this)" title="\u7f16\u8f91\u540e\u91cd\u53d1">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                \u7f16\u8f91
+            </button>` : ''}
+            ${role === 'user' ? `<button class="msg-action-btn" onclick="resendMessage(this)" title="\u91cd\u65b0\u53d1\u9001">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 .49-3.35"></path></svg>
+                \u91cd\u53d1
             </button>` : ''}
         </div>
     `;
     return `
-        <div class="message ${role}">
+        <div class="message ${role}"${meta.hidden ? ' style="display:none"' : ''}>
             <div class="message-avatar">${avatar}</div>
             <div class="message-content">
                 <div class="message-header">
@@ -1230,6 +1299,38 @@ function formatFileSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function renderSourcesPanel(sources) {
+    if (!Array.isArray(sources) || sources.length === 0) return '';
+    const items = sources.slice(0, 8).map((source, idx) => {
+        const rawUrl = String(source.url || '').trim();
+        const safeUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : '#';
+        const title = escapeHtml(String(source.title || `来源 ${idx + 1}`));
+        const domain = escapeHtml(String(source.domain || ''));
+        return `
+            <a class="message-source-item" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(rawUrl)}">
+                <span class="message-source-index">[${idx + 1}]</span>
+                <span class="message-source-title">${title}</span>
+                ${domain ? `<span class="message-source-domain">${domain}</span>` : ''}
+            </a>
+        `;
+    }).join('');
+
+    return `
+        <div class="message-sources">
+            <div class="message-sources-title">📚 参考来源</div>
+            <div class="message-sources-list">${items}</div>
+        </div>
+    `;
+}
+
+function appendSourcesToBody(bodyEl, sources) {
+    if (!bodyEl) return;
+    const oldPanel = bodyEl.querySelector('.message-sources');
+    if (oldPanel) oldPanel.remove();
+    if (!Array.isArray(sources) || sources.length === 0) return;
+    bodyEl.insertAdjacentHTML('beforeend', renderSourcesPanel(sources));
 }
 
 // 复制助手消息文本内容
@@ -1255,6 +1356,78 @@ function resendMessage(btn) {
     input.focus();
 }
 
+// \u5c06\u7528\u6237\u6d88\u606f\u53d8\u4e3a\u53ef\u7f16\u8f91\u72b6\u6001
+function editUserMessage(btn) {
+    const msgEl = btn.closest('.message');
+    const msgBody = msgEl ? msgEl.querySelector('.message-body') : null;
+    if (!msgBody) return;
+    const text = msgBody.innerText.trim();
+    const input = document.getElementById('messageInput');
+    input.value = text;
+    autoResize(input);
+    input.focus();
+    // \u79fb\u5230\u884c\u672b
+    input.setSelectionRange(input.value.length, input.value.length);
+}
+
+// \u91cd\u751f\u6210\uff1a\u627e\u5230\u6b64 assistant \u6d88\u606f\u524d\u9762\u7684\u6700\u8fd1\u7528\u6237\u6d88\u606f\uff0c\u91cd\u65b0\u53d1\u9001
+function regenMessage(btn) {
+    if (!currentSession) { showNotification('\u8bf7\u5148\u9009\u62e9\u4e00\u4e2a\u5bf9\u8bdd', 'warning'); return; }
+    if (isSessionGenerating(currentSession)) { showNotification('Koto \u6b63\u5728\u751f\u6210\u4e2d\uff0c\u8bf7\u7a0d\u5019...', 'warning'); return; }
+    const msgEl = btn.closest('.message.assistant');
+    if (!msgEl) return;
+    // \u627e\u5524\u5c45\u4e0a\u65b9\u7684 user \u6d88\u606f
+    let prev = msgEl.previousElementSibling;
+    while (prev && !prev.classList.contains('message')) prev = prev.previousElementSibling;
+    if (!prev || !prev.classList.contains('user')) {
+        showNotification('\u627e\u4e0d\u5230\u5bf9\u5e94\u7684\u7528\u6237\u6d88\u606f', 'warning');
+        return;
+    }
+    const text = prev.querySelector('.message-body')?.innerText?.trim();
+    if (!text) return;
+    const input = document.getElementById('messageInput');
+    input.value = text;
+    autoResize(input);
+    // \u81ea\u52a8\u63d0\u4ea4
+    document.querySelector('.chat-input-form').dispatchEvent(new Event('submit', { cancelable: true }));
+}
+
+async function generateMorningBrief() {
+    try {
+        const btn = document.getElementById('morningBriefBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ 生成中';
+        }
+
+        const resp = await fetch('/api/telegram/brief/preview');
+        const data = await resp.json();
+        if (!resp.ok || data.error || !data.brief) {
+            throw new Error(data.error || '简报生成失败');
+        }
+
+        const chatMessages = document.getElementById('chatMessages');
+        const welcome = document.getElementById('welcomeScreen');
+        if (welcome) welcome.style.display = 'none';
+
+        chatMessages.insertAdjacentHTML('beforeend', renderMessage('assistant', data.brief, {
+            task: 'MORNING_BRIEF',
+            taskLabel: '晨间简报'
+        }));
+        scrollToBottomForce();
+        showNotification('晨间简报已生成', 'success', 1800);
+    } catch (err) {
+        console.error('[MorningBrief] generate failed:', err);
+        showNotification(`晨间简报生成失败: ${err.message || err}`, 'error', 2600);
+    } finally {
+        const btn = document.getElementById('morningBriefBtn');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🌅 简报';
+        }
+    }
+}
+
 async function sendMessage(event) {
     event.preventDefault();
     
@@ -1262,7 +1435,7 @@ async function sendMessage(event) {
     const sendBtn = document.getElementById('sendBtn');
     const message = input.value.trim();
     
-    // ⭐ 改进：使用 session 特定的状态，而不是全局 isGenerating
+    // \u2b50 \u6539\u8fdb\uff1a\u4f7f\u7528 session \u7279\u5b9a\u7684\u72b6\u6001\uff0c\u800c\u4e0d\u662f\u5168\u5c40 isGenerating
     const isCurrentSessionGenerating = isSessionGenerating(currentSession);
     
     // 如果正在生成，点击按钮表示停止
@@ -1292,7 +1465,10 @@ async function sendMessage(event) {
     }
     
     if (!message && selectedFiles.length === 0) return;
-    
+
+    // Record active skills as "used" on every message send
+    if (typeof window.spTrackMessageUsage === 'function') window.spTrackMessageUsage();
+
     // === 如果没有选择对话，自动创建一个 ===
     if (!currentSession) {
         // 根据消息内容生成会话名称
@@ -1333,7 +1509,9 @@ async function sendMessage(event) {
         }));
     }
     
-    container.innerHTML += renderMessage('user', message || '(附件)', { attachment: attachmentInfo, attachments: attachmentList });
+    const _tarotHide = !!window._kotoTarotPending;
+    window._kotoTarotPending = false;
+    container.innerHTML += renderMessage('user', message || '(附件)', { attachment: attachmentInfo, attachments: attachmentList, hidden: _tarotHide });
     scrollToBottomForce();
     
     // === 确定任务类型和模型 ===
@@ -1441,6 +1619,7 @@ async function sendMessage(event) {
                 const bodyEl = document.getElementById(`${msgId}-body`);
                 const timeEl = document.getElementById(`${msgId}-time`);
                 let fullText = '';
+                let latestSources = [];
                 let lastUpdateTime = Date.now();
                 let streamComplete = false;
                 
@@ -1597,6 +1776,10 @@ async function sendMessage(event) {
                                         fullText += `*${data.message}*\n\n`;
                                         bodyEl.innerHTML = parseMarkdown(fullText);
                                         scrollToBottom();
+                                    } else if (data.type === 'sources') {
+                                        latestSources = Array.isArray(data.sources) ? data.sources : [];
+                                        appendSourcesToBody(bodyEl, latestSources);
+                                        scrollToBottom();
                                     } else if (data.type === 'error') {
                                         hideMiniGame();
                                         if (progressTickTimer) { clearInterval(progressTickTimer); progressTickTimer = null; }
@@ -1611,6 +1794,7 @@ async function sendMessage(event) {
                                         
                                         bodyEl.innerHTML = parseMarkdown(fullText);
                                         renderMermaidBlocks();
+                                        appendSourcesToBody(bodyEl, latestSources);
                                         timeEl.textContent = `⏱️ ${elapsedTime}s`;
                                         
                                         // 添加文件链接
@@ -1647,12 +1831,14 @@ async function sendMessage(event) {
                                             bodyEl.appendChild(filesDiv);
                                         }
                                         
-                                        // 完成标记
-                                        const completeDiv = document.createElement('div');
-                                        completeDiv.className = 'task-complete';
-                                        completeDiv.style.cssText = 'margin-top:12px;padding:10px;border-radius:6px;background:rgba(42,212,137,0.1);font-size:13px;color:#2ad489;';
-                                        completeDiv.textContent = `✅ 任务完成  耗时 ${elapsedTime}s`;
-                                        bodyEl.appendChild(completeDiv);
+                                        // 完成标记（占卜模式下不显示，保持沉浸感）
+                                        if (!window._kotoDivinationActive) {
+                                            const completeDiv = document.createElement('div');
+                                            completeDiv.className = 'task-complete';
+                                            completeDiv.style.cssText = 'margin-top:12px;padding:10px;border-radius:6px;background:rgba(42,212,137,0.1);font-size:13px;color:#2ad489;';
+                                            completeDiv.textContent = `✅ 任务完成  耗时 ${elapsedTime}s`;
+                                            bodyEl.appendChild(completeDiv);
+                                        }
 
                                         // 评分条（文件流路径）
                                         appendRatingBar(msgId, data.msg_id || '', message, fullText, taskType);
@@ -1676,6 +1862,7 @@ async function sendMessage(event) {
                 const bodyEl = document.getElementById(`${msgId}-body`);
                 const timeEl = document.getElementById(`${msgId}-time`);
                 bodyEl.innerHTML = parseMarkdown(data.response);
+                appendSourcesToBody(bodyEl, data.sources || []);
                 timeEl.textContent = `⏱️ ${elapsedTime}s`;
                 appendRatingBar(msgId, data.msg_id || '', message, data.response || '', taskType || 'CHAT');
                 // 宏录制检查
@@ -1726,6 +1913,13 @@ async function sendMessage(event) {
             const effectiveTaskType = String(taskType || '').toUpperCase();
             const useUnifiedAgentStream = (effectiveTaskType === 'AGENT');
             const streamEndpoint = useUnifiedAgentStream ? '/api/agent/process-stream' : '/api/chat/stream';
+            // 如果有待发送的影子上下文，附加到 payload 后清除
+            const _sc = _pendingShadowContext;
+            if (_sc) {
+                _pendingShadowContext = null;
+                const hint = document.getElementById('shadowReplyHint');
+                if (hint) hint.remove();
+            }
             const streamPayload = useUnifiedAgentStream
                 ? {
                     request: message,
@@ -1737,7 +1931,8 @@ async function sendMessage(event) {
                     session: thisSession,
                     message: message,
                     locked_task: taskType,
-                    locked_model: modelToUse
+                    locked_model: modelToUse,
+                    ...((_sc) ? { shadow_context: _sc.content } : {})
                 };
             
             console.log('[FETCH] Initiating stream request...');
@@ -1757,6 +1952,7 @@ async function sendMessage(event) {
             const bodyEl = document.getElementById(`${msgId}-body`);
             const timeEl = document.getElementById(`${msgId}-time`);
             let fullText = '';
+            let latestSources = [];
             let agentThoughtText = ''; // 记录Agent思考文本，用于去重
             let lastUpdateTime = Date.now();
             let streamComplete = false;
@@ -2210,6 +2406,11 @@ async function sendMessage(event) {
                                     // 任务分类已通过 header badge 展示，不再注入消息正文（旧方案清除）
                                     console.log('[STREAM] 任务分类:', data.task_type, '方法:', data.route_method);
                                     lastStreamEventTime = Date.now();
+                                } else if (data.type === 'sources') {
+                                    lastStreamEventTime = Date.now();
+                                    latestSources = Array.isArray(data.sources) ? data.sources : [];
+                                    appendSourcesToBody(bodyEl, latestSources);
+                                    scrollToBottom();
                                 } else if (data.type === 'status') {
                                     // 多步任务状态更新 — 保留注入正文（status 是实质性输出）
                                     console.log('[STREAM] 状态更新:', data.message);
@@ -2508,6 +2709,8 @@ async function sendMessage(event) {
                                         if (existingPicker) bodyEl.appendChild(existingPicker);
                                     }
 
+                                    appendSourcesToBody(bodyEl, latestSources);
+
                                     // 折叠思考过程面板（如有）并重新插回最前面
                                     if (savedThinkingPanel) {
                                         savedThinkingPanel.open = false;
@@ -2606,27 +2809,29 @@ async function sendMessage(event) {
                                         console.log('[STREAM] Files container added to DOM');
                                     }
                                     
-                                    // 4. 添加完成标记 - 使用真实DOM元素
-                                    const completeDiv = document.createElement('div');
-                                    completeDiv.className = 'task-complete';
-                                    completeDiv.style.marginTop = '12px';
-                                    completeDiv.style.padding = '10px';
-                                    completeDiv.style.borderRadius = '6px';
-                                    completeDiv.style.background = 'rgba(42, 212, 137, 0.1)';
-                                    
-                                    const completeSpan = document.createElement('span');
-                                    completeSpan.textContent = '✅ 任务完成';
-                                    completeDiv.appendChild(completeSpan);
-                                    
-                                    const timeSpan = document.createElement('span');
-                                    timeSpan.className = 'task-time';
-                                    timeSpan.textContent = `耗时 ${elapsedTime}s`;
-                                    timeSpan.style.marginLeft = '10px';
-                                    timeSpan.style.fontSize = '12px';
-                                    timeSpan.style.color = 'var(--text-muted)';
-                                    completeDiv.appendChild(timeSpan);
-                                    
-                                    bodyEl.appendChild(completeDiv);
+                                    // 4. 添加完成标记（占卜模式下不显示，保持沉浸感）
+                                    if (!window._kotoDivinationActive) {
+                                        const completeDiv = document.createElement('div');
+                                        completeDiv.className = 'task-complete';
+                                        completeDiv.style.marginTop = '12px';
+                                        completeDiv.style.padding = '10px';
+                                        completeDiv.style.borderRadius = '6px';
+                                        completeDiv.style.background = 'rgba(42, 212, 137, 0.1)';
+
+                                        const completeSpan = document.createElement('span');
+                                        completeSpan.textContent = '✅ 任务完成';
+                                        completeDiv.appendChild(completeSpan);
+
+                                        const timeSpan = document.createElement('span');
+                                        timeSpan.className = 'task-time';
+                                        timeSpan.textContent = `耗时 ${elapsedTime}s`;
+                                        timeSpan.style.marginLeft = '10px';
+                                        timeSpan.style.fontSize = '12px';
+                                        timeSpan.style.color = 'var(--text-muted)';
+                                        completeDiv.appendChild(timeSpan);
+
+                                        bodyEl.appendChild(completeDiv);
+                                    }
                                     
                                     // 评分条（主 SSE 流路径）
                                     appendRatingBar(msgId, data.msg_id || '', message, fullText, taskType);
@@ -2685,12 +2890,14 @@ async function sendMessage(event) {
                 bodyEl.innerHTML = parseMarkdown(fullText);
                 renderMermaidBlocks();
                 timeEl.textContent = `⏱️ ${elapsedTime}s`;
-                bodyEl.innerHTML += `
-                    <div class="task-complete">
-                        <span>✅ 任务完成</span>
-                        <span class="task-time">耗时 ${elapsedTime}s</span>
-                    </div>
-                `;
+                if (!window._kotoDivinationActive) {
+                    bodyEl.innerHTML += `
+                        <div class="task-complete">
+                            <span>✅ 任务完成</span>
+                            <span class="task-time">耗时 ${elapsedTime}s</span>
+                        </div>
+                    `;
+                }
                 appendRatingBar(msgId, '', message, fullText, taskType || 'CHAT');
                 // 宏录制检查
                 if (typeof window.checkMacroSuggestions === 'function') {
@@ -3196,29 +3403,61 @@ function updateBackToBottomBtn() {
     btn.style.display = (distFromBottom > 80 && isGenerating) ? 'flex' : 'none';
 }
 
+let _thinkingTimerInterval = null;
+let _thinkingStartTime = 0;
+const _THINKING_PHRASES = [
+    'Koto \u6b63\u5728\u601d\u8003...',
+    '\u6b63\u5728\u5206\u6790\u8bf7\u6c42...',
+    '\u6574\u7406\u601d\u8def\u4e2d...',
+    '\u6b63\u5728\u751f\u6210\u56de\u590d...',
+    '\u5373\u5c06\u5b8c\u6210...',
+];
+let _thinkingPhraseIdx = 0;
+
 function showLoading(text, model) {
     const think = document.getElementById('inputThinking');
-    document.getElementById('thinkingText').textContent = text || 'Koto 正在思考...';
+    const textEl = document.getElementById('thinkingText');
+    const timerEl = document.getElementById('thinkingTimer');
+    textEl.textContent = text || 'Koto \u6b63\u5728\u601d\u8003...';
     if (model) {
-        document.getElementById('currentModel').textContent = '📦 ' + model;
+        document.getElementById('currentModel').textContent = '\ud83d\udce6 ' + model;
     } else {
         document.getElementById('currentModel').textContent = '';
     }
+    if (timerEl) timerEl.textContent = '';
     think.style.display = '';
+    const spinner = think.querySelector('.spinner');
+    if (spinner) { spinner.style.animation = ''; spinner.style.animationPlayState = 'running'; }
+
+    // Start elapsed timer
+    _thinkingStartTime = Date.now();
+    _thinkingPhraseIdx = 0;
+    clearInterval(_thinkingTimerInterval);
+    _thinkingTimerInterval = setInterval(() => {
+        const elapsed = ((Date.now() - _thinkingStartTime) / 1000).toFixed(0);
+        if (timerEl) timerEl.textContent = elapsed + 's';
+        // Rotate status text every 8s when no custom text was given
+        if (!text) {
+            _thinkingPhraseIdx = Math.floor((Date.now() - _thinkingStartTime) / 8000) % _THINKING_PHRASES.length;
+            textEl.textContent = _THINKING_PHRASES[_thinkingPhraseIdx];
+        }
+    }, 1000);
 }
 
 function hideLoading() {
+    clearInterval(_thinkingTimerInterval);
+    _thinkingTimerInterval = null;
     const think = document.getElementById('inputThinking');
     think.style.display = 'none';
-    // 停止spinner动画，防止后台继续旋转
     const spinner = think.querySelector('.spinner');
     if (spinner) {
         spinner.style.animationPlayState = 'paused';
         spinner.style.animation = 'none';
     }
-    // 清除文本内容
-    document.getElementById('thinkingText').textContent = 'Koto 正在思考...';
+    document.getElementById('thinkingText').textContent = 'Koto \u6b63\u5728\u601d\u8003...';
     document.getElementById('currentModel').textContent = '';
+    const timerEl = document.getElementById('thinkingTimer');
+    if (timerEl) timerEl.textContent = '';
 }
 
 // ============== Agent Confirmation & Choice Dialogs ==============
@@ -3947,13 +4186,15 @@ function openSkillEditor(skillId) {
     _skeSelectedSession = null;
     document.getElementById('skeExtractZone').style.display = 'none';
     document.getElementById('skeExtractMsg').textContent = '';
+    // UI tab: load existing ui_config
+    skeLoadUiTab(skill.ui_config || {}, skill.ui_extensions || {});
     // Open on edit tab
     skeSwitchTab('edit');
     document.getElementById('skillEditorModal').style.display = 'flex';
 }
 
 function skeSwitchTab(tab) {
-    ['edit', 'ai', 'extract'].forEach(t => {
+    ['edit', 'ai', 'extract', 'ui'].forEach(t => {
         const btn = document.querySelector(`.ske-tab[data-tab="${t}"]`);
         const body = document.getElementById('skeTab' + t.charAt(0).toUpperCase() + t.slice(1));
         if (btn) btn.classList.toggle('active', t === tab);
@@ -4068,6 +4309,7 @@ async function saveSkillPromptEdit() {
     if (!_editingSkillId) return;
     const prompt = document.getElementById('skillEditorContent').value;
     try {
+        // 1. Save prompt via dedicated endpoint
         const resp = await fetch(`/api/skills/${_editingSkillId}/prompt`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4075,11 +4317,32 @@ async function saveSkillPromptEdit() {
         });
         const data = await resp.json();
         if (!data.success) throw new Error(data.error);
+
+        // 2. Save ui_config + ui_extensions via PUT endpoint
+        const uiPayload = skeCollectUiConfig();
+        const hasUiChanges = Object.keys(uiPayload.ui_config || {}).length > 0 ||
+                             (uiPayload.ui_extensions?.action_buttons || []).length > 0;
+        if (hasUiChanges) {
+            const permissions = [];
+            if ((uiPayload.ui_config?.css_vars) || uiPayload.ui_config?.theme) permissions.push('ui_style');
+            if ((uiPayload.ui_extensions?.action_buttons || []).length > 0) permissions.push('ui_interactive');
+
+            await fetch(`/api/skills/${_editingSkillId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...uiPayload, permissions }),
+            });
+        }
+
         // Update _allSkills cache
         const skill = _allSkills.find(s => s.id === _editingSkillId);
         if (skill) {
             skill.prompt = prompt;
             skill.has_custom_prompt = prompt.trim() !== '';
+            if (hasUiChanges) {
+                skill.ui_config = uiPayload.ui_config;
+                skill.ui_extensions = uiPayload.ui_extensions;
+            }
         }
         // Also sync _spSkills cache in the Skills Panel
         const spSkills = typeof window.getSpSkills === 'function' ? window.getSpSkills() : [];
@@ -4087,10 +4350,16 @@ async function saveSkillPromptEdit() {
         if (spSkill) {
             spSkill.prompt = prompt;
             spSkill.has_custom_prompt = prompt.trim() !== '';
+            if (hasUiChanges) {
+                spSkill.ui_config = uiPayload.ui_config;
+                spSkill.ui_extensions = uiPayload.ui_extensions;
+            }
         }
         closeSkillEditor();
         renderSkills(_currentSkillFilter);
         if (typeof window.spRenderCards === 'function') window.spRenderCards();
+        // Refresh skill UI in case this skill is active
+        if (typeof window.SkillUI === 'object') window.SkillUI.refresh();
     } catch (e) {
         alert('保存失败: ' + e.message);
     }
@@ -4118,6 +4387,183 @@ async function resetSkillPromptEdit() {
     } catch (e) {
         alert('恢复失败: ' + e.message);
     }
+}
+
+// ─── Skill 编辑器：界面 Tab 辅助函数 ─────────────────────────────────────────
+
+// 主题预设 CSS 变量套件
+const _SKE_THEMES = {
+    none: null,
+    mystic_purple: {
+        '--bg-primary': '#110820', '--bg-secondary': '#1a1135', '--bg-tertiary': '#221848',
+        '--bg-card': 'rgba(192,132,252,0.10)', '--bg-glass': 'rgba(192,132,252,0.13)',
+        '--accent-primary': '#d8a4ff', '--accent-secondary': '#f0a0ff',
+        '--accent-gradient': 'linear-gradient(135deg,#d8a4ff,#f0a0ff)',
+        '--border-color': 'rgba(192,132,252,0.28)',
+        '--text-primary': '#f4ecff', '--text-secondary': '#d4b8f0', '--text-muted': '#a888cc',
+        '--user-msg-bg': 'linear-gradient(135deg,rgba(192,132,252,0.28),rgba(232,121,249,0.22))',
+        '--assistant-msg-bg': 'rgba(192,132,252,0.13)',
+    },
+    ocean_blue: {
+        '--bg-primary': '#0d1b2e', '--bg-secondary': '#112240', '--bg-tertiary': '#1a3050',
+        '--bg-card': 'rgba(56,189,248,0.09)',
+        '--accent-primary': '#38bdf8', '--accent-secondary': '#7dd3fc',
+        '--accent-gradient': 'linear-gradient(135deg,#38bdf8,#818cf8)',
+        '--border-color': 'rgba(56,189,248,0.25)',
+        '--text-primary': '#e2f0ff', '--text-secondary': '#93c5fd', '--text-muted': '#5fa8d3',
+        '--user-msg-bg': 'linear-gradient(135deg,rgba(56,189,248,0.22),rgba(129,140,248,0.18))',
+        '--assistant-msg-bg': 'rgba(56,189,248,0.10)',
+    },
+    amber_gold: {
+        '--bg-primary': '#0c0e14', '--bg-secondary': '#13161f', '--bg-tertiary': '#1a1e2e',
+        '--bg-card': 'rgba(251,191,36,0.08)',
+        '--accent-primary': '#fbbf24', '--accent-secondary': '#f59e0b',
+        '--accent-gradient': 'linear-gradient(135deg,#fbbf24,#f97316)',
+        '--border-color': 'rgba(251,191,36,0.22)',
+        '--text-primary': '#f0ead6', '--text-secondary': '#d4b483', '--text-muted': '#8a7355',
+        '--user-msg-bg': 'linear-gradient(135deg,rgba(251,191,36,0.20),rgba(249,115,22,0.15))',
+        '--assistant-msg-bg': 'rgba(251,191,36,0.08)',
+    },
+    rose_pink: {
+        '--bg-primary': '#1a0e14', '--bg-secondary': '#241018', '--bg-tertiary': '#2e1520',
+        '--bg-card': 'rgba(244,114,182,0.09)',
+        '--accent-primary': '#f472b6', '--accent-secondary': '#fb7185',
+        '--accent-gradient': 'linear-gradient(135deg,#f472b6,#fb7185)',
+        '--border-color': 'rgba(244,114,182,0.25)',
+        '--text-primary': '#fce7f3', '--text-secondary': '#f9a8d4', '--text-muted': '#a0527a',
+        '--user-msg-bg': 'linear-gradient(135deg,rgba(244,114,182,0.22),rgba(251,113,133,0.16))',
+        '--assistant-msg-bg': 'rgba(244,114,182,0.09)',
+    },
+    cyan_space: {
+        '--bg-primary': '#0a0f1a', '--bg-secondary': '#0f1726', '--bg-tertiary': '#162035',
+        '--bg-card': 'rgba(34,211,238,0.08)',
+        '--accent-primary': '#22d3ee', '--accent-secondary': '#67e8f9',
+        '--accent-gradient': 'linear-gradient(135deg,#22d3ee,#818cf8)',
+        '--border-color': 'rgba(34,211,238,0.22)',
+        '--text-primary': '#e0f7ff', '--text-secondary': '#a5f3fc', '--text-muted': '#4fa8bf',
+        '--user-msg-bg': 'linear-gradient(135deg,rgba(34,211,238,0.20),rgba(129,140,248,0.15))',
+        '--assistant-msg-bg': 'rgba(34,211,238,0.08)',
+    },
+    forest_green: {
+        '--bg-primary': '#0a1a10', '--bg-secondary': '#0f2218', '--bg-tertiary': '#152e1e',
+        '--bg-card': 'rgba(52,211,153,0.09)',
+        '--accent-primary': '#34d399', '--accent-secondary': '#6ee7b7',
+        '--accent-gradient': 'linear-gradient(135deg,#34d399,#10b981)',
+        '--border-color': 'rgba(52,211,153,0.22)',
+        '--text-primary': '#e0fff0', '--text-secondary': '#a7f3d0', '--text-muted': '#4da87a',
+        '--user-msg-bg': 'linear-gradient(135deg,rgba(52,211,153,0.20),rgba(16,185,129,0.15))',
+        '--assistant-msg-bg': 'rgba(52,211,153,0.08)',
+    },
+    fire_red: {
+        '--bg-primary': '#1a0a0a', '--bg-secondary': '#261010', '--bg-tertiary': '#321515',
+        '--bg-card': 'rgba(251,146,60,0.09)',
+        '--accent-primary': '#fb923c', '--accent-secondary': '#f97316',
+        '--accent-gradient': 'linear-gradient(135deg,#fb923c,#dc2626)',
+        '--border-color': 'rgba(251,146,60,0.25)',
+        '--text-primary': '#fff1e6', '--text-secondary': '#fcd4a8', '--text-muted': '#a06040',
+        '--user-msg-bg': 'linear-gradient(135deg,rgba(251,146,60,0.22),rgba(220,38,38,0.15))',
+        '--assistant-msg-bg': 'rgba(251,146,60,0.08)',
+    },
+};
+
+function skePickTheme(el) {
+    document.querySelectorAll('#skeColorSwatches .ske-swatch').forEach(s => s.classList.remove('active'));
+    el.classList.add('active');
+}
+
+function skeLoadUiTab(uiConfig, uiExt) {
+    // Detect which theme preset matches (or none)
+    const cssVars = uiConfig.css_vars || {};
+    let matchedKey = 'none';
+    if (cssVars['--accent-primary']) {
+        for (const [key, vars] of Object.entries(_SKE_THEMES)) {
+            if (vars && vars['--accent-primary'] === cssVars['--accent-primary']) {
+                matchedKey = key;
+                break;
+            }
+        }
+    }
+    document.querySelectorAll('#skeColorSwatches .ske-swatch').forEach(s => {
+        s.classList.toggle('active', s.getAttribute('data-theme-key') === matchedKey);
+    });
+
+    // Overlay
+    const overlayEl = document.getElementById('skeOverlayEffect');
+    if (overlayEl) overlayEl.value = uiConfig.overlay_effect || '';
+
+    // Text fields
+    const f = (id, val) => { const el = document.getElementById(id); if (el) el.value = val || ''; };
+    f('skeTitleText',       uiConfig.title_text || '');
+    f('skeSubtitleText',    uiConfig.subtitle_text || '');
+    f('skePlaceholderText', uiConfig.input_placeholder || '');
+    f('skeWelcomeText',     uiConfig.welcome_text || '');
+    f('skeAssistantPrefix', uiConfig.assistant_prefix || '');
+
+    // Action buttons
+    const buttons = (uiExt.action_buttons || []).filter(b => b.id !== 'open_dice');
+    const listEl = document.getElementById('skeActionBtnList');
+    if (listEl) {
+        listEl.innerHTML = '';
+        buttons.forEach(btn => skeAddActionBtn(btn.label || '', btn.message || ''));
+    }
+}
+
+function skeAddActionBtn(label, message) {
+    const listEl = document.getElementById('skeActionBtnList');
+    if (!listEl) return;
+    const row = document.createElement('div');
+    row.className = 'ske-action-btn-row';
+    row.innerHTML = `
+        <input type="text" placeholder="按钮名称，如「下一步」" value="${_skeEsc(label || '')}">
+        <span class="ske-action-btn-sep">→</span>
+        <input type="text" placeholder="点击后发送的消息" value="${_skeEsc(message || '')}">
+        <button class="ske-rm-btn" title="删除" onclick="this.closest('.ske-action-btn-row').remove()">×</button>
+    `;
+    listEl.appendChild(row);
+}
+
+function _skeEsc(s) {
+    return String(s).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function skeCollectUiConfig() {
+    // Color theme
+    const activeThemeSwatch = document.querySelector('#skeColorSwatches .ske-swatch.active');
+    const themeKey = activeThemeSwatch ? activeThemeSwatch.getAttribute('data-theme-key') : 'none';
+    const cssVars = _SKE_THEMES[themeKey] || null;
+
+    // Other ui_config fields
+    const overlay  = (document.getElementById('skeOverlayEffect')  || {}).value || '';
+    const titleT   = (document.getElementById('skeTitleText')       || {}).value || '';
+    const subT     = (document.getElementById('skeSubtitleText')    || {}).value || '';
+    const phText   = (document.getElementById('skePlaceholderText') || {}).value || '';
+    const welcome  = (document.getElementById('skeWelcomeText')     || {}).value || '';
+    const prefix   = (document.getElementById('skeAssistantPrefix') || {}).value || '';
+
+    const uiConfig = {};
+    if (cssVars)  uiConfig.css_vars          = cssVars;
+    if (overlay)  uiConfig.overlay_effect    = overlay;
+    if (titleT)   uiConfig.title_text        = titleT;
+    if (subT)     uiConfig.subtitle_text     = subT;
+    if (phText)   uiConfig.input_placeholder = phText;
+    if (welcome)  uiConfig.welcome_text      = welcome;
+    if (prefix)   uiConfig.assistant_prefix  = prefix;
+
+    // Action buttons
+    const rows = document.querySelectorAll('#skeActionBtnList .ske-action-btn-row');
+    const actionButtons = [];
+    rows.forEach((row, i) => {
+        const inputs = row.querySelectorAll('input');
+        const label   = (inputs[0]?.value || '').trim();
+        const message = (inputs[1]?.value || '').trim();
+        if (label && message) {
+            actionButtons.push({ id: `custom_btn_${i}`, label, message, variant: 'default' });
+        }
+    });
+
+    const uiExtensions = actionButtons.length > 0 ? { action_buttons: actionButtons } : {};
+
+    return { ui_config: uiConfig, ui_extensions: uiExtensions };
 }
 
 // ================= Memory Management =================
@@ -4217,35 +4663,98 @@ async function deleteMemory(id) {
     }
 }
 
+async function importProfileMemories() {
+    const btn = document.querySelector('[onclick="importProfileMemories()"]');
+    const origText = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 导入中...'; }
+    try {
+        const response = await fetch('/api/memories/import-profile', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const result = await response.json();
+        if (result.success) {
+            loadMemories();
+            if (btn) { btn.textContent = `✅ 导入了 ${result.added} 条`; }
+            setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = origText; } }, 3000);
+        } else {
+            alert(`导入失败: ${result.error || '未知错误'}`);
+            if (btn) { btn.disabled = false; btn.textContent = origText; }
+        }
+    } catch (e) {
+        alert(`导入失败: ${e.message}`);
+        if (btn) { btn.disabled = false; btn.textContent = origText; }
+    }
+}
+
+async function batchExtractMemories() {
+    const btn = document.querySelector('[onclick="batchExtractMemories()"]');
+    const origText = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 提取中（约30秒）...'; }
+    try {
+        const response = await fetch('/api/memories/batch-extract', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ max_turns: 60, max_files: 10 }) });
+        const result = await response.json();
+        if (result.success) {
+            if (btn) { btn.textContent = '✅ 后台提取中...'; }
+            // 30秒后刷新列表
+            setTimeout(() => {
+                loadMemories();
+                if (btn) { btn.disabled = false; btn.textContent = origText; }
+            }, 30000);
+            // 也给用户一个即时提示
+            const listEl = document.getElementById('memoryList');
+            if (listEl && listEl.querySelector('.memory-empty')) {
+                listEl.innerHTML = `<div class="memory-empty" style="color:var(--text-muted)">⏳ 正在从历史对话提取记忆，稍后自动刷新...</div>`;
+            }
+        } else {
+            alert(`提取失败: ${result.error || '未知错误'}`);
+            if (btn) { btn.disabled = false; btn.textContent = origText; }
+        }
+    } catch (e) {
+        alert(`提取失败: ${e.message}`);
+        if (btn) { btn.disabled = false; btn.textContent = origText; }
+    }
+}
+
+// 等待 pywebview API 就绪（pywebviewready 在每次页面导航后重新触发）
+function waitForPywebviewApi(apiName, timeout) {
+    return new Promise((resolve) => {
+        const check = () => window.pywebview && window.pywebview.api && typeof window.pywebview.api[apiName] === 'function';
+        if (check()) return resolve(true);
+        const timer = setTimeout(() => {
+            window.removeEventListener('pywebviewready', handler);
+            resolve(false);
+        }, timeout || 2000);
+        function handler() {
+            clearTimeout(timer);
+            resolve(check());
+        }
+        window.addEventListener('pywebviewready', handler, { once: true });
+    });
+}
+
 // 切换到迷你模式
 async function switchToMiniMode() {
     try {
-        // 如果是pywebview环境，直接调用窗口API切换
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.switch_to_mini) {
+        const r = await fetch('/api/window/switch-to-mini', { method: 'POST' });
+        const d = await r.json();
+        if (d.success) return;
+    } catch (error) {
+        console.warn('switch_to_mini HTTP 调用失败，尝试 JS bridge 降级:', error);
+    }
+    try {
+        const ready = await waitForPywebviewApi('switch_to_mini', 2000);
+        if (ready) {
             await window.pywebview.api.switch_to_mini();
-        } else {
-            // 浏览器环境：优化的跳转流程
-            // 1. 添加淡出效果
-            document.body.style.transition = 'opacity 0.15s ease-out';
-            document.body.style.opacity = '0';
-            
-            // 2. 预加载目标页面（可选，提升加载速度）
-            const link = document.createElement('link');
-            link.rel = 'prefetch';
-            link.href = '/mini';
-            document.head.appendChild(link);
-            
-            // 3. 短暂延迟后跳转（让动画完成）
-            setTimeout(() => {
-                window.location.href = '/mini';
-            }, 150);
+            return;
         }
     } catch (error) {
-        console.error('切换到迷你模式失败:', error);
-        // 备用：快速跳转
-        document.body.style.opacity = '0';
-        setTimeout(() => window.location.href = '/mini', 100);
+        console.warn('switch_to_mini JS bridge 失败，尝试 URL 降级:', error);
     }
+    // 末级降级：URL 跳转（浏览器访问场景）
+    document.body.style.transition = 'opacity 0.15s ease-out';
+    document.body.style.opacity = '0';
+    setTimeout(() => { window.location.href = '/mini'; }, 150);
 }
 
 async function updateSetting(category, key, value) {
@@ -7413,8 +7922,9 @@ async function shadowDismissCurrent() {
     const msgId = banner?.dataset?.msgId;
     if (!msgId) return;
     try {
-        await fetch(`/api/shadow/dismiss/${msgId}`, { method: 'POST' });
-    } catch(e) { /* ignore */ }
+        const r = await fetch(`/api/shadow/dismiss/${msgId}`, { method: 'POST' });
+        if (!r.ok) console.warn('[Shadow] dismiss failed:', r.status);
+    } catch(e) { console.warn('[Shadow] dismiss error:', e); }
     _shadowPending = _shadowPending.filter(m => m.id !== msgId);
     _shadowCurrentIdx = Math.min(_shadowCurrentIdx, Math.max(0, _shadowPending.length - 1));
     _shadowUpdateBanner();
@@ -7422,24 +7932,70 @@ async function shadowDismissCurrent() {
 }
 
 async function shadowDismissAll() {
-    try { await fetch('/api/shadow/dismiss-all', { method: 'POST' }); } catch(e) { /* ignore */ }
+    try {
+        const r = await fetch('/api/shadow/dismiss-all', { method: 'POST' });
+        if (!r.ok) console.warn('[Shadow] dismiss-all failed:', r.status);
+    } catch(e) { console.warn('[Shadow] dismiss-all error:', e); }
     _shadowPending = [];
     _shadowUpdateBanner();
     _shadowUpdateBadge();
 }
 
+// ── 影子回复上下文（等待下一条用户消息时携带给 AI）─────────────────────────────
+let _pendingShadowContext = null;
+
 function shadowReply() {
-    // Paste the message content into the chat input as a reply trigger
     const banner = document.getElementById('shadowBanner');
     const msgId = banner?.dataset?.msgId;
     const msg = _shadowPending.find(m => m.id === msgId);
     if (!msg) return;
+
+    // 存储影子上下文，下次 sendMessage 时会自动携带给 AI
+    _pendingShadowContext = { id: msg.id, content: msg.content, type: msg.type };
+
+    // 在输入框上方显示一个轻量「正在回复影子消息」指示条
+    _showShadowReplyHint(msg.content);
+
+    // 清空输入框并聚焦，让用户直接输入回复内容
     const input = document.getElementById('messageInput');
-    if (input) {
-        input.value = '（回复 Koto 的提醒）' + msg.content;
-        input.focus();
-    }
+    if (input) { input.value = ''; input.focus(); }
+
+    // 自动 dismiss 当前影子消息（已进入回复流程）
     shadowDismissCurrent();
+}
+
+function _showShadowReplyHint(content) {
+    // 若已有提示条则先移除
+    const existing = document.getElementById('shadowReplyHint');
+    if (existing) existing.remove();
+
+    const inputArea = document.getElementById('messageInput')?.closest('form') ||
+                      document.getElementById('messageInput')?.parentElement;
+    if (!inputArea) return;
+
+    const hint = document.createElement('div');
+    hint.id = 'shadowReplyHint';
+    hint.style.cssText = [
+        'display:flex;align-items:center;gap:8px;',
+        'padding:5px 12px;font-size:12px;',
+        'background:var(--bg-tertiary,#1e2130);',
+        'border-top:1px solid var(--border-color,#2a2d3e);',
+        'color:var(--text-secondary,#8892a4);',
+        'border-radius:8px 8px 0 0;',
+    ].join('');
+    const preview = content.length > 60 ? content.slice(0, 60) + '…' : content;
+    hint.innerHTML = `
+        <span style="font-size:14px;flex-shrink:0;">👁️</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">正在回复影子消息：${escapeHtml(preview)}</span>
+        <button onclick="_cancelShadowReply()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:13px;padding:0 2px;">✕</button>
+    `;
+    inputArea.insertBefore(hint, inputArea.firstChild);
+}
+
+function _cancelShadowReply() {
+    _pendingShadowContext = null;
+    const hint = document.getElementById('shadowReplyHint');
+    if (hint) hint.remove();
 }
 
 function openShadowPanel() {
