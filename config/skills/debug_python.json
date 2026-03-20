@@ -55,7 +55,9 @@
                              "ModuleNotFoundError"
                          ],
     "executor_tools":  [
-                           "read_file"
+                           "read_file",
+                           "find_file",
+                           "python_exec"
                        ],
     "examples":  [
                      {

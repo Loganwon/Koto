@@ -1749,6 +1749,23 @@ a { color: var(--accent-primary); }
     white-space: nowrap;
 }
 
+/* ── 会议提炼卡片 ── */
+.meeting-actions-card { padding: 4px 0; }
+.meeting-actions-header { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
+.meeting-actions-section { margin-bottom: 14px; }
+.meeting-actions-section > strong { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; }
+.meeting-actions-section p, .meeting-actions-section ul { margin: 0; padding-left: 16px; font-size: 14px; line-height: 1.6; }
+.meeting-actions-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 4px; }
+.meeting-actions-table th { background: var(--bg-tertiary); color: var(--text-muted); font-weight: 500; padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
+.meeting-actions-table td { padding: 7px 10px; border-bottom: 1px solid var(--border-color); vertical-align: middle; }
+.meeting-actions-table tr:last-child td { border-bottom: none; }
+.priority-high { color: #e05c5c; font-weight: 600; }
+.priority-mid  { color: #e0a840; font-weight: 500; }
+.priority-low  { color: var(--text-muted); }
+.action-reminder-btn { font-size: 12px; padding: 3px 9px; border-radius: 6px; white-space: nowrap; }
+.action-reminder-btn.reminder-done { opacity: .55; cursor: default; }
+.muted-text { color: var(--text-muted); font-size: 13px; }
+
 /* ── 用户评分条 ── */
 .rating-bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 7px 10px; border-radius: 8px; background: var(--bg-tertiary); border: 1px solid var(--border-color); flex-wrap: wrap; }
 .rating-bar .rb-label { font-size: 11px; color: var(--text-muted); white-space: nowrap; }

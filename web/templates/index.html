@@ -1018,6 +1018,9 @@
                     <span>对话</span>
                     <button class="ghost-btn" onclick="loadSessions()" title="刷新列表">↻</button>
                 </div>
+                <select id="projectSelect" class="session-search" title="选择项目" style="margin-bottom:8px;">
+                    <option value="default">默认项目</option>
+                </select>
                 <input type="text" id="sessionSearchInput" class="session-search" placeholder="🔍 搜索对话..." oninput="filterSessions(this.value)" autocomplete="off">
                 <div class="sessions-list" id="sessionsList"></div>
             </div>
@@ -1080,7 +1083,7 @@
                         </div>
                     </div>
                     <button class="ghost-btn" onclick="openSettings()" title="设置">⚙️ 设置</button>
-                    <button class="ghost-btn" id="morningBriefBtn" onclick="generateMorningBrief()" title="生成晨间简报">🌅 简报</button>
+
                     <!-- 影子追踪主动交互按鈕 -->
                     <button class="ghost-btn" id="shadowToggleBtn" onclick="openShadowPanel()" title="影子追踪 · 主动交互" style="position:relative;display:none;">
                         👁️ 影子
@@ -1395,6 +1398,17 @@
                         </div>
                         <p class="setting-hint">开启后所有请求只走本地模型（Ollama），不调用云端 API，保证完全本地隐私。</p>
                     </div>
+                    <!-- 本地模型选择（仅 local-only 开启时显示） -->
+                    <div class="setting-item" id="localModelPickerRow" style="display:none;">
+                        <label>本地模型</label>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <select id="settingLocalModel" style="flex:1;" onchange="onLocalModelChange(this.value)">
+                                <option value="">— 检测后选择 —</option>
+                            </select>
+                            <button class="btn-secondary btn-sm" onclick="detectLocalModels()" title="扫描 Ollama 可用模型">🔍 检测</button>
+                        </div>
+                        <p class="setting-hint" id="localModelHint">点击「检测」扫描本地 Ollama 已安装的模型</p>
+                    </div>
                     <div class="setting-item">
                         <label>默认模型</label>
                         <select id="settingModel" onchange="onModelChange(this.value)">
@@ -1498,42 +1512,6 @@
                             </table>
                             <p class="proxy-help-tip">填写示例：<code>http://127.0.0.1:7890</code> 或 <code>socks5://127.0.0.1:1080</code></p>
                         </details>
-                    </div>
-                </div>
-
-                <!-- Skills Section → redirect to dedicated panel -->
-                <div class="settings-section">
-                    <h4>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                        </svg>
-                        Skills 技能模块
-                    </h4>
-                    <p class="setting-desc">通过 Skill 注入个性化 Prompt，调整 AI 的回复风格与行为模式。</p>
-                    <button class="settings-open-panel-btn" onclick="closeSettings(); openSkillsPanel()">
-                        ✨ 打开 Skill 管理面板
-                        <span class="settings-open-panel-arrow">→</span>
-                    </button>
-                    <p class="setting-hint" style="margin-top:6px;">意图绑定、触发器等高级配置仍在下方。</p>
-                </div>
-
-                <!-- Skill Intent Bindings Section -->
-                <div class="settings-section">
-                    <h4>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-                        </svg>
-                        意图绑定
-                    </h4>
-                    <p class="setting-desc">当用户输入匹配关键词时，自动临时注入对应 Skill Prompt，无需全局启用。</p>
-                    <div class="bindings-toolbar">
-                        <button class="btn-secondary btn-sm" onclick="openCreateBindingModal()">＋ 新建</button>
-                        <button class="btn-secondary btn-sm" onclick="bootstrapBindings(false)">✨ 初始化推荐</button>
-                        <button class="btn-secondary btn-sm" onclick="bootstrapBindings(true)" style="color:var(--accent-warning)">🔄 重建</button>
-                    </div>
-                    <div id="bindingsList" class="bindings-list">
-                        <div class="memory-empty">正在加载绑定...</div>
                     </div>
                 </div>
 

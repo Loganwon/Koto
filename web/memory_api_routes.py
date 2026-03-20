@@ -3,9 +3,86 @@
 # ═══════════════════════════════════════════════════════════════
 
 from flask import jsonify, request
+import re
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_div(num, den):
+    return round((num / den), 4) if den else 0.0
+
+
+def _build_writing_style_profile(text: str) -> dict:
+    text = (text or "").strip()
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    paragraphs = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
+    sentences = [s for s in re.split(r"[。！？!?\.]+", text) if s.strip()]
+    words = re.findall(r"[A-Za-z0-9\u4e00-\u9fff]+", text)
+
+    bullet_lines = [line for line in lines if re.match(r"^[-*•\d]+[\.)、\s]", line)]
+    punctuation_marks = re.findall(r"[，。！？；：,.!?;:]", text)
+
+    formal_keywords = ["请", "建议", "方案", "需要", "基于", "因此", "此外", "敬请", "感谢"]
+    casual_keywords = ["我觉得", "其实", "然后", "真的", "哈哈", "哇", "有点", "挺"]
+    formal_count = sum(text.count(k) for k in formal_keywords)
+    casual_count = sum(text.count(k) for k in casual_keywords)
+
+    avg_sentence_len = _safe_div(sum(len(s) for s in sentences), len(sentences))
+    avg_paragraph_len = _safe_div(sum(len(p) for p in paragraphs), len(paragraphs))
+    bullet_ratio = _safe_div(len(bullet_lines), len(lines))
+    punctuation_density = _safe_div(len(punctuation_marks), max(len(text), 1))
+
+    if formal_count >= casual_count * 1.4 and formal_count >= 2:
+        formality = "formal"
+    elif casual_count > formal_count and casual_count >= 2:
+        formality = "casual"
+    else:
+        formality = "neutral"
+
+    if avg_sentence_len >= 38:
+        detail = "detailed"
+    elif avg_sentence_len <= 18:
+        detail = "brief"
+    else:
+        detail = "moderate"
+
+    structure_pref = "bullet_first" if bullet_ratio >= 0.25 else "paragraph_first"
+
+    tone_tags = []
+    if formality == "formal":
+        tone_tags.append("专业")
+    elif formality == "casual":
+        tone_tags.append("口语化")
+    else:
+        tone_tags.append("中性")
+    if detail == "detailed":
+        tone_tags.append("展开说明")
+    elif detail == "brief":
+        tone_tags.append("简洁结论")
+    else:
+        tone_tags.append("平衡表达")
+    if structure_pref == "bullet_first":
+        tone_tags.append("要点优先")
+
+    return {
+        "formality": formality,
+        "preferred_detail_level": detail,
+        "structure_preference": structure_pref,
+        "avg_sentence_length": avg_sentence_len,
+        "avg_paragraph_length": avg_paragraph_len,
+        "bullet_ratio": bullet_ratio,
+        "punctuation_density": punctuation_density,
+        "sample_stats": {
+            "chars": len(text),
+            "lines": len(lines),
+            "paragraphs": len(paragraphs),
+            "sentences": len(sentences),
+            "tokens": len(words),
+        },
+        "tone_tags": tone_tags,
+    }
 
 def register_memory_routes(app, get_memory_manager):
     """注册记忆系统API路由到Flask app
@@ -148,6 +225,46 @@ def register_memory_routes(app, get_memory_manager):
                     "message": "当前版本不支持自动学习"
                 })
         
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return jsonify({"success": False, "error": str(e)}), 500
+
+
+    @app.route('/api/memory/style-profile', methods=['POST'])
+    def learn_writing_style_profile():
+        """从样本文本学习写作风格并写入用户画像。"""
+        try:
+            data = request.json or {}
+            sample_text = (data.get('sample_text') or '').strip()
+            sample_name = (data.get('sample_name') or 'default').strip() or 'default'
+
+            if len(sample_text) < 80:
+                return jsonify({"success": False, "error": "样本文本太短，至少需要 80 个字符"}), 400
+
+            memory_mgr = get_memory_manager()
+            if not hasattr(memory_mgr, 'user_profile'):
+                return jsonify({"success": False, "error": "当前记忆管理器不支持用户画像"}), 400
+
+            style_profile = _build_writing_style_profile(sample_text)
+
+            profile = memory_mgr.user_profile.profile
+            communication_style = profile.setdefault('communication_style', {})
+            communication_style['writing_style_profile'] = style_profile
+            communication_style['writing_style_sample_name'] = sample_name
+            communication_style['writing_style_updated_at'] = datetime.now().isoformat()
+            communication_style['preferred_detail_level'] = style_profile.get('preferred_detail_level', communication_style.get('preferred_detail_level', 'moderate'))
+            if style_profile.get('formality') in ('formal', 'casual', 'neutral'):
+                communication_style['formality'] = style_profile['formality']
+
+            profile.setdefault('metadata', {})['last_updated'] = datetime.now().isoformat()
+            memory_mgr.user_profile.save()
+
+            return jsonify({
+                "success": True,
+                "message": "写作风格学习完成",
+                "style_profile": style_profile,
+            })
         except Exception as e:
             import traceback
             traceback.print_exc()

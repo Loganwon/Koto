@@ -2094,9 +2094,10 @@ MODEL_MAP = {
     "SYSTEM":      "local-executor",
     "FILE_OP":     "local-executor",
     "AGENT":       "gemini-3-flash-preview",
-    "FILE_SEARCH": "gemini-3-flash-preview",
-    "DOC_ANNOTATE":"gemini-3-flash-preview",
-    "COMPLEX":     "gemini-3.1-pro-preview",
+    "FILE_SEARCH":      "gemini-3-flash-preview",
+    "DOC_ANNOTATE":     "gemini-3-flash-preview",
+    "MEETING_EXTRACT":  "gemini-2.5-flash",
+    "COMPLEX":          "gemini-3.1-pro-preview",
 }
 
 # ─── Interactions-API-only 模型（动态更新，静态默认兜底）──────────────────────
@@ -3360,6 +3361,43 @@ def _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION():
     except Exception:
         # 终极降级：返回基础指令
         return "你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。精通多个领域，快速理解用户意图，提供符合实际情境的答案。"
+
+
+def _get_writing_style_instruction(user_input: str) -> str:
+    """若命中写作任务，返回从用户画像提取的写作风格约束。"""
+    text = (user_input or "").lower()
+    writing_keywords = [
+        "写", "润色", "改写", "总结", "汇报", "报告", "邮件", "文案", "周报", "日报",
+        "计划", "说明", "write", "rewrite", "polish", "email", "report", "summary",
+    ]
+    if not any(k in text for k in writing_keywords):
+        return ""
+
+    try:
+        mm = get_memory_manager()
+        if not mm or not hasattr(mm, "user_profile"):
+            return ""
+        profile = mm.user_profile.profile or {}
+        style = (profile.get("communication_style") or {}).get("writing_style_profile") or {}
+        if not style:
+            return ""
+
+        detail = style.get("preferred_detail_level", "moderate")
+        formality = style.get("formality", "neutral")
+        structure_pref = style.get("structure_preference", "paragraph_first")
+        tone_tags = style.get("tone_tags", [])
+
+        return (
+            "\n\n## ✍️ 用户写作风格约束（自动学习）\n"
+            f"- 语气：{formality}\n"
+            f"- 详细度：{detail}\n"
+            f"- 结构偏好：{structure_pref}\n"
+            f"- 风格标签：{', '.join(tone_tags) if tone_tags else '无'}\n"
+            "- 生成文本时优先匹配以上风格；若用户本轮明确要求其他风格，以用户本轮要求为准。"
+        )
+    except Exception as exc:
+        _app_logger.debug(f"[StyleProfile] 注入失败: {exc}")
+        return ""
 
 
 def _get_system_instruction():
@@ -7676,6 +7714,10 @@ def chat_stream():
             "- 如果用户问起之前的对话内容，从历史记录中找到并引用"
         )
 
+    _writing_style_instr = _get_writing_style_instruction(user_input)
+    if _writing_style_instr:
+        system_instruction += _writing_style_instr
+
     history = session_manager.load(f"{session_name}.json")
     full_history = session_manager.load_full(f"{session_name}.json")
 
@@ -7759,6 +7801,7 @@ def chat_stream():
             "MULTI_STEP",
             "AGENT",
             "VISION",
+            "MEETING_EXTRACT",
         }
         if not task_type or task_type not in _HANDLED_TASK_TYPES:
             _app_logger.warning(f"[STREAM] ⚠️ 收到未知 task_type='{task_type}'，降级为 CHAT")
@@ -10047,6 +10090,115 @@ def chat_stream():
                     total_time = time.time() - start_time
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                     return
+
+            # === MEETING_EXTRACT Mode (会议提炼 - 流式输出) ===
+            if task_type == "MEETING_EXTRACT":
+                used_model = model_id or "gemini-2.5-flash"
+                t = yield_thinking("进入会议提炼模式，分析会议文本并提取行动项", "routing")
+                if t:
+                    yield t
+
+                # 从 user_input 中去掉触发词，剩余即会议文本
+                _meeting_triggers = [
+                    "帮我提炼一下", "帮我提炼", "帮我整理一下", "帮我整理",
+                    "帮我提取一下", "帮我提取", "帮我总结一下", "帮我总结",
+                    "提炼一下", "提炼", "提取行动项", "提取", "整理一下", "整理",
+                    "总结一下", "总结",
+                    "会议纪要：", "会议纪要:", "会议记录：", "会议记录:",
+                    "会议内容：", "会议内容:", "转录：", "转录:",
+                ]
+                _meeting_text = user_input.strip()
+                for _t in sorted(_meeting_triggers, key=len, reverse=True):
+                    _meeting_text = _meeting_text.replace(_t, "").strip()
+
+                if len(_meeting_text) < 30:
+                    _hint = (
+                        "请把会议纪要或转录文字直接粘贴在消息里，例如：\n\n"
+                        "> 提炼一下：[粘贴会议内容]"
+                    )
+                    yield f"data: {json.dumps({'type': 'token', 'content': _hint})}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, _hint)
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+                yield f"data: {json.dumps({'type': 'progress', 'message': '📝 正在分析会议内容...', 'detail': f'{len(_meeting_text)} 字'})}\n\n"
+
+                _meeting_prompt = f"""
+你是会议纪要分析助手。请从下面的会议文本中提取结构化结果，仅输出 JSON，不要输出任何额外文字。
+
+输出 JSON schema:
+{{
+  "summary": "一句到三句会议摘要",
+  "decisions": ["决策1", "决策2"],
+  "action_items": [
+    {{
+      "task": "具体可执行任务",
+      "owner": "负责人，未知则写待定",
+      "due_date": "YYYY-MM-DD 或 待定",
+      "priority": "high|medium|low"
+    }}
+  ]
+}}
+
+要求：
+1) 不要杜撰；没有提到的负责人/截止日写"待定"。
+2) action_items 必须是可执行动作，避免空泛描述。
+3) decisions 最多 6 条，action_items 最多 12 条。
+4) 语言使用中文。
+
+会议文本：
+{_meeting_text[:25000]}
+"""
+                try:
+                    _m_resp = client.models.generate_content(
+                        model=used_model,
+                        contents=_meeting_prompt,
+                        config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=1800),
+                    )
+                    _raw = (_m_resp.text or "").strip()
+                    if _raw.startswith("```json"):
+                        _raw = _raw[7:].rstrip("`").strip()
+                    elif _raw.startswith("```"):
+                        _raw = _raw[3:].rstrip("`").strip()
+
+                    _parsed = json.loads(_raw)
+                    _summary = str(_parsed.get("summary") or "").strip()
+                    _decisions = _parsed.get("decisions") if isinstance(_parsed.get("decisions"), list) else []
+                    _actions = _parsed.get("action_items") if isinstance(_parsed.get("action_items"), list) else []
+
+                    _md = f"## 📝 会议提炼结果\n\n### 摘要\n{_summary}\n\n"
+                    _md += "### 关键决策\n"
+                    if _decisions:
+                        _md += "\n".join(f"- {d}" for d in _decisions[:6]) + "\n\n"
+                    else:
+                        _md += "- （无）\n\n"
+                    _md += "### 行动项\n"
+                    if _actions:
+                        _md += "| 任务 | 负责人 | 截止日期 | 优先级 |\n|---|---|---|---|\n"
+                        _p_map = {"high": "高", "low": "低", "medium": "中"}
+                        for _item in _actions[:12]:
+                            if not isinstance(_item, dict):
+                                continue
+                            _prio = _p_map.get(str(_item.get("priority") or "medium").lower(), "中")
+                            _md += f"| {_item.get('task', '')} | {_item.get('owner', '待定')} | {_item.get('due_date', '待定')} | {_prio} |\n"
+                    else:
+                        _md += "- （未提取到可执行行动项）\n"
+
+                    yield f"data: {json.dumps({'type': 'token', 'content': _md})}\n\n"
+                    session_manager.append_and_save(
+                        f"{session_name}.json", user_input, _md,
+                        task="MEETING_EXTRACT", model_name=used_model,
+                    )
+                except Exception as _me:
+                    _app_logger.error(f"[MEETING_EXTRACT] 失败: {_me}")
+                    _err = f"❌ 会议提炼失败：{str(_me)[:200]}"
+                    yield f"data: {json.dumps({'type': 'error', 'message': _err})}\n\n"
+                    session_manager.append_and_save(f"{session_name}.json", user_input, _err)
+
+                total_time = time.time() - start_time
+                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                return
 
             # === DOC_ANNOTATE Mode (文档标注/润色 - 流式反馈) ===
             if task_type == "DOC_ANNOTATE":
@@ -16049,6 +16201,23 @@ def local_model_status():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+@app.route("/api/local-model/list", methods=["GET"])
+def local_model_list():
+    """列出 Ollama 已安装的所有本地模型"""
+    try:
+        import urllib.request as _urlreq
+        import json as _json
+
+        ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+        req = _urlreq.Request(f"{ollama_url}/api/tags", headers={"Accept": "application/json"})
+        with _urlreq.urlopen(req, timeout=4) as resp:
+            data = _json.loads(resp.read().decode())
+        models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+        return jsonify({"success": True, "models": models})
+    except Exception as e:
+        return jsonify({"success": False, "models": [], "error": str(e)}), 200
+
+
 @app.route("/api/local-model/switch", methods=["POST"])
 def local_model_switch():
     """切换 AI 模式（local / cloud）并热更新客户端缓存"""
@@ -19024,6 +19193,101 @@ def speech_extract_summary():
         )
 
         return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/speech/extract-actions", methods=["POST"])
+def speech_extract_actions():
+    """从会议转录文本提取摘要、决策与行动项。"""
+    try:
+        data = request.json or {}
+        transcript = (data.get("text") or "").strip()
+        if len(transcript) < 30:
+            return jsonify({"success": False, "error": "缺少有效会议文本"}), 400
+
+        prompt = f"""
+你是会议纪要分析助手。请从下面的会议文本中提取结构化结果，仅输出 JSON，不要输出任何额外文字。
+
+输出 JSON schema:
+{{
+  "summary": "一句到三句会议摘要",
+  "decisions": ["决策1", "决策2"],
+  "action_items": [
+    {{
+      "task": "具体可执行任务",
+      "owner": "负责人，未知则写待定",
+      "due_date": "YYYY-MM-DD 或 待定",
+      "priority": "high|medium|low"
+    }}
+  ]
+}}
+
+要求：
+1) 不要杜撰；没有提到的负责人/截止日写“待定”。
+2) action_items 必须是可执行动作，避免空泛描述。
+3) decisions 最多 6 条，action_items 最多 12 条。
+4) 语言使用中文。
+
+会议文本：
+{transcript[:25000]}
+"""
+
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                max_output_tokens=1800,
+            ),
+        )
+
+        raw = (resp.text or "").strip()
+        if raw.startswith("```json"):
+            raw = raw[7:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+        elif raw.startswith("```"):
+            raw = raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+
+        parsed = json.loads(raw)
+        summary = str(parsed.get("summary") or "").strip()
+        decisions = parsed.get("decisions") if isinstance(parsed.get("decisions"), list) else []
+        actions = parsed.get("action_items") if isinstance(parsed.get("action_items"), list) else []
+
+        cleaned_actions = []
+        for item in actions[:12]:
+            if not isinstance(item, dict):
+                continue
+            task = str(item.get("task") or "").strip()
+            if not task:
+                continue
+            owner = str(item.get("owner") or "待定").strip() or "待定"
+            due_date = str(item.get("due_date") or "待定").strip() or "待定"
+            priority = str(item.get("priority") or "medium").strip().lower()
+            if priority not in ("high", "medium", "low"):
+                priority = "medium"
+            cleaned_actions.append(
+                {
+                    "task": task,
+                    "owner": owner,
+                    "due_date": due_date,
+                    "priority": priority,
+                }
+            )
+
+        return jsonify(
+            {
+                "success": True,
+                "summary": summary,
+                "decisions": [str(d).strip() for d in decisions[:6] if str(d).strip()],
+                "action_items": cleaned_actions,
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

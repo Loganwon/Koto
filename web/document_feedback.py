@@ -1230,6 +1230,16 @@ class DocumentFeedbackSystem:
             if _fb_items:
                 logger.warning(f"[DocumentFeedback] ⚠️ 单段AI失败，已用本地兜底（{len(_fb_items)}条），均已过滤")
                 logger.error(f"[DocumentFeedback] ❌ 单段API错误: {_single_last_err[:100]}")
+
+            # 安全兜底：AI 成功但返回空列表（文档可能无明显翻译腔但有其他问题），
+            # 自动运行本地规则引擎确保用户始终获得建议反馈。
+            _local_fallback_triggered = False
+            if not anno_list and not _fb_items:
+                logger.info("[DocumentFeedback] ℹ️ AI 返回空标注，启用本地规则兜底")
+                anno_list = self._fallback_annotations_from_chunk(content_for_chunking)
+                _local_fallback_triggered = bool(anno_list)
+                logger.info(f"[DocumentFeedback] 🔧 本地规则兜底生成 {len(anno_list)} 条标注")
+
             return {
                 "success": True,
                 "file_path": file_path,
@@ -1237,10 +1247,10 @@ class DocumentFeedbackSystem:
                 "summary": f"单段AI标注，生成{len(anno_list)}条修改建议",
                 "annotation_count": len(anno_list),
                 "chunks_processed": 1,
-                "fallback_used": len(_fb_items) > 0 and len(anno_list) == 0,
+                "fallback_used": (_local_fallback_triggered and not _fb_items) or (len(_fb_items) > 0 and len(anno_list) == 0),
                 "partial_fallback": len(_fb_items) > 0 and len(anno_list) > 0,
-                "fallback_chunk_count": 1 if _fb_items else 0,
-                "ai_chunk_count": 1 if anno_list else 0,
+                "fallback_chunk_count": 1 if (_fb_items or _local_fallback_triggered) else 0,
+                "ai_chunk_count": 0 if _local_fallback_triggered else (1 if anno_list else 0),
                 "last_api_error": _single_last_err,
             }
 
@@ -2285,10 +2295,17 @@ class DocumentFeedbackSystem:
 - **保留专业术语**：技术栈名称（Python/MySQL/React等）、公司名、学校名、证书名**禁止修改**。
 - **保留原有结构**：不新增板块，不建议调整顺序，只改文字表述。"""
         else:
-            persona = "你是一名资深学术编辑"
+            persona = "你是一名资深中文编辑和写作顾问"
             task_intro = f"请逐段审阅此{doc_type.upper()}文档片段（共{para_count}段），基于全文背景进行直接修改。"
-            default_req = "对文档进行学术润色，提升表达的专业性、准确性和连贯性"
-            type_specific_tips = ""
+            default_req = "对文档进行全面编辑润色，包括：纠正翻译腔、消除官话套话、精简冗余表述、提升表达清晰度和逻辑连贯性"
+            type_specific_tips = """
+### 中文文档专项审查维度（请全面扫描，不局限于翻译问题）：
+- **官话套话**：删除"切实""扎实推进""稳步推进""持续深化""大力推进"等空洞套话，用具体动作替代。
+- **重复冗余**：找出同义重复（"提升和改善"、"推进和落实"）、无意义的修饰词（"进一步""不断地""积极"）。
+- **抽象模糊**：将"高质量发展""新质生产力""创新驱动"等空泛表述换成有具体含义的说法（如果语境允许）。
+- **翻译腔/书面腔**：纠正不自然的书面体（"进行了XXX"→"做了XXX"，"对XXX进行XXX"→直接动词）。
+- **句式臃肿**：拆分超长句子，删除"的"字长串（"对于XXX的XXX的XXX"）。
+- **逻辑断层**：标注句间逻辑不通或推论不当之处。"""
         
         # 如果提供了全文背景，限制长度以免超限(保留开头结尾和目录大纲信息)
         global_ctx_prompt = ""

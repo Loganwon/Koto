@@ -443,7 +443,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "task_types": ["DOC_ANNOTATE", "CODER"],
         "priority": 75,
         "conflict_with": ["code_best_practices"],
-        "executor_tools": ["read_file_snippet", "find_file", "list_directory"],
+        "executor_tools": ["read_file", "find_file", "list_directory"],
         "plan_template": [
             "读取目标代码文件或代码块",
             "分析安全性（注入风险/硬编码密钥/权限漏洞）",
@@ -493,7 +493,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户遇到 Python 报错、traceback、AttributeError、ImportError 等 bug 需要调试",
         "task_types": ["CODER"],
         "priority": 80,
-        "executor_tools": ["read_file_snippet", "find_file", "execute_python"],
+        "executor_tools": ["read_file", "find_file", "python_exec"],
         "plan_template": [
             "读取错误信息或问题代码文件",
             "分析完整 traceback，从最末帧定位根本原因",
@@ -1087,25 +1087,23 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要读取 PDF、解析 PDF 内容、提取 PDF 文字、分析 PDF 文档",
         "task_types": ["RESEARCH", "FILE_GEN", "DOC_ANNOTATE", "CHAT"],
         "priority": 60,
-        "executor_tools": ["read_file_snippet", "find_file", "summarize_file"],
+        "executor_tools": ["read_file", "find_file"],
         "plan_template": [
             "定位目标 PDF 文件路径（未知时用 find_file 搜索）",
-            "调用 read_file_snippet 读取前 8000 字内容",
-            "若内容被截断则再调用 summarize_file 获取针对性摘要",
+            "调用 read_file 读取文件内容",
+            "内容过长时分多次调用 read_file 分段读取关键部分",
             "基于读取内容直接回答用户问题",
         ],
         "prompt": (
             "\n\n## 📕 文件工具：PDF 深度解析\n"
             "\n**工具调用规范：**\n"
-            "1. **路径已知** → 直接调用 `read_file_snippet(path, max_chars=8000)` 读取前 8000 字\n"
-            "   - 返回内容若末尾带 `...` 说明被截断，文件有更多内容\n"
-            '   - 截断时：再调用 `summarize_file(path, focus="用户的具体问题")` 获取针对性摘要\n'
+            "1. **路径已知** → 直接调用 `read_file(path)` 读取文件内容\n"
+            "   - 内容过长时分多次读取关键段落\n"
             '2. **路径未知** → 先调用 `find_file(query="文件名关键词", category="document", limit=5)` 定位文件\n'
-            '3. **超长文档（>10页）** → 优先用 `summarize_file(path, focus="...")` 而非全文读取\n'
+            "3. **超长文档（>10页）** → 分段读取不同页码范围\n"
             "\n**边界情况处理：**\n"
             "- 若读取内容乱码（全是`?????`）→ 提示用户该 PDF 可能是扫描件无法直接提取文字\n"
             "- 若返回内容极短或空白 → 提示 PDF 可能加密或损坏，建议用户手动检查\n"
-            "- 多页 PDF：`read_file_snippet` 只读前 8 页，如需更多页请用 `summarize_file`\n"
             "\n**输出要求：**\n"
             "- 读取完成后直接呈现内容，不要重复文件路径\n"
             "- 如用户有具体问题，基于读取内容直接回答，不要原文堆砌"
@@ -1122,12 +1120,12 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要读取或查看各种类型的文件，需要解析文件内容",
         "task_types": ["RESEARCH", "FILE_GEN", "CHAT", "DOC_ANNOTATE"],
         "priority": 61,
-        "executor_tools": ["read_file_snippet", "find_file", "summarize_file", "list_directory"],
+        "executor_tools": ["read_file", "find_file", "list_directory"],
         "plan_template": [
             "识别文件扩展名确定读取策略",
             "路径不确定时用 find_file 定位文件",
-            "按格式调用对应工具读取内容（PDF/DOCX/XLSX/CSV/TXT）",
-            "文件过长时改用 summarize_file 获取针对性摘要",
+            "按格式调用 read_file 读取内容（PDF/DOCX/XLSX/CSV/TXT）",
+            "内容过长时分段读取关键部分",
             "整理并呈现文件内容，回答用户问题",
         ],
         "prompt": (
@@ -1135,14 +1133,14 @@ BUILTIN_SKILLS: List[Dict] = [
             "\n**按扩展名选择读取方式（严格遵守）：**\n"
             "| 格式 | 工具调用 | 最大字数 | 说明 |\n"
             "|------|---------|---------|------|\n"
-            "| `.pdf` | `read_file_snippet(path, 8000)` | PyPDF2 最多 8 页 | 扫描件可能乱码 |\n"
-            "| `.docx` | `read_file_snippet(path, 8000)` | 全部段落 | python-docx 提取 |\n"
-            "| `.xlsx` / `.xls` | `read_file_snippet(path, 6000)` | 最多 200 行 | openpyxl 提取 |\n"
-            "| `.csv` | `read_file_snippet(path, 10000)` | 纯文本 | 逗号分隔 |\n"
-            "| `.txt` / `.md` | `read_file_snippet(path, 10000)` | 全文 | UTF-8/GBK 自动检测 |\n"
-            "| `.json` / `.xml` / `.yaml` | `read_file_snippet(path, 10000)` | 结构化文本 | 原样返回 |\n"
-            "| `.py` / `.js` / `.ts` / `.sql` | `read_file_snippet(path, 10000)` | 代码文件 | 原样返回 |\n"
-            "| `.pptx` | ⚠️ **不支持** read_file_snippet | — | 见下方特殊处理 |\n"
+            "| `.pdf` | `read_file(path)` | PyPDF2 最多 8 页 | 扫描件可能乱码 |\n"
+            "| `.docx` | `read_file(path)` | 全部段落 | python-docx 提取 |\n"
+            "| `.xlsx` / `.xls` | `read_file(path)` | 最多 200 行 | openpyxl 提取 |\n"
+            "| `.csv` | `read_file(path)` | 纯文本 | 逗号分隔 |\n"
+            "| `.txt` / `.md` | `read_file(path)` | 全文 | UTF-8/GBK 自动检测 |\n"
+            "| `.json` / `.xml` / `.yaml` | `read_file(path)` | 结构化文本 | 原样返回 |\n"
+            "| `.py` / `.js` / `.ts` / `.sql` | `read_file(path)` | 代码文件 | 原样返回 |\n"
+            "| `.pptx` | ⚠️ **通过 python_exec 解析** | — | 见下方特殊处理 |\n"
             "\n**PPTX 特殊处理（必须走 CODER 路径）：**\n"
             "```python\n"
             "from pptx import Presentation\n"
@@ -1155,7 +1153,7 @@ BUILTIN_SKILLS: List[Dict] = [
             "```\n"
             "\n**通用规则：**\n"
             '- 路径不确定时先调用 `find_file(query="文件名", limit=5)` 定位\n'
-            '- 文件过长时改用 `summarize_file(path, focus="用户问题")` 获取摘要\n'
+            "- 文件过长时分段读取关键部分\n"
             "- 读取失败时告知用户具体失败原因（文件不存在/格式不对/编码问题）"
         ),
         "enabled": False,
@@ -1176,25 +1174,22 @@ BUILTIN_SKILLS: List[Dict] = [
             "\n**三步解析法：**\n"
             "1. **快速预览** \n"
             "   ```\n"
-            "   read_file_snippet(path, max_chars=3000)  # 读取文档开头，了解结构\n"
+            "   read_file(path)  # 读取文档开头，了解结构\n"
             "   ```\n"
             "   读完后：识别文档类型（报告/合同/论文/手册）、章节结构、主要话题\n"
             "\n"
-            "2. **针对性摘要**（按需多次调用，每次聚焦不同维度）：\n"
-            "   ```\n"
-            '   summarize_file(path, focus="文档的核心结论和主要观点")\n'
-            '   summarize_file(path, focus="具体的数据、统计和事实")\n'
-            '   summarize_file(path, focus="风险、问题和注意事项")\n'
-            "   ```\n"
+            "2. **分段精读**（按需多次调用 read_file，每次聚焦不同章节）：\n"
+            "   - 读取核心结论和主要观点所在章节\n"
+            "   - 读取具体数据、统计和事实所在章节\n"
+            "   - 读取风险、问题和注意事项所在章节\n"
             "\n"
-            "3. **综合整理**：将多次摘要的结果合并，用结构化格式呈现\n"
+            "3. **综合整理**：将多次分段读取的结果合并，用结构化格式呈现\n"
             "\n**输出格式建议：**\n"
             "- 📌 文档概述（1句话总结）\n"
             "- 📋 核心内容（分章节条目）\n"
             "- 📊 关键数据/事实\n"
             "- ⚠️ 注意事项/风险点（如有）\n"
-            "- 💡 我的分析与建议（基于内容）\n"
-            "\n**注意：** `summarize_file` 内部最多处理 6000 字原文，不同的 `focus` 参数会引导 AI 提取不同方面"
+            "- 💡 我的分析与建议（基于内容）"
         ),
         "enabled": False,
     },
@@ -1208,7 +1203,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要分析表格数据、Excel 文件、CSV 数据，进行统计或数据解读",
         "task_types": ["RESEARCH", "FILE_GEN", "CHAT"],
         "priority": 63,
-        "executor_tools": ["read_file_snippet", "find_file", "execute_python"],
+        "executor_tools": ["read_file", "find_file", "load_data", "describe_data", "query_data", "analyze_trends", "python_exec"],
         "plan_template": [
             "定位并读取 Excel/CSV 数据文件",
             "分析数据结构（行列数、字段名、数据类型、缺失值）",

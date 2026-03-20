@@ -238,6 +238,85 @@ class OutputSpec:
 
 
 # ══════════════════════════════════════════════════════════════════
+# UI 配置：SkillUIConfig
+# ══════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class SkillUIConfig:
+    """Skill 的 UI 定制配置。当此 Skill 启用时，可改变聊天界面的视觉主题。"""
+
+    theme: str = ""
+    css_vars: Dict[str, str] = field(default_factory=dict)
+    input_placeholder: str = ""
+    welcome_text: str = ""
+    overlay_effect: str = ""  # "stars" | "smoke" | "crystals" | "candles" | ""
+    title_text: str = ""
+    subtitle_text: str = ""
+    assistant_prefix: str = ""
+    font_style: str = ""  # "serif" | "mono" | "handwriting" | ""
+    hide_skill_bar: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "theme": self.theme,
+            "css_vars": self.css_vars,
+            "input_placeholder": self.input_placeholder,
+            "welcome_text": self.welcome_text,
+            "overlay_effect": self.overlay_effect,
+            "title_text": self.title_text,
+            "subtitle_text": self.subtitle_text,
+            "assistant_prefix": self.assistant_prefix,
+            "font_style": self.font_style,
+            "hide_skill_bar": self.hide_skill_bar,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SkillUIConfig":
+        return cls(
+            theme=data.get("theme", ""),
+            css_vars=data.get("css_vars", {}),
+            input_placeholder=data.get("input_placeholder", ""),
+            welcome_text=data.get("welcome_text", ""),
+            overlay_effect=data.get("overlay_effect", ""),
+            title_text=data.get("title_text", ""),
+            subtitle_text=data.get("subtitle_text", ""),
+            assistant_prefix=data.get("assistant_prefix", ""),
+            font_style=data.get("font_style", ""),
+            hide_skill_bar=data.get("hide_skill_bar", False),
+        )
+
+    def is_empty(self) -> bool:
+        return (
+            not self.theme
+            and not self.css_vars
+            and not self.input_placeholder
+            and not self.welcome_text
+            and not self.overlay_effect
+            and not self.title_text
+            and not self.subtitle_text
+            and not self.assistant_prefix
+            and not self.font_style
+            and not self.hide_skill_bar
+        )
+
+    def merge(self, other: "SkillUIConfig") -> "SkillUIConfig":
+        """合并两个 UIConfig，other 的非空字段覆盖 self（用于多 Skill 共存）"""
+        return SkillUIConfig(
+            theme=other.theme or self.theme,
+            css_vars={**self.css_vars, **other.css_vars},
+            input_placeholder=other.input_placeholder or self.input_placeholder,
+            welcome_text=other.welcome_text or self.welcome_text,
+            overlay_effect=other.overlay_effect or self.overlay_effect,
+            title_text=other.title_text or self.title_text,
+            subtitle_text=other.subtitle_text or self.subtitle_text,
+            assistant_prefix=other.assistant_prefix or self.assistant_prefix,
+            font_style=other.font_style or self.font_style,
+            hide_skill_bar=self.hide_skill_bar or other.hide_skill_bar,
+        )
+
+
+# ══════════════════════════════════════════════════════════════════
 # 核心：SkillDefinition
 # ══════════════════════════════════════════════════════════════════
 
@@ -352,6 +431,10 @@ class SkillDefinition:
     # 示例 I/O 对，供 UI 展示和测试
     # 格式: [{"input": "...", "output": "...", "note": "...（可选）"}, ...]
     examples: List[Dict[str, Any]] = field(default_factory=list)
+
+    # ── UI 定制配置 ──────────────────────────────────────────────────────────
+    # 激活此 Skill 时，用于改变聊天界面视觉主题
+    ui_config: "SkillUIConfig" = field(default_factory=lambda: SkillUIConfig())
 
     # ── Manifest v2 字段 ─────────────────────────────────────────────────────
     # 兼容性约束: {"min_koto_version": "1.0.0", "platform": "windows"}
@@ -592,6 +675,7 @@ class SkillDefinition:
             "plan_template": self.plan_template,
             "executor_tools": self.executor_tools,
             "entry_point": self.entry_point,
+            "ui_config": self.ui_config.to_dict() if self.ui_config else {},
         }
 
     @classmethod
@@ -658,6 +742,7 @@ class SkillDefinition:
             default_triggers=data.get("default_triggers", []),
             plan_template=data.get("plan_template", []),
             entry_point=data.get("entry_point"),
+            ui_config=SkillUIConfig.from_dict(data["ui_config"]) if data.get("ui_config") else SkillUIConfig(),
         )
 
     @classmethod

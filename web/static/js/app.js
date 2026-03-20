@@ -7,6 +7,13 @@ let lockedTaskType = null;  // 用户手动选择的任务类型
 let selectedModel = 'auto'; // 用户选择的模型 (auto = 自动选择)
 let enableMiniGame = true; // 是否启用等待小游戏
 const MAX_UPLOAD_FILES = 10;
+const PROJECT_OPTIONS = [
+    { key: 'default', label: '默认项目' },
+    { key: 'work', label: '工作' },
+    { key: 'study', label: '学习' },
+    { key: 'life', label: '生活' }
+];
+let currentProject = localStorage.getItem('koto.currentProject') || 'default';
 
 
 // ================= Mini Game (Dino Runner) =================
@@ -314,6 +321,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await checkSetupStatus();
     
     // 3. \u52a0\u8f7d\u4f1a\u8bdd\u548c\u72b6\u6001
+    initProjectSelector();
     await loadSessions();
     checkStatus();
     initCapabilityButtons();
@@ -525,24 +533,73 @@ function browseSetupFolder() {
     document.getElementById('folderModal').classList.add('active');
 }
 
+function getProjectSessionPrefix(projectKey = currentProject) {
+    return projectKey === 'default' ? '' : `proj_${projectKey}__`;
+}
+
+function listProjectSessions(allSessions) {
+    const list = Array.isArray(allSessions) ? allSessions : [];
+    const prefix = getProjectSessionPrefix();
+    if (!prefix) {
+        return list.filter(name => !/^proj_[a-z0-9_-]+__/.test(String(name || '')));
+    }
+    return list.filter(name => String(name || '').startsWith(prefix));
+}
+
+function toProjectSessionName(rawName, projectKey = currentProject) {
+    const clean = String(rawName || '').trim();
+    if (!clean) return clean;
+    const prefix = getProjectSessionPrefix(projectKey);
+    return prefix ? `${prefix}${clean}` : clean;
+}
+
+function toSessionDisplayName(sessionName) {
+    const text = String(sessionName || '');
+    const prefix = getProjectSessionPrefix();
+    if (prefix && text.startsWith(prefix)) return text.slice(prefix.length);
+    return text;
+}
+
+function initProjectSelector() {
+    const select = document.getElementById('projectSelect');
+    if (!select) return;
+    if (!PROJECT_OPTIONS.some(p => p.key === currentProject)) {
+        currentProject = 'default';
+        localStorage.setItem('koto.currentProject', currentProject);
+    }
+    select.innerHTML = PROJECT_OPTIONS.map(project =>
+        `<option value="${project.key}">${project.label}</option>`
+    ).join('');
+    select.value = currentProject;
+    select.addEventListener('change', async (e) => {
+        currentProject = e.target.value || 'default';
+        localStorage.setItem('koto.currentProject', currentProject);
+        goToWelcome();
+        await loadSessions();
+    });
+}
+
 // ================= Sessions =================
 async function loadSessions() {
     try {
         const response = await fetch('/api/sessions');
         const data = await response.json();
         window._allSessions = data.sessions || [];
+        window._projectSessions = listProjectSessions(window._allSessions);
         const q = document.getElementById('sessionSearchInput');
         const query = q ? q.value.trim() : '';
-        renderSessions(query ? window._allSessions.filter(s => s.toLowerCase().includes(query.toLowerCase())) : window._allSessions);
+        renderSessions(query
+            ? window._projectSessions.filter(s => toSessionDisplayName(s).toLowerCase().includes(query.toLowerCase()))
+            : window._projectSessions);
     } catch (error) {
         console.error('Failed to load sessions:', error);
     }
 }
 
 function filterSessions(query) {
-    const all = window._allSessions || [];
+    const all = window._projectSessions || [];
     const filtered = query.trim()
-        ? all.filter(s => s.toLowerCase().includes(query.trim().toLowerCase()))
+        ? all.filter(s => toSessionDisplayName(s).toLowerCase().includes(query.trim().toLowerCase()))
         : all;
     renderSessions(filtered);
 }
@@ -566,7 +623,7 @@ function renderSessions(sessions) {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
             </svg>
-            <span class="session-name">${escapeHtml(session)}</span>
+            <span class="session-name">${escapeHtml(toSessionDisplayName(session))}</span>
             <button class="session-rename-btn" data-session="${escapeHtml(session)}" onclick="renameSession(this.dataset.session, event)" title="\u91cd\u547d\u540d\u5bf9\u8bdd">\u270e</button>
             <button class="session-delete-btn" data-session="${escapeHtml(session)}" onclick="deleteSession(this.dataset.session, event)" title="\u5220\u9664\u5bf9\u8bdd">\u2715</button>
         </div>
@@ -639,7 +696,7 @@ function renderWelcomeScreen() {
 
 function _renderWelcomeScreen_unused() {
     // \u6700\u8fd1\u5bf9\u8bdd — removed per user request
-    const sessions = window._allSessions || [];
+    const sessions = window._projectSessions || [];
     const recentSec = document.getElementById('welcomeRecent');
     const recentList = document.getElementById('welcomeRecentList');
     if (recentSec && recentList && sessions.length > 0) {
@@ -670,7 +727,7 @@ async function selectSession(sessionName) {
     console.log(`[SWITCH] 从 ${currentSession} 切换到 ${sessionName}（保持后台任务运行）`);
     
     currentSession = sessionName;
-    document.getElementById('chatTitle').textContent = sessionName;
+    document.getElementById('chatTitle').textContent = toSessionDisplayName(sessionName);
     
     // Update active state
     document.querySelectorAll('.session-item').forEach(item => {
@@ -801,10 +858,11 @@ async function createNewSession(name = null) {
     
     // 自动创建会话
     try {
+        const projectName = toProjectSessionName(name);
         const response = await fetch('/api/sessions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: name })
+            body: JSON.stringify({ name: projectName })
         });
         
         if (response.ok) {
@@ -813,7 +871,7 @@ async function createNewSession(name = null) {
                 // 使用服务端返回的真实会话标识（经过文件名安全处理），
                 // 避免后续发送消息时使用原始名称而创建出另一个空白同名会话
                 currentSession = data.session;
-                document.getElementById('chatTitle').textContent = data.session;
+                document.getElementById('chatTitle').textContent = toSessionDisplayName(data.session);
                 loadSessions();
                 
                 // 清空聊天区域
@@ -844,7 +902,7 @@ async function confirmNewSession() {
         const response = await fetch('/api/sessions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name })
+            body: JSON.stringify({ name: toProjectSessionName(name) })
         });
         
         const data = await response.json();
@@ -862,7 +920,7 @@ async function deleteSession(sessionName, event) {
     if (event) event.stopPropagation();
     if (!sessionName) return;
     
-    if (!confirm(`确认删除对话 "${sessionName}"？`)) return;
+    if (!confirm(`确认删除对话 "${toSessionDisplayName(sessionName)}"？`)) return;
     
     // 如果有生成任务，先中止
     if (isSessionGenerating(sessionName)) {
@@ -940,18 +998,19 @@ async function renameSession(sessionName, event) {
             input.replaceWith(span);
         };
         if (!newName || newName === oldName) { restore(); return; }
+        const fullNewName = toProjectSessionName(newName);
         try {
             const resp = await fetch(`/api/sessions/${encodeURIComponent(sessionName)}/rename`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ new_name: newName }),
+                body: JSON.stringify({ new_name: fullNewName }),
             });
             const data = await resp.json();
             if (data.success) {
                 const newSession = data.new_session;
                 const span = document.createElement('span');
                 span.className = 'session-name';
-                span.textContent = newSession;
+                span.textContent = toSessionDisplayName(newSession);
                 input.replaceWith(span);
                 item.dataset.session = newSession;
                 const delBtn = item.querySelector('.session-delete-btn');
@@ -960,7 +1019,7 @@ async function renameSession(sessionName, event) {
                 if (renBtn) renBtn.dataset.session = newSession;
                 if (currentSession === sessionName) {
                     currentSession = newSession;
-                    document.getElementById('chatTitle').textContent = newSession;
+                    document.getElementById('chatTitle').textContent = toSessionDisplayName(newSession);
                 }
             } else {
                 alert('重命名失败: ' + (data.error || '未知错误'));
@@ -1424,6 +1483,173 @@ async function generateMorningBrief() {
         if (btn) {
             btn.disabled = false;
             btn.textContent = '🌅 简报';
+        }
+    }
+}
+
+async function trainWritingStyle() {
+    const sampleText = prompt('请粘贴你的写作样本（建议 200 字以上，用于学习风格）:');
+    if (!sampleText || !sampleText.trim()) return;
+
+    const sampleName = prompt('给这个风格样本起个名字（可选）:', 'default') || 'default';
+
+    try {
+        const btn = document.getElementById('writingStyleBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ 学习中';
+        }
+
+        const resp = await fetch('/api/memory/style-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sample_text: sampleText, sample_name: sampleName })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || '风格学习失败');
+        }
+
+        const profile = data.style_profile || {};
+        const summary = [
+            `✅ 写作风格学习完成（样本：${sampleName}）`,
+            `- 语气：${profile.formality || 'neutral'}`,
+            `- 详细度：${profile.preferred_detail_level || 'moderate'}`,
+            `- 结构偏好：${profile.structure_preference || 'paragraph_first'}`,
+            `- 风格标签：${Array.isArray(profile.tone_tags) ? profile.tone_tags.join('、') : '无'}`
+        ].join('\n');
+
+        const chatMessages = document.getElementById('chatMessages');
+        const welcome = document.getElementById('welcomeScreen');
+        if (welcome) welcome.style.display = 'none';
+        chatMessages.insertAdjacentHTML('beforeend', renderMessage('assistant', summary, {
+            task: 'STYLE_PROFILE',
+            taskLabel: '风格学习'
+        }));
+        scrollToBottomForce();
+        showNotification('写作风格已更新', 'success', 1800);
+    } catch (err) {
+        console.error('[StyleProfile] train failed:', err);
+        showNotification(`风格学习失败: ${err.message || err}`, 'error', 2600);
+    } finally {
+        const btn = document.getElementById('writingStyleBtn');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '✍️ 风格学习';
+        }
+    }
+}
+
+async function createReminderFromAction(task, dueDate, btnEl) {
+    // Parse due_date string (e.g. "2026-03-25", "明天", "下周五") into ISO8601 best-effort
+    let isoTime = null;
+    const dateMatch = dueDate && dueDate.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (dateMatch) {
+        // Use 09:00 on the due date as default reminder time
+        isoTime = `${dateMatch[0]}T09:00:00`;
+    }
+
+    try {
+        if (btnEl) { btnEl.disabled = true; btnEl.textContent = '⏳'; }
+        const body = { title: `📋 ${task}`, message: `会议行动项：${task}（截止：${dueDate}）`, icon: 'task' };
+        if (isoTime) body.time = isoTime; else body.seconds = 3600; // 1h later if no parsed date
+        const resp = await fetch('/api/reminders/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) throw new Error(data.error || '添加失败');
+        if (btnEl) { btnEl.textContent = '✅ 已创建'; btnEl.classList.add('reminder-done'); }
+        showNotification(`提醒已创建：${task}`, 'success', 2000);
+    } catch (err) {
+        if (btnEl) { btnEl.disabled = false; btnEl.textContent = '📅 创建提醒'; }
+        showNotification(`创建提醒失败: ${err.message}`, 'error', 2600);
+    }
+}
+
+async function extractMeetingActions() {
+    const transcript = prompt('请粘贴会议转录/纪要文本（建议 300 字以上）:');
+    if (!transcript || !transcript.trim()) return;
+
+    const btn = document.getElementById('meetingActionsBtn');
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '⏳ 提取中';
+        }
+
+        const resp = await fetch('/api/speech/extract-actions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: transcript })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.success) {
+            throw new Error(data.error || '行动项提取失败');
+        }
+
+        const summary = (data.summary || '（无摘要）').trim();
+        const decisions = Array.isArray(data.decisions) ? data.decisions : [];
+        const actions = Array.isArray(data.action_items) ? data.action_items : [];
+
+        // Build HTML directly so action rows can have interactive reminder buttons
+        const esc = s => (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+        let decisionsHtml = decisions.length
+            ? '<ul>' + decisions.map(d => `<li>${esc(d)}</li>`).join('') + '</ul>'
+            : '<p class="muted-text">（无）</p>';
+
+        let actionsHtml = '';
+        if (actions.length) {
+            const rows = actions.map((item, idx) => {
+                const p = (item.priority || 'medium').toLowerCase();
+                const pZh = p === 'high' ? '<span class="priority-high">高</span>' : (p === 'low' ? '<span class="priority-low">低</span>' : '<span class="priority-mid">中</span>');
+                const due = esc(item.due_date || '待定');
+                const hasDue = item.due_date && item.due_date !== '待定';
+                const reminderBtn = hasDue
+                    ? `<button class="action-reminder-btn ghost-btn" onclick="createReminderFromAction('${esc(item.task || '')}','${esc(item.due_date || '')}',this)">📅 创建提醒</button>`
+                    : `<span class="muted-text">—</span>`;
+                return `<tr>
+                    <td>${esc(item.task || '')}</td>
+                    <td>${esc(item.owner || '待定')}</td>
+                    <td>${due}</td>
+                    <td>${pZh}</td>
+                    <td>${reminderBtn}</td>
+                </tr>`;
+            }).join('');
+            actionsHtml = `<table class="meeting-actions-table">
+                <thead><tr><th>任务</th><th>负责人</th><th>截止日期</th><th>优先级</th><th>提醒</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>`;
+        } else {
+            actionsHtml = '<p class="muted-text">（未提取到可执行行动项）</p>';
+        }
+
+        const html = `<div class="meeting-actions-card">
+            <div class="meeting-actions-header">📝 会议提炼结果</div>
+            <div class="meeting-actions-section"><strong>摘要</strong><p>${esc(summary)}</p></div>
+            <div class="meeting-actions-section"><strong>关键决策</strong>${decisionsHtml}</div>
+            <div class="meeting-actions-section"><strong>行动项</strong>${actionsHtml}</div>
+        </div>`;
+
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'message assistant-message';
+        msgDiv.innerHTML = html;
+
+        const chatMessages = document.getElementById('chatMessages');
+        const welcome = document.getElementById('welcomeScreen');
+        if (welcome) welcome.style.display = 'none';
+        chatMessages.appendChild(msgDiv);
+        scrollToBottomForce();
+        showNotification('会议行动项提取完成', 'success', 1800);
+    } catch (err) {
+        console.error('[MeetingActions] extract failed:', err);
+        showNotification(`会议提炼失败: ${err.message || err}`, 'error', 2600);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '📝 会议提炼';
         }
     }
 }
@@ -3997,6 +4223,13 @@ function applySettingsToUI() {
         const localOnly = currentSettings.ai?.use_local_only === true;
         localOnlyEl.checked = localOnly;
         applyLocalOnlyMode(localOnly);
+        // 如果本地模式已开启、且有已保存的模型名，预填进选择框
+        if (localOnly && currentSettings.ai?.local_model) {
+            const localPickerEl = document.getElementById('settingLocalModel');
+            if (localPickerEl) {
+                localPickerEl.innerHTML = `<option value="${currentSettings.ai.local_model}">${currentSettings.ai.local_model}</option>`;
+            }
+        }
     }
 
     // Restore UI zoom from server settings (server is the source of truth)
@@ -5113,6 +5346,7 @@ function onLocalOnlyChange(enabled) {
 function applyLocalOnlyMode(enabled) {
     const modelSelect = document.getElementById('settingModel');
     const modelHint = document.getElementById('settingModelHint');
+    const pickerRow = document.getElementById('localModelPickerRow');
     if (enabled) {
         if (modelSelect) {
             modelSelect.disabled = true;
@@ -5120,6 +5354,7 @@ function applyLocalOnlyMode(enabled) {
             modelSelect.style.pointerEvents = 'none';
         }
         if (modelHint) modelHint.textContent = '本地模型独占已开启，所有请求将走 Ollama 本地推理';
+        if (pickerRow) pickerRow.style.display = '';
         selectedModel = 'local';
     } else {
         if (modelSelect) {
@@ -5129,7 +5364,42 @@ function applyLocalOnlyMode(enabled) {
             selectedModel = modelSelect.value || 'auto';
         }
         if (modelHint) modelHint.textContent = 'Auto 会根据任务类型自动选择最合适的模型';
+        if (pickerRow) pickerRow.style.display = 'none';
     }
+}
+
+// 检测本地 Ollama 可用模型
+async function detectLocalModels() {
+    const hintEl = document.getElementById('localModelHint');
+    const selectEl = document.getElementById('settingLocalModel');
+    if (hintEl) hintEl.textContent = '检测中…';
+    try {
+        const resp = await fetch('/api/local-model/list');
+        const data = await resp.json();
+        if (!data.success || !data.models.length) {
+            if (hintEl) hintEl.textContent = data.error ? `检测失败: ${data.error}` : '未检测到已安装的 Ollama 模型';
+            return;
+        }
+        if (selectEl) {
+            selectEl.innerHTML = data.models.map(m => `<option value="${m}">${m}</option>`).join('');
+            // restore saved selection
+            const saved = currentSettings?.ai?.local_model;
+            if (saved && data.models.includes(saved)) selectEl.value = saved;
+        }
+        if (hintEl) hintEl.textContent = `共检测到 ${data.models.length} 个本地模型`;
+    } catch (err) {
+        if (hintEl) hintEl.textContent = `检测失败: ${err.message || err}`;
+    }
+}
+
+// 切换选中的本地模型
+function onLocalModelChange(modelTag) {
+    updateSetting('ai', 'local_model', modelTag);
+    fetch('/api/local-model/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: 'local', model_tag: modelTag})
+    }).catch(err => console.warn('[LocalModel] switch failed:', err));
 }
 
 // ================= 语音输入功能（全新实时方案 v2） =================

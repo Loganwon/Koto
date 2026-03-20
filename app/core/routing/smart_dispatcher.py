@@ -194,6 +194,19 @@ class SmartDispatcher:
             "浏览器打开",
             "自动发邮件",
         ],
+        "MEETING_EXTRACT": [
+            "会议纪要",
+            "会议记录",
+            "提取会议",
+            "整理会议",
+            "总结会议",
+            "会议要点",
+            "提炼会议",
+            "会议行动项",
+            "会议决策",
+            "meeting minutes",
+            "extract action items",
+        ],
     }
 
     # 预计算特征 (字符级 n-gram)
@@ -811,6 +824,23 @@ class SmartDispatcher:
                 f"[SmartDispatcher] 🌤️ 天气实时快速通道: '{user_input[:30]}' → WEB_SEARCH"
             )
             return "WEB_SEARCH", "🌤️ Weather-Direct", context_info
+
+        # === 会议提炼快速通道 ===
+        _MEETING_VERBS = ["提炼", "提取", "整理", "总结", "分析", "归纳"]
+        _MEETING_NOUNS = ["会议", "纪要", "会议记录", "会议内容", "转录", "会议文字"]
+        if any(v in user_lower for v in _MEETING_VERBS) and any(
+            n in user_lower for n in _MEETING_NOUNS
+        ):
+            context_info = context_info or {}
+            context_info["routing_list"] = cls._build_routing_list(
+                similarity_scores,
+                boosts={"MEETING_EXTRACT": 1.0},
+                reasons={"MEETING_EXTRACT": ["rule:meeting_extract_direct"]},
+            )
+            logger.info(
+                f"[SmartDispatcher] 📝 会议提炼快速通道: '{user_input[:30]}' → MEETING_EXTRACT"
+            )
+            return "MEETING_EXTRACT", "📝 Meeting-Extract-Direct", context_info
 
         # === 代码编写快速通道（在本地模型之前，避免 koto-router 误判明确写代码请求）===
         # 条件：含写作动词 + 编程语言/代码概念，但不是"帮我写一段自我介绍"这类纯文本

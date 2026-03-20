@@ -34,7 +34,10 @@
                     ],
     "executor_tools":  [
                            "read_file",
-                           "data_process"
+                           "load_data",
+                           "describe_data",
+                           "query_data",
+                           "analyze_trends"
                        ],
     "task_types":  [
                        "CHAT",
