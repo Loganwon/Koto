@@ -252,4 +252,233 @@ def register_memory_routes(app, get_memory_manager):
             return jsonify({"success": False, "error": str(e)}), 500
 
 
+    @app.route('/api/memories/import-profile', methods=['POST'])
+    def import_memories_from_profile():
+        """从 user_profile.json + shadow_observations.json + personality_matrix.json 生成初始记忆条目"""
+        import json, os, time
+        from pathlib import Path
+        try:
+            memory_mgr = get_memory_manager()
+            added = 0
+            existing_contents = {m.get("content", "") for m in memory_mgr.get_all_memories()}
+
+            # ── 1. user_profile.json ────────────────────────────────────────
+            profile_path = Path("config/user_profile.json")
+            if profile_path.exists():
+                try:
+                    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+                    tech = profile.get("technical_background", {})
+                    style = profile.get("communication_style", {})
+                    prefs = profile.get("preferences", {})
+
+                    langs = tech.get("programming_languages", [])
+                    if langs:
+                        c = f"用户熟悉的编程语言：{', '.join(langs)}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "user_fact", "profile_import")
+                            existing_contents.add(c); added += 1
+
+                    tools = tech.get("tools", [])
+                    if tools:
+                        c = f"用户常用工具：{', '.join(tools[:8])}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "user_fact", "profile_import")
+                            existing_contents.add(c); added += 1
+
+                    domains = tech.get("domains", [])
+                    if domains:
+                        c = f"用户涉及领域：{', '.join(domains[:6])}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "user_fact", "profile_import")
+                            existing_contents.add(c); added += 1
+
+                    level = tech.get("experience_level")
+                    if level and level != "intermediate":
+                        c = f"用户的技术经验等级：{level}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "user_fact", "profile_import")
+                            existing_contents.add(c); added += 1
+
+                    detail = style.get("preferred_detail_level")
+                    if detail:
+                        c = f"用户偏好的回复详细程度：{detail}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "preference", "profile_import")
+                            existing_contents.add(c); added += 1
+
+                    for like in prefs.get("likes", [])[:5]:
+                        c = f"用户喜欢：{like}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "preference", "profile_import")
+                            existing_contents.add(c); added += 1
+
+                    for dislike in prefs.get("dislikes", [])[:5]:
+                        c = f"用户不喜欢：{dislike}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "preference", "profile_import")
+                            existing_contents.add(c); added += 1
+                except Exception as e:
+                    logger.warning(f"[ImportProfile] user_profile 解析失败: {e}")
+
+            # ── 2. personality_matrix.json ──────────────────────────────────
+            matrix_path = Path("config/personality_matrix.json")
+            if matrix_path.exists():
+                try:
+                    matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+
+                    for goal in (matrix.get("goals") or [])[-5:]:
+                        if goal and len(goal) > 3:
+                            c = f"用户近期目标：{goal}"
+                            if c not in existing_contents:
+                                memory_mgr.add_memory(c, "reminder", "profile_import")
+                                existing_contents.add(c); added += 1
+
+                    themes = (matrix.get("recent_themes") or [])[-5:]
+                    if themes:
+                        c = f"用户近期关注话题：{', '.join(themes)}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "topic_summary", "profile_import")
+                            existing_contents.add(c); added += 1
+
+                    expertise = matrix.get("expertise") or {}
+                    top_exp = [k for k, v in sorted(expertise.items(), key=lambda x: -x[1])[:4] if v > 0.2]
+                    if top_exp:
+                        c = f"用户专长领域：{', '.join(top_exp)}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "user_fact", "profile_import")
+                            existing_contents.add(c); added += 1
+                except Exception as e:
+                    logger.warning(f"[ImportProfile] personality_matrix 解析失败: {e}")
+
+            # ── 3. shadow_observations.json ─────────────────────────────────
+            shadow_path = Path("config/shadow_observations.json")
+            if shadow_path.exists():
+                try:
+                    obs = json.loads(shadow_path.read_text(encoding="utf-8"))
+                    topics = obs.get("topics") or {}
+                    top_topics = [k for k, _ in sorted(topics.items(), key=lambda x: -x[1])[:4]]
+                    if top_topics:
+                        c = f"用户高频使用话题：{', '.join(top_topics)}"
+                        if c not in existing_contents:
+                            memory_mgr.add_memory(c, "topic_summary", "profile_import")
+                            existing_contents.add(c); added += 1
+
+                    # 未完成任务
+                    open_tasks = [t for t in (obs.get("open_tasks") or []) if not t.get("done")]
+                    for t in open_tasks[:3]:
+                        c = f"待办事项：{t.get('text', '')}"
+                        if c and c not in existing_contents:
+                            memory_mgr.add_memory(c, "reminder", "profile_import")
+                            existing_contents.add(c); added += 1
+                except Exception as e:
+                    logger.warning(f"[ImportProfile] shadow_observations 解析失败: {e}")
+
+            return jsonify({"success": True, "added": added,
+                            "message": f"已从用户画像导入 {added} 条记忆"})
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return jsonify({"success": False, "error": str(e)}), 500
+
+
+    @app.route('/api/memories/batch-extract', methods=['POST'])
+    def batch_extract_from_chats():
+        """从 chats/ 目录的历史对话 JSON 文件中批量提取记忆（后台异步运行）"""
+        import json, threading
+        from pathlib import Path
+        try:
+            data = request.json or {}
+            max_turns = int(data.get("max_turns", 60))   # 每文件最多处理轮次
+            max_files = int(data.get("max_files", 10))   # 最多处理文件数
+
+            chats_dir = Path("chats")
+            if not chats_dir.exists():
+                return jsonify({"success": False, "error": "chats/ 目录不存在"}), 404
+
+            chat_files = sorted(chats_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:max_files]
+            if not chat_files:
+                return jsonify({"success": False, "error": "没有找到聊天记录文件"}), 404
+
+            def _run():
+                try:
+                    from app.core.memory.memory_reflector import MemoryReflector
+                except Exception:
+                    logger.error("[BatchExtract] 无法导入 MemoryReflector")
+                    return
+
+                # 构造一个简单的 LLM 函数（使用 get_memory_manager 中已有的 generate_fn）
+                llm_fn = None
+                try:
+                    mgr = get_memory_manager()
+                    if hasattr(mgr, "_generate_fn") and mgr._generate_fn:
+                        llm_fn = lambda p: mgr._generate_fn(p, temperature=0.15, max_tokens=600)
+                except Exception:
+                    pass
+
+                if llm_fn is None:
+                    logger.warning("[BatchExtract] 没有可用的 LLM 函数，无法提取记忆")
+                    return
+
+                total_saved = 0
+                for chat_file in chat_files:
+                    try:
+                        raw = json.loads(chat_file.read_text(encoding="utf-8", errors="ignore"))
+                        turns = raw if isinstance(raw, list) else raw.get("messages", raw.get("history", []))
+                        if not isinstance(turns, list):
+                            continue
+
+                        # 配对 user/model 轮次
+                        pairs = []
+                        i = 0
+                        while i < len(turns) - 1:
+                            t = turns[i]
+                            role = t.get("role", "")
+                            parts = t.get("parts", [])
+                            user_text = parts[0] if isinstance(parts, list) and parts else ""
+                            if role == "user" and user_text:
+                                nxt = turns[i + 1]
+                                if nxt.get("role") in ("model", "assistant"):
+                                    ai_parts = nxt.get("parts", [])
+                                    ai_text = ai_parts[0] if isinstance(ai_parts, list) and ai_parts else ""
+                                    if ai_text:
+                                        pairs.append((str(user_text)[:800], str(ai_text)[:600],
+                                                      nxt.get("task", "CHAT")))
+                                        i += 2
+                                        continue
+                            i += 1
+
+                        # 只取最近 max_turns 轮
+                        pairs = pairs[-max_turns:]
+                        session = chat_file.stem
+
+                        for user_msg, ai_msg, task_type in pairs:
+                            try:
+                                mgr = get_memory_manager()
+                                saved = MemoryReflector.reflect_sync(
+                                    user_msg=user_msg,
+                                    ai_msg=ai_msg,
+                                    task_type=task_type or "CHAT",
+                                    session_name=session,
+                                    get_memory_fn=lambda: mgr,
+                                    llm_fn=llm_fn,
+                                )
+                                total_saved += (saved or 0)
+                            except Exception as e:
+                                logger.debug(f"[BatchExtract] turn failed: {e}")
+
+                    except Exception as e:
+                        logger.warning(f"[BatchExtract] 处理 {chat_file.name} 失败: {e}")
+
+                logger.info(f"[BatchExtract] ✅ 批量提取完成，共保存 {total_saved} 条记忆")
+
+            threading.Thread(target=_run, daemon=True, name="batch-extract").start()
+            return jsonify({
+                "success": True,
+                "message": f"已开始从 {len(chat_files)} 个对话文件提取记忆，稍后刷新可查看结果",
+                "files": [f.name for f in chat_files],
+            })
+        except Exception as e:
+            import traceback; traceback.print_exc()
+            return jsonify({"success": False, "error": str(e)}), 500
+
+
     logger.info("🧠 增强记忆系统API路由已注册")

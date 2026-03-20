@@ -656,61 +656,6 @@
             transition: all .15s;
         }
         .sp-ext-link:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
-        /* ── Ask Koto panel ──────────────────────────────────────────────── */
-        .sp-askkoto { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
-        .sp-ak-input-row { display: flex; gap: 6px; align-items: flex-end; }
-        .sp-ak-ask-btn {
-            padding: 7px 14px; border-radius: 8px; border: none; cursor: pointer;
-            background: var(--accent-primary); color: #fff; font-size: 12px; font-weight: 600;
-            white-space: nowrap; transition: opacity .15s; flex-shrink: 0;
-        }
-        .sp-ak-ask-btn:disabled { opacity: .45; cursor: default; }
-        .sp-ak-ask-btn:not(:disabled):hover { opacity: .85; }
-        .sp-ak-result {
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            border-radius: 10px; padding: 10px 12px; display: none;
-        }
-        .sp-ak-reasoning {
-            font-size: 11px; color: var(--text-secondary); line-height: 1.5;
-            margin-bottom: 8px; padding: 6px 9px;
-            background: var(--bg-tertiary); border-radius: 7px;
-        }
-        .sp-ak-cards { display: flex; flex-direction: column; gap: 6px; }
-        .sp-ak-card {
-            display: flex; align-items: center; gap: 8px;
-            padding: 7px 9px; border-radius: 8px;
-            border: 1px solid var(--border-color); background: var(--bg-elevated);
-            transition: border-color .12s;
-        }
-        .sp-ak-card:hover { border-color: var(--accent-primary); }
-        .sp-ak-icon { font-size: 18px; flex-shrink: 0; }
-        .sp-ak-info { flex: 1; min-width: 0; }
-        .sp-ak-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
-        .sp-ak-desc { font-size: 10px; color: var(--text-muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .sp-ak-enable-btn {
-            padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 600;
-            border: 1px solid var(--accent-primary); background: transparent;
-            color: var(--accent-primary); cursor: pointer; transition: all .15s; flex-shrink: 0;
-        }
-        .sp-ak-enable-btn.enabled { background: var(--accent-primary); color: #fff; }
-        .sp-ak-enable-btn:hover { opacity: .8; }
-        /* ── Recommendations strip above catalog ─────────────────────────── */
-        .sp-rec-strip {
-            padding: 8px 12px 4px; border-bottom: 1px solid var(--border-color);
-        }
-        .sp-rec-strip-title {
-            font-size: 10px; font-weight: 600; color: var(--text-muted);
-            letter-spacing: .05em; text-transform: uppercase; margin-bottom: 5px;
-        }
-        .sp-rec-chips { display: flex; gap: 5px; flex-wrap: wrap; }
-        .sp-rec-chip {
-            display: flex; align-items: center; gap: 4px;
-            padding: 3px 9px; border-radius: 20px; font-size: 11px;
-            border: 1px solid var(--border-color); background: var(--bg-tertiary);
-            color: var(--text-secondary); cursor: pointer; transition: all .15s;
-        }
-        .sp-rec-chip:hover { border-color: var(--accent-primary); color: var(--text-primary); }
-        .sp-rec-chip.active { border-color: var(--accent-primary); background: rgba(99,198,255,.12); color: var(--accent-primary); }
         /* ── NotebookLM-style Skills Tile Grid ─────────────────────────────── */
         .sp-tile-grid {
             display: grid; grid-template-columns: 1fr 1fr;
@@ -1080,7 +1025,6 @@
                         </div>
                     </div>
                     <button class="ghost-btn" onclick="openSettings()" title="设置">⚙️ 设置</button>
-                    <button class="ghost-btn" id="morningBriefBtn" onclick="generateMorningBrief()" title="生成晨间简报">🌅 简报</button>
                     <!-- 影子追踪主动交互按鈕 -->
                     <button class="ghost-btn" id="shadowToggleBtn" onclick="openShadowPanel()" title="影子追踪 · 主动交互" style="position:relative;display:none;">
                         👁️ 影子
@@ -1118,20 +1062,25 @@
                         
                         <div class="welcome-screen" id="welcomeScreen">
                             <div class="welcome-card">
-                                <div class="welcome-logo">言</div>
+                                <div class="welcome-logo">\u8a00</div>
                                 <div class="welcome-copy">
-                                    <h2 id="welcomeGreeting">欢迎使用 Koto</h2>
-                                    <p>更轻、更快、更专注的本地 + 云端双引擎助手</p>
+                                    <h2 id="welcomeGreeting">\u6b22\u8fce\u4f7f\u7528 Koto</h2>
+                                    <p>\u66f4\u8f7b\u3001\u66f4\u5feb\u3001\u66f4\u4e13\u6ce8\u7684\u672c\u5730 + \u4e91\u7aef\u53cc\u5f15\u64ce\u52a9\u624b</p>
                                 </div>
+                            </div>
+                            <!-- \u6700\u8fd1\u5bf9\u8bdd\u5feb\u6377\u5b66\u8fdb\u53bb -->
+                            <div id="welcomeRecent" class="welcome-recent" style="display:none;">
+                                <div class="welcome-recent-title">\u6700\u8fd1\u5bf9\u8bdd</div>
+                                <div class="welcome-recent-list" id="welcomeRecentList"></div>
                             </div>
                             <div class="welcome-grid">
                                 <div class="welcome-block full-width">
-                                    <div class="block-title">直接开始对话</div>
+                                    <div class="block-title">\u76f4\u63a5\u5f00\u59cb\u5bf9\u8bdd</div>
                                     <div class="hint-list">
-                                        <span>🤖 <strong>自动任务识别</strong> — 直接输入需求，Koto 会自动判断并分配最合适的处理方式</span>
-                                        <span>📎 <strong>拖拽或上传文件</strong> — 支持 Word、PDF、图片、表格、代码等多种格式直接分析</span>
-                                        <span>🎙️ <strong>语音输入</strong> — 点击麦克风图标，用语音代替打字</span>
-                                        <span>✨ <strong>Skills 系统</strong> — 左下角可激活风格、行为、领域技能，个性化 Koto 的回应方式</span>
+                                        <span>\ud83e\udd16 <strong>\u81ea\u52a8\u4efb\u52a1\u8bc6\u522b</strong> \u2014 \u76f4\u63a5\u8f93\u5165\u9700\u6c42\uff0cKoto \u4f1a\u81ea\u52a8\u5224\u65ad\u5e76\u5206\u914d\u6700\u5408\u9002\u7684\u5904\u7406\u65b9\u5f0f</span>
+                                        <span>\ud83d\udcce <strong>\u62d6\u62fd\u6216\u4e0a\u4f20\u6587\u4ef6</strong> \u2014 \u652f\u6301 Word\u3001PDF\u3001\u56fe\u7247\u3001\u8868\u683c\u3001\u4ee3\u7801\u7b49\u591a\u79cd\u683c\u5f0f\u76f4\u63a5\u5206\u6790</span>
+                                        <span>\ud83c\udf99\ufe0f <strong>\u8bed\u97f3\u8f93\u5165</strong> \u2014 \u70b9\u51fb\u9ea6\u514b\u98ce\u56fe\u6807\uff0c\u7528\u8bed\u97f3\u4ee3\u66ff\u6253\u5b57</span>
+                                        <span>\u2728 <strong>Skills \u7cfb\u7edf</strong> \u2014 \u5de6\u4e0b\u89d2\u53ef\u6fc0\u6d3b\u98ce\u683c\u3001\u884c\u4e3a\u3001\u9886\u57df\u6280\u80fd\uff0c\u4e2a\u6027\u5316 Koto \u7684\u56de\u5e94\u65b9\u5f0f</span>
                                     </div>
                                 </div>
                             </div>
@@ -1267,10 +1216,6 @@
                             <input type="text" id="newMemoryInput" placeholder="输入你想让 Koto 记住的事实或偏好...">
                             <button class="btn-primary btn-sm" onclick="addNewMemory()">添加</button>
                         </div>
-                    </div>
-                    <div class="memory-actions-row" style="display:flex;gap:8px;margin-bottom:8px;">
-                        <button class="btn-secondary btn-sm" onclick="importProfileMemories()" title="将已有的用户画像数据转为记忆条目">📋 导入用户画像</button>
-                        <button class="btn-secondary btn-sm" onclick="batchExtractMemories()" title="从历史聊天记录中 AI 提取记忆（需要片刻）">🔍 从历史对话提取</button>
                     </div>
                     <div class="memory-list" id="memoryList">
                         <div class="memory-empty">正在加载记忆...</div>
@@ -2017,7 +1962,6 @@
                 <button class="sp-tab" data-tab="library" onclick="spSwitchTab('library')">我的库</button>
                 <button class="sp-tab" data-tab="presets" onclick="spSwitchTab('presets')">📦 预设</button>
                 <button class="sp-tab" data-tab="studio" onclick="spSwitchTab('studio')">创意工坊</button>
-                <button class="sp-tab" data-tab="askkoto" onclick="spSwitchTab('askkoto')">🤖 问 Koto</button>
             </div>
             <!-- Category filter chips -->
             <div class="sp-filter-row" id="spFilterRow">
@@ -2033,11 +1977,6 @@
                 <button class="sp-sort-chip active" data-sort="default" onclick="spSetSort('default')">默认</button>
                 <button class="sp-sort-chip" data-sort="recent" onclick="spSetSort('recent')">🕐 最近使用</button>
                 <button class="sp-sort-chip" data-sort="popular" onclick="spSetSort('popular')">🔥 最常用</button>
-            </div>
-            <!-- Recommendations strip (shown when usage data exists) -->
-            <div class="sp-rec-strip" id="spRecStrip" style="display:none;">
-                <div class="sp-rec-strip-title">⭐ 为你推荐</div>
-                <div class="sp-rec-chips" id="spRecChips"></div>
             </div>
             <!-- Skill cards content (catalog / library tabs) -->
             <div class="sp-content" id="spContent">
@@ -2116,24 +2055,6 @@
                     <div class="sp-studio-title">✏️ 手动创建</div>
                     <p class="sp-studio-desc">自定义图标、名称、System Prompt，完全由你掌控</p>
                     <button class="sp-create-btn" onclick="openCreateSkillModal()">＋ 创建自定义 Skill</button>
-                </div>
-            </div>
-            <!-- Ask Koto tab content -->
-            <div class="sp-askkoto" id="spAskKoto" style="display:none;">
-                <div class="sp-studio-section">
-                    <div class="sp-studio-title">🤖 问 Koto 该用什么 Skill</div>
-                    <p class="sp-studio-desc">描述你的任务，让 Koto 帮你挑选最合适的 Skill 组合</p>
-                    <div class="sp-ak-input-row">
-                        <textarea id="spAkTaskInput" class="sp-textarea" rows="3"
-                            placeholder="例：帮我写一封英文商务邮件；分析这段代码的性能问题；用严谨的学术风格回答问题…"></textarea>
-                    </div>
-                    <div style="margin-top:6px;display:flex;justify-content:flex-end;">
-                        <button class="sp-ak-ask-btn" id="spAkAskBtn" onclick="spAskKoto()">✨ 问 Koto</button>
-                    </div>
-                    <div class="sp-ak-result" id="spAkResult">
-                        <div class="sp-ak-reasoning" id="spAkReasoning"></div>
-                        <div class="sp-ak-cards" id="spAkCards"></div>
-                    </div>
                 </div>
             </div>
             <div class="sp-footer">
@@ -2440,9 +2361,9 @@
     <div class="apps-container" id="appsContainer"></div>
 
     <script src="{{ url_for('static', filename='js/auth.js') }}?v=20260315"></script>
-    <script defer src="{{ url_for('static', filename='js/app.js') }}?v=20260319i"></script>
+    <script defer src="{{ url_for('static', filename='js/app.js') }}?v=20260319b"></script>
     <script src="{{ url_for('static', filename='js/app-framework.js') }}?v=20260315"></script>
-    <script defer src="{{ url_for('static', filename='js/tarot-picker.js') }}?v=20260320-v2"></script>
+    <script defer src="{{ url_for('static', filename='js/tarot-picker.js') }}?v=20260319e"></script>
     <script defer src="{{ url_for('static', filename='js/skill-ui.js') }}?v=20260319b"></script>
     <script defer src="{{ url_for('static', filename='js/skill-ui-extensions.js') }}?v=20260526"></script>
 
@@ -2748,7 +2669,6 @@
             const navBtn = document.getElementById('navSkillsBtn');
             if (navBtn) navBtn.classList.add('active');
             spLoadSkills();
-            spLoadRecStrip();
         };
 
         window.closeSkillsPanel = function() {
@@ -2902,30 +2822,23 @@
             });
             const filterRow = document.getElementById('spFilterRow');
             const sortRow   = document.getElementById('spSortRow');
-            const recStrip  = document.getElementById('spRecStrip');
             const content   = document.getElementById('spContent');
             const studio    = document.getElementById('spStudio');
             const presets   = document.getElementById('spPresets');
-            const askKoto   = document.getElementById('spAskKoto');
             // hide everything first
             if (filterRow) filterRow.style.display = 'none';
             if (sortRow)   sortRow.style.display   = 'none';
-            if (recStrip)  recStrip.style.display  = 'none';
             if (content)   content.style.display   = 'none';
             if (studio)    studio.style.display    = 'none';
             if (presets)   presets.style.display   = 'none';
-            if (askKoto)   askKoto.style.display   = 'none';
             if (tab === 'studio') {
                 if (studio) { studio.style.display = 'flex'; spLoadSessionList(); }
             } else if (tab === 'presets') {
                 if (presets) { presets.style.display = 'flex'; spRenderPresets(); }
-            } else if (tab === 'askkoto') {
-                if (askKoto) askKoto.style.display = 'flex';
             } else {
                 if (filterRow) filterRow.style.display = 'flex';
                 if (sortRow)   sortRow.style.display   = 'flex';
                 if (content)   content.style.display   = 'block';
-                spLoadRecStrip();
                 if (tab === 'library') { spLoadSkills(); } else { spRenderCards(); }
             }
         };
@@ -3275,113 +3188,17 @@
         // Called on every message send — records all currently-enabled skills as used
         window.spTrackMessageUsage = function() {
             const now = Date.now();
-            const enabledIds = _spSkills.filter(s => s.enabled).map(s => s.id);
-            if (!enabledIds.length) return;
             try {
-                // localStorage (client-side sort)
                 const lu = spGetLastUsed();
                 const uc = spGetUseCounts();
-                enabledIds.forEach(id => {
-                    lu[id] = now;
-                    uc[id] = (uc[id] || 0) + 1;
+                _spSkills.filter(s => s.enabled).forEach(s => {
+                    lu[s.id] = now;
+                    uc[s.id] = (uc[s.id] || 0) + 1;
                 });
                 localStorage.setItem(LS_LAST_USED, JSON.stringify(lu));
                 localStorage.setItem(LS_USE_COUNT, JSON.stringify(uc));
             } catch(_) {}
-            // Backend persistent record
-            try {
-                fetch('/api/skills/usage', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ skill_ids: enabledIds }),
-                }).catch(() => {});
-            } catch(_) {}
         };
-
-        // Load recommendations strip above catalog/library tabs
-        async function spLoadRecStrip() {
-            const strip = document.getElementById('spRecStrip');
-            const chips = document.getElementById('spRecChips');
-            if (!strip || !chips) return;
-            try {
-                const resp = await fetch('/api/skills/recommendations?limit=6');
-                if (!resp.ok) return;
-                const data = await resp.json();
-                if (!data.success || !data.skills || !data.skills.length) return;
-                chips.innerHTML = data.skills.map(s => {
-                    const active = s.enabled ? ' active' : '';
-                    return `<button class="sp-rec-chip${active}" onclick="spToggleSkill('${s.id}', ${!s.enabled})" title="${(s.description||'').replace(/"/g,'&quot;')}">
-                        ${s.icon || '🔧'} ${s.name}
-                    </button>`;
-                }).join('');
-                strip.style.display = 'block';
-            } catch(_) {}
-        }
-
-        // Ask Koto to recommend skills for a task
-        window.spAskKoto = async function() {
-            const taskInput = document.getElementById('spAkTaskInput');
-            const btn = document.getElementById('spAkAskBtn');
-            const resultEl = document.getElementById('spAkResult');
-            const reasoningEl = document.getElementById('spAkReasoning');
-            const cardsEl = document.getElementById('spAkCards');
-            const task = (taskInput ? taskInput.value : '').trim();
-            if (!task) { taskInput && taskInput.focus(); return; }
-
-            btn.disabled = true;
-            btn.textContent = '思考中…';
-            resultEl.style.display = 'none';
-
-            try {
-                const resp = await fetch('/api/skills/ask-koto', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ task }),
-                });
-                const data = await resp.json();
-                if (!data.success) throw new Error(data.error || '请求失败');
-
-                reasoningEl.textContent = data.reasoning || '';
-                reasoningEl.style.display = data.reasoning ? 'block' : 'none';
-
-                if (!data.skills || !data.skills.length) {
-                    cardsEl.innerHTML = '<div style="font-size:11px;color:var(--text-muted);padding:4px 0;">没有找到特别匹配的 Skill，可以尝试更具体的描述。</div>';
-                } else {
-                    cardsEl.innerHTML = data.skills.map(s => {
-                        const isEnabled = _spSkills.find(x => x.id === s.id)?.enabled || s.enabled;
-                        return `<div class="sp-ak-card" id="spAkCard_${s.id}">
-                            <span class="sp-ak-icon">${s.icon || '🔧'}</span>
-                            <div class="sp-ak-info">
-                                <div class="sp-ak-name">${s.name}</div>
-                                <div class="sp-ak-desc">${(s.description || '').replace(/</g,'&lt;')}</div>
-                            </div>
-                            <button class="sp-ak-enable-btn${isEnabled ? ' enabled' : ''}"
-                                id="spAkEnableBtn_${s.id}"
-                                onclick="spAkToggle('${s.id}', this)">
-                                ${isEnabled ? '✓ 已启用' : '启用'}
-                            </button>
-                        </div>`;
-                    }).join('');
-                }
-                resultEl.style.display = 'block';
-            } catch(e) {
-                cardsEl.innerHTML = `<div style="font-size:11px;color:var(--error-color,#e06c75);padding:4px 0;">⚠ ${e.message}</div>`;
-                resultEl.style.display = 'block';
-            } finally {
-                btn.disabled = false;
-                btn.textContent = '✨ 问 Koto';
-            }
-        };
-
-        window.spAkToggle = async function(skillId, btnEl) {
-            const skill = _spSkills.find(s => s.id === skillId);
-            const toEnable = !(skill ? skill.enabled : btnEl.classList.contains('enabled'));
-            btnEl.textContent = '…';
-            await spToggleSkill(skillId, toEnable);
-            btnEl.classList.toggle('enabled', toEnable);
-            btnEl.textContent = toEnable ? '✓ 已启用' : '启用';
-        };
-
         window.spRenderCards = spRenderCards;
         window.spLoadSkills = spLoadSkills;
 

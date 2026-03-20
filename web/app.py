@@ -1901,6 +1901,17 @@ def _register_blueprints_deferred():
     except Exception as e:
         _app_logger.error(f"[HealthAPI] ❌ 健康检查 API 注册失败: {e}")
 
+    # 注册 Telegram Bot 管理 API（/api/telegram/*）
+    try:
+        from app.api.telegram_bot_routes import telegram_bp as _telegram_bp
+
+        app.register_blueprint(_telegram_bp, url_prefix="/api/telegram")
+        _app_logger.info("[TelegramAPI] ✅ Telegram Bot API 已注册: /api/telegram")
+    except ImportError as e:
+        _app_logger.warning(f"[TelegramAPI] ⚠️ 未能导入 Telegram Bot API 蓝图: {e}")
+    except Exception as e:
+        _app_logger.error(f"[TelegramAPI] ❌ Telegram Bot API 注册失败: {e}")
+
     _app_logger.info("[INIT] ✅ 所有蓝图注册完成")
 
 
@@ -1986,6 +1997,37 @@ def _initialize_background_runtime():
             _app_logger.info("[Flywheel] ✅ 数据飞轮监听器已注册（ShadowTracer → DistillManager）")
         except Exception as _fe:
             _app_logger.warning(f"[Flywheel] ⚠️ 飞轮监听器注册失败（非致命）: {_fe}")
+
+        # 启动 Telegram Bot（有配置 Token 时自动启动）
+        try:
+            from web.telegram_bot import get_telegram_bot
+
+            tg_bot = get_telegram_bot()
+            if tg_bot:
+                tg_bot.start()
+                _app_logger.info("[Telegram] ✅ Telegram Bot 已启动")
+            else:
+                _app_logger.info("[Telegram] ℹ️ 未配置 TELEGRAM_BOT_TOKEN，Bot 不启动")
+        except Exception as _tg_e:
+            _app_logger.warning(f"[Telegram] ⚠️ Bot 启动失败（非致命）: {_tg_e}")
+
+        # 启动晨间简报调度器
+        try:
+            from app.core.services.morning_brief import get_morning_brief_service
+
+            get_morning_brief_service().start_scheduler()
+            _app_logger.info("[MorningBrief] ✅ 晨间简报调度器已启动")
+        except Exception as _mb_e:
+            _app_logger.warning(f"[MorningBrief] ⚠️ 调度器启动失败（非致命）: {_mb_e}")
+
+        # 初始化 ContactManager（建表）
+        try:
+            from app.core.memory.contact_manager import get_contact_manager
+
+            _cm = get_contact_manager()
+            _app_logger.info(f"[ContactCRM] ✅ 联系人 CRM 已就绪 (已收录: {_cm.count()} 位)")
+        except Exception as _cm_e:
+            _app_logger.warning(f"[ContactCRM] ⚠️ 联系人 CRM 初始化失败（非致命）: {_cm_e}")
 
     except Exception as exc:
         _app_logger.warning(f"[Runtime] ⚠️ 后台运行时初始化失败: {exc}")
@@ -2809,6 +2851,60 @@ class WebSearcher:
             )
             return query, instruction
 
+    @staticmethod
+    def _extract_sources(response) -> list:
+        """从 Gemini grounding 响应中提取去重后的来源列表。"""
+        try:
+            candidates = getattr(response, "candidates", None) or []
+            if not candidates:
+                return []
+
+            first = candidates[0]
+            grounding = getattr(first, "grounding_metadata", None)
+            if grounding is None and isinstance(first, dict):
+                grounding = first.get("grounding_metadata")
+            if grounding is None:
+                return []
+
+            chunks = getattr(grounding, "grounding_chunks", None)
+            if chunks is None and isinstance(grounding, dict):
+                chunks = grounding.get("grounding_chunks")
+            if not chunks:
+                return []
+
+            seen = set()
+            sources = []
+            for idx, chunk in enumerate(chunks, 1):
+                web_obj = getattr(chunk, "web", None)
+                if web_obj is None and isinstance(chunk, dict):
+                    web_obj = chunk.get("web") or chunk
+
+                url = getattr(web_obj, "uri", None)
+                title = getattr(web_obj, "title", None)
+                if isinstance(web_obj, dict):
+                    url = url or web_obj.get("uri") or web_obj.get("url")
+                    title = title or web_obj.get("title")
+
+                if not url:
+                    continue
+                norm_url = str(url).strip()
+                if not norm_url or norm_url in seen:
+                    continue
+
+                seen.add(norm_url)
+                sources.append(
+                    {
+                        "id": len(sources) + 1,
+                        "title": (str(title).strip() if title else "未命名来源"),
+                        "url": norm_url,
+                        "domain": norm_url.split("/")[2] if "//" in norm_url and len(norm_url.split("/")) > 2 else "",
+                    }
+                )
+
+            return sources
+        except Exception as exc:
+            _app_logger.debug(f"[WebSearcher] 来源提取失败: {exc}")
+            return []
     @classmethod
     def search_with_grounding(cls, query, skill_prompt=None):
         """使用 Gemini Google Search Grounding 进行实时搜索（意图感知版本）
@@ -7058,8 +7154,6 @@ class KotoBrain:
                                     parts=[types.Part.from_text(text=model_input)],
                                 )
                             ]
-                            if not file_data
-                            else [original_input]
                         ),
                         config=types.GenerateContentConfig(
                             system_instruction=_brain_sys_instruction
@@ -7432,6 +7526,8 @@ def chat_stream():
     user_input = data.get("message", "")
     locked_task = data.get("locked_task")
     locked_model = data.get("locked_model", "auto")
+    # 影子对话上下文（影子模型发出的消息原文，用于让 AI 知道这是哪条影子消息的回复）
+    shadow_context = data.get("shadow_context", "")
 
     _app_logger.debug(
         f"\n[STREAM] Incoming request: locked_task='{locked_task}', locked_model='{locked_model}'"
@@ -7566,6 +7662,20 @@ def chat_stream():
             _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION()
         )  # 降级到新鲜生成的指令
 
+    # 👁️ 影子对话：将影子消息原文和对话历史感知能力注入系统指令
+    if shadow_context:
+        _app_logger.debug(f"[STREAM] 影子对话模式激活，shadow_context 长度={len(shadow_context)}")
+        system_instruction += (
+            "\n\n## 👁️ 影子对话上下文\n"
+            "你正在以 Koto 的身份，回应你之前主动向用户推送的一条消息。\n"
+            f"你之前主动发出的消息是：「{shadow_context}」\n\n"
+            "**重要提示：**\n"
+            "- 你可以查阅上方完整的对话历史，找到用户之前提到的任何信息\n"
+            "- 如果用户要求你执行任务（创建工作流、写代码、打开程序、分析文件等），请直接执行\n"
+            "- 不要重复你刚才发的那条消息，直接回应用户的需求\n"
+            "- 如果用户问起之前的对话内容，从历史记录中找到并引用"
+        )
+
     history = session_manager.load(f"{session_name}.json")
     full_history = session_manager.load_full(f"{session_name}.json")
 
@@ -7697,16 +7807,29 @@ def chat_stream():
     # 在 SmartDispatcher 已确定 task_type 的基础上，进一步获取 skill_id / forward 决策。
     # 以非阻塞方式运行（超时保护），失败时不影响主流程。
     _router_decision = None
+    _local_chat_override = False  # True → 跳过 is_simple_query()，直接走本地 Ollama 通道
     try:
         from app.core.routing.local_model_router import LocalModelRouter as _LMRv2
 
         _router_decision = _LMRv2.classify_v2(user_input, hint=task_type, timeout=1.5)
-        if _router_decision and _router_decision.skill_id:
+        if _router_decision:
             _app_logger.debug(
-                f"[STREAM] 🎯 RouterDecision skill_id={_router_decision.skill_id} "
+                f"[STREAM] 🎯 RouterDecision task={_router_decision.task_type} "
+                f"skill_id={_router_decision.skill_id} "
                 f"forward_to_cloud={_router_decision.forward_to_cloud} "
                 f"confidence={_router_decision.confidence:.2f}"
             )
+            # ── forward_to_cloud=False → 本地可以独立处理，仅在 CHAT 任务上激活
+            # （其他任务类型的本地执行尚未完全支持，保守起见只对 CHAT 开放）
+            if not _router_decision.forward_to_cloud and task_type == "CHAT":
+                _local_chat_override = True
+                _app_logger.debug("[STREAM] 🏠 RouterDecision→本地快速通道 (forward_to_cloud=False)")
+            # ── 将 RouterDecision.hint 注入 context_info（若 SmartDispatcher 未已提供）
+            if _router_decision.hint and context_info and not context_info.get("skill_prompt"):
+                context_info["skill_prompt"] = _router_decision.hint
+                _app_logger.debug(
+                    f"[STREAM] 💡 RouterDecision hint 注入: {_router_decision.hint[:60]}"
+                )
     except Exception as _rv2_err:
         _app_logger.debug(f"[STREAM] RouterDecision classify_v2 跳过: {_rv2_err}")
 
@@ -7793,8 +7916,10 @@ def chat_stream():
         pattern = multi_step_info.get("pattern", "unknown")
 
         # === 🤖 MultiAgent 高质量通路（LangGraph：研究→写作→审核→修订）===
-        # 仅当 LangGraph 可用且路由决策为 langgraph_react（通用复杂任务）时触发
-        if _wf_route == "langgraph_react":
+        # 仅当 LangGraph 可用且路由决策为 langgraph_react（通用开放复杂任务）时触发。
+        # local_plan 已有 LocalPlanner 生成的具体步骤（search / file_gen 等），
+        # 必须走 PlanExecutor 执行真实步骤，不能送入 MultiAgent 流水线（语义不匹配）。
+        if _wf_route == "langgraph_react" and pattern != "local_plan":
             _app_logger.debug(
                 f"[STREAM] 🤖 MultiAgentOrchestrator 通路：RESEARCHER→WRITER→CRITIC→REVISE"
             )
@@ -7805,16 +7930,31 @@ def chat_stream():
                 try:
                     from app.core.agent.multi_agent import MultiAgentOrchestrator
 
-                    orch = MultiAgentOrchestrator.preset_content_pipeline(
-                        model_id=_ma_model,
-                        max_revisions=1,
-                    )
+                    _ma_preset_name = context_info.get("multiagent_preset", "content")
+                    if _ma_preset_name == "code":
+                        orch = MultiAgentOrchestrator.preset_code_pipeline(
+                            model_id=_ma_model,
+                            max_revisions=1,
+                        )
+                    elif _ma_preset_name == "analysis":
+                        orch = MultiAgentOrchestrator.preset_analysis_pipeline(
+                            model_id=_ma_model,
+                            max_revisions=1,
+                        )
+                    else:
+                        orch = MultiAgentOrchestrator.preset_content_pipeline(
+                            model_id=_ma_model,
+                            max_revisions=1,
+                        )
                     _agent_labels = {
-                        "researcher": "📚 研究专员",
-                        "writer":     "✍️ 写作专员",
-                        "critic":     "🔍 审核专员",
-                        "revise":     "🔧 修订专员",
-                        "finalize":   "✅ 整合完成",
+                        "researcher":   "📚 研究专员",
+                        "writer":       "✍️ 写作专员",
+                        "critic":       "🔍 审核专员",
+                        "revise":       "🔧 修订专员",
+                        "coder":        "💻 编码专员",
+                        "reviewer":     "🔎 代码审查专员",
+                        "data_analyst": "📊 数据分析专员",
+                        "finalize":     "✅ 整合完成",
                     }
                     final_output = ""
                     for event in orch.stream(user_input=user_input, session_id=session_name):
@@ -8221,6 +8361,34 @@ def chat_stream():
                     if _lp_next:
                         _lp_msg += f"\n建议后续: {', '.join(_lp_next)}"
                     yield f"data: {json.dumps({'type': 'status', 'message': _lp_msg})}\n\n"
+
+                    # 自检发现缺口 → 触发补充执行（而非仅展示建议）
+                    if _lp_status in ("fail", "partial") and _lp_next:
+                        yield f"data: {json.dumps({'type': 'status', 'message': '⚙️ 自检发现缺口，正在补充执行...'})}\n\n"
+                        try:
+                            _replan_prompt = (
+                                f"原始任务: {user_input}\n\n"
+                                f"已完成步骤摘要:\n{final_result_text[:1500]}\n\n"
+                                f"自检发现的问题: {_lp_summary}\n\n"
+                                f"建议的后续动作: {', '.join(_lp_next)}\n\n"
+                                "请直接完成上述后续动作，输出补充结果。"
+                            )
+                            _replan_resp = client.models.generate_content(
+                                model=SmartDispatcher.get_model_for_task("MULTI_STEP"),
+                                contents=_replan_prompt,
+                                config=types.GenerateContentConfig(
+                                    system_instruction=system_instruction,
+                                    temperature=0.4,
+                                    max_output_tokens=2000,
+                                ),
+                            )
+                            _replan_text = getattr(_replan_resp, "text", "") or ""
+                            if _replan_text:
+                                final_result_text += f"\n\n---\n**补充执行结果**\n{_replan_text}"
+                                _supplement = f"\n\n---\n**补充执行结果**\n{_replan_text}"
+                                yield f"data: {json.dumps({'type': 'token', 'content': _supplement}, ensure_ascii=False)}\n\n"
+                        except Exception as _rp_err:
+                            _app_logger.warning(f"[MULTI_STEP] ⚠️ 自检补充执行失败: {_rp_err}")
 
                 separator = "=" * 50
                 output_text = (
@@ -10126,6 +10294,7 @@ def chat_stream():
                     user_input, skill_prompt=_skill_prompt
                 )
                 response_text = search_result["response"]
+                response_sources = search_result.get("sources") or []
 
                 if (
                     Utils.is_failure_output(response_text)
@@ -10153,6 +10322,7 @@ def chat_stream():
                     fixed_query = (fix_query_resp.text or user_input).strip()
                     search_result = WebSearcher.search_with_grounding(fixed_query)
                     response_text = search_result["response"]
+                    response_sources = search_result.get("sources") or []
 
                 if Utils.is_failure_output(response_text):
                     fix_prompt = Utils.build_fix_prompt(
@@ -10170,6 +10340,8 @@ def chat_stream():
                     response_text = fix_resp.text or response_text
 
                 yield f"data: {json.dumps({'type': 'token', 'content': response_text})}\n\n"
+                if response_sources:
+                    yield f"data: {json.dumps({'type': 'sources', 'sources': response_sources}, ensure_ascii=False)}\n\n"
 
                 # 先保存历史，再发送 done 事件
                 session_manager.append_and_save(
@@ -12902,9 +13074,11 @@ def chat_stream():
                 yield f"data: {json.dumps({'type': 'progress', 'message': '💬 Koto 正在思考...', 'detail': '请稍候'})}\n\n"
 
                 # ═══ 本地模型快速通道：简单问题直接走 Ollama ═══
+                # _local_chat_override: Phase2 RouterDecision.forward_to_cloud=False → 直接本地
+                # is_simple_query():    字数/复杂度兜底判断 → 两者任一为真即走本地
                 from app.core.routing import LocalModelRouter
 
-                if LocalModelRouter.is_simple_query(user_input, task_type, history):
+                if _local_chat_override or LocalModelRouter.is_simple_query(user_input, task_type, history):
                     local_stream = LocalModelRouter.generate_stream(
                         user_input,
                         history=history,
@@ -14872,10 +15046,16 @@ def chat_with_file():
                             from docx import Document as _Doc
 
                             _d = _Doc(_loc_target_path)
+                            # 收集所有段落（含表格单元格内的段落，适配表格排版简历）
+                            _all_paras = list(_d.paragraphs)
+                            for _tbl in _d.tables:
+                                for _row in _tbl.rows:
+                                    for _cell in _row.cells:
+                                        _all_paras.extend(_cell.paragraphs)
                             _total_paras = len(
-                                [p for p in _d.paragraphs if p.text.strip()]
+                                [p for p in _all_paras if p.text.strip()]
                             )
-                            _total_chars = sum(len(p.text) for p in _d.paragraphs)
+                            _total_chars = sum(len(p.text) for p in _all_paras)
                         except Exception:
                             _total_paras = 0
                             _total_chars = 0
@@ -16088,6 +16268,26 @@ def switch_to_mini():
             return jsonify({"success": False, "error": "找不到迷你模式程序"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/window/switch-to-full", methods=["POST"])
+def api_window_switch_to_full():
+    """通过 HTTP 降级调用 WindowAPI.switch_to_full（pywebview JS bridge 不可用时使用）"""
+    window_api = app.config.get("WINDOW_API")
+    if window_api is None:
+        return jsonify({"success": False, "error": "not_in_pywebview"})
+    result = window_api.switch_to_full()
+    return jsonify(result)
+
+
+@app.route("/api/window/switch-to-mini", methods=["POST"])
+def api_window_switch_to_mini():
+    """通过 HTTP 降级调用 WindowAPI.switch_to_mini"""
+    window_api = app.config.get("WINDOW_API")
+    if window_api is None:
+        return jsonify({"success": False, "error": "not_in_pywebview"})
+    result = window_api.switch_to_mini()
+    return jsonify(result)
 
 
 @app.route("/api/switch-to-main", methods=["POST"])
@@ -18451,6 +18651,186 @@ def compare_documents():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+# ── 多文档对比 API ──────────────────────────────────────────────────────────
+
+_COMPARE_UPLOAD_DIR = os.path.join(PROJECT_ROOT, "web", "uploads", "compare")
+os.makedirs(_COMPARE_UPLOAD_DIR, exist_ok=True)
+
+_ALLOWED_COMPARE_EXTS = {
+    '.txt', '.md', '.markdown', '.docx', '.doc',
+    '.pdf', '.xlsx', '.xls', '.pptx', '.ppt',
+}
+
+# 临时 file_id → 实际路径映射（进程内缓存，重启后失效属正常）
+_compare_file_registry: dict = {}
+
+
+@app.route("/api/compare/upload", methods=["POST"])
+def compare_upload():
+    """
+    上传一个文件用于多文档对比，返回 file_id。
+    前端逐文件调用，收集到 file_ids 后再调用 /api/compare/multi。
+    """
+    if "file" not in request.files:
+        return jsonify({"success": False, "error": "未收到文件字段 'file'"}), 400
+
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"success": False, "error": "文件名为空"}), 400
+
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in _ALLOWED_COMPARE_EXTS:
+        return jsonify({
+            "success": False,
+            "error": f"不支持的格式 {ext}，支持: {', '.join(sorted(_ALLOWED_COMPARE_EXTS))}",
+        }), 400
+
+    import uuid as _uuid
+    file_id = _uuid.uuid4().hex
+    save_path = os.path.join(_COMPARE_UPLOAD_DIR, f"{file_id}{ext}")
+
+    try:
+        f.save(save_path)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"保存文件失败: {e}"}), 500
+
+    _compare_file_registry[file_id] = {
+        "path": save_path,
+        "name": f.filename,
+        "size": os.path.getsize(save_path),
+    }
+
+    return jsonify({
+        "success": True,
+        "file_id": file_id,
+        "filename": f.filename,
+        "size": os.path.getsize(save_path),
+    })
+
+
+@app.route("/api/compare/multi", methods=["POST"])
+def compare_multi():
+    """
+    文本 diff 对比多个已上传文档。
+
+    Request JSON:
+        {
+            "file_ids": ["id1", "id2", ...],   // compare_upload 返回的 id
+            "output_format": "inline_json"      // "inline_json" | "markdown" | "html"
+        }
+    """
+    try:
+        from web.document_comparator import DocumentComparator
+
+        data = request.json or {}
+        file_ids = data.get("file_ids", [])
+        output_format = data.get("output_format", "inline_json")
+
+        if len(file_ids) < 2:
+            return jsonify({"success": False, "error": "至少需要两个文件"}), 400
+
+        file_paths = []
+        for fid in file_ids:
+            info = _compare_file_registry.get(fid)
+            if not info:
+                return jsonify({"success": False, "error": f"file_id 不存在或已过期: {fid}"}), 404
+            file_paths.append(info["path"])
+
+        comparator = DocumentComparator()
+        result = comparator.compare_multiple(file_paths, output_format=output_format)
+
+        # 把显示名注入 result
+        if result.get("success"):
+            for i, fid in enumerate(file_ids):
+                info = _compare_file_registry.get(fid, {})
+                if i < len(result.get("files", [])):
+                    result["files"][i]["display_name"] = info.get("name", "")
+
+        return jsonify(result)
+    except Exception as e:
+        _app_logger.exception("[compare_multi] error")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/compare/ai-stream", methods=["POST"])
+def compare_ai_stream():
+    """
+    SSE 流式 AI 语义对比分析。
+
+    Request JSON:
+        {
+            "file_ids": ["id1", "id2", ...],
+            "focus": "general"   // "general" | "argument" | "data" | "structure"
+        }
+    """
+    from flask import Response, stream_with_context
+
+    data = request.json or {}
+    file_ids = data.get("file_ids", [])
+    focus = data.get("focus", "general")
+
+    if len(file_ids) < 2:
+        def _err():
+            yield "data: " + json.dumps({"error": "至少需要两个文件"}) + "\n\n"
+        return Response(stream_with_context(_err()), mimetype="text/event-stream")
+
+    file_paths = []
+    for fid in file_ids:
+        info = _compare_file_registry.get(fid)
+        if info:
+            file_paths.append(info["path"])
+
+    if len(file_paths) < 2:
+        def _err2():
+            yield "data: " + json.dumps({"error": "有效文件不足，请重新上传"}) + "\n\n"
+        return Response(stream_with_context(_err2()), mimetype="text/event-stream")
+
+    def generate():
+        try:
+            from web.document_comparator import DocumentComparator
+
+            comparator = DocumentComparator()
+            prompt = comparator.build_ai_prompt(file_paths, focus=focus)
+            if not prompt:
+                yield "data: " + json.dumps({"error": "无法构建分析 prompt，请检查文件内容"}) + "\n\n"
+                return
+
+            client = get_client()
+            model_id = "gemini-2.5-flash"
+
+            # 支持 Gemini streaming
+            try:
+                for chunk in client.models.generate_content_stream(
+                    model=model_id,
+                    contents=prompt,
+                ):
+                    text = getattr(chunk, "text", "") or ""
+                    if text:
+                        yield "data: " + json.dumps({"chunk": text}) + "\n\n"
+            except AttributeError:
+                # Ollama / 非 streaming 客户端回退
+                response = client.models.generate_content(
+                    model=model_id, contents=prompt
+                )
+                text = getattr(response, "text", "") or str(response)
+                yield "data: " + json.dumps({"chunk": text}) + "\n\n"
+
+            yield "data: " + json.dumps({"done": True}) + "\n\n"
+
+        except Exception as e:
+            _app_logger.exception("[compare_ai_stream] error")
+            yield "data: " + json.dumps({"error": str(e)}) + "\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 # OCR 助手 API
 @app.route("/api/ocr/screenshot", methods=["POST"])
 def ocr_screenshot():
@@ -18831,6 +19211,12 @@ def notebook_upload():
 def notebook_ui():
     """NotebookLM 风格界面"""
     return render_template("notebook_lm.html")
+
+
+@app.route("/doc-compare")
+def doc_compare_ui():
+    """多文档对比界面"""
+    return render_template("doc_compare.html")
 
 
 if __name__ == "__main__":
