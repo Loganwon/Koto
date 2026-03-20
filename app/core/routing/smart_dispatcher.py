@@ -401,6 +401,35 @@ class SmartDispatcher:
 
         return False
 
+    @classmethod
+    def get_trivial_reply(cls, user_input: str) -> str:
+        """
+        为极简输入返回内置快速响应（本地模型不可用时使用，避免调用云端）。
+        匹配顺序：精确问候词 > 感谢 > 告别 > 确认 > 通用兜底。
+        """
+        tl = user_input.strip().lower()
+        if tl in {"你好", "你好呀", "你好啊", "hi", "hello", "哈喽", "嗨", "hey"}:
+            return "你好！😊 有什么我可以帮您？"
+        if tl in {"早上好", "早安"}:
+            return "早上好！☀️ 今天有什么需要帮忙？"
+        if tl in {"中午好"}:
+            return "中午好！🌤️ 需要帮忙吗？"
+        if tl in {"下午好"}:
+            return "下午好！有什么我可以帮您的？"
+        if tl in {"晚上好"}:
+            return "晚上好！🌙 今晚有什么需要帮忙？"
+        if tl in {"晚安"}:
+            return "晚安！🌙"
+        if tl in {"谢谢", "谢谢你", "谢了", "感谢", "多谢", "thanks", "thank you"}:
+            return "不客气！😊 有需要随时叫我。"
+        if tl in {"再见", "拜拜", "bye", "goodbye", "下次见"}:
+            return "再见！👋 有需要随时回来找我。"
+        if tl in {"好的", "好", "明白了", "知道了", "收到", "ok", "okay"}:
+            return "好的，有需要随时说。"
+        if tl in {"嗯", "嗯嗯"}:
+            return "嗯，有什么我可以帮到您？"
+        return "有什么需要帮忙的？😊"
+
     @staticmethod
     def _extract_ngrams(text, n=2):
         """提取字符级 n-gram"""

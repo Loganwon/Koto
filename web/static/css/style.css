@@ -2202,6 +2202,14 @@ a { color: var(--accent-primary); }
 }
 .settings-panel.active { transform: translateX(0); }
 
+/* 设置面板打开时，主内容区向左缩进，避免被遮挡 */
+.main-content {
+    transition: margin-right 0.25s ease;
+}
+body.settings-panel-open .main-content {
+    margin-right: var(--settings-panel-width, 420px);
+}
+
 .panel-header {
     padding: 18px 20px;
     display: flex;

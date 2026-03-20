@@ -4270,6 +4270,7 @@ function openSettings() {
     fileHubLoadStats();     // Load file registry stats
     loadShadowStatus();     // Load shadow watcher status
     document.getElementById('settingsPanel').classList.add('active');
+    document.body.classList.add('settings-panel-open');
     // Sync zoom slider to current state (suppress save - just restoring display)
     const savedZ = parseFloat(localStorage.getItem('koto.uiZoom') || '1');
     setUIZoom(savedZ, true);
@@ -4277,6 +4278,7 @@ function openSettings() {
 
 function closeSettings() {
     document.getElementById('settingsPanel').classList.remove('active');
+    document.body.classList.remove('settings-panel-open');
 }
 
 // ================= Skills Management =================
