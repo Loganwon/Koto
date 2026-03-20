@@ -11,6 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] — 2026-03-20
+
+### Added
+- **Telegram Bot Integration** (`web/telegram_bot.py`, 621 lines): Full Telegram Bot support with message splitting, allowed-user filtering, `get_bot_info`, and a `TELEGRAM_BOT_TOKEN`-driven singleton
+- **Memory API Routes** (`web/memory_api_routes.py`, 485 lines): RESTful memory CRUD (`GET/POST /api/memories`, `DELETE /api/memories/<id>`), user profile (`/api/memory/profile`), stats (`/api/memory/stats`), personality matrix (`/api/memory/personality`), bulk import (`/api/memories/import-profile`), and batch-extract endpoints
+- **Document Comparator** (`web/document_comparator.py`, 464 lines): Refactored multi-format diff engine with `compare_documents`, `compare_multiple` (N-way matrix), `build_ai_prompt`, and `compare_versions`; new `/doc-compare` UI page
+- **Skill UI Extensions**: `skill-ui-extensions.css`, `skill-ui-extensions.js`, `skill-ui.js`, `tarot-picker.js` for richer skill panel interactions
+- **Stress Tests** (`tests/unit/test_stress.py`, 39 tests): Concurrent load tests for TaskLedger, AIRouter cache, auth rate limiter, KnowledgeGraph, SkillPipeline, Flask request flood, large payloads, memory growth, and InterruptManager
+- **PR 20260320 Tests** (`tests/unit/test_pr_20260320.py`, 36 tests): Unit tests for TelegramBot helpers, memory API routes, and DocumentComparator
+
+### Fixed
+- **TaskLedger thread safety** (`app/core/tasks/task_ledger.py`): Added `threading.RLock` to serialise all SQLite access; `check_same_thread=False` alone does not prevent concurrent-connection race conditions
+- **TaskLedger API**: `count()` now accepts `source` kwarg; `list_tasks`/`count` accept `status` as either string or enum value
+- **web/app.py routes restored**: Merge conflict resolution had inadvertently dropped ~3,000 lines including clipboard, email, browser, search, workspace, notes, reminders, and calendar routes — all restored
+
+---
+
 ## [1.3.0] — 2026-03-18
 
 ### Added
