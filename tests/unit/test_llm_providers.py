@@ -34,7 +34,7 @@ class TestGeminiProviderBasic:
 
         captured_models = []
 
-        def fake_call_with_retry(model, contents, config):
+        def fake_call_with_retry(model, contents, config, client=None):
             captured_models.append(model)
             return {"text": "ok", "model": model}
 
