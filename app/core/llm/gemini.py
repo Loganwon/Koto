@@ -61,6 +61,28 @@ class GeminiProvider(LLMProvider):
         else:
             logger.warning("No Google API KEY provided")
 
+    def _get_client(self):
+        """Return a genai.Client for the current request.
+
+        Priority: per-request key in flask.g (set by auth middleware) >
+                  instance key (set at construction, from env).
+        A fresh client is returned only when the request key differs from
+        the instance key, avoiding unnecessary object creation.
+        """
+        try:
+            from flask import g as flask_g
+            request_key = getattr(flask_g, "api_key", None)
+        except RuntimeError:
+            # Outside Flask request context (background threads, tests)
+            request_key = None
+
+        if request_key and request_key != self.api_key and genai:
+            try:
+                return genai.Client(api_key=request_key)
+            except Exception:
+                pass
+        return self.client
+
     def generate_content(
         self,
         prompt: Union[str, List[Dict[str, Any]]],
@@ -70,7 +92,8 @@ class GeminiProvider(LLMProvider):
         stream: bool = False,
         **kwargs,
     ) -> Union[Dict[str, Any], Generator[Dict[str, Any], None, None]]:
-        if not self.client or not types:
+        client = self._get_client()
+        if not client or not types:
             raise ImportError("google.genai client not initialized")
 
         # Route interactions-only models through Interactions API transparently
@@ -96,7 +119,7 @@ class GeminiProvider(LLMProvider):
                 last_stream_exc = None
                 for _stream_attempt in range(self.MAX_RETRIES):
                     try:
-                        response_iter = self.client.models.generate_content_stream(
+                        response_iter = client.models.generate_content_stream(
                             model=model,
                             contents=contents,
                             config=config,
@@ -124,24 +147,26 @@ class GeminiProvider(LLMProvider):
                 raise last_stream_exc  # unreachable but satisfies type checker
 
             # Non-streaming with retry for transient errors
-            return self._call_with_retry(model, contents, config)
+            return self._call_with_retry(model, contents, config, client)
 
         except Exception as exc:
             logger.error(f"Gemini generation error: {exc}")
             raise
 
-    def _call_with_retry(self, model: str, contents, config):
+    def _call_with_retry(self, model: str, contents, config, client=None):
         """Call generate_content with exponential backoff retry on 429/503.
         
         每次调用在独立线程中执行，若超过 CALL_TIMEOUT 秒无响应则抛出
         TimeoutError（消息含 "timed out"），触发上层本地模型兜底逻辑。
         """
+        if client is None:
+            client = self._get_client()
         last_exc = None
         for attempt in range(self.MAX_RETRIES):
             try:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
                     _future = _pool.submit(
-                        self.client.models.generate_content,
+                        client.models.generate_content,
                         model=model,
                         contents=contents,
                         config=config,
@@ -185,7 +210,8 @@ class GeminiProvider(LLMProvider):
     def get_token_count(
         self, prompt: Union[str, List[Dict[str, Any]]], model: str
     ) -> int:
-        if not self.client or not types:
+        client = self._get_client()
+        if not client or not types:
             return 0
         try:
             if isinstance(prompt, str):
@@ -193,7 +219,7 @@ class GeminiProvider(LLMProvider):
             else:
                 # Already in contents-list format
                 contents = prompt  # type: ignore[assignment]
-            response = self.client.models.count_tokens(
+            response = client.models.count_tokens(
                 model=model,
                 contents=contents,
             )
