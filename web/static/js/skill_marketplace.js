@@ -28,9 +28,26 @@ const API = {
 };
 
 /* ═══════════════ State ═══════════════ */
+/* ── Subcategory config (order, labels, colours) ─────────────── */
+const SUBCAT_CONFIG = [
+  { id: 'koto_thinking', label: '🤔 思维增强',   cls: 'subcat-koto-thinking', group: 'Koto 对话能力' },
+  { id: 'personality',  label: '🎭 风格 & 人格', cls: 'subcat-personality',   group: 'Koto 对话能力' },
+  { id: 'code_debug',   label: '🐛 代码调试',    cls: 'subcat-code-debug',    group: '具体任务技能' },
+  { id: 'code_craft',   label: '⚙️ 代码 & 工程', cls: 'subcat-code-craft',    group: '具体任务技能' },
+  { id: 'annotation',   label: '📝 批注 & 审阅', cls: 'subcat-annotation',    group: '具体任务技能' },
+  { id: 'data_excel',   label: '📊 数据 & 表格', cls: 'subcat-data-excel',    group: '具体任务技能' },
+  { id: 'writing',      label: '✍️ 写作 & 文案', cls: 'subcat-writing',       group: '具体任务技能' },
+  { id: 'research',     label: '🔍 调研 & 分析', cls: 'subcat-research',      group: '具体任务技能' },
+  { id: 'file_ops',     label: '📁 文件操作',    cls: 'subcat-file-ops',      group: '具体任务技能' },
+  { id: 'career',       label: '👔 职场 & 学习', cls: 'subcat-career',        group: '具体任务技能' },
+  { id: 'doc_gen',      label: '📄 文档生成',    cls: 'subcat-doc-gen',       group: '自动化工作流' },
+];
+const SUBCAT_BY_ID = Object.fromEntries(SUBCAT_CONFIG.map(s => [s.id, s]));
+
 const state = {
   currentTab: 'catalog',    // catalog | library | studio | import-export
   activeCategory: 'all',
+  activeSubcategory: 'all', // all | koto_thinking | personality | code_debug | ...
   activeNature: 'all',      // all | model_hint | domain_skill | system
   searchQuery: '',
   allSkills: [],
@@ -38,6 +55,7 @@ const state = {
   sortBy: 'name',
   selectedSkills: new Set(),  // for batch export
   stats: {},
+  density: 'standard',        // compact | standard | comfortable
 };
 
 /* ═══════════════ DOM Helpers ═════════════ */
@@ -96,9 +114,6 @@ async function loadCatalog(category = null) {
     } else {
       let url = API.catalog();
       const params = [];
-      if (state.activeCategory && state.activeCategory !== 'all') {
-        params.push(`category=${state.activeCategory}`);
-      }
       if (state.activeNature && state.activeNature !== 'all') {
         params.push(`skill_nature=${state.activeNature}`);
       }
@@ -108,25 +123,90 @@ async function loadCatalog(category = null) {
 
     const skills = data.skills || [];
     state.allSkills = skills;
-    state.filteredSkills = sortSkills(skills);
+
+    // Client-side subcategory filter
+    let filtered = skills;
+    if (state.activeSubcategory && state.activeSubcategory !== 'all') {
+      filtered = skills.filter(s => s.subcategory === state.activeSubcategory);
+    }
+
+    state.filteredSkills = sortSkills(filtered);
     renderSkillGrid('catalog-grid', state.filteredSkills);
     updateResultCount(state.filteredSkills.length, 'catalog');
 
-    // Update sidebar counts
+    // Update sidebar counts (always from full skill list)
     updateSidebarCounts(skills);
     updateActiveBar(skills);
+    renderFilterChips();
   } catch (e) {
     showError('catalog-grid', e.message);
     toast(e.message, 'error');
   }
 }
 
+function renderFilterChips() {
+  const bar = document.getElementById('filter-chips');
+  if (!bar) return;
+  const chips = [];
+  if (state.searchQuery) {
+    chips.push(`<span class="filter-chip chip-search">🔍 "${escHtml(state.searchQuery)}" <span class="chip-x" data-clear="search">×</span></span>`);
+  }
+  if (state.activeSubcategory !== 'all') {
+    const sc = SUBCAT_BY_ID[state.activeSubcategory];
+    chips.push(`<span class="filter-chip chip-subcat">${sc ? sc.label : state.activeSubcategory} <span class="chip-x" data-clear="subcat">×</span></span>`);
+  }
+  if (state.activeNature !== 'all') {
+    const nlabel = { model_hint: '🧠 通用能力', domain_skill: '🎯 任务技能' };
+    chips.push(`<span class="filter-chip chip-nature">${nlabel[state.activeNature] || state.activeNature} <span class="chip-x" data-clear="nature">×</span></span>`);
+  }
+  if (!chips.length) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  bar.innerHTML = `<span class="chips-label">筛选：</span>${chips.join('')}<button class="chip-clear-all" id="chip-clear-all">清除全部 ×</button>`;
+  bar.querySelectorAll('.chip-x').forEach(x => {
+    x.addEventListener('click', () => {
+      const type = x.dataset.clear;
+      if (type === 'search') {
+        state.searchQuery = '';
+        const inp = document.getElementById('sm-search-input');
+        if (inp) inp.value = '';
+      } else if (type === 'subcat') {
+        state.activeSubcategory = 'all';
+        $$('.sm-sidebar-item[data-subcat]').forEach(i => i.classList.remove('active'));
+        document.querySelector('.sm-sidebar-item[data-subcat="all"]')?.classList.add('active');
+      } else if (type === 'nature') {
+        state.activeNature = 'all';
+        $$('.sm-sidebar-item[data-nature]').forEach(i => i.classList.remove('active'));
+        document.querySelector('.sm-sidebar-item[data-nature="all"]')?.classList.add('active');
+      }
+      loadCatalog();
+    });
+  });
+  document.getElementById('chip-clear-all')?.addEventListener('click', () => {
+    state.searchQuery = ''; state.activeSubcategory = 'all'; state.activeNature = 'all';
+    const inp = document.getElementById('sm-search-input');
+    if (inp) inp.value = '';
+    $$('.sm-sidebar-item[data-subcat]').forEach(i => i.classList.remove('active'));
+    document.querySelector('.sm-sidebar-item[data-subcat="all"]')?.classList.add('active');
+    $$('.sm-sidebar-item[data-nature]').forEach(i => i.classList.remove('active'));
+    document.querySelector('.sm-sidebar-item[data-nature="all"]')?.classList.add('active');
+    loadCatalog();
+  });
+}
+
+function highlightText(text, q) {
+  if (!q || !text) return escHtml(text || '');
+  const safe = escHtml(text);
+  const safeQ = escHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return safe.replace(new RegExp(safeQ, 'gi'), m => `<mark class="hl">${m}</mark>`);
+}
+
 function updateSidebarCounts(skills) {
-  // Category counts
-  const catCounts = { all: skills.length, agent: 0, behavior: 0, style: 0, domain: 0, workflow: 0, custom: 0 };
-  skills.forEach(s => { catCounts[s.category] = (catCounts[s.category] || 0) + 1; });
-  Object.entries(catCounts).forEach(([cat, count]) => {
-    const el = document.querySelector(`[data-cat="${cat}"] .item-count`);
+  // Subcategory counts
+  const subcatCounts = { all: skills.length };
+  SUBCAT_CONFIG.forEach(s => { subcatCounts[s.id] = 0; });
+  skills.forEach(s => { if (s.subcategory) subcatCounts[s.subcategory] = (subcatCounts[s.subcategory] || 0) + 1; });
+  Object.entries(subcatCounts).forEach(([sc, count]) => {
+    const el = document.querySelector(`[data-subcat-count="${sc}"]`);
     if (el) el.textContent = count;
   });
 
@@ -151,12 +231,24 @@ function updateActiveBar(skills) {
     return;
   }
 
-  pillsEl.innerHTML = enabled.map(s => `
+  const SHOW_MAX = 8;
+  const visible  = enabled.slice(0, SHOW_MAX);
+  const overflow = enabled.length - SHOW_MAX;
+  const expanded = bar.dataset.expanded === 'true';
+  const displayList = expanded ? enabled : visible;
+
+  const pillsHtml = displayList.map(s => `
     <span class="active-pill" title="点击禁用：${escHtml(s.name)}" data-id="${s.id}">
       ${escHtml(s.icon || '🔧')} ${escHtml(s.name)}
       <span class="pill-x" data-id="${s.id}" title="禁用">×</span>
     </span>
   `).join('');
+
+  const overflowBtn = !expanded && overflow > 0
+    ? `<button class="pill-overflow-btn" id="pill-show-more">+${overflow} 更多 ▾</button>`
+    : (expanded && overflow > 0 ? `<button class="pill-overflow-btn" id="pill-show-more">收起 ▴</button>` : '');
+
+  pillsEl.innerHTML = pillsHtml + overflowBtn;
 
   // bind pill × to disable
   pillsEl.querySelectorAll('.pill-x').forEach(x => {
@@ -164,6 +256,12 @@ function updateActiveBar(skills) {
       e.stopPropagation();
       toggleSkill(x.dataset.id, false);
     });
+  });
+
+  // bind expand toggle
+  document.getElementById('pill-show-more')?.addEventListener('click', () => {
+    bar.dataset.expanded = expanded ? 'false' : 'true';
+    updateActiveBar(state.allSkills);
   });
 }
 
@@ -204,7 +302,34 @@ function renderSkillGrid(gridId, skills) {
     return;
   }
 
-  grid.innerHTML = skills.map(skill => renderSkillCard(skill)).join('');
+  // Grouped view: show all with no subcat or nature filter, and no search
+  const showGrouped = state.activeSubcategory === 'all' &&
+                      state.activeNature === 'all' &&
+                      !state.searchQuery &&
+                      gridId === 'catalog-grid';
+
+  if (showGrouped) {
+    // Build map: subcategory id -> skills array
+    const groups = {};
+    skills.forEach(s => {
+      const sc = s.subcategory || 'custom';
+      (groups[sc] || (groups[sc] = [])).push(s);
+    });
+
+    const parts = [];
+    let currentGroup = null;
+    SUBCAT_CONFIG.forEach(({ id, label, cls }) => {
+      if (!groups[id] || !groups[id].length) return;
+      parts.push(`<div class="skill-group-header" style="grid-column:1/-1">
+        <span class="sm-tag ${cls} group-label-tag">${label}</span>
+        <span class="group-count">${groups[id].length} 个技能</span>
+      </div>`);
+      parts.push(...groups[id].map(s => renderSkillCard(s)));
+    });
+    grid.innerHTML = parts.join('');
+  } else {
+    grid.innerHTML = skills.map(skill => renderSkillCard(skill)).join('');
+  }
 
   // Bind click events
   grid.querySelectorAll('.sm-card').forEach(card => {
@@ -230,8 +355,11 @@ function renderSkillGrid(gridId, skills) {
 }
 
 function renderSkillCard(skill) {
-  const catClass = `category-${skill.category}`;
-  const catLabel = { agent: '🤖 Agent 能力', behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域', workflow: '⚡ 工作流', memory: '🧠 记忆', custom: '✨ 自定义' };
+  const q = state.searchQuery;
+  const sc = SUBCAT_BY_ID[skill.subcategory];
+  const subcatTag = sc
+    ? `<span class="sm-tag ${sc.cls}">${sc.label}</span>`
+    : `<span class="sm-tag category-${skill.category}">${skill.category}</span>`;
   const natureLabel = { model_hint: '🧠 通用能力', domain_skill: '🎯 任务技能', system: '⚙️ 系统' };
   const natureClass = skill.skill_nature ? `nature-${skill.skill_nature}` : '';
   const natureBadge = (skill.skill_nature && skill.skill_nature !== 'system')
@@ -252,7 +380,7 @@ function renderSkillCard(skill) {
     <div class="sm-card-header">
       <div class="sm-card-icon">${skill.icon || '🔧'}</div>
       <div class="sm-card-meta">
-        <div class="sm-card-name">${escHtml(skill.name)}</div>
+        <div class="sm-card-name">${highlightText(skill.name, q)}</div>
         <div class="sm-card-author">
           <span class="author-name">${escHtml(skill.author || 'builtin')}</span>
           &nbsp;·&nbsp; v${escHtml(skill.version || '1.0.0')}
@@ -260,9 +388,9 @@ function renderSkillCard(skill) {
       </div>
       ${editBtn}
     </div>
-    <div class="sm-card-desc">${escHtml(skill.description || '（暂无描述）')}</div>
+    <div class="sm-card-desc">${q ? highlightText(skill.description || '（暂无描述）', q) : escHtml(skill.description || '（暂无描述）')}</div>
     <div class="sm-card-footer">
-      <span class="sm-tag ${catClass}">${catLabel[skill.category] || skill.category}</span>
+      ${subcatTag}
       ${natureBadge}
       ${(skill.tags || []).slice(0, 2).map(t => `<span class="sm-tag">${escHtml(t)}</span>`).join('')}
       ${stars}
@@ -607,6 +735,7 @@ async function buildSkill() {
   const desc = (document.getElementById('studio-description')?.value || '').trim();
   const icon = (document.getElementById('studio-icon')?.value || '🎭').trim();
   const category = document.getElementById('studio-category')?.value || 'style';
+  const subcategory = document.getElementById('studio-subcategory')?.value || '';
   const enabled = document.getElementById('studio-enabled')?.checked || false;
 
   if (!name) { toast('请填写技能名称', 'error'); return; }
@@ -617,7 +746,7 @@ async function buildSkill() {
   btn.textContent = '⏳ 生成中…';
 
   try {
-    const body = buildStyleBody({ name, description: desc, icon, category, enabled, save: true });
+    const body = buildStyleBody({ name, description: desc, icon, category, subcategory, enabled, save: true });
     const data = await api('POST', API.autoBuild(), body);
     toast(`✅ 技能「${data.skill.name}」已创建！ID: ${data.skill_id}`, 'success', 5000);
     // Reset form
@@ -932,13 +1061,13 @@ document.addEventListener('DOMContentLoaded', () => {
     tab.addEventListener('click', () => switchTab(tab.dataset.tab));
   });
 
-  // Sidebar category filters
-  $$('.sm-sidebar-item[data-cat]').forEach(item => {
+  // Sidebar subcategory filters
+  $$('.sm-sidebar-item[data-subcat]').forEach(item => {
     item.addEventListener('click', () => {
-      $$('.sm-sidebar-item[data-cat]').forEach(i => i.classList.remove('active'));
+      $$('.sm-sidebar-item[data-subcat]').forEach(i => i.classList.remove('active'));
       item.classList.add('active');
-      state.activeCategory = item.dataset.cat;
-      loadCatalog(item.dataset.cat);
+      state.activeSubcategory = item.dataset.subcat;
+      loadCatalog();
     });
   });
 
@@ -977,6 +1106,31 @@ document.addEventListener('DOMContentLoaded', () => {
   // Studio init
   initStudio();
   initDropZone();
+
+  // Keyboard shortcuts: Ctrl+K or / → focus search; Esc → close overlays
+  document.addEventListener('keydown', (e) => {
+    const tag = document.activeElement?.tagName;
+    const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !inField)) {
+      e.preventDefault();
+      document.getElementById('sm-search-input')?.focus();
+    }
+    if (e.key === 'Escape' && !inField) { closeDrawer(); closeEditModal(); }
+  });
+
+  // Card density toggle
+  $$('.density-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $$('.density-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.density = btn.dataset.density;
+      const grid = document.getElementById('catalog-grid');
+      if (grid) {
+        grid.classList.remove('sm-grid--compact', 'sm-grid--comfortable');
+        if (state.density !== 'standard') grid.classList.add(`sm-grid--${state.density}`);
+      }
+    });
+  });
 
   // Initial load
   switchTab('catalog');

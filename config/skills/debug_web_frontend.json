@@ -25,7 +25,9 @@
                         "description":  "包含错误定位、状态/DOM分析和修复代码片段"
                     },
     "bound_tools":  [
-
+                        "read_file",
+                        "find_file",
+                        "list_directory"
                     ],
     "task_types":  [
                        "CODER"
@@ -78,5 +80,6 @@
                            "read_file",
                            "find_file",
                            "list_directory"
-                       ]
+                       ],
+    "subcategory":  "code_debug"
 }

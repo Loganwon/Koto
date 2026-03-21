@@ -143,77 +143,78 @@ def check_smart_feedback_quality(progress_msgs, task_type):
 
 
 # ═════════════════════════════════════════════════
-# 主测试流程
+# 主测试流程（直接运行时执行）
 # ═════════════════════════════════════════════════
 
-print("=" * 60)
-print("集成测试: 文件质量自检 + 智能反馈系统")
-print("=" * 60)
+if __name__ == "__main__":
+    print("=" * 60)
+    print("集成测试: 文件质量自检 + 智能反馈系统")
+    print("=" * 60)
 
-# 检查服务器
-if not test_server_alive():
-    print("❌ 服务器不在线，请先启动 Koto")
-    sys.exit(1)
-print("✅ 服务器在线\n")
+    # 检查服务器
+    if not test_server_alive():
+        print("❌ 服务器不在线，请先启动 Koto")
+        sys.exit(1)
+    print("✅ 服务器在线\n")
 
-# ── 测试 1: PPT 生成（核心功能） ──
-print("=" * 60)
-print("TEST 1: PPT 生成流程 — 智能反馈 + 质量自检")
-print("=" * 60)
+    # ── 测试 1: PPT 生成（核心功能） ──
+    print("=" * 60)
+    print("TEST 1: PPT 生成流程 — 智能反馈 + 质量自检")
+    print("=" * 60)
 
-result = stream_chat("帮我做一个关于人工智能发展趋势的PPT，大概5页", timeout=180)
+    result = stream_chat("帮我做一个关于人工智能发展趋势的PPT，大概5页", timeout=180)
 
-print(f"\n  进度消息数: {len(result['progress'])}")
-print(f"  生成文件: {result['saved_files']}")
-print(f"  回复文本长度: {len(result['full_text'])}")
+    print(f"\n  进度消息数: {len(result['progress'])}")
+    print(f"  生成文件: {result['saved_files']}")
+    print(f"  回复文本长度: {len(result['full_text'])}")
 
-# 检查
-checks = []
-checks.append(("有进度消息", len(result["progress"]) > 0))
-checks.append(("有生成文件", len(result["saved_files"]) > 0))
-checks.append(("有回复内容", len(result["full_text"]) > 0))
+    # 检查
+    checks = []
+    checks.append(("有进度消息", len(result["progress"]) > 0))
+    checks.append(("有生成文件", len(result["saved_files"]) > 0))
+    checks.append(("有回复内容", len(result["full_text"]) > 0))
 
-# 检查关键进度消息
-all_msgs = " ".join(p["msg"] for p in result["progress"])
-checks.append(("包含'规划'步骤", "规划" in all_msgs))
-checks.append(("包含'质量'检查", "质量" in all_msgs))
-checks.append(("包含'渲染'步骤", "渲染" in all_msgs))
-checks.append(
-    ("无旧式公式化前缀", len(check_no_hardcoded_emoji_prefix(result["progress"])) == 0)
-)
-
-# 检查文件内容无 markdown 残留
-if result["saved_files"]:
-    checks.append(("文件路径有效", result["saved_files"][0].endswith(".pptx")))
-
-for name, ok in checks:
-    print(f"  {'✅' if ok else '❌'} {name}")
-
-# ── 测试 2: 简单对话（确保没有影响） ──
-print(f"\n{'=' * 60}")
-print("TEST 2: 简单对话 — 确保没有副作用")
-print("=" * 60)
-
-result2 = stream_chat("你好，今天天气怎么样？", timeout=30)
-
-print(f"\n  进度消息数: {len(result2['progress'])}")
-print(f"  回复长度: {len(result2['full_text'])}")
-
-checks2 = []
-checks2.append(("有回复", len(result2["full_text"]) > 0))
-checks2.append(
-    ("无异常错误", not any(e.get("type") == "error" for e in result2["events"]))
-)
-checks2.append(
-    (
-        "开始消息无公式emoji",
-        len(check_no_hardcoded_emoji_prefix(result2["progress"])) == 0,
+    # 检查关键进度消息
+    all_msgs = " ".join(p["msg"] for p in result["progress"])
+    checks.append(("包含'规划'步骤", "规划" in all_msgs))
+    checks.append(("包含'质量'检查", "质量" in all_msgs))
+    checks.append(("包含'渲染'步骤", "渲染" in all_msgs))
+    checks.append(
+        ("无旧式公式化前缀", len(check_no_hardcoded_emoji_prefix(result["progress"])) == 0)
     )
-)
 
-for name, ok in checks2:
-    print(f"  {'✅' if ok else '❌'} {name}")
+    # 检查文件内容无 markdown 残留
+    if result["saved_files"]:
+        checks.append(("文件路径有效", result["saved_files"][0].endswith(".pptx")))
 
-print(f"\n{'=' * 60}")
-print("集成测试完成！")
-print("=" * 60)
+    for name, ok in checks:
+        print(f"  {'✅' if ok else '❌'} {name}")
+
+    # ── 测试 2: 简单对话（确保没有影响） ──
+    print(f"\n{'=' * 60}")
+    print("TEST 2: 简单对话 — 确保没有副作用")
+    print("=" * 60)
+
+    result2 = stream_chat("你好，今天天气怎么样？", timeout=30)
+
+    print(f"\n  进度消息数: {len(result2['progress'])}")
+    print(f"  回复长度: {len(result2['full_text'])}")
+
+    checks2 = []
+    checks2.append(("有回复", len(result2["full_text"]) > 0))
+    checks2.append(
+        ("无异常错误", not any(e.get("type") == "error" for e in result2["events"]))
+    )
+    checks2.append(
+        (
+            "开始消息无公式emoji",
+            len(check_no_hardcoded_emoji_prefix(result2["progress"])) == 0,
+        )
+    )
+
+    for name, ok in checks2:
+        print(f"  {'✅' if ok else '❌'} {name}")
+
+    print(f"\n{'=' * 60}")
+    print("集成测试完成！")
+    print("=" * 60)

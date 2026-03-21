@@ -337,31 +337,25 @@ class ProactiveDialogueEngine:
         # 保存对话历史
         self._save_dialogue(user_id, scene_type, message, context)
         
-        # 通过通知管理器发送
-        if self.notification_manager:
-            # 根据场景类型确定优先级
-            priority_map = {
-                'morning_greeting': 'low',
-                'afternoon_greeting': 'low',
-                'evening_greeting': 'low',
-                'long_break_reminder': 'medium',
-                'work_too_long': 'high',
-                'achievement': 'medium',
-                'file_organization': 'medium',
-                'related_files': 'medium',
-                'backup_reminder': 'high',
-                'weekly_summary': 'medium',
-                'tips': 'low'
-            }
-            
-            self.notification_manager.send_notification(
-                user_id=user_id,
-                notification_type='greeting',
-                priority=priority_map.get(scene_type, 'low'),
-                title=self._get_scene_title(scene_type),
-                message=message,
-                data={'scene_type': scene_type, 'context': context}
-            )
+        # 通过影子模型 ProactiveAgent 推送（统一走 shadow banner）
+        from app.core.agent.proactive_agent import ProactiveAgent
+        priority_map = {
+            'morning_greeting': 'low',
+            'afternoon_greeting': 'low',
+            'evening_greeting': 'low',
+            'long_break_reminder': 'medium',
+            'work_too_long': 'high',
+            'achievement': 'medium',
+            'file_organization': 'medium',
+            'related_files': 'medium',
+            'backup_reminder': 'high',
+            'weekly_summary': 'medium',
+            'tips': 'low'
+        }
+        priority = priority_map.get(scene_type, 'low')
+        title = self._get_scene_title(scene_type)
+        content = f"{title}：{message}" if message else title
+        ProactiveAgent.get().add_reminder(content, priority=priority)
     
     def _get_scene_title(self, scene_type: str) -> str:
         """获取场景标题"""

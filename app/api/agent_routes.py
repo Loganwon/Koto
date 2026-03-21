@@ -561,6 +561,7 @@ def chat():
     model_id = data.get('model', 'gemini-3-flash-preview')
     skill_id = data.get('skill_id')          # v2: 关联的 Skill ID
     task_type = data.get('task_type')         # v2: 任务分类
+    context_files = data.get('context_files') or []  # @文件 激活的上下文文件路径列表
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
@@ -610,6 +611,28 @@ def chat():
             _system_ctx_parts.append(_ctx_inj)
     if _cw_paged_context:
         _system_ctx_parts.append(_cw_paged_context)
+
+    # ── @文件 上下文注入 ─────────────────────────────────────────────────────
+    if context_files:
+        try:
+            from app.core.file.file_registry import get_file_registry
+            reg = get_file_registry()
+            file_blocks = []
+            for path in context_files[:5]:  # 最多注入 5 个文件防止 token 爆炸
+                entry = reg.get_by_path(str(path))
+                if entry and entry.content_preview:
+                    file_blocks.append(
+                        f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}"
+                    )
+            if file_blocks:
+                _system_ctx_parts.append(
+                    "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n"
+                    + "\n\n---\n\n".join(file_blocks)
+                )
+                logger.info(f"[chat] 注入 {len(file_blocks)} 个 @文件 上下文")
+        except Exception as _cf_err:
+            logger.debug(f"[chat] @文件 上下文注入跳过: {_cf_err}")
+
     _system_context = "\n\n".join(_system_ctx_parts) if _system_ctx_parts else None
 
     # Phase3: load system state snapshot and inject into history
@@ -872,14 +895,14 @@ def chat():
                         if _lv.is_blocked:
                             logger.warning(f"[chat] 🚫 本地模型异常路径输出被拦截: {_lv.reasons}")
                         _local_ans = _lv.text
-                    except Exception:
-                        pass
+                    except Exception as _ov_err:
+                        logger.debug("[chat] 本地模型输出检测跳过: %s", _ov_err)
                     # PII 还原
                     if mask_result and mask_result.has_pii:
                         try:
                             _local_ans = mask_result.restore(_local_ans)
-                        except Exception:
-                            pass
+                        except Exception as _pr_err:
+                            logger.debug("[chat] PII 还原失败: %s", _pr_err)
                     _lm = _local_mod or "本地模型"
                     _display = (
                         f"🔄 **[本地模型回复]** 云端服务不可用，"
@@ -988,6 +1011,7 @@ def process_stream_compat():
     skill_id = data.get("skill_id")
     task_type = data.get("task_type")
     context = data.get("context", {})
+    context_files = data.get("context_files") or []  # @文件 激活的上下文文件路径列表
     # Prefer explicit history from request, fall back to disk
     history = (
         context.get("history", []) if isinstance(context, dict) else []
@@ -998,6 +1022,28 @@ def process_stream_compat():
     snapshot_ctx = _build_snapshot_context_text(session_state)
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
+
+    # ── @文件 上下文注入 ─────────────────────────────────────────────────────
+    if context_files:
+        try:
+            from app.core.file.file_registry import get_file_registry
+            reg = get_file_registry()
+            file_blocks = []
+            for path in context_files[:5]:
+                entry = reg.get_by_path(str(path))
+                if entry and entry.content_preview:
+                    file_blocks.append(
+                        f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}"
+                    )
+            if file_blocks:
+                file_ctx = (
+                    "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n"
+                    + "\n\n---\n\n".join(file_blocks)
+                )
+                history = (history or []) + [{"role": "model", "content": file_ctx}]
+                logger.info(f"[process-stream] 注入 {len(file_blocks)} 个 @文件 上下文")
+        except Exception as _cf_err:
+            logger.debug(f"[process-stream] @文件 上下文注入跳过: {_cf_err}")
 
     if not user_request:
         return jsonify({"success": False, "error": "缺少请求内容"}), 400

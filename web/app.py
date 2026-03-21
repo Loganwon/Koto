@@ -1948,8 +1948,19 @@ def _initialize_background_runtime():
 
             _fr = get_file_registry()
             _fw = get_file_watcher()
+            # 自动监控 workspace 目录，确保 AI 生成的文件实时收录到「我的内容」
+            _ws_dir = get_workspace_root()
+            if _ws_dir and Path(_ws_dir).is_dir():
+                _fw.add_dir(_ws_dir)
+                # 后台立即扫描一次，把已有文件补录进注册表
+                threading.Thread(
+                    target=_fw.scan_once,
+                    args=(_ws_dir,),
+                    daemon=True,
+                    name="koto-init-scan",
+                ).start()
             _fw.start()
-            _app_logger.info(f"[FileHub] ✅ 文件注册表已启动 (已收录: {_fr.count()} 个文件)")
+            _app_logger.info(f"[FileHub] ✅ 文件注册表已启动 (已收录: {_fr.count()} 个文件，监控: {_ws_dir})")
         except Exception as _fe:
             _app_logger.warning(f"[FileHub] ⚠️ 文件模块初始化失败（非致命）: {_fe}")
 
@@ -2044,8 +2055,8 @@ try:
     from web.voice_engine import preload as _voice_preload
 
     _voice_preload()
-except Exception:
-    pass
+except Exception as _e:
+    _app_logger.debug("[startup] Vosk 预加载跳过: %s", _e)
 
 CHAT_DIR = os.path.join(PROJECT_ROOT, "chats")
 WORKSPACE_DIR = get_workspace_root()
@@ -7327,7 +7338,41 @@ def get_sessions():
                 type: string
     """
     sessions = session_manager.list_sessions()
-    return jsonify({"sessions": [s.replace(".json", "") for s in sessions]})
+    session_names = [s.replace(".json", "") for s in sessions]
+
+    # Optional preview mode: include last_message snippet + mtime
+    if request.args.get("preview") == "1":
+        result = []
+        for filename, name in zip(sessions, session_names):
+            path = os.path.join(CHAT_DIR, filename)
+            mtime = os.path.getmtime(path) if os.path.exists(path) else 0
+            preview = ""
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    history = json.load(f)
+                # Find the last assistant message for preview
+                for msg in reversed(history):
+                    if isinstance(msg, dict) and msg.get("role") == "assistant":
+                        content = msg.get("content") or ""
+                        if isinstance(content, list):
+                            content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
+                        preview = content[:80].strip().replace("\n", " ")
+                        break
+                if not preview:
+                    for msg in reversed(history):
+                        if isinstance(msg, dict):
+                            content = msg.get("content") or ""
+                            if isinstance(content, list):
+                                content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
+                            preview = content[:80].strip().replace("\n", " ")
+                            if preview:
+                                break
+            except Exception:
+                pass
+            result.append({"id": name, "preview": preview, "mtime": mtime})
+        return jsonify({"sessions": result})
+
+    return jsonify({"sessions": session_names})
 
 
 @app.route("/api/sessions", methods=["POST"])
@@ -7402,6 +7447,49 @@ def rename_session(session_name):
         new_session = result["new_filename"].replace(".json", "")
         return jsonify({"success": True, "new_session": new_session})
     return jsonify({"success": False, "error": result.get("error", "重命名失败")}), 400
+
+
+@app.route("/api/sessions/<session_name>/auto-title", methods=["POST"])
+def auto_title_session(session_name):
+    """Use AI to generate a concise title for a session based on its first message exchange."""
+    full_history = session_manager.load_full(f"{session_name}.json")
+    if not full_history:
+        return jsonify({"success": False, "error": "会话为空"}), 400
+
+    # 取前两条消息（用户 + 助手）作为上下文
+    snippets = []
+    for entry in full_history[:4]:
+        role = entry.get("role", "")
+        parts = entry.get("parts", [])
+        text = parts[0] if parts else ""
+        if role == "user":
+            snippets.append(f"用户：{text[:200]}")
+        elif role == "model":
+            snippets.append(f"助手：{text[:200]}")
+        if len(snippets) >= 2:
+            break
+
+    if not snippets:
+        return jsonify({"success": False, "error": "无内容可生成标题"}), 400
+
+    context = "\n".join(snippets)
+    prompt = (
+        f"请根据以下对话内容，生成一个简洁的中文标题（8个字以内，不加引号，不加标点，直接输出标题文字）：\n\n{context}"
+    )
+
+    try:
+        title_model = MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
+        result = brain.chat([], prompt, model=title_model, auto_model=False)
+        raw_title = (result.get("response") or "").strip()
+        # 清理多余字符
+        raw_title = raw_title.strip('"\'「」《》【】\n')
+        raw_title = raw_title.split("\n")[0].strip()
+        if not raw_title or len(raw_title) > 30:
+            return jsonify({"success": False, "error": "生成标题无效"}), 500
+        return jsonify({"success": True, "title": raw_title})
+    except Exception as e:
+        _app_logger.warning("auto_title_session error: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/sessions/<session_name>", methods=["DELETE"])
@@ -8593,8 +8681,8 @@ def chat_stream():
                     user_input,
                     final_answer or "[Agent 任务完成]",
                 )
-            except Exception:
-                pass
+            except Exception as _se:
+                _app_logger.warning("[STREAM] Agent 会话保存失败: %s", _se)
             try:
                 _start_memory_extraction(
                     user_input,
@@ -8603,8 +8691,8 @@ def chat_stream():
                     task_type="AGENT",
                     session_name=session_name,
                 )
-            except Exception:
-                pass
+            except Exception as _me:
+                _app_logger.debug("[STREAM] Agent 记忆提取跳过: %s", _me)
 
         return Response(generate_agent(), mimetype="text/event-stream")
 
@@ -8634,8 +8722,8 @@ def chat_stream():
             _intent_temp_ids = get_skill_binding_manager().match_intent(
                 user_input or ""
             )
-        except Exception:
-            pass
+        except Exception as _tb_err:
+            _app_logger.debug("[STREAM] SkillTriggerBinding 匹配跳过: %s", _tb_err)
         # AutoMatcher 补充：规则/语义匹配覆盖意图绑定未持久化的场景
         try:
             from app.core.skills.skill_auto_matcher import SkillAutoMatcher
@@ -8646,8 +8734,8 @@ def chat_stream():
             if _auto_ids:
                 # 合并去重，保持 intent 结果优先
                 _intent_temp_ids = list(dict.fromkeys(_intent_temp_ids + _auto_ids))
-        except Exception:
-            pass
+        except Exception as _am_err:
+            _app_logger.debug("[STREAM] SkillAutoMatcher 匹配跳过: %s", _am_err)
         if _intent_temp_ids:
             _app_logger.debug(f"[STREAM] 🔗 Auto Skills: {', '.join(_intent_temp_ids)}")
         system_instruction = SkillManager.inject_into_prompt(
@@ -8696,7 +8784,7 @@ def chat_stream():
             )
             _app_logger.debug(f"[STREAM] 🕸️ Graph RAG: 注入知识图谱关联事实")
     except Exception as _ge:
-        pass
+        _app_logger.debug("[STREAM] Graph RAG 跳过: %s", _ge)
 
     # 读取用户设置：是否显示思考过程
     _show_thinking = False

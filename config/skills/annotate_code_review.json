@@ -25,7 +25,9 @@
                         "description":  "逐行/逐函数批注，包含严重等级和具体修改建议"
                     },
     "bound_tools":  [
-
+                        "read_file",
+                        "find_file",
+                        "list_directory"
                     ],
     "task_types":  [
                        "DOC_ANNOTATE",
@@ -73,5 +75,6 @@
                            "read_file",
                            "find_file",
                            "list_directory"
-                       ]
+                       ],
+    "subcategory":  "code_craft"
 }

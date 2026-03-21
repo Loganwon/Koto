@@ -413,6 +413,26 @@ class LangGraphAgent:
             restore_pii=restore_pii_in_output,
         )
 
+    @property
+    def base_system_instruction(self) -> str:
+        """UnifiedAgent 兼容属性：读写系统提示词并自动重建图。"""
+        return self.system_instruction or ""
+
+    @base_system_instruction.setter
+    def base_system_instruction(self, value: str) -> None:
+        if value == self.system_instruction:
+            return
+        self.system_instruction = value
+        # 重建图以应用新系统提示词
+        self._graph = build_graph(
+            registry=self.registry,
+            model_id=self.model_id,
+            system_instruction=value,
+            enable_pii=self.enable_pii,
+            enable_validation=self.enable_validation,
+            restore_pii=self.restore_pii,
+        )
+
     def _build_initial_state(
         self,
         input_text: str,

@@ -73,33 +73,59 @@
       </div>
 
       <div class="sm-sidebar-section" style="margin-top:12px">分类</div>
-      <div class="sm-sidebar-item active" data-cat="all">
+      <div class="sm-sidebar-item active" data-subcat="all">
         <span>🔷 全部</span>
-        <span class="item-count" data-cat="all">—</span>
+        <span class="item-count" data-subcat-count="all">—</span>
       </div>
-      <div class="sm-sidebar-item" data-cat="agent">
-        <span>🤖 Agent 能力</span>
-        <span class="item-count" data-cat="agent">—</span>
+
+      <div class="sm-sidebar-group-label">— Koto 对话能力 —</div>
+      <div class="sm-sidebar-item" data-subcat="koto_thinking">
+        <span>🤔 思维增强</span>
+        <span class="item-count" data-subcat-count="koto_thinking">—</span>
       </div>
-      <div class="sm-sidebar-item" data-cat="behavior">
-        <span>⚙️ 行为</span>
-        <span class="item-count" data-cat="behavior">—</span>
+      <div class="sm-sidebar-item" data-subcat="personality">
+        <span>🎭 风格 &amp; 人格</span>
+        <span class="item-count" data-subcat-count="personality">—</span>
       </div>
-      <div class="sm-sidebar-item" data-cat="style">
-        <span>🎨 风格</span>
-        <span class="item-count" data-cat="style">—</span>
+
+      <div class="sm-sidebar-group-label">— 具体任务技能 —</div>
+      <div class="sm-sidebar-item" data-subcat="code_debug">
+        <span>🐛 代码调试</span>
+        <span class="item-count" data-subcat-count="code_debug">—</span>
       </div>
-      <div class="sm-sidebar-item" data-cat="domain">
-        <span>🔬 领域</span>
-        <span class="item-count" data-cat="domain">—</span>
+      <div class="sm-sidebar-item" data-subcat="code_craft">
+        <span>⚙️ 代码 &amp; 工程</span>
+        <span class="item-count" data-subcat-count="code_craft">—</span>
       </div>
-      <div class="sm-sidebar-item" data-cat="workflow">
-        <span>📋 工作流</span>
-        <span class="item-count" data-cat="workflow">—</span>
+      <div class="sm-sidebar-item" data-subcat="annotation">
+        <span>📝 批注 &amp; 审阅</span>
+        <span class="item-count" data-subcat-count="annotation">—</span>
       </div>
-      <div class="sm-sidebar-item" data-cat="custom">
-        <span>✨ 自定义</span>
-        <span class="item-count" data-cat="custom">—</span>
+      <div class="sm-sidebar-item" data-subcat="data_excel">
+        <span>📊 数据 &amp; 表格</span>
+        <span class="item-count" data-subcat-count="data_excel">—</span>
+      </div>
+      <div class="sm-sidebar-item" data-subcat="writing">
+        <span>✍️ 写作 &amp; 文案</span>
+        <span class="item-count" data-subcat-count="writing">—</span>
+      </div>
+      <div class="sm-sidebar-item" data-subcat="research">
+        <span>🔍 调研 &amp; 分析</span>
+        <span class="item-count" data-subcat-count="research">—</span>
+      </div>
+      <div class="sm-sidebar-item" data-subcat="file_ops">
+        <span>📁 文件操作</span>
+        <span class="item-count" data-subcat-count="file_ops">—</span>
+      </div>
+      <div class="sm-sidebar-item" data-subcat="career">
+        <span>👔 职场 &amp; 学习</span>
+        <span class="item-count" data-subcat-count="career">—</span>
+      </div>
+
+      <div class="sm-sidebar-group-label">— 自动化工作流 —</div>
+      <div class="sm-sidebar-item" data-subcat="doc_gen">
+        <span>📄 文档生成</span>
+        <span class="item-count" data-subcat-count="doc_gen">—</span>
       </div>
 
       <div class="sm-sidebar-section" style="margin-top:16px">快捷操作</div>
@@ -128,12 +154,19 @@
 
       <div class="sm-results-header">
         <span class="sm-results-count" id="results-count">加载中…</span>
+        <div class="density-toggle" title="卡片密度">
+          <button class="density-btn" data-density="compact" title="紧凑视图">⠇</button>
+          <button class="density-btn active" data-density="standard" title="标准视图">⊞</button>
+          <button class="density-btn" data-density="comfortable" title="宽松视图">▭</button>
+        </div>
         <select id="sort-select" class="sm-sort-select">
           <option value="name">按名称排序</option>
           <option value="enabled">已启用优先</option>
           <option value="rating">按评分排序</option>
         </select>
       </div>
+
+      <div id="filter-chips" class="filter-chips-bar hidden"></div>
 
       <div class="sm-grid" id="catalog-grid">
         <!-- Filled by JS -->
@@ -195,11 +228,12 @@
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label for="studio-category">分类</label>
+                <label for="studio-category">技能类型</label>
                 <select class="form-control" id="studio-category">
-                  <option value="style">🎨 风格</option>
-                  <option value="behavior">⚙️ 行为</option>
-                  <option value="domain">🔬 领域</option>
+                  <option value="style">🎨 风格 / 人格</option>
+                  <option value="behavior">⚙️ 行为 / 思维</option>
+                  <option value="domain">🔬 具体任务</option>
+                  <option value="workflow">⚡ 工作流</option>
                   <option value="custom">✨ 自定义</option>
                 </select>
               </div>

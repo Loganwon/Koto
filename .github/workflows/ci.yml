@@ -32,7 +32,7 @@ jobs:
         run: isort --check-only --profile black src/ app/ tests/
 
       - name: Security scan (bandit)
-        run: bandit -r app/ src/ -ll -q --exit-zero
+        run: bandit -r app/ src/ -lll -q
 
   test:
     name: Test
@@ -87,7 +87,7 @@ jobs:
             tests/test_unified_agent.py \
             -v --tb=short -q \
             --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
-            --cov-fail-under=39
+            --cov-fail-under=40
 
       - name: Upload coverage report
         if: always()

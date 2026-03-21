@@ -674,15 +674,11 @@ class ProactiveTriggerSystem:
         
         # 根据交互类型执行
         if decision.interaction_type == InteractionType.NOTIFICATION:
-            if self.notification_manager:
-                self.notification_manager.send_notification(
-                    user_id=user_id,
-                    notification_type='suggestion',
-                    priority=decision.priority,
-                    title=decision.content.get('title', '智能提醒'),
-                    message=decision.content.get('message', ''),
-                    data=decision.content
-                )
+            from app.core.agent.proactive_agent import ProactiveAgent
+            title = decision.content.get('title', '智能提醒')
+            msg = decision.content.get('message', '')
+            content = f"{title}：{msg}" if msg else title
+            ProactiveAgent.get().add_reminder(content, priority=decision.priority)
         
         elif decision.interaction_type == InteractionType.DIALOGUE:
             if self.dialogue_engine:
@@ -692,16 +688,11 @@ class ProactiveTriggerSystem:
                 )
         
         elif decision.interaction_type == InteractionType.ALERT:
-            if self.notification_manager:
-                self.notification_manager.send_notification(
-                    user_id=user_id,
-                    notification_type='alert',
-                    priority='critical',
-                    title=decision.content.get('title', '⚠️ 重要提醒'),
-                    message=decision.content.get('message', ''),
-                    data=decision.content,
-                    force_send=True
-                )
+            from app.core.agent.proactive_agent import ProactiveAgent
+            title = decision.content.get('title', '⚠️ 重要提醒')
+            msg = decision.content.get('message', '')
+            content = f"{title}：{msg}" if msg else title
+            ProactiveAgent.get().add_reminder(content, priority='high')
         
         # 其他交互类型类似...
     

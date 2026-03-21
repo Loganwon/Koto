@@ -615,6 +615,38 @@ class SmartDispatcher:
         return has_kw or (has_qw and has_target)
 
     @classmethod
+    def _apply_routing_safety(
+        cls,
+        task_type: str,
+        user_input: str,
+        user_lower: str,
+        file_context,
+        LocalExecutor,
+        WebSearcher,
+    ) -> str:
+        """对模型输出应用强规则安全覆写，避免模型分类器误判边界情况。"""
+        if task_type == "CHAT" and WebSearcher and WebSearcher.needs_web_search(user_input):
+            return "WEB_SEARCH"
+        if (
+            task_type not in ("SYSTEM", "AGENT")
+            and LocalExecutor
+            and LocalExecutor.is_system_command(user_input)
+        ):
+            return "SYSTEM"
+        _agent_pat = [
+            r"发微信", r"回微信", r"微信发", r"微信回",
+            r"给.{1,6}发消息", r"给.{1,6}发微信",
+            r"浏览器打开", r"点击.{1,6}按键",
+        ]
+        if any(re.search(p, user_input) for p in _agent_pat):
+            return "AGENT"
+        if task_type == "DOC_ANNOTATE" and not (
+            file_context and file_context.get("has_file")
+        ):
+            return "CHAT"
+        return task_type
+
+    @classmethod
     def analyze(cls, user_input: str, history=None, file_context=None):
         """
         智能分析用户输入，返回最匹配的任务类型
@@ -777,6 +809,50 @@ class SmartDispatcher:
             )
             return "SYSTEM", "🖥️ Action-Direct", context_info
 
+        # === 能力询问 / 方法咨询 → CHAT (在所有动作路由之前) ===
+        # 识别非执行型查询：用户在问 Koto「能不能做X」或「怎么做X」，不应触发动作路由
+        # 典型误触发：「你会做ppt么」「如何制作Word」「怎么生成图表」「你能画图吗」
+        _CAPABILITY_PREFIXES = [
+            "你会", "你能", "能不能", "你可以", "能否", "可以吗", "你支持", "支持吗",
+        ]
+        _HOWTO_PREFIXES = ["怎么", "如何", "怎样", "怎么样", "什么是", "怎么用"]
+        _QUESTION_ENDINGS = ["吗", "么", "?", "？", "嘛", "不"]
+        _ACTION_TOOL_KWS = [
+            "ppt", "幻灯片", "演示文稿", "word", "docx", "pdf", "excel", "文档",
+            "图片", "图表", "折线图", "柱状图", "画图", "绘图", "代码", "程序", "音频",
+        ]
+        _u_stripped_lower = user_lower.rstrip()
+        # 1) 能力询问：以「你会/你能/能不能…」开头 + 以「吗/么」结尾
+        if (
+            any(_u_stripped_lower.startswith(p) for p in _CAPABILITY_PREFIXES)
+            and any(_u_stripped_lower.endswith(s) for s in _QUESTION_ENDINGS)
+        ):
+            context_info = context_info or {}
+            context_info["routing_list"] = cls._build_routing_list(
+                similarity_scores,
+                boosts={"CHAT": 1.0},
+                reasons={"CHAT": ["rule:capability_query"]},
+            )
+            logger.info(
+                f"[SmartDispatcher] 💬 能力询问快速通道: '{user_input[:30]}' → CHAT"
+            )
+            return "CHAT", "💬 Capability-Query", context_info
+        # 2) 方法询问：「怎么做X / 如何制作X」— 开头为 how-to prefix + 含功能关键词
+        if (
+            any(_u_stripped_lower.startswith(p) for p in _HOWTO_PREFIXES)
+            and any(k in user_lower for k in _ACTION_TOOL_KWS)
+        ):
+            context_info = context_info or {}
+            context_info["routing_list"] = cls._build_routing_list(
+                similarity_scores,
+                boosts={"CHAT": 1.0},
+                reasons={"CHAT": ["rule:howto_query"]},
+            )
+            logger.info(
+                f"[SmartDispatcher] 💬 方法询问快速通道: '{user_input[:30]}' → CHAT"
+            )
+            return "CHAT", "💬 HowTo-Query", context_info
+
         # === 提醒/日程/消息发送快速通道 → AGENT ===
         _AGENT_NOTIFY_PATTERNS = [
             r'(设置?|帮我设?)(提醒|闹钟|定时).{0,20}',
@@ -837,7 +913,69 @@ class SmartDispatcher:
             )
             return "CHAT", "⚡ Trivial", context_info
 
-        # === 天气 / 实时信息快速通道（在 Trivial 之后、模型之前，防止冷启动漏判）===
+        # === 早期主分类器（TaskClassifier + 本地 Ollama）===
+        # 在所有领域关键词规则之前运行，让模型首先有机会理解意图。
+        # 置信度≥ 0.72 就立即返回；低于阈値时将结果缓存到 _early_model_result，
+        # 关键词规则后面会再以 0.62 作为二次安全网。
+        _early_model_result = None  # (task, conf_float, conf_str, hint, complexity)
+        try:
+            _TC = _get_task_classifier()
+            if _TC.is_available():
+                _tc_task, _tc_conf = _TC.classify(user_input)
+                if _tc_conf >= 0.72:
+                    _tc_task = cls._apply_routing_safety(
+                        _tc_task, user_input, user_lower,
+                        file_context, LocalExecutor, WebSearcher,
+                    )
+                    context_info = context_info or {}
+                    context_info["routing_list"] = cls._build_routing_list(
+                        similarity_scores,
+                        boosts={_tc_task: _tc_conf},
+                        reasons={_tc_task: ["early:task_classifier"]},
+                    )
+                    logger.info(
+                        f"[SmartDispatcher] 🚀 早期TaskClassifier: '{user_input[:30]}' → {_tc_task} ({_tc_conf:.2f})"
+                    )
+                    return _tc_task, f"🚀 TaskClassifier {_tc_conf:.2f}", context_info
+        except Exception as _tce:
+            logger.warning(f"[SmartDispatcher] ⚠️ 早期TaskClassifier异常（跳过）: {_tce}")
+        try:
+            _lmr = _get_local_model_router()
+            if _lmr.is_ollama_available():
+                _lm_task, _lm_cs, _lm_src, _lm_hint, _lm_cplx = \
+                    _lmr.classify_with_hint(user_input, timeout=3.5)
+                _lm_conf = 0.0
+                if isinstance(_lm_cs, str):
+                    _mm = re.search(r"(\d+\.\d+)", _lm_cs)
+                    if _mm:
+                        _lm_conf = float(_mm.group(1))
+                # 缓存结果供后面关键词规则抚质时复用（避免二次调用 Ollama）
+                _early_model_result = (_lm_task, _lm_conf, _lm_cs, _lm_hint, _lm_cplx)
+                if _lm_task and _lm_conf >= 0.72:
+                    _lm_task = cls._apply_routing_safety(
+                        _lm_task, user_input, user_lower,
+                        file_context, LocalExecutor, WebSearcher,
+                    )
+                    context_info = context_info or {}
+                    context_info["routing_list"] = cls._build_routing_list(
+                        similarity_scores,
+                        boosts={_lm_task: _lm_conf},
+                        reasons={_lm_task: ["early:local_model"]},
+                    )
+                    if _lm_hint:
+                        context_info["skill_prompt"] = _lm_hint
+                    if _lm_cplx == "complex" and _lm_task != "CHAT":
+                        context_info["complexity"] = "complex"
+                    logger.info(
+                        f"[SmartDispatcher] 🤖 早期本地模型: '{user_input[:30]}' → {_lm_task} ({_lm_conf:.2f})"
+                    )
+                    return _lm_task, f"🤖 EarlyLocal {_lm_conf:.2f}", context_info
+        except Exception as _lme:
+            logger.warning(f"[SmartDispatcher] ⚠️ 早期本地模型异常（跳过）: {_lme}")
+
+        # 模型不可用或置信度不足 0.72 → 继续领域关键词规则（将作为安全底层兆底）
+
+        # === 天气 / 实时信息快速通道（在 Trivial 之后、模型不足时兆底）===
         _WEATHER_KWS = [
             "天气", "气温", "下雨吗", "下雨", "下雪吗", "下雪", "天气怎么样", "天气怎样",
             "天气预报", "weather", "温度多少", "穿什么衣服",
@@ -857,8 +995,14 @@ class SmartDispatcher:
         # === 会议提炼快速通道 ===
         _MEETING_VERBS = ["提炼", "提取", "整理", "总结", "分析", "归纳"]
         _MEETING_NOUNS = ["会议", "纪要", "会议记录", "会议内容", "转录", "会议文字"]
-        if any(v in user_lower for v in _MEETING_VERBS) and any(
-            n in user_lower for n in _MEETING_NOUNS
+        # 排除知识性问句（「会议纪要怎么写」/ 「什么是会议纪要」不应触发提炼任务）
+        _MEETING_QUESTION_GUARDS = [
+            "什么是", "是什么", "怎么写", "如何写", "怎么做", "如何做", "怎么用", "有什么区别",
+        ]
+        if (
+            any(v in user_lower for v in _MEETING_VERBS)
+            and any(n in user_lower for n in _MEETING_NOUNS)
+            and not any(g in user_lower for g in _MEETING_QUESTION_GUARDS)
         ):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -929,7 +1073,13 @@ class SmartDispatcher:
         _CHART_ACTION_KWS = [
             "画", "作", "生成", "做", "绘制", "创建", "画出", "plot", "draw", "show", "显示",
         ]
-        if any(k in user_lower for k in _CHART_KWS):
+        # 排除知识性问句（「什么是折线图」/ 「折线图是什么」→ CHAT 知识回答）
+        _CHART_KNOWLEDGE_GUARDS = [
+            "什么是", "是什么", "怎么", "如何", "定义", "原理", "介绍", "解释",
+        ]
+        if any(k in user_lower for k in _CHART_KWS) and not any(
+            g in user_lower for g in _CHART_KNOWLEDGE_GUARDS
+        ):
             # 包含图表类型词就直接走 CODER（数据可视化），不必配合动作词
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -1033,86 +1183,90 @@ class SmartDispatcher:
         except Exception as _pe:
             logger.info(f"[SmartDispatcher] ⚠️ 多步抢先规划异常（跳过）: {_pe}")
 
-        # === 内置向量分类器（TaskClassifier）===
-        # 基于 Sentence-Transformer + LogisticRegression，<10ms，与用户安装的 Ollama 模型无关。
-        # 训练后优先使用；未训练或置信度 <0.72 时透明降级到下方的 LocalModelRouter。
+        # === 分类器二次兜底（关键词规则均未命中 / 模型早期置信度在 0.62-0.71）===
+        # 优先复用早期调用的缓存结果（避免二次调用 Ollama），阈值降为 0.62 作为安全网。
+        # 同时修复原有 bug：在线模式下模型结果也正常返回（原来仅 if not client 才 return）。
+        _SEC_THRESH = 0.62
+        # 先尝试 TaskClassifier 二次找回（早期未命中时可能模型刚完成加载）
         try:
-            _TC = _get_task_classifier()
-            if _TC.is_available():
-                _tc_task, _tc_conf = _TC.classify(user_input)
-                _tc_accepted = _tc_conf >= 0.72
-                print(f"[SmartDispatcher] 🚀 TaskClassifier: {_tc_task} ({_tc_conf:.2f}) {'✅ 采纳' if _tc_accepted else '⚠️ 置信度不足，回退 Ollama'}")
-
-                if _tc_accepted:
-                    # 复用与 LocalModelRouter 分支相同的 override 安全网
-                    if _tc_task == "CHAT" and WebSearcher and WebSearcher.needs_web_search(user_input):
-                        _tc_task = "WEB_SEARCH"
-                    if LocalExecutor and LocalExecutor.is_system_command(user_input) and _tc_task != "SYSTEM":
-                        _tc_task = "SYSTEM"
-                    _agent_pat = [r"发微信", r"回微信", r"微信发", r"微信回",
-                                  r"给.{1,6}发消息", r"给.{1,6}发微信",
-                                  r"浏览器打开", r"点击.{1,6}按钮"]
-                    if any(re.search(p, user_lower) for p in _agent_pat):
-                        _tc_task = "AGENT"
-                    # DOC_ANNOTATE 必须有文件附件
-                    if _tc_task == "DOC_ANNOTATE":
-                        if not (file_context and file_context.get("has_file")):
-                            _tc_task = "CHAT"
+            _TC2 = _get_task_classifier()
+            if _TC2.is_available():
+                _tc2_task, _tc2_conf = _TC2.classify(user_input)
+                if _tc2_conf >= _SEC_THRESH:
+                    _tc2_task = cls._apply_routing_safety(
+                        _tc2_task, user_input, user_lower,
+                        file_context, LocalExecutor, WebSearcher,
+                    )
                     context_info = context_info or {}
                     context_info["routing_list"] = cls._build_routing_list(
                         similarity_scores,
-                        boosts={_tc_task: _tc_conf},
-                        reasons={_tc_task: ["task_classifier"]}
+                        boosts={_tc2_task: _tc2_conf},
+                        reasons={_tc2_task: ["tc_2nd_chance"]},
                     )
-                    return _tc_task, f"🚀 TaskClassifier {_tc_conf:.2f}", context_info
-        except Exception as _tce:
-            print(f"[SmartDispatcher] ⚠️ TaskClassifier 异常（跳过）: {_tce}")
-
-        # === 本地 Ollama 路由（优先信号，低置信再回退规则） ===
-        # classify_with_hint() 同时返回任务分类 + skill_prompt + complexity，实现「本地理解意图 → 生成执行指令 → 云端模型执行」
-        local_task, local_confidence, local_source, local_hint, local_complexity = _get_local_model_router().classify_with_hint(user_input, timeout=4.5)
-        local_conf_value = 0.0
-        if isinstance(local_confidence, str):
-            m = re.search(r"(\d+\.\d+)", local_confidence)
-            if m:
-                try:
-                    local_conf_value = float(m.group(1))
-                except Exception:
-                    local_conf_value = 0.0
-        elif isinstance(local_confidence, (int, float)):
-            local_conf_value = float(local_confidence)
-
-        # === 离线兜底：本地 Ollama 路由（云端不可用时的后备）===
-        # 仅在没有 API 密钥或网络不通时触发
-        if not client:
-            print(f"[SmartDispatcher] 🔌 云端不可用，尝试本地 Ollama 路由...")
-            local_task, local_confidence, local_source, local_hint, local_complexity = _get_local_model_router().classify_with_hint(user_input, timeout=4.5)
-            local_conf_value = 0.0
-            if isinstance(local_confidence, str):
-                m = re.search(r"(\d+\.\d+)", local_confidence)
-                if m:
-                    try:
-                        local_conf_value = float(m.group(1))
-                    except Exception:
-                        local_conf_value = 0.0
-            elif isinstance(local_confidence, (int, float)):
-                local_conf_value = float(local_confidence)
-
-            local_confident = local_conf_value >= 0.70
-            if local_task and local_confident:
+                    logger.info(
+                        f"[SmartDispatcher] 🚀 TC二次兜底: '{user_input[:30]}' → {_tc2_task} ({_tc2_conf:.2f})"
+                    )
+                    return _tc2_task, f"🚀 TaskClassifier(2) {_tc2_conf:.2f}", context_info
+        except Exception:
+            pass
+        # 复用早期缓存的 Ollama 结果（减少重复请求）
+        if _early_model_result is not None:
+            _em_task, _em_conf, _em_cs, _em_hint, _em_cplx = _early_model_result
+            if _em_task and _em_conf >= _SEC_THRESH:
+                _em_task = cls._apply_routing_safety(
+                    _em_task, user_input, user_lower,
+                    file_context, LocalExecutor, WebSearcher,
+                )
                 context_info = context_info or {}
                 context_info["routing_list"] = cls._build_routing_list(
-                    similarity_scores, boosts={local_task: 0.9},
-                    reasons={local_task: ["local_model_offline"]}
+                    similarity_scores,
+                    boosts={_em_task: _em_conf},
+                    reasons={_em_task: ["local_model_2nd_chance"]},
                 )
-                if local_hint:
-                    context_info["skill_prompt"] = local_hint
-                if local_complexity == "complex" and local_task != "CHAT":
+                if _em_hint:
+                    context_info["skill_prompt"] = _em_hint
+                if _em_cplx == "complex" and _em_task != "CHAT":
                     context_info["complexity"] = "complex"
-                return local_task, f"{local_confidence}", context_info
+                logger.info(
+                    f"[SmartDispatcher] 🤖 Ollama二次兜底: '{user_input[:30]}' → {_em_task} ({_em_conf:.2f})"
+                )
+                return _em_task, f"🤖 LocalModel(2) {_em_conf:.2f}", context_info
+        else:
+            # 早期未能调用 Ollama（当时不可用），现在再试一次（含离线模式）
+            try:
+                _lmr2 = _get_local_model_router()
+                if _lmr2.is_ollama_available():
+                    _r2_task, _r2_cs, _, _r2_hint, _r2_cplx = \
+                        _lmr2.classify_with_hint(user_input, timeout=4.5)
+                    _r2_conf = 0.0
+                    if isinstance(_r2_cs, str):
+                        _mm2 = re.search(r"(\d+\.\d+)", _r2_cs)
+                        if _mm2:
+                            _r2_conf = float(_mm2.group(1))
+                    if _r2_task and _r2_conf >= _SEC_THRESH:
+                        _r2_task = cls._apply_routing_safety(
+                            _r2_task, user_input, user_lower,
+                            file_context, LocalExecutor, WebSearcher,
+                        )
+                        context_info = context_info or {}
+                        context_info["routing_list"] = cls._build_routing_list(
+                            similarity_scores,
+                            boosts={_r2_task: _r2_conf},
+                            reasons={_r2_task: ["local_model_late"]},
+                        )
+                        if _r2_hint:
+                            context_info["skill_prompt"] = _r2_hint
+                        if _r2_cplx == "complex" and _r2_task != "CHAT":
+                            context_info["complexity"] = "complex"
+                        logger.info(
+                            f"[SmartDispatcher] 🤖 Ollama延迟起动: '{user_input[:30]}' → {_r2_task} ({_r2_conf:.2f})"
+                        )
+                        return _r2_task, f"🤖 LocalModel(late) {_r2_conf:.2f}", context_info
+            except Exception:
+                pass
 
-        # === 关键词兜底规则（云端和本地模型都无法判断时触发）===
-        print(f"[SmartDispatcher] ⚠️ 模型路由均未成功，回退关键词兜底规则...")
+        # === 关键词兜底规则（所有模型均失败时最后路障）===
+        logger.debug(f"[SmartDispatcher] ⚠️ 模型均未达阈值，回退关键词兜底规则: '{user_input[:30]}'")
 
         # -- 附件文档标注 (需要 file_context 支撑，不纯靠关键词) --
         if file_context and file_context.get("has_file"):
@@ -1130,10 +1284,17 @@ class SmartDispatcher:
                 except Exception:
                     pass
 
-        # -- PPT 直通 (需要同时有 PPT 关键词 + 动作词) --
+        # -- PPT 直通 (需要同时有 PPT 关键词 + 动作词，且不是能力询问/方法问句) --
         _ppt_direct_keywords = ["ppt", "幻灯片", "演示文稿", "presentation", "slide", "slides", ".pptx"]
         _ppt_action_words = ["做", "生成", "创建", "制作", "做一个", "做个", "帮我做", "帮我生成"]
-        if any(k in user_lower for k in _ppt_direct_keywords) and any(a in user_lower for a in _ppt_action_words):
+        _ppt_question_guards = [
+            "怎么", "如何", "什么", "你会", "你能", "能不能", "可以吗", "能否", "支持",
+        ]
+        if (
+            any(k in user_lower for k in _ppt_direct_keywords)
+            and any(a in user_lower for a in _ppt_action_words)
+            and not any(q in user_lower for q in _ppt_question_guards)
+        ):
             context_info = {"complexity": "complex"}
             context_info["routing_list"] = cls._build_routing_list(
                 similarity_scores,
@@ -1147,7 +1308,14 @@ class SmartDispatcher:
         _doc_gen_output_kws = ["word", "docx", ".doc", "pdf", "excel", ".xlsx", "报告", "文档", "介绍文档", "word版"]
         _doc_gen_action_kws = ["做一个", "做一份", "做个", "写一份", "写一个", "帮我做", "帮我写",
                                "生成一个", "生成一份", "生成", "创建一个", "创建一份", "制作"]
-        if any(k in user_lower for k in _doc_gen_output_kws) and any(a in user_lower for a in _doc_gen_action_kws):
+        _doc_question_guards = [
+            "怎么", "如何", "什么", "你会", "你能", "能不能", "可以吗", "能否", "支持", "功能",
+        ]
+        if (
+            any(k in user_lower for k in _doc_gen_output_kws)
+            and any(a in user_lower for a in _doc_gen_action_kws)
+            and not any(q in user_lower for q in _doc_question_guards)
+        ):
             context_info = context_info or {"complexity": "complex"}
             context_info["complexity"] = "complex"
             context_info["routing_list"] = cls._build_routing_list(

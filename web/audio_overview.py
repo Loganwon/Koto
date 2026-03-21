@@ -100,5 +100,5 @@ class AudioOverviewGenerator:
                 if os.path.exists(f):
                     try:
                         os.remove(f)
-                    except:
+                    except OSError:
                         pass

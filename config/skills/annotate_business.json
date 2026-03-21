@@ -25,7 +25,9 @@
                         "description":  "以批注表格和修订全文两部分输出"
                     },
     "bound_tools":  [
-
+                        "read_file",
+                        "find_file",
+                        "annotate_document"
                     ],
     "task_types":  [
                        "DOC_ANNOTATE",
@@ -73,5 +75,6 @@
                            "read_file",
                            "find_file",
                            "annotate_document"
-                       ]
+                       ],
+    "subcategory":  "annotation"
 }

@@ -3,6 +3,13 @@ name: Build
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'CHANGELOG.md'
+      - '.github/dependabot.yml'
+      - 'SECURITY.md'
+      - 'LICENSE'
 
 jobs:
   build-windows:

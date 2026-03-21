@@ -845,3 +845,263 @@ def undo_last_op():
     result = _tools().undo_last_op()
     ok = result.startswith("✅")
     return jsonify({"status": "ok" if ok else "info", "message": result})
+
+
+# ── Goal / Session 关联端点 ───────────────────────────────────────────────────
+
+
+@file_hub_bp.route("/by-goal/<goal_id>", methods=["GET"])
+def files_by_goal(goal_id: str):
+    """
+    查询与指定 goal 关联的所有文件。
+    Query: limit=50
+    """
+    limit = min(max(1, int(request.args.get("limit", 50))), 200)
+    entries = _reg().list_by_goal(goal_id, limit=limit)
+    return jsonify(
+        {
+            "goal_id": goal_id,
+            "total": len(entries),
+            "files": [e.to_dict() for e in entries],
+        }
+    )
+
+
+@file_hub_bp.route("/by-session/<session_id>", methods=["GET"])
+def files_by_session(session_id: str):
+    """
+    查询与指定 session 关联的所有文件。
+    Query: limit=50
+    """
+    limit = min(max(1, int(request.args.get("limit", 50))), 200)
+    entries = _reg().list_by_session(session_id, limit=limit)
+    return jsonify(
+        {
+            "session_id": session_id,
+            "total": len(entries),
+            "files": [e.to_dict() for e in entries],
+        }
+    )
+
+
+@file_hub_bp.route("/<file_id>/link-goal", methods=["PATCH"])
+def link_file_to_goal(file_id: str):
+    """
+    将已注册的文件关联到指定 goal。
+    Body JSON: { "goal_id": "..." }
+    """
+    data = request.get_json(silent=True) or {}
+    goal_id = (data.get("goal_id") or "").strip()
+    if not goal_id:
+        return jsonify({"error": "缺少 goal_id 字段"}), 400
+
+    entry = _reg().get_by_id(file_id)
+    if not entry:
+        return jsonify({"error": "未找到该文件记录"}), 404
+
+    ok = _reg().link_goal(entry.path, goal_id)
+    if not ok:
+        return jsonify({"error": "关联失败"}), 500
+    return jsonify({"status": "ok", "file_id": file_id, "goal_id": goal_id})
+
+
+# ── 关系图数据端点 ────────────────────────────────────────────────────────────
+
+
+@file_hub_bp.route("/graph-data", methods=["GET"])
+def graph_data():
+    """
+    返回文件关系图数据（nodes + edges）。
+
+    Query: center=<file_id>（可选，以该文件为中心展开一度关系）
+           limit=80（最多节点数）
+
+    边类型：
+      goal   — 同一 origin_goal_id
+      dup    — 相同文件内容（MD5 哈希）
+      recent — 最近一批文件（无显式关系时的兜底连接）
+    """
+    center_id = request.args.get("center") or None
+    limit = min(max(10, int(request.args.get("limit", 80))), 200)
+
+    import sqlite3 as _sq
+
+    reg = _reg()
+    conn = reg._conn
+
+    # ── 计算以 center 为锚点的局部图（若无 center，取最近文件）───────────────
+    center_entry = reg.get_by_id(center_id) if center_id else None
+
+    if center_entry:
+        # 一度邻居：同 goal + 同 hash + RAG 相似（用 FTS 兜底）
+        neighbor_paths: set = {center_entry.path}
+
+        # 同 goal
+        if center_entry.origin_goal_id:
+            for e in reg.list_by_goal(center_entry.origin_goal_id, limit=30):
+                neighbor_paths.add(e.path)
+
+        # 同 hash（重复文件）
+        if center_entry.file_hash:
+            rows = conn.execute(
+                "SELECT path FROM koto_file_registry WHERE file_hash=? LIMIT 20",
+                (center_entry.file_hash,),
+            ).fetchall()
+            for r in rows:
+                neighbor_paths.add(r["path"])
+
+        # FTS 相似（用文件名搜索）
+        try:
+            similar = reg.search(center_entry.name.rsplit(".", 1)[0], limit=15)
+            for e in similar:
+                neighbor_paths.add(e.path)
+        except Exception:
+            pass
+
+        # 取所有邻居的完整 entry
+        entries = [center_entry]
+        for p in list(neighbor_paths)[:limit]:
+            if p == center_entry.path:
+                continue
+            e = reg.get_by_path(p)
+            if e:
+                entries.append(e)
+    else:
+        # 无 center，取最近 limit 个文件
+        entries = reg.list_recent(days=90, limit=limit)
+
+    # ── 构建 nodes ────────────────────────────────────────────────────────────
+    node_map = {e.file_id: e for e in entries}
+    nodes = [
+        {
+            "id": e.file_id,
+            "name": e.name,
+            "category": e.category,
+            "size_bytes": e.size_bytes,
+            "path": e.path,
+            "is_center": e.file_id == center_id,
+        }
+        for e in entries
+    ]
+
+    # ── 构建 edges ────────────────────────────────────────────────────────────
+    edges = []
+    seen_edges: set = set()
+
+    def _add_edge(src_id: str, tgt_id: str, etype: str):
+        if src_id == tgt_id:
+            return
+        key = tuple(sorted([src_id, tgt_id]))
+        if key not in seen_edges:
+            seen_edges.add(key)
+            edges.append({"source": src_id, "target": tgt_id, "type": etype})
+
+    # goal 关系
+    from collections import defaultdict
+    _goal_groups: dict = defaultdict(list)
+    _hash_groups: dict = defaultdict(list)
+    for e in entries:
+        if e.origin_goal_id:
+            _goal_groups[e.origin_goal_id].append(e.file_id)
+        if e.file_hash:
+            _hash_groups[e.file_hash].append(e.file_id)
+
+    for gid, ids in _goal_groups.items():
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                _add_edge(ids[i], ids[j], "goal")
+
+    for fhash, ids in _hash_groups.items():
+        if len(ids) > 1:
+            for i in range(len(ids)):
+                for j in range(i + 1, len(ids)):
+                    _add_edge(ids[i], ids[j], "dup")
+
+    return jsonify(
+        {
+            "nodes": nodes,
+            "edges": edges,
+            "center_id": center_id,
+            "total_nodes": len(nodes),
+            "total_edges": len(edges),
+        }
+    )
+
+
+# ── 文件内容读取 / OS 默认程序打开 ────────────────────────────────────────────
+
+
+_TEXT_EXTS = {
+    ".txt", ".md", ".py", ".js", ".ts", ".json", ".html", ".htm", ".css",
+    ".csv", ".yaml", ".yml", ".xml", ".sql", ".sh", ".bash", ".ps1",
+    ".java", ".cpp", ".c", ".h", ".go", ".rs", ".rb", ".php",
+    ".toml", ".ini", ".cfg", ".env", ".log",
+}
+_MAX_READ_BYTES = 2 * 1024 * 1024  # 2 MB 上限，防止意外加载超大文件
+
+
+@file_hub_bp.route("/read", methods=["GET"])
+def read_file_content():
+    """
+    读取文本文件内容，供前端代码查看器（Artifacts）展示。
+    Query: path=<绝对路径>
+    返回 JSON: { "content": "...", "size": N, "encoding": "utf-8" }
+    """
+    path = (request.args.get("path") or "").strip()
+    if not path:
+        return jsonify({"error": "缺少 path 参数"}), 400
+
+    p = Path(path).resolve()
+
+    # 安全检查：只允许读取文件，不允许路径遍历到 / 等根目录
+    if not p.is_file():
+        return jsonify({"error": "文件不存在"}), 404
+
+    if p.suffix.lower() not in _TEXT_EXTS:
+        return jsonify({"error": "不支持预览该类型文件，请用默认程序打开"}), 415
+
+    try:
+        size = p.stat().st_size
+        if size > _MAX_READ_BYTES:
+            return jsonify({"error": f"文件过大（{size // 1024} KB），请用外部程序打开"}), 413
+
+        content = p.read_text(encoding="utf-8", errors="replace")
+        return jsonify({"content": content, "size": size, "encoding": "utf-8"})
+    except PermissionError:
+        return jsonify({"error": "无权限读取该文件"}), 403
+    except Exception as exc:
+        logger.warning(f"[FileHub] read_file_content 失败: {exc}")
+        return jsonify({"error": "读取失败"}), 500
+
+
+@file_hub_bp.route("/open", methods=["POST"])
+def open_file_with_os():
+    """
+    用系统默认程序打开文件（适用于非代码类文件）。
+    Body JSON: { "path": "<绝对路径>" }
+    """
+    import platform
+    import subprocess as _sp
+
+    data = request.get_json(silent=True) or {}
+    path = (data.get("path") or "").strip()
+    if not path:
+        return jsonify({"error": "缺少 path 字段"}), 400
+
+    p = Path(path).resolve()
+    if not p.exists():
+        return jsonify({"error": "文件或目录不存在"}), 404
+
+    try:
+        sys_name = platform.system()
+        if sys_name == "Windows":
+            os.startfile(str(p))  # type: ignore[attr-defined]
+        elif sys_name == "Darwin":
+            _sp.Popen(["open", str(p)])
+        else:
+            _sp.Popen(["xdg-open", str(p)])
+        return jsonify({"status": "ok", "path": str(p)})
+    except Exception as exc:
+        logger.warning(f"[FileHub] open_file_with_os 失败: {exc}")
+        return jsonify({"error": f"打开失败: {exc}"}), 500
+

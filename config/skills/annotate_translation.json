@@ -25,7 +25,8 @@
                         "description":  "原文/译文对照批注，含错误分类和建议译文，附评分"
                     },
     "bound_tools":  [
-
+                        "read_file",
+                        "find_file"
                     ],
     "task_types":  [
                        "DOC_ANNOTATE"
@@ -70,5 +71,6 @@
     "executor_tools":  [
                            "read_file",
                            "find_file"
-                       ]
+                       ],
+    "subcategory":  "annotation"
 }

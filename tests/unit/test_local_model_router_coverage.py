@@ -1011,7 +1011,9 @@ class TestLocalModelRouterCoverage:
             assert gen is not None
             list(gen)
             payload = mock_post.call_args[1]["json"]
-            assert payload["messages"][0]["content"] == "You are a helpful bot."
+            # system_instruction should be present in the first message (may have
+            # user-context prefix injected at runtime)
+            assert "You are a helpful bot." in payload["messages"][0]["content"]
 
     @patch("app.core.routing.local_model_router.requests.post")
     def test_generate_stream_http_error_yields_nothing(self, mock_post):

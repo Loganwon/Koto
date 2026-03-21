@@ -438,7 +438,9 @@ def _handle_auto_catalog(ctx: JobContext) -> Optional[str]:
 
 def _handle_skill_exec(ctx: JobContext) -> Optional[str]:
     """通过技能 ID 执行对话技能（注入 skill prompt 后调用 agent）。"""
-    skill_id = ctx.payload.get("skill_id") or ctx.task_id  # fallback
+    skill_id = ctx.payload.get("skill_id")
+    if not skill_id:
+        raise ValueError("payload.skill_id 不能为空")
     query = ctx.payload.get("query", "")
     if not query:
         raise ValueError("payload.query 不能为空")

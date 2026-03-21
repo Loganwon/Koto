@@ -175,8 +175,11 @@ def interrupt_task(task_id: str):
                 progress=0,
             )
         )
-    except Exception:
-        pass
+    except Exception as _pe:
+        import logging as _logging
+        _logging.getLogger(__name__).debug(
+            "[TaskAPI] 进度事件发布失败 (task_id=%s): %s", task_id, _pe
+        )
 
     return _ok(message="任务已进入等待确认状态")
 
@@ -215,8 +218,11 @@ def resume_task(task_id: str):
                     progress=0,
                 )
             )
-        except Exception:
-            pass
+        except Exception as _pe:
+            import logging as _logging
+            _logging.getLogger(__name__).debug(
+                "[TaskAPI] resume 事件发布失败 (task_id=%s): %s", task_id, _pe
+            )
         return _ok(message="任务已恢复执行")
     else:
         ledger.cancel_task(task_id)

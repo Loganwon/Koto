@@ -26,7 +26,9 @@
                         "description":  "包含根因分析、最小复现代码和修复方案"
                     },
     "bound_tools":  [
-
+                        "read_file",
+                        "find_file",
+                        "python_exec"
                     ],
     "task_types":  [
                        "CODER"
@@ -84,5 +86,6 @@
     "output_keys":  [
                         "fixed_code",
                         "root_cause"
-                    ]
+                    ],
+    "subcategory":  "code_debug"
 }

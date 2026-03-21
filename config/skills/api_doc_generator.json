@@ -1,73 +1,80 @@
-{
-  "id": "api_doc_generator",
-  "name": "API 文档生成",
-  "icon": "📡",
-  "category": "domain",
-  "description": "根据代码/路由定义自动生成标准 API 文档（OpenAPI/Swagger 格式或 Markdown），包含请求参数、响应示例、错误码说明",
-  "intent_description": "用户粘贴了接口代码或路由定义，说「帮我写API文档」「接口文档」「swagger怎么写」「帮我补全文档」",
-  "output_spec": {
-    "format": "markdown",
-    "must_contain": [
-      "##",
-      "请求",
-      "响应"
-    ],
-    "must_not_contain": [],
-    "min_chars": 200,
-    "max_chars": null,
-    "required_json_keys": [],
-    "description": "标准API文档：路径/方法/描述/请求参数/响应示例/错误码"
-  },
-  "bound_tools": [
-    "read_file"
-  ],
-  "executor_tools": [
-    "read_file"
-  ],
-  "task_types": [
-    "CODER"
-  ],
-  "priority": 65,
-  "conflict_with": [],
-  "enabled": false,
-  "prompt": "\n\n## 📡 领域要求：API 文档生成\n\n你是一名精通 RESTful API 设计和 OpenAPI 3.0 规范的后端工程师，专门负责 API 文档标准化。\n\n### 文档生成规则\n\n**标准 Markdown 格式（默认，适合放在 README/Confluence）**\n\n```markdown\n## POST /api/v1/users  \n**描述**：注册新用户\n\n**Request Headers**\n| 字段 | 必须 | 说明 |\n|------|------|------|\n| Content-Type | ✅ | application/json |\n| Authorization | ❌ | Bearer Token（管理员创建时需要）|\n\n**Request Body**\n```json\n{\n  \"username\": \"alice\",     // string, 必填, 3-20位字母数字\n  \"email\": \"alice@x.com\",  // string, 必填, 邮箱格式\n  \"password\": \"...\"       // string, 必填, 最少8位\n}\n```\n\n**Response 201 Created**\n```json\n{\n  \"code\": 0,\n  \"data\": {\n    \"user_id\": \"usr_abc123\",\n    \"username\": \"alice\",\n    \"created_at\": \"2026-03-19T12:00:00Z\"\n  }\n}\n```\n\n**错误码**\n| code | HTTP | 说明 |\n|------|------|------|\n| 4001 | 400 | 参数校验失败 |\n| 4091 | 409 | 用户名/邮箱已存在 |\n| 5001 | 500 | 服务器内部错误 |\n```\n\n**如果用户要 OpenAPI YAML 格式**，直接输出符合 OpenAPI 3.0 规范的 YAML。\n\n### 从代码自动推断\n- Flask/FastAPI：从路由装饰器和函数参数推断\n- 从 Pydantic/TypedDict 推断字段类型和必填\n- 从代码中的 raise HTTPException 推断错误码\n- 没有明确说明的字段，标注「// 推断自代码，请人工确认」\n\n### 约束\n- 敏感字段（password, token, secret）在示例中用 `\"***\"` 替代\n- 不要省略错误码说明——这是开发者最需要的部分\n- 如果代码有安全问题（无鉴权的删除接口等），顺带在底部标注 ⚠️",
-  "examples": [
-    {
-      "input": "帮我给这个接口写 API 文档：\n@app.route('/api/messages/<session_id>', methods=['GET'])\ndef get_messages(session_id):\n    page = request.args.get('page', 1, type=int)\n    page_size = request.args.get('page_size', 20, type=int)\n    # 返回消息列表",
-      "output": "## GET /api/messages/{session_id}\n**描述**：获取指定会话的消息历史记录（分页）\n\n---\n\n**Path Parameters**\n| 参数 | 类型 | 必须 | 说明 |\n|------|------|------|------|\n| `session_id` | string | ✅ | 会话 ID |\n\n**Query Parameters**\n| 参数 | 类型 | 必须 | 默认值 | 说明 |\n|------|------|------|--------|------|\n| `page` | integer | ❌ | 1 | 页码，从 1 开始 |\n| `page_size` | integer | ❌ | 20 | 每页条数，建议不超过 100 |\n\n**Request Headers**\n| 字段 | 必须 | 说明 |\n|------|------|------|\n| Authorization | ⚠️ 推断：未见鉴权代码 | 建议添加 Bearer Token 鉴权 |\n\n---\n\n**Response 200 OK**\n```json\n{\n  \"code\": 0,\n  \"data\": {\n    \"total\": 156,\n    \"page\": 1,\n    \"page_size\": 20,\n    \"messages\": [\n      {\n        \"message_id\": \"msg_xyz\",        // 推断字段，请确认\n        \"role\": \"user\",                 // \"user\" | \"assistant\"\n        \"content\": \"你好\",\n        \"created_at\": \"2026-03-19T10:00:00Z\"\n      }\n    ]\n  }\n}\n```\n\n**错误码**\n| code | HTTP | 说明 |\n|------|------|------|\n| 4041 | 404 | session_id 不存在 |\n| 5001 | 500 | 服务器内部错误 |\n\n---\n\n⚠️ **安全建议**：当前代码未见鉴权逻辑，建议在此接口添加 session 归属校验（防止用户 A 读取用户 B 的消息历史）。",
-      "note": "从路由代码自动推断参数，标注推断字段，顺带指出安全问题"
-    }
-  ],
-  "plan_template": [
-    "1. 识别接口路径/HTTP方法/框架",
-    "2. 从代码推断路径参数/查询参数/请求体字段",
-    "3. 推断响应数据结构（含分页/错误情况）",
-    "4. 整理错误码表",
-    "5. 检查安全问题（无鉴权/参数未校验）并标注"
-  ],
-  "trigger_keywords": [
-    "API文档",
-    "接口文档",
-    "swagger",
-    "openapi",
-    "帮我写文档",
-    "写接口说明",
-    "api doc",
-    "帮我补文档",
-    "接口说明",
-    "路由文档",
-    "restful文档",
-    "api specification"
-  ],
-  "version": "1.0.0",
-  "author": "koto",
-  "created_at": "2026-03-19T00:00:00Z",
-  "tags": [
-    "api",
-    "documentation",
-    "swagger",
-    "openapi",
-    "backend"
-  ],
-  "source_inspiration": "GitHub Copilot Workspace + Postman AI — API文档自动生成（开发者日常Top需求）"
+﻿{
+    "id":  "api_doc_generator",
+    "name":  "API 文档生成",
+    "icon":  "📡",
+    "category":  "domain",
+    "description":  "根据代码/路由定义自动生成标准 API 文档（OpenAPI/Swagger 格式或 Markdown），包含请求参数、响应示例、错误码说明",
+    "intent_description":  "用户粘贴了接口代码或路由定义，说「帮我写API文档」「接口文档」「swagger怎么写」「帮我补全文档」",
+    "output_spec":  {
+                        "format":  "markdown",
+                        "must_contain":  [
+                                             "##",
+                                             "请求",
+                                             "响应"
+                                         ],
+                        "must_not_contain":  [
+
+                                             ],
+                        "min_chars":  200,
+                        "max_chars":  null,
+                        "required_json_keys":  [
+
+                                               ],
+                        "description":  "标准API文档：路径/方法/描述/请求参数/响应示例/错误码"
+                    },
+    "bound_tools":  [
+                        "read_file"
+                    ],
+    "executor_tools":  [
+                           "read_file"
+                       ],
+    "task_types":  [
+                       "CODER"
+                   ],
+    "priority":  65,
+    "conflict_with":  [
+
+                      ],
+    "enabled":  true,
+    "prompt":  "\n\n## 📡 领域要求：API 文档生成\n\n你是一名精通 RESTful API 设计和 OpenAPI 3.0 规范的后端工程师，专门负责 API 文档标准化。\n\n### 文档生成规则\n\n**标准 Markdown 格式（默认，适合放在 README/Confluence）**\n\n```markdown\n## POST /api/v1/users  \n**描述**：注册新用户\n\n**Request Headers**\n| 字段 | 必须 | 说明 |\n|------|------|------|\n| Content-Type | ✅ | application/json |\n| Authorization | ❌ | Bearer Token（管理员创建时需要）|\n\n**Request Body**\n```json\n{\n  \"username\": \"alice\",     // string, 必填, 3-20位字母数字\n  \"email\": \"alice@x.com\",  // string, 必填, 邮箱格式\n  \"password\": \"...\"       // string, 必填, 最少8位\n}\n```\n\n**Response 201 Created**\n```json\n{\n  \"code\": 0,\n  \"data\": {\n    \"user_id\": \"usr_abc123\",\n    \"username\": \"alice\",\n    \"created_at\": \"2026-03-19T12:00:00Z\"\n  }\n}\n```\n\n**错误码**\n| code | HTTP | 说明 |\n|------|------|------|\n| 4001 | 400 | 参数校验失败 |\n| 4091 | 409 | 用户名/邮箱已存在 |\n| 5001 | 500 | 服务器内部错误 |\n```\n\n**如果用户要 OpenAPI YAML 格式**，直接输出符合 OpenAPI 3.0 规范的 YAML。\n\n### 从代码自动推断\n- Flask/FastAPI：从路由装饰器和函数参数推断\n- 从 Pydantic/TypedDict 推断字段类型和必填\n- 从代码中的 raise HTTPException 推断错误码\n- 没有明确说明的字段，标注「// 推断自代码，请人工确认」\n\n### 约束\n- 敏感字段（password, token, secret）在示例中用 `\"***\"` 替代\n- 不要省略错误码说明——这是开发者最需要的部分\n- 如果代码有安全问题（无鉴权的删除接口等），顺带在底部标注 ⚠️",
+    "examples":  [
+                     {
+                         "input":  "帮我给这个接口写 API 文档：\n@app.route(\u0027/api/messages/\u003csession_id\u003e\u0027, methods=[\u0027GET\u0027])\ndef get_messages(session_id):\n    page = request.args.get(\u0027page\u0027, 1, type=int)\n    page_size = request.args.get(\u0027page_size\u0027, 20, type=int)\n    # 返回消息列表",
+                         "output":  "## GET /api/messages/{session_id}\n**描述**：获取指定会话的消息历史记录（分页）\n\n---\n\n**Path Parameters**\n| 参数 | 类型 | 必须 | 说明 |\n|------|------|------|------|\n| `session_id` | string | ✅ | 会话 ID |\n\n**Query Parameters**\n| 参数 | 类型 | 必须 | 默认值 | 说明 |\n|------|------|------|--------|------|\n| `page` | integer | ❌ | 1 | 页码，从 1 开始 |\n| `page_size` | integer | ❌ | 20 | 每页条数，建议不超过 100 |\n\n**Request Headers**\n| 字段 | 必须 | 说明 |\n|------|------|------|\n| Authorization | ⚠️ 推断：未见鉴权代码 | 建议添加 Bearer Token 鉴权 |\n\n---\n\n**Response 200 OK**\n```json\n{\n  \"code\": 0,\n  \"data\": {\n    \"total\": 156,\n    \"page\": 1,\n    \"page_size\": 20,\n    \"messages\": [\n      {\n        \"message_id\": \"msg_xyz\",        // 推断字段，请确认\n        \"role\": \"user\",                 // \"user\" | \"assistant\"\n        \"content\": \"你好\",\n        \"created_at\": \"2026-03-19T10:00:00Z\"\n      }\n    ]\n  }\n}\n```\n\n**错误码**\n| code | HTTP | 说明 |\n|------|------|------|\n| 4041 | 404 | session_id 不存在 |\n| 5001 | 500 | 服务器内部错误 |\n\n---\n\n⚠️ **安全建议**：当前代码未见鉴权逻辑，建议在此接口添加 session 归属校验（防止用户 A 读取用户 B 的消息历史）。",
+                         "note":  "从路由代码自动推断参数，标注推断字段，顺带指出安全问题"
+                     }
+                 ],
+    "plan_template":  [
+                          "1. 识别接口路径/HTTP方法/框架",
+                          "2. 从代码推断路径参数/查询参数/请求体字段",
+                          "3. 推断响应数据结构（含分页/错误情况）",
+                          "4. 整理错误码表",
+                          "5. 检查安全问题（无鉴权/参数未校验）并标注"
+                      ],
+    "trigger_keywords":  [
+                             "API文档",
+                             "接口文档",
+                             "swagger",
+                             "openapi",
+                             "帮我写文档",
+                             "写接口说明",
+                             "api doc",
+                             "帮我补文档",
+                             "接口说明",
+                             "路由文档",
+                             "restful文档",
+                             "api specification"
+                         ],
+    "version":  "1.0.0",
+    "author":  "koto",
+    "created_at":  "2026-03-19T00:00:00Z",
+    "tags":  [
+                 "api",
+                 "documentation",
+                 "swagger",
+                 "openapi",
+                 "backend"
+             ],
+    "source_inspiration":  "GitHub Copilot Workspace + Postman AI — API文档自动生成（开发者日常Top需求）",
+    "subcategory":  "code_craft"
 }

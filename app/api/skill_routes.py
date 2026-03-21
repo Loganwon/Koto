@@ -95,9 +95,13 @@ def _token_tracker():
 @skill_bp.route("/active-ui-config", methods=["GET"])
 def get_active_ui_config():
     """返回所有已启用且含有 ui_config / ui_extensions 的 Skill 合并后的 UI 配置。"""
-    sm = _sm()
-    result = sm.get_active_ui_config()
-    return jsonify({"success": True, **result})
+    try:
+        sm = _sm()
+        result = sm.get_active_ui_config()
+        return jsonify({"success": True, **result})
+    except Exception as e:
+        logger.error(f"[skills] active-ui-config error: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -257,34 +261,6 @@ def list_skills():
         )
     except Exception as e:
         logger.error(f"[skills] list error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# GET /api/skills/active-ui-config  —  返回当前激活 Skill 的合并 UI 配置
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-@skill_bp.route("/active-ui-config", methods=["GET"])
-def get_active_ui_config():
-    """
-    返回当前所有已启用 Skill 的合并 UI 配置。
-    前端用来实现 Skill UI 主题切换、背景特效、占位符变更等。
-
-    响应:
-    {
-      "success": true,
-      "has_ui": bool,
-      "config": { "theme": str, "css_vars": {...}, "overlay_effect": str, ... },
-      "sources": ["skill_id1", ...]
-    }
-    """
-    try:
-        sm = _sm()
-        result = sm.get_active_ui_config()
-        return jsonify({"success": True, **result})
-    except Exception as e:
-        logger.error(f"[skills] active-ui-config error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
 
 

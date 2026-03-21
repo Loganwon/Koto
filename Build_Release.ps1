@@ -70,10 +70,10 @@ Write-OK "版本号: $Version"
 if (-not $SkipBuild) {
     $buildLog = Join-Path $LOG_DIR "build_latest.log"
     if ($Incremental) {
-        Write-Step "步骤 1/3  PyInstaller 增量构建（无 --clean，输出日志至 logs\build_latest.log）"
+        Write-Step "步骤 1/5  PyInstaller 增量构建（无 --clean，输出日志至 logs\build_latest.log）"
         & $VENV_PIP $SPEC_FILE -y *> $buildLog
     } else {
-        Write-Step "步骤 1/3  PyInstaller 完整构建（--clean，输出日志至 logs\build_latest.log）"
+        Write-Step "步骤 1/5  PyInstaller 完整构建（--clean，输出日志至 logs\build_latest.log）"
         & $VENV_PIP $SPEC_FILE --clean -y *> $buildLog
     }
     if ($LASTEXITCODE -ne 0) {
@@ -89,7 +89,7 @@ if (-not $SkipBuild) {
 
 # ─── 步骤 2：构建本地模型安装器 ─────────────────
 $installerBuildLog = Join-Path $LOG_DIR "local_model_installer_build_latest.log"
-Write-Step "步骤 2/4  构建本地模型安装器（输出日志至 logs\local_model_installer_build_latest.log）"
+Write-Step "步骤 2/5  构建本地模型安装器（输出日志至 logs\local_model_installer_build_latest.log）"
 & $VENV_PIP $LOCAL_INSTALLER_SPEC --clean -y *> $installerBuildLog
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "LocalModelInstaller 构建失败，查看详细日志：$installerBuildLog"
@@ -100,7 +100,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-OK "本地模型安装器构建完成 → dist\LocalModelInstaller.exe"
 
 # ─── 步骤 3：组装便携包 ───────────────────────
-Write-Step "步骤 3/4  组装便携包（dist\Koto_Portable\）"
+Write-Step "步骤 3/5  组装便携包（dist\Koto_Portable\)
 & $PYTHON $DEPLOY_PY
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "deploy_portable.py 失败"
@@ -108,8 +108,29 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-OK "便携包已组装 → dist\Koto_Portable\"
 
-# ─── 步骤 4：压缩为 zip ───────────────────────
-Write-Step "步骤 4/4  压缩为 zip"
+# ─── 步骤 4：构建 Inno Setup 安装包（可选） ──────────────
+Write-Step "步骤 4/5  构建安装包（Inno Setup，未安装则跳过）"
+$isccPaths = @(
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+)
+$iscc = $isccPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ($iscc) {
+    $issFile = Join-Path $REPO_ROOT "koto_installer.iss"
+    & $iscc /DAppVersion=$Version $issFile
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Inno Setup 构建失败"
+        exit 1
+    }
+    $setupName = "Koto_v${Version}_Setup.exe"
+    Write-OK "安装包已生成 → dist\$setupName"
+} else {
+    Write-Host "  [--] 未检测到 Inno Setup 6，跳过安装包构建（可从 https://jrsoftware.org/isinfo.php 安装）" -ForegroundColor Yellow
+}
+
+# ─── 步骤 5：压缩为 zip ───────────────────────
+Write-Step "步骤 5/5  压缩为 zip"
 $zipName = "Koto_v${Version}_Windows.zip"
 $zipPath = Join-Path $DIST_DIR $zipName
 $portableDir = Join-Path $DIST_DIR "Koto_Portable"

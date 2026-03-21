@@ -26,7 +26,10 @@
                         "description":  "包含瓶颈定位、复杂度分析和分层优化建议"
                     },
     "bound_tools":  [
-
+                        "read_file",
+                        "find_file",
+                        "python_exec",
+                        "analyze_system_performance"
                     ],
     "task_types":  [
                        "CODER",
@@ -80,5 +83,6 @@
                            "find_file",
                            "python_exec",
                            "analyze_system_performance"
-                       ]
+                       ],
+    "subcategory":  "code_debug"
 }

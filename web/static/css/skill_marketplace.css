@@ -179,11 +179,76 @@ a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--border-subtle);
+  gap: 10px;
 }
 .sm-results-count { color: var(--text-muted); font-size: 13px; }
+
+/* ── Density Toggle ────────────────────────────────────────────── */
+.density-toggle {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px;
+  margin-left: auto;
+}
+.density-btn {
+  width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background var(--transition), color var(--transition);
+}
+.density-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.density-btn.active { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ── Filter Chips Bar ──────────────────────────────────────────── */
+.filter-chips-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12px;
+}
+.chips-label { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.filter-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: default;
+}
+.filter-chip.chip-search  { background: rgba(88,166,255,0.1); border: 1px solid rgba(88,166,255,0.3); color: #79c0ff; }
+.filter-chip.chip-subcat  { background: rgba(240,136,62,0.1); border: 1px solid rgba(240,136,62,0.3); color: #f0883e; }
+.filter-chip.chip-nature  { background: rgba(137,87,229,0.1); border: 1px solid rgba(137,87,229,0.3); color: #c084fc; }
+.filter-chip .chip-x {
+  cursor: pointer; font-size: 12px; color: var(--text-muted); line-height: 1;
+  opacity: 0.7; transition: opacity .15s, color .15s;
+}
+.filter-chip .chip-x:hover { opacity: 1; color: var(--accent-red); }
+.chip-clear-all {
+  margin-left: auto;
+  padding: 1px 8px; border-radius: 20px;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 11px;
+  cursor: pointer; transition: background .15s, color .15s;
+}
+.chip-clear-all:hover { background: var(--bg-hover); color: var(--text-primary); }
 .sm-sort-select {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -205,6 +270,23 @@ a:hover { text-decoration: underline; }
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 16px;
 }
+/* Compact: smaller cards, more per row */
+.sm-grid--compact {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.sm-grid--compact .sm-card { padding: 14px; gap: 8px; }
+.sm-grid--compact .sm-card-icon { font-size: 22px; width: 36px; height: 36px; border-radius: 8px; }
+.sm-grid--compact .sm-card-name { font-size: 13px; }
+.sm-grid--compact .sm-card-desc { -webkit-line-clamp: 1; }
+/* Comfortable: wider cards, more whitespace */
+.sm-grid--comfortable {
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 20px;
+}
+.sm-grid--comfortable .sm-card { padding: 24px; gap: 14px; }
+.sm-grid--comfortable .sm-card-icon { font-size: 38px; width: 56px; height: 56px; }
+.sm-grid--comfortable .sm-card-desc { -webkit-line-clamp: 3; }
 .sm-card {
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -290,8 +372,62 @@ a:hover { text-decoration: underline; }
 /* Skill nature badges */
 .sm-tag.nature-model_hint   { border-color: rgba(31,111,235,0.35); color: #79c0ff; background: rgba(31,111,235,0.08); }
 .sm-tag.nature-domain_skill { border-color: rgba(255,140,0,0.35);  color: #f0883e; background: rgba(255,140,0,0.08); }
+
+/* ── Subcategory tags ──────────────────────────────────────────── */
+/* Koto 对话能力 */
+.sm-tag.subcat-koto-thinking { border-color: rgba(31,111,235,0.5); color: #79c0ff; background: rgba(31,111,235,0.1); }
+.sm-tag.subcat-personality   { border-color: rgba(137,87,229,0.5); color: #c084fc; background: rgba(137,87,229,0.1); }
+/* 代码 */
+.sm-tag.subcat-code-debug    { border-color: rgba(248,81,73,0.4);  color: #ff7b72; background: rgba(248,81,73,0.08); }
+.sm-tag.subcat-code-craft    { border-color: rgba(88,166,255,0.4); color: #58a6ff; background: rgba(88,166,255,0.08); }
+/* 文档 & 写作 */
+.sm-tag.subcat-annotation    { border-color: rgba(227,179,65,0.4); color: #e3b341; background: rgba(227,179,65,0.08); }
+.sm-tag.subcat-writing       { border-color: rgba(240,136,62,0.4); color: #f0883e; background: rgba(240,136,62,0.08); }
+.sm-tag.subcat-research      { border-color: rgba(63,185,80,0.4);  color: #56d364; background: rgba(63,185,80,0.08); }
+/* 数据 & 文件 */
+.sm-tag.subcat-data-excel    { border-color: rgba(35,134,54,0.4);  color: #3fb950; background: rgba(35,134,54,0.08); }
+.sm-tag.subcat-file-ops      { border-color: rgba(139,148,158,0.4);color: #8b949e; background: rgba(139,148,158,0.06); }
+/* 职场 & 工作流 */
+.sm-tag.subcat-career        { border-color: rgba(210,153,34,0.4); color: #d29922; background: rgba(210,153,34,0.08); }
+.sm-tag.subcat-doc-gen       { border-color: rgba(218,104,32,0.4); color: #da6820; background: rgba(218,104,32,0.08); }
+
+/* ── Sidebar group labels ──────────────────────────────────────── */
+.sm-sidebar-group-label {
+  padding: 10px 16px 3px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(139,148,158,0.6);
+  user-select: none;
+}
+
+/* ── Grouped grid section headers ─────────────────────────────── */
+.skill-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 4px;
+  position: sticky;
+  top: 97px;
+  background: var(--bg-base);
+  z-index: 5;
+}
+.skill-group-header .group-label-tag { font-size: 12px; padding: 3px 12px; }
+.skill-group-header .group-count { font-size: 11px; color: var(--text-muted); margin-left: auto; }
 .sm-rating { display: flex; align-items: center; gap: 3px; font-size: 12px; color: #e3b341; margin-left: auto; }
 .sm-card-actions { display: flex; gap: 8px; margin-top: auto; }
+
+/* ── Search highlight ──────────────────────────────────────────── */
+mark.hl {
+  background: rgba(210,153,34,0.28);
+  color: var(--text-primary);
+  border-radius: 2px;
+  padding: 0 1px;
+  font-style: normal;
+}
 
 /* ── Enabled Badge ─────────────────────────────────────────────── */
 .sm-badge {
@@ -801,6 +937,14 @@ select.form-control {
   transition: color .15s;
 }
 .active-pill .pill-x:hover { color: var(--accent-danger); }
+.pill-overflow-btn {
+  display: inline-flex; align-items: center;
+  padding: 2px 9px; border-radius: 20px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  color: var(--text-muted); font-size: 11px; font-weight: 600;
+  cursor: pointer; transition: background .15s, color .15s;
+}
+.pill-overflow-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .no-active-msg { font-size: 12px; color: var(--text-muted); font-style: italic; }
 @keyframes pulse {
   0%, 100% { opacity: 1; }

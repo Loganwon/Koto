@@ -25,7 +25,8 @@
                         "description":  "包含状态码解析、请求/响应对比分析和 curl 复现命令"
                     },
     "bound_tools":  [
-
+                        "read_file",
+                        "find_file"
                     ],
     "task_types":  [
                        "CODER",
@@ -76,5 +77,6 @@
     "executor_tools":  [
                            "read_file",
                            "find_file"
-                       ]
+                       ],
+    "subcategory":  "code_debug"
 }

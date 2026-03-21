@@ -102,6 +102,12 @@ class PipelineResult:
 
     @property
     def success(self) -> bool:
+        """只要有步骤成功执行就视为成功；steps_skipped 是 skip_on_error 的预期行为。"""
+        return bool(self.steps_executed)
+
+    @property
+    def fully_succeeded(self) -> bool:
+        """所有步骤都成功执行（无跳过）。"""
         return bool(self.steps_executed) and not self.steps_skipped
 
 

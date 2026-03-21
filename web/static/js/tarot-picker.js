@@ -210,6 +210,11 @@
         if (!w) return;
         w.innerHTML = html;
         w.querySelector('#tp-close-btn')?.addEventListener('click', onCancel);
+        // 每次更新内容后自动滚到底部，确保用户无需手动下拉即可看到抽牌界面
+        requestAnimationFrame(() => {
+            const container = document.getElementById('chatMessages');
+            if (container) container.scrollTop = container.scrollHeight;
+        });
     }
 
     // ─── 月相计算 ─────────────────────────────────────────────────────────────────
@@ -733,7 +738,11 @@
             else { unhookSendMessage(); removePicker(); _resetState(); }
         },
         drawClarifier() {
-            if (!_active) return;
+            // 用户主动点击澄清牌时，即使 skill 状态已刷新导致 _active=false，也应强制继续
+            if (!_active) {
+                _active = true;
+                hookSendMessage();
+            }
             document.querySelector('.tp-clarifier-row')?.remove();
             _pendingMsg      = '（澄清解读，针对上一张牌的疑问）';
             _suggestedSpread = null;

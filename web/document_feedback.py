@@ -1730,8 +1730,8 @@ class DocumentFeedbackSystem:
             try:
                 if cancel_check and cancel_check():
                     return True
-            except Exception:
-                pass
+            except Exception as _cc_err:
+                logger.debug("[DocAnnotator] cancel_check 调用失败: %s", _cc_err)
             return bool(task_id and check_task_cancelled(task_id))
         
         logger.info("=" * 60)

@@ -2401,7 +2401,7 @@ class SkillManager:
                 return
             for skill_file in skills_dir.glob("*.json"):
                 try:
-                    with open(skill_file, "r", encoding="utf-8") as f:
+                    with open(skill_file, "r", encoding="utf-8-sig") as f:
                         data = json.load(f)
                     skill_def = SkillDefinition.from_dict(data)
                     if skill_def.id in cls._def_registry:
