@@ -469,17 +469,41 @@
             color: var(--text-secondary); cursor: pointer; transition: all .15s;
         }
         .sp-chip.active, .sp-chip:hover { background: var(--accent-primary); color: #fff; border-color: var(--accent-primary); }
-        .sp-sort-row {
-            display: flex; gap: 5px; align-items: center;
-            padding: 5px 14px 7px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+        .sp-filter-row { align-items: center; }
+        .sp-sort-trigger { margin-left: auto; flex-shrink: 0; position: relative; }
+        .sp-sort-btn {
+            display: flex; align-items: center; justify-content: center;
+            width: 28px; height: 24px; padding: 0;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+            border-radius: 7px; cursor: pointer; color: var(--text-secondary);
+            transition: all .15s; position: relative;
         }
-        .sp-sort-label { font-size: 10px; color: var(--text-muted); margin-right: 2px; white-space: nowrap; }
-        .sp-sort-chip {
-            padding: 2px 9px; border-radius: 20px; font-size: 11px;
-            border: 1px solid var(--border-color); background: var(--bg-tertiary);
-            color: var(--text-secondary); cursor: pointer; transition: all .15s;
+        .sp-sort-btn:hover { background: var(--bg-secondary); color: var(--text-primary); }
+        .sp-sort-btn.open { background: var(--accent-secondary, #4ec9b0); color: #fff; border-color: var(--accent-secondary, #4ec9b0); }
+        .sp-sort-btn.sorted::after {
+            content: ''; position: absolute; top: 3px; right: 3px;
+            width: 5px; height: 5px; border-radius: 50%;
+            background: var(--accent-secondary, #4ec9b0); pointer-events: none;
         }
-        .sp-sort-chip.active, .sp-sort-chip:hover { background: var(--accent-secondary, #4ec9b0); color: #fff; border-color: var(--accent-secondary, #4ec9b0); }
+        .sp-sort-btn.open.sorted::after { background: rgba(255,255,255,.7); }
+        .sp-sort-dropdown {
+            position: absolute; right: 0; top: calc(100% + 5px);
+            background: var(--bg-elevated, var(--bg-secondary));
+            border: 1px solid var(--border-color); border-radius: 10px;
+            padding: 4px; z-index: 300; min-width: 130px;
+            box-shadow: 0 6px 20px rgba(0,0,0,.3);
+            display: none;
+        }
+        .sp-sort-dropdown.open { display: block; animation: spSortIn .12s ease; }
+        @keyframes spSortIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+        .sp-sort-option {
+            display: block; width: 100%; text-align: left;
+            padding: 6px 12px; border-radius: 7px; font-size: 12px;
+            background: none; border: none; color: var(--text-primary);
+            cursor: pointer; transition: background .1s; white-space: nowrap;
+        }
+        .sp-sort-option:hover { background: var(--bg-tertiary); }
+        .sp-sort-option.active { color: var(--accent-secondary, #4ec9b0); font-weight: 600; }
         .sp-content { flex: 1; overflow-y: auto; padding: 0; }
         /* ── Preset panel ─────────────────────────────────────────────── */
         .sp-presets { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
@@ -2076,20 +2100,23 @@
                 <button class="sp-tab" data-tab="studio" onclick="spSwitchTab('studio')">创意工坊</button>
                 <button class="sp-tab" data-tab="askkoto" onclick="spSwitchTab('askkoto')">🤖 问 Koto</button>
             </div>
-            <!-- Category filter chips -->
+            <!-- Category filter chips + sort trigger -->
             <div class="sp-filter-row" id="spFilterRow">
                 <button class="sp-chip active" data-cat="all" onclick="spSetCat('all')">全部</button>
                 <button class="sp-chip" data-cat="behavior" onclick="spSetCat('behavior')">⚙️ 行为</button>
                 <button class="sp-chip" data-cat="style" onclick="spSetCat('style')">🎨 风格</button>
                 <button class="sp-chip" data-cat="domain" onclick="spSetCat('domain')">🔬 领域</button>
                 <button class="sp-chip" data-cat="custom" onclick="spSetCat('custom')">🔧 自定义</button>
-            </div>
-            <!-- Sort row -->
-            <div class="sp-sort-row" id="spSortRow">
-                <span class="sp-sort-label">排序：</span>
-                <button class="sp-sort-chip active" data-sort="default" onclick="spSetSort('default')">默认</button>
-                <button class="sp-sort-chip" data-sort="recent" onclick="spSetSort('recent')">🕐 最近使用</button>
-                <button class="sp-sort-chip" data-sort="popular" onclick="spSetSort('popular')">🔥 最常用</button>
+                <div class="sp-sort-trigger" id="spSortTrigger">
+                    <button class="sp-sort-btn" id="spSortBtn" onclick="spToggleSortMenu(event)" title="排序方式">
+                        <svg width="13" height="10" viewBox="0 0 13 10" fill="currentColor"><rect x="0" y="0" width="13" height="2" rx="1"/><rect x="0" y="4" width="13" height="2" rx="1"/><rect x="0" y="8" width="13" height="2" rx="1"/></svg>
+                    </button>
+                    <div class="sp-sort-dropdown" id="spSortDropdown">
+                        <button class="sp-sort-option active" data-sort="default" onclick="spSetSort('default')">默认</button>
+                        <button class="sp-sort-option" data-sort="recent" onclick="spSetSort('recent')">🕐 最近使用</button>
+                        <button class="sp-sort-option" data-sort="popular" onclick="spSetSort('popular')">🔥 最常用</button>
+                    </div>
+                </div>
             </div>
             <!-- Recommendations strip (shown when usage data exists) -->
             <div class="sp-rec-strip" id="spRecStrip" style="display:none;">
@@ -2246,6 +2273,10 @@
                         <input type="password" id="setupApiKey" placeholder="粘贴您的 API Key...">
                         <button class="btn-primary" onclick="saveApiKey()">验证并保存</button>
                         <div class="step-status" id="step1Status"></div>
+                        <div style="margin-top:14px;padding:10px 12px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:12px;color:#999;line-height:1.7;">
+                            📩 没有 API Key？可加微信申请<strong style="color:#e8c97a;">内测激活码</strong>：<br>
+                            <span style="font-size:14px;font-weight:600;color:#e0e0e0;letter-spacing:1px;">18913921188</span>
+                        </div>
                     </div>
                 </div>
                 
@@ -2979,11 +3010,33 @@
 
         window.spSetSort = function(sort) {
             _spCurrentSort = sort;
-            document.querySelectorAll('.sp-sort-chip').forEach(c => {
+            document.querySelectorAll('.sp-sort-option').forEach(c => {
                 c.classList.toggle('active', c.dataset.sort === sort);
             });
+            const btn = document.getElementById('spSortBtn');
+            if (btn) {
+                btn.classList.toggle('sorted', sort !== 'default');
+                btn.classList.remove('open');
+            }
+            const dd = document.getElementById('spSortDropdown');
+            if (dd) dd.classList.remove('open');
             spRenderCards();
         };
+
+        window.spToggleSortMenu = function(e) {
+            e.stopPropagation();
+            const dd = document.getElementById('spSortDropdown');
+            const btn = document.getElementById('spSortBtn');
+            const isOpen = dd.classList.toggle('open');
+            btn.classList.toggle('open', isOpen);
+        };
+
+        document.addEventListener('click', function() {
+            const dd = document.getElementById('spSortDropdown');
+            const btn = document.getElementById('spSortBtn');
+            if (dd) dd.classList.remove('open');
+            if (btn) btn.classList.remove('open');
+        });
 
         window.spSearchSkills = function(q) {
             _spCurrentSearch = q;

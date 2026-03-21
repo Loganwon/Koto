@@ -67,6 +67,10 @@ JWT_EXPIRY_HOURS = int(os.environ.get("KOTO_JWT_EXPIRY_HOURS", "72"))
 USERS_FILE = os.environ.get("KOTO_USERS_FILE", "config/users.json")
 MAX_DAILY_REQUESTS = int(os.environ.get("KOTO_MAX_DAILY_REQUESTS", "100"))
 ADMIN_TOKEN = os.environ.get("KOTO_ADMIN_TOKEN", "")
+# 激活码管理文件（管理员颁发，用户兑换后可使用系统 API key）
+ACTIVATION_CODES_FILE = os.environ.get("KOTO_ACTIVATION_CODES_FILE", "config/activation_codes.json")
+# 系统 API key（后台 Gemini key，供持有激活码的用户使用）
+SYSTEM_GEMINI_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY", "")
 
 
 def _hash_password(password: str, salt: str = None) -> tuple:
@@ -87,6 +91,48 @@ def _load_users() -> dict:
     except Exception as e:
         logger.warning("Failed to load users: %s", e)
         return {}
+
+
+# ── 激活码管理 ──
+
+def _load_activation_codes() -> dict:
+    """加载激活码列表  { code: { used_by: null|email, created_at, used_at } }"""
+    if not os.path.exists(ACTIVATION_CODES_FILE):
+        return {}
+    try:
+        with open(ACTIVATION_CODES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning("Failed to load activation codes: %s", e)
+        return {}
+
+
+def _save_activation_codes(codes: dict):
+    os.makedirs(os.path.dirname(ACTIVATION_CODES_FILE) or ".", exist_ok=True)
+    with open(ACTIVATION_CODES_FILE, "w", encoding="utf-8") as f:
+        json.dump(codes, f, ensure_ascii=False, indent=2)
+
+
+def get_user_api_key(user_record: dict) -> str | None:
+    """
+    返回该用户发起 AI 请求时应使用的 API key。
+    优先级：用户自己绑定的 key > 激活码（使用系统 key） > None（拒绝请求）
+    """
+    own_key = (user_record.get("gemini_api_key") or "").strip()
+    if own_key:
+        return own_key
+    if user_record.get("activation_code"):
+        return SYSTEM_GEMINI_KEY or None
+    return None
+
+
+def get_effective_api_key(user_id: str) -> str | None:
+    """通过 user_id 快捷获取有效 API key（供其他模块调用）"""
+    users = _load_users()
+    for _email, rec in users.items():
+        if rec.get("user_id") == user_id:
+            return get_user_api_key(rec)
+    return None
 
 
 def _save_users(users: dict):
@@ -207,6 +253,7 @@ def require_auth(f):
         if not AUTH_ENABLED:
             g.user_id = "local"
             g.user_email = "local@koto.ai"
+            g.api_key = SYSTEM_GEMINI_KEY
             return f(*args, **kwargs)
 
         # 从 header 或 cookie 获取 token
@@ -223,12 +270,33 @@ def require_auth(f):
 
         user_id = payload.get("user_id", "")
 
+        # 检查用户是否有可用 API key（自己的 key 或激活码）
+        users = _load_users()
+        user_rec = None
+        for _email, rec in users.items():
+            if rec.get("user_id") == user_id:
+                user_rec = rec
+                break
+        if user_rec is None:
+            return jsonify({"error": "用户不存在", "code": "UNAUTHORIZED"}), 401
+        effective_key = get_user_api_key(user_rec)
+        if not effective_key:
+            return (
+                jsonify(
+                    {
+                        "error": "请先绑定自己的 Gemini API Key，或向管理员申请激活码",
+                        "code": "NO_API_KEY",
+                    }
+                ),
+                403,
+            )
+
         # 频率限制
         if not _check_rate(user_id, "standard"):
             return (
                 jsonify(
                     {
-                        "error": "Rate limit exceeded",
+                        "error": f"今日请求已达上限 ({user_rec.get('daily_limit', MAX_DAILY_REQUESTS)}次)",
                         "code": "RATE_LIMIT",
                     }
                 ),
@@ -237,6 +305,7 @@ def require_auth(f):
 
         g.user_id = user_id
         g.user_email = payload.get("email", "")
+        g.api_key = effective_key  # 下游 AI 路由从 g.api_key 取 key
         return f(*args, **kwargs)
 
     return decorated
@@ -264,38 +333,57 @@ def register_auth_routes(app):
 
     @app.route("/api/auth/register", methods=["POST"])
     def auth_register():
-        """用户注册"""
+        """用户注册（手机号或邮箱 + 密码，无需验证码）"""
         if not AUTH_ENABLED:
             return jsonify({"error": "本地模式无需注册"}), 400
 
         data = request.get_json(force=True) or {}
         email = (data.get("email") or "").strip().lower()
+        phone = (data.get("phone") or "").strip()
         password = data.get("password", "")
-        name = data.get("name", "").strip()
+        name = (data.get("name") or "").strip()
 
-        if not email or "@" not in email:
-            return jsonify({"error": "请输入有效的邮箱地址"}), 400
+        # 至少提供邮箱或手机号之一
+        if not email and not phone:
+            return jsonify({"error": "请提供邮箱或手机号"}), 400
+        if email and "@" not in email:
+            return jsonify({"error": "邮箱格式不正确"}), 400
+        if phone and (not phone.lstrip("+").isdigit() or len(phone.lstrip("+")) < 7):
+            return jsonify({"error": "手机号格式不正确"}), 400
         if len(password) < 6:
             return jsonify({"error": "密码至少6位"}), 400
 
         users = _load_users()
-        if email in users:
+        # 唯一性检查：邮箱 / 手机号任意一个已存在就拒绝
+        if email and email in users:
             return jsonify({"error": "该邮箱已注册"}), 409
+        if phone:
+            for rec in users.values():
+                if rec.get("phone") == phone:
+                    return jsonify({"error": "该手机号已注册"}), 409
 
         hashed, salt = _hash_password(password)
         user_id = secrets.token_hex(8)
-        users[email] = {
+        # 用邮箱作主键；没有邮箱时用手机号@phone作占位
+        key = email if email else f"phone:{phone}"
+        display_name = name or (email.split("@")[0] if email else phone)
+        users[key] = {
             "user_id": user_id,
-            "name": name or email.split("@")[0],
+            "name": display_name,
+            "email": email or "",
+            "phone": phone or "",
             "password_hash": hashed,
             "salt": salt,
             "created_at": datetime.now().isoformat(),
             "plan": "free",
             "daily_limit": MAX_DAILY_REQUESTS,
+            "gemini_api_key": "",      # 用户可绑定自己的 key
+            "activation_code": "",    # 激活码（兑换后写入）
         }
         _save_users(users)
+        logger.info("[Auth] 新用户注册: %s (phone=%s)", key, phone or "-")
 
-        token = _generate_token(user_id, email)
+        token = _generate_token(user_id, key)
         return jsonify(
             {
                 "success": True,
@@ -303,8 +391,10 @@ def register_auth_routes(app):
                 "user": {
                     "user_id": user_id,
                     "email": email,
-                    "name": users[email]["name"],
+                    "phone": phone,
+                    "name": display_name,
                     "plan": "free",
+                    "has_api_access": False,
                 },
             }
         )
@@ -355,28 +445,44 @@ def register_auth_routes(app):
             )
 
         data = request.get_json(force=True) or {}
-        email = (data.get("email") or "").strip().lower()
+        # 支持用邮箱或手机号登录
+        login_id = (data.get("email") or data.get("phone") or "").strip().lower()
+        phone_raw = (data.get("phone") or "").strip()
         password = data.get("password", "")
 
         users = _load_users()
-        user = users.get(email)
+        # 先尝试直接 key 查找（邮箱 or phone:xxx）
+        user_key = None
+        user = users.get(login_id)
+        if user:
+            user_key = login_id
+        elif phone_raw:
+            # 手机号登录：遍历找 phone 字段
+            for k, rec in users.items():
+                if rec.get("phone") == phone_raw:
+                    user = rec
+                    user_key = k
+                    break
         if not user:
-            return jsonify({"error": "邮箱或密码错误"}), 401
+            return jsonify({"error": "账号或密码错误"}), 401
 
         hashed, _ = _hash_password(password, user["salt"])
         if hashed != user["password_hash"]:
-            return jsonify({"error": "邮箱或密码错误"}), 401
+            return jsonify({"error": "账号或密码错误"}), 401
 
-        token = _generate_token(user["user_id"], email)
+        effective_key = get_user_api_key(user)
+        token = _generate_token(user["user_id"], user_key)
         return jsonify(
             {
                 "success": True,
                 "token": token,
                 "user": {
                     "user_id": user["user_id"],
-                    "email": email,
+                    "email": user.get("email", ""),
+                    "phone": user.get("phone", ""),
                     "name": user["name"],
                     "plan": user.get("plan", "free"),
+                    "has_api_access": bool(effective_key),
                 },
             }
         )
@@ -389,17 +495,131 @@ def register_auth_routes(app):
         for email, user in users.items():
             if user["user_id"] == g.user_id:
                 used = len(_rate_buckets.get(g.user_id, []))
+                effective_key = get_user_api_key(user)
                 return jsonify(
                     {
                         "user_id": g.user_id,
-                        "email": email,
+                        "email": user.get("email", ""),
+                        "phone": user.get("phone", ""),
                         "name": user["name"],
                         "plan": user.get("plan", "free"),
                         "daily_limit": user.get("daily_limit", MAX_DAILY_REQUESTS),
                         "used_today": used,
+                        "has_api_access": bool(effective_key),
+                        "api_key_type": (
+                            "own" if (user.get("gemini_api_key") or "").strip()
+                            else ("activation" if user.get("activation_code") else "none")
+                        ),
                     }
                 )
         return jsonify({"user_id": g.user_id, "email": g.user_email, "plan": "free"})
+
+    @app.route("/api/auth/bind/apikey", methods=["POST"])
+    @require_auth
+    def auth_bind_apikey():
+        """绑定/更新用户自己的 Gemini API Key"""
+        data = request.get_json(force=True) or {}
+        api_key = (data.get("api_key") or "").strip()
+        if not api_key:
+            return jsonify({"error": "api_key 不能为空"}), 400
+        # 简单格式校验
+        if not api_key.startswith("AIza") or len(api_key) < 30:
+            return jsonify({"error": "API Key 格式不正确（应以 AIza 开头）"}), 400
+
+        users = _load_users()
+        for key, rec in users.items():
+            if rec.get("user_id") == g.user_id:
+                rec["gemini_api_key"] = api_key
+                _save_users(users)
+                return jsonify({"success": True, "message": "API Key 绑定成功"})
+        return jsonify({"error": "用户不存在"}), 404
+
+    @app.route("/api/auth/activate", methods=["POST"])
+    @require_auth
+    def auth_activate():
+        """用激活码兑换系统 API 使用权限"""
+        data = request.get_json(force=True) or {}
+        code = (data.get("code") or "").strip().upper()
+        if not code:
+            return jsonify({"error": "请输入激活码"}), 400
+
+        codes = _load_activation_codes()
+        if code not in codes:
+            return jsonify({"error": "激活码无效"}), 400
+        entry = codes[code]
+        if entry.get("used_by"):
+            return jsonify({"error": "该激活码已被使用"}), 400
+
+        # 标记激活码已使用
+        entry["used_by"] = g.user_id
+        entry["used_at"] = datetime.now().isoformat()
+        _save_activation_codes(codes)
+
+        # 写入用户记录
+        users = _load_users()
+        for key, rec in users.items():
+            if rec.get("user_id") == g.user_id:
+                rec["activation_code"] = code
+                _save_users(users)
+                logger.info("[Auth] 用户 %s 激活了激活码 %s", g.user_id, code)
+                return jsonify({"success": True, "message": "激活成功，可以开始使用 Koto 了！"})
+        return jsonify({"error": "用户不存在"}), 404
+
+    # ── 管理员接口（需 KOTO_ADMIN_TOKEN） ──
+
+    @app.route("/api/admin/activation_codes/create", methods=["POST"])
+    def admin_create_codes():
+        """管理员批量生成激活码"""
+        token = request.headers.get("X-Admin-Token", "")
+        if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+            return jsonify({"error": "无权限"}), 403
+        data = request.get_json(force=True) or {}
+        count = max(1, min(int(data.get("count", 1)), 100))
+        codes = _load_activation_codes()
+        new_codes = []
+        for _ in range(count):
+            code = secrets.token_hex(6).upper()  # 12-char hex code
+            while code in codes:
+                code = secrets.token_hex(6).upper()
+            codes[code] = {
+                "created_at": datetime.now().isoformat(),
+                "used_by": None,
+                "used_at": None,
+            }
+            new_codes.append(code)
+        _save_activation_codes(codes)
+        logger.info("[Admin] 生成了 %d 个激活码", count)
+        return jsonify({"success": True, "codes": new_codes})
+
+    @app.route("/api/admin/activation_codes", methods=["GET"])
+    def admin_list_codes():
+        """管理员查看所有激活码状态"""
+        token = request.headers.get("X-Admin-Token", "")
+        if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+            return jsonify({"error": "无权限"}), 403
+        codes = _load_activation_codes()
+        return jsonify({"codes": codes, "total": len(codes), "used": sum(1 for c in codes.values() if c.get("used_by"))})
+
+    @app.route("/api/admin/users", methods=["GET"])
+    def admin_list_users():
+        """管理员查看所有注册用户（手机号/邮箱收集）"""
+        token = request.headers.get("X-Admin-Token", "")
+        if not ADMIN_TOKEN or token != ADMIN_TOKEN:
+            return jsonify({"error": "无权限"}), 403
+        users = _load_users()
+        result = []
+        for key, rec in users.items():
+            result.append({
+                "user_id": rec.get("user_id"),
+                "name": rec.get("name"),
+                "email": rec.get("email", ""),
+                "phone": rec.get("phone", ""),
+                "plan": rec.get("plan", "free"),
+                "created_at": rec.get("created_at"),
+                "has_own_key": bool((rec.get("gemini_api_key") or "").strip()),
+                "has_activation": bool(rec.get("activation_code")),
+            })
+        return jsonify({"users": result, "total": len(result)})
 
     @app.route("/api/auth/logout", methods=["POST"])
     def auth_logout():

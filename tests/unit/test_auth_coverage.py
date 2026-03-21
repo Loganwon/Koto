@@ -258,6 +258,12 @@ class TestFlaskDecorators:
         """With AUTH_ENABLED=True and a valid Bearer token, require_auth passes."""
         auth_mod = _get_auth_module()
         monkeypatch.setattr(auth_mod, "AUTH_ENABLED", True)
+        # Provide a user record so require_auth can find the user and their key
+        monkeypatch.setattr(
+            auth_mod,
+            "_load_users",
+            lambda: {"ok@test.com": {"user_id": "uid-ok", "gemini_api_key": "test-key"}},
+        )
         token = auth_mod._generate_token("uid-ok", "ok@test.com")
         app = _make_flask_app(auth_enabled=True)
         with app.test_client() as c:

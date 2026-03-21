@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 # ── Provider registry ─────────────────────────────────────────────────────────
 
-def _load_gemini() -> LLMProvider:
+def _load_gemini(api_key: str = None) -> LLMProvider:
     from .gemini import GeminiProvider
-    return GeminiProvider()
+    return GeminiProvider(api_key=api_key)
 
 
 def _load_openai() -> LLMProvider:
@@ -84,12 +84,23 @@ def get_llm_provider(
     Selection logic (highest to lowest priority):
     1. `provider` argument (explicit override)
     2. `model` string prefix
-    3. Available API keys: OPENAI_API_KEY → ANTHROPIC_API_KEY → GEMINI_API_KEY → ollama
+    3. Per-request API key in flask.g (set by auth middleware)
+    4. Available API keys: OPENAI_API_KEY → ANTHROPIC_API_KEY → GEMINI_API_KEY → ollama
     """
+    # Collect per-request key from Flask g (if inside a request context)
+    request_api_key: Optional[str] = None
+    try:
+        from flask import g as flask_g
+        request_api_key = getattr(flask_g, "api_key", None) or None
+    except RuntimeError:
+        pass  # Not inside a Flask request context
+
     # 1. Explicit provider name
     if provider:
         name = provider.lower().strip()
         if name in _LOADERS:
+            if name == "gemini" and request_api_key:
+                return _load_gemini(api_key=request_api_key)
             return _LOADERS[name]()
         logger.warning(f"[ProviderFactory] Unknown provider '{provider}', falling back to auto-detect")
 
@@ -98,9 +109,15 @@ def get_llm_provider(
         m = model.lower()
         for prefix, pname in _MODEL_PREFIX_MAP:
             if m.startswith(prefix):
+                if pname == "gemini" and request_api_key:
+                    return _load_gemini(api_key=request_api_key)
                 return _LOADERS[pname]()
 
-    # 3. Auto-detect from available keys
+    # 3. Per-request key takes priority over global env var
+    if request_api_key:
+        return _load_gemini(api_key=request_api_key)
+
+    # 4. Auto-detect from available env keys
     if os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY") or os.getenv("GOOGLE_API_KEY"):
         return _load_gemini()
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
@@ -108,7 +125,7 @@ def get_llm_provider(
     if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
         return _load_anthropic()
 
-    # 4. Last resort: Ollama (local, no key needed)
+    # 5. Last resort: Ollama (local, no key needed)
     logger.warning("[ProviderFactory] No cloud API keys found, trying local Ollama")
     return _load_ollama()
 
