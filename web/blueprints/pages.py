@@ -19,13 +19,13 @@ Routes:
 
 import os
 
-from flask import Blueprint, render_template, send_from_directory
+from flask import Blueprint, Response, render_template, send_from_directory
 
 pages_bp = Blueprint("pages", __name__)
 
 
 @pages_bp.route("/")
-def index():
+def index() -> str:
     # 云模式：未认证用户看到落地页
     deploy_mode = os.environ.get("KOTO_DEPLOY_MODE", "local")
     auth_enabled = os.environ.get("KOTO_AUTH_ENABLED", "false").lower() == "true"
@@ -35,43 +35,43 @@ def index():
 
 
 @pages_bp.route("/app")
-def app_main():
+def app_main() -> str:
     """主应用页面（SaaS 模式下需认证后访问）"""
     return render_template("index.html")
 
 
 @pages_bp.route("/file-network")
-def file_network():
+def file_network() -> str:
     """文件网络界面"""
     return render_template("file_network.html")
 
 
 @pages_bp.route("/knowledge-graph")
-def knowledge_graph_page():
+def knowledge_graph_page() -> str:
     """知识图谱可视化界面"""
     return render_template("knowledge_graph.html")
 
 
 @pages_bp.route("/test_upload")
-def test_upload():
+def test_upload() -> str:
     return render_template("test_upload.html")
 
 
 @pages_bp.route("/edit-ppt/<session_id>")
-def edit_ppt(session_id):
+def edit_ppt(session_id: str) -> str:
     """PPT 生成后编辑页面（P1 功能）"""
     return render_template("edit_ppt.html")
 
 
 @pages_bp.route("/skills")
 @pages_bp.route("/skill-marketplace")
-def skill_marketplace():
+def skill_marketplace() -> str:
     """Koto Skill 库 — GitHub Extension Marketplace 风格管理界面"""
     return render_template("skill_marketplace.html")
 
 
 @pages_bp.route("/monitoring-dashboard")
-def monitoring_dashboard():
+def monitoring_dashboard() -> Response:
     """Phase 4 System Monitoring Dashboard"""
     return send_from_directory(
         os.path.join(os.path.dirname(__file__), os.pardir, "static"),
@@ -80,19 +80,25 @@ def monitoring_dashboard():
 
 
 @pages_bp.route("/mini")
-def mini_page():
+def mini_page() -> str:
     """迷你模式页面（浏览器访问用）"""
     return render_template("mini_koto.html")
 
 
 @pages_bp.route("/m")
 @pages_bp.route("/mobile")
-def mobile_page():
+def mobile_page() -> str:
     """移动端优化页面"""
     return render_template("mobile.html")
 
 
 @pages_bp.route("/notebook")
-def notebook_ui():
+def notebook_ui() -> str:
     """NotebookLM 风格界面"""
     return render_template("notebook_lm.html")
+
+
+@pages_bp.route("/doc-compare")
+def doc_compare_ui() -> str:
+    """多文档对比界面"""
+    return render_template("doc_compare.html")

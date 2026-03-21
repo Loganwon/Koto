@@ -24,7 +24,7 @@ Routes:
 import logging
 import os
 
-from flask import Blueprint, jsonify, request, send_file, send_from_directory
+from flask import Blueprint, Response, jsonify, request, send_file, send_from_directory
 
 _logger = logging.getLogger("koto.routes.dev")
 
@@ -35,7 +35,7 @@ dev_bp = Blueprint("dev", __name__)
 
 
 @dev_bp.route("/api/auto-catalog/status", methods=["GET"])
-def auto_catalog_status():
+def auto_catalog_status() -> Response:
     """获取自动归纳状态"""
     try:
         from auto_catalog_scheduler import get_auto_catalog_scheduler
@@ -56,7 +56,7 @@ def auto_catalog_status():
 
 
 @dev_bp.route("/api/auto-catalog/enable", methods=["POST"])
-def auto_catalog_enable():
+def auto_catalog_enable() -> Response:
     """启用自动归纳"""
     try:
         from auto_catalog_scheduler import get_auto_catalog_scheduler
@@ -82,7 +82,7 @@ def auto_catalog_enable():
 
 
 @dev_bp.route("/api/auto-catalog/disable", methods=["POST"])
-def auto_catalog_disable():
+def auto_catalog_disable() -> Response:
     """禁用自动归纳"""
     try:
         from auto_catalog_scheduler import get_auto_catalog_scheduler
@@ -97,7 +97,7 @@ def auto_catalog_disable():
 
 
 @dev_bp.route("/api/auto-catalog/run-now", methods=["POST"])
-def auto_catalog_run_now():
+def auto_catalog_run_now() -> Response:
     """立即执行一次归纳（手动触发）"""
     try:
         from auto_catalog_scheduler import get_auto_catalog_scheduler
@@ -121,7 +121,7 @@ def auto_catalog_run_now():
 
 
 @dev_bp.route("/api/auto-catalog/backup-manifest/<path:filename>", methods=["GET"])
-def get_backup_manifest(filename):
+def get_backup_manifest(filename: str) -> Response:
     """下载备份清单文件"""
     try:
         from auto_catalog_scheduler import get_auto_catalog_scheduler
@@ -138,7 +138,7 @@ def get_backup_manifest(filename):
 
 
 @dev_bp.route("/api/token-stats", methods=["GET"])
-def api_token_stats():
+def api_token_stats() -> Response:
     """返回 Token 用量统计（今日 / 本月 / 按模型 / 近 7 天）"""
     try:
         from token_tracker import get_stats
@@ -149,7 +149,7 @@ def api_token_stats():
 
 
 @dev_bp.route("/api/token-stats/reset", methods=["POST"])
-def api_token_stats_reset():
+def api_token_stats_reset() -> Response:
     """重置统计数据。Body: {"period": "today" | "month" | "all"}"""
     try:
         from token_tracker import reset_stats
@@ -164,7 +164,7 @@ def api_token_stats_reset():
 
 
 @dev_bp.route("/workflow-dag")
-def workflow_dag_page():
+def workflow_dag_page() -> Response:
     """工作流 DAG 可视化页面"""
     html_path = os.path.join(
         os.path.dirname(__file__), os.pardir, "static", "workflow_dag.html"
@@ -176,7 +176,7 @@ def workflow_dag_page():
 
 
 @dev_bp.route("/api/dev/graph-mermaid", methods=["GET"])
-def api_dev_graph_mermaid():
+def api_dev_graph_mermaid() -> Response:
     """
     返回指定工作流 / Agent 的 Mermaid DAG 图标记。
 
@@ -232,7 +232,7 @@ def api_dev_graph_mermaid():
 
 
 @dev_bp.route("/api/dev/checkpoint-info", methods=["GET"])
-def api_dev_checkpoint_info():
+def api_dev_checkpoint_info() -> Response:
     """返回检查点数据库信息（类型 / 会话数 / 快照总数）。"""
     try:
         from app.core.agent.checkpoint_manager import CheckpointManager
@@ -243,7 +243,7 @@ def api_dev_checkpoint_info():
 
 
 @dev_bp.route("/api/dev/checkpoints/<thread_id>", methods=["GET"])
-def api_dev_list_checkpoints(thread_id):
+def api_dev_list_checkpoints(thread_id: str) -> Response:
     """列出某会话的检查点快照列表。"""
     try:
         from app.core.agent.checkpoint_manager import CheckpointManager
@@ -257,7 +257,7 @@ def api_dev_list_checkpoints(thread_id):
 
 
 @dev_bp.route("/api/dev/checkpoints/<thread_id>", methods=["DELETE"])
-def api_dev_delete_checkpoints(thread_id):
+def api_dev_delete_checkpoints(thread_id: str) -> Response:
     """删除某会话的全部检查点（用于清除对话历史）。"""
     try:
         from app.core.agent.checkpoint_manager import CheckpointManager
@@ -272,7 +272,7 @@ def api_dev_delete_checkpoints(thread_id):
 
 
 @dev_bp.route("/api/rag/ingest", methods=["POST"])
-def api_rag_ingest():
+def api_rag_ingest() -> Response:
     """
     索引文件或文本到向量库。
 
@@ -309,7 +309,7 @@ def api_rag_ingest():
 
 
 @dev_bp.route("/api/rag/query", methods=["POST"])
-def api_rag_query():
+def api_rag_query() -> Response:
     """
     检索向量库，返回相关文本片段。
 
@@ -350,7 +350,7 @@ def api_rag_query():
 
 
 @dev_bp.route("/api/rag/stats", methods=["GET"])
-def api_rag_stats():
+def api_rag_stats() -> Response:
     """
     返回 RAG 索引统计信息。
 
@@ -373,7 +373,7 @@ def api_rag_stats():
 
 
 @dev_bp.route("/api/rag/clear", methods=["DELETE"])
-def api_rag_clear():
+def api_rag_clear() -> Response:
     """清空 RAG 向量库（删除所有索引数据）。"""
     try:
         import app.core.services.rag_service as _rag_mod
@@ -392,7 +392,7 @@ def api_rag_clear():
 
 
 @dev_bp.route("/api/response/rate", methods=["POST"])
-def api_response_rate():
+def api_response_rate() -> Response:
     """
     接收用户对 AI 回复的星级评分。
 

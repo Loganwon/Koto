@@ -23,7 +23,7 @@ Routes:
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 _logger = logging.getLogger("koto.routes.execution")
 
@@ -51,7 +51,7 @@ def _get_trigger_system():
 
 
 @execution_bp.route("/api/execution/authorize", methods=["POST"])
-def authorize_task_execution():
+def authorize_task_execution() -> Response:
     """授权任务执行"""
     try:
         data = request.json or {}
@@ -76,7 +76,7 @@ def authorize_task_execution():
 
 
 @execution_bp.route("/api/execution/revoke", methods=["POST"])
-def revoke_task_authorization():
+def revoke_task_authorization() -> Response:
     """撤销任务授权"""
     try:
         data = request.json or {}
@@ -96,7 +96,7 @@ def revoke_task_authorization():
 
 
 @execution_bp.route("/api/execution/execute", methods=["POST"])
-def execute_task():
+def execute_task() -> Response:
     """执行任务"""
     try:
         data = request.json or {}
@@ -121,7 +121,7 @@ def execute_task():
 
 
 @execution_bp.route("/api/execution/queue", methods=["POST"])
-def queue_task():
+def queue_task() -> Response:
     """任务加入队列"""
     try:
         data = request.json or {}
@@ -143,7 +143,7 @@ def queue_task():
 
 
 @execution_bp.route("/api/execution/history", methods=["GET"])
-def get_execution_history():
+def get_execution_history() -> Response:
     """获取执行历史"""
     try:
         user_id = request.args.get("user_id", "default")
@@ -159,7 +159,7 @@ def get_execution_history():
 
 
 @execution_bp.route("/api/execution/statistics", methods=["GET"])
-def get_execution_statistics():
+def get_execution_statistics() -> Response:
     """获取执行统计"""
     try:
         user_id = request.args.get("user_id", "default")
@@ -175,7 +175,7 @@ def get_execution_statistics():
 
 
 @execution_bp.route("/api/execution/start-processor", methods=["POST"])
-def start_execution_processor():
+def start_execution_processor() -> Response:
     """启动自动执行处理器"""
     try:
         data = request.json or {}
@@ -191,7 +191,7 @@ def start_execution_processor():
 
 
 @execution_bp.route("/api/execution/stop-processor", methods=["POST"])
-def stop_execution_processor():
+def stop_execution_processor() -> Response:
     """停止自动执行处理器"""
     try:
         engine = _get_auto_execution()
@@ -207,7 +207,7 @@ def stop_execution_processor():
 
 
 @execution_bp.route("/api/triggers/evaluate", methods=["POST"])
-def triggers_evaluate():
+def triggers_evaluate() -> Response:
     """评估是否需要主动交互"""
     try:
         data = request.json or {}
@@ -243,7 +243,7 @@ def triggers_evaluate():
 
 
 @execution_bp.route("/api/triggers/start", methods=["POST"])
-def triggers_start():
+def triggers_start() -> Response:
     """启动主动交互监控"""
     try:
         data = request.json or {}
@@ -262,7 +262,7 @@ def triggers_start():
 
 
 @execution_bp.route("/api/triggers/stop", methods=["POST"])
-def triggers_stop():
+def triggers_stop() -> Response:
     """停止主动交互监控"""
     try:
         system = _get_trigger_system()
@@ -275,7 +275,7 @@ def triggers_stop():
 
 
 @execution_bp.route("/api/triggers/stats", methods=["GET"])
-def triggers_stats():
+def triggers_stats() -> Response:
     """获取触发统计"""
     try:
         days = int(request.args.get("days", 7))
@@ -290,7 +290,7 @@ def triggers_stats():
 
 
 @execution_bp.route("/api/triggers/list", methods=["GET"])
-def triggers_list():
+def triggers_list() -> Response:
     """获取触发器列表"""
     try:
         system = _get_trigger_system()
@@ -303,7 +303,7 @@ def triggers_list():
 
 
 @execution_bp.route("/api/triggers/update", methods=["POST"])
-def triggers_update():
+def triggers_update() -> Response:
     """更新触发器配置"""
     try:
         data = request.json or {}
@@ -341,7 +341,7 @@ def triggers_update():
 
 
 @execution_bp.route("/api/triggers/params/<trigger_id>", methods=["GET"])
-def get_trigger_params(trigger_id):
+def get_trigger_params(trigger_id: str) -> Response:
     """获取触发器参数"""
     try:
         system = _get_trigger_system()
@@ -356,7 +356,7 @@ def get_trigger_params(trigger_id):
 
 
 @execution_bp.route("/api/triggers/params/<trigger_id>", methods=["POST"])
-def update_trigger_params_endpoint(trigger_id):
+def update_trigger_params_endpoint(trigger_id: str) -> Response:
     """更新触发器参数"""
     try:
         data = request.json or {}
@@ -381,7 +381,7 @@ def update_trigger_params_endpoint(trigger_id):
 
 
 @execution_bp.route("/api/triggers/feedback", methods=["POST"])
-def triggers_feedback():
+def triggers_feedback() -> Response:
     """提交触发反馈"""
     try:
         data = request.json or {}

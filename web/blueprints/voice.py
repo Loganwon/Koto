@@ -19,6 +19,7 @@ Routes (speech):
   POST /api/speech/extract-summary        — Extract keywords & summary from text
 """
 
+import json
 import logging
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
@@ -49,7 +50,7 @@ def _get_types():
 
 
 @voice_bp.route("/api/voice/engines", methods=["GET"])
-def voice_engines():
+def voice_engines() -> Response:
     """获取可用语音引擎列表"""
     try:
         from web.voice_fast import get_available_engines
@@ -70,7 +71,7 @@ def voice_engines():
 
 
 @voice_bp.route("/api/voice/record", methods=["POST"])
-def voice_record():
+def voice_record() -> Response:
     """录制音频"""
     try:
         data = request.json or {}
@@ -91,7 +92,7 @@ def voice_record():
 
 
 @voice_bp.route("/api/voice/recognize", methods=["POST"])
-def voice_recognize():
+def voice_recognize() -> Response:
     """识别音频文件"""
     try:
         data = request.json or {}
@@ -111,7 +112,7 @@ def voice_recognize():
 
 
 @voice_bp.route("/api/voice/listen", methods=["POST"])
-def voice_listen():
+def voice_listen() -> Response:
     """一键麦克风识别（本地模式 - 优化版：立即启动）"""
     try:
         data = request.json or {}
@@ -147,7 +148,7 @@ def voice_listen():
 
 
 @voice_bp.route("/api/voice/stream")
-def voice_stream():
+def voice_stream() -> Response:
     """流式语音识别 - Vosk 本地离线，实时返回部分/最终结果（SSE）"""
     import json as _json
 
@@ -178,7 +179,7 @@ def voice_stream():
 
 
 @voice_bp.route("/api/voice/stop", methods=["POST"])
-def voice_stop():
+def voice_stop() -> Response:
     """停止当前语音识别流（通知 voice_engine 停止）"""
     try:
         from web.voice_engine import request_stop
@@ -190,7 +191,7 @@ def voice_stop():
 
 
 @voice_bp.route("/api/voice/commands", methods=["GET"])
-def voice_commands():
+def voice_commands() -> Response:
     """返回内置语音命令列表（供语音面板展示）"""
     commands = [
         {"name": "发送消息", "description": "说出消息后自动发送", "keyword": ""},
@@ -202,7 +203,7 @@ def voice_commands():
 
 
 @voice_bp.route("/api/voice/stt_status", methods=["GET"])
-def voice_stt_status():
+def voice_stt_status() -> Response:
     """查询当前语音引擎状态（使用新 voice_engine）。"""
     try:
         from web.voice_engine import get_status
@@ -222,7 +223,7 @@ def voice_stt_status():
 
 @voice_bp.route("/api/voice/gemini_stt", methods=["POST"])
 @voice_bp.route("/api/voice/stt", methods=["POST"])  # 统一入口别名
-def voice_gemini_stt():
+def voice_gemini_stt() -> Response:
     """
     统一语音转文字 (STT) 入口：本地 Whisper 优先 → Gemini STT 备用。
 
@@ -353,7 +354,7 @@ def voice_gemini_stt():
 
 
 @voice_bp.route("/api/speech/transcribe-file", methods=["POST"])
-def speech_transcribe_file():
+def speech_transcribe_file() -> Response:
     """转写音频文件"""
     try:
         from web.speech_transcriber import SpeechTranscriber
@@ -383,7 +384,7 @@ def speech_transcribe_file():
 
 
 @voice_bp.route("/api/speech/transcribe-microphone", methods=["POST"])
-def speech_transcribe_microphone():
+def speech_transcribe_microphone() -> Response:
     """从麦克风录音并转写"""
     try:
         from web.speech_transcriber import SpeechTranscriber
@@ -437,7 +438,7 @@ def speech_transcribe_microphone():
 
 
 @voice_bp.route("/api/speech/extract-summary", methods=["POST"])
-def speech_extract_summary():
+def speech_extract_summary() -> Response:
     """从文本提取关键词和总结"""
     try:
         from web.speech_transcriber import SpeechTranscriber
@@ -455,5 +456,90 @@ def speech_extract_summary():
         )
 
         return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@voice_bp.route("/api/speech/extract-actions", methods=["POST"])
+def speech_extract_actions() -> Response:
+    """从会议转录文本提取摘要、决策与行动项。"""
+    try:
+        data = request.json or {}
+        transcript: str = (data.get("text") or "").strip()
+        if len(transcript) < 30:
+            return jsonify({"success": False, "error": "缺少有效会议文本"}), 400
+
+        prompt = f"""
+你是会议纪要分析助手。请从下面的会议文本中提取结构化结果，仅输出 JSON，不要输出任何额外文字。
+
+输出 JSON schema:
+{{
+  "summary": "一句到三句会议摘要",
+  "decisions": ["决策1", "决策2"],
+  "action_items": [
+    {{
+      "task": "具体可执行任务",
+      "owner": "负责人，未知则写待定",
+      "due_date": "YYYY-MM-DD 或 待定",
+      "priority": "high|medium|low"
+    }}
+  ]
+}}
+
+要求：
+1) 不要杜撰；没有提到的负责人/截止日写"待定"。
+2) action_items 必须是可执行动作，避免空泛描述。
+3) decisions 最多 6 条，action_items 最多 12 条。
+4) 语言使用中文。
+
+会议文本：
+{transcript[:25000]}
+"""
+        client = _get_client()
+        types = _get_types()
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=1800),
+        )
+        raw: str = (resp.text or "").strip()
+        if raw.startswith("```json"):
+            raw = raw[7:].rstrip("`").strip()
+        elif raw.startswith("```"):
+            raw = raw[3:].rstrip("`").strip()
+
+        parsed = json.loads(raw)
+        summary: str = str(parsed.get("summary") or "").strip()
+        decisions: list = (
+            parsed.get("decisions") if isinstance(parsed.get("decisions"), list) else []
+        )
+        actions: list = (
+            parsed.get("action_items") if isinstance(parsed.get("action_items"), list) else []
+        )
+
+        cleaned_actions: list[dict] = []
+        for item in actions[:12]:
+            if not isinstance(item, dict):
+                continue
+            task = str(item.get("task") or "").strip()
+            if not task:
+                continue
+            owner = str(item.get("owner") or "待定").strip() or "待定"
+            due_date = str(item.get("due_date") or "待定").strip() or "待定"
+            priority = str(item.get("priority") or "medium").strip().lower()
+            if priority not in ("high", "medium", "low"):
+                priority = "medium"
+            cleaned_actions.append(
+                {"task": task, "owner": owner, "due_date": due_date, "priority": priority}
+            )
+
+        return jsonify(
+            {
+                "success": True,
+                "summary": summary,
+                "decisions": [str(d).strip() for d in decisions[:6] if str(d).strip()],
+                "action_items": cleaned_actions,
+            }
+        )
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

@@ -1021,3 +1021,117 @@ select.form-control {
   display: flex; align-items: center; justify-content: center; gap: 8px;
 }
 
+
+/* ════════════════════════════════════════════════════════════════
+ * GitHub Skills Hub
+ * ════════════════════════════════════════════════════════════════ */
+
+.gh-hub { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+.gh-hub-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 20px 24px 16px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.gh-hub-title { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.gh-hub-subtitle { font-size: 13px; color: var(--text-muted); }
+.gh-hub-header-actions { margin-top: 4px; }
+
+/* Custom URL box */
+.gh-custom-url-box {
+  padding: 12px 24px 14px; background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.gh-custom-url-label { font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
+.gh-custom-url-row { display: flex; gap: 8px; align-items: center; }
+.gh-custom-url-input { flex: 1; font-size: 12px; font-family: monospace; }
+.gh-custom-url-hint { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
+/* Two-column body */
+.gh-hub-body {
+  display: flex; flex: 1 1 0; min-height: 0; overflow: hidden;
+}
+
+/* Left: Repos panel */
+.gh-repos-panel {
+  width: 280px; flex-shrink: 0; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.gh-repos-title {
+  padding: 10px 16px; font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.gh-repos-list { flex: 1; overflow-y: auto; padding: 8px; }
+.gh-repo-card {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px;
+  border: 1px solid transparent; transition: background 0.12s, border-color 0.12s;
+}
+.gh-repo-card:hover { background: var(--bg-elevated); }
+.gh-repo-card.active {
+  background: rgba(31,111,235,0.08); border-color: rgba(31,111,235,0.3);
+}
+.gh-repo-icon { font-size: 22px; line-height: 1; flex-shrink: 0; margin-top: 1px; }
+.gh-repo-info { flex: 1; min-width: 0; }
+.gh-repo-name { font-size: 13px; font-weight: 600; margin-bottom: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gh-repo-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-muted); margin-bottom: 5px; }
+.gh-stars { color: #d29922; }
+.gh-repo-slug { font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-repo-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.gh-tag {
+  font-size: 10px; padding: 1px 6px; border-radius: 10px;
+  background: rgba(110,118,129,0.12); color: var(--text-muted);
+}
+
+/* Right: Skills panel */
+.gh-skills-panel {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+}
+.gh-skills-header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.gh-skills-repo-name { font-size: 14px; font-weight: 600; }
+.gh-skills-count {
+  font-size: 12px; color: var(--text-muted);
+  background: var(--bg-elevated); border-radius: 10px; padding: 1px 8px;
+}
+.gh-skills-search-wrap { margin-left: auto; }
+.gh-skills-search-input { font-size: 12px; padding: 5px 10px; width: 200px; }
+
+.gh-skills-list { flex: 1; overflow-y: auto; padding: 8px 12px; }
+
+.gh-skill-card {
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px;
+  margin-bottom: 6px; background: var(--bg-primary);
+  transition: border-color 0.12s, background 0.12s;
+}
+.gh-skill-card:hover { border-color: rgba(31,111,235,0.4); background: var(--bg-elevated); }
+.gh-skill-card-main { display: flex; align-items: center; gap: 10px; }
+.gh-skill-icon { font-size: 18px; flex-shrink: 0; }
+.gh-skill-info { flex: 1; min-width: 0; }
+.gh-skill-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gh-skill-path { font-size: 11px; color: var(--text-muted); font-family: monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gh-skill-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.gh-badge-installed {
+  font-size: 11px; color: var(--accent-green); background: rgba(35,134,54,0.1);
+  border: 1px solid rgba(35,134,54,0.3); border-radius: 10px; padding: 2px 8px;
+  white-space: nowrap;
+}
+.btn-xs {
+  padding: 3px 10px; font-size: 11px; border-radius: 6px;
+}
+
+/* States */
+.gh-loading, .gh-error {
+  padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;
+}
+.gh-error { color: var(--accent-red, #f85149); }
+.gh-empty-state, .gh-error-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 200px; gap: 10px; color: var(--text-muted); text-align: center;
+}
+.gh-empty-icon { font-size: 36px; line-height: 1; }

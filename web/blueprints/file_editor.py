@@ -31,7 +31,7 @@ import os
 import tempfile
 import time
 
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, Response, jsonify, request, send_file
 
 _logger = logging.getLogger("koto.routes.file_editor")
 
@@ -71,7 +71,7 @@ def _get_settings_manager():
 
 
 @file_editor_bp.route("/api/notebook/overview", methods=["POST"])
-def notebook_overview():
+def notebook_overview() -> Response:
     """生成音频概览 (Podcast)"""
     data = request.json
     content = data.get("content", "")
@@ -113,7 +113,7 @@ def notebook_overview():
 
 
 @file_editor_bp.route("/api/notebook/qa", methods=["POST"])
-def notebook_qa():
+def notebook_qa() -> Response:
     """源文档深度问答 (Source-Grounded Q&A)"""
     data = request.json
     question = data.get("question")
@@ -151,7 +151,7 @@ def notebook_qa():
 
 
 @file_editor_bp.route("/api/notebook/study_guide", methods=["POST"])
-def notebook_study_guide():
+def notebook_study_guide() -> Response:
     """生成学习指南/简报"""
     data = request.json
     content = data.get("content", "")
@@ -180,7 +180,7 @@ def notebook_study_guide():
 
 
 @file_editor_bp.route("/api/notebook/upload", methods=["POST"])
-def notebook_upload():
+def notebook_upload() -> Response:
     """Upload and parse a file (PDF, Docx, or Txt).
     ---
     tags:
@@ -275,7 +275,7 @@ def notebook_upload():
 
 
 @file_editor_bp.route("/api/file-editor/read", methods=["POST"])
-def file_editor_read():
+def file_editor_read() -> Response:
     """读取文件内容"""
     try:
         data = request.json or {}
@@ -294,7 +294,7 @@ def file_editor_read():
 
 
 @file_editor_bp.route("/api/file-editor/write", methods=["POST"])
-def file_editor_write():
+def file_editor_write() -> Response:
     """写入文件内容"""
     try:
         data = request.json or {}
@@ -314,7 +314,7 @@ def file_editor_write():
 
 
 @file_editor_bp.route("/api/file-editor/replace", methods=["POST"])
-def file_editor_replace():
+def file_editor_replace() -> Response:
     """替换文件内容"""
     try:
         data = request.json or {}
@@ -336,7 +336,7 @@ def file_editor_replace():
 
 
 @file_editor_bp.route("/api/file-editor/smart-edit", methods=["POST"])
-def file_editor_smart_edit():
+def file_editor_smart_edit() -> Response:
     """智能编辑（理解自然语言指令）"""
     try:
         data = request.json or {}
@@ -361,7 +361,7 @@ def file_editor_smart_edit():
 
 
 @file_editor_bp.route("/api/file-search/index", methods=["POST"])
-def file_search_index():
+def file_search_index() -> Response:
     """索引文件或目录"""
     try:
         data = request.json or {}
@@ -385,7 +385,7 @@ def file_search_index():
 
 
 @file_editor_bp.route("/api/file-search/search", methods=["POST"])
-def file_search_search():
+def file_search_search() -> Response:
     """搜索文件"""
     try:
         data = request.json or {}
@@ -406,7 +406,7 @@ def file_search_search():
 
 
 @file_editor_bp.route("/api/file-search/find-by-content", methods=["POST"])
-def file_search_find_by_content():
+def file_search_find_by_content() -> Response:
     """根据内容片段查找文件"""
     try:
         data = request.json or {}
@@ -426,7 +426,7 @@ def file_search_find_by_content():
 
 
 @file_editor_bp.route("/api/file-search/list", methods=["GET"])
-def file_search_list():
+def file_search_list() -> Response:
     """列出所有已索引文件"""
     try:
         limit = request.args.get("limit", 100, type=int)
@@ -447,7 +447,7 @@ def file_search_list():
 
 
 @file_editor_bp.route("/api/scan/start", methods=["POST"])
-def scan_start():
+def scan_start() -> Response:
     """启动全盘文件扫描（后台线程）"""
     try:
         from web.file_scanner import FileScanner
@@ -470,7 +470,7 @@ def scan_start():
 
 
 @file_editor_bp.route("/api/scan/status", methods=["GET"])
-def scan_status():
+def scan_status() -> Response:
     """返回扫描进度和统计"""
     try:
         from web.file_scanner import FileScanner
@@ -488,7 +488,7 @@ def scan_status():
 
 
 @file_editor_bp.route("/api/scan/search", methods=["POST"])
-def scan_search():
+def scan_search() -> Response:
     """全盘文件名模糊搜索"""
     try:
         from web.file_scanner import FileScanner
@@ -510,7 +510,7 @@ def scan_search():
 
 
 @file_editor_bp.route("/api/scan/open", methods=["POST"])
-def scan_open():
+def scan_open() -> Response:
     """用系统默认程序打开指定绝对路径文件"""
     try:
         from web.file_scanner import FileScanner
@@ -526,7 +526,7 @@ def scan_open():
 
 
 @file_editor_bp.route("/api/scan/stats", methods=["GET"])
-def scan_stats():
+def scan_stats() -> Response:
     """索引统计数据"""
     try:
         from web.file_scanner import FileScanner
@@ -542,7 +542,7 @@ def scan_stats():
 
 
 @file_editor_bp.route("/api/concepts/extract", methods=["POST"])
-def concepts_extract():
+def concepts_extract() -> Response:
     """从文件中提取关键概念"""
     try:
         data = request.json or {}
@@ -563,7 +563,7 @@ def concepts_extract():
 
 
 @file_editor_bp.route("/api/concepts/related-files", methods=["POST"])
-def concepts_related_files():
+def concepts_related_files() -> Response:
     """查找与文件相关的其他文件"""
     try:
         data = request.json or {}
@@ -585,7 +585,7 @@ def concepts_related_files():
 
 
 @file_editor_bp.route("/api/concepts/top", methods=["GET"])
-def concepts_top():
+def concepts_top() -> Response:
     """获取全局热门概念"""
     try:
         limit = request.args.get("limit", 20, type=int)
@@ -600,7 +600,7 @@ def concepts_top():
 
 
 @file_editor_bp.route("/api/concepts/stats", methods=["GET"])
-def concepts_stats():
+def concepts_stats() -> Response:
     """获取概念提取统计"""
     try:
         extractor = _get_concept_extractor()

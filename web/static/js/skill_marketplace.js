@@ -25,6 +25,14 @@ const API = {
   importPack:    () => `${API.base}/import`,
   rate:          (id) => `${API.base}/rate/${id}`,
   stats:         () => `${API.base}/stats`,
+  ghRepos:       () => `${API.base}/github/repos`,
+  ghSkills:      (repo, path, branch) => {
+    let u = `${API.base}/github/skills?repo=${encodeURIComponent(repo)}`;
+    if (path)   u += `&path=${encodeURIComponent(path)}`;
+    if (branch) u += `&branch=${encodeURIComponent(branch)}`;
+    return u;
+  },
+  ghInstall:     () => `${API.base}/github/install`,
 };
 
 /* ═══════════════ State ═══════════════ */
@@ -100,6 +108,7 @@ function switchTab(tabName) {
   if (tabName === 'library') loadLibrary();
   if (tabName === 'import-export') loadImportExport();
   if (tabName === 'stats') loadStats();
+  if (tabName === 'github-hub') ghLoadRepos();
 }
 
 /* ═══════════════ Catalog ═════════════════ */
@@ -1135,3 +1144,257 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initial load
   switchTab('catalog');
 });
+
+/* ════════════════════════════════════════════════════════════════
+ * GitHub Skills Hub
+ * ════════════════════════════════════════════════════════════════ */
+
+const ghState = {
+  repos: [],
+  currentRepo: null,
+  allSkills: [],      // full list fetched from server
+  filteredSkills: [], // after search filter
+  loadingSkills: false,
+};
+
+/** Load and render the curated repos sidebar */
+async function ghLoadRepos() {
+  const listEl = document.getElementById('gh-repos-list');
+  if (!listEl) return;
+
+  // Only fetch once per session
+  if (ghState.repos.length > 0) {
+    ghRenderRepos(ghState.repos);
+    return;
+  }
+
+  listEl.innerHTML = '<div class="gh-loading">⏳ 加载仓库列表…</div>';
+  try {
+    const data = await api('GET', API.ghRepos());
+    ghState.repos = data.repos || [];
+    ghRenderRepos(ghState.repos);
+  } catch (e) {
+    listEl.innerHTML = `<div class="gh-error">❌ ${escHtml(e.message)}</div>`;
+  }
+}
+
+function ghRenderRepos(repos) {
+  const listEl = document.getElementById('gh-repos-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  repos.forEach(repo => {
+    const isActive = ghState.currentRepo && ghState.currentRepo.repo === repo.repo;
+    const card = document.createElement('div');
+    card.className = `gh-repo-card${isActive ? ' active' : ''}`;
+    card.dataset.repoId = repo.repo;
+    card.innerHTML = `
+      <div class="gh-repo-icon">${escHtml(repo.icon || '📦')}</div>
+      <div class="gh-repo-info">
+        <div class="gh-repo-name">${escHtml(repo.name)}</div>
+        <div class="gh-repo-meta">
+          <span class="gh-stars">⭐ ${ghFormatStars(repo.stars)}</span>
+          <span class="gh-repo-slug">${escHtml(repo.repo)}</span>
+        </div>
+        <div class="gh-repo-tags">
+          ${(repo.tags || []).map(t => `<span class="gh-tag">${escHtml(t)}</span>`).join('')}
+        </div>
+      </div>
+    `;
+    card.addEventListener('click', () => ghSelectRepo(repo));
+    listEl.appendChild(card);
+  });
+}
+
+function ghFormatStars(n) {
+  if (!n) return '—';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+/** Select a repo and load its skills */
+async function ghSelectRepo(repo) {
+  if (ghState.loadingSkills) return;
+  ghState.currentRepo = repo;
+
+  // Highlight selected repo card
+  $$('.gh-repo-card').forEach(c => c.classList.toggle('active', c.dataset.repoId === repo.repo));
+
+  // Update skills panel header
+  const repoNameEl = document.getElementById('gh-skills-repo-name');
+  if (repoNameEl) {
+    repoNameEl.textContent = `${repo.icon || '📦'} ${repo.name}`;
+  }
+
+  // Show search box
+  document.getElementById('gh-skills-search-wrap')?.classList.remove('hidden');
+
+  // Clear search box
+  const searchEl = document.getElementById('gh-skills-search');
+  if (searchEl) searchEl.value = '';
+
+  // Load skills
+  const listEl = document.getElementById('gh-skills-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="gh-loading">⏳ 正在从 GitHub 获取技能列表…</div>';
+  ghState.loadingSkills = true;
+
+  try {
+    const data = await api('GET', API.ghSkills(repo.repo, repo.skills_path, repo.branch));
+    ghState.allSkills = data.skills || [];
+    ghState.filteredSkills = ghState.allSkills;
+
+    const countEl = document.getElementById('gh-skills-count');
+    if (countEl) {
+      countEl.textContent = `${ghState.allSkills.length} 个技能`;
+      countEl.classList.remove('hidden');
+    }
+
+    ghRenderSkills(ghState.filteredSkills);
+  } catch (e) {
+    listEl.innerHTML = `
+      <div class="gh-error-state">
+        <div class="gh-empty-icon">❌</div>
+        <p>${escHtml(e.message)}</p>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:8px">
+          可能是该仓库结构与预期不同，或网络请求超时。
+          <a href="https://github.com/${escHtml(repo.repo)}" target="_blank" rel="noopener noreferrer"
+             style="color:var(--text-link)">在 GitHub 上查看 ↗</a>
+        </p>
+      </div>`;
+  } finally {
+    ghState.loadingSkills = false;
+  }
+}
+
+function ghRenderSkills(skills) {
+  const listEl = document.getElementById('gh-skills-list');
+  if (!listEl) return;
+
+  if (!skills.length) {
+    listEl.innerHTML = `
+      <div class="gh-empty-state">
+        <div class="gh-empty-icon">🔍</div>
+        <p>没有找到匹配的技能</p>
+      </div>`;
+    return;
+  }
+
+  listEl.innerHTML = '';
+  skills.forEach(skill => {
+    const card = document.createElement('div');
+    card.className = 'gh-skill-card';
+    const isInstalled = skill.is_installed;
+    card.innerHTML = `
+      <div class="gh-skill-card-main">
+        <div class="gh-skill-icon">🌐</div>
+        <div class="gh-skill-info">
+          <div class="gh-skill-name">${escHtml(skill.name)}</div>
+          <div class="gh-skill-path">${escHtml(skill.path)}</div>
+        </div>
+        <div class="gh-skill-actions">
+          ${isInstalled
+            ? `<span class="gh-badge-installed">✅ 已安装</span>`
+            : `<button class="btn btn-primary btn-xs gh-install-btn"
+                       data-repo="${escHtml(skill.repo)}"
+                       data-path="${escHtml(skill.path)}"
+                       data-branch="${escHtml(skill.branch || 'main')}"
+                       data-name="${escHtml(skill.name)}"
+                       onclick="ghInstallSkill(this)">
+                 ⬇️ 安装
+               </button>`
+          }
+          <a class="btn btn-secondary btn-xs"
+             href="${escHtml(skill.github_url)}"
+             target="_blank" rel="noopener noreferrer"
+             title="在 GitHub 上查看">↗</a>
+        </div>
+      </div>`;
+    listEl.appendChild(card);
+  });
+}
+
+/** Filter skills by search query (client-side) */
+function ghFilterSkills(q) {
+  const query = (q || '').toLowerCase().trim();
+  if (!query) {
+    ghState.filteredSkills = ghState.allSkills;
+  } else {
+    ghState.filteredSkills = ghState.allSkills.filter(s =>
+      s.name.toLowerCase().includes(query) ||
+      (s.path || '').toLowerCase().includes(query)
+    );
+  }
+  ghRenderSkills(ghState.filteredSkills);
+}
+
+/** Install a skill from a repo */
+async function ghInstallSkill(btn) {
+  const repo = btn.dataset.repo;
+  const path = btn.dataset.path;
+  const branch = btn.dataset.branch || 'main';
+  const name  = btn.dataset.name || path.split('/').pop();
+
+  btn.disabled = true;
+  btn.textContent = '⏳ 安装中…';
+
+  try {
+    await api('POST', API.ghInstall(), {
+      repo,
+      skill_path: path,
+      branch,
+      overwrite: false,
+    });
+    // Update UI: replace button with installed badge
+    btn.parentElement.innerHTML = `<span class="gh-badge-installed">✅ 已安装</span>
+      <a class="btn btn-secondary btn-xs"
+         href="https://github.com/${escHtml(repo)}/tree/${escHtml(branch)}/${escHtml(path)}"
+         target="_blank" rel="noopener noreferrer">↗</a>`;
+    // Mark as installed in state
+    const item = ghState.allSkills.find(s => s.path === path && s.repo === repo);
+    if (item) item.is_installed = true;
+    toast(`✅ "${escHtml(name)}" 安装成功！前往「我的技能库」查看`, 'success', 4000);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '⬇️ 安装';
+    if (e.message && e.message.includes('已安装')) {
+      toast(`"${escHtml(name)}" 已安装`, 'info');
+    } else {
+      toast(`安装失败: ${e.message}`, 'error');
+    }
+  }
+}
+
+/** Toggle visibility of the custom URL install box */
+function ghToggleCustomUrl() {
+  const box = document.getElementById('gh-custom-url-box');
+  const btn = document.getElementById('gh-custom-url-btn');
+  if (!box) return;
+  const isHidden = box.classList.toggle('hidden');
+  if (btn) btn.textContent = isHidden ? '🔗 自定义 URL 安装' : '✕ 关闭';
+}
+
+/** Install a skill from a pasted raw GitHub URL */
+async function ghInstallCustomUrl() {
+  const input = document.getElementById('gh-custom-url-input');
+  if (!input) return;
+  const rawUrl = (input.value || '').trim();
+  if (!rawUrl) { toast('请粘贴 raw.githubusercontent.com 链接', 'error'); return; }
+  if (!rawUrl.startsWith('https://raw.githubusercontent.com/')) {
+    toast('仅支持 https://raw.githubusercontent.com/ 开头的链接', 'error');
+    return;
+  }
+
+  const btn = input.nextElementSibling;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 安装中…'; }
+
+  try {
+    const result = await api('POST', API.ghInstall(), { raw_url: rawUrl });
+    toast(`✅ "${escHtml(result.skill?.name || result.skill_id)}" 安装成功！`, 'success', 4000);
+    input.value = '';
+    ghToggleCustomUrl();
+  } catch (e) {
+    toast(`安装失败: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇️ 安装'; }
+  }
+}

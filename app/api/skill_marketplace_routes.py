@@ -2032,3 +2032,498 @@ def download_template_output(skill_id: str, filename: str):
         download_name=filename,
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# GitHub Skills Hub
+# ══════════════════════════════════════════════════════════════════════════════
+# 允许用户直接从 GitHub 上的流行 Agent Skills 仓库浏览并一键安装 Skill。
+#
+# 支持两种格式：
+#   1. Anthropic SKILL.md 格式（官方标准）→ 自动转换为 Koto JSON
+#   2. Koto JSON 格式（.json 文件带 id/name/prompt 字段）→ 直接安装
+#
+# 安全约束：
+#   - 仅允许 HTTPS 请求
+#   - 仅允许 github.com / raw.githubusercontent.com 域名
+#   - 所有请求带 timeout 和 size 限制
+#   - YAML frontmatter 仅解析 key=value 纯文本，不执行代码
+# ══════════════════════════════════════════════════════════════════════════════
+
+# 精选热门仓库（按 Stars 排序，手动维护）
+_GH_CURATED_REPOS: List[Dict] = [
+    {
+        "repo": "anthropics/skills",
+        "name": "Anthropic 官方 Skills",
+        "description": "Anthropic 官方发布的 Agent Skills 示例库，涵盖创意设计、技术开发、企业协作、文档生成等场景。每个 skill 均为标准 SKILL.md 格式。",
+        "stars": 99100,
+        "format": "skill_md",
+        "skills_path": "skills",
+        "branch": "main",
+        "icon": "🏛️",
+        "tags": ["官方", "多领域", "SKILL.md"],
+        "license": "Apache-2.0",
+    },
+    {
+        "repo": "VoltAgent/awesome-agent-skills",
+        "name": "VoltAgent 社区技能集",
+        "description": "500+ 社区 Agent Skills，兼容 Claude Code、Codex、Gemini CLI、Cursor 等多个 AI 编码代理，包含编程、写作、分析等多种类型。",
+        "stars": 2800,
+        "format": "skill_md",
+        "skills_path": "skills",
+        "branch": "main",
+        "icon": "⚡",
+        "tags": ["社区", "多平台", "编程"],
+        "license": "MIT",
+    },
+    {
+        "repo": "sickn33/antigravity-awesome-skills",
+        "name": "Antigravity 技能库",
+        "description": "1304+ 精心筛选的 Agentic Skills，兼容 Claude Code、Cursor、Codex CLI、Gemini CLI 等，含官方和社区技能集合，附 CLI 安装工具。",
+        "stars": 1900,
+        "format": "skill_md",
+        "skills_path": "skills",
+        "branch": "main",
+        "icon": "🚀",
+        "tags": ["社区", "多平台", "CLI工具"],
+        "license": "MIT",
+    },
+    {
+        "repo": "K-Dense-AI/claude-scientific-skills",
+        "name": "科学研究技能集",
+        "description": "面向研究、科学、工程、金融和写作领域的 Agent Skills，涵盖生物信息学、材料科学、化学信息学、数据分析等专业场景。",
+        "stars": 620,
+        "format": "skill_md",
+        "skills_path": "skills",
+        "branch": "main",
+        "icon": "🔬",
+        "tags": ["科研", "金融", "写作"],
+        "license": "MIT",
+    },
+    {
+        "repo": "phuryn/pm-skills",
+        "name": "产品经理技能集",
+        "description": "100+ 产品管理相关的 Agentic Skills，覆盖产品发现、战略制定、执行落地、上线发布和增长分析全流程。",
+        "stars": 390,
+        "format": "skill_md",
+        "skills_path": "skills",
+        "branch": "main",
+        "icon": "📋",
+        "tags": ["产品", "PM", "战略"],
+        "license": "MIT",
+    },
+    {
+        "repo": "alirezarezvani/claude-skills",
+        "name": "Claude 全能技能集",
+        "description": "192+ Claude Code Skills & Agent Plugins，涵盖工程、市场营销、产品、合规、C-level 顾问等企业场景。",
+        "stars": 580,
+        "format": "skill_md",
+        "skills_path": "skills",
+        "branch": "main",
+        "icon": "💼",
+        "tags": ["企业", "工程", "营销"],
+        "license": "MIT",
+    },
+]
+
+# GitHub API 与 raw 内容的合法域名白名单
+_GH_ALLOWED_HOSTS = {"api.github.com", "raw.githubusercontent.com"}
+_GH_MAX_CONTENT_BYTES = 256 * 1024  # 256 KB 上限
+_GH_REQUEST_TIMEOUT = 10  # 秒
+
+
+def _gh_validate_url(url: str) -> bool:
+    """校验 URL 安全性：必须 HTTPS，域名在白名单内。"""
+    import urllib.parse
+    try:
+        parsed = urllib.parse.urlparse(url)
+        return parsed.scheme == "https" and parsed.netloc in _GH_ALLOWED_HOSTS
+    except Exception:
+        return False
+
+
+def _gh_fetch(url: str) -> bytes:
+    """安全抓取 GitHub 内容，有 size 和 timeout 限制。"""
+    import ssl
+    import urllib.request
+    if not _gh_validate_url(url):
+        raise ValueError(f"URL 不合法或域名不在白名单: {url}")
+    ctx = ssl.create_default_context()
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "koto-github-skill-hub/1.0",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=_GH_REQUEST_TIMEOUT, context=ctx) as resp:
+        data = resp.read(_GH_MAX_CONTENT_BYTES)
+    return data
+
+
+def _parse_skill_md(content: str, repo: str, skill_path: str, branch: str = "main") -> Dict:
+    """
+    将 SKILL.md（YAML frontmatter + Markdown body）转换为 Koto Skill JSON。
+
+    frontmatter 字段映射：
+      name        → name（显示名）
+      description → description
+      tools       → bound_tools（list）
+      tags        → tags（list）
+    body          → prompt（system_prompt_template）
+    """
+    import re as _re
+
+    name = ""
+    description = ""
+    bound_tools: List[str] = []
+    tags: List[str] = []
+    body = content
+
+    # 解析 YAML frontmatter（仅支持简单 key: value，不执行代码）
+    fm_match = _re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)", content, _re.DOTALL)
+    if fm_match:
+        fm_text = fm_match.group(1)
+        body = fm_match.group(2).strip()
+
+        current_key = None
+        in_list = False
+        for line in fm_text.splitlines():
+            # 列表项
+            list_item = _re.match(r"^\s+-\s+(.+)$", line)
+            if list_item and in_list and current_key:
+                val = list_item.group(1).strip().strip('"').strip("'")[:200]
+                if current_key == "tools":
+                    bound_tools.append(val)
+                elif current_key == "tags":
+                    tags.append(val)
+                continue
+
+            kv = _re.match(r"^([a-zA-Z_][a-zA-Z0-9_\-]*):\s*(.*)?$", line)
+            if kv:
+                key = kv.group(1).lower()
+                val = (kv.group(2) or "").strip().strip('"').strip("'")[:500]
+                current_key = key
+                in_list = val == ""  # 空值说明下面是列表
+                if key == "name":
+                    name = val
+                elif key == "description":
+                    description = val
+                elif key == "tools" and val and not in_list:
+                    bound_tools = [v.strip() for v in val.split(",") if v.strip()]
+                elif key == "tags" and val and not in_list:
+                    tags = [v.strip() for v in val.split(",") if v.strip()]
+            else:
+                in_list = False
+
+    if not name:
+        # 尝试从 Markdown 第一个 H1 取名
+        h1 = _re.search(r"^#\s+(.+)", body, _re.MULTILINE)
+        name = h1.group(1).strip() if h1 else skill_path.split("/")[-1].replace("-", " ").title()
+
+    if not description:
+        # 取正文第一段非标题文本作为 description
+        for line in body.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and not line.startswith("---"):
+                description = line[:200]
+                break
+
+    # 生成 Koto skill id
+    slug = _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")[:50] or "gh_skill"
+    skill_id = f"gh_{slug}"
+
+    # 拼源 URL
+    owner_repo = repo
+    source_url = f"https://github.com/{owner_repo}/tree/{branch}/{skill_path}"
+
+    return {
+        "id": skill_id,
+        "name": name,
+        "icon": "🌐",
+        "category": "domain",
+        "description": description or f"来自 GitHub {owner_repo} 的 Skill",
+        "intent_description": "",
+        "prompt": body,
+        "system_prompt_template": body,
+        "tags": list({t.lower() for t in (tags + ["github", "community"])})[:10],
+        "bound_tools": bound_tools,
+        "author": f"community:{owner_repo}",
+        "version": "1.0.0",
+        "enabled": False,
+        "source_url": source_url,
+        "skill_nature": "domain_skill",
+        "subcategory": "research",
+    }
+
+
+def _gh_list_skills_in_repo(repo: str, skills_path: str, branch: str) -> List[Dict]:
+    """
+    通过 GitHub Contents API 列出仓库 skills_path 下的所有技能目录/文件。
+    返回每项的 name、path、type、skill_md_url。
+    """
+    api_url = f"https://api.github.com/repos/{repo}/contents/{skills_path}?ref={branch}"
+    raw = _gh_fetch(api_url)
+    items = json.loads(raw.decode("utf-8"))
+    if not isinstance(items, list):
+        raise ValueError(f"无法列出目录 {skills_path}：{items.get('message', '未知错误')}")
+
+    result = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_name = item.get("name", "")
+        item_type = item.get("type", "")
+        item_path = item.get("path", "")
+
+        # 跳过隐藏、README、模板文件
+        if item_name.startswith(".") or item_name.startswith("_"):
+            continue
+        if item_name.upper() in ("README.MD", "LICENSE", "THIRD_PARTY_NOTICES.MD"):
+            continue
+
+        if item_type == "dir":
+            # 技能以目录形式存放（标准 Anthropic 格式）
+            skill_md_url = (
+                f"https://raw.githubusercontent.com/{repo}/{branch}/{item_path}/SKILL.md"
+            )
+            result.append({
+                "name": item_name,
+                "path": item_path,
+                "type": "dir",
+                "skill_md_url": skill_md_url,
+            })
+        elif item_type == "file" and item_name.upper() == "SKILL.MD":
+            # 某些仓库直接把 SKILL.md 放在根路径
+            skill_md_url = item.get(
+                "download_url",
+                f"https://raw.githubusercontent.com/{repo}/{branch}/{item_path}",
+            )
+            result.append({
+                "name": item_path.split("/")[-2] if "/" in item_path else item_name,
+                "path": item_path,
+                "type": "file",
+                "skill_md_url": skill_md_url,
+            })
+        elif item_type == "file" and item_name.lower().endswith(".json"):
+            # 某些仓库直接存放 JSON 格式的 Koto skill
+            result.append({
+                "name": item_name[:-5],
+                "path": item_path,
+                "type": "json",
+                "skill_md_url": item.get(
+                    "download_url",
+                    f"https://raw.githubusercontent.com/{repo}/{branch}/{item_path}",
+                ),
+            })
+
+    return result
+
+
+# ── GET /api/skillmarket/github/repos  ─────────────────────────────────────
+
+
+@marketplace_bp.route("/github/repos", methods=["GET"])
+def github_repos():
+    """返回精选热门 GitHub Skills 仓库列表（静态维护 + 实时安装状态）。"""
+    sm = _sm()
+    sm._ensure_init()
+    installed_ids = set(sm._def_registry.keys())
+
+    repos_out = []
+    for r in _GH_CURATED_REPOS:
+        entry = dict(r)
+        entry["github_url"] = f"https://github.com/{r['repo']}"
+        repos_out.append(entry)
+
+    return jsonify({"success": True, "repos": repos_out})
+
+
+# ── GET /api/skillmarket/github/skills  ────────────────────────────────────
+
+
+@marketplace_bp.route("/github/skills", methods=["GET"])
+def github_skills():
+    """
+    列出指定仓库下的可安装 Skill 列表。
+
+    查询参数:
+      repo   - "owner/repo"（必填，必须在精选列表内）
+      path   - skills 子目录（可选，默认从精选配置读取）
+      branch - 分支（可选，默认 main）
+    """
+    repo = (request.args.get("repo") or "").strip()
+    if not repo:
+        return jsonify({"success": False, "error": "参数 repo 不能为空"}), 400
+
+    # 安全校验：仅允许精选仓库，防止 SSRF
+    allowed_repos = {r["repo"] for r in _GH_CURATED_REPOS}
+    if repo not in allowed_repos:
+        return (
+            jsonify({
+                "success": False,
+                "error": f"仓库 '{repo}' 不在允许列表内。如需安装其他仓库的 Skill，请使用自定义 URL 安装功能。",
+            }),
+            403,
+        )
+
+    # 从精选配置取默认值
+    repo_cfg = next((r for r in _GH_CURATED_REPOS if r["repo"] == repo), {})
+    skills_path = request.args.get("path") or repo_cfg.get("skills_path", "skills")
+    branch = request.args.get("branch") or repo_cfg.get("branch", "main")
+
+    # 校验 path 和 branch 格式，防止路径注入
+    if not re.match(r"^[a-zA-Z0-9_\-/\.]{1,100}$", skills_path):
+        return jsonify({"success": False, "error": "path 参数无效"}), 400
+    if not re.match(r"^[a-zA-Z0-9_\-/\.]{1,50}$", branch):
+        return jsonify({"success": False, "error": "branch 参数无效"}), 400
+
+    try:
+        items = _gh_list_skills_in_repo(repo, skills_path, branch)
+
+        # 标注已安装状态
+        sm = _sm()
+        sm._ensure_init()
+        for item in items:
+            slug = re.sub(r"[^a-z0-9]+", "_", item["name"].lower()).strip("_")[:50]
+            candidate_id = f"gh_{slug}"
+            item["is_installed"] = candidate_id in sm._def_registry
+            item["koto_id"] = candidate_id
+            item["repo"] = repo
+            item["branch"] = branch
+            item["github_url"] = f"https://github.com/{repo}/tree/{branch}/{item['path']}"
+
+        return jsonify({
+            "success": True,
+            "repo": repo,
+            "skills_path": skills_path,
+            "count": len(items),
+            "skills": items,
+        })
+    except Exception as exc:
+        logger.warning("[github/skills] %s: %s", repo, exc)
+        return jsonify({"success": False, "error": str(exc)}), 502
+
+
+# ── POST /api/skillmarket/github/install  ──────────────────────────────────
+
+
+@marketplace_bp.route("/github/install", methods=["POST"])
+def github_install():
+    """
+    从 GitHub 获取一个 Skill 并安装到 Koto。
+
+    请求体（JSON）：
+    {
+      "repo": "owner/repo",                  # 精选仓库名（与 skill_path 配合）
+      "skill_path": "skills/code-reviewer",  # SKILL.md 所在目录或文件路径
+      "branch": "main",                      # 分支（可选，默认 main）
+      "overwrite": false,                    # 是否覆盖已安装的同名 Skill
+
+      # --- 或者使用自定义 URL 模式 ---
+      "raw_url": "https://raw.githubusercontent.com/owner/repo/main/path/SKILL.md"
+    }
+
+    支持格式：
+      - Anthropic SKILL.md  → 自动解析 frontmatter，转为 Koto JSON
+      - Koto JSON（含 id/name/prompt 字段）→ 直接安装
+    """
+    data = request.json or {}
+    overwrite = bool(data.get("overwrite", False))
+
+    raw_url: Optional[str] = (data.get("raw_url") or "").strip() or None
+    repo: Optional[str] = (data.get("repo") or "").strip() or None
+    skill_path: Optional[str] = (data.get("skill_path") or "").strip() or None
+    branch: str = (data.get("branch") or "main").strip()
+
+    # ── 1. 确定抓取 URL ────────────────────────────────────────────────────
+    if raw_url:
+        # 自定义 URL：必须是 raw.githubusercontent.com，且路径合法
+        if not _gh_validate_url(raw_url):
+            return jsonify({
+                "success": False,
+                "error": "raw_url 必须是 https://raw.githubusercontent.com/... 链接",
+            }), 400
+    elif repo and skill_path:
+        # 精选仓库：校验 repo 在白名单内
+        allowed_repos = {r["repo"] for r in _GH_CURATED_REPOS}
+        if repo not in allowed_repos:
+            return jsonify({
+                "success": False,
+                "error": f"仓库 '{repo}' 不在允许列表内",
+            }), 403
+
+        # 校验 skill_path 和 branch 格式
+        if not re.match(r"^[a-zA-Z0-9_\-/\. ]{1,200}$", skill_path):
+            return jsonify({"success": False, "error": "skill_path 参数无效"}), 400
+        if not re.match(r"^[a-zA-Z0-9_\-/\.]{1,50}$", branch):
+            return jsonify({"success": False, "error": "branch 参数无效"}), 400
+
+        # 自动判断是目录（拼 SKILL.md）还是直接文件
+        if skill_path.upper().endswith("SKILL.MD") or skill_path.lower().endswith(".json"):
+            raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{skill_path}"
+        else:
+            raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{skill_path}/SKILL.md"
+    else:
+        return jsonify({
+            "success": False,
+            "error": "请提供 raw_url，或同时提供 repo + skill_path",
+        }), 400
+
+    # ── 2. 抓取内容 ────────────────────────────────────────────────────────
+    try:
+        content_bytes = _gh_fetch(raw_url)
+    except Exception as exc:
+        return jsonify({"success": False, "error": f"抓取失败: {exc}"}), 502
+
+    content_str = content_bytes.decode("utf-8", errors="replace")
+
+    # ── 3. 解析格式 ────────────────────────────────────────────────────────
+    skill_dict: Dict[str, Any]
+
+    if raw_url.lower().endswith(".json"):
+        # Koto JSON 格式
+        try:
+            skill_dict = json.loads(content_str)
+        except json.JSONDecodeError as exc:
+            return jsonify({"success": False, "error": f"JSON 解析失败: {exc}"}), 422
+        if not skill_dict.get("id") or not skill_dict.get("name"):
+            return jsonify({"success": False, "error": "JSON 文件缺少 id 或 name 字段"}), 422
+        # 强制标记来源
+        skill_dict.setdefault("author", f"community:{repo or 'github'}")
+        skill_dict.setdefault("source_url", raw_url)
+        skill_dict.setdefault("tags", [])
+        if "github" not in skill_dict["tags"]:
+            skill_dict["tags"].append("github")
+    else:
+        # SKILL.md 格式（或默认当作 Markdown 处理）
+        effective_repo = repo or "github/community"
+        effective_path = skill_path or raw_url.split("raw.githubusercontent.com/", 1)[-1]
+        skill_dict = _parse_skill_md(
+            content=content_str,
+            repo=effective_repo,
+            skill_path=effective_path,
+            branch=branch,
+        )
+
+    # ── 4. 安装 ────────────────────────────────────────────────────────────
+    try:
+        SkillDefinition, _, _ = _schema()
+        SkillRecorder = _recorder()
+        skill = SkillDefinition.from_dict(skill_dict)
+        SkillRecorder.save_and_register(skill, overwrite=overwrite)
+        return jsonify({
+            "success": True,
+            "skill_id": skill.id,
+            "skill": skill.to_dict(),
+            "source": raw_url,
+        }), 201
+    except FileExistsError:
+        return jsonify({
+            "success": False,
+            "error": f"Skill '{skill_dict.get('id')}' 已安装，传 overwrite:true 覆盖",
+            "skill_id": skill_dict.get("id"),
+        }), 409
+    except Exception as exc:
+        logger.exception("[github/install]")
+        return jsonify({"success": False, "error": str(exc)}), 500

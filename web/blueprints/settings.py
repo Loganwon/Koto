@@ -10,7 +10,7 @@ import os
 import threading
 import time
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, current_app, jsonify, request
 
 _logger = logging.getLogger("koto.app")
 
@@ -64,7 +64,7 @@ def _get_detected_proxy():
 
 
 @settings_bp.route("/api/info", methods=["GET"])
-def api_info():
+def api_info() -> Response:
     """Application metadata and configuration info.
     ---
     tags: [Health]
@@ -95,7 +95,7 @@ def api_info():
 
 
 @settings_bp.route("/api/local-model/status", methods=["GET"])
-def local_model_status():
+def local_model_status() -> Response:
     """Get local model configuration and runtime status.
     ---
     tags:
@@ -135,7 +135,7 @@ def local_model_status():
 
 
 @settings_bp.route("/api/local-model/switch", methods=["POST"])
-def local_model_switch():
+def local_model_switch() -> Response:
     """Switch AI mode between local and cloud, hot-reloading client cache.
     ---
     tags:
@@ -217,7 +217,7 @@ def local_model_switch():
 
 
 @settings_bp.route("/api/local-model/setup", methods=["POST"])
-def local_model_setup():
+def local_model_setup() -> Response:
     """触发本地模型安装向导（异步，不阻塞 API 响应）"""
 
     def _run_gui():
@@ -245,7 +245,7 @@ def local_model_setup():
 
 
 @settings_bp.route("/api/skills/<skill_id>/toggle", methods=["POST"])
-def toggle_skill(skill_id: str):
+def toggle_skill(skill_id: str) -> Response:
     """Enable or disable a skill.
     ---
     tags:
@@ -296,7 +296,7 @@ def toggle_skill(skill_id: str):
 
 
 @settings_bp.route("/api/skills/<skill_id>/prompt", methods=["POST"])
-def update_skill_prompt(skill_id: str):
+def update_skill_prompt(skill_id: str) -> Response:
     """更新某个技能的自定义 Prompt"""
     try:
         from app.core.skills.skill_manager import SkillManager
@@ -313,7 +313,7 @@ def update_skill_prompt(skill_id: str):
 
 
 @settings_bp.route("/api/skills/<skill_id>/reset", methods=["POST"])
-def reset_skill_prompt(skill_id: str):
+def reset_skill_prompt(skill_id: str) -> Response:
     """将技能 Prompt 恢复为默认值"""
     try:
         from app.core.skills.skill_manager import SkillManager
@@ -330,7 +330,7 @@ def reset_skill_prompt(skill_id: str):
 
 
 @settings_bp.route("/api/settings", methods=["GET"])
-def get_settings():
+def get_settings() -> Response:
     """Get all application settings.
     ---
     tags:
@@ -346,7 +346,7 @@ def get_settings():
 
 
 @settings_bp.route("/api/settings", methods=["POST"])
-def update_settings():
+def update_settings() -> Response:
     """Update an application setting.
     ---
     tags:
@@ -399,7 +399,7 @@ def update_settings():
 
 
 @settings_bp.route("/api/settings/reset", methods=["POST"])
-def reset_settings():
+def reset_settings() -> Response:
     mod = _app()
     sm = _get_settings_manager()
     success = sm.reset()
@@ -416,7 +416,7 @@ def reset_settings():
 
 
 @settings_bp.route("/api/switch-to-mini", methods=["POST"])
-def switch_to_mini():
+def switch_to_mini() -> Response:
     """切换到迷你模式"""
     import subprocess
     import sys
@@ -449,7 +449,7 @@ def switch_to_mini():
 
 
 @settings_bp.route("/api/switch-to-main", methods=["POST"])
-def switch_to_main():
+def switch_to_main() -> Response:
     """切换到主程序"""
     import subprocess
     import sys
@@ -484,7 +484,7 @@ def switch_to_main():
 
 
 @settings_bp.route("/api/setup/status", methods=["GET"])
-def get_setup_status():
+def get_setup_status() -> Response:
     """Check initial setup status (API key, workspace).
     ---
     tags:
@@ -529,7 +529,7 @@ def get_setup_status():
 
 
 @settings_bp.route("/api/setup/apikey", methods=["POST"])
-def setup_api_key():
+def setup_api_key() -> Response:
     """设置 API Key"""
     mod = _app()
     data = request.json
@@ -560,7 +560,7 @@ def setup_api_key():
 
 
 @settings_bp.route("/api/setup/workspace", methods=["POST"])
-def setup_workspace():
+def setup_workspace() -> Response:
     """设置工作区目录"""
     from web.app import PROJECT_ROOT
 
@@ -586,7 +586,7 @@ def setup_workspace():
 
 
 @settings_bp.route("/api/setup/test", methods=["GET"])
-def test_api_connection():
+def test_api_connection() -> Response:
     """测试 API 连接"""
     try:
         c = _get_client()
@@ -609,7 +609,7 @@ def test_api_connection():
 
 
 @settings_bp.route("/api/diagnose", methods=["GET"])
-def diagnose_models():
+def diagnose_models() -> Response:
     """诊断所有模型的可用性"""
     c = _get_client()
     t = _get_types()
@@ -694,3 +694,225 @@ def diagnose_models():
         )
 
     return jsonify(results)
+
+
+# ---------------------------------------------------------------------------
+# Additional routes: local-model list, window API, setup activate,
+# model listing / refresh, task analysis
+# ---------------------------------------------------------------------------
+
+
+@settings_bp.route("/api/local-model/list", methods=["GET"])
+def local_model_list() -> Response:
+    """列出 Ollama 已安装的所有本地模型"""
+    try:
+        import json as _json
+        import urllib.request as _urlreq
+
+        ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+        req = _urlreq.Request(
+            f"{ollama_url}/api/tags", headers={"Accept": "application/json"}
+        )
+        with _urlreq.urlopen(req, timeout=4) as resp:
+            data = _json.loads(resp.read().decode())
+        models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+        return jsonify({"success": True, "models": models})
+    except Exception as e:
+        return jsonify({"success": False, "models": [], "error": str(e)}), 200
+
+
+@settings_bp.route("/api/window/switch-to-full", methods=["POST"])
+def api_window_switch_to_full() -> Response:
+    """通过 HTTP 降级调用 WindowAPI.switch_to_full（pywebview JS bridge 不可用时使用）"""
+    window_api = current_app.config.get("WINDOW_API")
+    if window_api is None:
+        return jsonify({"success": False, "error": "not_in_pywebview"})
+    return jsonify(window_api.switch_to_full())
+
+
+@settings_bp.route("/api/window/switch-to-mini", methods=["POST"])
+def api_window_switch_to_mini() -> Response:
+    """通过 HTTP 降级调用 WindowAPI.switch_to_mini"""
+    window_api = current_app.config.get("WINDOW_API")
+    if window_api is None:
+        return jsonify({"success": False, "error": "not_in_pywebview"})
+    return jsonify(window_api.switch_to_mini())
+
+
+@settings_bp.route("/api/setup/activate", methods=["POST"])
+def setup_activate() -> Response:
+    """使用激活码启用系统内置 API Key"""
+    data = request.json or {}
+    code = (data.get("code") or "").strip()
+    if not code:
+        return jsonify({"success": False, "error": "请输入激活码"})
+    try:
+        from app.core.llm._license import get_system_key
+
+        key = get_system_key(code)
+    except Exception as e:
+        _logger.warning("[Activate] 无法加载 _license 模块: %s", e)
+        return jsonify({"success": False, "error": "激活服务暂不可用"})
+    if not key:
+        return jsonify({"success": False, "error": "激活码无效"})
+    from web.app import PROJECT_ROOT
+
+    config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(f"# Koto Configuration\nGEMINI_API_KEY={key}\nAPI_KEY={key}\n")
+        os.environ["GEMINI_API_KEY"] = key
+        os.environ["API_KEY"] = key
+        _mod = _app()
+        _mod.API_KEY = key
+        _mod.client = _mod.create_client()
+        _logger.info("[Activate] 激活码验证成功，系统 API Key 已写入配置")
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@settings_bp.route("/api/v1/models", methods=["GET"])
+def api_list_models() -> Response:
+    """动态模型列表 API — 返回当前可用模型及各任务的路由结果"""
+    _a = _app()
+    if _a._model_manager:
+        return jsonify(
+            {
+                "ready": True,
+                "model_map": _a._model_manager.get_model_map_with_scores(),
+                "available": _a._model_manager.get_available_models(),
+                "fallback": _a._INTERACTIONS_FALLBACK_MODEL,
+                "interactions_only": list(_a._INTERACTIONS_ONLY_MODELS),
+            }
+        )
+    return jsonify(
+        {
+            "ready": False,
+            "model_map": {
+                task: {
+                    "model_id": mid,
+                    "display": _a.get_model_display_name(mid),
+                    "provider": "gemini" if mid != "local-executor" else "local",
+                    "tier": _a.MODEL_INFO.get(mid, {}).get("tier", 5),
+                    "score": None,
+                    "_inferred": False,
+                }
+                for task, mid in _a.MODEL_MAP.items()
+            },
+            "available": [
+                {
+                    "id": mid,
+                    "display": _a.get_model_display_name(mid),
+                    "tier": _a.MODEL_INFO.get(mid, {}).get("tier", 5),
+                    "provider": "gemini" if mid != "local-executor" else "local",
+                    "strengths": _a.MODEL_INFO.get(mid, {}).get("strengths", []),
+                    "capabilities": {},
+                }
+                for mid in dict.fromkeys(_a.MODEL_MAP.values())
+            ],
+            "fallback": _a._INTERACTIONS_FALLBACK_MODEL,
+            "interactions_only": list(_a._INTERACTIONS_ONLY_MODELS),
+        }
+    )
+
+
+@settings_bp.route("/api/v1/models/refresh", methods=["POST"])
+def api_refresh_models() -> Response:
+    """手动触发模型列表刷新，重新查询 API 并更新路由表"""
+    _a = _app()
+    if not _a._model_manager_available or _a._model_manager is None:
+        import threading as _t
+
+        _t.Thread(
+            target=_a._init_model_manager, name="ModelManagerReinit", daemon=True
+        ).start()
+        return jsonify({"status": "initializing", "message": "模型管理器正在后台初始化"})
+    try:
+        new_map = _a._model_manager.refresh()
+        _a.MODEL_MAP.update(new_map)
+        try:
+            from app.core.llm.model_fallback import get_fallback_executor
+
+            get_fallback_executor().update_model_map(_a.MODEL_MAP)
+        except Exception as _fe:
+            _logger.warning("[ModelRefresh] FallbackExecutor sync failed: %s", _fe)
+        try:
+            from app.core.routing.ai_router import AIRouter
+
+            _caps = _a._model_manager._cached_caps
+            _candidates = [
+                (mid, caps)
+                for mid, caps in _caps.items()
+                if not caps.get("interactions_only", False)
+                and not caps.get("image_gen", False)
+                and mid != "local-executor"
+            ]
+            if _candidates:
+                _best = max(
+                    _candidates,
+                    key=lambda x: x[1].get("speed", 0) + x[1].get("tier", 0) * 0.1,
+                )[0]
+                AIRouter.set_router_model(_best)
+        except Exception as _are:
+            _logger.warning("[ModelRefresh] AIRouter update failed: %s", _are)
+        return jsonify(
+            {
+                "status": "ok",
+                "model_map": _a._model_manager.get_model_map_with_scores(),
+                "count": len(_a._model_manager.get_available_models()),
+            }
+        )
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+
+@settings_bp.route("/api/analyze", methods=["POST"])
+def analyze_task() -> Response:
+    """预分析任务类型和模型选择 — 让前端立即显示路由结果"""
+    from app.core.routing import SmartDispatcher
+
+    _a = _app()
+    data = request.json or {}
+    message: str = data.get("message", "")
+    locked_task: str | None = data.get("locked_task")
+    locked_model: str = data.get("locked_model", "auto")
+    has_file: bool = data.get("has_file", False)
+    file_type: str = data.get("file_type", "")
+
+    if not message:
+        return jsonify({"task": "CHAT", "model": _a.MODEL_MAP["CHAT"], "route_method": "Empty"})
+
+    IMAGE_EDIT_KEYWORDS = [
+        "修改", "换", "改成", "变成", "底色", "背景", "颜色", "抠图",
+        "去背景", "P图", "美化", "滤镜", "调色", "编辑",
+        "change", "modify", "edit", "background", "color",
+    ]
+
+    if locked_task:
+        task = locked_task
+        route_method = "🔒 Manual"
+    elif has_file and file_type and file_type.startswith("image"):
+        is_edit = any(kw in message.lower() for kw in IMAGE_EDIT_KEYWORDS)
+        task = "PAINTER" if is_edit else "VISION"
+        route_method = "🖼️ Image Edit" if is_edit else "👁️ Image Analysis"
+    else:
+        task, route_method, _ = SmartDispatcher.analyze(message)
+
+    model = (
+        locked_model
+        if (locked_model and locked_model != "auto")
+        else SmartDispatcher.get_model_for_task(task, has_image=has_file)
+    )
+    model_info = _a.MODEL_INFO.get(model, {"name": model, "speed": ""})
+    return jsonify(
+        {
+            "task": task,
+            "model": model,
+            "model_name": model_info.get("name", model),
+            "model_speed": model_info.get("speed", ""),
+            "route_method": route_method,
+            "strengths": model_info.get("strengths", []),
+        }
+    )

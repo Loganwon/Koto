@@ -66,6 +66,17 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
 if ([string]::IsNullOrWhiteSpace($Version)) { $Version = Get-Date -Format "yyyy.MM.dd" }
 Write-OK "版本号: $Version"
 
+# ─── 步骤 0：Cython 编译（保护核心模块 + _license key）────
+Write-Step "步骤 0/5  Cython 编译核心模块 → .pyd（保护源码 + 内嵌 Key）"
+$cythonLog = Join-Path $LOG_DIR "cython_build.log"
+& $PYTHON (Join-Path $REPO_ROOT "build_cython.py") build_ext --inplace *> $cythonLog
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "Cython 编译失败，查看日志：$cythonLog"
+    Get-Content $cythonLog -Tail 20
+    exit 1
+}
+Write-OK "Cython 编译完成（_license.pyd 及核心模块 .pyd 已生成）"
+
 # ─── 步骤 1：PyInstaller 构建 ─────────────────
 if (-not $SkipBuild) {
     $buildLog = Join-Path $LOG_DIR "build_latest.log"
