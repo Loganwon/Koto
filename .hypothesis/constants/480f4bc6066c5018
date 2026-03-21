@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\trend_analysis_plugin.py
+# hypothesis_version: 6.151.9
+
+[0.2, 0.5, 0.7, '\nTop Trends:\n', 'Anomaly Score:\n\n', 'Critical', 'Elevated', 'Event Types:\n', 'High', 'INTEGER', 'Interpretation:\n', 'Normal', 'OBJECT', 'STRING', 'TrendAnalysisPlugin', 'analyze_event_trends', 'comparisons', 'current_metrics', 'description', 'event_data', 'event_types', 'func', 'get_anomaly_score', 'historical_stats', 'hours_back', 'message', 'metrics', 'name', 'parameters', 'predictions', 'properties', 'required', 'top_trends', 'type']

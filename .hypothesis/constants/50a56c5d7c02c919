@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\network_plugin.py
+# hypothesis_version: 6.151.9
+
+[200, 'Koto/1.0', 'Network', 'OBJECT', 'STRING', 'The URL to fetch.', 'The URL to post to.', 'User-Agent', 'body', 'description', 'func', 'html.parser', 'http_get', 'http_post', 'name', 'parameters', 'parse_html', 'properties', 'required', 'selector', 'type', 'url']

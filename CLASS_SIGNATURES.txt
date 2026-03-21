@@ -1,0 +1,552 @@
+═════════════════════════════════════════════════════════════════════════════════
+              KOTO - CLASS NAMES & METHOD SIGNATURES (REFERENCE)
+═════════════════════════════════════════════════════════════════════════════════
+
+1. LLM PROVIDER SYSTEM
+═════════════════════════════════════════════════════════════════════════════════
+
+FILE: app/core/llm/base.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class LLMProvider(ABC):
+    @abstractmethod
+    def generate_content(
+        self,
+        prompt: Union[str, List[Dict[str, Any]]],
+        model: str,
+        system_instruction: Optional[str] = None,
+        tools: Optional[List[Any]] = None,
+        stream: bool = False,
+        **kwargs
+    ) -> Union[Dict[str, Any], Generator[Dict[str, Any], None, None]]
+    
+    @abstractmethod
+    def get_token_count(
+        self,
+        prompt: Union[str, List[Dict[str, Any]]],
+        model: str
+    ) -> int
+
+    def _log_request(self, prompt: Union[str, List], model: str) -> None
+    
+    def _log_response(
+        self,
+        model: str,
+        response_len: int = 0,
+        *,
+        error: bool = False,
+        error_msg: str = ""
+    ) -> None
+
+
+FILE: app/core/llm/gemini.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class GeminiProvider(LLMProvider):
+    MAX_RETRIES = 3
+    RETRY_BASE_DELAY = 2.0
+    RETRYABLE_STATUS_CODES = {429, 503}
+    
+    def __init__(self, api_key: str = None) -> None
+    
+    def generate_content(...) -> Union[Dict, Generator]
+    
+    def get_token_count(prompt, model) -> int
+    
+    def _call_with_retry(self, model: str, contents, config)
+    
+    def _call_via_interactions_api(
+        self,
+        model_id: str,
+        prompt,
+        sys_instruction: str = None,
+        stream: bool = False,
+        timeout: float = 90.0
+    )
+    
+    def _format_tools(self, tools: Optional[List[Any]]) -> Optional[List[Any]]
+    
+    def _format_prompt(self, prompt: Union[str, List[Dict[str, Any]]]) -> Any
+    
+    def _format_response(self, response: Any) -> Dict[str, Any]
+    
+    def _stream_generator(self, response_iterator: Any) -> Generator
+    
+    @staticmethod
+    def _get_interactions_text(obj) -> str
+    
+    @staticmethod
+    def _flatten_prompt_to_text(prompt) -> str
+
+
+FILE: app/core/llm/ollama_llm_provider.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class OllamaLLMProvider(LLMProvider):
+    def __init__(
+        self,
+        model: str = "qwen3:8b",
+        base_url: str = None,
+        **kwargs
+    ) -> None
+    
+    def generate_content(
+        self,
+        prompt: Union[str, List[Dict[str, Any]]],
+        model: str = None,
+        system_instruction: Optional[str] = None,
+        tools: Optional[List[Any]] = None,
+        stream: bool = False,
+        **kwargs
+    ) -> Union[Dict[str, Any], Generator]
+    
+    def get_token_count(prompt, model) -> int
+
+
+FILE: app/core/llm/model_fallback.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class ModelFallbackExecutor:
+    _UNAVAILABLE_TTL: int = 300  # 5 minutes
+    _cascade_failures: Dict[str, int]
+    _cascade_failure_times: Dict[str, float]
+    _CIRCUIT_BREAKER_BASE: float = 5.0
+    _CIRCUIT_BREAKER_CAP: float = 120.0
+    
+    def __init__(self) -> None
+    
+    @classmethod
+    def update_model_map(cls, model_map: Dict[str, str]) -> None
+    
+    def mark_unavailable(self, model_id: str, ttl: int = None) -> None
+    
+    def is_available(self, model_id: str) -> bool
+    
+    def get_best_available(
+        self,
+        task_type: str = "CHAT",
+        preferred: str = None
+    ) -> Optional[str]
+    
+    def generate_with_fallback(
+        self,
+        provider,
+        prompt,
+        preferred_model: str,
+        task_type: str = "CHAT",
+        *,
+        system_instruction: str = None,
+        tools: list = None,
+        stream: bool = False,
+        **kwargs
+    ) -> Union[Dict, Generator]
+    
+    def _build_candidate_list(
+        self,
+        preferred: str,
+        task_type: str
+    ) -> List[str]
+
+
+2. AGENT SYSTEM
+═════════════════════════════════════════════════════════════════════════════════
+
+FILE: app/core/agent/base.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class AgentPlugin(ABC):
+    @property
+    @abstractmethod
+    def name(self) -> str
+    
+    @property
+    @abstractmethod
+    def description(self) -> str
+    
+    @abstractmethod
+    def get_tools(self) -> List[Dict[str, Any]]
+
+
+class Agent(ABC):
+    def __init__(self, llm_provider: LLMProvider) -> None
+    
+    @abstractmethod
+    def run(
+        self,
+        input_text: str,
+        context: Optional[Dict] = None
+    ) -> Union[AgentResponse, Generator[AgentStep, None, None]]
+
+
+FILE: app/core/agent/unified_agent.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class UnifiedAgent(Agent):
+    MAX_STEPS = 15
+    MAX_VALIDATION_RETRIES = 1
+    
+    def __init__(
+        self,
+        llm_provider: LLMProvider,
+        tool_registry: Optional[ToolRegistry] = None,
+        model_id: str = "gemini-3-flash-preview",
+        system_instruction: Optional[str] = None,
+        skill_id: Optional[str] = None,
+        task_type: Optional[str] = None,
+        enable_pii_filter: bool = True,
+        enable_output_validation: bool = True,
+        restore_pii_in_output: bool = True,
+        use_tool_router: bool = True,
+        tool_router_max: int = 20
+    ) -> None
+    
+    def run(
+        self,
+        input_text: str,
+        context: Optional[Dict] = None
+    ) -> Union[AgentResponse, Generator[AgentStep, None, None]]
+    
+    def _reason_and_decide(self) -> Optional[AgentAction]
+    
+    def _call_tools(self, tool_calls: List[Dict]) -> List[Dict]
+    
+    def _validate_output(self, text: str) -> ValidationResult
+    
+    def report_feedback(self, feedback: str, rating: int = 0) -> None
+
+
+FILE: app/core/agent/langgraph_agent.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class AgentState(TypedDict):
+    messages: Annotated[List[BaseMessage], operator.add]
+    skill_id: Optional[str]
+    task_type: Optional[str]
+    session_id: Optional[str]
+    steps_taken: int
+    validation_retries: int
+    pii_mask_result: Optional[Any]
+    original_input: str
+    final_answer: Optional[str]
+    error: Optional[str]
+
+
+class LangGraphAgent:
+    def __init__(
+        self,
+        registry: Optional[ToolRegistry] = None,
+        model_id: str = "gemini-3-flash-preview",
+        enable_pii_filter: bool = True,
+        enable_output_validation: bool = True
+    ) -> None
+    
+    def stream(
+        self,
+        user_input: str,
+        session_id: Optional[str] = None,
+        **kwargs
+    ) -> Generator[Dict[str, Any], None, None]
+    
+    def invoke(self, input_text: str, **kwargs) -> Dict[str, Any]
+
+
+FILE: app/core/agent/tool_registry.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class ToolRegistry:
+    def __init__(self) -> None
+    
+    def register_tool(
+        self,
+        name: str,
+        func: Callable,
+        description: Optional[str] = None,
+        parameters: Optional[Dict] = None
+    ) -> None
+    
+    def register_plugin(self, plugin: AgentPlugin) -> None
+    
+    def get_definitions(self) -> List[Dict[str, Any]]
+    
+    def execute(self, tool_name: str, tool_args: Dict[str, Any]) -> Any
+    
+    def _generate_schema(self, func: Callable) -> Dict[str, Any]
+
+
+FILE: app/core/agent/factory.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def create_agent(
+    api_key: Optional[str] = None,
+    model_id: str = "gemini-3-flash-preview"
+) -> UnifiedAgent
+
+def create_local_agent(
+    model: str = None,
+    base_url: str = None
+) -> UnifiedAgent
+
+def create_langgraph_agent(
+    api_key: Optional[str] = None,
+    model_id: str = "gemini-3-flash-preview",
+    enable_pii_filter: bool = True,
+    enable_output_validation: bool = True
+) -> LangGraphAgent
+
+def create_multi_agent(
+    api_key: Optional[str] = None,
+    model_id: str = "gemini-3-flash-preview",
+    max_revisions: int = 1
+) -> MultiAgentOrchestrator
+
+def _build_registry(
+    api_key: Optional[str] = None,
+    full: bool = True
+) -> ToolRegistry
+
+
+3. ROUTING SYSTEM
+═════════════════════════════════════════════════════════════════════════════════
+
+FILE: app/core/routing/smart_dispatcher.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class SmartDispatcher:
+    USE_AI_ROUTER = True
+    _route_cache: OrderedDict
+    _route_cache_max = 128
+    _route_cache_lock = None
+    
+    @classmethod
+    def configure(
+        cls,
+        local_executor,
+        context_analyzer,
+        web_searcher,
+        model_map,
+        client
+    ) -> None
+    
+    @classmethod
+    def analyze(cls, user_input: str, timeout: float = 5.0) -> Tuple[str, str, str]
+
+
+FILE: app/core/routing/intent_analyzer.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class IntentAnalyzer:
+    TRIGGER_PATTERNS = [...]  # List of regex patterns
+    REWRITE_PROMPT = "..."
+    
+    @classmethod
+    def analyze(
+        cls,
+        messages: List[Dict],
+        user_input: str,
+        client,
+        timeout: float = 5.0
+    ) -> str
+
+
+FILE: app/core/routing/ai_router.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class AIRouter:
+    ROUTER_INSTRUCTION = "..."
+    _cache = {}
+    _cache_max_size = 100
+    
+    @classmethod
+    def _cache_set(cls, key, value) -> None
+    
+    @classmethod
+    def classify(
+        cls,
+        client,
+        user_input: str,
+        timeout: float = 2.0
+    ) -> Tuple[str, str, str]
+
+
+4. SECURITY SYSTEM
+═════════════════════════════════════════════════════════════════════════════════
+
+FILE: app/core/security/pii_filter.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@dataclass
+class PIIConfig:
+    mask_phone: bool = True
+    mask_landline: bool = True
+    mask_id_card: bool = True
+    mask_bank_card: bool = True
+    mask_email: bool = True
+    mask_ip: bool = False
+    mask_name: bool = True
+    mask_address: bool = True
+    mask_passport: bool = True
+    custom_keywords: List[str] = field(default_factory=list)
+    log_stats: bool = True
+
+
+@dataclass
+class MaskResult:
+    masked_text: str
+    original_text: str
+    mask_map: Dict[str, str]
+    stats: Dict[str, int]
+    
+    @property
+    def has_pii(self) -> bool
+    
+    def restore(self, text: str) -> str
+
+
+class PIIFilter:
+    _compiled: Optional[List[Tuple[str, re.Pattern]]] = None
+    
+    @classmethod
+    def _get_compiled(cls) -> List[Tuple[str, re.Pattern]]
+    
+    @classmethod
+    def mask(
+        cls,
+        text: str,
+        config: Optional[PIIConfig] = None
+    ) -> MaskResult
+    
+    @classmethod
+    def restore(cls, masked_text: str, mask_map: Dict[str, str]) -> str
+    
+    @classmethod
+    def has_pii(cls, text: str, config: Optional[PIIConfig] = None) -> bool
+    
+    @classmethod
+    def add_custom_keyword(cls, config: PIIConfig, keyword: str) -> PIIConfig
+
+
+FILE: app/core/security/output_validator.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@dataclass
+class ValidationResult:
+    action: str  # PASS | WARN | REFORMAT | RETRY | BLOCK
+    text: str
+    original_text: str
+    reasons: List[str] = field(default_factory=list)
+    skill_id: Optional[str] = None
+    
+    @property
+    def passed(self) -> bool
+    
+    @property
+    def needs_retry(self) -> bool
+    
+    @property
+    def is_blocked(self) -> bool
+
+
+class OutputValidator:
+    _llm_judge_client: Optional[Any] = None
+    _llm_judge_model: str = "gemini-2.5-flash"
+    _llm_judge_timeout: float = 15.0
+    
+    @classmethod
+    def validate(
+        cls,
+        text: str,
+        skill_id: Optional[str] = None,
+        original_prompt: Optional[str] = None
+    ) -> ValidationResult
+    
+    @classmethod
+    def configure_llm_judge(
+        cls,
+        client,
+        model_id: str = "gemini-2.5-flash",
+        timeout: float = 15.0
+    ) -> None
+
+
+═════════════════════════════════════════════════════════════════════════════════
+                           PLUGIN CLASSES (24 TOTAL)
+═════════════════════════════════════════════════════════════════════════════════
+
+All plugins implement AgentPlugin interface:
+
+class [PluginName]Plugin(AgentPlugin):
+    @property
+    def name(self) -> str
+    
+    @property
+    def description(self) -> str
+    
+    def get_tools(self) -> List[Dict[str, Any]]
+        Returns: [
+            {
+                "name": "tool_name",
+                "description": "Tool description",
+                "func": callable_function,
+                "parameters": {...}  # Optional JSON schema
+            },
+            ...
+        ]
+
+Plugins (alphabetical):
+  1. alerting_plugin.AlertingPlugin
+  2. annotation_plugin.AnnotationPlugin
+  3. auto_remediation_plugin.AutoRemediationPlugin
+  4. basic_tools_plugin.BasicToolsPlugin
+  5. chart_vision_plugin.ChartVisionPlugin
+  6. configuration_plugin.ConfigurationPlugin
+  7. data_process_plugin.DataProcessPlugin
+  8. doc_gen_plugin.DocGenPlugin
+  9. file_converter_plugin.FileConverterPlugin
+ 10. file_editor_plugin.FileEditorPlugin
+ 11. image_process_plugin.ImageProcessPlugin
+ 12. memory_tools_plugin.MemoryToolsPlugin
+ 13. network_plugin.NetworkPlugin
+ 14. performance_analysis_plugin.PerformanceAnalysisPlugin
+ 15. productivity_plugin.ProductivityPlugin
+ 16. script_generation_plugin.ScriptGenerationPlugin
+ 17. search_plugin.SearchPlugin
+ 18. skill_tools_plugin.SkillToolsPlugin
+ 19. system_event_monitoring_plugin.SystemEventMonitoringPlugin
+ 20. system_info_plugin.SystemInfoPlugin
+ 21. system_tools_plugin.SystemToolsPlugin
+ 22. template_fill_plugin.TemplateFillPlugin
+ 23. trend_analysis_plugin.TrendAnalysisPlugin
+ 24. web_tools_bridge_plugin.WebToolsBridgePlugin
+
+
+═════════════════════════════════════════════════════════════════════════════════
+                         DEPLOYMENT ENTRY POINTS
+═════════════════════════════════════════════════════════════════════════════════
+
+FILE: src/koto_app.py (Desktop)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class DualOutput:
+    def __init__(self, original_stream, log_file)
+    def write(self, message: str) -> None
+    def flush(self) -> None
+
+# Main execution:
+if __name__ == "__main__":
+    # Start Flask server in background
+    # Create PyWebView window pointing to http://127.0.0.1:5000/
+
+
+FILE: src/server.py (Web Server)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+from web.app import app
+
+# Environment variables:
+DEPLOY_MODE = os.environ.get("KOTO_DEPLOY_MODE", "local")
+PORT = int(os.environ.get("KOTO_PORT", 5000))
+AUTH_ENABLED = os.environ.get("KOTO_AUTH_ENABLED", "false").lower() == "true"
+
+# Production run:
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=PORT, debug=(DEPLOY_MODE == "local"))

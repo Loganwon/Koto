@@ -8,9 +8,9 @@ and entry_point, dynamic import security allowlist, and edge cases.
 from __future__ import annotations
 
 import types
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import patch, MagicMock
 
 from app.core.skills.skill_capability import SkillCapabilityRegistry
 
@@ -343,5 +343,7 @@ class TestLoadEntryPoint:
         fake_module.FakeClass = FakeClass
         mock_import.return_value = fake_module
 
-        result = SkillCapabilityRegistry._load_entry_point("app.nested:FakeClass.method")
+        result = SkillCapabilityRegistry._load_entry_point(
+            "app.nested:FakeClass.method"
+        )
         assert result is inner_fn

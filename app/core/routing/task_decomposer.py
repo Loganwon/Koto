@@ -371,3 +371,27 @@ class TaskDecomposer:
         except Exception as exc:
             _log.debug(f"[TaskDecomposer] LLM 分解失败: {exc}")
             return None
+
+    @classmethod
+    def suggest_multiagent_preset(cls, compound_info: dict) -> str | None:
+        """Map compound_info → multiagent preset name ('code' | 'analysis' | 'content').
+
+        Returns None when the task is not compound.
+        """
+        if not compound_info.get("is_compound"):
+            return None
+
+        primary = (compound_info.get("primary_task") or "").upper()
+        secondary = [t.upper() for t in (compound_info.get("secondary_tasks") or [])]
+        pattern = compound_info.get("pattern") or ""
+
+        # Code pipeline
+        if "CODE" in primary or "CODER" in primary or "CODE" in secondary:
+            return "code"
+
+        # Analysis pipeline: research/data-heavy tasks
+        if primary in ("RESEARCH", "DATA_ANALYST") or pattern in ("research_and_document",):
+            return "analysis"
+
+        # Content pipeline (default for compound tasks)
+        return "content"

@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\monitoring\alert_manager.py
+# hypothesis_version: 6.151.9
+
+[400, 10000, ', ', 'Content-Type', 'From', 'Subject', 'To', 'application/json', 'channels', 'cpu_critical', 'cpu_high', 'cpu_spike', 'disk_critical', 'disk_full', 'disk_high', 'email', 'enabled', 'event', 'event_type', 'event_types', 'high', 'id', 'log', 'low', 'medium', 'memory_high', 'memory_warning', 'min_severity', 'name', 'plain', 'recipients', 'rule', 'sender_email', 'sender_password', 'severity', 'smtp_port', 'smtp_server', 'timestamp', 'webhook']

@@ -2,7 +2,7 @@
     "id":  "workspace_context",
     "name":  "工作区感知",
     "icon":  "🗺️",
-    "category":  "domain",
+    "category":  "behavior",
     "description":  "对话前自动扫描当前工作目录，让 AI 掌握项目文件结构，所有文件操作更精准",
     "intent_description":  "用户在处理文件、询问项目结构、或需要 AI 了解当前工作目录时自动生效",
     "system_prompt_template":  "",

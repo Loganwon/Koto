@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\monitoring\system_event_monitor.py
+# hypothesis_version: 6.151.9
+
+[0.0, -100, 100, 1000, 1024, '/', 'Monitor not running', 'by_severity', 'by_type', 'cpu_high', 'cpu_percent', 'cpu_spike', 'cpu_temperature', 'critical', 'description', 'disk_high', 'disk_percent', 'event_type', 'healthy', 'high', 'last_event', 'medium', 'memory_high', 'memory_info', 'memory_percent', 'metric_name', 'metric_value', 'name', 'pid', 'process_memory_high', 'process_memory_mb', 'severity', 'status', 'threshold', 'timestamp', 'total_events', 'warning']

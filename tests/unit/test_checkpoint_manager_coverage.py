@@ -5,9 +5,9 @@ Comprehensive tests for app.core.agent.checkpoint_manager
 
 import sqlite3
 import threading
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
 
 
 @pytest.mark.unit
@@ -16,10 +16,12 @@ class TestResetCheckpointer:
 
     def setup_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def teardown_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def test_reset_clears_instance(self):
@@ -37,10 +39,12 @@ class TestResetCheckpointer:
     def test_reset_is_idempotent(self):
         """Calling reset_checkpointer twice is safe."""
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
         reset_checkpointer()
 
         import app.core.agent.checkpoint_manager as cm
+
         assert cm._checkpointer_instance is None
         assert cm._checkpointer_type == "none"
 
@@ -51,26 +55,31 @@ class TestGetCheckpointerType:
 
     def setup_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def teardown_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def test_returns_none_initially(self):
         """Before any checkpointer is created, type should be 'none'."""
         from app.core.agent.checkpoint_manager import get_checkpointer_type
+
         assert get_checkpointer_type() == "none"
 
     def test_returns_sqlite_after_sqlite_init(self):
         """After SqliteSaver init, type should be 'sqlite'."""
         import app.core.agent.checkpoint_manager as cm
+
         cm._checkpointer_type = "sqlite"
         assert cm.get_checkpointer_type() == "sqlite"
 
     def test_returns_memory_after_memory_init(self):
         """After MemorySaver init, type should be 'memory'."""
         import app.core.agent.checkpoint_manager as cm
+
         cm._checkpointer_type = "memory"
         assert cm.get_checkpointer_type() == "memory"
 
@@ -81,10 +90,12 @@ class TestGetCheckpointer:
 
     def setup_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def teardown_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     @patch("app.core.agent.checkpoint_manager._get_sqlite_conn")
@@ -112,6 +123,7 @@ class TestGetCheckpointer:
     def test_fallback_to_memory_on_import_error(self):
         """get_checkpointer falls back to MemorySaver when SqliteSaver import fails."""
         import sys
+
         import app.core.agent.checkpoint_manager as cm
 
         # Ensure langgraph.checkpoint.sqlite is NOT importable
@@ -142,7 +154,9 @@ class TestGetCheckpointer:
 
     @patch("app.core.agent.checkpoint_manager._get_sqlite_conn")
     @patch("app.core.agent.checkpoint_manager.Path")
-    def test_fallback_to_memory_on_sqlite_init_exception(self, mock_path_cls, mock_get_conn):
+    def test_fallback_to_memory_on_sqlite_init_exception(
+        self, mock_path_cls, mock_get_conn
+    ):
         """get_checkpointer falls back to MemorySaver when SqliteSaver() raises."""
         import app.core.agent.checkpoint_manager as cm
 
@@ -208,10 +222,12 @@ class TestGetSqliteConn:
 
     def setup_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def teardown_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     @patch("sqlite3.connect")
@@ -249,10 +265,12 @@ class TestCheckpointManagerListCheckpoints:
 
     def setup_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def teardown_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def test_list_checkpoints_success(self):
@@ -282,7 +300,9 @@ class TestCheckpointManagerListCheckpoints:
         assert results[1]["checkpoint_id"] == "cp-2"
         assert results[1]["writes"] == []
 
-        mock_cp.list.assert_called_once_with({"configurable": {"thread_id": "thread-123"}})
+        mock_cp.list.assert_called_once_with(
+            {"configurable": {"thread_id": "thread-123"}}
+        )
 
     def test_list_checkpoints_with_empty_metadata(self):
         """list_checkpoints handles snap with metadata=None."""
@@ -324,10 +344,12 @@ class TestCheckpointManagerDeleteThread:
 
     def setup_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def teardown_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def test_delete_thread_non_sqlite_returns_true(self):
@@ -360,7 +382,9 @@ class TestCheckpointManagerDeleteThread:
 
         fake_sqlite_module = MagicMock()
 
-        with patch.dict("sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}):
+        with patch.dict(
+            "sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}
+        ):
             result = CheckpointManager.delete_thread("thread-42")
 
         assert result is True
@@ -385,7 +409,9 @@ class TestCheckpointManagerDeleteThread:
 
         fake_sqlite_module = MagicMock()
 
-        with patch.dict("sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}):
+        with patch.dict(
+            "sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}
+        ):
             result = CheckpointManager.delete_thread("thread-x")
 
         assert result is False
@@ -401,7 +427,9 @@ class TestCheckpointManagerDeleteThread:
         # Patch get_checkpointer to raise
         with patch.object(cm, "get_checkpointer", side_effect=RuntimeError("boom")):
             fake_sqlite_module = MagicMock()
-            with patch.dict("sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}):
+            with patch.dict(
+                "sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}
+            ):
                 result = CheckpointManager.delete_thread("thread-bad")
 
         assert result is False
@@ -426,7 +454,9 @@ class TestCheckpointManagerDeleteThread:
 
         fake_sqlite_module = MagicMock()
 
-        with patch.dict("sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}):
+        with patch.dict(
+            "sys.modules", {"langgraph.checkpoint.sqlite": fake_sqlite_module}
+        ):
             result = CheckpointManager.delete_thread("thread-partial")
 
         assert result is True
@@ -439,10 +469,12 @@ class TestCheckpointManagerGetDbInfo:
 
     def setup_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def teardown_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def test_get_db_info_type_none(self):
@@ -563,18 +595,22 @@ class TestModuleGlobals:
 
     def setup_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def teardown_method(self):
         from app.core.agent.checkpoint_manager import reset_checkpointer
+
         reset_checkpointer()
 
     def test_lock_is_threading_lock(self):
         """_checkpointer_lock is a threading.Lock."""
         import app.core.agent.checkpoint_manager as cm
+
         assert isinstance(cm._checkpointer_lock, type(threading.Lock()))
 
     def test_default_db_path_ends_with_sqlite(self):
         """_DEFAULT_DB_PATH ends with .sqlite."""
         import app.core.agent.checkpoint_manager as cm
+
         assert cm._DEFAULT_DB_PATH.endswith(".sqlite")

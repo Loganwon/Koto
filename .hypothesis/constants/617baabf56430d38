@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\web_tools_bridge_plugin.py
+# hypothesis_version: 6.151.9
+
+['ARRAY', 'BOOLEAN', 'INTEGER', 'NUMBER', 'OBJECT', 'STRING', 'WebToolsBridge', 'array', 'boolean', 'description', 'func', 'integer', 'name', 'number', 'object', 'parameters', 'string', 'type']

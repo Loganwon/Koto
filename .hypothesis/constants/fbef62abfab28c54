@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\learning\response_evaluator.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.15, 0.2, 0.3, 0.35, 0.5, 1.0, 500, 1200, 'SYSTEM', '\\s*```$', '\\{.*\\}', '^```(?:json)?\\s*', 'accuracy', 'helpfulness', 'personalization', 'reasoning', 'task_completion']

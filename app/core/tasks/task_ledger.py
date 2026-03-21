@@ -63,6 +63,14 @@ class TaskStatus(str, Enum):
     RETRYING = "retrying"  # 重试中
 
 
+class TaskPriority(int, Enum):
+    """任务优先级（数值越大越优先）。"""
+    LOW = 0     # 低优先级（后台任务）
+    NORMAL = 1  # 默认
+    HIGH = 2    # 高优先级（用户主动触发）
+    URGENT = 3  # 紧急（立即执行）
+
+
 @dataclass
 class TaskRecord:
     """任务台账条目（对应 koto_tasks 表的一行）"""
@@ -88,6 +96,9 @@ class TaskRecord:
     retry_count: int = 0
     error: Optional[str] = None
     result_summary: Optional[str] = None  # 最终答案的前 500 字
+
+    # 优先级
+    priority: int = 1  # TaskPriority 整数值（0=低/1=正常/2=高/3=紧急）
 
     # 控制标志
     interrupt_requested: bool = False  # 外部要求暂停（Human-in-loop）
@@ -203,6 +214,7 @@ class TaskLedger:
         result_summary    TEXT,
         interrupt_requested INTEGER NOT NULL DEFAULT 0,
         cancel_requested    INTEGER NOT NULL DEFAULT 0,
+        priority          INTEGER NOT NULL DEFAULT 1,
         metadata          TEXT NOT NULL DEFAULT '{}'
     );
     CREATE INDEX IF NOT EXISTS idx_koto_tasks_session  ON koto_tasks(session_id);
@@ -226,6 +238,7 @@ class TaskLedger:
     def __init__(self, db_path: Optional[str] = None):
         self._db_path = db_path or _DEFAULT_DB_PATH
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()  # serialise concurrent SQLite access
         self._conn = self._open_conn()
         self._init_schema()
         logger.info(f"[TaskLedger] ✅ 初始化完成 → {self._db_path}")
@@ -241,6 +254,16 @@ class TaskLedger:
 
     def _init_schema(self):
         self._conn.executescript(self._DDL)
+        # 迁移旧表：追加可能不存在的列和索引
+        _migrations = [
+            "ALTER TABLE koto_tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 1",
+            "CREATE INDEX IF NOT EXISTS idx_koto_tasks_priority ON koto_tasks(priority)",
+        ]
+        for sql in _migrations:
+            try:
+                self._conn.execute(sql)
+            except sqlite3.OperationalError:
+                pass  # 列已存在，忽略
         self._conn.commit()
 
     # ── 任务 CRUD ─────────────────────────────────────────────────────────────
@@ -253,6 +276,7 @@ class TaskLedger:
         skill_id: Optional[str] = None,
         source: str = "agent",
         metadata: Optional[Dict[str, Any]] = None,
+        priority: int = TaskPriority.NORMAL,
     ) -> TaskRecord:
         """创建新任务记录，返回 TaskRecord 对象。"""
         task = TaskRecord(
@@ -262,31 +286,34 @@ class TaskLedger:
             task_type=task_type,
             skill_id=skill_id,
             source=source,
+            priority=int(priority),
             metadata=json.dumps(metadata or {}, ensure_ascii=False),
         )
-        self._conn.execute(
-            """
-            INSERT INTO koto_tasks
-              (task_id, session_id, user_input, status, task_type, skill_id,
-               source, created_at, step_count, tool_calls, retry_count,
-               interrupt_requested, cancel_requested, metadata)
-            VALUES
-              (:task_id, :session_id, :user_input, :status, :task_type, :skill_id,
-               :source, :created_at, 0, 0, 0, 0, 0, :metadata)
-            """,
-            {
-                "task_id": task.task_id,
-                "session_id": task.session_id,
-                "user_input": task.user_input,
-                "status": task.status.value,
-                "task_type": task.task_type,
-                "skill_id": task.skill_id,
-                "source": task.source,
-                "created_at": task.created_at,
-                "metadata": task.metadata,
-            },
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO koto_tasks
+                  (task_id, session_id, user_input, status, task_type, skill_id,
+                   source, created_at, step_count, tool_calls, retry_count,
+                   interrupt_requested, cancel_requested, priority, metadata)
+                VALUES
+                  (:task_id, :session_id, :user_input, :status, :task_type, :skill_id,
+                   :source, :created_at, 0, 0, 0, 0, 0, :priority, :metadata)
+                """,
+                {
+                    "task_id": task.task_id,
+                    "session_id": task.session_id,
+                    "user_input": task.user_input,
+                    "status": task.status.value,
+                    "task_type": task.task_type,
+                    "skill_id": task.skill_id,
+                    "source": task.source,
+                    "created_at": task.created_at,
+                    "priority": task.priority,
+                    "metadata": task.metadata,
+                },
+            )
+            self._conn.commit()
         logger.debug(
             f"[TaskLedger] 创建任务 {task.task_id[:8]} session={session_id[:8]}"
         )
@@ -294,14 +321,15 @@ class TaskLedger:
 
     def get(self, task_id: str, include_steps: bool = False) -> Optional[TaskRecord]:
         """按 task_id 查询。include_steps=True 时同时加载步骤列表。"""
-        row = self._conn.execute(
-            "SELECT * FROM koto_tasks WHERE task_id = ?", (task_id,)
-        ).fetchone()
-        if not row:
-            return None
-        rec = self._row_to_record(row)
-        if include_steps:
-            rec.steps = self._get_steps(task_id)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM koto_tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            if not row:
+                return None
+            rec = self._row_to_record(row)
+            if include_steps:
+                rec.steps = self._get_steps(task_id)
         return rec
 
     def _row_to_record(self, row: sqlite3.Row) -> TaskRecord:
@@ -320,35 +348,47 @@ class TaskLedger:
         status: Optional[TaskStatus] = None,
         source: Optional[str] = None,
         date_from: Optional[str] = None,  # ISO 日期前缀，如 "2026-03-04"
+        priority: Optional[int] = None,
+        order_by: str = "created_at",  # "created_at" | "priority"
         limit: int = 50,
         offset: int = 0,
     ) -> List[TaskRecord]:
-        """多条件查询任务列表，按创建时间倒序。"""
+        """多条件查询任务列表。order_by='priority' 时按优先级降序+创建时间排序。"""
         clauses, params = [], []
         if session_id:
             clauses.append("session_id = ?")
             params.append(session_id)
         if status:
             clauses.append("status = ?")
-            params.append(status.value)
+            params.append(status.value if hasattr(status, "value") else status)
         if source:
             clauses.append("source = ?")
             params.append(source)
         if date_from:
             clauses.append("created_at >= ?")
             params.append(date_from)
+        if priority is not None:
+            clauses.append("priority = ?")
+            params.append(int(priority))
 
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        rows = self._conn.execute(
-            f"SELECT * FROM koto_tasks {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            params + [limit, offset],
-        ).fetchall()
+        order = (
+            "priority DESC, created_at ASC"
+            if order_by == "priority"
+            else "created_at DESC"
+        )
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM koto_tasks {where} ORDER BY {order} LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
         return [self._row_to_record(r) for r in rows]
 
     def count(
         self,
         session_id: Optional[str] = None,
         status: Optional[TaskStatus] = None,
+        source: Optional[str] = None,
         date_from: Optional[str] = None,
     ) -> int:
         clauses, params = [], []
@@ -357,14 +397,18 @@ class TaskLedger:
             params.append(session_id)
         if status:
             clauses.append("status = ?")
-            params.append(status.value)
+            params.append(status.value if hasattr(status, "value") else status)
+        if source:
+            clauses.append("source = ?")
+            params.append(source)
         if date_from:
             clauses.append("created_at >= ?")
             params.append(date_from)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        row = self._conn.execute(
-            f"SELECT COUNT(*) FROM koto_tasks {where}", params
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM koto_tasks {where}", params
+            ).fetchone()
         return row[0] if row else 0
 
     # ── 状态变更 ──────────────────────────────────────────────────────────────
@@ -372,10 +416,11 @@ class TaskLedger:
     def _update_fields(self, task_id: str, **kwargs):
         if not kwargs:
             return
-        sets = ", ".join(f"{k} = ?" for k in kwargs)
-        vals = list(kwargs.values()) + [task_id]
-        self._conn.execute(f"UPDATE koto_tasks SET {sets} WHERE task_id = ?", vals)
-        self._conn.commit()
+        with self._lock:
+            sets = ", ".join(f"{k} = ?" for k in kwargs)
+            vals = list(kwargs.values()) + [task_id]
+            self._conn.execute(f"UPDATE koto_tasks SET {sets} WHERE task_id = ?", vals)
+            self._conn.commit()
 
     def mark_running(self, task_id: str):
         self._update_fields(
@@ -411,10 +456,11 @@ class TaskLedger:
 
     def mark_waiting(self, task_id: str, reason: str = "human_in_loop"):
         """标记为等待人工确认。"""
-        row = self._conn.execute(
-            "SELECT metadata FROM koto_tasks WHERE task_id = ?", (task_id,)
-        ).fetchone()
-        meta = json.loads(row["metadata"]) if row else {}
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT metadata FROM koto_tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            meta = json.loads(row["metadata"]) if row else {}
         meta["waiting_reason"] = reason
         self._update_fields(
             task_id,
@@ -424,11 +470,17 @@ class TaskLedger:
         self._notify_status_change(task_id, TaskStatus.WAITING)
 
     def increment_retries(self, task_id: str):
-        self._conn.execute(
-            "UPDATE koto_tasks SET retry_count = retry_count + 1, status = ? WHERE task_id = ?",
-            (TaskStatus.RETRYING.value, task_id),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                "UPDATE koto_tasks SET retry_count = retry_count + 1, status = ? WHERE task_id = ?",
+                (TaskStatus.RETRYING.value, task_id),
+            )
+            self._conn.commit()
+
+    def set_priority(self, task_id: str, priority: int):
+        """更新任务优先级（0=低/1=正常/2=高/3=紧急）。"""
+        self._update_fields(task_id, priority=int(priority))
+        logger.info(f"[TaskLedger] 优先级更新 task={task_id[:8]} → {priority}")
 
     # ── 中断 / 取消控制 ───────────────────────────────────────────────────────
 
@@ -453,15 +505,17 @@ class TaskLedger:
 
     def is_cancel_requested(self, task_id: str) -> bool:
         """供执行线程轮询检查。"""
-        row = self._conn.execute(
-            "SELECT cancel_requested FROM koto_tasks WHERE task_id = ?", (task_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT cancel_requested FROM koto_tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
         return bool(row["cancel_requested"]) if row else False
 
     def is_interrupt_requested(self, task_id: str) -> bool:
-        row = self._conn.execute(
-            "SELECT interrupt_requested FROM koto_tasks WHERE task_id = ?", (task_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT interrupt_requested FROM koto_tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
         return bool(row["interrupt_requested"]) if row else False
 
     # ── 步骤记录 ──────────────────────────────────────────────────────────────
@@ -476,51 +530,53 @@ class TaskLedger:
         observation: Optional[str] = None,
     ) -> StepRecord:
         """追加一条步骤记录，同时更新任务的 step_count / tool_calls 计数。"""
-        row = self._conn.execute(
-            "SELECT COALESCE(MAX(step_index), -1) AS max_idx FROM koto_task_steps WHERE task_id = ?",
-            (task_id,),
-        ).fetchone()
-        step_index = (row["max_idx"] + 1) if row else 0
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(step_index), -1) AS max_idx FROM koto_task_steps WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()
+            step_index = (row["max_idx"] + 1) if row else 0
 
-        step = StepRecord(
-            task_id=task_id,
-            step_index=step_index,
-            step_type=step_type,
-            content=content[:2000],
-            tool_name=tool_name,
-            tool_args=json.dumps(tool_args, ensure_ascii=False) if tool_args else None,
-            observation=(observation or "")[:2000] if observation else None,
-        )
-        self._conn.execute(
-            """
-            INSERT INTO koto_task_steps
-              (step_id, task_id, step_index, step_type, content,
-               tool_name, tool_args, observation, created_at)
-            VALUES
-              (:step_id, :task_id, :step_index, :step_type, :content,
-               :tool_name, :tool_args, :observation, :created_at)
-            """,
-            asdict(step),
-        )
-        # 更新计数器
-        if step_type == "ACTION":
-            self._conn.execute(
-                "UPDATE koto_tasks SET step_count = step_count + 1, tool_calls = tool_calls + 1 WHERE task_id = ?",
-                (task_id,),
+            step = StepRecord(
+                task_id=task_id,
+                step_index=step_index,
+                step_type=step_type,
+                content=content[:2000],
+                tool_name=tool_name,
+                tool_args=json.dumps(tool_args, ensure_ascii=False) if tool_args else None,
+                observation=(observation or "")[:2000] if observation else None,
             )
-        else:
             self._conn.execute(
-                "UPDATE koto_tasks SET step_count = step_count + 1 WHERE task_id = ?",
-                (task_id,),
+                """
+                INSERT INTO koto_task_steps
+                  (step_id, task_id, step_index, step_type, content,
+                   tool_name, tool_args, observation, created_at)
+                VALUES
+                  (:step_id, :task_id, :step_index, :step_type, :content,
+                   :tool_name, :tool_args, :observation, :created_at)
+                """,
+                asdict(step),
             )
-        self._conn.commit()
+            # 更新计数器
+            if step_type == "ACTION":
+                self._conn.execute(
+                    "UPDATE koto_tasks SET step_count = step_count + 1, tool_calls = tool_calls + 1 WHERE task_id = ?",
+                    (task_id,),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE koto_tasks SET step_count = step_count + 1 WHERE task_id = ?",
+                    (task_id,),
+                )
+            self._conn.commit()
         return step
 
     def _get_steps(self, task_id: str) -> List[StepRecord]:
-        rows = self._conn.execute(
-            "SELECT * FROM koto_task_steps WHERE task_id = ? ORDER BY step_index ASC",
-            (task_id,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM koto_task_steps WHERE task_id = ? ORDER BY step_index ASC",
+                (task_id,),
+            ).fetchall()
         return [StepRecord(**dict(r)) for r in rows]
 
     def get_steps(self, task_id: str) -> List[StepRecord]:
@@ -531,21 +587,22 @@ class TaskLedger:
     def get_stats(self, date_from: Optional[str] = None) -> Dict[str, Any]:
         """返回任务运行统计摘要。"""
         where = f"WHERE created_at >= '{date_from}'" if date_from else ""
-        rows = self._conn.execute(f"""
-            SELECT status, COUNT(*) AS cnt
-            FROM koto_tasks {where}
-            GROUP BY status
-            """).fetchall()
-        by_status = {r["status"]: r["cnt"] for r in rows}
-        total = sum(by_status.values())
-        avg_row = self._conn.execute(f"""
-            SELECT AVG(
-                (JULIANDAY(COALESCE(completed_at, datetime('now'))) - JULIANDAY(started_at)) * 86400
-            ) AS avg_sec
-            FROM koto_tasks
-            {where}
-            WHERE started_at IS NOT NULL
-            """).fetchone()
+        with self._lock:
+            rows = self._conn.execute(f"""
+                SELECT status, COUNT(*) AS cnt
+                FROM koto_tasks {where}
+                GROUP BY status
+                """).fetchall()
+            by_status = {r["status"]: r["cnt"] for r in rows}
+            total = sum(by_status.values())
+            avg_row = self._conn.execute(f"""
+                SELECT AVG(
+                    (JULIANDAY(COALESCE(completed_at, datetime('now'))) - JULIANDAY(started_at)) * 86400
+                ) AS avg_sec
+                FROM koto_tasks
+                {where}
+                WHERE started_at IS NOT NULL
+                """).fetchone()
         return {
             "total": total,
             "by_status": by_status,
@@ -558,25 +615,26 @@ class TaskLedger:
         """删除超过 keep_days 天的已完成/已取消任务及其步骤。"""
         cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff_iso = cutoff.isoformat()
-        self._conn.execute(
-            """
-            DELETE FROM koto_task_steps WHERE task_id IN (
-                SELECT task_id FROM koto_tasks
+        with self._lock:
+            self._conn.execute(
+                """
+                DELETE FROM koto_task_steps WHERE task_id IN (
+                    SELECT task_id FROM koto_tasks
+                    WHERE status IN ('completed', 'cancelled', 'failed')
+                      AND created_at < ?
+                )
+                """,
+                (cutoff_iso,),
+            )
+            deleted = self._conn.execute(
+                """
+                DELETE FROM koto_tasks
                 WHERE status IN ('completed', 'cancelled', 'failed')
                   AND created_at < ?
-            )
-            """,
-            (cutoff_iso,),
-        )
-        deleted = self._conn.execute(
-            """
-            DELETE FROM koto_tasks
-            WHERE status IN ('completed', 'cancelled', 'failed')
-              AND created_at < ?
-            """,
-            (cutoff_iso,),
-        ).rowcount
-        self._conn.commit()
+                """,
+                (cutoff_iso,),
+            ).rowcount
+            self._conn.commit()
         logger.info(f"[TaskLedger] 清理 {deleted} 条历史任务（>{keep_days}天）")
         return deleted
 

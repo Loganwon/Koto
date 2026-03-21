@@ -87,5 +87,16 @@
                         "fixed_code",
                         "root_cause"
                     ],
+<<<<<<< HEAD
+
+    "tool_orchestration": "• 用户提供了文件路径 → read_file_snippet(path, max_chars=5000)\n  · 返回内容末尾含 '...'（被截断）→ 仅重读报错所在函数范围\n  · 返回内容为空/乱码 → 告知用户文件可能损坏，请手动确认\n• 用户仅提供 traceback 文字（无路径）→ 直接从最末帧开始分析，不调用文件工具\n  · 需要查看完整函数定义 → find_file 定位文件后 read_file_snippet\n• 分析出根因后需要验证修复 → execute_python(最小可复现代码片段)\n  · 执行通过 → 输出完整修复方案\n  · 执行仍报错 → 重新分析，检查是否有隐藏依赖或环境差异\n• 涉及第三方库版本 → 不要臆测，明确告知用户需要确认版本后再判断",
+
+    "react_protocol": "full",
+
+    "multi_model_hint": "• 含多层调用链/异步/线程/GIL 相关的复杂 traceback → 优先使用高推理能力模型（如 Gemini 2.5 Pro）\n• 简单 KeyError / TypeError / 变量名拼写错误 → 快速模型即可\n• MultiAgentOrchestrator 分工建议：\n  - 分析节点（根因定位）：推理能力优先的模型\n  - 修复生成节点（写修复代码）：代码能力强的较快模型\n• 节点间传递的关键字段：\n  - analysis_result: 根因说明（字符串，1-3句）\n  - error_location: {file, line, function}\n  - fix_snippet: 最小修复代码片段（str）",
+
+    "handoff_context": "为 write_unit_tests 准备的输出：\n- 修复后函数的完整签名（函数名/参数名+类型注解/返回类型）\n- 已识别的边界条件列表（None 输入/空容器/负数/编码错误/并发等）\n- 建议的测试场景：正常路径 × 1 + 边界场景 × 2 + 异常路径 × 1\n\n为 git_commit_helper 准备的输出：\n- 一句话修复摘要，格式：fix: [模块/函数名] [修复了什么问题]"
+=======
     "subcategory":  "code_debug"
+>>>>>>> review/pr-20260321
 }

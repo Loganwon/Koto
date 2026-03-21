@@ -25,7 +25,7 @@ import logging
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from app.core.tasks.progress_bus import get_progress_bus
-from app.core.tasks.task_ledger import TaskStatus, get_ledger
+from app.core.tasks.task_ledger import TaskPriority, TaskStatus, get_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +62,8 @@ def list_tasks():
       status      — 按状态过滤（pending/running/completed/failed/cancelled/waiting）
       source      — 按来源过滤（agent/scheduler/…）
       date_from   — 起始日期前缀，如 2026-03-04
+      priority    — 按优先级过滤（0=低/1=正常/2=高/3=紧急）
+      order_by    — 排序字段（created_at 默认 | priority 按优先级降序）
       limit       — 每页数量（默认 50，最大 200）
       offset      — 分页偏移
     """
@@ -70,6 +72,8 @@ def list_tasks():
     status_raw = request.args.get("status") or None
     source = request.args.get("source") or None
     date_from = request.args.get("date_from") or None
+    priority_raw = request.args.get("priority") or None
+    order_by = request.args.get("order_by", "created_at")
     limit = min(int(request.args.get("limit", 50)), 200)
     offset = int(request.args.get("offset", 0))
 
@@ -80,11 +84,23 @@ def list_tasks():
         except ValueError:
             return _err(f"无效状态值: {status_raw}")
 
+    priority = None
+    if priority_raw is not None:
+        try:
+            priority = int(priority_raw)
+        except ValueError:
+            return _err(f"无效优先级值: {priority_raw}")
+
+    if order_by not in ("created_at", "priority"):
+        order_by = "created_at"
+
     tasks = ledger.list_tasks(
         session_id=session_id,
         status=status,
         source=source,
         date_from=date_from,
+        priority=priority,
+        order_by=order_by,
         limit=limit,
         offset=offset,
     )
@@ -299,3 +315,27 @@ def purge_tasks():
     ledger = get_ledger()
     deleted = ledger.purge_old(keep_days=keep_days)
     return _ok(data={"deleted": deleted}, message=f"已清理 {deleted} 条历史任务")
+
+
+@task_bp.post("/<task_id>/priority")
+def set_task_priority(task_id: str):
+    """
+    设置任务优先级。
+
+    Body JSON:
+      {"priority": 2}   — 0=低 / 1=正常 / 2=高 / 3=紧急
+    """
+    ledger = get_ledger()
+    task = ledger.get(task_id)
+    if not task:
+        return _err("任务不存在", 404)
+    body = request.get_json(silent=True) or {}
+    try:
+        priority = int(body["priority"])
+        if priority not in (0, 1, 2, 3):
+            raise ValueError
+    except (KeyError, ValueError, TypeError):
+        return _err("请提供合法的 priority 字段（0/1/2/3）")
+    ledger.set_priority(task_id, priority)
+    label = {0: "低", 1: "正常", 2: "高", 3: "紧急"}.get(priority, str(priority))
+    return _ok(message=f"任务优先级已设置为「{label}」")

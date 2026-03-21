@@ -99,6 +99,31 @@ class FileToolsPlugin(AgentPlugin):
                 },
             },
             {
+                "name": "read_full_document",
+                "func": self.read_full_document,
+                "description": (
+                    "读取本地文件的完整全文内容，将整份文档纳入 LLM 上下文。"
+                    "与 read_file_snippet 的区别：不限页数/行数，PDF 读取全部页面，"
+                    "DOCX 同时提取段落与表格（财务表格完整保留），XLSX 读取所有 Sheet。"
+                    "适用于需要精确引用原文数据的分析场景（财务报告/合同/研究报告）。"
+                    "支持 pdf / docx / xlsx / csv / txt / md 等格式。"
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "path": {
+                            "type": "STRING",
+                            "description": "文件的绝对路径",
+                        },
+                        "max_chars": {
+                            "type": "INTEGER",
+                            "description": "最多读取字符数，默认 200000（约 15 万字），上限 200000",
+                        },
+                    },
+                    "required": ["path"],
+                },
+            },
+            {
                 "name": "list_recent_files",
                 "func": self.list_recent_files,
                 "description": (
@@ -605,6 +630,35 @@ class FileToolsPlugin(AgentPlugin):
                 + (f"   摘要: {r['snippet']}\n" if r.get("snippet") else "")
             )
         return "\n".join(lines)
+
+    def read_full_document(self, path: str, max_chars: int = 200_000) -> str:
+        """读取本地文件的完整全文内容，适用于全文作为 LLM 参考上下文的场景。"""
+        max_chars = min(max(1_000, int(max_chars)), 200_000)
+        p = Path(path)
+        if not p.exists():
+            return f"错误：文件不存在 → {path}"
+        if not p.is_file():
+            return f"错误：路径不是文件 → {path}"
+        size_mb = p.stat().st_size / (1024 * 1024)
+        if size_mb > 100:
+            return f"错误：文件过大（{size_mb:.1f} MB），超过 100 MB 安全限制，请使用 summarize_file 代替"
+        try:
+            from app.core.file.file_registry import _extract_text_full
+
+            content = _extract_text_full(str(p), max_chars=max_chars)
+            if not content or not content.strip():
+                return f"（无法提取文本内容，文件类型：{p.suffix}）"
+            char_count = len(content)
+            was_truncated = char_count >= max_chars
+            header = (
+                f"📄 {p.name}  "
+                f"({size_mb:.1f} MB | {char_count:,} 字符"
+                f"{'，已截断至上限' if was_truncated else ''})"
+                f"\n{'─' * 60}\n"
+            )
+            return header + content
+        except Exception as e:
+            return f"读取失败：{e}"
 
     def read_file_snippet(self, path: str, max_chars: int = 3000) -> str:
         """读取本地文件内容片段。"""

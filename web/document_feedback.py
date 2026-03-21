@@ -707,18 +707,12 @@ class DocumentFeedbackSystem:
                         continue
                 except Exception as e:
                     error_msg = str(e)[:120]
-                    # 503/UNAVAILABLE：模型过载，先等待后重试一次，仍失败再返回兜底
+                    # 503/UNAVAILABLE：模型过载，立即返回兜底（不重试，外层负责切换模型）
                     _is_503 = ("503" in error_msg or "UNAVAILABLE" in error_msg
                                or "overloaded" in error_msg.lower()
                                or "high demand" in error_msg.lower())
                     if _is_503:
-                        if retry < max_retries - 1:
-                            _wait = 10 * (retry + 1)  # 10s, 20s …
-                            logger.info(f"[DocumentFeedback] ⚡ 第{chunk_index}段 503过载，等待{_wait}s后重试: {error_msg[:80]}")
-                            import time as _time_mod
-                            _time_mod.sleep(_wait)
-                            continue
-                        logger.info(f"[DocumentFeedback] ⚡ 第{chunk_index}段 503过载（已重试{max_retries}次），返回兜底: {error_msg[:80]}")
+                        logger.info(f"[DocumentFeedback] ⚡ 第{chunk_index}段 503过载，直接返回兜底: {error_msg[:80]}")
                         fallback = self._fallback_annotations_from_chunk(chunk)
                         for ann in fallback:
                             ann["_koto_fallback_error"] = error_msg

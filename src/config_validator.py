@@ -1,6 +1,7 @@
 """Startup configuration validation for Koto."""
-import os
+
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -8,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 class ConfigError(Exception):
     """Raised when configuration is invalid."""
+
     pass
 
 
@@ -50,7 +52,9 @@ def validate_startup_config():
     # 5. Check Ollama URL format (if set)
     ollama_url = os.environ.get("OLLAMA_BASE_URL", "")
     if ollama_url and not ollama_url.startswith(("http://", "https://")):
-        errors.append(f"OLLAMA_BASE_URL must start with http:// or https://, got '{ollama_url}'")
+        errors.append(
+            f"OLLAMA_BASE_URL must start with http:// or https://, got '{ollama_url}'"
+        )
 
     # Log warnings
     for w in warnings:

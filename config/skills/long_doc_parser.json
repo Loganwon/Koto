@@ -1,0 +1,60 @@
+{
+  "id": "long_doc_parser",
+  "name": "全文档解析助手",
+  "version": "1.0.0",
+  "category": "workflow",
+  "description": "读取整篇文档作为 LLM 上下文，精确提取数据并辅助完成分析任务。适用于财务报告还原、合同条款提取、研究数据汇总等需要引用原文的场景。",
+  "author": "koto",
+  "created_at": "2026-03-18T00:00:00Z",
+  "activation_keywords": [
+    "读取全文",
+    "全文分析",
+    "全篇内容",
+    "整篇文档",
+    "原文数据",
+    "精确提取",
+    "一比一",
+    "财务数据",
+    "立项报告",
+    "年报",
+    "全文参考",
+    "读取报告",
+    "完整内容"
+  ],
+  "task_types": [
+    "财务数据提取",
+    "报告复刻",
+    "合同条款分析",
+    "文档对比",
+    "数据核实",
+    "全文索引"
+  ],
+  "executor_tools": [
+    "read_full_document",
+    "read_file_snippet",
+    "find_file",
+    "summarize_file"
+  ],
+  "plan_template": [
+    "1. 确认文件路径，调用 read_full_document(path) 读取完整文档",
+    "2. 理解文档结构（章节分布 / 表格位置 / 数据单位）",
+    "3. 定位用户需要的目标数据（财务科目 / 条款编号 / 关键指标）",
+    "4. 按原文精确提取数字和文字，注明来源（页码或章节名）",
+    "5. 按用户指定格式输出（表格 / 摘要 / 对照分析）"
+  ],
+  "tool_orchestration": "• 用户提供文件路径 → read_full_document(path) 全文读取\n• 文件 > 100 MB → 切换到 summarize_file(path, focus='目标数据类型')\n• 文件类型为 .pptx → 提示不支持全文读取，建议先导出为 PDF\n• 用户要求财务多期对比 → 逐年调用 read_full_document，按「年份 × 科目」结构整理表格\n• 用户要求对比两份文档 → 对每份文档分别调用 read_full_document\n• 提取过程中数据缺失 → 标注「原文未披露」，绝不填入估算值\n• 数字单位不一致（万元 vs 亿元）→ 统一换算后标注原始单位\n• 提取完成后询问是否需要导出 → chains_to doc_gen_excel 或 doc_gen_word",
+  "react_protocol": "full",
+  "multi_model_hint": "• 文档 < 50 页 → 快速模型（gemini-2.5-flash）可处理\n• 文档 > 100 页 / 涉及复杂财务交叉验证 → 优先高推理能力模型（Gemini 2.5 Pro）\n• MultiAgent 分工：读取节点（解析原文）→ 提取节点（定位字段）→ 输出节点（格式化）",
+  "handoff_context": "下游 doc_gen_excel / doc_gen_word 可用字段：\n- extracted_table: [{科目: 值, 年份: 值}] 结构化提取结果\n- source_doc: 原始文件路径\n- missing_fields: 原文未披露的字段列表\n- unit: 数据单位（元/万元/亿元）\n- source_refs: [{字段: 页码/章节}] 来源引用",
+  "chains_to": ["doc_gen_excel", "doc_gen_word", "financial_table_mapper"],
+  "synergizes_with": ["excel_analyst", "financial_table_mapper", "kpi_calculator"],
+  "output_keys": ["extracted_table", "source_refs", "missing_fields"],
+  "tags": [
+    "全文读取",
+    "长文档",
+    "财务报告",
+    "数据提取",
+    "原文引用",
+    "read_full_document"
+  ]
+}

@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\goal\goal_manager.py
+# hypothesis_version: 6.151.9
+
+[120, 180, 200, 500, 2000, ' AND ', ', ', 'ANSWER', 'GoalManager', 'GoalManagerLoop', 'KOTO_DB_DIR', 'WHERE ', '[]', 'active', 'category = ?', 'completed', 'config', 'custom', 'draft', 'failed', 'file_task', 'goal_check', 'goal_id', 'goal_title', 'milliseconds', 'normal', 'paused', 'pending', 'price_watch', 'progress_summary', 'reminder', 'research', 'run_on_activate', 'session_id = ?', 'status', 'status = ?', 'success', 'tool_calls', 'tool_calls_json', 'updated_at', 'waiting_reason', 'waiting_user', '{}', '（未获得明确答案）', '（首次执行）']

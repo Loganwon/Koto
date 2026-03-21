@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\learning\distill_manager.py
+# hypothesis_version: 6.151.9
+
+[0.0, 2.0, 100.0, 7200.0, -500, 100, 500, '%Y-%m-%dT%H:%M:%S', 'DistillManager', 'adapter_path', 'base_model', 'cancelled', 'distill_worker', 'done', 'duration_s', 'error', 'eval_loss', 'event', 'failed', 'job_id', 'loss', 'msg', 'num_samples', 'pct', 'progress', 'queued', 'running', 'skeleton', 'status', 'step', 'success', '任务已取消', '开始训练', '训练开始', '训练返回 success=False']

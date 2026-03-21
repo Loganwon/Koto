@@ -10,8 +10,6 @@ Local Model Installer  —  本地 AI 模型安装器
     pyinstaller local_model_installer.spec
 """
 
-import os
-import sys
 import json
 import os
 import platform
@@ -44,17 +42,6 @@ OLLAMA_WIN_URL_CANDIDATES = [
 ]
 
 # ─────────────────────────────────────────────────────────────
-#  ANSI 清理（Ollama 0.17+ 输出包含大量 ANSI 转义序列）
-# ─────────────────────────────────────────────────────────────
-_ANSI_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
-
-
-def _strip_ansi(text: str) -> str:
-    """移除 ANSI/VT100 转义序列，返回纯文本。"""
-    return _ANSI_RE.sub("", text)
-
-
-# ─────────────────────────────────────────────────────────────
 #  模型目录
 # ─────────────────────────────────────────────────────────────
 MODEL_CATALOG: List[Dict] = [
@@ -69,12 +56,14 @@ MODEL_CATALOG: List[Dict] = [
         "desc": "极低资源，适合 4 GB 以下内存，速度最快",
     },
     {
-        "tag":     "llama3.2:3b",
-        "name":    "LLaMA 3.2 3B",
-        "badge":   "轻量",
-        "vram":    2.5, "ram": 6,  "size_gb": 2.0,
-        "tier":    "light",
-        "desc":    "6–8 GB 内存，流畅度与效果兼顾，日常任务优选",
+        "tag": "llama3.2:3b",
+        "name": "LLaMA 3.2 3B",
+        "badge": "轻量",
+        "vram": 2.5,
+        "ram": 6,
+        "size_gb": 2.0,
+        "tier": "light",
+        "desc": "6–8 GB 内存，流畅度与效果兼顾，日常任务优选",
     },
     {
         "tag": "gemma3:4b",
@@ -87,20 +76,24 @@ MODEL_CATALOG: List[Dict] = [
         "desc": "8 GB+ 内存，效果优秀，推荐大多数用户",
     },
     {
-        "tag":     "qwen2.5:7b",
-        "name":    "Qwen 2.5 7B",
-        "badge":   "中文强化",
-        "vram":    6.0, "ram": 12, "size_gb": 4.7,
-        "tier":    "powerful",
-        "desc":    "12 GB+ 内存，中文理解出色，复杂任务首选",
+        "tag": "qwen2.5:7b",
+        "name": "Qwen 2.5 7B",
+        "badge": "中文强化",
+        "vram": 6.0,
+        "ram": 12,
+        "size_gb": 4.7,
+        "tier": "powerful",
+        "desc": "12 GB+ 内存，中文理解出色，复杂任务首选",
     },
     {
-        "tag":     "llama3.1:8b",
-        "name":    "LLaMA 3.1 8B",
-        "badge":   "高性能",
-        "vram":    7.0, "ram": 16, "size_gb": 5.0,
-        "tier":    "highend",
-        "desc":    "16 GB 内存 / NVIDIA 8 GB 显卡，综合能力强",
+        "tag": "llama3.1:8b",
+        "name": "LLaMA 3.1 8B",
+        "badge": "高性能",
+        "vram": 7.0,
+        "ram": 16,
+        "size_gb": 5.0,
+        "tier": "highend",
+        "desc": "16 GB 内存 / NVIDIA 8 GB 显卡，综合能力强",
     },
     {
         "tag": "qwen2.5:14b",
@@ -285,41 +278,11 @@ def get_system_info() -> Dict:
 
 
 def recommend_models(info: Dict) -> List[Dict]:
-    """
-    根据用户硬件推荐可行模型列表，标注 recommended=True。
-
-    「推荐」选取逻辑：在用户可运行的模型中，找到能满足硬件余量的最高档位：
-    - GPU 路径：显存需求 ≤ 可用显存 × 85%
-    - CPU 路径：内存需求 ≤ 可用内存 × 70%（预留 OS 开销）
-    两个条件任一满足即可成为推荐候选，取满足条件的最高档。
-    """
     ram = info["ram_gb"]
     vram = info["gpu_vram_gb"]
-
-    # ── 1. 所有可运行模型（理论上能跑）──
-    feasible = [m for m in MODEL_CATALOG if ram >= m["ram"] or vram >= m["vram"]]
-    if not feasible:
-        feasible = [MODEL_CATALOG[0]]
-
-    # ── 2. 找「舒适」推荐档：留足余量 ──
-    # VRAM 余量 15%（GPU 路径），RAM 余量 30%（CPU 路径）
-    sweet = None
-    for m in reversed(feasible):  # 从高档往低找，取最高的舒适档
-        gpu_ok = vram > 0 and vram >= m["vram"] * 1.15
-        cpu_ok = ram >= m["ram"] * 1.30
-        if gpu_ok or cpu_ok:
-            sweet = m
-            break
-    if sweet is None:
-        sweet = feasible[0]  # 全部偏紧时选最低档
-
-    # ── 3. 复制列表，标注 recommended 字段 ──
-    result = []
-    for m in feasible:
-        mc = dict(m)  # 浅拷贝，不污染 MODEL_CATALOG 原始数据
-        mc["recommended"] = m["tag"] == sweet["tag"]
-        result.append(mc)
-    return result
+    eff = max(ram, vram * 1.5)
+    out = [m for m in MODEL_CATALOG if eff >= m["ram"] or vram >= m["vram"]]
+    return out or [MODEL_CATALOG[0]]
 
 
 # ─────────────────────────────────────────────────────────────
@@ -409,10 +372,14 @@ def _download_with_retry(
         for attempt in range(1, max_attempts_per_url + 1):
             try:
                 if log_cb:
-                    log_cb(f"🌐 下载源: {url}（第 {attempt}/{max_attempts_per_url} 次）")
+                    log_cb(
+                        f"🌐 下载源: {url}（第 {attempt}/{max_attempts_per_url} 次）"
+                    )
 
                 req = urllib.request.Request(url, headers={"User-Agent": user_agent})
-                with urllib.request.urlopen(req, timeout=45) as resp, open(dest_path, "wb") as fp:
+                with urllib.request.urlopen(req, timeout=45) as resp, open(
+                    dest_path, "wb"
+                ) as fp:
                     total = int(resp.headers.get("Content-Length", "0") or "0")
                     downloaded = 0
                     while True:
@@ -454,12 +421,15 @@ def pull_model(tag: str, prog_cb=None, log_cb=None, max_attempts: int = 2) -> bo
                 log_cb(f"🔁 重试下载模型（第 {attempt}/{max_attempts} 次）...")
             proc = subprocess.Popen(
                 [exe, "pull", tag],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding="utf-8", errors="replace",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            for raw_line in proc.stdout:
-                line = _strip_ansi(raw_line).strip()
+            for line in proc.stdout:
+                line = line.strip()
                 if not line:
                     continue
                 log_cb and log_cb(line)
@@ -765,7 +735,7 @@ def run_gui():
 
         for m in ordered:
             is_installed = m["tag"] in installed_tags
-            is_rec = m == ordered[0]   # 最高规格推荐
+            is_rec = m == ordered[0]  # 最高规格推荐
             color = TIER_COLOR.get(m["tier"], MUTED)
 
             card = tk.Frame(scroll_frame, bg=PANEL, pady=0)
@@ -1198,6 +1168,7 @@ def run_gui():
             log(f"📥 下载 Ollama: {OLLAMA_WIN_URL}")
             setup_path = APP_DIR / "OllamaSetup_tmp.exe"
             try:
+
                 def _progress_cb(p):
                     if _cancel.is_set():
                         return
@@ -1213,7 +1184,8 @@ def run_gui():
                 )
                 if not ok_download:
                     raise RuntimeError("所有下载源均失败")
-                if cancelled(): return
+                if cancelled():
+                    return
                 log("✅ Ollama 下载完成，正在静默安装...")
                 set_prog(28, "安装 Ollama...")
                 install_ret = subprocess.run(

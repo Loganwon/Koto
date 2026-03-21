@@ -9,24 +9,26 @@ import json
 import os
 import tempfile
 import time
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import patch, MagicMock
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_auth_module():
     """Import (or re-import) the auth module."""
     import web.auth as auth_mod
+
     return auth_mod
 
 
 def _make_flask_app(auth_enabled: bool = True):
     """Create a minimal Flask app with auth routes registered."""
     from flask import Flask
+
     auth_mod = _get_auth_module()
 
     app = Flask(__name__)
@@ -37,12 +39,14 @@ def _make_flask_app(auth_enabled: bool = True):
     @auth_mod.require_auth
     def protected():
         from flask import g, jsonify
+
         return jsonify({"user": g.user_id})
 
     @app.route("/optional")
     @auth_mod.optional_auth
     def optional():
         from flask import g, jsonify
+
         return jsonify({"user": g.user_id})
 
     return app
@@ -51,6 +55,7 @@ def _make_flask_app(auth_enabled: bool = True):
 # ═══════════════════════════════════════════════════════════════════════════
 # 1. _validate_jwt_secret
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestValidateJwtSecret:
@@ -83,6 +88,7 @@ class TestValidateJwtSecret:
 # 2. _hash_password
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestHashPassword:
 
@@ -102,9 +108,7 @@ class TestHashPassword:
     def test_explicit_salt_is_deterministic(self):
         """PBKDF2-HMAC-SHA256 with the same inputs always yields the same hash."""
         auth_mod = _get_auth_module()
-        expected = hashlib.pbkdf2_hmac(
-            "sha256", b"hello", b"salt42", 100000
-        ).hex()
+        expected = hashlib.pbkdf2_hmac("sha256", b"hello", b"salt42", 100000).hex()
         h, _ = auth_mod._hash_password("hello", salt="salt42")
         assert h == expected
 
@@ -112,6 +116,7 @@ class TestHashPassword:
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. _load_users / _save_users
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestUserPersistence:
@@ -148,6 +153,7 @@ class TestUserPersistence:
 # 4. _generate_token / _verify_token
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestTokenLifecycle:
 
@@ -182,45 +188,52 @@ class TestTokenLifecycle:
 # 5. Rate limiting
 # ═══════════════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestRateLimiting:
 
     @pytest.fixture(autouse=True)
     def _clear_rate_limits(self):
         auth_mod = _get_auth_module()
-        auth_mod._rate_limits.clear()
+        auth_mod._rate_buckets.clear()
         yield
-        auth_mod._rate_limits.clear()
+        auth_mod._rate_buckets.clear()
 
     def test_under_limit_returns_true(self):
         auth_mod = _get_auth_module()
-        assert auth_mod._check_rate_limit("testuser") is True
+        assert auth_mod._check_rate("testuser", "standard") is True
 
     def test_over_limit_returns_false(self):
         auth_mod = _get_auth_module()
+        tier_cfg = auth_mod._RATE_TIERS["standard"]
         # Fill up to the limit
-        for _ in range(auth_mod.MAX_DAILY_REQUESTS):
-            auth_mod._increment_request("testuser")
-        assert auth_mod._check_rate_limit("testuser") is False
+        for _ in range(tier_cfg["max_requests"]):
+            auth_mod._check_rate("testuser", "standard")
+        assert auth_mod._check_rate("testuser", "standard") is False
 
-    def test_increment_request_increments_counter(self):
+    def test_check_rate_increments_bucket(self):
         auth_mod = _get_auth_module()
-        auth_mod._increment_request("u1")
-        auth_mod._increment_request("u1")
-        assert auth_mod._rate_limits["u1"]["count"] == 2
+        auth_mod._check_rate("u1", "standard")
+        auth_mod._check_rate("u1", "standard")
+        assert len(auth_mod._rate_buckets["u1"]) == 2
 
-    def test_rate_limit_resets_on_new_day(self):
+    def test_rate_limit_expires_after_window(self):
         auth_mod = _get_auth_module()
-        # Simulate yesterday's data
-        auth_mod._rate_limits["u1"] = {"date": "1999-01-01", "count": 999}
-        # Checking today should reset and return True
-        assert auth_mod._check_rate_limit("u1") is True
-        assert auth_mod._rate_limits["u1"]["count"] == 0
+        import time as _time
+
+        # Simulate entries older than the window
+        old = _time.time() - 120
+        auth_mod._rate_buckets["u1"] = [old] * 999
+        # Checking now should clear expired entries and return True
+        assert auth_mod._check_rate("u1", "standard") is True
+        # Old entries should be purged
+        assert len(auth_mod._rate_buckets["u1"]) == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 6. Flask decorator middleware
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestFlaskDecorators:
@@ -228,9 +241,9 @@ class TestFlaskDecorators:
     @pytest.fixture(autouse=True)
     def _clear_rate_limits(self):
         auth_mod = _get_auth_module()
-        auth_mod._rate_limits.clear()
+        auth_mod._rate_buckets.clear()
         yield
-        auth_mod._rate_limits.clear()
+        auth_mod._rate_buckets.clear()
 
     def test_require_auth_blocks_unauthenticated(self, monkeypatch):
         """With AUTH_ENABLED=True and no token, require_auth returns 401."""

@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\file_converter_plugin.py
+# hypothesis_version: 6.151.9
+
+[', ', '.', 'FileConverter', 'OBJECT', 'STRING', 'convert_file', 'description', 'file_ext', 'file_path', 'func', 'list_conversions', 'message', 'name', 'output_path', 'parameters', 'properties', 'required', 'success', 'target_format', 'type', 'warning']

@@ -1,0 +1,399 @@
+# KOTO CORE SYSTEMS - DETAILED ANALYSIS
+
+## 1. LLM PROVIDER SYSTEM (app/core/llm/)
+
+### Abstract Base Class
+**File:** app/core/llm/base.py
+**Class:** LLMProvider (ABC)
+
+Interface Methods:
+- generate_content(prompt, model, system_instruction=None, tools=None, stream=False, **kwargs)
+  Returns: Union[Dict{content, tool_calls, usage}, Generator]
+  
+- get_token_count(prompt, model) -> int
+
+- _log_request(prompt, model) -> None (debug logging)
+
+- _log_response(model, response_len, error=False, error_msg="") -> None
+
+### Concrete Implementations
+
+1. **GeminiProvider** (app/core/llm/gemini.py)
+   - API: google.genai.Client
+   - Retry: MAX_RETRIES=3, RETRY_BASE_DELAY=2.0s (exponential backoff for 429/503)
+   - Special: Interactions API for deep-research models (separate timeout=90s)
+   - Methods:
+     * generate_content() - Main with retry logic
+     * _call_with_retry() - Exponential backoff
+     * _call_via_interactions_api() - Routes deep-research models
+     * _format_tools() - to google.genai.types.FunctionDeclaration
+     * _format_prompt() - messages to content format
+     * _format_response() - to {content, tool_calls, usage}
+     * _stream_generator() - yields chunks
+
+2. **OllamaLLMProvider** (app/core/llm/ollama_llm_provider.py)
+   - Local models via Ollama
+   - OpenAI-compatible tool format
+   - Automatically injects Skills via UnifiedAgent
+
+### Fallback/Chain Mechanism
+**File:** app/core/llm/model_fallback.py
+**Class:** ModelFallbackExecutor (singleton)
+
+Key Methods:
+- generate_with_fallback(provider, prompt, preferred_model, task_type, ...)
+  - Auto-switch on "model not found" errors (circuit-breaker pattern)
+  
+- get_best_available(task_type, preferred=None) -> Optional[str]
+  - Returns first available from: preferred → MODEL_MAP → task-chain → default-chain
+  
+- mark_unavailable(model_id, ttl=300) -> None
+  - Blacklist for 5 minutes
+
+- is_available(model_id) -> bool
+
+Fallback Chains (Task-Specific):
+- CHAT: gemini-3-flash-preview → gemini-2.5-flash → gemini-2.0-flash → gemini-1.5-flash
+- CODER: gemini-3.1-pro-preview → gemini-3-pro-preview → gemini-2.5-pro-preview → ...
+- RESEARCH: ... → deep-research-pro-preview-12-2025 (Interactions API, slow)
+- PAINTER: gemini-3.1-flash-image-preview → gemini-2.0-flash-exp
+- (+ 10+ other task types)
+
+Error Patterns:
+- 404, "not found", "model.*not.*exist", "INVALID_ARGUMENT.*model"
+- "Interactions API", "requires.*Interactions"
+
+### Factory Pattern
+**File:** app/core/agent/factory.py
+
+Functions:
+- create_agent(api_key, model_id) -> UnifiedAgent
+  - Full config with all plugins, PII filter, output validator
+  - GeminiProvider backend
+  
+- create_local_agent(model, base_url) -> UnifiedAgent
+  - OllamaLLMProvider backend
+  
+- create_langgraph_agent(...) -> LangGraphAgent
+  - StateGraph based with checkpoints
+  - Requires: langgraph, langchain-core, langchain-google-genai
+  
+- _build_registry(api_key, full=True) -> ToolRegistry
+  - Core: BasicToolsPlugin, FileEditorPlugin, SearchPlugin, SystemToolsPlugin, SystemInfoPlugin
+  - Full (24): + 19 additional plugins
+
+---
+
+## 2. AGENT SYSTEM (app/core/agent/)
+
+### Main Agent Classes
+
+**1. UnifiedAgent** (app/core/agent/unified_agent.py)
+   Extends: Agent (ABC)
+   
+   Attributes:
+   - llm: LLMProvider
+   - registry: ToolRegistry
+   - model_id: str
+   - MAX_STEPS = 15
+   - MAX_VALIDATION_RETRIES = 1
+   - enable_pii_filter: bool
+   - enable_output_validation: bool
+   - restore_pii_in_output: bool
+   - use_tool_router: bool
+   - tool_router_max: int
+   
+   Methods:
+   - run(input_text, context=None) -> Union[AgentResponse, Generator[AgentStep]]
+     ReAct while-loop: reason → decide → execute tools → validate → respond
+   
+   - _reason_and_decide() - LLM reasoning
+   - _call_tools() - Tool execution
+   - _validate_output() - OutputValidator checks
+   - report_feedback() - ShadowTracer learning
+
+**2. LangGraphAgent** (app/core/agent/langgraph_agent.py)
+   StateGraph based ReAct
+   Nodes: reason → call_tools → validate → respond
+   MemorySaver checkpoints for multi-turn
+   Preserves PII filter & output validation
+
+**3. MultiAgentOrchestrator** (app/core/agent/multi_agent.py)
+   Roles: RESEARCHER, WRITER, CRITIC, REVISE
+   Topologies: sequential, critic_loop, parallel
+
+### Plugin System
+
+**Base Class:** AgentPlugin (ABC, app/core/agent/base.py)
+
+Abstract Methods:
+- name (property) -> str
+- description (property) -> str
+- get_tools() -> List[Dict{name, description, func, parameters}]
+
+**Registration:** ToolRegistry.register_plugin(plugin)
+- Extracts tools from plugin.get_tools()
+- Validates each has 'name' and 'func'
+
+**24 Plugins:**
+1. alerting_plugin
+2. annotation_plugin
+3. auto_remediation_plugin
+4. basic_tools_plugin
+5. chart_vision_plugin
+6. configuration_plugin
+7. data_process_plugin
+8. doc_gen_plugin
+9. file_converter_plugin
+10. file_editor_plugin
+11. image_process_plugin
+12. memory_tools_plugin (P2 - Active memory)
+13. network_plugin
+14. performance_analysis_plugin
+15. productivity_plugin
+16. script_generation_plugin
+17. search_plugin
+18. skill_tools_plugin
+19. system_event_monitoring_plugin
+20. system_info_plugin
+21. system_tools_plugin
+22. template_fill_plugin
+23. trend_analysis_plugin
+24. web_tools_bridge_plugin
+
+### Tool Registry
+**File:** app/core/agent/tool_registry.py
+**Class:** ToolRegistry
+
+Methods:
+- register_tool(name, func, description, parameters) -> None
+  Auto-generates JSON schema from function signature
+  
+- register_plugin(plugin: AgentPlugin) -> None
+  
+- get_definitions() -> List[Dict]
+  Returns JSON schemas for LLM
+  
+- execute(tool_name, tool_args) -> Any
+  ThreadPoolExecutor with 60-second timeout per tool
+  
+- _generate_schema(func) -> Dict
+  Uses inspect.signature() + get_type_hints()
+  Maps Python types: int→INTEGER, float→NUMBER, list→ARRAY, etc.
+
+---
+
+## 3. ROUTING/DISPATCH SYSTEM (app/core/routing/)
+
+### SmartDispatcher
+**File:** app/core/routing/smart_dispatcher.py
+**Class:** SmartDispatcher
+
+Features:
+- Hybrid routing: AI first, fallback to local algorithms
+- LRU cache (128 entries max, thread-safe)
+- USE_AI_ROUTER toggle
+- Dependency injection: LocalExecutor, ContextAnalyzer, WebSearcher, MODEL_MAP, client
+- Task corpus with 30+ task types
+
+Methods:
+- analyze(user_input) -> (task_type, confidence, source)
+  Returns: ("CHAT", "HIGH", "AI"|"LOCAL"|"CACHE")
+
+### IntentAnalyzer
+**File:** app/core/routing/intent_analyzer.py
+
+Methods:
+- analyze(messages, user_input, client, timeout=5.0) -> str
+  Rewrites pronoun-heavy multi-turn inputs to standalone instructions
+
+Trigger Patterns:
+- Repeat: "重复任务", "再做一遍"
+- Pronouns: "刚才", "这个", "上一个"
+- Modifications: "继续", "修改", "优化一下"
+- References: "第3点", "其中第二步"
+
+### AIRouter
+**File:** app/core/routing/ai_router.py
+
+Methods:
+- classify(client, user_input, timeout=2.0) -> (task_type, confidence, source)
+  Uses: gemini-2.0-flash-lite for fast classification
+  Cache: 100 entries LRU
+
+14 Task Types:
+PAINTER, FILE_GEN, DOC_ANNOTATE, RESEARCH, CODER, FILE_SEARCH, 
+SYSTEM, AGENT, WEB_SEARCH, CHAT, (plus special rules for disambiguation)
+
+### Other Components
+- LocalModelRouter - Ollama model initialization
+- TaskClassifier - Local task classification
+- TaskDecomposer - Complex task decomposition
+- LocalPlanner - Execution planning
+- ToolRouter - Filters tools by task type
+- PlanExecutor - Executes plans
+
+---
+
+## 4. SECURITY SYSTEM
+
+### PII Filter (Privacy)
+**File:** app/core/security/pii_filter.py
+
+**PIIConfig** dataclass:
+- Toggles: mask_phone, mask_landline, mask_id_card, mask_bank_card, mask_email, 
+  mask_ip, mask_name, mask_address, mask_passport
+- custom_keywords: List[str]
+- log_stats: bool
+
+**MaskResult** dataclass:
+- masked_text: Deidentified (safe to send to cloud)
+- original_text: Input
+- mask_map: Dict[placeholder → original]
+- stats: {label → count}
+- has_pii property
+
+**PIIFilter** static class (thread-safe):
+
+Methods:
+- mask(text, config=None) -> MaskResult
+  Regex patterns with pre-compiled cache
+  
+- restore(masked_text, mask_map) -> str
+  
+- has_pii(text, config) -> bool
+  
+- add_custom_keyword(config, keyword) -> PIIConfig
+
+Detectors (Regex):
+- 手机号: 1[3-9]\d{9}
+- 固话: 0\d{2,3}[-\s]?\d{7,8}
+- 身份证: 18-digit with checksum rules
+- 银行卡: 16-19 consecutive digits
+- 邮箱: Standard email regex
+- IP地址: 4 octets
+- 姓名: Heuristic with prefix words
+- 地址: Province/city/district/street pattern
+- 证件号: E/H/M + 7-9 alphanumeric
+
+### Output Validator (Quality)
+**File:** app/core/security/output_validator.py
+
+**ValidationResult** dataclass:
+- action: "PASS" | "WARN" | "REFORMAT" | "RETRY" | "BLOCK"
+- text: Validated (possibly reformatted) final text
+- original_text: LLM response
+- reasons: List[str]
+- skill_id: Associated skill ID
+- Properties: passed, needs_retry, is_blocked
+
+**OutputValidator** static class:
+
+Methods:
+- validate(text, skill_id=None, original_prompt=None) -> ValidationResult
+  Checks:
+  1. Refusal patterns (model refused)
+  2. Code substitute (claims no capability, provides code)
+  3. Realtime inability (no real-time data, doesn't call web_search)
+  4. Truncation endings ("...", "（未完）")
+  5. Internal leak detection (PII placeholders, system prompt)
+  6. Repetition detection (same sentence >4 times)
+  7. Format checking (if skill_id provided)
+  8. Completeness checking
+
+- configure_llm_judge(client, model_id, timeout) static
+  Optional LLM-based quality judgment
+
+Actions:
+- PASS: All OK, return directly
+- WARN: Minor issues (too short), log but return
+- REFORMAT: Content OK but format wrong → Auto-format (markdown list, table)
+- RETRY: Quality issues, re-request (max retries)
+- BLOCK: Severe security issues, stop
+
+---
+
+## 5. DEPLOYMENT
+
+### Desktop App (PyWebView)
+**File:** src/koto_app.py
+
+Architecture:
+- Backend: Flask on 127.0.0.1:5000 (fallback: 5001)
+- Frontend: PyWebView native window (EdgeChromium on Windows)
+- Communication: HTTP API from JS
+
+File Structure (Frozen by PyInstaller):
+- APP_ROOT: exe directory (persistent: chats/, config/, workspace/)
+- BUNDLE_DIR: _MEIPASS (bundled: web/, assets/)
+
+Features:
+- Dual output logging (console + file)
+- Graceful shutdown (atexit/signal)
+- Startup timeout: 10s (KOTO_STARTUP_TIMEOUT_SEC)
+- Crash detection with faulthandler
+- PythonNET runtime path fixes for EdgeChromium
+
+### Docker Deployment
+**File:** config/deploy/Dockerfile
+
+Base: python:3.11-slim
+Dependencies: build-essential, libxml2-dev, libxslt1-dev, portaudio19-dev
+User: koto (uid 1000, non-root)
+Port: 5000
+
+Environment:
+- PYTHONUNBUFFERED=1
+- KOTO_PORT=5000
+- KOTO_AUTH_ENABLED=true
+- KOTO_DEPLOY_MODE=cloud
+
+Healthcheck: GET /api/ping every 30s
+Production CMD: gunicorn --bind 0.0.0.0:5000 --workers 2 --threads 4 --timeout 120
+
+### PyInstaller Packaging
+**Files:** koto.spec, local_model_installer.spec
+
+koto.spec Configuration:
+- Entry: koto_setup.py (first-run wizard)
+- Mode: Directory mode (fast, fewer AV false positives)
+- Target: Windows x64
+
+Data Bundled:
+- web/templates/, web/static/
+- app/ (Python packages)
+- assets/ (icons: .ico, .png, .svg)
+- config/skills/, config/workflows/
+- src/ (scripts)
+
+Hidden Imports:
+- tkinter (GUI for model downloader)
+- flask, flask_cors, werkzeug
+- google.genai, google.ai.generativelanguage
+- langchain, langgraph
+- requests, urllib3, httpx
+
+### Web/Server Mode
+**File:** src/server.py
+
+Pure ASGI/WSGI (no desktop UI):
+- Dev: python server.py (Flask dev server)
+- Prod: gunicorn -w 2 -b 0.0.0.0:5000 server:app
+
+Environment:
+- KOTO_PORT
+- KOTO_AUTH_ENABLED
+- KOTO_JWT_SECRET
+- KOTO_MAX_DAILY_REQUESTS
+- KOTO_DEPLOY_MODE: "local" | "cloud"
+- LANGCHAIN_TRACING_V2
+- GEMINI_API_KEY
+
+Startup:
+1. Load .env from config/gemini_config.env
+2. Validate config (src/config_validator.py)
+3. Init logging (app/core/logging_setup.py)
+4. Init LangSmith (if enabled)
+5. Load Flask app (web/app.py)
+6. Start gunicorn/Flask
+

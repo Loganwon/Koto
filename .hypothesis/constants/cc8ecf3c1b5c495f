@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\memory\memory_router.py
+# hypothesis_version: 6.151.9
+
+[150, '?', 'AGENT', 'CHAT', 'CODER', 'FILE_GEN', 'MULTI_STEP', 'RESEARCH', 'WEB_SEARCH', '[长期记忆 — 与本次对话相关]\n', 'category', 'content', 'correction', 'decision', 'preference', 'reminder', 'search_memories', 'to_context_string', 'topic_summary', 'user_fact', 'user_preference', 'user_profile', '…']

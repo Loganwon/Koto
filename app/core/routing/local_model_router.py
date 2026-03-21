@@ -78,7 +78,7 @@ class LocalModelRouter:
         "qwen2.5:1.5b",  # 旧版轻量
         "llama3.2:3b",  # 英文为主
     ]
-    
+
     # 分类 Prompt（固定 JSON 格式，确保输出一致）
     # Qwen3 支持 /no_think 模式，跳过思考直接输出，加速分类
     CLASSIFY_PROMPT = """/no_think
@@ -400,42 +400,46 @@ class LocalModelRouter:
         """初始化本地模型（静默失败，不影响使用）"""
         if cls._initialized and cls._model_name:
             return True
-        
+
         if not cls.is_ollama_available():
             # 静默返回，不打印错误（避免刷屏）
             return False
-        
+
         # 获取已安装的模型
         try:
             resp = requests.get("http://localhost:11434/api/tags", timeout=2)
             if resp.status_code != 200:
                 return False
-            installed = [m['name'].split(':')[0] + ':' + m['name'].split(':')[1] if ':' in m['name'] else m['name'] 
-                        for m in resp.json().get('models', [])]
-        except Exception as e:
-            logger.debug("Failed to fetch installed models: %s", e)
+            installed = [
+                (
+                    m["name"].split(":")[0] + ":" + m["name"].split(":")[1]
+                    if ":" in m["name"]
+                    else m["name"]
+                )
+                for m in resp.json().get("models", [])
+            ]
+        except (requests.RequestException, ConnectionError) as e:
+            logger.warning("Failed to query Ollama models: %s", e)
             return False
-        
+
         if not installed:
             return False
-        
+
         # 选择可用的最快模型
         target_model = model_name
         if not target_model:
-            installed_map = {}
-            for im in installed:
-                base = im.split(':')[0]
-                installed_map[base] = im
-
             for m in cls.OLLAMA_MODELS:
-                base_name = m.split(':')[0]
-                if base_name in installed_map:
-                    target_model = installed_map[base_name]
+                base_name = m.split(":")[0]
+                if any(base_name in im for im in installed):
+                    for im in installed:
+                        if base_name in im:
+                            target_model = im
+                            break
                     break
-        
+
         if not target_model:
             return False
-        
+
         cls._model_name = target_model
         cls._initialized = True
         print(f"[LocalModelRouter] ✅ 使用本地模型: {target_model}")
@@ -865,7 +869,7 @@ class LocalModelRouter:
             resp = requests.get("http://localhost:11434/api/tags", timeout=2)
             if resp.status_code != 200:
                 return False
-            installed = [m['name'] for m in resp.json().get('models', [])]
+            installed = [m["name"] for m in resp.json().get("models", [])]
         except Exception:
             return False
 
@@ -874,7 +878,7 @@ class LocalModelRouter:
 
         # 优先选择更大的生成模型
         for want in cls.OLLAMA_RESPONSE_MODELS:
-            base = want.split(':')[0]
+            base = want.split(":")[0]
             for im in installed:
                 if base in im:
                     cls._response_model = im
@@ -888,24 +892,6 @@ class LocalModelRouter:
             cls._response_model_inited = True
             return True
         return False
-
-    @classmethod
-    def pick_best_chat_model(cls) -> Optional[str]:
-        """
-        返回最适合对话/生成的已安装本地模型名称。
-        按 OLLAMA_RESPONSE_MODELS 优先级顺序检测，找到即返回；
-        若都未安装则回退到分类模型 (_model_name)；
-        全部不可用时返回 None（调用方自行处理）。
-
-        等价于 _init_response_model() 但作为只读查询，不修改内部状态。
-        """
-        if cls._response_model:
-            return cls._response_model
-        # 尝试初始化（内部会设置 _response_model）
-        if cls._init_response_model():
-            return cls._response_model
-        # 最后降级到分类模型
-        return cls._model_name
 
     # ── 技术性话题信号词：命中即路由到云端 ──────────────────────────────
     # 原则：本地小模型可以回答"是什么/简介"类，但技术深度问题需要云端质量
@@ -1234,22 +1220,6 @@ class LocalModelRouter:
                 sys_prompt = _base
 
         messages.append({"role": "system", "content": sys_prompt})
-
-        # ── 注入记忆快照（PersonalityMatrix → 个人背景提示）────────────────
-        try:
-            import sys as _sys
-            _app = _sys.modules.get("web.app") or _sys.modules.get("app")
-            _get_mgr = getattr(_app, "get_memory_manager", None) if _app else None
-            if _get_mgr:
-                _mgr = _get_mgr()
-                if _mgr and hasattr(_mgr, "get_compact_memory_snapshot"):
-                    _mem_snap = _mgr.get_compact_memory_snapshot(max_chars=150) or ""
-                    if _mem_snap:
-                        messages[0]["content"] = (
-                            f"[用户背景：{_mem_snap}]\n\n" + messages[0]["content"]
-                        )
-        except Exception:
-            pass
 
         # 加入历史对话（最多最近 4 轮）
         if history:

@@ -19,10 +19,58 @@ ROOT = os.path.abspath('.')
 
 datas = []
 
+# ── Protected 模式：检测是否存在 Cython 编译产物 ──────────────────────────────
+# 当 build_cython.py --inplace 已运行时，核心模块的 .pyd 与 .py 并存，
+# 此时将受保护目录的文件逐个过滤：有 .pyd 的跳过 .py，只复制 .pyd。
+_PROTECTED_DIRS = {
+    os.path.join(ROOT, 'app', 'core', 'agent'),
+    os.path.join(ROOT, 'app', 'core', 'llm'),
+    os.path.join(ROOT, 'app', 'core', 'memory'),
+    os.path.join(ROOT, 'app', 'core', 'workflow'),
+    os.path.join(ROOT, 'app', 'core', 'skills'),
+    os.path.join(ROOT, 'app', 'core', 'learning'),
+    os.path.join(ROOT, 'app', 'core', 'routing'),
+    os.path.join(ROOT, 'app', 'core', 'goal'),
+    os.path.join(ROOT, 'app', 'core', 'tasks'),
+}
+
+def _protected_pyd_exists(py_path):
+    """检查对应的 .pyd / .so 是否已编译"""
+    stem = os.path.splitext(py_path)[0]
+    d = os.path.dirname(py_path)
+    for f in os.listdir(d) if os.path.isdir(d) else []:
+        if f.startswith(os.path.basename(stem)) and (f.endswith('.pyd') or f.endswith('.so')):
+            return True
+    return False
+
 def _add(src, dst):
     """安全添加数据文件/目录，仅在存在时加入"""
-    if os.path.exists(src):
-        datas.append((src, dst))
+    if not os.path.exists(src):
+        return
+    # 如果是受保护目录下的 .py 文件，且已有对应 .pyd，则跳过（不打包源码）
+    if src.endswith('.py') and os.path.dirname(src) in _PROTECTED_DIRS:
+        if _protected_pyd_exists(src):
+            return
+    datas.append((src, dst))
+
+def _add_dir_filtered(src_dir, dst_dir):
+    """
+    逐文件添加目录内容，对受保护目录做 .py → .pyd 过滤。
+    对非受保护目录，行为与 _add(dir, dst) 相同。
+    """
+    if not os.path.isdir(src_dir):
+        return
+    is_protected = src_dir in _PROTECTED_DIRS
+    for fname in os.listdir(src_dir):
+        fpath = os.path.join(src_dir, fname)
+        if os.path.isdir(fpath):
+            # 递归子目录
+            _add_dir_filtered(fpath, os.path.join(dst_dir, fname))
+        else:
+            if is_protected and fname.endswith('.py') and fname != '__init__.py':
+                if _protected_pyd_exists(fpath):
+                    continue  # 有 .pyd，跳过 .py
+            datas.append((fpath, dst_dir))
 
 # ── 前端资源 ──
 _add(os.path.join(ROOT, 'web', 'templates'),                  os.path.join('web', 'templates'))
@@ -31,8 +79,9 @@ _add(os.path.join(ROOT, 'web', 'static'),                     os.path.join('web'
 _add(os.path.join(ROOT, 'web', 'uploads', '.gitkeep'),        os.path.join('web', 'uploads'))
 
 # ── Python 包 ──
-_add(os.path.join(ROOT, 'app'),                     'app')
-_add(os.path.join(ROOT, 'launcher'),                'launcher')
+# 使用 _add_dir_filtered 而非简单的 _add(dir)，以便在 Protected 模式下过滤 .py 源码
+_add_dir_filtered(os.path.join(ROOT, 'app'),      'app')
+_add(os.path.join(ROOT, 'launcher'),              'launcher')
 
 # ── 图标资源 ──
 _add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.ico'), os.path.join('assets', 'koto_icon.ico'))

@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\factory.py
+# hypothesis_version: 6.151.9
+
+[15.0, 'API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'LangGraphAgent', 'ProductivityPlugin', 'ToolRegistry', 'UnifiedAgent', 'WebToolsBridgePlugin', '_model_name', 'base_url', 'gemini-2.5-flash']

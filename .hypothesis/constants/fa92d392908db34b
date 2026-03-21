@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\web\settings.py
+# hypothesis_version: 6.151.9
+
+[1.0, 2.0, 'ai', 'appearance', 'auto', 'auto_detect', 'auto_execute_scripts', 'auto_save_files', 'chats', 'chats_dir', 'cloud', 'config', 'dark', 'default_model', 'documents', 'documents_dir', 'enable_mini_game', 'enabled', 'font_size', 'frozen', 'images', 'images_dir', 'language', 'local_model', 'manual_proxy', 'medium', 'model_mode', 'proxy', 'r', 'show_thinking', 'storage', 'stream_response', 'theme', 'ui_zoom', 'user_settings.json', 'utf-8', 'voice_auto_send', 'w', 'workspace', 'workspace_dir', 'zh-CN']

@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\routing\ai_router.py
+# hypothesis_version: 6.151.9
+
+[0.1, 2.0, 3.0, 150, 500, '404', 'AGENT', 'AI', 'CHAT', 'CODER', 'Cache', 'DOC_ANNOTATE', 'Error', 'Exception', 'FILE_GEN', 'FILE_SEARCH', 'NoResult', 'PAINTER', 'RESEARCH', 'SYSTEM', 'Timeout-fallback', 'WEB_SEARCH', 'application/json', 'deep-research-', 'deprecated', 'does not exist', 'enabled', 'error', 'gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-3-pro-preview', 'h:', 'hint', 'intent_description', 'interactions only', 'invalid_argument', 'is not supported', 'not found', 'not supported', 'task', 'task_types', 'unavailable', '所有路由模型均不可用', '🤖 AI', '🤖 AI+Hint']

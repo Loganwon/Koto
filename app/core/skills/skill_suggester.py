@@ -29,6 +29,8 @@ Koto SkillSuggester — 智能 Skill 推荐引擎
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,8 @@ logger = logging.getLogger(__name__)
 _MAX_SUGGESTIONS = 3
 _NGRAM_THRESHOLD = 0.08   # Jaccard 二元组阈值，与 SkillAutoMatcher 保持一致
 _MIN_ANSWER_LEN  = 40     # 答案字数阈值——过短通常是闲聊，不推荐 Skill
+_DEFAULT_RATING  = 3.0    # 未评分 Skill 的默认分（5 分制）
+_RATING_WEIGHT   = 0.5    # 每 1 分评分差（相对于 3.0）对综合分的加成
 
 
 class SkillSuggester:
@@ -114,7 +118,8 @@ class SkillSuggester:
             return []
 
         # ── 评分 & 排序 ──────────────────────────────────────────────────────
-        scored = cls._score_candidates(user_input, candidates, task_type)
+        ratings = cls._load_ratings()
+        scored = cls._score_candidates(user_input, candidates, task_type, ratings=ratings)
         scored = [(score, c) for score, c in scored if score > 0]
         scored.sort(key=lambda x: x[0], reverse=True)
 
@@ -164,11 +169,35 @@ class SkillSuggester:
     # ── 内部方法 ─────────────────────────────────────────────────────────────
 
     @classmethod
+    def _load_ratings(cls) -> Dict[str, float]:
+        """从 config/skill_ratings.json 读取平均评分（懒加载，每次调用刷新）。"""
+        import json
+        try:
+            base = Path(
+                os.environ.get(
+                    "KOTO_DB_DIR",
+                    Path(__file__).resolve().parents[3] / "config",
+                )
+            )
+            path = base / "skill_ratings.json"
+            if path.exists():
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return {
+                    sid: float(v.get("avg", _DEFAULT_RATING))
+                    for sid, v in data.items()
+                    if isinstance(v, dict)
+                }
+        except Exception as exc:
+            logger.debug("[SkillSuggester] 评分加载失败: %s", exc)
+        return {}
+
+    @classmethod
     def _score_candidates(
         cls,
         user_input: str,
         candidates: List[Dict],
         task_type: str,
+        ratings: Optional[Dict[str, float]] = None,
     ) -> List[tuple]:
         """
         为每个候选 Skill 计算相关性分数（多层叠加）。
@@ -235,6 +264,10 @@ class SkillSuggester:
             applicable = c.get("task_types", [])
             if tt and applicable and tt in applicable:
                 score *= 1.2
+
+            # Layer 4: 用户评分加成（高评分 Skill 推荐排名更靠前）
+            _rating = (ratings or {}).get(skill_id, _DEFAULT_RATING)
+            score += (_rating - _DEFAULT_RATING) * _RATING_WEIGHT
 
             results.append((score, c))
 

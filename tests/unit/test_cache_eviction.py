@@ -50,7 +50,7 @@ class TestAIRouterCacheSet:
         from app.core.routing.ai_router import AIRouter
 
         max_size = AIRouter._CACHE_MAX_SIZE
-        half = max_size // 2  # 250
+        half = max_size // 2  # 50
         for i in range(max_size):
             AIRouter._cache_set(f"key_{i}", f"val_{i}")
         # One more → eviction
@@ -161,7 +161,14 @@ class TestAlertManagerHistoryTrimming:
         for i in range(10):
             mgr.process_event(self._make_event(i))
         assert len(mgr.alert_history) == 5
-        required_keys = {"id", "rule", "event_type", "severity", "timestamp", "channels"}
+        required_keys = {
+            "id",
+            "rule",
+            "event_type",
+            "severity",
+            "timestamp",
+            "channels",
+        }
         for entry in mgr.alert_history:
             assert required_keys.issubset(entry.keys())
             assert entry["rule"] == "test_cpu"

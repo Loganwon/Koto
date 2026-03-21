@@ -16,10 +16,10 @@ nothing touches the real disk or opens a real browser.
 from __future__ import annotations
 
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # 1. AnnotationPlugin  —  safe_dirs sandbox
@@ -32,6 +32,7 @@ class TestAnnotationPluginSandbox:
 
     def _make_plugin(self):
         from app.core.agent.plugins.annotation_plugin import AnnotationPlugin
+
         return AnnotationPlugin()
 
     # -- relative paths --------------------------------------------------------
@@ -65,10 +66,11 @@ class TestAnnotationPluginSandbox:
         else:
             bad_path = "/etc/passwd"
         result = plugin.annotate_document(file_path=bad_path)
-        assert "不在允许的目录范围内" in result, (
-            "Absolute path outside safe_dirs must be rejected"
-        )
+        assert (
+            "不在允许的目录范围内" in result
+        ), "Absolute path outside safe_dirs must be rejected"
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
     def test_windows_absolute_path_outside_safe_dirs_blocked(self):
         """Windows-style absolute path outside safe_dirs should be blocked."""
         plugin = self._make_plugin()
@@ -94,11 +96,12 @@ class TestAnnotationPluginSandbox:
         workspace = os.path.realpath(os.path.join(os.getcwd(), "workspace"))
         valid_path = os.path.join(workspace, "report.docx")
 
-        with patch("os.path.exists", return_value=True), \
-             patch("web.document_batch_annotator_v2.annotate_large_document") as mock_ann:
-            mock_ann.return_value = iter([
-                'data:{"type":"complete","output_file":"out.docx","total_edits":3}'
-            ])
+        with patch("os.path.exists", return_value=True), patch(
+            "web.document_batch_annotator_v2.annotate_large_document"
+        ) as mock_ann:
+            mock_ann.return_value = iter(
+                ['data:{"type":"complete","output_file":"out.docx","total_edits":3}']
+            )
             result = plugin.annotate_document(file_path=valid_path)
         assert "不在允许的目录范围内" not in result
         assert "绝对路径" not in result
@@ -109,11 +112,12 @@ class TestAnnotationPluginSandbox:
         uploads = os.path.realpath(os.path.join(os.getcwd(), "uploads"))
         valid_path = os.path.join(uploads, "doc.docx")
 
-        with patch("os.path.exists", return_value=True), \
-             patch("web.document_batch_annotator_v2.annotate_large_document") as mock_ann:
-            mock_ann.return_value = iter([
-                'data:{"type":"complete","output_file":"out.docx","total_edits":1}'
-            ])
+        with patch("os.path.exists", return_value=True), patch(
+            "web.document_batch_annotator_v2.annotate_large_document"
+        ) as mock_ann:
+            mock_ann.return_value = iter(
+                ['data:{"type":"complete","output_file":"out.docx","total_edits":1}']
+            )
             result = plugin.annotate_document(file_path=valid_path)
         assert "不在允许的目录范围内" not in result
 
@@ -123,11 +127,12 @@ class TestAnnotationPluginSandbox:
         dist = os.path.realpath(os.path.join(os.getcwd(), "dist"))
         valid_path = os.path.join(dist, "output.docx")
 
-        with patch("os.path.exists", return_value=True), \
-             patch("web.document_batch_annotator_v2.annotate_large_document") as mock_ann:
-            mock_ann.return_value = iter([
-                'data:{"type":"complete","output_file":"out.docx","total_edits":0}'
-            ])
+        with patch("os.path.exists", return_value=True), patch(
+            "web.document_batch_annotator_v2.annotate_large_document"
+        ) as mock_ann:
+            mock_ann.return_value = iter(
+                ['data:{"type":"complete","output_file":"out.docx","total_edits":0}']
+            )
             result = plugin.annotate_document(file_path=valid_path)
         assert "不在允许的目录范围内" not in result
 
@@ -156,6 +161,7 @@ class TestFileConverterOutputDirSandbox:
     def _call_convert(self, source_path, target_format, output_dir=None):
         """Import and call convert() with os.path.exists mocked for source."""
         from web.file_converter import convert
+
         return convert(
             source_path=source_path,
             target_format=target_format,
@@ -171,9 +177,9 @@ class TestFileConverterOutputDirSandbox:
 
         with patch("os.path.exists", return_value=True):
             result = self._call_convert(source, "pdf", output_dir=outside_dir)
-        assert result.get("success") is not True or "不在允许的范围内" in result.get("error", ""), (
-            "output_dir outside allowed roots should be rejected"
-        )
+        assert result.get("success") is not True or "不在允许的范围内" in result.get(
+            "error", ""
+        ), "output_dir outside allowed roots should be rejected"
 
     def test_output_dir_traversal_blocked(self):
         """output_dir using ../ to escape allowed roots should be blocked."""
@@ -183,12 +189,10 @@ class TestFileConverterOutputDirSandbox:
         with patch("os.path.exists", return_value=True):
             result = self._call_convert(source, "pdf", output_dir=traversal_dir)
         # After abspath normalisation the traversal should resolve outside roots
-        if os.path.abspath(traversal_dir) != os.path.abspath(
-            os.path.dirname(source)
-        ):
-            assert result.get("success") is not True, (
-                "Path-traversal output_dir should be blocked"
-            )
+        if os.path.abspath(traversal_dir) != os.path.abspath(os.path.dirname(source)):
+            assert (
+                result.get("success") is not True
+            ), "Path-traversal output_dir should be blocked"
 
     # -- output_dir inside allowed roots ---------------------------------------
 
@@ -197,28 +201,24 @@ class TestFileConverterOutputDirSandbox:
         workspace_out = os.path.abspath("workspace")
         source = os.path.join(workspace_out, "file.docx")
 
-        with patch("os.path.exists", return_value=True), \
-             patch("os.makedirs"), \
-             patch("web.file_converter._dispatch") as mock_dispatch:
-            mock_dispatch.return_value = (
-                os.path.join(workspace_out, "file.pdf"), ""
-            )
+        with patch("os.path.exists", return_value=True), patch("os.makedirs"), patch(
+            "web.file_converter._dispatch"
+        ) as mock_dispatch:
+            mock_dispatch.return_value = (os.path.join(workspace_out, "file.pdf"), "")
             result = self._call_convert(source, "pdf", output_dir=workspace_out)
-        assert result["success"] is True, (
-            "output_dir inside workspace should be allowed"
-        )
+        assert (
+            result["success"] is True
+        ), "output_dir inside workspace should be allowed"
 
     def test_output_dir_uploads_accepted(self):
         """output_dir under uploads/ should be accepted."""
         uploads_out = os.path.abspath("uploads")
         source = os.path.join(os.path.abspath("workspace"), "file.docx")
 
-        with patch("os.path.exists", return_value=True), \
-             patch("os.makedirs"), \
-             patch("web.file_converter._dispatch") as mock_dispatch:
-            mock_dispatch.return_value = (
-                os.path.join(uploads_out, "file.pdf"), ""
-            )
+        with patch("os.path.exists", return_value=True), patch("os.makedirs"), patch(
+            "web.file_converter._dispatch"
+        ) as mock_dispatch:
+            mock_dispatch.return_value = (os.path.join(uploads_out, "file.pdf"), "")
             result = self._call_convert(source, "pdf", output_dir=uploads_out)
         assert result["success"] is True
 
@@ -227,12 +227,10 @@ class TestFileConverterOutputDirSandbox:
         dist_out = os.path.abspath("dist")
         source = os.path.join(os.path.abspath("workspace"), "file.docx")
 
-        with patch("os.path.exists", return_value=True), \
-             patch("os.makedirs"), \
-             patch("web.file_converter._dispatch") as mock_dispatch:
-            mock_dispatch.return_value = (
-                os.path.join(dist_out, "file.pdf"), ""
-            )
+        with patch("os.path.exists", return_value=True), patch("os.makedirs"), patch(
+            "web.file_converter._dispatch"
+        ) as mock_dispatch:
+            mock_dispatch.return_value = (os.path.join(dist_out, "file.pdf"), "")
             result = self._call_convert(source, "pdf", output_dir=dist_out)
         assert result["success"] is True
 
@@ -245,18 +243,14 @@ class TestFileConverterOutputDirSandbox:
         source_parent = os.path.abspath(os.sep + "some" + os.sep + "project")
         source = os.path.join(source_parent, "file.docx")
 
-        with patch("os.path.exists", return_value=True), \
-             patch("os.makedirs"), \
-             patch("web.file_converter._dispatch") as mock_dispatch:
-            mock_dispatch.return_value = (
-                os.path.join(source_parent, "file.pdf"), ""
-            )
-            result = self._call_convert(
-                source, "pdf", output_dir=source_parent
-            )
-        assert result["success"] is True, (
-            "Same-directory-as-source fallback should be allowed"
-        )
+        with patch("os.path.exists", return_value=True), patch("os.makedirs"), patch(
+            "web.file_converter._dispatch"
+        ) as mock_dispatch:
+            mock_dispatch.return_value = (os.path.join(source_parent, "file.pdf"), "")
+            result = self._call_convert(source, "pdf", output_dir=source_parent)
+        assert (
+            result["success"] is True
+        ), "Same-directory-as-source fallback should be allowed"
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +264,7 @@ class TestOpenUrlSchemeValidation:
 
     def _make_api(self):
         from src.koto_app import WindowAPI
+
         window_mock = MagicMock()
         return WindowAPI(window=window_mock, base_url="http://127.0.0.1:5000")
 
@@ -325,12 +320,11 @@ class TestOpenUrlSchemeValidation:
         assert result["success"] is False
 
     def test_scheme_only_no_netloc(self):
-        """A bare 'http:' with no netloc should still be considered http scheme."""
+        """A bare 'http:' with no netloc is not a valid URL and should be rejected."""
         api = self._make_api()
-        with patch("webbrowser.open"):
-            result = api.open_url("http:")
-        # urlparse("http:").scheme == "http" so it passes the scheme check
-        assert result["success"] is True
+        result = api.open_url("http:")
+        # Implementation requires full 'http://' or 'https://' prefix
+        assert result["success"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -344,6 +338,7 @@ class TestSkillCapabilityModuleWhitelist:
 
     def _load(self, entry_point: str):
         from app.core.skills.skill_capability import SkillCapabilityRegistry
+
         return SkillCapabilityRegistry._load_entry_point(entry_point)
 
     # -- blocked modules -------------------------------------------------------

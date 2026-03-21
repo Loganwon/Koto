@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\system_event_monitoring_plugin.py
+# hypothesis_version: 6.151.9
+
+['INTEGER', 'OBJECT', 'STRING', 'already_running', 'anomalies', 'anomaly_count', 'check_interval', 'clear_monitoring_log', 'description', 'error', 'event_count', 'event_type', 'func', 'get_system_anomalies', 'get_system_health', 'health', 'limit', 'message', 'monitoring_active', 'name', 'not_running', 'parameters', 'properties', 'required', 'status', 'success', 'type']

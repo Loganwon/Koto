@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\ops\remediation_policy.py
+# hypothesis_version: 6.151.9
+
+[0.0, 120, 300, 600, '*', '?', 'cooldown_seconds', 'disable_failed_skill', 'enabled', 'fire_count', 'from', 'info', 'job_failed', 'last_fired', 'memory_pressure', 'min_occurrences', 'model_fallback', 'name', 'payload', 'reason', 'rule', 'skill_disabled', 'skill_id', 'to', 'trigger_event', 'warn_queue_backlog', 'warning']

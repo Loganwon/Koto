@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\config\configuration_manager.py
+# hypothesis_version: 6.151.9
+
+[100, 200, 500, 'cpu', 'critical', 'datetime', 'disk', 'event_rate', 'exported_at', 'inf', 'memory', 'message', 'network_latency', 'normal', 'process_cpu', 'process_memory', 'settings', 'status', 'thresholds', 'unknown', 'valid', 'warning']

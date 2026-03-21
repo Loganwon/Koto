@@ -6,6 +6,7 @@
   cd Koto
   .venv\\Scripts\\python.exe tests\\test_model_calls_live.py
 """
+
 import os
 import sys
 import time
@@ -21,16 +22,25 @@ with open(os.path.join(ROOT, "config", "gemini_config.env")) as f:
             k, v = line.split("=", 1)
             os.environ[k.strip()] = v.strip()
 
+
 # 自动检测并设置代理（与 web/app.py setup_proxy 逻辑一致）
 def _setup_proxy_for_test():
     import socket
     from urllib.parse import urlparse
-    candidates = ["http://127.0.0.1:7890", "http://127.0.0.1:10809",
-                  "http://127.0.0.1:1080", "http://127.0.0.1:8080"]
+
+    candidates = [
+        "http://127.0.0.1:7890",
+        "http://127.0.0.1:10809",
+        "http://127.0.0.1:1080",
+        "http://127.0.0.1:8080",
+    ]
     try:
         import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings") as k:
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+        ) as k:
             if winreg.QueryValueEx(k, "ProxyEnable")[0]:
                 ps = str(winreg.QueryValueEx(k, "ProxyServer")[0]).strip()
                 if ps:
@@ -54,27 +64,31 @@ def _setup_proxy_for_test():
             pass
     return None
 
+
 _proxy = _setup_proxy_for_test()
 if _proxy:
     print(f"  代理: {_proxy}")
 
-from app.core.llm.gemini import GeminiProvider, _INTERACTIONS_ONLY_MODELS
+from app.core.llm.gemini import _INTERACTIONS_ONLY_MODELS, GeminiProvider
 
 GREEN = "\033[92m"
-RED   = "\033[91m"
+RED = "\033[91m"
 YELLOW = "\033[93m"
 RESET = "\033[0m"
 
 passed = []
 failed = []
 
+
 def ok(label, detail=""):
     passed.append(label)
     print(f"  {GREEN}✅ {label}{RESET}" + (f" → {detail[:80]}" if detail else ""))
 
+
 def fail(label, err):
     failed.append(label)
     print(f"  {RED}❌ {label}: {str(err)[:120]}{RESET}")
+
 
 def section(title):
     print(f"\n{'─'*60}\n  {title}\n{'─'*60}")
@@ -92,12 +106,12 @@ else:
 # ── 检查模型分类 ──────────────────────────────────────────────────────────────
 section("1. 模型分类验证 (无需API)")
 check_cases = [
-    ("gemini-3-flash-preview",          False, "应走 generate_content"),
-    ("gemini-3-pro-preview",            False, "应走 generate_content"),
-    ("gemini-3.1-pro-preview",          False, "应走 generate_content"),
-    ("gemini-2.5-pro-preview",          False, "应走 generate_content"),
-    ("gemini-2.5-flash",                False, "应走 generate_content"),
-    ("gemini-2.0-flash",                False, "应走 generate_content"),
+    ("gemini-3-flash-preview", False, "应走 generate_content"),
+    ("gemini-3-pro-preview", False, "应走 generate_content"),
+    ("gemini-3.1-pro-preview", False, "应走 generate_content"),
+    ("gemini-2.5-pro-preview", False, "应走 generate_content"),
+    ("gemini-2.5-flash", False, "应走 generate_content"),
+    ("gemini-2.0-flash", False, "应走 generate_content"),
     ("deep-research-pro-preview-12-2025", True, "应走 interactions.create(agent=)"),
 ]
 for model_id, should_be_interactions, note in check_cases:
@@ -105,7 +119,9 @@ for model_id, should_be_interactions, note in check_cases:
     if result == should_be_interactions:
         ok(f"{model_id[:35]}", note)
     else:
-        fail(f"{model_id}", f"期望 interactions={should_be_interactions}, 实际={result}")
+        fail(
+            f"{model_id}", f"期望 interactions={should_be_interactions}, 实际={result}"
+        )
 
 # ── 实际 API 调用测试 ────────────────────────────────────────────────────────
 section("2. CHAT 任务 - gemini-3-flash-preview")
@@ -128,7 +144,9 @@ except Exception as e:
 
 section("4. STREAM 任务 - gemini-3-flash-preview")
 try:
-    chunks = list(p.generate_content("数1到5", model="gemini-3-flash-preview", stream=True))
+    chunks = list(
+        p.generate_content("数1到5", model="gemini-3-flash-preview", stream=True)
+    )
     assert chunks, "no chunks"
     full = "".join(c.get("content", "") for c in chunks)
     assert full, "empty stream"
@@ -141,7 +159,7 @@ try:
     r = p.generate_content(
         "What is 2+2?",
         model="gemini-3-flash-preview",
-        system_instruction="You are a math tutor. Answer only with numbers."
+        system_instruction="You are a math tutor. Answer only with numbers.",
     )
     text = r.get("content", "")
     assert text, "empty response"
@@ -152,8 +170,7 @@ except Exception as e:
 section("6. RESEARCH 任务 - gemini-3-pro-preview (generate_content)")
 try:
     r = p.generate_content(
-        "简述大型语言模型的发展历程，100字左右",
-        model="gemini-3-pro-preview"
+        "简述大型语言模型的发展历程，100字左右", model="gemini-3-pro-preview"
     )
     text = r.get("content", "")
     assert text, "empty response"
@@ -164,6 +181,7 @@ except Exception as e:
 section("7. ModelFallbackExecutor - 降级链验证")
 try:
     from app.core.llm.model_fallback import get_fallback_executor
+
     executor = get_fallback_executor()
     for task_type in ["CHAT", "RESEARCH", "FILE_GEN", "AGENT", "MULTI_STEP"]:
         model = executor.get_best_available(task_type=task_type)
@@ -175,12 +193,13 @@ except Exception as e:
 section("8. generate_with_fallback - CHAT")
 try:
     from app.core.llm.model_fallback import get_fallback_executor
+
     executor = get_fallback_executor()
     r = executor.generate_with_fallback(
         provider=p,
         prompt="Briefly say hello in Chinese",
         preferred_model="gemini-3-flash-preview",
-        task_type="CHAT"
+        task_type="CHAT",
     )
     text = r.get("content", "")
     assert text, "empty response"
@@ -192,6 +211,7 @@ section("9. deep-research 模型走 Interactions API (快速验证，不等完�
 try:
     # 只验证它不报"agent字段"或"generate_content"错误，有超时就算通过
     import threading
+
     result_box = {"err": None, "started": False}
 
     def _call():
@@ -199,7 +219,7 @@ try:
             p._call_via_interactions_api(
                 "deep-research-pro-preview-12-2025",
                 "用一句话解释深度学习",
-                timeout=20.0
+                timeout=20.0,
             )
         except TimeoutError:
             result_box["err"] = "timeout_ok"  # 超时说明成功走到了 Interactions API
@@ -218,13 +238,18 @@ try:
         fail("deep-research Interactions API", err)
     else:
         # Other errors (quota, unavailable) - not a routing bug
-        ok("deep-research 走 Interactions API", f"无路由错误 (API err: {str(err)[:60]})")
+        ok(
+            "deep-research 走 Interactions API",
+            f"无路由错误 (API err: {str(err)[:60]})",
+        )
 except Exception as e:
     fail("deep-research Interactions API", e)
 
 # ── 汇总 ─────────────────────────────────────────────────────────────────────
 print(f"\n{'═'*60}")
-print(f"  结果: {len(passed)} 通过 / {len(passed)+len(failed)} 总数，{len(failed)} 失败")
+print(
+    f"  结果: {len(passed)} 通过 / {len(passed)+len(failed)} 总数，{len(failed)} 失败"
+)
 print(f"{'═'*60}")
 if failed:
     print(f"\n{RED}  失败项目:{RESET}")

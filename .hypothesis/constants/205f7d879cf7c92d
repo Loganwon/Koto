@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\agent\plugins\performance_analysis_plugin.py
+# hypothesis_version: 6.151.9
+
+['CPU', 'Disk', 'General', 'Memory', 'OBJECT', 'PerformanceAnalysis', 'Processes', 'STRING', 'actions', 'bottlenecks', 'category', 'cpu', 'description', 'disk', 'focus_area', 'func', 'general', 'high', 'info', 'issue', 'medium', 'memory', 'memory_percent', 'name', 'parameters', 'percent', 'percent_full', 'processes', 'properties', 'recommendations', 'severity', 'time', 'timestamp', 'top_processes', 'type', 'usage_percent', 'warnings', '🔴 CPU very high', '🔴 Disk almost full', '🔴 Memory critical', '🟠 CPU elevated', '🟠 Disk space limited', '🟠 Memory high']

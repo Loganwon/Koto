@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\security\pii_filter.py
+# hypothesis_version: 6.151.9
+
+['IP地址', 'mask_address', 'mask_bank_card', 'mask_email', 'mask_id_card', 'mask_ip', 'mask_landline', 'mask_name', 'mask_passport', 'mask_phone', '固话', '地址', '姓名', '手机号', '自定义', '证件号', '身份证', '邮箱', '银行卡']

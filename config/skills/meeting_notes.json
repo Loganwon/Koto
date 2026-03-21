@@ -2,7 +2,7 @@
     "id":  "meeting_notes",
     "name":  "会议纪要整理",
     "icon":  "📌",
-    "category":  "domain",
+    "category":  "workflow",
     "description":  "将会议录音文字、笔记或聊天记录整理为结构化会议纪要，提取决策和行动项",
     "intent_description":  "用户说「帮我整理会议记录」「生成会议纪要」或粘贴了会议的文字/录音内容",
     "output_spec":  {
@@ -87,5 +87,12 @@
                         "action_items",
                         "decisions"
                     ],
+<<<<<<< HEAD
+
+    "tool_orchestration": "• 用户粘贴了文字/聊天记录 → 直接分析，不调用工具\n• 用户提供文件路径 → read_file(path) 读取录音转写/txt 记录\n• 提取结构优先级：会议元信息 → 议程/讨论要点 → 决策结论 → 行动项\n• 行动项识别规则：含「需要/待/要/负责/跟进/完成」类动词 + 人名或角色 → 自动提取\n  · 无明确负责人的事项 → 标注「责任人待确认」\n  · 无截止日期的事项 → 标注「截止日待确认」\n• 生成纪要后 → 询问是否保存为 Word：write_file(会议纪要_YYYYMMDD.docx)",
+
+    "react_protocol": "light"
+=======
     "subcategory":  "writing"
+>>>>>>> review/pr-20260321
 }

@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\web\auth.py
+# hypothesis_version: 6.151.9
+
+[120, 400, 401, 409, 429, 3600, 100000, '.', '/api/auth/login', '/api/auth/logout', '/api/auth/me', '/api/auth/register', '/api/auth/status', '1', '100', '72', '@', 'Authorization', 'Bearer ', 'GET', 'HS256', 'KOTO_ADMIN_TOKEN', 'KOTO_AUTH_ENABLED', 'KOTO_DEPLOY_MODE', 'KOTO_JWT_SECRET', 'KOTO_USERS_FILE', 'Local User', 'POST', 'RATE_LIMIT', 'Rate limit exceeded', 'UNAUTHORIZED', 'anon', 'auth_enabled', 'cloud', 'code', 'config/users.json', 'created_at', 'daily_limit', 'email', 'error', 'exp', 'free', 'iat', 'koto_token', 'local', 'local@koto.ai', 'max_requests', 'mode', 'name', 'password', 'password_hash', 'plan', 'r', 'relaxed', 'salt', 'sha256', 'standard', 'strict', 'success', 'token', 'true', 'unlimited', 'used_today', 'user', 'user_id', 'utf-8', 'w', 'window', 'yes', '密码至少6位', '未登录或登录已过期', '本地模式无需注册', '该邮箱已注册', '请输入有效的邮箱地址', '邮箱或密码错误']

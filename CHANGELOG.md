@@ -9,22 +9,135 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [1.5.0] — Agents, LLM Providers, Hooks, Skills & Services
+
 ### Added
-- Structured JSON logging via `KOTO_LOG_FORMAT=json` (requires `python-json-logger`)
-- Request ID tracing: `X-Request-ID` header on every request/response for log correlation
-- Global Flask error handlers returning JSON `{error, status, request_id}` for 404/405/500
+- **Background Agent** (`app/core/agent/background_agent.py`) — async task execution with job queue
+- **Deep Research** (`app/core/agent/deep_research.py`) — multi-step research pipeline
+- **MCP Adapter** (`app/core/agent/mcp_adapter.py`) — Model Context Protocol integration
+- **Reasoning Budget** (`app/core/agent/reasoning_budget.py`) — token budget management
+- **LangGraph Agent** (`app/core/agent/langgraph_agent.py`) — LangGraph-based agent
+- **LLM Provider Factory** (`app/core/llm/provider_factory.py`) — unified routing to Gemini/OpenAI/Anthropic/Ollama
+- **Anthropic Provider** (`app/core/llm/anthropic_provider.py`) — Claude models support
+- **OpenAI Provider** (`app/core/llm/openai_provider.py`) — GPT models support
+- **Hook Manager** (`app/core/hooks/hook_manager.py`) — lifecycle hooks from config/hooks/
+- **Skill Permissions** (`app/core/skills/skill_permissions.py`) — grant/revoke/check access control
+- **Context Provider** (`app/core/context/context_provider.py`) — custom context injection into prompts
+- **User Tool Loader** (`app/core/tools/user_tool_loader.py`) — user-defined tools via `@koto_tool`
+- **Contact Manager** (`app/core/memory/contact_manager.py`) — CRM for contacts
+- **Task Planner** (`app/core/tasks/task_planner.py`) — DAG task planner with Plan/PlanStep/StepStatus
+- **Morning Brief** (`app/core/services/morning_brief.py`) — scheduled daily summaries
+- **Telegram Bot Routes** (`app/api/telegram_bot_routes.py`) — Blueprint at `/api/telegram`
+- **MultiAgentOrchestrator**: `parallel_roles`, `preset_analysis_pipeline`, `run(timeout)`, `AgentRole.model_id`
+- **TaskDecomposer**: `suggest_multiagent_preset()` maps compound tasks → multiagent preset names
+- **SmartDispatcher**: stamps `context_info["multiagent_preset"]` on compound task routing
+- 20+ new Skill JSON configs in `config/skills/`
+
+### Fixed
+- `skill_routes.py`: removed duplicate `get_active_ui_config` endpoint (conflict artifact)
+- `document_feedback.py`: 503 errors now immediately return fallback without retry/sleep
+- `multi_agent._llm_call`: re-raises exceptions instead of silently swallowing them
+
+### Tests
+- 82 new unit tests covering all new modules (`tests/unit/test_pr_20260321.py`)
+- Total: **4058 tests passing**
+
+---
+
+## [1.4.0] — 2026-03-20
+
+### Added
+- **Telegram Bot Integration** (`web/telegram_bot.py`, 621 lines): Full Telegram Bot support with message splitting, allowed-user filtering, `get_bot_info`, and a `TELEGRAM_BOT_TOKEN`-driven singleton
+- **Memory API Routes** (`web/memory_api_routes.py`, 485 lines): RESTful memory CRUD (`GET/POST /api/memories`, `DELETE /api/memories/<id>`), user profile (`/api/memory/profile`), stats (`/api/memory/stats`), personality matrix (`/api/memory/personality`), bulk import (`/api/memories/import-profile`), and batch-extract endpoints
+- **Document Comparator** (`web/document_comparator.py`, 464 lines): Refactored multi-format diff engine with `compare_documents`, `compare_multiple` (N-way matrix), `build_ai_prompt`, and `compare_versions`; new `/doc-compare` UI page
+- **Skill UI Extensions**: `skill-ui-extensions.css`, `skill-ui-extensions.js`, `skill-ui.js`, `tarot-picker.js` for richer skill panel interactions
+- **Stress Tests** (`tests/unit/test_stress.py`, 39 tests): Concurrent load tests for TaskLedger, AIRouter cache, auth rate limiter, KnowledgeGraph, SkillPipeline, Flask request flood, large payloads, memory growth, and InterruptManager
+- **PR 20260320 Tests** (`tests/unit/test_pr_20260320.py`, 36 tests): Unit tests for TelegramBot helpers, memory API routes, and DocumentComparator
+
+### Fixed
+- **TaskLedger thread safety** (`app/core/tasks/task_ledger.py`): Added `threading.RLock` to serialise all SQLite access; `check_same_thread=False` alone does not prevent concurrent-connection race conditions
+- **TaskLedger API**: `count()` now accepts `source` kwarg; `list_tasks`/`count` accept `status` as either string or enum value
+- **web/app.py routes restored**: Merge conflict resolution had inadvertently dropped ~3,000 lines including clipboard, email, browser, search, workspace, notes, reminders, and calendar routes — all restored
+
+---
+
+## [1.3.0] — 2026-03-18
+
+### Added
+- **Playwright E2E Browser Tests** (63 tests): Full UI testing suite covering page loads, session management, chat interface, skill marketplace, settings, button sweep, mobile responsive, and accessibility checks
+- **API Smoke Tests** (35 tests): Comprehensive endpoint coverage for memory, macro, setup, voice, document, notebook, ops, shadow, and utility APIs
+- **Mobile Responsive Tests**: Verify pages render correctly at phone (375×667, 414×896) and tablet (768×1024) viewports with overflow and clipping detection
+- **Accessibility Tests**: WCAG checks for alt text, form labels, button names, heading hierarchy, tabindex, lang attribute, and landmark roles
+- **Server-Only Mode** (`KOTO_SERVER_ONLY=1`): New env var to start Flask without GUI/pywebview — enables full health check testing in CI
+- **Installer E2E Improvements**: File size validation, Start Menu shortcut check, reinstall/upgrade cycle test, registry cleanup verification, `/api/ping` endpoint check
+- **E2E CI Pipeline Job**: Playwright tests now run automatically on push (Windows runner, informational)
+
+### Fixed
+- **deleteSession null reference bug**: Fixed `TypeError: Cannot read properties of null (reading 'outerHTML')` when deleting the current session and `welcomeScreen` element was already removed from DOM (`web/static/js/app.js`)
+
+### Changed
+- Installer E2E tests now use `RequireHealth:$true` (was `$false`) — health endpoint is actually verified in CI builds
+
+### Added
+- **Modular Blueprint Architecture**: Extracted ~206 routes from monolithic `web/app.py` into 14 Flask blueprints (sessions, analytics, proactive, execution, knowledge, file_editor, dev, voice, document, file_organize, workspace, settings, misc_api, pages)
+- **Skill Pipeline**: New `skill_pipeline.py` for structured skill execution with validation, routing, and fallback
+- **Skill Tool Adapter**: New `skill_tool_adapter.py` bridging skills with the agent tool registry
+- **Task Classifier**: ML-based task classification for intelligent request routing
+- **Smart Dispatcher**: Enhanced model dispatching with intent analysis and local planner integration
+- **Model Fallback Executor**: Automatic LLM failover with circuit breaker pattern
+- **Conversation Tracker**: Long-running conversation context management
+- **PersonalityMatrix**: 4-layer context injection for personalized responses
+- **File Converter Engine**: Multi-format document conversion endpoint
+- **Annotation & Chart Vision Plugins**: New agent plugins for image annotation and chart analysis
+- **Output Validator**: Security-focused output sanitization for agent responses
+- **Document Planner & Feedback Loop**: Iterative document generation with quality feedback
+- **Swagger/OpenAPI docs** via flasgger at `/apidocs`
+- **SQLite Migration Manager**: Lightweight schema versioning
+- **Custom Exception Hierarchy**: Structured error types for all Koto subsystems
+- **Landing Page**: Updated marketing site with download button, feature showcase, setup tabs
+- **Bilingual Support**: EN/中文 marketing page
+- **3,900+ tests** (up from 467): security, concurrency, circuit breaker, caching, XSS, path traversal, integration
+- Structured JSON logging via `KOTO_LOG_FORMAT=json`
+- Request ID tracing: `X-Request-ID` header for log correlation
+- Global Flask error handlers returning JSON `{error, status, request_id}`
 - `/api/info` endpoint exposing `{version, deploy_mode, auth_enabled}`
-- `version` field in `/api/health` and `/api/ping` responses
 - Dependabot config for weekly pip + GitHub Actions dependency updates
 - `.pre-commit-config.yaml` with black, isort, flake8, bandit hooks
 - `docker-compose.yml` for local development with volume mounts
 - `Makefile` with `dev`, `test`, `lint`, `format`, `build`, `audit` targets
 - `pip-audit` CVE scanning step in CI (non-blocking)
-- `CHANGELOG.md` — this file
+- Dependency lock file for reproducible builds
+
+### Changed
+- **web/app.py reduced from ~20,800 to ~16,100 lines** via blueprint extraction
+- Default model upgraded to `gemini-3.1-pro-preview`
+- AIRouter refactored: removed `set_router_model`, uses internal `_ROUTER_MODEL_CHAIN`
+- `print()` replaced with `logging` across 80+ web modules
+- Proactive agent persists cooldown state across restarts
+- RAG service upgraded with hybrid search improvements
+- Training data builder and training database updates
+- CI pipeline hardened: black, isort, bandit, pytest with coverage artifacts, Docker build
+
+### Fixed
+- Thread-safe singletons for shared services
+- Bounded caches preventing unbounded memory growth
+- Graceful shutdown with proper resource cleanup
+- Deadlock in `TrainingDB.correct_label()`
+- Path traversal in `file_converter` output directory
+- XSS in `showNotification` — uses `escapeHtml` on message
+- XSS in `md_to_html` fallback renderer
+- Module whitelist for `importlib` entry_point loading
+- Sandbox path validation in annotation plugin
+- Platform-specific tests properly skipped on Linux CI (9 Windows-only tests)
+- isort/black formatting compliance across all source files
 
 ### Security
 - JWT secret startup validation: raises `RuntimeError` in cloud mode if `KOTO_JWT_SECRET` not set
-- `werkzeug.secure_filename()` applied to all file upload filenames (prevents path traversal)
+- `werkzeug.secure_filename()` applied to all file upload filenames
+- CODEOWNERS, PR template, issue templates, SECURITY.md added
+- Branch protection ruleset configured
 
 ---
 

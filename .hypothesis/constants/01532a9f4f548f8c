@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\app\core\llm\langchain_adapter.py
+# hypothesis_version: 6.151.9
+
+[0.7, 8192, 'BaseMessage', 'BaseTool', 'ChatGenerationChunk', 'ChatResult', 'KotoLangChainLLM', '_koto_provider', 'args', 'content', 'description', 'id', 'koto-gemini', 'model', 'name', 'object', 'parameters', 'properties', 'role', 'tool', 'tool_call', 'tool_call_id', 'tool_calls', 'tools', 'type', 'user']

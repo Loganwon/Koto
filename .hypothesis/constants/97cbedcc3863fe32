@@ -1,0 +1,4 @@
+# file: C:\repos\Koto\web\token_tracker.py
+# hypothesis_version: 6.151.9
+
+[0.0, 0.025, 0.075, 0.1, 0.3, 0.4, 1.25, 2.0, 5.0, 7.25, 8.0, 10.0, 20.0, 40.0, 1000000, '.tmp', 'all', 'by_date', 'by_model', 'calls', 'config', 'cost_cny', 'cost_usd', 'daily', 'data_file', 'date', 'deep-research', 'default', 'frozen', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash', 'gemini-2.0-pro', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3', 'gemini-3-flash', 'gemini-3-pro', 'gemini-3.1-flash', 'gemini-3.1-pro', 'imagen-3', 'imagen-4.0', 'imagen-4.0-fast', 'input', 'last_7_days', 'models/', 'month', 'monthly', 'nano-banana', 'output', 'r', 'reset', 'sessions', 'skills', 'success', 'text-embedding', 'text-embedding-004', 'this_month', 'today', 'token_usage.json', 'total', 'total_calls', 'total_tokens', 'utf-8', 'version', 'w']

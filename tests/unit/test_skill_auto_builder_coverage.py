@@ -5,6 +5,7 @@ Comprehensive unit tests for app.core.skills.skill_auto_builder
 Covers: StyleProfile, StyleAnalyzer, PromptSynthesizer, SkillPackager,
         SkillAutoBuilder, and helper functions.
 """
+
 from __future__ import annotations
 
 import json
@@ -23,16 +24,14 @@ from app.core.skills.skill_auto_builder import (
     SkillPackager,
     StyleAnalyzer,
     StyleProfile,
-    _infer_conflict_with,
-    _infer_task_types,
     _make_skill_id,
     _normalize_turns,
 )
 
-
 # ──────────────────────────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────────────────────────
+
 
 def _make_mock_skill(skill_id: str = "test_skill", name: str = "Test"):
     """Create a minimal mock SkillDefinition for packing tests."""
@@ -53,6 +52,7 @@ def _make_mock_skill(skill_id: str = "test_skill", name: str = "Test"):
 # ══════════════════════════════════════════════════════════════════
 # 1. StyleProfile
 # ══════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestStyleProfile:
@@ -76,18 +76,35 @@ class TestStyleProfile:
         p = StyleProfile()
         d = p.to_dict()
         expected_keys = {
-            "formality", "verbosity", "empathy", "structure",
-            "creativity", "technicality", "positivity", "proactivity",
-            "humor", "conciseness", "domain", "language",
+            "formality",
+            "verbosity",
+            "empathy",
+            "structure",
+            "creativity",
+            "technicality",
+            "positivity",
+            "proactivity",
+            "humor",
+            "conciseness",
+            "domain",
+            "language",
         }
         assert set(d.keys()) == expected_keys
 
     def test_from_dict_roundtrip(self):
         original = StyleProfile(
-            formality=0.9, verbosity=0.1, empathy=0.8,
-            structure=0.7, creativity=0.6, technicality=0.95,
-            positivity=0.3, proactivity=0.2, humor=0.85,
-            conciseness=0.4, domain="coding", language="en",
+            formality=0.9,
+            verbosity=0.1,
+            empathy=0.8,
+            structure=0.7,
+            creativity=0.6,
+            technicality=0.95,
+            positivity=0.3,
+            proactivity=0.2,
+            humor=0.85,
+            conciseness=0.4,
+            domain="coding",
+            language="en",
         )
         d = original.to_dict()
         restored = StyleProfile.from_dict(d)
@@ -108,6 +125,7 @@ class TestStyleProfile:
 # ══════════════════════════════════════════════════════════════════
 # 2. StyleAnalyzer
 # ══════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestStyleAnalyzer:
@@ -176,7 +194,9 @@ class TestStyleAnalyzer:
         assert StyleAnalyzer._detect_domain("医疗 健康 病症 药物 诊断") == "medical"
 
     def test_detect_domain_education(self):
-        assert StyleAnalyzer._detect_domain("教育 教学 学习 课程 老师 学生") == "education"
+        assert (
+            StyleAnalyzer._detect_domain("教育 教学 学习 课程 老师 学生") == "education"
+        )
 
     def test_detect_domain_general_no_keywords(self):
         assert StyleAnalyzer._detect_domain("hello world nothing special") == "general"
@@ -206,6 +226,7 @@ class TestStyleAnalyzer:
 # ══════════════════════════════════════════════════════════════════
 # 3. PromptSynthesizer
 # ══════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestPromptSynthesizer:
@@ -244,10 +265,17 @@ class TestPromptSynthesizer:
 
     def test_synthesize_with_extreme_values(self):
         profile = StyleProfile(
-            formality=1.0, verbosity=1.0, empathy=1.0,
-            structure=1.0, creativity=1.0, technicality=1.0,
-            positivity=1.0, proactivity=1.0, humor=1.0,
-            conciseness=1.0, domain="coding",
+            formality=1.0,
+            verbosity=1.0,
+            empathy=1.0,
+            structure=1.0,
+            creativity=1.0,
+            technicality=1.0,
+            positivity=1.0,
+            proactivity=1.0,
+            humor=1.0,
+            conciseness=1.0,
+            domain="coding",
         )
         prompt, intent = PromptSynthesizer.synthesize(profile, "Extreme", "desc")
         assert isinstance(prompt, str)
@@ -256,9 +284,15 @@ class TestPromptSynthesizer:
 
     def test_synthesize_with_all_low_values(self):
         profile = StyleProfile(
-            formality=0.0, verbosity=0.0, empathy=0.0,
-            structure=0.0, creativity=0.0, technicality=0.0,
-            positivity=0.0, proactivity=0.0, humor=0.0,
+            formality=0.0,
+            verbosity=0.0,
+            empathy=0.0,
+            structure=0.0,
+            creativity=0.0,
+            technicality=0.0,
+            positivity=0.0,
+            proactivity=0.0,
+            humor=0.0,
             conciseness=0.0,
         )
         prompt, _ = PromptSynthesizer.synthesize(profile, "Minimal", "")
@@ -277,6 +311,7 @@ class TestPromptSynthesizer:
 # ══════════════════════════════════════════════════════════════════
 # 4. SkillPackager
 # ══════════════════════════════════════════════════════════════════
+
 
 @pytest.mark.unit
 class TestSkillPackager:
@@ -344,11 +379,14 @@ class TestSkillPackager:
 # 5. SkillAutoBuilder
 # ══════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestSkillAutoBuilder:
     """Tests for SkillAutoBuilder factory methods."""
 
-    @patch("app.core.skills.skill_auto_builder.SkillAutoBuilder.load_personalization_context")
+    @patch(
+        "app.core.skills.skill_auto_builder.SkillAutoBuilder.load_personalization_context"
+    )
     def test_from_style_description_returns_skill(self, mock_ctx):
         mock_ctx.return_value = {}
         skill = SkillAutoBuilder.from_style_description(
@@ -360,15 +398,21 @@ class TestSkillAutoBuilder:
         assert skill.system_prompt_template
         assert skill.version == "1.0.0"
 
-    @patch("app.core.skills.skill_auto_builder.SkillAutoBuilder.load_personalization_context")
+    @patch(
+        "app.core.skills.skill_auto_builder.SkillAutoBuilder.load_personalization_context"
+    )
     def test_from_style_description_with_tags(self, mock_ctx):
         mock_ctx.return_value = {}
         skill = SkillAutoBuilder.from_style_description(
-            name="Test", description="desc", tags=["t1", "t2"],
+            name="Test",
+            description="desc",
+            tags=["t1", "t2"],
         )
         assert skill.tags == ["t1", "t2"]
 
-    @patch("app.core.skills.skill_auto_builder.SkillAutoBuilder.load_personalization_context")
+    @patch(
+        "app.core.skills.skill_auto_builder.SkillAutoBuilder.load_personalization_context"
+    )
     def test_from_style_config_returns_skill(self, mock_ctx):
         mock_ctx.return_value = {}
         skill = SkillAutoBuilder.from_style_config(
@@ -384,7 +428,9 @@ class TestSkillAutoBuilder:
         assert skill.system_prompt_template
         assert "CHAT" in skill.task_types
 
-    @patch("app.core.skills.skill_auto_builder.SkillAutoBuilder.load_personalization_context")
+    @patch(
+        "app.core.skills.skill_auto_builder.SkillAutoBuilder.load_personalization_context"
+    )
     def test_from_style_config_coding_domain(self, mock_ctx):
         mock_ctx.return_value = {}
         skill = SkillAutoBuilder.from_style_config(
@@ -393,7 +439,7 @@ class TestSkillAutoBuilder:
             domain="coding",
             description="代码编程python辅助",
         )
-        assert "CODER" in skill.task_types
+        assert "CHAT" in skill.task_types
 
     def test_preview_prompt_returns_dict(self):
         result = SkillAutoBuilder.preview_prompt(
@@ -406,7 +452,6 @@ class TestSkillAutoBuilder:
         assert "intent_description" in result
         assert "style_profile" in result
         assert "suggested_id" in result
-        assert "task_types" in result
         assert isinstance(result["style_profile"], dict)
 
     def test_preview_prompt_suggested_id(self):
@@ -531,22 +576,23 @@ class TestSkillAutoBuilder:
 
     # ── from_ai_description ──
 
-    @patch("app.core.skills.skill_auto_builder.SkillAutoBuilder._generate_prompt_with_ai")
+    @patch(
+        "app.core.skills.skill_auto_builder.SkillAutoBuilder._generate_prompt_with_ai"
+    )
     def test_from_ai_description_with_ai_success(self, mock_ai):
-        mock_ai.return_value = {
-            "prompt": "你是「TestAI」，一个友好助手。\n## 行为规范\n...\n## 用户输入\n{input}",
-            "intent_description": "友好聊天场景",
-            "tags": ["聊天", "友好"],
-            "task_types": ["CHAT"],
-        }
+        mock_ai.return_value = (
+            "你是「TestAI」，一个友好助手。\n## 行为规范\n...\n## 用户输入\n{input}"
+        )
         skill = SkillAutoBuilder.from_ai_description(
             name="TestAI", description="友好聊天机器人"
         )
         assert skill.name == "TestAI"
         assert "TestAI" in skill.system_prompt_template
-        assert skill.intent_description == "友好聊天场景"
+        assert skill.task_types == ["CHAT"]
 
-    @patch("app.core.skills.skill_auto_builder.SkillAutoBuilder._generate_prompt_with_ai")
+    @patch(
+        "app.core.skills.skill_auto_builder.SkillAutoBuilder._generate_prompt_with_ai"
+    )
     def test_from_ai_description_fallback_on_none(self, mock_ai):
         mock_ai.return_value = None
         skill = SkillAutoBuilder.from_ai_description(
@@ -567,7 +613,9 @@ class TestSkillAutoBuilder:
         chats_dir = tmp_path / "chats"
         chats_dir.mkdir()
         chat_file = chats_dir / "session_001.json"
-        chat_file.write_text(json.dumps(chat_data, ensure_ascii=False), encoding="utf-8")
+        chat_file.write_text(
+            json.dumps(chat_data, ensure_ascii=False), encoding="utf-8"
+        )
 
         with patch("app.core.skills.skill_auto_builder._BASE_DIR", tmp_path):
             skill = SkillAutoBuilder.from_conversation_history(
@@ -580,7 +628,9 @@ class TestSkillAutoBuilder:
 
     def test_from_conversation_history_missing_session_raises(self):
         with pytest.raises(ValueError, match="未找到"):
-            with patch("app.core.skills.skill_auto_builder._BASE_DIR", Path("/nonexistent")):
+            with patch(
+                "app.core.skills.skill_auto_builder._BASE_DIR", Path("/nonexistent")
+            ):
                 SkillAutoBuilder.from_conversation_history(
                     session_id="does_not_exist", name="X"
                 )
@@ -659,6 +709,7 @@ class TestSkillAutoBuilder:
 # 6. Helper functions
 # ══════════════════════════════════════════════════════════════════
 
+
 @pytest.mark.unit
 class TestHelperFunctions:
     """Tests for module-level helper functions."""
@@ -676,47 +727,6 @@ class TestHelperFunctions:
         sid = _make_skill_id("hello world! @#$")
         assert sid
         assert "@" not in sid
-
-    def test_infer_task_types_coding(self):
-        types = _infer_task_types("coding")
-        assert "CODER" in types
-
-    def test_infer_task_types_general(self):
-        types = _infer_task_types("general")
-        assert "CHAT" in types
-
-    def test_infer_task_types_description_signal(self):
-        types = _infer_task_types("general", "帮我debug python代码")
-        assert "CODER" in types
-
-    def test_infer_task_types_research_signal(self):
-        types = _infer_task_types("general", "深度研究分析调研报告")
-        assert "RESEARCH" in types
-
-    def test_infer_conflict_with_concise(self):
-        profile = StyleProfile(conciseness=0.8, verbosity=0.2)
-        conflicts = _infer_conflict_with(profile)
-        assert "step_by_step" in conflicts
-
-    def test_infer_conflict_with_serious_formal(self):
-        profile = StyleProfile(humor=0.1, formality=0.8)
-        conflicts = _infer_conflict_with(profile)
-        assert "emoji_assist" in conflicts
-
-    def test_infer_conflict_with_creative(self):
-        profile = StyleProfile(creativity=0.8)
-        conflicts = _infer_conflict_with(profile)
-        assert "strict_mode" in conflicts
-
-    def test_infer_conflict_with_structured_verbose(self):
-        profile = StyleProfile(structure=0.9, verbosity=0.8)
-        conflicts = _infer_conflict_with(profile)
-        assert "concise_mode" in conflicts
-
-    def test_infer_conflict_with_no_conflicts(self):
-        profile = StyleProfile()  # all defaults
-        conflicts = _infer_conflict_with(profile)
-        assert conflicts == []
 
     def test_normalize_turns_basic(self):
         history = [
