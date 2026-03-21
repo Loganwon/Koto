@@ -11,6 +11,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] — Agents, LLM Providers, Hooks, Skills & Services
+
+### Added
+- **Background Agent** (`app/core/agent/background_agent.py`) — async task execution with job queue
+- **Deep Research** (`app/core/agent/deep_research.py`) — multi-step research pipeline
+- **MCP Adapter** (`app/core/agent/mcp_adapter.py`) — Model Context Protocol integration
+- **Reasoning Budget** (`app/core/agent/reasoning_budget.py`) — token budget management
+- **LangGraph Agent** (`app/core/agent/langgraph_agent.py`) — LangGraph-based agent
+- **LLM Provider Factory** (`app/core/llm/provider_factory.py`) — unified routing to Gemini/OpenAI/Anthropic/Ollama
+- **Anthropic Provider** (`app/core/llm/anthropic_provider.py`) — Claude models support
+- **OpenAI Provider** (`app/core/llm/openai_provider.py`) — GPT models support
+- **Hook Manager** (`app/core/hooks/hook_manager.py`) — lifecycle hooks from config/hooks/
+- **Skill Permissions** (`app/core/skills/skill_permissions.py`) — grant/revoke/check access control
+- **Context Provider** (`app/core/context/context_provider.py`) — custom context injection into prompts
+- **User Tool Loader** (`app/core/tools/user_tool_loader.py`) — user-defined tools via `@koto_tool`
+- **Contact Manager** (`app/core/memory/contact_manager.py`) — CRM for contacts
+- **Task Planner** (`app/core/tasks/task_planner.py`) — DAG task planner with Plan/PlanStep/StepStatus
+- **Morning Brief** (`app/core/services/morning_brief.py`) — scheduled daily summaries
+- **Telegram Bot Routes** (`app/api/telegram_bot_routes.py`) — Blueprint at `/api/telegram`
+- **MultiAgentOrchestrator**: `parallel_roles`, `preset_analysis_pipeline`, `run(timeout)`, `AgentRole.model_id`
+- **TaskDecomposer**: `suggest_multiagent_preset()` maps compound tasks → multiagent preset names
+- **SmartDispatcher**: stamps `context_info["multiagent_preset"]` on compound task routing
+- 20+ new Skill JSON configs in `config/skills/`
+
+### Fixed
+- `skill_routes.py`: removed duplicate `get_active_ui_config` endpoint (conflict artifact)
+- `document_feedback.py`: 503 errors now immediately return fallback without retry/sleep
+- `multi_agent._llm_call`: re-raises exceptions instead of silently swallowing them
+
+### Tests
+- 82 new unit tests covering all new modules (`tests/unit/test_pr_20260321.py`)
+- Total: **4058 tests passing**
+
+---
+
 ## [1.4.0] — 2026-03-20
 
 ### Added
