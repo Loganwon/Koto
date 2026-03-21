@@ -11,6 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.1] — 2026-03-22
+
+### Added
+- **Skill Community page**: new community UI assets and template (`web/static/css/skill_community.css`, `web/static/js/skill_community.js`, `web/templates/skill_community.html`)
+- **Launcher package marker**: added `launcher/__init__.py` for packaging/runtime compatibility
+
+### Changed
+- **Landing page refresh** (`web/templates/landing.html`): updated messaging and visual layout to emphasize local-first workflow and Skill Marketplace
+- **Skill Marketplace API/UI updates** (`app/api/skill_marketplace_routes.py`, `web/templates/skill_marketplace.html`, `web/static/js/skill_marketplace.js`)
+- **Setup wizard UX** (`src/koto_setup.py`): expanded window height and added activation-code entry path
+- **Packaging updates** (`koto.spec`, `Build_Release.ps1`): improved web submodule data collection and hidden imports for release build stability
+
+### Fixed
+- **Web blueprint packaging gaps**: include `web.blueprints.*` and `web.routes.*` modules in build inputs to avoid missing dynamic imports in packaged app
+
+### Tests
+- `tests/test_error_handling.py`: **17 passed**
+
+---
+
 ## [1.6.0] — 2026-03-22
 
 ### Added
