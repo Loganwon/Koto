@@ -43,8 +43,11 @@ DEFAULT_SETTINGS = {
         "voice_auto_send": False,  # 语音输入后自动发送
         "stream_response": True,
         "show_thinking": False,  # 显示思考过程（推理链）
+        "show_task_type": False,  # 显示任务分类标签
         "auto_save_files": True,  # 自动保存回复中的文件（代码/文档/总结等）
         "enable_mini_game": True,  # 启用等待时的小游戏
+        "voice_auto_mode": True,  # 语音自动模式
+        "use_local_only": False,  # 本地模型独占模式
     },
     "proxy": {
         "enabled": True,
@@ -112,11 +115,11 @@ class SettingsManager:
         """合并设置，保留用户设置，添加新的默认项"""
         result = default.copy()
         for key, value in current.items():
-            if key in result:
-                if isinstance(value, dict) and isinstance(result[key], dict):
-                    result[key] = self._merge_settings(result[key], value)
-                else:
-                    result[key] = value
+            if key in result and isinstance(value, dict) and isinstance(result[key], dict):
+                result[key] = self._merge_settings(result[key], value)
+            else:
+                # 保留所有用户已保存的键值，包括不在默认设置中的新增项
+                result[key] = value
         return result
 
     def _save_settings(self):

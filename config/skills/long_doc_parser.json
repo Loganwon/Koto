@@ -46,9 +46,21 @@
   "react_protocol": "full",
   "multi_model_hint": "• 文档 < 50 页 → 快速模型（gemini-2.5-flash）可处理\n• 文档 > 100 页 / 涉及复杂财务交叉验证 → 优先高推理能力模型（Gemini 2.5 Pro）\n• MultiAgent 分工：读取节点（解析原文）→ 提取节点（定位字段）→ 输出节点（格式化）",
   "handoff_context": "下游 doc_gen_excel / doc_gen_word 可用字段：\n- extracted_table: [{科目: 值, 年份: 值}] 结构化提取结果\n- source_doc: 原始文件路径\n- missing_fields: 原文未披露的字段列表\n- unit: 数据单位（元/万元/亿元）\n- source_refs: [{字段: 页码/章节}] 来源引用",
-  "chains_to": ["doc_gen_excel", "doc_gen_word", "financial_table_mapper"],
-  "synergizes_with": ["excel_analyst", "financial_table_mapper", "kpi_calculator"],
-  "output_keys": ["extracted_table", "source_refs", "missing_fields"],
+  "chains_to": [
+    "doc_gen_excel",
+    "doc_gen_word",
+    "financial_table_mapper"
+  ],
+  "synergizes_with": [
+    "excel_analyst",
+    "financial_table_mapper",
+    "kpi_calculator"
+  ],
+  "output_keys": [
+    "extracted_table",
+    "source_refs",
+    "missing_fields"
+  ],
   "tags": [
     "全文读取",
     "长文档",
@@ -56,5 +68,6 @@
     "数据提取",
     "原文引用",
     "read_full_document"
-  ]
+  ],
+  "enabled": true
 }

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+
 from flask import Blueprint, jsonify
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ def _read_version() -> str:
 def _check_ollama() -> dict:
     """Check if Ollama is reachable."""
     try:
+        import requests
         resp = requests.get("http://localhost:11434/api/tags", timeout=2)
         ok = resp.status_code == 200
         return {"status": "ok" if ok else "error", "detail": f"HTTP {resp.status_code}"}
@@ -145,7 +147,6 @@ def ping():
 @health_bp.route("/api/ping/cloud", methods=["GET"])
 def ping_cloud():
     """Measure round-trip latency to the configured cloud AI API endpoint."""
-    import os
     from urllib.parse import urlparse
 
     base = os.getenv("GEMINI_API_BASE", "").strip()

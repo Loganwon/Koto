@@ -111,7 +111,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-OK "本地模型安装器构建完成 → dist\LocalModelInstaller.exe"
 
 # ─── 步骤 3：组装便携包 ───────────────────────
-Write-Step "步骤 3/5  组装便携包（dist\Koto_Portable\)
+Write-Step "步骤 3/5  组装便携包（dist\Koto_Portable\)"
 & $PYTHON $DEPLOY_PY
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "deploy_portable.py 失败"
