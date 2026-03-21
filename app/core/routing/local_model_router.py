@@ -94,17 +94,19 @@ class LocalModelRouter:
 - AGENT      : 命令执行跨应用工具操作（发送消息/邮件、设提醒/闹钟、日历、浏览器自动化）
 - WEB_SEARCH : 需要实时/当前信息（今日天气、即时股价/汇率、最新新闻、当前价格/排名）
 - CHAT       : 知识问答、概念解释、日常对话、建议咨询、历史信息、通用翻译、短文本创作
+- MEETING_EXTRACT: 用户提供了实际会议内容/转录文字/对话记录，要求提炼/整理/总结/归纳会议纪要/关键信息/行动项
 
 ━━━ 分类优先级（多条规则同时符合时，序号小的优先）━━━
-1. PAINTER      ← 含"画/绘/生成图/创作图/图片/壁纸/头像"等视觉创作词（注意："图表/折线图/柱状图/可视化"不在此列）
-2. FILE_GEN     ← 明确要生成+保存为文件格式（Word/PPT/Excel/PDF）
-3. DOC_ANNOTATE ← 有"这段/这篇/以下/下面的内容/代码"等**已有内容**的改写/润色请求；或 [FILE_ATTACHED] + 标注/批注/修改动作
-4. CODER        ← 要求输出可运行代码（写代码/写脚本/实现功能/帮我写一个函数），或调试/检查代码bug（这段代码有bug/帮我debug），或制作数据图表/可视化（作图/图表/折线图/柱状图/饼图/散点图）
-5. SYSTEM       ← 命令语气 + 操作本机系统/进程/环境（打开应用、关机、调音量、截图、修改设置、运行程序）
-6. AGENT        ← 命令语气 + 跨应用工具/服务（消息/提醒/日历/浏览器），或要求执行自动化工作流/多步骤任务（帮我自动完成X/按流程执行X/多步骤任务）
-7. WEB_SEARCH   ← 明确需要实时变化的数据（今天/现在/最新/当前）
-8. RESEARCH     ← 带"深入/系统/全面+具体主题"的研究请求
-9. CHAT         ← 默认分类（问问题、学知识、闲聊、短文本）
+1. PAINTER        ← 含"画/绘/生成图/创作图/图片/壁纸/头像"等视觉创作词（注意："图表/折线图/柱状图/可视化"不在此列）
+2. FILE_GEN       ← 明确要生成+保存为文件格式（Word/PPT/Excel/PDF）
+3. DOC_ANNOTATE   ← 有"这段/这篇/以下/下面的内容/代码"等**已有内容**的改写/润色请求；或 [FILE_ATTACHED] + 标注/批注/修改动作
+4. CODER          ← 要求输出可运行代码（写代码/写脚本/实现功能/帮我写一个函数），或调试/检查代码bug（这段代码有bug/帮我debug），或制作数据图表/可视化（作图/图表/折线图/柱状图/饼图/散点图）
+5. SYSTEM         ← 命令语气 + 操作本机系统/进程/环境（打开应用、关机、调音量、截图、修改设置、运行程序）
+6. AGENT          ← 命令语气 + 跨应用工具/服务（消息/提醒/日历/浏览器），或要求执行自动化工作流/多步骤任务（帮我自动完成X/按流程执行X/多步骤任务）
+7. MEETING_EXTRACT← 用户粘贴/提供了会议转录/对话记录 + 提炼/整理/总结/归纳关键信息/纪要/行动项
+8. WEB_SEARCH     ← 明确需要实时变化的数据（今天/现在/最新/当前）
+9. RESEARCH       ← 带"深入/系统/全面+具体主题"的研究请求
+10. CHAT           ← 默认分类（问问题、学知识、闲聊、短文本）
 
 ━━━ 关键区分规则 ━━━
 
@@ -141,6 +143,13 @@ class LocalModelRouter:
 【CODER vs AGENT】
 - "用Python写一个脚本来爬取数据" → CODER（要求代码输出）
 - "帮我自动登录某网站/自动发帖/自动填表" → AGENT（要求执行操作）
+
+【MEETING_EXTRACT vs CHAT】
+- MEETING_EXTRACT 触发条件：用户提供了真实会议内容/转录文字 + 提炼/整理/总结/归纳/提取
+- CHAT：仅问"会议纪要怎么写/什么是会议纪要/如何做好纪要" → 知识问答，不是提炼任务
+- "帮我提炼这次会议的关键信息" → MEETING_EXTRACT（有会议内容+提炼动作）
+- "会议纪要怎么写" → CHAT（知识询问）
+- "什么是会议纪要" → CHAT（概念解释）
 
 【PAINTER vs CODER（图表/可视化）】
 - "帮我画一张艺术图/生成一张封面/AI绘画": → PAINTER（视觉创作）
@@ -228,6 +237,10 @@ class LocalModelRouter:
 输出: {{"task":"RESEARCH","confidence":0.90}}
 输入: 设置明天早上8点提醒我开会
 输出: {{"task":"AGENT","confidence":0.92}}
+输入: 帮我整理一下这段会议记录，提炼关键决策和行动项
+输出: {{"task":"MEETING_EXTRACT","confidence":0.93}}
+输入: 会议纪要怎么写
+输出: {{"task":"CHAT","confidence":0.91}}
 输入: 用Python实现一个文件批量重命名工具
 输出: {{"task":"CODER","confidence":0.93}}
 输入: 帮我把这段代码优化一下
@@ -304,8 +317,8 @@ class LocalModelRouter:
 输出: {{"task":"CHAT","confidence":0.95}}
 （固定历史知识，不需要实时数据）
 输入: 调一下这段代码的bug
-输出: {{"task":"DOC_ANNOTATE","confidence":0.87}}
-（对已有代码修改，不是新建代码）
+输出: {{"task":"CODER","confidence":0.88}}
+（调试/debug=CODER，不是 DOC_ANNOTATE，即使有"这段代码"也不例外）
 输入: 原油是什么
 输出: {{"task":"CHAT","confidence":0.92}}
 （概念问答，无价格/行情词 → CHAT，不是 WEB_SEARCH）
@@ -430,6 +443,15 @@ class LocalModelRouter:
         cls._model_name = target_model
         cls._initialized = True
         print(f"[LocalModelRouter] ✅ 使用本地模型: {target_model}")
+        # 后台预热：发送一次简短分类请求让 Ollama 把模型加载进显存，
+        # 这样第一次真实分类请求无需等待冷启动延迟。
+        import threading as _threading
+        def _warmup():
+            try:
+                cls.classify("你好", timeout=8.0)
+            except Exception:
+                pass
+        _threading.Thread(target=_warmup, daemon=True, name="ollama-warmup").start()
         return True
 
     # ══════════════════════════════════════════════════════════════════

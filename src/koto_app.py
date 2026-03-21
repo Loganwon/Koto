@@ -341,26 +341,58 @@ class WindowAPI:
         self.full_pos = None
         self.mini_size = (320, 480)  # 适合高分辨率屏幕的迷你尺寸
 
+    def _get_logical_screen_size(self):
+        """返回逻辑像素下的屏幕尺寸（pywebview.move/resize 使用逻辑像素坐标）。
+        GetSystemMetrics 在 DPI-aware 进程中返回物理像素，需除以 DPI 缩放比例。
+        """
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        physical_w = user32.GetSystemMetrics(0)
+        physical_h = user32.GetSystemMetrics(1)
+        try:
+            get_dpi = ctypes.windll.user32.GetDpiForSystem
+            get_dpi.restype = ctypes.c_uint
+            dpi = get_dpi()
+            scale = dpi / 96.0
+        except AttributeError:
+            # Windows < 8.1 fallback: 用 GDI 查询 DPI
+            try:
+                hdc = ctypes.windll.gdi32.CreateDCW("DISPLAY", None, None, None)
+                dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+                ctypes.windll.gdi32.DeleteDC(hdc)
+                scale = dpi / 96.0
+            except Exception:
+                scale = 1.0
+        return int(physical_w / scale), int(physical_h / scale)
+
+    def _navigate_after_return(self, url, delay=0.15):
+        """延后导航，让当前 HTTP/JS 调用先完成，避免回调和页面跳转互相阻塞。"""
+
+        def _load_target():
+            import time
+
+            if delay > 0:
+                time.sleep(delay)
+            self.window.load_url(url)
+
+        threading.Thread(target=_load_target, daemon=True).start()
+
     def switch_to_mini(self):
-        """切换到迷你模式 - 固定在屏幕右下角"""
+        """切换到迷你模式 - 固定在屏幕右侧垂直居中"""
         if self.is_mini_mode:
             return {"success": True, "mode": "mini"}
 
         try:
-            import ctypes
+            screen_w, screen_h = self._get_logical_screen_size()
 
-            user32 = ctypes.windll.user32
-            # 使用真实屏幕分辨率（考虑DPI缩放）
-            user32.SetProcessDPIAware()
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
-
-            # 保存当前位置和大小
+            # 保存当前位置和大小，以便恢复
             self.full_size = (self.window.width, self.window.height)
+            self.full_pos = (self.window.x, self.window.y)
 
-            # 迷你窗口：固定屏幕右侧（垂直居中）
+            # 迷你窗口固定在屏幕右侧，垂直居中，留 20px 边距
             mini_w, mini_h = self.mini_size
-            x = screen_w - mini_w - 20
+            x = max(0, screen_w - mini_w - 20)
             y = max(20, (screen_h - mini_h) // 2)
 
             # 先移动再调整大小，确保位置正确
@@ -369,8 +401,8 @@ class WindowAPI:
             self.window.on_top = True
             self.is_mini_mode = True
 
-            # 加载迷你UI
-            self.window.load_url(f"{self.base_url}/mini")
+            # 延后加载迷你 UI，确保当前调用链先返回。
+            self._navigate_after_return(f"{self.base_url}/mini")
 
             return {
                 "success": True,
@@ -382,29 +414,28 @@ class WindowAPI:
             return {"success": False, "error": str(e)}
 
     def switch_to_full(self):
-        """切换到完整模式"""
+        """切换到完整模式，恢复切换前的位置"""
         if not self.is_mini_mode:
             return {"success": True, "mode": "full"}
 
         try:
-            import ctypes
-
-            user32 = ctypes.windll.user32
-            screen_w = user32.GetSystemMetrics(0)
-            screen_h = user32.GetSystemMetrics(1)
-
-            # 恢复完整模式
             full_w, full_h = self.full_size
-            x = (screen_w - full_w) // 2
-            y = (screen_h - full_h) // 2
+
+            # 优先恢复切换前的位置，否则居中
+            if self.full_pos is not None:
+                x, y = self.full_pos
+            else:
+                screen_w, screen_h = self._get_logical_screen_size()
+                x = max(0, (screen_w - full_w) // 2)
+                y = max(0, (screen_h - full_h) // 2)
 
             self.window.on_top = False
             self.window.resize(full_w, full_h)
             self.window.move(x, y)
             self.is_mini_mode = False
 
-            # 加载完整UI
-            self.window.load_url(self.base_url)
+            # 延后加载完整 UI，确保当前调用链先返回。
+            self._navigate_after_return(self.base_url)
 
             return {"success": True, "mode": "full"}
         except Exception as e:
@@ -1189,6 +1220,13 @@ def main():
     window.expose(window_api.maximize)
     window.expose(window_api.close)
     window.expose(window_api.open_url)
+
+    # 将 window_api 注入到 Flask app，供 HTTP 路由降级使用
+    try:
+        from web.app import app as _flask_app
+        _flask_app.config["WINDOW_API"] = window_api
+    except Exception as _e:
+        _write_log(f"⚠️ 无法注入 window_api 到 Flask: {_e}")
 
     # 窗口引用（供托盘使用）
     window_ref = [window]

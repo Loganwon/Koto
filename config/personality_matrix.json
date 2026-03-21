@@ -1,11 +1,18 @@
 {
   "cognitive": {
-    "exploratory": 0.5,
-    "executor": 0.5,
+    "exploratory": 0.53,
+    "executor": 0.545,
     "analytical": 0.5,
     "creative": 0.5
   },
   "expertise": {},
-  "goals": [],
-  "recent_themes": []
+  "goals": [
+    "获取塔罗牌解读",
+    "寻求指引"
+  ],
+  "recent_themes": [
+    "塔罗牌",
+    "占卜",
+    "自我探索"
+  ]
 }

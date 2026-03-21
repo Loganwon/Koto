@@ -129,90 +129,67 @@
   "executor_tools": [],
   "entry_point": null,
 
-  "_v3_dynamic_comment": [
+  "_permissions_comment": [
     "====================================================================",
-    "  v3 动态编排字段（高级）——强化模型工具调用与多模型协作能力",
+    "  permissions — Skill 权限系统（可选）",
     "====================================================================",
-    "",
-    "下面 4 个字段是 Koto Skill v3 新增的「动态编排」能力。",
-    "它们在 plan_template（固定步骤）的基础上，进一步教会模型：",
-    "  · 根据输入动态选择工具（tool_orchestration）",
-    "  · 按照 ReAct 推理循环执行任务（react_protocol）",
-    "  · 在多模型/多 Agent 管线中合理分工（multi_model_hint）",
-    "  · 为下游 skill（chains_to 列表中的技能）准备格式化输出（handoff_context）",
-    "",
-    "✅ 全部字段默认为空字符串，留空不影响现有 skill 行为。",
-    "✅ 只在你需要精细控制工具调用或 multi-agent 协作时才填写。"
+    "声明此 Skill 需要哪些额外权限。Koto 会在用户首次启用时提示授权。",
+    "未授权的权限不会生效。可选权限：",
+    "  ui_style       : 修改聊天界面主题色、背景 CSS（风险：低）",
+    "  ui_interactive : 添加交互控件（按钮、快速回复、浮动面板）（风险：低）",
+    "  notifications  : 发出系统通知提醒（风险：中）",
+    "  clipboard_read : 读取剪贴板内容（风险：中）",
+    "  clipboard_write: 写入剪贴板（风险：低）",
+    "  storage        : 在本地存储数据（风险：高）",
+    "  autorun        : 在无用户输入时自动执行（风险：中）",
+    "示例：[\"ui_interactive\", \"clipboard_write\"]"
   ],
+  "permissions": [],
 
-  "tool_orchestration": "",
-  "_tool_orchestration_comment": [
-    "【用途】告诉模型「在什么情况下调用哪个工具」，用条件树格式书写。",
-    "【格式】用 • 和缩进表示条件分支，用 → 表示动作：",
+  "_ui_extensions_comment": [
+    "====================================================================",
+    "  ui_extensions — UI 交互扩展（需要 ui_interactive 权限）",
+    "====================================================================",
+    "为聊天界面添加交互控件。需在 permissions 中声明 'ui_interactive' 且用户已授权。",
     "",
-    "示例：",
-    "• 用户提供了文件路径 → read_file_snippet(path, max_chars=5000)",
-    "  · 返回内容被截断（末尾有 '...'）→ summarize_file(path, focus='问题相关代码')",
-    "  · 返回乱码/空内容 → 告知用户文件可能损坏，建议手动检查",
-    "• 用户只提供了文字描述（无路径）→ 直接分析，不调用文件工具",
-    "  · 需要验证假设 → 调用 execute_python 运行最小验证代码",
+    "action_buttons  : 输入框上方的快捷操作按钮行",
+    "  每个按钮字段：",
+    "    id        : 唯一ID（小写+下划线）",
+    "    label     : 按钮显示文字",
+    "    message   : 点击后自动发送的消息（与 action 二选一）",
+    "    action    : 内置动作 ID（当前仅支持 'open_floating_widget'）",
+    "    variant   : 样式，可选 default | primary | danger",
+    "    tooltip   : 鼠标悬停提示文字",
     "",
-    "【技巧】",
-    "  - 越具体越好：与其说「需要时调用工具」，不如写「满足 X 条件 → 调用 Y」",
-    "  - 写上「工具失败时怎么办」能显著提升鲁棒性",
-    "  - executor_tools 字段控制「哪些工具可用」，tool_orchestration 控制「怎么用」"
+    "quick_replies   : AI 回复后自动显示的快速回复芯片列表（字符串数组）",
+    "",
+    "floating_widget : 可拖动的浮动小面板",
+    "  type     : 面板类型，可选：",
+    "               dice_roller  骰子（RPG/游戏）",
+    "               timer        倒计时/计时器",
+    "               notes        便签（会话期间暂存）",
+    "               calculator   计算器",
+    "               word_counter 字数统计",
+    "               color_picker 颜色选择器",
+    "  title    : 面板标题",
+    "  position : 初始位置 bottom-right | bottom-left | top-right | top-left"
   ],
-
-  "react_protocol": "",
-  "_react_protocol_comment": [
-    "【用途】控制模型是否使用 ReAct（Reason + Act）推理循环。",
-    "【取值】三选一：",
-    "  ''      → 不注入任何 ReAct 提示（默认，适合简单对话 skill）",
-    "  'light' → 注入一行提醒：调用工具前先说明理由，工具结束后总结",
-    "            适合需要 1-3 个工具调用的中等复杂 skill",
-    "  'full'  → 注入完整 4 步循环：思考 → 行动 → 观察 → 重复",
-    "            适合需要多轮工具调用、决策分支多的复杂 skill",
-    "",
-    "【建议】",
-    "  - 简单的 CHAT skill → 留空 ''，避免无谓 token 开销",
-    "  - 有 tool_orchestration 的 skill → 至少用 'light'",
-    "  - plan_template 超过 4 步 + 多种工具 → 用 'full'"
-  ],
-
-  "multi_model_hint": "",
-  "_multi_model_hint_comment": [
-    "【用途】为 Koto 的多模型/多 Agent 管线提供协作建议。",
-    "【格式】自由文本，建议用 • 列出：模型偏好 + Agent 分工 + 节点间数据传递。",
-    "",
-    "示例：",
-    "• 复杂分析任务（多层逻辑推理）→ 优先使用高推理能力模型（Gemini 2.5 Pro）",
-    "• 简单格式化/代码生成 → 可使用更快的本地模型降低延迟",
-    "• MultiAgentOrchestrator 推荐分工：",
-    "  - 节点 1（数据收集+工具调用）：速度优先的模型",
-    "  - 节点 2（深度分析+洞察生成）：推理能力优先的模型",
-    "  - 节点 1 → 节点 2 传递的关键字段：raw_data, context_summary",
-    "",
-    "【注意】这是建议性字段，最终路由决策由 MultiAgentOrchestrator 执行。",
-    "       填写后，编排器会将其作为参考权重，但不强制覆盖用户设置。"
-  ],
-
-  "handoff_context": "",
-  "_handoff_context_comment": [
-    "【用途】当此 skill 通过 chains_to 链接到下游 skill 时，描述应该输出哪些字段",
-    "       来让下游 skill 顺利接手任务（减少「上游输出 ≠ 下游期望输入」的断层）。",
-    "【格式】自由文本，建议按下游 skill 分段描述：",
-    "",
-    "示例（debug_python → write_unit_tests + git_commit_helper）：",
-    "为 write_unit_tests 准备的数据：",
-    "- 修复后函数的完整签名（名称/参数/返回类型注解）",
-    "- 已识别的边界条件（None/空列表/负数/编码/线程锁等）",
-    "- 建议的测试场景：正常路径 + 2 个边界场景 + 1 个错误路径",
-    "",
-    "为 git_commit_helper 准备：",
-    "- 一句话修复摘要，格式：fix: [模块名] [修复内容]",
-    "",
-    "【技巧】",
-    "  - 只需描述下游 skill 真正需要的字段，不要泛泛而谈",
-    "  - 格式越精确，下游 skill 的输入质量越高"
-  ]
+  "ui_extensions": {
+    "action_buttons": [
+      {
+        "id": "example_btn",
+        "label": "示例按钮",
+        "message": "发送这句话给 AI",
+        "variant": "default",
+        "tooltip": "点击后自动发送消息"
+      }
+    ],
+    "quick_replies": ["好的", "再来一个", "不对，重新来"],
+    "floating_widget": {
+      "type": "dice_roller",
+      "title": "骰子",
+      "position": "bottom-right"
+    }
+  }
 }
+

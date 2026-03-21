@@ -53,6 +53,10 @@ DEFAULT_SETTINGS = {
     },
     "model_mode": "cloud",
     "local_model": "",
+    "user": {
+        "name": "",
+        "role": "admin",
+    },
 }
 
 

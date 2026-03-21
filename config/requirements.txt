@@ -29,6 +29,7 @@ beautifulsoup4>=4.12.0
 jieba>=0.42.1              # 中文分词
 docx2txt>=0.8              # .doc / .docx 文本提取（无需 Word COM）
 striprtf>=0.0.26           # RTF 纯文本提取
+EbookLib>=0.18             # .epub 文本提取
 
 # ── Data ──
 pandas>=2.0.0

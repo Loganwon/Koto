@@ -12,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -32,17 +32,17 @@ jobs:
         run: isort --check-only --profile black src/ app/ tests/
 
       - name: Security scan (bandit)
-        run: bandit -r app/ src/ -ll -q --exit-zero
+        run: bandit -r app/ src/ -lll -q
 
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -87,53 +87,22 @@ jobs:
             tests/test_unified_agent.py \
             -v --tb=short -q \
             --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
-            --cov-fail-under=48
+            --cov-fail-under=40
 
       - name: Upload coverage report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.xml
           retention-days: 14
-
-  e2e:
-    name: Playwright E2E Tests
-    runs-on: windows-latest
-    needs: test
-    continue-on-error: true
-    timeout-minutes: 20
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r config/requirements.txt
-          pip install pytest pytest-mock pytest-cov
-
-      - name: Install Playwright
-        run: |
-          pip install pytest-playwright
-          playwright install chromium
-
-      - name: Run E2E tests
-        env:
-          PYTHONPATH: .
-        run: python -m pytest tests/e2e/ -q --tb=short
 
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4

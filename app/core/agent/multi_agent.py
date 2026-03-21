@@ -67,7 +67,6 @@ try:
         SystemMessage,
     )
     from langgraph.graph import END, StateGraph
-    from langgraph.types import Send
     from typing_extensions import Annotated, TypedDict
 
     _LG_AVAILABLE = True
@@ -109,7 +108,6 @@ class AgentRole:
     is_critic: bool = False
     input_fields: Optional[List[str]] = None
     temperature: float = 0.7
-    model_id: Optional[str] = None  # None = 使用 Orchestrator 级别的 model_id
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -163,9 +161,7 @@ class ROLES:
         system_prompt=(
             "你是文稿修订专员（Revise Agent）。\n"
             "根据审核意见，修订并提升文稿质量，保持 Markdown 格式。\n"
-            "确保修订后的内容解决了所有审核指出的问题。\n"
-            "【严格要求】只输出修订后的完整文稿本身，不得包含任何前言、"
-            "标注（如'修正版本'）、原文引用或说明性文字。"
+            "确保修订后的内容解决了所有审核指出的问题。"
         ),
         output_field="draft",
     )
@@ -224,8 +220,6 @@ if _LG_AVAILABLE:
         analysis: Optional[str]
         # 自定义输出的 fallback
         extra_outputs: Dict[str, str]
-        # 并行节点输出收集（每个并行分支写入一个 dict，使用 list reducer 合并）
-        parallel_outputs: Annotated[List[Dict[str, str]], operator.add]
         # 控制字段
         revision_count: int
         max_revisions: int
@@ -241,18 +235,25 @@ if _LG_AVAILABLE:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-# 节点重试降级链（原始 model 失败后依次尝试）
-_NODE_FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.0-flash-lite"]
+# 按 (model_id, temperature) 缓存 LLM 实例，避免每次节点调用都重建
+_llm_cache: Dict[tuple, Any] = {}
 
 
 def _llm_call(model_id: str, system: str, user: str, temperature: float = 0.7) -> str:
-    """单次同步 LLM 调用，返回文本。失败时抛出异常（不返回错误字符串）。"""
+    """单次同步 LLM 调用，返回文本。同一 (model_id, temperature) 复用同一 LLM 实例。"""
     from app.core.llm.langchain_adapter import KotoLangChainLLM
 
-    llm = KotoLangChainLLM(model_id=model_id, temperature=temperature)
+    cache_key = (model_id, temperature)
+    if cache_key not in _llm_cache:
+        _llm_cache[cache_key] = KotoLangChainLLM(model_id=model_id, temperature=temperature)
+    llm = _llm_cache[cache_key]
     msgs = [SystemMessage(content=system), HumanMessage(content=user)]
-    resp = llm.invoke(msgs)
-    return resp.content if hasattr(resp, "content") else str(resp)
+    try:
+        resp = llm.invoke(msgs)
+        return resp.content if hasattr(resp, "content") else str(resp)
+    except Exception as exc:
+        logger.error("[MultiAgent] LLM call failed: %s", exc)
+        return f"[错误] {exc}"
 
 
 def _build_context(state: "MultiAgentState", role: AgentRole) -> str:
@@ -264,10 +265,10 @@ def _build_context(state: "MultiAgentState", role: AgentRole) -> str:
         fields = ["research_result", "draft", "critic_feedback", "code", "analysis"]
 
     parts = [f"用户需求：{state['user_input']}"]
-    for f in fields:
-        val = state.get(f) or state.get("extra_outputs", {}).get(f)
+    for field_key in fields:
+        val = state.get(field_key) or state.get("extra_outputs", {}).get(field_key)
         if val:
-            label = f.replace("_", " ").title()
+            label = field_key.replace("_", " ").title()
             parts.append(f"\n---\n{label}：\n{val}")
     return "\n".join(parts)
 
@@ -276,53 +277,29 @@ def _make_agent_node(role: AgentRole):
     """工厂函数：为给定 AgentRole 生成 LangGraph 节点函数。"""
 
     def node_fn(state: "MultiAgentState") -> Dict:
-        # per-role model_id 优先，否则退回 Orchestrator 传入的全局 model_id
-        model_id = role.model_id or state.get("model_id", "gemini-3-flash-preview")
+        model_id = state.get("model_id", "gemini-3-flash-preview")
         user_context = _build_context(state, role)
 
-        # ── 带降级重试：原始模型失败后依次尝试备用模型（最多 2 次）─────────
-        _models_to_try = [model_id] + [
-            m for m in _NODE_FALLBACK_MODELS if m != model_id
-        ]
-        output = None
-        _last_exc: Exception = RuntimeError(f"[{role.display_name}] 所有模型均失败")
-        for _attempt, _m in enumerate(_models_to_try[:3]):
-            try:
-                logger.info(
-                    f"[MultiAgent] [{role.display_name}] 开始执行 "
-                    f"(model={_m}, attempt={_attempt + 1})"
-                )
-                output = _llm_call(
-                    model_id=_m,
-                    system=role.system_prompt,
-                    user=user_context,
-                    temperature=role.temperature,
-                )
-                logger.info(f"[MultiAgent] [{role.display_name}] 完成 (model={_m})")
-                break
-            except Exception as _exc:
-                _last_exc = _exc
-                logger.warning(
-                    f"[MultiAgent] [{role.display_name}] attempt {_attempt + 1} "
-                    f"failed ({_m}): {_exc}"
-                )
-        if output is None:
-            raise _last_exc
+        logger.info(f"[MultiAgent] [{role.display_name}] 开始执行")
+        output = _llm_call(
+            model_id=model_id,
+            system=role.system_prompt,
+            user=user_context,
+            temperature=role.temperature,
+        )
+        logger.info(f"[MultiAgent] [{role.display_name}] 完成")
 
         update: Dict[str, Any] = {
             "steps": state.get("steps", []) + [role.name],
             "messages": [AIMessage(content=f"[{role.display_name}] 完成")],
         }
 
-        # 修订节点：递增 revision_count，防止 Critic 循环无限执行
+        # Critic 循环：revise 节点每次被调用都递增修订计数，防止无限循环
         if "revise" in role.name.lower():
             update["revision_count"] = state.get("revision_count", 0) + 1
 
-        # 写入输出字段
-        if (
-            hasattr(state, "__annotations__")
-            and role.output_field in MultiAgentState.__annotations__
-        ):
+        # 写入输出字段（state 运行时是 dict，直接检查 TypedDict annotations）
+        if role.output_field in MultiAgentState.__annotations__:
             update[role.output_field] = output
         else:
             extras = dict(state.get("extra_outputs", {}))
@@ -382,21 +359,13 @@ class MultiAgentOrchestrator:
         roles: List[AgentRole],
         model_id: str = "gemini-3-flash-preview",
         max_revisions: int = 1,
-        parallel_roles: Optional[List[AgentRole]] = None,
         checkpointer=None,
     ):
-        """
-        parallel_roles : 可选的并行 Agent 列表。设置后会在管线第一个节点之前
-                         插入 fanout-dispatch → [A || B || C] → gather 段。
-                         各并行 Agent 的输出会合并到 extra_outputs / parallel_outputs，
-                         再流入后续顺序管线。
-        """
         _assert_langgraph()
         if not roles:
             raise ValueError("roles 不能为空")
 
         self.roles = roles
-        self.parallel_roles = parallel_roles or []
         self.model_id = model_id
         self.max_revisions = max_revisions
 
@@ -412,133 +381,116 @@ class MultiAgentOrchestrator:
         """自动从 roles 列表构建 StateGraph。"""
         graph = StateGraph(MultiAgentState)
 
-        # ── 注册顺序管线节点 ─────────────────────────────────────────────────
+        # revise 节点集合：名称含 "revise" 且非 critic
+        revise_names = {
+            r.name for r in self.roles if "revise" in r.name.lower() and not r.is_critic
+        }
+
+        # ── 注册所有 Agent 节点 ───────────────────────────────────────────────
         for role in self.roles:
             graph.add_node(role.name, _make_agent_node(role))
 
-        # ── 并行 Fanout 节点（可选）─────────────────────────────────────────
-        _has_parallel = bool(self.parallel_roles)
-        if _has_parallel:
-            _par_names = [f"parallel_{r.name}" for r in self.parallel_roles]
+        # ── finalize 节点：收集最终输出 ──────────────────────────────────────
+        _roles_snapshot = list(self.roles)  # 闭包捕获，避免引用可变列表
 
-            # 每个并行 Agent 节点：输出写入 parallel_outputs（list reducer 自动合并）
-            for role in self.parallel_roles:
-                def _make_par_node(r=role):
-                    def _par_fn(state: "MultiAgentState") -> Dict:
-                        model_id = r.model_id or state.get("model_id", "gemini-3-flash-preview")
-                        ctx = _build_context(state, r)
-                        logger.info(f"[MultiAgent] [{r.display_name}] 并行执行 (model={model_id})")
-                        out = _llm_call(model_id=model_id, system=r.system_prompt,
-                                        user=ctx, temperature=r.temperature)
-                        logger.info(f"[MultiAgent] [{r.display_name}] 并行完成")
-                        return {
-                            "parallel_outputs": [{r.output_field: out}],
-                            "steps": state.get("steps", []) + [f"parallel_{r.name}"],
-                            "messages": [AIMessage(content=f"[{r.display_name}(并行)] 完成")],
-                        }
-                    _par_fn.__name__ = f"parallel_{r.name}"
-                    return _par_fn
-                graph.add_node(f"parallel_{role.name}", _make_par_node())
-
-            # Dispatch 节点：用 Send API 触发所有并行分支
-            _par_names_snapshot = list(_par_names)
-            def _fanout_dispatch(state: "MultiAgentState"):
-                return [Send(name, state) for name in _par_names_snapshot]
-            graph.add_node("fanout_dispatch", lambda s: {})
-            graph.add_conditional_edges("fanout_dispatch", _fanout_dispatch, _par_names_snapshot)
-
-            # Gather 节点：将 parallel_outputs 合并到 extra_outputs，供后续顺序节点使用
-            def _gather(state: "MultiAgentState") -> Dict:
-                merged = dict(state.get("extra_outputs") or {})
-                for chunk in state.get("parallel_outputs") or []:
-                    merged.update(chunk)
-                return {"extra_outputs": merged}
-            graph.add_node("fanout_gather", _gather)
-            for pname in _par_names_snapshot:
-                graph.add_edge(pname, "fanout_gather")
-
-        # ── 添加 finalize 节点（设置 final_output）────────────────────────────
         def node_finalize(state: "MultiAgentState") -> Dict:
-            for field in ["draft", "code", "analysis"]:
-                val = state.get(field)
+            # 优先级字段（最常见的写作/代码/分析输出）
+            for priority_field in ["draft", "code", "analysis"]:
+                if val := state.get(priority_field):
+                    return {"final_output": val}
+            # 按角色逆序查找（最后执行的角色输出优先）
+            for r in reversed(_roles_snapshot):
+                val = state.get(r.output_field) or state.get("extra_outputs", {}).get(r.output_field)
                 if val:
                     return {"final_output": val}
-            # fallback: last extra_output (parallel outputs included)
+            # 兜底：extra_outputs 最后一项
             extras = state.get("extra_outputs", {})
             if extras:
                 return {"final_output": list(extras.values())[-1]}
             return {"final_output": ""}
 
         graph.add_node("finalize", node_finalize)
+        graph.set_entry_point(self.roles[0].name)
 
-        # ── 构建顺序管线边 ────────────────────────────────────────────────────
-        critic_roles = [r for r in self.roles if r.is_critic]
-
-        # 入口：若有并行段则先 fanout，否则直接进入第一个顺序节点
-        first_seq = self.roles[0].name
-        if _has_parallel:
-            graph.set_entry_point("fanout_dispatch")
-            graph.add_edge("fanout_gather", first_seq)
-        else:
-            graph.set_entry_point(first_seq)
-
-        i = 0
-        while i < len(self.roles):
-            role = self.roles[i]
-            next_i = i + 1
-
-            if role.is_critic:
-                revise_target = None
-                for r in self.roles:
-                    if "revise" in r.name.lower() and not r.is_critic:
-                        revise_target = r.name
+        # ── 构建边 ────────────────────────────────────────────────────────────
+        for i, role in enumerate(self.roles):
+            if role.name in revise_names:
+                # Revise → 向前找最近的 critic，形成循环
+                critic_target = "finalize"
+                for j in range(i - 1, -1, -1):
+                    if self.roles[j].is_critic:
+                        critic_target = self.roles[j].name
                         break
-                if revise_target is None and i > 0:
-                    revise_target = self.roles[i - 1].name
+                graph.add_edge(role.name, critic_target)
 
-                next_name = (
-                    self.roles[next_i].name if next_i < len(self.roles) else "finalize"
+            elif role.is_critic:
+                # 优先使用显式 revise 节点，否则回退到前一个非 critic 节点
+                revise_target = next(
+                    (r.name for r in self.roles if r.name in revise_names), None
                 )
+                if revise_target is None:
+                    for j in range(i - 1, -1, -1):
+                        if not self.roles[j].is_critic:
+                            revise_target = self.roles[j].name
+                            break
+
+                # PASS → 跳过所有 revise 节点，连到下一个普通节点（或 finalize）
+                pass_dest = "finalize"
+                for j in range(i + 1, len(self.roles)):
+                    if self.roles[j].name not in revise_names:
+                        pass_dest = self.roles[j].name
+                        break
+
                 router = _make_critic_router(
-                    role, revise_target or "finalize", next_name
+                    role, revise_target or "finalize", pass_dest
                 )
-                next_map = (
-                    {revise_target: revise_target, next_name: next_name}
-                    if revise_target and revise_target != next_name
-                    else {next_name: next_name}
-                )
-                graph.add_conditional_edges(role.name, router, next_map)
+                dest_map: Dict[str, str] = {pass_dest: pass_dest}
+                if revise_target and revise_target != pass_dest:
+                    dest_map[revise_target] = revise_target
+                graph.add_conditional_edges(role.name, router, dest_map)
+
             else:
+                # 普通节点 → 顺序连接到下一个节点
                 next_name = (
-                    self.roles[next_i].name if next_i < len(self.roles) else "finalize"
+                    self.roles[i + 1].name if i + 1 < len(self.roles) else "finalize"
                 )
                 graph.add_edge(role.name, next_name)
 
-            i += 1
-
-        # revise 节点回到 critic
-        for role in self.roles:
-            if "revise" in role.name.lower() and not role.is_critic:
-                for critic in critic_roles:
-                    graph.add_edge(role.name, critic.name)
-                    break
-
         graph.add_edge("finalize", END)
-
         return graph.compile(checkpointer=self._checkpointer)
+
+    def _make_initial_state(
+        self, user_input: str, session_id: str, model_id: str
+    ) -> Dict[str, Any]:
+        """构建初始 Graph 状态，供 run() 和 stream() 共用。"""
+        return {
+            "user_input": user_input,
+            "model_id": model_id,
+            "session_id": session_id,
+            "research_result": None,
+            "draft": None,
+            "critic_feedback": None,
+            "review_feedback": None,
+            "code": None,
+            "analysis": None,
+            "extra_outputs": {},
+            "revision_count": 0,
+            "max_revisions": self.max_revisions,
+            "revision_target": None,
+            "messages": [],
+            "steps": [],
+            "final_output": None,
+            "error": None,
+        }
 
     def run(
         self,
         user_input: str,
         session_id: Optional[str] = None,
         model_id: Optional[str] = None,
-        timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         同步执行多 Agent 管线。
-
-        参数:
-            timeout : 最长等待秒数（None = 不限）。超时时返回已完成步骤的部分结果。
 
         返回:
             {
@@ -551,53 +503,11 @@ class MultiAgentOrchestrator:
         _assert_langgraph()
         _session = session_id or f"ma-{int(time.time())}"
         _model = model_id or self.model_id
-
-        initial_state: Dict[str, Any] = {
-            "user_input": user_input,
-            "model_id": _model,
-            "session_id": _session,
-            "research_result": None,
-            "draft": None,
-            "critic_feedback": None,
-            "review_feedback": None,
-            "code": None,
-            "analysis": None,
-            "extra_outputs": {},
-            "parallel_outputs": [],
-            "revision_count": 0,
-            "max_revisions": self.max_revisions,
-            "revision_target": None,
-            "messages": [],
-            "steps": [],
-            "final_output": None,
-            "error": None,
-        }
-
+        initial_state = self._make_initial_state(user_input, _session, _model)
         config = {"configurable": {"thread_id": _session}}
 
         try:
-            if timeout is not None:
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-                    _future = _pool.submit(
-                        self._graph.invoke, initial_state, config
-                    )
-                    try:
-                        result = _future.result(timeout=timeout)
-                    except concurrent.futures.TimeoutError:
-                        logger.warning(
-                            "[MultiAgentOrchestrator] 超时 (%.1fs)，返回部分结果", timeout
-                        )
-                        return {
-                            "output": "",
-                            "steps": [],
-                            "state": {},
-                            "error": f"Timeout after {timeout}s",
-                        }
-            else:
-                result = self._graph.invoke(initial_state, config=config)
-
+            result = self._graph.invoke(initial_state, config=config)
             return {
                 "output": result.get("final_output", ""),
                 "steps": result.get("steps", []),
@@ -615,28 +525,7 @@ class MultiAgentOrchestrator:
         """
         _assert_langgraph()
         _session = session_id or f"ma-{int(time.time())}"
-
-        initial_state: Dict[str, Any] = {
-            "user_input": user_input,
-            "model_id": self.model_id,
-            "session_id": _session,
-            "research_result": None,
-            "draft": None,
-            "critic_feedback": None,
-            "review_feedback": None,
-            "code": None,
-            "analysis": None,
-            "extra_outputs": {},
-            "parallel_outputs": [],
-            "revision_count": 0,
-            "max_revisions": self.max_revisions,
-            "revision_target": None,
-            "messages": [],
-            "steps": [],
-            "final_output": None,
-            "error": None,
-        }
-
+        initial_state = self._make_initial_state(user_input, _session, self.model_id)
         config = {"configurable": {"thread_id": _session}}
 
         try:
@@ -700,28 +589,6 @@ class MultiAgentOrchestrator:
         )
         return cls(
             roles=[ROLES.RESEARCHER, ROLES.CODER, ROLES.REVIEWER, revise_role],
-            model_id=model_id,
-            max_revisions=max_revisions,
-        )
-
-    @classmethod
-    def preset_analysis_pipeline(
-        cls,
-        model_id: str = "gemini-3-flash-preview",
-        max_revisions: int = 1,
-    ) -> "MultiAgentOrchestrator":
-        """预置：数据分析管线（研究 → 数据分析 → Critic 审核 → 修订报告）"""
-        revise_role = AgentRole(
-            name="revise",
-            display_name="报告修订专员",
-            system_prompt=(
-                "你是分析报告修订专员。根据审核意见，修订并完善数据分析报告。\n"
-                "确保报告逻辑严谨、数据准确、结论清晰，保持 Markdown 格式。"
-            ),
-            output_field="analysis",
-        )
-        return cls(
-            roles=[ROLES.RESEARCHER, ROLES.DATA_ANALYST, ROLES.CRITIC, revise_role],
             model_id=model_id,
             max_revisions=max_revisions,
         )

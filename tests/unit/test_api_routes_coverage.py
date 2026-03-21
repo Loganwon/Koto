@@ -1050,6 +1050,18 @@ class TestMacroRoutes:
 class TestShadowRoutes:
     """Tests for app.api.shadow_routes endpoints."""
 
+    @pytest.fixture(autouse=True)
+    def _isolate_shadow(self, tmp_path, monkeypatch):
+        """Redirect ShadowWatcher file I/O to tmp_path and reset singleton so
+        that these tests never touch the production shadow_observations.json."""
+        from app.core.monitoring import shadow_watcher as sw_module
+
+        sw_module.ShadowWatcher._instance = None
+        obs_file = tmp_path / "shadow_observations.json"
+        monkeypatch.setattr(sw_module, "_OBS_FILE", obs_file)
+        yield
+        sw_module.ShadowWatcher._instance = None
+
     def test_shadow_status(self, full_client):
         resp = full_client.get("/api/shadow/status")
         assert resp.status_code in _ANY_VALID

@@ -241,6 +241,22 @@ class UnifiedAgent(Agent):
                 logger.warning(f"[UnifiedAgent] PII 过滤异常（跳过）: {e}")
                 safe_input = input_text
 
+        # ── pre_message 钩子：用户脚本可在此转换输入 ─────────────────────────
+        try:
+            from app.core.hooks.hook_manager import get_hook_manager, HookContext
+            _hook_ctx = HookContext(
+                session_id=_session_id,
+                task_type=_task_type or "",
+                skill_id=_skill_id or "",
+            )
+            _hook_mgr = get_hook_manager()
+            if _hook_mgr.has_hooks("pre_message"):
+                safe_input = _hook_mgr.fire_pre_message(safe_input, _hook_ctx)
+        except Exception as _hk_err:
+            logger.debug(f"[UnifiedAgent] pre_message 钩子跳过: {_hk_err}")
+            _hook_ctx = None
+            _hook_mgr = None
+
         steps_taken = 0
         current_history = list(history) if history else []
         current_history.append({"role": "user", "content": safe_input})
@@ -325,6 +341,19 @@ class UnifiedAgent(Agent):
                         )
         except Exception as _se:
             logger.debug(f"[UnifiedAgent] Skill 注入跳过: {_se}")
+
+        # ── ContextProvider 注入：用户 config/context/*.json 持久上下文 ────────
+        try:
+            from app.core.context.context_provider import get_context_provider
+            _ctx_injection = get_context_provider().inject_into_prompt(
+                _effective_instruction,
+                task_type=_task_type,
+            )
+            if _ctx_injection != _effective_instruction:
+                _effective_instruction = _ctx_injection
+                logger.debug("[UnifiedAgent] ContextProvider 注入完成")
+        except Exception as _cp_err:
+            logger.debug(f"[UnifiedAgent] ContextProvider 注入跳过: {_cp_err}")
 
         # ── executor_tools 过滤：收集显式激活 Skill 的工具白名单 ─────────────
         # 只对用户显式指定的 _skill_id 做强制过滤（精确任务场景）
@@ -601,6 +630,16 @@ class UnifiedAgent(Agent):
                             logger.debug(
                                 "[UnifiedAgent] Skill 感知提示跳过: %s", _nfy_err
                             )
+
+                    # ── post_response 钩子：用户脚本可在此处理/转换最终回复 ──
+                    try:
+                        if _hook_mgr and _hook_mgr.has_hooks("post_response") and _hook_ctx:
+                            _hook_ctx.active_skills = _auto_skill_ids or []
+                            final_answer = _hook_mgr.fire_post_response(
+                                final_answer or "", _hook_ctx
+                            )
+                    except Exception as _hk2_err:
+                        logger.debug(f"[UnifiedAgent] post_response 钩子跳过: {_hk2_err}")
 
                     yield AgentStep(
                         step_type=AgentStepType.ANSWER,

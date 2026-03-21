@@ -59,6 +59,50 @@ _DEFAULT_DB_PATH = str(
 _registry_instance: Optional["FileRegistry"] = None
 _registry_lock = threading.Lock()
 
+# ── 文件语义索引（RAG）─────────────────────────────────────────────────────────
+_file_rag_instance = None
+_file_rag_lock = threading.Lock()
+_FILE_RAG_INDEX_DIR = str(
+    Path(
+        os.environ.get(
+            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+        )
+    )
+    / "file_rag_index"
+)
+
+
+def _get_file_rag_service():
+    """懒加载文件专用 RAG 服务（独立索引目录，不污染知识库 rag_index）。"""
+    global _file_rag_instance
+    if _file_rag_instance is None:
+        with _file_rag_lock:
+            if _file_rag_instance is None:
+                try:
+                    from app.core.services.rag_service import RAGService
+
+                    _file_rag_instance = RAGService(
+                        index_dir=_FILE_RAG_INDEX_DIR,
+                        auto_load=True,
+                    )
+                    logger.info("[FileRegistry] 🔍 文件语义索引已加载")
+                except Exception as exc:
+                    logger.warning(
+                        f"[FileRegistry] 语义索引不可用，仅使用 FTS5 搜索: {exc}"
+                    )
+                    _file_rag_instance = None
+    return _file_rag_instance
+
+
+def _index_content_to_rag(path: str, content: str) -> None:
+    """在后台线程将文件内容写入语义索引，异常静默。"""
+    try:
+        rag = _get_file_rag_service()
+        if rag is not None and content:
+            rag.index_text(content, source=path)
+    except Exception as exc:
+        logger.debug(f"[FileRegistry] RAG 索引写入失败 {path}: {exc}")
+
 # ── 文件分类表 ────────────────────────────────────────────────────────────────
 _EXT_CATEGORY: Dict[str, str] = {}
 for _cat, _exts in {
@@ -220,6 +264,67 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
                         break
                     rows.append("\t".join(str(c or "") for c in row))
                 return "\n".join(rows)[:max_chars]
+            except Exception:
+                return ""
+
+        if ext == ".pptx":
+            try:
+                from pptx import Presentation
+
+                prs = Presentation(path)
+                parts = []
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if shape.has_text_frame:
+                            for para in shape.text_frame.paragraphs:
+                                text = "".join(run.text for run in para.runs).strip()
+                                if text:
+                                    parts.append(text)
+                return "\n".join(parts)[:max_chars]
+            except Exception:
+                return ""
+
+        if ext == ".doc":
+            # docx2txt 已安装（见 requirements.txt），优先使用；再降级 mammoth → antiword
+            try:
+                import docx2txt
+
+                return docx2txt.process(path)[:max_chars]
+            except Exception:
+                pass
+            try:
+                import mammoth
+
+                with open(path, "rb") as f:
+                    result = mammoth.extract_raw_text(f)
+                return result.value[:max_chars]
+            except Exception:
+                return ""
+
+        if ext == ".epub":
+            try:
+                import ebooklib
+                from ebooklib import epub
+                from html.parser import HTMLParser
+
+                class _StripTags(HTMLParser):
+                    def __init__(self):
+                        super().__init__()
+                        self._parts: list = []
+
+                    def handle_data(self, data):
+                        self._parts.append(data)
+
+                    def get_text(self):
+                        return " ".join(self._parts)
+
+                book = epub.read_epub(path)
+                parts = []
+                for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+                    parser = _StripTags()
+                    parser.feed(item.get_content().decode("utf-8", errors="ignore"))
+                    parts.append(parser.get_text())
+                return "\n".join(parts)[:max_chars]
             except Exception:
                 return ""
 
@@ -530,7 +635,15 @@ class FileRegistry:
                 (fhash, size, mtime, content_preview, now, path),
             )
             self._conn.commit()
-            return self.get_by_path(path)
+            updated_entry = self.get_by_path(path)
+            # 内容有变化时更新语义索引
+            if content_preview and content_preview != (existing.content_preview or ""):
+                threading.Thread(
+                    target=_index_content_to_rag,
+                    args=(path, content_preview),
+                    daemon=True,
+                ).start()
+            return updated_entry
         else:
             # 插入
             file_id = str(uuid.uuid4())
@@ -575,6 +688,13 @@ class FileRegistry:
             logger.debug(
                 f"[FileRegistry] 注册文件 {name} [{category}] hash={fhash[:8]}"
             )
+            # 新文件有内容时写入语义索引
+            if content_preview:
+                threading.Thread(
+                    target=_index_content_to_rag,
+                    args=(path, content_preview),
+                    daemon=True,
+                ).start()
             return entry
 
     def batch_register(
@@ -636,12 +756,34 @@ class FileRegistry:
     ) -> List[FileEntry]:
         """
         统一搜索：
-        1. 先用 FTS5 全文搜索 name + content_preview
-        2. 再用 LIKE 文件名模糊匹配补充（去重）
-        3. 可选按 category / source 过滤
+        1. 语义向量搜索（Gemini text-embedding-004，需 API Key；不可用时跳过）
+        2. FTS5 全文搜索 name + content_preview
+        3. LIKE 文件名模糊匹配补充（去重）
+        4. 可选按 category / source 过滤
         """
         seen_ids: set = set()
         results: List[FileEntry] = []
+
+        # — 语义向量搜索 —
+        if query:
+            try:
+                rag = _get_file_rag_service()
+                if rag is not None:
+                    rag_hits = rag.retrieve(query, k=min(limit, 10), score_threshold=0.3)
+                    for hit in rag_hits:
+                        hit_path = hit.get("source", "")
+                        if not hit_path:
+                            continue
+                        entry = self.get_by_path(hit_path)
+                        if (
+                            entry
+                            and self._filter_ok(entry, category, source)
+                            and entry.file_id not in seen_ids
+                        ):
+                            results.append(entry)
+                            seen_ids.add(entry.file_id)
+            except Exception as exc:
+                logger.debug(f"[FileRegistry] 语义搜索跳过: {exc}")
 
         # — FTS 搜索 —
         try:
@@ -784,7 +926,37 @@ class FileRegistry:
         self._conn.commit()
         return op_id
 
-    def get_op_log(self, limit: int = 20) -> List[Dict[str, Any]]:
+    # ── Goal 关联 ─────────────────────────────────────────────────────────────
+
+    def list_by_goal(self, goal_id: str, limit: int = 50) -> List[FileEntry]:
+        """返回与指定 goal 关联的所有文件（按注册时间倒序）。"""
+        rows = self._conn.execute(
+            "SELECT * FROM koto_file_registry WHERE origin_goal_id = ?"
+            " ORDER BY indexed_at DESC LIMIT ?",
+            (goal_id, limit),
+        ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
+    def link_goal(self, path: str, goal_id: str) -> bool:
+        """为已注册的文件关联（或更新）一个 goal_id，返回是否成功。"""
+        rows = self._conn.execute(
+            "UPDATE koto_file_registry SET origin_goal_id=?, updated_at=? WHERE path=?",
+            (goal_id, _now_iso(), path),
+        ).rowcount
+        self._conn.commit()
+        return rows > 0
+
+    def list_by_session(self, session_id: str, limit: int = 50) -> List[FileEntry]:
+        """返回与指定 session 关联的所有文件（按注册时间倒序）。"""
+        rows = self._conn.execute(
+            "SELECT * FROM koto_file_registry WHERE origin_session_id = ?"
+            " ORDER BY indexed_at DESC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+        return [self._row_to_entry(r) for r in rows]
+
+    # ── 操作日志（撤销支持）──────────────────────────────────────────────────
+    def get_op_log(self, limit: int = 20) -> "List[Dict]":
         """返回最近 N 条操作记录（含撤销状态）。"""
         import json as _json
 

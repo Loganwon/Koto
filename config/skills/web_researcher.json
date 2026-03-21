@@ -1,0 +1,84 @@
+﻿{
+    "id":  "web_researcher",
+    "name":  "深度网络调研",
+    "icon":  "🔬",
+    "category":  "workflow",
+    "description":  "基于多轮迭代网络搜索，完成深度调研任务并生成带引用的完整报告（集成 Deep Research 模式）",
+    "intent_description":  "用户说「帮我调研」「研究一下XX」「收集信息」「写一份报告」「分析XX市场/技术/竞品」or 需要多步搜索才能回答的复杂问题",
+    "output_spec":  {
+                        "format":  "markdown",
+                        "must_contain":  [
+                                             "##",
+                                             "分析",
+                                             "来源"
+                                         ],
+                        "must_not_contain":  [
+
+                                             ],
+                        "min_chars":  600,
+                        "max_chars":  null,
+                        "required_json_keys":  [
+
+                                               ],
+                        "description":  "带引用来源的结构化调研报告：执行摘要 + 多角度分析 + 结论 + 参考来源"
+                    },
+    "bound_tools":  [
+                        "web_search",
+                        "memory_search"
+                    ],
+    "executor_tools":  [
+                           "web_search",
+                           "memory_search"
+                       ],
+    "task_types":  [
+                       "RESEARCH"
+                   ],
+    "priority":  75,
+    "conflict_with":  [
+
+                      ],
+    "enabled":  true,
+    "prompt":  "\n\n## 🔬 领域要求：深度网络调研\n\n你是一名专业调研分析师，擅长在有限时间内系统性地收集信息并形成有洞见的报告。\n\n### 调研方法论\n\n**Step 1：问题分解**\n将用户的调研需求拆解为 3-5 个独立的搜索子问题，覆盖不同维度：\n- 现状/定义类（「XX是什么」）\n- 数据/统计类（「XX的市场规模/用户量」）\n- 趋势/进展类（「2025-2026年XX最新进展」）\n- 对比/竞品类（「XX vs YY」）\n- 专家观点类（「XX行业专家怎么看」）\n\n**Step 2：搜索执行**\n- 对每个子问题调用 web_search 搜索\n- 优先使用近12个月的数据（明确标注日期）\n- 来自官方/学术/主流媒体的信息优先级高于个人博客\n\n**Step 3：交叉验证**\n- 重要数据点要有 2 个以上来源\n- 如有数据冲突，说明而非隐藏\n\n**Step 4：报告合成**\n\n输出格式：\n```markdown\n# [主题] 调研报告\n**调研时间**：XXXX年XX月\n**摘要**：（3-5句话的核心结论）\n\n## 1. 背景与现状\n## 2. 核心发现\n  ### 2.1 [维度一]\n  ### 2.2 [维度二]\n## 3. 数据与统计\n## 4. 趋势与展望\n## 5. 结论与建议\n\n---\n## 参考来源\n- [来源名称] [大概时间]\n```\n\n### 诚信约束\n- **不能捏造数据**：没有搜索到的数据，写「暂未找到权威数据，建议关注[具体来源]」\n- 明确区分「搜索到的事实」和「分析推断」（用「据此推断」标注推断内容）\n- 超出 web_search 工具能力范围的信息（如内部数据、付费报告），直接告知用户",
+    "examples":  [
+                     {
+                         "input":  "帮我调研一下2025-2026年AI Agent的市场格局和主要玩家",
+                         "output":  "（此技能会调用 web_search 工具进行多轮搜索后生成完整报告，示例输出结构如下）\n\n# AI Agent 市场格局调研报告\n**调研时间**：2026年3月\n\n**摘要**：AI Agent 市场在2025-2026年进入高速增长期，OpenAI、Anthropic、Google 三家主导 Foundation Model 层，Cursor/Devin 等垂直代码代理快速崛起，国内字节（Coze）、阿里（通义）等加速布局。总体呈现「底层模型寡头+垂直代理百花齐放」格局...\n\n## 1. 市场背景\n...\n## 2. 主要玩家\n...\n## 参考来源\n...",
+                         "note":  "该技能实际运行时会调用web_search进行真实搜索，输出基于真实搜索结果"
+                     }
+                 ],
+    "plan_template":  [
+                          "1. 分解调研问题为3-5个子问题（不同维度）",
+                          "2. 逐一调用web_search搜索每个子问题",
+                          "3. 交叉验证重要数据点（2个以上来源）",
+                          "4. 按报告模板合成：摘要/背景/发现/数据/趋势/结论",
+                          "5. 列出参考来源，发现信息缺口时明确告知"
+                      ],
+    "trigger_keywords":  [
+                             "调研",
+                             "研究一下",
+                             "帮我搜集",
+                             "市场分析",
+                             "竞品分析",
+                             "写报告",
+                             "deep research",
+                             "行业报告",
+                             "分析一下",
+                             "了解一下",
+                             "最新进展",
+                             "综合分析",
+                             "帮我汇总",
+                             "信息收集"
+                         ],
+    "version":  "1.0.0",
+    "author":  "koto",
+    "created_at":  "2026-03-19T00:00:00Z",
+    "tags":  [
+                 "research",
+                 "web-search",
+                 "report",
+                 "deep-research",
+                 "analysis"
+             ],
+    "source_inspiration":  "OpenAI Deep Research + Perplexity Deep Research + Google Gemini Deep Research",
+    "subcategory":  "research"
+}

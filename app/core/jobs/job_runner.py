@@ -107,8 +107,8 @@ class JobContext:
                 content=content,
                 tool_name=tool_name,
             )
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("[JobContext] TaskLedger 记录步骤失败: %s", _e)
         try:
             self.bus.publish_step(
                 task_id=self.task_id,
@@ -118,8 +118,8 @@ class JobContext:
                 progress=progress,
                 tool_name=tool_name,
             )
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("[JobContext] ProgressBus 发布步骤失败: %s", _e)
 
 
 # ============================================================================
@@ -298,8 +298,8 @@ class JobRunner:
                         "error": str(exc)[:300],
                     },
                 )
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("[JobRunner] OpsEventBus 发布 job_failed 事件失败: %s", _e)
 
     def _recover_stale_tasks(self):
         """启动时将上次未完成的 PENDING 作业重新入队（崩溃恢复）。"""
@@ -447,7 +447,9 @@ def _handle_auto_catalog(ctx: JobContext) -> Optional[str]:
 
 def _handle_skill_exec(ctx: JobContext) -> Optional[str]:
     """通过技能 ID 执行对话技能（注入 skill prompt 后调用 agent）。"""
-    skill_id = ctx.payload.get("skill_id") or ctx.task_id  # fallback
+    skill_id = ctx.payload.get("skill_id")
+    if not skill_id:
+        raise ValueError("payload.skill_id 不能为空")
     query = ctx.payload.get("query", "")
     if not query:
         raise ValueError("payload.query 不能为空")
@@ -498,11 +500,24 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
                         temperature=0.7, max_output_tokens=80
                     ),
                 )
-                return resp.text or ""
+                text = resp.text or ""
+                # 有害内容检测
+                try:
+                    from app.core.security.output_validator import OutputValidator
+                    _v = OutputValidator.validate(text=text)
+                    if _v.is_blocked:
+                        import logging as _log
+                        _log.getLogger(__name__).warning(
+                            "[proactive_tick] llm 输出被拦截: %s", _v.reasons
+                        )
+                        return ""
+                    return _v.text
+                except Exception:
+                    return text
 
             llm_fn = _llm
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("[JobRunner] proactive_tick LLM 初始化失败: %s", _e)
 
         from app.core.agent.proactive_agent import get_proactive_agent
 

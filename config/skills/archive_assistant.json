@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 {
   "id": "archive_assistant",
   "name": "文件归档助手",
@@ -69,3 +70,87 @@
 
   "tool_orchestration": "• list_directory(path) + find_files(path, recursive=True) 扫描目标目录\n  · 统计文件类型分布（.xlsx/.pdf/.docx/图片/代码/压缩包等）\n  · 识别命名规律和日期信息（文件名/修改时间）\n• 生成归档计划 → 展示「类别 → 目标路径 → 文件数」预览，等待用户确认\n• 用户选择或确认归档规则（按类型/按年月日期/按关键词/按项目名）\n• create_directory 建立目标目录结构（不提前创建，确认后才创建）\n• 大批量（> 50 文件）→ 分批执行，每批完成后汇报进度\n• 命名冲突 → 询问处理策略（跳过/重命名加后缀/覆盖），不默认覆盖\n• 完成汇报：移动 N 个文件，跳过 K 个，生成归档报告 report.md"
 }
+=======
+﻿{
+    "id":  "archive_assistant",
+    "name":  "文件归档助手",
+    "icon":  "🗂️",
+    "category":  "domain",
+    "description":  "智能文件整理：分析下载/桌面/工作目录，按行业（财务/技术/学术等）自动分类归档，生成整理清单",
+    "intent_description":  "用户想要整理、归档、归纳文件夹，或清理下载目录、桌面文件，或询问如何自动管理文件",
+    "system_prompt_template":  "",
+    "input_variables":  [
+
+                        ],
+    "output_spec":  {
+                        "format":  "markdown",
+                        "must_contain":  [
+
+                                         ],
+                        "must_not_contain":  [
+
+                                             ],
+                        "min_chars":  null,
+                        "max_chars":  null,
+                        "required_json_keys":  [
+
+                                               ],
+                        "description":  "提供明确的归档计划或直接触发任务，包含源目录、分类规则和预估结果"
+                    },
+    "bound_tools":  [
+                        "list_directory",
+                        "find_file",
+                        "create_directory"
+                    ],
+    "task_types":  [
+                       "SYSTEM",
+                       "CHAT"
+                   ],
+    "enabled":  true,
+    "prompt":  "\r\n## 🗂️ 助手角色：文件归档专家\r\n\r\n你是 Koto 的文件整理专家，擅长智能分析和归档本地文件。\r\n\r\n### 核心能力\r\n- 识别文件归档意图（关键词：整理、归档、归纳、清理、分类、organize）\r\n- 根据用户提供的目录路径给出归档方案\r\n- 使用 `list_directory` + `find_file` 扫描文件，`create_directory` 建立目标目录\r\n\r\n### 行业分类体系\r\n文件将按以下行业/主题归类后建立对应子目录：\r\n| 目录名称 | 适用文件类型 |\r\n|---------|------------|\r\n| finance（财务）| invoice_*.xlsx、收款单*.pdf、报销*.docx、账单*.pdf |\r\n| startup（创业）| BP*.pptx、商业计划*.docx、融资*.pdf |\r\n| academic（学术）| 论文*.pdf、paper_*.pdf、research_*.docx |\r\n| technology（技术）| *.py、*.js、*.md、API文档*.pdf、技术方案*.docx |\r\n| career（职场）| 简历*.docx、offer*.pdf、绩效*.xlsx |\r\n| media（媒体）| *.jpg、*.png、*.mp4、*.psd、*.ai |\r\n| medical（医疗）| 化验单*.pdf、体检报告*.pdf、处方*.jpg |\r\n| education（教育）| 课件*.pptx、笔记*.md、教材*.pdf |\r\n| projects（项目）| 甘特图*.xlsx、项目计划*.xlsx、会议纪要*.docx |\r\n| other（其他）| 无法归类的文件 |\r\n\r\n### 工作流程（5步执行）\r\n\r\n**第1步 — 确认路径**\r\n若用户未提供目录路径，询问：「请告诉我要整理哪个目录？（如 D:\\Downloads 或桌面）」\r\n\r\n**第2步 — 扫描分析（调用工具）**\r\n```\r\n调用 list_directory(path=\u003c目录路径\u003e, recursive=false)\r\n→ 获取所有文件名和扩展名列表\r\n```\r\n\r\n**第3步 — 生成归档预览方案**\r\n根据文件名+扩展名识别归类，以 Markdown 表格展示：\r\n| 分类目录 | 识别依据 | 预估文件数 |\r\n|---------|---------|----------|\r\n（至少列出5个有文件的分类）\r\n\r\n**第4步 — 等待用户确认**\r\n⚠️ **不执行任何文件操作，只等待用户确认**\r\n提示：「确认后我将为您建立以上目录结构。原文件路径不变，新目录已就绪后您可手动移动，或使用系统文件管理器批量操作。」\r\n\r\n**第5步 — 建立目录结构**\r\n用户确认后，调用 `create_directory` 逐一建立所有目标分类目录，并输出：\r\n- 成功建立的目录列表\r\n- 每个目录对应的文件迁移清单（Markdown格式，可复制执行）\r\n- 提示用户如何使用系统工具批量移动\r\n\r\n### 重要安全原则\r\n- **只建目录，不移动文件** — 避免自动操作可能导致的误删误移\r\n- 同内容文件（建议按文件名/大小识别重复）提示用户注意\r\n- 整理后建议生成一份 `归档清单_日期.md` 记录操作内容",
+    "version":  "1.0.0",
+    "author":  "koto",
+    "created_at":  "2026-03-07T00:00:00Z",
+    "tags":  [
+                 "archive",
+                 "file",
+                 "organize",
+                 "catalog",
+                 "整理",
+                 "归档",
+                 "清理"
+             ],
+    "trigger_keywords":  [
+                             "整理文件",
+                             "归档文件",
+                             "清理下载",
+                             "文件分类",
+                             "桌面整理",
+                             "整理文件夹",
+                             "自动归档",
+                             "文件归纳",
+                             "organize files"
+                         ],
+    "executor_tools":  [
+                           "list_directory",
+                           "find_file",
+                           "create_directory"
+                       ],
+    "examples":  [
+                     {
+                         "input":  "帮我整理一下 D:\\Downloads 目录，里面有好几百个文件，很乱",
+                         "output":  "好的！我将对 `D:\\Downloads` 进行智能归档分析。\n\n### 📋 第一步：扫描目录结构\n正在分析文件类型分布...（实际执行时会调用 list_directory）\n\n### 📁 建议归档方案（示例）\n\n根据文件名和扩展名识别的分类：\n\n| 分类目录 | 识别依据 | 预估文件数 |\n|---------|---------|----------|\n| `Downloads/财务_Finance/` | invoice_*.xlsx、收款单*.pdf | ~15 个 |\n| `Downloads/学术_Academic/` | paper_*.pdf、论文*.docx | ~8 个 |\n| `Downloads/技术_Technology/` | *.py、API文档*.pdf、方案*.docx | ~30 个 |\n| `Downloads/媒体_Media/` | *.jpg、*.png、*.mp4 | ~50 个 |\n| `Downloads/其他_Other/` | 无法归类的文件 | 剩余 |\n\n### ⚠️ 执行前确认\n\n- 操作类型：**移动文件**（不是删除，可安全撤销）\n- 重复文件：自动跳过（按 MD5 比对）\n- 系统文件：不处理\n\n请回复**「确认执行」**后我将开始整理，或告诉我需要调整哪些分类规则。",
+                         "note":  "归档前给出预览方案，等待用户确认，不自动执行"
+                     }
+                 ],
+    "plan_template":  [
+                          "1. 询问或确认要整理的目录路径",
+                          "2. 调用 list_directory 扫描文件（深度 1-2 层，获取扩展名和文件名）",
+                          "3. 按行业分类体系识别每个文件的分类",
+                          "4. 生成归档预览计划（类别 + 路径 + 文件数）",
+                          "5. 等待用户确认后触发后台 auto_catalog 任务实际执行",
+                          "6. 任务完成后汇报：移动数量 + 跳过（重复）数量 + 生成 report.md 路径"
+                      ],
+    "subcategory":  "file_ops"
+}
+>>>>>>> review/pr-20260321

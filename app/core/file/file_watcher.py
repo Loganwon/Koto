@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-FileWatcher — Koto 目录轮询监控器
+FileWatcher — Koto 目录监控器
 ===================================
-无需 watchdog 等第三方依赖，纯 Python 轮询实现。
+优先使用 watchdog（OS 级事件驱动，实时），降级为纯轮询（30s 间隔）。
 
 功能：
-  - 每 30 秒（可配）扫描监控目录列表
-  - 检测新增/修改的文件 → 注册到 FileRegistry（含内容提取）
+  - watchdog Observer 实时感知文件创建/修改/删除 → 注册/移除 FileRegistry
+  - 轮询循环作为兜底，每 interval 秒一次全量对账
   - 检测已删除文件 → 从 FileRegistry 软删除
   - 监控目录从 user_settings.json 读取，运行时可动态更新
 
@@ -135,12 +135,118 @@ class FileWatcher:
             return
         self._running = True
         self._stop_event.clear()
+
+        # ── 尝试启动 watchdog Observer（事件驱动，实时）────────────────────
+        self._watchdog_observer = None
+        try:
+            from watchdog.observers import Observer
+            from watchdog.events import FileSystemEventHandler
+
+            skip_exts = self.skip_exts
+            max_bytes = self.max_file_size_bytes
+            extract_exts = {
+                ".txt", ".md", ".pdf", ".docx", ".doc",
+                ".xlsx", ".pptx", ".epub",
+                ".py", ".js", ".json", ".csv", ".html",
+            }
+
+            class _KotoHandler(FileSystemEventHandler):
+                def __init__(self_h):
+                    super().__init__()
+
+                def _should_skip(self_h, path: str) -> bool:
+                    p = Path(path)
+                    if p.suffix.lower() in skip_exts:
+                        return True
+                    if any(part.startswith(".") for part in p.parts):
+                        return True
+                    try:
+                        if p.stat().st_size > max_bytes:
+                            return True
+                    except OSError:
+                        return True
+                    return False
+
+                def on_created(self_h, event):
+                    if event.is_directory:
+                        return
+                    if self_h._should_skip(event.src_path):
+                        return
+                    try:
+                        from app.core.file.file_registry import get_file_registry
+                        ext = Path(event.src_path).suffix.lower()
+                        get_file_registry().register(
+                            event.src_path,
+                            source="watcher",
+                            extract_content=(ext in extract_exts),
+                        )
+                        logger.debug(f"[watchdog] 新增: {event.src_path}")
+                    except Exception as exc:
+                        logger.debug(f"[watchdog] on_created 失败: {exc}")
+
+                def on_modified(self_h, event):
+                    if event.is_directory:
+                        return
+                    if self_h._should_skip(event.src_path):
+                        return
+                    try:
+                        from app.core.file.file_registry import get_file_registry
+                        ext = Path(event.src_path).suffix.lower()
+                        get_file_registry().register(
+                            event.src_path,
+                            source="watcher",
+                            extract_content=(ext in extract_exts),
+                        )
+                        logger.debug(f"[watchdog] 修改: {event.src_path}")
+                    except Exception as exc:
+                        logger.debug(f"[watchdog] on_modified 失败: {exc}")
+
+                def on_deleted(self_h, event):
+                    if event.is_directory:
+                        return
+                    try:
+                        from app.core.file.file_registry import get_file_registry
+                        get_file_registry().delete(event.src_path)
+                        logger.debug(f"[watchdog] 删除: {event.src_path}")
+                    except Exception as exc:
+                        logger.debug(f"[watchdog] on_deleted 失败: {exc}")
+
+                def on_moved(self_h, event):
+                    if event.is_directory:
+                        return
+                    try:
+                        from app.core.file.file_registry import get_file_registry
+                        get_file_registry().update_path(event.src_path, event.dest_path)
+                        logger.debug(f"[watchdog] 移动: {event.src_path} → {event.dest_path}")
+                    except Exception as exc:
+                        logger.debug(f"[watchdog] on_moved 失败: {exc}")
+
+            observer = Observer()
+            handler = _KotoHandler()
+            for d in self.watch_dirs:
+                if Path(d).is_dir():
+                    observer.schedule(handler, d, recursive=True)
+                    logger.info(f"[FileWatcher] watchdog 监控: {d}")
+            observer.start()
+            self._watchdog_observer = observer
+            logger.info("[FileWatcher] ✅ 已启用 watchdog 实时监控")
+        except ImportError:
+            logger.info("[FileWatcher] watchdog 未安装，使用轮询模式（pip install watchdog 可升级）")
+        except Exception as exc:
+            logger.warning(f"[FileWatcher] watchdog 启动失败，降级轮询: {exc}")
+
+        # ── 轮询兜底线程（watchdog 存在时间隔延长至 5 分钟做对账）──────────
+        fallback_interval = 300 if self._watchdog_observer else self.interval
         self._thread = threading.Thread(
-            target=self._loop, daemon=True, name="koto-file-watcher"
+            target=self._loop,
+            args=(fallback_interval,),
+            daemon=True,
+            name="koto-file-watcher",
         )
         self._thread.start()
+        mode = "watchdog+轮询对账" if self._watchdog_observer else "纯轮询"
         logger.info(
-            f"[FileWatcher] 🚀 启动，监控 {len(self.watch_dirs)} 个目录，interval={self.interval}s"
+            f"[FileWatcher] 🚀 启动（{mode}），监控 {len(self.watch_dirs)} 个目录"
         )
 
     def stop(self):
@@ -148,20 +254,27 @@ class FileWatcher:
             return
         self._stop_event.set()
         self._running = False
+        if getattr(self, "_watchdog_observer", None):
+            try:
+                self._watchdog_observer.stop()
+                self._watchdog_observer.join(timeout=5)
+            except Exception:
+                pass
         if self._thread:
             self._thread.join(timeout=5)
         logger.info("[FileWatcher] 已停止")
 
     # ── 核心循环 ──────────────────────────────────────────────────────────────
 
-    def _loop(self):
+    def _loop(self, interval: Optional[int] = None):
+        effective_interval = interval or self.interval
         while not self._stop_event.is_set():
             try:
                 self._reload_config()
                 self._scan_all()
             except Exception as e:
                 logger.error(f"[FileWatcher] 扫描异常: {e}")
-            self._stop_event.wait(self.interval)
+            self._stop_event.wait(effective_interval)
 
     def _scan_all(self):
         from app.core.file.file_registry import get_file_registry
@@ -216,16 +329,9 @@ class FileWatcher:
             try:
                 ext = Path(path_str).suffix.lower()
                 extract = ext in {
-                    ".txt",
-                    ".md",
-                    ".pdf",
-                    ".docx",
-                    ".xlsx",
-                    ".py",
-                    ".js",
-                    ".json",
-                    ".csv",
-                    ".html",
+                    ".txt", ".md", ".pdf", ".docx", ".doc",
+                    ".xlsx", ".pptx", ".epub",
+                    ".py", ".js", ".json", ".csv", ".html",
                 }
                 entry = reg.register(
                     path_str, source="watcher", extract_content=extract
@@ -267,17 +373,23 @@ class FileWatcher:
         d_path = Path(directory)
         if not d_path.is_dir():
             return 0
+        _extract_exts = {
+            ".txt", ".md", ".pdf", ".docx", ".doc",
+            ".xlsx", ".pptx", ".epub",
+            ".py", ".js", ".json", ".csv", ".html",
+        }
         for p in d_path.rglob("*"):
             if not p.is_file():
                 continue
             if p.suffix.lower() in self.skip_exts:
                 continue
             try:
-                entry = reg.register(str(p), source="scanner", extract_content=False)
+                extract = p.suffix.lower() in _extract_exts
+                entry = reg.register(str(p), source="scanner", extract_content=extract)
                 if entry:
                     count += 1
             except Exception:
-                pass
+                logger.debug(f"[FileWatcher] scan_once 注册失败 {p}: ", exc_info=True)
         return count
 
     def _enrich_category_async(self, path_str: str):

@@ -144,7 +144,7 @@ def goal_stats():
 
 @goal_bp.get("/<goal_id>")
 def get_goal(goal_id: str):
-    """查询单个目标，同时返回最近 10 次执行记录。"""
+    """查询单个目标，同时返回最近 10 次执行记录和关联文件列表。"""
     gm = get_goal_manager()
     goal = gm.get(goal_id)
     if not goal:
@@ -152,6 +152,14 @@ def get_goal(goal_id: str):
     runs = gm.runs_for_goal(goal_id, limit=10)
     data = goal.to_dict()
     data["recent_runs"] = [r.to_dict() for r in runs]
+    # 附加关联文件列表（不可用时静默跳过）
+    try:
+        from app.core.file.file_registry import get_file_registry
+
+        entries = get_file_registry().list_by_goal(goal_id, limit=20)
+        data["linked_files"] = [e.to_dict() for e in entries]
+    except Exception:
+        data["linked_files"] = []
     return _ok(data)
 
 

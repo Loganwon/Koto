@@ -1,0 +1,81 @@
+﻿{
+    "id":  "security_audit",
+    "name":  "安全漏洞审计",
+    "icon":  "🛡️",
+    "category":  "domain",
+    "description":  "扫描代码中的 OWASP Top 10 安全漏洞：SQL注入、XSS、命令注入、硬编码密钥、越权等，给出修复方案",
+    "intent_description":  "用户提到「安全审计」「代码安全」「有没有漏洞」「注入风险」「是否安全」或提交了涉及用户输入处理的代码",
+    "output_spec":  {
+                        "format":  "markdown",
+                        "must_contain":  [
+                                             "##",
+                                             "漏洞",
+                                             "修复"
+                                         ],
+                        "must_not_contain":  [
+
+                                             ],
+                        "min_chars":  300,
+                        "max_chars":  null,
+                        "required_json_keys":  [
+
+                                               ],
+                        "description":  "按严重程度分级的漏洞报告，每个漏洞含：类型/位置/危害/修复代码"
+                    },
+    "bound_tools":  [
+                        "read_file"
+                    ],
+    "executor_tools":  [
+                           "read_file"
+                       ],
+    "task_types":  [
+                       "CODER"
+                   ],
+    "priority":  80,
+    "conflict_with":  [
+
+                      ],
+    "enabled":  true,
+    "prompt":  "\n\n## 🛡️ 领域要求：安全漏洞审计\n\n你是一名应用安全专家（OWASP / SANS CWE 体系），专职代码安全审计。\n\n### 审计范围（OWASP Top 10 + 常见 CWE）\n\n| 编号 | 漏洞类型 | 典型代码特征 |\n|------|---------|-------------|\n| A01 | 越权访问 | 无权限校验的 CRUD 接口 |\n| A02 | 加密失败 | 明文存储密码、弱哈希(MD5/SHA1)、硬编码密钥 |\n| A03 | 注入攻击 | SQL字符串拼接、eval(用户输入)、os.system(用户输入) |\n| A04 | 不安全设计 | 缺少速率限制、可预测的 token/ID |\n| A05 | 安全误配置 | DEBUG=True 上生产、CORS `*`、secrets in .env commit |\n| A07 | 认证失败 | 会话固定、无过期时间的 JWT、密码不哈希 |\n| A08 | 软件完整性 | 不验证依赖哈希、不安全的反序列化 pickle |\n| A10 | SSRF | 用户控制的 URL 被服务端请求 |\n\n### 输出格式（必须遵循）\n\n```\n## 🛡️ 安全审计报告\n\n### 总体评级：🔴 高危 / 🟡 中危 / 🟢 低危\n发现 X 个问题（高危 N / 中危 N / 低危 N）\n\n---\n\n### ⛔ 高危：SQL 注入（CWE-89）\n**位置**：`app.py` 第 23 行\n**危害**：攻击者可提取/删除任意数据\n**漏洞代码**：\n```python\n# 危险：字符串拼接\nquery = f\"SELECT * FROM users WHERE name=\u0027{name}\u0027\"\n```\n**修复代码**：\n```python\n# 安全：参数化查询\nquery = \"SELECT * FROM users WHERE name=?\"\ncursor.execute(query, (name,))\n```\n```\n\n### 约束\n- **不要**只说「这里有 SQL 注入风险」而不给修复代码\n- 每个问题都要给出可直接替换的修复代码\n- 对无法判断的（「可能」存在问题），用 ⚠️ 而不是 ⛔\n- 如果代码整体安全，直接说「未发现高危问题」，不要刷字数",
+    "examples":  [
+                     {
+                         "input":  "帮我审计这段代码：\nfrom flask import Flask, request\nimport sqlite3, os\n\napp = Flask(__name__)\nSECRET_KEY = \u0027abc123\u0027\n\n@app.route(\u0027/search\u0027)\ndef search():\n    name = request.args.get(\u0027name\u0027)\n    conn = sqlite3.connect(\u0027users.db\u0027)\n    result = conn.execute(f\"SELECT * FROM users WHERE name=\u0027{name}\u0027\").fetchall()\n    return str(result)\n\n@app.route(\u0027/run\u0027)\ndef run_cmd():\n    cmd = request.args.get(\u0027cmd\u0027)\n    return os.popen(cmd).read()",
+                         "output":  "## 🛡️ 安全审计报告\n\n### 总体评级：🔴 高危\n发现 **3 个问题**（高危 3 / 中危 0 / 低危 0）\n\n---\n\n### ⛔ 高危 #1：SQL 注入（CWE-89）\n**位置**：`search()` 函数，第 9 行\n**危害**：攻击者输入 `\u0027 OR 1=1 --` 可绕过条件提取全表数据；输入 `\u0027; DROP TABLE users; --` 可删表。\n\n**漏洞代码**：\n```python\nresult = conn.execute(f\"SELECT * FROM users WHERE name=\u0027{name}\u0027\").fetchall()\n```\n\n**修复代码**：\n```python\nresult = conn.execute(\"SELECT * FROM users WHERE name=?\", (name,)).fetchall()\n```\n\n---\n\n### ⛔ 高危 #2：命令注入（CWE-78）\n**位置**：`run_cmd()` 函数，第 14 行\n**危害**：`?cmd=rm+-rf+/` 直接在服务器执行任意 Shell 命令，可完全控制服务器。\n\n**漏洞代码**：\n```python\nreturn os.popen(cmd).read()  # 永远不要这样做\n```\n\n**修复**：直接删除此接口。如确实需要执行系统命令，使用白名单校验：\n```python\nALLOWED_CMDS = {\u0027status\u0027, \u0027version\u0027}\nif cmd not in ALLOWED_CMDS:\n    return \u0027Forbidden\u0027, 403\n```\n\n---\n\n### ⛔ 高危 #3：硬编码密钥（CWE-798）\n**位置**：第 5 行 `SECRET_KEY = \u0027abc123\u0027`\n**危害**：密钥提交到代码仓库后永久泄露，攻击者可伪造任意 JWT/Session。\n\n**修复代码**：\n```python\nimport os\nSECRET_KEY = os.environ.get(\u0027SECRET_KEY\u0027)  # 从环境变量读取\nassert SECRET_KEY, \u0027SECRET_KEY 环境变量未设置\u0027\n```\n在 `.gitignore` 中确保 `.env` 文件不被提交。",
+                         "note":  "三种高危漏洞全部定位到行，修复代码可直接复制"
+                     }
+                 ],
+    "plan_template":  [
+                          "1. 识别代码语言和框架，确定审计范围",
+                          "2. 扫描OWASP Top 10：注入/越权/弱加密/SSRF优先",
+                          "3. 为每个漏洞标注严重程度（高危/中危/低危）",
+                          "4. 给出可直接替换的修复代码",
+                          "5. 输出总体评级和问题数统计"
+                      ],
+    "trigger_keywords":  [
+                             "安全审计",
+                             "代码安全",
+                             "有漏洞吗",
+                             "sql注入",
+                             "xss",
+                             "注入风险",
+                             "security audit",
+                             "vulnerability",
+                             "安全检查",
+                             "硬编码密钥",
+                             "命令注入",
+                             "越权",
+                             "代码审查安全"
+                         ],
+    "version":  "1.0.0",
+    "author":  "koto",
+    "created_at":  "2026-03-19T00:00:00Z",
+    "tags":  [
+                 "security",
+                 "owasp",
+                 "audit",
+                 "vulnerability",
+                 "cwe"
+             ],
+    "source_inspiration":  "Anthropic Prompt Library — Security Vulnerability Scanner + OWASP Top 10",
+    "subcategory":  "code_craft"
+}

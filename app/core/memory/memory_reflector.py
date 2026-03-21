@@ -33,27 +33,35 @@ _REFLECT_TASK_TYPES = {"CHAT", "RESEARCH", "CODER", "FILE_GEN", "AGENT"}
 
 _REFLECT_PROMPT = """\
 请分析以下对话，提取值得长期记忆的信息。
-只提取真正重要的、能帮助未来对话的信息——不要琐事。
+尽量多提取——包括用户的兴趣、关注话题、工作方向、提到的人物/公司/项目、个人偏好等。
 
 对话：
 用户: {user_msg}
 Koto: {ai_msg}
 
 请以 JSON 数组格式输出，每条记忆包含：
-- "content": 记忆内容（1-2句话，中文）
+- "content": 记忆内容（1-2句话，中文，可独立理解）
 - "category": 分类，从以下选择: user_fact / preference / topic_summary / decision / reminder
-- "confidence": 置信度 0.0-1.0（只有真正确定的才给高分）
+- "confidence": 置信度 0.0-1.0
+
+判断标准：
+- user_fact: 用户身份、职业、背景、正在做的项目（confidence ≥ 0.5 即可保存）
+- preference: 用户的喜好、习惯、风格偏好（confidence ≥ 0.5）
+- topic_summary: 用户关注/研究的话题领域（confidence ≥ 0.4，几乎所有实质性对话都应有此类）
+- decision: 用户做出的决定或结论（confidence ≥ 0.6）
+- reminder: 用户要求记住的事项（confidence ≥ 0.5）
 
 只输出 JSON 数组，不要有任何其他文字。示例：
 [
   {{"content": "用户是一名前端工程师，偏好 React", "category": "user_fact", "confidence": 0.9}},
-  {{"content": "用户对 RAG 技术感兴趣", "category": "preference", "confidence": 0.7}}
+  {{"content": "用户对 RAG 技术感兴趣", "category": "preference", "confidence": 0.7}},
+  {{"content": "用户研究了极佳视界公司的融资和市场状况", "category": "topic_summary", "confidence": 0.9}}
 ]
 
-如果没有值得记忆的信息，输出空数组 []。
+如果对话完全是打招呼或无实质内容，输出空数组 []。
 """
 
-_MIN_CONFIDENCE = 0.60
+_MIN_CONFIDENCE = 0.45
 # Minimum content length to be worth saving
 _MIN_CONTENT_LEN = 10
 
@@ -255,6 +263,16 @@ class MemoryReflector:
         except Exception as _te:
             logger.debug(f"[Reflector] triple extraction failed: {_te}")
 
+        # 3-B: 联系人 CRM — 从对话中提取人物提及，更新社交记忆层
+        try:
+            from app.core.memory.contact_manager import get_contact_manager
+
+            # 推断本轮主题（取 user_msg 前 30 字作为话题摘要）
+            topic = user_msg[:30].strip() if user_msg else ""
+            get_contact_manager().observe_turn(user_msg, ai_msg, topic=topic)
+        except Exception as _cm_e:
+            logger.debug(f"[Reflector] contact extraction failed: {_cm_e}")
+
         return saved
 
     @classmethod
@@ -285,3 +303,22 @@ class MemoryReflector:
                 logger.debug(f"[Reflector] background thread error: {e}")
 
         threading.Thread(target=_worker, daemon=True, name="koto_reflector").start()
+
+    @classmethod
+    def reflect_sync(
+        cls,
+        user_msg: str,
+        ai_msg: str,
+        task_type: str,
+        session_name: str,
+        get_memory_fn: Callable,
+        llm_fn: Optional[Callable[[str], str]],
+    ) -> int:
+        """Synchronous reflection — blocks until complete. Returns count of saved memories.
+        If llm_fn is None, skips LLM extraction (useful for offline batch processing
+        that relies on a caller-provided LLM)."""
+        if not cls.should_reflect(user_msg, ai_msg, task_type):
+            return 0
+        if llm_fn is None:
+            return 0
+        return cls._do_reflect(user_msg, ai_msg, task_type, session_name, get_memory_fn, llm_fn)

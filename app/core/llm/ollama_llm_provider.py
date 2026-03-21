@@ -307,8 +307,14 @@ class OllamaLLMProvider(LLMProvider):
         prompt: Union[str, List[Dict[str, Any]]],
         model: str,
     ) -> int:
-        # Ollama has no dedicated count-tokens endpoint; return 0 as safe fallback
-        return 0
+        # Ollama has no token-count endpoint; estimate via char/3 (matches GPT-4 rule-of-thumb)
+        if isinstance(prompt, str):
+            return max(1, len(prompt) // 3)
+        total = 0
+        for msg in prompt or []:
+            c = msg.get("content") or msg.get("text") or ""
+            total += max(1, len(str(c)) // 3)
+        return total or 1
 
     # ── Internal ─────────────────────────────────────────────────────────
 

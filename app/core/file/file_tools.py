@@ -551,6 +551,34 @@ class FileToolsPlugin(AgentPlugin):
                 "description": "撤销上一次文件操作（rename / move / copy / delete-to-trash）。",
                 "parameters": {"type": "OBJECT", "properties": {}, "required": []},
             },
+            # ── 多文档联合问答 ───────────────────────────────────────────────
+            {
+                "name": "multi_file_qa",
+                "func": self.multi_file_qa,
+                "description": (
+                    "对多个本地文件进行联合问答（跨文档语义检索 + LLM 推理）。"
+                    "自动从文件内容中检索最相关段落，生成有段落引用的答案。"
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "question": {
+                            "type": "STRING",
+                            "description": "要问的问题，支持中英文",
+                        },
+                        "file_paths": {
+                            "type": "ARRAY",
+                            "description": "要检索的文件绝对路径列表（最多 8 个）",
+                            "items": {"type": "STRING"},
+                        },
+                        "top_k": {
+                            "type": "INTEGER",
+                            "description": "每个文件最多引用的段落数，默认 3",
+                        },
+                    },
+                    "required": ["question", "file_paths"],
+                },
+            },
         ]
 
     # ── 工具实现 ──────────────────────────────────────────────────────────────
@@ -1470,10 +1498,20 @@ class FileToolsPlugin(AgentPlugin):
             return f"无法提取文本内容（文件类型：{p.suffix}），无法生成摘要。"
         # 调用 LLM
         focus_hint = f"\n请重点关注：{focus}" if focus else ""
+        # ── PII 脱敏：防止文件中的个人信息上传至云端 LLM ────────────
+        _mask_result = None
+        safe_content = content
+        try:
+            from app.core.security.pii_filter import PIIFilter
+            _mask_result = PIIFilter.mask(content)
+            if _mask_result.has_pii:
+                safe_content = _mask_result.masked_text
+        except Exception:
+            pass
         prompt = (
             f"请对以下文件内容生成一段简洁的中文摘要（3-5 句话），涵盖主要信息点。{focus_hint}\n\n"
             f"文件名：{p.name}\n\n"
-            f"内容：\n{content}"
+            f"内容：\n{safe_content}"
         )
         try:
             from app.core.llm.gemini import GeminiProvider
@@ -1496,6 +1534,24 @@ class FileToolsPlugin(AgentPlugin):
                 )
             if not text:
                 text = str(resp)
+            # ── 输出验收：有害内容/泄露检测 + PII 还原 ───────────
+            try:
+                from app.core.security.output_validator import OutputValidator
+                _val = OutputValidator.validate(text=text)
+                if _val.is_blocked:
+                    import logging as _log
+                    _log.getLogger(__name__).warning(
+                        "[summarize_file] 输出被拦截: %s", _val.reasons
+                    )
+                    return "⚠️ 摘要内容被安全策略拦截。"
+                text = _val.text
+            except Exception:
+                pass
+            if _mask_result and _mask_result.has_pii:
+                try:
+                    text = _mask_result.restore(text)
+                except Exception:
+                    pass
             return f"📄 {p.name}\n\n{text.strip()}"
         except Exception as e:
             return f"LLM 摘要失败（{e}），以下为原始内容片段：\n\n{content[:500]}"
@@ -1554,6 +1610,99 @@ class FileToolsPlugin(AgentPlugin):
                 return f"不支持撤销的操作类型：{op_type}"
         except Exception as e:
             return f"撤销失败：{e}"
+
+    # ── 多文档联合问答 ─────────────────────────────────────────────────────────
+
+    def multi_file_qa(
+        self,
+        question: str,
+        file_paths: List[str],
+        top_k: int = 3,
+    ) -> str:
+        """
+        对多个本地文件进行联合语义问答。
+
+        策略：
+          1. 从 FileRegistry 取 content_preview（快速路径）
+          2. 若文件已在 file_rag_index 中，用向量检索取最相关段落
+          3. 将段落拼装为 context，调用 LLM 回答，标注来源文件
+        """
+        if not file_paths:
+            return "❌ 未指定文件路径。"
+
+        paths = file_paths[:8]  # 最多 8 个文件
+        top_k = min(max(1, int(top_k)), 5)
+
+        from app.core.file.file_registry import get_file_registry, _get_file_rag_service
+
+        reg = get_file_registry()
+        rag = _get_file_rag_service()
+
+        context_blocks: List[str] = []
+        missing: List[str] = []
+
+        for raw_path in paths:
+            path = str(raw_path)
+            entry = reg.get_by_path(path)
+            if not entry:
+                # 尝试注册
+                entry = reg.register(path, source="manual", extract_content=True)
+            if not entry:
+                missing.append(path)
+                continue
+
+            # 优先向量检索相关段落
+            if rag is not None:
+                try:
+                    hits = rag.retrieve(question, k=top_k, score_threshold=0.25)
+                    file_hits = [h for h in hits if h.get("source") == path]
+                    if file_hits:
+                        excerpts = "\n---\n".join(
+                            f"[第{h['chunk_index']+1}段，相关度{h['score']:.2f}]\n{h['content']}"
+                            for h in file_hits
+                        )
+                        context_blocks.append(f"【{entry.name}】\n{excerpts}")
+                        continue
+                except Exception:
+                    pass
+
+            # 降级：使用 content_preview 前 2000 字
+            if entry.content_preview:
+                context_blocks.append(
+                    f"【{entry.name}】\n{entry.content_preview[:2000]}"
+                )
+            else:
+                missing.append(path)
+
+        if not context_blocks:
+            return f"❌ 无法提取以下文件内容：{', '.join(missing)}"
+
+        context = "\n\n".join(context_blocks)
+        prompt = (
+            f"以下是用户提供的 {len(context_blocks)} 个文件的内容片段，"
+            f"请基于这些内容回答用户的问题。\n\n"
+            f"如果内容中有明确依据，请标注来自哪个文件（用【文件名】标记）。\n\n"
+            f"=== 文件内容 ===\n{context}\n\n"
+            f"=== 用户问题 ===\n{question}"
+        )
+
+        try:
+            from app.core.llm.gemini import GeminiProvider
+
+            provider = GeminiProvider()
+            resp = provider.generate_content(prompt)
+            answer = (
+                resp.get("content")
+                or resp.get("text")
+                or str(resp)
+            )
+        except Exception as exc:
+            return f"LLM 调用失败（{exc}），以下为原始内容片段：\n\n{context[:800]}"
+
+        note = f"\n\n---\n*基于 {len(context_blocks)} 个文件分析*" + (
+            f"；以下文件内容无法提取：{', '.join(missing)}" if missing else ""
+        )
+        return answer.strip() + note
 
     # ── 内部工具 ──────────────────────────────────────────────────────────────
 

@@ -50,13 +50,10 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # 配合 UnifiedAgent 系统指令中的主动记忆规则，让 LLM 主动管理长期记忆。
     try:
         from app.core.agent.plugins.memory_tools_plugin import MemoryToolsPlugin
-
         registry.register_plugin(MemoryToolsPlugin())
         logger.debug("[_build_registry] MemoryToolsPlugin 已加载")
     except Exception as _e:
-        logger.warning(
-            f"[_build_registry] MemoryToolsPlugin 加载失败（记忆工具不可用）: {_e}"
-        )
+        logger.warning(f"[_build_registry] MemoryToolsPlugin 加载失败（记忆工具不可用）: {_e}")
 
     # ── 可选生产力插件（两种模式均尝试加载，失败则跳过） ─────────────
     for plugin_path, name in [
@@ -98,7 +95,6 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # ── 多模态视觉工具（图表/截图分析）──────────────────────────────────
     try:
         from app.core.agent.plugins.chart_vision_plugin import ChartVisionPlugin
-
         registry.register_plugin(ChartVisionPlugin())
     except Exception as _e:
         logger.debug(f"[_build_registry] ChartVisionPlugin 跳过: {_e}")
@@ -121,7 +117,6 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # ── 文档标注技能工具 ───────────────────────────────────────────────
     try:
         from app.core.agent.plugins.annotation_plugin import AnnotationPlugin
-
         registry.register_plugin(AnnotationPlugin())
     except Exception as _e:
         logger.debug(f"[_build_registry] AnnotationPlugin 跳过: {_e}")
@@ -129,58 +124,107 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     # ── 文件格式转换工具 ───────────────────────────────────────────────
     try:
         from app.core.agent.plugins.file_converter_plugin import FileConverterPlugin
-
         registry.register_plugin(FileConverterPlugin())
     except Exception as _e:
         logger.debug(f"[_build_registry] FileConverterPlugin 跳过: {_e}")
+
+    # ── PPT 生成工具（web/ppt_master + web/ppt_generator）────────────────
+    try:
+        from app.core.agent.plugins.ppt_plugin import PPTPlugin
+        registry.register_plugin(PPTPlugin())
+        logger.debug("[_build_registry] PPTPlugin 已注册")
+    except Exception as _e:
+        logger.debug(f"[_build_registry] PPTPlugin 跳过: {_e}")
 
     # ── P0: Skills → 原生函数调用（SkillToolAdapter）────────────────────
     # 将所有 Skill 注册为 ToolRegistry 工具，让 LLM 通过原生 function calling
     # 自行决定何时激活哪个技能，取代 SkillAutoMatcher 的猜测式激活。
     try:
         from app.core.skills.skill_tool_adapter import SkillToolAdapter
-
         SkillToolAdapter.register_all(registry)
     except Exception as _e:
         logger.debug(f"[_build_registry] SkillToolAdapter 跳过: {_e}")
+
+    # ── 用户自定义工具（config/tools/*.py）──────────────────────────────
+    try:
+        from app.core.tools.user_tool_loader import load_user_tools, UserDefinedPlugin
+        load_user_tools()
+        plugin = UserDefinedPlugin()
+        if plugin.get_tools():
+            registry.register_plugin(plugin)
+            logger.info(f"[_build_registry] UserDefinedPlugin: {len(plugin.get_tools())} 个用户工具")
+    except Exception as _e:
+        logger.debug(f"[_build_registry] UserDefinedPlugin 跳过: {_e}")
 
     return registry
 
 
 def create_agent(
-    api_key: Optional[str] = None, model_id: str = "gemini-2.5-flash"
-) -> "UnifiedAgent":
+    api_key: Optional[str] = None,
+    model_id: str = "gemini-2.5-flash",
+    use_langgraph: Optional[bool] = None,
+):
     """
-    创建全量配置的 UnifiedAgent（ReAct while 循环实现）。
+    创建 Koto 主 Agent 实例。
 
-    特性：PII 脱敏、Skill 注入、ToolRouter 过滤、OutputValidator 验收、
-         TaskLedger 记录、ShadowTracer 异步学习。
-    所有重型依赖均在此函数内懒加载，不影响启动速度。
+    默认优先使用 LangGraphAgent（StateGraph 实现），当 langgraph 不可用或
+    ``use_langgraph=False`` 时回退到 UnifiedAgent（while 循环实现）。
+
+    参数:
+        api_key       : Gemini API Key（默认读取环境变量）
+        model_id      : 使用的 Gemini 模型
+        use_langgraph : True → 强制 LangGraph；False → 强制 UnifiedAgent；
+                        None（默认）→ 优先 LangGraph，不可用时自动回退
     """
-    from app.core.agent.unified_agent import UnifiedAgent
     from app.core.llm.gemini import GeminiProvider
 
     usage_api_key = _resolve_api_key(api_key)
     if not usage_api_key:
         logger.warning("No API Key provided for Agent. Agent will fail at generation.")
 
-    llm_provider = GeminiProvider(api_key=usage_api_key)
     registry = _build_registry(api_key=usage_api_key, full=True)
+
+    # ── 尝试 LangGraph 路径 ──────────────────────────────────────────────────
+    _want_lg = use_langgraph if use_langgraph is not None else True
+    if _want_lg:
+        try:
+            from app.core.agent.langgraph_agent import LangGraphAgent, _LG_AVAILABLE
+            if not _LG_AVAILABLE:
+                raise ImportError("langgraph not installed")
+            lg_agent = LangGraphAgent(
+                registry=registry,
+                model_id=model_id,
+                enable_pii_filter=True,
+                enable_output_validation=True,
+                restore_pii_in_output=True,
+            )
+            logger.info("[create_agent] ✅ 使用 LangGraph Agent（StateGraph 路径）")
+            return lg_agent
+        except Exception as _lg_err:
+            if use_langgraph is True:
+                # 用户明确要求 LangGraph，不可用则抛出
+                raise
+            logger.warning(
+                "[create_agent] LangGraph 不可用，回退到 UnifiedAgent: %s", _lg_err
+            )
+
+    # ── 回退：UnifiedAgent ───────────────────────────────────────────────────
+    from app.core.agent.unified_agent import UnifiedAgent
+
+    llm_provider = GeminiProvider(api_key=usage_api_key)
 
     # 配置 OutputValidator 的 LLM 质量判断器（复用同一个 provider，避免重复建连接）
     try:
         from app.core.security.output_validator import OutputValidator
-
         OutputValidator.configure_llm_judge(
             client=llm_provider,
             model_id="gemini-2.5-flash",
             timeout=15.0,
         )
     except Exception as _oj_err:
-        logger.debug(
-            "[create_agent] OutputValidator LLM judge 配置失败（跳过）: %s", _oj_err
-        )
+        logger.debug("[create_agent] OutputValidator LLM judge 配置失败（跳过）: %s", _oj_err)
 
+    logger.info("[create_agent] ⚙️  使用 UnifiedAgent（ReAct while 循环路径）")
     return UnifiedAgent(
         llm_provider=llm_provider,
         tool_registry=registry,

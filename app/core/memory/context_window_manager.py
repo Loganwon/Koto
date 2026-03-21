@@ -26,8 +26,8 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Threshold at which we summarize old turns (rough token estimate)
-# Lowered to 12K so long sessions compress earlier, reducing prompt bloat
-_MAX_HISTORY_TOKENS: int = 12_000
+# Gemini 2.5+ supports 1M context window; compress only when truly large
+_MAX_HISTORY_TOKENS: int = 80_000
 # How many recent turns to ALWAYS keep verbatim (model + user pairs)
 _RECENT_KEEP: int = 10
 # Minimum turns before we even consider compressing
@@ -160,7 +160,15 @@ class ContextWindowManager:
         try:
             mgr = get_memory_fn()
             if mgr is not None and query and len(query.strip()) > 4:
-                hits = mgr.search_memories(query, limit=4)
+                # 优先 FAISS 语义向量检索（不依赖 _embedding_fn），无结果再降级关键词
+                hits: List[Dict] = []
+                if hasattr(mgr, 'search_vector_memories'):
+                    try:
+                        hits = mgr.search_vector_memories(query, limit=4) or []
+                    except Exception:
+                        hits = []
+                if not hits:
+                    hits = mgr.search_memories(query, limit=4) or []
                 if hits:
                     lines: List[str] = []
                     for h in hits:

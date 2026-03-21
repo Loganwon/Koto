@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Koto (言) - AI Assistant</title>
     <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='assets/koto_icon.svg') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260319b">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260321">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/skill-ui-extensions.css') }}?v=20260526">
     <!-- Restore UI zoom before first paint to avoid flash -->
     <script>(function(){
@@ -63,7 +63,7 @@
         }
         .ske-panel {
             background: #111827; border-radius: 14px; width: min(640px,95vw);
-            border: 1px solid rgba(99,198,255,.18); box-shadow: 0 28px 70px rgba(0,0,0,.7);
+            border: 1px solid rgba(16,185,129,.18); box-shadow: 0 28px 70px rgba(0,0,0,.7);
             display: flex; flex-direction: column; max-height: 88vh; overflow: hidden;
         }
         .ske-header {
@@ -88,40 +88,40 @@
             color: #8b9ab0; font-size: 12px; padding: 9px 14px 8px;
             cursor: pointer; transition: all .15s; white-space: nowrap;
         }
-        .ske-tab.active { color: #63c6ff; border-bottom-color: #63c6ff; }
+        .ske-tab.active { color: #10b981; border-bottom-color: #10b981; }
         .ske-tab:hover:not(.active) { color: #c9d6e8; }
         .ske-body { padding: 16px 20px; flex: 1; overflow-y: auto; min-height: 0; }
         .ske-hint { font-size: 11px; color: #6c7a91; margin-bottom: 10px; line-height: 1.6; }
         .ske-textarea {
             width: 100%; box-sizing: border-box; background: #0d1420;
-            border: 1px solid rgba(99,198,255,.15); border-radius: 9px;
+            border: 1px solid rgba(16,185,129,.15); border-radius: 9px;
             color: #c9d6e8; font-family: 'JetBrains Mono', monospace;
             font-size: 12.5px; line-height: 1.65; padding: 13px 15px;
             resize: vertical; min-height: 210px; outline: none; transition: border-color .15s;
         }
-        .ske-textarea:focus { border-color: rgba(99,198,255,.4); }
+        .ske-textarea:focus { border-color: rgba(16,185,129,.4); }
         .ske-count { text-align: right; font-size: 10px; color: #4a5568; margin-top: 5px; }
         .ske-ai-btn, .ske-extract-btn {
             margin-top: 10px; padding: 7px 18px;
             background: linear-gradient(135deg,#1a3d6b,#1e4d8c);
-            border: 1px solid rgba(99,198,255,.3); border-radius: 8px;
-            color: #63c6ff; font-size: 12px; cursor: pointer; transition: all .15s;
+            border: 1px solid rgba(16,185,129,.3); border-radius: 8px;
+            color: #10b981; font-size: 12px; cursor: pointer; transition: all .15s;
         }
         .ske-ai-btn:hover, .ske-extract-btn:hover { background: linear-gradient(135deg,#1e4d8c,#2563aa); }
         .ske-ai-preview {
-            margin-top: 12px; border: 1px solid rgba(99,198,255,.2); border-radius: 9px; overflow: hidden;
+            margin-top: 12px; border: 1px solid rgba(16,185,129,.2); border-radius: 9px; overflow: hidden;
         }
         .ske-ai-preview-title {
-            padding: 8px 13px; background: rgba(99,198,255,.07);
+            padding: 8px 13px; background: rgba(16,185,129,.07);
             font-size: 11px; color: #8b9ab0;
             display: flex; align-items: center; justify-content: space-between;
         }
         .ske-apply-btn {
-            background: none; border: 1px solid rgba(99,198,255,.3);
-            border-radius: 6px; color: #63c6ff; font-size: 11px;
+            background: none; border: 1px solid rgba(16,185,129,.3);
+            border-radius: 6px; color: #10b981; font-size: 11px;
             padding: 2px 10px; cursor: pointer;
         }
-        .ske-apply-btn:hover { background: rgba(99,198,255,.1); }
+        .ske-apply-btn:hover { background: rgba(16,185,129,.1); }
         .ske-ai-pre {
             margin: 0; padding: 13px 15px; font-size: 11.5px; color: #a0b0c8;
             white-space: pre-wrap; line-height: 1.6; max-height: 170px; overflow-y: auto;
@@ -133,8 +133,8 @@
             border: 1px solid rgba(255,255,255,.07); color: #a0b0c8;
             font-size: 12px; cursor: pointer; transition: all .15s;
         }
-        .ske-session-item:hover { background: rgba(99,198,255,.07); border-color: rgba(99,198,255,.2); }
-        .ske-session-item.selected { background: rgba(99,198,255,.12); border-color: rgba(99,198,255,.4); color: #63c6ff; }
+        .ske-session-item:hover { background: rgba(16,185,129,.07); border-color: rgba(16,185,129,.2); }
+        .ske-session-item.selected { background: rgba(16,185,129,.12); border-color: rgba(16,185,129,.4); color: #10b981; }
         .ske-extract-zone { margin-top: 10px; }
         .ske-footer {
             display: flex; align-items: center; justify-content: space-between;
@@ -152,7 +152,7 @@
         .ske-btn-secondary:hover { border-color: rgba(255,255,255,.24); color: #e8eefc; }
         .ske-btn-primary {
             background: linear-gradient(135deg,#1e4d8c,#2563aa);
-            border: 1px solid rgba(99,198,255,.4); color: #fff;
+            border: 1px solid rgba(16,185,129,.4); color: #fff;
             font-size: 13px; padding: 7px 22px; border-radius: 8px;
             cursor: pointer; font-weight: 600; transition: all .15s;
         }
@@ -171,10 +171,10 @@
             position: relative; flex-shrink: 0;
         }
         .ske-swatch:hover { transform: scale(1.12); }
-        .ske-swatch.active { border-color: #63c6ff !important; }
+        .ske-swatch.active { border-color: #10b981 !important; }
         .ske-swatch.ske-swatch-none {
             background: repeating-linear-gradient(45deg, #1e293b 0px, #1e293b 4px, #273347 4px, #273347 8px);
-            border: 2px solid rgba(99,198,255,.25);
+            border: 2px solid rgba(16,185,129,.25);
         }
         .ske-swatch.ske-swatch-none::after {
             content: 'A'; position: absolute; inset: 0; display: flex; align-items: center;
@@ -182,27 +182,27 @@
         }
         .ske-select {
             width: 100%; padding: 6px 10px; border-radius: 8px; box-sizing: border-box;
-            border: 1px solid rgba(99,198,255,.18); background: #0d1420;
+            border: 1px solid rgba(16,185,129,.18); background: #0d1420;
             color: #c9d6e8; font-size: 12px; font-family: inherit; outline: none;
         }
-        .ske-select:focus { border-color: rgba(99,198,255,.4); }
+        .ske-select:focus { border-color: rgba(16,185,129,.4); }
         .ske-input-sm {
             width: 100%; padding: 6px 10px; border-radius: 8px; box-sizing: border-box;
-            border: 1px solid rgba(99,198,255,.15); background: #0d1420;
+            border: 1px solid rgba(16,185,129,.15); background: #0d1420;
             color: #c9d6e8; font-size: 12px; font-family: inherit; outline: none; transition: border-color .15s;
         }
-        .ske-input-sm:focus { border-color: rgba(99,198,255,.4); }
+        .ske-input-sm:focus { border-color: rgba(16,185,129,.4); }
         .ske-two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
         .ske-action-btn-row {
             display: flex; gap: 6px; align-items: center; margin-bottom: 6px;
-            padding: 7px 9px; border-radius: 8px; background: rgba(99,198,255,.05);
-            border: 1px solid rgba(99,198,255,.12);
+            padding: 7px 9px; border-radius: 8px; background: rgba(16,185,129,.05);
+            border: 1px solid rgba(16,185,129,.12);
         }
         .ske-action-btn-row input {
             flex: 1; padding: 4px 8px; border-radius: 6px; font-size: 11.5px; font-family: inherit;
-            border: 1px solid rgba(99,198,255,.15); background: #0d1420; color: #c9d6e8; outline: none;
+            border: 1px solid rgba(16,185,129,.15); background: #0d1420; color: #c9d6e8; outline: none;
         }
-        .ske-action-btn-row input:focus { border-color: rgba(99,198,255,.35); }
+        .ske-action-btn-row input:focus { border-color: rgba(16,185,129,.35); }
         .ske-action-btn-sep { color: #4a5568; font-size: 11px; flex-shrink: 0; }
         .ske-rm-btn {
             background: none; border: none; color: #6c7a91; font-size: 16px;
@@ -211,15 +211,15 @@
         .ske-rm-btn:hover { color: #ef4444; }
         .ske-add-btn {
             width: 100%; padding: 6px; border-radius: 8px;
-            border: 1px dashed rgba(99,198,255,.25); background: transparent;
+            border: 1px dashed rgba(16,185,129,.25); background: transparent;
             color: #6c7a91; font-size: 12px; cursor: pointer; transition: all .15s;
         }
-        .ske-add-btn:hover { border-color: rgba(99,198,255,.5); color: #63c6ff; }
+        .ske-add-btn:hover { border-color: rgba(16,185,129,.5); color: #10b981; }
 
         /* legacy class kept for other modals that use skill-editor-inner */
         .skill-editor-inner {
             background: #111827; border-radius: 14px; padding: 20px; width: min(540px, 92vw);
-            border: 1px solid rgba(99,198,255,.18); box-shadow: 0 24px 60px rgba(0,0,0,.65);
+            border: 1px solid rgba(16,185,129,.18); box-shadow: 0 24px 60px rgba(0,0,0,.65);
         }
         .skill-editor-header {
             display: flex; justify-content: space-between; align-items: center;
@@ -227,7 +227,7 @@
         }
         .skill-editor-textarea {
             width: 100%; padding: 10px; border-radius: 8px; box-sizing: border-box;
-            border: 1px solid rgba(99,198,255,.15); background: #0d1420;
+            border: 1px solid rgba(16,185,129,.15); background: #0d1420;
             color: #c9d6e8; font-size: 12px; font-family: 'JetBrains Mono', monospace;
             resize: vertical; min-height: 170px; line-height: 1.5;
         }
@@ -244,7 +244,7 @@
             padding: 8px 10px; background: var(--bg-tertiary);
             display: flex; align-items: center; gap: 8px; transition: border-color 0.15s;
         }
-        .binding-row.enabled, .trigger-row.enabled { border-color: rgba(99,198,255,0.3); }
+        .binding-row.enabled, .trigger-row.enabled { border-color: rgba(16,185,129,0.3); }
         .binding-row-info, .trigger-row-info { flex: 1; min-width: 0; }
         .binding-skill-name, .trigger-name {
             font-size: 12px; font-weight: 600; color: var(--text-primary);
@@ -253,8 +253,8 @@
         .binding-patterns { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
         .pattern-tag {
             font-size: 10px; padding: 1px 6px; border-radius: 10px;
-            background: rgba(99,198,255,0.12); color: var(--text-secondary);
-            border: 1px solid rgba(99,198,255,0.2);
+            background: rgba(16,185,129,0.12); color: var(--text-secondary);
+            border: 1px solid rgba(16,185,129,0.2);
         }
         .type-badge {
             font-size: 10px; padding: 1px 6px; border-radius: 10px;
@@ -290,7 +290,7 @@
         #jobsRunningPill {
             font-size: 10px; color: var(--accent-primary);
             padding: 3px 8px; border-radius: 8px;
-            background: rgba(99,198,255,.1); border: 1px solid rgba(99,198,255,.2);
+            background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.2);
             margin-top: 4px; text-align: center; display: none;
             cursor: default;
         }
@@ -298,7 +298,7 @@
         #jrpFloatTip {
             position: fixed;
             background: #1a2235;
-            border: 1px solid rgba(99,198,255,.3);
+            border: 1px solid rgba(16,185,129,.3);
             border-radius: 10px;
             padding: 10px 12px;
             min-width: 210px; max-width: 280px;
@@ -318,7 +318,7 @@
             font-size: 11px; color: #c8d8ee; margin-bottom: 4px;
         }
         .jrp-tip-type {
-            font-size: 10px; background: rgba(99,198,255,.15);
+            font-size: 10px; background: rgba(16,185,129,.15);
             border-radius: 4px; padding: 1px 5px;
             color: var(--accent-primary); flex-shrink: 0;
         }
@@ -339,22 +339,22 @@
         .csb-pill {
             display: inline-flex; align-items: center; gap: 3px;
             padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
-            background: rgba(99,198,255,0.12); border: 1px solid rgba(99,198,255,0.28);
+            background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.28);
             color: var(--accent-primary); cursor: default; white-space: nowrap;
             transition: background .15s; position: relative;
         }
-        .csb-pill:hover { background: rgba(99,198,255,0.22); }
+        .csb-pill:hover { background: rgba(16,185,129,0.22); }
         .csb-pill-dismiss {
             display: inline-flex; align-items: center; justify-content: center;
             width: 13px; height: 13px; border-radius: 50%;
             font-size: 9px; line-height: 1; font-style: normal;
-            background: transparent; color: rgba(99,198,255,.5);
+            background: transparent; color: rgba(16,185,129,.5);
             cursor: pointer; margin-left: 2px; flex-shrink: 0;
             transition: background .15s, color .15s;
             border: none; padding: 0;
         }
-        .csb-pill:hover .csb-pill-dismiss { color: rgba(99,198,255,.9); }
-        .csb-pill-dismiss:hover { background: rgba(99,198,255,.2) !important; color: #fff !important; }
+        .csb-pill:hover .csb-pill-dismiss { color: rgba(16,185,129,.9); }
+        .csb-pill-dismiss:hover { background: rgba(16,185,129,.2) !important; color: #fff !important; }
         .csb-pill-tip {
             display: none;
             position: absolute;
@@ -556,8 +556,8 @@
             border: 1px solid var(--border-color);
             background: var(--bg-card); transition: border-color .12s, box-shadow .12s; margin-bottom: 6px;
         }
-        .sp-card.enabled { border-color: rgba(99,198,255,0.35); background: rgba(99,198,255,0.04); }
-        .sp-card:hover { border-color: var(--accent-primary); box-shadow: 0 2px 12px rgba(99,198,255,0.1); }
+        .sp-card.enabled { border-color: rgba(16,185,129,0.35); background: rgba(16,185,129,0.04); }
+        .sp-card:hover { border-color: var(--accent-primary); box-shadow: 0 2px 12px rgba(16,185,129,0.1); }
         .sp-card-icon {
             font-size: 22px; line-height: 1; flex-shrink: 0;
             width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;
@@ -626,7 +626,7 @@
             color: var(--text-secondary); transition: all .15s;
         }
         .sp-session-item:hover { border-color: var(--accent-primary); color: var(--text-primary); }
-        .sp-session-item.selected { border-color: var(--accent-primary); background: rgba(99,198,255,0.1); color: var(--accent-primary); }
+        .sp-session-item.selected { border-color: var(--accent-primary); background: rgba(16,185,129,0.1); color: var(--accent-primary); }
         .sp-create-btn {
             width: 100%; padding: 8px; border-radius: 8px;
             border: 1px dashed var(--border-color); background: transparent;
@@ -710,7 +710,7 @@
             color: var(--text-secondary); cursor: pointer; transition: all .15s;
         }
         .sp-rec-chip:hover { border-color: var(--accent-primary); color: var(--text-primary); }
-        .sp-rec-chip.active { border-color: var(--accent-primary); background: rgba(99,198,255,.12); color: var(--accent-primary); }
+        .sp-rec-chip.active { border-color: var(--accent-primary); background: rgba(16,185,129,.12); color: var(--accent-primary); }
         /* ── NotebookLM-style Skills Tile Grid ─────────────────────────────── */
         .sp-tile-grid {
             display: grid; grid-template-columns: 1fr 1fr;
@@ -724,8 +724,8 @@
         }
         .sp-tile:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,.3); }
         .sp-tile.active {
-            border-color: rgba(99,198,255,.85) !important;
-            box-shadow: 0 0 0 1px rgba(99,198,255,.22), 0 4px 18px rgba(0,0,0,.28);
+            border-color: rgba(16,185,129,.85) !important;
+            box-shadow: 0 0 0 1px rgba(16,185,129,.22), 0 4px 18px rgba(0,0,0,.28);
         }
         .sp-tile.suppressed { opacity: .48; }
         .sp-tile-behavior         { background: rgba(63,131,248,.11); }
@@ -789,7 +789,7 @@
             border: 1px solid var(--border-color); margin-bottom: 5px;
             transition: border-color .12s;
         }
-        .sp-actv-item:hover { border-color: rgba(99,198,255,.4); }
+        .sp-actv-item:hover { border-color: rgba(16,185,129,.4); }
         .sp-actv-icon { font-size: 16px; flex-shrink: 0; }
         .sp-actv-info { flex: 1; min-width: 0; }
         .sp-actv-name { font-size: 12px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -807,7 +807,7 @@
             background: var(--bg-tertiary); color: var(--text-primary);
             font-size: 13px; cursor: pointer; transition: all .18s;
         }
-        .settings-open-panel-btn:hover { border-color: var(--accent-primary); background: rgba(99,198,255,0.07); color: var(--accent-primary); }
+        .settings-open-panel-btn:hover { border-color: var(--accent-primary); background: rgba(16,185,129,0.07); color: var(--accent-primary); }
         .settings-open-panel-arrow { font-size: 16px; opacity: .6; }
         .nav-skills-btn {
             display: flex; align-items: center; gap: 8px;
@@ -843,7 +843,7 @@
             height: 28px;
             border-radius: 50%;
             border: 3px solid #dbe2ef;
-            border-top-color: #338bff;
+            border-top-color: #10b981;
             animation: splashSpin 0.9s linear infinite;
         }
         @keyframes splashSpin { to { transform: rotate(360deg); } }
@@ -892,7 +892,7 @@
             font-size: 12px;
             font-weight: 500;
         }
-        #tokenChip:hover { border-color: var(--accent-primary, #338bff); color: var(--accent-primary, #338bff); }
+        #tokenChip:hover { border-color: var(--accent-primary, #10b981); color: var(--accent-primary, #10b981); }
         #tokenChip .tc-icon { font-size: 12px; }
         #tokenChip .tc-label { font-size: 11.5px; font-weight: 500; }
         #tokenPanel {
@@ -949,7 +949,7 @@
             padding: 1px 7px;
             border-radius: 10px;
             background: rgba(51,139,255,0.12);
-            color: #338bff;
+            color: #10b981;
             font-size: 11px;
             margin-right: 4px;
         }
@@ -963,7 +963,7 @@
         }
         .tp-model-row .tp-mv { color: var(--text-primary, #1e293b); font-size: 11px; }
         .tp-bar-wrap { height: 3px; background: var(--border-color, rgba(0,0,0,0.08)); border-radius: 2px; margin: 4px 0 8px; }
-        .tp-bar { height: 3px; border-radius: 2px; background: linear-gradient(90deg, #338bff, #56c27e); }
+        .tp-bar { height: 3px; border-radius: 2px; background: linear-gradient(90deg, #10b981, #56c27e); }
         .tp-footer {
             padding: 8px 14px;
             border-top: 1px solid var(--border-color, rgba(0,0,0,0.08));
@@ -977,10 +977,10 @@
             background: transparent; color: var(--text-muted, #6b7897);
             cursor: pointer; transition: all 0.15s;
         }
-        .tp-btn:hover { border-color: var(--accent-primary, #338bff); color: var(--accent-primary, #338bff); }
+        .tp-btn:hover { border-color: var(--accent-primary, #10b981); color: var(--accent-primary, #10b981); }
         .tp-spinner {
             width: 16px; height: 16px; border-radius: 50%;
-            border: 2px solid var(--border-color, rgba(0,0,0,0.1)); border-top-color: #338bff;
+            border: 2px solid var(--border-color, rgba(0,0,0,0.1)); border-top-color: #10b981;
             animation: tp-spin 0.8s linear infinite; margin: 12px auto;
         }
         @keyframes tp-spin { to { transform: rotate(360deg); } }
@@ -999,49 +999,89 @@
         <div class="grid"></div>
     </div>
     <div class="app-shell chatgpt-app">
-        <aside class="nav-rail chatgpt-sidebar">
-            <div class="nav-brand">
-                <div class="logo redesigned-logo" onclick="goToWelcome()" title="返回首页">
-                    <span class="logo-gradient-circle">
-                        <span class="logo-icon">言</span>
-                    </span>
-                    <div class="logo-copy">
-                        <span class="logo-text">Koto</span>
-                        <span class="logo-sub">Local · Gemini</span>
-                    </div>
-                </div>
-                <button class="pill-btn" onclick="showNewSessionModal()">+ 新对话</button>
+        <aside class="nav-rail chatgpt-sidebar" id="sideNav">
+            <!-- ── Top bar: hamburger + title + search ── -->
+            <div class="sidebar-topbar">
+                <button class="sb-topbar-btn" id="sidebarToggle" onclick="toggleSidebar()" title="折叠侧边栏">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <span class="sidebar-title sidebar-text" onclick="goToWelcome()" title="返回首页">Koto</span>
+                <button class="sb-topbar-btn sidebar-text" id="sidebarSearchBtn" onclick="toggleSidebarSearch()" title="搜索对话">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+                </button>
             </div>
 
-            <div class="nav-section">
-                <div class="nav-section-head">
-                    <span>对话</span>
-                    <button class="ghost-btn" onclick="loadSessions()" title="刷新列表">↻</button>
+            <!-- ── Inline search bar ── -->
+            <div class="sidebar-search-wrap" id="sidebarSearchWrap">
+                <input type="text" class="sidebar-search-input" id="sessionSearchInput"
+                       placeholder="搜索对话..." oninput="filterSessions(this.value)" autocomplete="off">
+            </div>
+
+            <!-- ── Scrollable body ── -->
+            <div class="sidebar-body">
+                <!-- New chat -->
+                <button class="sb-new-chat" onclick="showNewSessionModal()" title="新对话">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                    <span class="sidebar-text">新对话</span>
+                </button>
+
+                <!-- My stuff -->
+                <div class="sb-nav-item" id="myStuffItem" onclick="toggleMyStuff()" title="我的内容">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                    <span class="sidebar-text" style="flex:1;">我的内容</span>
+                    <svg class="sb-chevron sidebar-text" id="myStuffChevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
                 </div>
-                <input type="text" id="sessionSearchInput" class="session-search" placeholder="🔍 搜索对话..." oninput="filterSessions(this.value)" autocomplete="off">
+                <div class="sb-sub-panel" id="myStuffPanel">
+                    <div class="sb-sub-panel-inner" id="myStuffList">
+                        <div class="sb-sub-empty">加载中...</div>
+                    </div>
+                </div>
+
+                <!-- Skills / Gems -->
+                <div class="sb-nav-item" id="navSkillsBtn" onclick="openSkillsPanel()" title="Skills 库">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                    <span class="sidebar-text" style="flex:1;">Skills 库</span>
+                    <svg class="sb-arrow sidebar-text" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+
+                <!-- Divider -->
+                <div class="sb-divider sidebar-text"></div>
+
+                <!-- Chats section header -->
+                <div class="sb-section-head sidebar-text">
+                    <div style="display:flex;align-items:center;gap:4px;">
+                        <span style="flex:1;">对话</span>
+                        <button class="sb-icon-btn" onclick="loadSessions();event.stopPropagation();" title="刷新列表">↻</button>
+                        <button class="sb-icon-btn" onclick="openProjectsManager();event.stopPropagation();" title="管理项目">✎</button>
+                    </div>
+                    <select id="projectSelect" class="sb-project-select" title="选择项目">
+                        <option value="default">默认项目</option>
+                    </select>
+                </div>
+
+                <!-- Session list -->
                 <div class="sessions-list" id="sessionsList"></div>
             </div>
 
-            <div class="nav-footer">
-                <!-- 用户信息（云模式） -->
-                <div id="auth-user-bar" style="display:none;padding:8px 12px;margin-bottom:8px;border-radius:10px;background:var(--bg-tertiary);font-size:13px;">
+            <!-- ── Footer ── -->
+            <div class="sidebar-footer">
+                <div id="auth-user-bar" style="display:none;padding:6px 10px;border-radius:10px;background:var(--bg-tertiary);font-size:12px;">
                     <span id="auth-user-name" style="color:var(--text-secondary);"></span>
-                    <button id="auth-logout-btn" onclick="KotoAuth.logout()" style="float:right;background:none;border:none;color:var(--accent-primary);cursor:pointer;font-size:12px;" title="退出登录">退出</button>
+                    <button id="auth-logout-btn" onclick="KotoAuth.logout()" style="float:right;background:none;border:none;color:var(--accent-primary);cursor:pointer;font-size:12px;">退出</button>
                 </div>
-                <!-- Skill 库入口 -->
-                <button id="navSkillsBtn" class="nav-skills-btn" onclick="openSkillsPanel()" title="打开 Skills 面板">
-                    ✨ <span>Skills 库</span>
-                </button>
                 <div class="status-indicator" id="statusIndicator">
                     <span class="status-dot"></span>
-                    <div class="status-info">
+                    <div class="status-info sidebar-text">
                         <span class="status-text">检查中...</span>
                         <span id="opsStatusBadge" style="font-size:10px;color:var(--text-muted);display:none;"></span>
                     </div>
-                    <button class="icon-btn-mini" onclick="checkStatus()" title="刷新">🔄</button>
+                    <button class="sb-icon-btn" onclick="checkStatus()" title="刷新状态">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                    </button>
                 </div>
                 <div id="jobsRunningPill"></div>
             </div>
+
             <div class="resize-handle resize-handle-sidebar" id="sidebarResizeHandle"></div>
         </aside>
 
@@ -1055,10 +1095,6 @@
                 <div class="top-actions">
                     <button class="ghost-btn" onclick="switchToMiniMode()" title="切换到简洁模式">▣ 简洁</button>
                     <button class="ghost-btn" onclick="openWorkspaceFolder()" title="打开工作区文件夹">🗁 打开</button>
-                    <button class="ghost-btn notification-btn" onclick="openNotificationCenter()" title="通知中心">
-                        🔔 通知
-                        <span class="badge" id="notificationBadge" style="display: none;">0</span>
-                    </button>
                     <!-- Token 监测嵌入顶栏 -->
                     <div id="tokenMonitor">
                         <div id="tokenPanel">
@@ -1080,7 +1116,7 @@
                         </div>
                     </div>
                     <button class="ghost-btn" onclick="openSettings()" title="设置">⚙️ 设置</button>
-                    <button class="ghost-btn" id="morningBriefBtn" onclick="generateMorningBrief()" title="生成晨间简报">🌅 简报</button>
+
                     <!-- 影子追踪主动交互按鈕 -->
                     <button class="ghost-btn" id="shadowToggleBtn" onclick="openShadowPanel()" title="影子追踪 · 主动交互" style="position:relative;display:none;">
                         👁️ 影子
@@ -1108,6 +1144,17 @@
                         </div>
                     </div>
                 </div>
+                <!-- 聊天内搜索栏 (Ctrl+F) -->
+                <div id="chatSearchBar" style="display:none; border-bottom:1px solid var(--border-color); background:var(--bg-secondary); padding:6px 12px; flex-shrink:0; align-items:center; gap:8px;">
+                    <input type="text" id="chatSearchInput" placeholder="在对话中搜索…" autocomplete="off"
+                        style="flex:1; padding:5px 10px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-tertiary); color:var(--text-primary); font-size:13px; font-family:inherit; outline:none;"
+                        oninput="runChatSearch(this.value)"
+                        onkeydown="chatSearchNavKey(event)">
+                    <span id="chatSearchCount" style="font-size:12px; color:var(--text-muted); white-space:nowrap;"></span>
+                    <button class="sb-topbar-btn" onclick="chatSearchPrev()" title="上一个" style="width:28px;height:28px;font-size:14px;">&#8593;</button>
+                    <button class="sb-topbar-btn" onclick="chatSearchNext()" title="下一个" style="width:28px;height:28px;font-size:14px;">&#8595;</button>
+                    <button class="sb-topbar-btn" onclick="closeChatSearch()" title="关闭" style="width:28px;height:28px;font-size:14px;">&#10005;</button>
+                </div>
                     <div class="chat-messages" id="chatMessages" ondragover="handleDragOver(event)" ondrop="handleDrop(event)" ondragleave="handleDragLeave(event)">
                         <div class="drag-overlay" id="dragOverlay" style="display: none;">
                             <div class="drag-content">
@@ -1118,21 +1165,59 @@
                         
                         <div class="welcome-screen" id="welcomeScreen">
                             <div class="welcome-card">
-                                <div class="welcome-logo">言</div>
+                                <div class="welcome-logo">
+                                    <img src="{{ url_for('static', filename='assets/koto_icon.svg') }}" alt="Koto">
+                                </div>
                                 <div class="welcome-copy">
                                     <h2 id="welcomeGreeting">欢迎使用 Koto</h2>
                                     <p>更轻、更快、更专注的本地 + 云端双引擎助手</p>
                                 </div>
                             </div>
-                            <div class="welcome-grid">
-                                <div class="welcome-block full-width">
-                                    <div class="block-title">直接开始对话</div>
-                                    <div class="hint-list">
-                                        <span>🤖 <strong>自动任务识别</strong> — 直接输入需求，Koto 会自动判断并分配最合适的处理方式</span>
-                                        <span>📎 <strong>拖拽或上传文件</strong> — 支持 Word、PDF、图片、表格、代码等多种格式直接分析</span>
-                                        <span>🎙️ <strong>语音输入</strong> — 点击麦克风图标，用语音代替打字</span>
-                                        <span>✨ <strong>Skills 系统</strong> — 左下角可激活风格、行为、领域技能，个性化 Koto 的回应方式</span>
-                                    </div>
+                            <div class="suggestion-section">
+                                <div class="suggestion-label">快速开始 — 点击任意卡片填入示例</div>
+                                <div class="suggestion-grid">
+                                    <button class="suggestion-card" onclick="insertSuggestion('帮我写一篇关于')">
+                                        <div class="sc-icon">✍️</div>
+                                        <div class="sc-body">
+                                            <div class="sc-title">写作与润色</div>
+                                            <div class="sc-sub">邮件、报告、文案、文章...</div>
+                                        </div>
+                                    </button>
+                                    <button class="suggestion-card" onclick="insertSuggestion('帮我用 Python 写一个')">
+                                        <div class="sc-icon">💻</div>
+                                        <div class="sc-body">
+                                            <div class="sc-title">代码助手</div>
+                                            <div class="sc-sub">生成、调试、解释代码...</div>
+                                        </div>
+                                    </button>
+                                    <button class="suggestion-card" onclick="insertSuggestion('请将以下内容翻译成英文：\n\n')">
+                                        <div class="sc-icon">🌐</div>
+                                        <div class="sc-body">
+                                            <div class="sc-title">翻译与语言</div>
+                                            <div class="sc-sub">中英互译、语言润色...</div>
+                                        </div>
+                                    </button>
+                                    <button class="suggestion-card" onclick="insertSuggestion('帮我解释一下')">
+                                        <div class="sc-icon">🔍</div>
+                                        <div class="sc-body">
+                                            <div class="sc-title">信息查询</div>
+                                            <div class="sc-sub">解释概念、了解背景...</div>
+                                        </div>
+                                    </button>
+                                    <button class="suggestion-card" onclick="insertSuggestion('请帮我分析这组数据：\n\n')">
+                                        <div class="sc-icon">📊</div>
+                                        <div class="sc-body">
+                                            <div class="sc-title">数据处理</div>
+                                            <div class="sc-sub">表格、Excel、数据分析...</div>
+                                        </div>
+                                    </button>
+                                    <button class="suggestion-card" onclick="insertSuggestion('请帮我总结以下内容：\n\n')">
+                                        <div class="sc-icon">📄</div>
+                                        <div class="sc-body">
+                                            <div class="sc-title">文件分析</div>
+                                            <div class="sc-sub">上传 PDF、Word、图片...</div>
+                                        </div>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -1157,6 +1242,13 @@
                   <div class="csb-pills" id="csb-pills"><span class="csb-hint">暂无激活 — <a href="javascript:void(0)" onclick="openSkillsPanel()">打开 Skills 库</a></span></div>
                 </div>
 
+                <!-- @文件 激活的上下文文件 chips -->
+                <div id="contextFileBar" style="display:none; flex-wrap:wrap; gap:4px; padding:4px 8px; background:var(--bg-secondary,#f5f5f5); border-radius:6px; margin-bottom:4px; font-size:12px;"></div>
+                <!-- @文件 搜索弹出框 -->
+                <div id="atFileSuggest" style="display:none; position:absolute; z-index:1000; background:var(--bg-primary,#fff); border:1px solid var(--border-color,#ddd); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.15); max-height:220px; overflow-y:auto; min-width:260px; max-width:400px;"></div>
+                <!-- / 命令面板 -->
+                <div id="slashPalette"></div>
+
                 <div class="file-preview" id="filePreview" style="display: none;">
                     <div class="file-list" id="fileList"></div>
                     <button class="remove-all-files" onclick="removeFile()" title="清除所有文件">清空</button>
@@ -1175,10 +1267,10 @@
                     </button>
                     <textarea 
                         id="messageInput" 
-                        placeholder="输入消息或点击🎙️语音输入..." 
+                        placeholder="问我任何问题，或拖入文件开始分析…" 
                         rows="1"
                         onkeydown="handleKeyDown(event)"
-                        oninput="autoResize(this)"
+                        oninput="autoResize(this); handleAtMention(this); handleSlashCommand(this); updateInputMeta(this)"
                     ></textarea>
                     <div class="input-thinking" id="inputThinking" style="display:none;">
                         <span class="spinner"></span>
@@ -1196,7 +1288,8 @@
                         </svg>
                     </button>
                 </form>
-                <p class="input-hint">Enter 发送 · Shift+Enter 换行 · 可拖拽/上传文件</p>
+                <div class="input-meta-bar"></div>
+                <p class="input-hint">Enter 发送 · Shift+Enter 换行 · Ctrl+/ 快捷键</p>
             </div>
         </main>
 
@@ -1395,18 +1488,18 @@
                         </div>
                         <p class="setting-hint">开启后所有请求只走本地模型（Ollama），不调用云端 API，保证完全本地隐私。</p>
                     </div>
-                    <div class="setting-item">
-                        <label>默认模型</label>
-                        <select id="settingModel" onchange="onModelChange(this.value)">
-                            <option value="auto">🤖 Auto (智能选择)</option>
-                            <option value="gemini-3-flash-preview">⚡ Gemini 3 Flash (快速)</option>
-                            <option value="gemini-3-pro-preview">🚀 Gemini 3 Pro (智能)</option>
-                            <option value="gemini-3.1-flash-image-preview">🎨 Gemini 3.1 Flash Image (图像)</option>
-                            <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash</option>
-                            <option value="gemini-2.5-pro">🚀 Gemini 2.5 Pro</option>
-                        </select>
-                        <p class="setting-hint" id="settingModelHint">Auto 会根据任务类型自动选择最合适的模型</p>
+                    <!-- 本地模型选择（仅 local-only 开启时显示） -->
+                    <div class="setting-item" id="localModelPickerRow" style="display:none;">
+                        <label>本地模型</label>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <select id="settingLocalModel" style="flex:1;" onchange="onLocalModelChange(this.value)">
+                                <option value="">— 检测后选择 —</option>
+                            </select>
+                            <button class="btn-secondary btn-sm" onclick="detectLocalModels()" title="扫描 Ollama 可用模型">🔍 检测</button>
+                        </div>
+                        <p class="setting-hint" id="localModelHint">点击「检测」扫描本地 Ollama 已安装的模型</p>
                     </div>
+
                     <div class="setting-item">
                         <div class="toggle-row">
                             <span class="toggle-label">自动保存回复文件</span>
@@ -1498,42 +1591,6 @@
                             </table>
                             <p class="proxy-help-tip">填写示例：<code>http://127.0.0.1:7890</code> 或 <code>socks5://127.0.0.1:1080</code></p>
                         </details>
-                    </div>
-                </div>
-
-                <!-- Skills Section → redirect to dedicated panel -->
-                <div class="settings-section">
-                    <h4>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
-                        </svg>
-                        Skills 技能模块
-                    </h4>
-                    <p class="setting-desc">通过 Skill 注入个性化 Prompt，调整 AI 的回复风格与行为模式。</p>
-                    <button class="settings-open-panel-btn" onclick="closeSettings(); openSkillsPanel()">
-                        ✨ 打开 Skill 管理面板
-                        <span class="settings-open-panel-arrow">→</span>
-                    </button>
-                    <p class="setting-hint" style="margin-top:6px;">意图绑定、触发器等高级配置仍在下方。</p>
-                </div>
-
-                <!-- Skill Intent Bindings Section -->
-                <div class="settings-section">
-                    <h4>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-                        </svg>
-                        意图绑定
-                    </h4>
-                    <p class="setting-desc">当用户输入匹配关键词时，自动临时注入对应 Skill Prompt，无需全局启用。</p>
-                    <div class="bindings-toolbar">
-                        <button class="btn-secondary btn-sm" onclick="openCreateBindingModal()">＋ 新建</button>
-                        <button class="btn-secondary btn-sm" onclick="bootstrapBindings(false)">✨ 初始化推荐</button>
-                        <button class="btn-secondary btn-sm" onclick="bootstrapBindings(true)" style="color:var(--accent-warning)">🔄 重建</button>
-                    </div>
-                    <div id="bindingsList" class="bindings-list">
-                        <div class="memory-empty">正在加载绑定...</div>
                     </div>
                 </div>
 
@@ -1947,7 +2004,7 @@
 
         <!-- ==================== Template Upload Modal ==================== -->
         <div id="templateUploadModal" class="skill-editor-modal" style="display:none;" onclick="if(event.target===this)closeTemplateUpload()">
-            <div class="skill-editor-inner" style="max-width:480px;background:#131c2e;border:1px solid rgba(99,198,255,.18);box-shadow:0 24px 60px rgba(0,0,0,.65);">
+            <div class="skill-editor-inner" style="max-width:480px;background:#131c2e;border:1px solid rgba(16,185,129,.18);box-shadow:0 24px 60px rgba(0,0,0,.65);">
                 <!-- Header -->
                 <div class="skill-editor-header" style="border-bottom:1px solid rgba(255,255,255,.07);padding-bottom:12px;margin-bottom:14px;">
                     <div style="display:flex;align-items:center;gap:8px;">
@@ -1961,21 +2018,21 @@
                 </div>
 
                 <!-- Hint -->
-                <div style="background:#0b111d;border:1px solid rgba(99,198,255,.12);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#9fb3d1;line-height:1.6;">
-                    在 .docx 文档中用 <code style="background:rgba(99,198,255,.15);color:#7ecfff;padding:1px 5px;border-radius:4px;">{{字段名}}</code> 标记需要 AI 填写的位置，上传后自动识别所有字段。
+                <div style="background:#0b111d;border:1px solid rgba(16,185,129,.12);border-radius:8px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#9fb3d1;line-height:1.6;">
+                    在 .docx 文档中用 <code style="background:rgba(16,185,129,.15);color:#7ecfff;padding:1px 5px;border-radius:4px;">{{字段名}}</code> 标记需要 AI 填写的位置，上传后自动识别所有字段。
                 </div>
 
                 <!-- Drop Zone -->
                 <div id="templateDropZone"
-                    style="background:#0d1523;border:2px dashed rgba(99,198,255,.35);border-radius:10px;padding:32px 20px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;margin-bottom:12px;position:relative;"
+                    style="background:#0d1523;border:2px dashed rgba(16,185,129,.35);border-radius:10px;padding:32px 20px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;margin-bottom:12px;position:relative;"
                     onclick="document.getElementById('templateFileInput').click()"
-                    ondragover="event.preventDefault();this.style.borderColor='rgba(99,198,255,.85)';this.style.background='rgba(99,198,255,.06)'"
-                    ondragleave="this.style.borderColor='rgba(99,198,255,.35)';this.style.background='#0d1523'"
+                    ondragover="event.preventDefault();this.style.borderColor='rgba(16,185,129,.85)';this.style.background='rgba(16,185,129,.06)'"
+                    ondragleave="this.style.borderColor='rgba(16,185,129,.35)';this.style.background='#0d1523'"
                     ondrop="handleTemplateDrop(event)">
-                    <div id="tmplDropIcon" style="font-size:36px;margin-bottom:8px;filter:drop-shadow(0 2px 8px rgba(99,198,255,.3));">📄</div>
+                    <div id="tmplDropIcon" style="font-size:36px;margin-bottom:8px;filter:drop-shadow(0 2px 8px rgba(16,185,129,.3));">📄</div>
                     <div style="font-size:13px;font-weight:500;color:#c8d8ef;margin-bottom:4px;">点击选择 或 拖拽文件到此处</div>
                     <div style="font-size:11px;color:#4b5e7a;">仅支持 .docx 格式</div>
-                    <div id="templateFileName" style="margin-top:10px;display:inline-flex;align-items:center;gap:5px;background:rgba(99,198,255,.12);border:1px solid rgba(99,198,255,.3);border-radius:6px;padding:4px 10px;font-size:12px;color:#7ecfff;display:none;"></div>
+                    <div id="templateFileName" style="margin-top:10px;display:inline-flex;align-items:center;gap:5px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.3);border-radius:6px;padding:4px 10px;font-size:12px;color:#7ecfff;display:none;"></div>
                 </div>
                 <input type="file" id="templateFileInput" accept=".docx" style="display:none;" onchange="onTemplateFileSelected(event)">
 
@@ -2392,24 +2449,6 @@
         </div>
     </div>
 
-    <!-- ==================== 通知中心 ==================== -->
-    <div class="notification-panel-modal" id="notificationPanelModal" style="display: none;">
-        <div class="notification-panel">
-            <div class="panel-header">
-                <h3>🔔 通知中心</h3>
-                <div class="panel-header-actions">
-                    <button class="ghost-btn btn-xs" onclick="refreshNotifications()">↻ 刷新</button>
-                    <button class="ghost-btn btn-xs" onclick="markAllNotificationsRead()">✓ 全部已读</button>
-                </div>
-                <button class="close-panel" onclick="closeNotificationCenter()">×</button>
-            </div>
-            <div class="notification-panel-body">
-                <div class="notification-list" id="notificationList"></div>
-                <div class="notification-empty" id="notificationEmpty">暂无通知</div>
-            </div>
-        </div>
-    </div>
-
     <!-- ==================== 触发器配置 ==================== -->
     <div class="trigger-panel-modal" id="triggerPanelModal" style="display: none;">
         <div class="trigger-panel">
@@ -2499,7 +2538,7 @@
             for (const d of last7) {
                 const h = Math.max(3, Math.round((d.total / maxDay) * 22));
                 const isToday = d.date === new Date().toISOString().slice(0,10);
-                const color = isToday ? '#338bff' : 'var(--border-color, rgba(0,0,0,0.15))';
+                const color = isToday ? '#10b981' : 'var(--border-color, rgba(0,0,0,0.15))';
                 trendHtml += `<div title="${d.date}: ${fmt(d.total)} tokens" style="flex:1;height:${h}px;background:${color};border-radius:2px;cursor:default"></div>`;
             }
             trendHtml += '</div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-muted,#6b7897);margin-top:3px"><span>7天前</span><span>今天</span></div>';
@@ -2987,7 +3026,7 @@
                 if (!data.success) throw new Error(data.error || '生成失败');
                 const skill = data.skill || {};
                 resultEl.innerHTML = `
-                    <div style="color:var(--accent-secondary,#76f7d4);font-weight:600;margin-bottom:4px">
+                    <div style="color:var(--accent-secondary,#34d399);font-weight:600;margin-bottom:4px">
                         ✓ ${skill.icon || '✨'} ${skill.name || name} 已创建
                     </div>
                     <div style="font-size:10px;color:var(--text-muted);white-space:pre-wrap;
@@ -3071,7 +3110,7 @@
                 if (!data.success) throw new Error(data.error || '提取失败');
                 const prompt = data.prompt || data.skill?.prompt || '';
                 resultEl.innerHTML = `
-                    <div style="color:var(--accent-secondary,#76f7d4);font-weight:600;margin-bottom:6px;">
+                    <div style="color:var(--accent-secondary,#34d399);font-weight:600;margin-bottom:6px;">
                         ✓ ${icon} ${name} 已创建并启用
                     </div>
                     <div style="font-size:10px;color:var(--text-muted);margin-bottom:3px;">Prompt 预览：</div>
@@ -3456,7 +3495,7 @@
 
         window.handleTemplateDrop = function(event) {
             event.preventDefault();
-            document.getElementById('templateDropZone').style.borderColor = 'rgba(99,198,255,.4)';
+            document.getElementById('templateDropZone').style.borderColor = 'rgba(16,185,129,.4)';
             const file = event.dataTransfer.files[0];
             if (!file) return;
             if (!file.name.endsWith('.docx')) {
@@ -3488,7 +3527,7 @@
                 // Show parsed fields
                 const fieldsEl = document.getElementById('templateFieldsList');
                 fieldsEl.innerHTML = (data.fields || []).map(f =>
-                    {% raw %}`<span style="background:rgba(99,198,255,.15);border:1px solid rgba(99,198,255,.35);border-radius:4px;padding:2px 7px;font-size:11px;color:#7ecfff;">{{${f}}}</span>`{% endraw %}
+                    {% raw %}`<span style="background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.35);border-radius:4px;padding:2px 7px;font-size:11px;color:#7ecfff;">{{${f}}}</span>`{% endraw %}
                 ).join('');
                 document.getElementById('templateFieldsPreview').style.display = 'block';
                 document.getElementById('templateUploadStatus').textContent =
@@ -3898,6 +3937,59 @@
             });
         });
     })();
+    </script>
+
+    <!-- Hotkey Sheet Modal -->
+    <div class="modal-overlay" id="hotkeySheetModal">
+        <div class="modal" style="width:460px;max-width:96vw;">
+            <h3 style="margin-bottom:14px;">⌨️ 快捷键</h3>
+            <table class="hotkey-table">
+                <thead><tr><th>操作</th><th>快捷键</th></tr></thead>
+                <tbody>
+                    <tr><td>新建对话</td><td><kbd>Ctrl</kbd> + <kbd>K</kbd></td></tr>
+                    <tr><td>切换侧栏</td><td><kbd>Ctrl</kbd> + <kbd>B</kbd></td></tr>
+                    <tr><td>打开设置</td><td><kbd>Ctrl</kbd> + <kbd>,</kbd></td></tr>
+                    <tr><td>侧栏搜索</td><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td></tr>
+                    <tr><td>本快捷键列表</td><td><kbd>Ctrl</kbd> + <kbd>/</kbd></td></tr>
+                    <tr><td>停止生成</td><td><kbd>Esc</kbd></td></tr>
+                    <tr><td>发送消息</td><td><kbd>Enter</kbd></td></tr>
+                    <tr><td>换行</td><td><kbd>Shift</kbd> + <kbd>Enter</kbd></td></tr>
+                    <tr><td>引用文件</td><td><kbd>@</kbd> + 文件名</td></tr>
+                    <tr><td>快捷命令</td><td><kbd>/</kbd> + 命令名</td></tr>
+                </tbody>
+            </table>
+            <div class="modal-actions" style="margin-top:16px;">
+                <button class="btn-secondary" onclick="closeHotkeySheet()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Projects Manager Modal -->
+    <div class="modal-overlay" id="projectsManagerModal">
+        <div class="modal" style="width:340px;max-width:95vw;">
+            <h3 style="margin-bottom:14px;">管理项目</h3>
+            <div id="projectsManagerList" class="proj-mgr-list"></div>
+            <div class="proj-mgr-add">
+                <input type="text" id="newProjectNameInput" class="proj-mgr-name"
+                       placeholder="新项目名称..."
+                       onkeydown="if(event.key==='Enter'){addProjectEntry();}" autocomplete="off">
+                <button class="btn-primary" onclick="addProjectEntry()">添加</button>
+            </div>
+            <div class="modal-actions" style="margin-top:16px;">
+                <button class="btn-secondary" onclick="closeProjectsManager()">关闭</button>
+            </div>
+        </div>
+    </div>
+    <script>
+    // Welcome screen suggestion cards — fill input with a prompt template and focus
+    function insertSuggestion(text) {
+        var el = document.getElementById('messageInput');
+        if (!el) return;
+        el.value = text;
+        el.focus();
+        el.setSelectionRange(text.length, text.length);
+        el.dispatchEvent(new Event('input'));
+    }
     </script>
 </body>
 </html>

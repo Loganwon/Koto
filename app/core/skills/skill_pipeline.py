@@ -41,7 +41,6 @@ SkillChain（快捷方式）
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -101,14 +100,15 @@ class PipelineResult:
     elapsed_ms: float
     """总耗时（毫秒）"""
 
-    errors: Dict[str, str] = field(default_factory=dict)
-    """各步骤的错误信息 {skill_id: error_message}（仅记录失败步骤）"""
-
     @property
     def success(self) -> bool:
-        # 只要有步骤成功执行即视为整体成功；
-        # skip_on_error=True 的跳过是可接受的非致命失败，不影响成功判定
+        """只要有步骤成功执行就视为成功；steps_skipped 是 skip_on_error 的预期行为。"""
         return bool(self.steps_executed)
+
+    @property
+    def fully_succeeded(self) -> bool:
+        """所有步骤都成功执行（无跳过）。"""
+        return bool(self.steps_executed) and not self.steps_skipped
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -153,27 +153,22 @@ class SkillPipeline:
         ctx: Dict[str, Any] = dict(context or {})
         steps_executed: List[str] = []
         steps_skipped: List[str] = []
-        errors: Dict[str, str] = {}
         last_output: Any = None
         t0 = time.perf_counter()
 
         for step in self.steps:
             # 构建本步骤的调用参数
-            # pass_full_ctx=True : 将整个 context 完整传入（链式管道默认行为）
-            # pass_full_ctx=False: 仅传入 input_from 显式声明的键（精确注入模式）
+            call_ctx: Dict[str, Any] = {"skill_id": step.skill_id, **ctx}
+
             if step.pass_full_ctx:
-                call_ctx: Dict[str, Any] = {"skill_id": step.skill_id, **ctx}
+                call_ctx["context"] = dict(ctx)
             else:
-                call_ctx = {"skill_id": step.skill_id}
                 for ctx_key, param_name in step.input_from.items():
                     if ctx_key in ctx:
                         call_ctx[param_name] = ctx[ctx_key]
 
-            logger.debug(
-                "[SkillPipeline] ▶ step: %s | ctx_keys=%s",
-                step.skill_id,
-                list(call_ctx.keys()),
-            )
+            logger.debug("[SkillPipeline] ▶ step: %s | ctx_keys=%s",
+                         step.skill_id, list(call_ctx.keys()))
 
             try:
                 output = SkillCapabilityRegistry.dispatch(
@@ -188,8 +183,6 @@ class SkillPipeline:
                 logger.info("[SkillPipeline] ✅ step done: %s", step.skill_id)
 
             except Exception as exc:
-                err_msg = str(exc)
-                errors[step.skill_id] = err_msg
                 logger.warning(
                     "[SkillPipeline] ⚠️ step failed: %s — %s", step.skill_id, exc
                 )
@@ -203,15 +196,12 @@ class SkillPipeline:
                         steps_executed=steps_executed,
                         steps_skipped=steps_skipped,
                         elapsed_ms=elapsed,
-                        errors=errors,
                     )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
             "[SkillPipeline] 完成 | steps=%d skipped=%d elapsed=%.1fms",
-            len(steps_executed),
-            len(steps_skipped),
-            elapsed_ms,
+            len(steps_executed), len(steps_skipped), elapsed_ms,
         )
         return PipelineResult(
             final_output=last_output,
@@ -219,19 +209,7 @@ class SkillPipeline:
             steps_executed=steps_executed,
             steps_skipped=steps_skipped,
             elapsed_ms=elapsed_ms,
-            errors=errors,
         )
-
-    async def async_run(
-        self,
-        user_input: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> PipelineResult:
-        """
-        异步版本：将同步的 run() 移出事件循环执行，避免阻塞 asyncio。
-        从 async 上下文（如 PlanExecutor handler）调用时请使用此方法。
-        """
-        return await asyncio.to_thread(self.run, user_input, context)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -272,7 +250,6 @@ class SkillChain:
         """
         try:
             from app.core.skills.skill_manager import SkillManager
-
             SkillManager._ensure_init()
         except Exception as exc:
             raise RuntimeError(f"SkillChain: SkillManager 加载失败 — {exc}") from exc
@@ -296,7 +273,7 @@ class SkillChain:
             s_def = SkillManager._def_registry.get(skill_id)
             if not s_def:
                 return
-            for next_id in getattr(s_def, "chains_to", []) or []:
+            for next_id in (getattr(s_def, "chains_to", []) or []):
                 _collect(next_id, remaining_depth - 1)
 
         _collect(root_skill_id, depth)
@@ -304,7 +281,9 @@ class SkillChain:
         if not steps:
             raise ValueError(f"SkillChain: 找不到 Skill '{root_skill_id}'")
 
-        logger.debug("[SkillChain] 构建完成: %s", " → ".join(s.skill_id for s in steps))
+        logger.debug(
+            "[SkillChain] 构建完成: %s", " → ".join(s.skill_id for s in steps)
+        )
         return SkillPipeline(steps=steps)
 
     @classmethod
@@ -322,9 +301,8 @@ class SkillChain:
         Returns None 当没有任何可执行步骤时。
         """
         try:
-            from app.core.skills.skill_capability import SkillCapabilityRegistry
             from app.core.skills.skill_manager import SkillManager
-
+            from app.core.skills.skill_capability import SkillCapabilityRegistry
             SkillManager._ensure_init()
         except Exception:
             return None
@@ -338,9 +316,7 @@ class SkillChain:
             has_cap = SkillCapabilityRegistry.has_capability(sid)
             if has_ep or has_cap:
                 steps.append(
-                    PipelineStep(
-                        skill_id=sid, output_key=sid, pass_full_ctx=pass_full_ctx
-                    )
+                    PipelineStep(skill_id=sid, output_key=sid, pass_full_ctx=pass_full_ctx)
                 )
 
         if not steps:

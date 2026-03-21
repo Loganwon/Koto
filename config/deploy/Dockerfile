@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # 先复制依赖文件（利用 Docker 缓存）
-COPY config/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY config/requirements.lock .
+RUN pip install --no-cache-dir -r requirements.lock
 
 # 复制应用代码
 COPY web/ web/
@@ -37,7 +37,7 @@ ENV KOTO_DEPLOY_MODE=cloud
 
 # 健康检查（start-period 延长以等待 gunicorn 完全启动）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5000/api/ping')" || exit 1
+    CMD python -c "import requests; requests.get('http://localhost:5000/api/health').raise_for_status()" || exit 1
 
 EXPOSE 5000
 

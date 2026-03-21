@@ -1205,11 +1205,12 @@ class TestOllamaLLMProvider:
         assert provider._options["num_predict"] == 2048
 
     def test_get_token_count_returns_zero(self):
-        """get_token_count() always returns 0 (no endpoint available)."""
+        """get_token_count() returns a non-negative integer estimate."""
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
         provider = OllamaLLMProvider(model="test")
-        assert provider.get_token_count("hello world", "test") == 0
+        result = provider.get_token_count("hello world", "test")
+        assert isinstance(result, int) and result >= 0
 
     def test_to_ollama_messages_string_prompt(self):
         """_to_ollama_messages() converts string prompt to messages list."""

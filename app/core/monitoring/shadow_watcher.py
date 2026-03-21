@@ -282,6 +282,7 @@ class ShadowWatcher:
         self._obs: Dict[str, Any] = _default_obs()
         # 会话轮次计数（内存中，重启清零）
         self._session_exchanges: Dict[str, int] = {}
+        self._dirty_count = 0
         self._load()
 
     # ── 单例 ──────────────────────────────────────────────────────────────────
@@ -455,14 +456,14 @@ class ShadowWatcher:
             # 会话轮次计数（无需持锁）
             _session_ex = self._inc_session_exchanges(session_id)
 
-            self._save()
+            self._dirty_save()
             # 有新的未完成任务或失败请求时，立即（绕过定时 interval）唤醒 ProactiveAgent
             if _should_trigger:
                 self._trigger_proactive_tick()
             # 每次对话完成后都调用 per-exchange 主动训练
             self._trigger_after_exchange(_session_ex, _completed_task_text)
         except Exception as exc:
-            logger.debug("[ShadowWatcher] 处理异常: %s", exc)
+            logger.warning("[ShadowWatcher] 处理异常: %s", exc)
 
     def _trigger_proactive_tick(self):
         """在后台线程中立即触发 ProactiveAgent（绕过定时 interval）。"""
@@ -727,9 +728,10 @@ class ShadowWatcher:
                 logger.warning("[ShadowWatcher] 加载失败: %s", exc)
 
     def _dirty_save(self):
-        """累积变更计数；每 5 次写一次磁盘，降低高频对话下的 I/O 压力。"""
+        """累积变更计数；每 5 次写一次磁盘，降低高频对话下的 I/O 压力。
+        首次观察（重启后第一次）立即写盘，防止服务重启丢失数据。"""
         self._dirty_count += 1
-        if self._dirty_count >= 5:
+        if self._dirty_count == 1 or self._dirty_count >= 5:
             self._dirty_count = 0
             self._save()
 

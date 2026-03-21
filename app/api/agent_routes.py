@@ -78,6 +78,36 @@ def _is_service_unavailable_error(text: str) -> bool:
     )
 
 
+# ── 隐私路由：含高敏感内容时强制走本地模型 ───────────────────────────────────
+import re as _re
+
+_PRIVACY_PATTERNS = (
+    # API Key / Token / Password 赋值
+    _re.compile(
+        r'(password|passwd|secret|api[_\s-]?key|access[_\s-]?token|private[_\s-]?key'
+        r'|credential|auth[_\s-]?token|bearer)[s]?\s*[:=]\s*\S{6,}',
+        _re.IGNORECASE,
+    ),
+    # OpenAI / Anthropic / HuggingFace 等常见 Key 前缀
+    _re.compile(r'\b(sk-|sk-ant-|hf_|AIzaSy)[A-Za-z0-9_\-]{16,}', _re.IGNORECASE),
+    # 中国居民身份证（18 位，末位可为 X）
+    _re.compile(r'\b\d{17}[\dXx]\b'),
+    # 银行卡 / 信用卡（13-19 位纯数字，允许空格或连字符分隔）
+    _re.compile(r'\b(?:\d[ \-]?){13,19}\d\b'),
+    # 手机号（中国大陆，1 开头 11 位）
+    _re.compile(r'\b1[3-9]\d{9}\b'),
+    # 密码/私钥块
+    _re.compile(r'-----BEGIN\s+(RSA |EC )?PRIVATE KEY-----', _re.IGNORECASE),
+)
+
+
+def _is_privacy_sensitive(text: str) -> bool:
+    """返回 True 表示文本含高度敏感信息，应强制走本地模型。"""
+    if not text:
+        return False
+    return any(pat.search(text) for pat in _PRIVACY_PATTERNS)
+
+
 def _build_skill_system_instruction(
     user_input: str = "", task_type: str = "CHAT"
 ) -> str:
@@ -525,12 +555,13 @@ def _run_agent_collect(
 @agent_bp.route("/chat", methods=["POST"])
 def chat():
     data = request.json
-    message = data.get("message")
-    session_id = data.get("session_id") or data.get("session", "")
-    history = data.get("history") or _load_history(session_id)
-    model_id = data.get("model", "gemini-3-flash-preview")
-    skill_id = data.get("skill_id")  # v2: 关联的 Skill ID
-    task_type = data.get("task_type")  # v2: 任务分类
+    message = data.get('message')
+    session_id = data.get('session_id') or data.get('session', '')
+    history = data.get('history') or _load_history(session_id)
+    model_id = data.get('model', 'gemini-3-flash-preview')
+    skill_id = data.get('skill_id')          # v2: 关联的 Skill ID
+    task_type = data.get('task_type')         # v2: 任务分类
+    context_files = data.get('context_files') or []  # @文件 激活的上下文文件路径列表
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
@@ -540,7 +571,6 @@ def chat():
     _tracker_path = ""
     try:
         from app.core.memory.conversation_tracker import ConversationTracker
-
         _tracker_path = _get_tracker_path(session_id)
         _tracker = ConversationTracker.load(_tracker_path)
     except Exception as _te:
@@ -550,7 +580,6 @@ def chat():
     _rewritten_message = message
     try:
         from app.core.routing.intent_analyzer import IntentAnalyzer
-
         if IntentAnalyzer.should_analyze(message):
             _rw = IntentAnalyzer.rewrite_intent(message, history, _tracker)
             if _rw and _rw != message:
@@ -563,7 +592,6 @@ def chat():
     _cw_paged_context = ""
     try:
         from app.core.memory.context_window_manager import ContextWindowManager
-
         _cw_out = ContextWindowManager.manage(
             history=history,
             query=_rewritten_message,
@@ -583,6 +611,28 @@ def chat():
             _system_ctx_parts.append(_ctx_inj)
     if _cw_paged_context:
         _system_ctx_parts.append(_cw_paged_context)
+
+    # ── @文件 上下文注入 ─────────────────────────────────────────────────────
+    if context_files:
+        try:
+            from app.core.file.file_registry import get_file_registry
+            reg = get_file_registry()
+            file_blocks = []
+            for path in context_files[:5]:  # 最多注入 5 个文件防止 token 爆炸
+                entry = reg.get_by_path(str(path))
+                if entry and entry.content_preview:
+                    file_blocks.append(
+                        f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}"
+                    )
+            if file_blocks:
+                _system_ctx_parts.append(
+                    "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n"
+                    + "\n\n---\n\n".join(file_blocks)
+                )
+                logger.info(f"[chat] 注入 {len(file_blocks)} 个 @文件 上下文")
+        except Exception as _cf_err:
+            logger.debug(f"[chat] @文件 上下文注入跳过: {_cf_err}")
+
     _system_context = "\n\n".join(_system_ctx_parts) if _system_ctx_parts else None
 
     # Phase3: load system state snapshot and inject into history
@@ -590,10 +640,9 @@ def chat():
     snapshot_ctx = _build_snapshot_context_text(session_state)
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
+    
 
-    skill_id, auto_skill_ids = _resolve_runtime_skill(
-        _rewritten_message, skill_id, task_type
-    )
+    skill_id, auto_skill_ids = _resolve_runtime_skill(_rewritten_message, skill_id, task_type)
 
     agent = get_agent()
     if agent.model_id != model_id:
@@ -618,22 +667,43 @@ def chat():
         local_fallback_model = None
         _t_start = time.time()
         try:
-            for step in agent.run(
-                input_text=safe_message,
-                history=history,
-                session_id=session_id,
-                skill_id=skill_id,
-                task_type=task_type,
-                system_context=_system_context,
-            ):
-                step_data = step.to_dict()
-                collected_steps.append(step_data)
-                if step.step_type == AgentStepType.ANSWER:
-                    final_answer = step.content or ""
-                yield f"data: {json.dumps({'type': 'agent_step', 'data': step_data}, ensure_ascii=False)}\n\n"
+            # ── 隐私路由：高敏感内容强制走本地模型，不上云 ──────────────────
+            _privacy_routed = False
+            if _is_privacy_sensitive(safe_message):
+                logger.info("[chat] 🔒 检测到高敏感内容，强制使用本地模型（隐私路由）")
+                _priv_ans, _priv_mod = _local_model_fallback(safe_message, history)
+                if _priv_ans:
+                    _notice = {
+                        "step_type": "thought",
+                        "content": "🔒 检测到敏感信息，已启用隐私保护模式（本地模型处理，不上传云端）",
+                        "metadata": {"source": "privacy_routing"},
+                    }
+                    yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
+                    used_local_fallback = True
+                    local_fallback_model = _priv_mod
+                    final_answer = _priv_ans
+                    _privacy_routed = True
+                else:
+                    # 本地不可用时 fall-through 到云端（已经过 PII 脱敏）
+                    logger.warning("[chat] 隐私路由：本地模型不可用，继续走云端（已 PII 脱敏）")
 
-            if not final_answer and collected_steps:
-                final_answer = collected_steps[-1].get("content", "")
+            if not _privacy_routed:
+                for step in agent.run(
+                    input_text=safe_message,
+                    history=history,
+                    session_id=session_id,
+                    skill_id=skill_id,
+                    task_type=task_type,
+                    system_context=_system_context,
+                ):
+                    step_data = step.to_dict()
+                    collected_steps.append(step_data)
+                    if step.step_type == AgentStepType.ANSWER:
+                        final_answer = step.content or ""
+                    yield f"data: {json.dumps({'type': 'agent_step', 'data': step_data}, ensure_ascii=False)}\n\n"
+
+                if not final_answer and collected_steps:
+                    final_answer = collected_steps[-1].get("content", "")
 
             # ── 503 / 连接故障：本地模型兜底 ────────────────────────────────
             _error_steps = [s for s in collected_steps if s.get("step_type") == "error"]
@@ -664,17 +734,47 @@ def chat():
             validated_answer = final_answer
             validation_action = "PASS"
             try:
-                if final_answer and not used_local_fallback:
+                if final_answer:
                     OutputValidator = _lazy_validator()
+                    # 本地备用模型：只做泄露/有害内容检测，跳过实时数据/格式/LLM质量检测
                     val = OutputValidator.validate(
                         text=final_answer,
-                        skill_id=skill_id,
-                        original_prompt=message,
+                        skill_id=skill_id if not used_local_fallback else None,
+                        original_prompt=message if not used_local_fallback else None,
                     )
                     validation_action = val.action
                     if val.is_blocked:
                         validated_answer = val.text
                         logger.warning(f"[chat] 🚫 输出被拦截: {val.reasons}")
+                    elif val.needs_retry and not used_local_fallback:
+                        # 本地备用回复不触发重试（本地模型重试无意义）
+                        logger.warning(f"[chat] ⟳ 输出质量不合格，触发重试: {val.reasons}")
+                        _retry_input = val.text if val.text != final_answer else safe_message
+                        _retry_steps: list = []
+                        _retry_answer = ""
+                        try:
+                            for _rs in agent.run(
+                                input_text=_retry_input,
+                                history=history,
+                                session_id=session_id,
+                                skill_id=skill_id,
+                                task_type=task_type,
+                                system_context=_system_context,
+                            ):
+                                _retry_steps.append(_rs.to_dict())
+                                if _rs.step_type == AgentStepType.ANSWER:
+                                    _retry_answer = _rs.content or ""
+                        except Exception as _re:
+                            logger.warning(f"[chat] 重试执行异常: {_re}")
+                        if not _retry_answer and _retry_steps:
+                            _retry_answer = _retry_steps[-1].get("content", "")
+                        if _retry_answer:
+                            validated_answer = _retry_answer
+                            collected_steps.extend(_retry_steps)
+                            logger.info(f"[chat] ✓ 重试成功，新响应长度: {len(_retry_answer)}")
+                        else:
+                            validated_answer = final_answer  # 重试失败，保留原始响应
+                            logger.warning("[chat] 重试未返回有效响应，保留原始结果")
                     else:
                         validated_answer = val.text
             except Exception as _ve:
@@ -703,7 +803,6 @@ def chat():
             if display_answer and not used_local_fallback:
                 try:
                     from app.core.skills.skill_suggester import SkillSuggester
-
                     _suggestions = SkillSuggester.suggest(
                         user_input=message or "",
                         task_type=task_type or "CHAT",
@@ -713,12 +812,8 @@ def chat():
                     if _suggestions:
                         display_answer += SkillSuggester.format_hint(_suggestions)
                     # ── chains_to：基于本轮激活 Skill 推荐下一步 ──────────────
-                    _all_active = list(
-                        set((auto_skill_ids or []) + ([skill_id] if skill_id else []))
-                    )
-                    _already_ids = (
-                        [s["id"] for s in _suggestions] if _suggestions else []
-                    )
+                    _all_active = list(set((auto_skill_ids or []) + ([skill_id] if skill_id else [])))
+                    _already_ids = [s["id"] for s in _suggestions] if _suggestions else []
                     _chains = SkillSuggester.suggest_chains(
                         active_skill_ids=_all_active,
                         already_suggested_ids=_already_ids,
@@ -793,6 +888,21 @@ def chat():
                 yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
                 _local_ans, _local_mod = _local_model_fallback(safe_message, history)
                 if _local_ans:
+                    # 异常路径：对本地模型回复做 BLOCK 检测
+                    try:
+                        OutputValidator = _lazy_validator()
+                        _lv = OutputValidator.validate(text=_local_ans)
+                        if _lv.is_blocked:
+                            logger.warning(f"[chat] 🚫 本地模型异常路径输出被拦截: {_lv.reasons}")
+                        _local_ans = _lv.text
+                    except Exception as _ov_err:
+                        logger.debug("[chat] 本地模型输出检测跳过: %s", _ov_err)
+                    # PII 还原
+                    if mask_result and mask_result.has_pii:
+                        try:
+                            _local_ans = mask_result.restore(_local_ans)
+                        except Exception as _pr_err:
+                            logger.debug("[chat] PII 还原失败: %s", _pr_err)
                     _lm = _local_mod or "本地模型"
                     _display = (
                         f"🔄 **[本地模型回复]** 云端服务不可用，"
@@ -849,16 +959,36 @@ def process_compat():
 
     skill_id, auto_skill_ids = _resolve_runtime_skill(user_request, skill_id, task_type)
 
+    # ── 路由级 PII 脱敏 ─────────────────────────────────────────
+    _proc_mask = None
+    _proc_safe_request = user_request
+    try:
+        PIIFilter = _lazy_pii()
+        _proc_mask = PIIFilter.mask(user_request)
+        if _proc_mask.has_pii:
+            _proc_safe_request = _proc_mask.masked_text
+            logger.info(f"[process] PII 脱敏 {_proc_mask.stats}")
+    except Exception as _pe:
+        logger.warning(f"[process] PII 过滤器异常（跳过）: {_pe}")
+
     try:
         agent = get_agent()
         task = _run_agent_collect(
             agent,
-            user_request,
+            _proc_safe_request,
             history=history,
             session_id=session_id,
             skill_id=skill_id,
             task_type=task_type,
         )
+        # ── PII 还原 ────────────────────────────────────────────
+        if _proc_mask and _proc_mask.has_pii:
+            try:
+                _r = task.get("result", "")
+                if _r:
+                    task["result"] = _proc_mask.restore(_r)
+            except Exception:
+                pass
         task["skill_id"] = skill_id
         task["auto_skill_ids"] = auto_skill_ids
         task["task_type"] = task_type
@@ -881,6 +1011,7 @@ def process_stream_compat():
     skill_id = data.get("skill_id")
     task_type = data.get("task_type")
     context = data.get("context", {})
+    context_files = data.get("context_files") or []  # @文件 激活的上下文文件路径列表
     # Prefer explicit history from request, fall back to disk
     history = (
         context.get("history", []) if isinstance(context, dict) else []
@@ -891,6 +1022,28 @@ def process_stream_compat():
     snapshot_ctx = _build_snapshot_context_text(session_state)
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
+
+    # ── @文件 上下文注入 ─────────────────────────────────────────────────────
+    if context_files:
+        try:
+            from app.core.file.file_registry import get_file_registry
+            reg = get_file_registry()
+            file_blocks = []
+            for path in context_files[:5]:
+                entry = reg.get_by_path(str(path))
+                if entry and entry.content_preview:
+                    file_blocks.append(
+                        f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}"
+                    )
+            if file_blocks:
+                file_ctx = (
+                    "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n"
+                    + "\n\n---\n\n".join(file_blocks)
+                )
+                history = (history or []) + [{"role": "model", "content": file_ctx}]
+                logger.info(f"[process-stream] 注入 {len(file_blocks)} 个 @文件 上下文")
+        except Exception as _cf_err:
+            logger.debug(f"[process-stream] @文件 上下文注入跳过: {_cf_err}")
 
     if not user_request:
         return jsonify({"success": False, "error": "缺少请求内容"}), 400
@@ -967,16 +1120,49 @@ def process_stream_compat():
             latency_ms = int((time.time() - t0) * 1000)
             validation_action = "PASS"
             try:
-                if not used_local_fallback:
+                if raw_final:
                     OutputValidator = _lazy_validator()
+                    # 本地备用模型：只做泄露/有害内容检测，跳过实时数据/格式/LLM质量检测
                     val_result = OutputValidator.validate(
                         raw_final,
-                        skill_id=skill_id,
-                        original_prompt=user_request,
+                        skill_id=skill_id if not used_local_fallback else None,
+                        original_prompt=user_request if not used_local_fallback else None,
                     )
                     validation_action = val_result.action
                     if validation_action == "BLOCK":
                         raw_final = "[内容被安全策略拦截，请调整您的请求]"
+                    elif validation_action == "RETRY" and not used_local_fallback:
+                        logger.warning(
+                            f"[process-stream] ⟳ 输出质量不合格，触发重试: {val_result.reasons}"
+                        )
+                        _retry_input = (
+                            val_result.text if val_result.text != raw_final else safe_request
+                        )
+                        _retry_steps: list = []
+                        _retry_answer = ""
+                        try:
+                            for _rs in agent.run(
+                                input_text=_retry_input,
+                                history=history,
+                                session_id=session_id,
+                                skill_id=skill_id,
+                                task_type=task_type,
+                            ):
+                                _retry_steps.append(_rs.to_dict())
+                                if _rs.step_type == AgentStepType.ANSWER:
+                                    _retry_answer = _rs.content or ""
+                        except Exception as _re:
+                            logger.warning(f"[process-stream] 重试执行异常: {_re}")
+                        if not _retry_answer and _retry_steps:
+                            _retry_answer = _retry_steps[-1].get("content", "")
+                        if _retry_answer:
+                            raw_final = _retry_answer
+                            collected_steps.extend(_retry_steps)
+                            logger.info(
+                                f"[process-stream] ✓ 重试成功，新响应长度: {len(_retry_answer)}"
+                            )
+                        else:
+                            logger.warning("[process-stream] 重试未返回有效响应，保留原始结果")
                     elif validation_action in ("WARN", "REFORMAT"):
                         raw_final = val_result.text or raw_final
             except Exception as _ve:
@@ -1059,6 +1245,22 @@ def process_stream_compat():
                 yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
                 _local_ans, _local_mod = _local_model_fallback(safe_request, history)
                 if _local_ans:
+                    # 异常路径：对本地模型回复做 BLOCK 检测 + PII 还原
+                    try:
+                        OutputValidator = _lazy_validator()
+                        _lv = OutputValidator.validate(text=_local_ans)
+                        if _lv.is_blocked:
+                            logger.warning(
+                                f"[process-stream] 🚫 本地模型异常路径输出被拦截: {_lv.reasons}"
+                            )
+                        _local_ans = _lv.text
+                    except Exception:
+                        pass
+                    if mask_result and mask_result.has_pii:
+                        try:
+                            _local_ans = mask_result.restore(_local_ans)
+                        except Exception:
+                            pass
                     _lm = _local_mod or "本地模型"
                     _display = (
                         f"🔄 **[本地模型回复]** 云端服务不可用，"
@@ -2050,215 +2252,3 @@ def distill_prerequisites():
         )
     except Exception as e:
         return jsonify({"ready": False, "error": str(e)}), 500
-
-
-# ──────────────────────────────────────────────────────────────────
-# Multi-Agent Pipeline API
-# POST /api/agent/multi-run        — 同步多 Agent 管线执行
-# POST /api/agent/multi-run/stream — SSE 流式多 Agent 管线执行
-# ──────────────────────────────────────────────────────────────────
-
-
-@agent_bp.route("/multi-run", methods=["POST"])
-def multi_run():
-    """
-    启动多 Agent 协作管线（同步，等待全部完成后返回）。
-
-    请求体 (JSON):
-        user_input    (str, 必填)  — 用户任务描述
-        preset        (str, 可选)  — "content" | "code" | "analysis"，默认 "content"
-        model_id      (str, 可选)  — 使用的模型，默认 gemini-3-flash-preview
-        max_revisions (int, 可选)  — Critic 最大修订次数，默认 1
-        session_id    (str, 可选)  — 会话 ID（留空自动生成）
-        roles         (list, 可选) — 自定义角色定义列表（会覆盖 preset）
-            每项格式: {
-                "name": str, "display_name": str, "system_prompt": str,
-                "output_field": str, "is_critic": bool (默认 false),
-                "temperature": float (默认 0.7), "model_id": str (可选)
-            }
-
-    响应:
-        { "session_id": str, "output": str, "steps": [...], "error": str|null }
-    """
-    try:
-        from app.core.agent.multi_agent import (
-            AgentRole,
-            MultiAgentOrchestrator,
-            ROLES,
-        )
-
-        body = request.get_json(silent=True) or {}
-        user_input = (body.get("user_input") or "").strip()
-        if not user_input:
-            return jsonify({"error": "user_input is required"}), 400
-
-        preset = (body.get("preset") or "content").lower()
-        model_id = body.get("model_id") or "gemini-3-flash-preview"
-        max_revisions = int(body.get("max_revisions", 1))
-        session_id = body.get("session_id") or None
-        custom_roles_raw = body.get("roles")
-
-        # 构建角色列表
-        if custom_roles_raw and isinstance(custom_roles_raw, list):
-            roles = []
-            for rd in custom_roles_raw:
-                if not isinstance(rd, dict):
-                    continue
-                if not rd.get("name") or not rd.get("system_prompt"):
-                    continue
-                roles.append(
-                    AgentRole(
-                        name=str(rd["name"]),
-                        display_name=str(rd.get("display_name", rd["name"])),
-                        system_prompt=str(rd["system_prompt"]),
-                        output_field=str(rd.get("output_field", rd["name"] + "_output")),
-                        is_critic=bool(rd.get("is_critic", False)),
-                        temperature=float(rd.get("temperature", 0.7)),
-                        model_id=rd.get("model_id") or None,
-                    )
-                )
-            if not roles:
-                return jsonify({"error": "No valid roles provided"}), 400
-            orch = MultiAgentOrchestrator(
-                roles=roles, model_id=model_id, max_revisions=max_revisions
-            )
-        elif preset == "code":
-            orch = MultiAgentOrchestrator.preset_code_pipeline(
-                model_id=model_id, max_revisions=max_revisions
-            )
-        elif preset == "analysis":
-            orch = MultiAgentOrchestrator.preset_analysis_pipeline(
-                model_id=model_id, max_revisions=max_revisions
-            )
-        else:
-            orch = MultiAgentOrchestrator.preset_content_pipeline(
-                model_id=model_id, max_revisions=max_revisions
-            )
-
-        result = orch.run(user_input=user_input, session_id=session_id)
-
-        # ── TaskLedger 追踪 ────────────────────────────────────────────────
-        try:
-            from app.core.tasks.task_ledger import TaskPriority, get_ledger
-
-            ledger = get_ledger()
-            task_rec = ledger.create(
-                session_id=session_id or result.get("state", {}).get("session_id", "multi_agent"),
-                user_input=user_input[:500],
-                task_type="multi_agent",
-                source="multi_agent_api",
-                metadata={"preset": preset, "steps": result.get("steps", [])},
-                priority=TaskPriority.NORMAL,
-            )
-            if result.get("error"):
-                ledger.mark_failed(task_rec.task_id, result["error"][:500])
-            else:
-                ledger.mark_completed(task_rec.task_id, result_summary=(result.get("output") or "")[:200])
-        except Exception as _te:
-            logger.debug("[multi_run] TaskLedger 记录失败（非致命）: %s", _te)
-
-        return jsonify(result), 200
-
-    except Exception as exc:
-        logger.error("[multi_run] 执行失败: %s", exc, exc_info=True)
-        return jsonify({"error": str(exc), "output": "", "steps": []}), 500
-
-
-@agent_bp.route("/multi-run/stream", methods=["POST"])
-def multi_run_stream():
-    """
-    Multi-Agent 管线 SSE 流式执行。
-    每个 Agent 节点完成时推送一条 event: data JSON。
-
-    请求体与 POST /api/agent/multi-run 相同。
-
-    SSE 事件格式:
-        data: {"agent": "researcher", "content": "...", "done": false}
-        data: {"agent": "finalize",   "content": "...", "done": true}
-    """
-    try:
-        from app.core.agent.multi_agent import (
-            AgentRole,
-            MultiAgentOrchestrator,
-            ROLES,
-        )
-
-        body = request.get_json(silent=True) or {}
-        user_input = (body.get("user_input") or "").strip()
-        if not user_input:
-            return jsonify({"error": "user_input is required"}), 400
-
-        preset = (body.get("preset") or "content").lower()
-        model_id = body.get("model_id") or "gemini-3-flash-preview"
-        max_revisions = int(body.get("max_revisions", 1))
-        session_id = body.get("session_id") or None
-
-        if preset == "code":
-            orch = MultiAgentOrchestrator.preset_code_pipeline(
-                model_id=model_id, max_revisions=max_revisions
-            )
-        elif preset == "analysis":
-            orch = MultiAgentOrchestrator.preset_analysis_pipeline(
-                model_id=model_id, max_revisions=max_revisions
-            )
-        else:
-            orch = MultiAgentOrchestrator.preset_content_pipeline(
-                model_id=model_id, max_revisions=max_revisions
-            )
-
-        import json as _json
-
-        def _generate():
-            try:
-                for event in orch.stream(user_input=user_input, session_id=session_id):
-                    yield f"data: {_json.dumps(event, ensure_ascii=False)}\n\n"
-            except Exception as exc:
-                err_event = {"agent": "error", "content": str(exc), "done": True}
-                yield f"data: {_json.dumps(err_event, ensure_ascii=False)}\n\n"
-
-        from flask import Response
-
-        return Response(
-            _generate(),
-            mimetype="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
-        )
-
-    except Exception as exc:
-        logger.error("[multi_run_stream] 失败: %s", exc, exc_info=True)
-        return jsonify({"error": str(exc)}), 500
-
-
-@agent_bp.route("/multi-run/graph", methods=["GET"])
-def multi_run_graph():
-    """
-    返回多 Agent 管线的 Mermaid 图结构（可视化调试）。
-
-    查询参数:
-        preset  — "content" | "code" | "analysis"（默认 content）
-
-    响应:
-        { "mermaid": "graph TD\\n  ..." }
-    """
-    try:
-        from app.core.agent.multi_agent import MultiAgentOrchestrator
-
-        preset = (request.args.get("preset") or "content").lower()
-        model_id = request.args.get("model_id") or "gemini-3-flash-preview"
-
-        if preset == "code":
-            orch = MultiAgentOrchestrator.preset_code_pipeline(model_id=model_id)
-        elif preset == "analysis":
-            orch = MultiAgentOrchestrator.preset_analysis_pipeline(model_id=model_id)
-        else:
-            orch = MultiAgentOrchestrator.preset_content_pipeline(model_id=model_id)
-
-        mermaid = orch.get_graph_mermaid()
-        return jsonify({"preset": preset, "mermaid": mermaid}), 200
-
-    except Exception as exc:
-        logger.error("[multi_run_graph] 失败: %s", exc, exc_info=True)
-        return jsonify({"error": str(exc)}), 500

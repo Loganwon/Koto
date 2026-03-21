@@ -1,6 +1,3 @@
-from typing import Optional
-
-
 class TaskDecomposer:
     """
     分解复杂任务为多个子任务
@@ -11,7 +8,16 @@ class TaskDecomposer:
       1. WEB_SEARCH: 查询黄金价格历史数据
       2. FILE_GEN: 基于数据生成 Excel/Word 表格
       3. 返回完整的文件和数据
+
+    检测优先级（由快到慢）：
+      1. 关键词规则（无 LLM 开销，最快）
+      2. Gemini 语义检测（关键词未命中时启用，更准确）
     """
+
+    _VALID_TASK_TYPES = frozenset({
+        "CHAT", "CODER", "RESEARCH", "WEB_SEARCH", "FILE_GEN",
+        "PAINTER", "MULTI_STEP", "SYSTEM", "DOC_WORKFLOW",
+    })
 
     # 定义常见的任务组合模式
     TASK_PATTERNS = {
@@ -245,82 +251,123 @@ class TaskDecomposer:
             # 如果检测到是复合任务但不匹配具体模式，还是记录为复合
             result["secondary_tasks"] = ["FILE_GEN"]  # 默认最后生成文档
 
+        # ── LLM 语义增强（仅当关键词检测无结果时）─────────────────────────
+        if not result["is_compound"] and len(user_input.strip()) >= 20:
+            llm_result = cls._detect_with_llm(user_input, initial_task)
+            if llm_result and llm_result.get("is_compound"):
+                return llm_result
+
         return result
 
     @classmethod
     def create_subtasks(cls, original_input: str, compound_info: dict) -> list:
         """
-        根据分解信息创建具体的子任务。
-        自动为顺序步骤填充 output_key / depends_on / context_keys，
-        确保 PlanExecutor 能正确注入前步结果。
+        根据分解信息创建具体的子任务
         """
         subtasks = []
-        prev_output_key = None
 
         for i, task_template in enumerate(compound_info["subtasks"]):
-            task_type = task_template["task_type"]
-            output_key = f"{task_type.lower()}_result_{i + 1}"
-
             subtask = {
                 "id": i + 1,
-                "task_type": task_type,
+                "task_type": task_template["task_type"],
                 "description": task_template["description"],
                 "original_input": original_input,
-                # 统一使用原始输入作为 prompt base；_build_enriched_input 会
-                # 通过 context_keys 将前步真实结果追加到 prompt 末尾
-                "input": original_input,
                 "index": i,
                 "status": "pending",
                 "result": None,
                 "error": None,
-                "output_key": output_key,
-                # 线性依赖：每步依赖前一步
-                "depends_on": [i] if i > 0 else [],
-                # 将前一步的输出注入当前步的 prompt
-                "context_keys": [prev_output_key] if prev_output_key else [],
             }
+            if task_template.get("input"):
+                subtask["input"] = task_template["input"]
             if task_template.get("expected_output"):
                 subtask["expected_output"] = task_template["expected_output"]
             subtasks.append(subtask)
-            prev_output_key = output_key
 
         return subtasks
 
     @classmethod
-    def suggest_multiagent_preset(cls, compound_info: dict) -> Optional[str]:
+    def _detect_with_llm(cls, user_input: str, initial_task: str) -> dict | None:
         """
-        根据复合任务分析结果，建议使用哪个 MultiAgentOrchestrator 预置管线。
+        使用 Gemini 语义分析复合任务，当关键词规则无法覆盖时启用。
+        仅在 keyword 路径返回 is_compound=False 时调用，避免不必要开销。
 
-        返回值:
-            "content"  — 内容创作型（研究 → 写作 → Critic → 修订）
-            "code"     — 代码生成型（研究 → 编码 → 审查 → 修订）
-            "analysis" — 数据分析型（研究 → 分析 → Critic → 修订）
-            None       — 不适合走多 Agent 管线，使用默认单 Agent 流程
+        返回与 detect_compound_task() 格式相同的 dict，或 None（调用失败时）。
         """
-        if not compound_info.get("is_compound"):
+        import json
+        import logging
+
+        _log = logging.getLogger(__name__)
+
+        _PROMPT = (
+            "你是任务分解引擎。分析用户请求是否包含需要按顺序执行的多个不同步骤。\n\n"
+            "可用任务类型（只能用这些）:\n"
+            "  CHAT: 普通对话、问答\n"
+            "  CODER: 写代码、调试\n"
+            "  RESEARCH: 深度分析、写报告（不需要实时搜索）\n"
+            "  WEB_SEARCH: 搜索实时信息、价格、新闻\n"
+            "  FILE_GEN: 生成文件（Word/Excel/PPT/PDF）\n"
+            "  PAINTER: 生成图片\n"
+            "  SYSTEM: 控制系统、打开应用\n\n"
+            "如果是单步任务，返回: {\"is_compound\": false}\n"
+            "如果是多步任务（必须是真正需要先后执行的不同操作），返回:\n"
+            "{\n"
+            "  \"is_compound\": true,\n"
+            "  \"primary_task\": \"<第一步任务类型>\",\n"
+            "  \"secondary_tasks\": [\"<第二步类型>\"],\n"
+            "  \"pattern\": \"search_and_document | research_and_document | other\",\n"
+            "  \"subtasks\": [\n"
+            "    {\"task_type\": \"<类型>\", \"description\": \"<一句话描述>\", "
+            "\"input\": \"<输入说明>\", \"expected_output\": \"<期望输出>\"},\n"
+            "    ...\n"
+            "  ]\n"
+            "}\n\n"
+            "只输出合法 JSON，不要任何额外解释。\n\n"
+            f"用户请求: {user_input[:400]}"
+        )
+
+        try:
+            from app.core.llm.gemini import GeminiProvider
+
+            provider = GeminiProvider()
+            if not provider.client:
+                return None
+
+            resp = provider.generate_content(
+                prompt=_PROMPT,
+                model="gemini-2.0-flash",
+                stream=False,
+                max_tokens=400,
+            )
+            text = (resp.get("text") or "").strip() if isinstance(resp, dict) else ""
+            if not text:
+                return None
+
+            # 提取 JSON
+            import re
+            text = re.sub(r"^```[a-z]*\n?", "", text)
+            text = re.sub(r"\n?```$", "", text).strip()
+            if not text.startswith("{"):
+                m = re.search(r"\{.*\}", text, re.DOTALL)
+                text = m.group() if m else ""
+            if not text:
+                return None
+
+            data = json.loads(text)
+            if not isinstance(data, dict) or not data.get("is_compound"):
+                return None
+
+            # 校验 task_type 合法性
+            subtasks = data.get("subtasks", [])
+            for st in subtasks:
+                if st.get("task_type") not in cls._VALID_TASK_TYPES:
+                    st["task_type"] = "CHAT"
+
+            _log.info(
+                f"[TaskDecomposer] 🤖 LLM 分解: '{user_input[:50]}' → "
+                f"{[s.get('task_type') for s in subtasks]}"
+            )
+            return data
+
+        except Exception as exc:
+            _log.debug(f"[TaskDecomposer] LLM 分解失败: {exc}")
             return None
-
-        pattern = compound_info.get("pattern") or ""
-        primary = (compound_info.get("primary_task") or "").upper()
-        secondary = [s.upper() for s in (compound_info.get("secondary_tasks") or [])]
-
-        # 代码相关
-        if primary in ("CODER", "CODE") or "CODE" in secondary:
-            return "code"
-
-        # 研究 + 数据 / 分析类
-        if pattern in ("research_and_document",) or primary in ("RESEARCH",):
-            if any(k in secondary for k in ("FILE_GEN", "PAINTER")):
-                return "analysis"
-            return "content"
-
-        # 搜索 + 文档 → 内容管线
-        if pattern in ("search_and_document", "discuss_and_document"):
-            return "content"
-
-        # 文档工作流 → 内容管线
-        if pattern == "document_workflow":
-            return "content"
-
-        # 默认：内容管线兜底
-        return "content"

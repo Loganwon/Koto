@@ -415,6 +415,26 @@ class LangGraphAgent:
             restore_pii=restore_pii_in_output,
         )
 
+    @property
+    def base_system_instruction(self) -> str:
+        """UnifiedAgent 兼容属性：读写系统提示词并自动重建图。"""
+        return self.system_instruction or ""
+
+    @base_system_instruction.setter
+    def base_system_instruction(self, value: str) -> None:
+        if value == self.system_instruction:
+            return
+        self.system_instruction = value
+        # 重建图以应用新系统提示词
+        self._graph = build_graph(
+            registry=self.registry,
+            model_id=self.model_id,
+            system_instruction=value,
+            enable_pii=self.enable_pii,
+            enable_validation=self.enable_validation,
+            restore_pii=self.restore_pii,
+        )
+
     def _build_initial_state(
         self,
         input_text: str,
@@ -528,6 +548,72 @@ class LangGraphAgent:
         except Exception as exc:
             logger.error(f"[LangGraphAgent] stream 异常: {exc}", exc_info=True)
             yield {"type": "error", "content": str(exc)}
+
+    def run(
+        self,
+        input_text: str,
+        history: Optional[List[Dict]] = None,
+        session_id: Optional[str] = None,
+        skill_id: Optional[str] = None,
+        task_type: Optional[str] = None,
+        system_context: Optional[str] = None,
+    ):
+        """
+        UnifiedAgent 兼容接口：yield AgentStep 对象。
+
+        内部通过 stream() 获取 LangGraph 事件，转换为 AgentStep 供 agent_routes 消费。
+        """
+        from app.core.agent.types import AgentStep, AgentStepType
+
+        yielded_answer = False
+        try:
+            for event in self.stream(
+                input_text=input_text,
+                history=history,
+                session_id=session_id,
+                skill_id=skill_id,
+                task_type=task_type,
+            ):
+                etype = event.get("type", "")
+                content = event.get("content", "")
+                if etype == "tool_call":
+                    from app.core.agent.types import AgentAction
+                    yield AgentStep(
+                        step_type=AgentStepType.ACTION,
+                        content=f"调用工具: {content}",
+                        action=AgentAction(
+                            tool_name=content,
+                            tool_args=event.get("args", {}),
+                        ),
+                    )
+                elif etype == "tool_result":
+                    yield AgentStep(
+                        step_type=AgentStepType.OBSERVATION,
+                        content=content,
+                    )
+                elif etype == "token":
+                    yield AgentStep(
+                        step_type=AgentStepType.THOUGHT,
+                        content=content,
+                    )
+                elif etype == "answer":
+                    yield AgentStep(
+                        step_type=AgentStepType.ANSWER,
+                        content=content,
+                    )
+                    yielded_answer = True
+                elif etype == "error":
+                    yield AgentStep(
+                        step_type=AgentStepType.ERROR,
+                        content=content,
+                    )
+        except Exception as exc:
+            logger.error(f"[LangGraphAgent.run] 执行异常: {exc}", exc_info=True)
+            from app.core.agent.types import AgentStep, AgentStepType
+            yield AgentStep(
+                step_type=AgentStepType.ERROR,
+                content=str(exc),
+            )
 
     def get_graph_mermaid(self) -> str:
         """导出图结构为 Mermaid 格式（用于可视化调试）。"""

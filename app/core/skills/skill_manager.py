@@ -443,7 +443,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "task_types": ["DOC_ANNOTATE", "CODER"],
         "priority": 75,
         "conflict_with": ["code_best_practices"],
-        "executor_tools": ["read_file_snippet", "find_file", "list_directory"],
+        "executor_tools": ["read_file", "find_file", "list_directory"],
         "plan_template": [
             "读取目标代码文件或代码块",
             "分析安全性（注入风险/硬编码密钥/权限漏洞）",
@@ -493,7 +493,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户遇到 Python 报错、traceback、AttributeError、ImportError 等 bug 需要调试",
         "task_types": ["CODER"],
         "priority": 80,
-        "executor_tools": ["read_file_snippet", "find_file", "execute_python"],
+        "executor_tools": ["read_file", "find_file", "python_exec"],
         "plan_template": [
             "读取错误信息或问题代码文件",
             "分析完整 traceback，从最末帧定位根本原因",
@@ -1087,25 +1087,23 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要读取 PDF、解析 PDF 内容、提取 PDF 文字、分析 PDF 文档",
         "task_types": ["RESEARCH", "FILE_GEN", "DOC_ANNOTATE", "CHAT"],
         "priority": 60,
-        "executor_tools": ["read_file_snippet", "find_file", "summarize_file"],
+        "executor_tools": ["read_file", "find_file"],
         "plan_template": [
             "定位目标 PDF 文件路径（未知时用 find_file 搜索）",
-            "调用 read_file_snippet 读取前 8000 字内容",
-            "若内容被截断则再调用 summarize_file 获取针对性摘要",
+            "调用 read_file 读取文件内容",
+            "内容过长时分多次调用 read_file 分段读取关键部分",
             "基于读取内容直接回答用户问题",
         ],
         "prompt": (
             "\n\n## 📕 文件工具：PDF 深度解析\n"
             "\n**工具调用规范：**\n"
-            "1. **路径已知** → 直接调用 `read_file_snippet(path, max_chars=8000)` 读取前 8000 字\n"
-            "   - 返回内容若末尾带 `...` 说明被截断，文件有更多内容\n"
-            '   - 截断时：再调用 `summarize_file(path, focus="用户的具体问题")` 获取针对性摘要\n'
+            "1. **路径已知** → 直接调用 `read_file(path)` 读取文件内容\n"
+            "   - 内容过长时分多次读取关键段落\n"
             '2. **路径未知** → 先调用 `find_file(query="文件名关键词", category="document", limit=5)` 定位文件\n'
-            '3. **超长文档（>10页）** → 优先用 `summarize_file(path, focus="...")` 而非全文读取\n'
+            "3. **超长文档（>10页）** → 分段读取不同页码范围\n"
             "\n**边界情况处理：**\n"
             "- 若读取内容乱码（全是`?????`）→ 提示用户该 PDF 可能是扫描件无法直接提取文字\n"
             "- 若返回内容极短或空白 → 提示 PDF 可能加密或损坏，建议用户手动检查\n"
-            "- 多页 PDF：`read_file_snippet` 只读前 8 页，如需更多页请用 `summarize_file`\n"
             "\n**输出要求：**\n"
             "- 读取完成后直接呈现内容，不要重复文件路径\n"
             "- 如用户有具体问题，基于读取内容直接回答，不要原文堆砌"
@@ -1122,12 +1120,12 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要读取或查看各种类型的文件，需要解析文件内容",
         "task_types": ["RESEARCH", "FILE_GEN", "CHAT", "DOC_ANNOTATE"],
         "priority": 61,
-        "executor_tools": ["read_file_snippet", "find_file", "summarize_file", "list_directory"],
+        "executor_tools": ["read_file", "find_file", "list_directory"],
         "plan_template": [
             "识别文件扩展名确定读取策略",
             "路径不确定时用 find_file 定位文件",
-            "按格式调用对应工具读取内容（PDF/DOCX/XLSX/CSV/TXT）",
-            "文件过长时改用 summarize_file 获取针对性摘要",
+            "按格式调用 read_file 读取内容（PDF/DOCX/XLSX/CSV/TXT）",
+            "内容过长时分段读取关键部分",
             "整理并呈现文件内容，回答用户问题",
         ],
         "prompt": (
@@ -1135,14 +1133,14 @@ BUILTIN_SKILLS: List[Dict] = [
             "\n**按扩展名选择读取方式（严格遵守）：**\n"
             "| 格式 | 工具调用 | 最大字数 | 说明 |\n"
             "|------|---------|---------|------|\n"
-            "| `.pdf` | `read_file_snippet(path, 8000)` | PyPDF2 最多 8 页 | 扫描件可能乱码 |\n"
-            "| `.docx` | `read_file_snippet(path, 8000)` | 全部段落 | python-docx 提取 |\n"
-            "| `.xlsx` / `.xls` | `read_file_snippet(path, 6000)` | 最多 200 行 | openpyxl 提取 |\n"
-            "| `.csv` | `read_file_snippet(path, 10000)` | 纯文本 | 逗号分隔 |\n"
-            "| `.txt` / `.md` | `read_file_snippet(path, 10000)` | 全文 | UTF-8/GBK 自动检测 |\n"
-            "| `.json` / `.xml` / `.yaml` | `read_file_snippet(path, 10000)` | 结构化文本 | 原样返回 |\n"
-            "| `.py` / `.js` / `.ts` / `.sql` | `read_file_snippet(path, 10000)` | 代码文件 | 原样返回 |\n"
-            "| `.pptx` | ⚠️ **不支持** read_file_snippet | — | 见下方特殊处理 |\n"
+            "| `.pdf` | `read_file(path)` | PyPDF2 最多 8 页 | 扫描件可能乱码 |\n"
+            "| `.docx` | `read_file(path)` | 全部段落 | python-docx 提取 |\n"
+            "| `.xlsx` / `.xls` | `read_file(path)` | 最多 200 行 | openpyxl 提取 |\n"
+            "| `.csv` | `read_file(path)` | 纯文本 | 逗号分隔 |\n"
+            "| `.txt` / `.md` | `read_file(path)` | 全文 | UTF-8/GBK 自动检测 |\n"
+            "| `.json` / `.xml` / `.yaml` | `read_file(path)` | 结构化文本 | 原样返回 |\n"
+            "| `.py` / `.js` / `.ts` / `.sql` | `read_file(path)` | 代码文件 | 原样返回 |\n"
+            "| `.pptx` | ⚠️ **通过 python_exec 解析** | — | 见下方特殊处理 |\n"
             "\n**PPTX 特殊处理（必须走 CODER 路径）：**\n"
             "```python\n"
             "from pptx import Presentation\n"
@@ -1155,7 +1153,7 @@ BUILTIN_SKILLS: List[Dict] = [
             "```\n"
             "\n**通用规则：**\n"
             '- 路径不确定时先调用 `find_file(query="文件名", limit=5)` 定位\n'
-            '- 文件过长时改用 `summarize_file(path, focus="用户问题")` 获取摘要\n'
+            "- 文件过长时分段读取关键部分\n"
             "- 读取失败时告知用户具体失败原因（文件不存在/格式不对/编码问题）"
         ),
         "enabled": False,
@@ -1176,25 +1174,22 @@ BUILTIN_SKILLS: List[Dict] = [
             "\n**三步解析法：**\n"
             "1. **快速预览** \n"
             "   ```\n"
-            "   read_file_snippet(path, max_chars=3000)  # 读取文档开头，了解结构\n"
+            "   read_file(path)  # 读取文档开头，了解结构\n"
             "   ```\n"
             "   读完后：识别文档类型（报告/合同/论文/手册）、章节结构、主要话题\n"
             "\n"
-            "2. **针对性摘要**（按需多次调用，每次聚焦不同维度）：\n"
-            "   ```\n"
-            '   summarize_file(path, focus="文档的核心结论和主要观点")\n'
-            '   summarize_file(path, focus="具体的数据、统计和事实")\n'
-            '   summarize_file(path, focus="风险、问题和注意事项")\n'
-            "   ```\n"
+            "2. **分段精读**（按需多次调用 read_file，每次聚焦不同章节）：\n"
+            "   - 读取核心结论和主要观点所在章节\n"
+            "   - 读取具体数据、统计和事实所在章节\n"
+            "   - 读取风险、问题和注意事项所在章节\n"
             "\n"
-            "3. **综合整理**：将多次摘要的结果合并，用结构化格式呈现\n"
+            "3. **综合整理**：将多次分段读取的结果合并，用结构化格式呈现\n"
             "\n**输出格式建议：**\n"
             "- 📌 文档概述（1句话总结）\n"
             "- 📋 核心内容（分章节条目）\n"
             "- 📊 关键数据/事实\n"
             "- ⚠️ 注意事项/风险点（如有）\n"
-            "- 💡 我的分析与建议（基于内容）\n"
-            "\n**注意：** `summarize_file` 内部最多处理 6000 字原文，不同的 `focus` 参数会引导 AI 提取不同方面"
+            "- 💡 我的分析与建议（基于内容）"
         ),
         "enabled": False,
     },
@@ -1208,7 +1203,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要分析表格数据、Excel 文件、CSV 数据，进行统计或数据解读",
         "task_types": ["RESEARCH", "FILE_GEN", "CHAT"],
         "priority": 63,
-        "executor_tools": ["read_file_snippet", "find_file", "execute_python"],
+        "executor_tools": ["read_file", "find_file", "load_data", "describe_data", "query_data", "analyze_trends", "python_exec"],
         "plan_template": [
             "定位并读取 Excel/CSV 数据文件",
             "分析数据结构（行列数、字段名、数据类型、缺失值）",
@@ -1654,6 +1649,8 @@ class SkillManager:
         cls._load_states_from_settings()
         # 从 config/skills/ 目录加载用户自定义 Skill（如果存在）
         cls._load_custom_skills_dir()
+        # 自定义 Skill 加载后再次应用持久化状态（因自定义 Skill 在第一次 _load_states 时尚未注册）
+        cls._load_states_from_settings()
         cls._initialized = True
 
     @classmethod
@@ -1742,7 +1739,6 @@ class SkillManager:
                     "has_custom_prompt": s.get("prompt") != builtin_prompt,
                     "prompt": s["prompt"],
                     "is_builtin": True,
-                    "ui_config": cls._get_ui_config_dict(sid),
                 }
             )
 
@@ -1763,61 +1759,86 @@ class SkillManager:
                     "has_custom_prompt": False,
                     "prompt": s.get("prompt", ""),
                     "is_builtin": False,
-                    "ui_config": cls._get_ui_config_dict(skill_id),
                 }
             )
 
         return result
 
     @classmethod
-    def _get_ui_config_dict(cls, skill_id: str) -> dict:
-        """返回某个 Skill 的 ui_config dict，若无则返回空 dict"""
-        skill_def = cls._def_registry.get(skill_id)
-        if skill_def and hasattr(skill_def, "ui_config") and skill_def.ui_config:
-            return skill_def.ui_config.to_dict()
-        return {}
-
-    @classmethod
     def get_active_ui_config(cls) -> dict:
         """
-        合并所有已启用 Skill 的 ui_config，返回最终生效的 UI 配置。
+        收集所有已启用且含有 ui_config 或 ui_extensions 的 Skill，
+        按优先级从低到高合并，高优先级 Skill 的值覆盖低优先级的同名键；
+        css_vars 字典相互合并；ui_extensions 中的列表字段相互追加。
 
-        多个 Skill 同时启用时，按优先级（priority 字段降序）依次合并，
-        后加载的 Skill 的非空字段覆盖先加载的。
         返回格式:
           {
             "has_ui": bool,
-            "config": { ...SkillUIConfig 的完整字段... },
-            "sources": ["skill_id1", "skill_id2"]  # 贡献了 UI 配置的 Skill
+            "config": { ...合并后的 ui_config dict... },
+            "extensions": { ...合并后的 ui_extensions dict... },
+            "sources": ["skill_id", ...]
           }
         """
         cls._ensure_init()
-        from app.core.skills.skill_schema import SkillUIConfig as _UIConfig
 
-        # 收集已启用且有 ui_config 的 Skill，按 priority 降序
-        active_with_ui = []
-        for skill_id, s in cls._registry.items():
-            if not s.get("enabled", False):
-                continue
-            skill_def = cls._def_registry.get(skill_id)
-            if not skill_def:
-                continue
-            if not hasattr(skill_def, "ui_config") or skill_def.ui_config.is_empty():
-                continue
-            active_with_ui.append((skill_def.priority, skill_id, skill_def.ui_config))
+        # 检查权限：只有已授权 ui_interactive 的 skill 才返回其 ui_extensions
+        try:
+            from app.core.skills.skill_permissions import SkillPermissionManager
+            _perm_mgr = SkillPermissionManager
+        except Exception:
+            _perm_mgr = None
 
-        if not active_with_ui:
-            return {"has_ui": False, "config": _UIConfig().to_dict(), "sources": []}
+        enabled_with_ui = [
+            (sid, s)
+            for sid, s in cls._registry.items()
+            if s.get("enabled") and (s.get("ui_config") or s.get("ui_extensions"))
+        ]
 
-        # 按优先级升序排列（priority 高的最后覆盖，优先生效）
-        active_with_ui.sort(key=lambda x: x[0])
-        merged = _UIConfig()
-        sources = []
-        for _, skill_id, ui_cfg in active_with_ui:
-            merged = merged.merge(ui_cfg)
-            sources.append(skill_id)
+        if not enabled_with_ui:
+            return {"has_ui": False, "config": {}, "extensions": {}, "sources": []}
 
-        return {"has_ui": True, "config": merged.to_dict(), "sources": sources}
+        # 低优先级先合并，高优先级后覆盖
+        enabled_with_ui.sort(key=lambda x: x[1].get("priority", 50))
+
+        merged: dict = {}
+        merged_ext: dict = {}
+        sources: list = []
+        for sid, s in enabled_with_ui:
+            cfg = s.get("ui_config", {})
+            if isinstance(cfg, dict) and cfg:
+                css = cfg.get("css_vars")
+                if css and isinstance(css, dict):
+                    merged.setdefault("css_vars", {}).update(css)
+                for k, v in cfg.items():
+                    if k != "css_vars" and v not in (None, "", False, {}, []):
+                        merged[k] = v
+
+            # ui_extensions 合并（需要 ui_interactive 权限已授权，或 skill 未声明该权限要求）
+            ext = s.get("ui_extensions", {})
+            if ext and isinstance(ext, dict):
+                skill_def = cls._def_registry.get(sid)
+                required_perms = list(getattr(skill_def, "permissions", None) or s.get("permissions", []))
+                needs_interactive = "ui_interactive" in required_perms
+                interactive_granted = (
+                    _perm_mgr is None
+                    or not needs_interactive
+                    or _perm_mgr.is_granted(sid, "ui_interactive")
+                )
+                if interactive_granted:
+                    # action_buttons: 追加
+                    if ext.get("action_buttons"):
+                        merged_ext.setdefault("action_buttons", []).extend(ext["action_buttons"])
+                    # quick_replies: 追加
+                    if ext.get("quick_replies"):
+                        merged_ext.setdefault("quick_replies", []).extend(ext["quick_replies"])
+                    # floating_widget: 高优先级覆盖
+                    if ext.get("floating_widget"):
+                        merged_ext["floating_widget"] = ext["floating_widget"]
+
+            sources.append(sid)
+
+        has_ui = bool(merged) or bool(merged_ext)
+        return {"has_ui": has_ui, "config": merged, "extensions": merged_ext, "sources": sources}
 
     @classmethod
     def set_enabled(cls, skill_id: str, enabled: bool) -> bool:
@@ -2050,55 +2071,6 @@ class SkillManager:
                         "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
                         + "\n".join(f"{i+1}. {step}" for i, step in enumerate(pt))
                     )
-
-                # ── tool_orchestration：工具调用条件决策树 ──────────────────
-                toi = (
-                    getattr(skill_def, "tool_orchestration", None)
-                    if skill_def else None
-                ) or s.get("tool_orchestration", "")
-                if toi:
-                    p = p + "\n\n### 🔧 工具调用策略（根据输入动态选择）\n" + toi
-
-                # ── react_protocol：ReAct 执行循环 ─────────────────────────
-                rp = (
-                    getattr(skill_def, "react_protocol", None)
-                    if skill_def else None
-                ) or s.get("react_protocol", "")
-                if rp == "light":
-                    p = p + (
-                        "\n\n> 💭 **执行规则**：每次调用工具前，先一句话说明调用原因；"
-                        "观察结果后，明确下一步决策；达到目标后直接输出答案，不再调用工具。"
-                    )
-                elif rp == "full":
-                    p = p + (
-                        "\n\n### 🔄 执行循环协议（ReAct）\n"
-                        "每轮处理遵循以下循环，直到任务完成：\n"
-                        "1. **思考 (Thought)**：分析当前信息，判断下一步最优操作\n"
-                        "2. **行动 (Action)**：选择工具并说明调用理由（一句话）\n"
-                        "3. **观察 (Observation)**：解读工具返回结果，提取关键信息\n"
-                        "4. **→ 重复** 直到信息充足，输出最终答案\n\n"
-                        "**约束**：\n"
-                        "- 不要重复调用结果相同的工具（浪费 token）\n"
-                        "- 工具返回空/出错时，换一个工具或策略，不要原样重试\n"
-                        "- 达到目标后，直接输出答案，不再调用工具"
-                    )
-
-                # ── multi_model_hint：多模型协作建议 ──────────────────────
-                mmh = (
-                    getattr(skill_def, "multi_model_hint", None)
-                    if skill_def else None
-                ) or s.get("multi_model_hint", "")
-                if mmh:
-                    p = p + "\n\n### 🤝 多模型协作建议\n" + mmh
-
-                # ── handoff_context：下游交接上下文说明 ───────────────────
-                hc = (
-                    getattr(skill_def, "handoff_context", None)
-                    if skill_def else None
-                ) or s.get("handoff_context", "")
-                if hc:
-                    p = p + "\n\n### 📤 向下游传递的数据（供后续技能使用）\n" + hc
-
                 active_prompts.append(p)
 
             _inject_skill_count += 1
@@ -2166,31 +2138,6 @@ class SkillManager:
                     p = p + (
                         "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
                         + "\n".join(f"{i+1}. {step}" for i, step in enumerate(pt))
-                    )
-                # 临时 skill 也注入工具编排和 ReAct 协议
-                toi = getattr(skill_def, "tool_orchestration", None) if skill_def else None
-                if not toi and skill_def:
-                    toi = s.get("tool_orchestration", "")
-                if toi:
-                    p = p + "\n\n### 🔧 工具调用策略（根据输入动态选择）\n" + toi
-                rp = getattr(skill_def, "react_protocol", None) if skill_def else ""
-                if rp == "light":
-                    p = p + (
-                        "\n\n> 💭 **执行规则**：每次调用工具前，先一句话说明调用原因；"
-                        "观察结果后，明确下一步决策；达到目标后直接输出答案，不再调用工具。"
-                    )
-                elif rp == "full":
-                    p = p + (
-                        "\n\n### 🔄 执行循环协议（ReAct）\n"
-                        "每轮处理遵循以下循环，直到任务完成：\n"
-                        "1. **思考 (Thought)**：分析当前信息，判断下一步最优操作\n"
-                        "2. **行动 (Action)**：选择工具并说明调用理由（一句话）\n"
-                        "3. **观察 (Observation)**：解读工具返回结果，提取关键信息\n"
-                        "4. **→ 重复** 直到信息充足，输出最终答案\n\n"
-                        "**约束**：\n"
-                        "- 不要重复调用结果相同的工具（浪费 token）\n"
-                        "- 工具返回空/出错时，换一个工具或策略，不要原样重试\n"
-                        "- 达到目标后，直接输出答案，不再调用工具"
                     )
                 auto_prompts.append(p)
                 logger.debug(f"[SkillManager] 🤖 临时注入 Auto-Skill: {skill_id}")
@@ -2344,7 +2291,7 @@ class SkillManager:
         cls._def_registry[skill_def.id] = skill_def
 
         # 同步到旧版 _registry（保证 inject_into_prompt 等方法正常工作）
-        cls._registry[skill_def.id] = {
+        reg_entry: dict = {
             "id": skill_def.id,
             "name": skill_def.name,
             "icon": skill_def.icon,
@@ -2360,7 +2307,13 @@ class SkillManager:
             # 执行层增强字段（供 inject_into_prompt auto-skill 路径使用）
             "executor_tools": list(getattr(skill_def, "executor_tools", None) or []),
             "plan_template": list(getattr(skill_def, "plan_template", None) or []),
+            "permissions": list(getattr(skill_def, "permissions", None) or []),
         }
+        if getattr(skill_def, "ui_config", None):
+            reg_entry["ui_config"] = skill_def.ui_config
+        if getattr(skill_def, "ui_extensions", None):
+            reg_entry["ui_extensions"] = skill_def.ui_extensions
+        cls._registry[skill_def.id] = reg_entry
 
         cls._apply_default_triggers(skill_def)
 
@@ -2471,18 +2424,20 @@ class SkillManager:
                             if reg_entry:
                                 reg_entry["prompt"] = skill_def.render_prompt()
                                 reg_entry["plan_template"] = skill_def.plan_template
-                        # ── v3 动态编排字段 ─────────────────────────────────
-                        if skill_def.tool_orchestration:
-                            existing.tool_orchestration = skill_def.tool_orchestration
-                        if skill_def.react_protocol:
-                            existing.react_protocol = skill_def.react_protocol
-                        if skill_def.multi_model_hint:
-                            existing.multi_model_hint = skill_def.multi_model_hint
-                        if skill_def.handoff_context:
-                            existing.handoff_context = skill_def.handoff_context
-                        # ── UI 定制配置 ────────────────────────────────────
-                        if hasattr(skill_def, "ui_config") and not skill_def.ui_config.is_empty():
-                            existing.ui_config = skill_def.ui_config
+                        # 同步 ui_config / ui_extensions 到 _registry（供 get_active_ui_config 读取）
+                        if data.get("ui_config"):
+                            reg_entry = cls._registry.get(skill_def.id)
+                            if reg_entry is not None:
+                                reg_entry["ui_config"] = data["ui_config"]
+                                reg_entry["priority"] = data.get("priority", reg_entry.get("priority", 50))
+                        if data.get("ui_extensions"):
+                            reg_entry = cls._registry.get(skill_def.id)
+                            if reg_entry is not None:
+                                reg_entry["ui_extensions"] = data["ui_extensions"]
+                        if data.get("permissions"):
+                            reg_entry = cls._registry.get(skill_def.id)
+                            if reg_entry is not None:
+                                reg_entry["permissions"] = data["permissions"]
                         logger.debug(f"[SkillManager] 合并自定义增强字段到内置 Skill: {skill_def.id}")
                     else:
                         cls._def_registry[skill_def.id] = skill_def
@@ -2495,17 +2450,26 @@ class SkillManager:
                                 if hasattr(skill_def.category, "value")
                                 else skill_def.category
                             ),
+                            "skill_nature": data.get("skill_nature", "domain_skill"),
                             "description": skill_def.description,
+                            "priority": data.get("priority", 50),
                             "task_types": skill_def.task_types,
                             "prompt": skill_def.render_prompt(),
                             "enabled": skill_def.enabled,
                             "plan_template": skill_def.plan_template,
+                            "permissions": data.get("permissions", []),
                         }
                         # 保留 template_path 和 bound_tools（若 JSON 中有）
                         if data.get("template_path"):
                             entry["template_path"] = data["template_path"]
                         if data.get("bound_tools"):
                             entry["bound_tools"] = data["bound_tools"]
+                        # 保留 ui_config（供 get_active_ui_config 使用）
+                        if data.get("ui_config"):
+                            entry["ui_config"] = data["ui_config"]
+                        # 保留 ui_extensions（供 get_active_ui_config 使用）
+                        if data.get("ui_extensions"):
+                            entry["ui_extensions"] = data["ui_extensions"]
                         cls._registry[skill_def.id] = entry
                         logger.info(f"[SkillManager] 加载自定义 Skill: {skill_def.id}")
                 except Exception as e:

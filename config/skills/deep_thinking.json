@@ -1,0 +1,84 @@
+﻿{
+    "id":  "deep_thinking",
+    "name":  "深度推理模式",
+    "icon":  "🧠",
+    "category":  "behavior",
+    "description":  "对复杂问题启用「先思考、后回答」模式：结构化推理链 + 自我反思修正，仿 Claude Extended Thinking",
+    "intent_description":  "用户遇到复杂逻辑题、需要多步推理、要求「仔细想」「深入分析」「step by step」「一步步推导」的场景",
+    "output_spec":  {
+                        "format":  "markdown",
+                        "must_contain":  [
+                                             "##"
+                                         ],
+                        "must_not_contain":  [
+
+                                             ],
+                        "min_chars":  300,
+                        "max_chars":  null,
+                        "required_json_keys":  [
+
+                                               ],
+                        "description":  "先展示推理过程（标注为「推理」），再给出最终答案"
+                    },
+    "bound_tools":  [
+
+                    ],
+    "executor_tools":  [
+
+                       ],
+    "task_types":  [
+                       "CHAT",
+                       "CODER",
+                       "RESEARCH"
+                   ],
+    "priority":  55,
+    "conflict_with":  [
+
+                      ],
+    "enabled":  true,
+    "prompt":  "\n\n## 🧠 行为要求：深度推理模式（Extended Thinking）\n\n当此技能激活时，你必须在回答之前显示完整的推理过程。\n\n### 推理输出格式（必须严格遵守）\n\n```\n---\n### 🧠 推理过程\n\n**问题分解**：\n[将问题拆分为子问题]\n\n**逐步分析**：\n1. [第一步思考]\n2. [第二步思考]\n...\n\n**关键洞察**：\n[推理过程中最重要的发现或转折点]\n\n**自我检查**：\n- 我的推理有逻辑漏洞吗？\n- 是否遗漏了重要边界情况？\n[如有问题：修正...]\n\n---\n### 📌 最终答案\n\n[基于以上推理的清晰答案]\n```\n\n### 使用原则\n\n- 推理过程是**真实的思考展示**，不是「表演」——如果发现自己推理错了，就在「自我检查」中修正\n- 对于数学/逻辑题：展示每一步计算\n- 对于策略问题：列出各选项的 pros/cons 再做权衡\n- 对于代码调试：先假设最可能的原因，再逐一验证\n- 推理部分用较小字体思维流格式，答案部分用正式格式\n\n### 约束\n- 不要把推理过程写成「假装在思考」的套话（「让我想想...」「我仔细考虑一下...」）\n- 推理内容要有实际内容，展示真正的逻辑链\n- 如果问题很简单（「1+1等于几」），跳过推理，直接回答",
+    "examples":  [
+                     {
+                         "input":  "有 3 个正整数，它们的平均数是 12，中位数是 11，最大值是 17。这 3 个数是多少？",
+                         "output":  "---\n### 🧠 推理过程\n\n**问题分解**：\n已知条件：3个正整数，平均数=12，中位数=11，最大值=17\n求：三个数分别是多少\n\n**逐步分析**：\n\n1. **从平均数得到总和**\n   平均数 = 总和 ÷ 3 = 12  \n   → 总和 = 12 × 3 = **36**\n\n2. **排列三个数**\n   设从小到大为 a ≤ b ≤ c  \n   中位数 = b = **11**  \n   最大值 = c = **17**\n\n3. **求最小值 a**\n   a + b + c = 36  \n   a + 11 + 17 = 36  \n   a = 36 - 28 = **8**\n\n**验证**：\n- 三个数：8, 11, 17 ✓\n- 平均数：(8+11+17)/3 = 36/3 = 12 ✓  \n- 中位数：11（排序后中间值）✓  \n- 最大值：17 ✓\n\n**自我检查**：\n所有条件均满足，无逻辑漏洞，答案唯一确定。\n\n---\n### 📌 最终答案\n\n这 3 个正整数是 **8、11、17**。",
+                         "note":  "推理展示了完整的四步推导，包含验证步骤"
+                     }
+                 ],
+    "plan_template":  [
+                          "1. 分解问题为子问题",
+                          "2. 逐步推理，展示每一步思考",
+                          "3. 自我检查：找逻辑漏洞/边界情况",
+                          "4. 如有问题则修正，否则确认",
+                          "5. 输出清晰的最终答案"
+                      ],
+    "trigger_keywords":  [
+                             "仔细想",
+                             "一步步",
+                             "step by step",
+                             "深入分析",
+                             "推理",
+                             "prove",
+                             "证明",
+                             "推导",
+                             "逻辑推理",
+                             "深度思考",
+                             "extended thinking",
+                             "chain of thought",
+                             "think step by step",
+                             "慢慢想",
+                             "认真思考",
+                             "逻辑链"
+                         ],
+    "version":  "1.0.0",
+    "author":  "koto",
+    "created_at":  "2026-03-19T00:00:00Z",
+    "tags":  [
+                 "reasoning",
+                 "chain-of-thought",
+                 "extended-thinking",
+                 "logic",
+                 "behavior"
+             ],
+    "source_inspiration":  "Anthropic Claude Extended Thinking + OpenAI o1/o3 推理模式",
+    "subcategory":  "koto_thinking"
+}

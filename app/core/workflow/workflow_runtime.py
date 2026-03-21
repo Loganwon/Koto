@@ -195,10 +195,21 @@ class WorkflowRuntime:
             mgr = self._get_manager()
             if mgr:
                 mgr.save_workflow(wf)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("[WorkflowRuntime] 保存工作流执行计数失败: %s", _e)
 
         output = "\n\n".join(f"[{r['step']}]\n{r['result']}" for r in results)
+        # 合并输出有害内容检测
+        try:
+            from app.core.security.output_validator import OutputValidator
+            _val = OutputValidator.validate(text=output)
+            if _val.is_blocked:
+                logger.warning("[WorkflowRuntime] 合并输出被拦截: %s", _val.reasons)
+                output = _val.text
+            else:
+                output = _val.text
+        except Exception as _e:
+            logger.error("[WorkflowRuntime] OutputValidator 校验失败，输出未经验证: %s", _e)
         return {
             "output": output,
             "file_path": None,

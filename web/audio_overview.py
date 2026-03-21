@@ -1,24 +1,22 @@
 # audio_overview.py
-import asyncio
-import json
-import logging
 import os
-from datetime import datetime
-
+import json
+import asyncio
 import edge_tts
+from datetime import datetime
+import logging
 
 logger = logging.getLogger(__name__)
-
 
 class AudioOverviewGenerator:
     """
     Generates an 'Audio Overview' (Podcast) from text content.
     Uses edge-tts for high-quality speech synthesis.
     """
-
+    
     VOICE_HOST_A = "zh-CN-XiaoxiaoNeural"  # Female, lively
-    VOICE_HOST_B = "zh-CN-YunxiNeural"  # Male, steady
-
+    VOICE_HOST_B = "zh-CN-YunxiNeural"     # Male, steady
+    
     def __init__(self, output_dir="static/audio_cache"):
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
@@ -51,7 +49,7 @@ class AudioOverviewGenerator:
             {{"speaker": "Host B", "text": "大家好，今天我们要聊的内容非常有意思。"}}
         ]
         """
-
+        
         try:
             response = client_model.generate_content(prompt)
             # Clean up potential markdown code blocks
@@ -60,7 +58,7 @@ class AudioOverviewGenerator:
                 res_text = res_text[7:-3].strip()
             elif res_text.startswith("```"):
                 res_text = res_text[3:-3].strip()
-
+            
             script = json.loads(res_text)
             return script
         except Exception as e:
@@ -70,32 +68,28 @@ class AudioOverviewGenerator:
     async def synthesize_audio(self, script, session_id):
         """
         Synthesizes audio for each script line and combines them.
-        Since ffmpeg might be missing, we will use direct binary appending for MP3s (works often)
+        Since ffmpeg might be missing, we will use direct binary appending for MP3s (works often) 
         or return a playlist. Here we try binary append for a single file experience.
         """
         combined_audio_path = os.path.join(self.output_dir, f"podcast_{session_id}.mp3")
         temp_files = []
-
+        
         try:
             with open(combined_audio_path, "wb") as outfile:
                 for idx, line in enumerate(script):
                     speaker = line.get("speaker")
                     text = line.get("text")
-                    voice = (
-                        self.VOICE_HOST_A if speaker == "Host A" else self.VOICE_HOST_B
-                    )
-
-                    temp_file = os.path.join(
-                        self.output_dir, f"temp_{session_id}_{idx}.mp3"
-                    )
+                    voice = self.VOICE_HOST_A if speaker == "Host A" else self.VOICE_HOST_B
+                    
+                    temp_file = os.path.join(self.output_dir, f"temp_{session_id}_{idx}.mp3")
                     communicate = edge_tts.Communicate(text, voice)
                     await communicate.save(temp_file)
                     temp_files.append(temp_file)
-
+                    
                     # Append binary content
                     with open(temp_file, "rb") as infile:
                         outfile.write(infile.read())
-
+                        
             return combined_audio_path
         except Exception as e:
             logger.info(f"Error synthesizing audio: {e}")
@@ -106,5 +100,5 @@ class AudioOverviewGenerator:
                 if os.path.exists(f):
                     try:
                         os.remove(f)
-                    except OSError as e:
-                        logger.debug("Failed to remove temp file %s: %s", f, e)
+                    except OSError:
+                        pass

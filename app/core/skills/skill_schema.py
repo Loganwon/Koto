@@ -238,52 +238,13 @@ class OutputSpec:
 
 
 # ══════════════════════════════════════════════════════════════════
-# UI 定制配置：让 Skill 改变聊天界面的视觉和交互
+# UI 配置：SkillUIConfig
 # ══════════════════════════════════════════════════════════════════
 
 
 @dataclass
 class SkillUIConfig:
-    """
-    Skill 的 UI 定制配置。
-
-    当一个 Skill 启用时，可以通过此配置改变聊天界面的：
-        - 视觉主题（CSS 变量覆盖）
-        - 输入框占位符文字
-        - 背景叠加特效（星空、烟雾等）
-        - 侧边栏标题文字
-        - AI 回复的前缀装饰
-
-    字段说明
-    ────────
-    theme           : 切换为指定的内置主题 (如 "midnight", "sunset")；
-                      空字符串 = 不切换主题
-    css_vars        : CSS 变量覆盖字典，键为 CSS 变量名（含 --），值为颜色/尺寸字符串。
-                      例: {"--bg-primary": "#0a0010", "--accent-primary": "#c084fc"}
-    input_placeholder : 聊天输入框的占位符文字
-    welcome_text    : 技能激活时在聊天区显示的欢迎语（Markdown）
-    overlay_effect  : 背景叠加特效名 ("stars" | "smoke" | "crystals" | "candles" | "")
-    title_text      : 覆盖侧边栏 Logo 的标题文字（如 "神谕"）
-    subtitle_text   : 覆盖侧边栏 Logo 的副标题文字
-    assistant_prefix: AI 每条回复前追加的装饰文字（如 "✨ "）
-    font_style      : 字体风格 ("serif" | "mono" | "handwriting" | "")
-    hide_skill_bar  : 是否隐藏激活技能栏（沉浸式体验）
-
-    用法示例（在 JSON Skill 文件中）
-    ────────────────────────────────
-    "ui_config": {
-        "theme": "midnight",
-        "css_vars": {
-            "--accent-primary": "#c084fc",
-            "--bg-primary": "#080010"
-        },
-        "input_placeholder": "向神谕倾诉你的困惑...",
-        "overlay_effect": "stars",
-        "title_text": "神谕",
-        "assistant_prefix": "✨ ",
-        "hide_skill_bar": true
-    }
-    """
+    """Skill 的 UI 定制配置。当此 Skill 启用时，可改变聊天界面的视觉主题。"""
 
     theme: str = ""
     css_vars: Dict[str, str] = field(default_factory=dict)
@@ -326,7 +287,6 @@ class SkillUIConfig:
         )
 
     def is_empty(self) -> bool:
-        """如果没有任何 UI 配置，返回 True"""
         return (
             not self.theme
             and not self.css_vars
@@ -341,11 +301,10 @@ class SkillUIConfig:
         )
 
     def merge(self, other: "SkillUIConfig") -> "SkillUIConfig":
-        """合并两个 UIConfig，后者的非空字段覆盖前者（用于多 Skill 共存时合并）"""
-        merged_css = {**self.css_vars, **other.css_vars}
+        """合并两个 UIConfig，other 的非空字段覆盖 self（用于多 Skill 共存）"""
         return SkillUIConfig(
             theme=other.theme or self.theme,
-            css_vars=merged_css,
+            css_vars={**self.css_vars, **other.css_vars},
             input_placeholder=other.input_placeholder or self.input_placeholder,
             welcome_text=other.welcome_text or self.welcome_text,
             overlay_effect=other.overlay_effect or self.overlay_effect,
@@ -469,30 +428,13 @@ class SkillDefinition:
     # 例：excel_analyst.output_keys = ["analysis_result", "chart_data"]
     output_keys: List[str] = field(default_factory=list)
 
-    # ── 动态工具编排（v3）──────────────────────────────────────────────────────
-    # 工具调用策略：自由文本，描述「在什么条件下调用哪个工具、工具结果如何影响下一步决策」。
-    # 注入后以 "### 🔧 工具调用策略" 块出现在 system prompt 末尾。
-    # 推荐格式（条件树）：
-    #   「• 若用户提供文件路径 → 调用 X；返回截断 → 再调用 Y；返回乱码 → 提醒用户」
-    tool_orchestration: str = ""
-
-    # ReAct 执行循环协议强度：
-    #   "" / "none" : 不注入额外 ReAct 指令（默认）
-    #   "light"     : 一行提醒「先思考工具选择理由，再调用，观察结果后决策下一步」
-    #   "full"      : 完整 Thought→Action→Observation 循环规则，适合多步工具编排技能
-    react_protocol: str = ""
-
-    # 多模型协作建议：描述此 Skill 在 MultiAgentOrchestrator 中的推荐分工。
-    # 例：「分析节点用高推理模型；生成节点用快速模型；前者输出存入 analysis_result 键」
-    multi_model_hint: str = ""
-
-    # 链接交接上下文：描述完成本 Skill 后应为 chains_to 技能准备的输出格式/关键字段。
-    # 例：「完成调试后，为 write_unit_tests 准备：修复后函数签名 + 已发现的边界条件」
-    handoff_context: str = ""
-
     # 示例 I/O 对，供 UI 展示和测试
     # 格式: [{"input": "...", "output": "...", "note": "...（可选）"}, ...]
     examples: List[Dict[str, Any]] = field(default_factory=list)
+
+    # ── UI 定制配置 ──────────────────────────────────────────────────────────
+    # 激活此 Skill 时，用于改变聊天界面视觉主题
+    ui_config: "SkillUIConfig" = field(default_factory=lambda: SkillUIConfig())
 
     # ── Manifest v2 字段 ─────────────────────────────────────────────────────
     # 兼容性约束: {"min_koto_version": "1.0.0", "platform": "windows"}
@@ -537,11 +479,8 @@ class SkillDefinition:
     # 函数签名约定：fn(user_input: str, context: Dict[str, Any]) → Any
     entry_point: Optional[str] = None
 
-    # ── UI 定制配置 ───────────────────────────────────────────────────────────
-    # 让 Skill 改变聊天界面的视觉（CSS 主题/颜色/特效）和交互（占位符、标题等）
-    ui_config: SkillUIConfig = field(default_factory=SkillUIConfig)
-
     # ── 方法 ─────────────────────────────────────────────────────────────────
+
 
     def render_prompt(
         self,
@@ -571,11 +510,7 @@ class SkillDefinition:
             try:
                 template = template.format(**variables)
             except KeyError as e:
-                logger.warning(
-                    "[SkillDefinition] render_prompt() missing variable %s for skill=%s",
-                    e,
-                    self.id,
-                )
+                logger.warning("[SkillDefinition] render_prompt() missing variable %s for skill=%s", e, self.id)
 
         parts = [template] if template else []
 
@@ -729,11 +664,6 @@ class SkillDefinition:
             "synergizes_with": self.synergizes_with,
             "output_keys": self.output_keys,
             "examples": self.examples,
-            # v3 动态工具编排
-            "tool_orchestration": self.tool_orchestration,
-            "react_protocol": self.react_protocol,
-            "multi_model_hint": self.multi_model_hint,
-            "handoff_context": self.handoff_context,
             # manifest v2
             "compatibility": self.compatibility,
             "dependencies": self.dependencies,
@@ -745,8 +675,7 @@ class SkillDefinition:
             "plan_template": self.plan_template,
             "executor_tools": self.executor_tools,
             "entry_point": self.entry_point,
-            # UI 定制配置
-            "ui_config": self.ui_config.to_dict(),
+            "ui_config": self.ui_config.to_dict() if self.ui_config else {},
         }
 
     @classmethod
@@ -804,11 +733,6 @@ class SkillDefinition:
             synergizes_with=data.get("synergizes_with", []),
             output_keys=data.get("output_keys", []),
             examples=data.get("examples", []),
-            # v3 动态工具编排
-            tool_orchestration=data.get("tool_orchestration", ""),
-            react_protocol=data.get("react_protocol", ""),
-            multi_model_hint=data.get("multi_model_hint", ""),
-            handoff_context=data.get("handoff_context", ""),
             # manifest v2
             compatibility=data.get("compatibility", {}),
             dependencies=data.get("dependencies", []),
@@ -818,7 +742,7 @@ class SkillDefinition:
             default_triggers=data.get("default_triggers", []),
             plan_template=data.get("plan_template", []),
             entry_point=data.get("entry_point"),
-            ui_config=SkillUIConfig.from_dict(data.get("ui_config", {})),
+            ui_config=SkillUIConfig.from_dict(data["ui_config"]) if data.get("ui_config") else SkillUIConfig(),
         )
 
     @classmethod
@@ -858,13 +782,7 @@ class SkillDefinition:
             synergizes_with=legacy.get("synergizes_with", []),
             output_keys=legacy.get("output_keys", []),
             examples=legacy.get("examples", []),
-            # v3 动态工具编排
-            tool_orchestration=legacy.get("tool_orchestration", ""),
-            react_protocol=legacy.get("react_protocol", ""),
-            multi_model_hint=legacy.get("multi_model_hint", ""),
-            handoff_context=legacy.get("handoff_context", ""),
             entry_point=legacy.get("entry_point"),
-            ui_config=SkillUIConfig.from_dict(legacy.get("ui_config", {})),
         )
 
 
