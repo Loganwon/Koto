@@ -1404,6 +1404,11 @@ class SmartDispatcher:
                 "multi_step_info": compound_info,
             }
             context_info["routing_list"] = base_routing_list
+            try:
+                _ma_preset = _get_task_decomposer().suggest_multiagent_preset(compound_info)
+                context_info["multiagent_preset"] = _ma_preset
+            except Exception:
+                pass
             return "MULTI_STEP", "🔄 Fallback-MultiStep", context_info
 
         # -- RAG 上下文延续 --

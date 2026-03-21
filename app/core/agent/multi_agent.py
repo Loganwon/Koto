@@ -108,6 +108,7 @@ class AgentRole:
     is_critic: bool = False
     input_fields: Optional[List[str]] = None
     temperature: float = 0.7
+    model_id: Optional[str] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,6 +229,7 @@ if _LG_AVAILABLE:
         steps: List[str]
         final_output: Optional[str]
         error: Optional[str]
+        parallel_outputs: List[str]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -253,7 +255,7 @@ def _llm_call(model_id: str, system: str, user: str, temperature: float = 0.7) -
         return resp.content if hasattr(resp, "content") else str(resp)
     except Exception as exc:
         logger.error("[MultiAgent] LLM call failed: %s", exc)
-        return f"[错误] {exc}"
+        raise
 
 
 def _build_context(state: "MultiAgentState", role: AgentRole) -> str:
@@ -360,6 +362,7 @@ class MultiAgentOrchestrator:
         model_id: str = "gemini-3-flash-preview",
         max_revisions: int = 1,
         checkpointer=None,
+        parallel_roles: Optional[List[AgentRole]] = None,
     ):
         _assert_langgraph()
         if not roles:
@@ -368,6 +371,7 @@ class MultiAgentOrchestrator:
         self.roles = roles
         self.model_id = model_id
         self.max_revisions = max_revisions
+        self.parallel_roles: List[AgentRole] = list(parallel_roles) if parallel_roles else []
 
         if checkpointer is None:
             from app.core.agent.checkpoint_manager import get_checkpointer
@@ -488,6 +492,7 @@ class MultiAgentOrchestrator:
         user_input: str,
         session_id: Optional[str] = None,
         model_id: Optional[str] = None,
+        timeout: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         同步执行多 Agent 管线。
@@ -589,6 +594,19 @@ class MultiAgentOrchestrator:
         )
         return cls(
             roles=[ROLES.RESEARCHER, ROLES.CODER, ROLES.REVIEWER, revise_role],
+            model_id=model_id,
+            max_revisions=max_revisions,
+        )
+
+    @classmethod
+    def preset_analysis_pipeline(
+        cls,
+        model_id: str = "gemini-3-flash-preview",
+        max_revisions: int = 1,
+    ) -> "MultiAgentOrchestrator":
+        """预置：数据分析管线（研究 → 数据分析 → Critic）"""
+        return cls(
+            roles=[ROLES.RESEARCHER, ROLES.DATA_ANALYST, ROLES.CRITIC],
             model_id=model_id,
             max_revisions=max_revisions,
         )

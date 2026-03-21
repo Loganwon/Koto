@@ -89,23 +89,6 @@ def _token_tracker():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# GET /api/skills/active-ui-config  —  获取当前激活 Skill 的 UI 配置合并结果
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-@skill_bp.route("/active-ui-config", methods=["GET"])
-def get_active_ui_config():
-    """返回所有已启用且含有 ui_config / ui_extensions 的 Skill 合并后的 UI 配置。"""
-    try:
-        sm = _sm()
-        result = sm.get_active_ui_config()
-        return jsonify({"success": True, **result})
-    except Exception as e:
-        logger.error(f"[skills] active-ui-config error: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # GET  /api/skills/<id>/permissions       — 查询 Skill 的权限状态
 # POST /api/skills/<id>/permissions       — 授予权限
 # DELETE /api/skills/<id>/permissions     — 撤销权限

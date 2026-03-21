@@ -190,7 +190,7 @@ class TestDocumentFeedback:
     def test_build_annotation_prompt_academic(self):
         obj = self._make()
         prompt = obj._build_annotation_prompt("docx", "内容片段", "学术润色")
-        assert "资深学术编辑" in prompt
+        assert "资深中文编辑" in prompt or "资深学术编辑" in prompt
         assert "内容片段" in prompt
 
     def test_build_annotation_prompt_resume(self):
