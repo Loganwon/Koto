@@ -11,6 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.0] — 2026-03-22
+
+### Added
+- **Skill Marketplace** (`app/api/skill_marketplace_routes.py`, `web/static/css/skill_marketplace.css`, `web/static/js/skill_marketplace.js`, `web/templates/skill_marketplace.html`): Full marketplace UI — browse/search/filter by category, one-click install/uninstall, star ratings, export/import flows
+- **6 New Skills**: `algorithmic_art`, `frontend_design`, `internal_comms`, `mcp_builder`, `skill_creator`, `web_artifacts_builder`
+- **Chat Blueprint** (`web/blueprints/chat.py`): Chat routes extracted from `web/app.py` into a dedicated Blueprint
+- **LLM License File** (`app/core/llm/_license.py`): License info for LLM provider components
+- **Dev Scripts**: `scripts/add_route_type_hints.py`, `scripts/remove_blueprint_routes.py`
+
+### Changed
+- **`web/app.py` refactored**: All route groups moved to blueprints; `app.py` reduced from ~6 600 lines to ~500 lines
+- All blueprints updated with type annotations and improved debug/warning logging: `analytics`, `chat`, `dev`, `document`, `execution`, `file_editor`, `file_organize`, `knowledge`, `misc_api`, `pages`, `proactive`, `sessions`, `settings`, `voice`, `workspace`
+- **8 Enhanced skills**: `amount_converter`, `budget_variance_analyst`, `compliance_checker`, `divination`, `financial_statement_analyst`, `invoice_extractor`, `prompt_refiner`, `track_changes_writer` — improved prompts, `output_format`, and metadata
+- **Icon refresh**: new `koto_icon.svg` / `.png` / `.ico` across `src/assets/` and `web/static/assets/`
+- `config/triggers.json`: updated trigger definitions
+
+### Removed
+- **Archive cleanup**: 13 obsolete files deleted from `_archive/` — `old_agents/` (4), `old_launchers/` (4), `temp_files/` (8), `unused_code/` (3), `unused_launchers/` (1), `unused_tests/` (1)
+
+### Fixed
+- `tests/test_quality_feedback.py`: corrected `result['success']` → `bool(result.get('output_path'))` (PPTGenerator returns `output_path` not `success`)
+
+### Tests
+- `hypothesis` added as dev dependency for property-based tests (`tests/unit/test_property_based.py`)
+
+---
+
 ## [1.5.0] — Agents, LLM Providers, Hooks, Skills & Services
 
 ### Added

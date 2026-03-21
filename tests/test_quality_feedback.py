@@ -607,7 +607,8 @@ try:
         author="Koto AI",
     )
 
-    print(f"  生成结果: {result['success']}, {result.get('slide_count', 0)} 页")
+    generated_ok = bool(result.get('output_path'))
+    print(f"  生成结果: {generated_ok}, {result.get('slide_count', 0)} 页")
 
     # Step 3: 后置文件检查
     post_check = FileQualityGate.post_check_pptx(temp_path)
@@ -616,7 +617,7 @@ try:
     print(f"  空页面: {post_check.get('metrics', {}).get('empty_slides', 0)}")
 
     checks_e2e = [
-        ("生成成功", result["success"]),
+        ("生成成功", generated_ok),
         ("门控通过", qg["quality"]["pass"]),
         ("文件后检通过", post_check["pass"]),
         ("无Markdown残留", post_check.get("metrics", {}).get("md_residue", 0) == 0),
