@@ -18,7 +18,7 @@ Routes:
   POST   /api/insights/export-markdown    — Export report as markdown
 """
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 analytics_bp = Blueprint("analytics", __name__)
 
@@ -56,7 +56,7 @@ def _get_trigger_system():
 
 
 @analytics_bp.route("/api/behavior/log-event", methods=["POST"])
-def behavior_log_event():
+def behavior_log_event() -> Response:
     """记录用户行为事件"""
     try:
         data = request.json or {}
@@ -115,7 +115,7 @@ def behavior_log_event():
 
 
 @analytics_bp.route("/api/behavior/recent-events", methods=["GET"])
-def behavior_recent_events():
+def behavior_recent_events() -> Response:
     """获取最近的事件"""
     try:
         limit = request.args.get("limit", 50, type=int)
@@ -131,7 +131,7 @@ def behavior_recent_events():
 
 
 @analytics_bp.route("/api/behavior/top-files", methods=["GET"])
-def behavior_top_files():
+def behavior_top_files() -> Response:
     """获取最常用的文件"""
     try:
         limit = request.args.get("limit", 10, type=int)
@@ -146,7 +146,7 @@ def behavior_top_files():
 
 
 @analytics_bp.route("/api/behavior/work-patterns", methods=["GET"])
-def behavior_work_patterns():
+def behavior_work_patterns() -> Response:
     """获取工作模式分析"""
     try:
         monitor = _get_behavior_monitor()
@@ -159,7 +159,7 @@ def behavior_work_patterns():
 
 
 @analytics_bp.route("/api/behavior/stats", methods=["GET"])
-def behavior_stats():
+def behavior_stats() -> Response:
     """获取行为统计"""
     try:
         monitor = _get_behavior_monitor()
@@ -177,7 +177,7 @@ def behavior_stats():
 
 
 @analytics_bp.route("/api/suggestions/generate", methods=["POST"])
-def suggestions_generate():
+def suggestions_generate() -> Response:
     """生成智能建议"""
     try:
         data = request.json or {}
@@ -195,7 +195,7 @@ def suggestions_generate():
 
 
 @analytics_bp.route("/api/suggestions/pending", methods=["GET"])
-def suggestions_pending():
+def suggestions_pending() -> Response:
     """获取待处理的建议"""
     try:
         limit = request.args.get("limit", 10, type=int)
@@ -212,7 +212,7 @@ def suggestions_pending():
 
 
 @analytics_bp.route("/api/suggestions/dismiss", methods=["POST"])
-def suggestions_dismiss():
+def suggestions_dismiss() -> Response:
     """拒绝建议"""
     try:
         data = request.json or {}
@@ -232,7 +232,7 @@ def suggestions_dismiss():
 
 
 @analytics_bp.route("/api/suggestions/apply", methods=["POST"])
-def suggestions_apply():
+def suggestions_apply() -> Response:
     """应用建议"""
     try:
         data = request.json or {}
@@ -252,7 +252,7 @@ def suggestions_apply():
 
 
 @analytics_bp.route("/api/suggestions/stats", methods=["GET"])
-def suggestions_stats():
+def suggestions_stats() -> Response:
     """获取建议统计"""
     try:
         engine = _get_suggestion_engine()
@@ -270,7 +270,7 @@ def suggestions_stats():
 
 
 @analytics_bp.route("/api/insights/generate-weekly", methods=["POST"])
-def insights_generate_weekly():
+def insights_generate_weekly() -> Response:
     """生成周报"""
     try:
         reporter = _get_insight_reporter()
@@ -283,7 +283,7 @@ def insights_generate_weekly():
 
 
 @analytics_bp.route("/api/insights/generate-monthly", methods=["POST"])
-def insights_generate_monthly():
+def insights_generate_monthly() -> Response:
     """生成月报"""
     try:
         reporter = _get_insight_reporter()
@@ -296,7 +296,7 @@ def insights_generate_monthly():
 
 
 @analytics_bp.route("/api/insights/latest", methods=["GET"])
-def insights_latest():
+def insights_latest() -> Response:
     """获取最新报告"""
     try:
         report_type = request.args.get("type", "weekly")
@@ -314,7 +314,7 @@ def insights_latest():
 
 
 @analytics_bp.route("/api/insights/export-markdown", methods=["POST"])
-def insights_export_markdown():
+def insights_export_markdown() -> Response:
     """导出报告为Markdown"""
     try:
         data = request.json or {}

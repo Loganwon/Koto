@@ -1,6 +1,6 @@
 """Knowledge-base and knowledge-graph API routes."""
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 knowledge_bp = Blueprint("knowledge", __name__)
 
@@ -26,7 +26,7 @@ def _get_knowledge_graph():
 
 
 @knowledge_bp.route("/api/knowledge-base/add", methods=["POST"])
-def kb_add_document():
+def kb_add_document() -> Response:
     """添加文档到知识库"""
     try:
         data = request.json
@@ -44,7 +44,7 @@ def kb_add_document():
 
 
 @knowledge_bp.route("/api/knowledge-base/search", methods=["POST"])
-def kb_search():
+def kb_search() -> Response:
     """搜索知识库"""
     try:
         data = request.json
@@ -63,7 +63,7 @@ def kb_search():
 
 
 @knowledge_bp.route("/api/knowledge-base/stats", methods=["GET"])
-def kb_stats():
+def kb_stats() -> Response:
     """获取知识库统计"""
     try:
         kb = _get_kb()
@@ -78,7 +78,7 @@ def kb_stats():
 
 
 @knowledge_bp.route("/api/knowledge-graph/build", methods=["POST"])
-def knowledge_graph_build():
+def knowledge_graph_build() -> Response:
     """构建知识图谱"""
     try:
         data = request.json or {}
@@ -102,7 +102,7 @@ def knowledge_graph_build():
 
 
 @knowledge_bp.route("/api/knowledge-graph/data", methods=["GET"])
-def knowledge_graph_data():
+def knowledge_graph_data() -> Response:
     """获取知识图谱数据用于可视化"""
     try:
         max_nodes = request.args.get("max_nodes", 100, type=int)
@@ -117,7 +117,7 @@ def knowledge_graph_data():
 
 
 @knowledge_bp.route("/api/knowledge-graph/neighbors", methods=["POST"])
-def knowledge_graph_neighbors():
+def knowledge_graph_neighbors() -> Response:
     """获取文件的邻居节点"""
     try:
         data = request.json or {}
@@ -137,7 +137,7 @@ def knowledge_graph_neighbors():
 
 
 @knowledge_bp.route("/api/knowledge-graph/concept-cluster", methods=["POST"])
-def knowledge_graph_concept_cluster():
+def knowledge_graph_concept_cluster() -> Response:
     """获取概念相关的文件集群"""
     try:
         data = request.json or {}
@@ -157,7 +157,7 @@ def knowledge_graph_concept_cluster():
 
 
 @knowledge_bp.route("/api/knowledge-graph/stats", methods=["GET"])
-def knowledge_graph_stats():
+def knowledge_graph_stats() -> Response:
     """获取知识图谱统计"""
     try:
         kg = _get_knowledge_graph()

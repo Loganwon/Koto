@@ -172,7 +172,7 @@ def _call_document_analysis(file_path: str, requirement: str):
 
 
 @document_bp.route("/api/document/smart-process", methods=["POST"])
-def document_smart_process():
+def document_smart_process() -> Response:
     """Smart document processing entry point. Automatically routes to annotation or analysis system.
     ---
     tags:
@@ -253,7 +253,7 @@ def document_smart_process():
 
 
 @document_bp.route("/api/document/feedback", methods=["POST"])
-def document_feedback():
+def document_feedback() -> Response:
     """文档智能反馈：读取文档 → AI分析 → 应用修改"""
     try:
         data = request.json
@@ -294,7 +294,7 @@ def document_feedback():
 
 
 @document_bp.route("/api/document/analyze", methods=["POST"])
-def document_analyze():
+def document_analyze() -> Response:
     """Analyze a document without applying modifications.
     ---
     tags:
@@ -366,7 +366,7 @@ def document_analyze():
 
 
 @document_bp.route("/api/document/apply", methods=["POST"])
-def document_apply():
+def document_apply() -> Response:
     """应用修改建议到文档"""
     try:
         data = request.json
@@ -405,7 +405,7 @@ def document_apply():
 
 
 @document_bp.route("/api/document/annotate", methods=["POST"])
-def document_annotate():
+def document_annotate() -> Response:
     """文档自动标注：AI分析 -> 生成标注 -> 应用到副本"""
     try:
         data = request.json
@@ -444,7 +444,7 @@ def document_annotate():
 
 
 @document_bp.route("/api/document/analyze-annotations", methods=["POST"])
-def document_analyze_annotations():
+def document_analyze_annotations() -> Response:
     """仅分析文档并生成标注建议（不应用）- 已弃用，请使用 /api/document/batch-annotate-stream"""
     try:
         data = request.json
@@ -489,7 +489,7 @@ def document_analyze_annotations():
 
 
 @document_bp.route("/api/document/batch-annotate-stream", methods=["POST"])
-def document_batch_annotate_stream():
+def document_batch_annotate_stream() -> Response:
     """
     批量标注文档（SSE流式返回，实时反馈进度）
 
@@ -548,7 +548,7 @@ def document_batch_annotate_stream():
 
 
 @document_bp.route("/api/document/apply-annotations", methods=["POST"])
-def document_apply_annotations():
+def document_apply_annotations() -> Response:
     """应用标注建议到文档"""
     try:
         data = request.json
@@ -586,7 +586,7 @@ def document_apply_annotations():
 
 
 @document_bp.route("/api/document/suggest-stream", methods=["POST"])
-def document_suggest_stream():
+def document_suggest_stream() -> Response:
     """
     生成修改建议流（SSE）
 
@@ -640,7 +640,7 @@ def document_suggest_stream():
 
 
 @document_bp.route("/api/document/apply-suggestions", methods=["POST"])
-def document_apply_suggestions():
+def document_apply_suggestions() -> Response:
     """
     根据用户选择应用修改建议
 

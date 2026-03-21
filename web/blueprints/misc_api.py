@@ -8,7 +8,7 @@ code-generation, and file-network routes from web/app.py.
 import logging
 import os
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 _logger = logging.getLogger("koto.routes.misc_api")
 
@@ -30,7 +30,7 @@ def _get_workspace_dir():
 
 
 @misc_api_bp.route("/api/notes/add", methods=["POST"])
-def add_note():
+def add_note() -> Response:
     """添加笔记"""
     from note_manager import get_note_manager
 
@@ -41,13 +41,14 @@ def add_note():
     tags = data.get("tags", [])
 
     note_manager = get_note_manager()
-    note_id = note_manager.add_note(title, content, category, tags)
+    note = note_manager.add_note(content, tags=tags, category=category)
+    note_id = note.get("id") if isinstance(note, dict) else note
 
     return jsonify({"success": True, "note_id": note_id})
 
 
 @misc_api_bp.route("/api/notes/list", methods=["GET"])
-def list_notes():
+def list_notes() -> Response:
     """列出最近笔记"""
     from note_manager import get_note_manager
 
@@ -55,13 +56,13 @@ def list_notes():
     category = request.args.get("category")
 
     note_manager = get_note_manager()
-    notes = note_manager.get_recent_notes(limit, category)
+    notes = note_manager.get_recent_notes(limit)
 
     return jsonify({"notes": notes})
 
 
 @misc_api_bp.route("/api/notes/search", methods=["GET"])
-def search_notes():
+def search_notes() -> Response:
     """搜索笔记"""
     from note_manager import get_note_manager
 
@@ -73,7 +74,7 @@ def search_notes():
 
 
 @misc_api_bp.route("/api/notes/<note_id>", methods=["DELETE"])
-def delete_note(note_id):
+def delete_note(note_id: str) -> Response:
     """删除笔记"""
     from note_manager import get_note_manager
 
@@ -87,7 +88,7 @@ def delete_note(note_id):
 
 
 @misc_api_bp.route("/api/reminders/add", methods=["POST"])
-def add_reminder():
+def add_reminder() -> Response:
     """创建本地系统提醒
     请求体: {"title": str, "message": str, "time": ISO8601, "seconds": int}
     - 传 time (ISO 时间) 或 seconds (相对秒数) 任选其一
@@ -123,7 +124,7 @@ def add_reminder():
 
 
 @misc_api_bp.route("/api/reminders/list", methods=["GET"])
-def list_reminders_api():
+def list_reminders_api() -> Response:
     """列出所有提醒"""
     from reminder_manager import get_reminder_manager
 
@@ -132,7 +133,7 @@ def list_reminders_api():
 
 
 @misc_api_bp.route("/api/reminders/<reminder_id>", methods=["DELETE"])
-def cancel_reminder(reminder_id):
+def cancel_reminder(reminder_id: str) -> Response:
     """取消提醒"""
     from reminder_manager import get_reminder_manager
 
@@ -145,7 +146,7 @@ def cancel_reminder(reminder_id):
 
 
 @misc_api_bp.route("/api/calendar/add", methods=["POST"])
-def add_calendar_event():
+def add_calendar_event() -> Response:
     """新增日程并自动创建本地提醒
     请求体: {"title": str, "description": str, "start": ISO8601, "end": ISO8601?, "remind_before_minutes": int?}
     """
@@ -181,7 +182,7 @@ def add_calendar_event():
 
 
 @misc_api_bp.route("/api/calendar/list", methods=["GET"])
-def list_calendar_events():
+def list_calendar_events() -> Response:
     from calendar_manager import get_calendar_manager
 
     limit = int(request.args.get("limit", 100))
@@ -190,7 +191,7 @@ def list_calendar_events():
 
 
 @misc_api_bp.route("/api/calendar/<event_id>", methods=["DELETE"])
-def delete_calendar_event(event_id):
+def delete_calendar_event(event_id: str) -> Response:
     from calendar_manager import get_calendar_manager
 
     mgr = get_calendar_manager()
@@ -202,7 +203,7 @@ def delete_calendar_event(event_id):
 
 
 @misc_api_bp.route("/api/clipboard/history", methods=["GET"])
-def get_clipboard_history():
+def get_clipboard_history() -> Response:
     """获取剪贴板历史"""
     from clipboard_manager import get_clipboard_manager
 
@@ -217,7 +218,7 @@ def get_clipboard_history():
 
 
 @misc_api_bp.route("/api/clipboard/search", methods=["GET"])
-def search_clipboard():
+def search_clipboard() -> Response:
     """搜索剪贴板历史"""
     from clipboard_manager import get_clipboard_manager
 
@@ -232,7 +233,7 @@ def search_clipboard():
 
 
 @misc_api_bp.route("/api/clipboard/copy", methods=["POST"])
-def copy_from_history():
+def copy_from_history() -> Response:
     """从历史中复制"""
     from clipboard_manager import get_clipboard_manager
 
@@ -255,7 +256,7 @@ def copy_from_history():
 
 
 @misc_api_bp.route("/api/email/accounts", methods=["GET"])
-def list_email_accounts():
+def list_email_accounts() -> Response:
     """列出邮箱账户"""
     from email_manager import get_email_manager
 
@@ -267,7 +268,7 @@ def list_email_accounts():
 
 
 @misc_api_bp.route("/api/email/accounts/add", methods=["POST"])
-def add_email_account():
+def add_email_account() -> Response:
     """添加邮箱账户"""
     from email_manager import get_email_manager
 
@@ -293,7 +294,7 @@ def add_email_account():
 
 
 @misc_api_bp.route("/api/email/send", methods=["POST"])
-def send_email():
+def send_email() -> Response:
     """发送邮件"""
     from email_manager import get_email_manager
 
@@ -319,7 +320,7 @@ def send_email():
 
 
 @misc_api_bp.route("/api/email/fetch", methods=["GET"])
-def fetch_emails():
+def fetch_emails() -> Response:
     """获取邮件列表"""
     from email_manager import get_email_manager
 
@@ -336,7 +337,7 @@ def fetch_emails():
 
 
 @misc_api_bp.route("/api/email/search", methods=["GET"])
-def search_emails():
+def search_emails() -> Response:
     """搜索邮件"""
     from email_manager import get_email_manager
 
@@ -353,7 +354,7 @@ def search_emails():
 
 
 @misc_api_bp.route("/api/search/all", methods=["GET"])
-def search_all():
+def search_all() -> Response:
     """Global search across all indexed content.
     ---
     tags:
@@ -395,7 +396,7 @@ def search_all():
 
 
 @misc_api_bp.route("/api/search/files", methods=["GET"])
-def search_files():
+def search_files() -> Response:
     """搜索文件"""
     from search_engine import get_search_engine
 
@@ -412,7 +413,7 @@ def search_files():
 
 
 @misc_api_bp.route("/api/data/extract-transform", methods=["POST"])
-def data_extract_transform():
+def data_extract_transform() -> Response:
     """数据提取与转换 - 场景1：跨应用数据搬运"""
     try:
         from datetime import datetime
@@ -453,7 +454,7 @@ def data_extract_transform():
 
 
 @misc_api_bp.route("/api/code/generate", methods=["POST"])
-def code_generate():
+def code_generate() -> Response:
     """代码生成 - 场景2：帮助用户完成编程任务"""
     try:
         data = request.json
@@ -491,7 +492,7 @@ def code_generate():
 
 
 @misc_api_bp.route("/api/code/templates", methods=["GET"])
-def code_templates():
+def code_templates() -> Response:
     """获取可用代码模板列表"""
     try:
         from web.code_generator import CodeGenerator
@@ -513,7 +514,7 @@ def code_templates():
 
 
 @misc_api_bp.route("/api/file-network/search", methods=["POST"])
-def file_network_search():
+def file_network_search() -> Response:
     """多维查询文件
 
     请求参数:
@@ -547,7 +548,7 @@ def file_network_search():
 
 
 @misc_api_bp.route("/api/file-network/open", methods=["POST"])
-def file_network_open():
+def file_network_open() -> Response:
     """快速打开文件
 
     请求参数:
@@ -571,7 +572,7 @@ def file_network_open():
 
 
 @misc_api_bp.route("/api/file-network/network", methods=["POST"])
-def file_network_get_network():
+def file_network_get_network() -> Response:
     """获取文件关系网络
 
     请求参数:
@@ -597,7 +598,7 @@ def file_network_get_network():
 
 
 @misc_api_bp.route("/api/file-network/statistics", methods=["GET"])
-def file_network_statistics():
+def file_network_statistics() -> Response:
     """获取文件网络统计信息"""
     try:
         from web.processed_file_network import get_file_network
@@ -611,7 +612,7 @@ def file_network_statistics():
 
 
 @misc_api_bp.route("/api/file-network/register", methods=["POST"])
-def file_network_register():
+def file_network_register() -> Response:
     """手动注册文件到网络
 
     请求参数:

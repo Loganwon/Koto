@@ -229,6 +229,8 @@ a{color:var(--accent);}
 .bbl th{background:var(--bg2);}
 .bbl blockquote{border-left:3px solid var(--accent);padding-left:10px;margin:6px 0;color:var(--fg2);}
 .bbl a{color:var(--accent);}
+.bbl a.ext-link{text-decoration:underline;text-underline-offset:2px;cursor:pointer;}
+.bbl a.ext-link::after{content:' ↗';font-size:.75em;opacity:.6;}
 .bbl hr{border:none;border-top:1px solid var(--border);margin:8px 0;}
 /* copy code btn */
 .cpBtn{
@@ -676,6 +678,19 @@ document.addEventListener('DOMContentLoaded', () => {
   initVoice();
   watchScroll();
   document.getElementById('txIn').focus();
+
+  // 外部链接拦截：在系统浏览器中打开，防止 webview 内导航
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('a[data-ext="1"], a[href^="http://"], a[href^="https://"]');
+    if (!a) return;
+    e.preventDefault();
+    const url = a.href;
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.open_url) {
+      window.pywebview.api.open_url(url);
+    } else {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+  });
 });
 
 /* ────────────────── localStorage helpers ── */
@@ -878,7 +893,18 @@ function katexRender(el) {
 }
 function md(text) {
   if (!window.marked) return esc(text).replace(/\n/g,'<br>');
-  try { marked.setOptions({breaks:true,gfm:true}); return marked.parse(text); }
+  try {
+    const renderer = new marked.Renderer();
+    renderer.link = function(href, title, text) {
+      if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+        const t = title ? ` title="${esc(title)}"` : '';
+        return `<a href="${href}" data-ext="1"${t} class="ext-link">${text}</a>`;
+      }
+      return `<a href="${href || '#'}">${text}</a>`;
+    };
+    marked.setOptions({breaks:true,gfm:true,renderer});
+    return marked.parse(text);
+  }
   catch(e) { return esc(text).replace(/\n/g,'<br>'); }
 }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }

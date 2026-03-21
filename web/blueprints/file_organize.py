@@ -26,10 +26,11 @@ Routes:
   GET    /api/history/stats             — Get history statistics
 """
 
+import json
 import logging
 import os
 
-from flask import Blueprint, Response, jsonify, request, send_file
+from flask import Blueprint, Response, jsonify, request, send_file, stream_with_context
 
 _logger = logging.getLogger("koto.routes.file_organize")
 
@@ -71,7 +72,7 @@ def _get_organize_root():
 
 
 @file_organize_bp.route("/api/batch/rename", methods=["POST"])
-def batch_rename():
+def batch_rename() -> Response:
     """批量重命名文件"""
     try:
         from web.batch_processor import BatchFileProcessor
@@ -89,7 +90,7 @@ def batch_rename():
 
 
 @file_organize_bp.route("/api/batch/convert", methods=["POST"])
-def batch_convert():
+def batch_convert() -> Response:
     """批量格式转换"""
     try:
         from web.batch_processor import BatchFileProcessor
@@ -113,7 +114,7 @@ def batch_convert():
 
 
 @file_organize_bp.route("/api/template/list", methods=["GET"])
-def template_list():
+def template_list() -> Response:
     """获取模板列表"""
     try:
         from web.template_library import TemplateLibrary
@@ -127,7 +128,7 @@ def template_list():
 
 
 @file_organize_bp.route("/api/template/generate", methods=["POST"])
-def template_generate():
+def template_generate() -> Response:
     """从模板生成文档"""
     try:
         from web.template_library import TemplateLibrary
@@ -157,7 +158,7 @@ def template_generate():
 
 
 @file_organize_bp.route("/api/check/consistency", methods=["POST"])
-def check_consistency():
+def check_consistency() -> Response:
     """检查文档一致性"""
     try:
         from web.consistency_checker import ConsistencyChecker
@@ -180,7 +181,7 @@ def check_consistency():
 
 
 @file_organize_bp.route("/api/compare/documents", methods=["POST"])
-def compare_documents():
+def compare_documents() -> Response:
     """对比文档"""
     try:
         from web.document_comparator import DocumentComparator
@@ -204,7 +205,7 @@ def compare_documents():
 
 
 @file_organize_bp.route("/api/ocr/screenshot", methods=["POST"])
-def ocr_screenshot():
+def ocr_screenshot() -> Response:
     """截图并OCR"""
     try:
         from web.clipboard_ocr_assistant import ClipboardOCRAssistant
@@ -225,7 +226,7 @@ def ocr_screenshot():
 
 
 @file_organize_bp.route("/api/ocr/clipboard", methods=["POST"])
-def ocr_clipboard():
+def ocr_clipboard() -> Response:
     """剪贴板图片OCR"""
     try:
         from web.clipboard_ocr_assistant import ClipboardOCRAssistant
@@ -251,7 +252,7 @@ def ocr_clipboard():
 
 
 @file_organize_bp.route("/api/history/list", methods=["GET"])
-def history_list():
+def history_list() -> Response:
     """获取操作历史"""
     try:
         from web.operation_history import OperationHistory
@@ -268,7 +269,7 @@ def history_list():
 
 
 @file_organize_bp.route("/api/history/rollback/<op_id>", methods=["POST"])
-def history_rollback(op_id):
+def history_rollback(op_id: str) -> Response:
     """回滚操作"""
     try:
         from web.operation_history import OperationHistory
@@ -282,7 +283,7 @@ def history_rollback(op_id):
 
 
 @file_organize_bp.route("/api/history/stats", methods=["GET"])
-def history_stats():
+def history_stats() -> Response:
     """获取历史统计"""
     try:
         from web.operation_history import OperationHistory
@@ -301,7 +302,7 @@ def history_stats():
 
 
 @file_organize_bp.route("/api/files/download", methods=["GET"])
-def download_file_proxy():
+def download_file_proxy() -> Response:
     """通用的文件下载代理"""
     file_path = request.args.get("path")
     if not file_path or not os.path.exists(file_path):
@@ -315,7 +316,7 @@ def download_file_proxy():
 
 
 @file_organize_bp.route("/api/batch/submit", methods=["POST"])
-def batch_submit():
+def batch_submit() -> Response:
     """提交批量文件处理任务"""
     try:
         data = request.json or {}
@@ -364,14 +365,14 @@ def batch_submit():
 
 
 @file_organize_bp.route("/api/batch/jobs", methods=["GET"])
-def batch_list_jobs():
+def batch_list_jobs() -> Response:
     """列出批量任务"""
     manager = _get_batch_ops_manager()
     return jsonify({"success": True, "jobs": manager.list_jobs()})
 
 
 @file_organize_bp.route("/api/batch/jobs/<job_id>", methods=["GET"])
-def batch_get_job(job_id):
+def batch_get_job(job_id: str) -> Response:
     """获取单个任务详情"""
     manager = _get_batch_ops_manager()
     job = manager.get_job(job_id)
@@ -381,7 +382,7 @@ def batch_get_job(job_id):
 
 
 @file_organize_bp.route("/api/batch/stream/<job_id>", methods=["GET"])
-def batch_stream_job(job_id):
+def batch_stream_job(job_id: str) -> Response:
     """批量任务进度流"""
     manager = _get_batch_ops_manager()
     return Response(manager.stream_job(job_id), mimetype="text/event-stream")
@@ -393,7 +394,7 @@ def batch_stream_job(job_id):
 
 
 @file_organize_bp.route("/api/organize/scan-file", methods=["POST"])
-def organize_scan_file():
+def organize_scan_file() -> Response:
     """扫描和分析单个文件"""
     try:
         data = request.json
@@ -421,7 +422,7 @@ def organize_scan_file():
 
 
 @file_organize_bp.route("/api/organize/auto-organize", methods=["POST"])
-def organize_auto_organize():
+def organize_auto_organize() -> Response:
     """自动组织文件（分析+移动）"""
     try:
         data = request.json
@@ -470,7 +471,7 @@ def organize_auto_organize():
 
 
 @file_organize_bp.route("/api/organize/list-categories", methods=["GET"])
-def organize_list_categories():
+def organize_list_categories() -> Response:
     """列出所有分类和文件夹"""
     try:
         organizer = _get_file_organizer()
@@ -491,7 +492,7 @@ def organize_list_categories():
 
 
 @file_organize_bp.route("/api/organize/search", methods=["POST"])
-def organize_search():
+def organize_search() -> Response:
     """搜索已组织的文件"""
     try:
         data = request.json
@@ -517,7 +518,7 @@ def organize_search():
 
 
 @file_organize_bp.route("/api/organize/stats", methods=["GET"])
-def organize_stats():
+def organize_stats() -> Response:
     """获取组织统计信息"""
     try:
         organizer = _get_file_organizer()
@@ -540,7 +541,7 @@ def organize_stats():
 
 
 @file_organize_bp.route("/api/organize/cleanup", methods=["POST"])
-def organize_cleanup():
+def organize_cleanup() -> Response:
     """整合清理 _organize 目录中的重复文件夹"""
     try:
         data = request.get_json(silent=True) or {}
@@ -575,3 +576,160 @@ def organize_cleanup():
 
     except Exception as e:
         return jsonify({"error": f"整合清理失败: {str(e)}"}), 500
+
+
+# ---------------------------------------------------------------------------
+# Multi-document compare routes
+# ---------------------------------------------------------------------------
+
+_COMPARE_UPLOAD_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "web", "uploads", "compare",
+)
+os.makedirs(_COMPARE_UPLOAD_DIR, exist_ok=True)
+
+_ALLOWED_COMPARE_EXTS: set[str] = {
+    ".txt", ".md", ".markdown", ".docx", ".doc",
+    ".pdf", ".xlsx", ".xls", ".pptx", ".ppt",
+}
+
+# Temporary file_id → path mapping (process-level cache; resets on restart)
+_compare_file_registry: dict[str, dict] = {}
+
+
+@file_organize_bp.route("/api/compare/upload", methods=["POST"])
+def compare_upload() -> Response:
+    """
+    上传一个文件用于多文档对比，返回 file_id。
+    前端逐文件调用，收集到 file_ids 后再调用 /api/compare/multi。
+    """
+    if "file" not in request.files:
+        return jsonify({"success": False, "error": "未收到文件字段 'file'"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"success": False, "error": "文件名为空"}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in _ALLOWED_COMPARE_EXTS:
+        return jsonify(
+            {
+                "success": False,
+                "error": f"不支持的格式 {ext}，支持: {', '.join(sorted(_ALLOWED_COMPARE_EXTS))}",
+            }
+        ), 400
+    import uuid as _uuid
+
+    file_id = _uuid.uuid4().hex
+    save_path = os.path.join(_COMPARE_UPLOAD_DIR, f"{file_id}{ext}")
+    try:
+        f.save(save_path)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"保存文件失败: {e}"}), 500
+    _compare_file_registry[file_id] = {
+        "path": save_path,
+        "name": f.filename,
+        "size": os.path.getsize(save_path),
+    }
+    return jsonify(
+        {
+            "success": True,
+            "file_id": file_id,
+            "filename": f.filename,
+            "size": os.path.getsize(save_path),
+        }
+    )
+
+
+@file_organize_bp.route("/api/compare/multi", methods=["POST"])
+def compare_multi() -> Response:
+    """
+    文本 diff 对比多个已上传文档。
+
+    Request JSON:
+        {"file_ids": ["id1", "id2", ...], "output_format": "inline_json"}
+    """
+    try:
+        from web.document_comparator import DocumentComparator
+
+        data = request.json or {}
+        file_ids: list[str] = data.get("file_ids", [])
+        output_format: str = data.get("output_format", "inline_json")
+        if len(file_ids) < 2:
+            return jsonify({"success": False, "error": "至少需要两个文件"}), 400
+        file_paths: list[str] = []
+        for fid in file_ids:
+            info = _compare_file_registry.get(fid)
+            if not info:
+                return jsonify({"success": False, "error": f"file_id 不存在或已过期: {fid}"}), 404
+            file_paths.append(info["path"])
+        comparator = DocumentComparator()
+        result = comparator.compare_multiple(file_paths, output_format=output_format)
+        if result.get("success"):
+            for i, fid in enumerate(file_ids):
+                info = _compare_file_registry.get(fid, {})
+                if i < len(result.get("files", [])):
+                    result["files"][i]["display_name"] = info.get("name", "")
+        return jsonify(result)
+    except Exception as e:
+        _logger.exception("[compare_multi] error")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@file_organize_bp.route("/api/compare/ai-stream", methods=["POST"])
+def compare_ai_stream() -> Response:
+    """
+    SSE 流式 AI 语义对比分析。
+
+    Request JSON:
+        {"file_ids": ["id1", "id2", ...], "focus": "general"}
+    """
+    data = request.json or {}
+    file_ids: list[str] = data.get("file_ids", [])
+    focus: str = data.get("focus", "general")
+
+    if len(file_ids) < 2:
+        def _err():
+            yield "data: " + json.dumps({"error": "至少需要两个文件"}) + "\n\n"
+        return Response(stream_with_context(_err()), mimetype="text/event-stream")
+
+    file_paths = [
+        _compare_file_registry[fid]["path"]
+        for fid in file_ids
+        if fid in _compare_file_registry
+    ]
+    if len(file_paths) < 2:
+        def _err2():
+            yield "data: " + json.dumps({"error": "有效文件不足，请重新上传"}) + "\n\n"
+        return Response(stream_with_context(_err2()), mimetype="text/event-stream")
+
+    def generate():
+        try:
+            from web.app import client
+            from web.document_comparator import DocumentComparator
+
+            comparator = DocumentComparator()
+            prompt = comparator.build_ai_prompt(file_paths, focus=focus)
+            if not prompt:
+                yield "data: " + json.dumps({"error": "无法构建分析 prompt"}) + "\n\n"
+                return
+            model_id = "gemini-2.5-flash"
+            try:
+                for chunk in client.models.generate_content_stream(
+                    model=model_id, contents=prompt
+                ):
+                    text = getattr(chunk, "text", "") or ""
+                    if text:
+                        yield "data: " + json.dumps({"chunk": text}) + "\n\n"
+            except AttributeError:
+                response = client.models.generate_content(model=model_id, contents=prompt)
+                text = getattr(response, "text", "") or str(response)
+                yield "data: " + json.dumps({"chunk": text}) + "\n\n"
+            yield "data: " + json.dumps({"done": True}) + "\n\n"
+        except Exception as e:
+            _logger.exception("[compare_ai_stream] error")
+            yield "data: " + json.dumps({"error": str(e)}) + "\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

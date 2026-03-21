@@ -20,7 +20,7 @@ Routes:
 
 import logging
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request
 
 _logger = logging.getLogger("koto.routes.proactive")
 
@@ -60,7 +60,7 @@ def _get_trigger_system():
 
 
 @proactive_bp.route("/api/notifications/unread", methods=["GET"])
-def get_unread_notifications():
+def get_unread_notifications() -> Response:
     """获取未读通知"""
     try:
         user_id = request.args.get("user_id", "default")
@@ -82,7 +82,7 @@ def get_unread_notifications():
 
 
 @proactive_bp.route("/api/notifications/mark-read", methods=["POST"])
-def mark_notification_read():
+def mark_notification_read() -> Response:
     """标记通知已读"""
     try:
         data = request.json or {}
@@ -102,7 +102,7 @@ def mark_notification_read():
 
 
 @proactive_bp.route("/api/notifications/dismiss", methods=["POST"])
-def dismiss_notification():
+def dismiss_notification() -> Response:
     """忽略通知"""
     try:
         data = request.json or {}
@@ -122,7 +122,7 @@ def dismiss_notification():
 
 
 @proactive_bp.route("/api/notifications/stats", methods=["GET"])
-def get_notification_stats():
+def get_notification_stats() -> Response:
     """获取通知统计"""
     try:
         user_id = request.args.get("user_id", "default")
@@ -138,7 +138,7 @@ def get_notification_stats():
 
 
 @proactive_bp.route("/api/notifications/preferences", methods=["GET", "POST"])
-def notification_preferences():
+def notification_preferences() -> Response:
     """获取或设置通知偏好"""
     try:
         user_id = request.args.get("user_id", "default")
@@ -161,7 +161,7 @@ def notification_preferences():
 
 
 @proactive_bp.route("/api/dialogue/start-monitoring", methods=["POST"])
-def start_dialogue_monitoring():
+def start_dialogue_monitoring() -> Response:
     """启动主动对话监控"""
     try:
         data = request.json or {}
@@ -177,7 +177,7 @@ def start_dialogue_monitoring():
 
 
 @proactive_bp.route("/api/dialogue/stop-monitoring", methods=["POST"])
-def stop_dialogue_monitoring():
+def stop_dialogue_monitoring() -> Response:
     """停止主动对话监控"""
     try:
         engine = _get_proactive_dialogue()
@@ -190,7 +190,7 @@ def stop_dialogue_monitoring():
 
 
 @proactive_bp.route("/api/dialogue/trigger", methods=["POST"])
-def trigger_dialogue():
+def trigger_dialogue() -> Response:
     """手动触发对话"""
     try:
         data = request.json or {}
@@ -211,7 +211,7 @@ def trigger_dialogue():
 
 
 @proactive_bp.route("/api/dialogue/history", methods=["GET"])
-def get_dialogue_history():
+def get_dialogue_history() -> Response:
     """获取对话历史"""
     try:
         user_id = request.args.get("user_id", "default")
@@ -230,7 +230,7 @@ def get_dialogue_history():
 
 
 @proactive_bp.route("/api/context/detect", methods=["POST"])
-def detect_context():
+def detect_context() -> Response:
     """检测当前工作场景"""
     try:
         data = request.json or {}
@@ -246,7 +246,7 @@ def detect_context():
 
 
 @proactive_bp.route("/api/context/current", methods=["GET"])
-def get_current_context():
+def get_current_context() -> Response:
     """获取当前场景"""
     try:
         system = _get_context_awareness()
@@ -259,7 +259,7 @@ def get_current_context():
 
 
 @proactive_bp.route("/api/context/history", methods=["GET"])
-def get_context_history():
+def get_context_history() -> Response:
     """获取场景历史"""
     try:
         user_id = request.args.get("user_id", "default")
@@ -275,7 +275,7 @@ def get_context_history():
 
 
 @proactive_bp.route("/api/context/statistics", methods=["GET"])
-def get_context_statistics():
+def get_context_statistics() -> Response:
     """获取场景统计"""
     try:
         user_id = request.args.get("user_id", "default")
@@ -291,7 +291,7 @@ def get_context_statistics():
 
 
 @proactive_bp.route("/api/context/predict", methods=["GET"])
-def predict_next_context():
+def predict_next_context() -> Response:
     """预测下一个场景"""
     try:
         user_id = request.args.get("user_id", "default")

@@ -100,3 +100,14 @@ node_modules/
 # pytest local temp dirs
 .pytest_tmp/
 .pytest_cache_local/
+
+# Hypothesis test data
+.hypothesis/
+
+# Test runtime artifacts (SQLite DBs created during tests)
+config/test_*.db
+config/skill_ratings.json
+
+# Backup files
+*.bak
+web/app.py.bak

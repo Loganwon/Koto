@@ -371,7 +371,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // 7. 延迟初始化语音，等待 pywebview 就绪
     setTimeout(initVoice, 500);
-    initVoicePanel();
     initProactiveUI();
 
     // 9. 智能滚动 + 全局快捷键
@@ -468,6 +467,45 @@ async function saveApiKey() {
         }
     } catch (error) {
         status.textContent = '❌ 网络错误';
+        status.className = 'step-status error';
+    }
+}
+
+async function useActivationCode() {
+    const code = (document.getElementById('setupActivateCode').value || '').trim().toUpperCase();
+    const status = document.getElementById('step1ActivateStatus');
+
+    if (!code) {
+        status.textContent = '❌ 请输入激活码';
+        status.className = 'step-status error';
+        return;
+    }
+
+    status.textContent = '⏳ 正在验证激活码...';
+    status.className = 'step-status loading';
+
+    try {
+        const res = await fetch('/api/setup/activate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code })
+        });
+        const data = await res.json();
+        if (data.success) {
+            status.textContent = '✅ 激活成功！';
+            status.className = 'step-status success';
+            // Advance wizard same as successful API key entry
+            setTimeout(() => {
+                document.getElementById('setupStep1').classList.remove('active');
+                document.getElementById('setupStep1').classList.add('completed');
+                document.getElementById('setupStep2').classList.add('active');
+            }, 800);
+        } else {
+            status.textContent = '❌ ' + (data.error || '激活失败');
+            status.className = 'step-status error';
+        }
+    } catch (err) {
+        status.textContent = '❌ 网络错误，请重试';
         status.className = 'step-status error';
     }
 }
@@ -4028,6 +4066,7 @@ async function checkStatus() {
     }
 
     // 2. Cloud latency — measured server-side (Gemini API endpoint)
+    const noticeBar = document.getElementById('wechat-notice-bar');
     try {
         const cResp = await fetch('/api/ping/cloud', { signal: AbortSignal.timeout(6000) });
         if (cResp.ok) {
@@ -4035,12 +4074,17 @@ async function checkStatus() {
             const ollamaHint = text.textContent.startsWith('🦙') ? ' | 🦙' : '';
             if (c.reachable && c.latency_ms != null) {
                 text.textContent = `☁ ${c.latency_ms}ms${ollamaHint}`;
+                if (noticeBar) noticeBar.style.display = 'none';
             } else {
                 text.textContent = `☁ 超时${ollamaHint}`;
+                if (noticeBar) noticeBar.style.display = 'block';
             }
+        } else {
+            if (noticeBar) noticeBar.style.display = 'block';
         }
     } catch (_) {
         // cloud ping optional — silently ignore
+        if (noticeBar) noticeBar.style.display = 'block';
     }
 
     // 3. Ops metrics — best-effort, non-blocking
@@ -6733,96 +6777,6 @@ async function toggleVoiceFallback() {
     } catch (err) {
         setVoiceState('error');
         showNotification('❌ ' + err.message, 'error', 2000);
-    }
-}
-
-// ==================== 语音功能面板函数 ====================
-
-function initVoicePanel() {
-    loadVoiceCommands();
-    const modal = document.getElementById('voicePanelModal');
-    if (modal) {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) closeVoicePanel();
-        });
-    }
-}
-
-function openVoicePanel() {
-    const modal = document.getElementById('voicePanelModal');
-    if (modal) modal.style.display = 'flex';
-}
-
-function closeVoicePanel() {
-    const modal = document.getElementById('voicePanelModal');
-    if (modal) modal.style.display = 'none';
-}
-
-async function loadVoiceCommands() {
-    try {
-        const response = await fetch('/api/voice/commands');
-        if (!response.ok) return;
-        const data = await response.json();
-        const commandsList = document.getElementById('voiceCommandsList');
-        if (commandsList && data.commands) {
-            commandsList.innerHTML = '';
-            data.commands.forEach(cmd => {
-                const div = document.createElement('div');
-                div.className = 'command-item';
-                div.innerHTML = `<div class="command-name">${cmd.name}</div><div class="command-desc">${cmd.description}</div>`;
-                commandsList.appendChild(div);
-            });
-        }
-    } catch (error) {
-        console.warn('[VoicePanel] 未能加载语音命令:', error);
-    }
-}
-
-// 语音面板内的独立识别按钮（使用 toggleVoice 主逻辑）
-async function startVoiceRecognition() {
-    const btn       = document.getElementById('voiceRecognizeBtn');
-    const resultDiv = document.getElementById('voiceResult');
-    const resultText = document.getElementById('voiceResultText');
-
-    if (voiceState === 'listening') {
-        _stopVoice();
-        if (btn) { btn.disabled = false; btn.innerHTML = '<span>🎤 开始识别</span>'; }
-        return;
-    }
-
-    if (btn) { btn.disabled = true; btn.innerHTML = '<span>⏸ 录音中...</span>'; }
-    if (resultDiv) resultDiv.style.display = 'none';
-
-    // 临时覆盖 handleVoiceResult 以把结果显示在面板中
-    const origHandle = window._voicePanelOverride;
-    window._voicePanelOverride = (text) => {
-        if (resultText) resultText.textContent = text;
-        if (resultDiv) resultDiv.style.display = 'block';
-        window._voicePanelOverride = null;
-        if (btn) { btn.disabled = false; btn.innerHTML = '<span>🎤 开始识别</span>'; }
-        if (document.getElementById('voiceAutoSend')?.checked) {
-            handleVoiceResult(text);
-            closeVoicePanel();
-        }
-    };
-
-    // 包装 handleVoiceResult 到面板回调
-    const _origHandleVoiceResult = handleVoiceResult;
-    const panelHandleResult = (text) => {
-        if (window._voicePanelOverride) {
-            window._voicePanelOverride(text);
-            // 恢复
-        }
-        _origHandleVoiceResult(text);
-    };
-
-    try {
-        await toggleVoice();
-    } catch (err) {
-        if (btn) { btn.disabled = false; btn.innerHTML = '<span>🎤 开始识别</span>'; }
-        if (resultText) resultText.textContent = '错误: ' + err.message;
-        if (resultDiv) resultDiv.style.display = 'block';
-        window._voicePanelOverride = null;
     }
 }
 

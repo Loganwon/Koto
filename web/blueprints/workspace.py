@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 
-from flask import Blueprint, jsonify, request, send_from_directory
+from flask import Blueprint, Response, jsonify, request, send_from_directory
 
 from web.shared import PROJECT_ROOT, WORKSPACE_DIR, get_workspace_root
 
@@ -31,7 +31,7 @@ workspace_bp = Blueprint("workspace", __name__)
 
 
 @workspace_bp.route("/api/workspace/<path:filepath>")
-def get_workspace_file(filepath):
+def get_workspace_file(filepath: str) -> Response:
     """获取 workspace 中的文件，支持子目录"""
     _logger.debug(f"[API] Serving workspace file: {filepath}")
     full_path = os.path.join(WORKSPACE_DIR, filepath)
@@ -61,13 +61,13 @@ def get_workspace_file(filepath):
 
 
 @workspace_bp.route("/api/workspace", methods=["GET"])
-def list_workspace_files():
+def list_workspace_files() -> Response:
     files = os.listdir(WORKSPACE_DIR)
     return jsonify({"files": files})
 
 
 @workspace_bp.route("/api/open-file", methods=["POST"])
-def open_file_native():
+def open_file_native() -> Response:
     """用系统默认程序打开文件（不经过浏览器）"""
     try:
         data = request.get_json()
@@ -100,7 +100,7 @@ def open_file_native():
 
 
 @workspace_bp.route("/api/open-workspace", methods=["POST"])
-def open_workspace():
+def open_workspace() -> Response:
     """打开 workspace 文件夹"""
     try:
         if sys.platform == "win32":
@@ -123,7 +123,7 @@ def open_workspace():
 
 
 @workspace_bp.route("/api/browse", methods=["GET"])
-def browse_folders():
+def browse_folders() -> Response:
     path = request.args.get("path", "C:\\")
 
     try:
@@ -158,7 +158,7 @@ def browse_folders():
 
 
 @workspace_bp.route("/api/browser/open", methods=["POST"])
-def browser_open():
+def browser_open() -> Response:
     """打开 URL"""
     from browser_automation import get_browser_automation
 
@@ -170,7 +170,7 @@ def browser_open():
 
 
 @workspace_bp.route("/api/browser/search", methods=["POST"])
-def browser_search():
+def browser_search() -> Response:
     """Google 搜索"""
     from browser_automation import get_browser_automation
 
@@ -182,7 +182,7 @@ def browser_search():
 
 
 @workspace_bp.route("/api/browser/screenshot", methods=["POST"])
-def browser_screenshot():
+def browser_screenshot() -> Response:
     """截图"""
     from browser_automation import get_browser_automation
 
