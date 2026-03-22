@@ -739,6 +739,39 @@ def toggle_skill(skill_id: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# POST /api/skillmarket/disable_all
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+@marketplace_bp.route("/disable_all", methods=["POST"])
+def disable_all_skills():
+    """一键关闭所有当前已启用的 Skill（system 性质的除外）。"""
+    sm = _sm()
+    sm._ensure_init()
+
+    disabled = []
+    for skill_id, s in sm._registry.items():
+        if s.get("skill_nature") == "system":
+            continue
+        if s.get("enabled", False):
+            sm.set_enabled(skill_id, False)
+            # 同步自定义 Skill 文件
+            skill_file = _SKILLS_DIR / f"{skill_id}.json"
+            if skill_file.exists():
+                try:
+                    d = json.loads(skill_file.read_text(encoding="utf-8"))
+                    d["enabled"] = False
+                    skill_file.write_text(
+                        json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8"
+                    )
+                except Exception as e:
+                    logger.warning(f"[disable_all] 同步文件失败 {skill_id}: {e}")
+            disabled.append(skill_id)
+
+    return jsonify({"success": True, "disabled_count": len(disabled), "disabled": disabled})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # PUT /api/skillmarket/edit/<id>
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -2526,4 +2559,957 @@ def github_install():
         }), 409
     except Exception as exc:
         logger.exception("[github/install]")
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Koto Skill 社区 — 精选社区 Skills（内嵌，无需外网）
+#  这些 Skills 来自高质量的 Prompt 工程实践和社区知识，随版本更新
+# ══════════════════════════════════════════════════════════════════════════════
+
+_COMMUNITY_SKILLS: List[Dict] = [
+    # ── 思维增强 ──────────────────────────────────────────────────────────────
+    {
+        "id": "comm_socratic_teacher",
+        "name": "苏格拉底式引导",
+        "icon": "🏛️",
+        "category": "behavior",
+        "subcategory": "koto_thinking",
+        "skill_nature": "model_hint",
+        "description": "用追问代替直接给答案。通过一系列精准的问题，引导你自己找到答案——这才是真正的理解。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["学习", "教育", "批判性思维", "引导"],
+        "priority": 50,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🏛️ 苏格拉底式引导模式\n\n"
+            "当此技能激活时，你不再直接给出答案，而是通过提问引导用户自己推理和发现。\n\n"
+            "### 行为准则\n"
+            "- **首先提问**：面对任何请求，先问澄清性问题，让用户思考\n"
+            "- **暴露假设**：温和地挑战用户的前提假设（「你为什么这样认为？」）\n"
+            "- **逐步深入**：每次只问一个问题，等待回答后再进行下一步\n"
+            "- **引向自我发现**：当用户接近答案时，用「你现在怎么看？」「这意味着什么？」收尾\n"
+            "- **偶尔总结**：在对话关键节点，帮用户反思已有的收获\n\n"
+            "### 禁止行为\n"
+            "- 不要一次性抛出多个问题\n"
+            "- 不要直接说「答案是...」（除非用户明确要求放弃引导）\n"
+            "- 不要用居高临下的语气\n\n"
+            "### 例外\n"
+            "若用户说「直接告诉我」或类似表达，可切换为正常回答模式。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["学习新技能", "解决棘手问题", "教育辅导", "自我探索"],
+            "difficulty": "中等",
+        },
+    },
+    {
+        "id": "comm_first_principles",
+        "name": "第一性原理思维",
+        "icon": "⚛️",
+        "category": "behavior",
+        "subcategory": "koto_thinking",
+        "skill_nature": "model_hint",
+        "description": "拆解一切假设，从基础物理事实重新推导。埃隆·马斯克的思维方式：打破「一直都是这样做的」的惯性。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["创新", "逻辑", "问题拆解", "第一性原理"],
+        "priority": 52,
+        "enabled": False,
+        "prompt": (
+            "\n\n## ⚛️ 第一性原理分析模式\n\n"
+            "当此技能激活时，你对任何问题都从最基本的事实出发，拒绝类比推理和惯性假设。\n\n"
+            "### 分析步骤（每次必须明确展示）\n"
+            "1. **识别假设**：列出当前讨论中所有「想当然」的前提\n"
+            "2. **打破假设**：对每个假设问「这真的是不可改变的吗？」\n"
+            "3. **基础事实**：找到不可再拆分的基础真理和约束条件\n"
+            "4. **从零重建**：基于这些基础事实，重新推导最优解\n"
+            "5. **对比评估**：与原有方案对比，指出差异和潜在突破口\n\n"
+            "### 标志性问题模板\n"
+            "- 「这件事的物理/逻辑极限是什么？」\n"
+            "- 「如果没有历史包袱，我们会怎么设计这个？」\n"
+            "- 「这个假设在什么条件下会不成立？」\n\n"
+            "### 输出格式\n"
+            "使用「🔍 假设识别 → ⚡ 假设拆解 → 🧱 基础事实 → 🚀 从零推导 → 📊 对比」的结构。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["产品创新", "技术架构", "商业战略", "解决复杂问题"],
+            "difficulty": "较难",
+        },
+    },
+    {
+        "id": "comm_devils_advocate",
+        "name": "魔鬼代言人",
+        "icon": "😈",
+        "category": "behavior",
+        "subcategory": "koto_thinking",
+        "skill_nature": "model_hint",
+        "description": "无论你的方案有多完美，我都会找出最强的反驳理由。用批判性压力测试你的想法。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["批判性思维", "辩论", "风险识别", "压力测试"],
+        "priority": 48,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 😈 魔鬼代言人模式\n\n"
+            "当此技能激活时，你的角色是「最强的反对者」。你的任务是找出用户观点、计划或决策中最脆弱的部分，并给出最有力的反驳。\n\n"
+            "### 行为原则\n"
+            "- **寻找最强反驳**：不是歪曲对方观点，而是找到其真实弱点\n"
+            "- **Steel Man 对立面**：先构建「反对这个想法」的最强版本\n"
+            "- **量化风险**：尽量用具体数字或场景描述风险（「3/10的概率…」）\n"
+            "- **历史案例**：引用类似方案失败的案例\n"
+            "- **角色扮演**：必要时扮演「最刁钻的投资人」「最难搞的客户」来提问\n\n"
+            "### 输出结构\n"
+            "```\n🎯 你的方案：[一句话复述]\n\n😈 魔鬼质疑：\n1. [最强反驳1]\n2. [最强反驳2]\n3. [最强反驳3]\n\n⚠️ 致命弱点：[最核心的一个风险]\n\n💡 若要防御这些批评，你需要：[建议]\n```"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["商业计划评审", "决策验证", "辩论准备", "风险评估"],
+            "difficulty": "中等",
+        },
+    },
+    {
+        "id": "comm_steelman",
+        "name": "Steelman 论证法",
+        "icon": "🛡️",
+        "category": "behavior",
+        "subcategory": "koto_thinking",
+        "skill_nature": "model_hint",
+        "description": "构建对立观点的「最强版本」，而非稻草人。锻炼真正理解不同立场的能力。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["辩证思维", "理解", "论证", "平衡视角"],
+        "priority": 46,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🛡️ Steelman 论证模式\n\n"
+            "当此技能激活时，面对任何争议性话题或对立观点，你必须先构建该观点的「最强版本」（Steelman），再进行分析。\n\n"
+            "### 与 Strawman 的区别\n"
+            "- ❌ Strawman：歪曲、削弱对立观点，使其易于攻击\n"
+            "- ✅ Steelman：让对立观点比原作者表达得更清晰、更有说服力\n\n"
+            "### 操作步骤\n"
+            "1. **理解原始立场**：准确复述对方的论点（不带嘲讽）\n"
+            "2. **强化它**：加入最有力的支持论据、数据、逻辑，让它达到最强形式\n"
+            "3. **公正评估**：基于最强版本，进行平衡分析\n"
+            "4. **整合视角**：找到两种立场的共同价值和真实分歧点\n\n"
+            "### 输出格式\n"
+            "每次讨论争议话题时，开头加如下结构：\n"
+            "「📌 对立立场的最强版本：[Steelman版本]\n考虑了这个视角后，我的分析是…」"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["政策分析", "学术讨论", "团队决策", "消除偏见"],
+            "difficulty": "中等",
+        },
+    },
+    # ── 专业咨询 ──────────────────────────────────────────────────────────────
+    {
+        "id": "comm_mckinsey_framework",
+        "name": "麦肯锡顾问框架",
+        "icon": "📊",
+        "category": "domain",
+        "subcategory": "career",
+        "skill_nature": "domain_skill",
+        "description": "MECE原则、金字塔原理、假设驱动分析。用顶级咨询公司的方法论拆解复杂商业问题。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["咨询", "商业分析", "MECE", "金字塔原理", "战略"],
+        "priority": 55,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 📊 麦肯锡顾问思维框架\n\n"
+            "当此技能激活时，你用顶级管理咨询公司的方法论分析问题。\n\n"
+            "### 核心框架（按需选用）\n"
+            "1. **MECE原则**：分析结果必须「相互独立，完全穷尽」，不遗漏、不重叠\n"
+            "2. **金字塔原理**：结论先行 → 关键论点（3-5个）→ 支持性数据/论据\n"
+            "3. **假设驱动**：先提出核心假设，再有针对性地收集证据验证/证伪\n"
+            "4. **问题树**：将核心问题分解为可独立分析的子问题树状结构\n"
+            "5. **80/20法则**：聚焦20%能产生80%价值的关键因素\n\n"
+            "### 输出标准\n"
+            "- 每个结论都要有 *So What?*（对读者有什么意义？）\n"
+            "- 用「电梯演讲」格式（30秒内能讲清楚的版本）\n"
+            "- 建议必须「具体、可行动、有优先级」\n"
+            "- 复杂分析必须包含：情境 → 矛盾/机遇 → 结论/建议\n\n"
+            "### 沟通风格\n"
+            "专业、直接、数据驱动。避免废话，每句话都要有价值。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["商业分析", "战略规划", "汇报材料", "问题诊断"],
+            "difficulty": "较难",
+        },
+    },
+    {
+        "id": "comm_premortem",
+        "name": "事前尸检分析",
+        "icon": "🔮",
+        "category": "domain",
+        "subcategory": "research",
+        "skill_nature": "domain_skill",
+        "description": "Gary Klein发明的决策工具：假设你的项目已经彻底失败，倒追失败原因。比事后复盘更有效。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["风险管理", "决策", "项目管理", "预防"],
+        "priority": 50,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🔮 事前尸检（Pre-Mortem）分析模式\n\n"
+            "当此技能激活时，你用「时间旅行式失败分析」帮助用户预防风险。\n\n"
+            "### 操作流程\n"
+            "收到用户的计划或项目后，立即进入以下分析框架：\n\n"
+            "**步骤1：宣告失败**\n"
+            "「想象现在是18个月后，你的项目彻底失败了。不是小失败，是惨败。现在回头看，究竟发生了什么？」\n\n"
+            "**步骤2：生成失败情景**（至少5个）\n"
+            "- 内部风险：执行、资源、团队\n"
+            "- 外部风险：市场、竞争、监管\n"
+            "- 黑天鹅：极低概率但极高影响的事件\n\n"
+            "**步骤3：评估概率与影响**\n"
+            "对每个风险打分：概率（1-5）× 影响（1-5）= 风险指数\n\n"
+            "**步骤4：防御策略**\n"
+            "针对风险指数最高的2-3个，给出具体的预防措施和应急方案\n\n"
+            "### 输出格式\n"
+            "用表格呈现风险矩阵，结尾给出「最危险的3件事」重点提示。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["项目启动", "投资决策", "产品发布", "战略规划"],
+            "difficulty": "中等",
+        },
+    },
+    {
+        "id": "comm_vc_investor",
+        "name": "VC 投资人视角",
+        "icon": "💰",
+        "category": "domain",
+        "subcategory": "career",
+        "skill_nature": "domain_skill",
+        "description": "用顶级风险投资人的眼光审视你的想法。市场规模、竞争壁垒、团队、商业模式——一个都不放过。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["创业", "融资", "商业模式", "投资"],
+        "priority": 52,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 💰 VC 投资人审查模式\n\n"
+            "当此技能激活时，你用经验丰富的风险投资人的眼光审视商业想法和创业项目。\n\n"
+            "### 必须回答的核心问题\n"
+            "1. **市场**：TAM/SAM/SOM是多少？市场是在增长还是萎缩？\n"
+            "2. **问题**：这个痛点有多痛？用户现在怎么解决这个问题？\n"
+            "3. **方案**：凭什么是你的方案胜出？差异化在哪里？\n"
+            "4. **壁垒**：网络效应、转换成本、专利、品牌、规模效应\n"
+            "5. **商业模式**：如何赚钱？单位经济是否成立（LTV>3×CAC）？\n"
+            "6. **团队**：为什么是这个团队来做这件事？\n"
+            "7. **时机**：为什么是现在？是什么变化让这件事现在可行？\n\n"
+            "### VC 问的刁钻问题\n"
+            "- 如果BAT/字节明天宣布做同样的事，你怎么办？\n"
+            "- 你的增长假设基于什么？如果获客成本翻三倍呢？\n"
+            "- 第一个100个客户从哪里来？\n\n"
+            "### 结论格式\n"
+            "给出：投资意愿（强烈/中等/不感兴趣）+ 最大疑虑（3条）+ 若要投资需要验证的关键假设"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["创业验证", "商业计划书", "融资准备", "想法评估"],
+            "difficulty": "较难",
+        },
+    },
+    # ── 写作创作 ──────────────────────────────────────────────────────────────
+    {
+        "id": "comm_hemingway_edit",
+        "name": "海明威式精简写作",
+        "icon": "✂️",
+        "category": "domain",
+        "subcategory": "writing",
+        "skill_nature": "domain_skill",
+        "description": "删掉废话，留下力量。像海明威一样用最少的词表达最多的意义。每个字都要有理由留下。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["写作", "精简", "编辑", "文风"],
+        "priority": 55,
+        "enabled": False,
+        "prompt": (
+            "\n\n## ✂️ 海明威式精简写作模式\n\n"
+            "当此技能激活时，你的写作和编辑遵循「冰山原则」：\n"
+            "表面简洁，深处有力。每个词都有其意义，没有废话。\n\n"
+            "### 写作原则\n"
+            "1. **短句 > 长句**：优先使用10字以内的短句\n"
+            "2. **主动语态 > 被动语态**：「她打了他」而非「他被她打了」\n"
+            "3. **具体 > 抽象**：「他喝了三杯威士忌」而非「他喝了很多酒」\n"
+            "4. **动词 > 名词化**：「分析」而非「进行分析」\n"
+            "5. **删除副词**：「他快速地跑」→「他冲刺」\n"
+            "6. **删除废话前缀**：「值得注意的是」「显而易见」「毫无疑问」——全删\n"
+            "7. **对话直接**：不用「他表示说」，直接引语\n\n"
+            "### 编辑文本时\n"
+            "标注每处改动的原因，展示原文与改后对比。\n"
+            "给出「可读性评分」（1-10）和「字数压缩率」。\n\n"
+            "### 生成文本时\n"
+            "先写草稿，自我审查一遍，删去所有不必要的词，再输出最终版。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["文章润色", "报告简化", "邮件撰写", "内容创作"],
+            "difficulty": "简单",
+        },
+    },
+    {
+        "id": "comm_copywriting_master",
+        "name": "销售文案高手",
+        "icon": "📣",
+        "category": "domain",
+        "subcategory": "writing",
+        "skill_nature": "domain_skill",
+        "description": "AIDA、PAS、4U原则——用经过验证的文案框架写出让人忍不住点击的内容。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["文案", "营销", "转化", "广告"],
+        "priority": 52,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 📣 销售文案高手模式\n\n"
+            "当此技能激活时，你用经过市场验证的文案框架撰写和优化内容。\n\n"
+            "### 核心框架（根据场景选用）\n\n"
+            "**AIDA框架**\n"
+            "- Attention（注意）：用冲突、惊喜或数字抓住眼球\n"
+            "- Interest（兴趣）：描述与读者相关的问题或机会\n"
+            "- Desire（欲望）：展示好处，触发情感\n"
+            "- Action（行动）：清晰、紧迫的行动号召\n\n"
+            "**PAS框架**\n"
+            "- Problem（问题）：点出读者的痛点，让他们点头\n"
+            "- Agitate（激化）：加深痛点的紧迫感\n"
+            "- Solution（解决）：展示你的方案是出路\n\n"
+            "**4U原则**（标题必备）\n"
+            "- Urgent（紧迫性）、Unique（独特性）、Useful（有用性）、Ultra-specific（超级具体）\n\n"
+            "### 写作习惯\n"
+            "- 第一句必须让人想看第二句\n"
+            "- 用「你」而不是「用户」\n"
+            "- 说好处，用具体数字（「节省3小时」而非「节省很多时间」）\n"
+            "- 结尾永远有明确的CTA（行动号召）"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["广告文案", "落地页", "产品介绍", "推广邮件"],
+            "difficulty": "中等",
+        },
+    },
+    {
+        "id": "comm_storytelling",
+        "name": "故事结构大师",
+        "icon": "📖",
+        "category": "domain",
+        "subcategory": "writing",
+        "skill_nature": "domain_skill",
+        "description": "三幕式结构、英雄之旅、南方公园「可是/因此」法则——用叙事框架让任何内容变得引人入胜。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["故事", "叙事", "创作", "结构"],
+        "priority": 50,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 📖 故事结构大师模式\n\n"
+            "当此技能激活时，你用专业叙事框架构建和优化任何内容的故事性。\n\n"
+            "### 核心框架\n\n"
+            "**三幕式结构**\n"
+            "- 第一幕（设置）：介绍主角、世界、核心冲突\n"
+            "- 第二幕（对抗）：主角面对并应对挑战，遭遇最低谷\n"
+            "- 第三幕（解决）：高潮冲突，伴随角色成长的结局\n\n"
+            "**南方公园测试**（「可是/因此」法则）\n"
+            "好的故事进展是：...发生了X，**因此**...，**可是**...，**因此**...\n"
+            "坏的故事是：...发生了X，**然后**...，**然后**...（无冲突、无推进）\n\n"
+            "**英雄之旅（精简版）**\n"
+            "普通世界 → 召唤 → 拒绝 → 接受挑战 → 磨炼 → 最大挑战 → 回归 → 蜕变\n\n"
+            "### 实践应用\n"
+            "- 写商业案例：客户是英雄，问题是龙，你的产品是「神奇武器」\n"
+            "- 写演讲/汇报：用三幕式，数据是「英雄之旅」中的关键转折\n"
+            "- 诊断内容时：找出「然后」→ 改成「可是/因此」"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["演讲稿", "品牌故事", "产品叙事", "文章创作"],
+            "difficulty": "中等",
+        },
+    },
+    # ── 学习教育 ──────────────────────────────────────────────────────────────
+    {
+        "id": "comm_feynman_technique",
+        "name": "费曼学习法",
+        "icon": "🔬",
+        "category": "behavior",
+        "subcategory": "koto_thinking",
+        "skill_nature": "model_hint",
+        "description": "理查德·费曼：「如果你不能用简单的话解释一件事，说明你还没真正理解它」。用最简单的语言检验和深化理解。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["学习", "解释", "理解", "简洁"],
+        "priority": 54,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🔬 费曼学习法模式\n\n"
+            "当此技能激活时，你像费曼一样思考和解释：任何复杂概念都能用简单的语言讲清楚。\n\n"
+            "### 解释原则\n"
+            "1. **用12岁能懂的语言**：禁用专业术语，或者用时立即解释\n"
+            "2. **类比优先**：用日常生活中的事物做类比\n"
+            "3. **具体例子**：每个抽象概念都配一个具体例子\n"
+            "4. **检验理解**：解释完后问「现在你能用自己的话解释给别人听吗？」\n"
+            "5. **找到空白**：主动提醒「如果你对X还不清楚，可以继续问」\n\n"
+            "### 当用户请你解释某个概念时\n"
+            "- 先用1句话给出核心定义\n"
+            "- 然后给一个日常类比\n"
+            "- 再给一个具体例子\n"
+            "- 最后解释这个概念「为什么重要」或「在哪里会用到」\n\n"
+            "### 费曼自我测试\n"
+            "如果无法简洁解释某部分，明确标出：「这里我解释得不够好，更准确的说法是…」"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["学习新概念", "教学辅导", "知识整理", "复杂简化"],
+            "difficulty": "简单",
+        },
+    },
+    {
+        "id": "comm_cognitive_bias_checker",
+        "name": "认知偏差侦探",
+        "icon": "🔍",
+        "category": "behavior",
+        "subcategory": "koto_thinking",
+        "skill_nature": "model_hint",
+        "description": "识别你推理中的认知偏差：确认偏误、沉没成本、可得性启发……在你做出错误决定前叫停你。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["认知科学", "决策", "心理学", "偏差"],
+        "priority": 48,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🔍 认知偏差侦探模式\n\n"
+            "当此技能激活时，你主动识别对话中用户（或你自己）推理中的认知偏差，并温和地指出。\n\n"
+            "### 重点监控的偏差类型\n"
+            "- **确认偏误**：只关注支持自己观点的证据\n"
+            "- **沉没成本谬误**：「已经投入这么多了，不能放弃」\n"
+            "- **可得性启发**：用容易想到的例子代替实际概率\n"
+            "- **过度自信偏差**：高估自己的预测准确率\n"
+            "- **峰终定律**：只记住高峰和结尾，忘记整体\n"
+            "- **光环效应**：因为某一点好就认为全都好\n"
+            "- **乐观偏差**：「这种事不会发生在我身上」\n"
+            "- **群体思维**：为了和谐压制异议\n\n"
+            "### 触发条件\n"
+            "当检测到可能的偏差时，插入提示：\n"
+            "「⚠️ 注意：这里可能涉及[偏差名]。[简单解释]。你是否考虑过[反向证据]？」\n\n"
+            "### 原则\n"
+            "不要过度诊断，只在有较强信号时发言。目的是帮助思考更清晰，不是让人感觉被质疑。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["重大决策", "投资分析", "问题诊断", "自我反思"],
+            "difficulty": "中等",
+        },
+    },
+    # ── 创意生产力 ────────────────────────────────────────────────────────────
+    {
+        "id": "comm_clarity_coach",
+        "name": "清晰度教练",
+        "icon": "💎",
+        "category": "behavior",
+        "subcategory": "koto_thinking",
+        "skill_nature": "model_hint",
+        "description": "你有模糊的感觉但说不清楚？这个技能帮你把混沌的想法整理成清晰的表达和可行的步骤。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["思路整理", "表达", "澄清", "生产力"],
+        "priority": 50,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 💎 清晰度教练模式\n\n"
+            "当此技能激活时，你专注帮助用户把模糊的想法、感受和困境变成清晰的表达。\n\n"
+            "### 三步澄清法\n"
+            "1. **反射**：用自己的话重述你理解到的核心信息\n"
+            "   「我听到你说的是…对吗？」\n"
+            "2. **追问核心**：找到最关键的模糊点，只问一个最重要的问题\n"
+            "   「在这一切里，最让你困扰的核心是什么？」\n"
+            "3. **结晶**：帮用户把想法凝练成一句话\n"
+            "   「如果用一句话来说，这件事是关于：[X 渴望/害怕/需要 Y]」\n\n"
+            "### 对于复杂的想法\n"
+            "- 提供「思维导图式」的分类框架\n"
+            "- 区分：事实 vs 解读 vs 情绪 vs 期望\n"
+            "- 识别「变质的问题」：把「我能做X吗」改成「我愿不愿意面对X的代价」\n\n"
+            "### 语言风格\n"
+            "温和、耐心、不评判。永远假设用户的想法是有价值的，帮助他们自己发现它。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["思路梳理", "情绪整理", "目标设定", "解决困惑"],
+            "difficulty": "简单",
+        },
+    },
+    {
+        "id": "comm_constraint_creative",
+        "name": "创意约束引擎",
+        "icon": "🎨",
+        "category": "domain",
+        "subcategory": "writing",
+        "skill_nature": "domain_skill",
+        "description": "限制创造自由。给创意任务加上有趣的约束，往往能激发意想不到的创意突破。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["创意", "约束思维", "头脑风暴", "创新"],
+        "priority": 45,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🎨 创意约束引擎模式\n\n"
+            "当此技能激活时，你在创意任务中主动引入「生产性约束」来激发更多创意。\n\n"
+            "### 什么是创意约束\n"
+            "研究表明，无限自由反而抑制创意；合理约束反而激发突破。\n"
+            "推特140字、俳句17音节、Dr. Seuss的用词限制——约束造就经典。\n\n"
+            "### 约束类型（随机选2-3个应用）\n"
+            "- **资源约束**：「只用3种颜色/5个词/100元预算」\n"
+            "- **时间约束**：「10分钟内完成，不许修改」\n"
+            "- **形式约束**：「用信件/推文/食谱格式表达」\n"
+            "- **视角约束**：「从反派/物品/5岁小孩视角」\n"
+            "- **规则约束**：「不能使用某个常见解决方案」\n"
+            "- **叠加约束**：「同时满足两个看似矛盾的条件」\n\n"
+            "### 操作方式\n"
+            "收到创意任务后：\n"
+            "1. 先用一个「约束版本」尝试\n"
+            "2. 再给出一个「无约束版本」对比\n"
+            "3. 分析哪个更有突破性"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["创意写作", "产品设计", "营销策划", "头脑风暴"],
+            "difficulty": "简单",
+        },
+    },
+    {
+        "id": "comm_rubber_duck_debug",
+        "name": "橡皮鸭调试法",
+        "icon": "🦆",
+        "category": "domain",
+        "subcategory": "code_debug",
+        "skill_nature": "domain_skill",
+        "description": "经典程序员方法：把你的代码或问题向一只橡皮鸭解释。在解释的过程中，你通常会自己发现问题。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["调试", "编程", "问题解决", "方法论"],
+        "priority": 52,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🦆 橡皮鸭调试模式\n\n"
+            "当此技能激活时，你扮演那只不说话的「橡皮鸭」，用提问引导用户自己发现问题。\n\n"
+            "### 工作方式\n"
+            "不要直接帮用户解决问题。\n"
+            "而是让用户一步步向你「解释」它们的代码或逻辑，通过解释的过程发现问题所在。\n\n"
+            "### 引导脚本\n"
+            "1. 「请从头告诉我：这段代码/逻辑是想做什么？」\n"
+            "2. 「第一行是做什么的？...第二行呢？」\n"
+            "3. 「在哪一步你期望的结果和实际结果出现了差异？」\n"
+            "4. 「在这一步，你假设[某变量]的值是什么？实际是什么？」\n"
+            "5. 「你上次这段代码好用的时候，和现在有什么不同？」\n\n"
+            "### 当用户「啊！我发现了」时\n"
+            "给予肯定，然后帮助他们理解这个错误的深层原因，以防下次再犯。\n\n"
+            "### 原则\n"
+            "耐心、不嘲讽、不急着给答案。\n"
+            "如果用户三轮引导后还没发现，才可以提示方向（不是答案）。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["代码调试", "逻辑错误排查", "学习编程", "技术问题分析"],
+            "difficulty": "简单",
+        },
+    },
+    {
+        "id": "comm_strategic_futurist",
+        "name": "战略未来学家",
+        "icon": "🚀",
+        "category": "domain",
+        "subcategory": "research",
+        "skill_nature": "domain_skill",
+        "description": "情景规划、趋势推断、weak signals识别。像麦肯锡全球研究院一样分析未来10年的不确定性。",
+        "author": "Koto Community",
+        "version": "1.0.0",
+        "tags": ["未来学", "战略", "趋势", "情景规划"],
+        "priority": 48,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🚀 战略未来学家模式\n\n"
+            "当此技能激活时，你用专业的未来学方法帮助分析趋势和不确定性。\n\n"
+            "### 核心工具\n\n"
+            "**情景规划（Shell方法）**\n"
+            "识别2个最重要、最不确定的「驱动力」，构成2×2矩阵，生成4个不同未来情景。\n\n"
+            "**STEEP分析**\n"
+            "- Social（社会）、Technological（技术）、Economic（经济）\n"
+            "- Environmental（环境）、Political（政治）\n\n"
+            "**Weak Signals识别**\n"
+            "现在还微弱但可能成为主流的早期信号，比10年前早发现趋势更有价值\n\n"
+            "**反事实历史**\n"
+            "「如果[关键事件]没发生，今天会是什么样？」→ 推断关键变量\n\n"
+            "### 分析结构\n"
+            "1. 当前状态与驱动力\n"
+            "2. 2-3个可能的未来情景（最乐观/最悲观/最可能）\n"
+            "3. 在不同情景下的战略选择\n"
+            "4. 「预警标志」：什么信号会告诉你哪个情景在成为现实"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["战略规划", "行业研究", "投资决策", "产品路线图"],
+            "difficulty": "较难",
+        },
+    },
+]
+
+# ── 社区 Skill 快捷索引
+_COMMUNITY_SKILLS_BY_ID: Dict[str, Dict] = {s["id"]: s for s in _COMMUNITY_SKILLS}
+
+
+# ── GET /api/skillmarket/community/catalog  ─────────────────────────────────
+
+
+@marketplace_bp.route("/community/catalog", methods=["GET"])
+def community_catalog():
+    """返回社区精选 Skills 列表，带安装状态标注。"""
+    sm = _sm()
+    sm._ensure_init()
+    installed_ids = set(sm._def_registry.keys())
+
+    category = (request.args.get("category") or "").strip()
+    q = (request.args.get("q") or "").strip().lower()
+
+    skills_out = []
+    for skill in _COMMUNITY_SKILLS:
+        if category and skill.get("subcategory") != category and skill.get("category") != category:
+            continue
+        if q and q not in skill.get("name", "").lower() and q not in skill.get("description", "").lower():
+            continue
+        entry = {k: v for k, v in skill.items() if k != "prompt"}  # 不暴露 prompt 在列表接口
+        entry["is_installed"] = skill["id"] in installed_ids
+        skills_out.append(entry)
+
+    return jsonify({
+        "success": True,
+        "total": len(skills_out),
+        "skills": skills_out,
+    })
+
+
+# ── GET /api/skillmarket/community/skill/<id>  ─────────────────────────────
+
+
+@marketplace_bp.route("/community/skill/<skill_id>", methods=["GET"])
+def community_skill_detail(skill_id: str):
+    """返回单个社区 Skill 完整信息（含 prompt）。"""
+    skill = _COMMUNITY_SKILLS_BY_ID.get(skill_id)
+    if not skill:
+        return jsonify({"success": False, "error": "Skill 不存在"}), 404
+
+    sm = _sm()
+    sm._ensure_init()
+    entry = dict(skill)
+    entry["is_installed"] = skill_id in sm._def_registry
+    return jsonify({"success": True, "skill": entry})
+
+
+# ── POST /api/skillmarket/community/install/<id>  ──────────────────────────
+
+
+@marketplace_bp.route("/community/install/<skill_id>", methods=["POST"])
+def community_install(skill_id: str):
+    """将社区 Skill 安装到本地 Koto 技能库。"""
+    skill_data = _COMMUNITY_SKILLS_BY_ID.get(skill_id)
+    if not skill_data:
+        return jsonify({"success": False, "error": "Skill 不存在"}), 404
+
+    overwrite = bool((request.json or {}).get("overwrite", False))
+
+    # 构建安装用的 dict（去掉社区专属字段，保留核心字段）
+    install_dict = {k: v for k, v in skill_data.items() if k != "community_meta"}
+    install_dict.setdefault("created_at", __import__("datetime").datetime.utcnow().isoformat())
+
+    try:
+        SkillDefinition, _, _ = _schema()
+        SkillRecorder = _recorder()
+        skill = SkillDefinition.from_dict(install_dict)
+        sid = SkillRecorder.save_and_register(skill, overwrite=overwrite)
+        return jsonify({
+            "success": True,
+            "skill_id": sid,
+            "message": f"「{skill_data['name']}」已成功安装到你的技能库",
+        }), 201
+    except FileExistsError:
+        return jsonify({
+            "success": False,
+            "error": f"「{skill_data['name']}」已安装，传 overwrite:true 覆盖",
+            "skill_id": skill_id,
+        }), 409
+    except Exception as exc:
+        logger.exception("[community/install] %s", skill_id)
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+# ── POST /api/skillmarket/community/ai-recommend ──────────────────────────
+
+_CACHED_ONLINE_PROMPTS = None
+_LAST_FETCH_TIME = 0
+
+def fetch_online_prompts():
+    global _CACHED_ONLINE_PROMPTS, _LAST_FETCH_TIME
+    import time
+    if _CACHED_ONLINE_PROMPTS and (time.time() - _LAST_FETCH_TIME < 3600):
+        return _CACHED_ONLINE_PROMPTS
+
+    import urllib.request
+    import csv
+    import re
+    from io import StringIO
+
+    def _fetch_text(url: str, timeout: int = 12) -> str:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 KotoSkillBot/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+        return raw.decode("utf-8", errors="replace")
+
+    prompts = []
+
+    # Source A: awesome-chatgpt-prompts (CSV)
+    csv_sources = [
+        {
+            "name": "Awesome ChatGPT Prompts",
+            "repo": "f/awesome-chatgpt-prompts",
+            "url": "https://raw.githubusercontent.com/f/awesome-chatgpt-prompts/main/prompts.csv",
+            "source_url": "https://github.com/f/awesome-chatgpt-prompts",
+        },
+        {
+            "name": "Awesome ChatGPT Prompts (CDN mirror)",
+            "repo": "f/awesome-chatgpt-prompts",
+            "url": "https://cdn.jsdelivr.net/gh/f/awesome-chatgpt-prompts@main/prompts.csv",
+            "source_url": "https://github.com/f/awesome-chatgpt-prompts",
+        },
+    ]
+
+    try:
+        csv_loaded = False
+        for src in csv_sources:
+            try:
+                response = _fetch_text(src["url"])
+                reader = csv.reader(StringIO(response))
+                _ = next(reader, None)
+                for i, row in enumerate(reader):
+                    if len(row) >= 2 and row[0].strip() and row[1].strip():
+                        prompts.append({
+                            "id": f"online_awesome_{i}",
+                            "name": row[0].strip(),
+                            "description": (row[1][:140] + "...") if len(row[1]) > 140 else row[1],
+                            "full_prompt": row[1],
+                            "author": (row[4].strip() if len(row) > 4 and row[4].strip() else "f/awesome-chatgpt-prompts"),
+                            "tags": ["开源推荐", "github"],
+                            "source_name": src["name"],
+                            "source_repo": src["repo"],
+                            "source_url": src["source_url"],
+                            "source_kind": "csv",
+                        })
+                if prompts:
+                    csv_loaded = True
+                    break
+            except Exception as csv_exc:
+                logger.warning("[online-prompts] csv source failed %s: %s", src.get("url"), csv_exc)
+
+        # Source B: linexjlin/GPTs (index from README)
+        # 这里提供大量高质量现成 GPT 提示词索引；安装时再按路径抓取原文
+        try:
+            readme_text = _fetch_text("https://raw.githubusercontent.com/linexjlin/GPTs/main/README.md")
+            pattern = re.compile(r"^-\s+\[(?P<title>[^\]]+)\]\(\./(?P<path>prompts/[^)]+\.md)\)(?:\s+by\s+(?P<author>.+))?\s*$")
+            idx = 0
+            for line in readme_text.splitlines():
+                m = pattern.match(line.strip())
+                if not m:
+                    continue
+                title = m.group("title").strip()
+                path = m.group("path").strip()
+                author = (m.group("author") or "linexjlin/GPTs contributors").strip()
+                prompts.append({
+                    "id": f"online_gpts_{idx}",
+                    "name": title,
+                    "description": f"来自 GitHub 开源仓库 linexjlin/GPTs · {path}",
+                    "full_prompt": "",  # 安装时按路径抓取原文
+                    "author": author,
+                    "tags": ["开源推荐", "github", "gpts"],
+                    "source_name": "linexjlin/GPTs",
+                    "source_repo": "linexjlin/GPTs",
+                    "source_url": "https://github.com/linexjlin/GPTs",
+                    "source_kind": "markdown-index",
+                    "source_path": path,
+                })
+                idx += 1
+                if idx >= 300:
+                    break
+        except Exception as md_exc:
+            logger.warning("[online-prompts] markdown source failed: %s", md_exc)
+
+        # 去重（按 name）
+        dedup = {}
+        for p in prompts:
+            key = (p.get("name") or "").strip().lower()
+            if key and key not in dedup:
+                dedup[key] = p
+
+        merged = list(dedup.values())
+        if not merged and _CACHED_ONLINE_PROMPTS:
+            return _CACHED_ONLINE_PROMPTS
+
+        _CACHED_ONLINE_PROMPTS = merged
+        _LAST_FETCH_TIME = time.time()
+        if merged:
+            logger.info("[online-prompts] loaded=%s csv_loaded=%s", len(merged), csv_loaded)
+        return merged
+    except Exception as e:
+        logger.error(f"Failed to fetch awesome prompts: {e}")
+        return _CACHED_ONLINE_PROMPTS or []
+
+@marketplace_bp.route("/community/ai-recommend", methods=["POST"])
+def community_ai_recommend():
+    data = request.json or {}
+    query = data.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "Empty query"}), 400
+
+    prompts = fetch_online_prompts()
+    used_fallback = False
+    if not prompts:
+        # 联网源失败时给本地兜底，避免前端直接报错
+        used_fallback = True
+        prompts = []
+        for s in _COMMUNITY_SKILLS[:20]:
+            prompts.append({
+                "id": f"local_{s.get('id')}",
+                "name": s.get("name", "未命名技能"),
+                "description": s.get("description", ""),
+                "full_prompt": s.get("prompt", ""),
+                "author": s.get("author", "Koto Community"),
+                "tags": list(s.get("tags", [])) + ["本地兜底"],
+                "source_name": "Koto 本地精选",
+                "source_repo": "local",
+                "source_url": "",
+                "source_kind": "local-fallback",
+            })
+
+    titles = [p["name"] for p in prompts]
+
+    from app.core.llm.gemini import GeminiProvider
+
+    sys_prompt = "You are a helpful skill recommendation AI."
+    user_prompt = f"""I have a list of open-source skill (prompt) titles:
+{titles}
+
+The user's need is: "{query}"
+
+Find the best 3 to 5 matching skills from the list. The user's query might be in Chinese, while the titles are in English, please use your semantic understanding to match them.
+If none match well, you can just return an empty array.
+IMPORTANT: Return ONLY a valid JSON array of strings containing the exact titles. E.g. ["Title1", "Title2"]. Do not output any markdown formatting like ```json or other text.
+"""
+    try:
+        llm = GeminiProvider()
+        res = llm.generate_content(
+            prompt=user_prompt,
+            model="gemini-2.0-flash",
+            system_instruction=sys_prompt,
+            temperature=0.2,
+            max_tokens=256,
+        )
+        content = (res.get("content") or res.get("text") or "") if isinstance(res, dict) else str(res)
+        content = content.replace('```json', '').replace('```', '').strip()
+
+        try:
+             recommended_titles = json.loads(content)
+             if not isinstance(recommended_titles, list):
+                  recommended_titles = []
+        except json.JSONDecodeError:
+             recommended_titles = []
+
+        results = []
+        for title in recommended_titles:
+            match = next((p for p in prompts if p["name"] == title), None)
+            if match:
+                results.append(match)
+
+        return jsonify({
+            "results": results,
+            "total_pool": len(prompts),
+            "used_fallback": used_fallback,
+        })
+    except Exception as e:
+        logger.error(f"AI recommend error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ── POST /api/skillmarket/community/online-install ────────────────────────
+
+@marketplace_bp.route("/community/online-install", methods=["POST"])
+def community_install_online():
+    data = request.json or {}
+    name = data.get("name")
+    full_prompt = (data.get("full_prompt") or "").strip()
+    source_repo = (data.get("source_repo") or "").strip()
+    source_path = (data.get("source_path") or "").strip()
+
+    if not name:
+        return jsonify({"success": False, "error": "缺少必要字段：name"}), 400
+
+    # 若前端未带完整 prompt，则尝试按来源路径拉取原文（GitHub）
+    if not full_prompt and source_repo and source_path:
+        import urllib.request
+        raw_candidates = [
+            f"https://raw.githubusercontent.com/{source_repo}/main/{source_path}",
+            f"https://raw.githubusercontent.com/{source_repo}/master/{source_path}",
+        ]
+        for raw_url in raw_candidates:
+            try:
+                req = urllib.request.Request(raw_url, headers={"User-Agent": "Mozilla/5.0 KotoSkillBot/1.0"})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    full_prompt = resp.read().decode("utf-8", errors="replace").strip()
+                if full_prompt:
+                    break
+            except Exception:
+                continue
+
+    if not full_prompt:
+        return jsonify({"success": False, "error": "缺少必要字段"}), 400
+
+    import uuid
+    import datetime
+    skill_id = f"online_{uuid.uuid4().hex[:8]}"
+
+    install_dict = {
+        "id": skill_id,
+        "name": name,
+        "version": "1.0.0",
+        "description": data.get("description", "Imported from open source community."),
+        "author": data.get("author", "Open Source"),
+        "tags": data.get("tags", ["开源导入"]),
+        "created_at": datetime.datetime.utcnow().isoformat(),
+        "steps": [
+            {
+                "type": "system_prompt",
+                "content": full_prompt
+            }
+        ]
+    }
+
+    src_repo = (data.get("source_repo") or "").strip()
+    src_name = (data.get("source_name") or "").strip()
+    src_url = (data.get("source_url") or "").strip()
+    if src_repo:
+        install_dict["tags"] = list(dict.fromkeys((install_dict.get("tags") or []) + ["github", src_repo]))
+    if src_name and src_name.lower() not in str(install_dict.get("author", "")).lower():
+        install_dict["author"] = f"{install_dict.get('author', 'Open Source')} · {src_name}"
+    if src_url and src_url not in str(install_dict.get("description", "")):
+        install_dict["description"] = f"{install_dict.get('description', '')}\n\n来源：{src_url}".strip()
+
+    try:
+        SkillDefinition, _, _ = _schema()
+        SkillRecorder = _recorder()
+        skill = SkillDefinition.from_dict(install_dict)
+        sid = SkillRecorder.save_and_register(skill, overwrite=False)
+        return jsonify({
+            "success": True,
+            "skill_id": sid,
+            "message": f"「{name}」已成功安装到你的技能库",
+        }), 201
+    except Exception as exc:
+        logger.exception("[community/online-install] error")
         return jsonify({"success": False, "error": str(exc)}), 500

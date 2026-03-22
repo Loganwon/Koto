@@ -8,7 +8,6 @@ Routes (voice):
   POST /api/voice/listen        — One-click microphone recognition
   GET  /api/voice/stream        — Streaming voice recognition (SSE)
   POST /api/voice/stop          — Stop current voice recognition
-  GET  /api/voice/commands      — Built-in voice command list
   GET  /api/voice/stt_status    — Current STT engine status
   POST /api/voice/gemini_stt    — Unified STT entry (also /api/voice/stt)
   POST /api/voice/stt           — Alias for gemini_stt
@@ -188,18 +187,6 @@ def voice_stop() -> Response:
     except Exception:
         pass
     return jsonify({"success": True, "message": "已发送停止信号"})
-
-
-@voice_bp.route("/api/voice/commands", methods=["GET"])
-def voice_commands() -> Response:
-    """返回内置语音命令列表（供语音面板展示）"""
-    commands = [
-        {"name": "发送消息", "description": "说出消息后自动发送", "keyword": ""},
-        {"name": "新对话", "description": "说'新对话'开始新聊天", "keyword": "新对话"},
-        {"name": "清空输入", "description": "说'清空'清除输入框", "keyword": "清空"},
-        {"name": "重新识别", "description": "再次点击麦克风重新说", "keyword": ""},
-    ]
-    return jsonify({"success": True, "commands": commands})
 
 
 @voice_bp.route("/api/voice/stt_status", methods=["GET"])

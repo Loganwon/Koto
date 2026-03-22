@@ -334,7 +334,17 @@
         .csb-label {
             font-size: 10px; color: var(--text-muted);
             font-weight: 600; white-space: nowrap; letter-spacing: .04em;
+            cursor: pointer; user-select: none;
+            display: inline-flex; align-items: center; gap: 3px;
+            padding: 2px 6px; border-radius: 6px;
+            border: 1px solid transparent;
+            background: transparent;
+            transition: color .15s, border-color .15s, background .15s;
         }
+        .csb-label:hover { color: var(--accent-primary); border-color: var(--border-color); background: var(--bg-hover, rgba(16,185,129,.06)); }
+        .csb-label.panel-open { color: var(--accent-primary); border-color: rgba(16,185,129,.35); background: rgba(16,185,129,.08); }
+        .csb-toggle-arrow { font-size: 8px; display: inline-block; transition: transform .2s ease; }
+        .csb-label.panel-open .csb-toggle-arrow { transform: rotate(180deg); }
         .csb-pills { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; min-width: 0; }
         .csb-pill {
             display: inline-flex; align-items: center; gap: 3px;
@@ -405,6 +415,15 @@
             transition: color .15s, border-color .15s;
         }
         .csb-manage-link:hover { color: var(--accent-primary); border-color: var(--accent-primary); }
+        .csb-dismiss-all {
+            flex-shrink: 0; margin-left: 4px;
+            font-size: 10px; color: var(--text-muted); white-space: nowrap;
+            padding: 2px 7px; border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: transparent; cursor: pointer;
+            transition: color .15s, border-color .15s, background .15s;
+        }
+        .csb-dismiss-all:hover { color: #e06c75; border-color: #e06c75; background: rgba(224,108,117,.08); }
 
         /* ── FileHub panel ──────────────────────────────────────── */
         #fhFileList { max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; }
@@ -1203,42 +1222,42 @@
                             <div class="suggestion-section">
                                 <div class="suggestion-label">快速开始 — 点击任意卡片填入示例</div>
                                 <div class="suggestion-grid">
-                                    <button class="suggestion-card" onclick="insertSuggestion('帮我写一篇关于')">
+                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('帮我写一篇关于', ['email_writer', 'track_changes_writer'])">
                                         <div class="sc-icon">✍️</div>
                                         <div class="sc-body">
                                             <div class="sc-title">写作与润色</div>
                                             <div class="sc-sub">邮件、报告、文案、文章...</div>
                                         </div>
                                     </button>
-                                    <button class="suggestion-card" onclick="insertSuggestion('帮我用 Python 写一个')">
+                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('帮我用 Python 写一个', ['debug_python', 'code_explainer'])">
                                         <div class="sc-icon">💻</div>
                                         <div class="sc-body">
                                             <div class="sc-title">代码助手</div>
                                             <div class="sc-sub">生成、调试、解释代码...</div>
                                         </div>
                                     </button>
-                                    <button class="suggestion-card" onclick="insertSuggestion('请将以下内容翻译成英文：\n\n')">
+                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('请将以下内容翻译成英文：\n\n', ['annotate_translation'])">
                                         <div class="sc-icon">🌐</div>
                                         <div class="sc-body">
                                             <div class="sc-title">翻译与语言</div>
                                             <div class="sc-sub">中英互译、语言润色...</div>
                                         </div>
                                     </button>
-                                    <button class="suggestion-card" onclick="insertSuggestion('帮我解释一下')">
+                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('帮我解释一下', ['deep_thinking'])">
                                         <div class="sc-icon">🔍</div>
                                         <div class="sc-body">
                                             <div class="sc-title">信息查询</div>
                                             <div class="sc-sub">解释概念、了解背景...</div>
                                         </div>
                                     </button>
-                                    <button class="suggestion-card" onclick="insertSuggestion('请帮我分析这组数据：\n\n')">
+                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('请帮我分析这组数据：\n\n', ['excel_analyst', 'chart_analyst'])">
                                         <div class="sc-icon">📊</div>
                                         <div class="sc-body">
                                             <div class="sc-title">数据处理</div>
                                             <div class="sc-sub">表格、Excel、数据分析...</div>
                                         </div>
                                     </button>
-                                    <button class="suggestion-card" onclick="insertSuggestion('请帮我总结以下内容：\n\n')">
+                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('请帮我总结以下内容：\n\n', ['doc_summarizer', 'long_doc_parser'])">
                                         <div class="sc-icon">📄</div>
                                         <div class="sc-body">
                                             <div class="sc-title">文件分析</div>
@@ -1265,8 +1284,9 @@
                 <div class="resize-handle-row" id="inputResizeHandle"></div>
                 <!-- Active Skills Pill Bar -->
                 <div id="chat-skill-bar" style="display:flex;">
-                  <span class="csb-label">✨ Skills</span>
+                  <button class="csb-label" id="csbToggleBtn" onclick="toggleSkillsPanel()" title="打开 / 关闭 Skills 库">✨ Skills <span class="csb-toggle-arrow">▾</span></button>
                   <div class="csb-pills" id="csb-pills"><span class="csb-hint">暂无激活 — <a href="javascript:void(0)" onclick="openSkillsPanel()">打开 Skills 库</a></span></div>
+                  <button class="csb-dismiss-all" id="csbDismissAllBtn" onclick="csbDismissAllSkills()" title="关闭所有激活的 Skills" style="display:none;">✕ 全关</button>
                 </div>
 
                 <!-- @文件 激活的上下文文件 chips -->
@@ -2102,6 +2122,7 @@
                 <button class="sp-tab" data-tab="presets" onclick="spSwitchTab('presets')">📦 预设</button>
                 <button class="sp-tab" data-tab="studio" onclick="spSwitchTab('studio')">创意工坊</button>
                 <button class="sp-tab" data-tab="askkoto" onclick="spSwitchTab('askkoto')">🤖 问 Koto</button>
+                <button class="sp-tab" data-tab="community" onclick="spSwitchTab('community')">🌐 Skill 社区</button>
             </div>
             <!-- Category filter chips + sort trigger -->
             <div class="sp-filter-row" id="spFilterRow">
@@ -2221,6 +2242,36 @@
                         <div class="sp-ak-reasoning" id="spAkReasoning"></div>
                         <div class="sp-ak-cards" id="spAkCards"></div>
                     </div>
+                </div>
+            </div>
+            <!-- Skill 社区 tab content -->
+            <div class="sp-community" id="spCommunity" style="display:none;">
+                <!-- Community entry card -->
+                <div class="sp-studio-section">
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+                        <span style="font-size:28px">🌐</span>
+                        <div>
+                            <div class="sp-studio-title" style="margin-bottom:2px;">Skill 社区</div>
+                            <div style="font-size:11px;color:var(--text-muted,#8b949e)">15 个精选社区技能 · 无需网络</div>
+                        </div>
+                    </div>
+                    <p class="sp-studio-desc" style="margin-bottom:12px;">
+                        苏格拉底精炼、麦肯锡框架、费曼学习法、魔鬼代言人……<br>
+                        高质量社区 Skills，一键安装，即刻使用。
+                    </p>
+                    <a href="/skill-community" target="_blank" class="btn-primary btn-sm"
+                       style="display:block;text-align:center;text-decoration:none;">
+                        🚀 打开 Skill 社区 →
+                    </a>
+                </div>
+                <div class="sp-studio-section">
+                    <div class="sp-studio-title">⬇️ 自定义 URL 安装</div>
+                    <p class="sp-studio-desc">粘贴 raw.githubusercontent.com 链接，一键安装来自 GitHub 的 Skill</p>
+                    <input id="spGhUrlInput" class="sp-input" type="url"
+                           placeholder="https://raw.githubusercontent.com/..."
+                           style="width:100%;margin-bottom:6px;">
+                    <button class="btn-primary btn-sm" style="width:100%;" onclick="spGhInstallUrl()">⬇️ 安装</button>
+                    <div id="spGhInstallStatus" style="margin-top:6px;font-size:12px;display:none;"></div>
                 </div>
             </div>
             <div class="sp-footer">
@@ -2640,11 +2691,14 @@
                 const pills = document.getElementById(PILLS_ID);
                 if (!bar || !pills) return;
 
+                const dismissAllBtn = document.getElementById('csbDismissAllBtn');
                 if (!skills.length) {
                     bar.style.display = 'flex';
                     pills.innerHTML = '<span class="csb-hint">\u6682\u65e0\u6fc0\u6d3b \u2014 <a href="javascript:void(0)" onclick="openSkillsPanel()">\u6253\u5f00 Skills \u5e93</a></span>';
+                    if (dismissAllBtn) dismissAllBtn.style.display = 'none';
                     return;
                 }
+                if (dismissAllBtn) dismissAllBtn.style.display = '';
                 bar.style.display = 'flex';
                 const CAT_ZH = {behavior:'⚙️ 行为', style:'🎨 风格', domain:'🔬 领域', custom:'🔧 自定义', workflow:'🔄 工作流'};
 
@@ -2718,6 +2772,25 @@
             }
         };
 
+        window.csbDismissAllSkills = async function() {
+            const btn = document.getElementById('csbDismissAllBtn');
+            if (btn) { btn.disabled = true; btn.textContent = '\u5173\u95ed\u4e2d\u2026'; }
+            try {
+                const res = await fetch('/api/skillmarket/disable_all', { method: 'POST' });
+                if (!res.ok) throw new Error('disable_all failed');
+                if (typeof window.refreshActiveSkills === 'function') {
+                    await window.refreshActiveSkills();
+                } else {
+                    await refreshActiveSkills();
+                }
+                if (typeof window.spLoadSkills === 'function') window.spLoadSkills();
+            } catch (e) {
+                console.warn('[Koto] csbDismissAllSkills error', e);
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '\u2715 \u5168\u5173'; }
+            }
+        };
+
         // Load on page init
         document.addEventListener('DOMContentLoaded', refreshActiveSkills);
 
@@ -2761,12 +2834,20 @@
             } catch(_) {}
         }
 
+        function _syncCsbToggleBtn(isOpen) {
+            const btn = document.getElementById('csbToggleBtn');
+            if (!btn) return;
+            if (isOpen) btn.classList.add('panel-open');
+            else btn.classList.remove('panel-open');
+        }
+
         window.openSkillsPanel = function() {
             const panel = document.getElementById('skillsPanel');
             if (!panel) return;
             panel.classList.add('active');
             const navBtn = document.getElementById('navSkillsBtn');
             if (navBtn) navBtn.classList.add('active');
+            _syncCsbToggleBtn(true);
             spLoadSkills();
             spLoadRecStrip();
         };
@@ -2777,6 +2858,17 @@
             panel.classList.remove('active');
             const navBtn = document.getElementById('navSkillsBtn');
             if (navBtn) navBtn.classList.remove('active');
+            _syncCsbToggleBtn(false);
+        };
+
+        window.toggleSkillsPanel = function() {
+            const panel = document.getElementById('skillsPanel');
+            if (!panel) return;
+            if (panel.classList.contains('active')) {
+                window.closeSkillsPanel();
+            } else {
+                window.openSkillsPanel();
+            }
         };
 
         async function spLoadSkills() {
@@ -2927,6 +3019,7 @@
             const studio    = document.getElementById('spStudio');
             const presets   = document.getElementById('spPresets');
             const askKoto   = document.getElementById('spAskKoto');
+            const community = document.getElementById('spCommunity');
             // hide everything first
             if (filterRow) filterRow.style.display = 'none';
             if (sortRow)   sortRow.style.display   = 'none';
@@ -2935,12 +3028,15 @@
             if (studio)    studio.style.display    = 'none';
             if (presets)   presets.style.display   = 'none';
             if (askKoto)   askKoto.style.display   = 'none';
+            if (community) community.style.display = 'none';
             if (tab === 'studio') {
                 if (studio) { studio.style.display = 'flex'; spLoadSessionList(); }
             } else if (tab === 'presets') {
                 if (presets) { presets.style.display = 'flex'; spRenderPresets(); }
             } else if (tab === 'askkoto') {
                 if (askKoto) askKoto.style.display = 'flex';
+            } else if (tab === 'community') {
+                if (community) community.style.display = 'flex';
             } else {
                 if (filterRow) filterRow.style.display = 'flex';
                 if (sortRow)   sortRow.style.display   = 'flex';
@@ -3426,6 +3522,43 @@
 
         window.spRenderCards = spRenderCards;
         window.spLoadSkills = spLoadSkills;
+
+        window.spGhInstallUrl = async function() {
+            const input  = document.getElementById('spGhUrlInput');
+            const status = document.getElementById('spGhInstallStatus');
+            if (!input || !status) return;
+            const rawUrl = (input.value || '').trim();
+            if (!rawUrl) { input.focus(); return; }
+            if (!rawUrl.startsWith('https://raw.githubusercontent.com/')) {
+                status.style.display = 'block';
+                status.style.color = 'var(--error-color, #e06c75)';
+                status.textContent = '❌ 仅支持 https://raw.githubusercontent.com/ 开头的链接';
+                return;
+            }
+            const btn = input.nextElementSibling;
+            if (btn) { btn.disabled = true; btn.textContent = '⏳ 安装中…'; }
+            status.style.display = 'none';
+            try {
+                const resp = await fetch('/api/skillmarket/github/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ raw_url: rawUrl }),
+                });
+                const data = await resp.json();
+                if (!data.success) throw new Error(data.error || '安装失败');
+                status.style.display = 'block';
+                status.style.color = 'var(--success-color, #98c379)';
+                status.textContent = `✅ "${data.skill?.name || 'Skill'}" 安装成功！前往「我的库」查看`;
+                input.value = '';
+                await spLoadSkills();
+            } catch(e) {
+                status.style.display = 'block';
+                status.style.color = 'var(--error-color, #e06c75)';
+                status.textContent = `❌ ${e.message}`;
+            } finally {
+                if (btn) { btn.disabled = false; btn.textContent = '⬇️ 安装'; }
+            }
+        };
 
         // Pre-load skills silently on page init so spTrackMessageUsage works
         // even when the user has never opened the skills panel.
@@ -3992,6 +4125,47 @@
         el.focus();
         el.setSelectionRange(text.length, text.length);
         el.dispatchEvent(new Event('input'));
+    }
+
+    // All skill sets owned by the quick-start cards.
+    // When one card is selected, every skill from OTHER cards is deactivated first.
+    const _CARD_SKILL_SETS = [
+        ['email_writer', 'track_changes_writer'],
+        ['debug_python', 'code_explainer'],
+        ['annotate_translation'],
+        ['deep_thinking'],
+        ['excel_analyst', 'chart_analyst'],
+        ['doc_summarizer', 'long_doc_parser'],
+    ];
+
+    // Fill prompt, deactivate other cards' skills, then activate this card's skills.
+    // skillIds can be a string or an array of strings.
+    async function insertSuggestionWithSkill(text, skillIds) {
+        insertSuggestion(text);
+        const ids = Array.isArray(skillIds) ? skillIds : [skillIds];
+        const toDisable = _CARD_SKILL_SETS.flat().filter(id => !ids.includes(id));
+        try {
+            await Promise.all([
+                ...toDisable.map(id =>
+                    fetch('/api/skillmarket/toggle/' + id, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({enabled: false})
+                    })
+                ),
+                ...ids.map(id =>
+                    fetch('/api/skillmarket/toggle/' + id, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({enabled: true})
+                    })
+                ),
+            ]);
+            if (typeof window.refreshActiveSkills === 'function') window.refreshActiveSkills();
+            if (typeof window.spLoadSkills === 'function') window.spLoadSkills();
+        } catch (e) {
+            console.warn('[Koto] insertSuggestionWithSkill skill activation failed', e);
+        }
     }
     </script>
 </body>

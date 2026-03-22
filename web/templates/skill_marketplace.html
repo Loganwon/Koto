@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Koto Skill 库 — 风格市场</title>
-  <link rel="stylesheet" href="/static/css/skill_marketplace.css">
+  <link rel="stylesheet" href="/static/css/skill_marketplace.css?v=20260322c">
 </head>
 <body>
 <div class="sm-app">
@@ -52,7 +52,7 @@
       📊 统计
     </button>
     <button class="sm-tab" data-tab="github-hub">
-      🌐 GitHub 社区
+      🌐 Skill 社区
     </button>
   </div>
 
@@ -521,59 +521,37 @@
     <!-- ════════ Panel: GitHub Hub ════════ -->
     <div id="panel-github-hub" class="sm-content sm-panel gh-hub hidden">
 
-      <!-- Header -->
-      <div class="gh-hub-header">
-        <div>
-          <h2 class="gh-hub-title">🌐 GitHub Agent Skills 社区</h2>
-          <p class="gh-hub-subtitle">从 GitHub 上最热门的 Agent Skills 仓库浏览并一键安装到 Koto</p>
-        </div>
-        <div class="gh-hub-header-actions">
-          <button class="btn btn-secondary btn-sm" id="gh-custom-url-btn" onclick="ghToggleCustomUrl()">🔗 自定义 URL 安装</button>
+      <!-- Redirect banner -->
+      <div style="max-width:640px;margin:60px auto;text-align:center">
+        <div style="font-size:56px;margin-bottom:20px">🌐</div>
+        <h2 style="font-size:22px;font-weight:700;margin-bottom:12px">Skill 社区已升级</h2>
+        <p style="color:var(--text-muted);font-size:14px;line-height:1.7;margin-bottom:28px">
+          社区精选 Skills 现已迁移到专属页面，提供更丰富的内容、更便捷的安装体验。<br>
+          15 个高质量技能覆盖思维增强、写作、专业咨询、代码调试等场景，全部内嵌本地，无需网络。
+        </p>
+        <a href="/skill-community" class="btn btn-primary" style="font-size:15px;padding:10px 28px;text-decoration:none;">
+          🚀 打开 Skill 社区
+        </a>
+
+        <div style="margin-top:40px;padding:20px;background:var(--bg-elevated);border:1px solid var(--border);border-radius:12px;text-align:left">
+          <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-muted);margin-bottom:12px">
+            自定义 URL 安装（从 raw.githubusercontent.com）
+          </div>
+          <p style="color:var(--text-muted);font-size:13px;margin-bottom:10px">
+            如果你有来自 GitHub 的 SKILL.md 或 Koto JSON 文件链接，可以在这里直接安装：
+          </p>
+          <div style="display:flex;gap:8px">
+            <input class="form-control" id="gh-custom-url-input-inline"
+                   type="url"
+                   placeholder="https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md"
+                   style="flex:1">
+            <button class="btn btn-secondary btn-sm" onclick="ghInstallInlineUrl()">⬇️ 安装</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
+            仅支持 <code>raw.githubusercontent.com</code> 的 HTTPS 链接
+          </div>
         </div>
       </div>
-
-      <!-- Custom URL install (hidden by default) -->
-      <div class="gh-custom-url-box hidden" id="gh-custom-url-box">
-        <div class="gh-custom-url-label">粘贴 SKILL.md 或 Koto JSON 文件的 raw.githubusercontent.com 链接：</div>
-        <div class="gh-custom-url-row">
-          <input class="form-control gh-custom-url-input" id="gh-custom-url-input"
-                 type="url"
-                 placeholder="https://raw.githubusercontent.com/owner/repo/main/skills/my-skill/SKILL.md">
-          <button class="btn btn-primary btn-sm" onclick="ghInstallCustomUrl()">⬇️ 安装</button>
-        </div>
-        <div class="gh-custom-url-hint">仅支持 <code>raw.githubusercontent.com</code> 域名的 HTTPS 链接</div>
-      </div>
-
-      <!-- Two-column layout: repos sidebar + skills list -->
-      <div class="gh-hub-body">
-
-        <!-- Left: Repo list -->
-        <div class="gh-repos-panel">
-          <div class="gh-repos-title">精选仓库</div>
-          <div id="gh-repos-list" class="gh-repos-list">
-            <div class="gh-loading">⏳ 加载中…</div>
-          </div>
-        </div>
-
-        <!-- Right: Skills list for selected repo -->
-        <div class="gh-skills-panel">
-          <div class="gh-skills-header">
-            <span class="gh-skills-repo-name" id="gh-skills-repo-name">← 选择左侧仓库浏览技能</span>
-            <span class="gh-skills-count hidden" id="gh-skills-count"></span>
-            <div class="gh-skills-search-wrap hidden" id="gh-skills-search-wrap">
-              <input class="form-control gh-skills-search-input" id="gh-skills-search"
-                     type="text" placeholder="搜索技能名称…" oninput="ghFilterSkills(this.value)">
-            </div>
-          </div>
-          <div id="gh-skills-list" class="gh-skills-list">
-            <div class="gh-empty-state">
-              <div class="gh-empty-icon">🎯</div>
-              <p>选择左侧仓库查看可安装的 Skills</p>
-            </div>
-          </div>
-        </div>
-
-      </div><!-- end gh-hub-body -->
     </div><!-- end panel-github-hub -->
 
   </div><!-- end sm-main -->
@@ -675,6 +653,6 @@
 <!-- ═══════════ Toast Container ════════════ -->
 <div id="sm-toast-container"></div>
 
-<script src="/static/js/skill_marketplace.js"></script>
+<script src="/static/js/skill_marketplace.js?v=20260322c"></script>
 </body>
 </html>

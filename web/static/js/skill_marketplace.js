@@ -1398,3 +1398,28 @@ async function ghInstallCustomUrl() {
     if (btn) { btn.disabled = false; btn.textContent = '⬇️ 安装'; }
   }
 }
+
+/** 社区页内联 URL 安装（新版社区面板用） */
+async function ghInstallInlineUrl() {
+  const input = document.getElementById('gh-custom-url-input-inline');
+  if (!input) return;
+  const rawUrl = (input.value || '').trim();
+  if (!rawUrl) { toast('请粘贴 raw.githubusercontent.com 链接', 'error'); return; }
+  if (!rawUrl.startsWith('https://raw.githubusercontent.com/')) {
+    toast('仅支持 https://raw.githubusercontent.com/ 开头的链接', 'error');
+    return;
+  }
+
+  const btn = input.nextElementSibling;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 安装中…'; }
+
+  try {
+    const result = await api('POST', API.ghInstall(), { raw_url: rawUrl });
+    toast(`✅ "${escHtml(result.skill?.name || result.skill_id)}" 安装成功！前往「我的技能库」查看`, 'success', 4500);
+    input.value = '';
+  } catch (e) {
+    toast(`安装失败: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇️ 安装'; }
+  }
+}

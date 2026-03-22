@@ -8,8 +8,6 @@ import time
 import threading
 import subprocess
 import sys
-import threading
-import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -599,6 +597,13 @@ def get_detected_proxy():
 # 向后兼容：detected_proxy 现在通过函数访问
 detected_proxy = None  # 占位符，实际通过 get_detected_proxy() 获取
 
+# ── Settings Manager（在代理检测线程之前创建，以便读取用户代理配置）──
+try:
+    from settings import SettingsManager as _SettingsManager
+except ImportError:
+    from web.settings import SettingsManager as _SettingsManager
+settings_manager = _SettingsManager()
+
 
 # 在后台线程预热代理检测（不阻塞启动）
 def _warmup_proxy():
@@ -785,6 +790,13 @@ def _is_interactions_only(model_id: str) -> bool:
         iom = {"gemini-3-flash-preview", "gemini-3-pro-preview", "deep-research-pro-preview-12-2025"}
     mid = str(model_id or "")
     return mid in iom or mid.startswith("deep-research-pro-preview")
+
+
+def _is_interactions_agent(model_id: str) -> bool:
+    """True for genuine agent models that require agent=; False for model= variants.
+    deep-research-* models use agent=; gemini-3-*-preview use model=.
+    """
+    return str(model_id or "").startswith("deep-research")
 
 
 _logger_tracked = logging.getLogger(__name__)
@@ -1271,12 +1283,7 @@ def _call_interactions_api_sync(
     if sys_instruction:
         full_input = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{user_prompt}"
 
-    interaction = rc.interactions.create(
-        agent=model_id,
-        input=full_input[:80000],   # 支持大文档（gemini-3 上下文窗口 >1M tokens）
-        background=model_id not in _NO_BACKGROUND_MODELS,
-        stream=False,
-    )
+    _rc = create_research_client()
     # Interactions API 区分两种调用方式：
     #   agent=  → deep-research 等真正的 Agent
     #   model=  → gemini-3-pro/flash-preview 等普通模型（用 agent= 会报 400）
@@ -1290,7 +1297,7 @@ def _call_interactions_api_sync(
     else:
         _create_kwargs["model"] = model_id
 
-    interaction = rc.interactions.create(**_create_kwargs)
+    interaction = _rc.interactions.create(**_create_kwargs)
 
     interaction_id = getattr(interaction, "id", None)
     init_status    = str(getattr(interaction, "status", "") or "").lower()
@@ -1315,7 +1322,7 @@ def _call_interactions_api_sync(
 
     # 慢速路径：轮询等待（指数退避，含自动超时取消）
     final_interaction = _poll_interaction(
-        rc,
+        _rc,
         interaction_id,
         timeout=timeout,
         initial_sleep=2.0,
@@ -2097,13 +2104,6 @@ UPLOAD_DIR = os.path.join(PROJECT_ROOT, "web", "uploads")
 os.makedirs(CHAT_DIR, exist_ok=True)
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-# ================= Settings Manager (提前加载) =================
-try:
-    from settings import SettingsManager
-except ImportError:
-    from web.settings import SettingsManager
-settings_manager = SettingsManager()
 
 # ================= 动态模型管理器 =================
 # 自动从 API 发现可用模型并按任务类型智能匹配，无需手动维护模型列表。

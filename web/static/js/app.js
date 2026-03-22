@@ -858,10 +858,10 @@ async function loadRecentFiles() {
     const list = document.getElementById('myStuffList');
     if (!list) return;
     try {
-        const resp = await fetch('/api/files/recent?limit=12&days=30');
+        const resp = await fetch('/api/files/recent?limit=15&days=90');
         if (!resp.ok) throw new Error('api error');
         const data = await resp.json();
-        const files = (data.data || data.files || data || []).slice(0, 12);
+        const files = (data.data || data.files || data || []).slice(0, 15);
         if (!files.length) {
             list.innerHTML = '<div class="sb-sub-empty">暂无最近文件</div>';
             return;
@@ -871,7 +871,7 @@ async function loadRecentFiles() {
             const path = f.path || f.file_path || '';
             const ext = name.split('.').pop()?.toLowerCase() || '';
             const icon = _sidebarFileIcon(ext);
-            const mtime = f.modified_at || f.created_at || '';
+            const mtime = f.updated_at || f.indexed_at || f.modified_at || f.created_at || '';
             const meta = mtime ? _relativeTime(mtime) : '';
             return `<div class="sb-recent-file" onclick="openRecentFile(${JSON.stringify(path)}, ${JSON.stringify(name)})" title="${escapeHtml(path)}">
                 <span class="sb-recent-file-icon">${icon}</span>
@@ -4336,8 +4336,8 @@ function handleGlobalKeyDown(e) {
 
 function autoResize(textarea) {
     textarea.style.height = 'auto';
-    const maxH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--input-max-height') || '220');
-    textarea.style.height = Math.min(textarea.scrollHeight, maxH || 220) + 'px';
+    // Use CSS max-height (40vh) to cap growth; let content determine height up to that limit
+    textarea.style.height = textarea.scrollHeight + 'px';
 }
 
 // 智能滚动：只在用户未上划时才滚到底部（流式输出时使用）

@@ -835,18 +835,18 @@ class FileRegistry:
         category: Optional[str] = None,
         limit: int = 30,
     ) -> List[FileEntry]:
-        """列出最近 N 天索引的文件。"""
+        """列出最近 N 天内新增或修改过的文件（以 indexed_at / updated_at 中较新者为准）。"""
         from datetime import timedelta
 
         cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-        clauses = ["indexed_at >= ?"]
+        clauses = ["MAX(indexed_at, updated_at) >= ?"]
         params: List[Any] = [cutoff]
         if category:
             clauses.append("category = ?")
             params.append(category)
         params.append(limit)
         rows = self._conn.execute(
-            f"SELECT * FROM koto_file_registry WHERE {' AND '.join(clauses)} ORDER BY indexed_at DESC LIMIT ?",
+            f"SELECT * FROM koto_file_registry WHERE {' AND '.join(clauses)} ORDER BY MAX(indexed_at, updated_at) DESC LIMIT ?",
             params,
         ).fetchall()
         return [self._row_to_entry(r) for r in rows]

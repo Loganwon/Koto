@@ -70,6 +70,12 @@ def skill_marketplace() -> str:
     return render_template("skill_marketplace.html")
 
 
+@pages_bp.route("/skill-community")
+def skill_community() -> str:
+    """Koto Skill 社区 — 精选社区 Skills，一键安装"""
+    return render_template("skill_community.html")
+
+
 @pages_bp.route("/monitoring-dashboard")
 def monitoring_dashboard() -> Response:
     """Phase 4 System Monitoring Dashboard"""

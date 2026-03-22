@@ -81,7 +81,7 @@ _add(os.path.join(ROOT, 'web', 'uploads', '.gitkeep'),        os.path.join('web'
 # ── Python 包 ──
 # 使用 _add_dir_filtered 而非简单的 _add(dir)，以便在 Protected 模式下过滤 .py 源码
 _add_dir_filtered(os.path.join(ROOT, 'app'),      'app')
-_add(os.path.join(ROOT, 'launcher'),              'launcher')
+
 
 # ── 图标资源 ──
 _add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.ico'), os.path.join('assets', 'koto_icon.ico'))
@@ -102,12 +102,19 @@ _add(os.path.join(ROOT, 'config', 'workflows'),     os.path.join('config', 'work
 for _script in ['koto_app.py', 'model_downloader.py', 'koto_setup.py', 'server.py']:
     _add(os.path.join(ROOT, 'src', _script), '.')
 
-# ── web/*.py 全部作为数据文件（动态 import 兜底）──
+# ── web/*.py 全部作为数据文件（动态 import 兜底，含子包 blueprints/ routes/）──
 _web_dir = os.path.join(ROOT, 'web')
 if os.path.isdir(_web_dir):
     for _f in os.listdir(_web_dir):
         if _f.endswith('.py'):
             datas.append((os.path.join(_web_dir, _f), 'web'))
+    # 子目录：blueprints/ 和 routes/
+    for _subpkg in ('blueprints', 'routes'):
+        _sub_dir = os.path.join(_web_dir, _subpkg)
+        if os.path.isdir(_sub_dir):
+            for _f in os.listdir(_sub_dir):
+                if _f.endswith('.py'):
+                    datas.append((os.path.join(_sub_dir, _f), os.path.join('web', _subpkg)))
 
 # ── 用户文档 ──
 _add(os.path.join(ROOT, 'README.md'), '.')
@@ -260,65 +267,78 @@ hiddenimports = [
     'app.api.agent_routes',
     'app.api.skill_routes',
     'app.api.skill_marketplace_routes',
+    'app.api.task_routes',
+    'app.api.job_routes',
+    'app.api.goal_routes',
+    'app.api.file_hub_routes',
+    'app.api.ops_routes',
+    'app.api.shadow_routes',
+    'app.api.macro_routes',
+    'app.api.telegram_bot_routes',
+    'app.api.distill_routes',
+
+    # ── web/blueprints/ 分层蓝图（动态 import_module，PyInstaller 不自动发现）──
+    'web.blueprints',
+    'web.blueprints.chat',
+    'web.blueprints.voice',
+    'web.blueprints.pages',
+    'web.blueprints.sessions',
+    'web.blueprints.settings',
+    'web.blueprints.workspace',
+    'web.blueprints.document',
+    'web.blueprints.knowledge',
+    'web.blueprints.misc_api',
+    'web.blueprints.analytics',
+    'web.blueprints.proactive',
+    'web.blueprints.execution',
+    'web.blueprints.file_editor',
+    'web.blueprints.file_organize',
+    'web.blueprints.dev',
+
+    # ── web/routes/ ──
+    'web.routes',
+    'web.routes.health',
 
     # ── 模型下载器 ──
     'model_downloader',
 
-    # ── web/ 全部模块 ──
-    'web.app',
-    'web.analytics_engine', 'web.archive_search_engine', 'web.audio_overview',
-    'web.audit_logger', 'web.auth', 'web.auth_manager',
-    'web.auto_catalog_scheduler', 'web.auto_execution',
-    'web.batch_file_ops', 'web.batch_processor',
-    'web.behavior_monitor', 'web.browser_automation',
-    'web.cache_manager', 'web.calendar_manager',
-    'web.clipboard_manager', 'web.clipboard_ocr_assistant',
-    'web.code_generator', 'web.collaboration_engine',
-    'web.concept_extractor', 'web.config_manager',
-    'web.consistency_checker', 'web.context_awareness',
-    'web.context_injector', 'web.data_encryption',
-    'web.data_pipeline', 'web.doc_converter', 'web.doc_planner',
-    'web.document_annotator', 'web.document_batch_annotator_v2',
-    'web.document_comparator', 'web.document_direct_edit',
-    'web.document_editor', 'web.document_feedback',
-    'web.document_generator', 'web.document_reader',
+        # ── web/ 全部模块 ──
+    'web', 'web.app', 'web.audio_overview', 'web.audit_logger',
+    'web.auth', 'web.auth_manager', 'web.auto_catalog_scheduler',
+    'web.auto_execution', 'web.batch_file_ops', 'web.batch_processor',
+    'web.behavior_monitor', 'web.browser_automation', 'web.calendar_manager',
+    'web.clipboard_manager', 'web.clipboard_ocr_assistant', 'web.code_generator',
+    'web.concept_extractor', 'web.consistency_checker', 'web.context_awareness',
+    'web.context_injector', 'web.data_pipeline', 'web.doc_converter',
+    'web.doc_planner', 'web.document_annotator', 'web.document_batch_annotator_v2',
+    'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
+    'web.document_feedback', 'web.document_generator', 'web.document_reader',
     'web.document_validator', 'web.document_workflow_executor',
-    'web.email_manager',
-    'web.enhanced_memory_manager', 'web.etl_engine',
-    'web.excel_analyzer', 'web.feedback_loop',
-    'web.file_analyzer', 'web.file_converter', 'web.file_editor',
-    'web.file_indexer', 'web.file_organizer', 'web.file_parser',
-    'web.file_processor', 'web.file_quality_checker', 'web.file_scanner',
-    'web.folder_catalog_organizer', 'web.hotkey_manager',
-    'web.image_generator', 'web.image_manager',
-    'web.insight_reporter', 'web.intelligent_document_analyzer',
-    'web.knowledge_base', 'web.knowledge_graph',
-    'web.logger_setup', 'web.memory_api_routes',
-    'web.memory_integration', 'web.memory_manager',
-    'web.mini_koto', 'web.mobile_integration',
-    'web.note_manager', 'web.notification_manager',
-    'web.operation_history', 'web.organize_cleanup',
-    'web.parallel_api', 'web.parallel_executor',
-    'web.performance_monitor', 'web.permission_manager',
-    'web.ppt_api_routes', 'web.ppt_generator', 'web.ppt_master',
-    'web.ppt_pipeline', 'web.ppt_quality', 'web.ppt_session_manager',
-    'web.ppt_synthesizer', 'web.ppt_themes', 'web.ppt_workflow',
-    'web.proactive_dialogue', 'web.proactive_trigger',
-    'web.processed_file_network', 'web.progress_tracker',
-    'web.prompt_adapter', 'web.quality_evaluator',
-    'web.rate_limiter', 'web.reminder_manager',
-    'web.search_engine', 'web.security_manager',
-    'web.settings', 'web.setup_local_model',
-    'web.smart_feedback', 'web.speech_transcriber',
-    'web.suggestion_annotator', 'web.suggestion_engine',
-    'web.system_info', 'web.task_dispatcher', 'web.task_scheduler',
-    'web.template_library', 'web.test_generator',
-    'web.token_tracker', 'web.tool_registry',
-    'web.track_changes_editor', 'web.voice_api_enhanced',
-    'web.voice_fast', 'web.voice_input', 'web.voice_interaction',
-    'web.voice_recognition_enhanced',
-    'web.web_searcher', 'web.wechat_automation',
-    'web.windows_notifier', 'web.workflow_manager',
+    'web.docx_translator_module', 'web.email_manager', 'web.enhanced_memory_manager',
+    'web.feedback_loop', 'web.file_analyzer', 'web.file_converter',
+    'web.file_editor', 'web.file_fields_extractor', 'web.file_indexer',
+    'web.file_organizer', 'web.file_parser', 'web.file_processor',
+    'web.file_qa', 'web.file_quality_checker', 'web.file_scanner',
+    'web.file_watcher', 'web.folder_catalog_organizer', 'web.image_generator',
+    'web.image_manager', 'web.insight_reporter', 'web.intelligent_document_analyzer',
+    'web.knowledge_base', 'web.knowledge_graph', 'web.local_executor',
+    'web.local_stt', 'web.memory_api_routes', 'web.memory_integration',
+    'web.memory_manager', 'web.model_manager', 'web.note_manager',
+    'web.notification_manager', 'web.operation_history', 'web.organize_cleanup',
+    'web.parallel_api', 'web.parallel_executor', 'web.ppt_api_routes',
+    'web.ppt_generator', 'web.ppt_master', 'web.ppt_pipeline',
+    'web.ppt_quality', 'web.ppt_session_manager', 'web.ppt_synthesizer',
+    'web.ppt_themes', 'web.proactive_dialogue', 'web.proactive_trigger',
+    'web.processed_file_network', 'web.prompt_adapter', 'web.quality_evaluator',
+    'web.reminder_manager', 'web.search_engine', 'web.settings',
+    'web.shared', 'web.smart_feedback', 'web.speech_transcriber',
+    'web.suggestion_annotator', 'web.suggestion_engine', 'web.system_info',
+    'web.task_dispatcher', 'web.task_scheduler', 'web.telegram_bot',
+    'web.template_library', 'web.token_tracker', 'web.track_changes_editor',
+    'web.voice_api_enhanced', 'web.voice_engine', 'web.voice_fast',
+    'web.voice_input', 'web.voice_interaction', 'web.voice_recognition_enhanced',
+    'web.web_searcher', 'web.windows_notifier', 'web.work_file_library',
+    'web.workflow_manager',
 ]
 
 # ═══════════════════════════════════════════════

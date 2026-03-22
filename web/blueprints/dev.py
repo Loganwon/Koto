@@ -1,4 +1,4 @@
-"""
+﻿"""
 Dev / debug and RAG blueprint.
 
 Routes:
@@ -38,7 +38,7 @@ dev_bp = Blueprint("dev", __name__)
 def auto_catalog_status() -> Response:
     """获取自动归纳状态"""
     try:
-        from auto_catalog_scheduler import get_auto_catalog_scheduler
+        from web.auto_catalog_scheduler import get_auto_catalog_scheduler
 
         scheduler = get_auto_catalog_scheduler()
 
@@ -59,7 +59,7 @@ def auto_catalog_status() -> Response:
 def auto_catalog_enable() -> Response:
     """启用自动归纳"""
     try:
-        from auto_catalog_scheduler import get_auto_catalog_scheduler
+        from web.auto_catalog_scheduler import get_auto_catalog_scheduler
 
         scheduler = get_auto_catalog_scheduler()
 
@@ -85,7 +85,7 @@ def auto_catalog_enable() -> Response:
 def auto_catalog_disable() -> Response:
     """禁用自动归纳"""
     try:
-        from auto_catalog_scheduler import get_auto_catalog_scheduler
+        from web.auto_catalog_scheduler import get_auto_catalog_scheduler
 
         scheduler = get_auto_catalog_scheduler()
 
@@ -100,7 +100,7 @@ def auto_catalog_disable() -> Response:
 def auto_catalog_run_now() -> Response:
     """立即执行一次归纳（手动触发）"""
     try:
-        from auto_catalog_scheduler import get_auto_catalog_scheduler
+        from web.auto_catalog_scheduler import get_auto_catalog_scheduler
 
         scheduler = get_auto_catalog_scheduler()
 
@@ -124,7 +124,7 @@ def auto_catalog_run_now() -> Response:
 def get_backup_manifest(filename: str) -> Response:
     """下载备份清单文件"""
     try:
-        from auto_catalog_scheduler import get_auto_catalog_scheduler
+        from web.auto_catalog_scheduler import get_auto_catalog_scheduler
 
         scheduler = get_auto_catalog_scheduler()
 

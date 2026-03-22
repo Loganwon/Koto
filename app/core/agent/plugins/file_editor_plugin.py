@@ -116,19 +116,34 @@ class FileEditorPlugin(AgentPlugin):
 
     def write_file(self, file_path: str, content: str) -> str:
         r = self.service.write_file(file_path, content)
-        return (
-            f"Written to {r['path']} ({r['size']} bytes)"
-            if r["success"]
-            else f"Error: {r['error']}"
-        )
+        if r["success"]:
+            try:
+                from app.core.file.file_registry import get_file_registry
+                get_file_registry().register(r["path"], source="ai")
+            except Exception:
+                pass
+            return f"Written to {r['path']} ({r['size']} bytes)"
+        return f"Error: {r['error']}"
 
     def append_text(self, file_path: str, text: str) -> str:
         r = self.service.append_text(file_path, text)
-        return f"Appended to {r['path']}" if r["success"] else f"Error: {r['error']}"
+        if r["success"]:
+            try:
+                from app.core.file.file_registry import get_file_registry
+                get_file_registry().register(r["path"], source="ai")
+            except Exception:
+                pass
+            return f"Appended to {r['path']}"
+        return f"Error: {r['error']}"
 
     def replace_text(self, file_path: str, old_text: str, new_text: str) -> str:
         r = self.service.replace_text(file_path, old_text, new_text)
         if r["success"]:
+            try:
+                from app.core.file.file_registry import get_file_registry
+                get_file_registry().register(file_path, source="ai")
+            except Exception:
+                pass
             return f"Replaced {r.get('replacements', '?')} occurrence(s) in {file_path}"
         return f"Error: {r['error']}"
 
@@ -136,6 +151,11 @@ class FileEditorPlugin(AgentPlugin):
         """Apply multiple text replacements in a single file read+write."""
         r = self.service.patch_file(file_path, patches)
         if r["success"]:
+            try:
+                from app.core.file.file_registry import get_file_registry
+                get_file_registry().register(file_path, source="ai")
+            except Exception:
+                pass
             not_found = r.get("not_found", [])
             msg = f"Applied {r.get('total_replacements', 0)} replacement(s) in {file_path}"
             if not_found:

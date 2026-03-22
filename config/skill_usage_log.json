@@ -16,5 +16,23 @@
         "session": ""
       }
     ]
+  },
+  "long_doc_parser": {
+    "total": 3,
+    "last_used": 1774119169,
+    "events": [
+      {
+        "ts": 1774119068,
+        "session": ""
+      },
+      {
+        "ts": 1774119108,
+        "session": ""
+      },
+      {
+        "ts": 1774119169,
+        "session": ""
+      }
+    ]
   }
 }
