@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 class FileParser:
     """多格式文件解析器"""
 
-    SUPPORTED_FORMATS = [".pdf", ".docx", ".doc", ".txt", ".md", ".markdown"]
+    SUPPORTED_FORMATS = [".pdf", ".docx", ".doc", ".txt", ".md", ".markdown", ".pptx", ".pptm", ".ppt"]
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB 上限
     MAX_CONTENT_LENGTH = 100000  # 提取最多 10 万字符
 
@@ -60,6 +60,8 @@ class FileParser:
                 content = FileParser._parse_pdf(file_path)
             elif file_ext in [".docx", ".doc"]:
                 content = FileParser._parse_docx(file_path)
+            elif file_ext in [".pptx", ".pptm", ".ppt"]:
+                content = FileParser._parse_pptx(file_path)
             elif file_ext in [".txt", ".md", ".markdown"]:
                 content = FileParser._parse_text(file_path)
             else:
@@ -145,6 +147,43 @@ class FileParser:
                 content.append("\n".join(table_content))
 
         return "\n".join(content)
+
+    @staticmethod
+    def _parse_pptx(file_path: str) -> str:
+        """PPTX/PPTM/PPT 文本提取（逐页提取标题、正文和备注）"""
+        try:
+            from pptx import Presentation
+        except ImportError:
+            raise ImportError("需要安装 python-pptx: pip install python-pptx")
+
+        prs = Presentation(file_path)
+        content = []
+        for idx, slide in enumerate(prs.slides, 1):
+            slide_texts = []
+            for shape in slide.shapes:
+                if not hasattr(shape, "text"):
+                    continue
+                text = shape.text.strip()
+                if not text:
+                    continue
+                # 收集文本框内每一段，保留层次
+                if hasattr(shape, "text_frame"):
+                    for para in shape.text_frame.paragraphs:
+                        pt = para.text.strip()
+                        if pt:
+                            slide_texts.append(pt)
+                else:
+                    slide_texts.append(text)
+            if slide_texts:
+                content.append(f"[第 {idx} 页]\n" + "\n".join(slide_texts))
+            # 提取演讲者备注
+            if slide.has_notes_slide:
+                notes_tf = slide.notes_slide.notes_text_frame
+                if notes_tf:
+                    notes = notes_tf.text.strip()
+                    if notes:
+                        content.append(f"[第 {idx} 页·备注]\n{notes}")
+        return "\n\n".join(content)
 
     @staticmethod
     def _parse_text(file_path: str) -> str:
