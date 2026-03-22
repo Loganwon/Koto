@@ -383,6 +383,9 @@ for config_path in config_locations:
 
 # 尝试读取 GEMINI_API_KEY 或 API_KEY
 API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY")
+# 占位符视为无效
+if API_KEY and API_KEY.lower() in {"your_api_key_here", ""}:
+    API_KEY = None
 
 # 读取自定义 API 端点（用于中转服务）
 GEMINI_API_BASE = os.getenv("GEMINI_API_BASE", "").strip()
@@ -10183,6 +10186,23 @@ def chat_stream():
                     final_result = None
                     cancelled = False
 
+                    # 获取匹配到的批注类Skill专项要求（商务批注/翻译质检/代码审查等）
+                    _ann_skill_prompt = (context_info or {}).get("skill_prompt", "")
+                    if not _ann_skill_prompt:
+                        try:
+                            from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+                            from app.core.skills.skill_manager import SkillManager
+                            _sk_matched = get_skill_binding_manager().match_intent(user_input or "")
+                            SkillManager._ensure_init()
+                            for _sk_id in _sk_matched:
+                                _sk_def = SkillManager.get_definition(_sk_id)
+                                if _sk_def and "DOC_ANNOTATE" in (getattr(_sk_def, "task_types", None) or []) and getattr(_sk_def, "prompt", ""):
+                                    _ann_skill_prompt = _sk_def.prompt
+                                    _app_logger.debug(f"[DOC_ANNOTATE] 注入 Skill: {_sk_id}")
+                                    break
+                        except Exception as _sk_e:
+                            _app_logger.debug(f"[DOC_ANNOTATE] Skill 匹配跳过: {_sk_e}")
+
                     # 迭代流式结果，传入task_id用于支持取消
                     for (
                         progress_event
@@ -10194,6 +10214,7 @@ def chat_stream():
                         cancel_check=lambda: _interrupt_manager.is_interrupted(
                             session_name
                         ),
+                        skill_prompt=_ann_skill_prompt,
                     ):
                         stage = progress_event.get("stage", "unknown")
                         progress = progress_event.get("progress", 0)
@@ -14904,6 +14925,7 @@ def chat_with_file():
             _ann_user_input = user_input
             _ann_client = client
             _ann_docs_dir = docs_dir  # 确保转换后的文件和输出都保存到标准目录
+            _ann_context_info = context_info  # 用于 Skill prompt 注入
 
             def generate_doc_annotate_stream():
                 import time as _time
@@ -15018,6 +15040,23 @@ def chat_with_file():
                     revised_file = None
                     final_result = None
 
+                    # 获取匹配到的批注类Skill专项要求
+                    _ann_skill_prompt = (_ann_context_info or {}).get("skill_prompt", "")
+                    if not _ann_skill_prompt:
+                        try:
+                            from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+                            from app.core.skills.skill_manager import SkillManager
+                            _sk_matched = get_skill_binding_manager().match_intent(_ann_user_input or "")
+                            SkillManager._ensure_init()
+                            for _sk_id in _sk_matched:
+                                _sk_def = SkillManager.get_definition(_sk_id)
+                                if _sk_def and "DOC_ANNOTATE" in (getattr(_sk_def, "task_types", None) or []) and getattr(_sk_def, "prompt", ""):
+                                    _ann_skill_prompt = _sk_def.prompt
+                                    _app_logger.debug(f"[generate_doc_annotate_stream] 注入Skill: {_sk_id}")
+                                    break
+                        except Exception as _sk_e:
+                            _app_logger.debug(f"[generate_doc_annotate_stream] Skill匹配跳过: {_sk_e}")
+
                     for (
                         progress_event
                     ) in feedback_system.full_annotation_loop_streaming(
@@ -15028,6 +15067,7 @@ def chat_with_file():
                         cancel_check=lambda: _interrupt_manager.is_interrupted(
                             _ann_session
                         ),
+                        skill_prompt=_ann_skill_prompt,
                     ):
                         stage = progress_event.get("stage", "unknown")
                         progress = progress_event.get("progress", 0)
@@ -15476,16 +15516,48 @@ def chat_with_file():
                             print(f"[FILE STREAM] interactions-only 模型 {_stream_model} 不支持文件流，降级到 {_INTERACTIONS_FALLBACK_MODEL}")
                         _stream_model = _INTERACTIONS_FALLBACK_MODEL
                         if _has_binary_doc:
-                            try:
-                                _doc_part = types.Part.from_bytes(
-                                    data=file_data["data"],
-                                    mime_type=file_data.get("mime_type", "application/pdf")
-                                )
-                                _stream_contents = [formatted_message, _doc_part]
-                                print(f"[FILE STREAM] 📄 Binary-Doc-Read: model={_stream_model}, bytes={len(file_data['data'])}")
-                            except Exception as _bp_err:
-                                print(f"[FILE STREAM] ⚠️ 无法创建 doc_part，回退到文本模式: {_bp_err}")
-                                _stream_contents = formatted_message
+                            _bin_mime = (file_data.get("mime_type") or "application/octet-stream").lower()
+                            _is_pdf_for_gemini = "pdf" in _bin_mime
+                            if _is_pdf_for_gemini:
+                                # PDF：Gemini 原生支持字节流读取
+                                try:
+                                    _doc_part = types.Part.from_bytes(
+                                        data=file_data["data"],
+                                        mime_type="application/pdf"
+                                    )
+                                    _stream_contents = [formatted_message, _doc_part]
+                                    print(f"[FILE STREAM] 📄 PDF-Binary-Read: model={_stream_model}, bytes={len(file_data['data'])}")
+                                except Exception as _bp_err:
+                                    print(f"[FILE STREAM] ⚠️ 无法创建 pdf doc_part，回退到文本模式: {_bp_err}")
+                                    _stream_contents = formatted_message
+                            else:
+                                # Office 格式（PPTX/PPTM/DOCX/XLSX 等）：Gemini 无法解析二进制
+                                # 先用 FileParser 提取文本，再以文本方式输入给模型
+                                _text_extracted = False
+                                try:
+                                    from web.file_parser import FileParser
+                                    _fp_result = FileParser.parse_file(filepath)
+                                    if _fp_result and _fp_result.get("success") and _fp_result.get("content"):
+                                        _extracted_text = _fp_result["content"][:60000]
+                                        _stream_contents = (
+                                            f"{formatted_message}\n\n"
+                                            f"=== 文件内容：{filename} ===\n{_extracted_text}"
+                                        )
+                                        _text_extracted = True
+                                        print(f"[FILE STREAM] 📄 Office-Text-Extract: {filename}, {len(_extracted_text)} chars")
+                                except Exception as _text_err:
+                                    print(f"[FILE STREAM] ⚠️ 文本提取失败({_text_err})，尝试字节流回退")
+                                if not _text_extracted:
+                                    # 兜底：直接传字节（可能效果有限）
+                                    try:
+                                        _doc_part = types.Part.from_bytes(
+                                            data=file_data["data"],
+                                            mime_type=_bin_mime
+                                        )
+                                        _stream_contents = [formatted_message, _doc_part]
+                                    except Exception as _bp_err2:
+                                        print(f"[FILE STREAM] ⚠️ 字节流回退也失败: {_bp_err2}")
+                                        _stream_contents = formatted_message
 
                     yield f"data: {json.dumps({'type': 'classification', 'task_type': _captured_task, 'model': _stream_model, 'message': f'📄 正在分析: {filename}'})}\n\n"
                     yield f"data: {json.dumps({'type': 'progress', 'message': '📂 文件内容已就绪', 'stage': 'file_ready_complete', 'progress': 15})}\n\n"

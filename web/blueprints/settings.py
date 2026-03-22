@@ -514,7 +514,8 @@ def get_setup_status() -> Response:
     from web.app import API_KEY, PROJECT_ROOT, WORKSPACE_DIR
 
     config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
-    has_api_key = bool(API_KEY and len(API_KEY) > 10)
+    _placeholders = {"your_api_key_here", "YOUR_API_KEY_HERE", ""}
+    has_api_key = bool(API_KEY and len(API_KEY) > 10 and API_KEY not in _placeholders)
     has_workspace = os.path.exists(WORKSPACE_DIR)
 
     return jsonify(

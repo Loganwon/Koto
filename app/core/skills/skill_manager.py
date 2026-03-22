@@ -2395,10 +2395,24 @@ class SkillManager:
     @classmethod
     def _load_custom_skills_dir(cls):
         """从 config/skills/ 目录加载所有自定义 Skill JSON 文件"""
-        try:
-            skills_dir = cls._settings_path().parent / "skills"
-            if not skills_dir.exists():
-                return
+        import sys
+
+        dirs_to_scan: list[Path] = []
+        # 打包模式：先扫描 _internal/config/skills/（bundled 默认技能，低优先级）
+        if getattr(sys, "frozen", False):
+            bundle_skills = Path(sys._MEIPASS) / "config" / "skills"
+            if bundle_skills.exists():
+                dirs_to_scan.append(bundle_skills)
+        # 再扫描 exe 旁 config/skills/（用户自定义，高优先级可覆盖）
+        user_skills = cls._settings_path().parent / "skills"
+        if user_skills.exists():
+            dirs_to_scan.append(user_skills)
+
+        if not dirs_to_scan:
+            return
+
+        for skills_dir in dirs_to_scan:
+          try:
             for skill_file in skills_dir.glob("*.json"):
                 try:
                     with open(skill_file, "r", encoding="utf-8-sig") as f:
@@ -2474,8 +2488,8 @@ class SkillManager:
                         logger.info(f"[SkillManager] 加载自定义 Skill: {skill_def.id}")
                 except Exception as e:
                     logger.warning(f"[SkillManager] 加载 {skill_file.name} 失败: {e}")
-        except Exception as e:
-            logger.warning(f"[SkillManager] 加载自定义 Skill 目录失败: {e}")
+          except Exception as e:
+              logger.warning(f"[SkillManager] 加载自定义 Skill 目录失败: {skills_dir}: {e}")
 
     @classmethod
     def validate_output(cls, skill_id: str, text: str) -> tuple:

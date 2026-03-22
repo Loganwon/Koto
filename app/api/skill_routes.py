@@ -1128,7 +1128,7 @@ def ask_koto_recommend():
         client = GeminiProvider()
         raw = client.generate_content(
             prompt=prompt,
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             temperature=0.2,
             max_tokens=400,
         )

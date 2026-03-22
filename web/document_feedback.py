@@ -1702,7 +1702,8 @@ class DocumentFeedbackSystem:
         user_requirement: str = "",
         task_id: str = None,
         model_id: Optional[str] = None,
-        cancel_check: Optional[Callable[[], bool]] = None
+        cancel_check: Optional[Callable[[], bool]] = None,
+        skill_prompt: str = "",
     ):
         """
         完整标注闭环（流式版本，支持进度反馈和任务取消）
@@ -1711,10 +1712,18 @@ class DocumentFeedbackSystem:
             file_path: Word文档路径
             user_requirement: 用户需求
             task_id: 任务ID（用于检查是否被取消）
+            skill_prompt: 匹配到的批注类Skill专项要求（如商务批注、翻译质检等）
         
         Yields:
             {'stage': 'xxx', 'progress': 0-100, 'message': '...'}
         """
+        # 如果有 Skill 专项要求，将其前置合并到 user_requirement，确保 AI 遵循专业维度
+        if skill_prompt and skill_prompt.strip():
+            _skill_block = skill_prompt.strip()
+            if user_requirement and user_requirement.strip():
+                user_requirement = _skill_block + f"\n\n## 用户具体需求\n{user_requirement.strip()}"
+            else:
+                user_requirement = _skill_block
         from datetime import datetime
         import shutil
         from web.task_scheduler import check_task_cancelled

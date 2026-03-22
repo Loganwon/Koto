@@ -2577,7 +2577,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "koto_thinking",
         "skill_nature": "model_hint",
         "description": "用追问代替直接给答案。通过一系列精准的问题，引导你自己找到答案——这才是真正的理解。",
-        "author": "Koto Community",
+        "author": "Socrates · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["学习", "教育", "批判性思维", "引导"],
         "priority": 50,
@@ -2612,7 +2612,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "koto_thinking",
         "skill_nature": "model_hint",
         "description": "拆解一切假设，从基础物理事实重新推导。埃隆·马斯克的思维方式：打破「一直都是这样做的」的惯性。",
-        "author": "Koto Community",
+        "author": "Aristotle · Elon Musk · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["创新", "逻辑", "问题拆解", "第一性原理"],
         "priority": 52,
@@ -2647,7 +2647,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "koto_thinking",
         "skill_nature": "model_hint",
         "description": "无论你的方案有多完美，我都会找出最强的反驳理由。用批判性压力测试你的想法。",
-        "author": "Koto Community",
+        "author": "Edward de Bono · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["批判性思维", "辩论", "风险识别", "压力测试"],
         "priority": 48,
@@ -2678,7 +2678,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "koto_thinking",
         "skill_nature": "model_hint",
         "description": "构建对立观点的「最强版本」，而非稻草人。锻炼真正理解不同立场的能力。",
-        "author": "Koto Community",
+        "author": "Daniel Dennett · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["辩证思维", "理解", "论证", "平衡视角"],
         "priority": 46,
@@ -2713,7 +2713,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "career",
         "skill_nature": "domain_skill",
         "description": "MECE原则、金字塔原理、假设驱动分析。用顶级咨询公司的方法论拆解复杂商业问题。",
-        "author": "Koto Community",
+        "author": "Barbara Minto · McKinsey & Co. · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["咨询", "商业分析", "MECE", "金字塔原理", "战略"],
         "priority": 55,
@@ -2749,7 +2749,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "research",
         "skill_nature": "domain_skill",
         "description": "Gary Klein发明的决策工具：假设你的项目已经彻底失败，倒追失败原因。比事后复盘更有效。",
-        "author": "Koto Community",
+        "author": "Gary Klein · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["风险管理", "决策", "项目管理", "预防"],
         "priority": 50,
@@ -2786,7 +2786,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "career",
         "skill_nature": "domain_skill",
         "description": "用顶级风险投资人的眼光审视你的想法。市场规模、竞争壁垒、团队、商业模式——一个都不放过。",
-        "author": "Koto Community",
+        "author": "Sequoia Capital Framework · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["创业", "融资", "商业模式", "投资"],
         "priority": 52,
@@ -2824,7 +2824,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "writing",
         "skill_nature": "domain_skill",
         "description": "删掉废话，留下力量。像海明威一样用最少的词表达最多的意义。每个字都要有理由留下。",
-        "author": "Koto Community",
+        "author": "Ernest Hemingway · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["写作", "精简", "编辑", "文风"],
         "priority": 55,
@@ -2861,7 +2861,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "writing",
         "skill_nature": "domain_skill",
         "description": "AIDA、PAS、4U原则——用经过验证的文案框架写出让人忍不住点击的内容。",
-        "author": "Koto Community",
+        "author": "E. St. Elmo Lewis (AIDA) · Dan Kennedy (PAS) · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["文案", "营销", "转化", "广告"],
         "priority": 52,
@@ -2901,7 +2901,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "writing",
         "skill_nature": "domain_skill",
         "description": "三幕式结构、英雄之旅、南方公园「可是/因此」法则——用叙事框架让任何内容变得引人入胜。",
-        "author": "Koto Community",
+        "author": "Joseph Campbell · Trey Parker · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["故事", "叙事", "创作", "结构"],
         "priority": 50,
@@ -2939,7 +2939,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "koto_thinking",
         "skill_nature": "model_hint",
         "description": "理查德·费曼：「如果你不能用简单的话解释一件事，说明你还没真正理解它」。用最简单的语言检验和深化理解。",
-        "author": "Koto Community",
+        "author": "Richard Feynman · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["学习", "解释", "理解", "简洁"],
         "priority": 54,
@@ -2975,7 +2975,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "koto_thinking",
         "skill_nature": "model_hint",
         "description": "识别你推理中的认知偏差：确认偏误、沉没成本、可得性启发……在你做出错误决定前叫停你。",
-        "author": "Koto Community",
+        "author": "Daniel Kahneman · Amos Tversky · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["认知科学", "决策", "心理学", "偏差"],
         "priority": 48,
@@ -3013,7 +3013,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "koto_thinking",
         "skill_nature": "model_hint",
         "description": "你有模糊的感觉但说不清楚？这个技能帮你把混沌的想法整理成清晰的表达和可行的步骤。",
-        "author": "Koto Community",
+        "author": "Carl Rogers (Reflective Listening) · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["思路整理", "表达", "澄清", "生产力"],
         "priority": 50,
@@ -3049,7 +3049,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "writing",
         "skill_nature": "domain_skill",
         "description": "限制创造自由。给创意任务加上有趣的约束，往往能激发意想不到的创意突破。",
-        "author": "Koto Community",
+        "author": "Dr. Seuss · OULIPO · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["创意", "约束思维", "头脑风暴", "创新"],
         "priority": 45,
@@ -3087,7 +3087,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "code_debug",
         "skill_nature": "domain_skill",
         "description": "经典程序员方法：把你的代码或问题向一只橡皮鸭解释。在解释的过程中，你通常会自己发现问题。",
-        "author": "Koto Community",
+        "author": "Andrew Hunt · David Thomas (The Pragmatic Programmer) · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["调试", "编程", "问题解决", "方法论"],
         "priority": 52,
@@ -3124,7 +3124,7 @@ _COMMUNITY_SKILLS: List[Dict] = [
         "subcategory": "research",
         "skill_nature": "domain_skill",
         "description": "情景规划、趋势推断、weak signals识别。像麦肯锡全球研究院一样分析未来10年的不确定性。",
-        "author": "Koto Community",
+        "author": "Pierre Wack (Shell) · Peter Schwartz · Prompt by Koto",
         "version": "1.0.0",
         "tags": ["未来学", "战略", "趋势", "情景规划"],
         "priority": 48,
@@ -3152,6 +3152,419 @@ _COMMUNITY_SKILLS: List[Dict] = [
             "quality": "精选",
             "use_cases": ["战略规划", "行业研究", "投资决策", "产品路线图"],
             "difficulty": "较难",
+        },
+    },
+    # ── 代码调试 ──────────────────────────────────────────────────────────────
+    {
+        "id": "comm_code_review_expert",
+        "name": "代码审查专家",
+        "icon": "🔎",
+        "category": "domain",
+        "subcategory": "code_debug",
+        "skill_nature": "domain_skill",
+        "description": "像资深工程师一样审查代码：安全漏洞、性能瓶颈、可维护性、代码风格——给出专业评审意见。",
+        "author": "Google Engineering Practices · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["代码审查", "编程", "安全", "最佳实践"],
+        "priority": 54,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🔎 代码审查专家模式\n\n"
+            "当此技能激活时，你像資深工程師一樣对代码进行全方位审查。\n\n"
+            "### 审查维度（每次均覆盖）\n"
+            "1. **安全性**：注入漏洞、敏感数据暴露、权限越界\n"
+            "2. **性能**：时间/空间复杂度、N+1查询、不必要的重复计算\n"
+            "3. **可读性**：命名清晰度、函数长度、注释质量\n"
+            "4. **可维护性**：耦合度、单一职责、DRY原则\n"
+            "5. **边界情况**：空值处理、并发安全、异常路径\n\n"
+            "### 输出格式\n"
+            "```\n🔴 严重问题（必须修复）\n- [问题描述] → [修复建议]\n\n🟡 建议改进\n- [问题描述] → [改进方案]\n\n🟢 做得好的地方\n- [正面反馈]\n\n📊 总评：安全X/5 | 性能X/5 | 可读X/5 | 可维护X/5\n```"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["代码审查", "PR Review", "安全审计", "代码质量"],
+            "difficulty": "中等",
+        },
+    },
+    {
+        "id": "comm_refactor_master",
+        "name": "重构大师",
+        "icon": "🧹",
+        "category": "domain",
+        "subcategory": "code_debug",
+        "skill_nature": "domain_skill",
+        "description": "Martin Fowler的重构理念：在不改变外部行为的前提下，持续改善代码内部结构。识别代码坏味道并给出安全重构步骤。",
+        "author": "Martin Fowler (Refactoring) · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["重构", "设计模式", "代码质量", "架构"],
+        "priority": 50,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🧹 重构大师模式\n\n"
+            "当此技能激活时，你帮助识别代码坏味道并提供安全的重构方案。\n\n"
+            "### 常见坏味道检测\n"
+            "- **过长函数**：超过20行的函数考虑提取\n"
+            "- **重复代码**：相似代码出现两次以上\n"
+            "- **过大的类**：违反单一职责的类\n"
+            "- **过长参数列表**：超过3个参数考虑封装\n"
+            "- **特性依恋**：一个方法过多地访问另一个类的数据\n"
+            "- **散弹修改**：修改一个功能需要改很多类\n\n"
+            "### 重构步骤格式\n"
+            "每次重构建议必须包含：\n"
+            "1. 坏味道名目和所在位置\n"
+            "2. 具体重构手法名称（如：Extract Method、Move Field）\n"
+            "3. 分步操作指南（每步保证可编译通过）\n"
+            "4. 重构前后对比代码\n\n"
+            "### 原则\n"
+            "- 每次只做一种重构\n"
+            "- 确保有测试覆盖后再动手\n"
+            "- 小步前进，频繁验证"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["代码质量提升", "技术债清理", "架构改善", "Legacy代码"],
+            "difficulty": "较难",
+        },
+    },
+    {
+        "id": "comm_system_design",
+        "name": "系统设计面试官",
+        "icon": "🏗️",
+        "category": "domain",
+        "subcategory": "code_debug",
+        "skill_nature": "domain_skill",
+        "description": "像FAANG面试官一样拆解系统设计：需求分析、容量估算、API设计、数据模型、扩展性方案——完整系统设计框架。",
+        "author": "Alex Xu (System Design Interview) · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["系统设计", "架构", "面试", "分布式"],
+        "priority": 52,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🏗️ 系统设计面试官模式\n\n"
+            "当此技能激活时，你用系统设计面试的标准流程分析和设计系统。\n\n"
+            "### 标准分析框架（45分钟面试结构）\n"
+            "1. **需求澄清**（5min）：功能需求 vs 非功能需求，使用规模\n"
+            "2. **容量估算**（5min）：QPS、存储、带宽的粗略估算\n"
+            "3. **API设计**（5min）：核心接口定义\n"
+            "4. **数据模型**（5min）：数据库选型、Schema设计\n"
+            "5. **高层架构**（10min）：组件图、数据流\n"
+            "6. **深入设计**（10min）：核心组件详细设计\n"
+            "7. **扩展讨论**（5min）：瓶颈、扩展、容错\n\n"
+            "### 关键决策点\n"
+            "每个设计决策都解释 Trade-off：\n"
+            "- SQL vs NoSQL\n"
+            "- 一致性 vs 可用性 (CAP)\n"
+            "- Push vs Pull\n"
+            "- 同步 vs 异步\n\n"
+            "### 输出要求\n"
+            "包含架构图描述（文字版）、核心组件职责、数据流走向。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["系统设计", "面试准备", "架构设计", "技术方案"],
+            "difficulty": "较难",
+        },
+    },
+    # ── 调研分析 ──────────────────────────────────────────────────────────────
+    {
+        "id": "comm_swot_analysis",
+        "name": "SWOT 战略分析",
+        "icon": "📋",
+        "category": "domain",
+        "subcategory": "research",
+        "skill_nature": "domain_skill",
+        "description": "经典战略分析工具：Strengths、Weaknesses、Opportunities、Threats——从四个维度全面评估项目或业务。",
+        "author": "Albert Humphrey (Stanford) · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["SWOT", "战略分析", "竞争分析", "商业"],
+        "priority": 50,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 📋 SWOT 战略分析模式\n\n"
+            "当此技能激活时，你用 SWOT 框架对任何项目、产品或决策进行结构化分析。\n\n"
+            "### 分析框架\n\n"
+            "**S — Strengths（优势）**\n"
+            "- 内部因素：你有什么独特的资源、能力、经验？\n"
+            "- 与竞争对手比，你做得更好的是什么？\n\n"
+            "**W — Weaknesses（劣势）**\n"
+            "- 内部因素：缺少什么资源？哪些地方需要改进？\n"
+            "- 别人做得比你好的是什么？\n\n"
+            "**O — Opportunities（机会）**\n"
+            "- 外部因素：市场趋势、技术变革、政策变化\n"
+            "- 竞争对手的失误创造了什么机会？\n\n"
+            "**T — Threats（威胁）**\n"
+            "- 外部因素：竞争加剧、政策风险、技术替代\n"
+            "- 什么变化可能让你的优势失效？\n\n"
+            "### 输出格式\n"
+            "用2×2矩阵展示，每个象限3-5条。\n"
+            "结尾给出「SO策略」（利用优势+机会）和「WT策略」（规避劣势+威胁）。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["战略规划", "竞争分析", "项目评审", "商业决策"],
+            "difficulty": "中等",
+        },
+    },
+    {
+        "id": "comm_data_analyst",
+        "name": "数据分析师",
+        "icon": "📈",
+        "category": "domain",
+        "subcategory": "research",
+        "skill_nature": "domain_skill",
+        "description": "用数据说话：假设检验、趋势识别、异常检测、可视化建议——把原始数据变成可执行的洞察。",
+        "author": "Nate Silver (The Signal and the Noise) · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["数据分析", "统计", "可视化", "洞察"],
+        "priority": 52,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 📈 数据分析师模式\n\n"
+            "当此技能激活时，你用专业数据分析方法处理数据并提取洞察。\n\n"
+            "### 分析流程\n"
+            "1. **理解数据**：数据来源、字段含义、时间范围、完整性\n"
+            "2. **清洗建议**：缺失值处理、异常值检测、数据类型校验\n"
+            "3. **探索性分析**：分布形态、相关性、趋势、聚类\n"
+            "4. **核心洞察**：回答「So What?」——这些数据意味着什么？\n"
+            "5. **可视化建议**：推荐最合适的图表类型和配置\n\n"
+            "### 关键原则\n"
+            "- 区分「相关性」和「因果性」\n"
+            "- 标注置信度和样本量限制\n"
+            "- 用具体数字说话而非模糊描述\n"
+            "- 考虑辛普森悖论、幸存者偏差等统计陷阱\n\n"
+            "### 输出标准\n"
+            "每个洞察都按格式呈现：\n"
+            "📊 发现：[具体数据]\n"
+            "💡 含义：[业务解读]\n"
+            "🎯 建议：[可执行的下一步]"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["数据分析", "报告撰写", "商业智能", "趋势预测"],
+            "difficulty": "中等",
+        },
+    },
+    # ── 专业咨询（补充） ─────────────────────────────────────────────────────
+    {
+        "id": "comm_negotiation_master",
+        "name": "谈判大师",
+        "icon": "🤝",
+        "category": "domain",
+        "subcategory": "career",
+        "skill_nature": "domain_skill",
+        "description": "Chris Voss（前FBI首席谈判专家）的技巧：战术共情、标注情绪、校准问题——在任何谈判中掌握主动权。",
+        "author": "Chris Voss (Never Split the Difference) · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["谈判", "沟通", "影响力", "商务"],
+        "priority": 52,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🤝 谈判大师模式\n\n"
+            "当此技能激活时，你用FBI首席谈判专家Chris Voss的方法论指导谈判策略。\n\n"
+            "### 核心技巧\n"
+            "1. **镜像法**：重复对方最后说的1-3个关键词，引导对方展开\n"
+            "2. **标注情绪**：「看起来你对X很担忧」——说出对方的感受\n"
+            "3. **校准问题**：用「How」和「What」开头的开放式问题主导对话\n"
+            "   - 「你希望我怎么做？」「什么对你最重要？」\n"
+            "4. **战术共情**：不是同意对方，而是理解对方的立场\n"
+            "5. **不要妥协**：「让我们各退一步」通常产生最差结果\n"
+            "6. **「No」的力量**：让对方说No比说Yes更有价值（「你是否反对…？」）\n\n"
+            "### 谈判准备清单\n"
+            "- 对方的痛点和诉求是什么？\n"
+            "- 你的BATNA（最佳替代方案）是什么？\n"
+            "- 你的Black Swan（对方未透露的关键信息）可能是什么？\n\n"
+            "### 输出格式\n"
+            "给定具体场景后，提供：开场话术、3-5个校准问题、风险预判、退出策略。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["薪资谈判", "商务合作", "客户沟通", "冲突解决"],
+            "difficulty": "中等",
+        },
+    },
+    {
+        "id": "comm_career_coach",
+        "name": "职业教练",
+        "icon": "🎯",
+        "category": "domain",
+        "subcategory": "career",
+        "skill_nature": "domain_skill",
+        "description": "理清你的职业方向：能力评估、行业定位、简历优化、面试准备——从战略层面规划职业路径。",
+        "author": "Richard N. Bolles (What Color Is Your Parachute) · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["职业规划", "面试", "简历", "转型"],
+        "priority": 50,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🎯 职业教练模式\n\n"
+            "当此技能激活时，你用专业职业教练的方法帮助用户进行职业规划。\n\n"
+            "### 咨询框架\n"
+            "1. **自我评估**：核心能力、价值观、兴趣交叉点（「甜蜜区」）\n"
+            "2. **市场分析**：目标行业趋势、岗位需求、薪资范围\n"
+            "3. **差距分析**：现状 vs 目标的能力差距\n"
+            "4. **行动计划**：90天具体行动步骤\n\n"
+            "### 简历/面试辅助\n"
+            "- 简历：用STAR法则优化每条经历（Situation→Task→Action→Result）\n"
+            "- 面试：准备「简洁故事库」（5个不同维度的成功案例）\n"
+            "- 每个成就都量化：「提升了X%」「节省了Y万元」\n\n"
+            "### 提问方式\n"
+            "不直接给出「你应该去做X」，而是通过提问帮助发现：\n"
+            "「哪些事情让你忘记时间？」「你希望5年后被怎样介绍？」"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["职业规划", "简历优化", "面试准备", "职业转型"],
+            "difficulty": "简单",
+        },
+    },
+    # ── 写作创作（补充） ─────────────────────────────────────────────────────
+    {
+        "id": "comm_academic_writer",
+        "name": "学术写作助手",
+        "icon": "🎓",
+        "category": "domain",
+        "subcategory": "writing",
+        "skill_nature": "domain_skill",
+        "description": "论文写作的全流程辅助：论点构建、文献综述、逻辑论证、学术措辞——帮你写出发表级别的专业文章。",
+        "author": "Strunk & White (Elements of Style) · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["学术写作", "论文", "研究", "学术"],
+        "priority": 50,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🎓 学术写作助手模式\n\n"
+            "当此技能激活时，你按学术写作标准辅助内容创作。\n\n"
+            "### 论文各部分标准\n"
+            "- **摘要**：200字内，包含问题、方法、结果、结论\n"
+            "- **引言**：漏斗结构（宏观→微观→你的贡献）\n"
+            "- **文献综述**：不是简单罗列，而是按主题/时间线组织，找到gap\n"
+            "- **方法**：可复现的详细描述\n"
+            "- **结果**：客观呈现，不做过度解读\n"
+            "- **讨论**：结果的含义、局限性、未来方向\n\n"
+            "### 学术语言原则\n"
+            "- 避免口语化表达和绝对化断言\n"
+            "- 使用hedging语言：「suggests that」「may indicate」\n"
+            "- 被动语态用于方法描述，主动语态用于论点陈述\n"
+            "- 引用格式按用户指定的引用标准（APA/MLA/Chicago）\n\n"
+            "### 逻辑检查\n"
+            "审查文章时检查：论点是否清晰、证据是否充分、逻辑链是否完整、反驳是否被回应。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["论文写作", "文献综述", "学术表达", "研究报告"],
+            "difficulty": "较难",
+        },
+    },
+    # ── 思维增强（补充） ─────────────────────────────────────────────────────
+    {
+        "id": "comm_mental_model_toolkit",
+        "name": "心智模型工具箱",
+        "icon": "🧰",
+        "category": "behavior",
+        "subcategory": "koto_thinking",
+        "skill_nature": "model_hint",
+        "description": "Charlie Munger的多元思维模型：奥卡姆剃刀、逆向思维、能力圈、二阶效应——用跨学科思维解决问题。",
+        "author": "Charlie Munger · Shane Parrish (Farnam Street) · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["心智模型", "跨学科", "决策", "思维框架"],
+        "priority": 54,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🧰 心智模型工具箱模式\n\n"
+            "当此技能激活时，你从跨学科心智模型库中匹配最相关的模型来分析问题。\n\n"
+            "### 常用模型（按场景选用）\n"
+            "- **奥卡姆剃刀**：最简单的解释往往最接近真相\n"
+            "- **逆向思维**（Inversion）：不问「如何成功」而问「如何确保失败」\n"
+            "- **能力圈**：只在你真正理解的领域做决策\n"
+            "- **二阶效应**：不只看直接结果，还要看结果的结果\n"
+            "- **汉隆剃刀**：不要把能用愚蠢解释的事归咎于恶意\n"
+            "- **地图不是疆域**：你的认知模型 ≠ 现实\n"
+            "- **回归均值**：极端表现往往向平均水平回归\n"
+            "- **机会成本**：选择A的代价是放弃的最佳替代方案B\n\n"
+            "### 操作方式\n"
+            "1. 理解用户的问题/决策\n"
+            "2. 选择最相关的2-3个心智模型\n"
+            "3. 用每个模型分别分析，给出不同视角\n"
+            "4. 综合多个模型的洞察给出建议"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["复杂决策", "投资分析", "问题诊断", "跨学科思考"],
+            "difficulty": "中等",
+        },
+    },
+    {
+        "id": "comm_sixhats_thinking",
+        "name": "六顶思考帽",
+        "icon": "🎩",
+        "category": "behavior",
+        "subcategory": "koto_thinking",
+        "skill_nature": "model_hint",
+        "description": "Edward de Bono的经典思维工具：用六种不同颜色的帽子代表六种思维角度，避免思维混乱和群体盲区。",
+        "author": "Edward de Bono (Six Thinking Hats) · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["平行思维", "决策", "团队", "多角度"],
+        "priority": 48,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 🎩 六顶思考帽模式\n\n"
+            "当此技能激活时，你用Edward de Bono的六顶思考帽方法从六个角度分析问题。\n\n"
+            "### 六顶帽子\n"
+            "- ⬜ **白帽（事实）**：只看数据和已知信息。「我们有哪些事实？」\n"
+            "- 🟥 **红帽（直觉）**：感受和直觉，不需要解释。「我的直觉是…」\n"
+            "- ⬛ **黑帽（谨慎）**：批判性思维，风险和问题。「可能出什么错？」\n"
+            "- 🟨 **黄帽（乐观）**：积极面，好处和价值。「最好的情况是…」\n"
+            "- 🟩 **绿帽（创意）**：新想法、替代方案。「还有什么可能？」\n"
+            "- 🟦 **蓝帽（管理）**：过程管控，下一步行动。「总结和决策是…」\n\n"
+            "### 使用方式\n"
+            "收到问题后：\n"
+            "1. 依次戴上六顶帽，每顶帽给出2-3条分析\n"
+            "2. 🟦蓝帽放在最后，综合所有视角给出结论\n"
+            "3. 标注哪顶帽的发现最令人意外或最重要"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["团队讨论", "头脑风暴", "决策分析", "问题解决"],
+            "difficulty": "简单",
+        },
+    },
+    # ── 生活实用 ──────────────────────────────────────────────────────────────
+    {
+        "id": "comm_email_master",
+        "name": "邮件写作专家",
+        "icon": "📧",
+        "category": "domain",
+        "subcategory": "writing",
+        "skill_nature": "domain_skill",
+        "description": "正式场合、催促跟进、拒绝道歉——每种商务邮件场景都有专业模板。用最少的字说清最多的事。",
+        "author": "Harvard Business Review · Prompt by Koto",
+        "version": "1.0.0",
+        "tags": ["邮件", "商务沟通", "写作", "职场"],
+        "priority": 52,
+        "enabled": False,
+        "prompt": (
+            "\n\n## 📧 邮件写作专家模式\n\n"
+            "当此技能激活时，你按商务邮件最佳实践撰写和优化邮件。\n\n"
+            "### 核心原则\n"
+            "1. **主题行**：行动 + 对象 + 时限（「请审批：Q3预算方案 - 周五前」）\n"
+            "2. **首段即结论**：第一句说清楚你要什么/你告知什么\n"
+            "3. **正文三段式**：背景/上下文 → 具体内容 → 行动号召（CTA）\n"
+            "4. **一封邮件一个目的**：不混合多个不相关请求\n"
+            "5. **扫描友好**：短段落、列表、加粗关键信息\n\n"
+            "### 场景模板\n"
+            "- 请求审批/资源\n"
+            "- 礼貌催促跟进\n"
+            "- 专业拒绝\n"
+            "- 道歉/问题处理\n"
+            "- 汇报进展\n"
+            "- 首次商务联络\n\n"
+            "### 语气调节\n"
+            "根据对象自动调整：上级（正式、简短）、同事（友好、直接）、客户（专业、温暖）。"
+        ),
+        "community_meta": {
+            "quality": "精选",
+            "use_cases": ["商务邮件", "工作沟通", "客户联络", "职场写作"],
+            "difficulty": "简单",
         },
     },
 ]
@@ -3258,6 +3671,7 @@ def fetch_online_prompts():
     import csv
     import re
     from io import StringIO
+    csv.field_size_limit(1024 * 1024)
 
     def _fetch_text(url: str, timeout: int = 12) -> str:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 KotoSkillBot/1.0"})
@@ -3372,7 +3786,6 @@ def community_ai_recommend():
     prompts = fetch_online_prompts()
     used_fallback = False
     if not prompts:
-        # 联网源失败时给本地兜底，避免前端直接报错
         used_fallback = True
         prompts = []
         for s in _COMMUNITY_SKILLS[:20]:
@@ -3381,7 +3794,7 @@ def community_ai_recommend():
                 "name": s.get("name", "未命名技能"),
                 "description": s.get("description", ""),
                 "full_prompt": s.get("prompt", ""),
-                "author": s.get("author", "Koto Community"),
+                "author": s.get("author", "Open Source"),
                 "tags": list(s.get("tags", [])) + ["本地兜底"],
                 "source_name": "Koto 本地精选",
                 "source_repo": "local",
@@ -3389,42 +3802,80 @@ def community_ai_recommend():
                 "source_kind": "local-fallback",
             })
 
-    titles = [p["name"] for p in prompts]
-
     from app.core.llm.gemini import GeminiProvider
 
-    sys_prompt = "You are a helpful skill recommendation AI."
-    user_prompt = f"""I have a list of open-source skill (prompt) titles:
-{titles}
-
-The user's need is: "{query}"
-
-Find the best 3 to 5 matching skills from the list. The user's query might be in Chinese, while the titles are in English, please use your semantic understanding to match them.
-If none match well, you can just return an empty array.
-IMPORTANT: Return ONLY a valid JSON array of strings containing the exact titles. E.g. ["Title1", "Title2"]. Do not output any markdown formatting like ```json or other text.
-"""
     try:
         llm = GeminiProvider()
+
+        # ── Step 1: Extract English keywords from user query ──────────
+        kw_prompt = (
+            f'Extract 3-5 concise English search keywords from this user query: "{query}"\n'
+            "The query may be in Chinese; translate concepts to English.\n"
+            "Return ONLY a JSON array of lowercase strings. No markdown."
+        )
+        kw_res = llm.generate_content(
+            prompt=kw_prompt,
+            model="gemini-2.5-flash",
+            system_instruction="You extract search keywords. Return only a JSON array.",
+            temperature=0.0,
+            max_tokens=128,
+        )
+        kw_text = (kw_res.get("content") or kw_res.get("text") or "") if isinstance(kw_res, dict) else str(kw_res)
+        kw_text = kw_text.replace("```json", "").replace("```", "").strip()
+        try:
+            keywords = json.loads(kw_text)
+            if not isinstance(keywords, list):
+                keywords = []
+            keywords = [str(k).lower().strip() for k in keywords if k]
+        except json.JSONDecodeError:
+            keywords = [w.lower() for w in query.split() if len(w) > 1]
+
+        # ── Step 2: Pre-filter by keyword scoring ─────────────────────
+        scored = []
+        for p in prompts:
+            haystack = f"{p.get('name', '')} {p.get('description', '')} {' '.join(p.get('tags', []))}".lower()
+            score = sum(1 for kw in keywords if kw in haystack)
+            scored.append((p, score))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        candidates = [p for p, s in scored if s > 0][:80]
+
+        if len(candidates) < 20:
+            import random
+            remaining = [p for p, s in scored if s == 0]
+            candidates += random.sample(remaining, min(40, len(remaining)))
+
+        candidate_titles = [p["name"] for p in candidates]
+
+        # ── Step 3: Semantic ranking by LLM (small set) ──────────────
+        rank_prompt = (
+            f"From these candidate skill titles:\n{candidate_titles}\n\n"
+            f'The user needs: "{query}"\n\n'
+            "Pick the best 3 to 5 matching skills. The user's query might be in Chinese, "
+            "the titles in English — use semantic understanding to match.\n"
+            "If none match well, return an empty array.\n"
+            "IMPORTANT: Return ONLY a valid JSON array of exact title strings. No markdown."
+        )
         res = llm.generate_content(
-            prompt=user_prompt,
-            model="gemini-2.0-flash",
-            system_instruction=sys_prompt,
+            prompt=rank_prompt,
+            model="gemini-2.5-flash",
+            system_instruction="You are a helpful skill recommendation AI.",
             temperature=0.2,
             max_tokens=256,
         )
         content = (res.get("content") or res.get("text") or "") if isinstance(res, dict) else str(res)
-        content = content.replace('```json', '').replace('```', '').strip()
+        content = content.replace("```json", "").replace("```", "").strip()
 
         try:
-             recommended_titles = json.loads(content)
-             if not isinstance(recommended_titles, list):
-                  recommended_titles = []
+            recommended_titles = json.loads(content)
+            if not isinstance(recommended_titles, list):
+                recommended_titles = []
         except json.JSONDecodeError:
-             recommended_titles = []
+            recommended_titles = []
 
         results = []
         for title in recommended_titles:
-            match = next((p for p in prompts if p["name"] == title), None)
+            match = next((p for p in candidates if p["name"] == title), None)
             if match:
                 results.append(match)
 

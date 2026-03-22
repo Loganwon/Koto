@@ -570,7 +570,15 @@ async function testConnection() {
 function skipSetup() {
     if (confirm('跳过设置可能导致部分功能无法使用，确定要跳过吗？')) {
         hideSetupWizard();
+        // 显示持久提醒横幅
+        const banner = document.getElementById('apiKeyBanner');
+        if (banner) banner.style.display = 'flex';
     }
+}
+
+function dismissApiKeyBanner() {
+    const banner = document.getElementById('apiKeyBanner');
+    if (banner) banner.style.display = 'none';
 }
 
 function finishSetup() {
