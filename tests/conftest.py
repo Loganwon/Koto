@@ -11,6 +11,7 @@ from __future__ import annotations
 collect_ignore = ["phase2_smoke_test.py"]
 
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -20,6 +21,14 @@ import pytest
 
 def _root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+def _cleanup_test_artifacts() -> None:
+    root = _root()
+    for rel in (".hypothesis", ".pytest_tmp", ".pytest_cache_local"):
+        target = root / rel
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")
@@ -133,3 +142,15 @@ def tmp_workspace(tmp_path):
     os.environ["KOTO_WORKSPACE"] = str(ws)
     yield ws
     os.environ.pop("KOTO_WORKSPACE", None)
+
+
+def pytest_sessionfinish(session, exitstatus):
+    if os.getenv("KOTO_KEEP_TEST_ARTIFACTS", "0") == "1":
+        return
+    _cleanup_test_artifacts()
+
+
+def pytest_unconfigure(config):
+    if os.getenv("KOTO_KEEP_TEST_ARTIFACTS", "0") == "1":
+        return
+    _cleanup_test_artifacts()
