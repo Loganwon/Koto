@@ -63,7 +63,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
 
     root = tk.Tk()
     root.title("Koto 初始化配置")
-    root.resizable(False, False)
+    root.resizable(True, True)
 
     # ── 颜色常量 ──
     BG = "#05080f"
@@ -79,7 +79,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     root.configure(bg=BG)
 
     # ── 让窗口居中 ──
-    W, H = 480, 560
+    W, H = 480, 640
     root.geometry(f"{W}x{H}")
     root.update_idletasks()
     sw = root.winfo_screenwidth()
@@ -242,7 +242,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
 
     # ── 按钮行 ──
     btn_row = tk.Frame(body, bg=BG)
-    btn_row.pack(fill="x")
+    btn_row.pack(fill="x", side="bottom")
 
     def on_cancel():
         result["cancelled"] = True
