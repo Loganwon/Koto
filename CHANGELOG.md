@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.3] — 2026-03-22
+
+### Added
+- **PPTX/PPTM/PPT file reading** (`web/file_parser.py`): `FileParser` now extracts text from PowerPoint presentations via `python-pptx`, including slide content and speaker notes. Slides are labeled `[第 N 页]` and notes `[第 N 页·备注]`.
+- **DOC_ANNOTATE ↔ Skill injection** (`web/document_feedback.py`, `web/app.py`): `full_annotation_loop_streaming()` now accepts a `skill_prompt` parameter. Both the chat-stream and file-upload annotation paths look up the active annotation skill (`annotate_business`, `annotate_academic`, `annotate_translation`, `annotate_code_review`) via `SkillTriggerBinding` and prepend its domain-specific review dimensions into the annotation prompt, replacing the previous generic persona.
+
+### Fixed
+- **Office binary hallucinations** (`web/app.py` → `generate_file_analysis_stream`): Non-PDF binary documents (DOCX, PPTX, XLSX) are no longer sent as raw bytes to Gemini (which cannot parse them natively and hallucinates). They are now routed through `FileParser.parse_file()` and injected as text context. PDF files continue to use `Part.from_bytes()` for native vision analysis.
+- **Merge conflict in `annotate_academic.json`**: Resolved leftover `<<<<<<< HEAD` / `=======` / `>>>>>>>` conflict markers; kept the `review/pr-20260321` version with `enabled: true`, `bound_tools: ["read_docx_paragraphs", "annotate_document", "write_file"]`.
+
+### Tests
+- `tests/unit/test_pr_20260322b.py`: **17 passed** (PPTX extraction, skill injection, Office binary routing, skill metadata)
+
+---
+
 ## [1.6.2] — 2026-03-22
 
 ### Added
