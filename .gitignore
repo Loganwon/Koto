@@ -100,3 +100,4 @@ node_modules/
 # pytest local temp dirs
 .pytest_tmp/
 .pytest_cache_local/
+.hypothesis/
