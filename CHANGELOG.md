@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.2] - 2026-03-22
+- Chore: merge UI fixes and skill community updates.
+- Fix: setup initialization window sizing conflict.
+
+---
+
 ## [1.6.1] — 2026-03-22
 
 ### Added
