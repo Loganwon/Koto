@@ -495,3 +495,115 @@ function togglePromptPreview() {
   toggle.querySelector('.sc-prompt-toggle-icon').textContent = isOpen ? '▲' : '▼';
   block.style.maxHeight = isOpen ? '600px' : '200px';
 }
+
+/* ═══════════════ AI Recommendation ══════════════════════════ */
+async function scAiRecommend() {
+  const input = qs('#aiRecommendInput');
+  const query = (input?.value || '').trim();
+  if (!query) {
+    toast('请输入你需要的技能描述', 'error');
+    return;
+  }
+
+  const btn = qs('#aiRecommendBtn');
+  const loading = qs('#aiRecommendLoading');
+  const resultsArea = qs('#aiRecommendResults');
+  const grid = qs('#aiRecommendGrid');
+
+  if (btn) {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+  }
+  if (loading) loading.style.display = 'block';
+  if (resultsArea) resultsArea.style.display = 'none';
+  if (grid) grid.innerHTML = '';
+
+  try {
+    const resp = await apiFetch('POST', '/api/skillmarket/community/ai-recommend', { query });
+    const list = Array.isArray(resp?.results) ? resp.results : [];
+
+    if (!list.length) {
+      if (grid) {
+        grid.innerHTML = '<div style="color:var(--text-muted); font-size:14px; text-align:center; padding:20px 0;">未找到合适的开源匹配项，换个描述试试？</div>';
+      }
+    } else {
+      const html = list.map((skill, idx) => {
+        const payload = encodeURIComponent(JSON.stringify({
+          name: skill.name || `online_skill_${idx}`,
+          full_prompt: skill.full_prompt || '',
+          description: skill.description || '',
+          author: skill.author || 'Open Source',
+          tags: skill.tags || ['开源推荐'],
+          source_name: skill.source_name || '',
+          source_repo: skill.source_repo || '',
+          source_url: skill.source_url || '',
+          source_path: skill.source_path || '',
+        }));
+
+        return `
+        <div class="sc-card">
+          <div class="sc-card-header">
+            <div class="sc-card-icon">🧠</div>
+            <div class="sc-card-meta">
+              <div class="sc-card-name">${escHtml(skill.name || '未命名技能')}</div>
+              <div class="sc-card-author">${escHtml(skill.author || 'Open Source')}</div>
+            </div>
+          </div>
+          <div class="sc-card-desc">${escHtml(skill.description || '')}</div>
+          <div class="sc-card-tags">
+            <span class="sc-tag sc-tag-plain">开源推荐</span>
+            <span class="sc-tag sc-tag-plain">来源: ${escHtml(skill.source_name || skill.source_repo || 'GitHub')}</span>
+          </div>
+          <div class="sc-card-footer">
+            <span class="sc-difficulty"><span class="sc-difficulty-dot diff-medium"></span>在线</span>
+            <button class="sc-install-btn install" data-action="install-online" data-payload="${payload}">⬇️ 下载并安装</button>
+          </div>
+        </div>`;
+      }).join('');
+      if (grid) grid.innerHTML = html;
+
+      qsa('[data-action="install-online"]', grid || document).forEach(btnEl => {
+        btnEl.addEventListener('click', () => {
+          const raw = btnEl.getAttribute('data-payload') || '';
+          let data;
+          try { data = JSON.parse(decodeURIComponent(raw)); } catch { data = null; }
+          if (!data) {
+            toast('安装参数解析失败', 'error');
+            return;
+          }
+          scInstallOnlineSkill(btnEl, data);
+        });
+      });
+    }
+
+    if (resultsArea) resultsArea.style.display = 'block';
+  } catch (e) {
+    toast(`请求失败：${e.message}`, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }
+    if (loading) loading.style.display = 'none';
+  }
+}
+
+async function scInstallOnlineSkill(btnEl, payload) {
+  if (!btnEl || btnEl.disabled) return;
+  const orig = btnEl.innerHTML;
+  btnEl.disabled = true;
+  btnEl.className = 'sc-install-btn loading';
+  btnEl.innerHTML = '⏳ 安装中…';
+
+  try {
+    const res = await apiFetch('POST', '/api/skillmarket/community/online-install', payload);
+    btnEl.className = 'sc-install-btn installed';
+    btnEl.innerHTML = '✓ 已安装';
+    toast(res.message || '安装成功', 'success');
+  } catch (e) {
+    btnEl.className = 'sc-install-btn install';
+    btnEl.disabled = false;
+    btnEl.innerHTML = orig;
+    toast(`安装失败：${e.message}`, 'error');
+  }
+}

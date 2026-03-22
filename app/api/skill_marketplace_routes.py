@@ -3253,30 +3253,111 @@ def fetch_online_prompts():
     import time
     if _CACHED_ONLINE_PROMPTS and (time.time() - _LAST_FETCH_TIME < 3600):
         return _CACHED_ONLINE_PROMPTS
-        
+
     import urllib.request
     import csv
+    import re
     from io import StringIO
+
+    def _fetch_text(url: str, timeout: int = 12) -> str:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 KotoSkillBot/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+        return raw.decode("utf-8", errors="replace")
+
+    prompts = []
+
+    # Source A: awesome-chatgpt-prompts (CSV)
+    csv_sources = [
+        {
+            "name": "Awesome ChatGPT Prompts",
+            "repo": "f/awesome-chatgpt-prompts",
+            "url": "https://raw.githubusercontent.com/f/awesome-chatgpt-prompts/main/prompts.csv",
+            "source_url": "https://github.com/f/awesome-chatgpt-prompts",
+        },
+        {
+            "name": "Awesome ChatGPT Prompts (CDN mirror)",
+            "repo": "f/awesome-chatgpt-prompts",
+            "url": "https://cdn.jsdelivr.net/gh/f/awesome-chatgpt-prompts@main/prompts.csv",
+            "source_url": "https://github.com/f/awesome-chatgpt-prompts",
+        },
+    ]
+
     try:
-        url = "https://raw.githubusercontent.com/f/awesome-chatgpt-prompts/main/prompts.csv"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        response = urllib.request.urlopen(req, timeout=10).read().decode('utf-8')
-        reader = csv.reader(StringIO(response))
-        header = next(reader)
-        prompts = []
-        for i, row in enumerate(reader):
-            if len(row) >= 2:
+        csv_loaded = False
+        for src in csv_sources:
+            try:
+                response = _fetch_text(src["url"])
+                reader = csv.reader(StringIO(response))
+                _ = next(reader, None)
+                for i, row in enumerate(reader):
+                    if len(row) >= 2 and row[0].strip() and row[1].strip():
+                        prompts.append({
+                            "id": f"online_awesome_{i}",
+                            "name": row[0].strip(),
+                            "description": (row[1][:140] + "...") if len(row[1]) > 140 else row[1],
+                            "full_prompt": row[1],
+                            "author": (row[4].strip() if len(row) > 4 and row[4].strip() else "f/awesome-chatgpt-prompts"),
+                            "tags": ["开源推荐", "github"],
+                            "source_name": src["name"],
+                            "source_repo": src["repo"],
+                            "source_url": src["source_url"],
+                            "source_kind": "csv",
+                        })
+                if prompts:
+                    csv_loaded = True
+                    break
+            except Exception as csv_exc:
+                logger.warning("[online-prompts] csv source failed %s: %s", src.get("url"), csv_exc)
+
+        # Source B: linexjlin/GPTs (index from README)
+        # 这里提供大量高质量现成 GPT 提示词索引；安装时再按路径抓取原文
+        try:
+            readme_text = _fetch_text("https://raw.githubusercontent.com/linexjlin/GPTs/main/README.md")
+            pattern = re.compile(r"^-\s+\[(?P<title>[^\]]+)\]\(\./(?P<path>prompts/[^)]+\.md)\)(?:\s+by\s+(?P<author>.+))?\s*$")
+            idx = 0
+            for line in readme_text.splitlines():
+                m = pattern.match(line.strip())
+                if not m:
+                    continue
+                title = m.group("title").strip()
+                path = m.group("path").strip()
+                author = (m.group("author") or "linexjlin/GPTs contributors").strip()
                 prompts.append({
-                    "id": f"online_{i}",
-                    "name": row[0],
-                    "description": row[1][:120] + "..." if len(row[1])>120 else row[1],
-                    "full_prompt": row[1],
-                    "author": "Awesome Prompts",
-                    "tags": ["开源推荐"]
+                    "id": f"online_gpts_{idx}",
+                    "name": title,
+                    "description": f"来自 GitHub 开源仓库 linexjlin/GPTs · {path}",
+                    "full_prompt": "",  # 安装时按路径抓取原文
+                    "author": author,
+                    "tags": ["开源推荐", "github", "gpts"],
+                    "source_name": "linexjlin/GPTs",
+                    "source_repo": "linexjlin/GPTs",
+                    "source_url": "https://github.com/linexjlin/GPTs",
+                    "source_kind": "markdown-index",
+                    "source_path": path,
                 })
-        _CACHED_ONLINE_PROMPTS = prompts
+                idx += 1
+                if idx >= 300:
+                    break
+        except Exception as md_exc:
+            logger.warning("[online-prompts] markdown source failed: %s", md_exc)
+
+        # 去重（按 name）
+        dedup = {}
+        for p in prompts:
+            key = (p.get("name") or "").strip().lower()
+            if key and key not in dedup:
+                dedup[key] = p
+
+        merged = list(dedup.values())
+        if not merged and _CACHED_ONLINE_PROMPTS:
+            return _CACHED_ONLINE_PROMPTS
+
+        _CACHED_ONLINE_PROMPTS = merged
         _LAST_FETCH_TIME = time.time()
-        return prompts
+        if merged:
+            logger.info("[online-prompts] loaded=%s csv_loaded=%s", len(merged), csv_loaded)
+        return merged
     except Exception as e:
         logger.error(f"Failed to fetch awesome prompts: {e}")
         return _CACHED_ONLINE_PROMPTS or []
@@ -3289,17 +3370,31 @@ def community_ai_recommend():
         return jsonify({"error": "Empty query"}), 400
 
     prompts = fetch_online_prompts()
+    used_fallback = False
     if not prompts:
-        return jsonify({"error": "无法获取在线开源技能库，请检查网络。"}), 500
+        # 联网源失败时给本地兜底，避免前端直接报错
+        used_fallback = True
+        prompts = []
+        for s in _COMMUNITY_SKILLS[:20]:
+            prompts.append({
+                "id": f"local_{s.get('id')}",
+                "name": s.get("name", "未命名技能"),
+                "description": s.get("description", ""),
+                "full_prompt": s.get("prompt", ""),
+                "author": s.get("author", "Koto Community"),
+                "tags": list(s.get("tags", [])) + ["本地兜底"],
+                "source_name": "Koto 本地精选",
+                "source_repo": "local",
+                "source_url": "",
+                "source_kind": "local-fallback",
+            })
 
     titles = [p["name"] for p in prompts]
 
-    from app.api.agent_routes import get_agent
-    from app.core.config_defaults import DEFAULT_MODEL
-    import json
+    from app.core.llm.gemini import GeminiProvider
 
-    sys_prompt = f"""You are a helpful skill recommendation AI.
-I have a list of open-source skill (prompt) titles:
+    sys_prompt = "You are a helpful skill recommendation AI."
+    user_prompt = f"""I have a list of open-source skill (prompt) titles:
 {titles}
 
 The user's need is: "{query}"
@@ -3309,14 +3404,15 @@ If none match well, you can just return an empty array.
 IMPORTANT: Return ONLY a valid JSON array of strings containing the exact titles. E.g. ["Title1", "Title2"]. Do not output any markdown formatting like ```json or other text.
 """
     try:
-        agent = get_agent()
-        res = agent.llm_provider.generate_content(
-            sys_prompt,
-            model=DEFAULT_MODEL,
+        llm = GeminiProvider()
+        res = llm.generate_content(
+            prompt=user_prompt,
+            model="gemini-2.0-flash",
+            system_instruction=sys_prompt,
             temperature=0.2,
-            max_tokens=256
+            max_tokens=256,
         )
-        content = res.get("content", "") if isinstance(res, dict) else str(res)
+        content = (res.get("content") or res.get("text") or "") if isinstance(res, dict) else str(res)
         content = content.replace('```json', '').replace('```', '').strip()
 
         try:
@@ -3332,7 +3428,11 @@ IMPORTANT: Return ONLY a valid JSON array of strings containing the exact titles
             if match:
                 results.append(match)
 
-        return jsonify({"results": results})
+        return jsonify({
+            "results": results,
+            "total_pool": len(prompts),
+            "used_fallback": used_fallback,
+        })
     except Exception as e:
         logger.error(f"AI recommend error: {e}")
         return jsonify({"error": str(e)}), 500
@@ -3343,9 +3443,31 @@ IMPORTANT: Return ONLY a valid JSON array of strings containing the exact titles
 def community_install_online():
     data = request.json or {}
     name = data.get("name")
-    full_prompt = data.get("full_prompt")
+    full_prompt = (data.get("full_prompt") or "").strip()
+    source_repo = (data.get("source_repo") or "").strip()
+    source_path = (data.get("source_path") or "").strip()
 
-    if not name or not full_prompt:
+    if not name:
+        return jsonify({"success": False, "error": "缺少必要字段：name"}), 400
+
+    # 若前端未带完整 prompt，则尝试按来源路径拉取原文（GitHub）
+    if not full_prompt and source_repo and source_path:
+        import urllib.request
+        raw_candidates = [
+            f"https://raw.githubusercontent.com/{source_repo}/main/{source_path}",
+            f"https://raw.githubusercontent.com/{source_repo}/master/{source_path}",
+        ]
+        for raw_url in raw_candidates:
+            try:
+                req = urllib.request.Request(raw_url, headers={"User-Agent": "Mozilla/5.0 KotoSkillBot/1.0"})
+                with urllib.request.urlopen(req, timeout=12) as resp:
+                    full_prompt = resp.read().decode("utf-8", errors="replace").strip()
+                if full_prompt:
+                    break
+            except Exception:
+                continue
+
+    if not full_prompt:
         return jsonify({"success": False, "error": "缺少必要字段"}), 400
 
     import uuid
@@ -3368,17 +3490,26 @@ def community_install_online():
         ]
     }
 
+    src_repo = (data.get("source_repo") or "").strip()
+    src_name = (data.get("source_name") or "").strip()
+    src_url = (data.get("source_url") or "").strip()
+    if src_repo:
+        install_dict["tags"] = list(dict.fromkeys((install_dict.get("tags") or []) + ["github", src_repo]))
+    if src_name and src_name.lower() not in str(install_dict.get("author", "")).lower():
+        install_dict["author"] = f"{install_dict.get('author', 'Open Source')} · {src_name}"
+    if src_url and src_url not in str(install_dict.get("description", "")):
+        install_dict["description"] = f"{install_dict.get('description', '')}\n\n来源：{src_url}".strip()
+
     try:
         SkillDefinition, _, _ = _schema()
         SkillRecorder = _recorder()
         skill = SkillDefinition.from_dict(install_dict)
-        sid = SkillRecorder.save_and_register(skill, overwrite=False)       
+        sid = SkillRecorder.save_and_register(skill, overwrite=False)
         return jsonify({
             "success": True,
             "skill_id": sid,
-            "message": f"「{name}」已成功安装到你的技能库",       
+            "message": f"「{name}」已成功安装到你的技能库",
         }), 201
     except Exception as exc:
         logger.exception("[community/online-install] error")
         return jsonify({"success": False, "error": str(exc)}), 500
- 

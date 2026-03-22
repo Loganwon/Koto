@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Skill 社区 — Koto</title>
-  <link rel="stylesheet" href="/static/css/skill_community.css">
+  <link rel="stylesheet" href="/static/css/skill_community.css?v=20260322c">
 </head>
 <body>
 <div class="sc-page">
@@ -75,24 +75,24 @@
       z-index: 10;
     }
     .sc-ai-box {
-      background: var(--bg-elevated, #161b22);
-      border: 1px solid var(--border, #30363d);
+      background: var(--bg-elevated, #111a2a);
+      border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
       border-radius: 12px;
       padding: 24px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.2);
     }
     .sc-ai-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-    .sc-ai-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: #fff; }
-    .sc-ai-badge { font-size: 12px; font-weight: normal; background: rgba(88,166,255,0.15); color: #58a6ff; padding: 2px 8px; border-radius: 4px; }
-    .sc-ai-desc { color: var(--text-muted, #8b949e); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
+    .sc-ai-header h3 { margin: 0; font-size: 16px; font-weight: 600; color: #e8eefc; }
+    .sc-ai-badge { font-size: 12px; font-weight: normal; background: rgba(76,166,255,0.15); color: #4ca6ff; padding: 2px 8px; border-radius: 4px; }
+    .sc-ai-desc { color: var(--text-muted, #6c7a91); font-size: 13px; margin-bottom: 20px; line-height: 1.5; }
     .sc-ai-input-group { display: flex; gap: 12px; }
-    .sc-ai-input { flex: 1; padding: 12px 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--border, #30363d); border-radius: 8px; color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s; }
-    .sc-ai-input:focus { border-color: #58a6ff; }
-    .sc-ai-btn { padding: 0 24px; background: #238636; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
-    .sc-ai-btn:hover { background: #2ea043; }
-    .sc-ai-loading { display: none; color: #58a6ff; font-size: 13px; margin-top: 16px; animation: pulse 1.5s infinite; }
+    .sc-ai-input { flex: 1; padding: 12px 16px; background: rgba(255,255,255,0.03); border: 1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius: 8px; color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s; }
+    .sc-ai-input:focus { border-color: #4ca6ff; }
+    .sc-ai-btn { padding: 0 24px; background: #2ad489; color: #111a2a; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: opacity 0.2s; white-space: nowrap; }
+    .sc-ai-btn:hover { opacity: 0.9; }
+    .sc-ai-loading { display: none; color: #4ca6ff; font-size: 13px; margin-top: 16px; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
-    .sc-ai-results { display: none; margin-top: 24px; padding-top: 24px; border-top: 1px dashed var(--border, #30363d); }
+    .sc-ai-results { display: none; margin-top: 24px; padding-top: 24px; border-top: 1px dashed var(--border, rgba(255, 255, 255, 0.08)); }
     .sc-ai-results-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--text-muted); }
   </style>
   <div class="sc-ai-section">
@@ -215,6 +215,6 @@
 <!-- Toast Container -->
 <div class="sc-toast-container" id="sc-toast-container"></div>
 
-<script src="/static/js/skill_community.js"></script>
+<script src="/static/js/skill_community.js?v=20260322c"></script>
 </body>
 </html>
