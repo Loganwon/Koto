@@ -1132,6 +1132,12 @@
         </aside>
 
         <main class="main-content chatgpt-main">
+            <!-- API Key 缺失提醒横幅 -->
+            <div id="apiKeyBanner" class="api-key-banner" style="display:none;">
+                <span>⚠️ 尚未配置 API Key，AI 功能不可用。</span>
+                <button onclick="showSetupWizard()">去设置</button>
+                <button class="dismiss-btn" onclick="dismissApiKeyBanner()">✕</button>
+            </div>
             <header class="topbar">
                 <div class="title-stack">
                     <p class="eyebrow">Koto Studio · Gemini + 本地</p>

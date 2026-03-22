@@ -383,6 +383,9 @@ for config_path in config_locations:
 
 # 尝试读取 GEMINI_API_KEY 或 API_KEY
 API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY")
+# 占位符视为无效
+if API_KEY and API_KEY.lower() in {"your_api_key_here", ""}:
+    API_KEY = None
 
 # 读取自定义 API 端点（用于中转服务）
 GEMINI_API_BASE = os.getenv("GEMINI_API_BASE", "").strip()
