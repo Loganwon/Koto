@@ -23,7 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 - `tests/unit/test_pr_20260322b.py`: **17 passed** (PPTX extraction, skill injection, Office binary routing, skill metadata)
-
 ---
 
 ## [1.6.1] — 2026-03-22

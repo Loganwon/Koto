@@ -63,7 +63,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
 
     root = tk.Tk()
     root.title("Koto 初始化配置")
-    root.resizable(False, False)
+    root.resizable(True, True)
 
     # ── 颜色常量 ──
     BG = "#05080f"
@@ -79,7 +79,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     root.configure(bg=BG)
 
     # ── 让窗口居中 ──
-    W, H = 480, 680
+    W, H = 480, 640
     root.geometry(f"{W}x{H}")
     root.update_idletasks()
     sw = root.winfo_screenwidth()
@@ -220,54 +220,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
         bg=BG,
         fg=TEXT2,
         anchor="w",
-    ).pack(fill="x", pady=(0, 10))
-
-    # ── 分隔线（或使用激活码）──
-    sep_row = tk.Frame(body, bg=BG)
-    sep_row.pack(fill="x", pady=(0, 8))
-    tk.Frame(sep_row, bg=BORDER, height=1).pack(side="left", fill="x", expand=True, pady=7)
-    tk.Label(sep_row, text="  或使用激活码  ", font=f_hint, bg=BG, fg="#555").pack(side="left")
-    tk.Frame(sep_row, bg=BORDER, height=1).pack(side="left", fill="x", expand=True, pady=7)
-
-    # ── 激活码输入 ──
-    tk.Label(
-        body, text="激活码", font=f_label, bg=BG, fg=TEXT2, anchor="w"
-    ).pack(fill="x", pady=(0, 4))
-    act_var = tk.StringVar()
-    act_frame = tk.Frame(body, bg=BORDER, padx=1, pady=1)
-    act_frame.pack(fill="x", pady=(0, 6))
-    act_inner = tk.Frame(act_frame, bg=BG2)
-    act_inner.pack(fill="x")
-    tk.Entry(
-        act_inner,
-        textvariable=act_var,
-        font=f_input,
-        bg=BG2,
-        fg=TEXT,
-        insertbackground=ACCENT,
-        relief="flat",
-        bd=8,
-    ).pack(fill="x")
-
-    # ── 微信提示 ──
-    wechat_frame = tk.Frame(body, bg="#1a1400", padx=10, pady=8)
-    wechat_frame.pack(fill="x", pady=(0, 10))
-    tk.Label(
-        wechat_frame,
-        text="📩 没有激活码？加微信联系作者获取：",
-        font=f_hint,
-        bg="#1a1400",
-        fg="#aaa",
-        anchor="w",
-    ).pack(fill="x")
-    tk.Label(
-        wechat_frame,
-        text="18913921188",
-        font=tkfont.Font(family="Microsoft YaHei UI", size=12, weight="bold"),
-        bg="#1a1400",
-        fg="#e8c97a",
-        anchor="w",
-    ).pack(fill="x")
+    ).pack(fill="x", pady=(0, 14))
 
     # ── 状态提示 ──
     status_var = tk.StringVar(value="")
@@ -289,40 +242,16 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
 
     # ── 按钮行 ──
     btn_row = tk.Frame(body, bg=BG)
-    btn_row.pack(fill="x")
+    btn_row.pack(fill="x", side="bottom")
 
     def on_cancel():
         result["cancelled"] = True
         root.destroy()
 
-    def _use_activation_code():
-        code = act_var.get().strip().upper()
-        if not code:
-            return False
-        try:
-            from app.core.llm._license import get_system_key
-            sys_key = get_system_key(code)
-        except Exception:
-            sys_key = None
-        if sys_key:
-            result["key"] = sys_key
-            result["base"] = base_var.get().strip()
-            status_var.set("✅ 激活成功，正在启动…")
-            status_lbl.config(fg=SUCCESS)
-            root.after(600, root.destroy)
-            return True
-        status_var.set("❌ 激活码无效，请检查后重试")
-        status_lbl.config(fg=DANGER)
-        return False
-
     def on_confirm():
         raw_key = key_var.get().strip()
-        act_code = act_var.get().strip()
-        if not raw_key and act_code:
-            _use_activation_code()
-            return
-        if not raw_key and not act_code:
-            status_var.set("❌ 请输入 API 密钥或激活码")
+        if not raw_key:
+            status_var.set("❌ 请输入 API 密钥")
             status_lbl.config(fg=DANGER)
             key_entry.focus_set()
             return
