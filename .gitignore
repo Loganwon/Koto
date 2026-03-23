@@ -114,3 +114,6 @@ config/skill_ratings.json
 # Backup files
 *.bak
 web/app.py.bak
+
+# License module with embedded key (only compiled .pyd ships)
+app/core/llm/_license.py

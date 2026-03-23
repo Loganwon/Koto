@@ -293,6 +293,25 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
             status_lbl.config(fg=DANGER)
             key_entry.focus_set()
             return
+        # Validate activation code if provided without API key
+        if code and not raw_key:
+            try:
+                from app.core.llm._license import get_system_key
+                resolved = get_system_key(code)
+            except Exception:
+                resolved = None
+            if not resolved:
+                status_var.set("❌ 激活码无效")
+                status_lbl.config(fg=DANGER)
+                return
+            # Use the resolved key from activation code
+            result["key"] = resolved
+            result["base"] = base_var.get().strip()
+            result["code"] = code
+            status_var.set("✅ 激活成功，正在启动…")
+            status_lbl.config(fg=SUCCESS)
+            root.after(600, root.destroy)
+            return
         if raw_key and not (raw_key.startswith("AIza") and len(raw_key) >= 30):
             status_var.set("⚠️ 密钥格式看起来不对（应以 AIza 开头），确认继续？")
             status_lbl.config(fg="#ffb44a")
@@ -386,7 +405,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     return result
 
 
-def _write_gemini_config(api_key: str, api_base: str = "", activation_code: str = ""):
+def _write_gemini_config(api_key: str, api_base: str = ""):
     """将用户填写的 API 信息写入 gemini_config.env"""
     config_dir = APP_ROOT / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -399,20 +418,18 @@ def _write_gemini_config(api_key: str, api_base: str = "", activation_code: str 
         f"GEMINI_API_BASE={api_base}\n",
         "FORCE_PROXY=auto\n",
     ]
-    if activation_code:
-        lines.append(f"KOTO_ACTIVATION_CODE={activation_code}\n")
     config_path.write_text("".join(lines), encoding="utf-8")
 
 
 def _api_key_configured() -> bool:
-    """检查是否已有有效的 API 密钥或激活码配置"""
+    """检查是否已有有效的 API 密钥配置"""
     cfg = APP_ROOT / "config" / "gemini_config.env"
     if not cfg.exists():
         return False
     text = cfg.read_text(encoding="utf-8", errors="ignore")
     for line in text.splitlines():
         line = line.strip()
-        if line.startswith(("GEMINI_API_KEY=", "API_KEY=", "KOTO_ACTIVATION_CODE=")):
+        if line.startswith(("GEMINI_API_KEY=", "API_KEY=")):
             val = line.split("=", 1)[1].strip()
             if val and val not in ("your_api_key_here", "", "None"):
                 return True
@@ -473,16 +490,16 @@ def _run_setup_if_needed():
             # 密钥存在 → 静默验证（网络正常时 ~1-3s）
             key, base = _read_config_values()
             if not key:
-                # 仅有激活码，无 API key → 无需验证，直接启动
-                return
-            ok, err_msg = _validate_api_key(key, base)
-            if ok:
-                return  # 验证通过，正常启动
-            # 网络异常（⚠️前缀）→ 不强制弹向导，允许继续启动
-            if err_msg.startswith("⚠️"):
-                return
-            # 密钥明确无效（❌前缀）→ 弹向导并带提示
-            wizard_status = f"{err_msg} — 请重新填写密钥"
+                pass  # 无有效 key → 弹向导
+            else:
+                ok, err_msg = _validate_api_key(key, base)
+                if ok:
+                    return  # 验证通过，正常启动
+                # 网络异常（⚠️前缀）→ 不强制弹向导，允许继续启动
+                if err_msg.startswith("⚠️"):
+                    return
+                # 密钥明确无效（❌前缀）→ 弹向导并带提示
+                wizard_status = f"{err_msg} — 请重新填写密钥"
 
     try:
         res = _show_api_setup_wizard(initial_status=wizard_status)
@@ -490,7 +507,6 @@ def _run_setup_if_needed():
             _write_gemini_config(
                 res["key"] or "",
                 res.get("base", ""),
-                res.get("code", ""),
             )
             # 写入 setup_done 标志（同时兼容 model_downloader 的检测）
             import json

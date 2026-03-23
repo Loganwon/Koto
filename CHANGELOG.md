@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.6.5] - 2026-03-24
+
+### Security & Fixes
+- **Critical Security Fix**: Removed tracked `_license.py` from the Git repository to secure the XOR-obfuscated system API Key from source leaks.
+- **Fixed System API Key Allocation**: Refactored the key unlocking structure (updated the XOR seed to `0xA7`). The key is correctly released **only** when a valid activation code is verified.
+- **Set Up Wizard Fix**: Improved `src/koto_setup.py` activation code validation logic. The setup wizard now properly decrypts the system key before injecting it securely into `gemini_config.env`, instead of directly exposing raw activation codes.
+
 ## [1.6.4] - 2026-03-23
 
 ### Added
