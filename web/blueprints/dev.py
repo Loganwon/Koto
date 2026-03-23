@@ -1,4 +1,4 @@
-﻿"""
+"""
 Dev / debug and RAG blueprint.
 
 Routes:
@@ -26,6 +26,8 @@ import os
 
 from flask import Blueprint, Response, jsonify, request, send_file, send_from_directory
 
+from web.auth import require_auth
+
 _logger = logging.getLogger("koto.routes.dev")
 
 dev_bp = Blueprint("dev", __name__)
@@ -35,6 +37,7 @@ dev_bp = Blueprint("dev", __name__)
 
 
 @dev_bp.route("/api/auto-catalog/status", methods=["GET"])
+@require_auth
 def auto_catalog_status() -> Response:
     """获取自动归纳状态"""
     try:
@@ -56,6 +59,7 @@ def auto_catalog_status() -> Response:
 
 
 @dev_bp.route("/api/auto-catalog/enable", methods=["POST"])
+@require_auth
 def auto_catalog_enable() -> Response:
     """启用自动归纳"""
     try:
@@ -82,6 +86,7 @@ def auto_catalog_enable() -> Response:
 
 
 @dev_bp.route("/api/auto-catalog/disable", methods=["POST"])
+@require_auth
 def auto_catalog_disable() -> Response:
     """禁用自动归纳"""
     try:
@@ -97,6 +102,7 @@ def auto_catalog_disable() -> Response:
 
 
 @dev_bp.route("/api/auto-catalog/run-now", methods=["POST"])
+@require_auth
 def auto_catalog_run_now() -> Response:
     """立即执行一次归纳（手动触发）"""
     try:
@@ -121,6 +127,7 @@ def auto_catalog_run_now() -> Response:
 
 
 @dev_bp.route("/api/auto-catalog/backup-manifest/<path:filename>", methods=["GET"])
+@require_auth
 def get_backup_manifest(filename: str) -> Response:
     """下载备份清单文件"""
     try:
@@ -138,6 +145,7 @@ def get_backup_manifest(filename: str) -> Response:
 
 
 @dev_bp.route("/api/token-stats", methods=["GET"])
+@require_auth
 def api_token_stats() -> Response:
     """返回 Token 用量统计（今日 / 本月 / 按模型 / 近 7 天）"""
     try:
@@ -149,6 +157,7 @@ def api_token_stats() -> Response:
 
 
 @dev_bp.route("/api/token-stats/reset", methods=["POST"])
+@require_auth
 def api_token_stats_reset() -> Response:
     """重置统计数据。Body: {"period": "today" | "month" | "all"}"""
     try:
@@ -164,6 +173,7 @@ def api_token_stats_reset() -> Response:
 
 
 @dev_bp.route("/workflow-dag")
+@require_auth
 def workflow_dag_page() -> Response:
     """工作流 DAG 可视化页面"""
     html_path = os.path.join(
@@ -176,6 +186,7 @@ def workflow_dag_page() -> Response:
 
 
 @dev_bp.route("/api/dev/graph-mermaid", methods=["GET"])
+@require_auth
 def api_dev_graph_mermaid() -> Response:
     """
     返回指定工作流 / Agent 的 Mermaid DAG 图标记。
@@ -232,6 +243,7 @@ def api_dev_graph_mermaid() -> Response:
 
 
 @dev_bp.route("/api/dev/checkpoint-info", methods=["GET"])
+@require_auth
 def api_dev_checkpoint_info() -> Response:
     """返回检查点数据库信息（类型 / 会话数 / 快照总数）。"""
     try:
@@ -243,6 +255,7 @@ def api_dev_checkpoint_info() -> Response:
 
 
 @dev_bp.route("/api/dev/checkpoints/<thread_id>", methods=["GET"])
+@require_auth
 def api_dev_list_checkpoints(thread_id: str) -> Response:
     """列出某会话的检查点快照列表。"""
     try:
@@ -257,6 +270,7 @@ def api_dev_list_checkpoints(thread_id: str) -> Response:
 
 
 @dev_bp.route("/api/dev/checkpoints/<thread_id>", methods=["DELETE"])
+@require_auth
 def api_dev_delete_checkpoints(thread_id: str) -> Response:
     """删除某会话的全部检查点（用于清除对话历史）。"""
     try:
@@ -272,6 +286,7 @@ def api_dev_delete_checkpoints(thread_id: str) -> Response:
 
 
 @dev_bp.route("/api/rag/ingest", methods=["POST"])
+@require_auth
 def api_rag_ingest() -> Response:
     """
     索引文件或文本到向量库。
@@ -309,6 +324,7 @@ def api_rag_ingest() -> Response:
 
 
 @dev_bp.route("/api/rag/query", methods=["POST"])
+@require_auth
 def api_rag_query() -> Response:
     """
     检索向量库，返回相关文本片段。
@@ -350,6 +366,7 @@ def api_rag_query() -> Response:
 
 
 @dev_bp.route("/api/rag/stats", methods=["GET"])
+@require_auth
 def api_rag_stats() -> Response:
     """
     返回 RAG 索引统计信息。
@@ -373,6 +390,7 @@ def api_rag_stats() -> Response:
 
 
 @dev_bp.route("/api/rag/clear", methods=["DELETE"])
+@require_auth
 def api_rag_clear() -> Response:
     """清空 RAG 向量库（删除所有索引数据）。"""
     try:
@@ -392,6 +410,7 @@ def api_rag_clear() -> Response:
 
 
 @dev_bp.route("/api/response/rate", methods=["POST"])
+@require_auth
 def api_response_rate() -> Response:
     """
     接收用户对 AI 回复的星级评分。
