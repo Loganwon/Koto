@@ -35,6 +35,17 @@ def _stub(name: str) -> MagicMock:
     return sys.modules[name]
 
 
+# Pre-import real langgraph submodules so the stubs below don't replace them.
+# If langgraph is installed, these will already be in sys.modules and _stub() will skip them.
+try:
+    import langgraph  # noqa: F401
+    import langgraph.graph  # noqa: F401
+    import langgraph.checkpoint  # noqa: F401
+    import langgraph.checkpoint.memory  # noqa: F401
+    import langgraph.checkpoint.sqlite  # noqa: F401
+except Exception:
+    pass
+
 for _m in [
     "vosk",
     "pynput",

@@ -200,12 +200,26 @@ def _isolate_app_context_and_singletons():
     except Exception:
         pass
 
+    try:
+        from app.core.agent.checkpoint_manager import reset_checkpointer
+
+        reset_checkpointer()
+    except Exception:
+        pass
+
     yield
 
     try:
         from app.core.app_context import ctx
 
         ctx.reset()
+    except Exception:
+        pass
+
+    try:
+        from app.core.agent.checkpoint_manager import reset_checkpointer
+
+        reset_checkpointer()
     except Exception:
         pass
 
