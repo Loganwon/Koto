@@ -16,11 +16,10 @@ import logging
 import threading
 import time
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 from .parallel_executor import (
     CircuitBreaker,
-    Priority,
     RetryPolicy,
     Task,
     TaskStatus,

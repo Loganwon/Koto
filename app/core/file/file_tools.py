@@ -22,9 +22,7 @@ FileToolsPlugin — Agent 文件能力插件
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import re
 import shutil
 import tarfile
@@ -687,7 +685,7 @@ class FileToolsPlugin(AgentPlugin):
                 suffix = "…（已截断）" if len(entry.content_preview) > max_chars else ""
                 return preview + suffix
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         # 直接提取
         try:
@@ -1008,9 +1006,9 @@ class FileToolsPlugin(AgentPlugin):
                         try:
                             total += p.stat().st_size
                         except Exception:
-                            pass
+                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return total
 
         total_bytes = _dir_size(root)
@@ -1024,7 +1022,7 @@ class FileToolsPlugin(AgentPlugin):
                     try:
                         sub_sizes.append((child.name + " (文件)", child.stat().st_size))
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         except PermissionError:
             return f"错误：没有权限访问 {path}"
         sub_sizes.sort(key=lambda x: x[1], reverse=True)
@@ -1064,7 +1062,7 @@ class FileToolsPlugin(AgentPlugin):
                         if sz >= min_bytes:
                             results.append((str(p), sz))
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             results.sort(key=lambda x: x[1], reverse=True)
             results = results[:limit]
         else:
@@ -1342,7 +1340,7 @@ class FileToolsPlugin(AgentPlugin):
             try:
                 out.unlink()
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return "错误：没有有效文件可以压缩"
         size_kb = round(out.stat().st_size / 1024, 1)
         try:
@@ -1352,7 +1350,7 @@ class FileToolsPlugin(AgentPlugin):
             reg.register(str(out), source="manual")
             reg.log_op("compress", str(sources), str(out))
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return f"✅ 已打包 {added} 个文件 → {output_path}  ({size_kb} KB)"
 
     def extract_archive(self, archive_path: str, dest_dir: str = "") -> str:
@@ -1386,7 +1384,7 @@ class FileToolsPlugin(AgentPlugin):
                     registered += 1
             reg.log_op("extract", str(arc), str(dest))
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return f"✅ 解压完成 → {dest}\n   共释放 {registered} 个文件"
 
     # ── 标签 / 收藏 ───────────────────────────────────────────────────────────
@@ -1510,7 +1508,7 @@ class FileToolsPlugin(AgentPlugin):
             if _mask_result.has_pii:
                 safe_content = _mask_result.masked_text
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         prompt = (
             f"请对以下文件内容生成一段简洁的中文摘要（3-5 句话），涵盖主要信息点。{focus_hint}\n\n"
             f"文件名：{p.name}\n\n"
@@ -1551,12 +1549,12 @@ class FileToolsPlugin(AgentPlugin):
                     return "⚠️ 摘要内容被安全策略拦截。"
                 text = _val.text
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             if _mask_result and _mask_result.has_pii:
                 try:
                     text = _mask_result.restore(text)
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return f"📄 {p.name}\n\n{text.strip()}"
         except Exception as e:
             return f"LLM 摘要失败（{e}），以下为原始内容片段：\n\n{content[:500]}"
@@ -1669,7 +1667,7 @@ class FileToolsPlugin(AgentPlugin):
                         context_blocks.append(f"【{entry.name}】\n{excerpts}")
                         continue
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             # 降级：使用 content_preview 前 2000 字
             if entry.content_preview:

@@ -124,7 +124,7 @@ class FileEditorPlugin(AgentPlugin):
 
                 get_file_registry().register(r["path"], source="ai")
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return f"Written to {r['path']} ({r['size']} bytes)"
         return f"Error: {r['error']}"
 
@@ -136,7 +136,7 @@ class FileEditorPlugin(AgentPlugin):
 
                 get_file_registry().register(r["path"], source="ai")
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return f"Appended to {r['path']}"
         return f"Error: {r['error']}"
 
@@ -148,7 +148,7 @@ class FileEditorPlugin(AgentPlugin):
 
                 get_file_registry().register(file_path, source="ai")
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return f"Replaced {r.get('replacements', '?')} occurrence(s) in {file_path}"
         return f"Error: {r['error']}"
 
@@ -161,7 +161,7 @@ class FileEditorPlugin(AgentPlugin):
 
                 get_file_registry().register(file_path, source="ai")
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             not_found = r.get("not_found", [])
             msg = f"Applied {r.get('total_replacements', 0)} replacement(s) in {file_path}"
             if not_found:

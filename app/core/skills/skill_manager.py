@@ -30,11 +30,10 @@
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from app.core.skills.skill_schema import OutputSpec, SkillDefinition
+from app.core.skills.skill_schema import SkillDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -1963,6 +1962,71 @@ class SkillManager:
         return conflicts
 
     @classmethod
+    def _normalize_divination_prompt(cls, prompt: str, user_input: Optional[str] = None) -> str:
+        """统一占卜提示词风格：弱化“神谕”措辞，并默认按问题起牌。"""
+        if not prompt:
+            return prompt
+
+        normalized = prompt
+        replacements = {
+            "神谕占卜模式": "塔罗占卜模式",
+            "你现在是「神谕」——一位洞悉宇宙之语的存在。": "你现在是一位塔罗解读师，风格神秘但表达清晰、可执行。",
+            "神谕寄语（必须有）": "结论总结（必须有）",
+            "神谕的话": "结论",
+            "神谕为你揭示牌面": "牌面为你揭示",
+            "神谕静听宇宙之声": "牌面正在回应你的问题",
+            "向神谕倾诉": "说出你的问题",
+        }
+        for old, new in replacements.items():
+            normalized = normalized.replace(old, new)
+
+        default_draw_rule = (
+            "\n\n**默认起牌规则（高优先级）**\n"
+            "- 占卜技能开启后，只要用户提出占卜相关问题，即默认按问题起牌并解读。\n"
+            "- 不需要先追问“要不要抽牌”；直接进入抽牌与解读。\n"
+            "- 若用户未指定牌阵，默认使用「三张牌阵·处境·行动·结果」。"
+        )
+        if "默认起牌规则" not in normalized:
+            normalized += default_draw_rule
+
+        # 数据驱动分析指导：对于体育、财经、天气等领域给出明确的倾向性预测指导
+        data_driven_guidance = cls._get_divination_data_guidance(user_input)
+        if data_driven_guidance:
+            normalized += "\n\n" + data_driven_guidance
+
+        return normalized
+
+    @classmethod
+    def _get_divination_data_guidance(cls, user_input: Optional[str]) -> str:
+        """根据用户输入检测是否应该提供数据驱动的占卜分析指导"""
+        if not user_input:
+            return ""
+        
+        try:
+            from app.core.skills.divination_data_handler import DivinationDataHandler
+            
+            handler = DivinationDataHandler()
+            context = handler.analyze_divination_question(user_input)
+            
+            # 仅对有数据可用的问题提供指导
+            if context.is_data_available and context.domain != 'general':
+                prediction = handler.generate_data_driven_prediction(context, [])
+                guidance = f"""
+**【数据驱动分析提示】**
+检测到该问题涉及 {context.domain} 领域，且本地有相关数据可用。
+
+关键信息：
+{handler.format_prediction_for_prompt(prediction)}
+
+请在解读中融合这些信息，给出明确的倾向性判断。
+"""
+                return guidance
+        except Exception as e:
+            logger.debug(f"[SkillManager] 数据驱动分析失败（非致命）: {e}")
+        
+        return ""
+
+    @classmethod
     def inject_into_prompt(
         cls,
         base_instruction: str,
@@ -2083,6 +2147,9 @@ class SkillManager:
             else:
                 p = s.get("prompt", "").strip()
 
+            if skill_id == "divination" and p:
+                p = cls._normalize_divination_prompt(p, user_input)
+
             if p:
                 # 注入 plan_template（仅在 prompt 中尚未包含执行步骤时追加，避免重复）
                 pt = (
@@ -2153,6 +2220,8 @@ class SkillManager:
                 ).strip()
             else:
                 p = s.get("prompt", "").strip()
+            if skill_id == "divination" and p:
+                p = cls._normalize_divination_prompt(p, user_input)
             if p:
                 # 临时 skill 也注入 plan_template（不注入 examples，避免 token 浪费）
                 pt = getattr(skill_def, "plan_template", None) if skill_def else None
@@ -2343,6 +2412,61 @@ class SkillManager:
         logger.info(
             f"[SkillManager] ✅ 注册自定义 Skill: {skill_def.id} (v{skill_def.version})"
         )
+        return True
+
+    @classmethod
+    def uninstall_custom_skill(cls, skill_id: str) -> bool:
+        """
+        卸载一个自定义 Skill。
+        从内存注销并删除 config/skills/{id}.json，同时清除对应的配置。
+        """
+        cls._ensure_init()
+        
+        # 1. 检查是否存在且非内置
+        skill_def = cls._def_registry.get(skill_id)
+        if not skill_def:
+            return False
+            
+        if getattr(skill_def, "author", "") == "builtin":
+            logger.warning(f"[SkillManager] 拒绝卸载内置 Skill: {skill_id}")
+            return False
+
+        # 2. 从内存中移除
+        cls._def_registry.pop(skill_id, None)
+        cls._registry.pop(skill_id, None)
+
+        # 3. 清理 user_settings 中的配置信息
+        try:
+            p = cls._settings_path()
+            if p.exists():
+                with open(p, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if "skills" in data and skill_id in data["skills"]:
+                    del data["skills"][skill_id]
+                    with open(p, "w", encoding="utf-8") as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"[SkillManager] 卸载时清理设置失败: {e}")
+
+        # 4. 删除物理文件
+        try:
+            skills_dir = cls._settings_path().parent / "skills"
+            skill_file = skills_dir / f"{skill_id}.json"
+            if skill_file.exists():
+                skill_file.unlink()
+        except Exception as e:
+            logger.error(f"[SkillManager] 卸载时删除物理文件失败: {e}")
+            return False
+            
+        # 5. 解绑绑定的触发器（可选，如果不在此处处理也OK，依赖系统的懒惰清理）
+        try:
+            from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+            binding_manager = get_skill_binding_manager()
+            binding_manager.unbind_all_for_skill(skill_id)
+        except Exception as exc:
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 若没启用该管理器也不影响
+            
+        logger.info(f"[SkillManager] ✅ 成功卸载自定义 Skill: {skill_id}")
         return True
 
     @classmethod

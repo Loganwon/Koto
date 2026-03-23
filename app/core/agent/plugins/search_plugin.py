@@ -3,7 +3,6 @@
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
-from app.core.services.search_service import SearchService
 
 
 class SearchPlugin(AgentPlugin):

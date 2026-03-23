@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\plugins\memory_tools_plugin.py
-# hypothesis_version: 6.151.9
-
-['INTEGER', 'MemoryTools', 'OBJECT', 'STRING', 'agent', 'category', 'content', 'context_recall', 'decision', 'description', 'func', 'get_memory_manager', 'k', 'memory_save', 'memory_search', 'name', 'parameters', 'preference', 'properties', 'query', 'reminder', 'required', 'session_summary', 'topic', 'topic_summary', 'type', 'user_fact', 'web.app']

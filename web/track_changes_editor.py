@@ -17,7 +17,6 @@ import logging
 import os
 import re
 import shutil
-import tempfile
 import zipfile
 from datetime import datetime
 from typing import Any, Dict, List

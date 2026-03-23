@@ -12,14 +12,11 @@
 - 失败时自动回退为红色标注
 """
 
-import json
 import logging
 import os
 import shutil
 from copy import deepcopy
-from datetime import datetime
 from difflib import SequenceMatcher
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)

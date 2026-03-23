@@ -59,7 +59,7 @@ import logging
 import os
 import re
 import sys as _sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -527,7 +527,6 @@ class SkillPackager:
         打包多个 Skill 为 .kotosk 文件。
         返回输出文件路径。
         """
-        import tempfile
         import zipfile
         from datetime import datetime, timezone
 

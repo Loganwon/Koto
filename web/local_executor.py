@@ -442,7 +442,7 @@ class LocalExecutor:
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         return None
 
@@ -530,7 +530,7 @@ class LocalExecutor:
                     result["message"] = f"✅ 正在尝试打开 {app_name}"
                     return result
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
                 result["message"] = f"❌ 无法打开 {app_name}，请确认已安装"
                 return result

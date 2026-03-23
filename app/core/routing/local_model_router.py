@@ -5,7 +5,7 @@ import logging
 import socket
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Optional
 
 import requests
 
@@ -453,8 +453,7 @@ class LocalModelRouter:
             try:
                 cls.classify("你好", timeout=8.0)
             except Exception:
-                pass
-
+                logger.warning("Silenced exception caught", exc_info=True)
         _threading.Thread(target=_warmup, daemon=True, name="ollama-warmup").start()
         return True
 
@@ -658,7 +657,7 @@ class LocalModelRouter:
 
                     auto_record_interaction(user_input, task_type, confidence)
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                 return task_type, conf_str, "Local"
             else:
                 logger.info(f"[LocalModelRouter] 无法解析结果: {raw[:80]}")
@@ -1201,7 +1200,7 @@ class LocalModelRouter:
                         user_input=user_input or "", task_type="CHAT"
                     )
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                 try:
                     from app.core.skills.skill_trigger_binding import (
                         get_skill_binding_manager,
@@ -1213,7 +1212,7 @@ class LocalModelRouter:
                     if _binding_ids:
                         _temp_ids = list(dict.fromkeys(_temp_ids + _binding_ids))
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                 sys_prompt = SkillManager.inject_into_prompt(
                     _base,
                     task_type="CHAT",
@@ -1259,7 +1258,6 @@ class LocalModelRouter:
                 if resp.status_code != 200:
                     return
 
-                import re as _re
 
                 _in_think = False
                 _think_buf = ""
@@ -1354,7 +1352,7 @@ class LocalModelRouter:
                 except ValueError:
                     pass
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         if task_type is None:
             return RouterDecision(
@@ -1392,7 +1390,7 @@ class LocalModelRouter:
                         elif skill_id is None:
                             skill_id = sid  # 候选，继续看是否有更好的
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         return RouterDecision(
             task_type=task_type,

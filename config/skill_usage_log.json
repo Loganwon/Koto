@@ -1,7 +1,7 @@
 {
   "divination": {
-    "total": 3,
-    "last_used": 1773982025,
+    "total": 7,
+    "last_used": 1774183304,
     "events": [
       {
         "ts": 1773935751,
@@ -14,12 +14,28 @@
       {
         "ts": 1773982025,
         "session": ""
+      },
+      {
+        "ts": 1774178189,
+        "session": ""
+      },
+      {
+        "ts": 1774178258,
+        "session": ""
+      },
+      {
+        "ts": 1774182030,
+        "session": ""
+      },
+      {
+        "ts": 1774183304,
+        "session": ""
       }
     ]
   },
   "long_doc_parser": {
-    "total": 3,
-    "last_used": 1774119169,
+    "total": 4,
+    "last_used": 1774245116,
     "events": [
       {
         "ts": 1774119068,
@@ -31,6 +47,20 @@
       },
       {
         "ts": 1774119169,
+        "session": ""
+      },
+      {
+        "ts": 1774245116,
+        "session": ""
+      }
+    ]
+  },
+  "step_by_step": {
+    "total": 1,
+    "last_used": 1774245116,
+    "events": [
+      {
+        "ts": 1774245116,
         "session": ""
       }
     ]

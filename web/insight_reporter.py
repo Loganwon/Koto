@@ -10,10 +10,10 @@
 import json
 import logging
 import sqlite3
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from behavior_monitor import BehaviorMonitor
 from knowledge_graph import KnowledgeGraph

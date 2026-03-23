@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional
 
 from app.core.agent.base import AgentPlugin
 from app.core.remediation.remediation_manager import (
-    RemediationStatus,
     get_remediation_manager,
 )
 

@@ -31,7 +31,7 @@ doc_planner.py — 复杂文件生成的规划层（Planning Layer）
 import json
 import logging
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Optional
 
 # ═══════════════════════════════════════════════════════

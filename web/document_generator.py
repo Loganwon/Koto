@@ -13,7 +13,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,6 @@ def save_docx(
     os.makedirs(output_dir, exist_ok=True)
 
     from docx import Document
-    from docx.enum.style import WD_STYLE_TYPE
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
@@ -700,8 +699,8 @@ def save_pdf(
         output_dir = DEFAULT_OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
 
-    from reportlab.lib.colors import Color, HexColor, black, white
-    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
+    from reportlab.lib.colors import HexColor, white
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm, inch, mm
@@ -717,11 +716,9 @@ def save_pdf(
         PageTemplate,
         Paragraph,
         Preformatted,
-        SimpleDocTemplate,
         Spacer,
         Table,
         TableStyle,
-        doctemplate,
     )
     from reportlab.platypus.tableofcontents import TableOfContents
 
@@ -1261,16 +1258,14 @@ def _save_pdf_reportlab(
         output_dir = DEFAULT_OUTPUT_DIR
     os.makedirs(output_dir, exist_ok=True)
 
-    from reportlab.lib.colors import HexColor, black, white
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.colors import HexColor, white
+    from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
     from reportlab.platypus import (
-        ListFlowable,
-        ListItem,
         Paragraph,
         Preformatted,
         SimpleDocTemplate,

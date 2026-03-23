@@ -222,7 +222,7 @@ class TemplateFillPlugin(AgentPlugin):
                 if p.exists():
                     return p
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         # 回退：约定目录
         fallback = _TMPL_DIR / skill_id / "template.docx"

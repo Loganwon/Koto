@@ -10,7 +10,6 @@ SystemToolsPlugin — Python 代码执行 & 包管理
 import ast
 import importlib
 import logging
-import os
 import subprocess
 import sys
 import traceback

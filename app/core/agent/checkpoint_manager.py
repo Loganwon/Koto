@@ -188,7 +188,6 @@ class CheckpointManager:
             return True  # MemorySaver 不需要删除
 
         try:
-            from langgraph.checkpoint.sqlite import SqliteSaver
 
             cp = get_checkpointer()
             # SqliteSaver v1.x 支持通过 conn 直接删除
@@ -200,7 +199,7 @@ class CheckpointManager:
                             f"DELETE FROM {table} WHERE thread_id = ?", (thread_id,)
                         )
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                 cp.conn.commit()
                 logger.info(f"[CheckpointManager] 删除 thread_id={thread_id}")
                 return True

@@ -28,7 +28,7 @@ SkillAutoMatcher 仍保留为降级兜底，当 Skill 工具未被 LLM 触发时
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 

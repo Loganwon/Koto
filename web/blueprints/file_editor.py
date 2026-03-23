@@ -33,7 +33,7 @@ import os
 import tempfile
 import time
 
-from flask import Blueprint, Response, jsonify, request, send_file
+from flask import Blueprint, Response, jsonify, request
 
 _logger = logging.getLogger("koto.routes.file_editor")
 

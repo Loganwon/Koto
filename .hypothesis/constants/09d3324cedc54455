@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\types.py
-# hypothesis_version: 6.151.9
-
-['action', 'answer', 'content', 'error', 'metadata', 'observation', 'step_type', 'steps', 'thought', 'tool_args', 'tool_call_id', 'tool_name']

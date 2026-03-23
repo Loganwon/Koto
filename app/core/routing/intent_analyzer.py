@@ -152,7 +152,7 @@ class IntentAnalyzer:
                 if last_summary:
                     recent_lines.append(f"[上轮回复摘要] {last_summary}")
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         # Append pre-formatted memory context string if provided
         if memory_context and memory_context.strip():

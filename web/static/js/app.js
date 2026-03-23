@@ -854,12 +854,7 @@ function chatSearchNavKey(e) {
 }
 
 function toggleMyStuff() {
-    const panel = document.getElementById('myStuffPanel');
-    const item = document.getElementById('myStuffItem');
-    if (!panel) return;
-    const open = panel.classList.toggle('open');
-    if (item) item.classList.toggle('expanded', open);
-    if (open) loadRecentFiles();
+    openFileHubModal();
 }
 
 async function loadRecentFiles() {
@@ -2748,6 +2743,8 @@ async function sendMessage(event) {
             let lastStreamEventTime = Date.now();
             let stuckWatchdogTimer = null;
             let progressTickTimer = null;  // 1s 计秒器（不重绘面板）
+            const taskStepStates = new Map(); // step_index -> {status,title,detail}
+            let copilotTimelineActive = false; // Copilot 步骤时间线是否激活
 
             // 卡住检测 watchdog：连续 25s 无事件则展示重试/放弃按钮
             const STUCK_THRESHOLD_MS = 25000;
@@ -3081,7 +3078,7 @@ async function sendMessage(event) {
                                     // 每50ms更新一次UI
                                     if (Date.now() - lastUpdateTime > 50) {
                                         // Agent 模式：如有步骤/思考面板，只更新 .agent-answer 区，保留面板
-                                        const _hasAgentPanels = !!(bodyEl.querySelector('.koto-steps') || bodyEl.querySelector('.agent-steps-panel') || bodyEl.querySelector('.thinking-panel'));
+                                        const _hasAgentPanels = !!(bodyEl.querySelector('.koto-steps') || bodyEl.querySelector('.agent-steps-panel') || bodyEl.querySelector('.thinking-panel') || bodyEl.querySelector('.copilot-timeline'));
                                         if (_hasAgentPanels) {
                                             let _answerDiv = bodyEl.querySelector('.agent-answer');
                                             if (!_answerDiv) {
@@ -3183,9 +3180,90 @@ async function sendMessage(event) {
                                         if (pctEl) pctEl.textContent = pPct > 0 ? `${pPct}%` : '';
                                         scrollToBottom();
                                     }
+                                } else if (data.type === 'task_step') {
+                                    // ── Copilot 风格逐步执行时间线 ──
+                                    lastStreamEventTime = Date.now();
+                                    const stepStatus = data.status || 'running';
+
+                                    if (stepStatus === 'init') {
+                                        // 初始化：创建完整时间线面板
+                                        copilotTimelineActive = true;
+                                        taskStepStates.clear();
+                                        const steps = Array.isArray(data.steps) ? data.steps : [];
+                                        steps.forEach(s => {
+                                            taskStepStates.set(s.index, { status: 'planned', title: s.title || `步骤 ${s.index}`, detail: '' });
+                                        });
+                                        // 清空 bodyEl 并创建时间线
+                                        bodyEl.innerHTML = '';
+                                        const timeline = document.createElement('details');
+                                        timeline.className = 'copilot-timeline';
+                                        timeline.open = true;
+                                        const stepTotal = Number(data.step_total || steps.length);
+                                        let stepsHtml = '';
+                                        steps.forEach(s => {
+                                            stepsHtml += `<div class="ct-step ct-planned" data-step="${s.index}"><span class="ct-icon"><span class="ct-dot"></span></span><span class="ct-label">${escapeHtml(s.title || '步骤 ' + s.index)}</span><span class="ct-detail"></span><span class="ct-time"></span></div>`;
+                                        });
+                                        timeline.innerHTML = `<summary class="ct-summary"><span class="ct-spinner"></span><span class="ct-title">正在执行 · ${stepTotal} 个步骤</span><span class="ct-elapsed">0s</span></summary><div class="ct-body"><div class="ct-steps">${stepsHtml}</div><div class="ct-progress"><div class="ct-bar" style="width:0%"></div></div><div class="ct-pct"></div></div>`;
+                                        bodyEl.appendChild(timeline);
+                                        // 启动计秒器
+                                        if (progressTickTimer) clearInterval(progressTickTimer);
+                                        progressTickTimer = setInterval(() => {
+                                            if (streamComplete) { clearInterval(progressTickTimer); progressTickTimer = null; return; }
+                                            const el = bodyEl.querySelector('.ct-elapsed');
+                                            if (el) el.textContent = `${Math.floor((Date.now() - startTime) / 1000)}s`;
+                                        }, 1000);
+                                        scrollToBottom();
+
+                                    } else if (stepStatus === 'all_done') {
+                                        // 全部完成 — 更新进度到 100%
+                                        const bar = bodyEl.querySelector('.ct-bar');
+                                        if (bar) bar.style.width = '100%';
+                                        const pct = bodyEl.querySelector('.ct-pct');
+                                        if (pct) pct.textContent = '100%';
+                                        scrollToBottom();
+
+                                    } else {
+                                        // running / done / failed — 更新单个步骤
+                                        const idx = Number(data.step_index || 0);
+                                        const title = data.title || `步骤 ${idx}`;
+                                        const detail = data.detail || '';
+                                        if (idx > 0) {
+                                            taskStepStates.set(idx, { status: stepStatus, title, detail });
+                                        }
+                                        const stepEl = bodyEl.querySelector(`.ct-step[data-step="${idx}"]`);
+                                        if (stepEl) {
+                                            stepEl.className = `ct-step ct-${stepStatus}`;
+                                            const iconEl = stepEl.querySelector('.ct-icon');
+                                            if (iconEl) {
+                                                if (stepStatus === 'done') {
+                                                    iconEl.innerHTML = '<span class="ct-check">✓</span>';
+                                                } else if (stepStatus === 'failed') {
+                                                    iconEl.innerHTML = '<span class="ct-fail">✗</span>';
+                                                } else {
+                                                    iconEl.innerHTML = '<span class="ct-spin"></span>';
+                                                }
+                                            }
+                                            const detailEl = stepEl.querySelector('.ct-detail');
+                                            if (detailEl && detail) detailEl.textContent = detail;
+                                            const labelEl = stepEl.querySelector('.ct-label');
+                                            if (labelEl) labelEl.textContent = escapeHtml(title);
+                                        }
+                                        // 更新进度条
+                                        if (typeof data.progress === 'number') {
+                                            const pct = Math.max(0, Math.min(100, data.progress));
+                                            const bar = bodyEl.querySelector('.ct-bar');
+                                            if (bar) bar.style.width = `${pct}%`;
+                                            const pctEl = bodyEl.querySelector('.ct-pct');
+                                            if (pctEl) pctEl.textContent = pct > 0 ? `${pct}%` : '';
+                                        }
+                                        scrollToBottom();
+                                    }
                                 } else if (data.type === 'classification') {
                                     // 任务分类已通过 header badge 展示，不再注入消息正文（旧方案清除）
                                     console.log('[STREAM] 任务分类:', data.task_type, '方法:', data.route_method);
+                                    if (data.task_id) {
+                                        setSessionTaskId(thisSession, data.task_id);
+                                    }
                                     lastStreamEventTime = Date.now();
                                 } else if (data.type === 'sources') {
                                     lastStreamEventTime = Date.now();
@@ -3193,11 +3271,21 @@ async function sendMessage(event) {
                                     appendSourcesToBody(bodyEl, latestSources);
                                     scrollToBottom();
                                 } else if (data.type === 'status') {
-                                    // 多步任务状态更新 — 保留注入正文（status 是实质性输出）
+                                    // 多步任务状态更新
                                     console.log('[STREAM] 状态更新:', data.message);
                                     lastStreamEventTime = Date.now();
-                                    fullText += (data.message || '') + '\n';
-                                    bodyEl.innerHTML = parseMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
+                                    if (copilotTimelineActive) {
+                                        // 时间线模式：不写入 fullText 以避免覆盖时间线 UI
+                                        const timeline = bodyEl.querySelector('.copilot-timeline');
+                                        const titleEl = timeline && timeline.querySelector('.ct-title');
+                                        if (titleEl && data.message) {
+                                            const brief = (data.message || '').replace(/\n/g, ' ').substring(0, 60);
+                                            titleEl.textContent = brief;
+                                        }
+                                    } else {
+                                        fullText += (data.message || '') + '\n';
+                                        bodyEl.innerHTML = parseMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
+                                    }
                                     scrollToBottom();
                                 } else if (data.type === 'info') {
                                     // info 事件：调试用，不污染消息正文（旧方案清除）
@@ -3430,6 +3518,8 @@ async function sendMessage(event) {
                                     // ── 停止步骤计时器 ──
                                     if (agentStepTimer) { clearInterval(agentStepTimer); agentStepTimer = null; }
 
+                                    // ── Copilot 时间线面板 ──
+                                    const copilotTimeline = bodyEl.querySelector('.copilot-timeline');
                                     // ── 新版 .koto-steps 面板 ──
                                     const kotoSteps = bodyEl.querySelector('.koto-steps');
                                     // ── 旧版 .agent-steps-panel（向后兼容）──
@@ -3439,7 +3529,33 @@ async function sendMessage(event) {
                                     const savedThinkingPanel = bodyEl.querySelector('.thinking-panel');
                                     if (savedThinkingPanel) savedThinkingPanel.remove();
 
-                                    if (kotoSteps) {
+                                    if (copilotTimeline) {
+                                        // 折叠 Copilot 时间线
+                                        copilotTimeline.querySelectorAll('.ct-step.ct-running, .ct-step.ct-planned').forEach(el => {
+                                            el.className = 'ct-step ct-done';
+                                            const iconEl = el.querySelector('.ct-icon');
+                                            if (iconEl) iconEl.innerHTML = '<span class="ct-check">✓</span>';
+                                        });
+                                        copilotTimeline.open = false;
+                                        const ctSummary = copilotTimeline.querySelector('.ct-summary');
+                                        const stepCount = copilotTimeline.querySelectorAll('.ct-step').length;
+                                        if (ctSummary) {
+                                            ctSummary.innerHTML = `<span class="ct-done-icon">✓</span><span class="ct-meta">${stepCount} 步 · ${backendTime}s</span>`;
+                                        }
+                                        const bar = copilotTimeline.querySelector('.ct-bar');
+                                        if (bar) bar.style.width = '100%';
+                                        copilotTimelineActive = false;
+                                        // 渲染回复区
+                                        let answerDiv = bodyEl.querySelector('.agent-answer');
+                                        if (!answerDiv) {
+                                            answerDiv = document.createElement('div');
+                                            answerDiv.className = 'agent-answer';
+                                            bodyEl.appendChild(answerDiv);
+                                        }
+                                        answerDiv.innerHTML = parseMarkdown(fullText);
+                                        renderMermaidBlocks();
+                                        timeEl.textContent = `⏱️ ${backendTime}s`;
+                                    } else if (kotoSteps) {
                                         // 将所有仍然 pending 的行标记为 done（防止异常情况遗留）
                                         kotoSteps.querySelectorAll('.koto-step.pending').forEach(r => {
                                             const d2 = r.dataset.stepDesc || r.querySelector('.koto-step-desc')?.textContent || '';
@@ -8128,6 +8244,25 @@ async function saveCreateSkill() {
 
 // ================= FileHub Panel =================
 
+function openFileHubModal() {
+    const modal = document.getElementById('filehubModal');
+    if (modal) {
+        modal.style.display = 'flex';
+        // 默认显示搜索并加载最近文件（作为"我的内容"的综合入口）
+        fhSwitchTab('search');
+        fhLoadRecent();
+        const navItem = document.getElementById('myStuffItem');
+        if (navItem) navItem.classList.add('active');
+    }
+}
+
+function closeFileHubModal() {
+    const modal = document.getElementById('filehubModal');
+    if (modal) modal.style.display = 'none';
+    const navItem = document.getElementById('myStuffItem');
+    if (navItem) navItem.classList.remove('active');
+}
+
 const _FILE_CAT_ICONS = {
     '文档': '📄', '图片': '🖼️', '视频': '🎬', '音频': '🎵',
     '代码': '💻', '压缩包': '📦', '其他': '📎',
@@ -8286,7 +8421,7 @@ function fhFilterBrowseResults(q) {
 async function fhRegisterBrowsed() {
     const path = document.getElementById('fhBrowsePath')?.value?.trim();
     if (!path) { alert('请先浏览一个目录'); return; }
-    if (!confirm(`将目录「${path}」注册到文件库中，继续？`)) return;
+    if (!confirm(`将目录「${path}」注册到我的文件中，继续？`)) return;
     try {
         const r = await fetch('/api/files/scan-dir', {
             method: 'POST',
@@ -8378,7 +8513,7 @@ async function fileHubLoadStats() {
         const stats = d.stats || d;
         const total = stats.total || 0;
         const el = document.getElementById('fhStatsSummary');
-        if (el) el.textContent = `文件库：${total} 个文件`;
+        if (el) el.textContent = `我的文件：${total} 个文件`;
     } catch(e) { /* silent */ }
 }
 

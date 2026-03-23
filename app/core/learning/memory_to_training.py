@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -307,7 +306,6 @@ class MemoryToTraining:
         相比原始 TrainingDataBuilder._load_shadow_traces()，差异在于
         system 字段携带了真实用户画像，使本地模型学会「有上下文的回复」。
         """
-        import sys
 
         _base = _base_dir()
         shadow_dir = _base / "workspace" / "shadow_traces"

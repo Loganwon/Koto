@@ -41,7 +41,7 @@ import threading
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -325,7 +325,7 @@ class ContactManager:
                         contact["days_since"] = days_since
                         results.append(contact)
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return results
 
     def push_follow_up_reminders(self):

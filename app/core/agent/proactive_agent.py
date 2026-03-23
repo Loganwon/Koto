@@ -355,7 +355,7 @@ class ProactiveAgent:
                 if generated and 10 < len(generated) < 80:
                     content = generated.strip()
             except Exception:
-                pass  # fallback to template
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # fallback to template
 
         return _make_msg(
             "greeting", content, priority="low", triggered_by="time_gap", ttl_hours=8
@@ -392,7 +392,7 @@ class ProactiveAgent:
                 if generated and 15 < len(generated) < 100:
                     content = generated.strip()
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         msg = _make_msg(
             "follow_up",
@@ -599,7 +599,7 @@ class ProactiveAgent:
                 if generated and 15 < len(generated) < 100:
                     content = generated.strip()
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         msg = _make_msg(
             "failed_retry",

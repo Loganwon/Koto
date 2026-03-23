@@ -31,7 +31,7 @@ import logging
 import threading
 import time
 from collections import deque
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class ContextStore:
                 if summary and len(summary) < len(text):
                     return summary
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         # 兜底：硬截断
         return text[:max_chars]
 

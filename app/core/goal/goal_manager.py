@@ -542,7 +542,7 @@ class GoalManager:
         # 在 TaskLedger 创建对应的 TaskRecord，便于跨系统追踪
         linked_task_id: Optional[str] = None
         try:
-            from app.core.tasks.task_ledger import TaskPriority, get_ledger
+            from app.core.tasks.task_ledger import get_ledger
 
             ledger = get_ledger()
             task_rec = ledger.create(

@@ -87,7 +87,7 @@ def _search_files_in_dirs(
         if found:
             return found[:top_k]
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # 2. Fallback: glob scan
     _SUPPORTED = {

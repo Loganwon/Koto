@@ -31,6 +31,24 @@ def _cleanup_test_artifacts() -> None:
             shutil.rmtree(target, ignore_errors=True)
 
 
+def pytest_configure(config):
+    """Remove stale .pytest_tmp before each session and pre-load real packages
+    that module-level stubs in test files must not override."""
+    pytest_tmp = _root() / ".pytest_tmp"
+    if pytest_tmp.exists():
+        shutil.rmtree(pytest_tmp, ignore_errors=True)
+
+    # Pre-import packages so that module-level _stub() calls in test files
+    # (which only stub when 'name not in sys.modules') won't replace the real
+    # package with a MagicMock that breaks other tests.
+    for _pkg in ("docx",):
+        try:
+            import importlib
+            importlib.import_module(_pkg)
+        except ImportError:
+            pass
+
+
 @pytest.fixture(scope="session")
 def _koto_tmp_db(tmp_path_factory):
     """Isolated temp DB dir for the whole session."""
@@ -161,7 +179,6 @@ def _mock_vosk_teardown(monkeypatch):
     """Prevents vosk segfaults in pytest by mocking out vosk Model if not strictly needed."""
     try:
         import vosk
-
         def dummy_del(self):
             pass
 

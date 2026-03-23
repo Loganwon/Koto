@@ -31,6 +31,7 @@
     let _originalTheme     = '';
     let _originalPlaceholder = '';
     let _assistantPrefix   = '';
+    let _lastDivinationConfig = null;
 
     // ─── CSS 变量注入 ─────────────────────────────────────────────────────────
 
@@ -300,14 +301,29 @@
             const isNew = sourcesStr !== _lastSources;
             _lastSources = sourcesStr;
 
+            const sourceList = Array.isArray(data.sources) ? data.sources : [];
+            const hasDivinationSource = sourceList.includes('divination');
+            const tarotPersistent = Boolean(
+                (global.TarotPicker && typeof global.TarotPicker.isPersistentActive === 'function' && global.TarotPicker.isPersistentActive()) ||
+                document.getElementById('tarot-picker-widget') ||
+                global._kotoTarotPending
+            );
+
+            if (data.has_ui && hasDivinationSource && data.config) {
+                _lastDivinationConfig = data.config;
+            }
+
             if (data.has_ui) {
-                applySkillUI(data.config, isNew);
+                const configToApply = (tarotPersistent && _lastDivinationConfig) ? _lastDivinationConfig : data.config;
+                applySkillUI(configToApply, isNew);
+            } else if (tarotPersistent && _lastDivinationConfig) {
+                applySkillUI(_lastDivinationConfig, false);
             } else {
                 removeSkillUI();
             }
 
             // Activate tarot picker when divination skill is in the active source list
-            const divinationActive = data.has_ui && (data.sources || []).includes('divination');
+            const divinationActive = (data.has_ui && hasDivinationSource) || tarotPersistent;
             global._kotoDivinationActive = divinationActive;
             if (global.TarotPicker) {
                 global.TarotPicker.setActive(divinationActive);

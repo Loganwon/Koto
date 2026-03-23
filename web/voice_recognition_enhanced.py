@@ -14,17 +14,13 @@
 """
 
 import hashlib
-import json
 import logging
 import os
-import queue
-import sys
-import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 

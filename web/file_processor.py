@@ -110,22 +110,42 @@ class FileProcessor:
             result["binary_data"] = raw_bytes
             result["mime_type"] = "application/pdf"
 
-            # 尝试用 PyPDF2 提取文本，供质量评估使用
+# 尝试提文本，供质量评估使用
             try:
                 import warnings
-
-                import PyPDF2
-
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")  # 屏蔽 GBK-EUC-H 等编码警告
-                    with open(filepath, "rb") as f:
-                        reader = PyPDF2.PdfReader(f)
+                
+                extracted = ""
+                max_pages = 20
+                
+                # 优先尝试 pdfplumber 因为它的文本提取更精准
+                try:
+                    import pdfplumber
+                    with pdfplumber.open(filepath) as pdf:
                         text_parts = []
-                        max_pages = min(10, len(reader.pages))
+                        max_pages = min(20, len(pdf.pages))
                         for page_num in range(max_pages):
-                            page = reader.pages[page_num]
-                            text_parts.append(page.extract_text() or "")
+                            text = pdf.pages[page_num].extract_text()
+                            if text:
+                                text_parts.append(text)
                         extracted = "\n".join(text_parts)
+                except ImportError:
+                    pass
+                
+                # 回退：PyPDF2
+                if not extracted.strip():
+                    import PyPDF2
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        with open(filepath, "rb") as f:
+                            reader = PyPDF2.PdfReader(f)
+                            text_parts = []
+                            max_pages = min(20, len(reader.pages))
+                            for page_num in range(max_pages):
+                                page = reader.pages[page_num]
+                                text = page.extract_text()
+                                if text:
+                                    text_parts.append(text)
+                            extracted = "\n".join(text_parts)
 
                 # 评估文本质量：如果乱码比例高，放弃文本
                 def _is_garbled(text: str) -> bool:
@@ -199,10 +219,14 @@ class FileProcessor:
                 # 提取表格内容
                 if doc.tables:
                     result["text_content"] += "\n\n[表格内容]:\n"
-                    for table in doc.tables:
-                        for row in table.rows:
-                            cells = [cell.text.strip() for cell in row.cells]
-                            result["text_content"] += " | ".join(cells) + "\n"
+                    for table_idx, table in enumerate(doc.tables, 1):
+                        result["text_content"] += f"\n表 {table_idx}:\n"
+                        for row_idx, row in enumerate(table.rows):
+                            cells = [cell.text.strip().replace('\n', ' ') for cell in row.cells]
+                            result["text_content"] += "| " + " | ".join(cells) + " |\n"
+                            # Add markdown separator after the header row
+                            if row_idx == 0:
+                                result["text_content"] += "|" + "|".join(["---" for _ in cells]) + "|\n"
 
                 result["metadata"]["paragraphs"] = len(paragraphs)
                 result["metadata"]["tables"] = len(doc.tables)
@@ -241,6 +265,12 @@ class FileProcessor:
                             text = shape.text.strip()
                             if text:
                                 parts.append(text)
+                        
+                        if hasattr(shape, "has_table") and shape.has_table:
+                            parts.append("[表格内容]:")
+                            for row in shape.table.rows:
+                                row_data = [cell.text_frame.text.replace("\n", " ").strip() for cell in row.cells]
+                                parts.append("| " + " | ".join(row_data) + " |")
                     except Exception:
                         continue
 
@@ -282,14 +312,31 @@ class FileProcessor:
                 text_parts.append(f"工作表: {', '.join(xls.sheet_names)}\n")
 
                 # 读取前3个工作表
-                for sheet_name in xls.sheet_names[:3]:
+                for sheet_name in xls.sheet_names[:min(5, len(xls.sheet_names))]:
                     df = pd.read_excel(filepath, sheet_name=sheet_name)
                     text_parts.append(f"\n=== 工作表: {sheet_name} ===")
-                    text_parts.append(df.to_string(max_rows=50, max_cols=10))
+                    text_parts.append(f"数据维度: {df.shape[0]}行 x {df.shape[1]}列")
+                    
+                    if not df.empty:
+                        # 生成摘要统计
+                        if df.shape[0] > 100 or df.shape[1] > 20:
+                            text_parts.append("【数据抽样演示 (部分)】")
+                            sampled_df = df.head(50)
+                            # 如果列数过多，限制列数
+                            if sampled_df.shape[1] > 15:
+                                sampled_df = sampled_df.iloc[:, :15]
+                            text_parts.append(sampled_df.to_markdown(index=False))
+                            text_parts.append("\n【统计信息】")
+                            try:
+                                text_parts.append(df.describe(include='all').to_markdown())
+                            except:
+                                pass
+                        else:
+                            text_parts.append(df.to_markdown(index=False))
 
                 result["text_content"] = "\n".join(text_parts)
                 result["metadata"]["sheets"] = len(xls.sheet_names)
-                result["metadata"]["extracted_sheets"] = min(3, len(xls.sheet_names))
+                result["metadata"]["extracted_sheets"] = min(5, len(xls.sheet_names))
 
                 result["success"] = True
                 logger.info(

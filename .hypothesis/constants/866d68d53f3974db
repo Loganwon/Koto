@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\skills\skill_tool_adapter.py
-# hypothesis_version: 6.151.9
-
-['SkillDefinition', 'ToolRegistry', 'description', 'error', 'icon', 'inputSchema', 'message', 'object', 'properties', 'required', 'retry_hint', 'skill', 'skill_', 'status', 'string', 'type', 'user_input', 'when_not_to_use', '用户的原始请求文本或需要处理的内容摘要']

@@ -57,6 +57,7 @@ class SkillSuggester:
         already_active_ids: Optional[List[str]] = None,
         answer_text: str = "",
         max_n: int = _MAX_SUGGESTIONS,
+        conversation_history: Optional[List[Dict]] = None,
     ) -> List[Dict]:
         """
         返回与用户输入相关但当前未启用的 Skill 候选列表。
@@ -68,6 +69,7 @@ class SkillSuggester:
         already_active_ids: 本次已临时注入的 Skill ID（不重复提示）
         answer_text       : Koto 本轮回答文本（太短则跳过推荐）
         max_n             : 最多返回几个推荐
+        conversation_history : 最近几轮对话历史（用于上下文感知推荐）
 
         Returns
         -------
@@ -87,6 +89,9 @@ class SkillSuggester:
             logger.debug(f"[SkillSuggester] SkillManager 加载失败，跳过推荐: {exc}")
             return []
 
+        # ── 构建上下文增强的查询（结合历史对话）──────────────────────────────
+        enriched_input = cls._enrich_with_history(user_input, conversation_history)
+
         # ── 收集所有未启用的 Skill 作为候选 ─────────────────────────────────
         candidates: List[Dict] = []
         for skill_id, s in SkillManager._registry.items():
@@ -95,8 +100,6 @@ class SkillSuggester:
             if skill_id in exclude_ids:
                 continue  # 本次临时注入过了
 
-            # 从 _def_registry 取完整定义（含 intent_description / tags / trigger_keywords）
-            # _def_registry 在 register_custom() 时同步更新，新安装的 Skill 立即可见
             skill_def = SkillManager._def_registry.get(skill_id)
             intent_desc: str = ""
             tags: List[str] = []
@@ -122,10 +125,10 @@ class SkillSuggester:
         if not candidates:
             return []
 
-        # ── 评分 & 排序 ──────────────────────────────────────────────────────
+        # ── 评分 & 排序（使用增强输入）──────────────────────────────────────
         ratings = cls._load_ratings()
         scored = cls._score_candidates(
-            user_input, candidates, task_type, ratings=ratings
+            enriched_input, candidates, task_type, ratings=ratings
         )
         scored = [(score, c) for score, c in scored if score > 0]
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -142,6 +145,37 @@ class SkillSuggester:
                 }
             )
         return result
+
+    @classmethod
+    def _enrich_with_history(
+        cls,
+        user_input: str,
+        history: Optional[List[Dict]] = None,
+    ) -> str:
+        """
+        结合最近几轮对话历史，构建上下文增强的查询文本。
+        只提取用户侧的关键词，避免注入模型回复内容。
+        """
+        if not history:
+            return user_input
+
+        # 提取最近 3 轮用户消息的关键内容
+        recent_user_msgs: List[str] = []
+        for turn in reversed(history[-6:]):
+            if turn.get("role") == "user":
+                parts = turn.get("parts", [])
+                text = " ".join(str(p) for p in parts)[:200]
+                if text.strip():
+                    recent_user_msgs.append(text.strip())
+            if len(recent_user_msgs) >= 3:
+                break
+
+        if not recent_user_msgs:
+            return user_input
+
+        # 将历史用户消息作为上下文前缀
+        context = " ".join(reversed(recent_user_msgs))
+        return f"{context} {user_input}"
 
     @classmethod
     def format_hint(cls, suggestions: List[Dict]) -> str:
@@ -233,6 +267,9 @@ class SkillSuggester:
         # 预取 pattern map 命中集合（覆盖内置 Skill）
         pattern_hits = cls._get_pattern_hits(lowered)
 
+        # 预加载用户亲和度分数
+        _affinity_scores = cls._load_affinity_scores()
+
         # 预计算用户输入的字符二元组集合（前 300 字）
         input_bigrams = cls._ngrams(user_input[:300])
 
@@ -281,9 +318,24 @@ class SkillSuggester:
             _rating = (ratings or {}).get(skill_id, _DEFAULT_RATING)
             score += (_rating - _DEFAULT_RATING) * _RATING_WEIGHT
 
+            # Layer 5: 用户亲和度加成（基于历史使用偏好）
+            affinity = _affinity_scores.get(skill_id, 0.0)
+            if affinity > 0:
+                score += affinity * 1.5  # 亲和度最高可为 1.0，加成 1.5 分
+
             results.append((score, c))
 
         return results
+
+    @classmethod
+    def _load_affinity_scores(cls) -> Dict[str, float]:
+        """加载用户 Skill 亲和度分数。"""
+        try:
+            from app.core.skills.skill_affinity import SkillAffinityTracker
+            return SkillAffinityTracker.get_instance().get_affinity_scores()
+        except Exception as exc:
+            logger.debug(f"[SkillSuggester] 亲和度加载失败: {exc}")
+            return {}
 
     @classmethod
     def _get_pattern_hits(cls, lowered_input: str) -> set:

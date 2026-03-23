@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\api\goal_routes.py
-# hypothesis_version: 6.151.9
-
-[200, 201, 400, 404, '/<goal_id>', '/<goal_id>/activate', '/<goal_id>/complete', '/<goal_id>/confirm', '/<goal_id>/pause', '/<goal_id>/resume', '/<goal_id>/runs', '/stats', 'auto_activate', 'category', 'custom', 'data', 'deleted', 'due_at', 'error', 'goals', 'json', 'limit', 'normal', 'offset', 'ok', 'priority', 'recent_runs', 'run_on_activate', 'session_id', 'status', 'summary', 'title', 'title 不能为空', 'total', 'user_confirmation', 'user_goal', 'user_goal 不能为空', 'user_reply', 'user_reply 不能为空', 'waiting_reason', '无法激活（目标可能已处于终态）', '没有可更新的字段', '用户手动标记完成', '目标不存在']

@@ -7,7 +7,6 @@ Background service that continuously monitors system metrics and detects anomali
 Triggers proactive agent advisory when issues are detected.
 """
 
-import json
 import logging
 import threading
 import time

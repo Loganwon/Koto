@@ -7,14 +7,13 @@ PPT生成管道 - 集成所有模块的完整工作流
 从用户需求到高质量PPT输出
 """
 
-import asyncio
 import logging
 import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from web.ppt_master import PPTBlueprint, PPTMasterOrchestrator
-from web.ppt_synthesizer import PPTBeautyOptimizer, PPTQualityEnsurance, PPTSynthesizer
+from web.ppt_synthesizer import PPTQualityEnsurance, PPTSynthesizer
 
 logger = logging.getLogger(__name__)
 

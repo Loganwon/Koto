@@ -12,7 +12,6 @@ import importlib.util
 import logging
 import os
 import sqlite3
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 

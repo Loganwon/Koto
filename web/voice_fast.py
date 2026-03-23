@@ -8,15 +8,13 @@ Koto 快速本地语音识别模块
 import json
 import logging
 import os
-import queue
 import re
 import struct
 import sys
-import tempfile
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict
 
 logger = logging.getLogger(__name__)
 
@@ -552,7 +550,7 @@ class FastVoiceRecognizer:
                 try:
                     recognizer.adjust_for_ambient_noise(source, duration=0.05)
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                 try:
                     audio = recognizer.listen(
                         source, timeout=timeout, phrase_time_limit=min(8, timeout)
@@ -568,7 +566,7 @@ class FastVoiceRecognizer:
                             confidence=0.8,
                         )
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                     return VoiceResult(
                         success=False,
                         message="本地引擎无法识别，请安装 vosk 模型",
@@ -586,7 +584,6 @@ class FastVoiceRecognizer:
     def _recognize_with_win32(self, timeout: int, language: str) -> VoiceResult:
         """使用Windows SAPI SpSharedRecognizer进行本地离线语音识别"""
         try:
-            import time
 
             import pythoncom
             import win32com.client
@@ -641,7 +638,7 @@ class FastVoiceRecognizer:
                 reco_engine.SetRecognizerState(0)  # 0 = SPRST_INACTIVE
                 grammar.DictationSetState(0)
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             if result_text:
                 logger.info(f"[Win32 SAPI] 识别结果: {result_text}")

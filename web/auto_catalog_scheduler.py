@@ -8,7 +8,6 @@
 import json
 import logging
 import os
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional

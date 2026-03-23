@@ -16,9 +16,8 @@ Features:
 
 import logging
 import re
-from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Set, Tuple
 
 logger = logging.getLogger(__name__)
 

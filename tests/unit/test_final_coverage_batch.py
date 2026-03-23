@@ -296,9 +296,7 @@ class TestPptGeneratorDeep:
     generate_from_text, and EnhancedPPTGenerator."""
 
     def _make_gen(self, theme="business"):
-        with patch("web.ppt_generator.get_theme", return_value=None), patch(
-            "web.ppt_generator.ImageGenerator", create=True
-        ):
+        with patch("web.ppt_themes.get_theme", return_value=None):
             from web.ppt_generator import PPTGenerator
 
             return PPTGenerator(theme=theme)
@@ -468,9 +466,7 @@ class TestPptGeneratorDeep:
 
     # -- EnhancedPPTGenerator -----------------------------------------------
     def test_enhanced_extract_subtitle_with_year(self):
-        with patch("web.ppt_generator.get_theme", return_value=None), patch(
-            "web.ppt_generator.ImageGenerator", create=True
-        ):
+        with patch("web.ppt_themes.get_theme", return_value=None):
             from web.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator(theme="tech")
@@ -478,9 +474,7 @@ class TestPptGeneratorDeep:
         assert "2024" in subtitle or subtitle == ""
 
     def test_enhanced_generate_fallback_outline(self):
-        with patch("web.ppt_generator.get_theme", return_value=None), patch(
-            "web.ppt_generator.ImageGenerator", create=True
-        ):
+        with patch("web.ppt_themes.get_theme", return_value=None):
             from web.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
@@ -489,9 +483,7 @@ class TestPptGeneratorDeep:
         assert len(outline) > 0
 
     def test_enhanced_parse_enhanced_outline(self):
-        with patch("web.ppt_generator.get_theme", return_value=None), patch(
-            "web.ppt_generator.ImageGenerator", create=True
-        ):
+        with patch("web.ppt_themes.get_theme", return_value=None):
             from web.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
@@ -501,9 +493,7 @@ class TestPptGeneratorDeep:
         assert len(parsed) >= 2
 
     def test_enhanced_parse_enhanced_outline_empty(self):
-        with patch("web.ppt_generator.get_theme", return_value=None), patch(
-            "web.ppt_generator.ImageGenerator", create=True
-        ):
+        with patch("web.ppt_themes.get_theme", return_value=None):
             from web.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
@@ -511,9 +501,7 @@ class TestPptGeneratorDeep:
         assert isinstance(parsed, list)
 
     def test_enhanced_match_images_to_slides(self):
-        with patch("web.ppt_generator.get_theme", return_value=None), patch(
-            "web.ppt_generator.ImageGenerator", create=True
-        ):
+        with patch("web.ppt_themes.get_theme", return_value=None):
             from web.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
@@ -522,9 +510,7 @@ class TestPptGeneratorDeep:
         assert isinstance(result, list)
 
     def test_enhanced_build_outline_prompt(self):
-        with patch("web.ppt_generator.get_theme", return_value=None), patch(
-            "web.ppt_generator.ImageGenerator", create=True
-        ):
+        with patch("web.ppt_themes.get_theme", return_value=None):
             from web.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()

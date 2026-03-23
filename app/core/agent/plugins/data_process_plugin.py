@@ -275,7 +275,6 @@ class DataProcessPlugin(AgentPlugin):
     def describe_data(self, filepath: str) -> str:
         """Return a comprehensive statistical summary of the dataset."""
         try:
-            import pandas as pd
 
             df = self._load_df(filepath)
             lines = [

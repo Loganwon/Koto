@@ -29,15 +29,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.6.2] — 2026-03-22
 
 ### Added
-- **PPTX/PPTM/PPT file reading** (`web/file_parser.py`): `FileParser` now extracts text from PowerPoint presentations via `python-pptx`, including slide content and speaker notes. Slides are labeled `[第 N 页]` and notes `[第 N 页·备注]`.
-- **DOC_ANNOTATE ↔ Skill injection** (`web/document_feedback.py`, `web/app.py`): `full_annotation_loop_streaming()` now accepts a `skill_prompt` parameter. Both the chat-stream and file-upload annotation paths look up the active annotation skill (`annotate_business`, `annotate_academic`, `annotate_translation`, `annotate_code_review`) via `SkillTriggerBinding` and prepend its domain-specific review dimensions into the annotation prompt, replacing the previous generic persona.
+- **AppContext DI Container** (`app/core/app_context.py`): Centralized dependency injection container replacing 48 scattered module-level globals. Thread-safe lazy initialization with double-checked locking, `override()`/`reset()` for testing, typed property accessors for IDE completion. All core services (MemoryManager, ConfigManager, Agent, FileRegistry, etc.) registered as lazy singletons.
+- **Smart Memory Filter** (`app/core/memory/memory_router.py`): Three-stage pipeline (Retrieve → Score → Filter) for memory injection — composite relevance scoring (semantic signal × recency decay × category boost), character-bigram deduplication (Jaccard > 0.6 threshold), and configurable minimum score cutoff. Reduces per-turn memory token cost by ~50%.
+- **CWM Smart Page-in** (`app/core/memory/context_window_manager.py`): Upgraded page-in with relevance scoring, deduplication via `_smart_filter_page_in()`, and reduced max results from 4 → 3 focused memories.
+- **Skill Affinity Tracker** (`app/core/skills/skill_affinity.py`): User skill preference learning engine — records activations with exponential recency decay (30-day half-life), persists to `config/skill_affinity.json`, provides normalized 0–1 affinity scores for personalized Skill recommendations.
+- **Conversation-aware Skill Suggestions** (`app/core/skills/skill_suggester.py`): Enhanced `suggest()` with `conversation_history` parameter — extracts recent user messages for context-enriched matching. Added Layer 5 (User Affinity) scoring: high-affinity skills get +1.5 score boost.
 
-### Fixed
-- **Office binary hallucinations** (`web/app.py` → `generate_file_analysis_stream`): Non-PDF binary documents (DOCX, PPTX, XLSX) are no longer sent as raw bytes to Gemini (which cannot parse them natively and hallucinates). They are now routed through `FileParser.parse_file()` and injected as text context. PDF files continue to use `Part.from_bytes()` for native vision analysis.
-- **Merge conflict in `annotate_academic.json`**: Resolved leftover `<<<<<<< HEAD` / `=======` / `>>>>>>>` conflict markers; kept the `review/pr-20260321` version with `enabled: true`, `bound_tools: ["read_docx_paragraphs", "annotate_document", "write_file"]`.
+### Changed
+- **Memory injection backward compat** (`web/app.py`): `get_memory_manager()` now delegates to AppContext first, falls back to legacy path; extracted `_inject_memory_adapters()` helper.
+- **Agent singleton** (`app/api/agent_routes.py`): `get_agent()` delegates to AppContext, backward compatible.
+- **Config manager** (`app/core/config/configuration_manager.py`): `get_config_manager()` delegates to AppContext.
+- **Skill toggle routes** (`app/api/skill_routes.py`): Both toggle endpoints now record activation to SkillAffinityTracker when skills are enabled.
 
 ### Tests
-- `tests/unit/test_pr_20260322b.py`: **17 passed** (PPTX extraction, skill injection, Office binary routing, skill metadata)
+- `tests/test_optimization_phases.py`: **31 new tests** covering AppContext (8), Smart Memory Filter (10), CWM filtering (4), Skill Affinity (5), Skill Suggester enhancements (4). All passing.
+
 ---
 
 ## [1.6.1] — 2026-03-22

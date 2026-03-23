@@ -9,8 +9,6 @@ PPT合成引擎 - 使用蓝图生成高质量PPT
 
 import logging
 import os
-import re
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -60,9 +58,7 @@ class PPTSynthesizer:
 
         try:
             from pptx import Presentation
-            from pptx.dml.color import RGBColor
-            from pptx.enum.text import PP_ALIGN
-            from pptx.util import Inches, Pt
+            from pptx.util import Inches
 
             _report("初始化 PowerPoint 引擎...", 50)
 
@@ -143,9 +139,6 @@ class PPTSynthesizer:
     ):
         """填充幻灯片内容"""
 
-        from pptx.dml.color import RGBColor
-        from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
-        from pptx.util import Inches, Pt
 
         layout_config = slide_blueprint.layout_config
 
@@ -374,7 +367,6 @@ class PPTSynthesizer:
         """填充内容页"""
 
         from pptx.dml.color import RGBColor
-        from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
         from pptx.util import Inches, Pt
 
         # 背景
@@ -401,24 +393,37 @@ class PPTSynthesizer:
         line.line.color.rgb = RGBColor(*theme_colors["accent"])
         line.line.width = Pt(2)
 
-        # 内容点
+        # 内容点 - 限制条目数防止溢出页面
         content_box = slide.shapes.add_textbox(
             Inches(1), Inches(1.8), Inches(8.5), Inches(5.2)
         )
         text_frame = content_box.text_frame
         text_frame.word_wrap = True
 
-        for i, point in enumerate(slide_blueprint.content):
+        max_items = 6 # 限制最多显示6条
+        max_chars_per_point = 80 # 单条中文字数限制
+        
+        display_content = slide_blueprint.content[:max_items]
+        
+        # 动态调整字号
+        font_size = 24 if len(display_content) <= 4 else 20
+        
+        for i, point in enumerate(display_content):
             if i > 0:
                 text_frame.add_paragraph()
+                
+            # 截断过长的文本
+            point_str = str(point)
+            if len(point_str) > max_chars_per_point:
+                point_str = point_str[:max_chars_per_point] + "..."
 
             p = text_frame.paragraphs[i]
-            p.text = f"• {point}"
-            p.font.size = Pt(24)
+            p.text = f"• {point_str}"
+            p.font.size = Pt(font_size)
             p.font.color.rgb = RGBColor(*theme_colors["text"])
             p.level = 0
-            p.space_before = Pt(8)
-            p.space_after = Pt(8)
+            p.space_before = Pt(8 if len(display_content) <= 4 else 4)
+            p.space_after = Pt(8 if len(display_content) <= 4 else 4)
 
     async def _populate_content_image_slide(
         self,
@@ -430,7 +435,6 @@ class PPTSynthesizer:
         """填充文字+图片页"""
 
         from pptx.dml.color import RGBColor
-        from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
         from pptx.util import Inches, Pt
 
         # 背景
@@ -450,23 +454,32 @@ class PPTSynthesizer:
         title_p.font.bold = True
         title_p.font.color.rgb = RGBColor(*theme_colors["primary"])
 
-        # 左侧内容
+        # 左侧内容 - 由于有图片空间受限，收紧最多显示5条
         content_box = slide.shapes.add_textbox(
             Inches(0.5), Inches(1.5), Inches(4.5), Inches(5.5)
         )
         text_frame = content_box.text_frame
         text_frame.word_wrap = True
+        
+        max_items = 5
+        max_chars_per_point = 65 # 半屏显示，字数限制更严
+        display_content = slide_blueprint.content[:max_items]
+        font_size = 20 if len(display_content) <= 3 else 16
 
-        for i, point in enumerate(slide_blueprint.content):
+        for i, point in enumerate(display_content):
             if i > 0:
                 text_frame.add_paragraph()
+                
+            point_str = str(point)
+            if len(point_str) > max_chars_per_point:
+                point_str = point_str[:max_chars_per_point] + "..."
 
             p = text_frame.paragraphs[i]
-            p.text = f"• {point}"
-            p.font.size = Pt(20)
+            p.text = f"• {point_str}"
+            p.font.size = Pt(font_size)
             p.font.color.rgb = RGBColor(*theme_colors["text"])
-            p.space_before = Pt(6)
-            p.space_after = Pt(6)
+            p.space_before = Pt(6 if len(display_content) <= 3 else 3)
+            p.space_after = Pt(6 if len(display_content) <= 3 else 3)
 
         # 右侧图片
         image_list = (
@@ -515,7 +528,6 @@ class PPTSynthesizer:
     ):
         """应用美化规则"""
 
-        from pptx.dml.color import RGBColor
 
         # 为所有形状添加阴影和边框（如果配置了）
         layout_config = slide_blueprint.layout_config
@@ -562,9 +574,6 @@ class PPTBeautyOptimizer:
     def optimize_slide_aesthetics(slide, slide_blueprint, theme_colors: Dict):
         """优化幻灯片美观度"""
 
-        from pptx.dml.color import RGBColor
-        from pptx.enum.text import PP_ALIGN
-        from pptx.util import Pt
 
         # 1. 文本对齐和间距优化
         for shape in slide.shapes:

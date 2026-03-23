@@ -11,12 +11,7 @@
 4. 用户接受/拒绝UI支持
 """
 
-import json
-import os
-import re
-import time
-from datetime import datetime
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Generator
 
 from web.document_direct_edit import ImprovedBatchAnnotator
 

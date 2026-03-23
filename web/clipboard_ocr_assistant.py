@@ -6,12 +6,11 @@
 剪贴板与截图助手 - 本地OCR识别、自动入库
 """
 
-import io
 import logging
 import os
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from PIL import Image, ImageGrab
 

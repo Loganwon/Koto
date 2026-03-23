@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\plugins\system_info_plugin.py
-# hypothesis_version: 6.151.9
-
-['INTEGER', 'OBJECT', 'SystemInfo', 'description', 'func', 'get_system_warnings', 'list_running_apps', 'name', 'parameters', 'properties', 'query_cpu_status', 'query_disk_usage', 'query_memory_status', 'query_network_status', 'query_python_env', 'top_n', 'type', 'warnings']

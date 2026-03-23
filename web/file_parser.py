@@ -7,7 +7,6 @@
 用于 PPT 生成的多源文件融合
 """
 
-import json
 import logging
 import os
 from pathlib import Path
@@ -149,14 +148,16 @@ class FileParser:
             if para.text.strip():
                 content.append(para.text)
 
-        # 也提取表格
+        # 也提取表格，且带上有格式的Markdown
         for table in doc.tables:
             table_content = []
-            for row in table.rows:
-                row_data = [cell.text.strip() for cell in row.cells]
-                table_content.append(" | ".join(row_data))
+            for i, row in enumerate(table.rows):
+                row_data = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+                table_content.append("| " + " | ".join(row_data) + " |")
+                if i == 0:
+                    table_content.append("|" + "|".join(["---" for _ in row_data]) + "|")
             if table_content:
-                content.append("\n".join(table_content))
+                content.append("\n" + "\n".join(table_content))
 
         return "\n".join(content)
 
@@ -173,6 +174,13 @@ class FileParser:
         for idx, slide in enumerate(prs.slides, 1):
             slide_texts = []
             for shape in slide.shapes:
+                if hasattr(shape, "has_table") and shape.has_table:
+                    for row_idx, row in enumerate(shape.table.rows):
+                        row_data = [cell.text_frame.text.replace("\n", " ").strip() for cell in row.cells]
+                        slide_texts.append("| " + " | ".join(row_data) + " |")
+                        if row_idx == 0:
+                            slide_texts.append("|" + "|".join(["---" for _ in row_data]) + "|")
+                            
                 if not hasattr(shape, "text"):
                     continue
                 text = shape.text.strip()

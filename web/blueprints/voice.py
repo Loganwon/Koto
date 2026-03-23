@@ -187,7 +187,7 @@ def voice_stop() -> Response:
 
         request_stop()
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
     return jsonify({"success": True, "message": "已发送停止信号"})
 
 

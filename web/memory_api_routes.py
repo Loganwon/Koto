@@ -381,7 +381,7 @@ def register_memory_routes(app, get_memory_manager):
                     "last_seen": obs.get("last_seen"),
                 }
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             return jsonify(
                 {
@@ -401,8 +401,6 @@ def register_memory_routes(app, get_memory_manager):
     def import_memories_from_profile():
         """从 user_profile.json + shadow_observations.json + personality_matrix.json 生成初始记忆条目"""
         import json
-        import os
-        import time
         from pathlib import Path
 
         try:
@@ -594,7 +592,7 @@ def register_memory_routes(app, get_memory_manager):
                             p, temperature=0.15, max_tokens=600
                         )
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
                 if llm_fn is None:
                     logger.warning("[BatchExtract] 没有可用的 LLM 函数，无法提取记忆")

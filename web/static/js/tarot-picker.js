@@ -552,13 +552,36 @@
         single:       '星辰正在凝视...',
     };
 
-    function addClarifierBtn(container) {
-        container?.querySelector('.tp-clarifier-row')?.remove();
-        const row = document.createElement('div');
-        row.className = 'tp-clarifier-row';
-        row.innerHTML = '<button class="tp-clarifier-btn" onclick="window.TarotPicker.drawClarifier()">✦ 抽一张澄清牌</button>';
-        container?.appendChild(row);
-        if (container) container.scrollTop = container.scrollHeight;
+    function renderPostReadingScreen(sp, cards) {
+        const w = getWidget();
+        if (!w) return;
+        const sigils = (cards || []).map(({ card, isReversed }) =>
+            `<span class="tp-tx-card${isReversed ? ' tp-tx-rev' : ''}" title="${esc(card.zh)}">${card.sigil}</span>`
+        ).join('');
+
+        w.classList.remove('tp-transmitting', 'tp-dismissing');
+        w.classList.add('tp-mounted', 'tp-post-reading');
+        w.innerHTML = `
+            <button class="tp-close-btn" id="tp-close-btn" aria-label="取消" title="取消 (Esc)">×</button>
+            <div class="tp-header-area">
+                <div class="tp-deco-row" aria-hidden="true">✦ · ✧ · ✦</div>
+                <div class="tp-spread-badge">${esc((sp && sp.label) || '塔罗占卜')}</div>
+                <h3 class="tp-heading">牌面已揭示</h3>
+                <p class="tp-subheading">你可以继续在此画面抽澄清牌</p>
+            </div>
+            <div class="tp-tx-cards" aria-hidden="true">${sigils}</div>
+            <div class="tp-actions" style="display:flex; margin-top: 8px;">
+                <div class="tp-btn-row" style="width:100%;">
+                    <button class="tp-confirm-btn" id="tp-clarifier-in-widget">✦ 抽一张澄清牌</button>
+                </div>
+            </div>`;
+
+        w.querySelector('#tp-close-btn')?.addEventListener('click', onCancel);
+        w.querySelector('#tp-clarifier-in-widget')?.addEventListener('click', () => {
+            if (global.TarotPicker && typeof global.TarotPicker.drawClarifier === 'function') {
+                global.TarotPicker.drawClarifier();
+            }
+        });
     }
 
     // 确认后进入等待神谕状态，待 AI 回复开始后再优雅消退
@@ -580,12 +603,6 @@
             </div>`;
         w.classList.add('tp-transmitting');
 
-        const container = document.getElementById('chatMessages');
-        if (!container) {
-            setTimeout(() => removePicker(), 6000);
-            return;
-        }
-
         let dismissed = false;
         const dismiss = () => {
             if (dismissed) return;
@@ -593,13 +610,16 @@
             observer.disconnect();
             setTimeout(() => {
                 if (w.parentNode) {
-                    w.classList.add('tp-dismissing');
-                    setTimeout(() => { w.remove(); addClarifierBtn(container); }, 350);
-                } else {
-                    addClarifierBtn(container);
+                    renderPostReadingScreen(sp, cards);
                 }
             }, 900);
         };
+
+        const container = document.getElementById('chatMessages');
+        if (!container) {
+            setTimeout(() => { renderPostReadingScreen(sp, cards); }, 900);
+            return;
+        }
 
         const observer = new MutationObserver(() => {
             const lastMsg = container.lastElementChild;
@@ -684,6 +704,14 @@
         _selectedCards = [];
     }
 
+    function hasPersistentTarotUI() {
+        return Boolean(
+            document.getElementById('tarot-picker-widget') ||
+            document.querySelector('.tp-clarifier-row') ||
+            window._kotoTarotPending
+        );
+    }
+
     // ─── sendMessage 拦截 ─────────────────────────────────────────────────────────
 
     let _origOnKeyDown = null;
@@ -698,7 +726,7 @@
             input.onkeydown = function (e) {
                 if (_active && e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
                     const msg = input.value.trim();
-                    if (msg && DRAW_PATTERN.test(msg)) {
+                    if (msg) {
                         e.preventDefault(); _pendingMsg = msg; input.value = ''; showPicker(msg); return false;
                     }
                 }
@@ -713,7 +741,7 @@
                 if (_active) {
                     const inp = document.getElementById('messageInput');
                     const msg = inp ? inp.value.trim() : '';
-                    if (msg && DRAW_PATTERN.test(msg)) {
+                    if (msg) {
                         e?.preventDefault(); _pendingMsg = msg; if (inp) inp.value = ''; showPicker(msg); return false;
                     }
                 }
@@ -735,7 +763,18 @@
         setActive(active) {
             _active = Boolean(active);
             if (_active) hookSendMessage();
-            else { unhookSendMessage(); removePicker(); _resetState(); }
+            else {
+                // 关键修复：如果抽牌入口/流程仍在界面中（例如已解读后的「澄清牌」入口），
+                // 则忽略一次自动失活，保持抽卡界面可继续使用。
+                if (hasPersistentTarotUI()) {
+                    _active = true;
+                    hookSendMessage();
+                    return;
+                }
+                unhookSendMessage();
+                removePicker();
+                _resetState();
+            }
         },
         drawClarifier() {
             // 用户主动点击澄清牌时，即使 skill 状态已刷新导致 _active=false，也应强制继续
@@ -756,6 +795,9 @@
             const el = _createWidgetEl();
             if (!el) return;
             requestAnimationFrame(() => { el.classList.add('tp-mounted'); showCardsScreen(); });
+        },
+        isPersistentActive() {
+            return hasPersistentTarotUI();
         },
     };
 

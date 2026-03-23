@@ -7,7 +7,6 @@
 使用TF-IDF算法从文件内容中提取关键概念和主题
 """
 
-import json
 import logging
 import math
 import re
@@ -15,7 +14,7 @@ import sqlite3
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Tuple
 
 # 简化的中文停用词表
 

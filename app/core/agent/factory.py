@@ -271,7 +271,7 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
                 or LocalModelRouter.pick_best_chat_model()
             )
         except Exception:
-            pass  # model 保持 None → OllamaLLMProvider 在调用时自动解析
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # model 保持 None → OllamaLLMProvider 在调用时自动解析
 
     llm_kwargs = {}
     if base_url:

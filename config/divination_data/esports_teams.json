@@ -1,0 +1,71 @@
+{
+  "teams": {
+    "BLG": {
+      "name": "BLG",
+      "full_name": "Bilibili Gaming",
+      "region": "LPL",
+      "win_rate": 0.65,
+      "recent_form_score": 75,
+      "rank": 2,
+      "recent_matches": [
+        {"opponent": "FunPlus", "result": "win", "score": "3-0"},
+        {"opponent": "EDG", "result": "win", "score": "3-1"},
+        {"opponent": "WBG", "result": "loss", "score": "2-3"},
+        {"opponent": "TES", "result": "win", "score": "3-0"}
+      ]
+    },
+    "G2": {
+      "name": "G2",
+      "full_name": "G2 Esports",
+      "region": "LEC",
+      "win_rate": 0.58,
+      "recent_form_score": 68,
+      "rank": 3,
+      "recent_matches": [
+        {"opponent": "Fnatic", "result": "loss", "score": "1-3"},
+        {"opponent": "Rogue", "result": "win", "score": "3-0"},
+        {"opponent": "Vitality", "result": "win", "score": "3-1"},
+        {"opponent": "MAD", "result": "loss", "score": "0-3"}
+      ]
+    },
+    "T1": {
+      "name": "T1",
+      "full_name": "T1 Entertainment & Sports",
+      "region": "LCK",
+      "win_rate": 0.72,
+      "recent_form_score": 82,
+      "rank": 1,
+      "recent_matches": [
+        {"opponent": "Gen.G", "result": "win", "score": "3-0"},
+        {"opponent": "DK", "result": "win", "score": "3-1"},
+        {"opponent": "HLE", "result": "win", "score": "3-0"}
+      ]
+    }
+  },
+  "recent_matches": [
+    {
+      "team1": "BLG",
+      "team2": "G2",
+      "result": "win",
+      "winner": "BLG",
+      "score": "3-2",
+      "date": "2026-03-10"
+    },
+    {
+      "team1": "BLG",
+      "team2": "G2",
+      "result": "win",
+      "winner": "G2",
+      "score": "3-1",
+      "date": "2025-11-15"
+    },
+    {
+      "team1": "BLG",
+      "team2": "T1",
+      "result": "loss",
+      "winner": "T1",
+      "score": "0-3",
+      "date": "2025-09-20"
+    }
+  ]
+}

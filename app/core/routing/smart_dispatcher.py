@@ -3,7 +3,6 @@
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -1566,7 +1565,7 @@ class SmartDispatcher:
                         context_info,
                     )
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         # 复用早期缓存的 Ollama 结果（减少重复请求）
         if _early_model_result is not None:
             _em_task, _em_conf, _em_cs, _em_hint, _em_cplx = _early_model_result
@@ -1634,7 +1633,7 @@ class SmartDispatcher:
                             context_info,
                         )
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         # === 关键词兜底规则（所有模型均失败时最后路障）===
         logger.debug(
@@ -1655,7 +1654,7 @@ class SmartDispatcher:
                         )
                         return "DOC_ANNOTATE", "📄 Fallback-Annotation", context_info
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         # -- PPT 直通 (需要同时有 PPT 关键词 + 动作词，且不是能力询问/方法问句) --
         _ppt_direct_keywords = [
@@ -1867,7 +1866,7 @@ class SmartDispatcher:
                 )
                 context_info["multiagent_preset"] = _ma_preset
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return "MULTI_STEP", "🔄 Fallback-MultiStep", context_info
 
         # -- RAG 上下文延续 --
@@ -2054,7 +2053,7 @@ class SmartDispatcher:
                     )
                     _chat_candidate = _FLASH_FALLBACK
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return _avail(_chat_candidate)
 
         # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型

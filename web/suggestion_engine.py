@@ -10,10 +10,10 @@
 import json
 import logging
 import sqlite3
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -374,7 +374,7 @@ class SuggestionEngine:
                     }
                 )
         except Exception as e:
-            pass  # 忽略错误
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 忽略错误
 
         return suggestions
 
@@ -440,7 +440,7 @@ class SuggestionEngine:
                     }
                 )
         except Exception as e:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         return suggestions
 

@@ -61,7 +61,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     import tkinter as tk
     from tkinter import font as tkfont
 
-    result = {"key": None, "base": "", "cancelled": False}
+    result = {"key": None, "base": "", "code": "", "cancelled": False}
 
     root = tk.Tk()
     root.title("Koto 初始化配置")
@@ -81,7 +81,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     root.configure(bg=BG)
 
     # ── 让窗口居中 ──
-    W, H = 480, 640
+    W, H = 480, 760
     root.geometry(f"{W}x{H}")
     root.update_idletasks()
     sw = root.winfo_screenwidth()
@@ -224,6 +224,43 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
         anchor="w",
     ).pack(fill="x", pady=(0, 14))
 
+    # ── 激活码分隔线 ──
+    sep_row = tk.Frame(body, bg=BG)
+    sep_row.pack(fill="x", pady=(4, 10))
+    tk.Frame(sep_row, bg=BORDER, height=1).pack(side="left", fill="x", expand=True)
+    tk.Label(
+        sep_row, text="  或使用激活码  ", font=f_hint, bg=BG, fg=TEXT2
+    ).pack(side="left")
+    tk.Frame(sep_row, bg=BORDER, height=1).pack(side="left", fill="x", expand=True)
+
+    # ── 激活码输入 ──
+    tk.Label(
+        body, text="激活码", font=f_label, bg=BG, fg=TEXT2, anchor="w"
+    ).pack(fill="x", pady=(0, 4))
+    code_var = tk.StringVar()
+    code_frame = tk.Frame(body, bg=BORDER, padx=1, pady=1)
+    code_frame.pack(fill="x", pady=(0, 4))
+    code_inner = tk.Frame(code_frame, bg=BG2)
+    code_inner.pack(fill="x")
+    tk.Entry(
+        code_inner,
+        textvariable=code_var,
+        font=f_input,
+        bg=BG2,
+        fg=TEXT,
+        insertbackground=ACCENT,
+        relief="flat",
+        bd=8,
+    ).pack(fill="x")
+    tk.Label(
+        body,
+        text="💬 没有 API Key 或激活码？加微信 18913921188 申请",
+        font=f_hint,
+        bg=BG,
+        fg=TEXT2,
+        anchor="w",
+    ).pack(fill="x", pady=(2, 12))
+
     # ── 状态提示 ──
     status_var = tk.StringVar(value="")
     status_lbl = tk.Label(
@@ -252,12 +289,13 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
 
     def on_confirm():
         raw_key = key_var.get().strip()
-        if not raw_key:
-            status_var.set("❌ 请输入 API 密钥")
+        code = code_var.get().strip()
+        if not raw_key and not code:
+            status_var.set("❌ 请输入 Gemini API 密钥或激活码")
             status_lbl.config(fg=DANGER)
             key_entry.focus_set()
             return
-        if not (raw_key.startswith("AIza") and len(raw_key) >= 30):
+        if raw_key and not (raw_key.startswith("AIza") and len(raw_key) >= 30):
             status_var.set("⚠️ 密钥格式看起来不对（应以 AIza 开头），确认继续？")
             status_lbl.config(fg="#ffb44a")
             confirm_btn.config(text="仍然保存", command=_save)
@@ -267,8 +305,10 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     def _save():
         raw_key = key_var.get().strip()
         base = base_var.get().strip()
-        result["key"] = raw_key
+        code = code_var.get().strip()
+        result["key"] = raw_key or None
         result["base"] = base
+        result["code"] = code
         status_var.set("✅ 保存成功，正在启动…")
         status_lbl.config(fg=SUCCESS)
         root.after(600, root.destroy)
@@ -348,7 +388,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     return result
 
 
-def _write_gemini_config(api_key: str, api_base: str = ""):
+def _write_gemini_config(api_key: str, api_base: str = "", activation_code: str = ""):
     """将用户填写的 API 信息写入 gemini_config.env"""
     config_dir = APP_ROOT / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -361,18 +401,20 @@ def _write_gemini_config(api_key: str, api_base: str = ""):
         f"GEMINI_API_BASE={api_base}\n",
         "FORCE_PROXY=auto\n",
     ]
+    if activation_code:
+        lines.append(f"KOTO_ACTIVATION_CODE={activation_code}\n")
     config_path.write_text("".join(lines), encoding="utf-8")
 
 
 def _api_key_configured() -> bool:
-    """检查是否已有有效的 API 密钥配置"""
+    """检查是否已有有效的 API 密钥或激活码配置"""
     cfg = APP_ROOT / "config" / "gemini_config.env"
     if not cfg.exists():
         return False
     text = cfg.read_text(encoding="utf-8", errors="ignore")
     for line in text.splitlines():
         line = line.strip()
-        if line.startswith("GEMINI_API_KEY=") or line.startswith("API_KEY="):
+        if line.startswith(("GEMINI_API_KEY=", "API_KEY=", "KOTO_ACTIVATION_CODE=")):
             val = line.split("=", 1)[1].strip()
             if val and val not in ("your_api_key_here", "", "None"):
                 return True
@@ -428,10 +470,13 @@ def _run_setup_if_needed():
 
     if not force:
         if not _api_key_configured():
-            pass  # 没有密钥 → 弹向导
+            pass  # 没有密钥/激活码 → 弹向导
         else:
             # 密钥存在 → 静默验证（网络正常时 ~1-3s）
             key, base = _read_config_values()
+            if not key:
+                # 仅有激活码，无 API key → 无需验证，直接启动
+                return
             ok, err_msg = _validate_api_key(key, base)
             if ok:
                 return  # 验证通过，正常启动
@@ -443,8 +488,12 @@ def _run_setup_if_needed():
 
     try:
         res = _show_api_setup_wizard(initial_status=wizard_status)
-        if res["key"]:
-            _write_gemini_config(res["key"], res.get("base", ""))
+        if res["key"] or res.get("code"):
+            _write_gemini_config(
+                res["key"] or "",
+                res.get("base", ""),
+                res.get("code", ""),
+            )
             # 写入 setup_done 标志（同时兼容 model_downloader 的检测）
             import json
 

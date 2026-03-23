@@ -420,6 +420,32 @@ datas = _filter_datas(datas)
 # Analysis
 # ═══════════════════════════════════════════════
 
+
+# ── Dynamic Auto-discovery for hiddenimports ──
+def _discover_hidden_imports(base_dir, base_pkg):
+    import os
+    imports = []
+    if not os.path.exists(base_dir): return imports
+    for root, _, files in os.walk(base_dir):
+        for f in files:
+            if f.endswith('.py') and not f.startswith('_'):
+                rel_path = os.path.relpath(root, base_dir)
+                pkg = base_pkg
+                if rel_path != '.':
+                    pkg = f"{base_pkg}.{rel_path.replace(os.sep, '.')}"
+                mod = f[:-3]
+                imports.append(f"{pkg}.{mod}")
+            elif f == '__init__.py':
+                rel_path = os.path.relpath(root, base_dir)
+                pkg = base_pkg
+                if rel_path != '.':
+                    pkg = f"{base_pkg}.{rel_path.replace(os.sep, '.')}"
+                imports.append(pkg)
+    return imports
+
+hiddenimports.extend(_discover_hidden_imports(os.path.join(ROOT, 'app'), 'app'))
+hiddenimports.extend(_discover_hidden_imports(os.path.join(ROOT, 'web'), 'web'))
+
 a = Analysis(
     ['src/koto_setup.py'],       # ← 新入口（含下载器向导）
     pathex=[ROOT],

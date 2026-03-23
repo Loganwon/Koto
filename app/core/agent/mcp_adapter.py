@@ -68,14 +68,12 @@ Figma、Notion、Puppeteer 等）。
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import subprocess
 import threading
 import time
-import uuid
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

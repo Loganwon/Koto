@@ -27,7 +27,7 @@ import logging
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from app.core.tasks.progress_bus import get_progress_bus
-from app.core.tasks.task_ledger import TaskPriority, TaskStatus, get_ledger
+from app.core.tasks.task_ledger import TaskStatus, get_ledger
 
 logger = logging.getLogger(__name__)
 

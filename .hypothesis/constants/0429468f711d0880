@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\jobs\trigger_registry.py
-# hypothesis_version: 6.151.9
-
-[200, 300, 1800, 3600, '00:00', '09:00', ':', 'KOTO_DB_DIR', 'TriggerSpec', 'agent_query', 'auto_catalog', 'config', 'created', 'cron', 'daily_task_planner', 'enabled', 'error', 'interval', 'interval_seconds', 'job_payload', 'job_type', 'key', 'milliseconds', 'name', 'preset_key', 'proactive_agent_tick', 'proactive_tick', 'query', 'scheduler_skipped', 'session_id', 'skill_exec', 'skill_id', 'skipped', 'source_dir', 'startup', 'system', 'task_planner', 'time', 'trigger', 'trigger_id', 'trigger_name', 'trigger_type', 'triggers.json', 'utf-8', 'webhook', '下载目录自动整理', '主动交互巡检', '启动自检摘要', '每日任务规划']

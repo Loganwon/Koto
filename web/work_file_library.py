@@ -253,7 +253,7 @@ class WorkFileLibrary:
                     if p not in locations and os.path.isdir(p):
                         locations.append(p)
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return locations
 
     # ── Scan ──────────────────────────────────────────────────────────────────
@@ -565,4 +565,4 @@ def get_work_file_library() -> WorkFileLibrary:
 try:
     get_work_file_library()
 except Exception:
-    pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)

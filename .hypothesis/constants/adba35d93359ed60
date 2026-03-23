@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\unified_agent.py
-# hypothesis_version: 6.151.9
-
-[100, 300, 500, ' · ', 'ACTION', 'ANSWER', 'BLOCK', 'CHAT', 'ERROR', 'OBSERVATION', 'REFORMAT', 'THOUGHT', '_registry', 'adopted', 'agent', 'approved', 'args', 'content', 'domain', 'enabled', 'executor_tools', 'function', 'gemini-2.5-flash', 'icon', 'model', 'name', 'native_skills_used', 'pii_masked', 'reasons', 'role', 'session_id', 'skill_', 'skill_id', 'task_id', 'task_type', 'tool_calls', 'user', 'validation_action', 'value', '⏸ 任务已暂停，等待用户确认后继续...', '、', '任务已被用户取消', '周一', '周三', '周二', '周五', '周六', '周四', '周日', '正在分析请求', '等待超时，任务已取消', '，技能: ']

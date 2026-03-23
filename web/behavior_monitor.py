@@ -10,7 +10,6 @@
 import json
 import logging
 import sqlite3
-from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional

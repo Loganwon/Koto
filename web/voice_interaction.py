@@ -19,7 +19,6 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from enum import Enum
 from typing import Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -301,7 +300,7 @@ class VoiceInteractionManager:
                 with open(config_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         # 默认配置
         return {

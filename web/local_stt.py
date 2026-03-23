@@ -20,13 +20,12 @@ local_stt.py — 本地语音识别模块（离线 Whisper）
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 import tempfile
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +143,7 @@ def transcribe(
             try:
                 os.unlink(tmp_path)
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         text = (text or "").strip()
         elapsed = time.time() - t0

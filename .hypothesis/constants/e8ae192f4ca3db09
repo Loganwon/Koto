@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\llm\ollama_llm_provider.py
-# hypothesis_version: 6.151.9
-
-[0.0, 0.7, 60.0, 180, 4096, '## 🎯 当前激活的 Skills', '/', 'Content-Type', 'OLLAMA_BASE_URL', 'POST', 'application/json', 'args', 'arguments', 'assistant', 'completion_tokens', 'content', 'description', 'done', 'eval_count', 'function', 'message', 'messages', 'model', 'name', 'num_predict', 'object', 'options', 'parameters', 'parts', 'prompt_eval_count', 'prompt_tokens', 'properties', 'qwen3:8b', 'replace', 'required', 'role', 'stream', 'system', 'temperature', 'tool_calls', 'tools', 'top_k', 'top_p', 'type', 'usage', 'user', 'utf-8']

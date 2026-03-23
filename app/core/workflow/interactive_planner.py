@@ -13,7 +13,6 @@ Koto Interactive Planner
 同时提供基于新引擎的 InteractivePlanner.create_plan() 通用入口。
 """
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass, field

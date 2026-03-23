@@ -23,7 +23,6 @@ import os
 import pickle
 import sys
 import time
-import warnings
 from collections import Counter
 
 # Suppress transformers background safetensors-conversion network errors

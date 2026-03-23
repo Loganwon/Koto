@@ -7,7 +7,6 @@ Manages remediation actions with approval workflow.
 Tracks pending, executing, and completed fixes.
 """
 
-import json
 import logging
 import threading
 from datetime import datetime

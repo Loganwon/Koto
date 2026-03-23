@@ -162,7 +162,6 @@ class TrainingConfig:
         """
         vram_gb = 0.0
         try:
-            import re
             import subprocess
 
             result = subprocess.run(
@@ -183,7 +182,7 @@ class TrainingConfig:
                 )
                 vram_gb = vram_mb / 1024
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         import psutil
 
@@ -548,7 +547,6 @@ class LoRAPipeline:
             TrainerCallback,
             TrainerControl,
             TrainerState,
-            TrainingArguments,
         )
         from trl import SFTConfig, SFTTrainer
 
@@ -560,7 +558,7 @@ class LoRAPipeline:
                 try:
                     progress_cb({"msg": msg, "step": step, "loss": loss, "pct": pct})
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         _report(f"🚀 开始 Qwen3 LoRA 蒸馏训练  skill={skill_id}", pct=0)
         _report(
@@ -788,7 +786,7 @@ class LoRAPipeline:
                 ) as f:
                     result.append(AdapterMeta.from_dict(json.load(f)))
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return result
 
     # ══════════════════════════════════════════════════════════════════════════

@@ -11,11 +11,9 @@
 5. 用户订阅偏好管理
 """
 
-import asyncio
 import json
 import logging
 import sqlite3
-import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Set

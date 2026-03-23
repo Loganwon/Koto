@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\plugins\chart_vision_plugin.py
-# hypothesis_version: 6.151.9
-
-[1024, '.bmp', '.gif', '.jpeg', '.jpg', '.png', '.webp', 'API_KEY', 'ChartVision', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'OBJECT', 'STRING', 'analyze_chart_image', 'analyze_screenshot', 'description', 'filepath', 'func', 'gemini-2.0-flash', 'image/bmp', 'image/gif', 'image/jpeg', 'image/png', 'image/webp', 'name', 'parameters', 'properties', 'question', 'rb', 'required', 'text', 'type']

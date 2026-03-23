@@ -7,11 +7,10 @@
 支持 PPT、Word、PDF 等多种文件格式
 """
 
-import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 

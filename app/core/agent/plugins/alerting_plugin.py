@@ -8,7 +8,7 @@ Integrates with AlertManager for email and webhook notifications.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
 from app.core.monitoring.alert_manager import AlertChannel, AlertRule, get_alert_manager

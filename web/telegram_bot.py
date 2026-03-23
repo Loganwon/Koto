@@ -25,7 +25,6 @@ Koto Telegram Bot Integration
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 import os
@@ -33,7 +32,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +179,7 @@ class TelegramBot:
         try:
             self._call("sendChatAction", {"chat_id": chat_id, "action": "typing"})
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # ── 主动推送 ──────────────────────────────────────────────────────────────
 
@@ -237,7 +236,7 @@ class TelegramBot:
             try:
                 self.push_proactive_to_telegram()
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # ── 消息路由 ──────────────────────────────────────────────────────────────
 

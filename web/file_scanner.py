@@ -247,7 +247,7 @@ class FileScanner:
                 try:
                     loaded[pl] = FileEntry(**d)
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             with cls._lock:
                 cls._index = loaded
             logger.info(f"[FileScanner] 📂 已加载历史索引 {len(loaded):,} 个文件")
@@ -398,7 +398,7 @@ class FileScanner:
                                 try:
                                     on_progress(cls.get_status())
                                 except Exception:
-                                    pass
+                                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                             time.sleep(0.01)  # 让出 CPU
 
                     if scanned > _MAX_FILES:
@@ -689,4 +689,4 @@ def is_disk_search_intent(text: str) -> bool:
 try:
     FileScanner.ensure_loaded()
 except Exception:
-    pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
