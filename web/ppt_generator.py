@@ -6,13 +6,11 @@ PPT生成器 - 高质量演示文稿生成
 增强版支持：多模型协作、智能配图、搜索增强、排版优化
 """
 
-import io
 import logging
 import os
 import re
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +23,6 @@ try:
 except ImportError:
     logger.warning("Warning: python-pptx not installed. PPT generation will fail.")
 
-from web.image_generator import ImageGenerator
-from web.ppt_themes import PPTTheme, get_theme
 
 
 class SlideContent:
@@ -348,7 +344,7 @@ class PPTGenerator:
 
     def _create_picture_slide(self, prs, title, points, image_path):
         """Creates a slide with image on right, text on left"""
-        from pptx.util import Inches, Pt
+        from pptx.util import Inches
 
         slide = prs.slides.add_slide(prs.slide_layouts[1])  # Title and Content
 
@@ -369,7 +365,7 @@ class PPTGenerator:
         try:
             slide.shapes.add_picture(image_path, left, top, height=height)
         except Exception:
-            pass  # Image load fail
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # Image load fail
 
         # 3. Content (Left Half)
         body_shape = slide.placeholders[1]
@@ -383,7 +379,7 @@ class PPTGenerator:
 
     def _create_detail_slide(self, prs, title, points):
         """Standard detail slide with bullet points"""
-        from pptx.util import Inches, Pt
+        from pptx.util import Pt
 
         slide = prs.slides.add_slide(prs.slide_layouts[1])  # Title and Content
 
@@ -634,7 +630,6 @@ class PPTGenerator:
         self, slide, left, top, width, height, color_key="primary", alpha=None
     ):
         from pptx.enum.shapes import MSO_SHAPE
-        from pptx.util import Emu
 
         shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, left, top, width, height)
         shape.fill.solid()
@@ -664,7 +659,7 @@ class PPTGenerator:
 
     def _add_slide_number(self, prs, slide, current, total):
         from pptx.enum.text import PP_ALIGN
-        from pptx.util import Inches, Pt
+        from pptx.util import Inches
 
         w = prs.slide_width
         box = slide.shapes.add_textbox(
@@ -679,8 +674,8 @@ class PPTGenerator:
     # ─── 封面页 ─────────────────────────────────────
 
     def _add_title_slide(self, prs, title, subtitle, author):
-        from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
-        from pptx.util import Emu, Inches, Pt
+        from pptx.enum.text import PP_ALIGN
+        from pptx.util import Inches, Pt
 
         slide = prs.slides.add_slide(prs.slide_layouts[6])
         W = prs.slide_width
@@ -735,7 +730,7 @@ class PPTGenerator:
 
     def _add_agenda_slide(self, prs, outline):
         from pptx.enum.text import PP_ALIGN
-        from pptx.util import Inches, Pt
+        from pptx.util import Inches
 
         slide = prs.slides.add_slide(prs.slide_layouts[6])
         W = prs.slide_width
@@ -787,8 +782,7 @@ class PPTGenerator:
     # ─── 内容页 ─────────────────────────────────────
 
     def _add_content_slide(self, prs, section, page_num, total_pages):
-        from pptx.dml.color import RGBColor
-        from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+        from pptx.enum.text import PP_ALIGN
         from pptx.util import Inches, Pt
 
         slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -938,7 +932,6 @@ class PPTGenerator:
             points = section.get("points", section.get("content", []))
             if points:
                 # 智能分组: 每 2-3 个 point 归为一组，取第 1 个的前几个字作为小标题
-                import re as _re
 
                 group_size = 3 if len(points) <= 9 else 2
                 auto_subs = []
@@ -1094,9 +1087,8 @@ class PPTGenerator:
 
     def _add_highlight_slide(self, prs, section, page_num, total_pages):
         """亮点数据页 - 大字展示关键数字 / 成果（最多 3 张数据卡片）"""
-        from pptx.dml.color import RGBColor
         from pptx.enum.text import PP_ALIGN
-        from pptx.util import Inches, Pt
+        from pptx.util import Inches
 
         slide = prs.slides.add_slide(prs.slide_layouts[6])
         W = prs.slide_width
@@ -1212,7 +1204,6 @@ class PPTGenerator:
 
     def _add_section_divider_slide(self, prs, section, part_number=1):
         """章节过渡页 - 左文右色块，引入新的大章节"""
-        from pptx.dml.color import RGBColor
         from pptx.enum.text import PP_ALIGN
         from pptx.util import Inches, Pt
 
@@ -1373,7 +1364,7 @@ class PPTGenerator:
 
     def _add_ending_slide(self, prs, title):
         from pptx.dml.color import RGBColor
-        from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+        from pptx.enum.text import PP_ALIGN
         from pptx.util import Inches, Pt
 
         slide = prs.slides.add_slide(prs.slide_layouts[6])

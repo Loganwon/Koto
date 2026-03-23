@@ -44,7 +44,6 @@ Koto 的处理管线（无需修改核心代码）。
 from __future__ import annotations
 
 import logging
-import os
 import sys
 import threading
 from dataclasses import dataclass, field

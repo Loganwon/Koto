@@ -9,7 +9,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,6 @@ class DocumentEditor:
         """
         try:
             from pptx import Presentation
-            from pptx.util import Pt
 
             # 读取原文件
             prs = Presentation(file_path)
@@ -181,7 +180,6 @@ class DocumentEditor:
         try:
             from copy import deepcopy
 
-            import lxml.etree as etree
             from docx import Document
             from docx.oxml.ns import qn
 

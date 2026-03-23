@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\plugins\template_fill_plugin.py
-# hypothesis_version: 6.151.9
-
-['%Y%m%d_%H%M%S', 'OBJECT', 'STRING', 'Skill 的唯一标识符', 'TemplateFill', 'config', 'description', 'download_url', 'error', 'field_count', 'fields', 'file_name', 'fill_skill_template', 'filled_fields', 'frozen', 'func', 'get_template_fields', 'message', 'missing_fields', 'name', 'parameters', 'properties', 'required', 'skill_id', 'skill_templates', 'success', 'template.docx', 'template_path', 'type', 'values']

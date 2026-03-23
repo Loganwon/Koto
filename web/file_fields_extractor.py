@@ -12,8 +12,8 @@ from __future__ import annotations
 import json
 import re
 import socket
-from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from datetime import date
+from typing import Any, Dict, Optional
 
 # ── Ollama 连接 ──────────────────────────────────────────────────────────────
 _OLLAMA_HOST = "127.0.0.1"

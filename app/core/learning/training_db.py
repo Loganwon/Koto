@@ -31,13 +31,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import sqlite3
 import subprocess
 import sys
-import tempfile
 import threading
-import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -652,7 +649,7 @@ class DataHarvester:
 
             _router = LocalModelRouter
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         samples = []
         for f in chats_dir.glob("*.json"):
@@ -692,7 +689,7 @@ class DataHarvester:
                         )
                     )
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         r = self.db.upsert_batch(samples, verbose=False)
         if verbose:
@@ -735,7 +732,7 @@ class DataHarvester:
                         )
                     )
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         r = self.db.upsert_batch(samples, verbose=False)
         if verbose:

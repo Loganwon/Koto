@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\checkpoint_manager.py
-# hypothesis_version: 6.151.9
-
-['KOTO_DB_DIR', 'checkpoint_blobs', 'checkpoint_id', 'checkpoint_writes', 'checkpoints', 'config', 'configurable', 'conn', 'db_path', 'memory', 'none', 'source', 'sqlite', 'step', 'thread_count', 'thread_id', 'total_checkpoints', 'type', 'writes']

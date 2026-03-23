@@ -9,10 +9,8 @@ import difflib
 import json
 import os
 import re
-from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List
 
-from docx import Document
 from docx.shared import RGBColor
 
 

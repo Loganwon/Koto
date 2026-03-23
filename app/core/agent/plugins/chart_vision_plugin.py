@@ -6,7 +6,6 @@ ChartVisionPlugin — 通过 Gemini 多模态视觉分析图表图片
   - analyze_screenshot(filepath, question?)   截图/界面分析，同上但提示词侧重 UI 解读
 """
 
-import base64
 import logging
 import mimetypes
 import os

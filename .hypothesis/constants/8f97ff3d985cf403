@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\file\__init__.py
-# hypothesis_version: 6.151.9
-
-['FileEntry', 'FileRegistry', 'FileWatcher', 'get_file_registry', 'get_file_watcher', 'register_file_tools']

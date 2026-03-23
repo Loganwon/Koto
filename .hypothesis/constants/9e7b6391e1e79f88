@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\plugins\file_editor_plugin.py
-# hypothesis_version: 6.151.9
-
-[5000, ' [truncated]', ')', 'Copied', 'Created', 'FileEditor', 'Moved', 'No backups found.', 'Renamed', 'Restored', 'after', 'append_text', 'backups', 'copy_file', 'create_directory', 'delete_file', 'delete_lines', 'description', 'dir', 'find_file', 'func', 'get_file_info', 'insert_line', 'is_dir', 'items', 'list_backups', 'list_directory', 'message', 'move_file', 'name', 'not_found', 'patch_file', 'read_file', 'rename_file', 'replace_text', 'restore_backup', 'results', 'size_human', 'success', 'truncated', 'type', 'write_file', '📁', '📄']

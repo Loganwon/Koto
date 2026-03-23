@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\plugins\image_process_plugin.py
-# hypothesis_version: 6.151.9
-
-['.', '.bmp', '.gif', '.jpg', '.png', '.webp', 'BMP', 'GIF', 'INTEGER', 'ImageProcess', 'JPEG', 'OBJECT', 'P', 'PNG', 'RGB', 'RGBA', 'STRING', 'WEBP', 'description', 'filepath', 'func', 'height', 'image_convert', 'image_info', 'image_resize', 'name', 'output_path', 'parameters', 'properties', 'required', 'target_format', 'type', 'width']

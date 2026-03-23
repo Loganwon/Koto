@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\plugins\annotation_plugin.py
-# hypothesis_version: 6.151.9
-
-['.docx', 'Annotation', 'Word 文档的绝对路径（.docx）', 'annotate_document', 'complete', 'data:', 'default', 'description', 'dist', 'error', 'file_path', 'func', 'integer', 'max_paragraphs', 'message', 'name', 'object', 'output_file', 'paragraphs', 'parameters', 'progress', 'properties', 'read_docx_paragraphs', 'required', 'requirement', 'string', 'success', 'text', 'total_edits', 'total_paragraphs', 'type', 'uploads', 'workspace', '优化表达，使语言更自然流畅', '最多返回多少段落（默认 50）']

@@ -4,7 +4,6 @@ Batch file operations with progress tracking.
 
 import csv
 import json
-import os
 import queue
 import re
 import shutil

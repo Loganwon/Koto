@@ -10,11 +10,9 @@ import json
 # google.genai 延迟到路由函数内部加载，避免启动时加载 (~4.7s)
 import os
 import re
-from datetime import datetime
 
 from flask import Blueprint, jsonify, request, send_file
 
-from web.ppt_generator import PPTGenerator
 from web.ppt_session_manager import get_ppt_session_manager
 
 ppt_api_bp = Blueprint("ppt_api", __name__, url_prefix="/api/ppt")

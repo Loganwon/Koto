@@ -373,6 +373,13 @@ class SkillAutoMatcher:
                 "生成幻灯",
                 "ppt报告",
                 "整理成ppt",
+                "展示ppt",
+                "技术展示ppt",
+                "汇报ppt",
+                "ppt展示",
+                "ppt汇报",
+                "做一个ppt",
+                "做一份ppt",
             ],
         },
         {
@@ -481,6 +488,21 @@ class SkillAutoMatcher:
                 "合同审查",
                 "批注商务",
                 "商务文件批注",
+                "简历批注",
+                "批注简历",
+                "修改简历",
+                "简历修改",
+                "简历润色",
+                "优化简历",
+                "不妥之处",
+                "文档批注",
+                "批注文档",
+                "文件批注",
+                "批注修改",
+                "指出不妥",
+                "修改批注",
+                "resume review",
+                "polish resume",
             ],
         },
         {
@@ -796,7 +818,7 @@ class SkillAutoMatcher:
                 if not applicable or tt in applicable:
                     return True
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return False
 
     @classmethod
@@ -884,6 +906,31 @@ class SkillAutoMatcher:
                         return matched
         except Exception as _e:
             logger.debug("[AutoMatcher] trigger_keywords 扫描失败: %s", _e)
+
+        # 3. 拆词组合匹配：将 pattern 拆成短关键词原子，
+        #    若用户输入同时包含 ≥2 个属于同一 skill 的原子词，视为匹配
+        if len(matched) < _MAX_AUTO_SKILLS:
+            _ATOM_MAP: Dict[str, List[str]] = {
+                "ppt_generator_pro": ["ppt", "幻灯片", "演示"],
+                "docx_generator_pro": ["word", "docx", "文档"],
+                "excel_generator_pro": ["excel", "xlsx", "表格文件"],
+                "annotate_business": ["批注", "修改", "简历", "不妥", "审查"],
+                "annotate_academic": ["论文", "学术", "期刊", "审稿"],
+                "annotate_translation": ["翻译", "校对", "译文"],
+                "multi_format_reader": ["docx", "xlsx", "csv", "读取", "文件"],
+                "writing_assistant": ["润色", "改写", "修改", "优化"],
+                "data_analysis": ["数据", "分析", "统计", "趋势"],
+                "spreadsheet_analyst": ["表格", "excel", "数据", "分析"],
+            }
+            for sid, atoms in _ATOM_MAP.items():
+                if sid not in candidate_ids or sid in matched_set:
+                    continue
+                hits = sum(1 for a in atoms if a.lower() in lowered)
+                if hits >= 2:
+                    matched.append(sid)
+                    matched_set.add(sid)
+                    if len(matched) >= _MAX_AUTO_SKILLS:
+                        break
 
         return matched
 
@@ -1087,10 +1134,29 @@ class SkillAutoMatcher:
         # ── 刷新评分缓存（每次 match 调用时重新加载评分，确保实时性） ───────
         cls._ratings_cache = cls._load_ratings()
 
-        # ── 如果已有活跃领域 Skill，跳过自动匹配（避免重复注入） ─────────────
-        if not force and cls._has_active_skills_for_task(task_type):
-            logger.debug(f"[AutoMatcher] 用户已启用域 Skill，跳过自动匹配")
-            return []
+        # ── 从候选中排除已启用的 Skill（已由 SkillManager 注入，无需重复推荐）──
+        _active_ids: set = set()
+        if not force:
+            try:
+                from app.core.skills.skill_manager import SkillManager
+                SkillManager._ensure_init()
+                tt = (task_type or "").upper()
+                for sid, s in SkillManager._registry.items():
+                    if not s.get("enabled", False):
+                        continue
+                    if s.get("skill_nature", "") == "system":
+                        continue
+                    applicable = s.get("task_types", [])
+                    if not applicable or tt in applicable:
+                        _active_ids.add(sid)
+            except Exception:
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            if _active_ids:
+                candidates = [c for c in candidates if c["id"] not in _active_ids]
+                candidate_ids -= _active_ids
+                if not candidates:
+                    logger.debug("[AutoMatcher] 全部候选已被用户启用，跳过")
+                    return []
 
         # ── 1. 优先尝试本地模型匹配（快、私密）─────────────────────────────
         model_result = cls._match_with_local_model(

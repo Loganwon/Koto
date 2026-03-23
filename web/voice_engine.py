@@ -371,12 +371,12 @@ def recognize_stream(
                 stream.stop_stream()
                 stream.close()
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         if p is not None:
             try:
                 p.terminate()
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
 
 # ── Whisper 降级引擎 ─────────────────────────────────────────────────────────
@@ -497,7 +497,7 @@ def _recognize_with_whisper_stream(
             try:
                 os.unlink(tmp_path)
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     except OSError as e:
         yield {"type": "error", "message": f"麦克风错误: {e}"}
@@ -510,9 +510,9 @@ def _recognize_with_whisper_stream(
                 stream.stop_stream()
                 stream.close()
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         if p is not None:
             try:
                 p.terminate()
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)

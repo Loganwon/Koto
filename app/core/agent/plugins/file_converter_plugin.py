@@ -8,7 +8,6 @@ FileConverterPlugin — 文件格式转换 Agent 工具
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin

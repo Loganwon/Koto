@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\security\output_validator.py
-# hypothesis_version: 6.151.9
-
-[0.0, 15.0, 100, 128, '\n—', ' |\n', ' | ', '#', '*', ',', '-', '---', '...', '<<[^>]{2,30}>>', '<\\|im_start\\|>', 'API_KEY', 'BLOCK', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'LLM 返回空响应', 'PASS', 'REFORMAT', 'RETRY', 'System Prompt:', 'WARN', '\\[INST\\]', '\\[SYSTEM\\]', '^作为.*ai.*我(无法|不能)', '^我(不能|无法|不可以|拒绝|无权)', '^抱歉.*我(无法|不能|不允许)', '```', '```json', 'application/json', 'content', 'gemini-2.5-flash', 'markdown', 'reason', 'system_instruction', 'table', 'to be continued', 'value', 'verdict', '{}', '|', '| ', '…', '响应可能被截断（末尾有截断标志）', '模型拒绝执行请求', '（下文省略', '（以下略', '（待续）', '（未完）']

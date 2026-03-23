@@ -26,7 +26,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 # ── 路径引导：让脚本从项目根目录运行时能 import app ──────────────────────────
 _ROOT = Path(__file__).resolve().parents[1]

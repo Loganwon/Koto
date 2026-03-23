@@ -6,8 +6,7 @@
 """
 
 import re
-from collections import Counter
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 
 class DocumentValidator:

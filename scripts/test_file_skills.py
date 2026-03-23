@@ -5,7 +5,7 @@ Skills 功能验证测试脚本
 验证 10 个新文件技能引用的每个工具/路径是否真实可用。
 运行方式: .venv\Scripts\python.exe scripts\test_file_skills.py
 """
-import os, sys, json, traceback, shutil, tempfile
+import sys, traceback, shutil, tempfile
 from pathlib import Path
 
 # 确保项目根目录在 sys.path
@@ -100,7 +100,6 @@ except Exception as e:
 pptx_path = tmp_dir / "test_presentation.pptx"
 try:
     from pptx import Presentation as _Prs
-    from pptx.util import Pt
     prs = _Prs()
     slide = prs.slides.add_slide(prs.slide_layouts[0])
     slide.shapes.title.text = "2026年战略规划"

@@ -21,7 +21,6 @@ import socket
 import sys
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import psutil
@@ -401,7 +400,7 @@ class SystemInfoCollector:
                     for item in c.Win32_Product():
                         apps.append(item.Name)
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             # 备用方式：检查常见的可执行文件和注册表项
             common_apps = [
@@ -558,7 +557,7 @@ class SystemInfoCollector:
                 warnings.append(f"🟡 磁盘空间有限 (剩余 {disk['free_gb']}GB)")
 
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         return warnings
 

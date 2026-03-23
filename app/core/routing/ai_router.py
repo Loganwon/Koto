@@ -146,7 +146,7 @@ class AIRouter:
                     + "\n".join(_hints)
                 )
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         # 检查缓存（加入 skill 状态哈希，技能启用变化时自动失效）
         cache_key = hashlib.md5((user_input + _skill_hint_hash).encode()).hexdigest()[
@@ -346,7 +346,7 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
                                         cls._router_model = model_id
                                     return
                             except Exception:
-                                pass
+                                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                             # 纯文本回退解析
                             for task in valid_tasks:
                                 if task in raw.upper():

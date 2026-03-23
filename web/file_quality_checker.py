@@ -12,7 +12,7 @@ File Quality Checker — 文件质量自检系统
 
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 # ────── 导出清洗：转成 Word/Excel 时强制去除的 Markdown 符号 ──────
 # 这些规则会在 check_and_fix_for_export() 中永久生效

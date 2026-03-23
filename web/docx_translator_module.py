@@ -5,11 +5,10 @@ Word 文档翻译模块 - 格式保留翻译
 读取 .docx 文件，通过 LLM 翻译所有文本，保留原始样式（字体/加粗/颜色/表格/页眉页脚）
 """
 
-import json
 import logging
 import os
 import re
-from typing import Callable, Generator, Optional
+from typing import Generator, Optional
 
 # 语言代码映射（用于文件名后缀和提示语）
 

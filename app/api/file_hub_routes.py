@@ -182,7 +182,6 @@ def file_stats():
     stats = _reg().stats()
 
     # 补充 source 分布
-    import sqlite3
 
     conn = _reg()._conn
     source_rows = conn.execute(
@@ -431,7 +430,6 @@ def browse_directory():
       q         = 文件名关键词过滤（可选）
       limit     = 最多返回条数（默认 200，最大 1000）
     """
-    import mimetypes
     import os
 
     path = (request.args.get("path") or "").strip()
@@ -924,7 +922,6 @@ def graph_data():
     center_id = request.args.get("center") or None
     limit = min(max(10, int(request.args.get("limit", 80))), 200)
 
-    import sqlite3 as _sq
 
     reg = _reg()
     conn = reg._conn
@@ -956,7 +953,7 @@ def graph_data():
             for e in similar:
                 neighbor_paths.add(e.path)
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         # 取所有邻居的完整 entry
         entries = [center_entry]

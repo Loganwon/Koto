@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 
 from app.core.routing.local_model_router import LocalModelRouter
 
@@ -203,7 +202,7 @@ class LocalPlanner:
                             _mgr.get_compact_memory_snapshot(max_chars=150) or ""
                         )
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             prompt = cls.PLAN_PROMPT.format(input=user_input[:600])
             if _memory_hint:
@@ -311,7 +310,7 @@ class LocalPlanner:
                     _safe_plan_models[_PLAN_DEFAULT_IDX],
                 )
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             cloud_prompt = (
                 cls.PLAN_PROMPT.format(input=user_input[:600])
@@ -420,7 +419,7 @@ class LocalPlanner:
                         ),
                     }
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             return {"status": "partial", "summary": raw[:200], "next_actions": []}
 
@@ -464,7 +463,7 @@ class LocalPlanner:
                     _check_models[0],
                 )
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             summary_lines = []
             for i, (s, r) in enumerate(zip(steps, results), start=1):

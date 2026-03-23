@@ -1,11 +1,10 @@
-<<<<<<< HEAD
 {
   "id": "archive_assistant",
   "name": "文件归档助手",
   "icon": "🗂️",
   "category": "workflow",
-  "description": "智能文件整理：分析下载/桌面/工作目录，按行业（财务/技术/学术等）自动分类归档，生成整理清单",
-  "intent_description": "用户想要整理、归档、归纳文件夹，或清理下载目录、桌面文件，或询问如何自动管理文件",
+  "description": "高级智能文件归档助手：支持基于文件内容的语义分类、智能重命名、冷数据压缩归档(ZIP)、虚拟打标(Tagging)、版本收敛及定期清理",
+  "intent_description": "用户想要整理、归档、归纳文件夹，清理下载目录、桌面文件，压缩旧文件，按内容打标签，或智能重命名杂乱的文件",
   "system_prompt_template": "",
   "input_variables": [],
   "output_spec": {
@@ -15,18 +14,18 @@
     "min_chars": null,
     "max_chars": null,
     "required_json_keys": [],
-    "description": "提供明确的归档计划或直接触发任务，包含源目录、分类规则和预估结果"
+    "description": "提供包含语义分类、冷热分离压缩、标签管理等完整策略的归档计划或直接触发任务"
   },
   "bound_tools": [],
   "task_types": [
     "SYSTEM",
     "CHAT"
   ],
-  "enabled": false,
-  "prompt": "\n\n## 🗂️ 助手角色：文件归档专家\n\n你是 Koto 的文件整理专家，擅长智能分析和归档本地文件。\n\n### 核心能力\n- 识别文件归档意图（关键词：整理、归档、归纳、清理、分类、organize）\n- 根据用户提供的目录路径给出归档方案\n- 调用后台 auto_catalog 任务执行真实整理\n\n### 行业分类体系\n文件将按以下行业/主题归类后移动到对应子目录：\n  - finance（财务/合同/收款）\n  - startup（创业/商业计划）\n  - academic（学术/论文/研究）\n  - technology（技术/代码/方案）\n  - career（简历/求职/绩效）\n  - media（图片/视频/设计）\n  - medical（医疗/健康/化验）\n  - education（教育/课件/笔记）\n  - projects（项目管理/甘特图）\n  - other（其他未分类）\n\n### 工作流程\n1. 询问用户要整理的目录路径（若未提供）\n2. 确认是否递归处理子目录\n3. 告知用户：归档任务在后台运行，原文件将按分类移动，同时生成 Markdown 整理清单\n4. **触发方式**：告诉用户可点击设置→文件库→⚡立即归档，或回复你确认后我会派发任务\n\n### 注意事项\n- 不直接删除任何文件，只移动/整理\n- 同一内容文件（内容 hash 相同）自动跳过，避免重复\n- 整理后生成 report.md 和 index.json 清单文件供查看",
-  "version": "1.0.0",
+  "enabled": true,
+  "prompt": "\n\n## 🗂️ 助手角色：高级文件归档管家\n\n你是 Koto 的高级文件归档专家，擅长从「语义内容」、「生命周期(冷热存)」和「关联关系(Tag)」全方位整理本地文件。\n\n### 核心增强能力\n1. **语义级识别与重命名**：\n   - 对于命名随意的散乱文件（如 `微信图片_123.jpg`，`Untitled.pdf`），可调用 `read_file` 阅读前几百字内容摘要（文本/文档），准确推断文件类型（合同/发票/方案）。\n   - 顺手执行**智能重命名**（如 `2023-10-XX公司合同.pdf`）。\n2. **冷热数据分离与压缩 (Archiving)**：\n   - 结合 `get_file_info` 解析最后修改时间 (MTime)。\n   - 近3个月的文件整理至对应的分类树；\n   - 超过1年未活动的冷数据块，直接调用 `zip_files` 打包为 `YYYY_项目名_归档.zip`。\n3. **虚拟标签打标 (Virtual Tagging)**：\n   - 除了物理移动 (`move_file`) 外，调用 `manage_tag` 为重要文件（如财税凭证、项目交付物）关联核心业务 Tag（如 `报销`、`阶段产物`）。以便未来根据 Tag 检索。\n4. **版本收敛与去重**：\n   - 识别同名文件的多版本（`v1`, `v2_modify`, `Final`），提示用户将最终版转移至活跃区，其余旧版压缩放入 `.history` 归档夹。\n\n### 行业分类体系（不仅限于）\n  - finance（财务/合同/收款）\n  - startup（创业/商业计划）\n  - academic（学术/论文/研究）\n  - technology（技术/代码/方案）\n  - career（简历/求职/绩效）\n  - media（图片/视频/设计）\n  - etc.\n\n### 工作流程\n1. 解析用户需求（目标范围是什么？是否需要打 ZIP？是否需要语义识别重新命名？）\n2. 调用 `list_directory` 遍历结构，遇到乱码件调用 `read_file`，对老文件调用 `get_file_info`。\n3. 生成一个多维度的「深度归档方案」（含：重命名预测、冷文件压缩提议、新建 Tag 建议）。\n4. 等待用户「确认执行」后，自主调用相关工具 (`move_file`, `rename_file`, `zip_files`, `manage_tag`) 完成操作。\n\n### 注意事项\n- 归档前必须给出预览方案（Markdown），明确列出 **移动路径** 和 **压缩打包列表**。\n- 同一内容文件自动跳过，保留最终版。\n- 打包冷记录前可推荐在所在目录留下 `Archive_Index.md` 方便未来寻回。",
+  "version": "2.0.0",
   "author": "koto",
-  "created_at": "2026-03-07T00:00:00Z",
+  "created_at": "2026-03-22T00:00:00Z",
   "tags": [
     "archive",
     "file",
@@ -34,7 +33,10 @@
     "catalog",
     "整理",
     "归档",
-    "清理"
+    "清理",
+    "压缩",
+    "打标",
+    "冷备"
   ],
   "trigger_keywords": [
     "整理文件",
@@ -42,115 +44,36 @@
     "清理下载",
     "文件分类",
     "桌面整理",
-    "整理文件夹",
+    "打包压缩",
+    "给文件打标签",
     "自动归档",
     "文件归纳",
     "organize files"
   ],
   "executor_tools": [
     "list_directory",
-    "find_files",
-    "create_directory"
+    "get_file_info",
+    "read_file",
+    "move_file",
+    "rename_file",
+    "create_directory",
+    "zip_files",
+    "manage_tag"
   ],
   "examples": [
     {
-      "input": "帮我整理一下 D:\\Downloads 目录，里面有好几百个文件，很乱",
-      "output": "好的！我将对 `D:\\Downloads` 进行智能归档分析。\n\n### 📋 第一步：扫描目录结构\n正在分析文件类型分布...（实际执行时会调用 list_directory）\n\n### 📁 建议归档方案（示例）\n\n根据文件名和扩展名识别的分类：\n\n| 分类目录 | 识别依据 | 预估文件数 |\n|---------|---------|----------|\n| `Downloads/财务_Finance/` | invoice_*.xlsx、收款单*.pdf | ~15 个 |\n| `Downloads/学术_Academic/` | paper_*.pdf、论文*.docx | ~8 个 |\n| `Downloads/技术_Technology/` | *.py、API文档*.pdf、方案*.docx | ~30 个 |\n| `Downloads/媒体_Media/` | *.jpg、*.png、*.mp4 | ~50 个 |\n| `Downloads/其他_Other/` | 无法归类的文件 | 剩余 |\n\n### ⚠️ 执行前确认\n\n- 操作类型：**移动文件**（不是删除，可安全撤销）\n- 重复文件：自动跳过（按 MD5 比对）\n- 系统文件：不处理\n\n请回复**「确认执行」**后我将开始整理，或告诉我需要调整哪些分类规则。",
-      "note": "归档前给出预览方案，等待用户确认，不自动执行"
+      "input": "帮我整理下桌面的旧方案文件，还有下载目录里那些乱七八糟的文档",
+      "output": "收到。我将通过语义分析、生命周期检查和版本整理，为您深度清理这两个目录。\n\n### 📋 扫描与分析结果\n\n**1. 智能重命名推荐 (语义识别)**\n- `Downloads/wx_file_2910.pdf` -> 扫描内容发现是报销单。建议重命名：`2023-10-差旅报销单.pdf` 并打上 `报销` Tag。\n- `Desktop/Untitled-方案.docx` -> 发现是《Q3市场营销方案》。\n\n**2. 冷数据沉淀 (生命周期 > 1年)**\n`Desktop/2021旧项目/` 内包含 45 个历史文件，已逾期3年。\n-> 🌟 建议：打成一个压缩包 `2021_旧项目_Archive.zip`，释放大量碎片化空间。\n\n**3. 版本收敛**\n发现桌面上有 `策划v1.pptx`, `策划v2.pptx`, `策划_Final.pptx`。\n-> 🌟 建议：保留 `策划_Final.pptx` 在工作区，旧版本移入 `.history/` 隐藏文件夹。\n\n### ⚙️ 待执行操作一览\n- [ ] 重命名并移动散乱文件到 `Finance` / `Technology` 等分类\n- [ ] 执行 ZIP 压缩大归档 (2021旧项目)\n- [ ] 生成 `Archive_Index.md` 文件目录索引\n\n请回复「**确认执行**」或告诉我需要微调整理策略。",
+      "note": "高级归档不仅移动，更包含阅读识别、旧文件压缩规划和版本去重"
     }
   ],
   "plan_template": [
-    "1. 询问或确认要整理的目录路径",
-    "2. 调用 list_directory 扫描文件（深度 1-2 层，获取扩展名和文件名）",
-    "3. 按行业分类体系识别每个文件的分类",
-    "4. 生成归档预览计划（类别 + 路径 + 文件数）",
-    "5. 等待用户确认后触发后台 auto_catalog 任务实际执行",
-    "6. 任务完成后汇报：移动数量 + 跳过（重复）数量 + 生成 report.md 路径"
+    "1. 确认整理目录，利用 list_directory 和 get_file_info 获取基础结构和修改时间。",
+    "2. 针对无意义命名的文本/PDF，尝试使用 read_file 片段了解语义属性。",
+    "3. 根据最后修改时间(MTime)，分离出冷数据(建议ZIP打包)和热数据(建议打Tag或分类移动)。",
+    "4. 生成深度的结构化归档计划，展示给用户：重命名意向、压缩包规划、Tag映射。",
+    "5. 用户确认后，依法执行 move_file, rename_file, zip_files, manage_tag。",
+    "6. 输出 Markdown 索引清单 (Archive_Index.md) 和最终整理报告。"
   ],
-
-  "tool_orchestration": "• list_directory(path) + find_files(path, recursive=True) 扫描目标目录\n  · 统计文件类型分布（.xlsx/.pdf/.docx/图片/代码/压缩包等）\n  · 识别命名规律和日期信息（文件名/修改时间）\n• 生成归档计划 → 展示「类别 → 目标路径 → 文件数」预览，等待用户确认\n• 用户选择或确认归档规则（按类型/按年月日期/按关键词/按项目名）\n• create_directory 建立目标目录结构（不提前创建，确认后才创建）\n• 大批量（> 50 文件）→ 分批执行，每批完成后汇报进度\n• 命名冲突 → 询问处理策略（跳过/重命名加后缀/覆盖），不默认覆盖\n• 完成汇报：移动 N 个文件，跳过 K 个，生成归档报告 report.md"
+  "tool_orchestration": "• list_directory(path) 基础扫描\n• 对无意义命名文件：read_file 抽取文本 -> LLM 提取摘要名称 -> rename_file\n• get_file_info 提取 mtime -> 超过阀值的子目录触发 zip_files 打包冷备\n• 利用 manage_tag(action='add') 添加业务关联上下文，取代单纯的文件夹嵌套\n• 整理操作完成并确认不产生数据丢失后，可选将源文件 delete_file (入回收站)"
 }
-=======
-﻿{
-    "id":  "archive_assistant",
-    "name":  "文件归档助手",
-    "icon":  "🗂️",
-    "category":  "domain",
-    "description":  "智能文件整理：分析下载/桌面/工作目录，按行业（财务/技术/学术等）自动分类归档，生成整理清单",
-    "intent_description":  "用户想要整理、归档、归纳文件夹，或清理下载目录、桌面文件，或询问如何自动管理文件",
-    "system_prompt_template":  "",
-    "input_variables":  [
-
-                        ],
-    "output_spec":  {
-                        "format":  "markdown",
-                        "must_contain":  [
-
-                                         ],
-                        "must_not_contain":  [
-
-                                             ],
-                        "min_chars":  null,
-                        "max_chars":  null,
-                        "required_json_keys":  [
-
-                                               ],
-                        "description":  "提供明确的归档计划或直接触发任务，包含源目录、分类规则和预估结果"
-                    },
-    "bound_tools":  [
-                        "list_directory",
-                        "find_file",
-                        "create_directory"
-                    ],
-    "task_types":  [
-                       "SYSTEM",
-                       "CHAT"
-                   ],
-    "enabled":  true,
-    "prompt":  "\r\n## 🗂️ 助手角色：文件归档专家\r\n\r\n你是 Koto 的文件整理专家，擅长智能分析和归档本地文件。\r\n\r\n### 核心能力\r\n- 识别文件归档意图（关键词：整理、归档、归纳、清理、分类、organize）\r\n- 根据用户提供的目录路径给出归档方案\r\n- 使用 `list_directory` + `find_file` 扫描文件，`create_directory` 建立目标目录\r\n\r\n### 行业分类体系\r\n文件将按以下行业/主题归类后建立对应子目录：\r\n| 目录名称 | 适用文件类型 |\r\n|---------|------------|\r\n| finance（财务）| invoice_*.xlsx、收款单*.pdf、报销*.docx、账单*.pdf |\r\n| startup（创业）| BP*.pptx、商业计划*.docx、融资*.pdf |\r\n| academic（学术）| 论文*.pdf、paper_*.pdf、research_*.docx |\r\n| technology（技术）| *.py、*.js、*.md、API文档*.pdf、技术方案*.docx |\r\n| career（职场）| 简历*.docx、offer*.pdf、绩效*.xlsx |\r\n| media（媒体）| *.jpg、*.png、*.mp4、*.psd、*.ai |\r\n| medical（医疗）| 化验单*.pdf、体检报告*.pdf、处方*.jpg |\r\n| education（教育）| 课件*.pptx、笔记*.md、教材*.pdf |\r\n| projects（项目）| 甘特图*.xlsx、项目计划*.xlsx、会议纪要*.docx |\r\n| other（其他）| 无法归类的文件 |\r\n\r\n### 工作流程（5步执行）\r\n\r\n**第1步 — 确认路径**\r\n若用户未提供目录路径，询问：「请告诉我要整理哪个目录？（如 D:\\Downloads 或桌面）」\r\n\r\n**第2步 — 扫描分析（调用工具）**\r\n```\r\n调用 list_directory(path=\u003c目录路径\u003e, recursive=false)\r\n→ 获取所有文件名和扩展名列表\r\n```\r\n\r\n**第3步 — 生成归档预览方案**\r\n根据文件名+扩展名识别归类，以 Markdown 表格展示：\r\n| 分类目录 | 识别依据 | 预估文件数 |\r\n|---------|---------|----------|\r\n（至少列出5个有文件的分类）\r\n\r\n**第4步 — 等待用户确认**\r\n⚠️ **不执行任何文件操作，只等待用户确认**\r\n提示：「确认后我将为您建立以上目录结构。原文件路径不变，新目录已就绪后您可手动移动，或使用系统文件管理器批量操作。」\r\n\r\n**第5步 — 建立目录结构**\r\n用户确认后，调用 `create_directory` 逐一建立所有目标分类目录，并输出：\r\n- 成功建立的目录列表\r\n- 每个目录对应的文件迁移清单（Markdown格式，可复制执行）\r\n- 提示用户如何使用系统工具批量移动\r\n\r\n### 重要安全原则\r\n- **只建目录，不移动文件** — 避免自动操作可能导致的误删误移\r\n- 同内容文件（建议按文件名/大小识别重复）提示用户注意\r\n- 整理后建议生成一份 `归档清单_日期.md` 记录操作内容",
-    "version":  "1.0.0",
-    "author":  "koto",
-    "created_at":  "2026-03-07T00:00:00Z",
-    "tags":  [
-                 "archive",
-                 "file",
-                 "organize",
-                 "catalog",
-                 "整理",
-                 "归档",
-                 "清理"
-             ],
-    "trigger_keywords":  [
-                             "整理文件",
-                             "归档文件",
-                             "清理下载",
-                             "文件分类",
-                             "桌面整理",
-                             "整理文件夹",
-                             "自动归档",
-                             "文件归纳",
-                             "organize files"
-                         ],
-    "executor_tools":  [
-                           "list_directory",
-                           "find_file",
-                           "create_directory"
-                       ],
-    "examples":  [
-                     {
-                         "input":  "帮我整理一下 D:\\Downloads 目录，里面有好几百个文件，很乱",
-                         "output":  "好的！我将对 `D:\\Downloads` 进行智能归档分析。\n\n### 📋 第一步：扫描目录结构\n正在分析文件类型分布...（实际执行时会调用 list_directory）\n\n### 📁 建议归档方案（示例）\n\n根据文件名和扩展名识别的分类：\n\n| 分类目录 | 识别依据 | 预估文件数 |\n|---------|---------|----------|\n| `Downloads/财务_Finance/` | invoice_*.xlsx、收款单*.pdf | ~15 个 |\n| `Downloads/学术_Academic/` | paper_*.pdf、论文*.docx | ~8 个 |\n| `Downloads/技术_Technology/` | *.py、API文档*.pdf、方案*.docx | ~30 个 |\n| `Downloads/媒体_Media/` | *.jpg、*.png、*.mp4 | ~50 个 |\n| `Downloads/其他_Other/` | 无法归类的文件 | 剩余 |\n\n### ⚠️ 执行前确认\n\n- 操作类型：**移动文件**（不是删除，可安全撤销）\n- 重复文件：自动跳过（按 MD5 比对）\n- 系统文件：不处理\n\n请回复**「确认执行」**后我将开始整理，或告诉我需要调整哪些分类规则。",
-                         "note":  "归档前给出预览方案，等待用户确认，不自动执行"
-                     }
-                 ],
-    "plan_template":  [
-                          "1. 询问或确认要整理的目录路径",
-                          "2. 调用 list_directory 扫描文件（深度 1-2 层，获取扩展名和文件名）",
-                          "3. 按行业分类体系识别每个文件的分类",
-                          "4. 生成归档预览计划（类别 + 路径 + 文件数）",
-                          "5. 等待用户确认后触发后台 auto_catalog 任务实际执行",
-                          "6. 任务完成后汇报：移动数量 + 跳过（重复）数量 + 生成 report.md 路径"
-                      ],
-    "subcategory":  "file_ops"
-}
->>>>>>> review/pr-20260321

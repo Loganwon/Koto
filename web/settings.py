@@ -9,7 +9,6 @@ import logging
 import os
 import sys
 import threading
-from pathlib import Path
 
 # 默认设置文件位置
 # 打包模式：config/ 紧邻 Koto.exe；开发模式：config/ 在 web/ 的父级
@@ -32,7 +31,7 @@ DEFAULT_SETTINGS = {
         "chats_dir": os.path.join(PROJECT_ROOT, "chats"),
     },
     "appearance": {
-        "theme": "dark",  # dark, light, auto
+        "theme": "light",  # dark, light, auto
         "language": "zh-CN",  # zh-CN, en-US
         "font_size": "medium",  # small, medium, large
         "ui_zoom": 1.0,  # UI 缩放比例 0.7~1.5

@@ -361,6 +361,13 @@ function renderSkillGrid(gridId, skills) {
       openEditModal(btn.dataset.id);
     });
   });
+
+  grid.querySelectorAll('[data-action="uninstall"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      uninstallSkill(btn.dataset.id);
+    });
+  });
 }
 
 function renderSkillCard(skill) {
@@ -412,6 +419,13 @@ function renderSkillCard(skill) {
         style="margin-left:auto">
         ${skill.enabled ? '禁用' : '启用'}
       </button>
+      ${!skill.is_builtin ? `
+      <button class="btn btn-sm btn-danger"
+        data-action="uninstall" data-id="${skill.id}"
+        style="margin-left:6px"
+        title="删除">
+        删除
+      </button>` : ''}
     </div>
   </div>`;
 }

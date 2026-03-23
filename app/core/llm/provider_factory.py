@@ -148,5 +148,5 @@ def list_available_providers() -> list[str]:
             available.append("ollama")
         s.close()
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
     return available

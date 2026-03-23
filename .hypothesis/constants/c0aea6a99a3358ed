@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\plugins\script_generation_plugin.py
-# hypothesis_version: 6.151.9
-
-['.ps1', '.sh', 'INTEGER', 'OBJECT', 'STRING', 'Windows', 'available_scripts', 'cpu_high', 'description', 'disk_full', 'disk_health', 'error', 'examples', 'extension', 'filename', 'filepath', 'func', 'generate_fix_script', 'get_script_type', 'issue_type', 'memory_high', 'message', 'min_gb', 'min_gb (default 5)', 'name', 'next_step', 'os', 'parameters', 'process_memory_high', 'process_name', 'properties', 'required', 'save_script_to_file', 'script_content', 'script_type', 'scripts', 'service_name', 'service_restart', 'status', 'success', 'type', 'utf-8', 'w', 'workspace']

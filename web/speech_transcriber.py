@@ -4,12 +4,10 @@
 语音转写与总结系统 - 将音频转换为文本，并自动提取关键总结
 """
 
-import json
 import logging
 import os
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 

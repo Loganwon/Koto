@@ -20,7 +20,7 @@ import time
 
 from flask import Blueprint, Response, jsonify, request, send_from_directory
 
-from web.shared import PROJECT_ROOT, WORKSPACE_DIR, get_workspace_root
+from web.shared import WORKSPACE_DIR
 
 _logger = logging.getLogger("koto.routes.workspace")
 

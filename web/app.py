@@ -23,10 +23,8 @@ from flask import (
     Response,
     g,
     jsonify,
-    render_template,
     request,
     send_file,
-    send_from_directory,
     stream_with_context,
 )
 from flask_cors import CORS
@@ -474,7 +472,7 @@ def _extract_system_proxy_candidates() -> list:
         if _us is not False and _um.strip():
             candidates.append(_normalize_proxy_url(_um.strip()))
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # 1) Environment variables first (if user/system already configured)
     env_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
@@ -514,7 +512,7 @@ def _extract_system_proxy_candidates() -> list:
                         else:
                             candidates.append(_normalize_proxy_url(proxy_server))
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # 3) Built-in localhost fallback options
     candidates.extend(PROXY_OPTIONS)
@@ -549,7 +547,7 @@ def setup_proxy():
             _app_logger.info("🔧 用户已禁用代理")
             return None
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # 自动匹配系统代理与本地常见端口
     import socket
@@ -887,7 +885,7 @@ class _TrackedModels:
                         completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
                     )
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return response
 
     # ── generate_content_stream ─────────────────────────────────────────────
@@ -939,7 +937,7 @@ class _TrackedModels:
                                 completion_tokens=int(getattr(usage, 'candidates_token_count', 0) or 0),
                             )
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         except Exception as _stream_err:
             _err_str = str(_stream_err)
             if "Interactions API" in _err_str or (
@@ -972,7 +970,7 @@ class _TrackedModels:
                     completion_tokens=0,
                 )
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return response
 
     def embed_content(self, model=None, *args, **kwargs):
@@ -1000,7 +998,7 @@ class _TrackedModels:
                     completion_tokens=0,
                 )
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return response
 
     def __getattr__(self, name):
@@ -1204,7 +1202,7 @@ def _extract_interaction_text_global(interaction) -> str:
             try:
                 return _walk(obj.model_dump())
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         if hasattr(obj, "text") and obj.text:
             return [str(obj.text).strip()]
         if hasattr(obj, "parts"):
@@ -1719,7 +1717,7 @@ def _register_blueprints_deferred():
         try:
             importlib.import_module(mod_name)
         except Exception:
-            pass  # 导入失败时静默忽略，注册阶段会再次尝试并输出日志
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 导入失败时静默忽略，注册阶段会再次尝试并输出日志
 
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=min(6, len(_preload_modules)),
@@ -2199,7 +2197,7 @@ def _init_model_manager():
         try:
             SmartDispatcher._dependencies["MODEL_MAP"] = MODEL_MAP
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         _app_logger.info(f"[ModelManager] ✅ 动态路由已加载: {len(dynamic_map)} 个任务")
         # ── 同步更新 ModelFallbackExecutor 的路由表 ──────────────────────────
         try:
@@ -3205,7 +3203,7 @@ class WebSearcher:
                     texts.extend(_extract_text_from_obj(obj.model_dump()))
                     return texts
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return texts
 
         def _extract_interaction_text(interaction_obj) -> str:
@@ -4501,7 +4499,7 @@ class TaskOrchestrator:
 
         # 1. 规划阶段 (Planning Phase)
         try:
-            from web.ppt_master import PPTBlueprint, PPTContentPlanner
+            from web.ppt_master import PPTContentPlanner
 
             # 初始化规划器
             planner = PPTContentPlanner(ai_client=client, model_name="gemini-2.5-flash")
@@ -5083,7 +5081,7 @@ class TaskOrchestrator:
                                 f"正在生成PPT ({c}/{t})", f"页面: {st[:10]}... [{ty}]"
                             )
                         except Exception:
-                            pass
+                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
                     ppt_gen.generate_from_outline(
                         title=ppt_outline.get("title", "演示"),
@@ -5890,7 +5888,7 @@ class Utils:
                     result["skipped"].append(pkg)
                     continue
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             try:
                 if getattr(sys, "frozen", False):
@@ -6327,84 +6325,98 @@ class SessionManager:
 session_manager = SessionManager()
 
 # ================= 初始化全局模块 =================
-# 懒加载 Memory Manager 和 Knowledge Base
+# 懒加载 Memory Manager 和 Knowledge Base — 委托给 AppContext
 _memory_manager = None
 _kb = None
 
 
 def get_memory_manager():
-    """获取或创建 Memory Manager 实例（增强版）"""
+    """获取或创建 Memory Manager 实例（增强版）— 委托给 AppContext"""
     global _memory_manager
-    if _memory_manager is None:
-        try:
-            # 优先使用增强版本
-            from enhanced_memory_manager import EnhancedMemoryManager
+    if _memory_manager is not None:
+        return _memory_manager
 
+    # 优先使用 AppContext 集中管理
+    try:
+        from app.core.app_context import ctx
+        mgr = ctx.memory_manager
+        if mgr is not None:
+            _memory_manager = mgr
+            _inject_memory_adapters(_memory_manager)
+            return _memory_manager
+    except Exception:
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+
+    # AppContext 不可用时回退到原始逻辑
+    try:
+        from enhanced_memory_manager import EnhancedMemoryManager
+        _memory_manager = EnhancedMemoryManager()
+        _app_logger.info("[INIT] ✅ 增强记忆管理器已初始化")
+    except ImportError:
+        try:
+            from web.enhanced_memory_manager import EnhancedMemoryManager
             _memory_manager = EnhancedMemoryManager()
             _app_logger.info("[INIT] ✅ 增强记忆管理器已初始化")
         except ImportError:
             try:
-                from web.enhanced_memory_manager import EnhancedMemoryManager
-
-                _memory_manager = EnhancedMemoryManager()
-                _app_logger.info("[INIT] ✅ 增强记忆管理器已初始化")
+                from memory_manager import MemoryManager
             except ImportError:
-                # 降级到基础版本
-                try:
-                    from memory_manager import MemoryManager
-                except ImportError:
-                    from web.memory_manager import MemoryManager
-                _memory_manager = MemoryManager()
-                _app_logger.warning("[INIT] ⚠️  使用基础记忆管理器")
+                from web.memory_manager import MemoryManager
+            _memory_manager = MemoryManager()
+            _app_logger.warning("[INIT] ⚠️  使用基础记忆管理器")
 
-        # 注入摘要与向量适配器（如果支持）
-        try:
+    _inject_memory_adapters(_memory_manager)
+    return _memory_manager
 
-            def _memory_generate(
-                prompt: str, temperature: float = 0.2, max_tokens: int = 300
-            ) -> str:
-                resp = client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=temperature,
-                        max_output_tokens=max_tokens,
-                    ),
-                )
-                return resp.text or ""
 
-            def _memory_embed(texts: list) -> list:
-                safe_texts = [(t or "")[:1000] for t in texts]
-                resp = client.models.embed_content(
-                    model="text-embedding-004", contents=safe_texts
-                )
-                embeddings = []
-                if hasattr(resp, "embeddings"):
-                    for item in resp.embeddings:
-                        if hasattr(item, "values"):
-                            embeddings.append(list(item.values))
-                        elif hasattr(item, "embedding"):
-                            embeddings.append(list(item.embedding))
-                        elif isinstance(item, dict):
-                            embeddings.append(
-                                list(item.get("values") or item.get("embedding") or [])
-                            )
-                elif hasattr(resp, "embedding"):
-                    embeddings.append(list(resp.embedding))
-                elif isinstance(resp, dict) and "embeddings" in resp:
-                    for item in resp.get("embeddings", []):
+def _inject_memory_adapters(mgr):
+    """注入摘要与向量适配器到 MemoryManager（如果支持）。"""
+    try:
+
+        def _memory_generate(
+            prompt: str, temperature: float = 0.2, max_tokens: int = 300
+        ) -> str:
+            resp = client.models.generate_content(
+                model="gemini-2.0-flash-lite",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                ),
+            )
+            return resp.text or ""
+
+        def _memory_embed(texts: list) -> list:
+            safe_texts = [(t or "")[:1000] for t in texts]
+            resp = client.models.embed_content(
+                model="text-embedding-004", contents=safe_texts
+            )
+            embeddings = []
+            if hasattr(resp, "embeddings"):
+                for item in resp.embeddings:
+                    if hasattr(item, "values"):
+                        embeddings.append(list(item.values))
+                    elif hasattr(item, "embedding"):
+                        embeddings.append(list(item.embedding))
+                    elif isinstance(item, dict):
                         embeddings.append(
                             list(item.get("values") or item.get("embedding") or [])
                         )
-                return embeddings
+            elif hasattr(resp, "embedding"):
+                embeddings.append(list(resp.embedding))
+            elif isinstance(resp, dict) and "embeddings" in resp:
+                for item in resp.get("embeddings", []):
+                    embeddings.append(
+                        list(item.get("values") or item.get("embedding") or [])
+                    )
+            return embeddings
 
-            if hasattr(_memory_manager, "set_llm_adapters"):
-                _memory_manager.set_llm_adapters(
-                    generate_fn=_memory_generate, embedding_fn=_memory_embed
-                )
-        except Exception as e:
-            _app_logger.warning(f"[INIT] ⚠️  记忆适配器注入失败: {e}")
-    return _memory_manager
+        if hasattr(mgr, "set_llm_adapters"):
+            mgr.set_llm_adapters(
+                generate_fn=_memory_generate, embedding_fn=_memory_embed
+            )
+    except Exception as e:
+        _app_logger.warning(f"[INIT] ⚠️  记忆适配器注入失败: {e}")
 
 
 def _start_memory_extraction(
@@ -6451,7 +6463,7 @@ def _start_memory_extraction(
                 _quality_models[-1],
             )
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         try:
             resp = client.models.generate_content(
                 model=_model,
@@ -7484,7 +7496,7 @@ def chat_stream():
                 if _mm_for_intent:
                     _intent_memory_ctx = _mm_for_intent.get_context_string(user_input) or ""
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             rewritten_input = IntentAnalyzer.rewrite_intent(
                 user_input, full_hist, memory_context=_intent_memory_ctx
             )
@@ -7813,7 +7825,7 @@ def chat_stream():
                         final_output or f"[{_wf_label}工作流完成]",
                     )
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             except Exception as _wf_ex:
                 import traceback
 
@@ -7897,7 +7909,7 @@ def chat_stream():
                             final_output or "[多Agent任务完成]",
                         )
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
                 except Exception as _ma_err:
                     import traceback as _tb
@@ -8066,7 +8078,7 @@ def chat_stream():
                             f"[文档工作流完成] {executor.workflow_name}",
                         )
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
                 except Exception as e:
                     import traceback
@@ -8082,7 +8094,7 @@ def chat_stream():
                             f"[文档工作流失败] {str(e)[:200]}",
                         )
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             return Response(generate_doc_workflow(), mimetype="text/event-stream")
 
@@ -8093,17 +8105,17 @@ def chat_stream():
         use_local_planner = multi_step_info.get("pattern") == "local_plan"
 
         def generate_multi_step():
+            _ms_task_id = f"multi_step_{session_name}_{int(time.time() * 1000)}"
             # === 立即发送任务分类信息 ===
             pattern = multi_step_info.get("pattern", "unknown")
             classification_msg = f"🎯 任务分类: 🔄 多步任务\n"
-            yield f"data: {json.dumps({'type': 'classification', 'task_type': 'MULTI_STEP', 'pattern': pattern, 'route_method': route_method, 'message': classification_msg})}\n\n"
+            yield f"data: {json.dumps({'type': 'classification', 'task_type': 'MULTI_STEP', 'pattern': pattern, 'route_method': route_method, 'task_id': _ms_task_id, 'message': classification_msg})}\n\n"
             
-            # 显示所有子任务
-            status_msg = f"📋 任务分解:\n"
+            # 发送结构化任务时间线初始化（Copilot 风格逐步展示）
+            _planned_steps = []
             for i, subtask in enumerate(subtasks):
-                status_msg += f"  {i+1}. {subtask['description']}\n"
-            status_msg += "\n"
-            yield f"data: {json.dumps({'type': 'status', 'message': status_msg})}\n\n"
+                _planned_steps.append({"index": i + 1, "title": subtask.get("description", f"步骤 {i + 1}")})
+            yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'status': 'init', 'steps': _planned_steps, 'step_total': len(subtasks)})}\n\n"
             
             # 执行所有子任务（逐步流式反馈）
             try:
@@ -8170,18 +8182,32 @@ def chat_stream():
                     etype = evt.get("type", "")
 
                     if etype == "progress":
-                        yield f"data: {json.dumps({'type': 'progress', 'message': evt.get('message', ''), 'detail': evt.get('detail', '')})}\n\n"
+                        _step_no = int(evt.get("step_number") or 0)
+                        _step_total = int(total_steps or 0)
+                        _pct = evt.get("progress")
+                        if _pct is None:
+                            if _step_total > 0 and _step_no > 0:
+                                _pct = min(95, int((_step_no / _step_total) * 100))
+                            else:
+                                _pct = 0
+                        yield f"data: {json.dumps({'type': 'progress', 'task_id': _ms_task_id, 'stage': evt.get('stage', 'step_running'), 'step_number': _step_no, 'step_total': _step_total, 'progress': _pct, 'message': evt.get('message', ''), 'detail': evt.get('detail', '')})}\n\n"
+                        if _step_no > 0:
+                            yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'step_index': _step_no, 'step_total': _step_total, 'status': 'running', 'title': evt.get('step_description', evt.get('message', f'步骤 {_step_no}')), 'detail': evt.get('detail', ''), 'progress': _pct})}\n\n"
 
                     elif etype == "step_done":
                         step_idx = evt.get("step_index", 0)
                         task_type_done = evt.get("task_type", "")
                         success = evt.get("success", False)
                         preview = evt.get("output_preview", "")
+                        _step_total = int(total_steps or 0)
+                        _pct = min(95, int((step_idx / _step_total) * 100)) if _step_total > 0 else 0
                         if success:
-                            yield f"data: {json.dumps({'type': 'progress', 'message': f'步骤 {step_idx} 完成', 'detail': preview[:80]})}\n\n"
+                            yield f"data: {json.dumps({'type': 'progress', 'task_id': _ms_task_id, 'stage': 'step_complete', 'step_number': step_idx, 'step_total': _step_total, 'progress': _pct, 'message': f'步骤 {step_idx} 完成', 'detail': preview[:80]})}\n\n"
+                            yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'step_index': step_idx, 'step_total': _step_total, 'status': 'done', 'title': evt.get('description', f'步骤 {step_idx}'), 'detail': preview[:120], 'progress': _pct})}\n\n"
                         else:
                             err_msg = evt.get("error") or "执行失败"
-                            yield f"data: {json.dumps({'type': 'progress', 'message': f'步骤 {step_idx} 遇到问题', 'detail': err_msg[:80]})}\n\n"
+                            yield f"data: {json.dumps({'type': 'progress', 'task_id': _ms_task_id, 'stage': 'step_failed', 'step_number': step_idx, 'step_total': _step_total, 'progress': _pct, 'message': f'步骤 {step_idx} 遇到问题', 'detail': err_msg[:80]})}\n\n"
+                            yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'step_index': step_idx, 'step_total': _step_total, 'status': 'failed', 'title': evt.get('description', f'步骤 {step_idx}'), 'detail': err_msg[:120], 'progress': _pct})}\n\n"
                         # 回补 subtasks 状态（用于后续自检）
                         for _st in subtasks:
                             if str(_st.get("id")) == str(evt.get("step_id")):
@@ -8198,6 +8224,8 @@ def chat_stream():
 
                     elif etype == "plan_done":
                         _plan_done_event = evt
+                        yield f"data: {json.dumps({'type': 'progress', 'task_id': _ms_task_id, 'stage': 'complete', 'step_number': total_steps, 'step_total': total_steps, 'progress': 100, 'message': '✅ 多步任务执行完成', 'detail': f'共 {total_steps} 个步骤'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'step_index': total_steps, 'step_total': total_steps, 'status': 'all_done', 'title': '多步任务执行完成', 'detail': f'共 {total_steps} 个步骤', 'progress': 100})}\n\n"
                         # 收集保存文件
                         saved_files.extend(evt.get("saved_files") or [])
                         # 同步 context 快照
@@ -8530,6 +8558,65 @@ def chat_stream():
             user_input=user_input,
             temp_skill_ids=_intent_temp_ids,
         )
+
+        # 占卜模式规范化：默认按问题起牌，并减少“神谕”措辞
+        _divination_active = False
+        try:
+            for _s in SkillManager.list_skills():
+                if _s.get("id") == "divination" and _s.get("enabled", False):
+                    _divination_active = True
+                    break
+        except Exception:
+            _divination_active = False
+        if not _divination_active and "divination" in (_intent_temp_ids or []):
+            _divination_active = True
+
+        if _divination_active and isinstance(system_instruction, str):
+            _repls = {
+                "神谕占卜模式": "塔罗占卜模式",
+                "你现在是「神谕」——一位洞悉宇宙之语的存在。": "你现在是一位塔罗解读师，风格神秘但表达清晰、可执行。",
+                "神谕寄语（必须有）": "结论总结（必须有）",
+                "神谕的话": "结论",
+                "神谕为你揭示牌面": "牌面为你揭示",
+                "神谕静听宇宙之声": "牌面正在回应你的问题",
+                "向神谕倾诉": "说出你的问题",
+            }
+            for _old, _new in _repls.items():
+                system_instruction = system_instruction.replace(_old, _new)
+
+            if "默认起牌规则" not in system_instruction:
+                system_instruction += (
+                    "\n\n**默认起牌规则（高优先级）**\n"
+                    "- 占卜技能开启后，只要用户提出占卜相关问题，即默认按问题起牌并解读。\n"
+                    "- 不需要先追问“要不要抽牌”；直接进入抽牌与解读。\n"
+                    "- 若用户未指定牌阵，默认使用「三张牌阵·处境·行动·结果」。"
+                )
+
+            if "竞技比赛问题必须直接写出“谁赢，几比几”" not in system_instruction:
+                system_instruction += (
+                    "\n\n**竞技比赛输出规则（高优先级）**\n"
+                    "- 如果用户问的是比赛、对局、对阵、比分预测，必须直接给出最终判断：谁赢，几比几。\n"
+                    "- 不能只给胜率或倾向，必须补一个确定比分。\n"
+                    "- 回答顺序应为：数据依据 → 牌面含义 → 最终结论（谁赢、几比几）。"
+                )
+
+            try:
+                from app.core.skills.divination_data_handler import DivinationDataHandler
+
+                _div_handler = DivinationDataHandler()
+                _div_context = _div_handler.analyze_divination_question(user_input or "")
+                if _div_context.is_data_available and _div_context.domain == "sports_esports":
+                    _div_prediction = _div_handler.generate_data_driven_prediction(_div_context, [])
+                    system_instruction += (
+                        "\n\n**【占卜数据融合提示】**\n"
+                        f"问题领域：{_div_context.domain}\n"
+                        f"最终建议输出：{_div_prediction.get('prediction', '')}\n"
+                        f"胜者赢面：{int(round((_div_prediction.get('winner_probability') or 0.5) * 100))}%\n"
+                        f"预计比分：{_div_prediction.get('predicted_score', '')}\n"
+                        "回答时请直接写出这个结论，再解释原因，不要写成模糊倾向。"
+                    )
+            except Exception as _div_err:
+                _app_logger.debug(f"[STREAM] 占卜数据指导注入跳过: {_div_err}")
     except Exception as _sk_err:
         _app_logger.warning(f"[STREAM] ⚠️ Skills 注入失败: {_sk_err}")
 
@@ -8577,7 +8664,7 @@ def chat_stream():
     try:
         _show_thinking = settings_manager.get("ai", "show_thinking") == True
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     def generate():
         start_time = time.time()
@@ -10471,7 +10558,7 @@ def chat_stream():
                                     from web.file_processor import process_uploaded_file
                                     _rf_contents, _ = process_uploaded_file(recent_file_path, user_input)
                                 except Exception:
-                                    pass  # 用 user_input 作兜底
+                                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 用 user_input 作兜底
                         else:
                             # 文本类文件：提取内容后注入
                             try:
@@ -10508,7 +10595,7 @@ def chat_stream():
                                 task=task_type, model_name=_rf_model
                             )
                         except Exception:
-                            pass
+                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                         total_time = time.time() - start_time
                         yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                         return
@@ -10614,7 +10701,7 @@ def chat_stream():
                                 model_name=_tot_model,
                             )
                         except Exception:
-                            pass
+                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                         total_time = time.time() - start_time
                         yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time, 'tot_winner': _tot_winner_id})}\n\n"
                         return
@@ -13390,7 +13477,7 @@ def chat_stream():
                                                 if _pt:
                                                     yield _pt
                                     except Exception:
-                                        pass
+                                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                                     _plan_flushed = True
                                     _plan_future = None
 
@@ -13565,7 +13652,7 @@ def chat_stream():
                         f"[CHAT] 连接中断，已将 {model_id} 标记不可用 120s，下次自动降级"
                     )
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                 error_response = (
                     "❌ **服务器连接中断**\n\n"
                     "与 Gemini API 的连接被意外断开，这通常是临时性问题。\n\n"
@@ -13672,7 +13759,7 @@ def chat_stream():
 @app.route("/api/chat/file", methods=["POST"])
 def chat_with_file():
     """处理文件上传和聊天请求"""
-    from web.document_generator import save_docx, save_pdf, to_workspace_rel
+    from web.document_generator import save_docx, save_pdf
     from web.file_processor import process_uploaded_file
 
     def _strip_code_blocks(text: str) -> str:
@@ -13975,7 +14062,7 @@ def chat_with_file():
                             try:
                                 loop.close()
                             except Exception:
-                                pass
+                                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                             run_state["done"] = True
 
                     worker = threading.Thread(target=_run_pipeline_bg, daemon=True)
@@ -14040,7 +14127,7 @@ def chat_with_file():
                                 )
                                 yield f"data: {json.dumps({'type': 'text', 'content': thought_text})}\n\n"
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
                     if run_state["error"]:
                         err = run_state["error"]
@@ -15034,7 +15121,7 @@ def chat_with_file():
                             yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed})}\n\n"
                             return
                     except Exception:
-                        pass  # 检查失败时继续正常流程
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 检查失败时继续正常流程
                     # ──────────────────────────────────────────────────────────
 
                     revised_file = None
@@ -15340,7 +15427,7 @@ def chat_with_file():
                         try:
                             loop.close()
                         except Exception:
-                            pass
+                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                         run_state["done"] = True
 
                 worker = threading.Thread(target=_run_pipeline_bg, daemon=True)
@@ -15387,7 +15474,7 @@ def chat_with_file():
                             thought_text = f"\n\n> 🤖 **Koto 思考**: {item['text']}\n"
                             yield f"data: {json.dumps({'type': 'text', 'content': thought_text})}\n\n"
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
                 if run_state["error"]:
                     err = run_state["error"]
@@ -15417,7 +15504,7 @@ def chat_with_file():
                         ppt_file_path=saved_path,
                     )
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
                 success_msg = (
                     f"✅ **PPT 生成成功！**\n\n"
@@ -15628,7 +15715,7 @@ def chat_with_file():
                                         )
                                     )
                                 except Exception:
-                                    pass
+                                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                         except Exception as _de:
                             _app_logger.warning(f"[FILE UPLOAD] ⚠️ 保存 DOCX 失败: {_de}")
 

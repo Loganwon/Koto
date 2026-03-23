@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Koto (言) - AI Assistant</title>
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/koto_icon.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260321">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260323a">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/skill-ui-extensions.css') }}?v=20260526">
     <!-- Restore UI zoom before first paint to avoid flash -->
     <script>(function(){
@@ -1068,16 +1068,10 @@
                     <span class="sidebar-text">新对话</span>
                 </button>
 
-                <!-- My stuff -->
-                <div class="sb-nav-item" id="myStuffItem" onclick="toggleMyStuff()" title="我的内容">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                    <span class="sidebar-text" style="flex:1;">我的内容</span>
-                    <svg class="sb-chevron sidebar-text" id="myStuffChevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                </div>
-                <div class="sb-sub-panel" id="myStuffPanel">
-                    <div class="sb-sub-panel-inner" id="myStuffList">
-                        <div class="sb-sub-empty">加载中...</div>
-                    </div>
+                <!-- File Hub (replaces My Stuff) -->
+                <div class="sb-nav-item" id="myStuffItem" onclick="openFileHubModal()" title="我的文件">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    <span class="sidebar-text" style="flex:1;">我的文件</span>
                 </div>
 
                 <!-- Skills / Gems -->
@@ -1094,8 +1088,8 @@
                 <div class="sb-section-head sidebar-text">
                     <div style="display:flex;align-items:center;gap:4px;">
                         <span style="flex:1;">对话</span>
-                        <button class="sb-icon-btn" onclick="loadSessions();event.stopPropagation();" title="刷新列表">↻</button>
-                        <button class="sb-icon-btn" onclick="openProjectsManager();event.stopPropagation();" title="管理项目">✎</button>
+                        <button class="sb-icon-btn" onclick="loadSessions();event.stopPropagation();" title="刷新列表"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.88L9 8"/></svg></button>
+                        <button class="sb-icon-btn" onclick="openProjectsManager();event.stopPropagation();" title="管理项目"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
                     </div>
                     <select id="projectSelect" class="sb-project-select" title="选择项目">
                         <option value="default">默认项目</option>
@@ -1108,12 +1102,12 @@
 
             <!-- ── Footer ── -->
             <div class="sidebar-footer">
-                <div id="wechat-notice-bar" style="display:none;padding:8px 10px;border-radius:8px;background:rgba(232,201,122,0.08);border:1px solid rgba(232,201,122,0.2);font-size:11px;color:#999;line-height:1.6;margin-bottom:6px;">
-                    📩 内测激活码加微信：<strong style="color:#e8c97a;font-size:12px;letter-spacing:0.5px;">18913921188</strong>
+                <div id="wechat-notice-bar">
+                    📩 内测激活码加微信：<strong>18913921188</strong>
                 </div>
-                <div id="auth-user-bar" style="display:none;padding:6px 10px;border-radius:10px;background:var(--bg-tertiary);font-size:12px;">
-                    <span id="auth-user-name" style="color:var(--text-secondary);"></span>
-                    <button id="auth-logout-btn" onclick="KotoAuth.logout()" style="float:right;background:none;border:none;color:var(--accent-primary);cursor:pointer;font-size:12px;">退出</button>
+                <div id="auth-user-bar">
+                    <span id="auth-user-name"></span>
+                    <button id="auth-logout-btn" onclick="KotoAuth.logout()">退出</button>
                 </div>
                 <div class="status-indicator" id="statusIndicator">
                     <span class="status-dot"></span>
@@ -1136,7 +1130,7 @@
             <div id="apiKeyBanner" class="api-key-banner" style="display:none;">
                 <span>⚠️ 尚未配置 API Key，AI 功能不可用。</span>
                 <button onclick="showSetupWizard()">去设置</button>
-                <button class="dismiss-btn" onclick="dismissApiKeyBanner()">✕</button>
+                <button class="dismiss-btn" onclick="dismissApiKeyBanner()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <header class="topbar">
                 <div class="title-stack">
@@ -1145,14 +1139,14 @@
                     <p class="subtitle">对话、写作、调试、浏览、文件编辑一体化</p>
                 </div>
                 <div class="top-actions">
-                    <button class="ghost-btn" onclick="switchToMiniMode()" title="切换到简洁模式">▣ 简洁</button>
-                    <button class="ghost-btn" onclick="openWorkspaceFolder()" title="打开工作区文件夹">🗁 打开</button>
+                    <button class="ghost-btn" onclick="switchToMiniMode()" title="切换到简洁模式"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><path d="M9 3v18"/><path d="M3 9h18"/></svg> 简洁</button>
+                    <button class="ghost-btn" onclick="openWorkspaceFolder()" title="打开工作区文件夹"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg> 打开</button>
                     <!-- Token 监测嵌入顶栏 -->
                     <div id="tokenMonitor">
                         <div id="tokenPanel">
                             <div class="tp-header">
                                 <span class="tp-title">📊 Token 使用监测</span>
-                                <button class="tp-close" onclick="tokenWidget.close()">×</button>
+                                <button class="tp-close" onclick="tokenWidget.close()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                             </div>
                             <div class="tp-body" id="tokenPanelBody">
                                 <div class="tp-spinner"></div>
@@ -1167,11 +1161,11 @@
                             <span class="tc-label" id="tokenChipLabel">本月 …</span>
                         </div>
                     </div>
-                    <button class="ghost-btn" onclick="openSettings()" title="设置">⚙️ 设置</button>
+                    <button class="ghost-btn" onclick="openSettings()" title="设置"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> 设置</button>
 
                     <!-- 影子追踪主动交互按鈕 -->
-                    <button class="ghost-btn" id="shadowToggleBtn" onclick="openShadowPanel()" title="影子追踪 · 主动交互" style="position:relative;display:none;">
-                        👁️ 影子
+                    <button class="ghost-btn" id="shadowToggleBtn" onclick="openShadowPanel()" title="影子追踪 · 主动交互" style="position:relative;display:none!important;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg> 影子
                         <span class="badge" id="shadowBadge" style="display:none;">0</span>
                     </button>
                 </div>
@@ -1182,12 +1176,12 @@
             <div class="main-grid single-column">
                 <section class="chat-pane">
                 <!-- 影子追踪：主动消息条带（紧凑单行，不挤压欢迎屏幕） -->
-                <div id="shadowBanner" style="display:none; border-bottom:1px solid var(--border-color); background:var(--bg-tertiary); padding:5px 12px; font-size:12px; flex-shrink:0;">
+                <div id="shadowBanner">
                     <div style="display:flex;align-items:center;gap:8px;">
                         <span style="font-size:14px;flex-shrink:0;">&#x1F441;&#xFE0F;</span>
                         <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="shadowBannerText">应用正在呀话中...</div>
                         <div style="display:flex;gap:4px;flex-shrink:0;align-items:center;">
-                            <span id="shadowBannerCount" style="font-size:11px;color:var(--text-muted);white-space:nowrap;"></span>
+                            <span id="shadowBannerCount"></span>
                             <button class="btn-secondary btn-sm" onclick="shadowPrevMsg()">&#8249;</button>
                             <button class="btn-secondary btn-sm" onclick="shadowNextMsg()">&#8250;</button>
                             <button class="btn-secondary btn-sm" onclick="shadowDismissAll()">全部关闭</button>
@@ -1197,12 +1191,12 @@
                     </div>
                 </div>
                 <!-- 聊天内搜索栏 (Ctrl+F) -->
-                <div id="chatSearchBar" style="display:none; border-bottom:1px solid var(--border-color); background:var(--bg-secondary); padding:6px 12px; flex-shrink:0; align-items:center; gap:8px;">
+                <div id="chatSearchBar">
                     <input type="text" id="chatSearchInput" placeholder="在对话中搜索…" autocomplete="off"
                         style="flex:1; padding:5px 10px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-tertiary); color:var(--text-primary); font-size:13px; font-family:inherit; outline:none;"
                         oninput="runChatSearch(this.value)"
                         onkeydown="chatSearchNavKey(event)">
-                    <span id="chatSearchCount" style="font-size:12px; color:var(--text-muted); white-space:nowrap;"></span>
+                    <span id="chatSearchCount"></span>
                     <button class="sb-topbar-btn" onclick="chatSearchPrev()" title="上一个" style="width:28px;height:28px;font-size:14px;">&#8593;</button>
                     <button class="sb-topbar-btn" onclick="chatSearchNext()" title="下一个" style="width:28px;height:28px;font-size:14px;">&#8595;</button>
                     <button class="sb-topbar-btn" onclick="closeChatSearch()" title="关闭" style="width:28px;height:28px;font-size:14px;">&#10005;</button>
@@ -1280,7 +1274,7 @@
             <div id="miniGamePanel" class="mini-game-panel hidden">
                 <div class="mini-game-header">
                     <span>🦖 放松一下</span>
-                    <button class="mini-game-close" onclick="hideMiniGame()">✕</button>
+                    <button class="mini-game-close" onclick="hideMiniGame()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
                 <canvas id="miniGameCanvas" width="260" height="120"></canvas>
                 <div class="mini-game-hint">空格 / 点击 跳跃</div>
@@ -1290,15 +1284,15 @@
                 <div class="resize-handle-row" id="inputResizeHandle"></div>
                 <!-- Active Skills Pill Bar -->
                 <div id="chat-skill-bar" style="display:flex;">
-                  <button class="csb-label" id="csbToggleBtn" onclick="toggleSkillsPanel()" title="打开 / 关闭 Skills 库">✨ Skills <span class="csb-toggle-arrow">▾</span></button>
+                  <button class="csb-label" id="csbToggleBtn" onclick="toggleSkillsPanel()" title="打开 / 关闭 Skills 库"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Skills <span class="csb-toggle-arrow">▾</span></button>
                   <div class="csb-pills" id="csb-pills"><span class="csb-hint">暂无激活 — <a href="javascript:void(0)" onclick="openSkillsPanel()">打开 Skills 库</a></span></div>
-                  <button class="csb-dismiss-all" id="csbDismissAllBtn" onclick="csbDismissAllSkills()" title="关闭所有激活的 Skills" style="display:none;">✕ 全关</button>
+                  <button class="csb-dismiss-all" id="csbDismissAllBtn" onclick="csbDismissAllSkills()" title="关闭所有激活的 Skills" style="display:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> 全关</button>
                 </div>
 
                 <!-- @文件 激活的上下文文件 chips -->
-                <div id="contextFileBar" style="display:none; flex-wrap:wrap; gap:4px; padding:4px 8px; background:var(--bg-secondary,#f5f5f5); border-radius:6px; margin-bottom:4px; font-size:12px;"></div>
+                <div id="contextFileBar"></div>
                 <!-- @文件 搜索弹出框 -->
-                <div id="atFileSuggest" style="display:none; position:absolute; z-index:1000; background:var(--bg-primary,#fff); border:1px solid var(--border-color,#ddd); border-radius:8px; box-shadow:0 4px 16px rgba(0,0,0,.15); max-height:220px; overflow-y:auto; min-width:260px; max-width:400px;"></div>
+                <div id="atFileSuggest"></div>
                 <!-- / 命令面板 -->
                 <div id="slashPalette"></div>
 
@@ -1316,7 +1310,7 @@
                         </svg>
                     </label>
                     <button type="button" class="voice-btn" id="voiceBtn" onclick="toggleVoice()" title="语音输入">
-                        <span class="voice-icon">🎙️</span>
+                        <svg class="voice-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
                     </button>
                     <textarea 
                         id="messageInput" 
@@ -1349,7 +1343,7 @@
         <aside class="workspace-panel" id="workspacePanel">
             <div class="panel-header">
                 <h3>工作区文件</h3>
-                <button class="close-panel" onclick="toggleWorkspace()">×</button>
+                <button class="close-panel" onclick="toggleWorkspace()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="workspace-files" id="workspaceFiles"></div>
         </aside>
@@ -1358,8 +1352,8 @@
         <aside class="settings-panel" id="settingsPanel">
             <div class="resize-handle resize-handle-skills" id="settingsResizeHandle"></div>
             <div class="panel-header">
-                <h3>⚙️ 设置</h3>
-                <button class="close-panel" onclick="closeSettings()">×</button>
+                <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> 设置</h3>
+                <button class="close-panel" onclick="closeSettings()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="settings-content">
                 <div class="settings-section">
@@ -1441,19 +1435,19 @@
                     <div class="setting-item">
                         <label>主题</label>
                         <div class="theme-selector" id="themeSelector">
-                            <div class="theme-option" data-theme="dark" onclick="selectTheme('dark')">
-                                <div class="theme-preview dark-preview">
-                                    <div class="preview-sidebar"></div>
-                                    <div class="preview-content"></div>
-                                </div>
-                                <span>深色</span>
-                            </div>
                             <div class="theme-option" data-theme="light" onclick="selectTheme('light')">
                                 <div class="theme-preview light-preview">
                                     <div class="preview-sidebar"></div>
                                     <div class="preview-content"></div>
                                 </div>
                                 <span>浅色</span>
+                            </div>
+                            <div class="theme-option" data-theme="dark" onclick="selectTheme('dark')">
+                                <div class="theme-preview dark-preview">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content"></div>
+                                </div>
+                                <span>深色</span>
                             </div>
                             <div class="theme-option" data-theme="ocean" onclick="selectTheme('ocean')">
                                 <div class="theme-preview ocean-preview">
@@ -1533,7 +1527,7 @@
                     </h4>
                     <div class="setting-item">
                         <div class="toggle-row">
-                            <span class="toggle-label">🖥️ 仅使用本地模型</span>
+                            <span class="toggle-label"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-3px;"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg> 仅使用本地模型</span>
                             <label class="toggle">
                                 <input type="checkbox" id="settingLocalOnly" onchange="onLocalOnlyChange(this.checked)">
                                 <span class="toggle-slider"></span>
@@ -1692,87 +1686,6 @@
                     </div>
                 </div>
 
-                <!-- FileHub Section -->
-                <div class="settings-section">
-                    <h4>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                        </svg>
-                        文件库
-                    </h4>
-                    <p class="setting-desc">搜索已注册文件，或直接浏览任意目录下的文件。</p>
-
-                    <!-- 模式切换标签 -->
-                    <div style="display:flex;gap:0;margin-bottom:8px;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
-                        <button id="fhTabSearch" onclick="fhSwitchTab('search')"
-                            style="flex:1;padding:6px 0;font-size:12px;border:none;background:var(--accent-primary);color:#fff;cursor:pointer;">
-                            🔍 关键词搜索
-                        </button>
-                        <button id="fhTabBrowse" onclick="fhSwitchTab('browse')"
-                            style="flex:1;padding:6px 0;font-size:12px;border:none;background:var(--bg-card);color:var(--text-primary);cursor:pointer;">
-                            📂 浏览目录
-                        </button>
-                    </div>
-
-                    <!-- 搜索模式 -->
-                    <div id="fhPaneSearch">
-                        <div style="display:flex;gap:6px;margin-bottom:6px;">
-                            <input type="text" id="fhSearchInput" class="form-input"
-                                placeholder="输入文件名、关键词…"
-                                style="flex:1;"
-                                onkeydown="if(event.key==='Enter')fhDoSearch()"
-                            >
-                            <select id="fhCatFilter" class="form-select" style="width:82px;">
-                                <option value="">全部</option>
-                                <option value="文档">文档</option>
-                                <option value="图片">图片</option>
-                                <option value="代码">代码</option>
-                                <option value="视频">视频</option>
-                                <option value="音频">音频</option>
-                                <option value="压缩包">压缩包</option>
-                                <option value="其他">其他</option>
-                            </select>
-                            <button class="btn-primary btn-sm" onclick="fhDoSearch()">搜索</button>
-                        </div>
-                        <div style="display:flex;gap:6px;margin-bottom:6px;">
-                            <button class="btn-secondary btn-sm" onclick="fhLoadRecent()">🕐 最近文件</button>
-                            <button class="btn-secondary btn-sm" onclick="fhCheckDuplicates()">🔁 重复检测</button>
-                            <span id="fhStatsSummary" style="margin-left:auto;font-size:11px;color:var(--text-muted);line-height:1;align-self:center;"></span>
-                        </div>
-                    </div>
-
-                    <!-- 浏览目录模式 -->
-                    <div id="fhPaneBrowse" style="display:none;">
-                        <div style="display:flex;gap:6px;margin-bottom:6px;">
-                            <input type="text" id="fhBrowsePath" class="form-input"
-                                placeholder="输入目录路径，如 C:\Users\12524\Desktop"
-                                style="flex:1;"
-                                onkeydown="if(event.key==='Enter')fhDoBrowse()"
-                            >
-                            <button class="btn-secondary btn-sm" onclick="fhPickFolder()" title="打开系统文件夹选择对话框">📂</button>
-                            <button class="btn-primary btn-sm" onclick="fhDoBrowse()">浏览</button>
-                        </div>
-                        <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
-                            <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;">
-                                <input type="checkbox" id="fhRecursive"> 包含子目录
-                            </label>
-                            <input type="text" id="fhBrowseFilter" class="form-input"
-                                placeholder="过滤文件名…" style="flex:1;font-size:12px;"
-                                oninput="fhFilterBrowseResults(this.value)"
-                            >
-                        </div>
-                    </div>
-
-                    <!-- 统一文件结果区 -->
-                    <div id="fhResultHeader" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
-                        <span id="fhResultCount"></span>
-                        <button class="btn-secondary btn-sm" style="font-size:11px;" onclick="fhCopyAllPaths()">📋 复制所有路径</button>
-                    </div>
-                    <div id="fhFileList" style="max-height:280px;overflow-y:auto;">
-                        <div class="memory-empty">在上方选择搜索模式</div>
-                    </div>
-                </div>
-
                 <div class="settings-actions">
                     <button class="btn-secondary" onclick="resetSettings()">重置默认</button>
                     <button class="btn-primary" onclick="closeSettings()">完成</button>
@@ -1785,7 +1698,7 @@
             <div class="skill-editor-inner">
                 <div class="skill-editor-header">
                     <span>＋ 新建意图绑定</span>
-                    <button class="close-panel" onclick="closeCreateBindingModal()">×</button>
+                    <button class="close-panel" onclick="closeCreateBindingModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
                 <p class="setting-hint" style="margin:0 0 10px;">当用户输入匹配关键词时，自动临时注入该 Skill Prompt。</p>
                 <div class="form-group">
@@ -1812,7 +1725,7 @@
             <div class="skill-editor-inner">
                 <div class="skill-editor-header">
                     <span>➕ 新建触发器</span>
-                    <button class="close-panel" onclick="closeCreateTriggerModal()">×</button>
+                    <button class="close-panel" onclick="closeCreateTriggerModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
                 <div class="form-group">
                     <label class="form-label">名称</label>
@@ -1863,7 +1776,7 @@
             <div class="skill-editor-inner" style="width:min(560px,93vw);">
                 <div class="skill-editor-header">
                     <span>✨ 创建自定义 Skill</span>
-                    <button class="close-panel" onclick="closeCreateSkillModal()">×</button>
+                    <button class="close-panel" onclick="closeCreateSkillModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
                 <div class="form-row">
                     <div class="form-group" style="width:68px;flex:none;">
@@ -1904,7 +1817,7 @@
             <div class="skill-editor-inner" style="width:min(480px,93vw);">
                 <div class="skill-editor-header">
                     <span>⏰ 定时自动整理向导</span>
-                    <button class="close-panel" onclick="closeCatalogScheduleWizard()">×</button>
+                    <button class="close-panel" onclick="closeCatalogScheduleWizard()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
                 <p class="setting-hint" style="margin:0 0 12px;">配置「下载目录自动整理」触发器，按设定间隔自动整理指定目录。</p>
                 <div class="form-group">
@@ -1935,7 +1848,7 @@
                             <div id="skeMeta" class="ske-meta"></div>
                         </div>
                     </div>
-                    <button class="ske-close" onclick="closeSkillEditor()">×</button>
+                    <button class="ske-close" onclick="closeSkillEditor()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
                 <!-- Tab bar -->
                 <div class="ske-tabs">
@@ -1985,7 +1898,7 @@
 
                     <!-- Color preset -->
                     <div class="ske-ui-section">
-                        <span class="ske-ui-label">🎨 主题色预设</span>
+                        <span class="ske-ui-label"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><circle cx="13.5" cy="6.5" r=".5"/><circle cx="17.5" cy="10.5" r=".5"/><circle cx="8.5" cy="7.5" r=".5"/><circle cx="6.5" cy="12.5" r=".5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg> 主题色预设</span>
                         <div class="ske-swatch-row" id="skeColorSwatches">
                             <div class="ske-swatch ske-swatch-none active" data-theme-key="none" title="默认（不改变主题）" onclick="skePickTheme(this)"></div>
                             <div class="ske-swatch" style="background:linear-gradient(135deg,#d8a4ff,#f0a0ff)" data-theme-key="mystic_purple" title="神秘紫"       onclick="skePickTheme(this)"></div>
@@ -2028,11 +1941,11 @@
                         </div>
                         <div style="margin-bottom:6px;">
                             <div style="font-size:10px;color:#6c7a91;margin-bottom:3px;">欢迎语（首次激活时显示）</div>
-                            <input id="skeWelcomeText" class="ske-input-sm" placeholder="例：✦ 神谕已降临 ✦  说出你心中的疑惑…">
+                            <input id="skeWelcomeText" class="ske-input-sm" placeholder="例：✦ 牌面已揭示 ✦  说出你心中的疑惑…">
                         </div>
                         <div>
                             <div style="font-size:10px;color:#6c7a91;margin-bottom:3px;">AI 回复前缀装饰</div>
-                            <input id="skeAssistantPrefix" class="ske-input-sm" placeholder="例：🔮   或   ✨ 神谕" style="max-width:200px;">
+                            <input id="skeAssistantPrefix" class="ske-input-sm" placeholder="例：🔮   或   ✨ 占卜指引" style="max-width:200px;">
                         </div>
                     </div>
 
@@ -2067,7 +1980,7 @@
                             <div style="font-size:11px;color:#6c7a91;margin-top:1px;">为此 Skill 绑定 .docx 填写模板</div>
                         </div>
                     </div>
-                    <button class="close-panel" onclick="closeTemplateUpload()">×</button>
+                    <button class="close-panel" onclick="closeTemplateUpload()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
 
                 <!-- Hint -->
@@ -2111,12 +2024,12 @@
             <div class="resize-handle resize-handle-skills" id="skillsResizeHandle"></div>
             <div class="sp-header">
                 <div style="display:flex;align-items:center;gap:8px;">
-                    <span class="sp-title">✨ Skills 库</span>
+                    <span class="sp-title"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Skills 库</span>
                     <span class="sp-active-badge" id="spActiveBadge" style="display:none;"></span>
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;">
                     <a href="/skill-marketplace" target="_blank" class="sp-ext-link" title="完整管理视图">⤢ 完整视图</a>
-                    <button class="close-panel" onclick="closeSkillsPanel()" title="关闭">×</button>
+                    <button class="close-panel" onclick="closeSkillsPanel()" title="关闭"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
             </div>
             <div class="sp-search-wrap">
@@ -2297,7 +2210,7 @@
                         <button class="artifact-tab-btn" data-tab="code" onclick="switchArtifactTab('code')" title="代码">⟨/⟩ 代码</button>
                         <button class="ghost-btn artifact-copy-all" onclick="copyArtifactContent()" title="复制全部">📋</button>
                         <button class="ghost-btn artifact-download" onclick="downloadArtifact()" title="下载">⬇</button>
-                        <button class="close-panel" onclick="closeArtifacts()">×</button>
+                        <button class="close-panel" onclick="closeArtifacts()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                     </div>
                 </div>
                 <div class="artifacts-meta">
@@ -2336,14 +2249,14 @@
 
                         <div style="display:flex;align-items:center;gap:8px;margin:14px 0 10px;">
                             <div style="flex:1;height:1px;background:rgba(255,255,255,0.1);"></div>
-                            <span style="font-size:11px;color:#666;">或使用激活码</span>
+                            <span style="font-size:11px;color:var(--text-secondary);">或使用激活码</span>
                             <div style="flex:1;height:1px;background:rgba(255,255,255,0.1);"></div>
                         </div>
                         <input type="text" id="setupActivateCode" placeholder="输入激活码..." style="text-transform:uppercase;letter-spacing:1px;">
                         <button class="btn-primary" onclick="useActivationCode()" style="margin-top:6px;">使用激活码</button>
                         <div class="step-status" id="step1ActivateStatus"></div>
 
-                        <div style="margin-top:12px;padding:9px 11px;background:rgba(232,201,122,0.07);border:1px solid rgba(232,201,122,0.18);border-radius:8px;font-size:11px;color:#999;line-height:1.7;">
+                        <div style="margin-top:12px;padding:9px 11px;background:rgba(232,201,122,0.07);border:1px solid rgba(232,201,122,0.18);border-radius:8px;font-size:11px;color:var(--text-muted);line-height:1.7;">
                             📩 没有激活码？加微信联系作者获取：<br>
                             <strong style="color:#e8c97a;font-size:13px;letter-spacing:0.5px;">18913921188</strong>
                         </div>
@@ -2380,6 +2293,94 @@
             <div class="setup-footer">
                 <button class="btn-secondary" onclick="skipSetup()">跳过设置</button>
                 <button class="btn-primary" id="startKotoBtn" onclick="finishSetup()" disabled>开始使用 Koto</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FileHub Modal -->
+    <div class="modal-overlay" id="filehubModal" style="display:none;" onclick="if(event.target===this)closeFileHubModal()">
+        <div class="modal" style="width: 760px; max-width: 95vw; background: var(--bg-card); padding: 24px; text-align: left; display: flex; flex-direction: column; max-height: 85vh;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
+                <div>
+                    <h3 style="display:flex;align-items:center;gap:8px;margin:0 0 6px 0;font-size:18px;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                        我的文件
+                    </h3>
+                    <p class="setting-desc" style="margin:0;font-size:13px;">搜索已注册文件，或直接浏览任意目录下的文件。</p>
+                </div>
+                <button class="close-panel" onclick="closeFileHubModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+
+            <!-- 模式切换标签 -->
+            <div style="display:flex;gap:0;margin-bottom:12px;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;flex-shrink:0;">
+                <button id="fhTabSearch" onclick="fhSwitchTab('search')"
+                    style="flex:1;padding:8px 0;font-size:13px;border:none;background:var(--accent-primary);color:#fff;cursor:pointer;">
+                    🔍 关键词搜索
+                </button>
+                <button id="fhTabBrowse" onclick="fhSwitchTab('browse')"
+                    style="flex:1;padding:8px 0;font-size:13px;border:none;background:rgba(0,0,0,0.1);color:var(--text-primary);cursor:pointer;">
+                    📂 浏览目录
+                </button>
+            </div>
+
+            <!-- 搜索模式 -->
+            <div id="fhPaneSearch" style="flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:8px; margin-bottom:12px; border:1px solid var(--border-color);">
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <input type="text" id="fhSearchInput" class="form-input"
+                        placeholder="输入文件名、关键词..."
+                        style="flex:1;font-size:14px;"
+                        onkeydown="if(event.key==='Enter')fhDoSearch()"
+                    >
+                    <select id="fhCatFilter" class="form-select" style="width:100px;">
+                        <option value="">全部</option>
+                        <option value="文档">文档</option>
+                        <option value="图片">图片</option>
+                        <option value="代码">代码</option>
+                        <option value="视频">视频</option>
+                        <option value="音频">音频</option>
+                        <option value="压缩包">压缩包</option>
+                        <option value="其他">其他</option>
+                    </select>
+                    <button class="btn-primary" onclick="fhDoSearch()">搜索</button>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button class="btn-secondary btn-sm" onclick="fhLoadRecent()">🕐 最近文件</button>
+                    <button class="btn-secondary btn-sm" onclick="fhCheckDuplicates()">🔁 重复检测</button>
+                    <span id="fhStatsSummary" style="margin-left:auto;font-size:12px;color:var(--text-muted);"></span>
+                </div>
+            </div>
+
+            <!-- 浏览目录模式 -->
+            <div id="fhPaneBrowse" style="display:none; flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:8px; margin-bottom:12px; border:1px solid var(--border-color);">
+                <div style="display:flex;gap:8px;margin-bottom:12px;">
+                    <input type="text" id="fhBrowsePath" class="form-input"
+                        placeholder="输入目录路径，如 C:\Users\12524\Desktop"
+                        style="flex:1;font-size:14px;"
+                        onkeydown="if(event.key==='Enter')fhDoBrowse()"
+                    >
+                    <button class="btn-secondary" onclick="fhPickFolder()" title="打开系统文件夹选择对话框">📂</button>
+                    <button class="btn-primary" onclick="fhDoBrowse()">浏览</button>
+                </div>
+                <div style="display:flex;gap:12px;align-items:center;">
+                    <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="checkbox" id="fhRecursive"> 包含子目录
+                    </label>
+                    <input type="text" id="fhBrowseFilter" class="form-input"
+                        placeholder="过滤文件名..." style="flex:1;font-size:13px;"
+                        oninput="fhFilterBrowseResults(this.value)"
+                    >
+                </div>
+            </div>
+
+            <!-- 统一文件结果区 -->
+            <div id="fhResultHeader" style="display:none;font-size:13px;color:var(--text-muted);margin-bottom:8px;align-items:flex-end;justify-content:space-between;flex-shrink:0;">
+                <span id="fhResultCount"></span>
+                <button class="btn-secondary btn-sm" style="font-size:12px;" onclick="fhCopyAllPaths()">📋 复制所有路径</button>
+            </div>
+            <div id="fhFileList" style="flex:1; overflow-y:auto; background:var(--bg-elevated); border-radius:8px; border:1px solid var(--border-color); padding:8px;">
+                <div class="memory-empty" style="margin-top:40px;">在上方选择搜索模式</div>
             </div>
         </div>
     </div>
@@ -2421,7 +2422,7 @@
         <div class="suggestion-panel">
             <div class="panel-header">
                 <h3>📝 文档修改建议</h3>
-                <button class="close-panel" onclick="closeSuggestionPanel()">×</button>
+                <button class="close-panel" onclick="closeSuggestionPanel()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             
             <!-- 进度区域 -->
@@ -2474,7 +2475,7 @@
         <div class="batch-panel">
             <div class="panel-header">
                 <h3>📋 批量任务</h3>
-                <button class="close-panel" onclick="closeBatchJobsPanel()">×</button>
+                <button class="close-panel" onclick="closeBatchJobsPanel()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="batch-panel-body">
                 <div class="batch-panel-actions">
@@ -2495,7 +2496,7 @@
                 <div class="panel-header-actions">
                     <button class="ghost-btn btn-xs" onclick="runTriggerEvaluation()">⚡ 立即评估</button>
                 </div>
-                <button class="close-panel" onclick="closeTriggerPanel()">×</button>
+                <button class="close-panel" onclick="closeTriggerPanel()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="trigger-panel-body">
                 <div class="trigger-actions">
@@ -2517,7 +2518,7 @@
     <div class="apps-container" id="appsContainer"></div>
 
     <script src="{{ url_for('static', filename='js/auth.js') }}?v=20260315"></script>
-    <script defer src="{{ url_for('static', filename='js/app.js') }}?v=20260319i"></script>
+    <script defer src="{{ url_for('static', filename='js/app.js') }}?v=20260323b"></script>
     <script src="{{ url_for('static', filename='js/app-framework.js') }}?v=20260315"></script>
     <script defer src="{{ url_for('static', filename='js/tarot-picker.js') }}?v=20260320-v2"></script>
     <script defer src="{{ url_for('static', filename='js/skill-ui.js') }}?v=20260319b"></script>
@@ -2731,7 +2732,7 @@
                             <div class="csb-pill-tip-desc">${desc}${s.has_template ? '<br><span style="color:#7ecfff;font-size:11px">📄 已绑定 Word 模板</span>' : ''}${suppressNote}</div>
                         </span>
                         ${s.icon || '🔧'} ${s.name}${tmplBadge}${isSuppressed ? ' <span style="color:#ffb86c;font-size:10px">⚠️</span>' : ''}
-                        <button class="csb-pill-dismiss" title="取消 ${s.name}" onclick="csbDismissSkill(event,'${s.id}')">✕</button>
+                        <button class="csb-pill-dismiss" title="取消 ${s.name}" onclick="csbDismissSkill(event,'${s.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                     </span>`;
                 }).join('');
 
@@ -2877,6 +2878,10 @@
             }
         };
 
+        document.addEventListener('DOMContentLoaded', () => {
+            window.closeSkillsPanel();
+        });
+
         async function spLoadSkills() {
             const content = document.getElementById('spContent');
             if (!content) return;
@@ -3005,7 +3010,7 @@
                                 <div class="sp-actv-name">${s.name}${isSup ? ' ⚠️' : ''}</div>
                                 <div class="sp-actv-meta">${CAT_LABELS[s.category] || s.category}${supNote}</div>
                             </div>
-                            <button class="sp-actv-dismiss" onclick="event.stopPropagation();spToggleSkill('${s.id}',false)" title="禁用">✕</button>
+                            <button class="sp-actv-dismiss" onclick="event.stopPropagation();spToggleSkill('${s.id}',false)" title="禁用"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                         </div>`;
                     }).join('')}
                 </div>` : '';
@@ -3380,7 +3385,7 @@
                     ? '<span class="sp-preset-badge builtin">内置</span>'
                     : `<span class="sp-preset-badge">${new Date(p.created).toLocaleDateString('zh-CN', {month:'numeric',day:'numeric'})}</span>`;
                 const delBtn = !p.is_builtin
-                    ? `<button class="sp-preset-del-btn" onclick="event.stopPropagation();spDeletePreset('${p.id}')" title="删除">✕</button>`
+                    ? `<button class="sp-preset-del-btn" onclick="event.stopPropagation();spDeletePreset('${p.id}')" title="删除"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`
                     : '';
                 // Use ID-based lookup so no JSON is embedded in onclick
                 return `<div class="sp-preset-card${isActive ? ' active-preset' : ''}" data-preset-id="${p.id}"
@@ -3897,7 +3902,7 @@
     <!-- Confirm Modal -->
     <div id="macroModal">
         <div id="macroModalBox">
-            <button id="macroModalClose" onclick="macroCloseModal()" title="关闭">×</button>
+            <button id="macroModalClose" onclick="macroCloseModal()" title="关闭"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             <h3>🎯 固化为专属按钮</h3>
             <p class="macro-modal-sub">
                 系统检测到你反复执行以下操作，帮你一键固化为 Skill 按钮，下次直接点击使用。
@@ -4065,11 +4070,12 @@
     <script>
     (function() {
         var sp = document.getElementById('startupSplash');
-        if (!sp) return;
-        // 预应用系统深色模式，避免主题闪烁
+        // 预应用系统主题，避免主题闪烁
+        document.documentElement.setAttribute('data-theme', 'light');
         if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
             document.documentElement.setAttribute('data-theme', 'dark');
         }
+        if (!sp) return;
         // 两帧延迟：确保浏览器先渲染 app shell，再移除 splash（视觉更平滑）
         requestAnimationFrame(function() {
             requestAnimationFrame(function() {

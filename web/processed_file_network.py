@@ -20,14 +20,12 @@ import json
 import logging
 import os
 import platform
-import re
 import sqlite3
 import subprocess
-from collections import defaultdict
-from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

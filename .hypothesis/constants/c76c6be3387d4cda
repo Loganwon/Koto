@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\file\file_watcher.py
-# hypothesis_version: 6.151.9
-
-[0.5, 1024, '*', '.', '.crdownload', '.csv', '.db', '.db-shm', '.db-wal', '.docx', '.download', '.html', '.js', '.json', '.lnk', '.md', '.part', '.pdf', '.py', '.swp', '.tmp', '.txt', '.xlsx', '.~lock', 'FileWatcher', '[FileWatcher] 已停止', 'category', 'config', 'datetime', 'enabled', 'file_watcher', 'industry', 'interval_seconds', 'koto-file-watcher', 'max_file_size_mb', 'milliseconds', 'other', 'scanner', 'skip_extensions', 'user_settings.json', 'utf-8', 'watch_dirs', 'watcher', '其他']

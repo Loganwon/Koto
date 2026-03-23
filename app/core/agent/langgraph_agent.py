@@ -46,7 +46,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import Any, Dict, Generator, List, Literal, Optional, Sequence
+from typing import Any, Dict, Generator, List, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ def _make_nodes(
             name = td["name"]
             tool_map[name] = lambda _n=name, **kw: registry.execute(_n, kw)
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     def node_reason(state: "AgentState") -> Dict:
         """LLM 推理节点：调用 Gemini 决定下一步（工具调用 or 最终答案）。"""

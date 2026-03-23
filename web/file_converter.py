@@ -314,7 +314,7 @@ def _docx_to_pdf(src: str, out: str) -> Tuple[str, str]:
         word.Quit()
         return out, ""
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # 回退: LibreOffice
     lo = _try_libreoffice(src, str(Path(out).parent), "pdf")
@@ -393,7 +393,7 @@ def _doc_to_docx(src: str, out: str) -> Tuple[str, str]:
         word.Quit()
         return out, ""
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     try:
         from docx import Document as DocxDoc
@@ -402,7 +402,7 @@ def _doc_to_docx(src: str, out: str) -> Tuple[str, str]:
         d.save(out)
         return out, ""
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     lo = _try_libreoffice(src, str(Path(out).parent), "docx")
     if lo:
@@ -428,7 +428,7 @@ def _pdf_to_docx(src: str, out: str) -> Tuple[str, str]:
     except ImportError:
         pass
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # 回退: 文本提取 → 重建 DOCX
     from docx import Document as DocxDoc
@@ -473,7 +473,7 @@ def _extract_pdf_text(src: str) -> str:
         with pdfplumber.open(src) as pdf:
             return "\n".join(p.extract_text() or "" for p in pdf.pages)
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
     raise RuntimeError("无法提取 PDF 文本（需要 pypdf 或 pdfplumber）")
 
 
@@ -685,7 +685,7 @@ def _pptx_to_pdf(src: str, out: str) -> Tuple[str, str]:
         ppts.Quit()
         return out, ""
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # 回退: LibreOffice
     lo = _try_libreoffice(src, str(Path(out).parent), "pdf")
@@ -745,7 +745,7 @@ def _try_libreoffice(
                 if os.path.exists(expected):
                     return expected
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
     return None
 
 
