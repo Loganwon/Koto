@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.6.4] - 2026-03-23
 
 ### Added
 - **AppContext DI Container** (`app/core/app_context.py`): Centralized dependency injection container replacing 48 scattered module-level globals. Thread-safe lazy initialization with double-checked locking, `override()`/`reset()` for testing, typed property accessors for IDE completion. All core services (MemoryManager, ConfigManager, Agent, FileRegistry, etc.) registered as lazy singletons.
