@@ -1501,6 +1501,10 @@ except Exception:
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
 # ✅ 允许最大 20MB 请求体（语音 base64 约 1-5MB，留足余量）
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+# Session cookie security hardening
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("KOTO_DEPLOY_MODE") == "cloud"
 
 # CORS: 云模式限制来源，本地模式打开
 _cors_origins = os.environ.get("KOTO_CORS_ORIGINS", "*")

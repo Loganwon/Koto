@@ -265,6 +265,11 @@ def require_auth(f):
 
         payload = _verify_token(token)
         if not payload:
+            logger.warning(
+                "[Security] Unauthorized access attempt: path=%s, IP=%s",
+                request.path,
+                request.remote_addr,
+            )
             return jsonify({"error": "未登录或登录已过期", "code": "UNAUTHORIZED"}), 401
 
         user_id = payload.get("user_id", "")
@@ -277,6 +282,11 @@ def require_auth(f):
                 user_rec = rec
                 break
         if user_rec is None:
+            logger.warning(
+                "[Security] Unauthorized access attempt: path=%s, IP=%s",
+                request.path,
+                request.remote_addr,
+            )
             return jsonify({"error": "用户不存在", "code": "UNAUTHORIZED"}), 401
         effective_key = get_user_api_key(user_rec)
         if not effective_key:
