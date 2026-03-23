@@ -108,7 +108,7 @@ class TestSettingsManager:
             from web.settings import SettingsManager
 
             mgr = SettingsManager()
-            assert mgr.get("appearance", "theme") == "dark"
+            assert mgr.get("appearance", "theme") == "light"
 
     def test_get_missing_returns_none(self):
         with patch("web.settings.os.path.exists", return_value=False), patch(
@@ -216,7 +216,7 @@ class TestSettingsManager:
             assert mgr.documents_dir is not None
             assert mgr.images_dir is not None
             assert mgr.chats_dir is not None
-            assert mgr.theme == "dark"
+            assert mgr.theme == "light"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -6,32 +6,50 @@ Unit tests for 2026-03-22 (b) changes:
   3. generate_file_analysis_stream Office binary text extraction (not Gemini bytes)
 """
 
+import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
-import os
-import tempfile
-import json
+from unittest.mock import MagicMock, call, patch
 
 # ── Stubs for heavy optional dependencies ─────────────────────────────────────
+
 
 def _stub(name):
     if name not in sys.modules:
         sys.modules[name] = MagicMock()
     return sys.modules[name]
 
-for _m in ["vosk", "pynput", "pynput.keyboard", "pynput.mouse",
-           "scipy", "scipy.io", "pyaudio", "sounddevice",
-           "google", "google.genai", "google.genai.types",
-           "sentence_transformers", "cv2", "pdfplumber",
-           "docx", "docx.Document", "PIL", "PIL.Image"]:
+
+for _m in [
+    "vosk",
+    "pynput",
+    "pynput.keyboard",
+    "pynput.mouse",
+    "scipy",
+    "scipy.io",
+    "pyaudio",
+    "sounddevice",
+    "google",
+    "google.genai",
+    "google.genai.types",
+    "sentence_transformers",
+    "cv2",
+    "pdfplumber",
+    "docx",
+    "docx.Document",
+    "PIL",
+    "PIL.Image",
+]:
     _stub(_m)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. FileParser PPTX support
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 class TestFileParserPptxSupport(unittest.TestCase):
     """FileParser._parse_pptx extracts slide text and notes."""
@@ -47,9 +65,7 @@ class TestFileParserPptxSupport(unittest.TestCase):
             # title shape
             title_shape = MagicMock()
             title_shape.text = title_text
-            title_shape.text_frame.paragraphs = [
-                MagicMock(text=title_text)
-            ]
+            title_shape.text_frame.paragraphs = [MagicMock(text=title_text)]
             shapes.append(title_shape)
 
             # body shapes
@@ -76,16 +92,19 @@ class TestFileParserPptxSupport(unittest.TestCase):
 
     def test_pptx_in_supported_formats(self):
         from web.file_parser import FileParser
+
         for ext in [".pptx", ".pptm", ".ppt"]:
             self.assertIn(ext, FileParser.SUPPORTED_FORMATS)
 
     def test_parse_pptx_extracts_slide_content(self):
         from web.file_parser import FileParser
 
-        fake_prs = self._make_fake_prs([
-            ("Slide 1 Title", ["Bullet A", "Bullet B"], "Speaker notes 1"),
-            ("Slide 2 Title", ["只有一个要点"],          ""),
-        ])
+        fake_prs = self._make_fake_prs(
+            [
+                ("Slide 1 Title", ["Bullet A", "Bullet B"], "Speaker notes 1"),
+                ("Slide 2 Title", ["只有一个要点"], ""),
+            ]
+        )
 
         with patch("pptx.Presentation", return_value=fake_prs):
             result = FileParser._parse_pptx("/fake/file.pptx")
@@ -108,7 +127,9 @@ class TestFileParserPptxSupport(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as f:
             tmp_path = f.name
         try:
-            with patch.object(FileParser, "_parse_pptx", return_value="slide content") as mock_pp:
+            with patch.object(
+                FileParser, "_parse_pptx", return_value="slide content"
+            ) as mock_pp:
                 result = FileParser.parse_file(tmp_path)
             mock_pp.assert_called_once_with(tmp_path)
             self.assertTrue(result["success"])
@@ -124,7 +145,9 @@ class TestFileParserPptxSupport(unittest.TestCase):
         with tempfile.NamedTemporaryFile(suffix=".pptm", delete=False) as f:
             tmp_path = f.name
         try:
-            with patch.object(FileParser, "_parse_pptx", return_value="pptm content") as mock_pp:
+            with patch.object(
+                FileParser, "_parse_pptx", return_value="pptm content"
+            ) as mock_pp:
                 result = FileParser.parse_file(tmp_path)
             mock_pp.assert_called_once_with(tmp_path)
             self.assertTrue(result["success"])
@@ -144,6 +167,7 @@ class TestFileParserPptxSupport(unittest.TestCase):
 # 2. DOC_ANNOTATE skill_prompt injection in DocumentFeedbackSystem
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestDocumentFeedbackSkillInjection(unittest.TestCase):
     """full_annotation_loop_streaming merges skill_prompt into user_requirement."""
 
@@ -152,8 +176,11 @@ class TestDocumentFeedbackSkillInjection(unittest.TestCase):
         _stub("google.genai")
         _stub("google.genai.types")
         from web.document_feedback import DocumentFeedbackSystem
+
         client = MagicMock()
-        return DocumentFeedbackSystem(gemini_client=client, default_model_id="gemini-2.5-flash")
+        return DocumentFeedbackSystem(
+            gemini_client=client, default_model_id="gemini-2.5-flash"
+        )
 
     def test_skill_prompt_is_prepended_to_user_requirement(self):
         """When skill_prompt is given, it is combined with user_requirement."""
@@ -162,7 +189,9 @@ class TestDocumentFeedbackSkillInjection(unittest.TestCase):
         merged = []
 
         class _FeedbackCapture(DocumentFeedbackSystem):
-            def analyze_for_annotation_chunked(self, file_path, user_requirement, **kwargs):
+            def analyze_for_annotation_chunked(
+                self, file_path, user_requirement, **kwargs
+            ):
                 merged.append(user_requirement)
                 return {"success": False, "error": "stub"}
 
@@ -226,7 +255,9 @@ class TestDocumentFeedbackSkillInjection(unittest.TestCase):
     def test_full_annotation_signature_accepts_skill_prompt(self):
         """full_annotation_loop_streaming accepts skill_prompt kwarg without TypeError."""
         import inspect
+
         from web.document_feedback import DocumentFeedbackSystem
+
         sig = inspect.signature(DocumentFeedbackSystem.full_annotation_loop_streaming)
         self.assertIn("skill_prompt", sig.parameters)
 
@@ -246,6 +277,7 @@ class TestDocumentFeedbackSkillInjection(unittest.TestCase):
 # 3. generate_file_analysis_stream: Office binary uses text extraction
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestOfficeFileTextExtraction(unittest.TestCase):
     """Non-PDF binary files go through FileParser.parse_file, not Part.from_bytes."""
 
@@ -261,9 +293,11 @@ class TestOfficeFileTextExtraction(unittest.TestCase):
                 "content": "Slide 1: AI Agent\nSlide 2: Architecture",
                 "filename": "test.pptx",
                 "format": "pptx",
-                "char_count": 40
+                "char_count": 40,
             }
-            with patch.object(FileParser, "parse_file", return_value=mock_result) as mock_pf:
+            with patch.object(
+                FileParser, "parse_file", return_value=mock_result
+            ) as mock_pf:
                 result = FileParser.parse_file(tmp_path)
             self.assertTrue(result["success"])
             self.assertIn("AI Agent", result["content"])
@@ -296,6 +330,7 @@ class TestOfficeFileTextExtraction(unittest.TestCase):
 # 4. Skill DOC_ANNOTATE annotation binding — task_types field
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestAnnotateSkillMetadata(unittest.TestCase):
     """Annotation skill JSON files declare DOC_ANNOTATE in task_types."""
 
@@ -312,11 +347,11 @@ class TestAnnotateSkillMetadata(unittest.TestCase):
         self.assertIn(
             "DOC_ANNOTATE",
             task_types,
-            f"{filename} should declare DOC_ANNOTATE in task_types"
+            f"{filename} should declare DOC_ANNOTATE in task_types",
         )
         self.assertTrue(
             len(skill.get("prompt", "")) > 50,
-            f"{filename} should have a non-trivial prompt"
+            f"{filename} should have a non-trivial prompt",
         )
 
     def test_annotate_business_skill_has_doc_annotate(self):

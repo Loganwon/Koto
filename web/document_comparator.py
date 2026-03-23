@@ -1,32 +1,39 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 文档对比与总结器 - 支持多格式（PDF/DOCX/XLSX/PPTX/TXT/MD）、
 多文档横向对比矩阵、AI 语义分析 prompt 构建。
 """
 
-import os
 import difflib
-from typing import Dict, List, Any, Optional
-from datetime import datetime
 import logging
+import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 # ── 参数 ──────────────────────────────────────────────────────────────────────
-_MAX_CHARS_PER_DOC = 6000   # 每份文档送 LLM 的最大字符数
-_MAX_DOCS = 5               # 同时对比最多多少份文档
+_MAX_CHARS_PER_DOC = 6000  # 每份文档送 LLM 的最大字符数
+_MAX_DOCS = 5  # 同时对比最多多少份文档
 
 
 class DocumentComparator:
     """多文档对比与总结器（文本 diff + AI 语义分析）"""
 
     SUPPORTED_FORMATS = {
-        '.txt', '.md', '.markdown',
-        '.docx', '.doc',
-        '.pdf',
-        '.xlsx', '.xls',
-        '.pptx', '.ppt',
+        ".txt",
+        ".md",
+        ".markdown",
+        ".docx",
+        ".doc",
+        ".pdf",
+        ".xlsx",
+        ".xls",
+        ".pptx",
+        ".ppt",
     }
 
     def __init__(self):
@@ -35,8 +42,9 @@ class DocumentComparator:
 
     # ── 公共接口 ──────────────────────────────────────────────────────────────
 
-    def compare_documents(self, file_a: str, file_b: str,
-                          output_format: str = "markdown") -> Dict[str, Any]:
+    def compare_documents(
+        self, file_a: str, file_b: str, output_format: str = "markdown"
+    ) -> Dict[str, Any]:
         """对比两个文档（向后兼容原始接口）。"""
         if not os.path.exists(file_a) or not os.path.exists(file_b):
             return {"success": False, "error": "文件不存在"}
@@ -60,9 +68,7 @@ class DocumentComparator:
         elif output_format == "inline_json":
             diff_output = self._format_diff_inline_json(lines_a, lines_b)
         else:
-            diff_output = '\n'.join(
-                difflib.unified_diff(lines_a, lines_b, lineterm='')
-            )
+            diff_output = "\n".join(difflib.unified_diff(lines_a, lines_b, lineterm=""))
 
         return {
             "success": True,
@@ -74,8 +80,9 @@ class DocumentComparator:
             "timestamp": datetime.now().isoformat(),
         }
 
-    def compare_multiple(self, file_paths: List[str],
-                         output_format: str = "inline_json") -> Dict[str, Any]:
+    def compare_multiple(
+        self, file_paths: List[str], output_format: str = "inline_json"
+    ) -> Dict[str, Any]:
         """
         N 个文档横向对比：返回所有两两 diff 矩阵 + 全局统计。
 
@@ -95,14 +102,19 @@ class DocumentComparator:
                 return {"success": False, "error": f"文件不存在: {path}"}
             text = self._read_file(path)
             if text is None:
-                return {"success": False, "error": f"无法读取文件: {os.path.basename(path)}"}
-            docs.append({
-                "name": os.path.basename(path),
-                "path": path,
-                "content": text,
-                "char_count": len(text),
-                "content_preview": text[:300].replace('\n', ' '),
-            })
+                return {
+                    "success": False,
+                    "error": f"无法读取文件: {os.path.basename(path)}",
+                }
+            docs.append(
+                {
+                    "name": os.path.basename(path),
+                    "path": path,
+                    "content": text,
+                    "char_count": len(text),
+                    "content_preview": text[:300].replace("\n", " "),
+                }
+            )
 
         n = len(docs)
         matrix: List[Dict] = []
@@ -122,13 +134,15 @@ class DocumentComparator:
                 else:
                     diff_out = self._format_diff_inline_json(lines_i, lines_j)
 
-                matrix.append({
-                    "doc_a": {"index": i, "name": docs[i]["name"]},
-                    "doc_b": {"index": j, "name": docs[j]["name"]},
-                    "changes": changes,
-                    "summary": summary,
-                    "diff": diff_out,
-                })
+                matrix.append(
+                    {
+                        "doc_a": {"index": i, "name": docs[i]["name"]},
+                        "doc_b": {"index": j, "name": docs[j]["name"]},
+                        "changes": changes,
+                        "summary": summary,
+                        "diff": diff_out,
+                    }
+                )
                 similarities.append(changes["similarity"])
 
         if matrix:
@@ -155,19 +169,28 @@ class DocumentComparator:
                 "file_count": n,
                 "pair_count": len(matrix),
                 "avg_similarity": avg_sim,
-                "most_similar": {
-                    "pair": f"{max_sim['doc_a']['name']} vs {max_sim['doc_b']['name']}",
-                    "similarity": max_sim["changes"]["similarity"],
-                } if max_sim else None,
-                "most_different": {
-                    "pair": f"{min_sim['doc_a']['name']} vs {min_sim['doc_b']['name']}",
-                    "similarity": min_sim["changes"]["similarity"],
-                } if min_sim else None,
+                "most_similar": (
+                    {
+                        "pair": f"{max_sim['doc_a']['name']} vs {max_sim['doc_b']['name']}",
+                        "similarity": max_sim["changes"]["similarity"],
+                    }
+                    if max_sim
+                    else None
+                ),
+                "most_different": (
+                    {
+                        "pair": f"{min_sim['doc_a']['name']} vs {min_sim['doc_b']['name']}",
+                        "similarity": min_sim["changes"]["similarity"],
+                    }
+                    if min_sim
+                    else None
+                ),
             },
         }
 
-    def build_ai_prompt(self, file_paths: List[str],
-                        focus: str = "general") -> Optional[str]:
+    def build_ai_prompt(
+        self, file_paths: List[str], focus: str = "general"
+    ) -> Optional[str]:
         """
         构建用于 AI 语义对比的 prompt（由 Flask 路由注入 LLM 调用）。
 
@@ -198,9 +221,9 @@ class DocumentComparator:
         )
 
         focus_instruction = {
-            "general":   "综合对比这些文档的主题、观点、结构和关键信息的异同",
-            "argument":  "重点对比各文档的核心论点、论据和结论是否一致或矛盾",
-            "data":      "重点对比各文档中的数据、数字、日期、统计信息的差异",
+            "general": "综合对比这些文档的主题、观点、结构和关键信息的异同",
+            "argument": "重点对比各文档的核心论点、论据和结论是否一致或矛盾",
+            "data": "重点对比各文档中的数据、数字、日期、统计信息的差异",
             "structure": "重点对比各文档的章节结构、逻辑框架和信息组织方式",
         }.get(focus, "综合对比这些文档的主题、观点、结构和关键信息的异同")
 
@@ -235,11 +258,13 @@ class DocumentComparator:
         for i in range(len(file_paths) - 1):
             result = self.compare_documents(file_paths[i], file_paths[i + 1])
             if result["success"]:
-                versions.append({
-                    "from": os.path.basename(file_paths[i]),
-                    "to": os.path.basename(file_paths[i + 1]),
-                    "summary": result["summary"],
-                })
+                versions.append(
+                    {
+                        "from": os.path.basename(file_paths[i]),
+                        "to": os.path.basename(file_paths[i + 1]),
+                        "summary": result["summary"],
+                    }
+                )
 
         return {
             "success": True,
@@ -248,18 +273,23 @@ class DocumentComparator:
             "versions": versions,
         }
 
-    def generate_change_log(self, comparisons: List[Dict[str, Any]],
-                            output_file: str) -> str:
+    def generate_change_log(
+        self, comparisons: List[Dict[str, Any]], output_file: str
+    ) -> str:
         """生成变更日志 Markdown 文件。"""
-        lines = ["# 文档变更日志",
-                 f"\n生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"]
+        lines = [
+            "# 文档变更日志",
+            f"\n生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+        ]
 
         for i, comp in enumerate(comparisons, 1):
             lines.append(f"## 版本 {i}: {comp['file_a']} → {comp['file_b']}")
             lines.append(f"\n{comp['summary']}\n")
 
-            for section_key, label in [("additions", "新增内容"),
-                                        ("deletions", "删除内容")]:
+            for section_key, label in [
+                ("additions", "新增内容"),
+                ("deletions", "删除内容"),
+            ]:
                 section = comp["changes"].get(section_key, {})
                 cnt = section.get("count", 0)
                 if cnt:
@@ -271,27 +301,28 @@ class DocumentComparator:
                         lines.append(f"... 还有 {cnt - 10} 行")
                     lines.append("")
 
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines))
+        with open(output_file, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
         return output_file
 
     # ── 私有辅助 ─────────────────────────────────────────────────────────────
 
-    def _analyze_changes(self, lines_a: List[str],
-                         lines_b: List[str]) -> Dict[str, Any]:
+    def _analyze_changes(
+        self, lines_a: List[str], lines_b: List[str]
+    ) -> Dict[str, Any]:
         matcher = difflib.SequenceMatcher(None, lines_a, lines_b)
         additions, deletions, modifications = [], [], []
 
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-            if tag == 'insert':
+            if tag == "insert":
                 additions.extend(lines_b[j1:j2])
-            elif tag == 'delete':
+            elif tag == "delete":
                 deletions.extend(lines_a[i1:i2])
-            elif tag == 'replace':
+            elif tag == "replace":
                 modifications.append({"old": lines_a[i1:i2], "new": lines_b[j1:j2]})
 
-        text_a = '\n'.join(lines_a)
-        text_b = '\n'.join(lines_b)
+        text_a = "\n".join(lines_a)
+        text_b = "\n".join(lines_b)
 
         return {
             "additions": {"count": len(additions), "lines": additions},
@@ -325,10 +356,11 @@ class DocumentComparator:
             lines.append(f"- 内容增加: +{cd} 字符")
         elif cd < 0:
             lines.append(f"- 内容减少: {cd} 字符")
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
-    def _format_diff_inline_json(self, lines_a: List[str],
-                                 lines_b: List[str]) -> List[Dict]:
+    def _format_diff_inline_json(
+        self, lines_a: List[str], lines_b: List[str]
+    ) -> List[Dict]:
         """
         返回结构化 diff 列表，供前端逐块高亮渲染。
         每个元素: {"type": "equal"|"insert"|"delete"|"replace",
@@ -337,39 +369,40 @@ class DocumentComparator:
         result = []
         matcher = difflib.SequenceMatcher(None, lines_a, lines_b, autojunk=False)
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-            result.append({
-                "type": tag,
-                "lines_a": lines_a[i1:i2],
-                "lines_b": lines_b[j1:j2],
-            })
+            result.append(
+                {
+                    "type": tag,
+                    "lines_a": lines_a[i1:i2],
+                    "lines_b": lines_b[j1:j2],
+                }
+            )
         return result
 
-    def _format_diff_markdown(self, lines_a: List[str],
-                               lines_b: List[str]) -> str:
+    def _format_diff_markdown(self, lines_a: List[str], lines_b: List[str]) -> str:
         matcher = difflib.SequenceMatcher(None, lines_a, lines_b)
         output = ["# 文档对比\n"]
 
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-            if tag == 'equal':
+            if tag == "equal":
                 span = i2 - i1
                 if span > 4:
-                    for line in lines_a[i1:i1 + 2]:
+                    for line in lines_a[i1 : i1 + 2]:
                         output.append(f"  {line}")
                     output.append(f"  ... ({span - 4} 行相同内容省略) ...")
-                    for line in lines_a[i2 - 2:i2]:
+                    for line in lines_a[i2 - 2 : i2]:
                         output.append(f"  {line}")
                 else:
                     for line in lines_a[i1:i2]:
                         output.append(f"  {line}")
-            elif tag == 'delete':
+            elif tag == "delete":
                 output.append("\n**删除:**")
                 for line in lines_a[i1:i2]:
                     output.append(f"- ~~{line}~~")
-            elif tag == 'insert':
+            elif tag == "insert":
                 output.append("\n**新增:**")
                 for line in lines_b[j1:j2]:
                     output.append(f"+ **{line}**")
-            elif tag == 'replace':
+            elif tag == "replace":
                 output.append("\n**修改:**")
                 output.append("原文:")
                 for line in lines_a[i1:i2]:
@@ -378,7 +411,7 @@ class DocumentComparator:
                 for line in lines_b[j1:j2]:
                     output.append(f"+ **{line}**")
 
-        return '\n'.join(output)
+        return "\n".join(output)
 
     def _format_diff_html(self, lines_a: List[str], lines_b: List[str]) -> str:
         return difflib.HtmlDiff().make_file(
@@ -394,28 +427,30 @@ class DocumentComparator:
         ext = os.path.splitext(file_path)[1].lower()
         try:
             # ── 纯文本 ──
-            if ext in {'.txt', '.md', '.markdown'}:
-                with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+            if ext in {".txt", ".md", ".markdown"}:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                     return f.read()
 
             # ── Word ──
-            elif ext in {'.docx', '.doc'}:
+            elif ext in {".docx", ".doc"}:
                 from web.file_parser import FileParser
+
                 result = FileParser.parse_file(file_path)
                 return result.get("content") if result.get("success") else None
 
             # ── PDF ──
-            elif ext == '.pdf':
+            elif ext == ".pdf":
                 from web.file_parser import FileParser
+
                 result = FileParser.parse_file(file_path)
                 return result.get("content") if result.get("success") else None
 
             # ── Excel ──
-            elif ext in {'.xlsx', '.xls'}:
+            elif ext in {".xlsx", ".xls"}:
                 return self._read_xlsx(file_path)
 
             # ── PowerPoint ──
-            elif ext in {'.pptx', '.ppt'}:
+            elif ext in {".pptx", ".ppt"}:
                 return self._read_pptx(file_path)
 
             else:
@@ -429,6 +464,7 @@ class DocumentComparator:
     def _read_xlsx(self, file_path: str) -> Optional[str]:
         try:
             import openpyxl
+
             wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
             lines = []
             for sheet in wb.worksheets:
@@ -439,7 +475,7 @@ class DocumentComparator:
                     )
                     if row_text.strip():
                         lines.append(row_text)
-            return '\n'.join(lines)
+            return "\n".join(lines)
         except ImportError:
             logger.warning("[DocComparator] openpyxl 未安装，无法读取 Excel 文件")
             return None
@@ -447,6 +483,7 @@ class DocumentComparator:
     def _read_pptx(self, file_path: str) -> Optional[str]:
         try:
             from pptx import Presentation
+
             prs = Presentation(file_path)
             lines = []
             for i, slide in enumerate(prs.slides, 1):
@@ -457,7 +494,7 @@ class DocumentComparator:
                             text = para.text.strip()
                             if text:
                                 lines.append(text)
-            return '\n'.join(lines)
+            return "\n".join(lines)
         except ImportError:
             logger.warning("[DocComparator] python-pptx 未安装，无法读取 PPT 文件")
             return None

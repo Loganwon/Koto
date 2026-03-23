@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto 快速本地语音识别模块
 优先使用 Vosk 离线识别（无需网络），降级到 Google Speech API

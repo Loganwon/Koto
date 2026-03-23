@@ -262,7 +262,9 @@ class TestFlaskDecorators:
         monkeypatch.setattr(
             auth_mod,
             "_load_users",
-            lambda: {"ok@test.com": {"user_id": "uid-ok", "gemini_api_key": "test-key"}},
+            lambda: {
+                "ok@test.com": {"user_id": "uid-ok", "gemini_api_key": "test-key"}
+            },
         )
         token = auth_mod._generate_token("uid-ok", "ok@test.com")
         app = _make_flask_app(auth_enabled=True)

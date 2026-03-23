@@ -1,34 +1,3 @@
-
-import pytest
-
-@pytest.fixture(autouse=True)
-def _isolate_app_context_and_singletons():
-    # Attempt to reset app_context.ctx and all its singletons to avoid inter-test pollution
-    try:
-        from app.core.app_context import ctx
-        ctx.reset()
-    except Exception:
-        pass
-    
-    yield
-    
-    try:
-        from app.core.app_context import ctx
-        ctx.reset()
-    except Exception:
-        pass
-
-@pytest.fixture(autouse=True)
-def _isolate_shadow_watcher(monkeypatch, tmp_path):
-    try:
-        from app.core.learning.shadow_tracer import ShadowWatcher
-        # Reset the singleton specifically
-        ShadowWatcher._instance = None
-        # Mock file path
-        monkeypatch.setattr(ShadowWatcher, '_OBS_FILE', str(tmp_path / 'shadow_obs.json'))
-    except Exception:
-        pass
-
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -60,6 +29,24 @@ def _cleanup_test_artifacts() -> None:
         target = root / rel
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
+
+
+def pytest_configure(config):
+    """Remove stale .pytest_tmp before each session and pre-load real packages
+    that module-level stubs in test files must not override."""
+    pytest_tmp = _root() / ".pytest_tmp"
+    if pytest_tmp.exists():
+        shutil.rmtree(pytest_tmp, ignore_errors=True)
+
+    # Pre-import packages so that module-level _stub() calls in test files
+    # (which only stub when 'name not in sys.modules') won't replace the real
+    # package with a MagicMock that breaks other tests.
+    for _pkg in ("docx",):
+        try:
+            import importlib
+            importlib.import_module(_pkg)
+        except ImportError:
+            pass
 
 
 @pytest.fixture(scope="session")
@@ -186,13 +173,66 @@ def pytest_unconfigure(config):
         return
     _cleanup_test_artifacts()
 
+
 @pytest.fixture(autouse=True)
 def _mock_vosk_teardown(monkeypatch):
-    "\""Prevents vosk segfaults in pytest by mocking out vosk Model if not strictly needed"\""
+    """Prevents vosk segfaults in pytest by mocking out vosk Model if not strictly needed."""
     try:
         import vosk
-        def dummy_del(self): pass
-        monkeypatch.setattr(vosk.Model, '__del__', dummy_del, raising=False)
-        monkeypatch.setattr(vosk.Recognizer, '__del__', dummy_del, raising=False)
+        def dummy_del(self):
+            pass
+
+        if hasattr(vosk.Model, "__del__"):
+            monkeypatch.setattr(vosk.Model, "__del__", dummy_del, raising=False)
+        if hasattr(vosk.Recognizer, "__del__"):
+            monkeypatch.setattr(vosk.Recognizer, "__del__", dummy_del, raising=False)
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _isolate_app_context_and_singletons():
+    """Reset AppContext singletons before/after each test to prevent cross-test pollution."""
+    try:
+        from app.core.app_context import ctx
+
+        ctx.reset()
+    except Exception:
+        pass
+
+    try:
+        from app.core.agent.checkpoint_manager import reset_checkpointer
+
+        reset_checkpointer()
+    except Exception:
+        pass
+
+    yield
+
+    try:
+        from app.core.app_context import ctx
+
+        ctx.reset()
+    except Exception:
+        pass
+
+    try:
+        from app.core.agent.checkpoint_manager import reset_checkpointer
+
+        reset_checkpointer()
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _isolate_shadow_watcher(monkeypatch, tmp_path):
+    """Isolate ShadowWatcher singleton and file path in each test."""
+    try:
+        from app.core.learning.shadow_tracer import ShadowWatcher
+
+        ShadowWatcher._instance = None
+        monkeypatch.setattr(
+            ShadowWatcher, "_OBS_FILE", str(tmp_path / "shadow_obs.json")
+        )
     except Exception:
         pass

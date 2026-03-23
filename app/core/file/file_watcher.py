@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 FileWatcher — Koto 目录监控器
 ===================================
@@ -137,15 +139,25 @@ class FileWatcher:
         # ── 尝试启动 watchdog Observer（事件驱动，实时）────────────────────
         self._watchdog_observer = None
         try:
-            from watchdog.observers import Observer
             from watchdog.events import FileSystemEventHandler
+            from watchdog.observers import Observer
 
             skip_exts = self.skip_exts
             max_bytes = self.max_file_size_bytes
             extract_exts = {
-                ".txt", ".md", ".pdf", ".docx", ".doc",
-                ".xlsx", ".pptx", ".epub",
-                ".py", ".js", ".json", ".csv", ".html",
+                ".txt",
+                ".md",
+                ".pdf",
+                ".docx",
+                ".doc",
+                ".xlsx",
+                ".pptx",
+                ".epub",
+                ".py",
+                ".js",
+                ".json",
+                ".csv",
+                ".html",
             }
 
             class _KotoHandler(FileSystemEventHandler):
@@ -172,6 +184,7 @@ class FileWatcher:
                         return
                     try:
                         from app.core.file.file_registry import get_file_registry
+
                         ext = Path(event.src_path).suffix.lower()
                         get_file_registry().register(
                             event.src_path,
@@ -189,6 +202,7 @@ class FileWatcher:
                         return
                     try:
                         from app.core.file.file_registry import get_file_registry
+
                         ext = Path(event.src_path).suffix.lower()
                         get_file_registry().register(
                             event.src_path,
@@ -204,6 +218,7 @@ class FileWatcher:
                         return
                     try:
                         from app.core.file.file_registry import get_file_registry
+
                         get_file_registry().delete(event.src_path)
                         logger.debug(f"[watchdog] 删除: {event.src_path}")
                     except Exception as exc:
@@ -214,8 +229,11 @@ class FileWatcher:
                         return
                     try:
                         from app.core.file.file_registry import get_file_registry
+
                         get_file_registry().update_path(event.src_path, event.dest_path)
-                        logger.debug(f"[watchdog] 移动: {event.src_path} → {event.dest_path}")
+                        logger.debug(
+                            f"[watchdog] 移动: {event.src_path} → {event.dest_path}"
+                        )
                     except Exception as exc:
                         logger.debug(f"[watchdog] on_moved 失败: {exc}")
 
@@ -229,7 +247,9 @@ class FileWatcher:
             self._watchdog_observer = observer
             logger.info("[FileWatcher] ✅ 已启用 watchdog 实时监控")
         except ImportError:
-            logger.info("[FileWatcher] watchdog 未安装，使用轮询模式（pip install watchdog 可升级）")
+            logger.info(
+                "[FileWatcher] watchdog 未安装，使用轮询模式（pip install watchdog 可升级）"
+            )
         except Exception as exc:
             logger.warning(f"[FileWatcher] watchdog 启动失败，降级轮询: {exc}")
 
@@ -327,9 +347,19 @@ class FileWatcher:
             try:
                 ext = Path(path_str).suffix.lower()
                 extract = ext in {
-                    ".txt", ".md", ".pdf", ".docx", ".doc",
-                    ".xlsx", ".pptx", ".epub",
-                    ".py", ".js", ".json", ".csv", ".html",
+                    ".txt",
+                    ".md",
+                    ".pdf",
+                    ".docx",
+                    ".doc",
+                    ".xlsx",
+                    ".pptx",
+                    ".epub",
+                    ".py",
+                    ".js",
+                    ".json",
+                    ".csv",
+                    ".html",
                 }
                 entry = reg.register(
                     path_str, source="watcher", extract_content=extract
@@ -372,9 +402,19 @@ class FileWatcher:
         if not d_path.is_dir():
             return 0
         _extract_exts = {
-            ".txt", ".md", ".pdf", ".docx", ".doc",
-            ".xlsx", ".pptx", ".epub",
-            ".py", ".js", ".json", ".csv", ".html",
+            ".txt",
+            ".md",
+            ".pdf",
+            ".docx",
+            ".doc",
+            ".xlsx",
+            ".pptx",
+            ".epub",
+            ".py",
+            ".js",
+            ".json",
+            ".csv",
+            ".html",
         }
         for p in d_path.rglob("*"):
             if not p.is_file():

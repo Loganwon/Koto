@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║   Koto  ─  SkillPermissions（技能权限系统）                        ║
@@ -54,6 +56,7 @@ Skill 权限分级制度
     # 撤销权限
     SkillPermissionManager.revoke("my_skill", ["notifications"])
 """
+
 from __future__ import annotations
 
 import json
@@ -113,6 +116,7 @@ ALL_PERMISSIONS: Set[str] = set(PERMISSION_META.keys())
 def _config_dir() -> Path:
     """返回 config/ 目录的绝对路径（兼容打包和开发模式）"""
     import sys
+
     if getattr(sys, "frozen", False):
         return Path(sys.executable).parent / "config"
     return Path(__file__).resolve().parents[3] / "config"
@@ -125,6 +129,7 @@ _write_lock = threading.Lock()
 # ══════════════════════════════════════════════════════════════════
 # SkillPermissionManager
 # ══════════════════════════════════════════════════════════════════
+
 
 class SkillPermissionManager:
     """
@@ -163,7 +168,9 @@ class SkillPermissionManager:
     def _save(cls):
         p = cls._path()
         p.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps({"granted": cls._cache or {}}, ensure_ascii=False, indent=2)
+        payload = json.dumps(
+            {"granted": cls._cache or {}}, ensure_ascii=False, indent=2
+        )
         with _write_lock:
             p.write_text(payload, encoding="utf-8")
 
@@ -205,7 +212,9 @@ class SkillPermissionManager:
         return store[skill_id]
 
     @classmethod
-    def revoke(cls, skill_id: str, permissions: Optional[List[str]] = None) -> List[str]:
+    def revoke(
+        cls, skill_id: str, permissions: Optional[List[str]] = None
+    ) -> List[str]:
         """
         撤销 skill_id 的指定权限。
         若 permissions=None，则撤销该 skill 的所有权限。
@@ -236,7 +245,9 @@ class SkillPermissionManager:
             if meta:
                 result.append({"id": p, **meta})
             else:
-                result.append({"id": p, "label": p, "desc": "未知权限", "risk": "unknown"})
+                result.append(
+                    {"id": p, "label": p, "desc": "未知权限", "risk": "unknown"}
+                )
         return result
 
     @classmethod

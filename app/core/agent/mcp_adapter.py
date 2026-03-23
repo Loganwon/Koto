@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 MCP (Model Context Protocol) Adapter
 ======================================
@@ -79,6 +81,7 @@ logger = logging.getLogger(__name__)
 try:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
+
     _MCP_SDK_AVAILABLE = True
 except ImportError:
     _MCP_SDK_AVAILABLE = False
@@ -87,6 +90,7 @@ except ImportError:
 # ── httpx（HTTP MCP server 用） ───────────────────────────────────────────────
 try:
     import httpx
+
     _HTTPX_AVAILABLE = True
 except ImportError:
     _HTTPX_AVAILABLE = False
@@ -95,6 +99,7 @@ except ImportError:
 # ─────────────────────────────────────────────────────────────────────────────
 # JSON-RPC 2.0 工具函数（内置实现，不依赖 SDK）
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _make_request(method: str, params: Any = None, req_id: int = 1) -> bytes:
     obj: Dict = {"jsonrpc": "2.0", "id": req_id, "method": method}
@@ -110,6 +115,7 @@ def _parse_response(line: bytes) -> Dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # MCPStdioClient — 内置 stdio 实现（无需 mcp SDK）
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MCPStdioClient:
     """
@@ -135,11 +141,14 @@ class MCPStdioClient:
                 stderr=subprocess.PIPE,
             )
             # MCP initialize 握手
-            resp = self._rpc("initialize", {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {}},
-                "clientInfo": {"name": "koto", "version": "1.0.0"},
-            })
+            resp = self._rpc(
+                "initialize",
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "clientInfo": {"name": "koto", "version": "1.0.0"},
+                },
+            )
             if "error" in resp:
                 logger.error(f"[MCPStdio] 初始化失败: {resp['error']}")
                 return False
@@ -159,10 +168,13 @@ class MCPStdioClient:
 
     def call_tool(self, tool_name: str, arguments: Dict) -> Any:
         """调用指定工具，返回内容列表（MCP 规范格式）。"""
-        resp = self._rpc("tools/call", {
-            "name": tool_name,
-            "arguments": arguments,
-        })
+        resp = self._rpc(
+            "tools/call",
+            {
+                "name": tool_name,
+                "arguments": arguments,
+            },
+        )
         if "error" in resp:
             raise RuntimeError(f"MCP tool error: {resp['error']}")
         content = resp.get("result", {}).get("content", [])
@@ -211,6 +223,7 @@ class MCPStdioClient:
 # MCPHTTPClient — HTTP/SSE MCP server 客户端
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class MCPHTTPClient:
     """
     通过 HTTP POST 调用 MCP server（适用于支持 Streamable HTTP 的 MCP servers）。
@@ -231,10 +244,13 @@ class MCPHTTPClient:
         return resp.get("result", {}).get("tools", [])
 
     def call_tool(self, tool_name: str, arguments: Dict) -> Any:
-        resp = self._post("tools/call", {
-            "name": tool_name,
-            "arguments": arguments,
-        })
+        resp = self._post(
+            "tools/call",
+            {
+                "name": tool_name,
+                "arguments": arguments,
+            },
+        )
         if "error" in resp:
             raise RuntimeError(f"MCP HTTP error: {resp['error']}")
         content = resp.get("result", {}).get("content", [])
@@ -248,6 +264,7 @@ class MCPHTTPClient:
             payload["params"] = params
         try:
             import httpx
+
             r = httpx.post(
                 f"{self.base_url}/mcp",
                 json=payload,
@@ -264,6 +281,7 @@ class MCPHTTPClient:
 # ─────────────────────────────────────────────────────────────────────────────
 # MCPServerEntry — 描述一个已注册的 MCP server
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MCPServerEntry:
     def __init__(self, name: str, client, server_type: str):
@@ -296,6 +314,7 @@ class MCPServerEntry:
 # ─────────────────────────────────────────────────────────────────────────────
 # MCPRegistry — 管理多个 MCP server
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class MCPRegistry:
     """
@@ -360,9 +379,7 @@ class MCPRegistry:
             if stype == "stdio":
                 self.add_stdio_server(name, cfg["command"])
             elif stype == "http":
-                self.add_http_server(
-                    name, cfg["url"], api_key=cfg.get("api_key", "")
-                )
+                self.add_http_server(name, cfg["url"], api_key=cfg.get("api_key", ""))
         return self
 
     def connect_all(self) -> Dict[str, bool]:
@@ -414,14 +431,13 @@ class MCPRegistry:
             for tool_def in entry.tools:
                 original_name = tool_def["name"]
                 koto_name = f"mcp__{server_name}__{original_name}"
-                description = (
-                    f"[MCP:{server_name}] {tool_def.get('description', '')}"
-                )
+                description = f"[MCP:{server_name}] {tool_def.get('description', '')}"
 
                 # 构造闭包，捕获 server_name / original_name
                 def _make_caller(sn: str, tn: str):
                     def _call(**kwargs):
                         return self.call_tool(sn, tn, kwargs)
+
                     _call.__doc__ = description
                     return _call
 
@@ -470,7 +486,10 @@ class MCPRegistry:
         }
         """
         import pathlib
-        settings_path = pathlib.Path(__file__).parents[3] / "config" / "user_settings.json"
+
+        settings_path = (
+            pathlib.Path(__file__).parents[3] / "config" / "user_settings.json"
+        )
         reg = cls()
         try:
             if settings_path.exists():

@@ -5,7 +5,7 @@
 [![Docker Build](https://github.com/Loganwon/Koto/actions/workflows/docker.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/docker.yml)
 [![Release](https://github.com/Loganwon/Koto/actions/workflows/release.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/release.yml)
 
-> 🌐 **Marketing site** — [https://sicongliusimon.github.io/](https://sicongliusimon.github.io/)
+> 🌐 **Marketing site** — [https://loganwon.github.io/Koto/](https://loganwon.github.io/Koto/)
 > Source in [`docs/index.html`](docs/index.html) — fully self-contained, no build step.
 
 Koto 是一个基于多模型 AI 的桌面 / 云端智能助手，支持多轮对话、长期记忆、知识库、文件分析、语音交互和工作流自动化。
@@ -147,6 +147,21 @@ Koto/
 └── docs/               # 详细文档
 ```
 
-## License
+## Intellectual Property
 
-MIT
+Koto is proprietary software. All rights reserved © 2024-2026 Koto AI.
+
+This software and its source code are protected by copyright law. Unauthorized reproduction, distribution, or modification is strictly prohibited.
+
+### DMCA & Takedown Requests
+
+If you believe your copyrighted material has been used in violation of your rights, please contact us:
+
+- **Email:** [DMCA contact email — user should fill in]
+- **Subject line:** DMCA Takedown Request — Koto
+
+Include: (1) description of the copyrighted work, (2) URL of the infringing material, (3) your contact information, and (4) a statement of good faith belief.
+
+### License
+
+This project is licensed under a proprietary license. See [LICENSE](LICENSE) for details.

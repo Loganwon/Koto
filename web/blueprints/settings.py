@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """Settings, setup, diagnose, info, local-model, and mode-switch routes.
 
 Extracted from web/app.py into a standalone Flask Blueprint so that the
@@ -11,6 +13,8 @@ import threading
 import time
 
 from flask import Blueprint, Response, current_app, jsonify, request
+
+from web.auth import require_auth
 
 _logger = logging.getLogger("koto.app")
 
@@ -95,6 +99,7 @@ def api_info() -> Response:
 
 
 @settings_bp.route("/api/local-model/status", methods=["GET"])
+@require_auth
 def local_model_status() -> Response:
     """Get local model configuration and runtime status.
     ---
@@ -135,6 +140,7 @@ def local_model_status() -> Response:
 
 
 @settings_bp.route("/api/local-model/switch", methods=["POST"])
+@require_auth
 def local_model_switch() -> Response:
     """Switch AI mode between local and cloud, hot-reloading client cache.
     ---
@@ -217,6 +223,7 @@ def local_model_switch() -> Response:
 
 
 @settings_bp.route("/api/local-model/setup", methods=["POST"])
+@require_auth
 def local_model_setup() -> Response:
     """触发本地模型安装向导（异步，不阻塞 API 响应）"""
 
@@ -245,6 +252,7 @@ def local_model_setup() -> Response:
 
 
 @settings_bp.route("/api/skills/<skill_id>/toggle", methods=["POST"])
+@require_auth
 def toggle_skill(skill_id: str) -> Response:
     """Enable or disable a skill.
     ---
@@ -296,6 +304,7 @@ def toggle_skill(skill_id: str) -> Response:
 
 
 @settings_bp.route("/api/skills/<skill_id>/prompt", methods=["POST"])
+@require_auth
 def update_skill_prompt(skill_id: str) -> Response:
     """更新某个技能的自定义 Prompt"""
     try:
@@ -313,6 +322,7 @@ def update_skill_prompt(skill_id: str) -> Response:
 
 
 @settings_bp.route("/api/skills/<skill_id>/reset", methods=["POST"])
+@require_auth
 def reset_skill_prompt(skill_id: str) -> Response:
     """将技能 Prompt 恢复为默认值"""
     try:
@@ -330,6 +340,7 @@ def reset_skill_prompt(skill_id: str) -> Response:
 
 
 @settings_bp.route("/api/settings", methods=["GET"])
+@require_auth
 def get_settings() -> Response:
     """Get all application settings.
     ---
@@ -346,6 +357,7 @@ def get_settings() -> Response:
 
 
 @settings_bp.route("/api/settings", methods=["POST"])
+@require_auth
 def update_settings() -> Response:
     """Update an application setting.
     ---
@@ -399,6 +411,7 @@ def update_settings() -> Response:
 
 
 @settings_bp.route("/api/settings/reset", methods=["POST"])
+@require_auth
 def reset_settings() -> Response:
     mod = _app()
     sm = _get_settings_manager()
@@ -416,6 +429,7 @@ def reset_settings() -> Response:
 
 
 @settings_bp.route("/api/switch-to-mini", methods=["POST"])
+@require_auth
 def switch_to_mini() -> Response:
     """切换到迷你模式"""
     import subprocess
@@ -449,6 +463,7 @@ def switch_to_mini() -> Response:
 
 
 @settings_bp.route("/api/switch-to-main", methods=["POST"])
+@require_auth
 def switch_to_main() -> Response:
     """切换到主程序"""
     import subprocess
@@ -610,6 +625,7 @@ def test_api_connection() -> Response:
 
 
 @settings_bp.route("/api/diagnose", methods=["GET"])
+@require_auth
 def diagnose_models() -> Response:
     """诊断所有模型的可用性"""
     c = _get_client()
@@ -704,6 +720,7 @@ def diagnose_models() -> Response:
 
 
 @settings_bp.route("/api/local-model/list", methods=["GET"])
+@require_auth
 def local_model_list() -> Response:
     """列出 Ollama 已安装的所有本地模型"""
     try:
@@ -723,6 +740,7 @@ def local_model_list() -> Response:
 
 
 @settings_bp.route("/api/window/switch-to-full", methods=["POST"])
+@require_auth
 def api_window_switch_to_full() -> Response:
     """通过 HTTP 降级调用 WindowAPI.switch_to_full（pywebview JS bridge 不可用时使用）"""
     window_api = current_app.config.get("WINDOW_API")
@@ -732,6 +750,7 @@ def api_window_switch_to_full() -> Response:
 
 
 @settings_bp.route("/api/window/switch-to-mini", methods=["POST"])
+@require_auth
 def api_window_switch_to_mini() -> Response:
     """通过 HTTP 降级调用 WindowAPI.switch_to_mini"""
     window_api = current_app.config.get("WINDOW_API")
@@ -775,6 +794,7 @@ def setup_activate() -> Response:
 
 
 @settings_bp.route("/api/v1/models", methods=["GET"])
+@require_auth
 def api_list_models() -> Response:
     """动态模型列表 API — 返回当前可用模型及各任务的路由结果"""
     _a = _app()
@@ -820,6 +840,7 @@ def api_list_models() -> Response:
 
 
 @settings_bp.route("/api/v1/models/refresh", methods=["POST"])
+@require_auth
 def api_refresh_models() -> Response:
     """手动触发模型列表刷新，重新查询 API 并更新路由表"""
     _a = _app()
@@ -829,7 +850,9 @@ def api_refresh_models() -> Response:
         _t.Thread(
             target=_a._init_model_manager, name="ModelManagerReinit", daemon=True
         ).start()
-        return jsonify({"status": "initializing", "message": "模型管理器正在后台初始化"})
+        return jsonify(
+            {"status": "initializing", "message": "模型管理器正在后台初始化"}
+        )
     try:
         new_map = _a._model_manager.refresh()
         _a.MODEL_MAP.update(new_map)
@@ -870,6 +893,7 @@ def api_refresh_models() -> Response:
 
 
 @settings_bp.route("/api/analyze", methods=["POST"])
+@require_auth
 def analyze_task() -> Response:
     """预分析任务类型和模型选择 — 让前端立即显示路由结果"""
     from app.core.routing import SmartDispatcher
@@ -883,12 +907,30 @@ def analyze_task() -> Response:
     file_type: str = data.get("file_type", "")
 
     if not message:
-        return jsonify({"task": "CHAT", "model": _a.MODEL_MAP["CHAT"], "route_method": "Empty"})
+        return jsonify(
+            {"task": "CHAT", "model": _a.MODEL_MAP["CHAT"], "route_method": "Empty"}
+        )
 
     IMAGE_EDIT_KEYWORDS = [
-        "修改", "换", "改成", "变成", "底色", "背景", "颜色", "抠图",
-        "去背景", "P图", "美化", "滤镜", "调色", "编辑",
-        "change", "modify", "edit", "background", "color",
+        "修改",
+        "换",
+        "改成",
+        "变成",
+        "底色",
+        "背景",
+        "颜色",
+        "抠图",
+        "去背景",
+        "P图",
+        "美化",
+        "滤镜",
+        "调色",
+        "编辑",
+        "change",
+        "modify",
+        "edit",
+        "background",
+        "color",
     ]
 
     if locked_task:

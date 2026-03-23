@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Anthropic Provider
 =======================
@@ -13,6 +15,7 @@ Returns the same response dict format as GeminiProvider:
 
 Requires:  pip install anthropic>=0.30
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,7 +29,13 @@ logger = logging.getLogger(__name__)
 
 try:
     import anthropic as _anthropic  # type: ignore
-    from anthropic import Anthropic, APIStatusError, APITimeoutError, APIConnectionError  # type: ignore
+    from anthropic import (  # type: ignore
+        Anthropic,
+        APIConnectionError,
+        APIStatusError,
+        APITimeoutError,
+    )
+
     _anthropic_available = True
 except ImportError:
     _anthropic_available = False
@@ -44,14 +53,14 @@ class AnthropicProvider(LLMProvider):
 
     def __init__(self, api_key: str | None = None):
         self.api_key = (
-            api_key
-            or os.getenv("ANTHROPIC_API_KEY")
-            or os.getenv("CLAUDE_API_KEY")
+            api_key or os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
         )
         self.client = None
 
         if not _anthropic_available:
-            logger.warning("[AnthropicProvider] anthropic package not installed (pip install anthropic)")
+            logger.warning(
+                "[AnthropicProvider] anthropic package not installed (pip install anthropic)"
+            )
             return
         if not self.api_key:
             logger.warning("[AnthropicProvider] No ANTHROPIC_API_KEY found")
@@ -115,9 +124,15 @@ class AnthropicProvider(LLMProvider):
                     exc, (APIStatusError, APITimeoutError, APIConnectionError)
                 )
                 status = getattr(exc, "status_code", None)
-                if retryable and status in (429, 500, 529) and attempt < self.MAX_RETRIES - 1:
-                    delay = self.RETRY_BASE_DELAY * (2 ** attempt)
-                    logger.warning(f"[AnthropicProvider] Retryable error, retry {attempt+1} in {delay}s: {exc}")
+                if (
+                    retryable
+                    and status in (429, 500, 529)
+                    and attempt < self.MAX_RETRIES - 1
+                ):
+                    delay = self.RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning(
+                        f"[AnthropicProvider] Retryable error, retry {attempt+1} in {delay}s: {exc}"
+                    )
                     time.sleep(delay)
                     continue
                 raise
@@ -163,14 +178,18 @@ class AnthropicProvider(LLMProvider):
                         p if isinstance(p, str) else str(p) for p in content_text
                     )
                 # Anthropic tool results must follow the assistant tool_use block
-                messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": f"toolu_{len(messages)}",
-                        "content": str(content_text),
-                    }],
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": f"toolu_{len(messages)}",
+                                "content": str(content_text),
+                            }
+                        ],
+                    }
+                )
                 continue
             else:
                 role = "user"
@@ -189,12 +208,14 @@ class AnthropicProvider(LLMProvider):
                 if content:
                     content_blocks.append({"type": "text", "text": str(content)})
                 for i, tc in enumerate(tool_calls_raw):
-                    content_blocks.append({
-                        "type": "tool_use",
-                        "id": f"toolu_{len(messages)}_{i}",
-                        "name": tc.get("name", ""),
-                        "input": tc.get("args", {}),
-                    })
+                    content_blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": f"toolu_{len(messages)}_{i}",
+                            "name": tc.get("name", ""),
+                            "input": tc.get("args", {}),
+                        }
+                    )
                 messages.append({"role": "assistant", "content": content_blocks})
             else:
                 messages.append({"role": role, "content": str(content)})
@@ -209,26 +230,30 @@ class AnthropicProvider(LLMProvider):
             if not isinstance(t, dict) or not t.get("name"):
                 continue
             params = t.get("parameters") or {"type": "object", "properties": {}}
-            claude_tools.append({
-                "name": t["name"],
-                "description": t.get("description", ""),
-                "input_schema": params,
-            })
+            claude_tools.append(
+                {
+                    "name": t["name"],
+                    "description": t.get("description", ""),
+                    "input_schema": params,
+                }
+            )
         return claude_tools or None
 
     def _format_response(self, resp: Any) -> Dict[str, Any]:
         content_text = ""
         tool_calls: List[Dict[str, Any]] = []
 
-        for block in (resp.content or []):
+        for block in resp.content or []:
             btype = getattr(block, "type", "")
             if btype == "text":
                 content_text += getattr(block, "text", "")
             elif btype == "tool_use":
-                tool_calls.append({
-                    "name": getattr(block, "name", ""),
-                    "args": dict(getattr(block, "input", {}) or {}),
-                })
+                tool_calls.append(
+                    {
+                        "name": getattr(block, "name", ""),
+                        "args": dict(getattr(block, "input", {}) or {}),
+                    }
+                )
             # Extended thinking blocks (type="thinking") are intentionally skipped
             # so the agent sees only the final answer, not raw CoT
 
@@ -248,4 +273,9 @@ class AnthropicProvider(LLMProvider):
         with self.client.messages.stream(**call_kwargs) as s:
             for text in s.text_stream:
                 accumulated += text
-                yield {"content": accumulated, "tool_calls": [], "usage": {}, "delta": text}
+                yield {
+                    "content": accumulated,
+                    "tool_calls": [],
+                    "usage": {},
+                    "delta": text,
+                }

@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Voice & Speech blueprint.
 
@@ -501,7 +503,9 @@ def speech_extract_actions() -> Response:
             parsed.get("decisions") if isinstance(parsed.get("decisions"), list) else []
         )
         actions: list = (
-            parsed.get("action_items") if isinstance(parsed.get("action_items"), list) else []
+            parsed.get("action_items")
+            if isinstance(parsed.get("action_items"), list)
+            else []
         )
 
         cleaned_actions: list[dict] = []
@@ -517,7 +521,12 @@ def speech_extract_actions() -> Response:
             if priority not in ("high", "medium", "low"):
                 priority = "medium"
             cleaned_actions.append(
-                {"task": task, "owner": owner, "due_date": due_date, "priority": priority}
+                {
+                    "task": task,
+                    "owner": owner,
+                    "due_date": due_date,
+                    "priority": priority,
+                }
             )
 
         return jsonify(

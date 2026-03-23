@@ -109,6 +109,11 @@ class TestROLES:
 class TestLlmCall:
     """Tests for module-level _llm_call helper."""
 
+    def setup_method(self):
+        """Clear the LLM instance cache before each test to avoid cross-test pollution."""
+        import app.core.agent.multi_agent as _mod
+        _mod._llm_cache.clear()
+
     @patch(_LLM_CLS)
     def test_returns_content_string(self, mock_cls):
         from app.core.agent.multi_agent import _llm_call
@@ -124,6 +129,7 @@ class TestLlmCall:
     @patch(_LLM_CLS)
     def test_raises_on_failure(self, mock_cls):
         import pytest
+
         from app.core.agent.multi_agent import _llm_call
 
         mock_llm = Mock()

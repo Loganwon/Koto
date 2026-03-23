@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 MemoryRouter — Unified memory read dispatcher for Koto.
 
@@ -152,6 +154,7 @@ class MemoryRouter:
                                 f"(从 {len(candidates)} 候选中筛选, "
                                 f"得分范围 {final[-1][0]:.2f}-{final[0][0]:.2f})"
                             )
+
             except Exception as e:
                 logger.debug(f"[MemoryRouter] Memory search layer error: {e}")
 

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 app/core/agent/plugins/ppt_plugin.py
 =====================================
@@ -60,7 +62,9 @@ class PPTPlugin(AgentPlugin):
 
     @property
     def description(self) -> str:
-        return "生成 PowerPoint 演示文稿：支持主题规划、内容大纲生成与完整 .pptx 文件输出"
+        return (
+            "生成 PowerPoint 演示文稿：支持主题规划、内容大纲生成与完整 .pptx 文件输出"
+        )
 
     def get_tools(self) -> List[Dict[str, Any]]:
         _OUTLINE_SCHEMA = {
@@ -201,7 +205,9 @@ class PPTPlugin(AgentPlugin):
                 indent=2,
             )
         except Exception as exc:
-            logger.error("[PPTPlugin] generate_ppt_outline 失败: %s", exc, exc_info=True)
+            logger.error(
+                "[PPTPlugin] generate_ppt_outline 失败: %s", exc, exc_info=True
+            )
             # 降级：返回固定结构大纲
             outline = self._fallback_outline(topic, slide_count)
             return json.dumps(
@@ -297,7 +303,9 @@ class PPTPlugin(AgentPlugin):
         return {
             "title": slide.get("title", slide.get("heading", "幻灯片")),
             "type": slide.get("type", slide.get("slide_type", "detail")),
-            "points": slide.get("points", slide.get("content", slide.get("bullets", []))),
+            "points": slide.get(
+                "points", slide.get("content", slide.get("bullets", []))
+            ),
         }
 
     @staticmethod
@@ -305,7 +313,11 @@ class PPTPlugin(AgentPlugin):
         """当规划器不可用时生成通用大纲结构。"""
         slides = [
             {"title": topic, "type": "highlight", "points": ["副标题", "Koto AI 生成"]},
-            {"title": "议程", "type": "overview", "points": ["背景介绍", "核心内容", "总结展望"]},
+            {
+                "title": "议程",
+                "type": "overview",
+                "points": ["背景介绍", "核心内容", "总结展望"],
+            },
         ]
         section_count = max(1, slide_count - 3)
         for i in range(1, section_count + 1):
@@ -316,5 +328,7 @@ class PPTPlugin(AgentPlugin):
                     "points": [f"要点 {i}.1", f"要点 {i}.2", f"要点 {i}.3"],
                 }
             )
-        slides.append({"title": "总结", "type": "highlight", "points": ["感谢观看", "欢迎提问"]})
+        slides.append(
+            {"title": "总结", "type": "highlight", "points": ["感谢观看", "欢迎提问"]}
+        )
         return slides

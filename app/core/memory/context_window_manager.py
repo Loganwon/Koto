@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 ContextWindowManager — MemGPT-style context paging for Koto.
 
@@ -162,7 +164,7 @@ class ContextWindowManager:
             if mgr is not None and query and len(query.strip()) > 4:
                 # 优先 FAISS 语义向量检索，无结果再降级关键词
                 hits: List[Dict] = []
-                if hasattr(mgr, 'search_vector_memories'):
+                if hasattr(mgr, "search_vector_memories"):
                     try:
                         hits = mgr.search_vector_memories(query, limit=6) or []
                     except Exception:

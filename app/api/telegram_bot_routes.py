@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Telegram Bot 管理 API
 ======================
@@ -31,6 +33,7 @@ telegram_bp = Blueprint("telegram", __name__)
 
 # ── Bot 状态 ─────────────────────────────────────────────────────────────────
 
+
 @telegram_bp.get("/status")
 def bot_status():
     try:
@@ -40,18 +43,23 @@ def bot_status():
         if bot is None:
             return jsonify({"running": False, "reason": "未配置 TELEGRAM_BOT_TOKEN"})
         info = bot.get_bot_info()
-        return jsonify({
-            "running": bot.is_running,
-            "bot_info": info,
-            "allowed_chat_ids": os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", ""),
-            "morning_brief_chat_id": os.environ.get("TELEGRAM_MORNING_BRIEF_CHAT_ID", ""),
-            "morning_brief_time": os.environ.get("MORNING_BRIEF_TIME", "08:00"),
-        })
+        return jsonify(
+            {
+                "running": bot.is_running,
+                "bot_info": info,
+                "allowed_chat_ids": os.environ.get("TELEGRAM_ALLOWED_CHAT_IDS", ""),
+                "morning_brief_chat_id": os.environ.get(
+                    "TELEGRAM_MORNING_BRIEF_CHAT_ID", ""
+                ),
+                "morning_brief_time": os.environ.get("MORNING_BRIEF_TIME", "08:00"),
+            }
+        )
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
 
 # ── 配置更新 ─────────────────────────────────────────────────────────────────
+
 
 @telegram_bp.post("/config")
 def update_config():
@@ -70,11 +78,15 @@ def update_config():
         if "allowed_chat_ids" in data:
             updates["TELEGRAM_ALLOWED_CHAT_IDS"] = str(data["allowed_chat_ids"]).strip()
         if "morning_brief_chat_id" in data:
-            updates["TELEGRAM_MORNING_BRIEF_CHAT_ID"] = str(data["morning_brief_chat_id"]).strip()
+            updates["TELEGRAM_MORNING_BRIEF_CHAT_ID"] = str(
+                data["morning_brief_chat_id"]
+            ).strip()
         if "morning_brief_time" in data:
             updates["MORNING_BRIEF_TIME"] = str(data["morning_brief_time"]).strip()
         if "morning_brief_enabled" in data:
-            updates["MORNING_BRIEF_ENABLED"] = "true" if data["morning_brief_enabled"] else "false"
+            updates["MORNING_BRIEF_ENABLED"] = (
+                "true" if data["morning_brief_enabled"] else "false"
+            )
 
         if not updates:
             return jsonify({"error": "没有提供任何有效字段"}), 400
@@ -91,6 +103,7 @@ def update_config():
 
 
 # ── 测试消息 ─────────────────────────────────────────────────────────────────
+
 
 @telegram_bp.post("/test")
 def send_test():
@@ -119,6 +132,7 @@ def send_test():
 
 # ── 重启 Bot ─────────────────────────────────────────────────────────────────
 
+
 @telegram_bp.post("/restart")
 def restart_bot():
     """停止旧 Bot 实例，用最新环境变量重新创建并启动。"""
@@ -146,6 +160,7 @@ def restart_bot():
 
 # ── 联系人 CRUD ───────────────────────────────────────────────────────────────
 
+
 @telegram_bp.get("/contacts")
 def list_contacts():
     try:
@@ -153,7 +168,12 @@ def list_contacts():
 
         limit = min(int(request.args.get("limit", 20)), 100)
         sort_by = request.args.get("sort_by", "last_interaction")
-        if sort_by not in {"last_interaction", "interaction_count", "name", "created_at"}:
+        if sort_by not in {
+            "last_interaction",
+            "interaction_count",
+            "name",
+            "created_at",
+        }:
             sort_by = "last_interaction"
         contacts = get_contact_manager().list_contacts(limit=limit, sort_by=sort_by)
         return jsonify({"contacts": contacts, "total": get_contact_manager().count()})
@@ -210,6 +230,7 @@ def delete_contact(contact_id: str):
 
 # ── 晨间简报 ─────────────────────────────────────────────────────────────────
 
+
 @telegram_bp.get("/brief/preview")
 def preview_brief():
     try:
@@ -237,11 +258,22 @@ def send_brief():
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
 
+
 def _find_env_file() -> str:
     """查找 gemini_config.env 文件路径。"""
     candidates = [
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "config", "gemini_config.env"),
-        os.path.join(os.path.dirname(__file__), "..", "..", "..", "config", "gemini_config.env"),
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "..",
+            "..",
+            "config",
+            "gemini_config.env",
+        ),
+        os.path.join(
+            os.path.dirname(__file__), "..", "..", "..", "config", "gemini_config.env"
+        ),
     ]
     for c in candidates:
         p = os.path.realpath(c)

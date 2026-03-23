@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 文件编辑器 - 提供类似 Copilot 的本地文件编辑能力
 支持：读取、替换、插入、删除、智能编辑

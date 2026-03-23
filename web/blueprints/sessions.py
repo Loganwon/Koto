@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Session management blueprint.
 
@@ -191,7 +193,7 @@ def auto_title_session(session_name: str) -> Response:
         title_model = _get_model_map().get("CHAT", "gemini-2.5-flash")
         result = _get_brain().chat([], prompt, model=title_model, auto_model=False)
         raw_title = (result.get("response") or "").strip()
-        raw_title = raw_title.strip('"\'「」《》【】\n').split("\n")[0].strip()
+        raw_title = raw_title.strip("\"'「」《》【】\n").split("\n")[0].strip()
         if not raw_title or len(raw_title) > 30:
             return jsonify({"success": False, "error": "生成标题无效"}), 500
         return jsonify({"success": True, "title": raw_title})

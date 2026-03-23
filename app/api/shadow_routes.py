@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """Koto Shadow Routes — 影子追踪 REST API
 =======================================
 挂载前缀: /api/shadow

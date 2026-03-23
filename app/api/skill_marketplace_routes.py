@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║       Koto  ─  Skill Marketplace API Blueprint                   ║
@@ -768,7 +770,9 @@ def disable_all_skills():
                     logger.warning(f"[disable_all] 同步文件失败 {skill_id}: {e}")
             disabled.append(skill_id)
 
-    return jsonify({"success": True, "disabled_count": len(disabled), "disabled": disabled})
+    return jsonify(
+        {"success": True, "disabled_count": len(disabled), "disabled": disabled}
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2168,6 +2172,7 @@ _GH_REQUEST_TIMEOUT = 10  # 秒
 def _gh_validate_url(url: str) -> bool:
     """校验 URL 安全性：必须 HTTPS，域名在白名单内。"""
     import urllib.parse
+
     try:
         parsed = urllib.parse.urlparse(url)
         return parsed.scheme == "https" and parsed.netloc in _GH_ALLOWED_HOSTS
@@ -2179,6 +2184,7 @@ def _gh_fetch(url: str) -> bytes:
     """安全抓取 GitHub 内容，有 size 和 timeout 限制。"""
     import ssl
     import urllib.request
+
     if not _gh_validate_url(url):
         raise ValueError(f"URL 不合法或域名不在白名单: {url}")
     ctx = ssl.create_default_context()
@@ -2194,7 +2200,9 @@ def _gh_fetch(url: str) -> bytes:
     return data
 
 
-def _parse_skill_md(content: str, repo: str, skill_path: str, branch: str = "main") -> Dict:
+def _parse_skill_md(
+    content: str, repo: str, skill_path: str, branch: str = "main"
+) -> Dict:
     """
     将 SKILL.md（YAML frontmatter + Markdown body）转换为 Koto Skill JSON。
 
@@ -2252,7 +2260,11 @@ def _parse_skill_md(content: str, repo: str, skill_path: str, branch: str = "mai
     if not name:
         # 尝试从 Markdown 第一个 H1 取名
         h1 = _re.search(r"^#\s+(.+)", body, _re.MULTILINE)
-        name = h1.group(1).strip() if h1 else skill_path.split("/")[-1].replace("-", " ").title()
+        name = (
+            h1.group(1).strip()
+            if h1
+            else skill_path.split("/")[-1].replace("-", " ").title()
+        )
 
     if not description:
         # 取正文第一段非标题文本作为 description
@@ -2299,7 +2311,9 @@ def _gh_list_skills_in_repo(repo: str, skills_path: str, branch: str) -> List[Di
     raw = _gh_fetch(api_url)
     items = json.loads(raw.decode("utf-8"))
     if not isinstance(items, list):
-        raise ValueError(f"无法列出目录 {skills_path}：{items.get('message', '未知错误')}")
+        raise ValueError(
+            f"无法列出目录 {skills_path}：{items.get('message', '未知错误')}"
+        )
 
     result = []
     for item in items:
@@ -2317,38 +2331,42 @@ def _gh_list_skills_in_repo(repo: str, skills_path: str, branch: str) -> List[Di
 
         if item_type == "dir":
             # 技能以目录形式存放（标准 Anthropic 格式）
-            skill_md_url = (
-                f"https://raw.githubusercontent.com/{repo}/{branch}/{item_path}/SKILL.md"
+            skill_md_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{item_path}/SKILL.md"
+            result.append(
+                {
+                    "name": item_name,
+                    "path": item_path,
+                    "type": "dir",
+                    "skill_md_url": skill_md_url,
+                }
             )
-            result.append({
-                "name": item_name,
-                "path": item_path,
-                "type": "dir",
-                "skill_md_url": skill_md_url,
-            })
         elif item_type == "file" and item_name.upper() == "SKILL.MD":
             # 某些仓库直接把 SKILL.md 放在根路径
             skill_md_url = item.get(
                 "download_url",
                 f"https://raw.githubusercontent.com/{repo}/{branch}/{item_path}",
             )
-            result.append({
-                "name": item_path.split("/")[-2] if "/" in item_path else item_name,
-                "path": item_path,
-                "type": "file",
-                "skill_md_url": skill_md_url,
-            })
+            result.append(
+                {
+                    "name": item_path.split("/")[-2] if "/" in item_path else item_name,
+                    "path": item_path,
+                    "type": "file",
+                    "skill_md_url": skill_md_url,
+                }
+            )
         elif item_type == "file" and item_name.lower().endswith(".json"):
             # 某些仓库直接存放 JSON 格式的 Koto skill
-            result.append({
-                "name": item_name[:-5],
-                "path": item_path,
-                "type": "json",
-                "skill_md_url": item.get(
-                    "download_url",
-                    f"https://raw.githubusercontent.com/{repo}/{branch}/{item_path}",
-                ),
-            })
+            result.append(
+                {
+                    "name": item_name[:-5],
+                    "path": item_path,
+                    "type": "json",
+                    "skill_md_url": item.get(
+                        "download_url",
+                        f"https://raw.githubusercontent.com/{repo}/{branch}/{item_path}",
+                    ),
+                }
+            )
 
     return result
 
@@ -2393,10 +2411,12 @@ def github_skills():
     allowed_repos = {r["repo"] for r in _GH_CURATED_REPOS}
     if repo not in allowed_repos:
         return (
-            jsonify({
-                "success": False,
-                "error": f"仓库 '{repo}' 不在允许列表内。如需安装其他仓库的 Skill，请使用自定义 URL 安装功能。",
-            }),
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"仓库 '{repo}' 不在允许列表内。如需安装其他仓库的 Skill，请使用自定义 URL 安装功能。",
+                }
+            ),
             403,
         )
 
@@ -2424,15 +2444,19 @@ def github_skills():
             item["koto_id"] = candidate_id
             item["repo"] = repo
             item["branch"] = branch
-            item["github_url"] = f"https://github.com/{repo}/tree/{branch}/{item['path']}"
+            item["github_url"] = (
+                f"https://github.com/{repo}/tree/{branch}/{item['path']}"
+            )
 
-        return jsonify({
-            "success": True,
-            "repo": repo,
-            "skills_path": skills_path,
-            "count": len(items),
-            "skills": items,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "repo": repo,
+                "skills_path": skills_path,
+                "count": len(items),
+                "skills": items,
+            }
+        )
     except Exception as exc:
         logger.warning("[github/skills] %s: %s", repo, exc)
         return jsonify({"success": False, "error": str(exc)}), 502
@@ -2473,18 +2497,28 @@ def github_install():
     if raw_url:
         # 自定义 URL：必须是 raw.githubusercontent.com，且路径合法
         if not _gh_validate_url(raw_url):
-            return jsonify({
-                "success": False,
-                "error": "raw_url 必须是 https://raw.githubusercontent.com/... 链接",
-            }), 400
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "raw_url 必须是 https://raw.githubusercontent.com/... 链接",
+                    }
+                ),
+                400,
+            )
     elif repo and skill_path:
         # 精选仓库：校验 repo 在白名单内
         allowed_repos = {r["repo"] for r in _GH_CURATED_REPOS}
         if repo not in allowed_repos:
-            return jsonify({
-                "success": False,
-                "error": f"仓库 '{repo}' 不在允许列表内",
-            }), 403
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": f"仓库 '{repo}' 不在允许列表内",
+                    }
+                ),
+                403,
+            )
 
         # 校验 skill_path 和 branch 格式
         if not re.match(r"^[a-zA-Z0-9_\-/\. ]{1,200}$", skill_path):
@@ -2493,15 +2527,22 @@ def github_install():
             return jsonify({"success": False, "error": "branch 参数无效"}), 400
 
         # 自动判断是目录（拼 SKILL.md）还是直接文件
-        if skill_path.upper().endswith("SKILL.MD") or skill_path.lower().endswith(".json"):
+        if skill_path.upper().endswith("SKILL.MD") or skill_path.lower().endswith(
+            ".json"
+        ):
             raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{skill_path}"
         else:
             raw_url = f"https://raw.githubusercontent.com/{repo}/{branch}/{skill_path}/SKILL.md"
     else:
-        return jsonify({
-            "success": False,
-            "error": "请提供 raw_url，或同时提供 repo + skill_path",
-        }), 400
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "请提供 raw_url，或同时提供 repo + skill_path",
+                }
+            ),
+            400,
+        )
 
     # ── 2. 抓取内容 ────────────────────────────────────────────────────────
     try:
@@ -2521,7 +2562,10 @@ def github_install():
         except json.JSONDecodeError as exc:
             return jsonify({"success": False, "error": f"JSON 解析失败: {exc}"}), 422
         if not skill_dict.get("id") or not skill_dict.get("name"):
-            return jsonify({"success": False, "error": "JSON 文件缺少 id 或 name 字段"}), 422
+            return (
+                jsonify({"success": False, "error": "JSON 文件缺少 id 或 name 字段"}),
+                422,
+            )
         # 强制标记来源
         skill_dict.setdefault("author", f"community:{repo or 'github'}")
         skill_dict.setdefault("source_url", raw_url)
@@ -2531,7 +2575,9 @@ def github_install():
     else:
         # SKILL.md 格式（或默认当作 Markdown 处理）
         effective_repo = repo or "github/community"
-        effective_path = skill_path or raw_url.split("raw.githubusercontent.com/", 1)[-1]
+        effective_path = (
+            skill_path or raw_url.split("raw.githubusercontent.com/", 1)[-1]
+        )
         skill_dict = _parse_skill_md(
             content=content_str,
             repo=effective_repo,
@@ -2545,18 +2591,28 @@ def github_install():
         SkillRecorder = _recorder()
         skill = SkillDefinition.from_dict(skill_dict)
         SkillRecorder.save_and_register(skill, overwrite=overwrite)
-        return jsonify({
-            "success": True,
-            "skill_id": skill.id,
-            "skill": skill.to_dict(),
-            "source": raw_url,
-        }), 201
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "skill_id": skill.id,
+                    "skill": skill.to_dict(),
+                    "source": raw_url,
+                }
+            ),
+            201,
+        )
     except FileExistsError:
-        return jsonify({
-            "success": False,
-            "error": f"Skill '{skill_dict.get('id')}' 已安装，传 overwrite:true 覆盖",
-            "skill_id": skill_dict.get("id"),
-        }), 409
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"Skill '{skill_dict.get('id')}' 已安装，传 overwrite:true 覆盖",
+                    "skill_id": skill_dict.get("id"),
+                }
+            ),
+            409,
+        )
     except Exception as exc:
         logger.exception("[github/install]")
         return jsonify({"success": False, "error": str(exc)}), 500
@@ -3589,7 +3645,11 @@ def community_catalog():
     skills_out = []
     import hashlib as _hl
     for skill in _COMMUNITY_SKILLS:
-        if category and skill.get("subcategory") != category and skill.get("category") != category:
+        if (
+            category
+            and skill.get("subcategory") != category
+            and skill.get("category") != category
+        ):
             continue
         if q:
             haystack = " ".join([
@@ -3608,11 +3668,13 @@ def community_catalog():
             entry["source_name"] = "Koto 社区精选"
         skills_out.append(entry)
 
-    return jsonify({
-        "success": True,
-        "total": len(skills_out),
-        "skills": skills_out,
-    })
+    return jsonify(
+        {
+            "success": True,
+            "total": len(skills_out),
+            "skills": skills_out,
+        }
+    )
 
 
 # ── GET /api/skillmarket/community/skill/<id>  ─────────────────────────────
@@ -3669,47 +3731,65 @@ def community_install(skill_id: str):
 
     # 构建安装用的 dict（去掉社区专属字段，保留核心字段）
     install_dict = {k: v for k, v in skill_data.items() if k != "community_meta"}
-    install_dict.setdefault("created_at", __import__("datetime").datetime.utcnow().isoformat())
+    install_dict.setdefault(
+        "created_at", __import__("datetime").datetime.utcnow().isoformat()
+    )
 
     try:
         SkillDefinition, _, _ = _schema()
         SkillRecorder = _recorder()
         skill = SkillDefinition.from_dict(install_dict)
         sid = SkillRecorder.save_and_register(skill, overwrite=overwrite)
-        return jsonify({
-            "success": True,
-            "skill_id": sid,
-            "message": f"「{skill_data['name']}」已成功安装到你的技能库",
-        }), 201
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "skill_id": sid,
+                    "message": f"「{skill_data['name']}」已成功安装到你的技能库",
+                }
+            ),
+            201,
+        )
     except FileExistsError:
-        return jsonify({
-            "success": False,
-            "error": f"「{skill_data['name']}」已安装，传 overwrite:true 覆盖",
-            "skill_id": skill_id,
-        }), 409
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"「{skill_data['name']}」已安装，传 overwrite:true 覆盖",
+                    "skill_id": skill_id,
+                }
+            ),
+            409,
+        )
     except Exception as exc:
         logger.exception("[community/install] %s", skill_id)
         return jsonify({"success": False, "error": str(exc)}), 500
+
 
 # ── POST /api/skillmarket/community/ai-recommend ──────────────────────────
 
 _CACHED_ONLINE_PROMPTS = None
 _LAST_FETCH_TIME = 0
 
+
 def fetch_online_prompts():
     global _CACHED_ONLINE_PROMPTS, _LAST_FETCH_TIME
     import time
+
     if _CACHED_ONLINE_PROMPTS and (time.time() - _LAST_FETCH_TIME < 3600):
         return _CACHED_ONLINE_PROMPTS
 
-    import urllib.request
     import csv
     import re
+    import urllib.request
     from io import StringIO
+
     csv.field_size_limit(1024 * 1024)
 
     def _fetch_text(url: str, timeout: int = 12) -> str:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 KotoSkillBot/1.0"})
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Mozilla/5.0 KotoSkillBot/1.0"}
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
         return raw.decode("utf-8", errors="replace")
@@ -3760,13 +3840,19 @@ def fetch_online_prompts():
                     csv_loaded = True
                     break
             except Exception as csv_exc:
-                logger.warning("[online-prompts] csv source failed %s: %s", src.get("url"), csv_exc)
+                logger.warning(
+                    "[online-prompts] csv source failed %s: %s", src.get("url"), csv_exc
+                )
 
         # Source B: linexjlin/GPTs (index from README)
         # 这里提供大量高质量现成 GPT 提示词索引；安装时再按路径抓取原文
         try:
-            readme_text = _fetch_text("https://raw.githubusercontent.com/linexjlin/GPTs/main/README.md")
-            pattern = re.compile(r"^-\s+\[(?P<title>[^\]]+)\]\(\./(?P<path>prompts/[^)]+\.md)\)(?:\s+by\s+(?P<author>.+))?\s*$")
+            readme_text = _fetch_text(
+                "https://raw.githubusercontent.com/linexjlin/GPTs/main/README.md"
+            )
+            pattern = re.compile(
+                r"^-\s+\[(?P<title>[^\]]+)\]\(\./(?P<path>prompts/[^)]+\.md)\)(?:\s+by\s+(?P<author>.+))?\s*$"
+            )
             idx = 0
             for line in readme_text.splitlines():
                 m = pattern.match(line.strip())
@@ -3811,11 +3897,14 @@ def fetch_online_prompts():
         _CACHED_ONLINE_PROMPTS = merged
         _LAST_FETCH_TIME = time.time()
         if merged:
-            logger.info("[online-prompts] loaded=%s csv_loaded=%s", len(merged), csv_loaded)
+            logger.info(
+                "[online-prompts] loaded=%s csv_loaded=%s", len(merged), csv_loaded
+            )
         return merged
     except Exception as e:
         logger.error(f"Failed to fetch awesome prompts: {e}")
         return _CACHED_ONLINE_PROMPTS or []
+
 
 @marketplace_bp.route("/community/ai-recommend", methods=["POST"])
 def community_ai_recommend():
@@ -3830,18 +3919,20 @@ def community_ai_recommend():
         used_fallback = True
         prompts = []
         for s in _COMMUNITY_SKILLS[:20]:
-            prompts.append({
-                "id": f"local_{s.get('id')}",
-                "name": s.get("name", "未命名技能"),
-                "description": s.get("description", ""),
-                "full_prompt": s.get("prompt", ""),
-                "author": s.get("author", "Open Source"),
-                "tags": list(s.get("tags", [])) + ["本地兜底"],
-                "source_name": "Koto 本地精选",
-                "source_repo": "local",
-                "source_url": "",
-                "source_kind": "local-fallback",
-            })
+            prompts.append(
+                {
+                    "id": f"local_{s.get('id')}",
+                    "name": s.get("name", "未命名技能"),
+                    "description": s.get("description", ""),
+                    "full_prompt": s.get("prompt", ""),
+                    "author": s.get("author", "Open Source"),
+                    "tags": list(s.get("tags", [])) + ["本地兜底"],
+                    "source_name": "Koto 本地精选",
+                    "source_repo": "local",
+                    "source_url": "",
+                    "source_kind": "local-fallback",
+                }
+            )
 
     # ── 中文→英文 关键词映射表（本地，不依赖 LLM）──────────────
     _ZH_EN_MAP = {
@@ -3952,7 +4043,9 @@ def community_ai_recommend():
         "used_fallback": used_fallback,
     })
 
+
 # ── POST /api/skillmarket/community/online-install ────────────────────────
+
 
 @marketplace_bp.route("/community/online-install", methods=["POST"])
 def community_install_online():
@@ -3968,13 +4061,16 @@ def community_install_online():
     # 若前端未带完整 prompt，则尝试按来源路径拉取原文（GitHub）
     if not full_prompt and source_repo and source_path:
         import urllib.request
+
         raw_candidates = [
             f"https://raw.githubusercontent.com/{source_repo}/main/{source_path}",
             f"https://raw.githubusercontent.com/{source_repo}/master/{source_path}",
         ]
         for raw_url in raw_candidates:
             try:
-                req = urllib.request.Request(raw_url, headers={"User-Agent": "Mozilla/5.0 KotoSkillBot/1.0"})
+                req = urllib.request.Request(
+                    raw_url, headers={"User-Agent": "Mozilla/5.0 KotoSkillBot/1.0"}
+                )
                 with urllib.request.urlopen(req, timeout=12) as resp:
                     full_prompt = resp.read().decode("utf-8", errors="replace").strip()
                 if full_prompt:
@@ -3985,8 +4081,9 @@ def community_install_online():
     if not full_prompt:
         return jsonify({"success": False, "error": "缺少必要字段"}), 400
 
-    import uuid
     import datetime
+    import uuid
+
     skill_id = f"online_{uuid.uuid4().hex[:8]}"
 
     install_dict = {
@@ -3997,34 +4094,40 @@ def community_install_online():
         "author": data.get("author", "Open Source"),
         "tags": data.get("tags", ["开源导入"]),
         "created_at": datetime.datetime.utcnow().isoformat(),
-        "steps": [
-            {
-                "type": "system_prompt",
-                "content": full_prompt
-            }
-        ]
+        "steps": [{"type": "system_prompt", "content": full_prompt}],
     }
 
     src_repo = (data.get("source_repo") or "").strip()
     src_name = (data.get("source_name") or "").strip()
     src_url = (data.get("source_url") or "").strip()
     if src_repo:
-        install_dict["tags"] = list(dict.fromkeys((install_dict.get("tags") or []) + ["github", src_repo]))
+        install_dict["tags"] = list(
+            dict.fromkeys((install_dict.get("tags") or []) + ["github", src_repo])
+        )
     if src_name and src_name.lower() not in str(install_dict.get("author", "")).lower():
-        install_dict["author"] = f"{install_dict.get('author', 'Open Source')} · {src_name}"
+        install_dict["author"] = (
+            f"{install_dict.get('author', 'Open Source')} · {src_name}"
+        )
     if src_url and src_url not in str(install_dict.get("description", "")):
-        install_dict["description"] = f"{install_dict.get('description', '')}\n\n来源：{src_url}".strip()
+        install_dict["description"] = (
+            f"{install_dict.get('description', '')}\n\n来源：{src_url}".strip()
+        )
 
     try:
         SkillDefinition, _, _ = _schema()
         SkillRecorder = _recorder()
         skill = SkillDefinition.from_dict(install_dict)
         sid = SkillRecorder.save_and_register(skill, overwrite=False)
-        return jsonify({
-            "success": True,
-            "skill_id": sid,
-            "message": f"「{name}」已成功安装到你的技能库",
-        }), 201
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "skill_id": sid,
+                    "message": f"「{name}」已成功安装到你的技能库",
+                }
+            ),
+            201,
+        )
     except Exception as exc:
         logger.exception("[community/online-install] error")
         return jsonify({"success": False, "error": str(exc)}), 500

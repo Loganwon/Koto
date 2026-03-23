@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import json
 import logging
 import socket
@@ -446,11 +448,12 @@ class LocalModelRouter:
         # 后台预热：发送一次简短分类请求让 Ollama 把模型加载进显存，
         # 这样第一次真实分类请求无需等待冷启动延迟。
         import threading as _threading
+
         def _warmup():
             try:
                 cls.classify("你好", timeout=8.0)
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                logger.warning("Silenced exception caught", exc_info=True)
         _threading.Thread(target=_warmup, daemon=True, name="ollama-warmup").start()
         return True
 

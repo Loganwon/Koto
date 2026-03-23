@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. TelegramBot — pure-logic helpers (no network)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -28,6 +27,7 @@ class TestSplitMessage:
 
     def _split(self, text, max_len=None):
         from web.telegram_bot import _split_message
+
         if max_len:
             return _split_message(text, max_len)
         return _split_message(text)
@@ -68,6 +68,7 @@ class TestAllowedIds:
 
     def test_returns_none_when_env_not_set(self):
         from web.telegram_bot import _allowed_ids
+
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("TELEGRAM_ALLOWED_CHAT_IDS", None)
             result = _allowed_ids()
@@ -75,12 +76,14 @@ class TestAllowedIds:
 
     def test_parses_comma_separated_ids(self):
         from web.telegram_bot import _allowed_ids
+
         with patch.dict(os.environ, {"TELEGRAM_ALLOWED_CHAT_IDS": "111,222,333"}):
             result = _allowed_ids()
         assert result == [111, 222, 333]
 
     def test_ignores_empty_segments(self):
         from web.telegram_bot import _allowed_ids
+
         with patch.dict(os.environ, {"TELEGRAM_ALLOWED_CHAT_IDS": "111,,222"}):
             result = _allowed_ids()
         assert 111 in result
@@ -93,6 +96,7 @@ class TestGetTelegramBot:
 
     def test_returns_none_without_token(self):
         from web import telegram_bot as tb
+
         # Reset singleton so the factory runs fresh
         orig = tb._bot_instance
         tb._bot_instance = None
@@ -124,6 +128,7 @@ class TestTelegramBotHelpers:
 
     def setup_method(self):
         from web.telegram_bot import TelegramBot
+
         self.bot = TelegramBot(token="999:FAKE_TOKEN")
 
     def test_is_running_false_by_default(self):
@@ -152,7 +157,7 @@ class TestTelegramBotHelpers:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
             "ok": True,
-            "result": {"id": 999, "first_name": "KotoBot", "username": "kotobot"}
+            "result": {"id": 999, "first_name": "KotoBot", "username": "kotobot"},
         }
         mock_resp.raise_for_status = MagicMock()
         with patch("requests.post", return_value=mock_resp):
@@ -169,6 +174,7 @@ class TestTelegramBotHelpers:
 def _make_memory_app():
     """Create a minimal Flask app with memory routes registered."""
     from flask import Flask
+
     from web.memory_api_routes import register_memory_routes
 
     app = Flask(__name__)
@@ -177,11 +183,19 @@ def _make_memory_app():
     mgr = MagicMock()
     # Basic CRUD — must return plain JSON-serialisable dicts
     mgr.get_all_memories.return_value = [
-        {"id": 1, "content": "User likes Python", "category": "user_preference",
-         "source": "user", "use_count": 3}
+        {
+            "id": 1,
+            "content": "User likes Python",
+            "category": "user_preference",
+            "source": "user",
+            "use_count": 3,
+        }
     ]
     mgr.add_memory.return_value = {
-        "id": 2, "content": "New fact", "category": "user_preference", "source": "user"
+        "id": 2,
+        "content": "New fact",
+        "category": "user_preference",
+        "source": "user",
     }
     mgr.delete_memory.return_value = True
 
@@ -190,8 +204,11 @@ def _make_memory_app():
     mgr.user_profile.get_brief_summary.return_value = "Logan — Python developer"
     mgr.user_profile.profile = {
         "metadata": {"total_interactions": 42},
-        "technical_background": {"programming_languages": ["Python", "Go"], "tools": ["git", "docker"]},
-        "preferences": {"likes": ["clean code"], "dislikes": ["meetings"]}
+        "technical_background": {
+            "programming_languages": ["Python", "Go"],
+            "tools": ["git", "docker"],
+        },
+        "preferences": {"likes": ["clean code"], "dislikes": ["meetings"]},
     }
     mgr.personality_matrix.data = {"openness": 0.8, "conscientiousness": 0.7}
     mgr.personality_matrix.to_context_string.return_value = "Curious and organised"
@@ -270,6 +287,7 @@ class TestMemoryApiRoutes:
 class TestDocumentComparatorInit:
     def test_instantiation(self):
         from web.document_comparator import DocumentComparator
+
         dc = DocumentComparator()
         assert ".txt" in dc.supported_formats
         assert ".pdf" in dc.supported_formats
@@ -282,10 +300,13 @@ class TestDocumentComparatorTwoFiles:
 
     def setup_method(self):
         from web.document_comparator import DocumentComparator
+
         self.dc = DocumentComparator()
 
     def _write(self, content: str) -> str:
-        f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        )
         f.write(content)
         f.close()
         return f.name
@@ -307,7 +328,8 @@ class TestDocumentComparatorTwoFiles:
             assert changes["additions"]["count"] == 0
             assert changes["deletions"]["count"] == 0
         finally:
-            os.unlink(a); os.unlink(b)
+            os.unlink(a)
+            os.unlink(b)
 
     def test_different_files_detect_insertions_and_deletions(self):
         a = self._write("line one\nline two\n")
@@ -318,7 +340,8 @@ class TestDocumentComparatorTwoFiles:
             # added a line → additions count should be ≥ 1
             assert r["changes"]["additions"]["count"] >= 1
         finally:
-            os.unlink(a); os.unlink(b)
+            os.unlink(a)
+            os.unlink(b)
 
     def test_html_output_format(self):
         a = self._write("hello\nworld\n")
@@ -328,7 +351,8 @@ class TestDocumentComparatorTwoFiles:
             assert r["success"] is True
             assert "<" in r["diff"]  # should contain HTML tags
         finally:
-            os.unlink(a); os.unlink(b)
+            os.unlink(a)
+            os.unlink(b)
 
     def test_inline_json_output_format(self):
         a = self._write("old content\n")
@@ -339,7 +363,8 @@ class TestDocumentComparatorTwoFiles:
             # diff may be list or string — just not empty
             assert r["diff"] is not None
         finally:
-            os.unlink(a); os.unlink(b)
+            os.unlink(a)
+            os.unlink(b)
 
 
 @pytest.mark.unit
@@ -348,11 +373,14 @@ class TestDocumentComparatorMultiple:
 
     def setup_method(self):
         from web.document_comparator import DocumentComparator
+
         self.dc = DocumentComparator()
         self._files = []
 
     def _write(self, content: str) -> str:
-        f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        )
         f.write(content)
         f.close()
         self._files.append(f.name)
@@ -398,11 +426,14 @@ class TestDocumentComparatorBuildPrompt:
 
     def setup_method(self):
         from web.document_comparator import DocumentComparator
+
         self.dc = DocumentComparator()
         self._files = []
 
     def _write(self, content: str) -> str:
-        f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        )
         f.write(content)
         f.close()
         self._files.append(f.name)
@@ -436,11 +467,14 @@ class TestDocumentComparatorVersions:
 
     def setup_method(self):
         from web.document_comparator import DocumentComparator
+
         self.dc = DocumentComparator()
         self._files = []
 
     def _write(self, content: str) -> str:
-        f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+        f = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8"
+        )
         f.write(content)
         f.close()
         self._files.append(f.name)

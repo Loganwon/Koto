@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 概念提取模块 - Koto智能文件大脑的核心
 使用TF-IDF算法从文件内容中提取关键概念和主题

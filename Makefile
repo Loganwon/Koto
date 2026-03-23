@@ -9,7 +9,7 @@ FLAKE8 := flake8
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev test lint format build clean install pre-commit-install
+.PHONY: help dev test lint format build clean install pre-commit-install mutation-test
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -48,6 +48,13 @@ pre-commit-install:  ## Install pre-commit hooks
 audit:  ## Scan dependencies for CVEs
 	$(PIP) install pip-audit
 	pip-audit --desc || true
+
+mutation-test:  ## Run mutation testing on security-critical modules
+	python -m mutmut run --paths-to-mutate="web/auth.py" --tests-dir=tests/unit/ --runner="python -m pytest tests/unit/test_auth_coverage.py tests/unit/test_security_hardening.py -x -q --no-header --tb=no"
+	python -m mutmut results
+
+load-test:  ## Run load tests (requires running Koto server)
+	$(PYTHON) -m locust -f tests/load/locustfile.py --headless -u 10 -r 2 --run-time 60s --host http://localhost:5820
 
 clean:  ## Remove build artifacts and caches
 	Remove-Item -Recurse -Force dist/ -ErrorAction SilentlyContinue

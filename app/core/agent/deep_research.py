@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Deep Research Agent
 ===================
@@ -50,15 +52,16 @@ from typing import Any, Dict, Generator, List, Optional
 logger = logging.getLogger(__name__)
 
 # ── 默认参数 ──────────────────────────────────────────────────────────────────
-_DEFAULT_MAX_ROUNDS = 3          # 最多几轮迭代搜索
-_DEFAULT_QUERIES_PER_ROUND = 4   # 每轮并行子查询数
-_DEFAULT_MAX_RESULTS_PER_Q = 5   # 每个查询最多取几条结果
-_DEFAULT_SEARCH_TIMEOUT = 15     # 单次搜索超时秒数
+_DEFAULT_MAX_ROUNDS = 3  # 最多几轮迭代搜索
+_DEFAULT_QUERIES_PER_ROUND = 4  # 每轮并行子查询数
+_DEFAULT_MAX_RESULTS_PER_Q = 5  # 每个查询最多取几条结果
+_DEFAULT_SEARCH_TIMEOUT = 15  # 单次搜索超时秒数
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 数据结构
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @dataclass
 class SearchResult:
@@ -144,6 +147,7 @@ _SYNTHESIS_PROMPT = """\
 # DeepResearchAgent
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class DeepResearchAgent:
     """
     迭代式深度调研代理。
@@ -177,6 +181,7 @@ class DeepResearchAgent:
         self._ProgressEvent = None
         try:
             from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             self._progress_bus = get_progress_bus()
             self._ProgressEvent = ProgressEvent
         except Exception as _e:
@@ -202,26 +207,30 @@ class DeepResearchAgent:
 
         try:
             # ── 阶段 1：问题分解 ─────────────────────────────────────────
-            yield self._evt("progress", "decompose", f"正在分解问题：{query[:50]}...", 0)
+            yield self._evt(
+                "progress", "decompose", f"正在分解问题：{query[:50]}...", 0
+            )
             state.sub_queries = self._decompose_query(query, self.queries_per_round)
             yield self._evt(
-                "progress", "decompose",
-                f"拆解出 {len(state.sub_queries)} 个子问题：{', '.join(state.sub_queries[:2])}...", 0
+                "progress",
+                "decompose",
+                f"拆解出 {len(state.sub_queries)} 个子问题：{', '.join(state.sub_queries[:2])}...",
+                0,
             )
 
             # ── 阶段 2-4：迭代搜索 ──────────────────────────────────────
             for round_num in range(1, self.max_rounds + 1):
                 state.current_round = round_num
-                queries_this_round = (
-                    state.sub_queries if round_num == 1 else state.gaps
-                )
+                queries_this_round = state.sub_queries if round_num == 1 else state.gaps
 
                 if not queries_this_round:
                     break
 
                 yield self._evt(
-                    "progress", "search",
-                    f"第 {round_num} 轮搜索：{len(queries_this_round)} 个查询...", round_num
+                    "progress",
+                    "search",
+                    f"第 {round_num} 轮搜索：{len(queries_this_round)} 个查询...",
+                    round_num,
                 )
 
                 # 并行搜索
@@ -229,8 +238,10 @@ class DeepResearchAgent:
                 state.results.extend(new_results)
 
                 yield self._evt(
-                    "progress", "search",
-                    f"第 {round_num} 轮完成，共获得 {len(new_results)} 条新证据", round_num
+                    "progress",
+                    "search",
+                    f"第 {round_num} 轮完成，共获得 {len(new_results)} 条新证据",
+                    round_num,
                 )
 
                 # 最后一轮无需检测 gap
@@ -243,16 +254,22 @@ class DeepResearchAgent:
                 state.gaps = gap_result.get("gaps", [])
 
                 if gap_result.get("sufficient", False) or not state.gaps:
-                    yield self._evt("progress", "gap", "证据已充分，跳过后续轮次", round_num)
+                    yield self._evt(
+                        "progress", "gap", "证据已充分，跳过后续轮次", round_num
+                    )
                     break
 
                 yield self._evt(
-                    "progress", "gap",
-                    f"发现 {len(state.gaps)} 个信息缺口，继续补充搜索", round_num
+                    "progress",
+                    "gap",
+                    f"发现 {len(state.gaps)} 个信息缺口，继续补充搜索",
+                    round_num,
                 )
 
             # ── 阶段 5：最终合成 ─────────────────────────────────────────
-            yield self._evt("progress", "synthesis", "正在合成调研报告...", state.current_round)
+            yield self._evt(
+                "progress", "synthesis", "正在合成调研报告...", state.current_round
+            )
             report = self._synthesize(query, state.results)
             state.final_report = report
 
@@ -338,7 +355,7 @@ class DeepResearchAgent:
             if raw and not str(raw).startswith("Search failed"):
                 return SearchResult(
                     query=query,
-                    content=str(raw)[:3000],   # 限制单条长度
+                    content=str(raw)[:3000],  # 限制单条长度
                     round_num=round_num,
                 )
         except Exception as e:
@@ -351,10 +368,10 @@ class DeepResearchAgent:
         """并行执行多个搜索查询。"""
         results: List[SearchResult] = []
         with ThreadPoolExecutor(max_workers=min(len(queries), 5)) as pool:
-            futures = {
-                pool.submit(self._search_one, q, round_num): q for q in queries
-            }
-            for fut in as_completed(futures, timeout=self.search_timeout * len(queries)):
+            futures = {pool.submit(self._search_one, q, round_num): q for q in queries}
+            for fut in as_completed(
+                futures, timeout=self.search_timeout * len(queries)
+            ):
                 try:
                     res = fut.result(timeout=self.search_timeout)
                     if res:
@@ -367,10 +384,7 @@ class DeepResearchAgent:
         """将所有搜索结果合并为 LLM 可消化的证据字符串。"""
         lines = []
         for i, r in enumerate(results, 1):
-            lines.append(
-                f"[证据{i}] 来源查询：{r.query}\n"
-                f"{r.content[:800]}\n"
-            )
+            lines.append(f"[证据{i}] 来源查询：{r.query}\n" f"{r.content[:800]}\n")
         return "\n".join(lines)
 
     def _detect_gaps(self, original_query: str, results: List[SearchResult]) -> Dict:
@@ -391,12 +405,13 @@ class DeepResearchAgent:
         evidence = self._build_evidence_summary(results)
         prompt = _SYNTHESIS_PROMPT.format(
             original_query=original_query,
-            evidence=evidence[:12000],   # Gemini 2.5 Flash 支持长上下文
+            evidence=evidence[:12000],  # Gemini 2.5 Flash 支持长上下文
         )
         raw = self._llm_call(prompt, temperature=0.4)
         # 最终报告有害内容检测
         try:
             from app.core.security.output_validator import OutputValidator
+
             _val = OutputValidator.validate(text=raw)
             if _val.is_blocked:
                 logger.warning("[DeepResearch] synthesis 输出被拦截: %s", _val.reasons)
@@ -410,6 +425,7 @@ class DeepResearchAgent:
 # 便捷工厂函数
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def create_deep_research_agent(
     session_id: str = "",
     max_rounds: int = 3,
@@ -421,11 +437,12 @@ def create_deep_research_agent(
     如依赖不可用则返回 None（降级处理）。
     """
     try:
-        from app.core.agent.factory import create_agent  # noqa: F401
-        from app.core.llm.gemini import GeminiProvider
-        from app.core.agent.tool_registry import ToolRegistry
-        from app.core.agent.plugins.search_plugin import SearchPlugin
         import os
+
+        from app.core.agent.factory import create_agent  # noqa: F401
+        from app.core.agent.plugins.search_plugin import SearchPlugin
+        from app.core.agent.tool_registry import ToolRegistry
+        from app.core.llm.gemini import GeminiProvider
 
         api_key = os.environ.get("GEMINI_API_KEY", "")
         llm = GeminiProvider(api_key=api_key)

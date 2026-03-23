@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 FileHub REST API — /api/files
 ==============================
@@ -995,6 +997,7 @@ def graph_data():
 
     # goal 关系
     from collections import defaultdict
+
     _goal_groups: dict = defaultdict(list)
     _hash_groups: dict = defaultdict(list)
     for e in entries:
@@ -1029,10 +1032,36 @@ def graph_data():
 
 
 _TEXT_EXTS = {
-    ".txt", ".md", ".py", ".js", ".ts", ".json", ".html", ".htm", ".css",
-    ".csv", ".yaml", ".yml", ".xml", ".sql", ".sh", ".bash", ".ps1",
-    ".java", ".cpp", ".c", ".h", ".go", ".rs", ".rb", ".php",
-    ".toml", ".ini", ".cfg", ".env", ".log",
+    ".txt",
+    ".md",
+    ".py",
+    ".js",
+    ".ts",
+    ".json",
+    ".html",
+    ".htm",
+    ".css",
+    ".csv",
+    ".yaml",
+    ".yml",
+    ".xml",
+    ".sql",
+    ".sh",
+    ".bash",
+    ".ps1",
+    ".java",
+    ".cpp",
+    ".c",
+    ".h",
+    ".go",
+    ".rs",
+    ".rb",
+    ".php",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".env",
+    ".log",
 }
 _MAX_READ_BYTES = 2 * 1024 * 1024  # 2 MB 上限，防止意外加载超大文件
 
@@ -1060,7 +1089,10 @@ def read_file_content():
     try:
         size = p.stat().st_size
         if size > _MAX_READ_BYTES:
-            return jsonify({"error": f"文件过大（{size // 1024} KB），请用外部程序打开"}), 413
+            return (
+                jsonify({"error": f"文件过大（{size // 1024} KB），请用外部程序打开"}),
+                413,
+            )
 
         content = p.read_text(encoding="utf-8", errors="replace")
         return jsonify({"content": content, "size": size, "encoding": "utf-8"})
@@ -1101,4 +1133,3 @@ def open_file_with_os():
     except Exception as exc:
         logger.warning(f"[FileHub] open_file_with_os 失败: {exc}")
         return jsonify({"error": f"打开失败: {exc}"}), 500
-

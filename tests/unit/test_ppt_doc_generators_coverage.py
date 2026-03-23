@@ -49,9 +49,7 @@ class TestPptGenerator:
     """Tests for web.ppt_generator.PPTGenerator"""
 
     def _make_gen(self, theme="business"):
-        with patch("web.ppt_generator.get_theme", return_value=None), patch(
-            "web.ppt_generator.ImageGenerator", create=True
-        ):
+        with patch("web.ppt_themes.get_theme", return_value=None):
             from web.ppt_generator import PPTGenerator
 
             return PPTGenerator(theme=theme)

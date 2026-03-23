@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 FileToolsPlugin — Agent 文件能力插件
 ======================================
@@ -1501,6 +1503,7 @@ class FileToolsPlugin(AgentPlugin):
         safe_content = content
         try:
             from app.core.security.pii_filter import PIIFilter
+
             _mask_result = PIIFilter.mask(content)
             if _mask_result.has_pii:
                 safe_content = _mask_result.masked_text
@@ -1535,9 +1538,11 @@ class FileToolsPlugin(AgentPlugin):
             # ── 输出验收：有害内容/泄露检测 + PII 还原 ───────────
             try:
                 from app.core.security.output_validator import OutputValidator
+
                 _val = OutputValidator.validate(text=text)
                 if _val.is_blocked:
                     import logging as _log
+
                     _log.getLogger(__name__).warning(
                         "[summarize_file] 输出被拦截: %s", _val.reasons
                     )
@@ -1631,7 +1636,7 @@ class FileToolsPlugin(AgentPlugin):
         paths = file_paths[:8]  # 最多 8 个文件
         top_k = min(max(1, int(top_k)), 5)
 
-        from app.core.file.file_registry import get_file_registry, _get_file_rag_service
+        from app.core.file.file_registry import _get_file_rag_service, get_file_registry
 
         reg = get_file_registry()
         rag = _get_file_rag_service()
@@ -1689,11 +1694,7 @@ class FileToolsPlugin(AgentPlugin):
 
             provider = GeminiProvider()
             resp = provider.generate_content(prompt)
-            answer = (
-                resp.get("content")
-                or resp.get("text")
-                or str(resp)
-            )
+            answer = resp.get("content") or resp.get("text") or str(resp)
         except Exception as exc:
             return f"LLM 调用失败（{exc}），以下为原始内容片段：\n\n{context[:800]}"
 

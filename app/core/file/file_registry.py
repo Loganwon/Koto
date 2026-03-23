@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 FileRegistry — Koto 统一文件元数据注册表
 ==========================================
@@ -101,6 +103,7 @@ def _index_content_to_rag(path: str, content: str) -> None:
             rag.index_text(content, source=path)
     except Exception as exc:
         logger.debug(f"[FileRegistry] RAG 索引写入失败 {path}: {exc}")
+
 
 # ── 文件分类表 ────────────────────────────────────────────────────────────────
 _EXT_CATEGORY: Dict[str, str] = {}
@@ -302,9 +305,10 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
 
         if ext == ".epub":
             try:
+                from html.parser import HTMLParser
+
                 import ebooklib
                 from ebooklib import epub
-                from html.parser import HTMLParser
 
                 class _StripTags(HTMLParser):
                     def __init__(self):
@@ -348,9 +352,27 @@ def _extract_text_full(path: str, max_chars: int = 200_000) -> str:
     try:
         # ── 纯文本类 ─────────────────────────────────────────────────────────
         if ext in {
-            ".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml",
-            ".html", ".htm", ".py", ".js", ".ts", ".sql", ".sh",
-            ".bat", ".ps1", ".cs", ".java", ".go", ".rs", ".css",
+            ".txt",
+            ".md",
+            ".csv",
+            ".json",
+            ".xml",
+            ".yaml",
+            ".yml",
+            ".html",
+            ".htm",
+            ".py",
+            ".js",
+            ".ts",
+            ".sql",
+            ".sh",
+            ".bat",
+            ".ps1",
+            ".cs",
+            ".java",
+            ".go",
+            ".rs",
+            ".css",
         }:
             for enc in ("utf-8", "gbk", "latin-1"):
                 try:
@@ -403,6 +425,7 @@ def _extract_text_full(path: str, max_chars: int = 200_000) -> str:
                 # fallback：仅段落
                 try:
                     from docx import Document
+
                     doc = Document(path)
                     return "\n".join(p.text for p in doc.paragraphs)[:max_chars]
                 except Exception:
@@ -768,7 +791,9 @@ class FileRegistry:
             try:
                 rag = _get_file_rag_service()
                 if rag is not None:
-                    rag_hits = rag.retrieve(query, k=min(limit, 10), score_threshold=0.3)
+                    rag_hits = rag.retrieve(
+                        query, k=min(limit, 10), score_threshold=0.3
+                    )
                     for hit in rag_hits:
                         hit_path = hit.get("source", "")
                         if not hit_path:

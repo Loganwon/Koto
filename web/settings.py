@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Settings Manager
 用户设置管理模块 - 支持自定义存储路径和应用配置
@@ -114,7 +116,11 @@ class SettingsManager:
         """合并设置，保留用户设置，添加新的默认项"""
         result = default.copy()
         for key, value in current.items():
-            if key in result and isinstance(value, dict) and isinstance(result[key], dict):
+            if (
+                key in result
+                and isinstance(value, dict)
+                and isinstance(result[key], dict)
+            ):
                 result[key] = self._merge_settings(result[key], value)
             else:
                 # 保留所有用户已保存的键值，包括不在默认设置中的新增项

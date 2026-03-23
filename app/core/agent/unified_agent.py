@@ -1,3 +1,6 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
+import json
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -74,7 +77,7 @@ class UnifiedAgent(Agent):
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
     ]
-    
+
     def __init__(
         self,
         llm_provider: LLMProvider,
@@ -240,7 +243,8 @@ class UnifiedAgent(Agent):
 
         # ── pre_message 钩子：用户脚本可在此转换输入 ─────────────────────────
         try:
-            from app.core.hooks.hook_manager import get_hook_manager, HookContext
+            from app.core.hooks.hook_manager import HookContext, get_hook_manager
+
             _hook_ctx = HookContext(
                 session_id=_session_id,
                 task_type=_task_type or "",
@@ -268,7 +272,7 @@ class UnifiedAgent(Agent):
 
         # ── Skill 注入：将启用的 Skills 注入到 system_instruction ──────────────
         _effective_instruction = self.base_system_instruction
-        _auto_skill_ids: list = []   # 提前初始化保证后续规划步骤可引用
+        _auto_skill_ids: list = []  # 提前初始化保证后续规划步骤可引用
         try:
             from app.core.skills.skill_manager import SkillManager
 
@@ -293,6 +297,7 @@ class UnifiedAgent(Agent):
             # ── TriggerBinding 补充匹配：将用户配置的意图绑定合并进来 ──────────
             try:
                 from app.core.skills.skill_trigger_binding import SkillBindingManager
+
                 _binding_mgr = SkillBindingManager()
                 _binding_mgr.ensure_recommended_bindings()
                 _binding_ids = _binding_mgr.match_intent(safe_input)
@@ -323,7 +328,8 @@ class UnifiedAgent(Agent):
                 runtime_skill = SkillManager.get_definition(_skill_id)
                 if runtime_skill and not runtime_enabled:
                     _is_domain = (
-                        getattr(runtime_skill.category, "value", runtime_skill.category) == "domain"
+                        getattr(runtime_skill.category, "value", runtime_skill.category)
+                        == "domain"
                     )
                     runtime_prompt = runtime_skill.render_prompt(
                         with_examples=_is_domain,
@@ -342,6 +348,7 @@ class UnifiedAgent(Agent):
         # ── ContextProvider 注入：用户 config/context/*.json 持久上下文 ────────
         try:
             from app.core.context.context_provider import get_context_provider
+
             _ctx_injection = get_context_provider().inject_into_prompt(
                 _effective_instruction,
                 task_type=_task_type,
@@ -359,6 +366,7 @@ class UnifiedAgent(Agent):
         if _skill_id:
             try:
                 from app.core.skills.skill_manager import SkillManager as _SM_et
+
                 _active_def = _SM_et.get_definition(_skill_id)
                 if _active_def and getattr(_active_def, "executor_tools", None):
                     _executor_tool_whitelist = set(_active_def.executor_tools)
@@ -371,7 +379,9 @@ class UnifiedAgent(Agent):
 
         # ── 注入本地时间（每次请求动态注入，确保模型感知当前时间）──────────────
         _now = datetime.now()
-        _weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][_now.weekday()]
+        _weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
+            _now.weekday()
+        ]
         _time_prefix = (
             f"当前本地时间：{_now.strftime('%Y年%m月%d日 %H:%M')}（{_weekday}）\n\n"
         )
@@ -380,11 +390,11 @@ class UnifiedAgent(Agent):
         # ── v4: 多轮对话上下文注入（来自 ConversationTracker / CWM paged-in）──
         if system_context and system_context.strip():
             _effective_instruction = (
-                _effective_instruction
-                + "\n\n"
-                + system_context.strip()
+                _effective_instruction + "\n\n" + system_context.strip()
             )
-            logger.debug("[UnifiedAgent] 注入对话上下文 (%d chars)", len(system_context))
+            logger.debug(
+                "[UnifiedAgent] 注入对话上下文 (%d chars)", len(system_context)
+            )
 
         # ── 0. 规划反馈：立即向用户报告初始化状态 ────────────────────────────────
         try:
@@ -394,6 +404,7 @@ class UnifiedAgent(Agent):
             if _auto_skill_ids:
                 try:
                     from app.core.skills.skill_manager import SkillManager as _SM_p
+
                     _SM_p._ensure_init()
                     for _sid in _auto_skill_ids:
                         _entry = _SM_p._registry.get(_sid, {})
@@ -402,7 +413,9 @@ class UnifiedAgent(Agent):
                         _skill_display.append(f"{_icon}{_name}" if _icon else _name)
                 except Exception:
                     _skill_display = list(_auto_skill_ids)
-            _skill_part = ("，技能: " + " · ".join(_skill_display)) if _skill_display else ""
+            _skill_part = (
+                ("，技能: " + " · ".join(_skill_display)) if _skill_display else ""
+            )
             _tool_part = (f"，{_tool_count} 个工具可用") if _tool_count else ""
             _planning_msg = "正在分析请求" + _skill_part + _tool_part
             _pub("THOUGHT", _planning_msg)
@@ -420,8 +433,12 @@ class UnifiedAgent(Agent):
                 tools_def = all_tools_def
             # v3.1: executor_tools 白名单过滤（Skill 显式声明时生效）
             if _executor_tool_whitelist and tools_def:
-                filtered = [t for t in tools_def if t.get("name") in _executor_tool_whitelist]
-                if filtered:  # 非空才应用，防止白名单与 ToolRouter 结果完全不重叠时工具断供
+                filtered = [
+                    t for t in tools_def if t.get("name") in _executor_tool_whitelist
+                ]
+                if (
+                    filtered
+                ):  # 非空才应用，防止白名单与 ToolRouter 结果完全不重叠时工具断供
                     tools_def = filtered
                     logger.debug(
                         f"[UnifiedAgent] 工具白名单过滤后: {[t.get('name') for t in tools_def]}"
@@ -433,15 +450,20 @@ class UnifiedAgent(Agent):
             if _skill_id:
                 try:
                     from app.core.skills.skill_manager import SkillManager as _SM
+
                     _sk_def = _SM.get_definition(_skill_id)
                     if _sk_def and _sk_def.executor_tools:
                         _allowed = set(_sk_def.executor_tools)
-                        _et_filtered = [t for t in tools_def if t.get("name") in _allowed]
+                        _et_filtered = [
+                            t for t in tools_def if t.get("name") in _allowed
+                        ]
                         if _et_filtered:
                             tools_def = _et_filtered
                             logger.debug(
                                 "[UnifiedAgent] 🎯 Skill '%s' executor_tools 过滤: %d → %d 工具",
-                                _skill_id, len(all_tools_def), len(tools_def),
+                                _skill_id,
+                                len(all_tools_def),
+                                len(tools_def),
                             )
                 except Exception as _ste:
                     logger.debug("[UnifiedAgent] executor_tools 过滤跳过: %s", _ste)
@@ -450,6 +472,7 @@ class UnifiedAgent(Agent):
                 # 使用 ModelFallbackExecutor：首选 _active_model_id，失败时自动降级
                 try:
                     from app.core.llm.model_fallback import get_fallback_executor
+
                     _executor = get_fallback_executor()
                     response = _executor.generate_with_fallback(
                         provider=self.llm,
@@ -468,14 +491,13 @@ class UnifiedAgent(Agent):
                         tools=tools_def if tools_def else None,
                         stream=False,
                     )
-                
+
                 content_text = response.get("content", "")
                 tool_calls = response.get("tool_calls", [])
 
                 if content_text:
                     yield AgentStep(
-                        step_type=AgentStepType.THOUGHT, 
-                        content=content_text
+                        step_type=AgentStepType.THOUGHT, content=content_text
                     )
                     _pub("THOUGHT", content_text)
                     current_history.append({"role": "model", "content": content_text})
@@ -606,10 +628,11 @@ class UnifiedAgent(Agent):
                             from app.core.skills.skill_manager import (
                                 SkillManager as _SM_notify,
                             )
+
                             _SM_notify._ensure_init()
                             _skill_tags: list = []
                             for _stn in _native_skill_calls:
-                                _sid_notify = _stn[len("skill_"):]
+                                _sid_notify = _stn[len("skill_") :]
                                 _entry = _SM_notify._registry.get(_sid_notify, {})
                                 _icon = _entry.get("icon", "")
                                 _name = _entry.get("name", _sid_notify)
@@ -630,13 +653,19 @@ class UnifiedAgent(Agent):
 
                     # ── post_response 钩子：用户脚本可在此处理/转换最终回复 ──
                     try:
-                        if _hook_mgr and _hook_mgr.has_hooks("post_response") and _hook_ctx:
+                        if (
+                            _hook_mgr
+                            and _hook_mgr.has_hooks("post_response")
+                            and _hook_ctx
+                        ):
                             _hook_ctx.active_skills = _auto_skill_ids or []
                             final_answer = _hook_mgr.fire_post_response(
                                 final_answer or "", _hook_ctx
                             )
                     except Exception as _hk2_err:
-                        logger.debug(f"[UnifiedAgent] post_response 钩子跳过: {_hk2_err}")
+                        logger.debug(
+                            f"[UnifiedAgent] post_response 钩子跳过: {_hk2_err}"
+                        )
 
                     yield AgentStep(
                         step_type=AgentStepType.ANSWER,
@@ -718,8 +747,11 @@ class UnifiedAgent(Agent):
                         and tool_name not in _native_skill_calls
                     ):
                         try:
-                            from app.core.skills.skill_manager import SkillManager as _SM_tr
-                            _sid_tr = tool_name[len("skill_"):]
+                            from app.core.skills.skill_manager import (
+                                SkillManager as _SM_tr,
+                            )
+
+                            _sid_tr = tool_name[len("skill_") :]
                             _entry_tr = _SM_tr._registry.get(_sid_tr, {})
                             _user_enabled = bool(_entry_tr.get("enabled", False))
                         except Exception:
@@ -733,15 +765,17 @@ class UnifiedAgent(Agent):
                     yield AgentStep(
                         step_type=AgentStepType.ACTION,
                         content=f"Calling tool: {tool_name}",
-                        action=action_obj
+                        action=action_obj,
                     )
-                    _pub("ACTION", f"Calling tool: {tool_name}",
-                         tool_name=tool_name, tool_args=tool_args)
-                    current_history.append({
-                        "role": "model",
-                        "content": "",
-                        "tool_calls": [tool_call]
-                    })
+                    _pub(
+                        "ACTION",
+                        f"Calling tool: {tool_name}",
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                    )
+                    current_history.append(
+                        {"role": "model", "content": "", "tool_calls": [tool_call]}
+                    )
 
                 # 2. 并行执行所有工具（多工具时可大幅减少等待时间）
                 def _exec_one(tc):
@@ -770,31 +804,35 @@ class UnifiedAgent(Agent):
                         yield AgentStep(
                             step_type=AgentStepType.OBSERVATION,
                             content=observation,
-                            observation=observation
+                            observation=observation,
                         )
-                        _pub("OBSERVATION", observation[:500],
-                             tool_name=_n, observation=observation[:500])
-                        current_history.append({
-                            "role": "function",
-                            "name": _n,
-                            "content": observation
-                        })
+                        _pub(
+                            "OBSERVATION",
+                            observation[:500],
+                            tool_name=_n,
+                            observation=observation[:500],
+                        )
+                        current_history.append(
+                            {"role": "function", "name": _n, "content": observation}
+                        )
                 else:
                     # 单工具直接执行
                     _n, observation = _exec_one(tool_calls[0])
                     yield AgentStep(
                         step_type=AgentStepType.OBSERVATION,
                         content=observation,
-                        observation=observation
+                        observation=observation,
                     )
-                    _pub("OBSERVATION", observation[:500],
-                         tool_name=_n, observation=observation[:500])
-                    current_history.append({
-                        "role": "function",
-                        "name": _n,
-                        "content": observation
-                    })
-            
+                    _pub(
+                        "OBSERVATION",
+                        observation[:500],
+                        tool_name=_n,
+                        observation=observation[:500],
+                    )
+                    current_history.append(
+                        {"role": "function", "name": _n, "content": observation}
+                    )
+
             except Exception as e:
                 err_msg = str(e)
                 logger.error(f"Agent loop error: {e}", exc_info=True)
@@ -803,8 +841,17 @@ class UnifiedAgent(Agent):
                 # 对于 LLM 调用错误（配额、模型不可用等），尝试升级到更强模型
                 _is_llm_error = any(
                     kw in err_msg.lower()
-                    for kw in ("quota", "rate_limit", "overloaded", "not found",
-                               "unavailable", "model", "429", "503", "404")
+                    for kw in (
+                        "quota",
+                        "rate_limit",
+                        "overloaded",
+                        "not found",
+                        "unavailable",
+                        "model",
+                        "429",
+                        "503",
+                        "404",
+                    )
                 )
                 if _is_llm_error and _escalation_count < self.MAX_ESCALATION_STEPS:
                     # 从升级链中找下一个比当前更强的模型
@@ -812,7 +859,7 @@ class UnifiedAgent(Agent):
                         _current_idx = self._ESCALATION_CHAIN.index(_active_model_id)
                     except ValueError:
                         _current_idx = -1
-                    _next_candidates = self._ESCALATION_CHAIN[_current_idx + 1:]
+                    _next_candidates = self._ESCALATION_CHAIN[_current_idx + 1 :]
                     _next_model = _next_candidates[0] if _next_candidates else None
                     if _next_model and _next_model != _active_model_id:
                         _escalation_count += 1

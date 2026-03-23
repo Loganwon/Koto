@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 文件管理服务 - 提供完整的本地文件操作能力
 包含: 读写、编辑、复制/移动/删除、目录管理、元数据查询、智能文件查找

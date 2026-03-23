@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 # app/core/learning/__init__.py
 from app.core.learning.distill_manager import DistillManager, JobStatus, TrainingJob
 from app.core.learning.lora_pipeline import (

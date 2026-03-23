@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 图像管理器 - 统一处理图像搜索与生成
 为 PPT 制作提供 "生辰大哥" (AI生成) 或 "网上找图" (Web Search) 的能力

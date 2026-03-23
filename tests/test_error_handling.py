@@ -23,10 +23,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _inject_stub(module_path: str, stub_attrs: dict):
     """Insert a fake module into sys.modules so guarded `import` statements
@@ -56,12 +56,14 @@ def _inject_stub(module_path: str, stub_attrs: dict):
 # 1.  BackgroundAgent
 # ===========================================================================
 
+
 class TestBackgroundAgentErrorHandling:
     """Tests for background_agent.py exception paths."""
 
     @pytest.fixture(autouse=True)
     def _import_module(self):
         from app.core.agent.background_agent import BackgroundAgent
+
         self.BackgroundAgent = BackgroundAgent
 
     # ------------------------------------------------------------------
@@ -69,6 +71,7 @@ class TestBackgroundAgentErrorHandling:
     # ------------------------------------------------------------------
     def test_emit_progressbus_failure_does_not_raise(self, caplog):
         import logging
+
         agent = self.BackgroundAgent.__new__(self.BackgroundAgent)
         agent.session_id = "sess-test"
 
@@ -91,6 +94,7 @@ class TestBackgroundAgentErrorHandling:
     # ------------------------------------------------------------------
     def test_extract_json_malformed_returns_none(self, caplog):
         import logging
+
         agent = self.BackgroundAgent.__new__(self.BackgroundAgent)
 
         with caplog.at_level(logging.DEBUG, logger="app.core.agent.background_agent"):
@@ -98,10 +102,13 @@ class TestBackgroundAgentErrorHandling:
 
         assert result is None
         # Log should mention json parse failure
-        assert any(
-            "json" in r.message.lower() or "none" in r.message.lower()
-            for r in caplog.records
-        ) or True  # presence of log is optional for DEBUG-level tests
+        assert (
+            any(
+                "json" in r.message.lower() or "none" in r.message.lower()
+                for r in caplog.records
+            )
+            or True
+        )  # presence of log is optional for DEBUG-level tests
 
     def test_extract_json_valid_returns_dict(self):
         agent = self.BackgroundAgent.__new__(self.BackgroundAgent)
@@ -130,14 +137,16 @@ class TestBackgroundAgentErrorHandling:
         with patch.dict(
             "sys.modules",
             {
-                "app.core.tasks.progress_bus": None,           # None → ImportError
+                "app.core.tasks.progress_bus": None,  # None → ImportError
                 "app.core.tasks.task_ledger": None,
                 "app.core.llm.gemini": None,
                 "app.core.agent.tool_registry": None,
                 "app.core.agent.factory": None,
             },
         ):
-            with caplog.at_level(logging.WARNING, logger="app.core.agent.background_agent"):
+            with caplog.at_level(
+                logging.WARNING, logger="app.core.agent.background_agent"
+            ):
                 # _init_lazy should complete without raising
                 try:
                     agent._init_lazy()
@@ -165,12 +174,14 @@ class TestBackgroundAgentErrorHandling:
 # 2.  DeepResearchAgent
 # ===========================================================================
 
+
 class TestDeepResearchAgentErrorHandling:
     """Tests for deep_research.py exception paths."""
 
     @pytest.fixture(autouse=True)
     def _import_module(self):
         from app.core.agent.deep_research import DeepResearchAgent
+
         self.DeepResearchAgent = DeepResearchAgent
 
     # ------------------------------------------------------------------
@@ -182,11 +193,13 @@ class TestDeepResearchAgentErrorHandling:
         mock_llm = MagicMock()
         mock_llm.generate_text = MagicMock(return_value="ok")
 
-        with patch.dict(
-            "sys.modules", {"app.core.tasks.progress_bus": None}
-        ):
-            with caplog.at_level(logging.WARNING, logger="app.core.agent.deep_research"):
-                agent = self.DeepResearchAgent(llm_provider=mock_llm, session_id="sess-dr")
+        with patch.dict("sys.modules", {"app.core.tasks.progress_bus": None}):
+            with caplog.at_level(
+                logging.WARNING, logger="app.core.agent.deep_research"
+            ):
+                agent = self.DeepResearchAgent(
+                    llm_provider=mock_llm, session_id="sess-dr"
+                )
 
         assert agent._progress_bus is None
         assert agent._ProgressEvent is None
@@ -239,12 +252,14 @@ class TestDeepResearchAgentErrorHandling:
 # 3.  WorkflowRuntime
 # ===========================================================================
 
+
 class TestWorkflowRuntimeErrorHandling:
     """Tests for workflow_runtime.py exception paths."""
 
     @pytest.fixture(autouse=True)
     def _import_classes(self):
         from app.core.workflow.workflow_runtime import WorkflowRuntime
+
         self.WorkflowRuntime = WorkflowRuntime
 
     # ------------------------------------------------------------------
@@ -273,7 +288,9 @@ class TestWorkflowRuntimeErrorHandling:
         # _run_single_step returns something so the loop completes
         runtime._run_single_step = MagicMock(return_value="step-ok")
 
-        with caplog.at_level(logging.WARNING, logger="app.core.workflow.workflow_runtime"):
+        with caplog.at_level(
+            logging.WARNING, logger="app.core.workflow.workflow_runtime"
+        ):
             result = runtime._execute_steps("wf-id", "hello", {}, None)
 
         assert result["error"] is None
@@ -294,9 +311,7 @@ class TestWorkflowRuntimeErrorHandling:
         runtime._get_manager = MagicMock(return_value=None)  # no save needed
         runtime._run_single_step = MagicMock(return_value="hello world")
 
-        with patch.dict(
-            "sys.modules", {"app.core.security.output_validator": None}
-        ):
+        with patch.dict("sys.modules", {"app.core.security.output_validator": None}):
             result = runtime._execute_steps("wf-id", "anything", {}, None)
 
         # output must not be empty
@@ -308,12 +323,14 @@ class TestWorkflowRuntimeErrorHandling:
 # 4.  JobContext (inside job_runner.py)
 # ===========================================================================
 
+
 class TestJobContextErrorHandling:
     """Tests for the JobContext.step() exception paths in job_runner.py."""
 
     @pytest.fixture(autouse=True)
     def _import_classes(self):
         from app.core.jobs.job_runner import JobContext
+
         self.JobContext = JobContext
 
     def _make_context(self, ledger=None, bus=None):

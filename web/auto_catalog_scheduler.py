@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 自动归纳调度器
 每日定时执行微信文件归纳，备份验证，存入归纳库

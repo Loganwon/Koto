@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Task Management API Routes
 =================================
@@ -193,6 +195,7 @@ def interrupt_task(task_id: str):
         )
     except Exception as _pe:
         import logging as _logging
+
         _logging.getLogger(__name__).debug(
             "[TaskAPI] 进度事件发布失败 (task_id=%s): %s", task_id, _pe
         )
@@ -236,6 +239,7 @@ def resume_task(task_id: str):
             )
         except Exception as _pe:
             import logging as _logging
+
             _logging.getLogger(__name__).debug(
                 "[TaskAPI] resume 事件发布失败 (task_id=%s): %s", task_id, _pe
             )

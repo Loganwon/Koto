@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Morning Brief Service — 晨间简报
 ======================================
@@ -101,7 +103,9 @@ class MorningBriefService:
             except Exception as exc:
                 logger.warning(f"[MorningBrief] 调度检查异常: {exc}")
             # 精确到分钟，每 30s 检查一次（避免整分恰好错过）
-            import time; time.sleep(30)
+            import time
+
+            time.sleep(30)
 
     # ── 生成 ──────────────────────────────────────────────────────────────────
 
@@ -157,6 +161,7 @@ class MorningBriefService:
         if as_text:
             # 去掉 Markdown 符号给纯文本场景
             import re
+
             brief = re.sub(r"[#*`_]", "", brief)
         return brief
 
@@ -169,16 +174,20 @@ class MorningBriefService:
             try:
                 from app.core.agent.proactive_agent import ProactiveAgent
 
-                ProactiveAgent.get()._enqueue({
-                    "id": f"brief_{datetime.now().strftime('%Y%m%d')}",
-                    "type": "session_summary",
-                    "content": brief_text,
-                    "priority": "high",
-                    "triggered_by": "morning_brief",
-                    "created_at": datetime.now().isoformat(timespec="seconds"),
-                    "expires_at": (datetime.now() + timedelta(hours=12)).isoformat(timespec="seconds"),
-                    "dismissed": False,
-                })
+                ProactiveAgent.get()._enqueue(
+                    {
+                        "id": f"brief_{datetime.now().strftime('%Y%m%d')}",
+                        "type": "session_summary",
+                        "content": brief_text,
+                        "priority": "high",
+                        "triggered_by": "morning_brief",
+                        "created_at": datetime.now().isoformat(timespec="seconds"),
+                        "expires_at": (datetime.now() + timedelta(hours=12)).isoformat(
+                            timespec="seconds"
+                        ),
+                        "dismissed": False,
+                    }
+                )
                 logger.info("[MorningBrief] ✅ 简报已推入 ProactiveAgent 队列")
             except Exception as exc:
                 logger.warning(f"[MorningBrief] ProactiveAgent 推送失败: {exc}")
@@ -189,7 +198,9 @@ class MorningBriefService:
 
                 bot = get_telegram_bot()
                 if bot and bot.is_running:
-                    chat_id_str = os.environ.get("TELEGRAM_MORNING_BRIEF_CHAT_ID", "").strip()
+                    chat_id_str = os.environ.get(
+                        "TELEGRAM_MORNING_BRIEF_CHAT_ID", ""
+                    ).strip()
                     if chat_id_str:
                         tg_text = self.generate_brief(as_text=True)
                         bot.send_text(int(chat_id_str), tg_text)
@@ -211,7 +222,8 @@ class MorningBriefService:
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             today_end = today_start + timedelta(days=1)
             events = [
-                e for e in cm.list_events(limit=50)
+                e
+                for e in cm.list_events(limit=50)
                 if _in_range(e.get("start", ""), today_start, today_end)
             ]
             if not events:
@@ -234,21 +246,24 @@ class MorningBriefService:
             from app.core.goal.goal_manager import GoalStatus, get_goal_manager
 
             gm = get_goal_manager()
-            goals = (
-                gm.list_goals(status=GoalStatus.ACTIVE, limit=10)
-                + gm.list_goals(status=GoalStatus.WAITING_USER, limit=10)
+            goals = gm.list_goals(status=GoalStatus.ACTIVE, limit=10) + gm.list_goals(
+                status=GoalStatus.WAITING_USER, limit=10
             )
             if not goals:
                 return ""
             lines = ["## 🎯 活跃目标\n"]
             for g in goals[:5]:
-                status_icon = {"active": "🟢", "waiting_user": "🟡"}.get(str(g.status), "⚪")
+                status_icon = {"active": "🟢", "waiting_user": "🟡"}.get(
+                    str(g.status), "⚪"
+                )
                 lines.append(f"- {status_icon} **{g.title}**")
                 if getattr(g, "deadline", None):
                     deadline = g.deadline[:10]
                     # 计算剩余天数
                     try:
-                        days_left = (datetime.fromisoformat(g.deadline) - datetime.now()).days
+                        days_left = (
+                            datetime.fromisoformat(g.deadline) - datetime.now()
+                        ).days
                         if days_left == 0:
                             lines.append(f"  ⚠️ 今天截止！")
                         elif days_left < 0:
@@ -270,7 +285,8 @@ class MorningBriefService:
             rm = get_reminder_manager()
             today_end = now.replace(hour=23, minute=59, second=59)
             pending = [
-                r for r in rm.reminders.values()
+                r
+                for r in rm.reminders.values()
                 if r.get("status") == "scheduled"
                 and _before_or_on(r.get("time", ""), today_end)
             ]
@@ -288,7 +304,9 @@ class MorningBriefService:
     def _section_memory(self) -> str:
         """昨日/近期记忆洞察。"""
         try:
-            mem_path = Path(__file__).parent.parent.parent.parent / "config" / "memory.json"
+            mem_path = (
+                Path(__file__).parent.parent.parent.parent / "config" / "memory.json"
+            )
             if not mem_path.exists():
                 return ""
             with open(mem_path, "r", encoding="utf-8") as f:
@@ -357,7 +375,9 @@ class MorningBriefService:
             from app.core.agent.factory import create_agent
 
             agent = create_agent()
-            weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()]
+            weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
+                now.weekday()
+            ]
             prompt = (
                 f"今天是{weekday}，请用一句话（不超过30字）给用户一个友善的激励或建议。"
                 "风格简洁温暖，不要重复「加油」或「努力」之类的陈词。直接输出这句话，不加任何前缀。"
@@ -365,7 +385,9 @@ class MorningBriefService:
             result = agent.llm_provider.generate_content(
                 prompt, model=agent.model_id, max_tokens=60, temperature=0.9
             )
-            text = result.get("content", "") if isinstance(result, dict) else str(result)
+            text = (
+                result.get("content", "") if isinstance(result, dict) else str(result)
+            )
             return text.strip()[:60]
         except Exception as exc:
             logger.debug(f"[MorningBrief] LLM 激励生成跳过: {exc}")
@@ -381,6 +403,7 @@ class MorningBriefService:
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
 
 def _time_greeting(now: datetime) -> str:
     h = now.hour

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto ContextProvider — 用户自定义上下文注入系统
 ================================================
@@ -57,24 +59,34 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 _CONTEXT_DIR = Path(__file__).parent.parent.parent.parent / "config" / "context"
-_USER_PROFILE_PATH = Path(__file__).parent.parent.parent.parent / "config" / "user_profile.json"
+_USER_PROFILE_PATH = (
+    Path(__file__).parent.parent.parent.parent / "config" / "user_profile.json"
+)
 
 
 class ContextBlock:
     """单个上下文块的内存表示。"""
 
-    __slots__ = ("id", "name", "content", "enabled", "priority", "task_types",
-                 "inject_mode", "template_vars")
+    __slots__ = (
+        "id",
+        "name",
+        "content",
+        "enabled",
+        "priority",
+        "task_types",
+        "inject_mode",
+        "template_vars",
+    )
 
     def __init__(self, data: Dict[str, Any]) -> None:
-        self.id:            str       = data.get("id", "")
-        self.name:          str       = data.get("name", self.id)
-        self.content:       str       = data.get("content", "")
-        self.enabled:       bool      = data.get("enabled", True)
-        self.priority:      int       = int(data.get("priority", 50))
-        self.task_types:    List[str] = [t.upper() for t in data.get("task_types", [])]
-        self.inject_mode:   str       = data.get("inject_mode", "system")  # system | header
-        self.template_vars: Dict      = data.get("template_vars", {})
+        self.id: str = data.get("id", "")
+        self.name: str = data.get("name", self.id)
+        self.content: str = data.get("content", "")
+        self.enabled: bool = data.get("enabled", True)
+        self.priority: int = int(data.get("priority", 50))
+        self.task_types: List[str] = [t.upper() for t in data.get("task_types", [])]
+        self.inject_mode: str = data.get("inject_mode", "system")  # system | header
+        self.template_vars: Dict = data.get("template_vars", {})
 
     def matches(self, task_type: Optional[str]) -> bool:
         if not self.enabled:
@@ -128,7 +140,9 @@ class ContextProvider:
     def _load_user_profile(self) -> None:
         try:
             if _USER_PROFILE_PATH.exists():
-                self._user_profile = json.loads(_USER_PROFILE_PATH.read_text(encoding="utf-8"))
+                self._user_profile = json.loads(
+                    _USER_PROFILE_PATH.read_text(encoding="utf-8")
+                )
         except Exception as e:
             logger.debug(f"[ContextProvider] 加载 user_profile 失败: {e}")
 
@@ -149,7 +163,9 @@ class ContextProvider:
                 block = ContextBlock(data)
                 self._blocks.append(block)
                 loaded += 1
-                logger.debug(f"[ContextProvider] 加载上下文块: {block.id} (priority {block.priority})")
+                logger.debug(
+                    f"[ContextProvider] 加载上下文块: {block.id} (priority {block.priority})"
+                )
             except Exception as e:
                 logger.warning(f"[ContextProvider] 加载 {json_file.name} 失败: {e}")
 
@@ -246,13 +262,13 @@ class ContextProvider:
         """列出所有上下文块（用于 API/UI 展示）。"""
         return [
             {
-                "id":          b.id,
-                "name":        b.name,
-                "enabled":     b.enabled,
-                "priority":    b.priority,
-                "task_types":  b.task_types,
+                "id": b.id,
+                "name": b.name,
+                "enabled": b.enabled,
+                "priority": b.priority,
+                "task_types": b.task_types,
                 "inject_mode": b.inject_mode,
-                "preview":     b.content[:120] + ("…" if len(b.content) > 120 else ""),
+                "preview": b.content[:120] + ("…" if len(b.content) > 120 else ""),
             }
             for b in self._blocks
         ]

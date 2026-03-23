@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 本地知识库系统 - 向量化语义搜索 + 全文检索
 支持：PDF、Word、Markdown、TXT 等格式

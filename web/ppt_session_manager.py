@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 PPT 编辑数据管理 - 支持保存和恢复 PPT 生成数据
 用于 P1 阶段的"生成后编辑"功能

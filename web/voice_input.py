@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 轻量级语音输入模块 - 适配 Koto 打包环境
 支持多种降级方案，确保在任何环境下都能提供反馈

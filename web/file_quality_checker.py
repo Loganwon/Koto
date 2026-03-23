@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 File Quality Checker — 文件质量自检系统
 对 Koto 生成的文件（PPT/Word/Excel）进行质量评估和内容清洗。

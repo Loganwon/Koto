@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 文档关键字段提取器
 使用 Ollama 本地模型从文档内容中提取结构化字段：

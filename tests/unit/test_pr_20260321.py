@@ -11,6 +11,7 @@ Covers new modules:
   - app.core.tools.user_tool_loader   (koto_tool, get_registered_tools)
   - app.api.telegram_bot_routes    (Blueprint REST API)
 """
+
 import json
 import os
 import sys
@@ -20,10 +21,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════════
+
 
 def _stub_module(name: str) -> MagicMock:
     """Register a MagicMock as a sys.modules stub (once)."""
@@ -36,18 +37,26 @@ def _stub_module(name: str) -> MagicMock:
 # 1. LLM Provider Factory
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestProviderFactoryListProviders(unittest.TestCase):
     """list_available_providers reflects env variables."""
 
     def setUp(self):
         # Clear any residual API-key env vars
-        for k in ("GEMINI_API_KEY", "API_KEY", "GOOGLE_API_KEY",
-                  "OPENAI_API_KEY", "OPENAI_KEY",
-                  "ANTHROPIC_API_KEY", "CLAUDE_API_KEY"):
+        for k in (
+            "GEMINI_API_KEY",
+            "API_KEY",
+            "GOOGLE_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENAI_KEY",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_API_KEY",
+        ):
             os.environ.pop(k, None)
 
     def test_empty_when_no_keys(self):
         from app.core.llm.provider_factory import list_available_providers
+
         providers = list_available_providers()
         # ollama may appear if port 11434 is open — filter it out
         cloud = [p for p in providers if p != "ollama"]
@@ -55,24 +64,28 @@ class TestProviderFactoryListProviders(unittest.TestCase):
 
     def test_gemini_detected_via_api_key(self):
         from app.core.llm.provider_factory import list_available_providers
+
         with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
             providers = list_available_providers()
         self.assertIn("gemini", providers)
 
     def test_openai_detected_via_openai_key(self):
         from app.core.llm.provider_factory import list_available_providers
+
         with patch.dict(os.environ, {"OPENAI_KEY": "test-key"}):
             providers = list_available_providers()
         self.assertIn("openai", providers)
 
     def test_anthropic_detected_via_claude_key(self):
         from app.core.llm.provider_factory import list_available_providers
+
         with patch.dict(os.environ, {"CLAUDE_API_KEY": "test-key"}):
             providers = list_available_providers()
         self.assertIn("anthropic", providers)
 
     def test_returns_list_type(self):
         from app.core.llm.provider_factory import list_available_providers
+
         self.assertIsInstance(list_available_providers(), list)
 
 
@@ -81,61 +94,83 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
 
     def test_explicit_provider_gemini(self):
         from app.core.llm.provider_factory import get_llm_provider
+
         mock_inst = MagicMock()
-        with patch.dict("app.core.llm.provider_factory._LOADERS",
-                        {"gemini": lambda: mock_inst}):
+        with patch.dict(
+            "app.core.llm.provider_factory._LOADERS", {"gemini": lambda: mock_inst}
+        ):
             result = get_llm_provider(provider="gemini")
         self.assertIs(result, mock_inst)
 
     def test_explicit_provider_openai(self):
         from app.core.llm.provider_factory import get_llm_provider
+
         mock_inst = MagicMock()
-        with patch.dict("app.core.llm.provider_factory._LOADERS",
-                        {"openai": lambda: mock_inst}):
+        with patch.dict(
+            "app.core.llm.provider_factory._LOADERS", {"openai": lambda: mock_inst}
+        ):
             result = get_llm_provider(provider="openai")
         self.assertIs(result, mock_inst)
 
     def test_model_prefix_gpt_selects_openai(self):
         from app.core.llm.provider_factory import get_llm_provider
+
         mock_inst = MagicMock()
-        with patch.dict("app.core.llm.provider_factory._LOADERS",
-                        {"openai": lambda: mock_inst}):
+        with patch.dict(
+            "app.core.llm.provider_factory._LOADERS", {"openai": lambda: mock_inst}
+        ):
             result = get_llm_provider(model="gpt-4o")
         self.assertIs(result, mock_inst)
 
     def test_model_prefix_claude_selects_anthropic(self):
         from app.core.llm.provider_factory import get_llm_provider
+
         mock_inst = MagicMock()
-        with patch.dict("app.core.llm.provider_factory._LOADERS",
-                        {"anthropic": lambda: mock_inst}):
+        with patch.dict(
+            "app.core.llm.provider_factory._LOADERS", {"anthropic": lambda: mock_inst}
+        ):
             result = get_llm_provider(model="claude-3-sonnet-20240229")
         self.assertIs(result, mock_inst)
 
     def test_model_prefix_gemini_selects_gemini(self):
         from app.core.llm.provider_factory import get_llm_provider
+
         mock_inst = MagicMock()
-        with patch.dict("app.core.llm.provider_factory._LOADERS",
-                        {"gemini": lambda: mock_inst}):
+        with patch.dict(
+            "app.core.llm.provider_factory._LOADERS", {"gemini": lambda: mock_inst}
+        ):
             result = get_llm_provider(model="gemini-3-flash-preview")
         self.assertIs(result, mock_inst)
 
     def test_model_prefix_llama_selects_ollama(self):
         from app.core.llm.provider_factory import get_llm_provider
+
         mock_inst = MagicMock()
-        with patch.dict("app.core.llm.provider_factory._LOADERS",
-                        {"ollama": lambda: mock_inst}):
+        with patch.dict(
+            "app.core.llm.provider_factory._LOADERS", {"ollama": lambda: mock_inst}
+        ):
             result = get_llm_provider(model="llama3.1")
         self.assertIs(result, mock_inst)
 
     def test_unknown_provider_falls_back_to_autodetect(self):
         """Unknown provider name logs warning and falls through to auto-detect."""
         from app.core.llm.provider_factory import get_llm_provider
+
         mock_inst = MagicMock()
-        for k in ("GEMINI_API_KEY", "API_KEY", "GOOGLE_API_KEY",
-                  "OPENAI_API_KEY", "OPENAI_KEY", "ANTHROPIC_API_KEY", "CLAUDE_API_KEY"):
+        for k in (
+            "GEMINI_API_KEY",
+            "API_KEY",
+            "GOOGLE_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENAI_KEY",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_API_KEY",
+        ):
             os.environ.pop(k, None)
         # The fallback (no keys) calls _load_ollama() directly, not via _LOADERS
-        with patch("app.core.llm.provider_factory._load_ollama", return_value=mock_inst):
+        with patch(
+            "app.core.llm.provider_factory._load_ollama", return_value=mock_inst
+        ):
             result = get_llm_provider(provider="nonexistent_provider")
         self.assertIs(result, mock_inst)
 
@@ -144,9 +179,11 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
 # 2. Hook Manager
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestHookContext(unittest.TestCase):
     def test_default_fields(self):
         from app.core.hooks.hook_manager import HookContext
+
         ctx = HookContext()
         self.assertEqual(ctx.session_id, "")
         self.assertEqual(ctx.task_type, "")
@@ -155,8 +192,13 @@ class TestHookContext(unittest.TestCase):
 
     def test_custom_fields(self):
         from app.core.hooks.hook_manager import HookContext
-        ctx = HookContext(session_id="s1", task_type="CHAT", skill_id="sk1",
-                          active_skills=["divination"])
+
+        ctx = HookContext(
+            session_id="s1",
+            task_type="CHAT",
+            skill_id="sk1",
+            active_skills=["divination"],
+        )
         self.assertEqual(ctx.session_id, "s1")
         self.assertIn("divination", ctx.active_skills)
 
@@ -167,6 +209,7 @@ class TestHookManagerNoHooks(unittest.TestCase):
     def setUp(self):
         # Reload with a temp empty directory
         from app.core.hooks import hook_manager as hm
+
         self._orig_dir = hm._HOOKS_DIR
         self._tmpdir = tempfile.mkdtemp()
         hm._HOOKS_DIR = Path(self._tmpdir)
@@ -175,13 +218,16 @@ class TestHookManagerNoHooks(unittest.TestCase):
 
     def tearDown(self):
         from app.core.hooks import hook_manager as hm
+
         hm._HOOKS_DIR = self._orig_dir
         hm.HookManager._instance = None
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def _ctx(self):
         from app.core.hooks.hook_manager import HookContext
+
         return HookContext(session_id="test", task_type="CHAT")
 
     def test_fire_pre_message_passthrough(self):
@@ -215,6 +261,7 @@ class TestHookManagerWithHook(unittest.TestCase):
 
     def setUp(self):
         from app.core.hooks import hook_manager as hm
+
         self._orig_dir = hm._HOOKS_DIR
         self._tmpdir = tempfile.mkdtemp()
         hook_path = Path(self._tmpdir) / "test_hook.py"
@@ -224,7 +271,7 @@ class TestHookManagerWithHook(unittest.TestCase):
             "\n"
             "def post_response(text, ctx):\n"
             "    return '[HOOKED] ' + text\n",
-            encoding="utf-8"
+            encoding="utf-8",
         )
         hm._HOOKS_DIR = Path(self._tmpdir)
         hm.HookManager._instance = None
@@ -232,13 +279,16 @@ class TestHookManagerWithHook(unittest.TestCase):
 
     def tearDown(self):
         from app.core.hooks import hook_manager as hm
+
         hm._HOOKS_DIR = self._orig_dir
         hm.HookManager._instance = None
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def _ctx(self):
         from app.core.hooks.hook_manager import HookContext
+
         return HookContext()
 
     def test_pre_message_hook_transforms_text(self):
@@ -261,56 +311,68 @@ class TestHookManagerWithHook(unittest.TestCase):
 # 3. Skill Permissions
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestSkillPermissions(unittest.TestCase):
 
     def setUp(self):
         from app.core.skills import skill_permissions as sp
+
         self._tmpdir = tempfile.mkdtemp()
         self._orig_cache = sp.SkillPermissionManager._cache
         sp.SkillPermissionManager._cache = None
         # Point _config_dir to tmpdir
-        self._patcher = patch("app.core.skills.skill_permissions._config_dir",
-                              return_value=Path(self._tmpdir))
+        self._patcher = patch(
+            "app.core.skills.skill_permissions._config_dir",
+            return_value=Path(self._tmpdir),
+        )
         self._patcher.start()
 
     def tearDown(self):
         from app.core.skills import skill_permissions as sp
+
         sp.SkillPermissionManager._cache = self._orig_cache
         self._patcher.stop()
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_get_granted_empty_by_default(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         SkillPermissionManager._cache = None
         result = SkillPermissionManager.get_granted("nonexistent_skill")
         self.assertEqual(result, [])
 
     def test_grant_valid_permission(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         SkillPermissionManager._cache = None
         granted = SkillPermissionManager.grant("my_skill", ["storage"])
         self.assertIn("storage", granted)
 
     def test_grant_invalid_permission_ignored(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         SkillPermissionManager._cache = None
         granted = SkillPermissionManager.grant("my_skill", ["totally_fake_perm"])
         self.assertNotIn("totally_fake_perm", granted)
 
     def test_is_granted_after_grant(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         SkillPermissionManager._cache = None
         SkillPermissionManager.grant("skill_a", ["clipboard_read"])
         self.assertTrue(SkillPermissionManager.is_granted("skill_a", "clipboard_read"))
 
     def test_is_not_granted_before_grant(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         SkillPermissionManager._cache = None
         self.assertFalse(SkillPermissionManager.is_granted("skill_a", "autorun"))
 
     def test_get_missing_returns_ungrant(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         SkillPermissionManager._cache = None
         SkillPermissionManager.grant("skill_b", ["storage"])
         missing = SkillPermissionManager.get_missing("skill_b", ["storage", "autorun"])
@@ -319,6 +381,7 @@ class TestSkillPermissions(unittest.TestCase):
 
     def test_revoke_removes_permission(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         SkillPermissionManager._cache = None
         SkillPermissionManager.grant("skill_c", ["notifications", "clipboard_write"])
         SkillPermissionManager.revoke("skill_c", ["notifications"])
@@ -327,26 +390,37 @@ class TestSkillPermissions(unittest.TestCase):
 
     def test_revoke_all_when_no_list(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         SkillPermissionManager._cache = None
         SkillPermissionManager.grant("skill_d", ["storage", "autorun"])
         SkillPermissionManager.revoke("skill_d")
         self.assertEqual(SkillPermissionManager.get_granted("skill_d"), [])
 
     def test_permission_meta_has_known_keys(self):
-        from app.core.skills.skill_permissions import PERMISSION_META, ALL_PERMISSIONS
-        for key in ("ui_style", "ui_interactive", "notifications",
-                    "clipboard_read", "clipboard_write", "storage", "autorun"):
+        from app.core.skills.skill_permissions import ALL_PERMISSIONS, PERMISSION_META
+
+        for key in (
+            "ui_style",
+            "ui_interactive",
+            "notifications",
+            "clipboard_read",
+            "clipboard_write",
+            "storage",
+            "autorun",
+        ):
             self.assertIn(key, ALL_PERMISSIONS)
             self.assertIn(key, PERMISSION_META)
 
     def test_get_permission_info_returns_list(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         info = SkillPermissionManager.get_permission_info(["storage", "autorun"])
         self.assertIsInstance(info, list)
         self.assertEqual(len(info), 2)
 
     def test_invalidate_cache_clears_cache(self):
         from app.core.skills.skill_permissions import SkillPermissionManager
+
         SkillPermissionManager._cache = {"x": ["storage"]}
         SkillPermissionManager.invalidate_cache()
         self.assertIsNone(SkillPermissionManager._cache)
@@ -356,9 +430,11 @@ class TestSkillPermissions(unittest.TestCase):
 # 4. Task Planner — Plan, PlanStep, StepStatus
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestStepStatus(unittest.TestCase):
     def test_enum_values(self):
         from app.core.tasks.task_planner import StepStatus
+
         self.assertEqual(StepStatus.PENDING.value, "pending")
         self.assertEqual(StepStatus.COMPLETED.value, "completed")
         self.assertEqual(StepStatus.FAILED.value, "failed")
@@ -367,6 +443,7 @@ class TestStepStatus(unittest.TestCase):
 class TestPlanStep(unittest.TestCase):
     def test_default_construction(self):
         from app.core.tasks.task_planner import PlanStep
+
         step = PlanStep(name="fetch_data", description="Download dataset")
         self.assertEqual(step.name, "fetch_data")
         self.assertEqual(step.depends_on, [])
@@ -374,35 +451,40 @@ class TestPlanStep(unittest.TestCase):
 
     def test_to_dict_has_name(self):
         from app.core.tasks.task_planner import PlanStep
+
         step = PlanStep(name="step_a", description="Do A")
         d = step.to_dict()
         self.assertEqual(d["name"], "step_a")
 
     def test_depends_on_set(self):
         from app.core.tasks.task_planner import PlanStep
-        step = PlanStep(name="step_b", description="Do B",
-                        depends_on=["step_a"])
+
+        step = PlanStep(name="step_b", description="Do B", depends_on=["step_a"])
         self.assertIn("step_a", step.depends_on)
 
 
 class TestPlan(unittest.TestCase):
     def _make_plan(self):
         from app.core.tasks.task_planner import Plan, PlanStep, StepStatus
+
         plan = Plan(task_id="task-1", original_request="Test request")
         step_a = PlanStep(name="step_a", description="First step")
-        step_b = PlanStep(name="step_b", description="Second step",
-                          depends_on=["step_a"])
+        step_b = PlanStep(
+            name="step_b", description="Second step", depends_on=["step_a"]
+        )
         plan.add_step(step_a)
         plan.add_step(step_b)
         return plan, step_a, step_b
 
     def test_plan_starts_with_pending_steps(self):
         from app.core.tasks.task_planner import StepStatus
+
         plan, step_a, _ = self._make_plan()
         self.assertEqual(step_a.status, StepStatus.PENDING)
 
     def test_add_step_returns_plan(self):
         from app.core.tasks.task_planner import Plan, PlanStep
+
         plan = Plan(task_id="t", original_request="req")
         result = plan.add_step(PlanStep(name="x", description="y"))
         self.assertIs(result, plan)
@@ -418,6 +500,7 @@ class TestPlan(unittest.TestCase):
 
     def test_ready_steps_initially_empty_or_no_deps(self):
         from app.core.tasks.task_planner import Plan, PlanStep, StepStatus
+
         plan = Plan(task_id="t", original_request="r")
         step = PlanStep(name="s1", description="d")
         plan.add_step(step)
@@ -450,17 +533,20 @@ class TestPlan(unittest.TestCase):
 class TestPlanTemplates(unittest.TestCase):
     def test_research_and_report_returns_plan(self):
         from app.core.tasks.task_planner import PlanTemplates
+
         plan = PlanTemplates.research_and_report("task-r", "Write a research report")
         self.assertEqual(plan.task_id, "task-r")
         self.assertGreater(len(plan.steps), 0)
 
     def test_data_pipeline_returns_plan(self):
         from app.core.tasks.task_planner import PlanTemplates
+
         plan = PlanTemplates.data_pipeline("task-dp", "Process CSV data")
         self.assertGreater(len(plan.steps), 0)
 
     def test_multi_step_task_uses_provided_steps(self):
         from app.core.tasks.task_planner import PlanTemplates
+
         steps = [
             {"name": "fetch", "description": "Fetch data"},
             {"name": "process", "description": "Process data", "depends_on": ["fetch"]},
@@ -474,15 +560,19 @@ class TestPlanTemplates(unittest.TestCase):
 class TestStepResult(unittest.TestCase):
     def test_context_text_includes_summary(self):
         from app.core.tasks.task_planner import StepResult
-        r = StepResult(full_output="long output", summary="short summary",
-                       key_facts=["fact1", "fact2"])
+
+        r = StepResult(
+            full_output="long output",
+            summary="short summary",
+            key_facts=["fact1", "fact2"],
+        )
         text = r.context_text()
         self.assertIn("short summary", text)
 
     def test_context_text_includes_key_facts(self):
         from app.core.tasks.task_planner import StepResult
-        r = StepResult(full_output="output", summary="sum",
-                       key_facts=["key fact here"])
+
+        r = StepResult(full_output="output", summary="sum", key_facts=["key fact here"])
         self.assertIn("key fact here", r.context_text())
 
 
@@ -490,36 +580,43 @@ class TestStepResult(unittest.TestCase):
 # 5. Context Provider
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestContextBlock(unittest.TestCase):
     def test_default_enabled(self):
         from app.core.context.context_provider import ContextBlock
+
         cb = ContextBlock({"id": "test", "content": "hello"})
         self.assertTrue(cb.enabled)
 
     def test_matches_all_task_types_when_empty_list(self):
         from app.core.context.context_provider import ContextBlock
+
         cb = ContextBlock({"id": "t", "content": "c", "task_types": []})
         self.assertTrue(cb.matches("CHAT"))
         self.assertTrue(cb.matches(None))
 
     def test_matches_specific_task_type(self):
         from app.core.context.context_provider import ContextBlock
+
         cb = ContextBlock({"id": "t", "content": "c", "task_types": ["CHAT"]})
         self.assertTrue(cb.matches("CHAT"))
         self.assertFalse(cb.matches("CODE"))
 
     def test_disabled_block_never_matches(self):
         from app.core.context.context_provider import ContextBlock
+
         cb = ContextBlock({"id": "t", "content": "c", "enabled": False})
         self.assertFalse(cb.matches("CHAT"))
 
     def test_priority_default(self):
         from app.core.context.context_provider import ContextBlock
+
         cb = ContextBlock({"id": "t", "content": "c"})
         self.assertEqual(cb.priority, 50)
 
     def test_inject_mode_default(self):
         from app.core.context.context_provider import ContextBlock
+
         cb = ContextBlock({"id": "t", "content": "c"})
         self.assertEqual(cb.inject_mode, "system")
 
@@ -527,16 +624,22 @@ class TestContextBlock(unittest.TestCase):
 class TestContextProvider(unittest.TestCase):
     def setUp(self):
         from app.core.context import context_provider as cp
+
         self._tmpdir = tempfile.mkdtemp()
         # Write one context block
         ctx_file = Path(self._tmpdir) / "myctx.json"
-        ctx_file.write_text(json.dumps({
-            "id": "bg_info",
-            "name": "Background",
-            "content": "User is a Python developer.",
-            "enabled": True,
-            "priority": 10,
-        }), encoding="utf-8")
+        ctx_file.write_text(
+            json.dumps(
+                {
+                    "id": "bg_info",
+                    "name": "Background",
+                    "content": "User is a Python developer.",
+                    "enabled": True,
+                    "priority": 10,
+                }
+            ),
+            encoding="utf-8",
+        )
         cp.ContextProvider._instance = None
         self._orig_dir = cp._CONTEXT_DIR
         cp._CONTEXT_DIR = Path(self._tmpdir)
@@ -544,9 +647,11 @@ class TestContextProvider(unittest.TestCase):
 
     def tearDown(self):
         from app.core.context import context_provider as cp
+
         cp._CONTEXT_DIR = self._orig_dir
         cp.ContextProvider._instance = None
         import shutil
+
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_list_blocks_returns_loaded_block(self):
@@ -565,12 +670,18 @@ class TestContextProvider(unittest.TestCase):
 
     def test_disabled_block_not_injected(self):
         from app.core.context import context_provider as cp
+
         disabled = Path(self._tmpdir) / "disabled.json"
-        disabled.write_text(json.dumps({
-            "id": "disabled_ctx",
-            "content": "SECRET_NOT_INJECTED",
-            "enabled": False,
-        }), encoding="utf-8")
+        disabled.write_text(
+            json.dumps(
+                {
+                    "id": "disabled_ctx",
+                    "content": "SECRET_NOT_INJECTED",
+                    "enabled": False,
+                }
+            ),
+            encoding="utf-8",
+        )
         cp.ContextProvider._instance = None
         provider = cp.ContextProvider()
         result = provider.inject_into_prompt("base")
@@ -579,13 +690,19 @@ class TestContextProvider(unittest.TestCase):
     def test_task_type_filter(self):
         """Block scoped to CHAT should not inject for CODE tasks."""
         from app.core.context import context_provider as cp
+
         scoped = Path(self._tmpdir) / "scoped.json"
-        scoped.write_text(json.dumps({
-            "id": "chat_only",
-            "content": "CHAT_SPECIFIC_TEXT",
-            "enabled": True,
-            "task_types": ["CHAT"],
-        }), encoding="utf-8")
+        scoped.write_text(
+            json.dumps(
+                {
+                    "id": "chat_only",
+                    "content": "CHAT_SPECIFIC_TEXT",
+                    "enabled": True,
+                    "task_types": ["CHAT"],
+                }
+            ),
+            encoding="utf-8",
+        )
         cp.ContextProvider._instance = None
         provider = cp.ContextProvider()
         result_code = provider.inject_into_prompt("base", task_type="CODE")
@@ -598,45 +715,56 @@ class TestContextProvider(unittest.TestCase):
 # 6. User Tool Loader
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 class TestKotoToolDecorator(unittest.TestCase):
     def setUp(self):
         import app.core.tools.user_tool_loader as utl
+
         utl._REGISTERED_TOOLS.clear()
 
     def test_decorator_registers_tool(self):
-        from app.core.tools.user_tool_loader import koto_tool, get_registered_tools
+        from app.core.tools.user_tool_loader import get_registered_tools, koto_tool
+
         @koto_tool(description="Add two numbers", name="add_numbers")
         def add(a, b):
             return a + b
+
         tools = get_registered_tools()
         names = [t["name"] for t in tools]
         self.assertIn("add_numbers", names)
 
     def test_decorator_uses_function_name_if_no_name(self):
-        from app.core.tools.user_tool_loader import koto_tool, get_registered_tools
+        from app.core.tools.user_tool_loader import get_registered_tools, koto_tool
+
         @koto_tool(description="Multiply numbers")
         def multiply(x, y):
             return x * y
+
         tools = get_registered_tools()
         names = [t["name"] for t in tools]
         self.assertIn("multiply", names)
 
     def test_decorated_function_still_callable(self):
         from app.core.tools.user_tool_loader import koto_tool
+
         @koto_tool(description="Greet user", name="greeter")
         def greet(name):
             return f"Hello, {name}!"
+
         self.assertEqual(greet("Logan"), "Hello, Logan!")
 
     def test_get_registered_tools_returns_list(self):
         from app.core.tools.user_tool_loader import get_registered_tools
+
         self.assertIsInstance(get_registered_tools(), list)
 
     def test_tool_has_description(self):
-        from app.core.tools.user_tool_loader import koto_tool, get_registered_tools
+        from app.core.tools.user_tool_loader import get_registered_tools, koto_tool
+
         @koto_tool(description="Useful tool", name="useful_one")
         def do_something():
             pass
+
         tools = {t["name"]: t for t in get_registered_tools()}
         self.assertEqual(tools["useful_one"]["description"], "Useful tool")
 
@@ -644,6 +772,7 @@ class TestKotoToolDecorator(unittest.TestCase):
 class TestLoadUserTools(unittest.TestCase):
     def test_load_from_empty_dir(self):
         from app.core.tools import user_tool_loader as utl
+
         tmpdir = tempfile.mkdtemp()
         try:
             orig = utl._TOOLS_DIR
@@ -653,10 +782,13 @@ class TestLoadUserTools(unittest.TestCase):
             self.assertEqual(count, 0)
         finally:
             utl._TOOLS_DIR = orig
-            import shutil; shutil.rmtree(tmpdir, ignore_errors=True)
+            import shutil
+
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_load_from_dir_with_valid_tool(self):
         from app.core.tools import user_tool_loader as utl
+
         tmpdir = tempfile.mkdtemp()
         try:
             tool_file = Path(tmpdir) / "my_tools.py"
@@ -665,7 +797,7 @@ class TestLoadUserTools(unittest.TestCase):
                 "@koto_tool(description='Test')\n"
                 "def test_fn():\n"
                 "    return 42\n",
-                encoding="utf-8"
+                encoding="utf-8",
             )
             orig = utl._TOOLS_DIR
             utl._TOOLS_DIR = Path(tmpdir)
@@ -674,15 +806,19 @@ class TestLoadUserTools(unittest.TestCase):
             self.assertGreaterEqual(count, 1)
         finally:
             utl._TOOLS_DIR = orig
-            import shutil; shutil.rmtree(tmpdir, ignore_errors=True)
+            import shutil
+
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
     def test_user_defined_plugin_name(self):
         from app.core.tools.user_tool_loader import UserDefinedPlugin
+
         p = UserDefinedPlugin()
         self.assertEqual(p.name, "UserDefinedTools")
 
     def test_user_defined_plugin_get_tools(self):
         from app.core.tools.user_tool_loader import UserDefinedPlugin
+
         p = UserDefinedPlugin()
         self.assertIsInstance(p.get_tools(), list)
 
@@ -691,9 +827,11 @@ class TestLoadUserTools(unittest.TestCase):
 # 7. Telegram Bot Routes Blueprint
 # ══════════════════════════════════════════════════════════════════════════════
 
+
 def _make_telegram_app():
     """Create a minimal Flask app with telegram_bot_routes registered."""
     from flask import Flask
+
     from app.api.telegram_bot_routes import telegram_bp
 
     app = Flask(__name__)
@@ -737,7 +875,7 @@ class TestTelegramBotRoutesContacts(unittest.TestCase):
         resp = self.client.post(
             "/api/telegram/contacts",
             data=json.dumps({}),
-            content_type="application/json"
+            content_type="application/json",
         )
         self.assertIn(resp.status_code, (400, 422, 500))
 
@@ -748,9 +886,7 @@ class TestTelegramBotRoutesConfig(unittest.TestCase):
 
     def test_post_config_empty_returns_ok_or_error(self):
         resp = self.client.post(
-            "/api/telegram/config",
-            data=json.dumps({}),
-            content_type="application/json"
+            "/api/telegram/config", data=json.dumps({}), content_type="application/json"
         )
         self.assertIn(resp.status_code, (200, 400, 500))
 
@@ -759,7 +895,7 @@ class TestTelegramBotRoutesConfig(unittest.TestCase):
         resp = self.client.post(
             "/api/telegram/test",
             data=json.dumps({"chat_id": "123", "text": "hello"}),
-            content_type="application/json"
+            content_type="application/json",
         )
         self.assertIn(resp.status_code, (200, 400, 500, 503))
 

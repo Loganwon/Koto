@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """Health check endpoints for Koto.
 
 Provides /api/health (detailed) and /api/ping (lightweight) endpoints
@@ -14,7 +16,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-
 from flask import Blueprint, jsonify
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ def _check_ollama() -> dict:
     """Check if Ollama is reachable."""
     try:
         import requests
+
         resp = requests.get("http://localhost:11434/api/tags", timeout=2)
         ok = resp.status_code == 200
         return {"status": "ok" if ok else "error", "detail": f"HTTP {resp.status_code}"}

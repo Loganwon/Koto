@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto WorkflowRuntime — 统一工作流执行入口
 ==========================================
@@ -202,6 +204,7 @@ class WorkflowRuntime:
         # 合并输出有害内容检测
         try:
             from app.core.security.output_validator import OutputValidator
+
             _val = OutputValidator.validate(text=output)
             if _val.is_blocked:
                 logger.warning("[WorkflowRuntime] 合并输出被拦截: %s", _val.reasons)
@@ -209,7 +212,9 @@ class WorkflowRuntime:
             else:
                 output = _val.text
         except Exception as _e:
-            logger.error("[WorkflowRuntime] OutputValidator 校验失败，输出未经验证: %s", _e)
+            logger.error(
+                "[WorkflowRuntime] OutputValidator 校验失败，输出未经验证: %s", _e
+            )
         return {
             "output": output,
             "file_path": None,

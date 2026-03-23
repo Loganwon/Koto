@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 class TaskDecomposer:
     """
     分解复杂任务为多个子任务
@@ -14,10 +16,19 @@ class TaskDecomposer:
       2. Gemini 语义检测（关键词未命中时启用，更准确）
     """
 
-    _VALID_TASK_TYPES = frozenset({
-        "CHAT", "CODER", "RESEARCH", "WEB_SEARCH", "FILE_GEN",
-        "PAINTER", "MULTI_STEP", "SYSTEM", "DOC_WORKFLOW",
-    })
+    _VALID_TASK_TYPES = frozenset(
+        {
+            "CHAT",
+            "CODER",
+            "RESEARCH",
+            "WEB_SEARCH",
+            "FILE_GEN",
+            "PAINTER",
+            "MULTI_STEP",
+            "SYSTEM",
+            "DOC_WORKFLOW",
+        }
+    )
 
     # 定义常见的任务组合模式
     TASK_PATTERNS = {
@@ -308,16 +319,16 @@ class TaskDecomposer:
             "  FILE_GEN: 生成文件（Word/Excel/PPT/PDF）\n"
             "  PAINTER: 生成图片\n"
             "  SYSTEM: 控制系统、打开应用\n\n"
-            "如果是单步任务，返回: {\"is_compound\": false}\n"
+            '如果是单步任务，返回: {"is_compound": false}\n'
             "如果是多步任务（必须是真正需要先后执行的不同操作），返回:\n"
             "{\n"
-            "  \"is_compound\": true,\n"
-            "  \"primary_task\": \"<第一步任务类型>\",\n"
-            "  \"secondary_tasks\": [\"<第二步类型>\"],\n"
-            "  \"pattern\": \"search_and_document | research_and_document | other\",\n"
-            "  \"subtasks\": [\n"
-            "    {\"task_type\": \"<类型>\", \"description\": \"<一句话描述>\", "
-            "\"input\": \"<输入说明>\", \"expected_output\": \"<期望输出>\"},\n"
+            '  "is_compound": true,\n'
+            '  "primary_task": "<第一步任务类型>",\n'
+            '  "secondary_tasks": ["<第二步类型>"],\n'
+            '  "pattern": "search_and_document | research_and_document | other",\n'
+            '  "subtasks": [\n'
+            '    {"task_type": "<类型>", "description": "<一句话描述>", '
+            '"input": "<输入说明>", "expected_output": "<期望输出>"},\n'
             "    ...\n"
             "  ]\n"
             "}\n\n"
@@ -344,6 +355,7 @@ class TaskDecomposer:
 
             # 提取 JSON
             import re
+
             text = re.sub(r"^```[a-z]*\n?", "", text)
             text = re.sub(r"\n?```$", "", text).strip()
             if not text.startswith("{"):
@@ -390,7 +402,9 @@ class TaskDecomposer:
             return "code"
 
         # Analysis pipeline: research/data-heavy tasks
-        if primary in ("RESEARCH", "DATA_ANALYST") or pattern in ("research_and_document",):
+        if primary in ("RESEARCH", "DATA_ANALYST") or pattern in (
+            "research_and_document",
+        ):
             return "analysis"
 
         # Content pipeline (default for compound tasks)

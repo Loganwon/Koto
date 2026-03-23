@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Generic Task Planner
 ==========================
@@ -69,10 +71,11 @@ class StepResult:
     避免将完整原始输出直接填入 prompt（大幅降低 token 消耗）。
     ``replan_hint`` 允许执行层在发现计划偏差时向规划层反馈再规划信号。
     """
-    full_output: str                    # 完整原始输出（保留备查）
-    summary: str = ""                   # 压缩摘要（≤300 字），用于后续步骤的上下文注入
+
+    full_output: str  # 完整原始输出（保留备查）
+    summary: str = ""  # 压缩摘要（≤300 字），用于后续步骤的上下文注入
     key_facts: List[str] = field(default_factory=list)  # 提炼出的关键事实列表
-    replan_hint: str = ""               # 非空时触发再规划："后续步骤应改为…"
+    replan_hint: str = ""  # 非空时触发再规划："后续步骤应改为…"
     structured: Optional[Dict[str, Any]] = None  # 可选结构化数据（JSON）
 
     def context_text(self) -> str:
@@ -94,10 +97,11 @@ class StepResult:
     避免将完整原始输出直接填入 prompt（大幅降低 token 消耗）。
     ``replan_hint`` 允许执行层在发现计划偏差时向规划层反馈再规划信号。
     """
-    full_output: str                    # 完整原始输出（保留备查）
-    summary: str = ""                   # 压缩摘要（≤300 字），用于后续步骤的上下文注入
+
+    full_output: str  # 完整原始输出（保留备查）
+    summary: str = ""  # 压缩摘要（≤300 字），用于后续步骤的上下文注入
     key_facts: List[str] = field(default_factory=list)  # 提炼出的关键事实列表
-    replan_hint: str = ""               # 非空时触发再规划："后续步骤应改为…"
+    replan_hint: str = ""  # 非空时触发再规划："后续步骤应改为…"
     structured: Optional[Dict[str, Any]] = None  # 可选结构化数据（JSON）
 
     def context_text(self) -> str:
@@ -119,10 +123,11 @@ class StepResult:
     避免将完整原始输出直接填入 prompt（大幅降低 token 消耗）。
     ``replan_hint`` 允许执行层在发现计划偏差时向规划层反馈再规划信号。
     """
-    full_output: str                    # 完整原始输出（保留备查）
-    summary: str = ""                   # 压缩摘要（≤300 字），用于后续步骤的上下文注入
+
+    full_output: str  # 完整原始输出（保留备查）
+    summary: str = ""  # 压缩摘要（≤300 字），用于后续步骤的上下文注入
     key_facts: List[str] = field(default_factory=list)  # 提炼出的关键事实列表
-    replan_hint: str = ""               # 非空时触发再规划："后续步骤应改为…"
+    replan_hint: str = ""  # 非空时触发再规划："后续步骤应改为…"
     structured: Optional[Dict[str, Any]] = None  # 可选结构化数据（JSON）
 
     def context_text(self) -> str:
@@ -150,25 +155,37 @@ class PlanStep:
     allow_failure: bool = False  # True = 本步失败不阻塞后续步骤
 
     # ── 规划层填充的执行指导（v2 新增，均有默认值保持向后兼容） ────────────────
-    executor_prompt: str = ""              # 执行器应使用的具体指令（替代模糊的 description）
-    context_keys: List[str] = field(default_factory=list)  # 明确声明需要哪些上游结果（空=所有依赖）
-    result_schema: str = ""               # 预期输出格式描述，用于引导执行器和验收
-    success_criteria: str = ""            # 判断本步成功的标准
-    suggested_tools: List[str] = field(default_factory=list)  # 建议执行器使用的工具名列表
+    executor_prompt: str = ""  # 执行器应使用的具体指令（替代模糊的 description）
+    context_keys: List[str] = field(
+        default_factory=list
+    )  # 明确声明需要哪些上游结果（空=所有依赖）
+    result_schema: str = ""  # 预期输出格式描述，用于引导执行器和验收
+    success_criteria: str = ""  # 判断本步成功的标准
+    suggested_tools: List[str] = field(
+        default_factory=list
+    )  # 建议执行器使用的工具名列表
 
     # ── 规划层填充的执行指导（v2 新增，均有默认值保持向后兼容） ────────────────
-    executor_prompt: str = ""              # 执行器应使用的具体指令（替代模糊的 description）
-    context_keys: List[str] = field(default_factory=list)  # 明确声明需要哪些上游结果（空=所有依赖）
-    result_schema: str = ""               # 预期输出格式描述，用于引导执行器和验收
-    success_criteria: str = ""            # 判断本步成功的标准
-    suggested_tools: List[str] = field(default_factory=list)  # 建议执行器使用的工具名列表
+    executor_prompt: str = ""  # 执行器应使用的具体指令（替代模糊的 description）
+    context_keys: List[str] = field(
+        default_factory=list
+    )  # 明确声明需要哪些上游结果（空=所有依赖）
+    result_schema: str = ""  # 预期输出格式描述，用于引导执行器和验收
+    success_criteria: str = ""  # 判断本步成功的标准
+    suggested_tools: List[str] = field(
+        default_factory=list
+    )  # 建议执行器使用的工具名列表
 
     # ── 规划层填充的执行指导（v2 新增，均有默认值保持向后兼容） ────────────────
-    executor_prompt: str = ""              # 执行器应使用的具体指令（替代模糊的 description）
-    context_keys: List[str] = field(default_factory=list)  # 明确声明需要哪些上游结果（空=所有依赖）
-    result_schema: str = ""               # 预期输出格式描述，用于引导执行器和验收
-    success_criteria: str = ""            # 判断本步成功的标准
-    suggested_tools: List[str] = field(default_factory=list)  # 建议执行器使用的工具名列表
+    executor_prompt: str = ""  # 执行器应使用的具体指令（替代模糊的 description）
+    context_keys: List[str] = field(
+        default_factory=list
+    )  # 明确声明需要哪些上游结果（空=所有依赖）
+    result_schema: str = ""  # 预期输出格式描述，用于引导执行器和验收
+    success_criteria: str = ""  # 判断本步成功的标准
+    suggested_tools: List[str] = field(
+        default_factory=list
+    )  # 建议执行器使用的工具名列表
 
     # 运行时字段（不参与 dict 初始化）
     step_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
@@ -176,7 +193,7 @@ class PlanStep:
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
     retry_count: int = 0
-    result: Any = None                     # 兼容旧代码的原始结果；优先使用 step_result
+    result: Any = None  # 兼容旧代码的原始结果；优先使用 step_result
     step_result: Optional["StepResult"] = None  # 结构化结果（v2）
     error: Optional[str] = None
     expected_output: str = ""
@@ -407,22 +424,24 @@ class PlanTemplates:
         """
         plan = Plan(task_id=task_id, original_request=request)
         for s in steps:
-            plan.add_step(PlanStep(
-                name=s.get("name", f"step_{uuid.uuid4().hex[:4]}"),
-                description=s.get("description", ""),
-                step_type=s.get("step_type", "llm"),
-                depends_on=s.get("depends_on", []),
-                require_approval=s.get("require_approval", False),
-                allow_failure=s.get("allow_failure", False),
-                timeout_seconds=s.get("timeout_seconds", 120),
-                expected_output=s.get("expected_output", ""),
-                # v2 新字段
-                executor_prompt=s.get("executor_prompt", ""),
-                context_keys=s.get("context_keys", []),
-                result_schema=s.get("result_schema", ""),
-                success_criteria=s.get("success_criteria", ""),
-                suggested_tools=s.get("suggested_tools", []),
-            ))
+            plan.add_step(
+                PlanStep(
+                    name=s.get("name", f"step_{uuid.uuid4().hex[:4]}"),
+                    description=s.get("description", ""),
+                    step_type=s.get("step_type", "llm"),
+                    depends_on=s.get("depends_on", []),
+                    require_approval=s.get("require_approval", False),
+                    allow_failure=s.get("allow_failure", False),
+                    timeout_seconds=s.get("timeout_seconds", 120),
+                    expected_output=s.get("expected_output", ""),
+                    # v2 新字段
+                    executor_prompt=s.get("executor_prompt", ""),
+                    context_keys=s.get("context_keys", []),
+                    result_schema=s.get("result_schema", ""),
+                    success_criteria=s.get("success_criteria", ""),
+                    suggested_tools=s.get("suggested_tools", []),
+                )
+            )
         return plan
 
 
@@ -530,10 +549,13 @@ class TaskPlanner:
             if start >= 0 and end > start:
                 steps_data = json.loads(content[start:end])
                 if isinstance(steps_data, list) and steps_data:
-                    plan = PlanTemplates.multi_step_task(task_id, user_input, steps_data)
+                    plan = PlanTemplates.multi_step_task(
+                        task_id, user_input, steps_data
+                    )
                     logger.info(
                         "[TaskPlanner] ✅ LLM 规划完成：%d 步（工具感知=%s）",
-                        len(plan.steps), bool(available_tools),
+                        len(plan.steps),
+                        bool(available_tools),
                     )
                     return plan
         except Exception as e:
@@ -543,12 +565,14 @@ class TaskPlanner:
         return Plan(
             task_id=task_id,
             original_request=user_input,
-            steps=[PlanStep(
-                name="execute",
-                description="直接执行用户请求",
-                step_type="llm",
-                executor_prompt=user_input,
-            )]
+            steps=[
+                PlanStep(
+                    name="execute",
+                    description="直接执行用户请求",
+                    step_type="llm",
+                    executor_prompt=user_input,
+                )
+            ],
         )
 
     def plan_with_context(
@@ -581,13 +605,15 @@ class TaskPlanner:
         session_context = ""
         if history:
             relevant = [
-                m for m in history
+                m
+                for m in history
                 if m.get("role") in ("user", "model") and m.get("content")
-            ][-8:]  # 最近 4 轮（user+model 各算 1 条）
+            ][
+                -8:
+            ]  # 最近 4 轮（user+model 各算 1 条）
             if relevant:
                 session_context = "\n".join(
-                    f"[{m['role']}] {str(m['content'])[:200]}"
-                    for m in relevant
+                    f"[{m['role']}] {str(m['content'])[:200]}" for m in relevant
                 )
 
         return self.plan_with_llm(
@@ -624,6 +650,7 @@ class TaskPlanner:
         """
         try:
             from app.core.skills.skill_capability import SkillCapabilityRegistry
+
             template = SkillCapabilityRegistry.get_plan_template(skill_id)
         except Exception as e:
             logger.warning("[TaskPlanner] plan_from_skill() 无法加载模板: %s", e)
@@ -639,7 +666,8 @@ class TaskPlanner:
 
         logger.info(
             "[TaskPlanner] 📋 从 Skill '%s' 构建计划: %d 步",
-            skill_id, len(plan.steps),
+            skill_id,
+            len(plan.steps),
         )
         return plan
 
@@ -735,7 +763,9 @@ class TaskPlanner:
                 if step.result_schema:
                     step.input_data.setdefault("result_schema", step.result_schema)
                 if step.success_criteria:
-                    step.input_data.setdefault("success_criteria", step.success_criteria)
+                    step.input_data.setdefault(
+                        "success_criteria", step.success_criteria
+                    )
 
                 # 人工确认
                 if step.require_approval:
@@ -789,11 +819,15 @@ class TaskPlanner:
                         if step.retry_count <= step.max_retries:
                             logger.warning(
                                 "[TaskPlanner] 步骤 %s 失败，第 %d 次重试: %s",
-                                step.name, step.retry_count, e,
+                                step.name,
+                                step.retry_count,
+                                e,
                             )
                             time.sleep(min(2**step.retry_count, 30))
                         else:
-                            logger.error("[TaskPlanner] 步骤 %s 最终失败: %s", step.name, e)
+                            logger.error(
+                                "[TaskPlanner] 步骤 %s 最终失败: %s", step.name, e
+                            )
 
                 if success:
                     self._publish_step_event(plan.task_id, step, "step_done")
@@ -805,13 +839,13 @@ class TaskPlanner:
 
                     # ── 再规划信号检查（v2） ────────────────────────────────
                     _replan_hint = (
-                        step.step_result.replan_hint
-                        if step.step_result else ""
+                        step.step_result.replan_hint if step.step_result else ""
                     )
                     if _replan_hint and llm_provider:
                         logger.info(
                             "[TaskPlanner] 🔄 步骤 '%s' 触发再规划: %s",
-                            step.name, _replan_hint[:100],
+                            step.name,
+                            _replan_hint[:100],
                         )
                         changed = self.replan_remaining(
                             plan=plan,
@@ -829,7 +863,8 @@ class TaskPlanner:
                                 "trigger_step": step.name,
                                 "hint": _replan_hint,
                                 "remaining_steps": [
-                                    s.to_dict() for s in plan.steps
+                                    s.to_dict()
+                                    for s in plan.steps
                                     if s.status == StepStatus.PENDING
                                 ],
                             }
@@ -963,27 +998,35 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
             if existing and existing.status == StepStatus.PENDING:
                 # 原地更新可修改字段
                 existing.description = sd.get("description", existing.description)
-                existing.executor_prompt = sd.get("executor_prompt", existing.executor_prompt)
+                existing.executor_prompt = sd.get(
+                    "executor_prompt", existing.executor_prompt
+                )
                 existing.context_keys = sd.get("context_keys", existing.context_keys)
                 existing.result_schema = sd.get("result_schema", existing.result_schema)
-                existing.success_criteria = sd.get("success_criteria", existing.success_criteria)
-                existing.suggested_tools = sd.get("suggested_tools", existing.suggested_tools)
+                existing.success_criteria = sd.get(
+                    "success_criteria", existing.success_criteria
+                )
+                existing.suggested_tools = sd.get(
+                    "suggested_tools", existing.suggested_tools
+                )
                 existing.depends_on = sd.get("depends_on", existing.depends_on)
                 changed = True
             elif s_name not in existing_names:
                 # 新增步骤
-                plan.add_step(PlanStep(
-                    name=s_name,
-                    description=sd.get("description", ""),
-                    step_type=sd.get("step_type", "llm"),
-                    depends_on=sd.get("depends_on", []),
-                    executor_prompt=sd.get("executor_prompt", ""),
-                    context_keys=sd.get("context_keys", []),
-                    result_schema=sd.get("result_schema", ""),
-                    success_criteria=sd.get("success_criteria", ""),
-                    suggested_tools=sd.get("suggested_tools", []),
-                    expected_output=sd.get("expected_output", ""),
-                ))
+                plan.add_step(
+                    PlanStep(
+                        name=s_name,
+                        description=sd.get("description", ""),
+                        step_type=sd.get("step_type", "llm"),
+                        depends_on=sd.get("depends_on", []),
+                        executor_prompt=sd.get("executor_prompt", ""),
+                        context_keys=sd.get("context_keys", []),
+                        result_schema=sd.get("result_schema", ""),
+                        success_criteria=sd.get("success_criteria", ""),
+                        suggested_tools=sd.get("suggested_tools", []),
+                        expected_output=sd.get("expected_output", ""),
+                    )
+                )
                 changed = True
                 logger.info("[TaskPlanner] 再规划：新增步骤 '%s'", s_name)
 
@@ -1051,7 +1094,8 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
         while changed:
             changed = False
             skip_names = {
-                s.name for s in plan.steps
+                s.name
+                for s in plan.steps
                 if s.status in (StepStatus.FAILED, StepStatus.SKIPPED)
             }
             for s in plan.steps:
@@ -1063,31 +1107,37 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
     @staticmethod
     def _publish_step_event(task_id: str, step: PlanStep, event_type: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=task_id,
-                event_type=event_type,
-                step_type=step.step_type.upper(),
-                message=step.description,
-                progress=step.retry_count,
-                detail={"step_name": step.name, "status": step.status.value},
-            ))
+            bus.publish(
+                ProgressEvent(
+                    task_id=task_id,
+                    event_type=event_type,
+                    step_type=step.step_type.upper(),
+                    message=step.description,
+                    progress=step.retry_count,
+                    detail={"step_name": step.name, "status": step.status.value},
+                )
+            )
         except Exception:
             import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=plan.task_id,
-                event_type=event_type,
-                status=plan.status,
-                message=message,
-                progress=plan.progress_percent(),
-            ))
+            bus.publish(
+                ProgressEvent(
+                    task_id=plan.task_id,
+                    event_type=event_type,
+                    status=plan.status,
+                    message=message,
+                    progress=plan.progress_percent(),
+                )
+            )
         except Exception:
             import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         """递归将依赖 failed_name 的步骤设为 SKIPPED。"""
@@ -1095,7 +1145,8 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
         while changed:
             changed = False
             skip_names = {
-                s.name for s in plan.steps
+                s.name
+                for s in plan.steps
                 if s.status in (StepStatus.FAILED, StepStatus.SKIPPED)
             }
             for s in plan.steps:
@@ -1107,31 +1158,37 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
     @staticmethod
     def _publish_step_event(task_id: str, step: PlanStep, event_type: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=task_id,
-                event_type=event_type,
-                step_type=step.step_type.upper(),
-                message=step.description,
-                progress=step.retry_count,
-                detail={"step_name": step.name, "status": step.status.value},
-            ))
+            bus.publish(
+                ProgressEvent(
+                    task_id=task_id,
+                    event_type=event_type,
+                    step_type=step.step_type.upper(),
+                    message=step.description,
+                    progress=step.retry_count,
+                    detail={"step_name": step.name, "status": step.status.value},
+                )
+            )
         except Exception:
             import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=plan.task_id,
-                event_type=event_type,
-                status=plan.status,
-                message=message,
-                progress=plan.progress_percent(),
-            ))
+            bus.publish(
+                ProgressEvent(
+                    task_id=plan.task_id,
+                    event_type=event_type,
+                    status=plan.status,
+                    message=message,
+                    progress=plan.progress_percent(),
+                )
+            )
         except Exception:
             import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         """递归将依赖 failed_name 的步骤设为 SKIPPED。"""
@@ -1139,7 +1196,8 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
         while changed:
             changed = False
             skip_names = {
-                s.name for s in plan.steps
+                s.name
+                for s in plan.steps
                 if s.status in (StepStatus.FAILED, StepStatus.SKIPPED)
             }
             for s in plan.steps:
@@ -1151,30 +1209,36 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
     @staticmethod
     def _publish_step_event(task_id: str, step: PlanStep, event_type: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=task_id,
-                event_type=event_type,
-                step_type=step.step_type.upper(),
-                message=step.description,
-                progress=step.retry_count,
-                detail={"step_name": step.name, "status": step.status.value},
-            ))
+            bus.publish(
+                ProgressEvent(
+                    task_id=task_id,
+                    event_type=event_type,
+                    step_type=step.step_type.upper(),
+                    message=step.description,
+                    progress=step.retry_count,
+                    detail={"step_name": step.name, "status": step.status.value},
+                )
+            )
         except Exception:
             import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
         try:
-            from app.core.tasks.progress_bus import get_progress_bus, ProgressEvent
+            from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             bus = get_progress_bus()
-            bus.publish(ProgressEvent(
-                task_id=plan.task_id,
-                event_type=event_type,
-                status=plan.status,
-                message=message,
-                progress=plan.progress_percent(),
-            ))
+            bus.publish(
+                ProgressEvent(
+                    task_id=plan.task_id,
+                    event_type=event_type,
+                    status=plan.status,
+                    message=message,
+                    progress=plan.progress_percent(),
+                )
+            )
         except Exception:
             import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)

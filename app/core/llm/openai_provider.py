@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto OpenAI Provider
 ====================
@@ -16,6 +18,7 @@ Streaming yields the same keys with partial content accumulated.
 
 Requires:  pip install openai>=1.0
 """
+
 from __future__ import annotations
 
 import json
@@ -29,7 +32,13 @@ from .base import LLMProvider
 logger = logging.getLogger(__name__)
 
 try:
-    from openai import OpenAI, APIStatusError, APITimeoutError, APIConnectionError  # type: ignore
+    from openai import (  # type: ignore
+        APIConnectionError,
+        APIStatusError,
+        APITimeoutError,
+        OpenAI,
+    )
+
     _openai_available = True
 except ImportError:
     _openai_available = False
@@ -51,23 +60,24 @@ class OpenAIProvider(LLMProvider):
         api_key: str | None = None,
         base_url: str | None = None,
     ):
-        self.api_key = (
-            api_key
-            or os.getenv("OPENAI_API_KEY")
-            or os.getenv("OPENAI_KEY")
-        )
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY")
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL")  # for Azure / local
         self.client = None
 
         if not _openai_available:
-            logger.warning("[OpenAIProvider] openai package not installed (pip install openai)")
+            logger.warning(
+                "[OpenAIProvider] openai package not installed (pip install openai)"
+            )
             return
         if not self.api_key:
             logger.warning("[OpenAIProvider] No OPENAI_API_KEY found")
             return
 
         try:
-            kwargs: Dict[str, Any] = {"api_key": self.api_key, "timeout": self.CALL_TIMEOUT}
+            kwargs: Dict[str, Any] = {
+                "api_key": self.api_key,
+                "timeout": self.CALL_TIMEOUT,
+            }
             if self.base_url:
                 kwargs["base_url"] = self.base_url
             self.client = OpenAI(**kwargs)
@@ -115,9 +125,15 @@ class OpenAIProvider(LLMProvider):
                     exc, (APIStatusError, APITimeoutError, APIConnectionError)
                 )
                 status = getattr(exc, "status_code", None)
-                if retryable and status in (429, 500, 502, 503) and attempt < self.MAX_RETRIES - 1:
-                    delay = self.RETRY_BASE_DELAY * (2 ** attempt)
-                    logger.warning(f"[OpenAIProvider] Retryable error, retry {attempt+1} in {delay}s: {exc}")
+                if (
+                    retryable
+                    and status in (429, 500, 502, 503)
+                    and attempt < self.MAX_RETRIES - 1
+                ):
+                    delay = self.RETRY_BASE_DELAY * (2**attempt)
+                    logger.warning(
+                        f"[OpenAIProvider] Retryable error, retry {attempt+1} in {delay}s: {exc}"
+                    )
                     time.sleep(delay)
                     continue
                 raise
@@ -127,8 +143,15 @@ class OpenAIProvider(LLMProvider):
     ) -> int:
         try:
             import tiktoken  # type: ignore
-            enc = tiktoken.encoding_for_model(model.replace("gpt-4o", "gpt-4").replace("-preview", ""))
-            text = prompt if isinstance(prompt, str) else json.dumps(prompt, ensure_ascii=False)
+
+            enc = tiktoken.encoding_for_model(
+                model.replace("gpt-4o", "gpt-4").replace("-preview", "")
+            )
+            text = (
+                prompt
+                if isinstance(prompt, str)
+                else json.dumps(prompt, ensure_ascii=False)
+            )
             return len(enc.encode(text))
         except Exception:
             text = prompt if isinstance(prompt, str) else str(prompt)
@@ -175,19 +198,36 @@ class OpenAIProvider(LLMProvider):
                 # model turn with tool calls
                 oai_tool_calls = []
                 for i, tc in enumerate(tool_calls_raw):
-                    oai_tool_calls.append({
-                        "id": f"call_{i}",
-                        "type": "function",
-                        "function": {
-                            "name": tc.get("name", ""),
-                            "arguments": json.dumps(tc.get("args", {}), ensure_ascii=False),
-                        },
-                    })
-                messages.append({"role": "assistant", "content": content or None, "tool_calls": oai_tool_calls})
+                    oai_tool_calls.append(
+                        {
+                            "id": f"call_{i}",
+                            "type": "function",
+                            "function": {
+                                "name": tc.get("name", ""),
+                                "arguments": json.dumps(
+                                    tc.get("args", {}), ensure_ascii=False
+                                ),
+                            },
+                        }
+                    )
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": content or None,
+                        "tool_calls": oai_tool_calls,
+                    }
+                )
             elif role == "tool":
                 # function result
                 name = turn.get("name", "tool")
-                messages.append({"role": "tool", "tool_call_id": f"call_0", "name": name, "content": str(content)})
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": f"call_0",
+                        "name": name,
+                        "content": str(content),
+                    }
+                )
             else:
                 messages.append({"role": role, "content": str(content)})
 
@@ -200,14 +240,17 @@ class OpenAIProvider(LLMProvider):
         for t in tools:
             if not isinstance(t, dict) or not t.get("name"):
                 continue
-            oai_tools.append({
-                "type": "function",
-                "function": {
-                    "name": t["name"],
-                    "description": t.get("description", ""),
-                    "parameters": t.get("parameters") or {"type": "object", "properties": {}},
-                },
-            })
+            oai_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t["name"],
+                        "description": t.get("description", ""),
+                        "parameters": t.get("parameters")
+                        or {"type": "object", "properties": {}},
+                    },
+                }
+            )
         return oai_tools or None
 
     def _format_response(self, resp: Any) -> Dict[str, Any]:
@@ -235,7 +278,9 @@ class OpenAIProvider(LLMProvider):
 
         return {"content": content, "tool_calls": tool_calls, "usage": usage}
 
-    def _stream_generator(self, stream_resp: Any) -> Generator[Dict[str, Any], None, None]:
+    def _stream_generator(
+        self, stream_resp: Any
+    ) -> Generator[Dict[str, Any], None, None]:
         accumulated = ""
         for chunk in stream_resp:
             delta = chunk.choices[0].delta if chunk.choices else None
@@ -243,4 +288,9 @@ class OpenAIProvider(LLMProvider):
                 continue
             piece = delta.content or ""
             accumulated += piece
-            yield {"content": accumulated, "tool_calls": [], "usage": {}, "delta": piece}
+            yield {
+                "content": accumulated,
+                "tool_calls": [],
+                "usage": {},
+                "delta": piece,
+            }

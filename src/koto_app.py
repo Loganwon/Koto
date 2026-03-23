@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto 桌面应用 - 独立窗口版本
 使用 pywebview 创建原生窗口，Flask 作为后端
@@ -1224,6 +1226,7 @@ def main():
     # 将 window_api 注入到 Flask app，供 HTTP 路由降级使用
     try:
         from web.app import app as _flask_app
+
         _flask_app.config["WINDOW_API"] = window_api
     except Exception as _e:
         _write_log(f"⚠️ 无法注入 window_api 到 Flask: {_e}")

@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import concurrent.futures
 import logging
 import os
@@ -89,6 +91,7 @@ class GeminiProvider(LLMProvider):
         """
         try:
             from flask import g as flask_g
+
             request_key = getattr(flask_g, "api_key", None)
         except RuntimeError:
             # Outside Flask request context (background threads, tests)
@@ -156,7 +159,7 @@ class GeminiProvider(LLMProvider):
                         )
                         if not _se_retryable or _stream_attempt == self.MAX_RETRIES - 1:
                             raise
-                        _delay = self.RETRY_BASE_DELAY * (2 ** _stream_attempt)
+                        _delay = self.RETRY_BASE_DELAY * (2**_stream_attempt)
                         logger.warning(
                             f"Stream connect error (attempt {_stream_attempt + 1}/{self.MAX_RETRIES}), "
                             f"retrying in {_delay:.1f}s: {_se}"

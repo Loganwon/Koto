@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 文件夹监控模块 (Watch Mode)
 使用 watchdog 监视指定文件夹，新文件出现时自动分析+归类。

@@ -29,17 +29,32 @@ import requests
 # Constants and helpers
 # ---------------------------------------------------------------------------
 PAGE_TIMEOUT = 15_000  # ms
-THINK_SHORT = 400       # ms — brief pause between keystrokes / clicks
-THINK_MEDIUM = 1_000    # ms — pause after an action before reading result
-THINK_LONG = 2_500      # ms — wait for async (animations, fetch responses)
+THINK_SHORT = 400  # ms — brief pause between keystrokes / clicks
+THINK_MEDIUM = 1_000  # ms — pause after an action before reading result
+THINK_LONG = 2_500  # ms — wait for async (animations, fetch responses)
 
 # Errors that are benign when the AI backend isn't configured in CI
 BENIGN_PATTERNS = (
-    "api key", "API key", "model not found", "Failed to fetch",
-    "NetworkError", "AbortError", "Interrupt signal failed",
-    "ERR_CONNECTION", "net::ERR_", "interrupt", "INTERRUPT",
-    "Reset interrupt failed", "stream", "STREAM", "422", "500",
-    "Unprocessable", "fetch", "WebSocket", "ws://",
+    "api key",
+    "API key",
+    "model not found",
+    "Failed to fetch",
+    "NetworkError",
+    "AbortError",
+    "Interrupt signal failed",
+    "ERR_CONNECTION",
+    "net::ERR_",
+    "interrupt",
+    "INTERRUPT",
+    "Reset interrupt failed",
+    "stream",
+    "STREAM",
+    "422",
+    "500",
+    "Unprocessable",
+    "fetch",
+    "WebSocket",
+    "ws://",
 )
 
 
@@ -88,7 +103,9 @@ def _api(base_url: str, method: str, path: str, **kwargs):
 class TestNewUserJourney:
     """A brand-new user opens Koto for the first time."""
 
-    def test_landing_page_loads_and_shows_chat(self, e2e_page, console_errors, e2e_base_url):
+    def test_landing_page_loads_and_shows_chat(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         """User types URL → page loads → sees chat interface."""
         # Step 1: Navigate (simulate typing URL and hitting Enter)
         _goto(e2e_page, f"{e2e_base_url}/")
@@ -110,9 +127,13 @@ class TestNewUserJourney:
         input_val = e2e_page.locator("#messageInput").input_value()
         assert input_val == "", "Input should be empty on first visit"
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
-    def test_user_types_and_sends_first_message(self, e2e_page, console_errors, e2e_base_url):
+    def test_user_types_and_sends_first_message(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         """User reads the UI, decides to send a greeting."""
         _goto(e2e_page, f"{e2e_base_url}/")
         _settle(e2e_page, THINK_LONG)
@@ -144,7 +165,9 @@ class TestNewUserJourney:
         after_val = ta.input_value()
         assert after_val == "" or True, "Input may clear after send"  # graceful
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
 
 # ---------------------------------------------------------------------------
@@ -174,15 +197,17 @@ class TestConversationJourney:
             ta.fill(msg)
             _settle(e2e_page, THINK_SHORT)  # user pauses before sending
             ta.press("Enter")
-            _settle(e2e_page, THINK_LONG)   # wait for UI to update
+            _settle(e2e_page, THINK_LONG)  # wait for UI to update
 
         # All 3 user messages should appear
         user_msgs = e2e_page.locator("#chatMessages .message.user")
-        assert user_msgs.count() == 3, (
-            f"Expected 3 user message bubbles, got {user_msgs.count()}"
-        )
+        assert (
+            user_msgs.count() == 3
+        ), f"Expected 3 user message bubbles, got {user_msgs.count()}"
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
     def test_user_clears_input_mid_type(self, e2e_page, console_errors, e2e_base_url):
         """User starts typing, changes mind, clears, types something else."""
@@ -212,7 +237,9 @@ class TestConversationJourney:
         user_bubbles = e2e_page.locator("#chatMessages .message.user")
         assert user_bubbles.count() >= 1
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +267,9 @@ class TestSessionLifecycleJourney:
         _settle(e2e_page, THINK_MEDIUM)
 
         # Step 2: If a name input appears, type the session name
-        name_input = e2e_page.locator("input[placeholder*='名称'], input[placeholder*='name'], .session-name-input").first
+        name_input = e2e_page.locator(
+            "input[placeholder*='名称'], input[placeholder*='name'], .session-name-input"
+        ).first
         if name_input.count() > 0 and name_input.is_visible():
             name_input.fill(session_name)
             _settle(e2e_page, THINK_SHORT)
@@ -254,7 +283,9 @@ class TestSessionLifecycleJourney:
         user_msgs = e2e_page.locator("#chatMessages .message.user")
         assert user_msgs.count() >= 1, "Message should appear in new session"
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
     def test_switch_between_sessions(self, e2e_page, console_errors, e2e_base_url):
         """User creates 2 sessions via API, switches between them."""
@@ -263,10 +294,8 @@ class TestSessionLifecycleJourney:
         s2_name = _unique_name("beta")
 
         try:
-            r1 = _api(e2e_base_url, "post", "/api/sessions",
-                      json={"name": s1_name})
-            r2 = _api(e2e_base_url, "post", "/api/sessions",
-                      json={"name": s2_name})
+            r1 = _api(e2e_base_url, "post", "/api/sessions", json={"name": s1_name})
+            r2 = _api(e2e_base_url, "post", "/api/sessions", json={"name": s2_name})
             if r1.status_code not in (200, 201) or r2.status_code not in (200, 201):
                 pytest.skip("Session API not available")
             s1_id = r1.json().get("session_id") or r1.json().get("id")
@@ -279,7 +308,9 @@ class TestSessionLifecycleJourney:
             _settle(e2e_page, THINK_LONG)
 
             # User sees sessions in sidebar, clicks first session
-            item1 = e2e_page.locator(f"[data-session='{s1_name}'], [data-id='{s1_id}']").first
+            item1 = e2e_page.locator(
+                f"[data-session='{s1_name}'], [data-id='{s1_id}']"
+            ).first
             if item1.count() > 0 and item1.is_visible():
                 item1.click()
                 _settle(e2e_page, THINK_MEDIUM)
@@ -289,7 +320,9 @@ class TestSessionLifecycleJourney:
                 _settle(e2e_page, THINK_LONG)
 
             # Switch to session 2
-            item2 = e2e_page.locator(f"[data-session='{s2_name}'], [data-id='{s2_id}']").first
+            item2 = e2e_page.locator(
+                f"[data-session='{s2_name}'], [data-id='{s2_id}']"
+            ).first
             if item2.count() > 0 and item2.is_visible():
                 item2.click()
                 _settle(e2e_page, THINK_MEDIUM)
@@ -297,7 +330,9 @@ class TestSessionLifecycleJourney:
                 # Session 2 should have empty chat (no bleed from session 1)
                 _settle(e2e_page, THINK_LONG)
 
-            assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+            assert (
+                _real_errors(console_errors) == []
+            ), f"JS errors: {_real_errors(console_errors)}"
         finally:
             # Clean up
             for sid in [s1_id, s2_id]:
@@ -346,13 +381,17 @@ class TestSkillMarketplaceJourney:
         e2e_page.mouse.wheel(0, 300)
         _settle(e2e_page, THINK_MEDIUM)
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
     def test_search_skill_journey(self, e2e_page, console_errors, e2e_base_url):
         """User types in search box to find a specific skill."""
         self._goto_marketplace(e2e_page, e2e_base_url)
 
-        search = e2e_page.locator("#sm-search-input, input[placeholder*='搜索'], input[type='search']").first
+        search = e2e_page.locator(
+            "#sm-search-input, input[placeholder*='搜索'], input[type='search']"
+        ).first
         if search.count() == 0 or not search.is_visible():
             pytest.skip("Search input not found")
 
@@ -379,7 +418,9 @@ class TestSkillMarketplaceJourney:
         search.press("Delete")
         _settle(e2e_page, THINK_MEDIUM)
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
     def test_open_and_close_skill_detail(self, e2e_page, console_errors, e2e_base_url):
         """User clicks a skill card, reads details, closes the drawer."""
@@ -403,7 +444,9 @@ class TestSkillMarketplaceJourney:
         _settle(e2e_page, THINK_LONG)
 
         # Step 3: Drawer should open
-        drawer = e2e_page.locator("#sm-drawer, .skill-drawer, .detail-panel, [class*='drawer']").first
+        drawer = e2e_page.locator(
+            "#sm-drawer, .skill-drawer, .detail-panel, [class*='drawer']"
+        ).first
         if drawer.count() > 0 and drawer.is_visible():
             _settle(e2e_page, THINK_MEDIUM)
 
@@ -415,7 +458,9 @@ class TestSkillMarketplaceJourney:
                 close_btn.click()
                 _settle(e2e_page, THINK_MEDIUM)
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
 
 # ---------------------------------------------------------------------------
@@ -435,15 +480,19 @@ class TestFileAttachmentJourney:
             pytest.skip("File input not found")
 
         # Step 1: User attaches a text file
-        file_input.set_input_files({
-            "name": "meeting_notes.txt",
-            "mimeType": "text/plain",
-            "buffer": b"Meeting notes:\n1. Discuss Q1 goals\n2. Review backlog\n3. Plan sprint",
-        })
+        file_input.set_input_files(
+            {
+                "name": "meeting_notes.txt",
+                "mimeType": "text/plain",
+                "buffer": b"Meeting notes:\n1. Discuss Q1 goals\n2. Review backlog\n3. Plan sprint",
+            }
+        )
         _settle(e2e_page, THINK_LONG)
 
         # Step 2: File preview may appear — check gracefully
-        preview = e2e_page.locator("#filePreview, .file-preview, .attachment-preview, [class*='file-chip']").first
+        preview = e2e_page.locator(
+            "#filePreview, .file-preview, .attachment-preview, [class*='file-chip']"
+        ).first
         if preview.count() > 0 and preview.is_visible():
             # User reads file name in preview
             _settle(e2e_page, THINK_SHORT)
@@ -462,9 +511,13 @@ class TestFileAttachmentJourney:
         user_msgs = e2e_page.locator("#chatMessages .message.user")
         assert user_msgs.count() >= 1, "User message should appear after send"
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
-    def test_attach_multiple_files_workflow(self, e2e_page, console_errors, e2e_base_url):
+    def test_attach_multiple_files_workflow(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         """User attaches multiple files, checks preview, clears, re-attaches one."""
         _goto(e2e_page, f"{e2e_base_url}/")
         _settle(e2e_page, THINK_LONG)
@@ -474,20 +527,24 @@ class TestFileAttachmentJourney:
             pytest.skip("File input not found")
 
         # Step 1: Attach first file
-        file_input.set_input_files({
-            "name": "report.txt",
-            "mimeType": "text/plain",
-            "buffer": b"Q1 report data: revenue $1M, costs $600K",
-        })
+        file_input.set_input_files(
+            {
+                "name": "report.txt",
+                "mimeType": "text/plain",
+                "buffer": b"Q1 report data: revenue $1M, costs $600K",
+            }
+        )
         _settle(e2e_page, THINK_MEDIUM)
 
         # Step 2: User sees preview, decides to also upload second file
         # (set_input_files replaces — simulate clearing and re-attaching)
-        file_input.set_input_files({
-            "name": "summary.txt",
-            "mimeType": "text/plain",
-            "buffer": b"Executive summary: profitable quarter",
-        })
+        file_input.set_input_files(
+            {
+                "name": "summary.txt",
+                "mimeType": "text/plain",
+                "buffer": b"Executive summary: profitable quarter",
+            }
+        )
         _settle(e2e_page, THINK_MEDIUM)
 
         # Step 3: User types follow-up and sends
@@ -496,7 +553,9 @@ class TestFileAttachmentJourney:
         ta.press("Enter")
         _settle(e2e_page, THINK_LONG)
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
 
 # ---------------------------------------------------------------------------
@@ -536,7 +595,9 @@ class TestKeyboardNavigationJourney:
             e2e_page.keyboard.press("Enter")
             _settle(e2e_page, THINK_LONG)
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
     def test_escape_clears_or_cancels(self, e2e_page, console_errors, e2e_base_url):
         """User presses Escape mid-type — text is cleared or dialog dismissed."""
@@ -555,7 +616,9 @@ class TestKeyboardNavigationJourney:
         # No crash expected — either text remains or clears, both are valid
         _settle(e2e_page, THINK_MEDIUM)
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
 
 # ---------------------------------------------------------------------------
@@ -591,9 +654,13 @@ class TestPageNavigationJourney:
         _settle(e2e_page, THINK_LONG)
 
         # Step 4: Chat history should still be visible (or page reloaded cleanly)
-        assert e2e_page.locator("#chatMessages").count() > 0, "Chat area should exist after back"
+        assert (
+            e2e_page.locator("#chatMessages").count() > 0
+        ), "Chat area should exist after back"
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
     def test_navigate_all_main_pages(self, e2e_page, console_errors, e2e_base_url):
         """User visits each main section of the app sequentially."""
@@ -619,7 +686,9 @@ class TestPageNavigationJourney:
             # Don't assert hard — just verify no crash (errors check below)
             _ = found
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
 
 # ---------------------------------------------------------------------------
@@ -664,7 +733,9 @@ class TestMobileUserJourney:
         # Restore viewport
         e2e_page.set_viewport_size({"width": 1280, "height": 720})
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
 
 # ---------------------------------------------------------------------------
@@ -674,7 +745,9 @@ class TestMobileUserJourney:
 class TestCopyPasteJourney:
     """User copies text from a message bubble and pastes it as input."""
 
-    def test_paste_quoted_text_as_new_message(self, e2e_page, console_errors, e2e_base_url):
+    def test_paste_quoted_text_as_new_message(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         """User sends a message, manually quotes part of it, sends again."""
         _goto(e2e_page, f"{e2e_base_url}/")
         _settle(e2e_page, THINK_LONG)
@@ -707,7 +780,9 @@ class TestCopyPasteJourney:
         user_msgs = e2e_page.locator("#chatMessages .message.user")
         assert user_msgs.count() >= 2, "Both messages should appear"
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
 
 # ---------------------------------------------------------------------------
@@ -717,7 +792,9 @@ class TestCopyPasteJourney:
 class TestRapidContextSwitching:
     """User quickly switches between actions without waiting for each to complete."""
 
-    def test_rapid_session_and_page_switches(self, e2e_page_with_network, failed_requests, console_errors, e2e_base_url):
+    def test_rapid_session_and_page_switches(
+        self, e2e_page_with_network, failed_requests, console_errors, e2e_base_url
+    ):
         """Rapidly switch sessions and tabs — no state bleed or crash."""
         _goto(e2e_page_with_network, f"{e2e_base_url}/")
         _settle(e2e_page_with_network, THINK_LONG)
@@ -751,7 +828,9 @@ class TestRapidContextSwitching:
         ta = e2e_page_with_network.locator("#messageInput")
         assert ta.is_visible(), "Input should still be visible after navigation"
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
     def test_repeated_empty_send_attempts(self, e2e_page, console_errors, e2e_base_url):
         """User spam-clicks send with empty input — no crash, no ghost bubbles."""
@@ -773,4 +852,6 @@ class TestRapidContextSwitching:
         user_msgs = e2e_page.locator("#chatMessages .message.user")
         assert user_msgs.count() == 0, "Empty send spam should not create bubbles"
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"

@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Runtime Hook — 语音模块安全降级
 PyInstaller 打包后, 动态链接库（如 portaudio.dll）可能缺失。

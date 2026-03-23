@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto LLM Provider Factory
 ==========================
@@ -14,6 +16,7 @@ Usage:
     provider = get_llm_provider(provider="openai")       # force OpenAI
     provider = get_llm_provider(model="claude-3-7-sonnet-20250219")  # infer from model
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,27 +30,33 @@ logger = logging.getLogger(__name__)
 
 # ── Provider registry ─────────────────────────────────────────────────────────
 
+
 def _load_gemini(api_key: str = None) -> LLMProvider:
     from .gemini import GeminiProvider
+
     return GeminiProvider(api_key=api_key)
 
 
 def _load_openai() -> LLMProvider:
     from .openai_provider import OpenAIProvider
+
     return OpenAIProvider()
 
 
 def _load_anthropic() -> LLMProvider:
     from .anthropic_provider import AnthropicProvider
+
     return AnthropicProvider()
 
 
 def _load_ollama() -> LLMProvider:
     try:
         from .ollama_llm_provider import OllamaLLMProvider
+
         return OllamaLLMProvider()
     except ImportError:
         from .ollama_provider import OllamaClientProxy  # type: ignore
+
         return OllamaClientProxy()  # type: ignore
 
 
@@ -60,17 +69,17 @@ _LOADERS = {
 
 # Model-name prefix → provider name
 _MODEL_PREFIX_MAP = (
-    ("gpt-",       "openai"),
-    ("o1",         "openai"),
-    ("o3",         "openai"),
-    ("o4",         "openai"),
-    ("claude-",    "anthropic"),
-    ("gemini-",    "gemini"),
+    ("gpt-", "openai"),
+    ("o1", "openai"),
+    ("o3", "openai"),
+    ("o4", "openai"),
+    ("claude-", "anthropic"),
+    ("gemini-", "gemini"),
     ("deep-research", "gemini"),
-    ("llama",      "ollama"),
-    ("qwen",       "ollama"),
-    ("mistral",    "ollama"),
-    ("phi",        "ollama"),
+    ("llama", "ollama"),
+    ("qwen", "ollama"),
+    ("mistral", "ollama"),
+    ("phi", "ollama"),
 )
 
 
@@ -91,6 +100,7 @@ def get_llm_provider(
     request_api_key: Optional[str] = None
     try:
         from flask import g as flask_g
+
         request_api_key = getattr(flask_g, "api_key", None) or None
     except RuntimeError:
         pass  # Not inside a Flask request context
@@ -102,7 +112,9 @@ def get_llm_provider(
             if name == "gemini" and request_api_key:
                 return _load_gemini(api_key=request_api_key)
             return _LOADERS[name]()
-        logger.warning(f"[ProviderFactory] Unknown provider '{provider}', falling back to auto-detect")
+        logger.warning(
+            f"[ProviderFactory] Unknown provider '{provider}', falling back to auto-detect"
+        )
 
     # 2. Infer from model name prefix
     if model:
@@ -118,7 +130,11 @@ def get_llm_provider(
         return _load_gemini(api_key=request_api_key)
 
     # 4. Auto-detect from available env keys
-    if os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY") or os.getenv("GOOGLE_API_KEY"):
+    if (
+        os.getenv("GEMINI_API_KEY")
+        or os.getenv("API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+    ):
         return _load_gemini()
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         return _load_openai()
@@ -133,7 +149,11 @@ def get_llm_provider(
 def list_available_providers() -> list[str]:
     """Return names of providers whose API keys are present in the environment."""
     available = []
-    if os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY") or os.getenv("GOOGLE_API_KEY"):
+    if (
+        os.getenv("GEMINI_API_KEY")
+        or os.getenv("API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+    ):
         available.append("gemini")
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         available.append("openai")
@@ -142,6 +162,7 @@ def list_available_providers() -> list[str]:
     # Ollama is always potentially available (check runtime)
     try:
         import socket
+
         s = socket.socket()
         s.settimeout(0.3)
         if s.connect_ex(("127.0.0.1", 11434)) == 0:
