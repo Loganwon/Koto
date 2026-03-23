@@ -30,7 +30,6 @@ import logging
 import re
 import threading
 import uuid
-from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional

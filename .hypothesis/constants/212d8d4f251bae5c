@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\api\distill_routes.py
-# hypothesis_version: 6.151.9
-
-[7200.0, 202, 400, 404, 409, 500, '*.json', '/adapters', '/jobs', '/jobs/<job_id>', '/stream/<job_id>', '/submit', 'Cache-Control', 'GET', 'POST', 'X-Accel-Buffering', 'adapters', 'config', 'config_override', 'count', 'dataset_path', 'distill', 'error', 'job_id', 'jobs', 'message', 'no', 'no-cache', 'queued', 'skill_id', 'skill_id is required', 'status', 'success', 'text/event-stream', 'utf-8']

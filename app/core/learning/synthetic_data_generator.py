@@ -30,9 +30,7 @@ RESEARCH / WEB_SEARCH / FILE_SEARCH / SYSTEM / AGENT
 
 from __future__ import annotations
 
-import json
 import random
-from dataclasses import dataclass
 from typing import List, Tuple
 
 # (user_input, task_type, confidence)

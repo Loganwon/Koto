@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\ops\health_snapshot.py
-# hypothesis_version: 6.151.9
-
-[0.1, 200, '; ', '=', 'API Key 已配置', 'GEMINI_API_KEY', 'GEMINI_API_KEY 未配置', 'GEMINI_API_KEY=', 'Ollama 不可达（本地模型不可用）', 'Ollama 可达', 'OpsEventBus 尚未初始化', 'User-Agent', 'checks', 'cpu_pct', 'critical', 'degraded', 'enabled', 'error', 'errored', 'failed', 'healthy', 'issues', 'job_queue', 'job_runner', 'koto-healthcheck', 'mem_pct', 'message', 'milliseconds', 'model', 'ollama', 'ops_events', 'pending', 'psutil 未安装（跳过资源检查）', 'recent_errors', 'resources', 'running', 'scheduler', 'skills', 'status', 'summary', 'timestamp', 'total', 'unhealthy', 'utf-8', 'value', '所有系统正常', '无异常运维事件']

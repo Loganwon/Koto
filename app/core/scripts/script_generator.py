@@ -7,7 +7,7 @@ Supports PowerShell (Windows) and Bash (Linux/Mac).
 
 import logging
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

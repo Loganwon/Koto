@@ -32,11 +32,10 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 # ── 路径引导 ──────────────────────────────────────────────────────────────────
 _ROOT = Path(__file__).resolve().parents[1]
@@ -111,7 +110,7 @@ def train(args: argparse.Namespace):
         sys.exit(1)
 
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
+    from transformers import AutoModelForCausalLM, AutoTokenizer
     from peft import LoraConfig, get_peft_model, TaskType
     from trl import SFTTrainer, SFTConfig
     from datasets import Dataset

@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\web\memory_api_routes.py
-# hypothesis_version: 6.151.9
-
-[400, 404, 500, '...', '/api/memories', '/api/memory/profile', '/api/memory/stats', 'DELETE', 'GET', 'POST', 'active_hours', 'ai_message', 'by_category', 'by_source', 'category', 'content', 'context', 'days', 'dislikes', 'done', 'error', 'last_seen', 'likes', 'matrix', 'memory', 'message', 'metadata', 'most_used', 'open_tasks', 'open_tasks_count', 'personality_matrix', 'preferences', 'preferences_count', 'profile', 'profile_stats', 'recent_topics_7d', 'result', 'shadow', 'source', 'stats', 'streak', 'streak_days', 'success', 'summary', 'task_style', 'task_types', 'technical_background', 'tools', 'total_interactions', 'total_memories', 'total_observations', 'unknown', 'use_count', 'user', 'user_message', 'user_preference', 'user_profile', '内容不能为空', '当前使用基础记忆管理器', '当前使用基础记忆管理器，不支持用户画像', '当前版本不支持个人矩阵', '当前版本不支持自动学习', '用户画像已更新', '记忆不存在', '记忆已删除', '🧠 增强记忆系统API路由已注册']

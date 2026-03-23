@@ -13,8 +13,7 @@ import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 
@@ -264,7 +263,7 @@ class PersonalityMatrix:
                     saved = json.load(f)
                 return self._deep_merge(default, saved)
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return default
 
     def _save(self):
@@ -539,7 +538,7 @@ class PersonalityMatrix:
                     "recent_themes": saved.get("recent_themes", []),
                 }
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return {
             "cognitive": dict(self._DEFAULT_COGNITIVE),
             "expertise": {},
@@ -957,7 +956,7 @@ class EnhancedMemoryManager:
             if rag is not None:
                 rag.index_text(item["content"], source=f"mem_{item['id']}")
         except Exception:
-            pass  # 向量索引失败不影响主路径
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 向量索引失败不影响主路径
 
         # 同步写入向量记庆（原有 numpy 路径）
         self.add_vector_memory(
@@ -1228,7 +1227,7 @@ class EnhancedMemoryManager:
                     if results:
                         return results[:limit]
         except Exception as _fe:
-            pass  # FAISS 失败 → 降级
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # FAISS 失败 → 降级
 
         # ── 降级：原有 numpy cosine 路径 ──────────────────────────────
         if self._embedding_fn is None or not self.vector_memories:

@@ -19,7 +19,6 @@ Koto LangChain Adapter
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Dict, Iterator, List, Optional, Sequence, Union
 
 logger = logging.getLogger(__name__)
@@ -131,13 +130,12 @@ if _LANGCHAIN_AVAILABLE:
             max_tokens  : 最大输出 token 数（默认 8192）
         """
 
+        model_config = {"arbitrary_types_allowed": True}
+
         model_id: str = "gemini-3-flash-preview"
         temperature: float = 0.7
         max_tokens: int = 8192
         _koto_provider: Any = None  # GeminiProvider 实例（私有，不序列化）
-
-        class Config:
-            arbitrary_types_allowed = True
 
         def __init__(
             self,

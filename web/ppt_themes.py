@@ -6,7 +6,7 @@ Defines the visual style, color palettes, and layout rules for Koto PPT Generato
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Tuple
 
 RGB = Tuple[int, int, int]
 

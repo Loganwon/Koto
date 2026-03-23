@@ -14,15 +14,13 @@
 └─ 系统操作 (BACKUP, EXPORT, CONFIG_CHANGE)
 """
 
-import hashlib
 import json
 import logging
 import sqlite3
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)

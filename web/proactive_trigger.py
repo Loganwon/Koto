@@ -1088,7 +1088,7 @@ class ProactiveTriggerSystem:
                             reason = ctx.get("waiting_reason", "需要你的补充信息")
                             messages.append(f"《{g.title}》{reason}")
                     except Exception:
-                        pass
+                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             if check_completed:
                 # 找最近 15 分钟内完成的目标（避免重复提醒）

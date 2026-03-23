@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\ops\ops_event_bus.py
-# hypothesis_version: 6.151.9
-
-[500, '*', '[OpsEvent] %s | %s', 'by_type', 'critical', 'description', 'detail', 'error', 'event_type', 'high', 'info', 'low', 'medium', 'metric_name', 'metric_value', 'milliseconds', 'severity', 'source', 'system', 'threshold', 'timestamp', 'total', 'warning']

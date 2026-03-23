@@ -22,22 +22,16 @@
     "  3. 填写各个字段，不需要全填，最少填：name / description / prompt / examples",
     "  4. 放到 config/skills/ 目录，重启 Koto 即可生效"
   ],
-
   "id": "my_custom_skill",
   "_id_comment": "唯一ID，小写字母+下划线，不能和其他 skill 重复",
-
   "name": "我的自定义技能",
   "icon": "✨",
   "_icon_comment": "直接输入一个 emoji，会显示在 UI 上",
-
   "category": "domain",
   "_category_comment": "三选一：behavior（改变 AI 行为）| style（改变风格）| domain（专业领域技能）",
-
   "description": "简短描述这个 skill 是干什么的（20 字以内，显示在 Skill 列表里）",
-
   "intent_description": "描述什么情况下应该自动激活这个 skill（30 字以内，AI 匹配意图用）",
   "_intent_description_comment": "例：'用户需要分析、总结、改写某类文本时'",
-
   "prompt": "\n\n## ✨ 领域要求：[技能名称]\n\n你是一名 [角色描述]。\n\n当用户提交 [输入类型] 时，你必须：\n1. [第一步要做什么]\n2. [第二步要做什么]\n3. [第三步要做什么]\n\n### 输出格式\n[精确描述格式，比如：Markdown 表格 / JSON / 带编号的列表]\n\n### 不允许\n- [禁止做的事情1]\n- [禁止做的事情2]",
   "_prompt_comment": [
     "prompt 是最核心的字段，决定 AI 怎么工作。",
@@ -45,7 +39,6 @@
     "越具体越好，用 '必须' '不允许' 代替模糊词语。",
     "写完 prompt 后，写几个 examples（下面的字段），效果会大幅提升。"
   ],
-
   "examples": [
     {
       "_comment": "examples 是 Anthropic 强调的最重要元素。写 2-3 个就够了。",
@@ -70,7 +63,6 @@
     "  · input 和 output 格式要和你在 prompt 里描述的完全一致",
     "  · 至少一个 '典型例子' + 一个 '边界/特殊例子'"
   ],
-
   "output_spec": {
     "format": "markdown",
     "_format_comment": "markdown | plain | json | table | code | any",
@@ -82,8 +74,9 @@
     "required_json_keys": [],
     "description": "在这里描述期望的输出格式（比 output_spec.format 更详细的文字说明）"
   },
-
-  "task_types": ["CHAT"],
+  "task_types": [
+    "CHAT"
+  ],
   "_task_types_comment": [
     "决定这个 skill 在哪些任务类型下生效。常用：",
     "  CHAT        通用对话（绝大多数情况）",
@@ -93,23 +86,20 @@
     "  RESEARCH    研究/查询任务",
     "留空 [] 或省略 = 所有任务类型都生效"
   ],
-
   "bound_tools": [],
   "_bound_tools_comment": "这个 skill 推荐使用的工具名列表。填了之后 AI 会优先调用这些工具。常见工具：read_file, write_file, web_search, list_directory, annotate_document",
-
   "enabled": false,
   "_enabled_comment": "false = 默认关闭，用户在 UI 里手动开启 | true = 默认开启",
-
-  "tags": ["自定义", "示例"],
+  "tags": [
+    "自定义",
+    "示例"
+  ],
   "_tags_comment": "搜索标签，中英文均可，方便在 Skill 市场里被找到",
-
   "priority": 50,
   "_priority_comment": "0-100，数字越大越先注入到 prompt。默认 50，重要 skill 可设 70-80",
-
   "version": "1.0.0",
   "author": "your_name",
   "created_at": "2026-03-14T00:00:00Z",
-
   "_advanced_comment": [
     "====================================================================",
     "  进阶字段（小白可以忽略，熟练后再添加）",
@@ -124,11 +114,9 @@
     "entry_point    : 绑定一个 Python 函数实现，让 skill 直接调用真实代码",
     "                 格式：'module.path:function_name'"
   ],
-
   "plan_template": [],
   "executor_tools": [],
   "entry_point": null,
-
   "_permissions_comment": [
     "====================================================================",
     "  permissions — Skill 权限系统（可选）",
@@ -145,7 +133,6 @@
     "示例：[\"ui_interactive\", \"clipboard_write\"]"
   ],
   "permissions": [],
-
   "_ui_extensions_comment": [
     "====================================================================",
     "  ui_extensions — UI 交互扩展（需要 ui_interactive 权限）",
@@ -184,7 +171,11 @@
         "tooltip": "点击后自动发送消息"
       }
     ],
-    "quick_replies": ["好的", "再来一个", "不对，重新来"],
+    "quick_replies": [
+      "好的",
+      "再来一个",
+      "不对，重新来"
+    ],
     "floating_widget": {
       "type": "dice_roller",
       "title": "骰子",
@@ -192,4 +183,3 @@
     }
   }
 }
-

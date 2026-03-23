@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\memory\conversation_tracker.py
-# hypothesis_version: 6.151.9
-
-[120, '"([^"]{2,20})"', "'([^']{2,20})'", 'ConversationTracker', '[。！？\\n]', '[对话上下文]', '`([^`]{2,20})`', 'accumulated_facts', 'active_topic', 'bug', 'cpu', 'csv', 'excel', 'javascript', 'pdf', 'python', 'r', 'recent_entities', 'translate', 'turn_count', 'updated_at', 'utf-8', 'w', 'word', '})', '。', '《([^《》]{1,20})》', '「([^「」]{2,20})」', '上轮回复要点：', '下雨', '中文', '代码', '公式', '内存', '写入', '函数', '大纲', '天气', '找一下', '报错', '搜索', '数学', '文件', '文档', '方案', '方程', '日文', '晴', '最新', '有没有', '查找', '步骤', '气温', '流程', '温度', '硬件', '磁盘', '程序', '系统', '结果', '翻译', '脚本', '英文', '计划', '计算', '读取', '进程', '风', '；']

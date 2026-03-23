@@ -112,6 +112,45 @@ _RECOMMENDED_TRIGGER_PRESETS = [
         "enabled": True,
         "config": {"interval_seconds": 1800},  # 每 30 分钟检查一次
     },
+    {
+        "key": "morning_briefing",
+        "name": "晨间新闻与日程播报",
+        "trigger_type": "cron",
+        "job_type": "agent_query",
+        "job_payload": {
+            "query": "请读取我今天的目标与日程，同时结合最新的重要资讯，生成一份高信噪比的简短晨间播报。",
+            "preset_key": "morning_briefing"
+        },
+        "session_id": "system",
+        "enabled": False,
+        "config": {"time": "08:30"},
+    },
+    {
+        "key": "read_it_later_digest",
+        "name": "稍后阅读自动摘要",
+        "trigger_type": "interval",
+        "job_type": "agent_query",
+        "job_payload": {
+            "query": "请扫描我的“稍后阅读”文件夹，提取并阅读最新的未处理文件，提炼出核心摘要和结论记录到知识库中。",
+            "preset_key": "read_it_later_digest"
+        },
+        "session_id": "system",
+        "enabled": False,
+        "config": {"interval_seconds": 14400},  # 每 4 小时检查一次
+    },
+    {
+        "key": "weekly_review",
+        "name": "周报与目标回顾",
+        "trigger_type": "cron",
+        "job_type": "agent_query",
+        "job_payload": {
+            "query": "请回顾近期所有的任务变更(Task Ledger)和设定的目标(Goal)，总结本阶段的工作产出，并对未完成的事项进行梳理与提醒。",
+            "preset_key": "weekly_review"
+        },
+        "session_id": "system",
+        "enabled": False,
+        "config": {"time": "17:00"},
+    },
 ]
 
 
@@ -336,7 +375,7 @@ class TriggerRegistry:
                     },
                 )
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return None
 
     # ── 调度循环 ──────────────────────────────────────────────────────────────
@@ -379,7 +418,7 @@ class TriggerRegistry:
                     if last_dt.date() == now_dt.date():
                         return False  # 今天已执行过
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             return True
 
         # webhook / startup 不由调度器主动触发

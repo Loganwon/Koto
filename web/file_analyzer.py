@@ -5,10 +5,8 @@
 
 import json
 import logging
-import mimetypes
 import os
 import re
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -569,7 +567,7 @@ class FileAnalyzer:
                     if file_name in _seen:
                         return  # 已有此文件的分类样本，跳过
                 except Exception:
-                    pass  # 去重失败时仍继续写入，宁可重复也不丢数据
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 去重失败时仍继续写入，宁可重复也不丢数据
 
             content_preview = (content or "")[:600].strip()
             sample = {
@@ -587,7 +585,7 @@ class FileAnalyzer:
             with open(_train_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(sample, ensure_ascii=False) + "\n")
         except Exception:
-            pass  # 训练样本写入失败不影响主流程
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 训练样本写入失败不影响主流程
 
     def _sanitize_component(self, value: str) -> str:
         """Clean a path component to avoid invalid characters."""

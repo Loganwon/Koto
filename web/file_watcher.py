@@ -164,7 +164,7 @@ class FileWatcher:
             entry.observer.stop()
             entry.observer.join(timeout=3)
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         logger.info(f"[FileWatcher] ⛔ 已停止监控: {directory}")
         return {"success": True, "status": "stopped", "path": directory}
 
@@ -233,7 +233,7 @@ class FileWatcher:
                 try:
                     self._on_file_cataloged(outcome)
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             status = "✅" if outcome["success"] else "⚠️"
             logger.info(f"[FileWatcher] {status} {p.name} → {suggested_folder}")

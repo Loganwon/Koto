@@ -8,7 +8,6 @@ job_type="goal_check" 的作业，由本模块中的处理器负责执行。
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Optional
 

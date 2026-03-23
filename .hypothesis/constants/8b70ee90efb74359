@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\jobs\job_runner.py
-# hypothesis_version: 6.151.9
-
-[0.7, 1.0, 300.0, 100, 300, 500, 1000, 'ACTION', 'ANSWER', 'THOUGHT', 'agent_query', 'auto_catalog', 'content', 'error', 'history', 'job_failed', 'job_runner', 'job_type', 'koto_job', 'koto_job_dispatcher', 'koto_job_recovery', 'max_retries', 'output', 'payload.query 不能为空', 'proactive_tick', 'query', 'raw', 'skill_exec', 'skill_id', 'source_dir', 'step_type', 'system', 'task_id', 'timeout_seconds', 'tool_name', 'user_input', 'variables', 'workflow', 'workflow_id', '{}', '工作流完成', '开始主动交互巡检', '整理完成']

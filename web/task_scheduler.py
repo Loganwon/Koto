@@ -12,7 +12,7 @@ import threading
 import time
 from datetime import datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List
+from typing import Callable, Dict, List
 
 import schedule  # pip install schedule
 

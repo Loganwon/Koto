@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\tasks\progress_bus.py
-# hypothesis_version: 6.151.9
-
-[0.1, 5.0, 10.0, 300.0, 200, 300, ': heartbeat\n\n', 'ProgressBus', 'cancelled', 'completed', 'failed', 'milliseconds', 'progress', 'step', 'task_id']

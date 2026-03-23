@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\multi_agent.py
-# hypothesis_version: 6.151.9
-
-[0.7, 'DECISION: REVISE', 'MultiAgentState', '_', '__annotations__', '__end__', 'agent', 'analysis', 'code', 'coder', 'configurable', 'content', 'critic', 'critic_feedback', 'data_analyst', 'done', 'draft', 'error', 'extra_outputs', 'final_output', 'finalize', 'max_revisions', 'messages', 'model_id', 'next', 'output', 'research_result', 'researcher', 'review_feedback', 'reviewer', 'revise', 'revision_count', 'revision_target', 'roles 不能为空', 'session_id', 'state', 'steps', 'thread_id', 'updates', 'user_input', 'writer', '代码修订专员', '代码审查专员', '代码生成专员', '修订专员', '写作专员', '审核专员', '数据分析专员', '研究专员']

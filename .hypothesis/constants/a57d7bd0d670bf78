@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\services\rag_service.py
-# hypothesis_version: 6.151.9
-
-[0.0, 0.2, 0.3, 1.0, 120, 150, 800, 1024, '*', '.', '.csv', '.doc', '.docx', '.faiss', '.json', '.markdown', '.md', '.pdf', '.txt', 'API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'KOTO_DB_DIR', 'RAGService', '[RAGService] 索引已清空', '_ce', 'all-MiniLM-L6-v2', 'answer', 'chunk_index', 'chunks', 'config', 'content', 'context_used', 'cpu', 'device', 'doc', 'doc_count', 'docstore', 'embedding_model', 'faiss_index', 'faiss_index*', 'gemini-2.5-flash', 'ignore', 'index_dir', 'index_path', 'index_size_mb', 'index_to_docstore_id', 'indexed_at', 'initialized', 'metadata.json', 'normalize_embeddings', 'not_loaded', 'rag_index', 'rrf_score', 'saved_at', 'score', 'source', 'sources', 'text', 'unknown', 'user_input', 'utf-8', '。', '！', '，', '；', '？']

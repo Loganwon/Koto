@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\api\macro_routes.py
-# hypothesis_version: 6.151.9
-
-[400, 404, 500, '/api/macro', '/history', '/pending', 'data', 'error', 'macro', 'name', 'name 不能为空', 'name 不能超过 50 个字符', 'ok', 'skill_id', '未找到该建议，或已被处理']

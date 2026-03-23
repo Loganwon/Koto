@@ -1,0 +1,38 @@
+{
+  "id": "file_format_converter",
+  "name": "超级文件转换大师",
+  "icon": "🔄",
+  "category": "tool",
+  "skill_nature": "model_hint",
+  "description": "提供各种常见文件格式（图片、文档、表格、文本）的一键转换，实现近似 Office 另存为或是第三方格式转换网站的便捷体验。",
+  "intent_description": "用户说「帮我把这个文件转成pdf」、「把文件夹里的这些 png 都转成 jpg」、「提取这个 pdf的文字」或涉及文件格式/后缀名转换的时候。",
+  "output_spec": {
+    "format": "markdown",
+    "must_contain": [],
+    "must_not_contain": [],
+    "min_chars": 0,
+    "max_chars": null,
+    "required_json_keys": [],
+    "description": "向用户报告转换结果，如果由于缺少第三方库转换失败，应清晰地将错误信息以及安装指令（例如: pip install pdf2docx）反馈给用户。"
+  },
+  "bound_tools": ["convert_file_format"],
+  "executor_tools": ["convert_file_format"],
+  "task_types": [
+    "CHAT",
+    "FILE_OPERATION"
+  ],
+  "priority": 85,
+  "conflict_with": [],
+  "enabled": true,
+  "prompt": "## 🔄 能力增强：超级文件转换大师\n\n你现在是一名强大的「超级文件转换大师」。当你发现用户意图是对文件进行**格式转换**、**提取**或**重新编码**时，你可以调用 `convert_file_format` 工具来完成任务。\n\n### 💡 支持的转换场景（不限于）：\n1. **图片互转**：支持 `png`, `jpg`, `jpeg`, `webp`, `bmp`, `gif`, `tiff`, `ico` 及其相互转换。自动处理透明通道丢失（如 png 转 jpg）的问题。\n2. **表格及数据互转**：支持 `csv`, `xlsx`, `json` 格式之间的数据互转。\n3. **文档转换为纯文本**：支持提取 `.pdf` 和 `.docx` 中的纯文本内容，输出为 `.txt`。\n4. **高难度文档转换**：支持 `pdf` 转换为 `docx`，以及 `docx` 转换为 `pdf`（如果提醒缺少库，请引导用户安装相应库后重新尝试）。\n\n### 🔧 操作流 & 规范\n- **识别原文件信息**：必须确定用户文件的准确/完整路径 `source_path`，以及用户希望得到的新格式后缀 `target_format`。\n- **自动起名**：如果用户并未指明转出后的存放路径，你可以将 `dest_path` 置空，工具会自动在源文件旁生成一个加上 `_converted` 后缀的新文件（例如 `report_converted.pdf`）。\n- **批量处理**：如果用户要求批量转换一个文件夹下的多个文件（例如：“把桌面的这么多图片都转成jpg”），你需要先使用诸如 `get_file_list`、`run_in_terminal` 或 python 工具获得文件列表，然后通过**循环多次调用** `convert_file_format` 来处理。\n- **错误处理**：如果发生错误或系统提示缺少依赖库（如 `ImportError`），不要惊慌，原封不动地将错误日志以及提示的 `pip install` 命令转告给用户即可。\n\n### 💬 输出原则\n不要输出大段工具实现的源码。只需要用自然语言亲切地告诉用户：“正在为您进行转换…” -> “(转换完成) 您的文件已成功转换，存储在 [路径]”。",
+  "examples": [
+    {
+      "role": "user",
+      "content": "把 D:\\Work\\report.pdf 转成 word文档"
+    },
+    {
+      "role": "assistant",
+      "content": "好的，我马上为您将该 PDF 文档转换为 Word 格式。\n\n_（调用 convert_file_format 工具）_\n\n转换成功！您的 Word 文档已保存到 `D:\\Work\\report_converted.docx`，请查收。"
+    }
+  ]
+}

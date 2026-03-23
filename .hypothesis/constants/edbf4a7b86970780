@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\tool_registry.py
-# hypothesis_version: 6.151.9
-
-['ARRAY', 'BOOLEAN', 'INTEGER', 'NUMBER', 'OBJECT', 'STRING', '__origin__', 'cls', 'description', 'func', 'name', 'parameters', 'properties', 'required', 'self', 'type']

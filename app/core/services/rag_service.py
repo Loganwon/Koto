@@ -542,7 +542,7 @@ class RAGService:
                     for doc in candidates:
                         doc.pop("_ce", None)
         except Exception:
-            pass  # Cross-Encoder 不可用：维持 RRF 顺序
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # Cross-Encoder 不可用：维持 RRF 顺序
 
         result = candidates[:k]
         logger.info(
@@ -738,7 +738,7 @@ class RAGService:
             if faiss_file.exists():
                 index_size_mb = round(faiss_file.stat().st_size / 1024 / 1024, 2)
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
         return {
             "initialized": self._vectorstore is not None,

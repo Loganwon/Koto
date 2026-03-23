@@ -160,22 +160,22 @@ class ContextWindowManager:
         try:
             mgr = get_memory_fn()
             if mgr is not None and query and len(query.strip()) > 4:
-                # 优先 FAISS 语义向量检索（不依赖 _embedding_fn），无结果再降级关键词
+                # 优先 FAISS 语义向量检索，无结果再降级关键词
                 hits: List[Dict] = []
                 if hasattr(mgr, 'search_vector_memories'):
                     try:
-                        hits = mgr.search_vector_memories(query, limit=4) or []
+                        hits = mgr.search_vector_memories(query, limit=6) or []
                     except Exception:
                         hits = []
                 if not hits:
-                    hits = mgr.search_memories(query, limit=4) or []
+                    hits = mgr.search_memories(query, limit=6) or []
                 if hits:
-                    lines: List[str] = []
-                    for h in hits:
-                        content = h.get("content", "")
-                        if content and len(content) > 10:
-                            lines.append(f"• {content[:300]}")
-                    if lines:
+                    # Smart filtering: deduplicate + truncate with scoring
+                    filtered = _smart_filter_page_in(hits, query)
+                    if filtered:
+                        lines: List[str] = [
+                            f"• {h.get('content', '')[:200]}" for h in filtered
+                        ]
                         result["paged_in_context"] = (
                             "## 🧠 相关长期记忆（自动调入）\n" + "\n".join(lines)
                         )
@@ -183,3 +183,58 @@ class ContextWindowManager:
             logger.debug(f"[CWM] page_in failed: {ex}")
 
         return result
+
+
+def _smart_filter_page_in(
+    hits: List[Dict], query: str, max_results: int = 3
+) -> List[Dict]:
+    """
+    Filter page-in memories: deduplicate near-identical content,
+    prefer content with higher query overlap, limit to max_results.
+    """
+    if not hits:
+        return []
+
+    query_lower = query.lower()
+    scored: List[tuple] = []
+
+    for h in hits:
+        content = (h.get("content") or "").strip()
+        if not content or len(content) < 10:
+            continue
+        # Simple relevance: keyword overlap ratio
+        content_lower = content.lower()
+        overlap = sum(1 for w in query_lower.split() if w in content_lower)
+        score = overlap / max(len(query_lower.split()), 1)
+        scored.append((score, content, h))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    # Deduplicate by content similarity (character bigram Jaccard)
+    result: List[Dict] = []
+    seen_contents: List[str] = []
+
+    for _, content, h in scored:
+        is_dup = False
+        for prev in seen_contents:
+            if _content_similarity(content, prev) > 0.5:
+                is_dup = True
+                break
+        if not is_dup:
+            result.append(h)
+            seen_contents.append(content)
+            if len(result) >= max_results:
+                break
+
+    return result
+
+
+def _content_similarity(a: str, b: str) -> float:
+    """Character-bigram Jaccard similarity."""
+    if len(a) < 2 or len(b) < 2:
+        return 1.0 if a == b else 0.0
+    bg_a = {a[i:i + 2] for i in range(len(a) - 1)}
+    bg_b = {b[i:i + 2] for i in range(len(b) - 1)}
+    inter = len(bg_a & bg_b)
+    union = len(bg_a | bg_b)
+    return inter / max(union, 1)

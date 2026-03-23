@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\api\ops_routes.py
-# hypothesis_version: 6.151.9
-
-[100, 200, 500, 503, '/api/ops', '/gc', '/health', '/incidents', '/metrics', '/readiness', '/remediation', '/triggers/status', 'GET', 'POST', '[ops/health] %s', '[ops/incidents] %s', 'agent', 'cancelled', 'collected_objects', 'completed', 'count', 'detail', 'enabled', 'error', 'errored', 'event_type', 'events', 'failed', 'id', 'input', 'job_type', 'jobs', 'last_error', 'last_run', 'milliseconds', 'n', 'name', 'ops', 'ops_events', 'pending', 'pending_list', 'ready', 'rules', 'run_count', 'running', 'running_list', 'scheduler_running', 'severity', 'source', 'status', 'timestamp', 'total', 'total_fires', 'trigger_count', 'trigger_id', 'triggers', 'type', 'unhealthy']

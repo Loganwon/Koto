@@ -48,6 +48,7 @@ class GeminiProvider(LLMProvider):
             or os.getenv("API_KEY")
             or os.getenv("GOOGLE_API_KEY")
         )
+        self._api_base = os.getenv("GEMINI_API_BASE", "").strip()
         self.client = None
 
         if not genai or not types:
@@ -56,12 +57,27 @@ class GeminiProvider(LLMProvider):
 
         if self.api_key:
             try:
-                self.client = genai.Client(api_key=self.api_key)
+                self.client = self._make_client(self.api_key)
             except Exception as exc:
                 logger.error(f"Failed to initialize google.genai client: {exc}")
                 self.client = None
         else:
             logger.warning("No Google API KEY provided")
+
+    def _make_client(self, api_key: str):
+        """Build a genai.Client, honoring GEMINI_API_BASE if configured."""
+        if self._api_base and genai:
+            try:
+                from google.genai._api_client import HttpOptions as _HttpOptions
+                return genai.Client(
+                    api_key=api_key,
+                    http_options=_HttpOptions(
+                        api_version="v1beta", base_url=self._api_base
+                    ),
+                )
+            except Exception:
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+        return genai.Client(api_key=api_key)
 
     def _get_client(self):
         """Return a genai.Client for the current request.
@@ -80,9 +96,9 @@ class GeminiProvider(LLMProvider):
 
         if request_key and request_key != self.api_key and genai:
             try:
-                return genai.Client(api_key=request_key)
+                return self._make_client(request_key)
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return self.client
 
     def generate_content(
@@ -470,7 +486,7 @@ class GeminiProvider(LLMProvider):
             try:
                 rc.interactions.cancel(interaction_id)
             except Exception:
-                pass
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             raise TimeoutError(
                 f"Interactions API timeout ({timeout}s) model={model_id}"
             )

@@ -23,7 +23,7 @@ import math
 import os
 import sys as _sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 from flask import Blueprint, jsonify, request
 
@@ -434,7 +434,7 @@ def skill_stats():
         tt = _token_tracker()
         token_stats = tt.get_skill_stats()
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # ── 2. 影子记录数量 ───────────────────────────────────────────────────────
     trace_counts: dict = {}
@@ -442,7 +442,7 @@ def skill_stats():
         tracer = _tracer()
         trace_counts = tracer.get_counts()
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # ── 3. 用户评分（从 skill_ratings.json 读取）──────────────────────────────
     ratings: dict = {}
@@ -457,7 +457,7 @@ def skill_stats():
                         "count": int(val.get("count", 0)),
                     }
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # ── 4. Skill 元数据（名称 / 类别）────────────────────────────────────────
     skill_meta: dict = {}
@@ -471,7 +471,7 @@ def skill_stats():
                 "enabled": s.get("enabled", False),
             }
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # ── 5. 合并 ──────────────────────────────────────────────────────────────
     all_ids = set(
@@ -639,7 +639,7 @@ def delete_skill(skill_id: str):
             if hasattr(sm, "_def_registry"):
                 sm._def_registry.pop(skill_id, None)
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return jsonify({"success": True, "deleted": skill_id})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -668,13 +668,20 @@ def toggle_skill(skill_id: str):
         existing["enabled"] = bool(enabled)
         with open(skill_file, "w", encoding="utf-8") as f:
             json.dump(existing, f, ensure_ascii=False, indent=2)
+        # 记录亲和度
+        if bool(enabled):
+            try:
+                from app.core.skills.skill_affinity import SkillAffinityTracker
+                SkillAffinityTracker.get_instance().record_activation(skill_id)
+            except Exception:
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         try:
             from app.core.hooks.hook_manager import get_hook_manager, HookContext
             get_hook_manager().fire_on_skill_change(
                 skill_id, bool(enabled), HookContext(task_type="skill_toggle", skill_id=skill_id)
             )
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -701,13 +708,20 @@ def toggle_skill_v2(skill_id: str):
                 jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
                 404,
             )
+        # 记录亲和度
+        if enabled:
+            try:
+                from app.core.skills.skill_affinity import SkillAffinityTracker
+                SkillAffinityTracker.get_instance().record_activation(skill_id)
+            except Exception:
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         try:
             from app.core.hooks.hook_manager import get_hook_manager, HookContext
             get_hook_manager().fire_on_skill_change(
                 skill_id, enabled, HookContext(task_type="skill_toggle", skill_id=skill_id)
             )
         except Exception:
-            pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
         return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -988,7 +1002,7 @@ def _load_usage() -> Dict:
         if _USAGE_FILE.exists():
             return json.loads(_USAGE_FILE.read_text(encoding="utf-8"))
     except Exception:
-        pass
+            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
     return {}
 
 

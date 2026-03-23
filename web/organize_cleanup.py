@@ -23,7 +23,7 @@ from collections import defaultdict
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Set
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ class OrganizeCleanup:
                 try:
                     total_size += fp.stat().st_size
                 except Exception:
-                    pass
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
             folder_info[rel] = {
                 "files": real_files,

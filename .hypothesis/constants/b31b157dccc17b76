@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\agent\plugins\configuration_plugin.py
-# hypothesis_version: 6.151.9
-
-['All Thresholds:\n\n', 'ConfigurationPlugin', 'Metric name', 'NUMBER', 'OBJECT', 'STRING', 'Threshold value', 'all', 'description', 'func', 'get_configuration', 'get_thresholds', 'level', 'metric', 'name', 'parameters', 'properties', 'required', 'reset_threshold', 'set_threshold', 'type', 'validate_metric', 'value']

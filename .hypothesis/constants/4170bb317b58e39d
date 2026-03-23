@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\errors.py
-# hypothesis_version: 6.151.9
-
-['AUTH_ERROR', 'CONFIG_ERROR', 'GEMINI_API_ERROR', 'KOTO_ERROR', 'LLM_ERROR', 'MISSING_CONFIG', 'MODEL_NOT_FOUND', 'MODEL_TIMEOUT', 'PATH_TRAVERSAL', 'ROUTING_ERROR', 'SKILL_ERROR', 'SKILL_LOAD_ERROR', 'SKILL_NOT_FOUND', 'STORAGE_ERROR', 'TOKEN_EXPIRED', 'details', 'error', 'message']

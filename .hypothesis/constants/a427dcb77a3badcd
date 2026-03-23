@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\tasks\task_ledger.py
-# hypothesis_version: 6.151.9
-
-[100, 500, 1000, 2000, ' AND ', '%Y-%m-%dT%H:%M:%S.%f', ', ', 'ACTION', 'KOTO_DB_DIR', 'StepRecord', 'TaskLedger', 'WHERE ', 'agent', 'avg_duration_seconds', 'avg_sec', 'by_status', 'cancel_requested', 'cancelled', 'cnt', 'completed', 'config', 'created_at', 'created_at >= ?', 'elapsed_seconds', 'failed', 'human_in_loop', 'interrupt_requested', 'max_idx', 'metadata', 'milliseconds', 'pending', 'retrying', 'running', 'session_id', 'session_id = ?', 'skill_id', 'source', 'source = ?', 'status', 'status = ?', 'status_change', 'steps', 'task_id', 'task_type', 'total', 'user_input', 'waiting', 'waiting_reason', '{}']

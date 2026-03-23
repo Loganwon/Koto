@@ -11,7 +11,6 @@ import os
 import sys
 import tempfile
 import time
-import traceback
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
@@ -281,7 +280,6 @@ class VoiceInputEngine:
     ) -> RecognitionResult:
         """使用 Vosk 本地识别 - 完全离线，超快响应！"""
         try:
-            import wave
 
             import pyaudio
             from vosk import KaldiRecognizer, Model, SetLogLevel

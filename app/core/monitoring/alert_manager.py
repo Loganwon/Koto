@@ -5,7 +5,6 @@ Email and webhook notifications for monitoring events.
 Supports customizable alert rules and severity thresholds.
 """
 
-import json
 import logging
 import smtplib
 import threading

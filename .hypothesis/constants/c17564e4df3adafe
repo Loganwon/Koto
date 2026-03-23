@@ -1,4 +1,0 @@
-# file: C:\repos\Koto\app\core\goal\__init__.py
-# hypothesis_version: 6.151.9
-
-['GoalManager', 'GoalRun', 'GoalStatus', 'GoalTask', 'get_goal_manager']

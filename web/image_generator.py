@@ -8,8 +8,6 @@ Handles integration with Google Gemini's Imagen 3 / Image generation capabilitie
 import base64
 import logging
 import os
-import time
-from typing import Optional
 
 from google import genai
 from google.genai import types
