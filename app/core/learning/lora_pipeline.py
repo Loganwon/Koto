@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 lora_pipeline.py — Koto LoRA 蒸馏训练流水线（生产级实装）
 ===========================================================

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 文档修改二次快速检测机制
 用于在应用 AI 修改建议前/后进行质量校验，防止破坏性修改。

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 工作流管理系统 - Phase 5
 支持：工作流定义、保存、加载、执行、模板库管理

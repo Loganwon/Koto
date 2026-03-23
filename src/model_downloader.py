@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto 本地模型下载器
 检测系统硬件，推荐并下载适合的本地 AI 模型（通过 Ollama）

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto HookManager — 用户生命周期钩子系统
 ==========================================
@@ -56,11 +58,11 @@ logger = logging.getLogger(__name__)
 _HOOKS_DIR = Path(__file__).parent.parent.parent.parent / "config" / "hooks"
 
 # 钩子点枚举
-HOOK_PRE_MESSAGE      = "pre_message"
-HOOK_POST_RESPONSE    = "post_response"
-HOOK_ON_SKILL_CHANGE  = "on_skill_change"
+HOOK_PRE_MESSAGE = "pre_message"
+HOOK_POST_RESPONSE = "post_response"
+HOOK_ON_SKILL_CHANGE = "on_skill_change"
 HOOK_ON_SESSION_START = "on_session_start"
-HOOK_ON_TOOL_RESULT   = "on_tool_result"
+HOOK_ON_TOOL_RESULT = "on_tool_result"
 
 _KNOWN_HOOKS = {
     HOOK_PRE_MESSAGE,
@@ -165,9 +167,7 @@ class HookManager:
                     f"[HookManager] {py_file.name}: 注册了 {registered_count} 个钩子函数"
                 )
             else:
-                logger.debug(
-                    f"[HookManager] {py_file.name}: 未找到已知钩子函数，跳过"
-                )
+                logger.debug(f"[HookManager] {py_file.name}: 未找到已知钩子函数，跳过")
         except Exception as e:
             logger.warning(f"[HookManager] 加载 {py_file.name} 失败: {e}")
 
@@ -208,7 +208,9 @@ class HookManager:
             except Exception as e:
                 logger.warning(f"[HookManager] on_skill_change 钩子异常: {e}")
 
-    def fire_on_session_start(self, session_id: str, ctx: Optional[HookContext] = None) -> None:
+    def fire_on_session_start(
+        self, session_id: str, ctx: Optional[HookContext] = None
+    ) -> None:
         """触发 on_session_start 钩子（无返回值）。"""
         _ctx = ctx or HookContext(session_id=session_id)
         for fn in self._hooks[HOOK_ON_SESSION_START]:
@@ -217,9 +219,7 @@ class HookManager:
             except Exception as e:
                 logger.warning(f"[HookManager] on_session_start 钩子异常: {e}")
 
-    def fire_on_tool_result(
-        self, tool_name: str, result: str, ctx: HookContext
-    ) -> str:
+    def fire_on_tool_result(self, tool_name: str, result: str, ctx: HookContext) -> str:
         """触发 on_tool_result 钩子链。返回（可能被修改过的）工具结果。"""
         current = result
         for fn in self._hooks[HOOK_ON_TOOL_RESULT]:

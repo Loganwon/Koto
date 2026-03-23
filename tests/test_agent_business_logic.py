@@ -21,7 +21,6 @@ import unittest
 from typing import Any, Dict
 from unittest.mock import MagicMock, patch
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -120,7 +119,11 @@ class TestBackgroundAgentSubmit(unittest.TestCase):
 
     def test_on_complete_callback_invoked(self):
         """on_complete callback is called with (task_id, report) when task succeeds."""
-        from app.core.agent.background_agent import BackgroundAgent, ExecutionPlan, PlanStep
+        from app.core.agent.background_agent import (
+            BackgroundAgent,
+            ExecutionPlan,
+            PlanStep,
+        )
 
         callback_results = {}
 
@@ -218,7 +221,9 @@ class TestDeepResearchAgentRun(unittest.TestCase):
                 patch.object(
                     agent,
                     "_parallel_search",
-                    return_value=[{"query": "sub-q1", "results": [{"snippet": "fact"}]}],
+                    return_value=[
+                        {"query": "sub-q1", "results": [{"snippet": "fact"}]}
+                    ],
                 ),
                 patch.object(
                     agent,
@@ -255,7 +260,9 @@ class TestDeepResearchAgentRun(unittest.TestCase):
 
     def test_run_error_yields_error_event(self):
         agent = self._make_agent()
-        with patch.object(agent, "_decompose_query", side_effect=RuntimeError("LLM explode")):
+        with patch.object(
+            agent, "_decompose_query", side_effect=RuntimeError("LLM explode")
+        ):
             events = list(agent.run("Bad query"))
 
         error_events = [e for e in events if e["type"] == "error"]
@@ -302,11 +309,14 @@ class TestMultiAgentOrchestrator(unittest.TestCase):
         try:
             import langgraph  # noqa: F401
         except ImportError:
-            raise unittest.SkipTest("langgraph not installed – skipping MultiAgent tests")
+            raise unittest.SkipTest(
+                "langgraph not installed – skipping MultiAgent tests"
+            )
 
     def _make_orchestrator(self):
-        from app.core.agent.multi_agent import ROLES, MultiAgentOrchestrator
         from langgraph.checkpoint.memory import MemorySaver
+
+        from app.core.agent.multi_agent import ROLES, MultiAgentOrchestrator
 
         return MultiAgentOrchestrator(
             roles=[ROLES.RESEARCHER, ROLES.WRITER],
@@ -316,7 +326,9 @@ class TestMultiAgentOrchestrator(unittest.TestCase):
 
     def test_run_returns_dict_with_output_key(self):
         orchestrator = self._make_orchestrator()
-        with patch("app.core.agent.multi_agent._llm_call", return_value="mocked result"):
+        with patch(
+            "app.core.agent.multi_agent._llm_call", return_value="mocked result"
+        ):
             result = orchestrator.run("Write about Python")
 
         self.assertIn("output", result)
@@ -325,7 +337,9 @@ class TestMultiAgentOrchestrator(unittest.TestCase):
 
     def test_run_steps_include_role_names(self):
         orchestrator = self._make_orchestrator()
-        with patch("app.core.agent.multi_agent._llm_call", return_value="Mocked LLM text"):
+        with patch(
+            "app.core.agent.multi_agent._llm_call", return_value="Mocked LLM text"
+        ):
             result = orchestrator.run("Task")
 
         # researcher and writer nodes should both appear in steps
@@ -334,7 +348,9 @@ class TestMultiAgentOrchestrator(unittest.TestCase):
 
     def test_run_returns_error_on_graph_failure(self):
         orchestrator = self._make_orchestrator()
-        with patch("app.core.agent.multi_agent._llm_call", side_effect=RuntimeError("boom")):
+        with patch(
+            "app.core.agent.multi_agent._llm_call", side_effect=RuntimeError("boom")
+        ):
             result = orchestrator.run("Failing task")
 
         # Should not raise; error captured in result
@@ -342,7 +358,9 @@ class TestMultiAgentOrchestrator(unittest.TestCase):
 
     def test_stream_yields_agent_events(self):
         orchestrator = self._make_orchestrator()
-        with patch("app.core.agent.multi_agent._llm_call", return_value="Stream content"):
+        with patch(
+            "app.core.agent.multi_agent._llm_call", return_value="Stream content"
+        ):
             events = list(orchestrator.stream("Stream task"))
 
         # Must yield at least one event dict with 'agent' and 'content' keys
@@ -352,8 +370,9 @@ class TestMultiAgentOrchestrator(unittest.TestCase):
             self.assertIn("content", evt)
 
     def test_preset_content_pipeline_creates_orchestrator(self):
-        from app.core.agent.multi_agent import MultiAgentOrchestrator
         from langgraph.checkpoint.memory import MemorySaver
+
+        from app.core.agent.multi_agent import MultiAgentOrchestrator
 
         with patch.object(MultiAgentOrchestrator, "__init__", lambda self, **kw: None):
             # Smoke test: class method does not crash when __init__ is stubbed

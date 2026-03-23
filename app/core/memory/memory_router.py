@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 MemoryRouter — Unified memory read dispatcher for Koto.
 
@@ -107,7 +109,7 @@ class MemoryRouter:
                 vec_fn = getattr(mgr, "search_vector_memories", None)
                 if vec_fn and query:
                     try:
-                        for h in (vec_fn(query, limit=_MEMORY_K) or []):
+                        for h in vec_fn(query, limit=_MEMORY_K) or []:
                             mid = h.get("id")
                             if mid not in seen_ids:
                                 seen_ids.add(mid)
@@ -147,9 +149,7 @@ class MemoryRouter:
                             )
                             lines.append(f"  [{cat}] {content_short}")
                     if lines:
-                        parts.append(
-                            "[长期记忆 — 与本次对话相关]\n" + "\n".join(lines)
-                        )
+                        parts.append("[长期记忆 — 与本次对话相关]\n" + "\n".join(lines))
             except Exception as e:
                 logger.debug(f"[MemoryRouter] Memory search layer error: {e}")
 

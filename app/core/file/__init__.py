@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from app.core.file.file_registry import FileEntry, FileRegistry, get_file_registry
 from app.core.file.file_tools import register_file_tools
 from app.core.file.file_watcher import FileWatcher, get_file_watcher

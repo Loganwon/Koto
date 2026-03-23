@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """Koto custom exception hierarchy.
 
 Provides structured, catchable exceptions for all Koto subsystems.

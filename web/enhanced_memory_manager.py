@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 增强的记忆管理器 - Phase 1: 自动提取 + 用户画像
 支持从对话中自动学习用户偏好，建立用户画像

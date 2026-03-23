@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║   Koto  ─  SkillPipeline（技能顺序执行链）                        ║
@@ -167,8 +169,11 @@ class SkillPipeline:
                     if ctx_key in ctx:
                         call_ctx[param_name] = ctx[ctx_key]
 
-            logger.debug("[SkillPipeline] ▶ step: %s | ctx_keys=%s",
-                         step.skill_id, list(call_ctx.keys()))
+            logger.debug(
+                "[SkillPipeline] ▶ step: %s | ctx_keys=%s",
+                step.skill_id,
+                list(call_ctx.keys()),
+            )
 
             try:
                 output = SkillCapabilityRegistry.dispatch(
@@ -201,7 +206,9 @@ class SkillPipeline:
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
             "[SkillPipeline] 完成 | steps=%d skipped=%d elapsed=%.1fms",
-            len(steps_executed), len(steps_skipped), elapsed_ms,
+            len(steps_executed),
+            len(steps_skipped),
+            elapsed_ms,
         )
         return PipelineResult(
             final_output=last_output,
@@ -250,6 +257,7 @@ class SkillChain:
         """
         try:
             from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
         except Exception as exc:
             raise RuntimeError(f"SkillChain: SkillManager 加载失败 — {exc}") from exc
@@ -273,7 +281,7 @@ class SkillChain:
             s_def = SkillManager._def_registry.get(skill_id)
             if not s_def:
                 return
-            for next_id in (getattr(s_def, "chains_to", []) or []):
+            for next_id in getattr(s_def, "chains_to", []) or []:
                 _collect(next_id, remaining_depth - 1)
 
         _collect(root_skill_id, depth)
@@ -281,9 +289,7 @@ class SkillChain:
         if not steps:
             raise ValueError(f"SkillChain: 找不到 Skill '{root_skill_id}'")
 
-        logger.debug(
-            "[SkillChain] 构建完成: %s", " → ".join(s.skill_id for s in steps)
-        )
+        logger.debug("[SkillChain] 构建完成: %s", " → ".join(s.skill_id for s in steps))
         return SkillPipeline(steps=steps)
 
     @classmethod
@@ -301,8 +307,9 @@ class SkillChain:
         Returns None 当没有任何可执行步骤时。
         """
         try:
-            from app.core.skills.skill_manager import SkillManager
             from app.core.skills.skill_capability import SkillCapabilityRegistry
+            from app.core.skills.skill_manager import SkillManager
+
             SkillManager._ensure_init()
         except Exception:
             return None
@@ -316,7 +323,9 @@ class SkillChain:
             has_cap = SkillCapabilityRegistry.has_capability(sid)
             if has_ep or has_cap:
                 steps.append(
-                    PipelineStep(skill_id=sid, output_key=sid, pass_full_ctx=pass_full_ctx)
+                    PipelineStep(
+                        skill_id=sid, output_key=sid, pass_full_ctx=pass_full_ctx
+                    )
                 )
 
         if not steps:

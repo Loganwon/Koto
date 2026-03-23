@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Task Ledger
 ================
@@ -65,9 +67,10 @@ class TaskStatus(str, Enum):
 
 class TaskPriority(int, Enum):
     """任务优先级（数值越大越优先）。"""
-    LOW = 0     # 低优先级（后台任务）
+
+    LOW = 0  # 低优先级（后台任务）
     NORMAL = 1  # 默认
-    HIGH = 2    # 高优先级（用户主动触发）
+    HIGH = 2  # 高优先级（用户主动触发）
     URGENT = 3  # 紧急（立即执行）
 
 
@@ -514,7 +517,8 @@ class TaskLedger:
     def is_interrupt_requested(self, task_id: str) -> bool:
         with self._lock:
             row = self._conn.execute(
-                "SELECT interrupt_requested FROM koto_tasks WHERE task_id = ?", (task_id,)
+                "SELECT interrupt_requested FROM koto_tasks WHERE task_id = ?",
+                (task_id,),
             ).fetchone()
         return bool(row["interrupt_requested"]) if row else False
 
@@ -543,7 +547,9 @@ class TaskLedger:
                 step_type=step_type,
                 content=content[:2000],
                 tool_name=tool_name,
-                tool_args=json.dumps(tool_args, ensure_ascii=False) if tool_args else None,
+                tool_args=(
+                    json.dumps(tool_args, ensure_ascii=False) if tool_args else None
+                ),
                 observation=(observation or "")[:2000] if observation else None,
             )
             self._conn.execute(

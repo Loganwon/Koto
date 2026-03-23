@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 skill_routes.py — Skill CRUD & MCP 导出 API Blueprint
 ======================================================
@@ -99,7 +101,10 @@ def _token_tracker():
 def get_skill_permissions(skill_id: str):
     """返回该 Skill 所需权限及当前授权状态。"""
     try:
-        from app.core.skills.skill_permissions import SkillPermissionManager, PERMISSION_META
+        from app.core.skills.skill_permissions import (
+            PERMISSION_META,
+            SkillPermissionManager,
+        )
 
         sm = _sm()
         skill = sm.get_definition(skill_id)
@@ -113,22 +118,26 @@ def get_skill_permissions(skill_id: str):
         perms_info = []
         for perm in required:
             meta = PERMISSION_META.get(perm, {})
-            perms_info.append({
-                "id": perm,
-                "label": meta.get("label", perm),
-                "description": meta.get("description", ""),
-                "risk": meta.get("risk", "unknown"),
-                "granted": perm in granted,
-            })
+            perms_info.append(
+                {
+                    "id": perm,
+                    "label": meta.get("label", perm),
+                    "description": meta.get("description", ""),
+                    "risk": meta.get("risk", "unknown"),
+                    "granted": perm in granted,
+                }
+            )
 
-        return jsonify({
-            "success": True,
-            "skill_id": skill_id,
-            "required": required,
-            "granted": granted,
-            "missing": missing,
-            "permissions": perms_info,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "skill_id": skill_id,
+                "required": required,
+                "granted": granted,
+                "missing": missing,
+                "permissions": perms_info,
+            }
+        )
     except Exception as e:
         logger.error(f"[skills] get permissions error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -138,16 +147,25 @@ def get_skill_permissions(skill_id: str):
 def grant_skill_permissions(skill_id: str):
     """为 Skill 授予指定权限列表。Body: {\"permissions\": [\"ui_interactive\", ...]}"""
     try:
-        from app.core.skills.skill_permissions import SkillPermissionManager, PERMISSION_META
+        from app.core.skills.skill_permissions import (
+            PERMISSION_META,
+            SkillPermissionManager,
+        )
 
         body = request.get_json(silent=True) or {}
         perms = body.get("permissions", [])
         if not isinstance(perms, list):
-            return jsonify({"success": False, "error": "permissions must be a list"}), 400
+            return (
+                jsonify({"success": False, "error": "permissions must be a list"}),
+                400,
+            )
 
         unknown = [p for p in perms if p not in PERMISSION_META]
         if unknown:
-            return jsonify({"success": False, "error": f"Unknown permissions: {unknown}"}), 400
+            return (
+                jsonify({"success": False, "error": f"Unknown permissions: {unknown}"}),
+                400,
+            )
 
         sm = _sm()
         skill = sm.get_definition(skill_id)
@@ -157,11 +175,13 @@ def grant_skill_permissions(skill_id: str):
         for perm in perms:
             SkillPermissionManager.grant(skill_id, perm)
 
-        return jsonify({
-            "success": True,
-            "skill_id": skill_id,
-            "granted": SkillPermissionManager.get_granted(skill_id),
-        })
+        return jsonify(
+            {
+                "success": True,
+                "skill_id": skill_id,
+                "granted": SkillPermissionManager.get_granted(skill_id),
+            }
+        )
     except Exception as e:
         logger.error(f"[skills] grant permissions error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -176,7 +196,10 @@ def revoke_skill_permissions(skill_id: str):
         body = request.get_json(silent=True) or {}
         perms = body.get("permissions", [])
         if not isinstance(perms, list):
-            return jsonify({"success": False, "error": "permissions must be a list"}), 400
+            return (
+                jsonify({"success": False, "error": "permissions must be a list"}),
+                400,
+            )
 
         sm = _sm()
         skill = sm.get_definition(skill_id)
@@ -186,11 +209,13 @@ def revoke_skill_permissions(skill_id: str):
         for perm in perms:
             SkillPermissionManager.revoke(skill_id, perm)
 
-        return jsonify({
-            "success": True,
-            "skill_id": skill_id,
-            "granted": SkillPermissionManager.get_granted(skill_id),
-        })
+        return jsonify(
+            {
+                "success": True,
+                "skill_id": skill_id,
+                "granted": SkillPermissionManager.get_granted(skill_id),
+            }
+        )
     except Exception as e:
         logger.error(f"[skills] revoke permissions error: {e}")
         return jsonify({"success": False, "error": str(e)}), 500
@@ -669,9 +694,12 @@ def toggle_skill(skill_id: str):
         with open(skill_file, "w", encoding="utf-8") as f:
             json.dump(existing, f, ensure_ascii=False, indent=2)
         try:
-            from app.core.hooks.hook_manager import get_hook_manager, HookContext
+            from app.core.hooks.hook_manager import HookContext, get_hook_manager
+
             get_hook_manager().fire_on_skill_change(
-                skill_id, bool(enabled), HookContext(task_type="skill_toggle", skill_id=skill_id)
+                skill_id,
+                bool(enabled),
+                HookContext(task_type="skill_toggle", skill_id=skill_id),
             )
         except Exception:
             pass
@@ -702,9 +730,12 @@ def toggle_skill_v2(skill_id: str):
                 404,
             )
         try:
-            from app.core.hooks.hook_manager import get_hook_manager, HookContext
+            from app.core.hooks.hook_manager import HookContext, get_hook_manager
+
             get_hook_manager().fire_on_skill_change(
-                skill_id, enabled, HookContext(task_type="skill_toggle", skill_id=skill_id)
+                skill_id,
+                enabled,
+                HookContext(task_type="skill_toggle", skill_id=skill_id),
             )
         except Exception:
             pass
@@ -1043,7 +1074,9 @@ def get_skill_recommendations():
     try:
         sm = _sm()
         all_skills = sm.list_skills()
-        skill_map = {s["id"]: s for s in all_skills if not s.get("skill_nature") == "system"}
+        skill_map = {
+            s["id"]: s for s in all_skills if not s.get("skill_nature") == "system"
+        }
 
         with _usage_lock:
             usage = _load_usage()
@@ -1067,8 +1100,12 @@ def get_skill_recommendations():
 
         # 补全未使用过的高评分 skill（精选列表），凑满 limit 个
         _POPULAR_FALLBACK = [
-            "step_by_step", "concise_mode", "code_best_practices",
-            "professional_tone", "teaching_mode", "deep_think",
+            "step_by_step",
+            "concise_mode",
+            "code_best_practices",
+            "professional_tone",
+            "teaching_mode",
+            "deep_think",
         ]
         for fid in _POPULAR_FALLBACK:
             if len(top_ids) >= limit:
@@ -1098,8 +1135,7 @@ def ask_koto_recommend():
     try:
         sm = _sm()
         all_skills = [
-            s for s in sm.list_skills()
-            if not s.get("skill_nature") == "system"
+            s for s in sm.list_skills() if not s.get("skill_nature") == "system"
         ]
 
         # 构建 Skill 目录摘要给 LLM
@@ -1125,6 +1161,7 @@ def ask_koto_recommend():
 }}"""
 
         from app.core.llm.gemini import GeminiProvider
+
         client = GeminiProvider()
         raw = client.generate_content(
             prompt=prompt,
@@ -1136,6 +1173,7 @@ def ask_koto_recommend():
         text = text.strip()
         # 去掉可能的 ```json 包裹
         import re
+
         if text.startswith("```"):
             text = re.sub(r"^```[\w]*\n?", "", text)
             text = re.sub(r"\n?```$", "", text.strip())
@@ -1147,11 +1185,13 @@ def ask_koto_recommend():
         skill_map = {s["id"]: s for s in all_skills}
         skills_out = [skill_map[sid] for sid in recommended_ids if sid in skill_map]
 
-        return jsonify({
-            "success": True,
-            "skills": skills_out,
-            "reasoning": reasoning,
-        })
+        return jsonify(
+            {
+                "success": True,
+                "skills": skills_out,
+                "reasoning": reasoning,
+            }
+        )
 
     except json.JSONDecodeError as e:
         logger.warning(f"[skills/ask-koto] LLM 输出解析失败: {e}")

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Prompt Adapter - 将用户请求解析为结构化 Markdown
 目标：让LLM更易理解、减少歧义、提升任务完成度

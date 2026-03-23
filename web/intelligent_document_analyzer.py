@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 智能文档分析引擎 - Intelligent Document Analyzer
 能够理解用户意图、分析文档结构、分解任务、生成高质量回复

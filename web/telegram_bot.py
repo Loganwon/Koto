@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Telegram Bot Integration
 ==============================
@@ -37,9 +39,9 @@ logger = logging.getLogger(__name__)
 
 # ── 常量 ──────────────────────────────────────────────────────────────────────
 _TG_API_BASE = "https://api.telegram.org/bot{token}/{method}"
-_POLL_TIMEOUT = 30          # long-poll 超时（秒）
-_SESSION_PREFIX = "tg_"     # Telegram 会话 ID 前缀，与桌面端隔离
-_MAX_MSG_LEN = 4000          # Telegram 单条消息最大长度（4096 减留量）
+_POLL_TIMEOUT = 30  # long-poll 超时（秒）
+_SESSION_PREFIX = "tg_"  # Telegram 会话 ID 前缀，与桌面端隔离
+_MAX_MSG_LEN = 4000  # Telegram 单条消息最大长度（4096 减留量）
 _MAX_HISTORY_TURNS = int(os.environ.get("TELEGRAM_MAX_HISTORY_TURNS", "20"))
 
 # ── 单例 ──────────────────────────────────────────────────────────────────────
@@ -63,6 +65,7 @@ def get_telegram_bot() -> Optional["TelegramBot"]:
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
 
 def _split_message(text: str, max_len: int = _MAX_MSG_LEN) -> List[str]:
     """将超长文本切割成多段，优先在换行处切割。"""
@@ -155,11 +158,14 @@ class TelegramBot:
             return False
         for part in _split_message(text):
             try:
-                resp = self._call("sendMessage", {
-                    "chat_id": chat_id,
-                    "text": part,
-                    "parse_mode": parse_mode,
-                })
+                resp = self._call(
+                    "sendMessage",
+                    {
+                        "chat_id": chat_id,
+                        "text": part,
+                        "parse_mode": parse_mode,
+                    },
+                )
                 if not resp.get("ok"):
                     # Markdown 解析失败时退回纯文本
                     if "can't parse" in str(resp).lower():
@@ -206,11 +212,14 @@ class TelegramBot:
         logger.info("[Telegram] 开始长轮询…")
         while self._running:
             try:
-                resp = self._call("getUpdates", {
-                    "offset": self._offset,
-                    "timeout": _POLL_TIMEOUT,
-                    "allowed_updates": ["message"],
-                })
+                resp = self._call(
+                    "getUpdates",
+                    {
+                        "offset": self._offset,
+                        "timeout": _POLL_TIMEOUT,
+                        "allowed_updates": ["message"],
+                    },
+                )
                 if not resp.get("ok"):
                     time.sleep(5)
                     continue
@@ -302,31 +311,37 @@ class TelegramBot:
             self._handle_chat(chat_id, text, username)
 
     def _cmd_start(self, chat_id: int, _args: str, username: str):
-        self.send_text(chat_id, (
-            f"👋 你好，{username}！我是 Koto，你的个人 AI 助理。\n\n"
-            "你可以直接发消息跟我聊，或者使用以下命令：\n"
-            "/goals — 查看当前活跃目标\n"
-            "/morning — 获取今日晨间简报\n"
-            "/status — 查看系统状态\n"
-            "/memory — 查看近期记忆摘要\n"
-            "/remind <内容> — 设置一个提醒\n"
-            "/contacts — 查看联系人列表\n"
-            "/help — 查看帮助"
-        ))
+        self.send_text(
+            chat_id,
+            (
+                f"👋 你好，{username}！我是 Koto，你的个人 AI 助理。\n\n"
+                "你可以直接发消息跟我聊，或者使用以下命令：\n"
+                "/goals — 查看当前活跃目标\n"
+                "/morning — 获取今日晨间简报\n"
+                "/status — 查看系统状态\n"
+                "/memory — 查看近期记忆摘要\n"
+                "/remind <内容> — 设置一个提醒\n"
+                "/contacts — 查看联系人列表\n"
+                "/help — 查看帮助"
+            ),
+        )
 
     def _cmd_help(self, chat_id: int, _args: str, _username: str):
-        self.send_text(chat_id, (
-            "🤖 *Koto 帮助*\n\n"
-            "直接发送任意消息即可对话，我会调用工具帮你完成任务。\n\n"
-            "*命令列表:*\n"
-            "/goals — 活跃目标概览\n"
-            "/morning — 今日晨间简报\n"
-            "/status — 系统状态\n"
-            "/memory — 近期记忆摘要\n"
-            "/remind <内容> — 创建提醒（如：/remind 明天下午3点开会）\n"
-            "/contacts — 联系人列表\n\n"
-            "支持发送语音、图片、文档进行分析。"
-        ))
+        self.send_text(
+            chat_id,
+            (
+                "🤖 *Koto 帮助*\n\n"
+                "直接发送任意消息即可对话，我会调用工具帮你完成任务。\n\n"
+                "*命令列表:*\n"
+                "/goals — 活跃目标概览\n"
+                "/morning — 今日晨间简报\n"
+                "/status — 系统状态\n"
+                "/memory — 近期记忆摘要\n"
+                "/remind <内容> — 创建提醒（如：/remind 明天下午3点开会）\n"
+                "/contacts — 联系人列表\n\n"
+                "支持发送语音、图片、文档进行分析。"
+            ),
+        )
 
     def _cmd_goals(self, chat_id: int, _args: str, _username: str):
         self.send_typing(chat_id)
@@ -334,19 +349,22 @@ class TelegramBot:
             from app.core.goal.goal_manager import GoalStatus, get_goal_manager
 
             gm = get_goal_manager()
-            goals = (
-                gm.list_goals(status=GoalStatus.ACTIVE, limit=10)
-                + gm.list_goals(status=GoalStatus.WAITING_USER, limit=10)
+            goals = gm.list_goals(status=GoalStatus.ACTIVE, limit=10) + gm.list_goals(
+                status=GoalStatus.WAITING_USER, limit=10
             )
             if not goals:
                 self.send_text(chat_id, "✅ 当前没有活跃的目标。")
                 return
             lines = ["📋 *活跃目标*\n"]
             for g in goals[:10]:
-                status_icon = {"active": "🟢", "waiting_user": "🟡"}.get(str(g.status), "⚪")
+                status_icon = {"active": "🟢", "waiting_user": "🟡"}.get(
+                    str(g.status), "⚪"
+                )
                 lines.append(f"{status_icon} *{g.title}*")
                 if g.description:
-                    lines.append(f"   {g.description[:60]}{'…' if len(g.description)>60 else ''}")
+                    lines.append(
+                        f"   {g.description[:60]}{'…' if len(g.description)>60 else ''}"
+                    )
                 if g.deadline:
                     lines.append(f"   ⏰ 截止: {g.deadline[:10]}")
                 lines.append("")
@@ -368,6 +386,7 @@ class TelegramBot:
         self.send_typing(chat_id)
         try:
             import platform
+
             import psutil
 
             cpu = psutil.cpu_percent(interval=1)
@@ -401,7 +420,11 @@ class TelegramBot:
                 self.send_text(chat_id, "📭 记忆库为空。")
                 return
             # 取最近 8 条
-            recent = memories[-8:] if isinstance(memories, list) else list(memories.values())[-8:]
+            recent = (
+                memories[-8:]
+                if isinstance(memories, list)
+                else list(memories.values())[-8:]
+            )
             lines = ["🧠 *近期记忆*\n"]
             for m in recent:
                 if isinstance(m, dict):
@@ -452,7 +475,12 @@ class TelegramBot:
         self.send_typing(chat_id)
         session_id = f"{_SESSION_PREFIX}{chat_id}"
         try:
-            from app.api.agent_routes import _load_history, _run_agent_collect, _save_history, get_agent
+            from app.api.agent_routes import (
+                _load_history,
+                _run_agent_collect,
+                _save_history,
+                get_agent,
+            )
 
             history = _load_history(session_id, max_turns=_MAX_HISTORY_TURNS)
             agent = get_agent()
@@ -463,7 +491,9 @@ class TelegramBot:
                 session_id=session_id,
                 task_type="CHAT",
             )
-            answer = result.get("answer", "") if isinstance(result, dict) else str(result)
+            answer = (
+                result.get("answer", "") if isinstance(result, dict) else str(result)
+            )
             if not answer:
                 answer = "（抱歉，没有得到回复，请再试一次。）"
             _save_history(session_id, text, answer)
@@ -538,7 +568,9 @@ class TelegramBot:
 
     # ── 工具方法 ──────────────────────────────────────────────────────────────
 
-    def _call(self, method: str, data: Optional[Dict] = None, timeout: int = 35) -> Dict:
+    def _call(
+        self, method: str, data: Optional[Dict] = None, timeout: int = 35
+    ) -> Dict:
         """调用 Telegram Bot API，返回 JSON 响应。"""
         import requests  # 已在 requirements.txt
 
@@ -564,7 +596,9 @@ class TelegramBot:
             logger.warning(f"[Telegram] 文件下载失败 file_id={file_id}: {exc}")
             return None
 
-    def _stt_from_bytes(self, audio_bytes: bytes, mime: str = "audio/ogg") -> Optional[str]:
+    def _stt_from_bytes(
+        self, audio_bytes: bytes, mime: str = "audio/ogg"
+    ) -> Optional[str]:
         """使用已有 STT 模块将音频字节转文字。"""
         try:
             import tempfile
@@ -596,6 +630,7 @@ class TelegramBot:
 
 
 # ── 辅助 ──────────────────────────────────────────────────────────────────────
+
 
 def _get_morning_brief_chat_id() -> Optional[int]:
     raw = os.environ.get("TELEGRAM_MORNING_BRIEF_CHAT_ID", "").strip()

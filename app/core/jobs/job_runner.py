@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto JobRunner — 后台作业执行器
 ================================
@@ -221,7 +223,9 @@ class JobRunner:
         self._queue.put((3 - _priority_int, time.time(), task.task_id, spec))
         logger.info(
             "[JobRunner] 作业入队 task_id=%s type=%s priority=%d",
-            task.task_id[:8], spec.job_type, _priority_int,
+            task.task_id[:8],
+            spec.job_type,
+            _priority_int,
         )
         return task.task_id
 
@@ -504,9 +508,11 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
                 # 有害内容检测
                 try:
                     from app.core.security.output_validator import OutputValidator
+
                     _v = OutputValidator.validate(text=text)
                     if _v.is_blocked:
                         import logging as _log
+
                         _log.getLogger(__name__).warning(
                             "[proactive_tick] llm 输出被拦截: %s", _v.reasons
                         )

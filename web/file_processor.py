@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 文件处理器 - 统一处理各种文件类型的解析和内容提取
 支持格式: .docx, .pdf, .xlsx, .txt, 图片等

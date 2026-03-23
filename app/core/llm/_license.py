@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto License / Activation Key Module
 =====================================
@@ -19,9 +21,45 @@ _C = [0, 36, 63, 36, 10, 44, 46, 37, 63]
 # Embedded system API key (XOR-encoded with seed _S)
 # To update: [b ^ _S for b in b"YOUR_API_KEY_HERE"]
 _K = [
-    10, 2, 49, 42, 24, 50, 15, 5, 28, 12, 24, 9, 25, 19, 32, 24,
-    44, 57, 35, 35, 62, 33, 26, 20, 29, 28, 57, 126, 3, 27, 123,
-    63, 63, 20, 120, 61, 31, 50, 14,
+    10,
+    2,
+    49,
+    42,
+    24,
+    50,
+    15,
+    5,
+    28,
+    12,
+    24,
+    9,
+    25,
+    19,
+    32,
+    24,
+    44,
+    57,
+    35,
+    35,
+    62,
+    33,
+    26,
+    20,
+    29,
+    28,
+    57,
+    126,
+    3,
+    27,
+    123,
+    63,
+    63,
+    20,
+    120,
+    61,
+    31,
+    50,
+    14,
 ]
 
 

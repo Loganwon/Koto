@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 GoalManager — 长期委托任务管理器
 ==================================
@@ -564,7 +566,10 @@ class GoalManager:
                     job_type="goal_check",
                     payload={"goal_id": goal.goal_id},
                     session_id=goal.session_id or "",
-                    metadata={"goal_title": goal.title, "linked_task_id": linked_task_id},
+                    metadata={
+                        "goal_title": goal.title,
+                        "linked_task_id": linked_task_id,
+                    },
                     priority=_priority_int,
                 )
             )

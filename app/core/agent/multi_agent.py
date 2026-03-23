@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Multi-Agent Orchestrator
 ==============================
@@ -247,7 +249,9 @@ def _llm_call(model_id: str, system: str, user: str, temperature: float = 0.7) -
 
     cache_key = (model_id, temperature)
     if cache_key not in _llm_cache:
-        _llm_cache[cache_key] = KotoLangChainLLM(model_id=model_id, temperature=temperature)
+        _llm_cache[cache_key] = KotoLangChainLLM(
+            model_id=model_id, temperature=temperature
+        )
     llm = _llm_cache[cache_key]
     msgs = [SystemMessage(content=system), HumanMessage(content=user)]
     try:
@@ -371,7 +375,9 @@ class MultiAgentOrchestrator:
         self.roles = roles
         self.model_id = model_id
         self.max_revisions = max_revisions
-        self.parallel_roles: List[AgentRole] = list(parallel_roles) if parallel_roles else []
+        self.parallel_roles: List[AgentRole] = (
+            list(parallel_roles) if parallel_roles else []
+        )
 
         if checkpointer is None:
             from app.core.agent.checkpoint_manager import get_checkpointer
@@ -404,7 +410,9 @@ class MultiAgentOrchestrator:
                     return {"final_output": val}
             # 按角色逆序查找（最后执行的角色输出优先）
             for r in reversed(_roles_snapshot):
-                val = state.get(r.output_field) or state.get("extra_outputs", {}).get(r.output_field)
+                val = state.get(r.output_field) or state.get("extra_outputs", {}).get(
+                    r.output_field
+                )
                 if val:
                     return {"final_output": val}
             # 兜底：extra_outputs 最后一项

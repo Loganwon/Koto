@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 文件解析器 - 支持 PDF/DOCX/TXT/MD 文件读取
 用于 PPT 生成的多源文件融合
@@ -17,7 +19,17 @@ logger = logging.getLogger(__name__)
 class FileParser:
     """多格式文件解析器"""
 
-    SUPPORTED_FORMATS = [".pdf", ".docx", ".doc", ".txt", ".md", ".markdown", ".pptx", ".pptm", ".ppt"]
+    SUPPORTED_FORMATS = [
+        ".pdf",
+        ".docx",
+        ".doc",
+        ".txt",
+        ".md",
+        ".markdown",
+        ".pptx",
+        ".pptm",
+        ".ppt",
+    ]
     MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB 上限
     MAX_CONTENT_LENGTH = 100000  # 提取最多 10 万字符
 

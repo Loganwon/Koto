@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import ast
 from datetime import datetime
 from typing import Any, Dict, List

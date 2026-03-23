@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Auth - 用户认证与会话管理
 支持 JWT token 认证，用于 SaaS 部署
@@ -68,7 +70,9 @@ USERS_FILE = os.environ.get("KOTO_USERS_FILE", "config/users.json")
 MAX_DAILY_REQUESTS = int(os.environ.get("KOTO_MAX_DAILY_REQUESTS", "100"))
 ADMIN_TOKEN = os.environ.get("KOTO_ADMIN_TOKEN", "")
 # 激活码管理文件（管理员颁发，用户兑换后可使用系统 API key）
-ACTIVATION_CODES_FILE = os.environ.get("KOTO_ACTIVATION_CODES_FILE", "config/activation_codes.json")
+ACTIVATION_CODES_FILE = os.environ.get(
+    "KOTO_ACTIVATION_CODES_FILE", "config/activation_codes.json"
+)
 # 系统 API key（后台 Gemini key，供持有激活码的用户使用）
 SYSTEM_GEMINI_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY", "")
 
@@ -94,6 +98,7 @@ def _load_users() -> dict:
 
 
 # ── 激活码管理 ──
+
 
 def _load_activation_codes() -> dict:
     """加载激活码列表  { code: { used_by: null|email, created_at, used_at } }"""
@@ -387,8 +392,8 @@ def register_auth_routes(app):
             "created_at": datetime.now().isoformat(),
             "plan": "free",
             "daily_limit": MAX_DAILY_REQUESTS,
-            "gemini_api_key": "",      # 用户可绑定自己的 key
-            "activation_code": "",    # 激活码（兑换后写入）
+            "gemini_api_key": "",  # 用户可绑定自己的 key
+            "activation_code": "",  # 激活码（兑换后写入）
         }
         _save_users(users)
         logger.info("[Auth] 新用户注册: %s (phone=%s)", key, phone or "-")
@@ -517,8 +522,11 @@ def register_auth_routes(app):
                         "used_today": used,
                         "has_api_access": bool(effective_key),
                         "api_key_type": (
-                            "own" if (user.get("gemini_api_key") or "").strip()
-                            else ("activation" if user.get("activation_code") else "none")
+                            "own"
+                            if (user.get("gemini_api_key") or "").strip()
+                            else (
+                                "activation" if user.get("activation_code") else "none"
+                            )
                         ),
                     }
                 )
@@ -572,7 +580,9 @@ def register_auth_routes(app):
                 rec["activation_code"] = code
                 _save_users(users)
                 logger.info("[Auth] 用户 %s 激活了激活码 %s", g.user_id, code)
-                return jsonify({"success": True, "message": "激活成功，可以开始使用 Koto 了！"})
+                return jsonify(
+                    {"success": True, "message": "激活成功，可以开始使用 Koto 了！"}
+                )
         return jsonify({"error": "用户不存在"}), 404
 
     # ── 管理员接口（需 KOTO_ADMIN_TOKEN） ──
@@ -608,7 +618,13 @@ def register_auth_routes(app):
         if not ADMIN_TOKEN or token != ADMIN_TOKEN:
             return jsonify({"error": "无权限"}), 403
         codes = _load_activation_codes()
-        return jsonify({"codes": codes, "total": len(codes), "used": sum(1 for c in codes.values() if c.get("used_by"))})
+        return jsonify(
+            {
+                "codes": codes,
+                "total": len(codes),
+                "used": sum(1 for c in codes.values() if c.get("used_by")),
+            }
+        )
 
     @app.route("/api/admin/users", methods=["GET"])
     def admin_list_users():
@@ -619,16 +635,18 @@ def register_auth_routes(app):
         users = _load_users()
         result = []
         for key, rec in users.items():
-            result.append({
-                "user_id": rec.get("user_id"),
-                "name": rec.get("name"),
-                "email": rec.get("email", ""),
-                "phone": rec.get("phone", ""),
-                "plan": rec.get("plan", "free"),
-                "created_at": rec.get("created_at"),
-                "has_own_key": bool((rec.get("gemini_api_key") or "").strip()),
-                "has_activation": bool(rec.get("activation_code")),
-            })
+            result.append(
+                {
+                    "user_id": rec.get("user_id"),
+                    "name": rec.get("name"),
+                    "email": rec.get("email", ""),
+                    "phone": rec.get("phone", ""),
+                    "plan": rec.get("plan", "free"),
+                    "created_at": rec.get("created_at"),
+                    "has_own_key": bool((rec.get("gemini_api_key") or "").strip()),
+                    "has_activation": bool(rec.get("activation_code")),
+                }
+            )
         return jsonify({"users": result, "total": len(result)})
 
     @app.route("/api/auth/logout", methods=["POST"])

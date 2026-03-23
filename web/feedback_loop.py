@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 AI反馈循环 - 根据质量评估结果，自动改进生成的内容
 集成 Gemini 模型进行迭代改进

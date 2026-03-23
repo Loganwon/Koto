@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 SkillToolsPlugin — 向 UnifiedAgent 暴露 Skill 管理工具。
 
@@ -70,7 +72,7 @@ class SkillToolsPlugin(AgentPlugin):
                                 "可选。声明该 Skill 需要的权限列表，用户启用后会看到授权提示。"
                                 "可选值：ui_style | ui_interactive | notifications | "
                                 "clipboard_read | clipboard_write | storage | autorun。"
-                                "示例：[\"ui_interactive\"]"
+                                '示例：["ui_interactive"]'
                             ),
                         },
                         "ui_extensions": {
@@ -257,7 +259,9 @@ class SkillToolsPlugin(AgentPlugin):
                 plan_str = "\n".join(f"    {i+1}. {s}" for i, s in enumerate(plan))
                 meta_lines.append(f"  - ⚙️ 执行步骤:\n{plan_str}")
             if skill_def.permissions:
-                meta_lines.append(f"  - 🔐 权限声明: {', '.join(skill_def.permissions)}")
+                meta_lines.append(
+                    f"  - 🔐 权限声明: {', '.join(skill_def.permissions)}"
+                )
             if skill_def.ui_extensions:
                 ext = skill_def.ui_extensions
                 parts = []
@@ -266,7 +270,9 @@ class SkillToolsPlugin(AgentPlugin):
                 if ext.get("quick_replies"):
                     parts.append(f"{len(ext['quick_replies'])} 个快速回复")
                 if ext.get("floating_widget"):
-                    parts.append(f"浮动面板 ({ext['floating_widget'].get('type', '?')})")
+                    parts.append(
+                        f"浮动面板 ({ext['floating_widget'].get('type', '?')})"
+                    )
                 if parts:
                     meta_lines.append(f"  - 🎛️ UI 扩展: {', '.join(parts)}")
             analysis_note = (
@@ -310,11 +316,14 @@ class SkillToolsPlugin(AgentPlugin):
                                          clipboard_read | clipboard_write | storage | autorun
         """
         try:
-            from app.core.skills.skill_permissions import SkillPermissionManager, PERMISSION_META
             from app.core.skills.skill_manager import SkillManager
+            from app.core.skills.skill_permissions import (
+                PERMISSION_META,
+                SkillPermissionManager,
+            )
 
             if permission not in PERMISSION_META:
-                valid = ', '.join(PERMISSION_META.keys())
+                valid = ", ".join(PERMISSION_META.keys())
                 return f"❌ 未知权限 `{permission}`。可用权限：{valid}"
 
             SkillManager._ensure_init()

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto Ops REST API — /api/ops
 ======================================
@@ -396,7 +398,9 @@ def system_stats():
 
         rated_skills.sort(key=lambda x: x["avg_rating"], reverse=True)
         all_ratings = [s["avg_rating"] for s in rated_skills if s["n"] > 0]
-        overall_avg = round(sum(all_ratings) / len(all_ratings), 2) if all_ratings else 0.0
+        overall_avg = (
+            round(sum(all_ratings) / len(all_ratings), 2) if all_ratings else 0.0
+        )
 
         result["skills"] = {
             "total_rated": len(rated_skills),

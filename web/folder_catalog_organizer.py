@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 指定路径文件夹自动归纳 + 归纳清单生成（含发送者/来源人线索）
 """

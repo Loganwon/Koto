@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 数据提取与转换模块 - 跨应用数据搬运专家
 支持从微信、浏览器等提取数据并转换到Excel、数据库等

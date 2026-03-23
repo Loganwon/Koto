@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import logging
 import re
 import time
@@ -35,9 +37,12 @@ def _get_local_planner():
 
     return LocalPlanner
 
+
 def _get_task_classifier():
     from app.core.routing.task_classifier import TaskClassifier
+
     return TaskClassifier
+
 
 class SmartDispatcher:
     """
@@ -311,15 +316,49 @@ class SmartDispatcher:
         "okay",
     }
     _TRIVIAL_IDENTITY = [
-        "你是谁", "你叫什么", "你叫啥", "你是什么", "介绍一下你自己", "你是koto", "koto是什么",
+        "你是谁",
+        "你叫什么",
+        "你叫啥",
+        "你是什么",
+        "介绍一下你自己",
+        "你是koto",
+        "koto是什么",
     ]
     # 若存在这些词，再短也不能走极简通道
     _TRIVIAL_EXCLUDE = [
-        "画", "图片", "照片", "图", "代码", "程序", "脚本", "文件", "文档", "报告",
-        "pdf", "word", "excel", "ppt", "天气", "股价", "新闻", "汇率",
-        "打开", "关闭", "截图", "启动", "运行", "搜索",
-        "微信", "发送", "发消息", "发邮件", "购票",
-        "研究", "分析", "深入", "全面",
+        "画",
+        "图片",
+        "照片",
+        "图",
+        "代码",
+        "程序",
+        "脚本",
+        "文件",
+        "文档",
+        "报告",
+        "pdf",
+        "word",
+        "excel",
+        "ppt",
+        "天气",
+        "股价",
+        "新闻",
+        "汇率",
+        "打开",
+        "关闭",
+        "截图",
+        "启动",
+        "运行",
+        "搜索",
+        "微信",
+        "发送",
+        "发消息",
+        "发邮件",
+        "购票",
+        "研究",
+        "分析",
+        "深入",
+        "全面",
         # 图表/数据可视化 — 防止「帮我作图」被误判为极简 CHAT
         "作图",
         "图表",
@@ -375,7 +414,14 @@ class SmartDispatcher:
         "接口",
         "api",
         # 时效性信号词 — 防止「目前金价」「近期AI动态」被极简通道漏判
-        "目前", "近期", "局势", "战况", "动态", "进展", "现状", "近况",
+        "目前",
+        "近期",
+        "局势",
+        "战况",
+        "动态",
+        "进展",
+        "现状",
+        "近况",
     ]
 
     @classmethod
@@ -625,7 +671,11 @@ class SmartDispatcher:
         WebSearcher,
     ) -> str:
         """对模型输出应用强规则安全覆写，避免模型分类器误判边界情况。"""
-        if task_type == "CHAT" and WebSearcher and WebSearcher.needs_web_search(user_input):
+        if (
+            task_type == "CHAT"
+            and WebSearcher
+            and WebSearcher.needs_web_search(user_input)
+        ):
             return "WEB_SEARCH"
         if (
             task_type not in ("SYSTEM", "AGENT")
@@ -634,9 +684,14 @@ class SmartDispatcher:
         ):
             return "SYSTEM"
         _agent_pat = [
-            r"发微信", r"回微信", r"微信发", r"微信回",
-            r"给.{1,6}发消息", r"给.{1,6}发微信",
-            r"浏览器打开", r"点击.{1,6}按键",
+            r"发微信",
+            r"回微信",
+            r"微信发",
+            r"微信回",
+            r"给.{1,6}发消息",
+            r"给.{1,6}发微信",
+            r"浏览器打开",
+            r"点击.{1,6}按键",
         ]
         if any(re.search(p, user_input) for p in _agent_pat):
             return "AGENT"
@@ -693,11 +748,22 @@ class SmartDispatcher:
 
         # === 0. Force Plan Mode (New Feature) ===
         _FORCE_PLAN_TRIGGERS = [
-            "请制定计划", "拆解任务", "帮我计划", "分步骤", "一步步",
-            "分步完成", "制定方案", "拆分任务", "步骤规划",
-            "step by step", "step-by-step", "plan and execute",
+            "请制定计划",
+            "拆解任务",
+            "帮我计划",
+            "分步骤",
+            "一步步",
+            "分步完成",
+            "制定方案",
+            "拆分任务",
+            "步骤规划",
+            "step by step",
+            "step-by-step",
+            "plan and execute",
         ]
-        if user_input.strip().startswith("/plan ") or any(t in user_input for t in _FORCE_PLAN_TRIGGERS):
+        if user_input.strip().startswith("/plan ") or any(
+            t in user_input for t in _FORCE_PLAN_TRIGGERS
+        ):
             context_info = {"complexity": "complex", "is_multi_step_task": True}
             context_info["multi_step_info"] = {
                 "pattern": "forced_plan",
@@ -714,13 +780,43 @@ class SmartDispatcher:
         if file_context and file_context.get("has_file"):
             file_ext = file_context.get("file_type", "")
             edit_keywords = [
-                "修改", "更改", "标注", "批注", "润色", "改写", "校对", "审校", "修订",
-                "纠错", "改善", "优化", "调整", "精炼", "通畅", "通顺", "流畅", "精简",
-                "凝练", "简洁", "整理", "梳理", "提炼", "整体修改", "修一下", "帮我改",
-                "改一改", "改得", "写得", "polish", "refine", "revise", "edit", "improve",
+                "修改",
+                "更改",
+                "标注",
+                "批注",
+                "润色",
+                "改写",
+                "校对",
+                "审校",
+                "修订",
+                "纠错",
+                "改善",
+                "优化",
+                "调整",
+                "精炼",
+                "通畅",
+                "通顺",
+                "流畅",
+                "精简",
+                "凝练",
+                "简洁",
+                "整理",
+                "梳理",
+                "提炼",
+                "整体修改",
+                "修一下",
+                "帮我改",
+                "改一改",
+                "改得",
+                "写得",
+                "polish",
+                "refine",
+                "revise",
+                "edit",
+                "improve",
             ]
             has_edit_intent = any(kw in user_lower for kw in edit_keywords)
-            
+
             if has_edit_intent and file_ext in [".docx", ".doc"]:
                 context_info = {"complexity": "complex"}
                 context_info["routing_list"] = cls._build_routing_list(
@@ -760,17 +856,46 @@ class SmartDispatcher:
 
         # === 指定路径文件列举快速通道（最高优先级，防止被误路由到 FILE_GEN/CHAT）===
         # 匹配：输入含 Windows 路径（如 C:\xxx）且含列举/归纳/查找意图关键词
-        if re.search(r'[A-Za-z]:[\\]', user_input):
+        if re.search(r"[A-Za-z]:[\\]", user_input):
             _path_list_kws = [
-                "归纳", "列出", "列举", "有哪些", "所有", "全部",
-                "找", "查", "看看", "显示", "汇总", "整理",
+                "归纳",
+                "列出",
+                "列举",
+                "有哪些",
+                "所有",
+                "全部",
+                "找",
+                "查",
+                "看看",
+                "显示",
+                "汇总",
+                "整理",
                 # Watch Mode / 字段提取 / 问答
-                "监控", "监视", "停止监控", "自动归类",
-                "提取", "关键信息", "合同信息", "解读", "分析",
-                "哪个", "哪些", "里面", "这几份", "对比",
+                "监控",
+                "监视",
+                "停止监控",
+                "自动归类",
+                "提取",
+                "关键信息",
+                "合同信息",
+                "解读",
+                "分析",
+                "哪个",
+                "哪些",
+                "里面",
+                "这几份",
+                "对比",
                 # 内容过滤搜索（如"哪几个是报告/合同/简历/访谈"）
-                "哪几", "几个", "几份", "路径下", "下有", "下面有",
-                "属于", "什么文件", "文件类型", "下的文件",
+                "哪几",
+                "几个",
+                "几份",
+                "路径下",
+                "下有",
+                "下面有",
+                "属于",
+                "什么文件",
+                "文件类型",
+                "下的文件",
             ]
             if any(k in user_input for k in _path_list_kws):
                 context_info = context_info or {}
@@ -786,11 +911,37 @@ class SmartDispatcher:
 
         # === 系统操作快速通道（打开/启动/关闭 + 应用名，不依赖 APP_ALIASES）===
         # 命令语气、短输入、不含问句/文件/网页关键词
-        _sys_action_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
+        _sys_action_starters = (
+            "打开",
+            "启动",
+            "运行",
+            "开启",
+            "关闭",
+            "退出",
+            "关掉",
+            "杀掉",
+        )
         _sys_exclude_kws = (
-            "怎么", "如何", "什么", "为什么", "能不能", "可以吗", "怎样", "咋",
-            "文件", "网页", "网址", "url", "网站", "链接", "附件",
-            "思路", "方式", "方法", "问题", "功能",
+            "怎么",
+            "如何",
+            "什么",
+            "为什么",
+            "能不能",
+            "可以吗",
+            "怎样",
+            "咋",
+            "文件",
+            "网页",
+            "网址",
+            "url",
+            "网站",
+            "链接",
+            "附件",
+            "思路",
+            "方式",
+            "方法",
+            "问题",
+            "功能",
         )
         _stripped = user_input.strip()
         if (
@@ -813,19 +964,40 @@ class SmartDispatcher:
         # 识别非执行型查询：用户在问 Koto「能不能做X」或「怎么做X」，不应触发动作路由
         # 典型误触发：「你会做ppt么」「如何制作Word」「怎么生成图表」「你能画图吗」
         _CAPABILITY_PREFIXES = [
-            "你会", "你能", "能不能", "你可以", "能否", "可以吗", "你支持", "支持吗",
+            "你会",
+            "你能",
+            "能不能",
+            "你可以",
+            "能否",
+            "可以吗",
+            "你支持",
+            "支持吗",
         ]
         _HOWTO_PREFIXES = ["怎么", "如何", "怎样", "怎么样", "什么是", "怎么用"]
         _QUESTION_ENDINGS = ["吗", "么", "?", "？", "嘛", "不"]
         _ACTION_TOOL_KWS = [
-            "ppt", "幻灯片", "演示文稿", "word", "docx", "pdf", "excel", "文档",
-            "图片", "图表", "折线图", "柱状图", "画图", "绘图", "代码", "程序", "音频",
+            "ppt",
+            "幻灯片",
+            "演示文稿",
+            "word",
+            "docx",
+            "pdf",
+            "excel",
+            "文档",
+            "图片",
+            "图表",
+            "折线图",
+            "柱状图",
+            "画图",
+            "绘图",
+            "代码",
+            "程序",
+            "音频",
         ]
         _u_stripped_lower = user_lower.rstrip()
         # 1) 能力询问：以「你会/你能/能不能…」开头 + 以「吗/么」结尾
-        if (
-            any(_u_stripped_lower.startswith(p) for p in _CAPABILITY_PREFIXES)
-            and any(_u_stripped_lower.endswith(s) for s in _QUESTION_ENDINGS)
+        if any(_u_stripped_lower.startswith(p) for p in _CAPABILITY_PREFIXES) and any(
+            _u_stripped_lower.endswith(s) for s in _QUESTION_ENDINGS
         ):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -838,9 +1010,8 @@ class SmartDispatcher:
             )
             return "CHAT", "💬 Capability-Query", context_info
         # 2) 方法询问：「怎么做X / 如何制作X」— 开头为 how-to prefix + 含功能关键词
-        if (
-            any(_u_stripped_lower.startswith(p) for p in _HOWTO_PREFIXES)
-            and any(k in user_lower for k in _ACTION_TOOL_KWS)
+        if any(_u_stripped_lower.startswith(p) for p in _HOWTO_PREFIXES) and any(
+            k in user_lower for k in _ACTION_TOOL_KWS
         ):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -855,10 +1026,10 @@ class SmartDispatcher:
 
         # === 提醒/日程/消息发送快速通道 → AGENT ===
         _AGENT_NOTIFY_PATTERNS = [
-            r'(设置?|帮我设?)(提醒|闹钟|定时).{0,20}',
-            r'提醒我.{0,25}(点|时|分|号|日)',
-            r'(给|向).{1,8}(发|回)(微信|消息|邮件)',
-            r'(发|回)(微信|消息).{0,15}给.{1,8}',
+            r"(设置?|帮我设?)(提醒|闹钟|定时).{0,20}",
+            r"提醒我.{0,25}(点|时|分|号|日)",
+            r"(给|向).{1,8}(发|回)(微信|消息|邮件)",
+            r"(发|回)(微信|消息).{0,15}给.{1,8}",
         ]
         if any(re.search(p, user_input) for p in _AGENT_NOTIFY_PATTERNS):
             context_info = context_info or {}
@@ -875,18 +1046,33 @@ class SmartDispatcher:
         # === AI绘画/图片生成快速通道（在极简通道之前，防止短句被误分到 CHAT）===
         # 匹配：画/做/生成 + 一张/个/幅 + 任意内容 + 图/图片/照片；或含明确图片生成词
         _PAINTER_PATTERNS = [
-            r'(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,20}(图片|照片|壁纸|头像|封面)',
-            r'(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,3}(一张|一幅|一个|张|幅).{0,30}图',
-            r'(一张|一幅).{1,20}(图|图片|照片)',
-            r'(ai|AI).{0,5}(画|绘|生成|创作)',
+            r"(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,20}(图片|照片|壁纸|头像|封面)",
+            r"(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,3}(一张|一幅|一个|张|幅).{0,30}图",
+            r"(一张|一幅).{1,20}(图|图片|照片)",
+            r"(ai|AI).{0,5}(画|绘|生成|创作)",
         ]
         import re as _re_painter
+
         if any(_re_painter.search(p, user_input) for p in _PAINTER_PATTERNS):
             # 排除图表/可视化词（那些走 CODER）
-            _not_chart = not any(k in user_lower for k in [
-                "图表", "折线图", "柱状图", "饼图", "散点图", "直方图", "条形图",
-                "可视化", "统计图", "数据图", "chart", "plot", "matplotlib",
-            ])
+            _not_chart = not any(
+                k in user_lower
+                for k in [
+                    "图表",
+                    "折线图",
+                    "柱状图",
+                    "饼图",
+                    "散点图",
+                    "直方图",
+                    "条形图",
+                    "可视化",
+                    "统计图",
+                    "数据图",
+                    "chart",
+                    "plot",
+                    "matplotlib",
+                ]
+            )
             if _not_chart:
                 context_info = context_info or {}
                 context_info["routing_list"] = cls._build_routing_list(
@@ -924,8 +1110,12 @@ class SmartDispatcher:
                 _tc_task, _tc_conf = _TC.classify(user_input)
                 if _tc_conf >= 0.72:
                     _tc_task = cls._apply_routing_safety(
-                        _tc_task, user_input, user_lower,
-                        file_context, LocalExecutor, WebSearcher,
+                        _tc_task,
+                        user_input,
+                        user_lower,
+                        file_context,
+                        LocalExecutor,
+                        WebSearcher,
                     )
                     context_info = context_info or {}
                     context_info["routing_list"] = cls._build_routing_list(
@@ -938,12 +1128,15 @@ class SmartDispatcher:
                     )
                     return _tc_task, f"🚀 TaskClassifier {_tc_conf:.2f}", context_info
         except Exception as _tce:
-            logger.warning(f"[SmartDispatcher] ⚠️ 早期TaskClassifier异常（跳过）: {_tce}")
+            logger.warning(
+                f"[SmartDispatcher] ⚠️ 早期TaskClassifier异常（跳过）: {_tce}"
+            )
         try:
             _lmr = _get_local_model_router()
             if _lmr.is_ollama_available():
-                _lm_task, _lm_cs, _lm_src, _lm_hint, _lm_cplx = \
-                    _lmr.classify_with_hint(user_input, timeout=3.5)
+                _lm_task, _lm_cs, _lm_src, _lm_hint, _lm_cplx = _lmr.classify_with_hint(
+                    user_input, timeout=3.5
+                )
                 _lm_conf = 0.0
                 if isinstance(_lm_cs, str):
                     _mm = re.search(r"(\d+\.\d+)", _lm_cs)
@@ -953,8 +1146,12 @@ class SmartDispatcher:
                 _early_model_result = (_lm_task, _lm_conf, _lm_cs, _lm_hint, _lm_cplx)
                 if _lm_task and _lm_conf >= 0.72:
                     _lm_task = cls._apply_routing_safety(
-                        _lm_task, user_input, user_lower,
-                        file_context, LocalExecutor, WebSearcher,
+                        _lm_task,
+                        user_input,
+                        user_lower,
+                        file_context,
+                        LocalExecutor,
+                        WebSearcher,
                     )
                     context_info = context_info or {}
                     context_info["routing_list"] = cls._build_routing_list(
@@ -977,8 +1174,18 @@ class SmartDispatcher:
 
         # === 天气 / 实时信息快速通道（在 Trivial 之后、模型不足时兆底）===
         _WEATHER_KWS = [
-            "天气", "气温", "下雨吗", "下雨", "下雪吗", "下雪", "天气怎么样", "天气怎样",
-            "天气预报", "weather", "温度多少", "穿什么衣服",
+            "天气",
+            "气温",
+            "下雨吗",
+            "下雨",
+            "下雪吗",
+            "下雪",
+            "天气怎么样",
+            "天气怎样",
+            "天气预报",
+            "weather",
+            "温度多少",
+            "穿什么衣服",
         ]
         if any(k in user_lower for k in _WEATHER_KWS):
             context_info = context_info or {}
@@ -997,7 +1204,14 @@ class SmartDispatcher:
         _MEETING_NOUNS = ["会议", "纪要", "会议记录", "会议内容", "转录", "会议文字"]
         # 排除知识性问句（「会议纪要怎么写」/ 「什么是会议纪要」不应触发提炼任务）
         _MEETING_QUESTION_GUARDS = [
-            "什么是", "是什么", "怎么写", "如何写", "怎么做", "如何做", "怎么用", "有什么区别",
+            "什么是",
+            "是什么",
+            "怎么写",
+            "如何写",
+            "怎么做",
+            "如何做",
+            "怎么用",
+            "有什么区别",
         ]
         if (
             any(v in user_lower for v in _MEETING_VERBS)
@@ -1017,14 +1231,45 @@ class SmartDispatcher:
 
         # === 代码编写快速通道（在本地模型之前，避免 koto-router 误判明确写代码请求）===
         # 条件：含写作动词 + 编程语言/代码概念，但不是"帮我写一段自我介绍"这类纯文本
-        _CODE_WRITE_VERBS = ["帮我写", "给我写", "写一个", "写个", "实现", "编写", "开发", "编程"]
+        _CODE_WRITE_VERBS = [
+            "帮我写",
+            "给我写",
+            "写一个",
+            "写个",
+            "实现",
+            "编写",
+            "开发",
+            "编程",
+        ]
         _CODE_CONCEPTS = [
-            "函数", "算法", "类", "接口", "脚本", "程序", "代码",
-            "排序", "查找", "递归", "遍历", "爬虫", "api", "模块",
+            "函数",
+            "算法",
+            "类",
+            "接口",
+            "脚本",
+            "程序",
+            "代码",
+            "排序",
+            "查找",
+            "递归",
+            "遍历",
+            "爬虫",
+            "api",
+            "模块",
         ]
         _CODE_LANGS = [
-            "python", "javascript", "java", "c++", "golang", "rust",
-            "typescript", "kotlin", "swift", "php", "ruby", "sql",
+            "python",
+            "javascript",
+            "java",
+            "c++",
+            "golang",
+            "rust",
+            "typescript",
+            "kotlin",
+            "swift",
+            "php",
+            "ruby",
+            "sql",
         ]
         _has_code_verb = any(v in user_lower for v in _CODE_WRITE_VERBS)
         _has_code_concept = any(c in user_lower for c in _CODE_CONCEPTS)
@@ -1044,10 +1289,32 @@ class SmartDispatcher:
         # === 时效性关键词快速通道（目前/近期/最新 + 时事主题）===
         _REALTIME_SIGNALS = ["目前", "现在", "当前", "最新", "近期", "今日", "近况"]
         _REALTIME_TOPIC_KWS = [
-            "新闻", "消息", "进展", "动态", "局势", "战况", "现状", "情况",
-            "比分", "结果", "成绩", "排名", "股价", "金价", "油价",
+            "新闻",
+            "消息",
+            "进展",
+            "动态",
+            "局势",
+            "战况",
+            "现状",
+            "情况",
+            "比分",
+            "结果",
+            "成绩",
+            "排名",
+            "股价",
+            "金价",
+            "油价",
         ]
-        _REALTIME_EXCLUDE_KWS = ["历史", "是什么", "什么是", "定义", "原理", "原因", "介绍", "解释"]
+        _REALTIME_EXCLUDE_KWS = [
+            "历史",
+            "是什么",
+            "什么是",
+            "定义",
+            "原理",
+            "原因",
+            "介绍",
+            "解释",
+        ]
         if (
             any(s in user_lower for s in _REALTIME_SIGNALS)
             and any(t in user_lower for t in _REALTIME_TOPIC_KWS)
@@ -1066,16 +1333,49 @@ class SmartDispatcher:
 
         # === 数据图表/可视化快速通道（在所有模型之前，防止被误路由到 PAINTER/CHAT）===
         _CHART_KWS = [
-            "图表", "折线图", "柱状图", "饼图", "散点图", "直方图", "条形图", "热力图",
-            "作图", "可视化", "统计图", "数据图", "chart", "plot", "graph",
-            "matplotlib", "seaborn", "plotly", "echarts",
+            "图表",
+            "折线图",
+            "柱状图",
+            "饼图",
+            "散点图",
+            "直方图",
+            "条形图",
+            "热力图",
+            "作图",
+            "可视化",
+            "统计图",
+            "数据图",
+            "chart",
+            "plot",
+            "graph",
+            "matplotlib",
+            "seaborn",
+            "plotly",
+            "echarts",
         ]
         _CHART_ACTION_KWS = [
-            "画", "作", "生成", "做", "绘制", "创建", "画出", "plot", "draw", "show", "显示",
+            "画",
+            "作",
+            "生成",
+            "做",
+            "绘制",
+            "创建",
+            "画出",
+            "plot",
+            "draw",
+            "show",
+            "显示",
         ]
         # 排除知识性问句（「什么是折线图」/ 「折线图是什么」→ CHAT 知识回答）
         _CHART_KNOWLEDGE_GUARDS = [
-            "什么是", "是什么", "怎么", "如何", "定义", "原理", "介绍", "解释",
+            "什么是",
+            "是什么",
+            "怎么",
+            "如何",
+            "定义",
+            "原理",
+            "介绍",
+            "解释",
         ]
         if any(k in user_lower for k in _CHART_KWS) and not any(
             g in user_lower for g in _CHART_KNOWLEDGE_GUARDS
@@ -1094,13 +1394,14 @@ class SmartDispatcher:
 
         # === 实时出行查询快速通道（在所有模型之前，确保不被误判为CHAT/AGENT）===
         _travel_search_patterns = [
-            r'(查|查询|查一下|看|有没有|有无|还有).{0,8}(火车票|高铁票|动车票|机票|余票|班次)',
-            r'(下周|明天|后天|今天|大后天|[0-9]+[号日]).{0,14}(去|到|从).{0,14}(高铁|动车|火车|航班|机票)',
-            r'(去|从).{1,14}(去|到).{1,20}(火车|高铁|动车|机)',
-            r'(几点|什么时候).{0,8}(从|到|出发|到达).{0,12}(车|班|次|机)',
-            r'(余票|时刻表|列车时刻|航班动态|航班查询)',
+            r"(查|查询|查一下|看|有没有|有无|还有).{0,8}(火车票|高铁票|动车票|机票|余票|班次)",
+            r"(下周|明天|后天|今天|大后天|[0-9]+[号日]).{0,14}(去|到|从).{0,14}(高铁|动车|火车|航班|机票)",
+            r"(去|从).{1,14}(去|到).{1,20}(火车|高铁|动车|机)",
+            r"(几点|什么时候).{0,8}(从|到|出发|到达).{0,12}(车|班|次|机)",
+            r"(余票|时刻表|列车时刻|航班动态|航班查询)",
         ]
         import re as _re_travel
+
         if any(_re_travel.search(p, user_input) for p in _travel_search_patterns):
             _buy_kw_early = ["订票", "买票", "购票", "帮我买", "帮我订", "12306"]
             if any(k in user_lower for k in _buy_kw_early):
@@ -1124,18 +1425,67 @@ class SmartDispatcher:
 
         # === 金融/商品价格快速通道（价格 = 实时数据，强制 WEB_SEARCH）===
         _PRICE_ASSETS = [
-            "原油", "布伦特", "wti", "天然气", "黄金", "白银", "铜", "铁矿石",
-            "大豆", "小麦", "棉花", "黄铜", "铝", "锌", "铅", "镍",
-            "比特币", "以太坊", "btc", "eth", "加密货币", "数字货币",
-            "美元", "欧元", "日元", "英镑", "港币", "外汇", "汇率",
-            "a股", "港股", "道琼斯", "纳斯达克", "标普", "上证", "深证",
-            "期货", "基金", "债券", "股票",
+            "原油",
+            "布伦特",
+            "wti",
+            "天然气",
+            "黄金",
+            "白银",
+            "铜",
+            "铁矿石",
+            "大豆",
+            "小麦",
+            "棉花",
+            "黄铜",
+            "铝",
+            "锌",
+            "铅",
+            "镍",
+            "比特币",
+            "以太坊",
+            "btc",
+            "eth",
+            "加密货币",
+            "数字货币",
+            "美元",
+            "欧元",
+            "日元",
+            "英镑",
+            "港币",
+            "外汇",
+            "汇率",
+            "a股",
+            "港股",
+            "道琼斯",
+            "纳斯达克",
+            "标普",
+            "上证",
+            "深证",
+            "期货",
+            "基金",
+            "债券",
+            "股票",
             # 简写形式（如「目前金价」「油价多少」）
-            "金价", "油价", "银价", "铜价",
+            "金价",
+            "油价",
+            "银价",
+            "铜价",
         ]
         _PRICE_SIGNALS = [
-            "价格", "现价", "报价", "行情", "走势", "涨跌", "多少钱",
-            "今日价", "实时", "最新价", "开盘", "收盘", "涨了", "跌了",
+            "价格",
+            "现价",
+            "报价",
+            "行情",
+            "走势",
+            "涨跌",
+            "多少钱",
+            "今日价",
+            "实时",
+            "最新价",
+            "开盘",
+            "收盘",
+            "涨了",
+            "跌了",
         ]
         _has_asset = any(k in user_lower for k in _PRICE_ASSETS)
         _has_price_signal = any(k in user_lower for k in _PRICE_SIGNALS)
@@ -1194,8 +1544,12 @@ class SmartDispatcher:
                 _tc2_task, _tc2_conf = _TC2.classify(user_input)
                 if _tc2_conf >= _SEC_THRESH:
                     _tc2_task = cls._apply_routing_safety(
-                        _tc2_task, user_input, user_lower,
-                        file_context, LocalExecutor, WebSearcher,
+                        _tc2_task,
+                        user_input,
+                        user_lower,
+                        file_context,
+                        LocalExecutor,
+                        WebSearcher,
                     )
                     context_info = context_info or {}
                     context_info["routing_list"] = cls._build_routing_list(
@@ -1206,7 +1560,11 @@ class SmartDispatcher:
                     logger.info(
                         f"[SmartDispatcher] 🚀 TC二次兜底: '{user_input[:30]}' → {_tc2_task} ({_tc2_conf:.2f})"
                     )
-                    return _tc2_task, f"🚀 TaskClassifier(2) {_tc2_conf:.2f}", context_info
+                    return (
+                        _tc2_task,
+                        f"🚀 TaskClassifier(2) {_tc2_conf:.2f}",
+                        context_info,
+                    )
         except Exception:
             pass
         # 复用早期缓存的 Ollama 结果（减少重复请求）
@@ -1214,8 +1572,12 @@ class SmartDispatcher:
             _em_task, _em_conf, _em_cs, _em_hint, _em_cplx = _early_model_result
             if _em_task and _em_conf >= _SEC_THRESH:
                 _em_task = cls._apply_routing_safety(
-                    _em_task, user_input, user_lower,
-                    file_context, LocalExecutor, WebSearcher,
+                    _em_task,
+                    user_input,
+                    user_lower,
+                    file_context,
+                    LocalExecutor,
+                    WebSearcher,
                 )
                 context_info = context_info or {}
                 context_info["routing_list"] = cls._build_routing_list(
@@ -1236,8 +1598,9 @@ class SmartDispatcher:
             try:
                 _lmr2 = _get_local_model_router()
                 if _lmr2.is_ollama_available():
-                    _r2_task, _r2_cs, _, _r2_hint, _r2_cplx = \
-                        _lmr2.classify_with_hint(user_input, timeout=4.5)
+                    _r2_task, _r2_cs, _, _r2_hint, _r2_cplx = _lmr2.classify_with_hint(
+                        user_input, timeout=4.5
+                    )
                     _r2_conf = 0.0
                     if isinstance(_r2_cs, str):
                         _mm2 = re.search(r"(\d+\.\d+)", _r2_cs)
@@ -1245,8 +1608,12 @@ class SmartDispatcher:
                             _r2_conf = float(_mm2.group(1))
                     if _r2_task and _r2_conf >= _SEC_THRESH:
                         _r2_task = cls._apply_routing_safety(
-                            _r2_task, user_input, user_lower,
-                            file_context, LocalExecutor, WebSearcher,
+                            _r2_task,
+                            user_input,
+                            user_lower,
+                            file_context,
+                            LocalExecutor,
+                            WebSearcher,
                         )
                         context_info = context_info or {}
                         context_info["routing_list"] = cls._build_routing_list(
@@ -1261,12 +1628,18 @@ class SmartDispatcher:
                         logger.info(
                             f"[SmartDispatcher] 🤖 Ollama延迟起动: '{user_input[:30]}' → {_r2_task} ({_r2_conf:.2f})"
                         )
-                        return _r2_task, f"🤖 LocalModel(late) {_r2_conf:.2f}", context_info
+                        return (
+                            _r2_task,
+                            f"🤖 LocalModel(late) {_r2_conf:.2f}",
+                            context_info,
+                        )
             except Exception:
                 pass
 
         # === 关键词兜底规则（所有模型均失败时最后路障）===
-        logger.debug(f"[SmartDispatcher] ⚠️ 模型均未达阈值，回退关键词兜底规则: '{user_input[:30]}'")
+        logger.debug(
+            f"[SmartDispatcher] ⚠️ 模型均未达阈值，回退关键词兜底规则: '{user_input[:30]}'"
+        )
 
         # -- 附件文档标注 (需要 file_context 支撑，不纯靠关键词) --
         if file_context and file_context.get("has_file"):
@@ -1285,10 +1658,35 @@ class SmartDispatcher:
                     pass
 
         # -- PPT 直通 (需要同时有 PPT 关键词 + 动作词，且不是能力询问/方法问句) --
-        _ppt_direct_keywords = ["ppt", "幻灯片", "演示文稿", "presentation", "slide", "slides", ".pptx"]
-        _ppt_action_words = ["做", "生成", "创建", "制作", "做一个", "做个", "帮我做", "帮我生成"]
+        _ppt_direct_keywords = [
+            "ppt",
+            "幻灯片",
+            "演示文稿",
+            "presentation",
+            "slide",
+            "slides",
+            ".pptx",
+        ]
+        _ppt_action_words = [
+            "做",
+            "生成",
+            "创建",
+            "制作",
+            "做一个",
+            "做个",
+            "帮我做",
+            "帮我生成",
+        ]
         _ppt_question_guards = [
-            "怎么", "如何", "什么", "你会", "你能", "能不能", "可以吗", "能否", "支持",
+            "怎么",
+            "如何",
+            "什么",
+            "你会",
+            "你能",
+            "能不能",
+            "可以吗",
+            "能否",
+            "支持",
         ]
         if (
             any(k in user_lower for k in _ppt_direct_keywords)
@@ -1305,11 +1703,44 @@ class SmartDispatcher:
             return "FILE_GEN", "📄 PPT-Direct", context_info
 
         # -- 文档/报告生成直通 (Word/PDF/Excel 等明确输出格式 + 动作意图，不含PPT已有规则) --
-        _doc_gen_output_kws = ["word", "docx", ".doc", "pdf", "excel", ".xlsx", "报告", "文档", "介绍文档", "word版"]
-        _doc_gen_action_kws = ["做一个", "做一份", "做个", "写一份", "写一个", "帮我做", "帮我写",
-                               "生成一个", "生成一份", "生成", "创建一个", "创建一份", "制作"]
+        _doc_gen_output_kws = [
+            "word",
+            "docx",
+            ".doc",
+            "pdf",
+            "excel",
+            ".xlsx",
+            "报告",
+            "文档",
+            "介绍文档",
+            "word版",
+        ]
+        _doc_gen_action_kws = [
+            "做一个",
+            "做一份",
+            "做个",
+            "写一份",
+            "写一个",
+            "帮我做",
+            "帮我写",
+            "生成一个",
+            "生成一份",
+            "生成",
+            "创建一个",
+            "创建一份",
+            "制作",
+        ]
         _doc_question_guards = [
-            "怎么", "如何", "什么", "你会", "你能", "能不能", "可以吗", "能否", "支持", "功能",
+            "怎么",
+            "如何",
+            "什么",
+            "你会",
+            "你能",
+            "能不能",
+            "可以吗",
+            "能否",
+            "支持",
+            "功能",
         ]
         if (
             any(k in user_lower for k in _doc_gen_output_kws)
@@ -1330,13 +1761,20 @@ class SmartDispatcher:
 
         # -- 全盘文件搜索/打开（优先于系统命令，避免"打开xxx文件"被误判为SYSTEM）--
         _file_search_patterns = [
-            r"帮我找.{0,20}文件", r"找一下.{1,30}", r"找找.{1,30}",
-            r"找到.{1,20}文件", r"定位.{1,20}文件", r"搜索文件",
-            r"在哪(里|儿|个目录)", r"哪个文件.{0,10}",
-            r"扫描(我的)?(电脑|磁盘|硬盘|文件)", r"全盘扫描",
+            r"帮我找.{0,20}文件",
+            r"找一下.{1,30}",
+            r"找找.{1,30}",
+            r"找到.{1,20}文件",
+            r"定位.{1,20}文件",
+            r"搜索文件",
+            r"在哪(里|儿|个目录)",
+            r"哪个文件.{0,10}",
+            r"扫描(我的)?(电脑|磁盘|硬盘|文件)",
+            r"全盘扫描",
             r"帮我打开.{1,30}(文件|\.)",
         ]
         import re as _re
+
         if any(_re.search(p, user_input) for p in _file_search_patterns):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
@@ -1358,8 +1796,27 @@ class SmartDispatcher:
             return "SYSTEM", "🖥️ Fallback-System", context_info
 
         # -- 系统命令兜底：命令动词 + 短输入（不依赖 APP_ALIASES）--
-        _fb_sys_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
-        _fb_sys_exclude = ("怎么", "如何", "什么", "文件", "网页", "网站", "思路", "方法", "功能")
+        _fb_sys_starters = (
+            "打开",
+            "启动",
+            "运行",
+            "开启",
+            "关闭",
+            "退出",
+            "关掉",
+            "杀掉",
+        )
+        _fb_sys_exclude = (
+            "怎么",
+            "如何",
+            "什么",
+            "文件",
+            "网页",
+            "网站",
+            "思路",
+            "方法",
+            "功能",
+        )
         _stripped_fb = user_input.strip()
         if (
             len(_stripped_fb) <= 18
@@ -1405,7 +1862,9 @@ class SmartDispatcher:
             }
             context_info["routing_list"] = base_routing_list
             try:
-                _ma_preset = _get_task_decomposer().suggest_multiagent_preset(compound_info)
+                _ma_preset = _get_task_decomposer().suggest_multiagent_preset(
+                    compound_info
+                )
                 context_info["multiagent_preset"] = _ma_preset
             except Exception:
                 pass
@@ -1414,8 +1873,21 @@ class SmartDispatcher:
         # -- RAG 上下文延续 --
         if history and len(history) >= 2 and ContextAnalyzer:
             context_info = ContextAnalyzer.analyze_context(user_input, history)
-            if context_info.get("is_continuation") and context_info.get("related_task") == "WEB_SEARCH":
-                search_verbs = ["查", "搜", "搜索", "查询", "找", "再找", "再查", "再搜", "再看看"]
+            if (
+                context_info.get("is_continuation")
+                and context_info.get("related_task") == "WEB_SEARCH"
+            ):
+                search_verbs = [
+                    "查",
+                    "搜",
+                    "搜索",
+                    "查询",
+                    "找",
+                    "再找",
+                    "再查",
+                    "再搜",
+                    "再看看",
+                ]
                 if any(v in user_lower for v in search_verbs):
                     context_info["routing_list"] = cls._build_routing_list(
                         similarity_scores,
@@ -1423,7 +1895,7 @@ class SmartDispatcher:
                         reasons={"WEB_SEARCH": ["fallback:search_followup"]},
                     )
                     return "WEB_SEARCH", "🌐 Fallback-SearchFollowup", context_info
-        
+
         # -- 网页搜索检测 --
         if WebSearcher and WebSearcher.needs_web_search(user_input):
             context_info = context_info or {}
@@ -1433,23 +1905,30 @@ class SmartDispatcher:
                 reasons={"WEB_SEARCH": ["fallback:web_search"]},
             )
             return "WEB_SEARCH", "🌐 Fallback-WebSearch", context_info
-        
+
         # -- RAG 历史延续 --
         if history and len(history) >= 2 and ContextAnalyzer:
             context_info = ContextAnalyzer.analyze_context(user_input, history)
-            
-            if context_info.get("is_continuation") and context_info.get("confidence", 0) > 0.7:
+
+            if (
+                context_info.get("is_continuation")
+                and context_info.get("confidence", 0) > 0.7
+            ):
                 related_task = context_info.get("related_task")
                 continuation_type = context_info.get("continuation_type", "unknown")
-                
+
                 if related_task:
                     context_info["routing_list"] = cls._build_routing_list(
                         similarity_scores,
                         boosts={related_task: 0.88},
-                        reasons={related_task: [f"fallback:rag_{continuation_type}"]}
+                        reasons={related_task: [f"fallback:rag_{continuation_type}"]},
                     )
-                    return related_task, f"🔗 Fallback-RAG-{continuation_type}", context_info
-        
+                    return (
+                        related_task,
+                        f"🔗 Fallback-RAG-{continuation_type}",
+                        context_info,
+                    )
+
         # === 最终兜底：ML 相似度 → 默认 CHAT ===
         scores = similarity_scores
         best_task = max(scores, key=scores.get)
@@ -1457,8 +1936,21 @@ class SmartDispatcher:
         latency = (time.time() - start_time) * 1000
 
         if best_score > 0.45:
-            _q_words = ["怎么", "如何", "什么", "为什么", "能不能", "可以吗",
-                        "怎样", "咋", "啥", "how", "what", "why", "which"]
+            _q_words = [
+                "怎么",
+                "如何",
+                "什么",
+                "为什么",
+                "能不能",
+                "可以吗",
+                "怎样",
+                "咋",
+                "啥",
+                "how",
+                "what",
+                "why",
+                "which",
+            ]
             is_q = any(qw in user_lower for qw in _q_words)
             if is_q and best_score < 0.6 and best_task != "CHAT":
                 pass
@@ -1493,6 +1985,7 @@ class SmartDispatcher:
         # ── 咨询 ModelFallbackExecutor：若首选模型当前不可用，直接返回备选 ──
         try:
             from app.core.llm.model_fallback import get_fallback_executor
+
             _fbe = get_fallback_executor()
         except Exception:
             _fbe = None
@@ -1503,32 +1996,41 @@ class SmartDispatcher:
                 alt = _fbe.get_best_available(task_type=fb_task, preferred=preferred)
                 if alt and alt != preferred:
                     import logging as _log
+
                     _log.getLogger(__name__).warning(
                         "[Dispatcher] 模型 %s 当前不可用，改用 %s (task=%s)",
-                        preferred, alt, task_type,
+                        preferred,
+                        alt,
+                        task_type,
                     )
                     return alt
             return preferred
 
         if task_type == "FILE_GEN":
             if complexity == "complex":
-                return MODEL_MAP.get("COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
+                return MODEL_MAP.get(
+                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                )
             return MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
-        
+
         if task_type == "DOC_ANNOTATE":
             if complexity == "complex":
-                return MODEL_MAP.get("COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
+                return MODEL_MAP.get(
+                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                )
             return MODEL_MAP.get("DOC_ANNOTATE", "gemini-3-flash-preview")
-            
+
         if task_type == "RESEARCH":
             return MODEL_MAP.get("RESEARCH", "gemini-3.1-pro-preview")
-        
+
         if task_type == "CODER":
             return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
 
         # 多步复杂任务 → Pro 模型确保执行质量
         if task_type == "MULTI_STEP":
-            return MODEL_MAP.get("MULTI_STEP", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview"))
+            return MODEL_MAP.get(
+                "MULTI_STEP", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+            )
 
         # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
         if task_type == "CHAT":
@@ -1537,12 +2039,18 @@ class SmartDispatcher:
             _FLASH_FALLBACK = "gemini-3-flash-preview"
             try:
                 from web.model_manager import KNOWN_MODEL_REGISTRY
-                _candidate_tier = KNOWN_MODEL_REGISTRY.get(_chat_candidate, {}).get("tier", 5)
+
+                _candidate_tier = KNOWN_MODEL_REGISTRY.get(_chat_candidate, {}).get(
+                    "tier", 5
+                )
                 if _candidate_tier > 7:
                     import logging as _lg
+
                     _lg.getLogger(__name__).warning(
                         "[Dispatcher] CHAT MODEL_MAP 指向 tier-%d 模型 %s，强制回退到 %s",
-                        _candidate_tier, _chat_candidate, _FLASH_FALLBACK,
+                        _candidate_tier,
+                        _chat_candidate,
+                        _FLASH_FALLBACK,
                     )
                     _chat_candidate = _FLASH_FALLBACK
             except Exception:
@@ -1554,13 +2062,20 @@ class SmartDispatcher:
             return MODEL_MAP.get("COMPLEX", "gemini-3.1-pro-preview")
 
         if has_image and task_type != "PAINTER":
-            return _avail(MODEL_MAP.get("VISION", MODEL_MAP.get("CHAT", "gemini-2.5-flash")), "VISION")
+            return _avail(
+                MODEL_MAP.get("VISION", MODEL_MAP.get("CHAT", "gemini-2.5-flash")),
+                "VISION",
+            )
 
-        return _avail(MODEL_MAP.get(task_type, MODEL_MAP.get("CHAT", "gemini-2.5-flash")))
+        return _avail(
+            MODEL_MAP.get(task_type, MODEL_MAP.get("CHAT", "gemini-2.5-flash"))
+        )
 
     # ── LangGraph 工作流集成 ────────────────────────────────────────────────
     @classmethod
-    def resolve_workflow(cls, task_type: str, user_input: str, has_file: bool = False) -> str:
+    def resolve_workflow(
+        cls, task_type: str, user_input: str, has_file: bool = False
+    ) -> str:
         """
         根据 dispatch() 返回的 task_type 决定是否使用 LangGraph 多步工作流。
 
@@ -1583,7 +2098,10 @@ class SmartDispatcher:
         """
         try:
             from app.core.workflow.langgraph_workflow import WorkflowEngine
-            detected = WorkflowEngine.detect_workflow(task_type, user_input, has_file=has_file)
+
+            detected = WorkflowEngine.detect_workflow(
+                task_type, user_input, has_file=has_file
+            )
             if detected == "multi_agent_ppt":
                 return "langgraph_multi_agent_ppt"
             elif detected == "research_and_document":

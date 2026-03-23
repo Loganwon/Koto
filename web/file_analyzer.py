@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 智能文件分析器 - 根据文件内容识别行业、类型、主题
 支持 AI 增强分类（Ollama + Qwen3）

@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 MemoryReflector — Deep background reflection after conversation turns.
 
@@ -321,4 +323,6 @@ class MemoryReflector:
             return 0
         if llm_fn is None:
             return 0
-        return cls._do_reflect(user_msg, ai_msg, task_type, session_name, get_memory_fn, llm_fn)
+        return cls._do_reflect(
+            user_msg, ai_msg, task_type, session_name, get_memory_fn, llm_fn
+        )

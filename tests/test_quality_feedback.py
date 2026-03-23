@@ -607,7 +607,7 @@ try:
         author="Koto AI",
     )
 
-    generated_ok = bool(result.get('output_path'))
+    generated_ok = bool(result.get("output_path"))
     print(f"  生成结果: {generated_ok}, {result.get('slide_count', 0)} 页")
 
     # Step 3: 后置文件检查

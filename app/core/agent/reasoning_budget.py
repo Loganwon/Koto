@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Reasoning Budget — 可见推理链与思考预算
 =======================================
@@ -61,11 +63,12 @@ logger = logging.getLogger(__name__)
 # 复杂度分级
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class ComplexityTier(str, Enum):
-    TRIVIAL   = "trivial"    # 直接回答，无需思考
-    MODERATE  = "moderate"   # 简短思考
-    COMPLEX   = "complex"    # 深度思考 + 反射
-    EXPERT    = "expert"     # 多步推理 + 反射 + 自我批评
+    TRIVIAL = "trivial"  # 直接回答，无需思考
+    MODERATE = "moderate"  # 简短思考
+    COMPLEX = "complex"  # 深度思考 + 反射
+    EXPERT = "expert"  # 多步推理 + 反射 + 自我批评
 
 
 # 复杂度判断关键词（原创规则，非机器学习）
@@ -76,16 +79,47 @@ _TRIVIAL_PATTERNS = [
 ]
 
 _COMPLEX_KEYWORDS = [
-    "设计", "架构", "实现", "优化", "分析", "比较", "证明",
-    "为什么", "如何", "推导", "调试", "重构", "评估", "预测",
-    "design", "implement", "architecture", "optimize", "analyze",
-    "why", "how to", "debug", "refactor", "prove",
+    "设计",
+    "架构",
+    "实现",
+    "优化",
+    "分析",
+    "比较",
+    "证明",
+    "为什么",
+    "如何",
+    "推导",
+    "调试",
+    "重构",
+    "评估",
+    "预测",
+    "design",
+    "implement",
+    "architecture",
+    "optimize",
+    "analyze",
+    "why",
+    "how to",
+    "debug",
+    "refactor",
+    "prove",
 ]
 
 _EXPERT_KEYWORDS = [
-    "百万并发", "分布式", "一致性", "CAP定理", "NP", "算法复杂度",
-    "深度学习训练", "量化", "微调", "安全漏洞", "密码学",
-    "million concurrent", "distributed consensus", "complexity proof",
+    "百万并发",
+    "分布式",
+    "一致性",
+    "CAP定理",
+    "NP",
+    "算法复杂度",
+    "深度学习训练",
+    "量化",
+    "微调",
+    "安全漏洞",
+    "密码学",
+    "million concurrent",
+    "distributed consensus",
+    "complexity proof",
 ]
 
 
@@ -93,14 +127,15 @@ _EXPERT_KEYWORDS = [
 # 结果数据类
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class ThinkingResult:
     question: str
-    thinking: str                    # 完整推理链（可能为 "" 表示未触发）
-    reflection: str = ""             # 自我反思内容
-    answer: str = ""                 # 最终答案
+    thinking: str  # 完整推理链（可能为 "" 表示未触发）
+    reflection: str = ""  # 自我反思内容
+    answer: str = ""  # 最终答案
     tier: ComplexityTier = ComplexityTier.TRIVIAL
-    thinking_tokens_used: int = 0    # 估算使用的思考 token 数
+    thinking_tokens_used: int = 0  # 估算使用的思考 token 数
     total_time_ms: int = 0
     model_id: str = ""
 
@@ -172,6 +207,7 @@ _STEP_BACK_PROMPT = """\
 # ReasoningEngine
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class ReasoningEngine:
     """
     为 Koto 提供"扩展推理"能力的引擎。
@@ -187,9 +223,9 @@ class ReasoningEngine:
         self,
         llm_provider,
         model_id: str = "gemini-2.5-flash",
-        max_thinking_tokens: int = 2000,   # 估算的最大思考 token 预算
+        max_thinking_tokens: int = 2000,  # 估算的最大思考 token 预算
         enable_reflection: bool = True,
-        auto_tier: bool = True,            # 自动判断复杂度
+        auto_tier: bool = True,  # 自动判断复杂度
     ):
         self.llm = llm_provider
         self.model_id = model_id
@@ -275,7 +311,8 @@ class ReasoningEngine:
                     yield {"type": "thinking", "text": sentence}
 
             if self.enable_reflection and tier in (
-                ComplexityTier.COMPLEX, ComplexityTier.EXPERT
+                ComplexityTier.COMPLEX,
+                ComplexityTier.EXPERT,
             ):
                 reflection, answer = self._reflect(thinking, answer)
                 if reflection and "无需修正" not in reflection:
@@ -351,7 +388,10 @@ class ReasoningEngine:
 
         # 检查思考预算
         if len(thinking.split()) * 2 > self.max_thinking_tokens:
-            thinking = thinking[: self.max_thinking_tokens * 3] + "\n...[推理已截断，达到预算上限]"
+            thinking = (
+                thinking[: self.max_thinking_tokens * 3]
+                + "\n...[推理已截断，达到预算上限]"
+            )
 
         return thinking, answer
 
@@ -386,6 +426,7 @@ class ReasoningEngine:
 # UnifiedAgent 集成协议 — 装饰器
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def with_reasoning(
     llm_provider,
     model_id: str = "gemini-2.5-flash",
@@ -415,5 +456,7 @@ def with_reasoning(
                 )
             # 将增强后的答案传给原函数（或直接返回）
             return result.answer
+
         return wrapper
+
     return decorator

@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import json
 import logging
 import os
@@ -84,20 +86,20 @@ import re as _re
 _PRIVACY_PATTERNS = (
     # API Key / Token / Password 赋值
     _re.compile(
-        r'(password|passwd|secret|api[_\s-]?key|access[_\s-]?token|private[_\s-]?key'
-        r'|credential|auth[_\s-]?token|bearer)[s]?\s*[:=]\s*\S{6,}',
+        r"(password|passwd|secret|api[_\s-]?key|access[_\s-]?token|private[_\s-]?key"
+        r"|credential|auth[_\s-]?token|bearer)[s]?\s*[:=]\s*\S{6,}",
         _re.IGNORECASE,
     ),
     # OpenAI / Anthropic / HuggingFace 等常见 Key 前缀
-    _re.compile(r'\b(sk-|sk-ant-|hf_|AIzaSy)[A-Za-z0-9_\-]{16,}', _re.IGNORECASE),
+    _re.compile(r"\b(sk-|sk-ant-|hf_|AIzaSy)[A-Za-z0-9_\-]{16,}", _re.IGNORECASE),
     # 中国居民身份证（18 位，末位可为 X）
-    _re.compile(r'\b\d{17}[\dXx]\b'),
+    _re.compile(r"\b\d{17}[\dXx]\b"),
     # 银行卡 / 信用卡（13-19 位纯数字，允许空格或连字符分隔）
-    _re.compile(r'\b(?:\d[ \-]?){13,19}\d\b'),
+    _re.compile(r"\b(?:\d[ \-]?){13,19}\d\b"),
     # 手机号（中国大陆，1 开头 11 位）
-    _re.compile(r'\b1[3-9]\d{9}\b'),
+    _re.compile(r"\b1[3-9]\d{9}\b"),
     # 密码/私钥块
-    _re.compile(r'-----BEGIN\s+(RSA |EC )?PRIVATE KEY-----', _re.IGNORECASE),
+    _re.compile(r"-----BEGIN\s+(RSA |EC )?PRIVATE KEY-----", _re.IGNORECASE),
 )
 
 
@@ -555,13 +557,13 @@ def _run_agent_collect(
 @agent_bp.route("/chat", methods=["POST"])
 def chat():
     data = request.json
-    message = data.get('message')
-    session_id = data.get('session_id') or data.get('session', '')
-    history = data.get('history') or _load_history(session_id)
-    model_id = data.get('model', 'gemini-3-flash-preview')
-    skill_id = data.get('skill_id')          # v2: 关联的 Skill ID
-    task_type = data.get('task_type')         # v2: 任务分类
-    context_files = data.get('context_files') or []  # @文件 激活的上下文文件路径列表
+    message = data.get("message")
+    session_id = data.get("session_id") or data.get("session", "")
+    history = data.get("history") or _load_history(session_id)
+    model_id = data.get("model", "gemini-3-flash-preview")
+    skill_id = data.get("skill_id")  # v2: 关联的 Skill ID
+    task_type = data.get("task_type")  # v2: 任务分类
+    context_files = data.get("context_files") or []  # @文件 激活的上下文文件路径列表
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
@@ -571,6 +573,7 @@ def chat():
     _tracker_path = ""
     try:
         from app.core.memory.conversation_tracker import ConversationTracker
+
         _tracker_path = _get_tracker_path(session_id)
         _tracker = ConversationTracker.load(_tracker_path)
     except Exception as _te:
@@ -580,6 +583,7 @@ def chat():
     _rewritten_message = message
     try:
         from app.core.routing.intent_analyzer import IntentAnalyzer
+
         if IntentAnalyzer.should_analyze(message):
             _rw = IntentAnalyzer.rewrite_intent(message, history, _tracker)
             if _rw and _rw != message:
@@ -592,6 +596,7 @@ def chat():
     _cw_paged_context = ""
     try:
         from app.core.memory.context_window_manager import ContextWindowManager
+
         _cw_out = ContextWindowManager.manage(
             history=history,
             query=_rewritten_message,
@@ -616,6 +621,7 @@ def chat():
     if context_files:
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             file_blocks = []
             for path in context_files[:5]:  # 最多注入 5 个文件防止 token 爆炸
@@ -640,9 +646,10 @@ def chat():
     snapshot_ctx = _build_snapshot_context_text(session_state)
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
-    
 
-    skill_id, auto_skill_ids = _resolve_runtime_skill(_rewritten_message, skill_id, task_type)
+    skill_id, auto_skill_ids = _resolve_runtime_skill(
+        _rewritten_message, skill_id, task_type
+    )
 
     agent = get_agent()
     if agent.model_id != model_id:
@@ -685,7 +692,9 @@ def chat():
                     _privacy_routed = True
                 else:
                     # 本地不可用时 fall-through 到云端（已经过 PII 脱敏）
-                    logger.warning("[chat] 隐私路由：本地模型不可用，继续走云端（已 PII 脱敏）")
+                    logger.warning(
+                        "[chat] 隐私路由：本地模型不可用，继续走云端（已 PII 脱敏）"
+                    )
 
             if not _privacy_routed:
                 for step in agent.run(
@@ -748,8 +757,12 @@ def chat():
                         logger.warning(f"[chat] 🚫 输出被拦截: {val.reasons}")
                     elif val.needs_retry and not used_local_fallback:
                         # 本地备用回复不触发重试（本地模型重试无意义）
-                        logger.warning(f"[chat] ⟳ 输出质量不合格，触发重试: {val.reasons}")
-                        _retry_input = val.text if val.text != final_answer else safe_message
+                        logger.warning(
+                            f"[chat] ⟳ 输出质量不合格，触发重试: {val.reasons}"
+                        )
+                        _retry_input = (
+                            val.text if val.text != final_answer else safe_message
+                        )
                         _retry_steps: list = []
                         _retry_answer = ""
                         try:
@@ -771,7 +784,9 @@ def chat():
                         if _retry_answer:
                             validated_answer = _retry_answer
                             collected_steps.extend(_retry_steps)
-                            logger.info(f"[chat] ✓ 重试成功，新响应长度: {len(_retry_answer)}")
+                            logger.info(
+                                f"[chat] ✓ 重试成功，新响应长度: {len(_retry_answer)}"
+                            )
                         else:
                             validated_answer = final_answer  # 重试失败，保留原始响应
                             logger.warning("[chat] 重试未返回有效响应，保留原始结果")
@@ -803,6 +818,7 @@ def chat():
             if display_answer and not used_local_fallback:
                 try:
                     from app.core.skills.skill_suggester import SkillSuggester
+
                     _suggestions = SkillSuggester.suggest(
                         user_input=message or "",
                         task_type=task_type or "CHAT",
@@ -812,8 +828,12 @@ def chat():
                     if _suggestions:
                         display_answer += SkillSuggester.format_hint(_suggestions)
                     # ── chains_to：基于本轮激活 Skill 推荐下一步 ──────────────
-                    _all_active = list(set((auto_skill_ids or []) + ([skill_id] if skill_id else [])))
-                    _already_ids = [s["id"] for s in _suggestions] if _suggestions else []
+                    _all_active = list(
+                        set((auto_skill_ids or []) + ([skill_id] if skill_id else []))
+                    )
+                    _already_ids = (
+                        [s["id"] for s in _suggestions] if _suggestions else []
+                    )
                     _chains = SkillSuggester.suggest_chains(
                         active_skill_ids=_all_active,
                         already_suggested_ids=_already_ids,
@@ -893,7 +913,9 @@ def chat():
                         OutputValidator = _lazy_validator()
                         _lv = OutputValidator.validate(text=_local_ans)
                         if _lv.is_blocked:
-                            logger.warning(f"[chat] 🚫 本地模型异常路径输出被拦截: {_lv.reasons}")
+                            logger.warning(
+                                f"[chat] 🚫 本地模型异常路径输出被拦截: {_lv.reasons}"
+                            )
                         _local_ans = _lv.text
                     except Exception as _ov_err:
                         logger.debug("[chat] 本地模型输出检测跳过: %s", _ov_err)
@@ -1027,6 +1049,7 @@ def process_stream_compat():
     if context_files:
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             file_blocks = []
             for path in context_files[:5]:
@@ -1126,7 +1149,9 @@ def process_stream_compat():
                     val_result = OutputValidator.validate(
                         raw_final,
                         skill_id=skill_id if not used_local_fallback else None,
-                        original_prompt=user_request if not used_local_fallback else None,
+                        original_prompt=(
+                            user_request if not used_local_fallback else None
+                        ),
                     )
                     validation_action = val_result.action
                     if validation_action == "BLOCK":
@@ -1136,7 +1161,9 @@ def process_stream_compat():
                             f"[process-stream] ⟳ 输出质量不合格，触发重试: {val_result.reasons}"
                         )
                         _retry_input = (
-                            val_result.text if val_result.text != raw_final else safe_request
+                            val_result.text
+                            if val_result.text != raw_final
+                            else safe_request
                         )
                         _retry_steps: list = []
                         _retry_answer = ""
@@ -1162,7 +1189,9 @@ def process_stream_compat():
                                 f"[process-stream] ✓ 重试成功，新响应长度: {len(_retry_answer)}"
                             )
                         else:
-                            logger.warning("[process-stream] 重试未返回有效响应，保留原始结果")
+                            logger.warning(
+                                "[process-stream] 重试未返回有效响应，保留原始结果"
+                            )
                     elif validation_action in ("WARN", "REFORMAT"):
                         raw_final = val_result.text or raw_final
             except Exception as _ve:

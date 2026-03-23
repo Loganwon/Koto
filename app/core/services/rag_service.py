@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto RAG Service (Retrieval-Augmented Generation)
 ==================================================
@@ -143,21 +145,25 @@ def _get_embeddings(prefer_local: bool = False):
         logger.info("[RAGService] 嵌入模型: BAAI/bge-m3 (本地, 多语言 SOTA)")
         return emb
     except Exception as bge_exc:
-        logger.warning(f"[RAGService] BGE-M3 加载失败: {bge_exc}，尝试 Ollama Embeddings")
+        logger.warning(
+            f"[RAGService] BGE-M3 加载失败: {bge_exc}，尝试 Ollama Embeddings"
+        )
 
     # 本地模型优先顺序第三层：Ollama 原生 Embeddings API（sentence-transformers 未安装时备用）
     try:
         import socket as _sock_mod
+
         _s = _sock_mod.socket()
         _s.settimeout(0.4)
         _ollama_up = _s.connect_ex(("127.0.0.1", 11434)) == 0
         _s.close()
         if _ollama_up:
             from langchain_community.embeddings import OllamaEmbeddings  # type: ignore
+
             _OLLAMA_EMBED_MODELS = [
-                "nomic-embed-text",    # 768 维，多语言，体积小
-                "mxbai-embed-large",   # 1024 维，英文 SOTA
-                "bge-m3",              # 若用户手动 pull 了 BGE-M3
+                "nomic-embed-text",  # 768 维，多语言，体积小
+                "mxbai-embed-large",  # 1024 维，英文 SOTA
+                "bge-m3",  # 若用户手动 pull 了 BGE-M3
             ]
             for _em in _OLLAMA_EMBED_MODELS:
                 try:
@@ -518,7 +524,7 @@ class RAGService:
         # ── Step 4: Cross-Encoder 精排（可选，需 sentence-transformers）────────────
         # 优先 bge-reranker-v2-m3（中英双语 SOTA），降级到 ms-marco（英文兜底）
         _RERANKER_MODELS = [
-            "BAAI/bge-reranker-v2-m3",          # 多语言 SOTA，推荐
+            "BAAI/bge-reranker-v2-m3",  # 多语言 SOTA，推荐
             "cross-encoder/ms-marco-MiniLM-L-6-v2",  # 英文兜底
         ]
         try:

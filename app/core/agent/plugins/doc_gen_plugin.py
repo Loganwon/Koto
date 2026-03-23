@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║   Koto  ─  Document Generation Plugin（文档生成 Agent 工具）     ║

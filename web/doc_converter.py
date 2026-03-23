@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 doc_converter.py — 多格式文档转换器
 将 .doc / .pdf / .txt / .md / .rtf / .odt 转换为 .docx，

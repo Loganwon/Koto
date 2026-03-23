@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 WebToolsBridgePlugin — 将 web/tool_registry.py 中的 25 个工具桥接进 UnifiedAgent。
 

@@ -38,9 +38,9 @@ import pytest
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-THREADS = 50       # default concurrent thread count
-HEAVY = 100        # heavy stress tests
-TIMEOUT = 20       # seconds — join / barrier timeout
+THREADS = 50  # default concurrent thread count
+HEAVY = 100  # heavy stress tests
+TIMEOUT = 20  # seconds — join / barrier timeout
 
 
 def _barrier_run(target, n: int = THREADS, timeout: int = TIMEOUT):
@@ -128,9 +128,9 @@ class TestAIRouterCacheStress:
             AIRouter._cache_set(f"overflow_key_{i}", ("CHAT", 0.8, None))
 
         # Must never exceed max size
-        assert len(AIRouter._cache) <= max_size, (
-            f"Cache grew to {len(AIRouter._cache)}, limit is {max_size}"
-        )
+        assert (
+            len(AIRouter._cache) <= max_size
+        ), f"Cache grew to {len(AIRouter._cache)}, limit is {max_size}"
 
     def test_concurrent_read_write_mix_no_crash(self):
         """Mixed concurrent reads and writes must not crash."""
@@ -205,9 +205,9 @@ class TestAIRouterCacheStress:
 
         # Should be roughly half (max_size // 2 + 1)
         expected_max = max_size // 2 + 5  # +5 for any timing variance
-        assert len(AIRouter._cache) <= expected_max, (
-            f"After eviction expected ≤{expected_max}, got {len(AIRouter._cache)}"
-        )
+        assert (
+            len(AIRouter._cache) <= expected_max
+        ), f"After eviction expected ≤{expected_max}, got {len(AIRouter._cache)}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -388,9 +388,9 @@ class TestTaskLedgerStress:
             t.join(timeout=TIMEOUT + 5)
 
         assert not errors, f"Errors: {errors[:3]}"
-        assert len(created_ids) == THREADS, (
-            f"Expected {THREADS} tasks, created {len(created_ids)}"
-        )
+        assert (
+            len(created_ids) == THREADS
+        ), f"Expected {THREADS} tasks, created {len(created_ids)}"
 
         # Verify all are actually in the DB
         tasks = self.ledger.list_tasks(session_id=session, limit=THREADS + 10)
@@ -425,10 +425,12 @@ class TestTaskLedgerStress:
         assert not errors, f"Errors: {errors[:3]}"
 
         # Verify all completed
-        completed = self.ledger.list_tasks(session_id=session, status="completed", limit=THREADS + 10)
-        assert len(completed) == THREADS, (
-            f"Expected {THREADS} completed tasks, got {len(completed)}"
+        completed = self.ledger.list_tasks(
+            session_id=session, status="completed", limit=THREADS + 10
         )
+        assert (
+            len(completed) == THREADS
+        ), f"Expected {THREADS} completed tasks, got {len(completed)}"
 
     def test_concurrent_read_does_not_block_write(self):
         """Mixed reads and writes complete without deadlock within time budget."""
@@ -738,10 +740,12 @@ class TestSkillPipelineStress:
                 )
             return f"result_{skill_id}_{user_input}"
 
-        pipeline = SkillPipeline(steps=[
-            self._make_step("step_a"),
-            self._make_step("step_b"),
-        ])
+        pipeline = SkillPipeline(
+            steps=[
+                self._make_step("step_a"),
+                self._make_step("step_b"),
+            ]
+        )
 
         barrier = threading.Barrier(THREADS)
         errors = []
@@ -786,9 +790,11 @@ class TestSkillPipelineStress:
                 raise RuntimeError("Simulated flaky step")
             return f"ok_{n}"
 
-        pipeline = SkillPipeline(steps=[
-            PipelineStep(skill_id="flaky", output_key="flaky", skip_on_error=True),
-        ])
+        pipeline = SkillPipeline(
+            steps=[
+                PipelineStep(skill_id="flaky", output_key="flaky", skip_on_error=True),
+            ]
+        )
 
         n = 40
         results = []
@@ -853,9 +859,9 @@ class TestFlaskEndpointFlood:
             t.join(timeout=TIMEOUT + 5)
 
         assert not errors, f"Errors: {errors[:3]}"
-        assert all(s < 500 for s in results), (
-            f"5xx responses: {[s for s in results if s >= 500]}"
-        )
+        assert all(
+            s < 500 for s in results
+        ), f"5xx responses: {[s for s in results if s >= 500]}"
 
     def test_health_endpoint_concurrent(self, full_client):
         """50 concurrent GET /api/ops/health — must not crash (200 or 503 ok)."""
@@ -881,9 +887,9 @@ class TestFlaskEndpointFlood:
             t.join(timeout=TIMEOUT + 5)
 
         assert not errors, f"Errors: {errors[:3]}"
-        assert all(s in (200, 503) for s in results), (
-            f"Unexpected status codes: {set(results)}"
-        )
+        assert all(
+            s in (200, 503) for s in results
+        ), f"Unexpected status codes: {set(results)}"
 
     def test_session_list_endpoint_concurrent(self, full_client):
         """50 concurrent GET /api/tasks — must not crash with 5xx."""
@@ -909,9 +915,9 @@ class TestFlaskEndpointFlood:
             t.join(timeout=TIMEOUT + 5)
 
         assert not errors, f"Errors: {errors[:3]}"
-        assert all(s < 500 for s in results), (
-            f"5xx errors: {[s for s in results if s >= 500]}"
-        )
+        assert all(
+            s < 500 for s in results
+        ), f"5xx errors: {[s for s in results if s >= 500]}"
 
     def test_skill_list_endpoint_flood(self, full_client):
         """100 concurrent GET /api/skills — must not produce 5xx."""
@@ -938,9 +944,9 @@ class TestFlaskEndpointFlood:
 
         assert not errors, f"Errors: {errors[:3]}"
         # 4xx is fine (auth, missing params); 5xx is not
-        assert all(s < 500 for s in results), (
-            f"5xx errors: {[s for s in results if s >= 500]}"
-        )
+        assert all(
+            s < 500 for s in results
+        ), f"5xx errors: {[s for s in results if s >= 500]}"
 
     def test_concurrent_session_create_and_delete(self, full_client):
         """50 threads flood skill list and job list concurrently — no 5xx."""
@@ -970,9 +976,9 @@ class TestFlaskEndpointFlood:
             t.join(timeout=TIMEOUT + 5)
 
         assert not errors, f"Errors: {errors[:3]}"
-        assert all(s < 500 for s in results), (
-            f"5xx errors: {[s for s in results if s >= 500]}"
-        )
+        assert all(
+            s < 500 for s in results
+        ), f"5xx errors: {[s for s in results if s >= 500]}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1029,6 +1035,7 @@ class TestLargePayloadStress:
         finally:
             ledger._conn.close()
             import os
+
             try:
                 os.unlink(db_path)
             except Exception:
@@ -1054,6 +1061,7 @@ class TestLargePayloadStress:
             assert nid == "file:/large_meta.py"
         finally:
             import os
+
             try:
                 os.unlink(db_path)
             except Exception:
@@ -1080,6 +1088,7 @@ class TestLargePayloadStress:
         finally:
             ledger._conn.close()
             import os
+
             try:
                 os.unlink(db_path)
             except Exception:
@@ -1124,9 +1133,9 @@ class TestMemoryGrowthStress:
             for i in range(2_000):
                 AIRouter._cache_set(f"msg_{i}", ("CHAT", 0.8, None))
 
-            assert len(AIRouter._cache) <= AIRouter._CACHE_MAX_SIZE, (
-                f"Cache size {len(AIRouter._cache)} exceeds limit {AIRouter._CACHE_MAX_SIZE}"
-            )
+            assert (
+                len(AIRouter._cache) <= AIRouter._CACHE_MAX_SIZE
+            ), f"Cache size {len(AIRouter._cache)} exceeds limit {AIRouter._CACHE_MAX_SIZE}"
         finally:
             AIRouter._cache.clear()
             AIRouter._cache.update(orig)
@@ -1160,6 +1169,7 @@ class TestMemoryGrowthStress:
         finally:
             ledger._conn.close()
             import os
+
             try:
                 os.unlink(db_path)
             except Exception:
@@ -1186,12 +1196,14 @@ class TestMemoryGrowthStress:
 
             # Should still be able to open a new connection (no fd leak)
             import sqlite3
+
             conn = sqlite3.connect(db_path)
             count = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
             conn.close()
             assert count == 200
         finally:
             import os
+
             try:
                 os.unlink(db_path)
             except Exception:
@@ -1250,7 +1262,7 @@ class TestInterruptManagerStress:
             try:
                 barrier.wait(timeout=TIMEOUT)
                 self.mgr.cleanup(sid)  # multiple cleanup calls — no KeyError
-                self.mgr.reset(sid)    # reset on already-cleaned — no KeyError
+                self.mgr.reset(sid)  # reset on already-cleaned — no KeyError
             except Exception as exc:
                 errors.append(exc)
 
@@ -1302,6 +1314,6 @@ class TestInterruptManagerStress:
             self.mgr.reset(sid)
 
         elapsed = time.monotonic() - start
-        assert elapsed < 3.0, (
-            f"1000 interrupt operations took {elapsed:.2f}s (expected < 3s)"
-        )
+        assert (
+            elapsed < 3.0
+        ), f"1000 interrupt operations took {elapsed:.2f}s (expected < 3s)"

@@ -124,6 +124,7 @@ class TestLlmCall:
     @patch(_LLM_CLS)
     def test_raises_on_failure(self, mock_cls):
         import pytest
+
         from app.core.agent.multi_agent import _llm_call
 
         mock_llm = Mock()

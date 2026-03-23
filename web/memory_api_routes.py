@@ -1,11 +1,14 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 # ═══════════════════════════════════════════════════════════════
 # 增强记忆系统API端点
 # ═══════════════════════════════════════════════════════════════
 
-from flask import jsonify, request
-import re
 import logging
+import re
 from datetime import datetime
+
+from flask import jsonify, request
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +27,17 @@ def _build_writing_style_profile(text: str) -> dict:
     bullet_lines = [line for line in lines if re.match(r"^[-*•\d]+[\.)、\s]", line)]
     punctuation_marks = re.findall(r"[，。！？；：,.!?;:]", text)
 
-    formal_keywords = ["请", "建议", "方案", "需要", "基于", "因此", "此外", "敬请", "感谢"]
+    formal_keywords = [
+        "请",
+        "建议",
+        "方案",
+        "需要",
+        "基于",
+        "因此",
+        "此外",
+        "敬请",
+        "感谢",
+    ]
     casual_keywords = ["我觉得", "其实", "然后", "真的", "哈哈", "哇", "有点", "挺"]
     formal_count = sum(text.count(k) for k in formal_keywords)
     casual_count = sum(text.count(k) for k in casual_keywords)
@@ -84,17 +97,18 @@ def _build_writing_style_profile(text: str) -> dict:
         "tone_tags": tone_tags,
     }
 
+
 def register_memory_routes(app, get_memory_manager):
     """注册记忆系统API路由到Flask app
-    
+
     Args:
         app: Flask应用实例
         get_memory_manager: 获取记忆管理器的函数
     """
-    
+
     # ==================== 基础记忆 CRUD API ====================
-    
-    @app.route('/api/memories', methods=['GET'])
+
+    @app.route("/api/memories", methods=["GET"])
     def get_all_memories():
         """获取所有记忆"""
         try:
@@ -103,239 +117,248 @@ def register_memory_routes(app, get_memory_manager):
             return jsonify(memories)
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return jsonify({"error": str(e)}), 500
-    
-    
-    @app.route('/api/memories', methods=['POST'])
+
+    @app.route("/api/memories", methods=["POST"])
     def add_memory():
         """添加新记忆"""
         try:
             data = request.json
-            content = data.get('content', '').strip()
-            category = data.get('category', 'user_preference')
-            source = data.get('source', 'user')
-            
+            content = data.get("content", "").strip()
+            category = data.get("category", "user_preference")
+            source = data.get("source", "user")
+
             if not content:
                 return jsonify({"success": False, "error": "内容不能为空"}), 400
-            
+
             memory_mgr = get_memory_manager()
             new_memory = memory_mgr.add_memory(content, category, source)
-            
-            return jsonify({
-                "success": True,
-                "memory": new_memory
-            })
+
+            return jsonify({"success": True, "memory": new_memory})
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
-    
-    
-    @app.route('/api/memories/<int:memory_id>', methods=['DELETE'])
+
+    @app.route("/api/memories/<int:memory_id>", methods=["DELETE"])
     def delete_memory(memory_id):
         """删除记忆"""
         try:
             memory_mgr = get_memory_manager()
             success = memory_mgr.delete_memory(memory_id)
-            
+
             if success:
                 return jsonify({"success": True, "message": "记忆已删除"})
             else:
                 return jsonify({"success": False, "error": "记忆不存在"}), 404
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
-    
-    
+
     # ==================== 增强功能 API ====================
-    
-    @app.route('/api/memory/profile', methods=['GET'])
+
+    @app.route("/api/memory/profile", methods=["GET"])
     def get_user_profile():
         """获取用户画像"""
         try:
             memory_mgr = get_memory_manager()
-            
+
             # 检查是否是增强版本
-            if hasattr(memory_mgr, 'user_profile'):
+            if hasattr(memory_mgr, "user_profile"):
                 profile = memory_mgr.get_profile()
                 summary = memory_mgr.user_profile.get_brief_summary()
-                
-                return jsonify({
-                    "success": True,
-                    "profile": profile,
-                    "summary": summary
-                })
+
+                return jsonify(
+                    {"success": True, "profile": profile, "summary": summary}
+                )
             else:
-                return jsonify({
-                    "success": False,
-                    "message": "当前使用基础记忆管理器，不支持用户画像"
-                })
-        
+                return jsonify(
+                    {
+                        "success": False,
+                        "message": "当前使用基础记忆管理器，不支持用户画像",
+                    }
+                )
+
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-
-    @app.route('/api/memory/profile', methods=['POST'])
+    @app.route("/api/memory/profile", methods=["POST"])
     def update_user_profile():
         """手动更新用户画像"""
         try:
             data = request.json
             memory_mgr = get_memory_manager()
-            
-            if hasattr(memory_mgr, 'update_profile_manually'):
+
+            if hasattr(memory_mgr, "update_profile_manually"):
                 memory_mgr.update_profile_manually(data)
                 return jsonify({"success": True, "message": "用户画像已更新"})
             else:
-                return jsonify({
-                    "success": False,
-                    "message": "当前使用基础记忆管理器"
-                })
-        
+                return jsonify({"success": False, "message": "当前使用基础记忆管理器"})
+
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-
-    @app.route('/api/memory/auto-learn', methods=['POST'])
+    @app.route("/api/memory/auto-learn", methods=["POST"])
     def trigger_auto_learn():
         """触发自动学习（测试用）"""
         try:
             data = request.json
-            user_msg = data.get('user_message', '')
-            ai_msg = data.get('ai_message', '')
-            
+            user_msg = data.get("user_message", "")
+            ai_msg = data.get("ai_message", "")
+
             memory_mgr = get_memory_manager()
-            
-            if hasattr(memory_mgr, 'auto_extract_from_conversation'):
-                result = memory_mgr.auto_extract_from_conversation(
-                    user_msg, ai_msg
-                )
-                return jsonify({
-                    "success": True,
-                    "result": result
-                })
+
+            if hasattr(memory_mgr, "auto_extract_from_conversation"):
+                result = memory_mgr.auto_extract_from_conversation(user_msg, ai_msg)
+                return jsonify({"success": True, "result": result})
             else:
-                return jsonify({
-                    "success": False,
-                    "message": "当前版本不支持自动学习"
-                })
-        
+                return jsonify({"success": False, "message": "当前版本不支持自动学习"})
+
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-
-    @app.route('/api/memory/style-profile', methods=['POST'])
+    @app.route("/api/memory/style-profile", methods=["POST"])
     def learn_writing_style_profile():
         """从样本文本学习写作风格并写入用户画像。"""
         try:
             data = request.json or {}
-            sample_text = (data.get('sample_text') or '').strip()
-            sample_name = (data.get('sample_name') or 'default').strip() or 'default'
+            sample_text = (data.get("sample_text") or "").strip()
+            sample_name = (data.get("sample_name") or "default").strip() or "default"
 
             if len(sample_text) < 80:
-                return jsonify({"success": False, "error": "样本文本太短，至少需要 80 个字符"}), 400
+                return (
+                    jsonify(
+                        {"success": False, "error": "样本文本太短，至少需要 80 个字符"}
+                    ),
+                    400,
+                )
 
             memory_mgr = get_memory_manager()
-            if not hasattr(memory_mgr, 'user_profile'):
-                return jsonify({"success": False, "error": "当前记忆管理器不支持用户画像"}), 400
+            if not hasattr(memory_mgr, "user_profile"):
+                return (
+                    jsonify(
+                        {"success": False, "error": "当前记忆管理器不支持用户画像"}
+                    ),
+                    400,
+                )
 
             style_profile = _build_writing_style_profile(sample_text)
 
             profile = memory_mgr.user_profile.profile
-            communication_style = profile.setdefault('communication_style', {})
-            communication_style['writing_style_profile'] = style_profile
-            communication_style['writing_style_sample_name'] = sample_name
-            communication_style['writing_style_updated_at'] = datetime.now().isoformat()
-            communication_style['preferred_detail_level'] = style_profile.get('preferred_detail_level', communication_style.get('preferred_detail_level', 'moderate'))
-            if style_profile.get('formality') in ('formal', 'casual', 'neutral'):
-                communication_style['formality'] = style_profile['formality']
+            communication_style = profile.setdefault("communication_style", {})
+            communication_style["writing_style_profile"] = style_profile
+            communication_style["writing_style_sample_name"] = sample_name
+            communication_style["writing_style_updated_at"] = datetime.now().isoformat()
+            communication_style["preferred_detail_level"] = style_profile.get(
+                "preferred_detail_level",
+                communication_style.get("preferred_detail_level", "moderate"),
+            )
+            if style_profile.get("formality") in ("formal", "casual", "neutral"):
+                communication_style["formality"] = style_profile["formality"]
 
-            profile.setdefault('metadata', {})['last_updated'] = datetime.now().isoformat()
+            profile.setdefault("metadata", {})[
+                "last_updated"
+            ] = datetime.now().isoformat()
             memory_mgr.user_profile.save()
 
-            return jsonify({
-                "success": True,
-                "message": "写作风格学习完成",
-                "style_profile": style_profile,
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "message": "写作风格学习完成",
+                    "style_profile": style_profile,
+                }
+            )
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-
-    @app.route('/api/memory/stats', methods=['GET'])
+    @app.route("/api/memory/stats", methods=["GET"])
     def get_memory_stats():
         """获取记忆系统统计"""
         try:
             memory_mgr = get_memory_manager()
-            
+
             memories = memory_mgr.get_all_memories()
-            
+
             # 统计信息
             stats = {
                 "total_memories": len(memories),
                 "by_category": {},
                 "by_source": {},
-                "most_used": []
+                "most_used": [],
             }
-            
+
             # 按分类统计
             for m in memories:
                 cat = m.get("category", "unknown")
                 stats["by_category"][cat] = stats["by_category"].get(cat, 0) + 1
-                
+
                 src = m.get("source", "unknown")
                 stats["by_source"][src] = stats["by_source"].get(src, 0) + 1
-            
+
             # 最常使用的记忆
             sorted_memories = sorted(
-                memories, 
-                key=lambda x: x.get("use_count", 0), 
-                reverse=True
+                memories, key=lambda x: x.get("use_count", 0), reverse=True
             )
             stats["most_used"] = [
                 {
-                    "content": m["content"][:50] + "..." if len(m["content"]) > 50 else m["content"],
-                    "use_count": m.get("use_count", 0)
+                    "content": (
+                        m["content"][:50] + "..."
+                        if len(m["content"]) > 50
+                        else m["content"]
+                    ),
+                    "use_count": m.get("use_count", 0),
                 }
                 for m in sorted_memories[:5]
             ]
-            
+
             # 用户画像统计
-            if hasattr(memory_mgr, 'user_profile'):
+            if hasattr(memory_mgr, "user_profile"):
                 profile = memory_mgr.user_profile.profile
                 stats["profile_stats"] = {
                     "total_interactions": profile["metadata"]["total_interactions"],
-                    "programming_languages": len(profile["technical_background"]["programming_languages"]),
+                    "programming_languages": len(
+                        profile["technical_background"]["programming_languages"]
+                    ),
                     "tools": len(profile["technical_background"]["tools"]),
-                    "preferences_count": len(profile["preferences"]["likes"]) + len(profile["preferences"]["dislikes"])
+                    "preferences_count": len(profile["preferences"]["likes"])
+                    + len(profile["preferences"]["dislikes"]),
                 }
-            
-            return jsonify({
-                "success": True,
-                "stats": stats
-            })
-        
+
+            return jsonify({"success": True, "stats": stats})
+
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
-    
-    @app.route('/api/memory/personality', methods=['GET'])
+
+    @app.route("/api/memory/personality", methods=["GET"])
     def get_personality_matrix():
         """获取个人记忆矩阵（含 ShadowWatcher 整合数据）"""
         try:
             memory_mgr = get_memory_manager()
-            if not hasattr(memory_mgr, 'personality_matrix'):
-                return jsonify({"success": False, "message": "当前版本不支持个人矩阵"}), 404
+            if not hasattr(memory_mgr, "personality_matrix"):
+                return (
+                    jsonify({"success": False, "message": "当前版本不支持个人矩阵"}),
+                    404,
+                )
 
             pm = memory_mgr.personality_matrix
             data = dict(pm.data)
@@ -344,40 +367,50 @@ def register_memory_routes(app, get_memory_manager):
             shadow_summary = {}
             try:
                 from app.core.monitoring.shadow_watcher import ShadowWatcher
+
                 obs = ShadowWatcher.get().get_observations()
                 shadow_summary = {
-                    "streak_days":       obs.get("streak", {}).get("days", 0),
-                    "total_observations":obs.get("total_observations", 0),
-                    "open_tasks_count":  sum(1 for t in obs.get("open_tasks", []) if not t.get("done")),
-                    "recent_topics_7d":  obs.get("recent_topics_7d", {}),
-                    "task_types":        obs.get("task_style", {}).get("task_types", {}),
-                    "active_hours":      obs.get("active_hours", {}),
-                    "last_seen":         obs.get("last_seen"),
+                    "streak_days": obs.get("streak", {}).get("days", 0),
+                    "total_observations": obs.get("total_observations", 0),
+                    "open_tasks_count": sum(
+                        1 for t in obs.get("open_tasks", []) if not t.get("done")
+                    ),
+                    "recent_topics_7d": obs.get("recent_topics_7d", {}),
+                    "task_types": obs.get("task_style", {}).get("task_types", {}),
+                    "active_hours": obs.get("active_hours", {}),
+                    "last_seen": obs.get("last_seen"),
                 }
             except Exception:
                 pass
 
-            return jsonify({
-                "success": True,
-                "matrix":  data,
-                "context": pm.to_context_string(),
-                "shadow":  shadow_summary,
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "matrix": data,
+                    "context": pm.to_context_string(),
+                    "shadow": shadow_summary,
+                }
+            )
         except Exception as e:
             import traceback
+
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-
-    @app.route('/api/memories/import-profile', methods=['POST'])
+    @app.route("/api/memories/import-profile", methods=["POST"])
     def import_memories_from_profile():
         """从 user_profile.json + shadow_observations.json + personality_matrix.json 生成初始记忆条目"""
-        import json, os, time
+        import json
+        import os
+        import time
         from pathlib import Path
+
         try:
             memory_mgr = get_memory_manager()
             added = 0
-            existing_contents = {m.get("content", "") for m in memory_mgr.get_all_memories()}
+            existing_contents = {
+                m.get("content", "") for m in memory_mgr.get_all_memories()
+            }
 
             # ── 1. user_profile.json ────────────────────────────────────────
             profile_path = Path("config/user_profile.json")
@@ -393,47 +426,54 @@ def register_memory_routes(app, get_memory_manager):
                         c = f"用户熟悉的编程语言：{', '.join(langs)}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "user_fact", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
 
                     tools = tech.get("tools", [])
                     if tools:
                         c = f"用户常用工具：{', '.join(tools[:8])}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "user_fact", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
 
                     domains = tech.get("domains", [])
                     if domains:
                         c = f"用户涉及领域：{', '.join(domains[:6])}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "user_fact", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
 
                     level = tech.get("experience_level")
                     if level and level != "intermediate":
                         c = f"用户的技术经验等级：{level}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "user_fact", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
 
                     detail = style.get("preferred_detail_level")
                     if detail:
                         c = f"用户偏好的回复详细程度：{detail}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "preference", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
 
                     for like in prefs.get("likes", [])[:5]:
                         c = f"用户喜欢：{like}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "preference", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
 
                     for dislike in prefs.get("dislikes", [])[:5]:
                         c = f"用户不喜欢：{dislike}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "preference", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
                 except Exception as e:
                     logger.warning(f"[ImportProfile] user_profile 解析失败: {e}")
 
@@ -448,22 +488,29 @@ def register_memory_routes(app, get_memory_manager):
                             c = f"用户近期目标：{goal}"
                             if c not in existing_contents:
                                 memory_mgr.add_memory(c, "reminder", "profile_import")
-                                existing_contents.add(c); added += 1
+                                existing_contents.add(c)
+                                added += 1
 
                     themes = (matrix.get("recent_themes") or [])[-5:]
                     if themes:
                         c = f"用户近期关注话题：{', '.join(themes)}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "topic_summary", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
 
                     expertise = matrix.get("expertise") or {}
-                    top_exp = [k for k, v in sorted(expertise.items(), key=lambda x: -x[1])[:4] if v > 0.2]
+                    top_exp = [
+                        k
+                        for k, v in sorted(expertise.items(), key=lambda x: -x[1])[:4]
+                        if v > 0.2
+                    ]
                     if top_exp:
                         c = f"用户专长领域：{', '.join(top_exp)}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "user_fact", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
                 except Exception as e:
                     logger.warning(f"[ImportProfile] personality_matrix 解析失败: {e}")
 
@@ -473,45 +520,61 @@ def register_memory_routes(app, get_memory_manager):
                 try:
                     obs = json.loads(shadow_path.read_text(encoding="utf-8"))
                     topics = obs.get("topics") or {}
-                    top_topics = [k for k, _ in sorted(topics.items(), key=lambda x: -x[1])[:4]]
+                    top_topics = [
+                        k for k, _ in sorted(topics.items(), key=lambda x: -x[1])[:4]
+                    ]
                     if top_topics:
                         c = f"用户高频使用话题：{', '.join(top_topics)}"
                         if c not in existing_contents:
                             memory_mgr.add_memory(c, "topic_summary", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
 
                     # 未完成任务
-                    open_tasks = [t for t in (obs.get("open_tasks") or []) if not t.get("done")]
+                    open_tasks = [
+                        t for t in (obs.get("open_tasks") or []) if not t.get("done")
+                    ]
                     for t in open_tasks[:3]:
                         c = f"待办事项：{t.get('text', '')}"
                         if c and c not in existing_contents:
                             memory_mgr.add_memory(c, "reminder", "profile_import")
-                            existing_contents.add(c); added += 1
+                            existing_contents.add(c)
+                            added += 1
                 except Exception as e:
                     logger.warning(f"[ImportProfile] shadow_observations 解析失败: {e}")
 
-            return jsonify({"success": True, "added": added,
-                            "message": f"已从用户画像导入 {added} 条记忆"})
+            return jsonify(
+                {
+                    "success": True,
+                    "added": added,
+                    "message": f"已从用户画像导入 {added} 条记忆",
+                }
+            )
         except Exception as e:
-            import traceback; traceback.print_exc()
+            import traceback
+
+            traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-
-    @app.route('/api/memories/batch-extract', methods=['POST'])
+    @app.route("/api/memories/batch-extract", methods=["POST"])
     def batch_extract_from_chats():
         """从 chats/ 目录的历史对话 JSON 文件中批量提取记忆（后台异步运行）"""
-        import json, threading
+        import json
+        import threading
         from pathlib import Path
+
         try:
             data = request.json or {}
-            max_turns = int(data.get("max_turns", 60))   # 每文件最多处理轮次
-            max_files = int(data.get("max_files", 10))   # 最多处理文件数
+            max_turns = int(data.get("max_turns", 60))  # 每文件最多处理轮次
+            max_files = int(data.get("max_files", 10))  # 最多处理文件数
 
             chats_dir = Path("chats")
             if not chats_dir.exists():
                 return jsonify({"success": False, "error": "chats/ 目录不存在"}), 404
 
-            chat_files = sorted(chats_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:max_files]
+            chat_files = sorted(
+                chats_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+            )[:max_files]
             if not chat_files:
                 return jsonify({"success": False, "error": "没有找到聊天记录文件"}), 404
 
@@ -527,7 +590,9 @@ def register_memory_routes(app, get_memory_manager):
                 try:
                     mgr = get_memory_manager()
                     if hasattr(mgr, "_generate_fn") and mgr._generate_fn:
-                        llm_fn = lambda p: mgr._generate_fn(p, temperature=0.15, max_tokens=600)
+                        llm_fn = lambda p: mgr._generate_fn(
+                            p, temperature=0.15, max_tokens=600
+                        )
                 except Exception:
                     pass
 
@@ -538,8 +603,14 @@ def register_memory_routes(app, get_memory_manager):
                 total_saved = 0
                 for chat_file in chat_files:
                     try:
-                        raw = json.loads(chat_file.read_text(encoding="utf-8", errors="ignore"))
-                        turns = raw if isinstance(raw, list) else raw.get("messages", raw.get("history", []))
+                        raw = json.loads(
+                            chat_file.read_text(encoding="utf-8", errors="ignore")
+                        )
+                        turns = (
+                            raw
+                            if isinstance(raw, list)
+                            else raw.get("messages", raw.get("history", []))
+                        )
                         if not isinstance(turns, list):
                             continue
 
@@ -550,15 +621,26 @@ def register_memory_routes(app, get_memory_manager):
                             t = turns[i]
                             role = t.get("role", "")
                             parts = t.get("parts", [])
-                            user_text = parts[0] if isinstance(parts, list) and parts else ""
+                            user_text = (
+                                parts[0] if isinstance(parts, list) and parts else ""
+                            )
                             if role == "user" and user_text:
                                 nxt = turns[i + 1]
                                 if nxt.get("role") in ("model", "assistant"):
                                     ai_parts = nxt.get("parts", [])
-                                    ai_text = ai_parts[0] if isinstance(ai_parts, list) and ai_parts else ""
+                                    ai_text = (
+                                        ai_parts[0]
+                                        if isinstance(ai_parts, list) and ai_parts
+                                        else ""
+                                    )
                                     if ai_text:
-                                        pairs.append((str(user_text)[:800], str(ai_text)[:600],
-                                                      nxt.get("task", "CHAT")))
+                                        pairs.append(
+                                            (
+                                                str(user_text)[:800],
+                                                str(ai_text)[:600],
+                                                nxt.get("task", "CHAT"),
+                                            )
+                                        )
                                         i += 2
                                         continue
                             i += 1
@@ -578,24 +660,31 @@ def register_memory_routes(app, get_memory_manager):
                                     get_memory_fn=lambda: mgr,
                                     llm_fn=llm_fn,
                                 )
-                                total_saved += (saved or 0)
+                                total_saved += saved or 0
                             except Exception as e:
                                 logger.debug(f"[BatchExtract] turn failed: {e}")
 
                     except Exception as e:
-                        logger.warning(f"[BatchExtract] 处理 {chat_file.name} 失败: {e}")
+                        logger.warning(
+                            f"[BatchExtract] 处理 {chat_file.name} 失败: {e}"
+                        )
 
-                logger.info(f"[BatchExtract] ✅ 批量提取完成，共保存 {total_saved} 条记忆")
+                logger.info(
+                    f"[BatchExtract] ✅ 批量提取完成，共保存 {total_saved} 条记忆"
+                )
 
             threading.Thread(target=_run, daemon=True, name="batch-extract").start()
-            return jsonify({
-                "success": True,
-                "message": f"已开始从 {len(chat_files)} 个对话文件提取记忆，稍后刷新可查看结果",
-                "files": [f.name for f in chat_files],
-            })
+            return jsonify(
+                {
+                    "success": True,
+                    "message": f"已开始从 {len(chat_files)} 个对话文件提取记忆，稍后刷新可查看结果",
+                    "files": [f.name for f in chat_files],
+                }
+            )
         except Exception as e:
-            import traceback; traceback.print_exc()
-            return jsonify({"success": False, "error": str(e)}), 500
+            import traceback
 
+            traceback.print_exc()
+            return jsonify({"success": False, "error": str(e)}), 500
 
     logger.info("🧠 增强记忆系统API路由已注册")

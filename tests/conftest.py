@@ -161,11 +161,14 @@ def _mock_vosk_teardown(monkeypatch):
     """Prevents vosk segfaults in pytest by mocking out vosk Model if not strictly needed."""
     try:
         import vosk
-        def dummy_del(self): pass
-        if hasattr(vosk.Model, '__del__'):
-            monkeypatch.setattr(vosk.Model, '__del__', dummy_del, raising=False)
-        if hasattr(vosk.Recognizer, '__del__'):
-            monkeypatch.setattr(vosk.Recognizer, '__del__', dummy_del, raising=False)
+
+        def dummy_del(self):
+            pass
+
+        if hasattr(vosk.Model, "__del__"):
+            monkeypatch.setattr(vosk.Model, "__del__", dummy_del, raising=False)
+        if hasattr(vosk.Recognizer, "__del__"):
+            monkeypatch.setattr(vosk.Recognizer, "__del__", dummy_del, raising=False)
     except Exception:
         pass
 
@@ -175,6 +178,7 @@ def _isolate_app_context_and_singletons():
     """Reset AppContext singletons before/after each test to prevent cross-test pollution."""
     try:
         from app.core.app_context import ctx
+
         ctx.reset()
     except Exception:
         pass
@@ -183,6 +187,7 @@ def _isolate_app_context_and_singletons():
 
     try:
         from app.core.app_context import ctx
+
         ctx.reset()
     except Exception:
         pass
@@ -193,7 +198,10 @@ def _isolate_shadow_watcher(monkeypatch, tmp_path):
     """Isolate ShadowWatcher singleton and file path in each test."""
     try:
         from app.core.learning.shadow_tracer import ShadowWatcher
+
         ShadowWatcher._instance = None
-        monkeypatch.setattr(ShadowWatcher, '_OBS_FILE', str(tmp_path / 'shadow_obs.json'))
+        monkeypatch.setattr(
+            ShadowWatcher, "_OBS_FILE", str(tmp_path / "shadow_obs.json")
+        )
     except Exception:
         pass

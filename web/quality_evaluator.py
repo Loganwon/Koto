@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 质量评估系统 - 对生成的文档进行自动评分和改进建议
 支持 PPT、Word、PDF 等多种文件格式

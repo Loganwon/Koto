@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """Initial schema snapshot — documents existing tables.
 
 This migration is a no-op for existing databases (tables already exist

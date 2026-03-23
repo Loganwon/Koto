@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 File organization, batch processing and utility routes blueprint.
 
@@ -584,13 +586,23 @@ def organize_cleanup() -> Response:
 
 _COMPARE_UPLOAD_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "web", "uploads", "compare",
+    "web",
+    "uploads",
+    "compare",
 )
 os.makedirs(_COMPARE_UPLOAD_DIR, exist_ok=True)
 
 _ALLOWED_COMPARE_EXTS: set[str] = {
-    ".txt", ".md", ".markdown", ".docx", ".doc",
-    ".pdf", ".xlsx", ".xls", ".pptx", ".ppt",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".docx",
+    ".doc",
+    ".pdf",
+    ".xlsx",
+    ".xls",
+    ".pptx",
+    ".ppt",
 }
 
 # Temporary file_id → path mapping (process-level cache; resets on restart)
@@ -610,12 +622,15 @@ def compare_upload() -> Response:
         return jsonify({"success": False, "error": "文件名为空"}), 400
     ext = os.path.splitext(f.filename)[1].lower()
     if ext not in _ALLOWED_COMPARE_EXTS:
-        return jsonify(
-            {
-                "success": False,
-                "error": f"不支持的格式 {ext}，支持: {', '.join(sorted(_ALLOWED_COMPARE_EXTS))}",
-            }
-        ), 400
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"不支持的格式 {ext}，支持: {', '.join(sorted(_ALLOWED_COMPARE_EXTS))}",
+                }
+            ),
+            400,
+        )
     import uuid as _uuid
 
     file_id = _uuid.uuid4().hex
@@ -659,7 +674,12 @@ def compare_multi() -> Response:
         for fid in file_ids:
             info = _compare_file_registry.get(fid)
             if not info:
-                return jsonify({"success": False, "error": f"file_id 不存在或已过期: {fid}"}), 404
+                return (
+                    jsonify(
+                        {"success": False, "error": f"file_id 不存在或已过期: {fid}"}
+                    ),
+                    404,
+                )
             file_paths.append(info["path"])
         comparator = DocumentComparator()
         result = comparator.compare_multiple(file_paths, output_format=output_format)
@@ -687,8 +707,10 @@ def compare_ai_stream() -> Response:
     focus: str = data.get("focus", "general")
 
     if len(file_ids) < 2:
+
         def _err():
             yield "data: " + json.dumps({"error": "至少需要两个文件"}) + "\n\n"
+
         return Response(stream_with_context(_err()), mimetype="text/event-stream")
 
     file_paths = [
@@ -697,8 +719,10 @@ def compare_ai_stream() -> Response:
         if fid in _compare_file_registry
     ]
     if len(file_paths) < 2:
+
         def _err2():
             yield "data: " + json.dumps({"error": "有效文件不足，请重新上传"}) + "\n\n"
+
         return Response(stream_with_context(_err2()), mimetype="text/event-stream")
 
     def generate():
@@ -720,7 +744,9 @@ def compare_ai_stream() -> Response:
                     if text:
                         yield "data: " + json.dumps({"chunk": text}) + "\n\n"
             except AttributeError:
-                response = client.models.generate_content(model=model_id, contents=prompt)
+                response = client.models.generate_content(
+                    model=model_id, contents=prompt
+                )
                 text = getattr(response, "text", "") or str(response)
                 yield "data: " + json.dumps({"chunk": text}) + "\n\n"
             yield "data: " + json.dumps({"done": True}) + "\n\n"

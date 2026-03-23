@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 🎯 Koto Skills Manager（v2 — 原子化 Schema 升级）
 
@@ -1203,7 +1205,15 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户要分析表格数据、Excel 文件、CSV 数据，进行统计或数据解读",
         "task_types": ["RESEARCH", "FILE_GEN", "CHAT"],
         "priority": 63,
-        "executor_tools": ["read_file", "find_file", "load_data", "describe_data", "query_data", "analyze_trends", "python_exec"],
+        "executor_tools": [
+            "read_file",
+            "find_file",
+            "load_data",
+            "describe_data",
+            "query_data",
+            "analyze_trends",
+            "python_exec",
+        ],
         "plan_template": [
             "定位并读取 Excel/CSV 数据文件",
             "分析数据结构（行列数、字段名、数据类型、缺失值）",
@@ -1784,6 +1794,7 @@ class SkillManager:
         # 检查权限：只有已授权 ui_interactive 的 skill 才返回其 ui_extensions
         try:
             from app.core.skills.skill_permissions import SkillPermissionManager
+
             _perm_mgr = SkillPermissionManager
         except Exception:
             _perm_mgr = None
@@ -1817,7 +1828,9 @@ class SkillManager:
             ext = s.get("ui_extensions", {})
             if ext and isinstance(ext, dict):
                 skill_def = cls._def_registry.get(sid)
-                required_perms = list(getattr(skill_def, "permissions", None) or s.get("permissions", []))
+                required_perms = list(
+                    getattr(skill_def, "permissions", None) or s.get("permissions", [])
+                )
                 needs_interactive = "ui_interactive" in required_perms
                 interactive_granted = (
                     _perm_mgr is None
@@ -1827,10 +1840,14 @@ class SkillManager:
                 if interactive_granted:
                     # action_buttons: 追加
                     if ext.get("action_buttons"):
-                        merged_ext.setdefault("action_buttons", []).extend(ext["action_buttons"])
+                        merged_ext.setdefault("action_buttons", []).extend(
+                            ext["action_buttons"]
+                        )
                     # quick_replies: 追加
                     if ext.get("quick_replies"):
-                        merged_ext.setdefault("quick_replies", []).extend(ext["quick_replies"])
+                        merged_ext.setdefault("quick_replies", []).extend(
+                            ext["quick_replies"]
+                        )
                     # floating_widget: 高优先级覆盖
                     if ext.get("floating_widget"):
                         merged_ext["floating_widget"] = ext["floating_widget"]
@@ -1838,7 +1855,12 @@ class SkillManager:
             sources.append(sid)
 
         has_ui = bool(merged) or bool(merged_ext)
-        return {"has_ui": has_ui, "config": merged, "extensions": merged_ext, "sources": sources}
+        return {
+            "has_ui": has_ui,
+            "config": merged,
+            "extensions": merged_ext,
+            "sources": sources,
+        }
 
     @classmethod
     def set_enabled(cls, skill_id: str, enabled: bool) -> bool:
@@ -2043,7 +2065,8 @@ class SkillManager:
             if _inject_skill_count >= cls._MAX_ACTIVE_INJECT:
                 logger.debug(
                     "[SkillManager] 注入上限 (%d) 已达，跳过低优先级 Skill: %s",
-                    cls._MAX_ACTIVE_INJECT, skill_id,
+                    cls._MAX_ACTIVE_INJECT,
+                    skill_id,
                 )
                 continue
 
@@ -2063,9 +2086,8 @@ class SkillManager:
             if p:
                 # 注入 plan_template（仅在 prompt 中尚未包含执行步骤时追加，避免重复）
                 pt = (
-                    (getattr(skill_def, "plan_template", None) if skill_def else None)
-                    or s.get("plan_template", [])
-                )
+                    getattr(skill_def, "plan_template", None) if skill_def else None
+                ) or s.get("plan_template", [])
                 if pt and "执行步骤" not in p:
                     p = p + (
                         "\n\n### ⚙️ 执行步骤（必须严格按顺序完成）\n"
@@ -2190,8 +2212,7 @@ class SkillManager:
         if synergy_lines:
             separator = "\n\n─────────────────────────────────────────"
             synergy_block = (
-                separator
-                + "\n## 🔗 协同工作说明\n"
+                separator + "\n## 🔗 协同工作说明\n"
                 "以下技能正在协同发挥作用，请在回答中体现它们的互补关系，"
                 "不要重复描述各自的工作流程，而是以整体视角输出统一的结果：\n"
                 + "\n".join(synergy_lines)
@@ -2412,84 +2433,96 @@ class SkillManager:
             return
 
         for skills_dir in dirs_to_scan:
-          try:
-            for skill_file in skills_dir.glob("*.json"):
-                try:
-                    with open(skill_file, "r", encoding="utf-8-sig") as f:
-                        data = json.load(f)
-                    skill_def = SkillDefinition.from_dict(data)
-                    if skill_def.id in cls._def_registry:
-                        # 已有内置注册：将 JSON 文件的增强字段合并进去
-                        # （trigger_keywords / plan_template / executor_tools / examples / prompt）
-                        # 保留 enabled 状态由 _load_states_from_settings 管理，不从 JSON 覆盖
-                        existing = cls._def_registry[skill_def.id]
-                        if skill_def.trigger_keywords:
-                            existing.trigger_keywords = skill_def.trigger_keywords
-                        if skill_def.plan_template:
-                            existing.plan_template = skill_def.plan_template
-                        if skill_def.executor_tools:
-                            existing.executor_tools = skill_def.executor_tools
-                        if skill_def.examples:
-                            existing.examples = skill_def.examples
-                        if skill_def.prompt:
-                            existing.prompt = skill_def.prompt
-                            # 同步到 _registry 的 prompt 字段
-                            reg_entry = cls._registry.get(skill_def.id)
-                            if reg_entry:
-                                reg_entry["prompt"] = skill_def.render_prompt()
-                                reg_entry["plan_template"] = skill_def.plan_template
-                        # 同步 ui_config / ui_extensions 到 _registry（供 get_active_ui_config 读取）
-                        if data.get("ui_config"):
-                            reg_entry = cls._registry.get(skill_def.id)
-                            if reg_entry is not None:
-                                reg_entry["ui_config"] = data["ui_config"]
-                                reg_entry["priority"] = data.get("priority", reg_entry.get("priority", 50))
-                        if data.get("ui_extensions"):
-                            reg_entry = cls._registry.get(skill_def.id)
-                            if reg_entry is not None:
-                                reg_entry["ui_extensions"] = data["ui_extensions"]
-                        if data.get("permissions"):
-                            reg_entry = cls._registry.get(skill_def.id)
-                            if reg_entry is not None:
-                                reg_entry["permissions"] = data["permissions"]
-                        logger.debug(f"[SkillManager] 合并自定义增强字段到内置 Skill: {skill_def.id}")
-                    else:
-                        cls._def_registry[skill_def.id] = skill_def
-                        entry = {
-                            "id": skill_def.id,
-                            "name": skill_def.name,
-                            "icon": skill_def.icon,
-                            "category": (
-                                skill_def.category.value
-                                if hasattr(skill_def.category, "value")
-                                else skill_def.category
-                            ),
-                            "skill_nature": data.get("skill_nature", "domain_skill"),
-                            "description": skill_def.description,
-                            "priority": data.get("priority", 50),
-                            "task_types": skill_def.task_types,
-                            "prompt": skill_def.render_prompt(),
-                            "enabled": skill_def.enabled,
-                            "plan_template": skill_def.plan_template,
-                            "permissions": data.get("permissions", []),
-                        }
-                        # 保留 template_path 和 bound_tools（若 JSON 中有）
-                        if data.get("template_path"):
-                            entry["template_path"] = data["template_path"]
-                        if data.get("bound_tools"):
-                            entry["bound_tools"] = data["bound_tools"]
-                        # 保留 ui_config（供 get_active_ui_config 使用）
-                        if data.get("ui_config"):
-                            entry["ui_config"] = data["ui_config"]
-                        # 保留 ui_extensions（供 get_active_ui_config 使用）
-                        if data.get("ui_extensions"):
-                            entry["ui_extensions"] = data["ui_extensions"]
-                        cls._registry[skill_def.id] = entry
-                        logger.info(f"[SkillManager] 加载自定义 Skill: {skill_def.id}")
-                except Exception as e:
-                    logger.warning(f"[SkillManager] 加载 {skill_file.name} 失败: {e}")
-          except Exception as e:
-              logger.warning(f"[SkillManager] 加载自定义 Skill 目录失败: {skills_dir}: {e}")
+            try:
+                for skill_file in skills_dir.glob("*.json"):
+                    try:
+                        with open(skill_file, "r", encoding="utf-8-sig") as f:
+                            data = json.load(f)
+                        skill_def = SkillDefinition.from_dict(data)
+                        if skill_def.id in cls._def_registry:
+                            # 已有内置注册：将 JSON 文件的增强字段合并进去
+                            # （trigger_keywords / plan_template / executor_tools / examples / prompt）
+                            # 保留 enabled 状态由 _load_states_from_settings 管理，不从 JSON 覆盖
+                            existing = cls._def_registry[skill_def.id]
+                            if skill_def.trigger_keywords:
+                                existing.trigger_keywords = skill_def.trigger_keywords
+                            if skill_def.plan_template:
+                                existing.plan_template = skill_def.plan_template
+                            if skill_def.executor_tools:
+                                existing.executor_tools = skill_def.executor_tools
+                            if skill_def.examples:
+                                existing.examples = skill_def.examples
+                            if skill_def.prompt:
+                                existing.prompt = skill_def.prompt
+                                # 同步到 _registry 的 prompt 字段
+                                reg_entry = cls._registry.get(skill_def.id)
+                                if reg_entry:
+                                    reg_entry["prompt"] = skill_def.render_prompt()
+                                    reg_entry["plan_template"] = skill_def.plan_template
+                            # 同步 ui_config / ui_extensions 到 _registry（供 get_active_ui_config 读取）
+                            if data.get("ui_config"):
+                                reg_entry = cls._registry.get(skill_def.id)
+                                if reg_entry is not None:
+                                    reg_entry["ui_config"] = data["ui_config"]
+                                    reg_entry["priority"] = data.get(
+                                        "priority", reg_entry.get("priority", 50)
+                                    )
+                            if data.get("ui_extensions"):
+                                reg_entry = cls._registry.get(skill_def.id)
+                                if reg_entry is not None:
+                                    reg_entry["ui_extensions"] = data["ui_extensions"]
+                            if data.get("permissions"):
+                                reg_entry = cls._registry.get(skill_def.id)
+                                if reg_entry is not None:
+                                    reg_entry["permissions"] = data["permissions"]
+                            logger.debug(
+                                f"[SkillManager] 合并自定义增强字段到内置 Skill: {skill_def.id}"
+                            )
+                        else:
+                            cls._def_registry[skill_def.id] = skill_def
+                            entry = {
+                                "id": skill_def.id,
+                                "name": skill_def.name,
+                                "icon": skill_def.icon,
+                                "category": (
+                                    skill_def.category.value
+                                    if hasattr(skill_def.category, "value")
+                                    else skill_def.category
+                                ),
+                                "skill_nature": data.get(
+                                    "skill_nature", "domain_skill"
+                                ),
+                                "description": skill_def.description,
+                                "priority": data.get("priority", 50),
+                                "task_types": skill_def.task_types,
+                                "prompt": skill_def.render_prompt(),
+                                "enabled": skill_def.enabled,
+                                "plan_template": skill_def.plan_template,
+                                "permissions": data.get("permissions", []),
+                            }
+                            # 保留 template_path 和 bound_tools（若 JSON 中有）
+                            if data.get("template_path"):
+                                entry["template_path"] = data["template_path"]
+                            if data.get("bound_tools"):
+                                entry["bound_tools"] = data["bound_tools"]
+                            # 保留 ui_config（供 get_active_ui_config 使用）
+                            if data.get("ui_config"):
+                                entry["ui_config"] = data["ui_config"]
+                            # 保留 ui_extensions（供 get_active_ui_config 使用）
+                            if data.get("ui_extensions"):
+                                entry["ui_extensions"] = data["ui_extensions"]
+                            cls._registry[skill_def.id] = entry
+                            logger.info(
+                                f"[SkillManager] 加载自定义 Skill: {skill_def.id}"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"[SkillManager] 加载 {skill_file.name} 失败: {e}"
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"[SkillManager] 加载自定义 Skill 目录失败: {skills_dir}: {e}"
+                )
 
     @classmethod
     def validate_output(cls, skill_id: str, text: str) -> tuple:

@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """Settings, setup, diagnose, info, local-model, and mode-switch routes.
 
 Extracted from web/app.py into a standalone Flask Blueprint so that the

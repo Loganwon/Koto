@@ -180,7 +180,10 @@ if __name__ == "__main__":
     checks.append(("包含'质量'检查", "质量" in all_msgs))
     checks.append(("包含'渲染'步骤", "渲染" in all_msgs))
     checks.append(
-        ("无旧式公式化前缀", len(check_no_hardcoded_emoji_prefix(result["progress"])) == 0)
+        (
+            "无旧式公式化前缀",
+            len(check_no_hardcoded_emoji_prefix(result["progress"])) == 0,
+        )
     )
 
     # 检查文件内容无 markdown 残留

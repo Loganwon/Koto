@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto 语音引擎 v3 — Vosk（离线）+ Faster-Whisper（降级）引擎
 
@@ -39,7 +41,9 @@ _preload_started = False  # 避免重复后台预加载
 # Faster-Whisper
 _whisper_model: Any = None
 _whisper_lock = threading.Lock()
-_WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL_SIZE", "small")  # tiny/base/small/medium
+_WHISPER_MODEL_SIZE = os.environ.get(
+    "WHISPER_MODEL_SIZE", "small"
+)  # tiny/base/small/medium
 
 
 # ── 模型路径查找 ───────────────────────────────────────────────────────────────
@@ -126,6 +130,7 @@ def _has_whisper() -> bool:
     """Faster-Whisper 包是否安装。"""
     try:
         import importlib
+
         return importlib.util.find_spec("faster_whisper") is not None
     except Exception:
         return False
@@ -141,6 +146,7 @@ def _load_whisper_model() -> Any:
             return _whisper_model
         try:
             from faster_whisper import WhisperModel  # type: ignore
+
             logger.info(f"[VoiceEngine] 正在加载 Whisper 模型: {_WHISPER_MODEL_SIZE}")
             t0 = time.time()
             _whisper_model = WhisperModel(
@@ -236,7 +242,9 @@ def recognize_stream(
     if model is None:
         # Vosk 不可用：尝试 Whisper 引擎
         if _has_whisper():
-            yield from _recognize_with_whisper_stream(max_wait=max_wait, max_speech=max_speech)
+            yield from _recognize_with_whisper_stream(
+                max_wait=max_wait, max_speech=max_speech
+            )
             return
         yield {
             "type": "error",
@@ -381,6 +389,7 @@ def recognize_stream(
 
 # ── Whisper 降级引擎 ─────────────────────────────────────────────────────────
 
+
 def _recognize_with_whisper_stream(
     max_wait: float = 8.0,
     max_speech: float = 30.0,
@@ -400,17 +409,23 @@ def _recognize_with_whisper_stream(
     try:
         import pyaudio  # type: ignore
     except ImportError:
-        yield {"type": "error", "message": "pyaudio 未安装，请运行: pip install pyaudio"}
+        yield {
+            "type": "error",
+            "message": "pyaudio 未安装，请运行: pip install pyaudio",
+        }
         return
 
     whisper = _load_whisper_model()
     if whisper is None:
-        yield {"type": "error", "message": "Whisper 模型加载失败，请运行: pip install faster-whisper"}
+        yield {
+            "type": "error",
+            "message": "Whisper 模型加载失败，请运行: pip install faster-whisper",
+        }
         return
 
     RATE = 16000
-    CHUNK = 1600          # 100ms
-    SILENCE_LIMIT = 15    # 1.5s 静音后结束
+    CHUNK = 1600  # 100ms
+    SILENCE_LIMIT = 15  # 1.5s 静音后结束
     MAX_WAIT_CHUNKS = int(max_wait * RATE / CHUNK)
     MAX_TOTAL_CHUNKS = int(max_speech * RATE / CHUNK)
 
@@ -443,7 +458,9 @@ def _recognize_with_whisper_stream(
 
             if len(noise_samples) < 20:
                 noise_samples.append(rms)
-                noise_baseline = max(120.0, (sum(noise_samples) / len(noise_samples)) * 1.8)
+                noise_baseline = max(
+                    120.0, (sum(noise_samples) / len(noise_samples)) * 1.8
+                )
 
             is_speech_frame = rms > noise_baseline
 

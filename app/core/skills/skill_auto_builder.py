@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║      Koto  ─  SkillAutoBuilder：交流风格 → Skill 自动转化器      ║

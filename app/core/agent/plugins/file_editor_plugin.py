@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
@@ -119,6 +121,7 @@ class FileEditorPlugin(AgentPlugin):
         if r["success"]:
             try:
                 from app.core.file.file_registry import get_file_registry
+
                 get_file_registry().register(r["path"], source="ai")
             except Exception:
                 pass
@@ -130,6 +133,7 @@ class FileEditorPlugin(AgentPlugin):
         if r["success"]:
             try:
                 from app.core.file.file_registry import get_file_registry
+
                 get_file_registry().register(r["path"], source="ai")
             except Exception:
                 pass
@@ -141,6 +145,7 @@ class FileEditorPlugin(AgentPlugin):
         if r["success"]:
             try:
                 from app.core.file.file_registry import get_file_registry
+
                 get_file_registry().register(file_path, source="ai")
             except Exception:
                 pass
@@ -153,6 +158,7 @@ class FileEditorPlugin(AgentPlugin):
         if r["success"]:
             try:
                 from app.core.file.file_registry import get_file_registry
+
                 get_file_registry().register(file_path, source="ai")
             except Exception:
                 pass

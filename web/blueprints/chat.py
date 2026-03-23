@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Chat interaction blueprint.
 
@@ -97,7 +99,9 @@ def mini_chat() -> Response:
     session_name = "MiniKoto_Quick"
     history = _a.session_manager.load(f"{session_name}.json")
 
-    task_type, route_method, context_info = _a.SmartDispatcher.analyze(user_input, history)
+    task_type, route_method, context_info = _a.SmartDispatcher.analyze(
+        user_input, history
+    )
     _logger.debug(
         "[MINI_CHAT] SmartDispatcher: task_type='%s', method='%s'",
         task_type,
@@ -151,7 +155,9 @@ def mini_chat() -> Response:
                 used_model = "LocalExecutor"
                 is_error = not exec_result.get("success", False)
                 if is_error or _a.Utils.is_failure_output(response_text):
-                    fix_prompt = _a.Utils.build_fix_prompt("SYSTEM", user_input, response_text)
+                    fix_prompt = _a.Utils.build_fix_prompt(
+                        "SYSTEM", user_input, response_text
+                    )
                     try:
                         fix_resp = _a.client.models.generate_content(
                             model="gemini-2.5-flash",

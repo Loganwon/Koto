@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Background Agent — 后台自主执行代理
 =====================================
@@ -84,23 +86,25 @@ logger = logging.getLogger(__name__)
 # 数据结构
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class StepStatus(str, Enum):
-    PENDING   = "pending"
-    RUNNING   = "running"
-    DONE      = "done"
-    FAILED    = "failed"
-    SKIPPED   = "skipped"
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 @dataclass
 class PlanStep:
     """执行计划中的单个步骤。"""
+
     step_id: str
     title: str
     description: str
-    tool_hint: Optional[str] = None      # 建议使用的工具类型
+    tool_hint: Optional[str] = None  # 建议使用的工具类型
     depends_on: List[str] = field(default_factory=list)  # 依赖的 step_id 列表
-    can_parallel: bool = False           # 是否可与其他步骤并行
+    can_parallel: bool = False  # 是否可与其他步骤并行
     status: StepStatus = StepStatus.PENDING
     result: str = ""
     error: str = ""
@@ -111,11 +115,12 @@ class PlanStep:
 @dataclass
 class ExecutionPlan:
     """Agent 生成的完整执行计划。"""
+
     plan_id: str
     goal: str
     steps: List[PlanStep]
     estimated_minutes: int = 0
-    reasoning: str = ""                  # LLM 的规划思路
+    reasoning: str = ""  # LLM 的规划思路
 
 
 @dataclass
@@ -123,7 +128,7 @@ class BackgroundTaskStatus:
     task_id: str
     goal: str
     session_id: str
-    phase: str                           # "planning"|"review"|"executing"|"done"|"failed"
+    phase: str  # "planning"|"review"|"executing"|"done"|"failed"
     plan: Optional[ExecutionPlan]
     steps_total: int
     steps_done: int
@@ -208,6 +213,7 @@ _SYNTHESIS_PROMPT = """\
 # ─────────────────────────────────────────────────────────────────────────────
 # BackgroundAgent
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class BackgroundAgent:
     """
@@ -296,7 +302,14 @@ class BackgroundAgent:
         # 启动后台线程
         thread = threading.Thread(
             target=self._run_task,
-            args=(task_id, goal, context or {}, review_event, cancel_event, on_complete),
+            args=(
+                task_id,
+                goal,
+                context or {},
+                review_event,
+                cancel_event,
+                on_complete,
+            ),
             daemon=True,
             name=f"koto-bg-agent-{task_id[:8]}",
         )
@@ -367,11 +380,14 @@ class BackgroundAgent:
                 return
 
             self._plans[task_id] = plan
-            self._update(task_id, phase="review", plan=plan, steps_total=len(plan.steps))
+            self._update(
+                task_id, phase="review", plan=plan, steps_total=len(plan.steps)
+            )
             self._emit(
-                task_id, "plan_ready",
+                task_id,
+                "plan_ready",
                 f"计划已生成，共 {len(plan.steps)} 步，预计 {plan.estimated_minutes} 分钟\n"
-                f"步骤：{', '.join(s.title for s in plan.steps)}"
+                f"步骤：{', '.join(s.title for s in plan.steps)}",
             )
 
             # ── 阶段 2：等待人工审批 ─────────────────────────────────────
@@ -390,8 +406,7 @@ class BackgroundAgent:
 
                 self._update(task_id, current_step=step.step_id, steps_done=i)
                 self._emit(
-                    task_id, "step_start",
-                    f"[{i+1}/{len(plan.steps)}] {step.title}"
+                    task_id, "step_start", f"[{i+1}/{len(plan.steps)}] {step.title}"
                 )
 
                 step.status = StepStatus.RUNNING
@@ -408,16 +423,18 @@ class BackgroundAgent:
 
                 self._update(task_id, steps_done=i + 1)
                 self._emit(
-                    task_id, "step_done",
-                    f"[{i+1}/{len(plan.steps)}] {step.title} ✓"
+                    task_id, "step_done", f"[{i+1}/{len(plan.steps)}] {step.title} ✓"
                 )
 
             # ── 阶段 4：合成报告 ─────────────────────────────────────────
             self._emit(task_id, "synthesis", "正在合成最终报告...")
             report = self._synthesize(goal, plan.steps)
             self._update(
-                task_id, phase="done", final_report=report,
-                steps_done=len(plan.steps), current_step=None
+                task_id,
+                phase="done",
+                final_report=report,
+                steps_done=len(plan.steps),
+                current_step=None,
             )
             self._emit(task_id, "completed", "任务已完成，最终报告已生成")
 
@@ -460,25 +477,29 @@ class BackgroundAgent:
             return ExecutionPlan(
                 plan_id=str(uuid.uuid4()),
                 goal=goal,
-                steps=[PlanStep(
-                    step_id="step_1",
-                    title="直接执行",
-                    description=goal,
-                    tool_hint="web_search",
-                )],
+                steps=[
+                    PlanStep(
+                        step_id="step_1",
+                        title="直接执行",
+                        description=goal,
+                        tool_hint="web_search",
+                    )
+                ],
                 reasoning="规划解析失败，降级为单步执行",
             )
 
         steps = []
-        for s in data.get("steps", [])[:self.max_steps]:
-            steps.append(PlanStep(
-                step_id=s.get("step_id", str(uuid.uuid4())),
-                title=s.get("title", "步骤"),
-                description=s.get("description", ""),
-                tool_hint=s.get("tool_hint"),
-                depends_on=s.get("depends_on", []),
-                can_parallel=s.get("can_parallel", False),
-            ))
+        for s in data.get("steps", [])[: self.max_steps]:
+            steps.append(
+                PlanStep(
+                    step_id=s.get("step_id", str(uuid.uuid4())),
+                    title=s.get("title", "步骤"),
+                    description=s.get("description", ""),
+                    tool_hint=s.get("tool_hint"),
+                    depends_on=s.get("depends_on", []),
+                    can_parallel=s.get("can_parallel", False),
+                )
+            )
 
         return ExecutionPlan(
             plan_id=str(uuid.uuid4()),
@@ -549,9 +570,12 @@ class BackgroundAgent:
         # 合成报告有害内容检测
         try:
             from app.core.security.output_validator import OutputValidator
+
             _val = OutputValidator.validate(text=result)
             if _val.is_blocked:
-                logger.warning("[BackgroundAgent] synthesis 输出被拦截: %s", _val.reasons)
+                logger.warning(
+                    "[BackgroundAgent] synthesis 输出被拦截: %s", _val.reasons
+                )
                 return _val.text
             return _val.text
         except Exception:
@@ -632,8 +656,10 @@ class BackgroundAgent:
         if self._llm_provider is not None:
             return
         try:
-            from app.core.llm.gemini import GeminiProvider
             import os
+
+            from app.core.llm.gemini import GeminiProvider
+
             api_key = os.environ.get("GEMINI_API_KEY", "")
             self._llm_provider = GeminiProvider(api_key=api_key)
         except Exception as e:
@@ -641,18 +667,21 @@ class BackgroundAgent:
             self._llm_provider = None
 
         try:
-            from app.core.agent.tool_registry import ToolRegistry
             from app.core.agent.factory import build_default_registry
+            from app.core.agent.tool_registry import ToolRegistry
+
             self._registry = build_default_registry()
         except Exception:
             try:
                 from app.core.agent.tool_registry import ToolRegistry
+
                 self._registry = ToolRegistry()
             except Exception:
                 self._registry = None
 
         try:
             from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+
             self._progress_bus = get_progress_bus()
             self._ProgressEvent = ProgressEvent
         except Exception as _e:
@@ -660,6 +689,7 @@ class BackgroundAgent:
 
         try:
             from app.core.tasks.task_ledger import get_ledger
+
             self._ledger = get_ledger()
         except Exception as _e:
             logger.warning("[BackgroundAgent] TaskLedger 加载失败: %s", _e)
@@ -680,6 +710,7 @@ def _run_agent_step(
     设计为同步辅助函数，被 BackgroundAgent._execute_step 调用。
     """
     from app.core.agent.unified_agent import UnifiedAgent
+
     agent = UnifiedAgent(
         llm_provider=llm,
         tool_registry=registry,
@@ -688,8 +719,13 @@ def _run_agent_step(
     final_answer = ""
     try:
         for step in agent.run(input_text=prompt):
-            if hasattr(step, "step_type") and str(step.step_type) in ("final_answer", "FINAL_ANSWER"):
-                final_answer = getattr(step, "content", "") or getattr(step, "output", "")
+            if hasattr(step, "step_type") and str(step.step_type) in (
+                "final_answer",
+                "FINAL_ANSWER",
+            ):
+                final_answer = getattr(step, "content", "") or getattr(
+                    step, "output", ""
+                )
             elif hasattr(step, "output") and step.output:
                 final_answer = step.output
     except Exception as e:

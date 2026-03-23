@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 WebSearcher 桥接模块 — 避免 tool_registry → app.py 循环导入
 从 app.py 中的 WebSearcher 类代理 search_with_grounding 方法

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Word 文档翻译模块 - 格式保留翻译
 读取 .docx 文件，通过 LLM 翻译所有文本，保留原始样式（字体/加粗/颜色/表格/页眉页脚）

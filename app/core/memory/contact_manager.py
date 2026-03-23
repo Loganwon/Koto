@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto ContactManager — 关系记忆 / 社交 CRM
 ==========================================
@@ -70,16 +72,35 @@ _EN_NAME_RE = re.compile(r"\b([A-Z][a-z]{1,15}(?:\s+[A-Z][a-z]{1,15})?)\b")
 
 # 关系词推断
 _RELATION_MAP = {
-    "朋友": "朋友", "同学": "同学", "同事": "同事",
-    "老板": "上级", "上司": "上级", "领导": "上级",
-    "下属": "下属", "部下": "下属",
-    "客户": "客户", "甲方": "客户",
-    "老师": "老师", "导师": "导师",
-    "爸爸": "家人", "妈妈": "家人", "父亲": "家人", "母亲": "家人",
-    "老婆": "伴侣", "老公": "伴侣", "爱人": "伴侣", "妻子": "伴侣", "丈夫": "伴侣",
-    "女朋友": "伴侣", "男朋友": "伴侣",
-    "哥": "家人", "姐": "家人", "弟": "家人", "妹": "家人",
-    "合伙人": "合作伙伴", "合作伙伴": "合作伙伴",
+    "朋友": "朋友",
+    "同学": "同学",
+    "同事": "同事",
+    "老板": "上级",
+    "上司": "上级",
+    "领导": "上级",
+    "下属": "下属",
+    "部下": "下属",
+    "客户": "客户",
+    "甲方": "客户",
+    "老师": "老师",
+    "导师": "导师",
+    "爸爸": "家人",
+    "妈妈": "家人",
+    "父亲": "家人",
+    "母亲": "家人",
+    "老婆": "伴侣",
+    "老公": "伴侣",
+    "爱人": "伴侣",
+    "妻子": "伴侣",
+    "丈夫": "伴侣",
+    "女朋友": "伴侣",
+    "男朋友": "伴侣",
+    "哥": "家人",
+    "姐": "家人",
+    "弟": "家人",
+    "妹": "家人",
+    "合伙人": "合作伙伴",
+    "合作伙伴": "合作伙伴",
 }
 
 # ── 单例 ──────────────────────────────────────────────────────────────────────
@@ -165,8 +186,12 @@ class ContactManager:
                                    topics = ?,
                                    updated_at = ?
                                WHERE id = ?""",
-                            (now_iso, json.dumps(new_topics, ensure_ascii=False),
-                             now_iso, existing["id"]),
+                            (
+                                now_iso,
+                                json.dumps(new_topics, ensure_ascii=False),
+                                now_iso,
+                                existing["id"],
+                            ),
                         )
                     else:
                         # 新增联系人
@@ -208,8 +233,15 @@ class ContactManager:
                        (id, name, relationship, notes, follow_up_after_days,
                         interaction_count, created_at, updated_at)
                        VALUES (?, ?, ?, ?, ?, 0, ?, ?)""",
-                    (contact_id, name, relationship, notes,
-                     follow_up_after_days, now_iso, now_iso),
+                    (
+                        contact_id,
+                        name,
+                        relationship,
+                        notes,
+                        follow_up_after_days,
+                        now_iso,
+                        now_iso,
+                    ),
                 )
                 conn.commit()
         return contact_id
@@ -281,11 +313,9 @@ class ContactManager:
         now = datetime.now()
         results = []
         with self._connect() as conn:
-            rows = conn.execute(
-                """SELECT * FROM contacts
+            rows = conn.execute("""SELECT * FROM contacts
                    WHERE follow_up_after_days > 0
-                     AND last_interaction IS NOT NULL"""
-            ).fetchall()
+                     AND last_interaction IS NOT NULL""").fetchall()
             for row in rows:
                 contact = dict(row)
                 try:
@@ -315,27 +345,31 @@ class ContactManager:
                 )
                 if c.get("notes"):
                     content += f"（备注：{c['notes'][:40]}）"
-                pa._enqueue({
-                    "id": f"followup_{c['id']}",
-                    "type": "follow_up",
-                    "content": content,
-                    "priority": "medium",
-                    "triggered_by": "contact_manager",
-                    "created_at": datetime.now().isoformat(timespec="seconds"),
-                    "expires_at": (datetime.now() + timedelta(hours=24)).isoformat(timespec="seconds"),
-                    "dismissed": False,
-                })
+                pa._enqueue(
+                    {
+                        "id": f"followup_{c['id']}",
+                        "type": "follow_up",
+                        "content": content,
+                        "priority": "medium",
+                        "triggered_by": "contact_manager",
+                        "created_at": datetime.now().isoformat(timespec="seconds"),
+                        "expires_at": (datetime.now() + timedelta(hours=24)).isoformat(
+                            timespec="seconds"
+                        ),
+                        "dismissed": False,
+                    }
+                )
             logger.info(f"[ContactManager] 推送了 {len(pending)} 条跟进提醒")
         except Exception as exc:
             logger.warning(f"[ContactManager] ProactiveAgent 推送失败: {exc}")
 
     # ── 私有工具 ──────────────────────────────────────────────────────────────
 
-    def _find_by_name(self, conn: sqlite3.Connection, name: str) -> Optional[sqlite3.Row]:
+    def _find_by_name(
+        self, conn: sqlite3.Connection, name: str
+    ) -> Optional[sqlite3.Row]:
         """在 name 和 aliases 中查找匹配。"""
-        row = conn.execute(
-            "SELECT * FROM contacts WHERE name = ?", (name,)
-        ).fetchone()
+        row = conn.execute("SELECT * FROM contacts WHERE name = ?", (name,)).fetchone()
         if row:
             return row
         # 检查 aliases
@@ -373,13 +407,54 @@ class ContactManager:
 
 # ── 停用词（防止把常见词误判为人名）─────────────────────────────────────────────
 _STOP_NAMES = {
-    "用户", "系统", "助手", "机器", "工具", "模型", "数据",
-    "文件", "内容", "信息", "结果", "问题", "任务", "项目",
-    "代码", "文档", "报告", "分析", "方案", "计划", "测试",
+    "用户",
+    "系统",
+    "助手",
+    "机器",
+    "工具",
+    "模型",
+    "数据",
+    "文件",
+    "内容",
+    "信息",
+    "结果",
+    "问题",
+    "任务",
+    "项目",
+    "代码",
+    "文档",
+    "报告",
+    "分析",
+    "方案",
+    "计划",
+    "测试",
 }
 _EN_STOP_WORDS = {
-    "The", "This", "That", "With", "From", "Have", "Will",
-    "Can", "Are", "Was", "Has", "For", "Your", "Our",
-    "Please", "Thank", "Hello", "Sorry", "Sure", "Yes", "No",
-    "True", "False", "None", "Error", "Warning", "Info",
+    "The",
+    "This",
+    "That",
+    "With",
+    "From",
+    "Have",
+    "Will",
+    "Can",
+    "Are",
+    "Was",
+    "Has",
+    "For",
+    "Your",
+    "Our",
+    "Please",
+    "Thank",
+    "Hello",
+    "Sorry",
+    "Sure",
+    "Yes",
+    "No",
+    "True",
+    "False",
+    "None",
+    "Error",
+    "Warning",
+    "Info",
 }

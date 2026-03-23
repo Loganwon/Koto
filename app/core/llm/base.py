@@ -1,3 +1,5 @@
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Generator, List, Optional, Union

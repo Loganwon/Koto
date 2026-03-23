@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 ╔══════════════════════════════════════════════════════════════════╗
 ║          Koto  ─  Skill 原子化标准定义（MCP 兼容）               ║
@@ -481,7 +483,6 @@ class SkillDefinition:
 
     # ── 方法 ─────────────────────────────────────────────────────────────────
 
-
     def render_prompt(
         self,
         variables: Optional[Dict[str, Any]] = None,
@@ -510,7 +511,11 @@ class SkillDefinition:
             try:
                 template = template.format(**variables)
             except KeyError as e:
-                logger.warning("[SkillDefinition] render_prompt() missing variable %s for skill=%s", e, self.id)
+                logger.warning(
+                    "[SkillDefinition] render_prompt() missing variable %s for skill=%s",
+                    e,
+                    self.id,
+                )
 
         parts = [template] if template else []
 
@@ -742,7 +747,11 @@ class SkillDefinition:
             default_triggers=data.get("default_triggers", []),
             plan_template=data.get("plan_template", []),
             entry_point=data.get("entry_point"),
-            ui_config=SkillUIConfig.from_dict(data["ui_config"]) if data.get("ui_config") else SkillUIConfig(),
+            ui_config=(
+                SkillUIConfig.from_dict(data["ui_config"])
+                if data.get("ui_config")
+                else SkillUIConfig()
+            ),
         )
 
     @classmethod

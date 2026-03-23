@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto LangGraph ReAct Agent
 ==========================
@@ -578,6 +580,7 @@ class LangGraphAgent:
                 content = event.get("content", "")
                 if etype == "tool_call":
                     from app.core.agent.types import AgentAction
+
                     yield AgentStep(
                         step_type=AgentStepType.ACTION,
                         content=f"调用工具: {content}",
@@ -610,6 +613,7 @@ class LangGraphAgent:
         except Exception as exc:
             logger.error(f"[LangGraphAgent.run] 执行异常: {exc}", exc_info=True)
             from app.core.agent.types import AgentStep, AgentStepType
+
             yield AgentStep(
                 step_type=AgentStepType.ERROR,
                 content=str(exc),

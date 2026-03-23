@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 app/core/services/voice_service.py
 ===================================
@@ -57,6 +59,7 @@ class VoiceService:
         """
         try:
             from web.voice_engine import get_status
+
             return get_status()
         except ImportError as exc:
             logger.warning("[VoiceService] voice_engine 导入失败: %s", exc)
@@ -74,9 +77,12 @@ class VoiceService:
         """请求中止当前正在运行的识别流。"""
         try:
             from web.voice_engine import request_stop
+
             request_stop()
         except ImportError as exc:
-            logger.warning("[VoiceService] voice_engine 导入失败（request_stop）: %s", exc)
+            logger.warning(
+                "[VoiceService] voice_engine 导入失败（request_stop）: %s", exc
+            )
 
     @staticmethod
     def preload() -> None:
@@ -85,6 +91,7 @@ class VoiceService:
         """
         try:
             from web.voice_engine import preload
+
             preload()
         except ImportError as exc:
             logger.warning("[VoiceService] voice_engine 导入失败（preload）: %s", exc)
@@ -109,9 +116,12 @@ class VoiceService:
         """
         try:
             from web.voice_engine import recognize_stream
+
             yield from recognize_stream(max_wait=max_wait, max_speech=max_speech)
         except ImportError as exc:
-            logger.warning("[VoiceService] voice_engine 导入失败（recognize_stream）: %s", exc)
+            logger.warning(
+                "[VoiceService] voice_engine 导入失败（recognize_stream）: %s", exc
+            )
             yield {"type": "error", "message": f"语音模块不可用: {exc}"}
         except Exception as exc:
             logger.error("[VoiceService] recognize_stream 异常: %s", exc, exc_info=True)

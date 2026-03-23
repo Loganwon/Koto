@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 🎯 Koto 智能上下文注入器
 
@@ -545,7 +547,10 @@ class ContextInjector:
                     _personality_part = f"\n\n## 🧠 用户画像（持续学习更新）\n{_pm_ctx}"
         except Exception as _e:
             import logging as _logging
-            _logging.getLogger(__name__).debug("[ContextInjector] PersonalityMatrix 加载跳过: %s", _e)
+
+            _logging.getLogger(__name__).debug(
+                "[ContextInjector] PersonalityMatrix 加载跳过: %s", _e
+            )
 
         return f"""你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。{_personality_part}{context_part}
 

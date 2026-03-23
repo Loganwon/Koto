@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Smart Feedback System — 智能反馈系统
 替代过去的硬编码/公式化进度消息，基于任务上下文动态生成自然、有信息量的反馈。

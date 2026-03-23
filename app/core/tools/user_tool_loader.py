@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 Koto UserToolLoader — 用户自定义工具脚本加载器
 ===============================================
@@ -90,6 +92,7 @@ def koto_tool(
         def get_time() -> str:
             ...
     """
+
     def decorator(fn: Callable) -> Callable:
         tool_name = name or fn.__name__
 
@@ -98,18 +101,18 @@ def koto_tool(
         if parameters:
             for k, v in parameters.items():
                 props[k] = {
-                    "type":        v.get("type", "STRING"),
+                    "type": v.get("type", "STRING"),
                     "description": v.get("description", ""),
                 }
 
         tool_def = {
-            "name":        tool_name,
+            "name": tool_name,
             "description": description or (fn.__doc__ or "").strip().split("\n")[0],
-            "func":        _safe_wrapper(fn),
+            "func": _safe_wrapper(fn),
             "parameters": {
-                "type":       "OBJECT",
+                "type": "OBJECT",
                 "properties": props,
-                "required":   required or [],
+                "required": required or [],
             },
         }
         if returns_type:
@@ -117,7 +120,10 @@ def koto_tool(
 
         with _REGISTRY_LOCK:
             # 覆盖同名工具
-            existing = next((i for i, t in enumerate(_REGISTERED_TOOLS) if t["name"] == tool_name), None)
+            existing = next(
+                (i for i, t in enumerate(_REGISTERED_TOOLS) if t["name"] == tool_name),
+                None,
+            )
             if existing is not None:
                 _REGISTERED_TOOLS[existing] = tool_def
             else:
@@ -134,6 +140,7 @@ def koto_tool(
 
 def _safe_wrapper(fn: Callable) -> Callable:
     """包装函数以捕获异常并返回错误字符串（工具调用不应炸掉整个管线）。"""
+
     @functools.wraps(fn)
     def wrapped(*args, **kwargs) -> str:
         try:
@@ -142,6 +149,7 @@ def _safe_wrapper(fn: Callable) -> Callable:
         except Exception as e:
             logger.warning(f"[UserTool:{fn.__name__}] 执行出错: {e}")
             return f"[工具执行错误] {fn.__name__}: {e}"
+
     return wrapped
 
 
