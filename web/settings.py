@@ -113,7 +113,7 @@ class SettingsManager:
             self._save_settings()
 
     def _merge_settings(self, default, current):
-        """合并设置，保留用户设置，添加新的默认项"""
+        """合并设置，保留用户设置，添加新的默认项，同时保留非默认键"""
         result = default.copy()
         for key, value in current.items():
             if (
@@ -127,12 +127,27 @@ class SettingsManager:
                 result[key] = value
         return result
 
+    # SkillManager 独立管理 "skills" 键，SettingsManager 写入时不得覆盖
+    _EXTERNAL_KEYS = frozenset({"skills"})
+
     def _save_settings(self):
-        """保存设置"""
+        """保存设置 — read-modify-write，避免覆盖其他子系统写入的数据"""
         try:
             os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+            # 先读取磁盘最新数据，保留其他子系统的写入（如 SkillManager → "skills"）
+            on_disk = {}
+            if os.path.exists(SETTINGS_FILE):
+                try:
+                    with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                        on_disk = json.load(f)
+                except Exception:
+                    pass
+            # 写入 SettingsManager 管辖的所有 key，但跳过外部子系统独占的 key
+            for key, value in self._settings.items():
+                if key not in self._EXTERNAL_KEYS:
+                    on_disk[key] = value
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._settings, f, indent=2, ensure_ascii=False)
+                json.dump(on_disk, f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
             logger.info(f"保存设置失败: {e}")
