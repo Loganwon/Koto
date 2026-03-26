@@ -377,3 +377,68 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
 .save-bar .save-status.saving { color: #ffcc80; }
 .save-bar .save-status.saved { color: #a5d6a7; }
 
+/* ── Streaming cursor ──────────────────────────────────────── */
+@keyframes blink-cursor {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.chat-msg.streaming::after {
+  content: '▋';
+  display: inline-block;
+  margin-left: 2px;
+  animation: blink-cursor 0.8s step-start infinite;
+}
+
+/* ── Code execution results ────────────────────────────────── */
+.code-result {
+  background: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.code-result-label {
+  color: #9e9e9e;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+.code-stdout {
+  color: #a5d6a7;
+  font-family: 'Consolas', 'Courier New', monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.code-stderr {
+  color: #ef9a9a;
+  font-family: 'Consolas', 'Courier New', monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+.code-result-img {
+  max-width: 100%;
+  border-radius: 4px;
+  margin-top: 8px;
+  display: block;
+  cursor: zoom-in;
+}
+.code-result-download {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 3px 8px;
+  background: #2d5a8e;
+  color: #fff;
+  border-radius: 4px;
+  font-size: 11px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.code-result-download:hover { background: #1177bb; }
+

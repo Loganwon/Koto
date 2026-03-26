@@ -1,79 +1,75 @@
 // ══════════════════════════════════════════════════════════════
-// AIPanel.js — 模块 B：AI 交互面板层
+// AIPanel.js — v2: Preview-First + Streaming Typewriter Output
 //
-// 渲染右侧控制台 UI，绑定按钮点击事件，渲染 AI 返回的对话气泡。
-// 约束：不得直接调用 Univer 底层方法，只能调用 DocController 的接口。
+// RULE: AI output is NEVER applied to the document automatically.
+// All results stream into the right panel first. Only after the
+// user clicks a confirm button does the text enter the document.
 // ══════════════════════════════════════════════════════════════
 
 export class AIPanel {
-  /**
-   * @param {string}          containerId    右侧面板挂载 DOM id
-   * @param {import('./DocController').DocController} docController
-   * @param {import('./SocketBridge').SocketBridge}   socketBridge
-   */
   constructor(containerId, docController, socketBridge) {
     this._container = document.getElementById(containerId);
     this._doc = docController;
     this._bridge = socketBridge;
     this._chatFlow = null;
+    /** Current streaming message <div> element */
+    this._streamingEl = null;
 
     this._render();
     this._bind();
     this._bridge.setAIPanel(this);
   }
 
-  // ══════════════════ UI 渲染 ══════════════════
+  // ══════════════════ Render ══════════════════
 
   _render() {
-    // 默认折叠右侧面板，给编辑区更多空间
     this._container.classList.add('collapsed');
-
     this._container.innerHTML = `
       <div class="ai-panel-header">
-        <button id="ai-panel-toggle" class="ai-panel-toggle-btn" title="展开/折叠 AI 面板">◀</button>
+        <button id="ai-panel-toggle" class="ai-panel-toggle-btn" title="展开/折叠">◀</button>
         <span class="ai-panel-title">AI 文件助手</span>
         <span id="conn-status" class="conn-status disconnected">离线</span>
       </div>
-
       <div class="ai-actions">
-        <button id="btn-polish"    class="action-btn" title="将选中文本发送给 AI 进行润色">✨ AI 润色</button>
-        <button id="btn-summarize" class="action-btn" title="让 AI 总结全文要点">📝 全文摘要</button>
-        <button id="btn-continue"  class="action-btn" title="AI 根据上下文继续写作">🖊️ 续写</button>
-        <button id="btn-translate" class="action-btn" title="翻译选中文本">🌐 翻译</button>
+        <button class="action-btn" data-action="polish"          title="润色选中文本">✨ 润色</button>
+        <button class="action-btn" data-action="translate"       title="翻译选中文本">🌐 翻译</button>
+        <button class="action-btn" data-action="summarize"       title="生成全文摘要">📝 摘要</button>
+        <button class="action-btn" data-action="continue_writing" title="AI 续写">🖊️ 续写</button>
       </div>
-
       <div id="ai-chat-flow" class="ai-chat-flow">
-        <div class="chat-msg system">欢迎使用 Koto 文件助手！选中文本后可使用浮动工具栏快速调用 AI。</div>
+        <div class="chat-msg system">AI 结果会在此预览，确认后再应用到文档。选中文本后点击按钮或使用浮动工具栏。</div>
       </div>
-
       <div class="ai-input-bar">
-        <input id="ai-input" type="text" placeholder="输入自定义指令…" autocomplete="off" />
-        <button id="btn-send">发送</button>
+        <textarea id="ai-input" rows="1" placeholder="输入指令…（Enter 发送，Shift+Enter 换行）" autocomplete="off"></textarea>
+        <button id="btn-send" title="发送">▶</button>
       </div>
     `;
     this._chatFlow = document.getElementById('ai-chat-flow');
   }
 
-  // ══════════════════ 事件绑定 ══════════════════
+  // ══════════════════ Bind ══════════════════
 
   _bind() {
-    // 折叠/展开切换
+    // Collapse toggle
     const toggleBtn = document.getElementById('ai-panel-toggle');
     toggleBtn.addEventListener('click', () => {
       const collapsed = this._container.classList.toggle('collapsed');
       toggleBtn.textContent = collapsed ? '◀' : '▶';
     });
 
-    // 快捷操作按钮
-    document.getElementById('btn-polish').addEventListener('click', () => this._onAction('polish'));
-    document.getElementById('btn-summarize').addEventListener('click', () => this._onAction('summarize'));
-    document.getElementById('btn-continue').addEventListener('click', () => this._onAction('continue_writing'));
-    document.getElementById('btn-translate').addEventListener('click', () => this._onAction('translate'));
+    // Action buttons
+    this._container.querySelectorAll('.action-btn[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => this._onAction(btn.dataset.action));
+    });
 
-    // 自定义指令输入
+    // Custom input textarea - auto-resize
     const input = document.getElementById('ai-input');
-    const sendBtn = document.getElementById('btn-send');
-    sendBtn.addEventListener('click', () => this._onCustomInput(input));
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    });
+
+    document.getElementById('btn-send').addEventListener('click', () => this._onCustomInput(input));
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -82,53 +78,51 @@ export class AIPanel {
     });
   }
 
-  // ══════════════════ 操作处理 ══════════════════
+  // ══════════════════ Action Dispatch ══════════════════
 
   _onAction(actionType) {
-    const selection = this._doc.getSelection();
-
     if (actionType === 'summarize' || actionType === 'continue_writing') {
-      // 摘要和续写使用全文
       const fullText = this._doc.getFullText();
-      if (!fullText) {
-        this.addMessage('文档为空，请先输入内容', 'error');
+      if (!fullText.trim()) {
+        this.addMessage('文档为空，请先输入内容。', 'error');
         return;
       }
-      this.addMessage(actionType === 'summarize' ? '请求全文摘要…' : '请求 AI 续写…', 'user');
+      const label = actionType === 'summarize' ? '📝 全文摘要' : '🖊️ AI 续写';
+      this.addMessage(label, 'user');
       this._bridge.sendAction(actionType, { text: fullText, range: null });
+      this.expand();
       return;
     }
 
-    // 润色和翻译需要选区
-    if (!selection || !selection.text || selection.text.length === 0) {
-      this.addMessage('请先在编辑器中选中文本', 'error');
+    // polish / translate require a selection
+    const selection = this._doc.getSelection();
+    if (!selection || !selection.text || !selection.text.trim()) {
+      this.addMessage('请先在编辑器中选中要处理的文本。', 'error');
       return;
     }
-    const label = actionType === 'polish' ? 'AI 润色' : '翻译';
-    this.addMessage(`${label}: "${this._truncate(selection.text, 60)}"`, 'user');
+
+    const labels = { polish: '✨ 润色', translate: '🌐 翻译' };
+    this.addMessage(`${labels[actionType]}：「${this._truncate(selection.text, 80)}」`, 'user');
     this._bridge.sendAction(actionType, selection);
+    this.expand();
   }
 
   _onCustomInput(input) {
     const text = input.value.trim();
     if (!text) return;
     input.value = '';
-
+    input.style.height = 'auto';
     const selection = this._doc.getSelection();
     this.addMessage(text, 'user');
-    this._bridge.sendAction('custom_instruction', {
-      instruction: text,
-      context: selection,
-    });
+    this._bridge.sendAction('custom_instruction', { instruction: text, context: selection });
+    this.expand();
   }
 
-  // ══════════════════ 公开方法（供 SocketBridge 调用） ══════════════════
+  // ══════════════════ Public API (used by SocketBridge) ══════════════════
 
   updateStatus(text, type) {
     const el = document.getElementById('conn-status');
-    if (!el) return;
-    el.textContent = text;
-    el.className = 'conn-status ' + type;
+    if (el) { el.textContent = text; el.className = 'conn-status ' + type; }
   }
 
   addMessage(text, role = 'system') {
@@ -138,38 +132,138 @@ export class AIPanel {
     div.textContent = text;
     this._chatFlow.appendChild(div);
     this._chatFlow.scrollTop = this._chatFlow.scrollHeight;
+    return div;
   }
 
-  /** 带操作按钮的消息（用于"应用到文档"等场景） */
-  addMessageWithAction(text, role, actions) {
-    if (!this._chatFlow) return;
+  /** Begin a new streaming AI bubble. Returns the element. */
+  startStreamMessage() {
+    this.removeTyping();
+    if (this._streamingEl) return this._streamingEl; // already open
     const div = document.createElement('div');
-    div.className = 'chat-msg ' + role;
-
-    if (text) {
-      const span = document.createElement('span');
-      span.textContent = text;
-      div.appendChild(span);
-    }
-
-    if (actions && actions.length) {
-      const bar = document.createElement('div');
-      bar.className = 'msg-action-bar';
-      actions.forEach(a => {
-        const btn = document.createElement('button');
-        btn.className = 'msg-action-btn';
-        btn.textContent = a.label;
-        btn.addEventListener('click', () => {
-          a.callback();
-          btn.disabled = true;
-          btn.textContent = '✅ 已应用';
-        });
-        bar.appendChild(btn);
-      });
-      div.appendChild(bar);
-    }
-
+    div.className = 'chat-msg ai streaming';
     this._chatFlow.appendChild(div);
+    this._streamingEl = div;
+    this._chatFlow.scrollTop = this._chatFlow.scrollHeight;
+    return div;
+  }
+
+  /** Append a text chunk to the current streaming bubble (typewriter). */
+  appendStreamChunk(chunk) {
+    if (!this._streamingEl) this.startStreamMessage();
+    this._streamingEl.textContent += chunk;
+    this._chatFlow.scrollTop = this._chatFlow.scrollHeight;
+  }
+
+  /**
+   * Stream complete: lock the bubble and attach Preview action buttons.
+   * NOTHING is written to the document until the user clicks a button.
+   */
+  finalizeStreamMessage(fullText, actionType, selectionContext) {
+    const el = this._streamingEl;
+    this._streamingEl = null;
+    if (!el) return;
+    el.classList.remove('streaming');
+
+    const bar = document.createElement('div');
+    bar.className = 'msg-action-bar';
+
+    // Domain-specific apply buttons
+    this._buildApplyButtons(fullText, actionType, selectionContext)
+        .forEach(b => bar.appendChild(b));
+
+    // Copy button — always present
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'msg-action-btn secondary';
+    copyBtn.textContent = '📋 复制';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(fullText).then(() => {
+        copyBtn.textContent = '✅ 已复制';
+        setTimeout(() => { copyBtn.textContent = '📋 复制'; }, 2000);
+      });
+    });
+    bar.appendChild(copyBtn);
+
+    el.appendChild(bar);
+    this._chatFlow.scrollTop = this._chatFlow.scrollHeight;
+  }
+
+  _buildApplyButtons(text, actionType, ctx) {
+    const btns = [];
+    const make = (label, cb) => {
+      const btn = document.createElement('button');
+      btn.className = 'msg-action-btn';
+      btn.textContent = label;
+      btn.addEventListener('click', () => { cb(); btn.disabled = true; btn.textContent = '✅ 已应用'; });
+      return btn;
+    };
+
+    if (actionType === 'polish' || actionType === 'translate') {
+      if (ctx?.range) btns.push(make('✏️ 替换选中内容', () => this._doc.replaceRange(ctx.range, text)));
+      btns.push(make('📝 插入到末尾', () => this._doc.insertTextAtCursor('\n' + text)));
+    } else if (actionType === 'continue_writing') {
+      btns.push(make('📝 追加到文档', () => this._doc.insertTextAtCursor('\n' + text)));
+    } else if (actionType === 'summarize') {
+      btns.push(make('📝 插入摘要', () => this._doc.insertTextAtCursor('\n\n【摘要】\n' + text)));
+    } else {
+      // custom_instruction
+      if (ctx?.range) btns.push(make('✏️ 替换选中内容', () => this._doc.replaceRange(ctx.range, text)));
+      btns.push(make('📝 插入到末尾', () => this._doc.insertTextAtCursor('\n' + text)));
+    }
+    return btns;
+  }
+
+  /** Display code execution result (stdout + images) */
+  showCodeResult(payload) {
+    if (!this._chatFlow) return;
+    this.removeTyping();
+
+    if (payload.error) {
+      this.addMessage('❌ 执行错误：' + payload.error, 'error');
+      return;
+    }
+
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-msg code-result';
+
+    if (payload.stdout) {
+      const pre = document.createElement('pre');
+      pre.className = 'code-stdout';
+      pre.textContent = payload.stdout.trim();
+      wrap.appendChild(pre);
+    }
+    if (payload.stderr) {
+      const pre = document.createElement('pre');
+      pre.className = 'code-stderr';
+      pre.textContent = payload.stderr.trim();
+      wrap.appendChild(pre);
+    }
+    if (payload.files) {
+      Object.entries(payload.files).forEach(([name, b64]) => {
+        const ext = name.split('.').pop().toLowerCase();
+        if (['png', 'jpg', 'jpeg', 'svg', 'gif'].includes(ext)) {
+          const img = document.createElement('img');
+          img.className = 'code-result-img';
+          img.src = `data:image/${ext === 'svg' ? 'svg+xml' : ext};base64,${b64}`;
+          img.alt = name;
+          wrap.appendChild(img);
+
+          const bar = document.createElement('div');
+          bar.className = 'msg-action-bar';
+          const dl = document.createElement('button');
+          dl.className = 'msg-action-btn';
+          dl.textContent = '💾 下载图片';
+          dl.addEventListener('click', () => {
+            const a = document.createElement('a');
+            a.href = img.src; a.download = name; a.click();
+            dl.textContent = '✅ 下载中'; dl.disabled = true;
+          });
+          bar.appendChild(dl);
+          wrap.appendChild(bar);
+        }
+      });
+    }
+
+    this._chatFlow.appendChild(wrap);
     this._chatFlow.scrollTop = this._chatFlow.scrollHeight;
   }
 
@@ -184,11 +278,17 @@ export class AIPanel {
   }
 
   removeTyping() {
-    const existing = document.getElementById('typing-indicator');
-    if (existing) existing.remove();
+    const el = document.getElementById('typing-indicator');
+    if (el) el.remove();
   }
 
-  // ══════════════════ 工具方法 ══════════════════
+  expand() {
+    if (this._container.classList.contains('collapsed')) {
+      this._container.classList.remove('collapsed');
+      const btn = document.getElementById('ai-panel-toggle');
+      if (btn) btn.textContent = '▶';
+    }
+  }
 
   _truncate(str, max) {
     return str.length > max ? str.substring(0, max) + '…' : str;

@@ -1,40 +1,33 @@
 // ══════════════════════════════════════════════════════════════
-// SocketBridge.js — 模块 C：实时通信网关
+// SocketBridge.js — v2: Streaming-aware + Preview-First
 //
-// 维护客户端与 Flask 后端之间的 WebSocket 全双工长连接。
-// 将 AIPanel 产生的动作封装为 JSON 发送给后端，
-// 接收后端推送的指令并派发给 DocController 执行物理修改。
+// KEY CHANGES from v1:
+// - agent_stream_chunk  → appends to a single growing bubble (typewriter)
+// - agent_task_complete → calls panel.finalizeStreamMessage() attaching
+//     apply buttons instead of auto-writing to the document
+// - code_result         → renders stdout + images via panel.showCodeResult()
 // ══════════════════════════════════════════════════════════════
 
-// socket.io 客户端：使用 CDN 全局变量 window.io
 const _io = typeof window !== 'undefined' && window.io ? window.io : null;
 
 export class SocketBridge {
-  /**
-   * @param {string} serverUrl         后端地址 (e.g. "http://127.0.0.1:5000")
-   * @param {import('./DocController').DocController} docController
-   */
   constructor(serverUrl, docController) {
     this._url = serverUrl;
     this._doc = docController;
     this._socket = null;
-    /** @type {import('./AIPanel').AIPanel | null} */
+    /** @type {import('./AIPanel').AIPanel|null} */
     this._panel = null;
-    /** 当前待处理的 AI 请求上下文 */
+    /** Track current request context for task_complete finalisation */
     this._pendingAction = null;
-    /** 最后一条 AI 结果文本（用于 task_complete 时提供"应用到文档"按钮） */
-    this._lastAiResult = null;
   }
 
-  setAIPanel(panel) {
-    this._panel = panel;
-  }
+  setAIPanel(panel) { this._panel = panel; }
 
-  // ══════════════════ 初始化连接 ══════════════════
+  // ══════════════════ Init ══════════════════
 
   init() {
     if (!_io) {
-      console.error('[SocketBridge] socket.io 客户端不可用');
+      console.error('[SocketBridge] socket.io CDN global not available');
       if (this._panel) this._panel.updateStatus('无 socket.io', 'disconnected');
       return;
     }
@@ -49,159 +42,100 @@ export class SocketBridge {
       reconnectionDelay: 2000,
     });
 
-    // ── 连接生命周期 ──
     this._socket.on('connect', () => {
-      console.log('[SocketBridge] 已连接:', this._url);
       if (this._panel) this._panel.updateStatus('已连接', 'connected');
     });
-
-    this._socket.on('disconnect', (reason) => {
-      console.warn('[SocketBridge] 断开:', reason);
+    this._socket.on('disconnect', () => {
       if (this._panel) this._panel.updateStatus('已断开', 'disconnected');
     });
-
-    this._socket.on('connect_error', (err) => {
-      console.error('[SocketBridge] 连接失败:', err.message);
+    this._socket.on('connect_error', () => {
       if (this._panel) this._panel.updateStatus('连接失败', 'disconnected');
     });
 
-    // ── 监听后端指令 ──
-    this._socket.on('agent_execute_command', (payload) => {
-      this._handleCommand(payload);
-    });
-
-    // ── 监听流式输出 ──
-    this._socket.on('agent_stream_chunk', (payload) => {
-      this._handleStreamChunk(payload);
-    });
-
-    // ── 监听处理完成 ──
-    this._socket.on('agent_task_complete', (payload) => {
-      this._handleTaskComplete(payload);
-    });
+    // ── Backend event handlers ──
+    this._socket.on('agent_execute_command', (p) => this._handleCommand(p));
+    this._socket.on('agent_stream_chunk',    (p) => this._handleStreamChunk(p));
+    this._socket.on('agent_task_complete',   (p) => this._handleTaskComplete(p));
+    this._socket.on('code_result',           (p) => this._handleCodeResult(p));
   }
 
-  // ══════════════════ 发送动作到后端 ══════════════════
+  // ══════════════════ Send ══════════════════
 
   sendAction(actionType, data) {
-    if (!this._socket || !this._socket.connected) {
-      console.warn('[SocketBridge] 未连接，无法发送');
-      if (this._panel) this._panel.addMessage('未连接到服务器，请稍后重试', 'error');
+    if (!this._socket?.connected) {
+      if (this._panel) this._panel.addMessage('未连接到服务器，请稍后重试。', 'error');
       return;
     }
-
-    // 记录当前请求上下文，用于任务完成时添加"应用"按钮
     this._pendingAction = { type: actionType, data };
-    this._lastAiResult = null;
-
     if (this._panel) this._panel.showTyping();
-
-    this._socket.emit('client_request', {
-      type: actionType,
-      payload: data,
-      timestamp: Date.now(),
-    });
+    this._socket.emit('client_request', { type: actionType, payload: data, timestamp: Date.now() });
   }
 
-  // ══════════════════ 后端指令处理 ══════════════════
+  // ══════════════════ Handlers ══════════════════
 
   _handleCommand(payload) {
-    console.log('[SocketBridge] 收到指令:', payload?.action);
+    if (!this._panel) return;
+    this._panel.removeTyping();
 
     switch (payload.action) {
-      case 'replace': {
-        const ok = this._doc.replaceRange(payload.range, payload.text);
-        this._lastAiResult = payload.text;
-        if (this._panel) {
-          this._panel.removeTyping();
-          // 显示截断预览
-          const preview = payload.text.length > 120
-            ? payload.text.substring(0, 120) + '…'
-            : payload.text;
-          this._panel.addMessage(preview, 'ai');
-          this._panel.addMessage(
-            ok ? '✅ 已更新到文档' : '❌ 文档更新失败',
-            ok ? 'system' : 'error'
-          );
-        }
+      case 'show_message':
+        // Status / error messages only — shown in panel, never touch the doc
+        this._panel.addMessage(payload.text, payload.is_error ? 'error' : 'system');
         break;
-      }
-
-      case 'insert': {
-        const ok = this._doc.insertTextAtCursor(payload.text);
-        this._lastAiResult = payload.text;
-        if (this._panel) {
-          this._panel.removeTyping();
-          const preview = payload.text.length > 120
-            ? payload.text.substring(0, 120) + '…'
-            : payload.text;
-          this._panel.addMessage(preview, 'ai');
-          this._panel.addMessage(
-            ok ? '✅ 已插入到文档' : '❌ 插入失败',
-            ok ? 'system' : 'error'
-          );
-        }
-        break;
-      }
-
-      case 'show_message': {
-        this._lastAiResult = payload.text;
-        if (this._panel) {
-          this._panel.removeTyping();
-          this._panel.addMessage(payload.text, 'ai');
-        }
-        break;
-      }
 
       default:
-        console.warn('[SocketBridge] 未知指令:', payload.action);
+        console.warn('[SocketBridge] Unexpected command action:', payload.action);
     }
   }
 
+  /**
+   * Streaming chunk: append to the current bubble (typewriter effect).
+   * The first chunk auto-creates the bubble.
+   */
   _handleStreamChunk(payload) {
-    this._lastAiResult = (this._lastAiResult || '') + (payload.chunk || '');
-    if (this._panel) {
-      this._panel.removeTyping();
-      this._panel.addMessage(payload.chunk, 'ai');
-    }
+    if (!this._panel) return;
+    this._panel.removeTyping();
+    this._panel.appendStreamChunk(payload.chunk || '');
   }
 
+  /**
+   * Task complete: seal the streaming bubble and attach action buttons.
+   * Crucially stores the FULL text so user can choose what to do with it.
+   */
   _handleTaskComplete(payload) {
     const ctx = this._pendingAction;
     this._pendingAction = null;
-
     if (!this._panel) return;
 
     this._panel.removeTyping();
-    if (payload?.message) {
+
+    const fullText = payload.full_text || '';
+    const actionType = ctx?.type || 'custom_instruction';
+    const selectionContext = ctx?.data || null;
+
+    if (payload.error) {
+      this._panel.addMessage('❌ ' + payload.error, 'error');
+      return;
+    }
+
+    // Finalise (attach apply buttons) only if there's text to show
+    if (fullText) {
+      this._panel.finalizeStreamMessage(fullText, actionType, selectionContext);
+    } else if (payload.message) {
       this._panel.addMessage(payload.message, 'system');
     }
-
-    // 对于"仅展示"型结果（摘要/自定义/翻译），提供手动应用按钮
-    if (this._lastAiResult && ctx) {
-      const result = this._lastAiResult;
-      const type = ctx.type;
-
-      if (type === 'summarize' || type === 'custom_instruction') {
-        this._panel.addMessageWithAction('', 'system', [
-          { label: '📝 插入到文档末尾', callback: () => this._doc.insertTextAtCursor('\n' + result) },
-          { label: '📋 替换全文', callback: () => this._doc.loadContent(result) },
-        ]);
-      }
-    }
-    this._lastAiResult = null;
   }
 
-  // ══════════════════ 工具方法 ══════════════════
-
-  get connected() {
-    return this._socket?.connected ?? false;
+  _handleCodeResult(payload) {
+    if (this._panel) this._panel.showCodeResult(payload);
   }
+
+  // ══════════════════ Utils ══════════════════
+
+  get connected() { return this._socket?.connected ?? false; }
 
   disconnect() {
-    if (this._socket) {
-      this._socket.disconnect();
-      this._socket = null;
-    }
+    this._socket?.disconnect();
+    this._socket = null;
   }
 }

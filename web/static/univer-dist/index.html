@@ -24,9 +24,9 @@
   <!-- socket.io CDN (esbuild external) -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <!-- 合并后的 CSS -->
-  <link rel="stylesheet" crossorigin href="/editor/assets/main.css?v=20260327a">
+  <link rel="stylesheet" crossorigin href="/editor/assets/main.css?v=20260327b">
   <!-- 主入口 JS (ES Module) -->
-  <script type="module" crossorigin src="/editor/assets/main.js?v=20260327a"></script>
+  <script type="module" crossorigin src="/editor/assets/main.js?v=20260327b"></script>
   <!-- 模块加载失败检测 -->
   <script>
     // 4秒后检测：如果 Univer 未初始化 → 显示诊断面板
@@ -38,6 +38,33 @@
         d.style.display = 'block';
       }
     }, 4000);
+
+    // 自动激活文档：等待 FileManager 就绪后，自动加载最近的文档
+    // 解决首次进入时 _activeId=null 导致保存无效的问题
+    (function autoActivateDoc() {
+      var attempts = 0;
+      var timer = setInterval(function() {
+        attempts++;
+        var fm = window.__koto && window.__koto.fileManager;
+        if (!fm) { if (attempts > 20) clearInterval(timer); return; }
+        clearInterval(timer);
+        // 如果已有激活文档则不干预
+        if (fm._activeId) return;
+        // 有文档列表则加载第一个（最近修改）
+        if (fm._files && fm._files.length > 0) {
+          fm._switchDoc(fm._files[0].id);
+        } else {
+          // 无任何文档 → 自动创建"快速笔记"
+          fetch('/api/editor/docs', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: '快速笔记'})
+          }).then(function(r){ return r.json(); }).then(function(d){
+            if (d.id) { fm._activeId = d.id; fm.refresh(); }
+          }).catch(function(){});
+        }
+      }, 300);
+    })();
   </script>
 </head>
 <body>

@@ -56,11 +56,35 @@
     ]
   },
   "step_by_step": {
-    "total": 1,
-    "last_used": 1774245116,
+    "total": 2,
+    "last_used": 1774534680,
     "events": [
       {
         "ts": 1774245116,
+        "session": ""
+      },
+      {
+        "ts": 1774534680,
+        "session": ""
+      }
+    ]
+  },
+  "strict_mode": {
+    "total": 1,
+    "last_used": 1774534680,
+    "events": [
+      {
+        "ts": 1774534680,
+        "session": ""
+      }
+    ]
+  },
+  "annotate_academic": {
+    "total": 1,
+    "last_used": 1774534680,
+    "events": [
+      {
+        "ts": 1774534680,
         "session": ""
       }
     ]
