@@ -61,6 +61,8 @@ from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 
+from web.settings import settings as user_settings
+
 logger = logging.getLogger(__name__)
 
 file_hub_bp = Blueprint("file_hub", __name__)
@@ -77,6 +79,13 @@ def pick_folder():
     result = {"path": None}
     error_holder = {}
 
+    # 根据传入参数或用户存储路径设置，确定打开对话框时的初始目录
+    initial_dir = request.args.get("initial_dir", "") or ""
+    if isinstance(initial_dir, str):
+        initial_dir = initial_dir.strip()
+    if not initial_dir:
+        initial_dir = user_settings.workspace_dir or os.path.expanduser("~")
+
     def _run():
         try:
             import tkinter as tk
@@ -85,7 +94,7 @@ def pick_folder():
             root = tk.Tk()
             root.withdraw()
             root.attributes("-topmost", True)
-            selected = filedialog.askdirectory(parent=root, title="选择目录")
+            selected = filedialog.askdirectory(parent=root, title="选择目录", initialdir=initial_dir)
             root.destroy()
             result["path"] = selected or None
         except Exception as exc:

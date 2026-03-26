@@ -10,6 +10,11 @@ Uses the full_client fixture from conftest.py.
 from __future__ import annotations
 
 import io
+import os
+import sys
+import types
+
+from web.settings import settings as web_settings
 
 import pytest
 
@@ -80,6 +85,75 @@ class TestFileListDir:
         """list-dir with an existing directory should succeed."""
         resp = full_client.get(f"/api/files/list-dir?path={str(tmp_workspace)}")
         assert resp.status_code in (200, 400), resp.get_data(as_text=True)
+
+
+@pytest.mark.integration
+class TestFilePickFolder:
+    def test_pick_folder_initial_dir_from_query(self, full_client, monkeypatch):
+        captured = {}
+
+        class FakeTk:
+            def withdraw(self):
+                pass
+
+            def attributes(self, *args, **kwargs):
+                pass
+
+            def destroy(self):
+                pass
+
+        fake_tk = types.ModuleType("tkinter")
+        fake_tk.Tk = FakeTk
+        fake_filedialog = types.ModuleType("tkinter.filedialog")
+
+        def fake_askdirectory(*, parent=None, title=None, initialdir=None):
+            captured["initialdir"] = initialdir
+            return "/tmp/selected"
+
+        fake_filedialog.askdirectory = fake_askdirectory
+
+        monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+        monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
+
+        resp = full_client.get("/api/files/pick-folder?initial_dir=/tmp/example")
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["path"] == "/tmp/selected"
+        assert captured["initialdir"] == "/tmp/example"
+
+    def test_pick_folder_falls_back_to_workspace_directory(self, full_client, monkeypatch):
+        captured = {}
+
+        class FakeTk:
+            def withdraw(self):
+                pass
+
+            def attributes(self, *args, **kwargs):
+                pass
+
+            def destroy(self):
+                pass
+
+        fake_tk = types.ModuleType("tkinter")
+        fake_tk.Tk = FakeTk
+        fake_filedialog = types.ModuleType("tkinter.filedialog")
+
+        def fake_askdirectory(*, parent=None, title=None, initialdir=None):
+            captured["initialdir"] = initialdir
+            return "/tmp/selected"
+
+        fake_filedialog.askdirectory = fake_askdirectory
+
+        monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+        monkeypatch.setitem(sys.modules, "tkinter.filedialog", fake_filedialog)
+
+        resp = full_client.get("/api/files/pick-folder")
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        data = resp.get_json()
+        assert data["ok"] is True
+        assert data["path"] == "/tmp/selected"
+        assert captured["initialdir"] == web_settings.workspace_dir
 
 
 @pytest.mark.integration

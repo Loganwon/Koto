@@ -397,14 +397,22 @@ class WindowAPI:
             x = max(0, screen_w - mini_w - 20)
             y = max(20, (screen_h - mini_h) // 2)
 
-            # 先移动再调整大小，确保位置正确
-            self.window.move(x, y)
-            self.window.resize(mini_w, mini_h)
-            self.window.on_top = True
             self.is_mini_mode = True
 
-            # 延后加载迷你 UI，确保当前调用链先返回。
-            self._navigate_after_return(f"{self.base_url}/mini")
+            def _do_switch():
+                import time
+                time.sleep(0.15)
+                try:
+                    # 先移动再调整大小，确保位置正确
+                    self.window.move(x, y)
+                    self.window.resize(mini_w, mini_h)
+                    self.window.on_top = True
+                    self.window.load_url(f"{self.base_url}/mini")
+                except Exception as ex:
+                    logger.debug("Failed to switch to mini mode ui: %s", ex)
+
+            import threading
+            threading.Thread(target=_do_switch, daemon=True).start()
 
             return {
                 "success": True,
@@ -431,13 +439,21 @@ class WindowAPI:
                 x = max(0, (screen_w - full_w) // 2)
                 y = max(0, (screen_h - full_h) // 2)
 
-            self.window.on_top = False
-            self.window.resize(full_w, full_h)
-            self.window.move(x, y)
             self.is_mini_mode = False
 
-            # 延后加载完整 UI，确保当前调用链先返回。
-            self._navigate_after_return(self.base_url)
+            def _do_switch():
+                import time
+                time.sleep(0.15)
+                try:
+                    self.window.on_top = False
+                    self.window.resize(full_w, full_h)
+                    self.window.move(x, y)
+                    self.window.load_url(self.base_url)
+                except Exception as ex:
+                    logger.debug("Failed to switch to full mode ui: %s", ex)
+
+            import threading
+            threading.Thread(target=_do_switch, daemon=True).start()
 
             return {"success": True, "mode": "full"}
         except Exception as e:

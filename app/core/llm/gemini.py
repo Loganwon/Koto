@@ -119,9 +119,17 @@ class GeminiProvider(LLMProvider):
 
         # Route interactions-only models through Interactions API transparently
         if model in _INTERACTIONS_ONLY_MODELS:
-            return self._call_via_interactions_api(
+            result = self._call_via_interactions_api(
                 model, prompt, sys_instruction=system_instruction, stream=stream
             )
+            if not stream and isinstance(result, dict):
+                self._track_usage(
+                    model,
+                    result.get("usage"),
+                    skill_id=kwargs.get("skill_id"),
+                    session_id=kwargs.get("session_id"),
+                )
+            return result
 
         try:
             config = types.GenerateContentConfig(
@@ -145,7 +153,12 @@ class GeminiProvider(LLMProvider):
                             contents=contents,
                             config=config,
                         )
-                        return self._stream_generator(response_iter)
+                        return self._stream_generator(
+                            response_iter,
+                            model=model,
+                            skill_id=kwargs.get("skill_id"),
+                            session_id=kwargs.get("session_id"),
+                        )
                     except Exception as _se:
                         last_stream_exc = _se
                         _se_str = str(_se)
@@ -168,7 +181,14 @@ class GeminiProvider(LLMProvider):
                 raise last_stream_exc  # unreachable but satisfies type checker
 
             # Non-streaming with retry for transient errors
-            return self._call_with_retry(model, contents, config, client)
+            result = self._call_with_retry(model, contents, config, client)
+            self._track_usage(
+                model,
+                result.get("usage"),
+                skill_id=kwargs.get("skill_id"),
+                session_id=kwargs.get("session_id"),
+            )
+            return result
 
         except Exception as exc:
             logger.error(f"Gemini generation error: {exc}")
@@ -316,13 +336,26 @@ class GeminiProvider(LLMProvider):
             if role == "assistant":
                 role = "model"
             elif role == "function":
-                role = "tool"
+                # Gemini only accepts "user" and "model" roles.
+                # Function responses are sent as user-role parts.
+                role = "user"
 
             parts: List[Dict[str, Any]] = []
 
-            text = msg.get("content")
-            if text:
-                parts.append({"text": str(text)})
+            # For function-response messages, only emit the function_response part
+            if msg.get("role") == "function":
+                parts.append(
+                    {
+                        "function_response": {
+                            "name": msg.get("name", "unknown_tool"),
+                            "response": {"content": msg.get("content", "")},
+                        }
+                    }
+                )
+            else:
+                text = msg.get("content")
+                if text:
+                    parts.append({"text": str(text)})
 
             for tool_call in msg.get("tool_calls", []) or []:
                 parts.append(
@@ -330,16 +363,6 @@ class GeminiProvider(LLMProvider):
                         "function_call": {
                             "name": tool_call.get("name"),
                             "args": tool_call.get("args", {}),
-                        }
-                    }
-                )
-
-            if msg.get("role") == "function":
-                parts.append(
-                    {
-                        "function_response": {
-                            "name": msg.get("name", "unknown_tool"),
-                            "response": {"content": msg.get("content", "")},
                         }
                     }
                 )
@@ -357,18 +380,29 @@ class GeminiProvider(LLMProvider):
         text = getattr(response, "text", "") or ""
 
         function_calls: List[Dict[str, Any]] = []
+        raw_parts: List[Dict[str, Any]] = []  # preserves thought_signature for multi-turn tool calling
         candidates = getattr(response, "candidates", None) or []
         if candidates:
             parts = getattr(candidates[0].content, "parts", None) or []
             for part in parts:
+                # Preserve thought parts (including thought_signature) required by thinking models
+                if getattr(part, "thought", False):
+                    raw_parts.append({
+                        "thought": True,
+                        "text": getattr(part, "text", "") or "",
+                        "thought_signature": getattr(part, "thought_signature", "") or "",
+                    })
+                    continue
                 function_call = getattr(part, "function_call", None)
                 if function_call:
-                    function_calls.append(
-                        {
-                            "name": function_call.name,
-                            "args": dict(function_call.args or {}),
-                        }
-                    )
+                    fc_dict = {
+                        "name": function_call.name,
+                        "args": dict(function_call.args or {}),
+                    }
+                    function_calls.append(fc_dict)
+                    raw_parts.append({"function_call": fc_dict})
+                elif getattr(part, "text", None):
+                    raw_parts.append({"text": part.text})
 
         usage_metadata = getattr(response, "usage_metadata", None)
         usage = {}
@@ -383,10 +417,17 @@ class GeminiProvider(LLMProvider):
         return {
             "content": text,
             "tool_calls": function_calls,
+            "_raw_parts": raw_parts,  # re-injected into multi-turn history to preserve thought_signature
             "usage": usage,
         }
 
-    def _stream_generator(self, response_iterator: Any):
+    def _stream_generator(
+        self,
+        response_iterator: Any,
+        model: str,
+        skill_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ):
         """Yield standardized chunks from google.genai stream.
 
         后台线程负责迭代 SDK 流并向队列投递 chunk；主生成器以 STREAM_CHUNK_TIMEOUT
@@ -407,6 +448,7 @@ class GeminiProvider(LLMProvider):
         _t = threading.Thread(target=_feed, daemon=True)
         _t.start()
 
+        usage_tracked = False
         while True:
             try:
                 item = _q.get(timeout=self.STREAM_CHUNK_TIMEOUT)
@@ -423,6 +465,15 @@ class GeminiProvider(LLMProvider):
             candidates = getattr(item, "candidates", None) or []
             if candidates:
                 finish_reason = getattr(candidates[0], "finish_reason", None)
+            usage_metadata = getattr(item, "usage_metadata", None)
+            if usage_metadata and not usage_tracked:
+                self._track_usage(
+                    model,
+                    usage_metadata,
+                    skill_id=skill_id,
+                    session_id=session_id,
+                )
+                usage_tracked = True
             yield {
                 "content": text,
                 "finish_reason": finish_reason,
@@ -506,7 +557,8 @@ class GeminiProvider(LLMProvider):
 
             return _single_chunk()
 
-        return {"content": text, "tool_calls": [], "usage": {}}
+        usage = self._normalize_usage(interaction)
+        return {"content": text, "tool_calls": [], "usage": usage}
 
     @staticmethod
     def _get_interactions_text(obj) -> str:

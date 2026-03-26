@@ -1,0 +1,20 @@
+Traceback (most recent call last):
+  File "C:\Users\12524\Desktop\Koto\app\core\llm\gemini.py", line 211, in _call_with_retry
+    response = _future.result(timeout=self.CALL_TIMEOUT)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.11_3.11.2544.0_x64__qbz5n2kfra8p0\Lib\concurrent\futures\_base.py", line 458, in result
+    raise TimeoutError()
+TimeoutError
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\12524\Desktop\Koto\test_agent.py", line 18, in <module>
+    res = llm.generate_content(prompt=messages, model=llm_model, temperature=0, tools=[])
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\12524\Desktop\Koto\app\core\llm\gemini.py", line 179, in generate_content
+    result = self._call_with_retry(model, contents, config, client)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\12524\Desktop\Koto\app\core\llm\gemini.py", line 213, in _call_with_retry
+    raise TimeoutError(
+TimeoutError: LLM call timed out after 30s

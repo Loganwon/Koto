@@ -80,12 +80,7 @@ def _tracer():
 
 
 def _token_tracker():
-    import sys
-
-    _wb = str(_BASE_DIR / "web")
-    if _wb not in sys.path:
-        sys.path.insert(0, _wb)
-    import token_tracker
+    import web.token_tracker as token_tracker
 
     return token_tracker
 

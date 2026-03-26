@@ -53,6 +53,111 @@ class LLMProvider(ABC):
                 type(self).__name__,
             )
 
+    @staticmethod
+    def _safe_int(value: Any) -> int:
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def _extract_usage_value(
+        self, usage: Any, field_names: tuple[str, ...], depth: int = 0
+    ) -> int:
+        if usage is None or depth > 2:
+            return 0
+
+        if isinstance(usage, dict):
+            for name in field_names:
+                if name in usage:
+                    return self._safe_int(usage.get(name))
+            for nested_name in ("usage", "usage_metadata", "metadata", "token_usage"):
+                if nested_name in usage:
+                    value = self._extract_usage_value(
+                        usage.get(nested_name), field_names, depth + 1
+                    )
+                    if value:
+                        return value
+            return 0
+
+        for name in field_names:
+            if hasattr(usage, name):
+                return self._safe_int(getattr(usage, name, 0))
+
+        for nested_name in ("usage", "usage_metadata", "metadata", "token_usage"):
+            nested = getattr(usage, nested_name, None)
+            value = self._extract_usage_value(nested, field_names, depth + 1)
+            if value:
+                return value
+        return 0
+
+    def _normalize_usage(self, usage: Any) -> Dict[str, int]:
+        if not usage:
+            return {}
+
+        prompt_tokens = self._extract_usage_value(
+            usage,
+            (
+                "prompt_tokens",
+                "prompt_token_count",
+                "input_tokens",
+                "input_token_count",
+            ),
+        )
+        completion_tokens = self._extract_usage_value(
+            usage,
+            (
+                "completion_tokens",
+                "candidates_token_count",
+                "output_tokens",
+                "output_token_count",
+            ),
+        )
+
+        if not prompt_tokens and not completion_tokens:
+            return {}
+
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+        }
+
+    def _track_usage(
+        self,
+        model: str,
+        usage: Any,
+        *,
+        skill_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> None:
+        normalized = self._normalize_usage(usage)
+        if not normalized:
+            return
+
+        try:
+            import web.token_tracker as token_tracker
+
+            if skill_id or session_id:
+                token_tracker.record_usage_with_skill(
+                    model=model,
+                    prompt_tokens=normalized["prompt_tokens"],
+                    completion_tokens=normalized["completion_tokens"],
+                    skill_id=skill_id,
+                    session_id=session_id,
+                )
+            else:
+                token_tracker.record_usage(
+                    model=model,
+                    prompt_tokens=normalized["prompt_tokens"],
+                    completion_tokens=normalized["completion_tokens"],
+                )
+        except Exception as exc:
+            logger.debug(
+                "[LLMProvider] token tracking skipped model=%s class=%s: %s",
+                model,
+                type(self).__name__,
+                exc,
+            )
+
     @abstractmethod
     def generate_content(
         self,

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="{{ initial_theme | default('light') }}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -426,17 +426,89 @@
         .csb-dismiss-all:hover { color: #e06c75; border-color: #e06c75; background: rgba(224,108,117,.08); }
 
         /* ── FileHub panel ──────────────────────────────────────── */
-        #fhFileList { max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; }
-        .fh-card { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px;
-            background:var(--bg-tertiary); border:1px solid var(--border-color); font-size:12px; }
-        .fh-card .fh-icon { font-size:18px; flex:none; }
-        .fh-card .fh-meta { flex:1; min-width:0; }
-        .fh-card .fh-name { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .fh-card .fh-sub { color:var(--text-secondary); font-size:11px; margin-top:1px; }
-        .fh-dup-group { padding:8px 10px; border-radius:8px; border:1px solid var(--accent-warning);
-            background:rgba(255,165,0,.06); margin-bottom:6px; font-size:12px; }
-        .fh-dup-group .fh-dup-title { font-weight:600; color:var(--accent-warning); margin-bottom:4px; }
-        .fh-dup-group .fh-dup-path { color:var(--text-secondary); font-size:11px; padding:2px 0; display:flex; align-items:center; }
+        #fhFileList { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
+        #fhFileList::-webkit-scrollbar { width: 6px; }
+        #fhFileList::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        
+        .fh-card { 
+            display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px;
+            background: var(--bg-card); border: 1px solid var(--border-color); font-size: 13px;
+            transition: all 0.2s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+            cursor: pointer;
+        }
+        .fh-card:hover { 
+            border-color: var(--accent-primary); 
+            box-shadow: 0 3px 8px rgba(0,0,0,0.05);
+            transform: translateY(-1px);
+        }
+        .fh-card .fh-icon { 
+            font-size: 20px; flex: none; display: flex; align-items: center; justify-content: center;
+            width: 32px; height: 32px; background: var(--bg-secondary); border-radius: 6px;
+        }
+        .fh-card .fh-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+        .fh-card .fh-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); font-size: 14px;}
+        .fh-card .fh-sub { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+        
+        .fh-action-btn {
+            background: transparent; border: 1px solid transparent; border-radius: 6px;
+            cursor: pointer; padding: 6px; color: var(--text-secondary);
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.15s ease; flex-shrink: 0;
+        }
+        .fh-action-btn svg { width: 16px; height: 16px; stroke-width: 2; }
+        .fh-action-btn:hover { background: var(--bg-secondary); color: var(--accent-primary); border-color: var(--border-color); }
+        
+        .fh-dup-group { padding: 12px; border-radius: 8px; border: 1px solid var(--accent-warning);
+            background: rgba(255,165,0,.06); margin-bottom: 8px; font-size: 13px; }
+        .fh-dup-group .fh-dup-title { font-weight: 600; color: var(--accent-warning); margin-bottom: 6px; }
+        .fh-dup-group .fh-dup-path { color: var(--text-secondary); font-size: 12px; padding: 3px 0; display: flex; align-items: center; border-bottom: 1px dashed rgba(255,165,0,.15); }
+        .fh-dup-group .fh-dup-path:last-child { border-bottom: none; }
+
+        /* ── Editor View (文件助手 — 全屏固定覆盖层) ────────────────── */
+        #editorView {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            z-index: 50000;
+            background: #1e1e1e;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #editorView.active {
+            display: flex;
+        }
+        #editorView iframe {
+            flex: 1; width: 100%; height: 100%; border: none;
+            background: #1e1e1e;
+        }
+        #editorBackBtn {
+            position: absolute;
+            top: 10px; left: 10px;
+            z-index: 50001;
+            background: rgba(30,30,30,0.85);
+            color: #e0e0e0;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 6px;
+            padding: 6px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            backdrop-filter: blur(6px);
+            transition: background 0.15s, border-color 0.15s;
+        }
+        #editorBackBtn:hover {
+            background: rgba(60,60,60,0.95);
+            border-color: rgba(255,255,255,0.3);
+        }
+        #chatView {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            width: 100%; height: 100%;
+            overflow: hidden;
+        }
+        #chatView.hidden {
+            display: none;
+        }
 
         /* ── Skills Panel (VS Code Extension 风格) ──────────────────────── */
         .skills-panel {
@@ -1074,6 +1146,12 @@
                     <span class="sidebar-text" style="flex:1;">我的文件</span>
                 </div>
 
+                <!-- 文件助手 -->
+                <div class="sb-nav-item" id="navEditorBtn" onclick="switchToEditorView()" title="文件助手">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    <span class="sidebar-text" style="flex:1;">文件助手</span>
+                </div>
+
                 <!-- Skills / Gems -->
                 <div class="sb-nav-item" id="navSkillsBtn" onclick="openSkillsPanel()" title="Skills 库">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
@@ -1126,6 +1204,8 @@
         </aside>
 
         <main class="main-content chatgpt-main">
+            <!-- ═══ 聊天视图 (默认) ═══ -->
+            <div id="chatView">
             <!-- API Key 缺失提醒横幅 -->
             <div id="apiKeyBanner" class="api-key-banner" style="display:none;">
                 <span>⚠️ 尚未配置 API Key，AI 功能不可用。</span>
@@ -1338,6 +1418,7 @@
                 <div class="input-meta-bar"></div>
                 <p class="input-hint">Enter 发送 · Shift+Enter 换行 · Ctrl+/ 快捷键</p>
             </div>
+            </div><!-- /chatView -->
         </main>
 
         <aside class="workspace-panel" id="workspacePanel">
@@ -1685,7 +1766,6 @@
                         <div class="memory-empty">正在加载触发器...</div>
                     </div>
                 </div>
-
                 <div class="settings-actions">
                     <button class="btn-secondary" onclick="resetSettings()">重置默认</button>
                     <button class="btn-primary" onclick="closeSettings()">完成</button>
@@ -2245,20 +2325,12 @@
                         <p>从 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> 获取免费的 API Key</p>
                         <input type="password" id="setupApiKey" placeholder="粘贴您的 API Key...">
                         <button class="btn-primary" onclick="saveApiKey()">验证并保存</button>
+                        <div style="text-align:center; margin:14px 0 10px; color:var(--text-secondary); font-size:13px;">或使用激活码</div>
+                        <input type="text" id="activationCode" placeholder="输入激活码..." autocomplete="off">
+                        <button class="btn-primary" onclick="activateWithCode()">使用激活码</button>
                         <div class="step-status" id="step1Status"></div>
-
-                        <div style="display:flex;align-items:center;gap:8px;margin:14px 0 10px;">
-                            <div style="flex:1;height:1px;background:rgba(255,255,255,0.1);"></div>
-                            <span style="font-size:11px;color:var(--text-secondary);">或使用激活码</span>
-                            <div style="flex:1;height:1px;background:rgba(255,255,255,0.1);"></div>
-                        </div>
-                        <input type="text" id="setupActivateCode" placeholder="输入激活码..." style="text-transform:uppercase;letter-spacing:1px;">
-                        <button class="btn-primary" onclick="useActivationCode()" style="margin-top:6px;">使用激活码</button>
-                        <div class="step-status" id="step1ActivateStatus"></div>
-
-                        <div style="margin-top:12px;padding:9px 11px;background:rgba(232,201,122,0.07);border:1px solid rgba(232,201,122,0.18);border-radius:8px;font-size:11px;color:var(--text-muted);line-height:1.7;">
-                            📩 没有激活码？加微信联系作者获取：<br>
-                            <strong style="color:#e8c97a;font-size:13px;letter-spacing:0.5px;">18913921188</strong>
+                        <div style="margin-top:8px; padding:8px 10px; border-radius:8px; background:rgba(99,198,255,0.1); font-size:12px; color:var(--text-secondary);">
+                            💬 没有激活码？加微信联系作者获取：<strong style="color:var(--accent-primary);">18913921188</strong>
                         </div>
                     </div>
                 </div>
@@ -2298,89 +2370,110 @@
     </div>
 
     <!-- FileHub Modal -->
-    <div class="modal-overlay" id="filehubModal" style="display:none;" onclick="if(event.target===this)closeFileHubModal()">
-        <div class="modal" style="width: 760px; max-width: 95vw; background: var(--bg-card); padding: 24px; text-align: left; display: flex; flex-direction: column; max-height: 85vh;">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
+    <div class="modal-overlay" id="filehubModal" style="display:none; backdrop-filter: blur(2px);" onclick="if(event.target===this)closeFileHubModal()">
+        <div class="modal" style="width: 800px; max-width: 95vw; background: var(--bg-primary); padding: 28px; text-align: left; display: flex; flex-direction: column; max-height: 85vh; border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,0.12); border: 1px solid var(--border-color);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
                 <div>
-                    <h3 style="display:flex;align-items:center;gap:8px;margin:0 0 6px 0;font-size:18px;">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <h3 style="display:flex;align-items:center;gap:10px;margin:0 0 8px 0;font-size:20px; font-weight: 600; color: var(--text-primary);">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
                         </svg>
                         我的文件
                     </h3>
-                    <p class="setting-desc" style="margin:0;font-size:13px;">搜索已注册文件，或直接浏览任意目录下的文件。</p>
+                    <p class="setting-desc" style="margin:0;font-size:13px; color: var(--text-secondary);">全方位管理、搜索、浏览您已注册的库文件或本地任意目录文件。</p>
                 </div>
-                <button class="close-panel" onclick="closeFileHubModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                <button class="close-panel" onclick="closeFileHubModal()" style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
 
             <!-- 模式切换标签 -->
-            <div style="display:flex;gap:0;margin-bottom:12px;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;flex-shrink:0;">
+            <div style="display:flex;gap:4px;margin-bottom:16px; background: var(--bg-elevated); padding: 4px; border-radius: 8px; flex-shrink:0; border: 1px solid var(--border-color);">
                 <button id="fhTabSearch" onclick="fhSwitchTab('search')"
-                    style="flex:1;padding:8px 0;font-size:13px;border:none;background:var(--accent-primary);color:#fff;cursor:pointer;">
-                    🔍 关键词搜索
+                    style="flex:1;padding:10px 0;font-size:14px; font-weight: 500; border:none;border-radius: 6px; background:var(--accent-primary);color:#ffffff;cursor:pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    关键词搜索
                 </button>
                 <button id="fhTabBrowse" onclick="fhSwitchTab('browse')"
-                    style="flex:1;padding:8px 0;font-size:13px;border:none;background:rgba(0,0,0,0.1);color:var(--text-primary);cursor:pointer;">
-                    📂 浏览目录
+                    style="flex:1;padding:10px 0;font-size:14px; font-weight: 500; border:none;border-radius: 6px; background:transparent;color:var(--text-secondary);cursor:pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    局部目录浏览
                 </button>
             </div>
 
             <!-- 搜索模式 -->
-            <div id="fhPaneSearch" style="flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:8px; margin-bottom:12px; border:1px solid var(--border-color);">
-                <div style="display:flex;gap:8px;margin-bottom:12px;">
-                    <input type="text" id="fhSearchInput" class="form-input"
-                        placeholder="输入文件名、关键词..."
-                        style="flex:1;font-size:14px;"
-                        onkeydown="if(event.key==='Enter')fhDoSearch()"
-                    >
-                    <select id="fhCatFilter" class="form-select" style="width:100px;">
-                        <option value="">全部</option>
-                        <option value="文档">文档</option>
-                        <option value="图片">图片</option>
-                        <option value="代码">代码</option>
-                        <option value="视频">视频</option>
-                        <option value="音频">音频</option>
-                        <option value="压缩包">压缩包</option>
-                        <option value="其他">其他</option>
+            <div id="fhPaneSearch" style="flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:16px; border:1px solid var(--border-color);">
+                <div style="display:flex;gap:12px;margin-bottom:16px;">
+                    <div style="flex:1; position: relative; display: flex; align-items: center;">
+                        <svg style="position: absolute; left: 12px; color: var(--text-muted);" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="text" id="fhSearchInput" class="form-input"
+                            placeholder="输入文件名、关键词、扩展名等..."
+                            style="width: 100%; font-size:14px; padding-left: 36px; padding-right: 12px; height: 40px; border-radius: 6px;"
+                            onkeydown="if(event.key==='Enter')fhDoSearch()"
+                        >
+                    </div>
+                    <select id="fhCatFilter" class="form-select" style="width:120px; height: 40px; border-radius: 6px; font-size: 14px;">
+                        <option value="">全部类型</option>
+                        <option value="文档">📃 文档</option>
+                        <option value="图片">🖼️ 图片</option>
+                        <option value="代码">💻 代码</option>
+                        <option value="视频">🎬 视频</option>
+                        <option value="音频">🎵 音频</option>
+                        <option value="压缩包">📦 压缩</option>
+                        <option value="其他">📄 其他</option>
                     </select>
-                    <button class="btn-primary" onclick="fhDoSearch()">搜索</button>
+                    <button class="btn-primary" onclick="fhDoSearch()" style="height: 40px; padding: 0 20px; border-radius: 6px; font-size: 14px; font-weight: 500;">搜索文件</button>
                 </div>
-                <div style="display:flex;gap:8px;align-items:center;">
-                    <button class="btn-secondary btn-sm" onclick="fhLoadRecent()">🕐 最近文件</button>
-                    <button class="btn-secondary btn-sm" onclick="fhCheckDuplicates()">🔁 重复检测</button>
-                    <span id="fhStatsSummary" style="margin-left:auto;font-size:12px;color:var(--text-muted);"></span>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <button class="btn-secondary btn-sm" onclick="fhLoadRecent()" style="background: var(--bg-primary); border-color: var(--border-color); color: var(--text-primary); border-radius: 6px; padding: 6px 12px; font-size: 13px;">
+                        <span style="margin-right: 4px;">🕐</span> 最近文件
+                    </button>
+                    <button class="btn-secondary btn-sm" onclick="fhCheckDuplicates()" style="background: var(--bg-primary); border-color: var(--border-color); color: var(--text-primary); border-radius: 6px; padding: 6px 12px; font-size: 13px;">
+                        <span style="margin-right: 4px;">🔁</span> 重复检测
+                    </button>
+                    <span id="fhStatsSummary" style="margin-left:auto;font-size:13px;color:var(--text-muted);"></span>
                 </div>
             </div>
 
             <!-- 浏览目录模式 -->
-            <div id="fhPaneBrowse" style="display:none; flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:8px; margin-bottom:12px; border:1px solid var(--border-color);">
-                <div style="display:flex;gap:8px;margin-bottom:12px;">
-                    <input type="text" id="fhBrowsePath" class="form-input"
-                        placeholder="输入目录路径，如 C:\Users\12524\Desktop"
-                        style="flex:1;font-size:14px;"
-                        onkeydown="if(event.key==='Enter')fhDoBrowse()"
-                    >
-                    <button class="btn-secondary" onclick="fhPickFolder()" title="打开系统文件夹选择对话框">📂</button>
-                    <button class="btn-primary" onclick="fhDoBrowse()">浏览</button>
+            <div id="fhPaneBrowse" style="display:none; flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:16px; border:1px solid var(--border-color);">
+                <div style="display:flex;gap:12px;margin-bottom:16px;">
+                    <div style="flex:1; position: relative; display: flex; align-items: center;">
+                        <svg style="position: absolute; left: 12px; color: var(--text-muted);" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                        <input type="text" id="fhBrowsePath" class="form-input"
+                            placeholder="输入本地绝对路径，如 C:\Users\12524\Desktop..."
+                            style="width: 100%; font-size:14px; padding-left: 36px; padding-right: 12px; height: 40px; border-radius: 6px;"
+                            onkeydown="if(event.key==='Enter')fhDoBrowse()"
+                        >
+                    </div>
+                    <button class="btn-secondary" onclick="fhPickFolder()" title="打开系统文件夹选择对话框" style="height: 40px; width: 40px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 6px;">📂</button>
+                    <button class="btn-primary" onclick="fhDoBrowse()" style="height: 40px; padding: 0 20px; border-radius: 6px; font-size: 14px; font-weight: 500;">浏览目录</button>
                 </div>
-                <div style="display:flex;gap:12px;align-items:center;">
-                    <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;">
-                        <input type="checkbox" id="fhRecursive"> 包含子目录
+                <div style="display:flex;gap:16px;align-items:center;">
+                    <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer; color: var(--text-primary); user-select: none;">
+                        <input type="checkbox" id="fhRecursive" style="width: 16px; height: 16px; accent-color: var(--accent-primary);"> 包含子目录深度浏览
                     </label>
                     <input type="text" id="fhBrowseFilter" class="form-input"
-                        placeholder="过滤文件名..." style="flex:1;font-size:13px;"
+                        placeholder="在结果中过滤文件名..." style="flex:1;font-size:13px; height: 32px; border-radius: 6px;"
                         oninput="fhFilterBrowseResults(this.value)"
                     >
                 </div>
             </div>
 
             <!-- 统一文件结果区 -->
-            <div id="fhResultHeader" style="display:none;font-size:13px;color:var(--text-muted);margin-bottom:8px;align-items:flex-end;justify-content:space-between;flex-shrink:0;">
-                <span id="fhResultCount"></span>
-                <button class="btn-secondary btn-sm" style="font-size:12px;" onclick="fhCopyAllPaths()">📋 复制所有路径</button>
+            <div id="fhResultHeader" style="display:none;font-size:13px;color:var(--text-secondary); margin-bottom:10px; align-items:center; justify-content:space-between; flex-shrink:0; padding: 0 4px;">
+                <span id="fhResultCount" style="font-weight: 500;"></span>
+                <button class="btn-secondary btn-sm" style="font-size:12px; display: flex; align-items: center; gap: 6px; border-radius: 6px; padding: 4px 10px;" onclick="fhCopyAllPaths()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    复制所有路径
+                </button>
             </div>
-            <div id="fhFileList" style="flex:1; overflow-y:auto; background:var(--bg-elevated); border-radius:8px; border:1px solid var(--border-color); padding:8px;">
-                <div class="memory-empty" style="margin-top:40px;">在上方选择搜索模式</div>
+            <div id="fhFileList" style="flex:1; overflow-y:auto; background:transparent; padding:2px; margin: 0 -2px;">
+                <div class="memory-empty" style="margin-top:40px; padding: 40px 0; background: var(--bg-elevated); border-radius: 12px; border: 1px dashed var(--border-color); display: flex; flex-direction: column; align-items: center;">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" stroke-width="1.5" style="margin-bottom: 16px;">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <span style="color: var(--text-muted); font-size: 14px;">在上方选择搜索或浏览模式</span>
+                </div>
             </div>
         </div>
     </div>
@@ -2848,9 +2941,50 @@
             else btn.classList.remove('panel-open');
         }
 
+        /* ── View switching: Chat ↔ Editor ── */
+        window.switchToEditorView = function() {
+            const chatView = document.getElementById('chatView');
+            const editorView = document.getElementById('editorView');
+            const navBtn = document.getElementById('navEditorBtn');
+            if (!chatView || !editorView) return;
+            // Hide chat, show editor
+            chatView.classList.add('hidden');
+            editorView.classList.add('active');
+            if (navBtn) navBtn.classList.add('active');
+            // Lazy-load iframe on first switch
+            const frame = document.getElementById('editorFrame');
+            if (frame && (!frame.src || frame.src === 'about:blank')) {
+                frame.src = '/editor';
+            }
+            // Mark current view
+            document.body.setAttribute('data-view', 'editor');
+        };
+        window.switchToChatView = function() {
+            const chatView = document.getElementById('chatView');
+            const editorView = document.getElementById('editorView');
+            const navBtn = document.getElementById('navEditorBtn');
+            if (!chatView || !editorView) return;
+            // Hide editor, show chat
+            editorView.classList.remove('active');
+            chatView.classList.remove('hidden');
+            if (navBtn) navBtn.classList.remove('active');
+            document.body.setAttribute('data-view', 'chat');
+        };
+        // Alias for backward compat
+        window.openFileAssistant = window.switchToEditorView;
+        window.closeFileAssistant = window.switchToChatView;
+        window.toggleFileAssistant = function() {
+            if (document.body.getAttribute('data-view') === 'editor') {
+                window.switchToChatView();
+            } else {
+                window.switchToEditorView();
+            }
+        };
+
         window.openSkillsPanel = function() {
             const panel = document.getElementById('skillsPanel');
             if (!panel) return;
+            window.switchToChatView(); // Always return to chat view when opening skills
             panel.classList.add('active');
             const navBtn = document.getElementById('navSkillsBtn');
             if (navBtn) navBtn.classList.add('active');
@@ -4070,11 +4204,9 @@
     <script>
     (function() {
         var sp = document.getElementById('startupSplash');
-        // 预应用系统主题，避免主题闪烁
-        document.documentElement.setAttribute('data-theme', 'light');
-        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            document.documentElement.setAttribute('data-theme', 'dark');
-        }
+        // 主题已由服务端注入 html[data-theme]，此处同步到 localStorage 供后续使用
+        var _serverTheme = document.documentElement.getAttribute('data-theme') || 'light';
+        localStorage.setItem('koto.theme', _serverTheme);
         if (!sp) return;
         // 两帧延迟：确保浏览器先渲染 app shell，再移除 splash（视觉更平滑）
         requestAnimationFrame(function() {
@@ -4180,5 +4312,11 @@
         }
     }
     </script>
+
+    <!-- ═══ 编辑器视图 — 全屏固定覆盖层（必须在 body 直接子级，不能放在有 backdrop-filter 的 main 里） ═══ -->
+    <div id="editorView">
+        <button id="editorBackBtn" onclick="switchToChatView()">← 返回对话</button>
+        <iframe id="editorFrame" src="about:blank" allow="clipboard-read; clipboard-write"></iframe>
+    </div>
 </body>
 </html>

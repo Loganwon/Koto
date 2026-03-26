@@ -28,6 +28,105 @@ class TestGeminiProviderBasic:
         # Normal model should NOT be in the interactions-only set
         assert "gemini-2.5-flash" not in _INTERACTIONS_ONLY_MODELS
 
+    def test_generate_content_tracks_usage(self):
+        from app.core.llm.gemini import GeminiProvider
+
+        provider = GeminiProvider.__new__(GeminiProvider)
+        provider._get_client = MagicMock(return_value=MagicMock())
+        provider._call_with_retry = MagicMock(
+            return_value={
+                "content": "ok",
+                "tool_calls": [],
+                "usage": {"prompt_tokens": 11, "completion_tokens": 13},
+            }
+        )
+        provider._format_tools = MagicMock(return_value=None)
+        provider._format_prompt = MagicMock(return_value=[{"role": "user", "parts": []}])
+        provider._track_usage = MagicMock()
+
+        with patch("app.core.llm.gemini.types.GenerateContentConfig", return_value=object()):
+            result = provider.generate_content(
+                prompt="hello",
+                model="gemini-2.5-flash",
+                stream=False,
+                skill_id="skill-a",
+                session_id="sess-a",
+            )
+
+        assert result["content"] == "ok"
+        provider._track_usage.assert_called_once_with(
+            "gemini-2.5-flash",
+            {"prompt_tokens": 11, "completion_tokens": 13},
+            skill_id="skill-a",
+            session_id="sess-a",
+        )
+
+
+class TestOpenAIProviderTracking:
+    def test_generate_content_tracks_usage(self):
+        from app.core.llm.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider.__new__(OpenAIProvider)
+        provider.client = MagicMock()
+        provider._build_messages = MagicMock(return_value=[{"role": "user", "content": "hi"}])
+        provider._format_tools = MagicMock(return_value=None)
+        provider._format_response = MagicMock(
+            return_value={
+                "content": "ok",
+                "tool_calls": [],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 4},
+            }
+        )
+        provider._track_usage = MagicMock()
+
+        result = provider.generate_content(
+            prompt="hi",
+            model="gpt-4o",
+            skill_id="skill-b",
+            session_id="sess-b",
+        )
+
+        assert result["content"] == "ok"
+        provider._track_usage.assert_called_once_with(
+            "gpt-4o",
+            {"prompt_tokens": 3, "completion_tokens": 4},
+            skill_id="skill-b",
+            session_id="sess-b",
+        )
+
+
+class TestAnthropicProviderTracking:
+    def test_generate_content_tracks_usage(self):
+        from app.core.llm.anthropic_provider import AnthropicProvider
+
+        provider = AnthropicProvider.__new__(AnthropicProvider)
+        provider.client = MagicMock()
+        provider._build_messages = MagicMock(return_value=[{"role": "user", "content": "hi"}])
+        provider._format_tools = MagicMock(return_value=None)
+        provider._format_response = MagicMock(
+            return_value={
+                "content": "ok",
+                "tool_calls": [],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 9},
+            }
+        )
+        provider._track_usage = MagicMock()
+
+        result = provider.generate_content(
+            prompt="hi",
+            model="claude-3-7-sonnet-20250219",
+            skill_id="skill-c",
+            session_id="sess-c",
+        )
+
+        assert result["content"] == "ok"
+        provider._track_usage.assert_called_once_with(
+            "claude-3-7-sonnet-20250219",
+            {"prompt_tokens": 8, "completion_tokens": 9},
+            skill_id="skill-c",
+            session_id="sess-c",
+        )
+
 
 # ---------------------------------------------------------------------------
 # OllamaLLMProvider — _resolve_model auto-selection
@@ -73,6 +172,59 @@ class TestOllamaLLMProviderResolveModel:
         result = prov._resolve_model()
         # Cache hit: should return cached value without calling router
         assert result == "cached-model:7b"
+
+
+# ---------------------------------------------------------------------------
+# GeminiProvider._format_prompt — role mapping regression tests
+# ---------------------------------------------------------------------------
+
+
+class TestGeminiFormatPromptRoles:
+    """Ensure _format_prompt only emits Gemini-legal roles (user / model)."""
+
+    @staticmethod
+    def _provider():
+        from app.core.llm.gemini import GeminiProvider
+        return GeminiProvider.__new__(GeminiProvider)
+
+    def test_assistant_mapped_to_model(self):
+        prov = self._provider()
+        contents = prov._format_prompt([{"role": "assistant", "content": "hi"}])
+        assert all(c["role"] in ("user", "model") for c in contents)
+        assert contents[0]["role"] == "model"
+
+    def test_function_mapped_to_user_with_function_response(self):
+        prov = self._provider()
+        contents = prov._format_prompt([
+            {"role": "function", "name": "search", "content": "result"},
+        ])
+        assert contents[0]["role"] == "user"
+        assert any("function_response" in p for p in contents[0]["parts"])
+
+    def test_no_tool_role_emitted(self):
+        """Gemini rejects 'tool' role — make sure it never appears."""
+        prov = self._provider()
+        messages = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "calling tool", "tool_calls": [{"name": "f", "args": {}}]},
+            {"role": "function", "name": "f", "content": "done"},
+        ]
+        contents = prov._format_prompt(messages)
+        roles = {c["role"] for c in contents}
+        assert roles <= {"user", "model"}, f"unexpected roles: {roles}"
+
+
+# ---------------------------------------------------------------------------
+# TestOllamaAutoDetect (continued) — expired cache + fallback
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaAutoDetectExtended:
+
+    @staticmethod
+    def _get_provider(model):
+        from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+        return OllamaLLMProvider(model=model)
 
     def test_expired_cache_triggers_re_detection(self):
         import sys

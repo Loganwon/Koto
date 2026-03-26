@@ -116,9 +116,21 @@ class AnthropicProvider(LLMProvider):
         for attempt in range(self.MAX_RETRIES):
             try:
                 if stream:
-                    return self._stream_generator(model, call_kwargs)
+                    return self._stream_generator(
+                        model,
+                        call_kwargs,
+                        skill_id=kwargs.get("skill_id"),
+                        session_id=kwargs.get("session_id"),
+                    )
                 resp = self.client.messages.create(**call_kwargs)
-                return self._format_response(resp)
+                result = self._format_response(resp)
+                self._track_usage(
+                    model,
+                    result.get("usage"),
+                    skill_id=kwargs.get("skill_id"),
+                    session_id=kwargs.get("session_id"),
+                )
+                return result
             except Exception as exc:
                 retryable = _anthropic_available and isinstance(
                     exc, (APIStatusError, APITimeoutError, APIConnectionError)
@@ -267,7 +279,11 @@ class AnthropicProvider(LLMProvider):
         return {"content": content_text, "tool_calls": tool_calls, "usage": usage}
 
     def _stream_generator(
-        self, model: str, call_kwargs: Dict[str, Any]
+        self,
+        model: str,
+        call_kwargs: Dict[str, Any],
+        skill_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> Generator[Dict[str, Any], None, None]:
         accumulated = ""
         with self.client.messages.stream(**call_kwargs) as s:
@@ -279,3 +295,14 @@ class AnthropicProvider(LLMProvider):
                     "usage": {},
                     "delta": text,
                 }
+            try:
+                message = s.get_message()
+                if hasattr(message, "usage") and message.usage:
+                    self._track_usage(
+                        model,
+                        message.usage,
+                        skill_id=skill_id,
+                        session_id=session_id,
+                    )
+            except Exception as e:
+                logger.debug(f"[Anthropic] Could not retrieve stream usage: {e}")

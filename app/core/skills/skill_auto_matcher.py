@@ -1508,12 +1508,8 @@ class SkillAutoMatcher:
             except Exception:
                 import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
             if _active_ids:
-                candidates = [c for c in candidates if c["id"] not in _active_ids]
-                candidate_ids -= _active_ids
-                if not candidates:
-                    logger.debug("[AutoMatcher] 全部候选已被用户启用，跳过")
-                    return []
-
+                logger.debug("[AutoMatcher] 检测到用户已手动启用Skill，跳过自动匹配以尊重用户选择")  
+                return []
         # ── 1. 优先尝试本地模型匹配（快、私密）─────────────────────────────
         model_result = cls._match_with_local_model(
             user_input, task_type, catalog_text, candidate_ids

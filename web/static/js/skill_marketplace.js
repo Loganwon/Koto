@@ -326,16 +326,30 @@ function renderSkillGrid(gridId, skills) {
     });
 
     const parts = [];
-    let currentGroup = null;
+    const renderedIds = new Set();
     SUBCAT_CONFIG.forEach(({ id, label, cls }) => {
       if (!groups[id] || !groups[id].length) return;
+      renderedIds.add(id);
       parts.push(`<div class="skill-group-header" style="grid-column:1/-1">
         <span class="sm-tag ${cls} group-label-tag">${label}</span>
         <span class="group-count">${groups[id].length} 个技能</span>
       </div>`);
       parts.push(...groups[id].map(s => renderSkillCard(s)));
     });
-    grid.innerHTML = parts.join('');
+    // Render skills with unrecognized subcategory IDs (old data / different naming)
+    const remaining = [];
+    Object.keys(groups).forEach(id => {
+      if (!renderedIds.has(id)) remaining.push(...groups[id]);
+    });
+    if (remaining.length) {
+      parts.push(`<div class="skill-group-header" style="grid-column:1/-1">
+        <span class="sm-tag group-label-tag">🔧 其他技能</span>
+        <span class="group-count">${remaining.length} 个技能</span>
+      </div>`);
+      parts.push(...remaining.map(s => renderSkillCard(s)));
+    }
+    // If nothing matched at all, fall back to flat list
+    grid.innerHTML = parts.length ? parts.join('') : skills.map(s => renderSkillCard(s)).join('');
   } else {
     grid.innerHTML = skills.map(skill => renderSkillCard(skill)).join('');
   }

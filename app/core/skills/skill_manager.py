@@ -2620,7 +2620,10 @@ class SkillManager:
                                 "priority": data.get("priority", 50),
                                 "task_types": skill_def.task_types,
                                 "prompt": skill_def.render_prompt(),
-                                "enabled": skill_def.enabled,
+                                # 始终以 disabled 状态注册；enabled 状态完全由
+                                # _load_states_from_settings 从 user_settings.json 恢复，
+                                # 不从 JSON 文件直接继承（与 builtin 分支保持一致）。
+                                "enabled": False,
                                 "plan_template": skill_def.plan_template,
                                 "permissions": data.get("permissions", []),
                             }

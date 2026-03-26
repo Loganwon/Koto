@@ -147,23 +147,22 @@ def get_backup_manifest(filename: str) -> Response:
 
 
 @dev_bp.route("/api/token-stats", methods=["GET"])
-@require_auth
 def api_token_stats() -> Response:
     """返回 Token 用量统计（今日 / 本月 / 按模型 / 近 7 天）"""
     try:
-        from token_tracker import get_stats
+        from web.token_tracker import get_stats
 
         return jsonify(get_stats())
     except Exception as e:
+        logger.error(f"[token_stats] {e}")
         return jsonify({"error": str(e)}), 500
 
 
 @dev_bp.route("/api/token-stats/reset", methods=["POST"])
-@require_auth
 def api_token_stats_reset() -> Response:
     """重置统计数据。Body: {"period": "today" | "month" | "all"}"""
     try:
-        from token_tracker import reset_stats
+        from web.token_tracker import reset_stats
 
         period = (request.json or {}).get("period", "all")
         return jsonify(reset_stats(period))

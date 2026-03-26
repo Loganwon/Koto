@@ -483,6 +483,11 @@ def _run_setup_if_needed():
     # 支持命令行强制重新配置:  Koto.exe --setup
     force = "--setup" in sys.argv or "--reconfigure" in sys.argv
 
+    # 如果内置密钥文件存在且尚未配置，跳过桌面向导（由 Web 界面处理激活码）
+    builtin_key_file = APP_ROOT / "config" / ".builtin_key"
+    if not force and builtin_key_file.exists():
+        return
+
     wizard_status = ""  # 传给向导的初始提示（密钥失效时填充）
 
     if not force:

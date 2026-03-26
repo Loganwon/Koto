@@ -129,4 +129,14 @@ if __name__ == "__main__":
 ║  Port: {PORT:<33d} ║
 ╚═══════════════════════════════════════╝
     """)
-    app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)  # nosec B104
+    # 优先使用 SocketIO 启动（支持文件助手全双工通信）
+    try:
+        from web.app import socketio as _sio
+        if _sio is not None:
+            logger.info("[Server] 使用 Flask-SocketIO 启动（WebSocket 支持已启用）")
+            _sio.run(app, host="0.0.0.0", port=PORT, debug=False, allow_unsafe_werkzeug=True)  # nosec B104
+        else:
+            raise ImportError("socketio is None")
+    except (ImportError, AttributeError):
+        logger.info("[Server] 使用标准 Flask 启动（无 WebSocket）")
+        app.run(host="0.0.0.0", port=PORT, debug=False, threaded=True)  # nosec B104
