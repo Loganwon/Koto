@@ -2534,6 +2534,33 @@ class DocumentFeedbackSystem:
             "analysis_summary": analysis_result.get("summary"),
         }
 
+    @staticmethod
+    def _strip_markdown_for_annotation(text: str) -> str:
+        """将 format_for_ai 输出的 Markdown 标记还原为纯文本，确保 AI 输出的 `原文`
+        能精确匹配 Word 文档中的实际文字（不含 #/*/- 等 Markdown 标记）。"""
+        import re
+
+        lines = []
+        for line in text.split("\n"):
+            # 去掉标题前缀 #### / ### / ## / #
+            line = re.sub(r"^#{1,6}\s+", "", line)
+            # 去掉列表符 - 或 * 开头（只去符号，保留文字）
+            line = re.sub(r"^[-*]\s+", "", line)
+            # 去掉引用符 >
+            line = re.sub(r"^>\s*", "", line)
+            # 去掉行内加粗/斜体 **text** / *text*
+            line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+            line = re.sub(r"\*(.+?)\*", r"\1", line)
+            # 去掉"← [此段落有格式变化]"标注
+            line = re.sub(r"\s*←\s*\[此段落有格式变化\]", "", line)
+            # 去掉颜色标记 [text](颜色:RRGGBB)
+            line = re.sub(r"\[(.+?)\]\(颜色:[0-9A-Fa-f]+\)", r"\1", line)
+            # 去掉表格/图片占位符行（以 [📊 或 [📷 开头）
+            if re.match(r"^\[(?:📊|📷)", line.strip()):
+                continue
+            lines.append(line)
+        return "\n".join(lines)
+
     def _build_annotation_prompt(
         self,
         doc_type: str,
@@ -2543,8 +2570,11 @@ class DocumentFeedbackSystem:
     ) -> str:
         """构建用于标注的AI Prompt - 精准修改版，生成可直接替换的文本修订"""
 
+        # 将 markdown 格式化内容还原为纯文本，确保 AI 的 `原文` 可精确匹配 Word 实际文字
+        plain_content = self._strip_markdown_for_annotation(formatted_content)
+
         # 统计段落数，用于指导 AI 均匀分布
-        paragraphs = [p.strip() for p in formatted_content.split("\n\n") if p.strip()]
+        paragraphs = [p.strip() for p in plain_content.split("\n\n") if p.strip()]
         para_count = len(paragraphs)
 
         # 判断文档类型：简历 vs 学术文档
@@ -2591,30 +2621,31 @@ class DocumentFeedbackSystem:
 
         # 如果提供了全文背景，限制长度以免超限(保留开头结尾和目录大纲信息)
         global_ctx_prompt = ""
-        if full_doc_context and len(full_doc_context) > len(formatted_content) * 1.5:
+        if full_doc_context and len(full_doc_context) > len(plain_content) * 1.5:
             # 只有当背景明显长于当前片段时才包含背景，避免第一段自我重复干扰
-            ctx_len = len(full_doc_context)
+            plain_ctx = self._strip_markdown_for_annotation(full_doc_context)
+            ctx_len = len(plain_ctx)
             if ctx_len > 30000:
                 # 截取开头3000字和结尾2000字作为背景
                 global_ctx_prompt = f"""
-## 全文背景参考（节选）
+## 全文背景参考（节选，纯文本）
 ...（前文忽略）
-{full_doc_context[:3000]}
+{plain_ctx[:3000]}
 ...
-{full_doc_context[-2000:]}
+{plain_ctx[-2000:]}
 """
             else:
                 global_ctx_prompt = f"""
-## 全文完整背景（供连贯性分析参考）
-{full_doc_context}
+## 全文完整背景（供连贯性分析参考，纯文本）
+{plain_ctx}
 """
 
         base_prompt = f"""{persona}。{task_intro}
 
 {global_ctx_prompt}
 
-## 当前待审阅文档片段（共{para_count}段）
-{formatted_content}
+## 当前待审阅文档片段（共{para_count}段，纯文本，标题/粗体等格式已剥离）
+{plain_content}
 
 ## 任务要求
 {user_requirement if user_requirement else default_req}
@@ -2630,10 +2661,15 @@ class DocumentFeedbackSystem:
 
 ## ⚠️ 重要写作指令：
 1. **少废话，多干活**：不要给出"建议修改..."的空洞批注，直接提供修改后的文本。
-2. **精准定位**：`原文` 字段必须与文档中的**纯文本**完全一致，不要省略或修改原文。
-3. **纯文本原文（关键！）**：`原文` 字段中**绝对不能含有** Markdown 格式符号，例如 `##`、`###`、`-`（列表符）、`>`（引用符）、`**`、`*` 等。请只提取括号外的实际文字内容。例如文档中显示的是某段正文内容，`原文` 就写那段正文，不要带任何标记前缀。
-4. **适度修改**：只修改真正有语病、翻译腔、逻辑不通顺或生硬的地方。不要为了修改而修改。
-5. **最小原文范围（关键！）**：`原文` 必须是**需要改动的最小文本单元**——改一个词就只选那个词，改几个字就只选那几个字，改一句就选那句。**禁止把整段话都放进 `原文`**，除非整段都需要整体重写。有长有短才是正常的标注，大部分标注应该是片段或短句级别，而非整段。
+2. **逐段覆盖（关键！）**：必须审阅文档中**每一段**，从第一段到最后一段，不得跳过任何段落，每段至少尝试找出1处问题。
+3. **精准定位**：`原文` 字段必须与文档片段中显示的**纯文本**完全一致，逐字复制，不增删任何字符。
+4. **最小原文范围（最关键！）**：`原文` 必须是**需要改动的最小文本单元**。规则如下：
+   - 只改一个词 → `原文` 只填那个词（2-6字）
+   - 只改一个短语 → `原文` 只填那个短语（5-15字）
+   - 整句有问题 → `原文` 填那整句（最多30字）
+   - **严禁把整段文字都放进 `原文`**（超过40字的 `原文` 几乎都是错误用法）
+   - 正常标注中，80%应该是片段级别（≤15字），20%是句子级别（≤35字）
+5. **适度修改**：只修改真正有语病、翻译腔、逻辑不通顺或生硬的地方。不要为了修改而修改。
 
 ## ⚠️ 去AI味 — 必须严格遵守的语言风格：
 你改写后的文本**绝对不能有AI味**。以下是具体禁令：
@@ -2669,10 +2705,15 @@ class DocumentFeedbackSystem:
 ## 输出格式
 只返回JSON数组，禁止其他文字：
 [
-  {{"原文": "被广泛地进行使用", "改为": "已广泛使用", "原因": "精简"}},
-  {{"原文": "在当前数字艺术发展的主流实践中，研究者们主要聚焦于...（原长句）", "改为": "目前数字艺术研究主要集中在...（重写后）", "原因": "去冗余"}},
+  {{"原文": "进行使用", "改为": "使用", "原因": "精简"}},
+  {{"原文": "在这个图像中", "改为": "该图像", "原因": "翻译腔"}},
+  {{"原文": "研究者们主要聚焦于", "改为": "研究主要集中在", "原因": "去冗余"}},
   {{"原文": "这为后续研究提供了有力支撑", "改为": "这对后续研究有参考价值", "原因": "去套话"}}
 ]
+
+❌ 错误示例（`原文` 过长，超过整段）：
+{{"原文": "在当前数字艺术发展的主流实践中，研究者们主要聚焦于三个核心方向：技术驱动的创新探索、社会文化的批判性介入以及跨学科的融合实践。", "改为": "..."}}
+✅ 应拆分为多条短标注，每条只针对一个问题词组。
 """
         return base_prompt
 
@@ -2680,6 +2721,21 @@ class DocumentFeedbackSystem:
         """解析AI响应为标注格式"""
         import json
         import re
+
+        def _clean_original(text: str) -> str:
+            """清理 `原文` 字段：去除 AI 意外输出的 Markdown 标记，确保可精确匹配原文。"""
+            # 去掉行首 Markdown 符号（##, -, *, >）
+            text = re.sub(r"^#{1,6}\s+", "", text.strip())
+            text = re.sub(r"^[-*]\s+", "", text)
+            text = re.sub(r"^>\s*", "", text)
+            # 去掉行内加粗/斜体
+            text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+            text = re.sub(r"\*(.+?)\*", r"\1", text)
+            # 去掉格式变化标注
+            text = re.sub(r"\s*←\s*\[此段落有格式变化\]", "", text)
+            # 去掉颜色标记
+            text = re.sub(r"\[(.+?)\]\(颜色:[0-9A-Fa-f]+\)", r"\1", text)
+            return text.strip()
 
         try:
             # 尝试提取JSON数组
@@ -2722,8 +2778,22 @@ class DocumentFeedbackSystem:
                         )
 
                         if original and modified:
+                            cleaned_orig = _clean_original(str(original))
+                            if not cleaned_orig:
+                                continue
+                            # 过滤超长 `原文`（超过60字几乎肯定是整段，无法精确锚定）
+                            if len(cleaned_orig) > 60:
+                                logger.debug(
+                                    f"[DocumentFeedback] ⚠️ 过滤超长原文({len(cleaned_orig)}字): {cleaned_orig[:30]}..."
+                                )
+                                # 超长项：尝试拆分为第一个逗号/句号前的片段
+                                _short = re.split(r"[，。；！？,;!?]", cleaned_orig)[0].strip()
+                                if 4 <= len(_short) <= 40:
+                                    cleaned_orig = _short
+                                else:
+                                    continue  # 无法拆分，丢弃
                             entry = {
-                                "原文片段": str(original).strip(),
+                                "原文片段": cleaned_orig,
                                 "修改建议": str(modified).strip(),
                             }
                             if reason:
@@ -2757,8 +2827,20 @@ class DocumentFeedbackSystem:
                                 )
 
                                 if original and modified:
+                                    cleaned_orig = _clean_original(str(original))
+                                    if not cleaned_orig:
+                                        continue
+                                    if len(cleaned_orig) > 60:
+                                        logger.debug(
+                                            f"[DocumentFeedback] ⚠️ 过滤超长原文({len(cleaned_orig)}字): {cleaned_orig[:30]}..."
+                                        )
+                                        _short = re.split(r"[，。；！？,;!?]", cleaned_orig)[0].strip()
+                                        if 4 <= len(_short) <= 40:
+                                            cleaned_orig = _short
+                                        else:
+                                            continue
                                     entry = {
-                                        "原文片段": str(original).strip(),
+                                        "原文片段": cleaned_orig,
                                         "修改建议": str(modified).strip(),
                                     }
                                     if reason:
