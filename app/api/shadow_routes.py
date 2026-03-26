@@ -216,16 +216,29 @@ def shadow_retry_context(task_id: str):
     """返回失败任务的完整原始用户消息，供前端一键重试。"""
     try:
         ctx = _get_watcher().get_failed_task_context(task_id)
-        if not ctx:
-            return _err("Task not found", 404)
-        return _ok(
-            {
-                "task_id": task_id,
-                "original_text": ctx.get("full_text") or ctx.get("text", ""),
-                "session": ctx.get("session", ""),
-                "asked_at": ctx.get("asked_at", ""),
-            }
-        )
+        if ctx:
+            return _ok(
+                {
+                    "task_id": task_id,
+                    "original_text": ctx.get("full_text") or ctx.get("text", ""),
+                    "session": ctx.get("session", ""),
+                    "asked_at": ctx.get("asked_at", ""),
+                }
+            )
+        # Fallback：watcher 数据可能因 dirty_save 未写盘而丢失，改从 proactive 队列中取原始文本
+        for pending_msg in _get_agent().pending():
+            if pending_msg.get("task_id") == task_id:
+                original_text = pending_msg.get("original_text", "")
+                if original_text:
+                    return _ok(
+                        {
+                            "task_id": task_id,
+                            "original_text": original_text,
+                            "session": "",
+                            "asked_at": pending_msg.get("created_at", ""),
+                        }
+                    )
+        return _err("Task not found", 404)
     except Exception as exc:
         logger.exception("[shadow/retry-context] error")
         return _err(str(exc), 500)
