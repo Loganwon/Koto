@@ -24,13 +24,13 @@
   <!-- socket.io CDN (esbuild external) -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <!-- 合并后的 CSS -->
-  <link rel="stylesheet" crossorigin href="/editor/assets/main.css?v=20260327c">
+  <link rel="stylesheet" crossorigin href="/editor/assets/main.css?v=20260328a">
   <!-- 主入口 JS (ES Module) -->
-  <script type="module" crossorigin src="/editor/assets/main.js?v=20260327c"></script>
-  <!-- 运行时扩展补丁（快捷键 + 浮动工具栏）-->
-  <script defer src="/editor/assets/koto-patch.js?v=20260327c"></script>
-  <!-- 快捷键提示样式 -->
+  <script type="module" crossorigin src="/editor/assets/main.js?v=20260328a"></script>
+  <!-- 运行时扩展补丁（快捷键 + 浮动工具栏 + 多格式查看器）-->
+  <script defer src="/editor/assets/koto-patch.js?v=20260328a"></script>
   <style>
+    /* ── 快捷键提示栏 ── */
     .koto-shortcut-hint {
       display: flex; flex-wrap: wrap; gap: 3px 6px;
       padding: 4px 8px; border-top: 1px solid #2a2a2a;
@@ -38,6 +38,132 @@
     }
     .koto-shortcut-hint span { white-space: nowrap; cursor: default; }
     .koto-shortcut-hint span:hover { color: #999; }
+
+    /* ── 多格式查看器覆盖层 ── */
+    #koto-alt-viewer {
+      position: absolute; inset: 0; z-index: 20;
+      display: flex; flex-direction: column;
+      background: #f7f7f7; overflow: hidden;
+    }
+    #koto-viewer-bar {
+      display: flex; align-items: center; gap: 8px;
+      height: 40px; min-height: 40px;
+      background: #fff; border-bottom: 1px solid #e0e0e0;
+      padding: 0 12px; font-size: 13px; flex-shrink: 0;
+    }
+    #koto-viewer-icon { font-size: 16px; }
+    #koto-viewer-filename { font-weight: 500; color: #333; max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #koto-viewer-bar button {
+      padding: 4px 10px; font-size: 12px; cursor: pointer;
+      border: 1px solid #d0d0d0; border-radius: 4px;
+      background: #fff; color: #333;
+      transition: background 0.15s;
+    }
+    #koto-viewer-bar button:hover { background: #f0f0f0; }
+    #koto-viewer-body {
+      flex: 1; overflow: auto; padding: 0;
+    }
+
+    /* PDF */
+    iframe.koto-pdf-frame { width: 100%; height: 100%; border: none; display: block; }
+
+    /* Excel / CSV table */
+    .koto-sheet-tabs {
+      display: flex; gap: 0; border-bottom: 2px solid #217346;
+      background: #f0f0f0; padding: 0 8px; flex-shrink: 0;
+    }
+    .koto-sheet-tab {
+      padding: 6px 14px; font-size: 12px; cursor: pointer;
+      border: 1px solid transparent; border-bottom: none;
+      background: #f0f0f0; color: #444; user-select: none;
+    }
+    .koto-sheet-tab.active {
+      background: #fff; border-color: #ccc; border-bottom-color: #fff;
+      font-weight: 600; color: #217346;
+    }
+    .koto-sheet-tab:hover:not(.active) { background: #e0e0e0; }
+    .koto-table-wrapper { overflow: auto; }
+    table.koto-sheet-table {
+      border-collapse: collapse; font-size: 12px;
+      font-family: 'Calibri', 'Microsoft YaHei', sans-serif;
+    }
+    table.koto-sheet-table th {
+      background: #217346; color: #fff;
+      padding: 5px 10px; border: 1px solid #1a5c38;
+      font-weight: 600; white-space: nowrap; position: sticky; top: 0;
+    }
+    table.koto-sheet-table td {
+      padding: 4px 8px; border: 1px solid #d0d0d0;
+      white-space: nowrap; max-width: 300px;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    table.koto-sheet-table tr:nth-child(even) td { background: #f5fbf7; }
+    table.koto-sheet-table tr:hover td { background: #e8f5ec; }
+
+    /* PPT slide viewer */
+    .koto-slide-nav {
+      display: flex; align-items: center; gap: 12px; justify-content: center;
+      padding: 8px; background: #e8e8e8; border-bottom: 1px solid #ccc;
+      font-size: 13px; flex-shrink: 0;
+    }
+    .koto-slide-nav button {
+      padding: 4px 12px; cursor: pointer;
+      border: 1px solid #bbb; border-radius: 4px; background: #fff;
+    }
+    .koto-slide-nav button:hover:not(:disabled) { background: #f0f0f0; }
+    .koto-slide-nav button:disabled { opacity: 0.4; cursor: default; }
+    .koto-slide-card {
+      margin: 16px auto; max-width: 800px; width: 95%;
+      background: #fff; border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12); overflow: hidden;
+    }
+    .koto-slide-header {
+      background: #1a4e8c; color: #fff;
+      padding: 14px 18px; font-size: 16px; font-weight: 600;
+    }
+    .koto-slide-body { padding: 14px 18px; font-size: 14px; line-height: 1.65; color: #333; white-space: pre-wrap; }
+    .koto-slide-images { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 18px 14px; }
+    .koto-slide-images img { max-width: 200px; max-height: 150px; border: 1px solid #ddd; border-radius: 3px; cursor: zoom-in; }
+    .koto-slide-notes { background: #fffbea; border-top: 1px solid #e8e0a0; padding: 8px 18px; font-size: 12px; color: #666; }
+
+    /* Code viewer */
+    .koto-code-header {
+      display: flex; align-items: center; padding: 6px 14px;
+      background: #1e1e1e; border-bottom: 1px solid #333;
+    }
+    .koto-lang-badge {
+      font-size: 11px; background: #0e7a0d; color: #fff;
+      padding: 2px 7px; border-radius: 3px; margin-right: 8px; font-family: monospace;
+    }
+    .koto-copy-btn {
+      margin-left: auto; padding: 3px 10px; font-size: 11px;
+      cursor: pointer; border: 1px solid #555; border-radius: 3px;
+      background: #2d2d2d; color: #ccc;
+    }
+    .koto-copy-btn:hover { background: #3d3d3d; }
+    pre.koto-code-block {
+      margin: 0; padding: 16px; font-family: 'Consolas', 'Fira Code', monospace;
+      font-size: 13px; line-height: 1.55; background: #1e1e1e; color: #d4d4d4;
+      white-space: pre-wrap; word-break: break-all; tab-size: 4;
+    }
+
+    /* DOCX image badge + gallery */
+    .koto-img-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 12px; padding: 3px 8px;
+      background: #e8f4fd; border: 1px solid #aed6f1;
+      border-radius: 12px; cursor: pointer; user-select: none;
+    }
+    .koto-img-badge:hover { background: #d0ebfa; }
+    .koto-img-gallery {
+      display: flex; flex-wrap: wrap; gap: 10px;
+      padding: 12px; background: #fff;
+      border-top: 1px solid #e0e0e0;
+    }
+    .koto-img-gallery img {
+      max-width: 180px; max-height: 140px; border: 1px solid #ddd;
+      border-radius: 4px; cursor: zoom-in;
+    }
   </style>
   <!-- 模块加载失败检测 -->
   <script>
@@ -89,6 +215,17 @@
     <!-- 中央：Univer Canvas 文档编辑器 -->
     <main id="center-doc">
       <div id="univer-container"></div>
+      <!-- 多格式查看器覆盖层（PDF/Excel/PPT/CSV/Code） -->
+      <div id="koto-alt-viewer" style="display:none">
+        <div id="koto-viewer-bar">
+          <span id="koto-viewer-icon"></span>
+          <span id="koto-viewer-filename"></span>
+          <div style="flex:1"></div>
+          <button id="koto-viewer-to-text" title="将文件内容载入文字编辑器">📝 转为可编辑文本</button>
+          <button id="koto-viewer-ai" title="用 AI 分析文件内容">🤖 用 AI 分析</button>
+        </div>
+        <div id="koto-viewer-body"></div>
+      </div>
     </main>
 
     <!-- 右侧：AI 助手面板（由 AIPanel.js 动态渲染） -->

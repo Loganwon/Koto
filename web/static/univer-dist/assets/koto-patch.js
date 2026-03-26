@@ -261,7 +261,443 @@
     patchFloatingToolbar(window.__koto.floatingToolbar);
     addKeyboardShortcuts();
     injectShortcutHint();
-    console.log('[Koto Patch] ✅ 快捷键 & 浮动工具栏已增强');
+    // fetch interceptor is installed immediately by the AltViewer IIFE below
+    console.log('[Koto Patch] ✅ 快捷键 & 浮动工具栏 & 多格式查看器 已增强');
   });
+
+})();
+
+// ═════════════════════════════════════════════════════════════════
+// AltViewer — 多格式文件查看器（独立 IIFE，不依赖 __koto 就绪）
+// ═════════════════════════════════════════════════════════════════
+(function () {
+  'use strict';
+
+  // ── AltViewer controller ──────────────────────────────────────
+  var AltViewer = {
+    _currentDocContent: '',
+    _currentDocId: '',
+
+    show: function (data) {
+      var el = document.getElementById('koto-alt-viewer');
+      var uc = document.getElementById('univer-container');
+      if (!el) return;
+
+      this._currentDocContent = data.content || '';
+      this._currentDocId = data.id || '';
+
+      // Show viewer, hide (but keep) Univer canvas
+      el.style.display = 'flex';
+      if (uc) uc.style.visibility = 'hidden';
+
+      // Update filename bar
+      var fnEl = document.getElementById('koto-viewer-filename');
+      var iconEl = document.getElementById('koto-viewer-icon');
+      if (fnEl) fnEl.textContent = data.name || data.importedFrom || '文件';
+
+      var vd = data.viewerData || {};
+      var iconMap = { pdf: '📕', excel: '📊', csv: '📋', ppt: '📑', code: '💻', markdown: '📝', docx: '📘' };
+      if (iconEl) iconEl.textContent = iconMap[vd.type] || '📄';
+
+      // Render body
+      var body = document.getElementById('koto-viewer-body');
+      if (body) body.innerHTML = '';
+
+      switch (vd.type) {
+        case 'pdf':     this._renderPDF(data.id, body); break;
+        case 'excel':   this._renderExcel(vd, body); break;
+        case 'csv':     this._renderCSV(vd, body); break;
+        case 'ppt':     this._renderPPT(vd, body); break;
+        case 'code':    this._renderCode(data.content || '', vd.lang || 'text', body); break;
+        case 'markdown':this._renderCode(data.content || '', 'markdown', body); break;
+        case 'docx':    this._renderDocxImages(vd, body); break;
+        default:        el.style.display = 'none'; if (uc) uc.style.visibility = 'visible'; return;
+      }
+
+      // Bind toolbar buttons
+      var toTextBtn = document.getElementById('koto-viewer-to-text');
+      var aiBtn = document.getElementById('koto-viewer-ai');
+      if (toTextBtn) {
+        toTextBtn.onclick = function () { AltViewer.convertToText(); };
+      }
+      if (aiBtn) {
+        aiBtn.onclick = function () { AltViewer.aiAnalyze(); };
+      }
+
+      // DOCX: also show Univer editor alongside image badge
+      if (vd.type === 'docx') {
+        el.style.display = 'none';  // Don't show full overlay
+        if (uc) uc.style.visibility = 'visible';
+        this._injectDocxBadge(vd);
+      }
+    },
+
+    hide: function () {
+      var el = document.getElementById('koto-alt-viewer');
+      var uc = document.getElementById('univer-container');
+      if (el) el.style.display = 'none';
+      if (uc) uc.style.visibility = 'visible';
+      // Remove docx badge if any
+      var badge = document.getElementById('koto-docx-img-badge');
+      if (badge) badge.remove();
+      var gallery = document.getElementById('koto-docx-img-gallery');
+      if (gallery) gallery.remove();
+    },
+
+    convertToText: function () {
+      var koto = window.__koto;
+      if (!koto) return;
+      // Load text content into Univer doc editor
+      if (koto.docController && this._currentDocContent) {
+        koto.docController.loadContent(this._currentDocContent);
+      }
+      this.hide();
+    },
+
+    aiAnalyze: function () {
+      var koto = window.__koto;
+      if (!koto) return;
+      var panel = koto.aiPanel;
+      var bridge = koto.socketBridge;
+      if (!this._currentDocContent) {
+        if (panel) panel.addMessage('文件内容为空。', 'error');
+        return;
+      }
+      if (panel) panel.addMessage('🤖 AI 分析文件内容…', 'user');
+      if (bridge) bridge.sendAction('summarize', { text: this._currentDocContent, fullText: this._currentDocContent });
+      if (panel) panel.expand();
+    },
+
+    // ── Renderers ──
+
+    _renderPDF: function (docId, body) {
+      var iframe = document.createElement('iframe');
+      iframe.className = 'koto-pdf-frame';
+      iframe.title = 'PDF 预览';
+      iframe.src = '/api/editor/docs/' + encodeURIComponent(docId) + '/raw';
+      body.appendChild(iframe);
+    },
+
+    _renderExcel: function (vd, body) {
+      var sheets = vd.sheets || [];
+      if (!sheets.length) { body.textContent = '（空表格）'; return; }
+
+      // Tab bar
+      var tabBar = document.createElement('div');
+      tabBar.className = 'koto-sheet-tabs';
+      var currentSheet = 0;
+
+      var tableWrapper = document.createElement('div');
+      tableWrapper.className = 'koto-table-wrapper';
+      tableWrapper.style.height = 'calc(100% - 36px)';
+      tableWrapper.style.overflow = 'auto';
+
+      function renderSheet(idx) {
+        currentSheet = idx;
+        tabBar.querySelectorAll('.koto-sheet-tab').forEach(function (t, i) {
+          t.classList.toggle('active', i === idx);
+        });
+        tableWrapper.innerHTML = '';
+        var sheet = sheets[idx];
+        var rows = sheet.rows || [];
+        if (!rows.length) { tableWrapper.textContent = '（空）'; return; }
+
+        var table = document.createElement('table');
+        table.className = 'koto-sheet-table';
+
+        // Row number + data headers (A B C…)
+        var maxCols = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0);
+        var thead = document.createElement('thead');
+        var hrow = document.createElement('tr');
+        var thNum = document.createElement('th');
+        thNum.textContent = '#';
+        hrow.appendChild(thNum);
+        for (var ci = 0; ci < maxCols; ci++) {
+          var th = document.createElement('th');
+          // Convert col index to letter(s): A, B, ... Z, AA, AB...
+          var colLabel = '';
+          var n = ci;
+          do {
+            colLabel = String.fromCharCode(65 + (n % 26)) + colLabel;
+            n = Math.floor(n / 26) - 1;
+          } while (n >= 0);
+          th.textContent = colLabel;
+          hrow.appendChild(th);
+        }
+        thead.appendChild(hrow);
+        table.appendChild(thead);
+
+        var tbody = document.createElement('tbody');
+        rows.forEach(function (row, ri) {
+          var tr = document.createElement('tr');
+          var tdNum = document.createElement('td');
+          tdNum.textContent = ri + 1;
+          tdNum.style.color = '#999';
+          tdNum.style.background = '#f0f0f0';
+          tdNum.style.fontWeight = '500';
+          tr.appendChild(tdNum);
+          for (var ci2 = 0; ci2 < maxCols; ci2++) {
+            var td = document.createElement('td');
+            var cell = row[ci2];
+            td.textContent = cell ? String(cell.v !== undefined ? cell.v : '') : '';
+            if (cell && cell.t === 'n') td.style.textAlign = 'right';
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        tableWrapper.appendChild(table);
+      }
+
+      sheets.forEach(function (sheet, idx) {
+        var tab = document.createElement('div');
+        tab.className = 'koto-sheet-tab' + (idx === 0 ? ' active' : '');
+        tab.textContent = sheet.name || ('Sheet' + (idx + 1));
+        tab.addEventListener('click', function () { renderSheet(idx); });
+        tabBar.appendChild(tab);
+      });
+
+      body.style.display = 'flex';
+      body.style.flexDirection = 'column';
+      body.style.height = '100%';
+      body.appendChild(tabBar);
+      body.appendChild(tableWrapper);
+      renderSheet(0);
+    },
+
+    _renderCSV: function (vd, body) {
+      var headers = vd.headers || [];
+      var rows = vd.rows || [];
+
+      var wrapper = document.createElement('div');
+      wrapper.className = 'koto-table-wrapper';
+      wrapper.style.padding = '8px';
+
+      var table = document.createElement('table');
+      table.className = 'koto-sheet-table';
+
+      if (headers.length) {
+        var thead = document.createElement('thead');
+        var hrow = document.createElement('tr');
+        headers.forEach(function (h) {
+          var th = document.createElement('th');
+          th.textContent = h;
+          hrow.appendChild(th);
+        });
+        thead.appendChild(hrow);
+        table.appendChild(thead);
+      }
+
+      var tbody = document.createElement('tbody');
+      rows.forEach(function (row, ri) {
+        var tr = document.createElement('tr');
+        row.forEach(function (cell) {
+          var td = document.createElement('td');
+          td.textContent = cell;
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      wrapper.appendChild(table);
+      body.appendChild(wrapper);
+    },
+
+    _renderPPT: function (vd, body) {
+      var slides = vd.slides || [];
+      if (!slides.length) { body.textContent = '（空演示文稿）'; return; }
+
+      var currentIdx = 0;
+
+      // Nav bar
+      var nav = document.createElement('div');
+      nav.className = 'koto-slide-nav';
+      var prevBtn = document.createElement('button');
+      prevBtn.textContent = '◀ 上一页';
+      var counter = document.createElement('span');
+      var nextBtn = document.createElement('button');
+      nextBtn.textContent = '下一页 ▶';
+
+      nav.appendChild(prevBtn);
+      nav.appendChild(counter);
+      nav.appendChild(nextBtn);
+
+      // Slide display area
+      var slideArea = document.createElement('div');
+      slideArea.style.overflowY = 'auto';
+      slideArea.style.flex = '1';
+      slideArea.style.padding = '12px';
+
+      function showSlide(idx) {
+        currentIdx = idx;
+        prevBtn.disabled = idx === 0;
+        nextBtn.disabled = idx === slides.length - 1;
+        counter.textContent = (idx + 1) + ' / ' + slides.length;
+
+        slideArea.innerHTML = '';
+        var s = slides[idx];
+        var card = document.createElement('div');
+        card.className = 'koto-slide-card';
+
+        if (s.title) {
+          var header = document.createElement('div');
+          header.className = 'koto-slide-header';
+          header.textContent = s.title;
+          card.appendChild(header);
+        }
+
+        if (s.body) {
+          var sbody = document.createElement('div');
+          sbody.className = 'koto-slide-body';
+          sbody.textContent = s.body;
+          card.appendChild(sbody);
+        }
+
+        if (s.images && s.images.length) {
+          var imgRow = document.createElement('div');
+          imgRow.className = 'koto-slide-images';
+          s.images.forEach(function (img) {
+            var im = document.createElement('img');
+            im.src = img.url;
+            im.alt = img.filename || '图片';
+            im.title = img.filename || '图片';
+            im.onerror = function () { this.style.display = 'none'; };
+            imgRow.appendChild(im);
+          });
+          card.appendChild(imgRow);
+        }
+
+        if (s.notes) {
+          var notes = document.createElement('div');
+          notes.className = 'koto-slide-notes';
+          notes.textContent = '备注：' + s.notes;
+          card.appendChild(notes);
+        }
+
+        slideArea.appendChild(card);
+      }
+
+      prevBtn.onclick = function () { if (currentIdx > 0) showSlide(currentIdx - 1); };
+      nextBtn.onclick = function () { if (currentIdx < slides.length - 1) showSlide(currentIdx + 1); };
+
+      body.style.display = 'flex';
+      body.style.flexDirection = 'column';
+      body.style.height = '100%';
+      body.appendChild(nav);
+      body.appendChild(slideArea);
+      showSlide(0);
+    },
+
+    _renderCode: function (content, lang, body) {
+      var header = document.createElement('div');
+      header.className = 'koto-code-header';
+
+      var badge = document.createElement('span');
+      badge.className = 'koto-lang-badge';
+      badge.textContent = lang;
+      header.appendChild(badge);
+
+      var copyBtn = document.createElement('button');
+      copyBtn.className = 'koto-copy-btn';
+      copyBtn.textContent = '📋 复制';
+      copyBtn.onclick = function () {
+        navigator.clipboard.writeText(content).then(function () {
+          copyBtn.textContent = '✅ 已复制';
+          setTimeout(function () { copyBtn.textContent = '📋 复制'; }, 2000);
+        }).catch(function () {
+          copyBtn.textContent = '❌ 失败';
+        });
+      };
+      header.appendChild(copyBtn);
+
+      var pre = document.createElement('pre');
+      pre.className = 'koto-code-block';
+      // Safely escape HTML
+      pre.textContent = content;
+
+      body.appendChild(header);
+      body.appendChild(pre);
+    },
+
+    // DOCX: show images as a badge above the Univer editor (editor stays usable)
+    _injectDocxBadge: function (vd) {
+      var images = vd.images || [];
+      if (!images.length) return;
+
+      var container = document.getElementById('univer-container');
+      if (!container) return;
+
+      // Remove existing badge/gallery
+      var old = document.getElementById('koto-docx-img-badge');
+      if (old) old.remove();
+      var oldG = document.getElementById('koto-docx-img-gallery');
+      if (oldG) oldG.remove();
+
+      var badge = document.createElement('div');
+      badge.id = 'koto-docx-img-badge';
+      badge.className = 'koto-img-badge';
+      badge.style.cssText = 'position:absolute;top:8px;right:12px;z-index:30;';
+      badge.innerHTML = '📷 ' + images.length + ' 张图片';
+
+      var gallery = document.createElement('div');
+      gallery.id = 'koto-docx-img-gallery';
+      gallery.className = 'koto-img-gallery';
+      gallery.style.cssText = 'position:absolute;top:40px;right:0;left:0;z-index:29;display:none;max-height:200px;overflow-y:auto;';
+      images.forEach(function (img) {
+        var im = document.createElement('img');
+        im.src = img.url;
+        im.alt = img.filename || '图片';
+        im.title = img.filename;
+        im.onerror = function () { this.style.display = 'none'; };
+        gallery.appendChild(im);
+      });
+
+      badge.onclick = function () {
+        gallery.style.display = gallery.style.display === 'none' ? 'flex' : 'none';
+      };
+
+      var parent = container.parentElement;
+      if (parent) {
+        parent.style.position = 'relative';
+        parent.appendChild(badge);
+        parent.appendChild(gallery);
+      }
+    },
+  };
+
+  // Expose AltViewer globally so the fetch interceptor (inside main IIFE) can call it
+  window.__kotoAltViewer = AltViewer;
+
+  // Script has `defer` so DOM is interactive when we run — install directly.
+  installFetchInterceptor();
+
+  function installFetchInterceptor() {
+    if (window.__kotoFetchPatched) return;
+    window.__kotoFetchPatched = true;
+
+    var origFetch = window.fetch;
+    window.fetch = function (input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || String(input);
+      var p = origFetch.apply(this, arguments);
+
+      if (/\/api\/editor\/docs\/[a-zA-Z0-9_-]+$/.test(url)) {
+        var method = (init && init.method ? init.method : 'GET').toUpperCase();
+        if (method === 'GET') {
+          p.then(function (res) {
+            var clone = res.clone();
+            clone.json().then(function (data) {
+              if (data && data.viewerData && data.viewerData.type) {
+                setTimeout(function () { AltViewer.show(data); }, 80);
+              } else {
+                AltViewer.hide();
+              }
+            }).catch(function () {});
+          }).catch(function () {});
+        }
+      }
+
+      return p;
+    };
+  }
 
 })();

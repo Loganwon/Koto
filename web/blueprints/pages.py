@@ -22,7 +22,7 @@ Routes:
 
 import os
 
-from flask import Blueprint, Response, render_template, send_from_directory
+from flask import Blueprint, Response, make_response, render_template, send_from_directory
 
 pages_bp = Blueprint("pages", __name__)
 
@@ -126,10 +126,14 @@ def doc_compare_ui() -> str:
 @pages_bp.route("/editor")
 def file_assistant() -> Response:
     """文件助手 — Univer Canvas 编辑器 + AI 面板"""
-    return send_from_directory(
+    resp = make_response(send_from_directory(
         os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist"),
         "index.html",
-    )
+    ))
+    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @pages_bp.route("/editor/<path:subpath>")
