@@ -1,0 +1,27 @@
+{
+  "name": "koto-univer-editor",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Koto 文件助手 — Univer Canvas + AI 全双工文档编辑器",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@univerjs/core": "^0.5.0",
+    "@univerjs/design": "^0.5.0",
+    "@univerjs/engine-render": "^0.5.0",
+    "@univerjs/ui": "^0.5.0",
+    "@univerjs/docs": "^0.5.0",
+    "@univerjs/docs-ui": "^0.5.0",
+    "@univerjs/facade": "^0.5.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "rxjs": "^7.8.1",
+    "socket.io-client": "^4.7.5"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

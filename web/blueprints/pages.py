@@ -17,6 +17,7 @@ Routes:
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
+  GET /editor                  — file_assistant
 """
 
 import os
@@ -26,6 +27,16 @@ from flask import Blueprint, Response, render_template, send_from_directory
 pages_bp = Blueprint("pages", __name__)
 
 
+def _get_initial_theme() -> str:
+    """从已保存的用户设置读取初始主题，默认 light。"""
+    try:
+        from web.app import settings_manager
+        theme = settings_manager.get("appearance", "theme")
+        return theme if theme else "light"
+    except Exception:
+        return "light"
+
+
 @pages_bp.route("/")
 def index() -> str:
     # 云模式：未认证用户看到落地页
@@ -33,13 +44,13 @@ def index() -> str:
     auth_enabled = os.environ.get("KOTO_AUTH_ENABLED", "false").lower() == "true"
     if deploy_mode == "cloud" and auth_enabled:
         return render_template("landing.html")
-    return render_template("index.html")
+    return render_template("index.html", initial_theme=_get_initial_theme())
 
 
 @pages_bp.route("/app")
 def app_main() -> str:
     """主应用页面（SaaS 模式下需认证后访问）"""
-    return render_template("index.html")
+    return render_template("index.html", initial_theme=_get_initial_theme())
 
 
 @pages_bp.route("/file-network")
@@ -110,3 +121,21 @@ def notebook_ui() -> str:
 def doc_compare_ui() -> str:
     """多文档对比界面"""
     return render_template("doc_compare.html")
+
+
+@pages_bp.route("/editor")
+def file_assistant() -> Response:
+    """文件助手 — Univer Canvas 编辑器 + AI 面板"""
+    return send_from_directory(
+        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist"),
+        "index.html",
+    )
+
+
+@pages_bp.route("/editor/<path:subpath>")
+def file_assistant_assets(subpath: str) -> Response:
+    """文件助手静态资源（JS/CSS）"""
+    return send_from_directory(
+        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist"),
+        subpath,
+    )

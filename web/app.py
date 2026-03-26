@@ -76,20 +76,40 @@ agent_bp = None  # 延迟加载，见下方蓝图注册区
 
 # ================= 并行执行系统导入 =================
 try:
-    from parallel_api import register_parallel_api
-    from parallel_executor import (
-        Priority,
-        Task,
-        TaskStatus,
-        TaskType,
-        cancel_task,
-        get_next_task,
-        get_queue_manager,
-        get_resource_manager,
-        get_task_monitor,
-        submit_task,
-    )
-    from task_dispatcher import get_scheduler, start_dispatcher, stop_dispatcher
+    try:
+        from parallel_api import register_parallel_api
+        from parallel_executor import (
+            Priority,
+            Task,
+            TaskStatus,
+            TaskType,
+            cancel_task,
+            get_next_task,
+            get_queue_manager,
+            get_resource_manager,
+            get_task_monitor,
+            submit_task,
+        )
+        from task_dispatcher import get_scheduler, start_dispatcher, stop_dispatcher
+    except ImportError:
+        from web.parallel_api import register_parallel_api
+        from web.parallel_executor import (
+            Priority,
+            Task,
+            TaskStatus,
+            TaskType,
+            cancel_task,
+            get_next_task,
+            get_queue_manager,
+            get_resource_manager,
+            get_task_monitor,
+            submit_task,
+        )
+        from web.task_dispatcher import (
+            get_scheduler,
+            start_dispatcher,
+            stop_dispatcher,
+        )
 
     PARALLEL_SYSTEM_ENABLED = True
 except ImportError as e:
@@ -100,6 +120,15 @@ try:
     from flask_sock import Sock
 except ImportError:
     Sock = None
+
+# ── Flask-SocketIO（文件助手全双工通信）──
+try:
+    from flask_socketio import SocketIO
+    _has_socketio = True
+except ImportError:
+    SocketIO = None
+    _has_socketio = False
+    _app_logger.warning("[WebSocket] flask-socketio 未安装，文件助手 AI 面板不可用")
 
 # ================= 懒加载重型模块（启动优化） =================
 # google.genai (~4.7s), requests (~0.5s) 延迟到首次使用时加载
@@ -730,7 +759,7 @@ def get_client():
 
 # ── Token 监测模块（本地统计，无需额外连接 Google）─────────────────────────
 try:
-    from token_tracker import record_usage as _record_token_usage
+    from web.token_tracker import record_usage as _record_token_usage
 
     _TOKEN_TRACKER_ENABLED = True
 except ImportError:
@@ -1562,6 +1591,23 @@ if os.environ.get("KOTO_DEPLOY_MODE") == "cloud" and _cors_origins == "*":
     _cors_origins = os.environ.get("KOTO_SITE_URL", "*")
 CORS(app, origins=_cors_origins)
 
+# ── Flask-SocketIO 初始化（文件助手全双工通信）──
+socketio = None
+if _has_socketio and SocketIO is not None:
+    socketio = SocketIO(
+        app,
+        cors_allowed_origins=_cors_origins,
+        async_mode="threading",
+        logger=False,
+        engineio_logger=False,
+    )
+    try:
+        from app.core.socket_handler import register_socket_events
+        register_socket_events(socketio)
+        _app_logger.info("[WebSocket] Flask-SocketIO 初始化完成，文件助手 AI 通道就绪")
+    except Exception as _sio_err:
+        _app_logger.warning("[WebSocket] socket_handler 注册失败: %s", _sio_err)
+
 
 # ── Sentry error tracking (no-op if SENTRY_DSN not set) ──────────────────────
 _sentry_dsn = os.environ.get("SENTRY_DSN", "")
@@ -1997,6 +2043,7 @@ def _register_blueprints_deferred():
         ("web.blueprints.execution", "execution_bp", None, "Execution"),
         ("web.blueprints.file_editor", "file_editor_bp", None, "FileEditor"),
         ("web.blueprints.file_organize", "file_organize_bp", None, "FileOrganize"),
+        ("web.blueprints.editor_docs", "editor_docs_bp", None, "EditorDocs"),
         ("web.blueprints.dev", "dev_bp", None, "Dev"),
         ("web.blueprints.chat", "chat_bp", None, "Chat"),
     ]
@@ -16526,6 +16573,315 @@ def get_ppt_session(session_id):
 
 
 # ================= Setup & Initialization API =================
+
+
+@app.route("/api/setup/status", methods=["GET"])
+def get_setup_status():
+    """检查首次设置状态"""
+    config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
+    has_api_key = bool(API_KEY and len(API_KEY) > 10)
+    has_workspace = os.path.exists(WORKSPACE_DIR)
+
+    return jsonify(
+        {
+            "initialized": has_api_key and has_workspace,
+            "has_api_key": has_api_key,
+            "has_workspace": has_workspace,
+            "workspace_path": os.path.abspath(WORKSPACE_DIR),
+            "config_path": os.path.abspath(config_path),
+        }
+    )
+
+
+@app.route("/api/setup/apikey", methods=["POST"])
+def setup_api_key():
+    """设置 API Key"""
+    data = request.json
+    api_key = data.get("api_key", "").strip()
+
+    if not api_key or len(api_key) < 10:
+        return jsonify({"success": False, "error": "Invalid API key"})
+
+    config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
+    os.makedirs(os.path.dirname(config_path), exist_ok=True)
+
+    try:
+        # 写入配置文件（同时写入两个变量名，避免优先级错乱）
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(
+                f"# Koto Configuration\nGEMINI_API_KEY={api_key}\nAPI_KEY={api_key}\n"
+            )
+
+        # 更新环境变量
+        os.environ["GEMINI_API_KEY"] = api_key
+        os.environ["API_KEY"] = api_key
+        global API_KEY, client
+        API_KEY = api_key
+        client = create_client()
+
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/setup/activate", methods=["POST"])
+def activate_with_code():
+    """使用激活码激活 Koto（自动配置内置 API Key）"""
+    import hmac
+
+    data = request.json or {}
+    code = data.get("code", "").strip()
+
+    if not code:
+        return jsonify({"success": False, "error": "请输入激活码"})
+
+    # 验证激活码（大小写不敏感）
+    valid_code = "KotoAgent"
+    if not hmac.compare_digest(code.lower(), valid_code.lower()):
+        return jsonify({"success": False, "error": "激活码无效"})
+
+    # 读取内置 API Key
+    builtin_key_path = os.path.join(PROJECT_ROOT, "config", ".builtin_key")
+    if not os.path.exists(builtin_key_path):
+        return jsonify({"success": False, "error": "激活服务暂不可用"})
+
+    try:
+        with open(builtin_key_path, "r", encoding="utf-8") as f:
+            builtin_key = f.read().strip()
+
+        if not builtin_key or len(builtin_key) < 10:
+            return jsonify({"success": False, "error": "激活服务配置异常"})
+
+        # 写入配置文件
+        config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(
+                f"# Koto Configuration (activated)\n"
+                f"GEMINI_API_KEY={builtin_key}\n"
+                f"API_KEY={builtin_key}\n"
+            )
+
+        # 更新运行时状态
+        os.environ["GEMINI_API_KEY"] = builtin_key
+        os.environ["API_KEY"] = builtin_key
+        global API_KEY, client
+        API_KEY = builtin_key
+        client = create_client()
+
+        # 确保工作区目录存在
+        os.makedirs(WORKSPACE_DIR, exist_ok=True)
+        for sub in ("documents", "images", "code"):
+            os.makedirs(os.path.join(WORKSPACE_DIR, sub), exist_ok=True)
+
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/setup/workspace", methods=["POST"])
+def setup_workspace():
+    """设置工作区目录"""
+    data = request.json
+    workspace_path = data.get("path", "").strip()
+
+    if not workspace_path:
+        workspace_path = os.path.join(PROJECT_ROOT, "workspace")
+
+    try:
+        os.makedirs(workspace_path, exist_ok=True)
+        os.makedirs(os.path.join(workspace_path, "documents"), exist_ok=True)
+        os.makedirs(os.path.join(workspace_path, "images"), exist_ok=True)
+        os.makedirs(os.path.join(workspace_path, "code"), exist_ok=True)
+
+        # 更新设置
+        settings_manager.set("storage", "workspace_dir", workspace_path)
+
+        return jsonify({"success": True, "path": workspace_path})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/setup/test", methods=["GET"])
+def test_api_connection():
+    """测试 API 连接"""
+    try:
+        start = time.time()
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents="Say 'Koto is ready!' in one short sentence.",
+        )
+        latency = time.time() - start
+        return jsonify(
+            {"success": True, "message": response.text, "latency": round(latency, 2)}
+        )
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+
+@app.route("/api/diagnose", methods=["GET"])
+def diagnose_models():
+    """诊断所有模型的可用性"""
+    import threading
+
+    results = {
+        "proxy": {
+            "detected": get_detected_proxy(),
+            "force": FORCE_PROXY or None,
+            "custom_endpoint": GEMINI_API_BASE or None,
+        },
+        "models": {},
+    }
+
+    # 测试模型列表
+    test_models = [
+        ("gemini-2.0-flash-lite", "路由分类"),
+        ("gemini-3-flash-preview", "日常对话"),
+        ("gemini-3-pro-preview", "代码生成"),
+        ("gemini-2.5-flash", "联网搜索"),
+        ("gemini-3.1-flash-image-preview", "图像生成"),
+    ]
+
+    def test_model(model_id, purpose):
+        try:
+            start = time.time()
+            if "image-generation" in model_id or "imagen" in model_id:
+                # 图像模型只测试连通性
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents="test",
+                    config=types.GenerateContentConfig(max_output_tokens=10),
+                )
+            else:
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents="Reply with only: OK",
+                    config=types.GenerateContentConfig(max_output_tokens=10),
+                )
+            latency = time.time() - start
+            return {
+                "status": "✅ 可用",
+                "latency": round(latency, 2),
+                "purpose": purpose,
+            }
+        except Exception as e:
+            error_msg = str(e)
+            if "location is not supported" in error_msg:
+                status = "❌ 地区限制"
+            elif "not found" in error_msg.lower():
+                status = "❌ 模型不存在"
+            elif "quota" in error_msg.lower():
+                status = "⚠️ 配额耗尽"
+            elif "timeout" in error_msg.lower():
+                status = "⚠️ 超时"
+            else:
+                status = f"❌ 错误"
+            return {"status": status, "error": error_msg[:150], "purpose": purpose}
+
+    # 并行测试（带超时）
+    threads = []
+    for model_id, purpose in test_models:
+
+        def run_test(m=model_id, p=purpose):
+            results["models"][m] = test_model(m, p)
+
+        t = threading.Thread(target=run_test, daemon=True)
+        threads.append(t)
+        t.start()
+
+    # 等待所有线程完成（最多 15 秒）
+    for t in threads:
+        t.join(timeout=15)
+
+    # 检查是否所有模型都不可用
+    all_failed = all(
+        "❌" in results["models"].get(m, {}).get("status", "") for m, _ in test_models
+    )
+
+    if all_failed:
+        results["recommendation"] = (
+            "所有模型均不可用。建议：\n1. 检查代理配置是否正确\n2. 考虑使用 API 中转服务\n3. 在 gemini_config.env 中配置 GEMINI_API_BASE"
+        )
+
+    return jsonify(results)
+
+
+@app.route("/api/browse", methods=["GET"])
+def browse_folders():
+    import os
+
+    path = request.args.get("path", "C:\\")
+
+    try:
+        if not os.path.exists(path):
+            return jsonify({"error": "路径不存在", "folders": [], "parent": None})
+
+        if not os.path.isdir(path):
+            return jsonify({"error": "不是文件夹", "folders": [], "parent": None})
+
+        folders = []
+        try:
+            for item in os.listdir(path):
+                item_path = os.path.join(path, item)
+                if os.path.isdir(item_path):
+                    folders.append({"name": item, "path": item_path})
+        except PermissionError:
+            return jsonify({"error": "没有权限访问", "folders": [], "parent": None})
+
+        folders.sort(key=lambda x: x["name"].lower())
+
+        # Get parent path
+        parent = os.path.dirname(path)
+        if parent == path:  # Root drive
+            parent = None
+
+        return jsonify({"folders": folders, "parent": parent, "current": path})
+    except Exception as e:
+        return jsonify({"error": str(e), "folders": [], "parent": None})
+
+
+@app.route("/api/chat/interrupt", methods=["POST"])
+def interrupt_chat():
+    """中断当前对话生成"""
+    payload = request.json or {}
+    session_name = payload.get("session")
+    task_id = payload.get("task_id")
+    if not session_name:
+        return jsonify({"error": "Missing session"}), 400
+
+    # 使用新的中断管理器
+    _interrupt_manager.set_interrupt(session_name)
+    # 保持向后兼容
+    _interrupt_flags[session_name] = True
+
+    # 可选：如果前端传入 task_id，同步取消调度器任务（用于 DOC_ANNOTATE 等流式长任务）
+    if task_id:
+        try:
+            from task_scheduler import get_task_scheduler
+
+            get_task_scheduler().cancel_task(task_id)
+            _app_logger.debug(f"[INTERRUPT] Cancel task_id={task_id}")
+        except Exception as e:
+            _app_logger.debug(f"[INTERRUPT] cancel task failed: {e}")
+
+    # 同步中断标志到 AgentLoop（如果正在执行 Agent 任务）
+    # NOTE: Legacy agent_loop retired — interrupt handled by _interrupt_manager above
+    pass
+
+    return jsonify({"success": True, "message": "Chat interrupted"})
+
+
+@app.route("/api/chat/reset-interrupt", methods=["POST"])
+def reset_interrupt():
+    """重置中断标志"""
+    session_name = request.json.get("session")
+    if session_name:
+        # 使用新的中断管理器
+        _interrupt_manager.reset(session_name)
+        # 保持向后兼容
+        if session_name in _interrupt_flags:
+            del _interrupt_flags[session_name]
+    return jsonify({"success": True})
 
 
 # ================= 新功能 API 路由 =================

@@ -118,6 +118,43 @@ for font_name in ["fa-brands-400", "fa-regular-400", "fa-solid-900", "fa-v4compa
 print("\n== Tailwind CSS ==")
 dl(f"{JSDELIVR}/tailwindcss@3/dist/tailwind.min.css", "tailwindcss/tailwind.min.css")
 
+# ── React 18.3.1 (required by Univer) ───────────────────────────────────────
+print("\n== React 18 ==")
+REACT_CDN = "https://unpkg.com"
+dl(f"{REACT_CDN}/react@18.3.1/umd/react.production.min.js",     "react/react.production.min.js")
+dl(f"{REACT_CDN}/react-dom@18.3.1/umd/react-dom.production.min.js", "react/react-dom.production.min.js")
+
+# ── RxJS 7 (required by Univer) ─────────────────────────────────────────────
+print("\n== RxJS ==")
+dl(f"{REACT_CDN}/rxjs/dist/bundles/rxjs.umd.min.js", "rxjs/rxjs.umd.min.js")
+
+# ── Univer (Canvas document + spreadsheet editor) ────────────────────────────
+# NOTE: Univer packages are on unpkg; jsDelivr does not carry all of them.
+print("\n== Univer ==")
+UNIVER_VER = "0.5.4"  # latest stable UMD-compatible release
+UNIVER = f"{REACT_CDN}/@univerjs"
+# Core presets bundle
+dl(f"{UNIVER}/presets@{UNIVER_VER}/lib/umd/index.js",                       "univer/presets.umd.js")
+# Docs preset + locale + CSS
+dl(f"{UNIVER}/preset-docs-core@{UNIVER_VER}/lib/umd/index.js",              "univer/preset-docs-core.umd.js")
+dl(f"{UNIVER}/preset-docs-core@{UNIVER_VER}/lib/umd/locales/zh-CN.js",       "univer/preset-docs-core-zh-CN.js")
+dl(f"{UNIVER}/preset-docs-core@{UNIVER_VER}/lib/index.css",                  "univer/preset-docs-core.css")
+# Sheets preset + locale + CSS
+dl(f"{UNIVER}/preset-sheets-core@{UNIVER_VER}/lib/umd/index.js",            "univer/preset-sheets-core.umd.js")
+dl(f"{UNIVER}/preset-sheets-core@{UNIVER_VER}/lib/umd/locales/zh-CN.js",     "univer/preset-sheets-core-zh-CN.js")
+dl(f"{UNIVER}/preset-sheets-core@{UNIVER_VER}/lib/index.css",                "univer/preset-sheets-core.css")
+
+# ── PDF.js 4.x (in-browser PDF rendering) ───────────────────────────────────
+print("\n== PDF.js ==")
+PDFJS_VER = "4.10.38"
+PDFJS = f"{REACT_CDN}/pdfjs-dist@{PDFJS_VER}/build"
+dl(f"{PDFJS}/pdf.min.mjs",        "pdfjs/pdf.min.mjs")
+dl(f"{PDFJS}/pdf.worker.min.mjs", "pdfjs/pdf.worker.min.mjs")
+# ── Floating UI DOM ─────────────────────────────────────────────────────────
+print("\n== Floating UI ==")
+FUI = f"{JSDELIVR}/@floating-ui"
+dl(f"{FUI}/core@1.6.9/dist/floating-ui.core.umd.min.js",   "floating-ui/floating-ui.core.umd.min.js")
+dl(f"{FUI}/dom@1.6.13/dist/floating-ui.dom.umd.min.js",   "floating-ui/floating-ui.dom.umd.min.js")
 
 # ── 汇总 ────────────────────────────────────────────────────────────────────
 total_kb = sum(f.stat().st_size for f in VENDOR.rglob("*") if f.is_file()) // 1024
