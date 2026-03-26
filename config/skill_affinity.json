@@ -1,0 +1,17 @@
+{
+  "annotate_academic": {
+    "activations": 1,
+    "last_used": "2026-03-26T22:17:51.922516",
+    "decay_score": 0.0
+  },
+  "step_by_step": {
+    "activations": 1,
+    "last_used": "2026-03-26T22:17:55.751887",
+    "decay_score": 0.0
+  },
+  "strict_mode": {
+    "activations": 1,
+    "last_used": "2026-03-26T22:17:57.014681",
+    "decay_score": 0.0
+  }
+}

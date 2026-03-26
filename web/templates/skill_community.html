@@ -1,170 +1,149 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Skill 社区 — Koto</title>
-  <link rel="stylesheet" href="/static/css/skill_community.css?v=20260322v6">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Skill 社区 - Koto</title>
+<link rel="stylesheet" href="/static/css/skill_community.css?v=20260326v6">
 </head>
 <body>
 <div class="sc-page">
 
-  <!-- ════════════ Navigation ════════════ -->
   <nav class="sc-nav">
-    <div class="sc-nav-brand">
-      <span class="brand-logo">言</span>
-      <span class="brand-name">Koto</span>
-      <span class="sc-nav-separator">/</span>
-      <span class="brand-section">Skill 社区</span>
+    <div class="sc-brand">
+      <span class="sc-logo">言</span>
+      <span class="sc-title">Koto</span>
+      <span class="sc-sep">/</span>
+      <span class="sc-subtitle">Skill 社区</span>
     </div>
-
-    <div class="sc-nav-search">
-      <span class="search-icon">🔍</span>
-      <input id="sc-search-input" type="text"
-        placeholder="搜索技能名称、描述、标签…"
-        autocomplete="off" spellcheck="false">
+    <div class="sc-search-box">
+      <span class="sc-search-icon">🔍</span>
+      <input id="sc-search" type="text" placeholder="搜索技能…" autocomplete="off" spellcheck="false">
+      <button id="sc-search-clear" class="sc-search-clear" title="清除">✕</button>
     </div>
-
-    <div class="sc-nav-actions">
-      <a href="/skill-marketplace" class="btn btn-secondary btn-sm">📦 我的技能库</a>
-      <a href="/" class="btn btn-secondary btn-sm">← 返回主界面</a>
+    <div class="sc-nav-links">
+      <a href="/skill-marketplace" class="sc-link-btn">📦 我的技能库</a>
+      <a href="/" class="sc-link-btn">← 返回</a>
     </div>
   </nav>
 
-  <!-- ════════════ Hero ════════════ -->
-  <section class="sc-hero">
-    <div class="sc-hero-inner">
-      <div class="sc-hero-badge">Koto Skill 社区精选</div>
-      <h1 class="sc-hero-title">高质量 Skills，由社区精心筛选</h1>
-      <p class="sc-hero-subtitle">
-        汇聚 Prompt 工程、认知科学、顶级咨询与创作实践的精选 Skills。
-        每一个都经过验证——安装后即可在所有对话中使用。
-      </p>
-      <div class="sc-hero-future-note">
-        🚀 <strong>即将上线：</strong>社区定期更新，未来支持在线热更新
+  <div class="sc-body">
+    <aside class="sc-sidebar">
+      <div class="sc-stats">
+        <div class="sc-stat"><span class="sc-stat-num" id="stat-total">-</span><span class="sc-stat-label">精选技能</span></div>
+        <div class="sc-stat"><span class="sc-stat-num" id="stat-installed">-</span><span class="sc-stat-label">已安装</span></div>
       </div>
-      <div class="sc-hero-stats">
-        <div class="sc-hero-stat">
-          <span class="sc-hero-stat-value" id="hero-stat-total">—</span>
-          <span class="sc-hero-stat-label">精选技能</span>
-        </div>
-        <div class="sc-hero-stat">
-          <span class="sc-hero-stat-value" id="hero-stat-cats">—</span>
-          <span class="sc-hero-stat-label">技能分类</span>
-        </div>
-        <div class="sc-hero-stat">
-          <span class="sc-hero-stat-value" id="hero-stat-installed">—</span>
-          <span class="sc-hero-stat-label">已安装</span>
-        </div>
-      </div>
-    </div>
-  </section>
 
-  <!-- ════════════ AI Recommendation ════════════ -->
-  <div style="max-width:1200px;margin:0 auto 24px;padding:0 32px;">
-    <div style="background:var(--bg-elevated,#111a2a);border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:12px;padding:24px;">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-        <span style="font-size:22px;">✨</span>
-        <h3 style="margin:0;font-size:16px;font-weight:600;color:#e8eefc;">AI 开源技能助手</h3>
-        <span style="font-size:12px;background:rgba(76,166,255,0.15);color:#4ca6ff;padding:2px 8px;border-radius:4px;">包含 Awesome Prompts 150+ 热门技能</span>
+      <div class="sc-section">
+        <div class="sc-section-title">分类</div>
+        <div id="sc-cat-list" class="sc-cat-list"></div>
       </div>
-      <p style="color:var(--text-muted,#6c7a91);font-size:13px;margin-bottom:20px;line-height:1.5;">
-        找不到想要的技能？告诉 AI 你当前面临的工作或任务，它将从开源社区中寻找最匹配的高质量预设，并帮你一键下载。
-      </p>
-      <div style="display:flex;gap:12px;">
-        <input type="text" id="aiRecommendInput"
-          style="flex:1;padding:12px 16px;background:rgba(255,255,255,0.03);border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:8px;color:#fff;font-size:14px;outline:none;"
-          placeholder="例如：我需要一个能够扮演外企 HR 帮我练习英语面试的技能..."
-          onkeydown="if(event.key==='Enter') document.getElementById('aiRecommendBtn').click()">
-        <button id="aiRecommendBtn"
-          style="padding:0 24px;background:#2ad489;color:#111a2a;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;"
-          onclick="scAiRecommend()">✨ 智能推荐</button>
+
+      <div class="sc-section">
+        <div class="sc-section-title">排序</div>
+        <div id="sc-sort-list" class="sc-sort-list">
+          <button class="sc-sort-btn active" data-sort="default">默认</button>
+          <button class="sc-sort-btn" data-sort="name">名称 A→Z</button>
+          <button class="sc-sort-btn" data-sort="installed">已安装优先</button>
+        </div>
       </div>
-      <div id="aiRecommendLoading" style="display:none;color:#4ca6ff;font-size:13px;margin-top:16px;animation:pulse 1.5s infinite;">
-        💡 AI 正在前往开源社区检索最匹配的 Skills，请稍候...
+
+
+    </aside>
+
+    <main class="sc-main">
+
+      <!-- ✨ AI 推荐 — 核心功能区 -->
+      <div class="sc-ai-panel">
+        <div class="sc-ai-panel-hd">
+          <span class="sc-ai-panel-icon">✨</span>
+          <div class="sc-ai-panel-title-wrap">
+            <span class="sc-ai-panel-title">AI 智能推荐</span>
+            <span class="sc-ai-panel-sub">描述你的需求，从 <strong>~500 个</strong>开源技能中精准匹配 &amp; 一键装入 Koto</span>
+          </div>
+        </div>
+        <div class="sc-ai-panel-body">
+          <textarea id="sc-ai-input" class="sc-ai-panel-textarea" placeholder="例：帮我写代码 review / 做产品分析 / 翻译英文论文…" rows="2"></textarea>
+          <div class="sc-ai-panel-foot">
+            <button id="sc-ai-btn" class="sc-ai-panel-btn">✨ 智能推荐</button>
+            <span id="sc-ai-loading" class="sc-ai-loading" style="display:none">💡 AI 检索中…</span>
+          </div>
+        </div>
       </div>
-      <style>@keyframes pulse{0%{opacity:.6}50%{opacity:1}100%{opacity:.6}}</style>
-      <div id="aiRecommendResults" style="display:none;margin-top:24px;padding-top:24px;border-top:1px dashed var(--border,rgba(255,255,255,0.08));">
-        <div style="font-size:14px;font-weight:600;margin-bottom:16px;color:var(--text-muted,#6c7a91);">检索结果：</div>
-        <div class="sc-grid" id="aiRecommendGrid"></div>
+
+      <div class="sc-toolbar">
+        <span id="sc-count" class="sc-count">加载中…</span>
+        <div class="sc-view-btns">
+          <button id="sc-view-grid" class="sc-view-btn active" title="网格">⊞</button>
+          <button id="sc-view-list" class="sc-view-btn" title="列表">☰</button>
+        </div>
       </div>
-    </div>
+
+      <div id="sc-ai-results" class="sc-ai-results" style="display:none">
+        <div class="sc-ai-results-hdr">
+          <span>✨ AI 推荐结果</span>
+          <button id="sc-ai-close" class="sc-close-btn">✕ 关闭</button>
+        </div>
+        <div id="sc-ai-grid" class="sc-grid"></div>
+        <hr class="sc-divider">
+      </div>
+
+      <div id="sc-grid" class="sc-grid"></div>
+    </main>
   </div>
-
-  <!-- ════════════ Filter Bar ════════════ -->
-  <div class="sc-filter-bar" id="sc-filter-bar">
-    <select id="sc-sort-select" class="sc-filter-sort">
-      <option value="default">默认排序</option>
-      <option value="name">按名称</option>
-      <option value="installed">已安装优先</option>
-    </select>
-  </div>
-
-  <!-- ════════════ Main Content ════════════ -->
-  <main class="sc-main">
-    <div class="sc-section-header">
-      <span class="sc-section-title">精选 Skills</span>
-      <span class="sc-results-count" id="sc-results-count">加载中…</span>
-    </div>
-    <div class="sc-grid" id="sc-grid"></div>
-  </main>
-
 </div>
 
-<!-- ════════════ Detail Modal ════════════ -->
-<div class="sc-modal-overlay" id="sc-modal-overlay">
-  <div class="sc-modal" role="dialog" aria-modal="true">
-    <div class="sc-modal-header">
-      <div class="sc-modal-icon" id="modal-icon">🔧</div>
-      <div class="sc-modal-title-block">
-        <div class="sc-modal-name" id="modal-name">
-          技能名称
-          <span class="sc-installed-badge" id="modal-installed-badge" style="display:none">✓ 已安装</span>
+<!-- Detail Modal -->
+<div class="sc-overlay" id="sc-overlay">
+  <div class="sc-modal">
+    <div class="sc-modal-head">
+      <div class="sc-modal-icon" id="m-icon">🤖</div>
+      <div class="sc-modal-info">
+        <div class="sc-modal-name">
+          <span id="m-name">技能名</span>
+          <span class="sc-badge-ok" id="m-badge" style="display:none">✓ 已安装</span>
         </div>
-        <div class="sc-modal-meta" id="modal-meta"></div>
+        <div class="sc-modal-meta" id="m-meta"></div>
       </div>
-      <button class="sc-modal-close" id="sc-modal-close" title="关闭">✕</button>
+      <button class="sc-modal-x" id="m-close">✕</button>
     </div>
-    <div class="sc-modal-body">
-      <div>
-        <div class="sc-modal-section-title">技能描述</div>
-        <p class="sc-modal-desc" id="modal-desc"></p>
-        <p class="sc-modal-desc" id="modal-source" style="margin-top: 8px;"></p>
-      </div>
-      <div>
-        <div class="sc-modal-section-title">适用场景</div>
-        <div class="sc-use-cases" id="modal-use-cases"></div>
-      </div>
-      <div style="display:flex;align-items:center;gap:20px">
+    <div class="sc-modal-content">
+      <p class="sc-modal-desc" id="m-desc"></p>
+      <p class="sc-modal-src" id="m-src"></p>
+      <div class="sc-modal-row">
         <div>
-          <div class="sc-modal-section-title">难度</div>
-          <span class="sc-difficulty" id="modal-difficulty" style="font-size:13px"></span>
+          <div class="sc-label">适用场景</div>
+          <div class="sc-chips" id="m-cases"></div>
+        </div>
+        <div>
+          <div class="sc-label">难度</div>
+          <span class="sc-diff" id="m-diff"></span>
         </div>
       </div>
       <div>
-        <div class="sc-modal-section-title">标签</div>
-        <div class="sc-modal-tags" id="modal-tags"></div>
+        <div class="sc-label">标签</div>
+        <div class="sc-modal-tags" id="m-tags"></div>
       </div>
       <div>
-        <div class="sc-modal-section-title sc-prompt-toggle" id="prompt-toggle" onclick="togglePromptPreview()" style="cursor:pointer;display:flex;align-items:center;justify-content:space-between;">
+        <div class="sc-label sc-prompt-hdr" id="m-prompt-hdr">
           <span>Prompt 预览</span>
-          <span class="sc-prompt-toggle-icon">▼</span>
+          <span class="sc-chevron" id="m-chevron">▼</span>
         </div>
-        <div style="overflow:hidden;max-height:200px;transition:max-height 0.3s ease">
-          <pre class="sc-modal-prompt-block" id="modal-prompt-content" style="margin-top:8px"></pre>
+        <div class="sc-prompt-body" id="m-prompt-body">
+          <pre class="sc-prompt-pre" id="m-prompt"></pre>
         </div>
       </div>
     </div>
-    <div class="sc-modal-footer">
-      <button class="btn btn-primary btn-lg" id="modal-install-btn">⬇️ 安装到 Koto</button>
-      <span style="font-size:12px;color:var(--text-muted);margin-left:8px">安装后在「技能市场」中启用即可使用</span>
+    <div class="sc-modal-foot">
+      <button class="sc-btn sc-btn-install" id="m-install">⬇️ 安装到 Koto</button>
+      <button class="sc-btn sc-btn-danger" id="m-uninstall" style="display:none">🗑️ 卸载</button>
+      <span class="sc-modal-tip">安装后在「技能市场」中启用即可使用</span>
     </div>
   </div>
 </div>
 
-<!-- Toast -->
-<div class="sc-toast-container" id="sc-toast-container"></div>
+<div class="sc-toasts" id="sc-toasts"></div>
 
-<script src="/static/js/skill_community.js?v=20260322v6"></script>
+<script src="/static/js/skill_community.js?v=20260326v4"></script>
 </body>
 </html>

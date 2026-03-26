@@ -115,11 +115,28 @@ class OpenAIProvider(LLMProvider):
         for attempt in range(self.MAX_RETRIES):
             try:
                 if stream:
+                    # 只在官方 OpenAI 下安全包含 include_usage
+                    # 以防第三方兼容 API (如 ollama, deepseek) 报错 "Unknown parameter"
+                    if "api.openai.com" in str(self.client.base_url):
+                        call_kwargs["stream_options"] = {"include_usage": True}
+                    elif "stream_options" in call_kwargs:
+                        del call_kwargs["stream_options"]
+
                     return self._stream_generator(
-                        self.client.chat.completions.create(**call_kwargs)
+                        self.client.chat.completions.create(**call_kwargs),
+                        model=model,
+                        skill_id=kwargs.get("skill_id"),
+                        session_id=kwargs.get("session_id"),
                     )
                 resp = self.client.chat.completions.create(**call_kwargs)
-                return self._format_response(resp)
+                result = self._format_response(resp)
+                self._track_usage(
+                    model,
+                    result.get("usage"),
+                    skill_id=kwargs.get("skill_id"),
+                    session_id=kwargs.get("session_id"),
+                )
+                return result
             except Exception as exc:
                 retryable = _openai_available and isinstance(
                     exc, (APIStatusError, APITimeoutError, APIConnectionError)
@@ -279,10 +296,23 @@ class OpenAIProvider(LLMProvider):
         return {"content": content, "tool_calls": tool_calls, "usage": usage}
 
     def _stream_generator(
-        self, stream_resp: Any
+        self,
+        stream_resp: Any,
+        model: str,
+        skill_id: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> Generator[Dict[str, Any], None, None]:
         accumulated = ""
         for chunk in stream_resp:
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                self._track_usage(
+                    model,
+                    usage,
+                    skill_id=skill_id,
+                    session_id=session_id,
+                )
+            
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta is None:
                 continue
@@ -291,6 +321,6 @@ class OpenAIProvider(LLMProvider):
             yield {
                 "content": accumulated,
                 "tool_calls": [],
-                "usage": {},
+                "usage": usage.model_dump() if usage else {},
                 "delta": piece,
             }

@@ -159,6 +159,12 @@ class TestToggle:
             json={"enabled": True},
         )
         assert resp.status_code in (200, 201, 204)
+        # Restore state so this test does not leave concise_mode enabled in the
+        # real user_settings.json after the session.
+        market_client.post(
+            "/api/skillmarket/toggle/concise_mode",
+            json={"enabled": False},
+        )
 
 
 # ---------------------------------------------------------------------------

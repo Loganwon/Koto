@@ -2,6 +2,7 @@
 """Unit tests for app.core.llm.base.LLMProvider abstract interface."""
 
 import logging
+from unittest.mock import patch
 
 import pytest
 
@@ -149,3 +150,39 @@ class TestLLMProviderLogging:
         assert (
             warnings == []
         ), f"Unexpected warnings in _log_request: {[r.message for r in warnings]}"
+
+
+@pytest.mark.unit
+class TestLLMProviderUsageTracking:
+    def test_normalize_usage_accepts_dict_and_sdk_field_names(self):
+        provider = _make_provider()
+
+        usage = provider._normalize_usage(
+            {
+                "usage_metadata": {
+                    "prompt_token_count": 12,
+                    "candidates_token_count": 34,
+                }
+            }
+        )
+
+        assert usage == {"prompt_tokens": 12, "completion_tokens": 34}
+
+    def test_track_usage_calls_record_usage_with_skill(self):
+        provider = _make_provider()
+
+        with patch("web.token_tracker.record_usage_with_skill") as mock_record:
+            provider._track_usage(
+                "gemini-2.5-flash",
+                {"prompt_tokens": 5, "completion_tokens": 7},
+                skill_id="translator",
+                session_id="sess-1",
+            )
+
+        mock_record.assert_called_once_with(
+            model="gemini-2.5-flash",
+            prompt_tokens=5,
+            completion_tokens=7,
+            skill_id="translator",
+            session_id="sess-1",
+        )

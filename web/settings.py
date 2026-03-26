@@ -78,43 +78,59 @@ class SettingsManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._load_settings()
-            atexit.register(cls._instance.flush)
         return cls._instance
 
-    def _schedule_flush(self):
-        """Cancel any pending timer and schedule a new flush in _FLUSH_DELAY seconds."""
-        if self._flush_timer is not None:
-            self._flush_timer.cancel()
-        self._flush_timer = threading.Timer(self._FLUSH_DELAY, self.flush)
-        self._flush_timer.daemon = True
-        self._flush_timer.start()
-
     def flush(self):
-        """Write to disk now if dirty, then clear the dirty flag."""
-        with self._lock:
-            if not self._dirty:
-                return True
-            self._dirty = False
+        """Write to disk now (kept for backwards compatibility)."""
         return self._save_settings()
 
     def _load_settings(self):
         """加载设置"""
+        import copy
         if os.path.exists(SETTINGS_FILE):
             try:
                 with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
-                    self._settings = json.load(f)
+                    raw = json.load(f)
                 # 合并默认设置（处理新增的设置项）
-                self._settings = self._merge_settings(DEFAULT_SETTINGS, self._settings)
+                self._settings = self._merge_settings(DEFAULT_SETTINGS, raw)
+                # 如果文件缺少新增的默认键（如版本升级后添加的 ai 子项），
+                # 立即将完整合并结果写回磁盘，确保文件始终包含所有默认项。
+                if self._has_missing_defaults(raw):
+                    self._save_settings()
             except Exception as e:
                 logger.info(f"加载设置失败: {e}")
-                self._settings = DEFAULT_SETTINGS.copy()
+                self._settings = copy.deepcopy(DEFAULT_SETTINGS)
         else:
-            self._settings = DEFAULT_SETTINGS.copy()
+            self._settings = copy.deepcopy(DEFAULT_SETTINGS)
             self._save_settings()
+
+        # 规范化存储路径：空字符串回退默认值
+        self._normalize_storage()
+
+    def _has_missing_defaults(self, raw: dict) -> bool:
+        """检查 raw 是否缺少当前 DEFAULT_SETTINGS 中的任意键（递归）"""
+        def _missing(default: dict, current: dict) -> bool:
+            for k, v in default.items():
+                if k not in current:
+                    return True
+                if isinstance(v, dict) and isinstance(current.get(k), dict):
+                    if _missing(v, current[k]):
+                        return True
+            return False
+        return _missing(DEFAULT_SETTINGS, raw)
+
+    def _normalize_storage(self):
+        """将空存储路径重置为默认值，避免路径丢失导致的查找失败。"""
+        storage = self._settings.get("storage", {})
+        for key, default_value in DEFAULT_SETTINGS.get("storage", {}).items():
+            if not storage.get(key) or (isinstance(storage.get(key), str) and not storage.get(key).strip()):
+                storage[key] = default_value
+        self._settings["storage"] = storage
 
     def _merge_settings(self, default, current):
         """合并设置，保留用户设置，添加新的默认项，同时保留非默认键"""
-        result = default.copy()
+        import copy
+        result = copy.deepcopy(default)
         for key, value in current.items():
             if (
                 key in result
@@ -124,7 +140,10 @@ class SettingsManager:
                 result[key] = self._merge_settings(result[key], value)
             else:
                 # 保留所有用户已保存的键值，包括不在默认设置中的新增项
-                result[key] = value
+                if isinstance(value, dict) and key not in result:
+                    result[key] = copy.deepcopy(value)
+                else:
+                    result[key] = value
         return result
 
     # SkillManager 独立管理 "skills" 键，SettingsManager 写入时不得覆盖
@@ -158,40 +177,64 @@ class SettingsManager:
         if category in self._settings:
             if key is None:
                 return self._settings[category]
-            return self._settings[category].get(key)
+            value = self._settings[category].get(key)
+            # 存储路径为空时自动回退默认值，避免路径缺失导致的寻路/查找失败
+            if (
+                category == "storage"
+                and key in DEFAULT_SETTINGS.get("storage", {})
+                and isinstance(value, str)
+                and not value.strip()
+            ):
+                return DEFAULT_SETTINGS["storage"].get(key)
+            return value
         return None
 
     def set(self, category, key, value):
-        """设置单个值 — marks dirty and schedules a batched flush."""
+        """设置单个值 — immediately flushes to disk."""
         if category not in self._settings:
             self._settings[category] = {}
+
+        # 如果用户将存储路径置空，则回退默认值，避免后续文件查找失败
+        if (
+            category == "storage"
+            and key in DEFAULT_SETTINGS.get("storage", {})
+            and isinstance(value, str)
+            and not value.strip()
+        ):
+            value = DEFAULT_SETTINGS["storage"].get(key)
+
         self._settings[category][key] = value
-        with self._lock:
-            self._dirty = True
-        self._schedule_flush()
-        return True
+        self._normalize_storage()
+        return self._save_settings()
 
     def update(self, category, values):
-        """更新一个分类的多个值 — marks dirty and schedules a batched flush."""
+        """更新一个分类的多个值 — immediately flushes to disk."""
         if category not in self._settings:
             self._settings[category] = {}
+
+        # 处理 storage 目录值为空的情况，回退默认路径
+        if category == "storage":
+            for k, v in values.items():
+                if k in DEFAULT_SETTINGS.get("storage", {}) and isinstance(v, str) and not v.strip():
+                    values[k] = DEFAULT_SETTINGS["storage"].get(k)
+
         self._settings[category].update(values)
-        with self._lock:
-            self._dirty = True
-        self._schedule_flush()
-        return True
+        self._normalize_storage()
+        return self._save_settings()
 
     def get_all(self):
         """获取所有设置"""
-        return self._settings.copy()
+        import copy
+        return copy.deepcopy(self._settings)
 
     def reset(self, category=None):
         """重置设置"""
+        import copy
         if category:
             if category in DEFAULT_SETTINGS:
-                self._settings[category] = DEFAULT_SETTINGS[category].copy()
+                self._settings[category] = copy.deepcopy(DEFAULT_SETTINGS[category])
         else:
-            self._settings = DEFAULT_SETTINGS.copy()
+            self._settings = copy.deepcopy(DEFAULT_SETTINGS)
         return self._save_settings()
 
     def ensure_directories(self):

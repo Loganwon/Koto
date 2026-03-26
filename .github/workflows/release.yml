@@ -346,13 +346,21 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update VERSION file and commit
+      - name: Update VERSION file and website fallback version, then commit
         run: |
           VERSION="${{ github.ref_name }}"
           VERSION="${VERSION#v}"
           echo "$VERSION" > VERSION
+
+          # Update fallback version strings in docs/index.html so even without
+          # the GitHub API fetch the latest version is displayed.
+          if [ -f docs/index.html ]; then
+            sed -i -E 's|(<span id="version-text">)v[0-9]+\.[0-9]+\.[0-9]+|\\1v'"$VERSION"'|' docs/index.html
+            sed -i -E 's|(© 2026 Koto · )v[0-9]+\.[0-9]+\.[0-9]+|\\1v'"$VERSION"'|' docs/index.html
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add VERSION
+          git add VERSION docs/index.html
           git diff --cached --quiet || git commit -m "chore: sync VERSION to $VERSION [skip ci]"
           git push origin main

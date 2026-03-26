@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koto (言) — 属于你的 AI 桌面工作台</title>
-    <meta name="description" content="Koto 是一款本地运行的 AI 助手，内置 Skill Marketplace，支持文档处理、PPT 生成、知识图谱、语音交互等强大功能。">
+    <title>Koto (言) — 本地 + 云端 AI 工作台</title>
+    <meta name="description" content="Koto 是一款本地 + 云端混合运行的 AI 工作台，内置 Skill Marketplace，支持文档处理、PPT 生成、知识图谱、语音交互等 51+ 技能。数据默认本地存储，云端能力按需开启。">
     <style>
             :root {
             --bg-primary: #05080f;
@@ -476,13 +476,13 @@
         <div class="hero-inner">
             <div class="hero-badge fade-up" id="hero-version-badge">
                 <span class="dot"></span>
-                v1.6.1 · 开源 · Python · 本地运行
+                <span id="version-text">v1.6.5</span> · 开源 · Python · 本地 + 云端
             </div>
             <h1 class="hero-title fade-up fade-up-1">
-                属于你的<br><span class="accent">AI 桌面工作台</span>
+                属于你的<br><span class="accent">AI 工作台</span>
             </h1>
             <p class="hero-desc fade-up fade-up-2">
-                Koto 运行在你的电脑上。Skill Marketplace 让 AI 能力无限扩展——从写作到代码，从分析到翻译，按需启用，完全本地，数据永远属于你。
+                本地部署，云端增强。51+ Skill 按需启用——写作、代码、分析、翻译、PPT 生成，数据默认存储在你的电脑上，云端能力一键开启。
             </p>
             <div class="hero-actions fade-up fade-up-3">
                 <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-hero" class="btn btn-primary btn-lg" target="_blank" rel="noopener">
@@ -493,10 +493,10 @@
                 </a>
             </div>
             <div class="hero-meta fade-up fade-up-4">
-                <span>🔒 完全本地运行</span>
+                <span>🔒 数据本地存储</span>
+                <span>☁️ 云端按需开启</span>
                 <span>🧩 51+ 技能</span>
                 <span>🤖 Gemini + Ollama</span>
-                <span>📦 快速部署</span>
             </div>
         </div>
     </section>
@@ -508,7 +508,7 @@
                 <div>
                     <div class="section-label">🧩 Skill Marketplace</div>
                     <h2 class="section-title">像应用商店一样<br>扩展 AI 能力</h2>
-                    <p class="section-desc">内置 51+ 精选技能，覆盖写作、代码、分析、翻译等场景。一键启用，即插即用，也可自定义创建属于你的专属技能。</p>
+                    <p class="section-desc">内置 51+ 精选技能，覆盖写作、代码、分析、翻译等场景。本地离线可用，联网解锁更多。一键启用，即插即用，也支持自定义创建专属技能。</p>
                     <div class="marketplace-cats">
                         <span class="cat-pill active">全部</span>
                         <span class="cat-pill">✍️ 写作润色</span>
@@ -599,7 +599,7 @@
 
             <div class="marketplace-cta">
                 <h3>探索更多技能</h3>
-                <p>51 个精选技能持续更新，涵盖职场、学术、创意、生活各场景，找到最适合你的 AI 工作方式。</p>
+                <p>51+ 精选技能持续更新，涵盖职场、学术、创意、生活各场景。本地运行，联网增强，找到最适合你的 AI 工作方式。</p>
                 <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
                     <a href="#download" class="btn btn-primary">下载体验</a>
                     <a href="https://github.com/Loganwon/Koto" class="btn btn-ghost" target="_blank" rel="noopener">查看源码</a>
@@ -624,13 +624,13 @@
             <div style="text-align:center;margin-bottom:64px;">
                 <div class="section-label" style="display:inline-flex;">⚡ 核心能力</div>
                 <h2 class="section-title" style="text-align:center;">不止于对话</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;">从文档到 PPT，从知识图谱到语音交互，Koto 是一个完整的 AI 工作站</p>
+                <p class="section-desc" style="margin:0 auto;text-align:center;">从文档到 PPT，从知识图谱到语音交互——本地处理确保隐私，云端加速提升效率</p>
             </div>
             <div class="features-grid">
                 <div class="feature-card">
                     <div class="feature-icon">💬</div>
                     <h3>多模型智能对话</h3>
-                    <p>Gemini 多模态 + Ollama 本地模型自由切换，多轮记忆，8 种界面主题，流式实时响应。</p>
+                    <p>Gemini 云端多模态 + Ollama 本地模型自由切换，多轮记忆，8 种界面主题，流式实时响应。</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">📄</div>
@@ -654,8 +654,8 @@
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">🔒</div>
-                    <h3>安全 · 私有 · 离线</h3>
-                    <p>所有数据存储在本地，支持完全离线运行。用户认证 + 请求限流，企业级安全保障。</p>
+                    <h3>安全 · 私有 · 灵活</h3>
+                    <p>数据默认本地存储，支持完全离线运行；也可开启云端功能加速处理。用户认证 + 请求限流，企业级安全保障。</p>
                 </div>
             </div>
         </div>
@@ -666,7 +666,7 @@
         <div class="activation-inner">
             <div class="section-label">� 开始使用</div>
             <h2 class="section-title">三步开始使用 Koto</h2>
-            <p class="section-desc">填入自己的 Google Gemini API Key 即可免费使用，也可申请激活码解锁云端高级功能。</p>
+            <p class="section-desc">用自己的 Gemini API Key 免费使用，或申请激活码解锁云端高级能力——两种模式自由切换。</p>
 
             <div class="steps-row">
                 <div class="step-card">
@@ -720,13 +720,13 @@
             <div class="download-left">
                 <div class="section-label">⬇ 下载</div>
                 <h2>立即下载<br>开始体验</h2>
-                <p>下载最新 Release，解压即可运行。无需配置 Python 环境，内置所有依赖。</p>
+                <p>下载最新 Release，解压即可运行。本地开箱即用，联网即享云端增强，无需配置 Python 环境。</p>
                 <div class="download-actions">
                     <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-main" class="download-btn" target="_blank" rel="noopener">
                         <div class="dl-icon">🪟</div>
                         <div class="dl-text">
                             <strong>Windows 便携版</strong>
-                            <span>Latest Release · 64-bit · 免安装</span>
+                            <span id="dl-subtitle">Latest Release · 64-bit · 免安装</span>
                         </div>
                         <div class="dl-arrow">↗</div>
                     </a>
@@ -776,7 +776,7 @@
                 <a href="#marketplace">技能市场</a>
                 <a href="#activation">使用指南</a>
             </div>
-            <div class="footer-copy" id="footer-version">© 2026 Koto · v1.6.1</div>
+            <div class="footer-copy" id="footer-version">© 2026 Koto · v1.6.5</div>
         </div>
     </footer>
 
@@ -785,30 +785,51 @@
         (function () {
             var REPO = 'Loganwon/Koto';
             var BTN_IDS = ['btn-download-hero', 'btn-download-main'];
-            fetch('https://api.github.com/repos/' + REPO + '/releases/latest')
-                .then(function(r) { return r.json(); })
+            fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
+                cache: 'no-store',
+                headers: { 'Accept': 'application/vnd.github.v3+json' }
+            })
+                .then(function(r) {
+                    if (!r.ok) throw new Error(r.status);
+                    return r.json();
+                })
                 .then(function(data) {
                     if (!data || !data.tag_name) return;
-                    var ver = data.tag_name;
-                    var asset = (data.assets || []).find(function(a) {
+                    var ver = data.tag_name.replace(/^v/i, '');
+                    var displayVer = 'v' + ver;
+                    var assets = data.assets || [];
+
+                    /* Pick best download asset: prefer Setup.exe > any .exe > .zip */
+                    var asset = assets.find(function(a) {
+                        return /setup.*\.exe$/i.test(a.name);
+                    }) || assets.find(function(a) {
                         return a.name.endsWith('.exe');
+                    }) || assets.find(function(a) {
+                        return a.name.endsWith('.zip');
                     });
+
                     if (asset) {
                         BTN_IDS.forEach(function(id) {
                             var el = document.getElementById(id);
                             if (el) el.href = asset.browser_download_url;
                         });
+                        /* Update download subtitle with real version */
+                        var dlSub = document.getElementById('dl-subtitle');
+                        if (dlSub) dlSub.textContent = displayVer + ' \u00b7 64-bit \u00b7 \u514d\u5b89\u88c5';
                     }
-                    var badge = document.getElementById('hero-version-badge');
-                    if (badge) {
-                        badge.innerHTML = '<span class="dot"></span>' + ver + ' \u00b7 \u5f00\u6e90 \u00b7 Python \u00b7 \u672c\u5730\u8fd0\u884c';
+
+                    /* Update hero badge version */
+                    var versionSpan = document.getElementById('version-text');
+                    if (versionSpan) {
+                        versionSpan.textContent = displayVer;
                     }
+                    /* Update footer version */
                     var footer = document.getElementById('footer-version');
                     if (footer) {
-                        footer.textContent = '\u00a9 2026 Koto \u00b7 ' + ver;
+                        footer.textContent = '\u00a9 2026 Koto \u00b7 ' + displayVer;
                     }
                 })
-                .catch(function() {});
+                .catch(function() { /* fallback version already in HTML */ });
         })();
 
         document.querySelectorAll('.cat-pill').forEach(function(pill) {

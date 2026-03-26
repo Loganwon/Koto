@@ -567,6 +567,46 @@ async function testConnection() {
     }
 }
 
+async function activateWithCode() {
+    const code = document.getElementById('activationCode').value.trim();
+    const status = document.getElementById('step1Status');
+
+    if (!code) {
+        status.textContent = '❌ 请输入激活码';
+        status.className = 'step-status error';
+        return;
+    }
+
+    status.textContent = '⏳ 正在验证激活码...';
+    status.className = 'step-status loading';
+
+    try {
+        const response = await fetch('/api/setup/activate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: code })
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            status.textContent = '✅ 激活成功！正在启动 Koto...';
+            status.className = 'step-status success';
+            setTimeout(() => {
+                setupComplete = true;
+                hideSetupWizard();
+                loadSessions();
+                checkStatus();
+            }, 800);
+        } else {
+            status.textContent = '❌ ' + (data.error || '激活失败');
+            status.className = 'step-status error';
+        }
+    } catch (error) {
+        status.textContent = '❌ 网络错误';
+        status.className = 'step-status error';
+    }
+}
+
 function skipSetup() {
     if (confirm('跳过设置可能导致部分功能无法使用，确定要跳过吗？')) {
         hideSetupWizard();
@@ -1122,6 +1162,8 @@ function renderSessions(sessions) {
 
 // ================= 返回欢迎页 =================
 function goToWelcome() {
+    // Switch back to chat view if in editor view
+    if (typeof window.switchToChatView === 'function') window.switchToChatView();
     // ⭐ 改进：如果之前的会话还在生成，先中止它
     if (currentSession && isSessionGenerating(currentSession)) {
         const controller = getSessionAbortController(currentSession);
@@ -1195,6 +1237,8 @@ function _renderWelcomeScreen_unused() {
 }
 
 async function selectSession(sessionName) {
+    // Switch back to chat view if we're in editor view
+    if (typeof window.switchToChatView === 'function') window.switchToChatView();
     // 离开时：如果当前 session 正在生成，将其 DOM 节点移入 Fragment 缓存
     // 这样后台流继续写入 bodyEl（引用仍有效），切回来时直接恢复，不会丢失流内容
     if (currentSession && currentSession !== sessionName && isSessionGenerating(currentSession)) {
@@ -1427,6 +1471,7 @@ async function createNewSession(name = null) {
 }
 
 function showNewSessionModal() {
+    if (typeof window.switchToChatView === 'function') window.switchToChatView();
     document.getElementById('newSessionModal').classList.add('active');
     document.getElementById('newSessionName').value = '';
     document.getElementById('newSessionName').focus();
@@ -5047,6 +5092,7 @@ function applySettingsToUI() {
     const currentTheme = currentSettings.appearance?.theme || 'light';
     updateThemeSelector(currentTheme);
     applyTheme(currentTheme);  // 确保设置面板打开时也同步主题
+    localStorage.setItem('koto.theme', currentTheme);  // 同步到 localStorage 供下次启动使用
     // Note: settingLanguage element removed from UI, skip to avoid TypeError
     
     // AI settings
@@ -5121,6 +5167,7 @@ function updateThemeSelector(theme) {
 function selectTheme(theme) {
     updateThemeSelector(theme);
     applyTheme(theme);
+    localStorage.setItem('koto.theme', theme);
     updateSetting('appearance', 'theme', theme);
 }
 
@@ -8253,6 +8300,10 @@ function openFileHubModal() {
         fhLoadRecent();
         const navItem = document.getElementById('myStuffItem');
         if (navItem) navItem.classList.add('active');
+        setTimeout(() => {
+            const input = document.getElementById('fhSearchInput');
+            if (input) input.focus();
+        }, 50);
     }
 }
 
@@ -8271,13 +8322,24 @@ const _FILE_CAT_ICONS = {
 // ---- Mode switch ----
 function fhSwitchTab(tab) {
     const isSearch = tab === 'search';
-    document.getElementById('fhTabSearch').style.background = isSearch ? 'var(--accent-primary)' : 'var(--bg-card)';
-    document.getElementById('fhTabSearch').style.color       = isSearch ? '#fff' : 'var(--text-primary)';
-    document.getElementById('fhTabBrowse').style.background = isSearch ? 'var(--bg-card)' : 'var(--accent-primary)';
-    document.getElementById('fhTabBrowse').style.color       = isSearch ? 'var(--text-primary)' : '#fff';
+    document.getElementById('fhTabSearch').style.background = isSearch ? 'var(--accent-primary)' : 'transparent';
+    document.getElementById('fhTabSearch').style.color       = isSearch ? '#ffffff' : 'var(--text-secondary)';
+    document.getElementById('fhTabSearch').style.boxShadow = isSearch ? '0 2px 4px rgba(0,0,0,0.1)' : 'none';
+    
+    document.getElementById('fhTabBrowse').style.background = isSearch ? 'transparent' : 'var(--accent-primary)';
+    document.getElementById('fhTabBrowse').style.color       = isSearch ? 'var(--text-secondary)' : '#ffffff';
+    document.getElementById('fhTabBrowse').style.boxShadow = isSearch ? 'none' : '0 2px 4px rgba(0,0,0,0.1)';
+    
     document.getElementById('fhPaneSearch').style.display = isSearch ? '' : 'none';
     document.getElementById('fhPaneBrowse').style.display = isSearch ? 'none' : '';
-    document.getElementById('fhFileList').innerHTML = '<div class="memory-empty">在上方选择搜索模式</div>';
+    document.getElementById('fhFileList').innerHTML = `
+        <div class="memory-empty" style="margin-top:40px; padding: 40px 0; background: var(--bg-elevated); border-radius: 12px; border: 1px dashed var(--border-color); display: flex; flex-direction: column; align-items: center;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" stroke-width="1.5" style="margin-bottom: 16px;">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <span style="color: var(--text-muted); font-size: 14px;">在上方选择搜索或浏览模式</span>
+        </div>`;
     document.getElementById('fhResultHeader').style.display = 'none';
 }
 
@@ -8287,7 +8349,13 @@ async function fhDoSearch() {
     const cat = document.getElementById('fhCatFilter')?.value || '';
     const list = document.getElementById('fhFileList');
     if (!list) return;
-    list.innerHTML = '<div class="memory-empty">搜索中…</div>';
+    list.innerHTML = `
+        <div class="memory-empty" style="margin-top:40px; padding: 40px 0; background: var(--bg-elevated); border-radius: 12px; border: 1px dashed var(--border-color); display: flex; flex-direction: column; align-items: center;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2" style="margin-bottom: 16px; animation: spin 1s linear infinite;">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+            </svg>
+            <span style="color: var(--text-muted); font-size: 14px;">正在搜索，请稍候...</span>
+        </div>`;
     document.getElementById('fhResultHeader').style.display = 'none';
     try {
         const params = new URLSearchParams({ limit: 100 });
@@ -8300,14 +8368,34 @@ async function fhDoSearch() {
         _fhRenderFiles(files, list, false);
         _fhShowCount(files.length, q || cat ? '搜索结果' : '最近文件');
     } catch(e) {
-        list.innerHTML = `<div class="memory-empty">搜索失败：${_esc(e.message)}</div>`;
+        list.innerHTML = fhShowEmpty(`搜索失败：${_esc(e.message)}`, 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z');
     }
+}
+
+function fhShowLoading(text) {
+    return `
+        <div class="memory-empty" style="margin-top:40px; padding: 40px 0; background: var(--bg-elevated); border-radius: 12px; border: 1px dashed var(--border-color); display: flex; flex-direction: column; align-items: center;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2" style="margin-bottom: 16px; animation: spin 1s linear infinite;">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56"></path>
+            </svg>
+            <span style="color: var(--text-muted); font-size: 14px;">${text}</span>
+        </div>`;
+}
+
+function fhShowEmpty(text, icon = 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z') {
+    return `
+        <div class="memory-empty" style="margin-top:40px; padding: 40px 0; background: var(--bg-elevated); border-radius: 12px; border: 1px dashed var(--border-color); display: flex; flex-direction: column; align-items: center;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" stroke-width="1.5" style="margin-bottom: 16px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="${icon}"></path>
+            </svg>
+            <span style="color: var(--text-muted); font-size: 14px;">${text}</span>
+        </div>`;
 }
 
 async function fhLoadRecent() {
     const list = document.getElementById('fhFileList');
     if (!list) return;
-    list.innerHTML = '<div class="memory-empty">加载中…</div>';
+    list.innerHTML = fhShowLoading('正在加载最近记录...');
     document.getElementById('fhResultHeader').style.display = 'none';
     try {
         const r = await fetch('/api/files/recent?days=14&limit=50');
@@ -8317,14 +8405,14 @@ async function fhLoadRecent() {
         _fhRenderFiles(files, list, false);
         _fhShowCount(files.length, '最近 14 天');
     } catch(e) {
-        list.innerHTML = `<div class="memory-empty">加载失败：${_esc(e.message)}</div>`;
+        list.innerHTML = fhShowEmpty(`加载失败：${_esc(e.message)}`, 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z');
     }
 }
 
 async function fhCheckDuplicates() {
     const list = document.getElementById('fhFileList');
     if (!list) return;
-    list.innerHTML = '<div class="memory-empty">检测中，请稍候…</div>';
+    list.innerHTML = fhShowLoading('正在检测重复项，请稍候...');
     document.getElementById('fhResultHeader').style.display = 'none';
     try {
         const controller = new AbortController();
@@ -8335,7 +8423,7 @@ async function fhCheckDuplicates() {
         const d = await r.json();
         const groups = d.groups || d.duplicates || [];
         if (!groups.length) {
-            list.innerHTML = '<div class="memory-empty">✅ 未发现重复文件</div>';
+            list.innerHTML = fhShowEmpty('✅ 未发现重复文件', 'M5 13l4 4L19 7');
             return;
         }
         list.innerHTML = groups.map((g, i) => {
@@ -8353,7 +8441,7 @@ async function fhCheckDuplicates() {
         _fhShowCount(groups.length, '重复组');
     } catch(e) {
         const msg = e.name === 'AbortError' ? '检测超时，文件太多，请缩小范围' : '检测失败：' + e.message;
-        list.innerHTML = `<div class="memory-empty">${_esc(msg)}</div>`;
+        list.innerHTML = fhShowEmpty(_esc(msg), 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z');
     }
 }
 
@@ -8364,7 +8452,10 @@ async function fhPickFolder() {
     const btn = document.querySelector('#fhPaneBrowse button[onclick="fhPickFolder()"]');
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     try {
-        const r = await fetch('/api/files/pick-folder');
+        const currentPath = document.getElementById('fhBrowsePath')?.value?.trim();
+        const initialPath = currentPath || currentSettings?.storage?.workspace_dir || '';
+        const query = initialPath ? '?initial_dir=' + encodeURIComponent(initialPath) : '';
+        const r = await fetch('/api/files/pick-folder' + query);
         const d = await r.json();
         if (d.ok && d.path) {
             document.getElementById('fhBrowsePath').value = d.path;
@@ -8384,7 +8475,7 @@ async function fhDoBrowse() {
     if (!path) { alert('请输入目录路径'); return; }
     const list = document.getElementById('fhFileList');
     if (!list) return;
-    list.innerHTML = '<div class="memory-empty">浏览中…</div>';
+    list.innerHTML = fhShowLoading('正在加载目录，请稍候...');
     document.getElementById('fhResultHeader').style.display = 'none';
     _fhBrowseCache = [];
     try {
@@ -8404,7 +8495,7 @@ async function fhDoBrowse() {
         _fhShowCount(_fhBrowseCache.length, '文件');
     } catch(e) {
         const msg = e.name === 'AbortError' ? '浏览超时，目录可能过大，请取消递归或换一个路径' : e.message;
-        list.innerHTML = `<div class="memory-empty">${_esc(msg)}</div>`;
+        list.innerHTML = fhShowEmpty(_esc(msg), 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z');
     }
 }
 
@@ -8442,7 +8533,7 @@ async function fhRegisterBrowsed() {
 
 // ---- Shared render helpers ----
 function _fhRenderFiles(files, container, showPath) {
-    if (!files.length) { container.innerHTML = '<div class="memory-empty">没有找到文件</div>'; return; }
+    if (!files.length) { container.innerHTML = fhShowEmpty('未能找到符合条件的文件', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'); return; }
     container.innerHTML = files.map(f => {
         const icon = _FILE_CAT_ICONS[f.category] || '📎';
         const size = f.size_bytes
@@ -8453,16 +8544,22 @@ function _fhRenderFiles(files, container, showPath) {
             ? (f.path || '')
             : [f.category, size, date].filter(Boolean).join(' · ');
         const path = _esc(f.path || '');
-        return `<div class="fh-card" title="${path}">
+        return `<div class="fh-card" title="${path}" onclick="_fhOpenFile(${JSON.stringify(f.path||'')})">
             <span class="fh-icon">${icon}</span>
             <div class="fh-meta" style="min-width:0;">
-                <div class="fh-name">${_esc(f.name || f.path || '')}</div>
-                <div class="fh-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_esc(sub)}</div>
+                <div class="fh-name" style="margin-bottom: 2px;">${_esc(f.name || f.path || '')}</div>
+                <div class="fh-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size: 11px; opacity: 0.85;">${_esc(sub)}</div>
             </div>
-            <button onclick="_fhOpenFile(${JSON.stringify(f.path||'')})"
-                title="打开文件" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;color:var(--text-muted);">📂</button>
-            <button onclick="_fhCopyPath(${JSON.stringify(f.path||'')})"
-                title="复制路径" style="flex-shrink:0;background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;color:var(--text-muted);">📋</button>
+            <div style="display: flex; gap: 4px;" onclick="event.stopPropagation()">
+                <button class="fh-action-btn" onclick="_fhOpenFile(${JSON.stringify(f.path||'')})"
+                    title="打开文件">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                </button>
+                <button class="fh-action-btn" onclick="_fhCopyPath(${JSON.stringify(f.path||'')})"
+                    title="复制路径">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                </button>
+            </div>
         </div>`;
     }).join('');
 }

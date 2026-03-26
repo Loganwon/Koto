@@ -236,3 +236,28 @@ def _isolate_shadow_watcher(monkeypatch, tmp_path):
         )
     except Exception:
         pass
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _protect_user_settings():
+    """Back up config/user_settings.json before the test session and restore it
+    afterwards.  Integration tests that call /api/settings/reset or
+    /api/skillmarket/toggle must not permanently modify the developer's
+    production settings file."""
+    settings_path = _root() / "config" / "user_settings.json"
+    backup: bytes | None = None
+    if settings_path.exists():
+        try:
+            backup = settings_path.read_bytes()
+        except Exception:
+            pass
+    yield
+    if backup is not None:
+        try:
+            settings_path.write_bytes(backup)
+        except Exception:
+            pass
+    elif settings_path.exists():
+        # File was created during the session but didn't exist before — remove it
+        # only if created by tests (i.e. it existed before = backup would be set).
+        pass

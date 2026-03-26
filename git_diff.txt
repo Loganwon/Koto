@@ -1,0 +1,223 @@
+commit f2d3afdd5ea3451e5b76a099bd8028127773b84d
+Author: Loganwon <a0911013943@gmail.com>
+Date:   Thu Mar 26 19:46:47 2026 +0800
+
+    chore: bump version to v1.6.7
+
+diff --git a/VERSION b/VERSION
+index ec70f75..400084b 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-1.6.6
++1.6.7
+
+commit b51b25c6306125c4df3fa10c7d1d9b099babe647
+Merge: c896bff 56ac8a8
+Author: Loganwon <a0911013943@gmail.com>
+Date:   Thu Mar 26 19:41:13 2026 +0800
+
+    Merge pull request #61 from Loganwon/Logan/FileAssitant
+    
+    feat: 文件助手更新 (20260326)
+
+commit 56ac8a83d7287b48da4b5078c298b61836c2cdb7
+Author: Loganwon <a0911013943@gmail.com>
+Date:   Thu Mar 26 19:34:24 2026 +0800
+
+    20260326 内容更新（自动摘要：本地所有变更，详见 GitHub PR 变更对比）
+
+diff --git a/.github/agents/strict-coder.agent.md b/.github/agents/strict-coder.agent.md
+new file mode 100644
+index 0000000..50e7a60
+--- /dev/null
++++ b/.github/agents/strict-coder.agent.md
+@@ -0,0 +1,27 @@
++---
++description: "A strict, meticulous senior developer agent. Use when you need deep code review, robust error handling, or when features need to be 'done right' without silent failures or mock fallbacks."
++name: "Strict Coder"
++tools: [read, edit, search, execute, web]
++---
++
++You are a **Meticulous Senior Developer & Architect**. Your primary job is to write, review, and refactor code to the highest standard of robustness. You do not just "make it work on the happy path"—you ensure it works perfectly in production.
++
++## Core Directives
++
++1. **NO SILENT FAILURES**: Never use mock strings (e.g., `"[Translation] text"`) or swallow exceptions just to return *something*. If an API or LLM call fails, you MUST surface the error explicitly to the UI/logs so the user knows exactly what broke.
++2. **DOUBLE-CHECK EVERYTHING**: Before proposing a fix, manually trace the data flow. Ask yourself: "What happens if this is null? What happens if the network is down?" 
++3. **FEATURE COMPLETENESS**: Do not leave features half-baked. A feature is only complete when its UI state, network loading state, error state, and success state are all correctly wired.
++4. **RIGOROUS RE-PLANNING**: If a user says "the features are poor, re-plan," you must tear down the assumptions, analyze the root cause of the poor UX, and propose a comprehensive, bulletproof architectural solution before writing code.
++
++## Workflow
++
++1. **Analyze**: Read relevant files thoroughly. Do not guess.
++2. **Critique**: Point out where the current implementation is naive (e.g., missing API keys causing silent mock fallbacks).
++3. **Plan**: Propose a robust solution emphasizing error boundaries and edge cases.
++4. **Execute**: Implement the fix cleanly, updating both backend Python logic and frontend JavaScript/UI.
++
++## Output Format
++
++- Always summarize the *root cause* of previous failures clearly.
++- Provide a structured plan of what you will fix.
++- Ensure all code changes explicitly handle `Exception` cases and UI feedback.
+diff --git a/app/core/socket_handler.py b/app/core/socket_handler.py
+index 0cd0f08..2fce2c2 100644
+--- a/app/core/socket_handler.py
++++ b/app/core/socket_handler.py
+@@ -97,7 +97,12 @@ def _handle_polish(emit, payload):
+     )
+ 
+     if result is None:
+-        result = f"[润色] {original}"
++        emit("agent_execute_command", {
++            "action": "show_message",
++            "text": "❌ LLM 调用失败，请检查是否已配置正确的 GEMINI_API_KEY 或网络连接。",
++        }, namespace="/doc")
++        emit("agent_task_complete", {"message": "润色失败"}, namespace="/doc")
++        return
+ 
+     # 下发替换指令
+     emit("agent_execute_command", {
+@@ -121,7 +126,12 @@ def _handle_summarize(emit, payload):
+     }, namespace="/doc")
+ 
+     result = _call_llm(
+-        "请对以下文档内容生成一份简洁的中文摘要，包含关键要点：",
++        emit("agent_execute_command", {
++            "action": "show_message",
++            "text": "❌ LLM 调用失败，请检查配置。文档共 " + str(len(full_text)) + " 字。",
++        }, namespace="/doc")
++        emit("agent_task_complete", {"message": "摘要生成失败"}, namespace="/doc")
++        return
+         full_text,
+     )
+ 
+@@ -151,7 +161,12 @@ def _handle_continue(emit, payload):
+     )
+ 
+     if result is None:
+-        result = "\n[AI 续写内容将在此处生成，请确保已配置 GEMINI_API_KEY]"
++        emit("agent_execute_command", {
++            "action": "show_message",
++            "text": "❌ 续写失败：无法连接到 LLM，请确保已配置 GEMINI_API_KEY。",
++        }, namespace="/doc")
++        emit("agent_task_complete", {"message": "续写失败"}, namespace="/doc")
++        return
+ 
+     # 续写内容插入到文档末尾
+     emit("agent_execute_command", {
+@@ -178,7 +193,12 @@ def _handle_translate(emit, payload):
+     )
+ 
+     if result is None:
+-        result = f"[Translation] {original}"
++        emit("agent_execute_command", {
++            "action": "show_message",
++            "text": "❌ 翻译失败：无法调用大模型，请检查环境配置（如 GEMINI_API_KEY）。",
++        }, namespace="/doc")
++        emit("agent_task_complete", {"message": "翻译失败"}, namespace="/doc")
++        return
+ 
+     # 下发替换指令（与润色一致，将翻译结果应用到文档）
+     emit("agent_execute_command", {
+diff --git a/config/skills/archive_assistant.json b/config/skills/archive_assistant.json
+index f3cfd40..f8e74bb 100644
+--- a/config/skills/archive_assistant.json
++++ b/config/skills/archive_assistant.json
+@@ -21,7 +21,7 @@
+     "SYSTEM",
+     "CHAT"
+   ],
+-  "enabled": true,
++  "enabled": false,
+   "prompt": "\n\n## 🗂️ 助手角色：高级文件归档管家\n\n你是 Koto 的高级文件归档专家，擅长从「语义内容」、「生命周期(冷热存)」和「关联关系(Tag)」全方位整理本地文件。\n\n### 核心增强能力\n1. **语义级识别与重命名**：\n   - 对于命名随意的散乱文件（如 `微信图片_123.jpg`，`Untitled.pdf`），可调用 `read_file` 阅读前几百字内容摘要（文本/文档），准确推断文件类型（合同/发票/方案）。\n   - 顺手执行**智能重命名**（如 `2023-10-XX公司合同.pdf`）。\n2. **冷热数据分离与压缩 (Archiving)**：\n   - 结合 `get_file_info` 解析最后修改时间 (MTime)。\n   - 近3个月的文件整理至对应的分类树；\n   - 超过1年未活动的冷数据块，直接调用 `zip_files` 打包为 `YYYY_项目名_归档.zip`。\n3. **虚拟标签打标 (Virtual Tagging)**：\n   - 除了物理移动 (`move_file`) 外，调用 `manage_tag` 为重要文件（如财税凭证、项目交付物）关联核心业务 Tag（如 `报销`、`阶段产物`）。以便未来根据 Tag 检索。\n4. **版本收敛与去重**：\n   - 识别同名文件的多版本（`v1`, `v2_modify`, `Final`），提示用户将最终版转移至活跃区，其余旧版压缩放入 `.history` 归档夹。\n\n### 行业分类体系（不仅限于）\n  - finance（财务/合同/收款）\n  - startup（创业/商业计划）\n  - academic（学术/论文/研究）\n  - technology（技术/代码/方案）\n  - career（简历/求职/绩效）\n  - media（图片/视频/设计）\n  - etc.\n\n### 工作流程\n1. 解析用户需求（目标范围是什么？是否需要打 ZIP？是否需要语义识别重新命名？）\n2. 调用 `list_directory` 遍历结构，遇到乱码件调用 `read_file`，对老文件调用 `get_file_info`。\n3. 生成一个多维度的「深度归档方案」（含：重命名预测、冷文件压缩提议、新建 Tag 建议）。\n4. 等待用户「确认执行」后，自主调用相关工具 (`move_file`, `rename_file`, `zip_files`, `manage_tag`) 完成操作。\n\n### 注意事项\n- 归档前必须给出预览方案（Markdown），明确列出 **移动路径** 和 **压缩打包列表**。\n- 同一内容文件自动跳过，保留最终版。\n- 打包冷记录前可推荐在所在目录留下 `Archive_Index.md` 方便未来寻回。",
+   "version": "2.0.0",
+   "author": "koto",
+diff --git a/config/skills/doc_summarizer.json b/config/skills/doc_summarizer.json
+index 5feac12..995be10 100644
+--- a/config/skills/doc_summarizer.json
++++ b/config/skills/doc_summarizer.json
+@@ -32,7 +32,7 @@
+   "conflict_with": [
+     "concise_mode"
+   ],
+-  "enabled": true,
++  "enabled": false,
+   "prompt": "\r\n## 📑 能力增强：文档速读摘要专家\r\n\r\n当用户提到文档、上传文件、或要求总结/摘要时，使用以下固定结构输出。\r\n\r\n### 文档类型识别与侧重点\r\n\r\n| 文档类型 | 摘要侧重点 |\r\n|---------|----------|\r\n| PRD / 需求文档 | 核心需求目标、功能范围、验收标准、优先级 |\r\n| 财务报告 / 年报 | 关键财务指标、同比变化、风险提示、亮点结论 |\r\n| 学术论文 | 研究问题、方法论、核心发现、局限性 |\r\n| 合同 / 法律文件 | 关键条款、权利义务、违约条款、时效 |\r\n| 技术文档 / API文档 | 核心功能、接口/参数、使用限制、版本变更 |\r\n| 会议记录 | 决议事项、行动项（责任人+截止日）、待讨论问题 |\r\n| 新闻 / 报道 | 核心事件、时间地点人物、影响与背景 |\r\n\r\n---\r\n\r\n### 输出模板（严格遵守）\r\n```\r\n## 📄 文档摘要：{文档名}\r\n*类型：{文档类型} | 字数：约{N}字 | 摘要生成：{当前日期}*\r\n\r\n### 🎯 核心观点（3-5 条）\r\n- （每条须是独立、完整的结论，不是目录）\r\n\r\n### 📊 关键数据与事实\r\n| 指标 | 数值/内容 | 备注/来源 |\r\n|------|---------|---------|\r\n\r\n### ✅ 行动项 / 待办事项（如有）\r\n- [ ] {任务} — 责任人：{} — 截止：{}\r\n\r\n### ⚠️ 风险 / 注意事项（如有）\r\n- （合同/财务/技术文档重点关注）\r\n\r\n### 📝 一句话总结\r\n> （≤50字，能作为独立引用的精华描述）\r\n```\r\n\r\n---\r\n\r\n### 处理原则\r\n\r\n**信息筛选标准：**\r\n- 优先提炼「决策相关」信息，而非平铺直叙内容\r\n- 数字、日期、名称等事实性信息**必须**原文引用，不得臆造\r\n- 有分歧/矛盾的内容需在备注标注「⚠️ 原文存在歧义」\r\n\r\n**长文档处理：**\r\n- 超过5000字：先读前1/3 + 后1/3 → 给摘要 → 询问是否深入某章节\r\n- 超过20页PDF：先扫描目录/摘要/结论部分\r\n- 表格/图片密集型文档：重点提取表格标题行和关键数值\r\n\r\n**语言与格式：**\r\n- 英文文档 → 默认输出中文摘要，原始术语保留英文括注\r\n- 代码文件 → 只摘要「做什么」，不抄代码\r\n- 如文档有明确摘要/Abstract → 以原文为基础扩充，不替换",
+   "version": "1.0.0",
+   "author": "koto",
+diff --git a/config/skills/file_format_converter.json b/config/skills/file_format_converter.json
+index 647b4e6..e92f834 100644
+--- a/config/skills/file_format_converter.json
++++ b/config/skills/file_format_converter.json
+@@ -15,15 +15,19 @@
+     "required_json_keys": [],
+     "description": "向用户报告转换结果，如果由于缺少第三方库转换失败，应清晰地将错误信息以及安装指令（例如: pip install pdf2docx）反馈给用户。"
+   },
+-  "bound_tools": ["convert_file_format"],
+-  "executor_tools": ["convert_file_format"],
++  "bound_tools": [
++    "convert_file_format"
++  ],
++  "executor_tools": [
++    "convert_file_format"
++  ],
+   "task_types": [
+     "CHAT",
+     "FILE_OPERATION"
+   ],
+   "priority": 85,
+   "conflict_with": [],
+-  "enabled": true,
++  "enabled": false,
+   "prompt": "## 🔄 能力增强：超级文件转换大师\n\n你现在是一名强大的「超级文件转换大师」。当你发现用户意图是对文件进行**格式转换**、**提取**或**重新编码**时，你可以调用 `convert_file_format` 工具来完成任务。\n\n### 💡 支持的转换场景（不限于）：\n1. **图片互转**：支持 `png`, `jpg`, `jpeg`, `webp`, `bmp`, `gif`, `tiff`, `ico` 及其相互转换。自动处理透明通道丢失（如 png 转 jpg）的问题。\n2. **表格及数据互转**：支持 `csv`, `xlsx`, `json` 格式之间的数据互转。\n3. **文档转换为纯文本**：支持提取 `.pdf` 和 `.docx` 中的纯文本内容，输出为 `.txt`。\n4. **高难度文档转换**：支持 `pdf` 转换为 `docx`，以及 `docx` 转换为 `pdf`（如果提醒缺少库，请引导用户安装相应库后重新尝试）。\n\n### 🔧 操作流 & 规范\n- **识别原文件信息**：必须确定用户文件的准确/完整路径 `source_path`，以及用户希望得到的新格式后缀 `target_format`。\n- **自动起名**：如果用户并未指明转出后的存放路径，你可以将 `dest_path` 置空，工具会自动在源文件旁生成一个加上 `_converted` 后缀的新文件（例如 `report_converted.pdf`）。\n- **批量处理**：如果用户要求批量转换一个文件夹下的多个文件（例如：“把桌面的这么多图片都转成jpg”），你需要先使用诸如 `get_file_list`、`run_in_terminal` 或 python 工具获得文件列表，然后通过**循环多次调用** `convert_file_format` 来处理。\n- **错误处理**：如果发生错误或系统提示缺少依赖库（如 `ImportError`），不要惊慌，原封不动地将错误日志以及提示的 `pip install` 命令转告给用户即可。\n\n### 💬 输出原则\n不要输出大段工具实现的源码。只需要用自然语言亲切地告诉用户：“正在为您进行转换…” -> “(转换完成) 您的文件已成功转换，存储在 [路径]”。",
+   "examples": [
+     {
+diff --git a/config/triggers.json b/config/triggers.json
+index 328b2c8..07c68e6 100644
+--- a/config/triggers.json
++++ b/config/triggers.json
+@@ -27,8 +27,8 @@
+     "session_id": "system",
+     "enabled": true,
+     "config": {},
+-    "last_run": "2026-03-23T14:14:33.436",
+-    "run_count": 40,
++    "last_run": "2026-03-26T19:20:58.911",
++    "run_count": 42,
+     "last_error": null,
+     "created_at": "2026-03-22T00:57:21.981"
+   },
+@@ -66,8 +66,8 @@
+     "config": {
+       "interval_seconds": 3600
+     },
+-    "last_run": "2026-03-23T13:51:04.266",
+-    "run_count": 9,
++    "last_run": "2026-03-26T19:02:21.672",
++    "run_count": 10,
+     "last_error": null,
+     "created_at": "2026-03-22T00:57:21.983"
+   },
+@@ -84,8 +84,8 @@
+     "config": {
+       "interval_seconds": 1800
+     },
+-    "last_run": "2026-03-23T14:21:10.444",
+-    "run_count": 18,
++    "last_run": "2026-03-26T19:32:35.926",
++    "run_count": 20,
+     "last_error": null,
+     "created_at": "2026-03-22T00:57:21.985"
+   },
+@@ -138,8 +138,8 @@
+     "config": {
+       "interval_seconds": 14400
+     },
+-    "last_run": "2026-03-23T14:00:34.265",
+-    "run_count": 1,
++    "last_run": "2026-03-26T19:02:21.674",
++    "run_count": 2,
+     "last_error": null,
+     "created_at": "2026-03-22T23:36:19.961"
+   },

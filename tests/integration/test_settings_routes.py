@@ -109,7 +109,20 @@ class TestUpdateSettings:
             "/api/settings",
             json={"category": "appearance", "key": "theme", "value": "dark"},
         )
+    def test_empty_storage_path_falls_back_to_default(self, client):
+        # 如果用户将 workspace_dir 置空，系统应当回退到默认路径而不是保留空字符串
+        response = client.post(
+            "/api/settings",
+            json={"category": "storage", "key": "workspace_dir", "value": ""},
+        )
+        data = _check(response)
+        assert data["success"] is True
 
+        settings = _check(client.get("/api/settings"))
+        workspace_dir = settings.get("storage", {}).get("workspace_dir")
+        assert workspace_dir is not None
+        assert workspace_dir != ""
+        assert "workspace" in workspace_dir
 
 # ── POST /api/settings/reset ────────────────────────────────────────────────
 

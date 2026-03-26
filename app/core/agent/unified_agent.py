@@ -482,6 +482,8 @@ class UnifiedAgent(Agent):
                         system_instruction=_effective_instruction,
                         tools=tools_def if tools_def else None,
                         stream=False,
+                        skill_id=_skill_id,
+                        session_id=_session_id,
                     )
                 except ImportError:
                     response = self.llm.generate_content(
@@ -490,6 +492,8 @@ class UnifiedAgent(Agent):
                         system_instruction=_effective_instruction,
                         tools=tools_def if tools_def else None,
                         stream=False,
+                        skill_id=_skill_id,
+                        session_id=_session_id,
                     )
 
                 content_text = response.get("content", "")
