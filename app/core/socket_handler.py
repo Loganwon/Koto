@@ -97,7 +97,12 @@ def _handle_polish(emit, payload):
     )
 
     if result is None:
-        result = f"[润色] {original}"
+        emit("agent_execute_command", {
+            "action": "show_message",
+            "text": "❌ LLM 调用失败，请检查是否已配置正确的 GEMINI_API_KEY 或网络连接。",
+        }, namespace="/doc")
+        emit("agent_task_complete", {"message": "润色失败"}, namespace="/doc")
+        return
 
     # 下发替换指令
     emit("agent_execute_command", {
@@ -121,7 +126,12 @@ def _handle_summarize(emit, payload):
     }, namespace="/doc")
 
     result = _call_llm(
-        "请对以下文档内容生成一份简洁的中文摘要，包含关键要点：",
+        emit("agent_execute_command", {
+            "action": "show_message",
+            "text": "❌ LLM 调用失败，请检查配置。文档共 " + str(len(full_text)) + " 字。",
+        }, namespace="/doc")
+        emit("agent_task_complete", {"message": "摘要生成失败"}, namespace="/doc")
+        return
         full_text,
     )
 
@@ -151,7 +161,12 @@ def _handle_continue(emit, payload):
     )
 
     if result is None:
-        result = "\n[AI 续写内容将在此处生成，请确保已配置 GEMINI_API_KEY]"
+        emit("agent_execute_command", {
+            "action": "show_message",
+            "text": "❌ 续写失败：无法连接到 LLM，请确保已配置 GEMINI_API_KEY。",
+        }, namespace="/doc")
+        emit("agent_task_complete", {"message": "续写失败"}, namespace="/doc")
+        return
 
     # 续写内容插入到文档末尾
     emit("agent_execute_command", {
@@ -178,7 +193,12 @@ def _handle_translate(emit, payload):
     )
 
     if result is None:
-        result = f"[Translation] {original}"
+        emit("agent_execute_command", {
+            "action": "show_message",
+            "text": "❌ 翻译失败：无法调用大模型，请检查环境配置（如 GEMINI_API_KEY）。",
+        }, namespace="/doc")
+        emit("agent_task_complete", {"message": "翻译失败"}, namespace="/doc")
+        return
 
     # 下发替换指令（与润色一致，将翻译结果应用到文档）
     emit("agent_execute_command", {
