@@ -2505,7 +2505,17 @@
     <!-- Folder Select Modal -->
     <div class="modal-overlay" id="folderModal">
         <div class="modal folder-modal">
-            <h3>选择文件夹</h3>
+            <div class="folder-modal-header">
+                <h3>选择文件夹</h3>
+                <button class="folder-modal-nav-btn" onclick="loadFolderDrives()" title="我的电脑">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    我的电脑
+                </button>
+                <button class="folder-modal-nav-btn" onclick="loadFolderList(currentBrowsePath || browseHomeDir)" title="上级目录">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+                    上级
+                </button>
+            </div>
             <div class="folder-browser">
                 <div class="current-path" id="currentBrowsePath"></div>
                 <div class="folder-list" id="folderList">
@@ -2513,11 +2523,13 @@
                 </div>
             </div>
             <div class="manual-path">
-                <input type="text" id="manualPathInput" placeholder="或直接输入路径...">
+                <input type="text" id="manualPathInput" placeholder="或直接输入路径后按 Enter..."
+                    onkeydown="if(event.key==='Enter'){loadFolderList(this.value.trim())}">
+                <button class="browse-btn" onclick="loadFolderList(document.getElementById('manualPathInput').value.trim())">前往</button>
             </div>
             <div class="modal-actions">
                 <button class="btn-secondary" onclick="closeFolderModal()">取消</button>
-                <button class="btn-primary" onclick="confirmFolderSelect()">选择</button>
+                <button class="btn-primary" onclick="confirmFolderSelect()">选择此文件夹</button>
             </div>
         </div>
     </div>

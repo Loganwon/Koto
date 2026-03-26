@@ -631,9 +631,14 @@ function finishSetup() {
 function browseSetupFolder() {
     // 使用现有的文件夹浏览功能
     currentBrowseTarget = 'setup_workspace';
-    currentBrowsePath = 'C:\\';
-    document.getElementById('manualPathInput').value = currentBrowsePath;
-    loadFolderList(currentBrowsePath);
+    const startPath = document.getElementById('setupWorkspacePath')?.value.trim() || browseHomeDir || '';
+    currentBrowsePath = startPath;
+    document.getElementById('manualPathInput').value = startPath;
+    if (startPath) {
+        loadFolderList(startPath);
+    } else {
+        loadFolderDrives();
+    }
     document.getElementById('folderModal').classList.add('active');
 }
 
@@ -5087,6 +5092,8 @@ function applySettingsToUI() {
     document.getElementById('settingDocumentsDir').value = currentSettings.storage?.documents_dir || '';
     document.getElementById('settingImagesDir').value = currentSettings.storage?.images_dir || '';
     document.getElementById('settingChatsDir').value = currentSettings.storage?.chats_dir || '';
+    // Cache home dir for folder browser fallback
+    browseHomeDir = currentSettings.storage?.workspace_dir || '';
     
     // Appearance settings - update theme selector
     const currentTheme = currentSettings.appearance?.theme || 'light';
@@ -6022,35 +6029,91 @@ function updateCodeTheme(theme) {
 // 主题已在主初始化流程中统一加载和应用，无需额外的 DOMContentLoaded 监听器
 
 // ================= Folder Browser =================
+let browseHomeDir = '';  // resolved from settings on first use
+
 async function browseFolder(target) {
     currentBrowseTarget = target;
     
-    // Get current path for this setting
+    // Use current value of the input, or fall back to the setting from server, or home dir
     let startPath = '';
     switch(target) {
-        case 'workspace_dir':
-            startPath = document.getElementById('settingWorkspaceDir').value;
-            break;
-        case 'documents_dir':
-            startPath = document.getElementById('settingDocumentsDir').value;
-            break;
-        case 'images_dir':
-            startPath = document.getElementById('settingImagesDir').value;
-            break;
-        case 'chats_dir':
-            startPath = document.getElementById('settingChatsDir').value;
-            break;
+        case 'workspace_dir':   startPath = document.getElementById('settingWorkspaceDir').value; break;
+        case 'documents_dir':   startPath = document.getElementById('settingDocumentsDir').value; break;
+        case 'images_dir':      startPath = document.getElementById('settingImagesDir').value;    break;
+        case 'chats_dir':       startPath = document.getElementById('settingChatsDir').value;     break;
+        case 'setup_workspace': startPath = document.getElementById('setupWorkspacePath')?.value; break;
+    }
+    // If the input is still empty, fall back to the workspace dir from settings, then home
+    if (!startPath && currentSettings?.storage?.workspace_dir) {
+        startPath = currentSettings.storage.workspace_dir;
     }
     
-    currentBrowsePath = startPath || 'C:\\';
+    currentBrowsePath = startPath || browseHomeDir || '';
     document.getElementById('manualPathInput').value = currentBrowsePath;
     
-    await loadFolderList(currentBrowsePath);
+    if (currentBrowsePath) {
+        await loadFolderList(currentBrowsePath);
+    } else {
+        await loadFolderDrives();
+    }
     document.getElementById('folderModal').classList.add('active');
 }
 
+async function loadFolderDrives() {
+    const container = document.getElementById('folderList');
+    const pathEl = document.getElementById('currentBrowsePath');
+    pathEl.textContent = '我的电脑';
+    container.innerHTML = '<div style="padding:12px; color:var(--text-muted)">正在加载磁盘...</div>';
+    try {
+        const r = await fetch('/api/browse/drives');
+        const d = await r.json();
+        let html = '';
+
+        const quickAccess = d.quick_access || [];
+        if (quickAccess.length) {
+            html += '<div class="folder-group-label">快速访问</div>';
+            for (const loc of quickAccess) {
+                const icon = _quickAccessIcon(loc.name);
+                html += `<div class="folder-item" onclick="loadFolderList('${escapeAttr(loc.path)}')">${icon}<span>${escapeHtml(loc.name)}</span><small style="color:var(--text-muted);margin-left:auto;font-size:11px">${escapeHtml(loc.path)}</small></div>`;
+            }
+        }
+
+        const drives = d.drives || [];
+        if (drives.length) {
+            html += '<div class="folder-group-label">设备和驱动器</div>';
+            for (const drv of drives) {
+                html += `<div class="folder-item" onclick="loadFolderList('${escapeAttr(drv.path)}')">${_driveIcon()}<span>${escapeHtml(drv.name)}</span></div>`;
+            }
+        }
+
+        if (!html) html = '<div style="padding:16px;color:var(--text-muted)">未找到磁盘</div>';
+        container.innerHTML = html;
+        currentBrowsePath = '';
+        document.getElementById('manualPathInput').value = '';
+    } catch(e) {
+        container.innerHTML = `<div style="padding:16px;color:var(--accent-danger)">加载失败: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function _quickAccessIcon(name) {
+    const icons = {
+        'Koto 工作区': '🗂️',
+        '桌面': '🖥️', '文档': '📄', '下载': '⬇️', '图片': '🖼️',
+        '视频': '🎬', '音乐': '🎵', '用户主目录': '🏠',
+    };
+    const emoji = icons[name] || '📁';
+    return `<span style="font-size:16px;margin-right:8px;min-width:20px;flex-shrink:0">${emoji}</span>`;
+}
+
+function _driveIcon() {
+    return `<span style="font-size:16px;margin-right:8px;min-width:20px;flex-shrink:0">💽</span>`;
+}
+
 async function loadFolderList(path) {
-    document.getElementById('currentBrowsePath').textContent = path;
+    if (!path || !path.trim()) { await loadFolderDrives(); return; }
+    path = path.trim();
+    const pathEl = document.getElementById('currentBrowsePath');
+    pathEl.textContent = path;
     
     try {
         const response = await fetch(`/api/browse?path=${encodeURIComponent(path)}`);
@@ -6059,34 +6122,23 @@ async function loadFolderList(path) {
         const container = document.getElementById('folderList');
         
         if (data.error) {
-            container.innerHTML = `<div style="padding: 20px; color: var(--accent-danger);">${data.error}</div>`;
+            container.innerHTML = `<div style="padding: 20px; color: var(--accent-danger);">${escapeHtml(data.error)}</div>`;
             return;
         }
         
         let html = '';
         
+        // Back to My Computer
+        html += `<div class="folder-item folder-item-computer" onclick="loadFolderDrives()"><span style="font-size:15px;margin-right:6px">🖥️</span><span>我的电脑</span></div>`;
+
         // Parent folder
         if (data.parent) {
-            html += `
-                <div class="folder-item" onclick="loadFolderList('${escapeAttr(data.parent)}')">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="15 18 9 12 15 6"></polyline>
-                    </svg>
-                    <span>..</span>
-                </div>
-            `;
+            html += `<div class="folder-item" onclick="loadFolderList('${escapeAttr(data.parent)}')"><span style="font-size:15px;margin-right:8px;flex-shrink:0">↩</span><span>上级目录</span></div>`;
         }
         
         // Folders
         for (const folder of data.folders) {
-            html += `
-                <div class="folder-item" onclick="selectFolder('${escapeAttr(folder.path)}')">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                    </svg>
-                    <span>${escapeHtml(folder.name)}</span>
-                </div>
-            `;
+            html += `<div class="folder-item" onclick="selectFolder('${escapeAttr(folder.path)}')"><span style="font-size:16px;margin-right:8px;min-width:20px;flex-shrink:0">📁</span><span>${escapeHtml(folder.name)}</span></div>`;
         }
         
         if (data.folders.length === 0 && !data.parent) {
@@ -6138,21 +6190,14 @@ async function confirmFolderSelect() {
     
     // Update the input field
     switch(currentBrowseTarget) {
-        case 'workspace_dir':
-            document.getElementById('settingWorkspaceDir').value = path;
-            break;
-        case 'documents_dir':
-            document.getElementById('settingDocumentsDir').value = path;
-            break;
-        case 'images_dir':
-            document.getElementById('settingImagesDir').value = path;
-            break;
-        case 'chats_dir':
-            document.getElementById('settingChatsDir').value = path;
-            break;
+        case 'workspace_dir': document.getElementById('settingWorkspaceDir').value = path; break;
+        case 'documents_dir': document.getElementById('settingDocumentsDir').value  = path; break;
+        case 'images_dir':    document.getElementById('settingImagesDir').value     = path; break;
+        case 'chats_dir':     document.getElementById('settingChatsDir').value      = path; break;
     }
     
     closeFolderModal();
+
 }
 
 function escapeAttr(str) {
