@@ -5192,6 +5192,41 @@ function closeSettings() {
     document.body.classList.remove('settings-panel-open');
 }
 
+async function saveSettingsApiKey() {
+    const input = document.getElementById('settingsApiKeyInput');
+    const status = document.getElementById('settingsApiKeyStatus');
+    const apiKey = input.value.trim();
+    if (!apiKey || apiKey.length < 10) {
+        status.textContent = '❌ 请输入有效的 API Key';
+        status.style.color = 'var(--accent-error, #ef4444)';
+        return;
+    }
+    status.textContent = '⏳ 正在保存…';
+    status.style.color = 'var(--text-secondary)';
+    try {
+        const res = await fetch('/api/setup/apikey', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: apiKey })
+        });
+        const data = await res.json();
+        if (data.success) {
+            status.textContent = '✅ 已保存，正在生效…';
+            status.style.color = 'var(--accent-primary, #10b981)';
+            input.value = '';
+            const banner = document.getElementById('apiKeyBanner');
+            if (banner) banner.style.display = 'none';
+            setTimeout(() => { status.textContent = ''; }, 3000);
+        } else {
+            status.textContent = '❌ ' + (data.error || '保存失败');
+            status.style.color = 'var(--accent-error, #ef4444)';
+        }
+    } catch (e) {
+        status.textContent = '❌ 网络错误: ' + e.message;
+        status.style.color = 'var(--accent-error, #ef4444)';
+    }
+}
+
 // ================= Skills Management =================
 
 let _allSkills = [];       // full skills data cache
@@ -6245,7 +6280,32 @@ async function loadUserSettings() {
 
 
 // 本地模型独占开关切换
-function onLocalOnlyChange(enabled) {
+async function onLocalOnlyChange(enabled) {
+    if (enabled) {
+        let ollamaOk = false;
+        try {
+            const resp = await fetch('/api/local-model/list');
+            const data = await resp.json();
+            ollamaOk = data.success && data.models && data.models.length > 0;
+            if (!ollamaOk) {
+                document.getElementById('settingLocalOnly').checked = false;
+                showNotification('⚠️ Ollama 未运行。请先安装并启动 Ollama（ollama.com），再开启本地模式。', 'warning', 6000);
+                return;
+            }
+            const selectEl = document.getElementById('settingLocalModel');
+            if (!selectEl || !selectEl.value) {
+                document.getElementById('settingLocalOnly').checked = false;
+                showNotification('⚠️ 请先在下方选择一个本地模型', 'warning', 4000);
+                document.getElementById('localModelPickerRow').style.display = '';
+                detectLocalModels();
+                return;
+            }
+        } catch (_) {
+            document.getElementById('settingLocalOnly').checked = false;
+            showNotification('⚠️ 无法检测 Ollama 状态，请确认 Ollama 已启动', 'warning', 5000);
+            return;
+        }
+    }
     applyLocalOnlyMode(enabled);
     updateSetting('ai', 'use_local_only', enabled);
 }

@@ -17288,6 +17288,10 @@ _compare_file_registry: dict = {}
 
 
 if __name__ == "__main__":
+    import sys
+    # Allow emoji/unicode in startup prints on Windows (cp1252 terminal)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     print("\n🚀 Koto Web Server Starting...")
     print(f"📁 Chat Directory: {os.path.abspath(CHAT_DIR)}")
