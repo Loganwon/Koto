@@ -98,6 +98,15 @@ def _build_writing_style_profile(text: str) -> dict:
     }
 
 
+def _get_shadow_watcher():
+    """获取 ShadowWatcher 实例（作为记忆存储后端）。"""
+    try:
+        from app.core.monitoring.shadow_watcher import get_shadow_watcher
+        return get_shadow_watcher()
+    except Exception:
+        return None
+
+
 def register_memory_routes(app, get_memory_manager):
     """注册记忆系统API路由到Flask app
 
@@ -110,14 +119,28 @@ def register_memory_routes(app, get_memory_manager):
 
     @app.route("/api/memories", methods=["GET"])
     def get_all_memories():
-        """获取所有记忆"""
+        """获取所有记忆（优先从 ShadowWatcher 读取，回退到 MemoryManager）"""
         try:
+            sw = _get_shadow_watcher()
+            if sw is not None:
+                memories = sw.get_user_memories()
+                # 兼容旧格式：补充 MemoryManager 的记忆（若有）
+                try:
+                    memory_mgr = get_memory_manager()
+                    old_mems = memory_mgr.get_all_memories()
+                    existing_ids = {m.get("id") for m in memories}
+                    for m in old_mems:
+                        if m.get("id") not in existing_ids:
+                            memories.append(m)
+                except Exception:
+                    pass
+                return jsonify(memories)
+            # fallback: 旧 MemoryManager
             memory_mgr = get_memory_manager()
             memories = memory_mgr.get_all_memories()
             return jsonify(memories)
         except Exception as e:
             import traceback
-
             traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
@@ -133,9 +156,13 @@ def register_memory_routes(app, get_memory_manager):
             if not content:
                 return jsonify({"success": False, "error": "内容不能为空"}), 400
 
+            sw = _get_shadow_watcher()
+            if sw is not None:
+                new_memory = sw.add_user_memory(content, category, source)
+                return jsonify({"success": True, "memory": new_memory})
+            # fallback
             memory_mgr = get_memory_manager()
             new_memory = memory_mgr.add_memory(content, category, source)
-
             return jsonify({"success": True, "memory": new_memory})
         except Exception as e:
             import traceback
@@ -143,17 +170,22 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/memories/<int:memory_id>", methods=["DELETE"])
-    def delete_memory(memory_id):
+    @app.route("/api/memories/<mem_id>", methods=["DELETE"])
+    def delete_memory(mem_id):
         """删除记忆"""
         try:
+            sw = _get_shadow_watcher()
+            if sw is not None:
+                success = sw.delete_user_memory(str(mem_id))
+                if success:
+                    return jsonify({"success": True, "message": "记忆已删除"})
+                return jsonify({"success": False, "error": "记忆不存在"}), 404
+            # fallback
             memory_mgr = get_memory_manager()
-            success = memory_mgr.delete_memory(memory_id)
-
+            success = memory_mgr.delete_memory(int(mem_id))
             if success:
                 return jsonify({"success": True, "message": "记忆已删除"})
-            else:
-                return jsonify({"success": False, "error": "记忆不存在"}), 404
+            return jsonify({"success": False, "error": "记忆不存在"}), 404
         except Exception as e:
             import traceback
 

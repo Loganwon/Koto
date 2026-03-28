@@ -17,7 +17,6 @@ Routes:
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
-  GET /editor                  — file_assistant
 """
 
 import os
@@ -117,29 +116,15 @@ def notebook_ui() -> str:
     return render_template("notebook_lm.html")
 
 
+@pages_bp.route("/workspace-assistant")
+def workspace_assistant_page() -> str:
+    """全格式 AI 原生工作区"""
+    return render_template("workspace_assistant.html")
+
+
 @pages_bp.route("/doc-compare")
 def doc_compare_ui() -> str:
     """多文档对比界面"""
     return render_template("doc_compare.html")
 
 
-@pages_bp.route("/editor")
-def file_assistant() -> Response:
-    """文件助手 — Univer Canvas 编辑器 + AI 面板"""
-    resp = make_response(send_from_directory(
-        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist"),
-        "index.html",
-    ))
-    resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-    resp.headers["Pragma"] = "no-cache"
-    resp.headers["Expires"] = "0"
-    return resp
-
-
-@pages_bp.route("/editor/<path:subpath>")
-def file_assistant_assets(subpath: str) -> Response:
-    """文件助手静态资源（JS/CSS）"""
-    return send_from_directory(
-        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist"),
-        subpath,
-    )
