@@ -224,7 +224,7 @@ def raw_file(file_id: str):
     if not matches:
         return jsonify({"error": "文件不存在或已过期"}), 404
 
-    target = matches[0]
+    target = matches[0].resolve()  # Always use absolute path for send_file
     mime_map = {
         ".pdf": "application/pdf",
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
