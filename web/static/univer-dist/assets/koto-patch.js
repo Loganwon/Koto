@@ -261,9 +261,190 @@
     patchFloatingToolbar(window.__koto.floatingToolbar);
     addKeyboardShortcuts();
     injectShortcutHint();
+    patchSaveWithExport(window.__koto.fileManager);
+    patchSnapshotLoading(window.__koto.fileManager, window.__koto.docController);
+
+    // Polyfill aiPanel.expand() — ay class in main.js has no such method;
+    // the correct DOM operation is removing the 'collapsed' class.
+    var _panel = window.__koto.aiPanel;
+    if (_panel && !_panel.expand) {
+      _panel.expand = function () {
+        var el = document.getElementById('right-ai-panel');
+        if (el && el.classList.contains('collapsed')) {
+          el.classList.remove('collapsed');
+          var t = document.getElementById('ai-panel-toggle');
+          if (t) t.textContent = '\u25B6';
+        }
+      };
+    }
+
+    // 处理 URL 参数 ?open=<docId> — 由「我的文件」搜索中打开传入
+    var params = new URLSearchParams(window.location.search);
+    var openId = params.get('open');
+    if (openId && window.__koto.fileManager) {
+      window.__koto.fileManager._switchDoc(openId);
+    }
+
     // fetch interceptor is installed immediately by the AltViewer IIFE below
     console.log('[Koto Patch] ✅ 快捷键 & 浮动工具栏 & 多格式查看器 已增强');
   });
+
+  // ═════════════════════════════════════════════════════════
+  // 5. DOCX 富格式快照载入
+  // ═════════════════════════════════════════════════════════
+
+  function patchSnapshotLoading(fm, dc) {
+    if (!fm || !dc || fm.__kotoSnapshotPatched) return;
+    fm.__kotoSnapshotPatched = true;
+
+    var origSwitch = fm._onDocSwitch;
+    fm._onDocSwitch = function (content, docId) {
+      // Completely skip loadContent for altviewer-only docs.
+      // Returning {content:''} alone still causes Univer to call loadContent('')
+      // which throws "Cannot set properties of undefined (setting 'parent')".
+      if (window.__kotoAltViewerDocs && window.__kotoAltViewerDocs.has(docId)) {
+        return;
+      }
+      var pending = window.__kotoPendingSnapshots && window.__kotoPendingSnapshots[docId];
+      if (pending) {
+        delete window.__kotoPendingSnapshots[docId];
+        _loadSnapshotIntoUniver(dc, pending);
+        return;
+      }
+      if (origSwitch) origSwitch.call(fm, content, docId);
+    };
+  }
+
+  function _loadSnapshotIntoUniver(dc, snapshot) {
+    if (!dc || !snapshot || !snapshot.body) return;
+    try {
+      // Temporarily override _buildDocBody so _replaceEntireDoc uses
+      // the snapshot's body directly instead of building from plain text.
+      var _orig = dc._buildDocBody.bind(dc);
+      dc._buildDocBody = function () {
+        dc._buildDocBody = _orig;
+        return snapshot.body;
+      };
+      dc._replaceEntireDoc('');
+    } catch (e) {
+      dc._buildDocBody = dc._buildDocBody.__proto__ && dc._buildDocBody._orig
+        ? dc._buildDocBody._orig : dc._buildDocBody;
+      console.warn('[Koto] snapshot load failed:', e);
+    }
+  }
+
+  // ═════════════════════════════════════════════════════════
+  // 4. 保存 — 使用原生 Windows 文件另存对话框
+  // ═════════════════════════════════════════════════════════
+
+  // MIME 映射（用于 showSaveFilePicker types）
+  var _MIME_MAP = {
+    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    '.pdf':  'application/pdf',
+    '.txt':  'text/plain',
+    '.md':   'text/markdown',
+    '.csv':  'text/csv',
+    '.html': 'text/html',
+    '.json': 'application/json',
+    '.py':   'text/x-python',
+    '.js':   'text/javascript',
+  };
+
+  function patchSaveWithExport(fm) {
+    if (!fm || fm.__kotoExportPatched) return;
+    fm.__kotoExportPatched = true;
+
+    var origSave = fm.saveWithFeedback.bind(fm);
+
+    fm.saveWithFeedback = async function () {
+      // 1. 先执行内部 JSON 保存
+      await origSave();
+
+      var docId = fm._activeId;
+      if (!docId) return;
+
+      var statusEl = document.getElementById('fm-save-status');
+
+      try {
+        // 2. 获取文档元信息（文件名、原始扩展名）
+        var infoResp = await fetch('/api/editor/docs/' + docId);
+        var docInfo = infoResp.ok ? await infoResp.json() : {};
+        var importedFrom = docInfo.importedFrom || '';
+        var suggestedName;
+        if (importedFrom) {
+          // 取文件名部分（去掉路径）
+          suggestedName = importedFrom.split(/[\\/]/).pop();
+        } else {
+          suggestedName = (docInfo.name || '未命名文档') + '.txt';
+        }
+        var ext = suggestedName.includes('.')
+          ? '.' + suggestedName.split('.').pop().toLowerCase()
+          : '.txt';
+        var mime = _MIME_MAP[ext] || 'application/octet-stream';
+
+        // 3. 打开原生 Windows 文件保存对话框（Chrome/Edge 86+）
+        if (typeof window.showSaveFilePicker === 'function') {
+          var fileHandle;
+          try {
+            fileHandle = await window.showSaveFilePicker({
+              suggestedName: suggestedName,
+              types: [{ description: '文档', accept: { [mime]: [ext] } }],
+            });
+          } catch (e) {
+            // 用户点击了取消，静默退出
+            if (statusEl) statusEl.textContent = '';
+            return;
+          }
+
+          // 4. 从服务器拉取文件字节
+          var dlResp = await fetch('/api/editor/docs/' + docId + '/download');
+          if (!dlResp.ok) throw new Error('download failed: ' + dlResp.status);
+          var blob = await dlResp.blob();
+
+          // 5. 写入用户选择的路径
+          var writable = await fileHandle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+
+          var savedName = fileHandle.name;
+          if (statusEl) {
+            statusEl.textContent = '✓ 已保存 → ' + savedName;
+            statusEl.className = 'save-status saved';
+            setTimeout(function () { if (statusEl) statusEl.textContent = ''; }, 3000);
+          }
+          console.log('[Koto] 另存为:', savedName);
+
+        } else {
+          // 降级：触发浏览器下载（Firefox 等）
+          var dlResp2 = await fetch('/api/editor/docs/' + docId + '/download');
+          if (!dlResp2.ok) throw new Error('download failed');
+          var blob2 = await dlResp2.blob();
+          var url = URL.createObjectURL(blob2);
+          var a = document.createElement('a');
+          a.href = url;
+          a.download = suggestedName;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          if (statusEl) {
+            statusEl.textContent = '✓ 已下载: ' + suggestedName;
+            statusEl.className = 'save-status saved';
+            setTimeout(function () { if (statusEl) statusEl.textContent = ''; }, 3000);
+          }
+        }
+      } catch (e) {
+        console.warn('[Koto] 保存对话框失败:', e);
+        if (statusEl) {
+          statusEl.textContent = '⚠ 保存失败';
+          statusEl.className = 'save-status error';
+          setTimeout(function () { if (statusEl) statusEl.textContent = ''; }, 4000);
+        }
+      }
+    };
+  }
 
 })();
 
@@ -277,6 +458,7 @@
   var AltViewer = {
     _currentDocContent: '',
     _currentDocId: '',
+    _editVD: null,
 
     show: function (data) {
       var el = document.getElementById('koto-alt-viewer');
@@ -317,11 +499,22 @@
       // Bind toolbar buttons
       var toTextBtn = document.getElementById('koto-viewer-to-text');
       var aiBtn = document.getElementById('koto-viewer-ai');
+      var saveBtn = document.getElementById('koto-viewer-save');
       if (toTextBtn) {
         toTextBtn.onclick = function () { AltViewer.convertToText(); };
       }
       if (aiBtn) {
         aiBtn.onclick = function () { AltViewer.aiAnalyze(); };
+      }
+      // Show save button only for editable types
+      var _EDITABLE_TYPES = ['excel', 'csv', 'ppt'];
+      if (saveBtn) {
+        if (_EDITABLE_TYPES.indexOf(vd.type) !== -1) {
+          saveBtn.style.display = '';
+          saveBtn.onclick = function () { AltViewer.saveEdits(vd.type); };
+        } else {
+          saveBtn.style.display = 'none';
+        }
       }
 
       // DOCX: also show Univer editor alongside image badge
@@ -368,6 +561,67 @@
       if (panel) panel.expand();
     },
 
+    saveEdits: function (vtype) {
+      var docId = this._currentDocId;
+      var vd = this._editVD;
+      if (!docId || !vd) return;
+      var saveBtn = document.getElementById('koto-viewer-save');
+      if (saveBtn) { saveBtn.textContent = '⏳ 保存中…'; saveBtn.disabled = true; }
+      var self = this;
+      var p;
+      if (vtype === 'excel') {
+        p = self._saveExcelCells(docId, vd);
+      } else if (vtype === 'csv') {
+        p = self._saveCSVCells(docId, vd);
+      } else if (vtype === 'ppt') {
+        p = self._savePPTSlides(docId, vd);
+      } else {
+        if (saveBtn) { saveBtn.textContent = '💾 保存'; saveBtn.disabled = false; }
+        return;
+      }
+      p.then(function () {
+        if (saveBtn) { saveBtn.textContent = '✓ 已保存'; saveBtn.disabled = false; }
+        setTimeout(function () { if (saveBtn) saveBtn.textContent = '💾 保存'; }, 2500);
+      }).catch(function (err) {
+        console.error('[Koto] saveEdits failed:', err);
+        if (saveBtn) { saveBtn.textContent = '❌ 保存失败'; saveBtn.disabled = false; }
+        setTimeout(function () { if (saveBtn) saveBtn.textContent = '💾 保存'; }, 3000);
+      });
+    },
+
+    _saveExcelCells: function (docId, vd) {
+      return fetch('/api/editor/docs/' + encodeURIComponent(docId) + '/cells', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheets: vd.sheets }),
+      }).then(function (r) {
+        if (!r.ok) return r.json().then(function (e) { throw new Error(e.error || r.status); });
+      });
+    },
+
+    _saveCSVCells: function (docId, vd) {
+      return fetch('/api/editor/docs/' + encodeURIComponent(docId) + '/cells', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ headers: vd.headers || [], rows: vd.rows || [] }),
+      }).then(function (r) {
+        if (!r.ok) return r.json().then(function (e) { throw new Error(e.error || r.status); });
+      });
+    },
+
+    _savePPTSlides: function (docId, vd) {
+      var slides = (vd.slides || []).map(function (s) {
+        return { index: s.index || 0, title: s.title || '', body: s.body || '' };
+      });
+      return fetch('/api/editor/docs/' + encodeURIComponent(docId) + '/slide-texts', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slides: slides }),
+      }).then(function (r) {
+        if (!r.ok) return r.json().then(function (e) { throw new Error(e.error || r.status); });
+      });
+    },
+
     // ── Renderers ──
 
     _renderPDF: function (docId, body) {
@@ -381,6 +635,9 @@
     _renderExcel: function (vd, body) {
       var sheets = vd.sheets || [];
       if (!sheets.length) { body.textContent = '（空表格）'; return; }
+
+      // Store reference for save
+      this._editVD = vd;
 
       // Tab bar
       var tabBar = document.createElement('div');
@@ -404,8 +661,9 @@
 
         var table = document.createElement('table');
         table.className = 'koto-sheet-table';
+        table.dataset.sheetIdx = idx;
 
-        // Row number + data headers (A B C…)
+        // Column headers (A B C…)
         var maxCols = rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0);
         var thead = document.createElement('thead');
         var hrow = document.createElement('tr');
@@ -414,7 +672,6 @@
         hrow.appendChild(thNum);
         for (var ci = 0; ci < maxCols; ci++) {
           var th = document.createElement('th');
-          // Convert col index to letter(s): A, B, ... Z, AA, AB...
           var colLabel = '';
           var n = ci;
           do {
@@ -441,6 +698,24 @@
             var cell = row[ci2];
             td.textContent = cell ? String(cell.v !== undefined ? cell.v : '') : '';
             if (cell && cell.t === 'n') td.style.textAlign = 'right';
+            td.contentEditable = 'true';
+            td.dataset.sheetIdx = idx;
+            td.dataset.rowIdx = ri;
+            td.dataset.colIdx = ci2;
+            // Sync edits back to vd on blur
+            td.addEventListener('blur', function (e) {
+              var si = parseInt(e.target.dataset.sheetIdx);
+              var ri2 = parseInt(e.target.dataset.rowIdx);
+              var ci3 = parseInt(e.target.dataset.colIdx);
+              if (sheets[si] && sheets[si].rows[ri2]) {
+                var cellObj = sheets[si].rows[ri2][ci3];
+                if (cellObj) {
+                  cellObj.v = e.target.textContent;
+                } else {
+                  sheets[si].rows[ri2][ci3] = { v: e.target.textContent, t: 's' };
+                }
+              }
+            });
             tr.appendChild(td);
           }
           tbody.appendChild(tr);
@@ -469,6 +744,9 @@
       var headers = vd.headers || [];
       var rows = vd.rows || [];
 
+      // Store reference for save
+      this._editVD = vd;
+
       var wrapper = document.createElement('div');
       wrapper.className = 'koto-table-wrapper';
       wrapper.style.padding = '8px';
@@ -479,9 +757,15 @@
       if (headers.length) {
         var thead = document.createElement('thead');
         var hrow = document.createElement('tr');
-        headers.forEach(function (h) {
+        headers.forEach(function (h, hi) {
           var th = document.createElement('th');
           th.textContent = h;
+          th.contentEditable = 'true';
+          th.dataset.headerIdx = hi;
+          th.addEventListener('blur', function (e) {
+            var idx = parseInt(e.target.dataset.headerIdx);
+            vd.headers[idx] = e.target.textContent;
+          });
           hrow.appendChild(th);
         });
         thead.appendChild(hrow);
@@ -491,9 +775,17 @@
       var tbody = document.createElement('tbody');
       rows.forEach(function (row, ri) {
         var tr = document.createElement('tr');
-        row.forEach(function (cell) {
+        row.forEach(function (cell, ci) {
           var td = document.createElement('td');
           td.textContent = cell;
+          td.contentEditable = 'true';
+          td.dataset.rowIdx = ri;
+          td.dataset.colIdx = ci;
+          td.addEventListener('blur', function (e) {
+            var ri2 = parseInt(e.target.dataset.rowIdx);
+            var ci2 = parseInt(e.target.dataset.colIdx);
+            if (vd.rows[ri2]) vd.rows[ri2][ci2] = e.target.textContent;
+          });
           tr.appendChild(td);
         });
         tbody.appendChild(tr);
@@ -506,6 +798,9 @@
     _renderPPT: function (vd, body) {
       var slides = vd.slides || [];
       if (!slides.length) { body.textContent = '（空演示文稿）'; return; }
+
+      // Store reference for save
+      this._editVD = vd;
 
       var currentIdx = 0;
 
@@ -539,17 +834,29 @@
         var card = document.createElement('div');
         card.className = 'koto-slide-card';
 
-        if (s.title) {
+        if (s.title !== undefined) {
           var header = document.createElement('div');
           header.className = 'koto-slide-header';
           header.textContent = s.title;
+          header.contentEditable = 'true';
+          header.title = '点击编辑标题';
+          header.addEventListener('blur', function () {
+            slides[idx].title = header.textContent;
+          });
           card.appendChild(header);
         }
 
-        if (s.body) {
+        if (s.body !== undefined) {
           var sbody = document.createElement('div');
           sbody.className = 'koto-slide-body';
           sbody.textContent = s.body;
+          sbody.contentEditable = 'true';
+          sbody.title = '点击编辑正文';
+          // Use pre-wrap so line breaks are preserved
+          sbody.style.whiteSpace = 'pre-wrap';
+          sbody.addEventListener('blur', function () {
+            slides[idx].body = sbody.textContent;
+          });
           card.appendChild(sbody);
         }
 
@@ -668,6 +975,9 @@
   // Expose AltViewer globally so the fetch interceptor (inside main IIFE) can call it
   window.__kotoAltViewer = AltViewer;
 
+  // Global pending-snapshot map shared between IIFEs
+  window.__kotoPendingSnapshots = window.__kotoPendingSnapshots || {};
+
   // Script has `defer` so DOM is interactive when we run — install directly.
   installFetchInterceptor();
 
@@ -675,28 +985,55 @@
     if (window.__kotoFetchPatched) return;
     window.__kotoFetchPatched = true;
 
+    // These viewer types render in AltViewer ONLY — Univer must NOT try to load
+    // their raw text as a document (it crashes with "cannot set parent of undefined").
+    var _ALTVIEWER_ONLY = ['pdf', 'excel', 'csv', 'ppt'];
+
     var origFetch = window.fetch;
     window.fetch = function (input, init) {
       var url = typeof input === 'string' ? input : (input && input.url) || String(input);
-      var p = origFetch.apply(this, arguments);
 
       if (/\/api\/editor\/docs\/[a-zA-Z0-9_-]+$/.test(url)) {
         var method = (init && init.method ? init.method : 'GET').toUpperCase();
         if (method === 'GET') {
-          p.then(function (res) {
+          return origFetch.apply(this, arguments).then(function (res) {
             var clone = res.clone();
-            clone.json().then(function (data) {
-              if (data && data.viewerData && data.viewerData.type) {
-                setTimeout(function () { AltViewer.show(data); }, 80);
-              } else {
+            return clone.json().then(function (data) {
+              if (!data || !data.viewerData || !data.viewerData.type) {
                 AltViewer.hide();
+                return res;  // normal text doc — let Univer load it as-is
               }
-            }).catch(function () {});
-          }).catch(function () {});
+
+              var vtype = data.viewerData.type;
+              setTimeout(function () { AltViewer.show(data); }, 80);
+
+              if (_ALTVIEWER_ONLY.indexOf(vtype) !== -1) {
+                // Register doc as altviewer-only so patchSnapshotLoading
+                // can skip calling loadContent() entirely (prevents Univer crash).
+                window.__kotoAltViewerDocs = window.__kotoAltViewerDocs || new Set();
+                window.__kotoAltViewerDocs.add(data.id);
+                // Return a safe empty-content response so Univer doesn't try
+                // to render doc content (belt-and-suspenders alongside the skip below)
+                var safeData = Object.assign({}, data, { content: '', snapshot: null });
+                return new Response(JSON.stringify(safeData), {
+                  status: res.status,
+                  headers: { 'Content-Type': 'application/json' },
+                });
+              }
+
+              // DOCX with rich snapshot: stash it so patchSnapshotLoading can pick it up
+              if (vtype === 'docx' && data.snapshot && data.id) {
+                window.__kotoPendingSnapshots[data.id] = data.snapshot;
+              }
+
+              // markdown / code / docx — Univer loads the text content
+              return res;
+            }).catch(function () { return res; });
+          });
         }
       }
 
-      return p;
+      return origFetch.apply(this, arguments);
     };
   }
 

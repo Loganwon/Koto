@@ -28,7 +28,8 @@ from flask import g, jsonify, request
 logger = logging.getLogger(__name__)
 
 # ── 配置 ──
-AUTH_ENABLED = os.environ.get("KOTO_AUTH_ENABLED", "true").lower() in (
+# 默认禁用认证（本地桌面模式）；云端部署须在环境变量中显式设置 KOTO_AUTH_ENABLED=true
+AUTH_ENABLED = os.environ.get("KOTO_AUTH_ENABLED", "false").lower() in (
     "true",
     "1",
     "yes",
@@ -44,6 +45,10 @@ if not AUTH_ENABLED:
 def _validate_jwt_secret() -> str:
     """Read and validate KOTO_JWT_SECRET. Returns the secret to use.
 
+    Priority:
+      1. KOTO_JWT_SECRET env var
+      2. config/jwt_secret.txt (auto-generated and persisted on first run)
+
     Raises:
         RuntimeError: In cloud mode when KOTO_JWT_SECRET is not set.
     """
@@ -52,14 +57,28 @@ def _validate_jwt_secret() -> str:
         if os.environ.get("KOTO_DEPLOY_MODE", "local") == "cloud":
             raise RuntimeError(
                 "KOTO_JWT_SECRET environment variable must be set in cloud/production mode. "
-                'Generate one with: python -c "import secrets; logger.info(secrets.token_hex(32))"'
+                'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
             )
-        # Local dev: generate ephemeral secret (tokens invalidate on restart — acceptable locally)
-        logger.warning(
-            "[auth] KOTO_JWT_SECRET not set — generating ephemeral secret. "
-            "All tokens will invalidate on restart. Set KOTO_JWT_SECRET for persistent sessions."
+        # Local mode: persist secret to disk so tokens survive app restarts
+        _secret_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "config", "jwt_secret.txt"
         )
-        secret = secrets.token_hex(32)
+        if os.path.exists(_secret_file):
+            try:
+                with open(_secret_file, "r", encoding="utf-8") as _f:
+                    secret = _f.read().strip()
+            except Exception:
+                pass
+        if not secret:
+            secret = secrets.token_hex(32)
+            try:
+                os.makedirs(os.path.dirname(_secret_file), exist_ok=True)
+                with open(_secret_file, "w", encoding="utf-8") as _f:
+                    _f.write(secret)
+                logger.info("[auth] 已生成并保存 JWT 密钥到 config/jwt_secret.txt")
+            except Exception as _e:
+                logger.warning("[auth] 无法持久化 JWT 密钥: %s", _e)
     return secret
 
 

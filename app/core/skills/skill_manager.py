@@ -2112,17 +2112,24 @@ class SkillManager:
             ):
                 continue
 
-            # ── 长期记忆 skill：动态从 MemoryManager 检索相关记忆并注入 ────────
+            # ── 长期记忆 skill：优先从 ShadowWatcher 检索记忆并注入 ────────────
             if skill_id == "long_term_memory":
                 try:
-                    from web.memory_manager import MemoryManager
-
-                    _mm = MemoryManager()
-                    ctx = _mm.get_context_string(user_input or "")
+                    from app.core.monitoring.shadow_watcher import get_shadow_watcher
+                    ctx = get_shadow_watcher().get_memories_context_string(user_input or "")
                     if ctx.strip():
                         memory_block = ctx
                 except Exception as _me:
-                    logger.debug(f"[SkillManager] 长期记忆注入跳过: {_me}")
+                    logger.debug(f"[SkillManager] 影子记忆注入跳过: {_me}")
+                    # 回退：旧 MemoryManager
+                    try:
+                        from web.memory_manager import MemoryManager
+                        _mm = MemoryManager()
+                        ctx = _mm.get_context_string(user_input or "")
+                        if ctx.strip():
+                            memory_block = ctx
+                    except Exception:
+                        pass
                 continue  # 长期记忆不走普通 prompt 通道
 
             # ── 注入上限检测（长期记忆走了 continue，不计入此计数）─────────────

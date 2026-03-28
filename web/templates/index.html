@@ -457,6 +457,10 @@
         }
         .fh-action-btn svg { width: 16px; height: 16px; stroke-width: 2; }
         .fh-action-btn:hover { background: var(--bg-secondary); color: var(--accent-primary); border-color: var(--border-color); }
+        .fh-action-primary { background: var(--accent-primary) !important; color: #fff !important;
+            border-color: var(--accent-primary) !important; font-size: 11px; padding: 3px 8px !important;
+            gap: 3px; white-space: nowrap; }
+        .fh-action-primary:hover { opacity: 0.85; color: #fff !important; }
         
         .fh-dup-group { padding: 12px; border-radius: 8px; border: 1px solid var(--accent-warning);
             background: rgba(255,165,0,.06); margin-bottom: 8px; font-size: 13px; }
@@ -464,41 +468,6 @@
         .fh-dup-group .fh-dup-path { color: var(--text-secondary); font-size: 12px; padding: 3px 0; display: flex; align-items: center; border-bottom: 1px dashed rgba(255,165,0,.15); }
         .fh-dup-group .fh-dup-path:last-child { border-bottom: none; }
 
-        /* ── Editor View (文件助手 — 全屏固定覆盖层) ────────────────── */
-        #editorView {
-            display: none;
-            position: fixed;
-            top: 0; left: 0; right: 0; bottom: 0;
-            z-index: 50000;
-            background: #1e1e1e;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        #editorView.active {
-            display: flex;
-        }
-        #editorView iframe {
-            flex: 1; width: 100%; height: 100%; border: none;
-            background: #1e1e1e;
-        }
-        #editorBackBtn {
-            position: absolute;
-            top: 10px; left: 10px;
-            z-index: 50001;
-            background: rgba(30,30,30,0.85);
-            color: #e0e0e0;
-            border: 1px solid rgba(255,255,255,0.15);
-            border-radius: 6px;
-            padding: 6px 16px;
-            font-size: 13px;
-            cursor: pointer;
-            backdrop-filter: blur(6px);
-            transition: background 0.15s, border-color 0.15s;
-        }
-        #editorBackBtn:hover {
-            background: rgba(60,60,60,0.95);
-            border-color: rgba(255,255,255,0.3);
-        }
         #chatView {
             display: flex;
             flex-direction: column;
@@ -550,6 +519,94 @@
         }
         .sp-tab.active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
         .sp-tab:hover:not(.active) { color: var(--text-primary); }
+        /* Community tab highlight */
+        .sp-tab--community { color: #58a6ff; }
+        .sp-tab--community:hover:not(.active) { color: #79baff; }
+        .sp-tab--community.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+        /* Community Skill Preview Modal */
+        .sp-preview-modal {
+            background: var(--bg-primary); width: 440px; max-width: 90%;
+            border-radius: 12px; border: 1px solid var(--border-color);
+            box-shadow: 0 10px 30px rgba(0,0,0,.25); display: flex; flex-direction: column;
+            overflow: hidden; animation: modalFadeIn .2s ease-out;
+        }
+        .sp-preview-header {
+            padding: 16px; border-bottom: 1px solid var(--border-color);
+            display: flex; align-items: flex-start; gap: 12px;
+        }
+        .sp-preview-icon { font-size: 32px; flex-shrink: 0; line-height: 1; }
+        .sp-preview-title { font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+        .sp-preview-meta { font-size: 11px; color: var(--text-secondary); display: flex; gap: 8px; }
+        .sp-preview-body {
+            padding: 16px; overflow-y: auto; max-height: 60vh; font-size: 13px; color: var(--text-primary);
+        }
+        .sp-preview-label { font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;}
+        .sp-preview-prompt {
+            background: var(--bg-secondary); padding: 12px; border-radius: 8px;
+            font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap;
+            border: 1px solid var(--border-color); color: var(--text-secondary);
+        }
+        .sp-preview-footer {
+            padding: 12px 16px; border-top: 1px solid var(--border-color);
+            display: flex; justify-content: flex-end; gap: 8px; background: var(--bg-tertiary);
+        }
+        /* Community promo banner (catalog view) */
+        .sp-community-promo {
+            margin: 10px 12px 4px; padding: 9px 12px 9px 14px;
+            border-left: 3px solid #58a6ff;
+            background: rgba(88,166,255,0.06);
+            border-radius: 0 8px 8px 0;
+            cursor: pointer; display: flex; align-items: center; gap: 10px;
+            transition: background 0.15s;
+        }
+        .sp-community-promo:hover { background: rgba(88,166,255,0.1); }
+        .sp-community-promo-text { flex: 1; min-width: 0; }
+        .sp-community-promo-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+        .sp-community-promo-sub { font-size: 11px; color: var(--text-secondary,#8b949e); margin-top: 2px; }
+        .sp-community-promo-enter { font-size: 14px; color: #58a6ff; flex-shrink: 0; }
+        /* Community panel: search bar */
+        .sp-comm-search-wrap { padding: 7px 10px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
+        .sp-comm-search-input {
+            width: 100%; box-sizing: border-box; padding: 6px 10px;
+            border-radius: 6px; border: 1px solid var(--border-color);
+            background: var(--bg-secondary); color: var(--text-primary);
+            font-size: 12px; outline: none; transition: border-color 0.15s;
+        }
+        .sp-comm-search-input:focus { border-color: #58a6ff; }
+        .sp-comm-search-input::placeholder { color: var(--text-muted); }
+        /* Community panel: expandable skill cards */
+        .sp-comm-card { border-bottom: 1px solid var(--border-color); cursor: pointer; }
+        .sp-comm-card:hover .sp-comm-card-row { background: rgba(255,255,255,0.03); }
+        .sp-comm-card-row { display: flex; align-items: center; gap: 8px; padding: 9px 12px; }
+        .sp-comm-card-icon { font-size: 18px; flex-shrink: 0; width: 24px; text-align: center; }
+        .sp-comm-card-name {
+            font-size: 12px; font-weight: 600; color: var(--text-primary);
+            flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .sp-comm-card-cat {
+            font-size: 10px; color: var(--text-muted); background: var(--bg-secondary);
+            border: 1px solid var(--border-color); padding: 1px 5px; border-radius: 3px; flex-shrink: 0;
+        }
+        .sp-comm-card-stats {
+            font-size: 10px; color: #e05c5c; flex-shrink: 0; letter-spacing: 0.2px;
+        }
+        .sp-comm-card-install {
+            font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 4px;
+            border: none; cursor: pointer; flex-shrink: 0; transition: opacity 0.15s;
+        }
+        .sp-comm-card-install.uninstalled { background: rgba(88,166,255,0.12); color: #58a6ff; }
+        .sp-comm-card-install.uninstalled:hover { background: rgba(88,166,255,0.22); }
+        .sp-comm-card-install.installed { background: rgba(63,185,80,0.1); color: #3fb950; cursor: default; }
+        .sp-comm-card-chevron { font-size: 10px; color: var(--text-muted); flex-shrink: 0; margin-left: 2px; transition: transform 0.2s; }
+        .sp-comm-card.open .sp-comm-card-chevron { transform: rotate(180deg); }
+        .sp-comm-card-detail {
+            display: none; padding: 4px 12px 10px 44px;
+            font-size: 11px; line-height: 1.6; color: var(--text-secondary);
+            border-top: 1px solid rgba(255,255,255,0.04);
+        }
+        .sp-comm-card.open .sp-comm-card-detail { display: block; }
+        .sp-comm-card-drow { display: flex; gap: 6px; margin-bottom: 3px; }
+        .sp-comm-card-dlabel { color: var(--text-muted); font-weight: 600; flex-shrink: 0; min-width: 28px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px; }
         .sp-filter-row {
             display: flex; gap: 5px; flex-wrap: wrap;
             padding: 8px 14px; border-bottom: 1px solid var(--border-color); flex-shrink: 0;
@@ -1146,16 +1203,17 @@
                     <span class="sidebar-text" style="flex:1;">我的文件</span>
                 </div>
 
-                <!-- 文件助手 -->
-                <div class="sb-nav-item" id="navEditorBtn" onclick="switchToEditorView()" title="文件助手">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                    <span class="sidebar-text" style="flex:1;">文件助手</span>
-                </div>
-
                 <!-- Skills / Gems -->
                 <div class="sb-nav-item" id="navSkillsBtn" onclick="openSkillsPanel()" title="Skills 库">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
                     <span class="sidebar-text" style="flex:1;">Skills 库</span>
+                    <svg class="sb-arrow sidebar-text" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+
+                <!-- 全格式工作区 -->
+                <div class="sb-nav-item" id="navWorkspaceBtn" onclick="window.open('/workspace-assistant','_blank')" title="全格式 AI 工作区">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                    <span class="sidebar-text" style="flex:1;">全格式工作区</span>
                     <svg class="sb-arrow sidebar-text" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
                 </div>
 
@@ -1474,29 +1532,7 @@
                     </div>
                 </div>
 
-                <!-- Memory Section -->
-                <div class="settings-section">
-                    <h4>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                        </svg>
-                        长期记忆 (Long-term Memory)
-                    </h4>
-                    <p class="setting-desc">Koto 会记住这些偏好和事实，并在对话中自动引用。</p>
-                    <div class="setting-item">
-                        <div class="memory-input-group">
-                            <input type="text" id="newMemoryInput" placeholder="输入你想让 Koto 记住的事实或偏好...">
-                            <button class="btn-primary btn-sm" onclick="addNewMemory()">添加</button>
-                        </div>
-                    </div>
-                    <div class="memory-actions-row" style="display:flex;gap:8px;margin-bottom:8px;">
-                        <button class="btn-secondary btn-sm" onclick="importProfileMemories()" title="将已有的用户画像数据转为记忆条目">📋 导入用户画像</button>
-                        <button class="btn-secondary btn-sm" onclick="batchExtractMemories()" title="从历史聊天记录中 AI 提取记忆（需要片刻）">🔍 从历史对话提取</button>
-                    </div>
-                    <div class="memory-list" id="memoryList">
-                        <div class="memory-empty">正在加载记忆...</div>
-                    </div>
-                </div>
+                <!-- Memory Section removed: memories are now managed by Shadow Watcher (影子追踪 · 主动交互 section above) -->
 
                 <div class="settings-section">
                     <h4>
@@ -1731,7 +1767,7 @@
                         </svg>
                         影子追踪 · 主动交互
                     </h4>
-                    <p class="setting-desc">长期观察您的常用话题、活跃时段和未完成任务，由 Koto 主动进行问候、跨日跟进和智能提醒。</p>
+                    <p class="setting-desc">长期观察您的常用话题、活跃时段和未完成任务，由 Koto 主动进行问候、跨日跟进和智能提醒。记忆由影子追踪自动管理，无需手动维护。</p>
                     <div class="bindings-toolbar">
                         <label class="toggle" title="开关影子追踪">
                             <input type="checkbox" id="shadowWatcherToggle" onchange="toggleShadowWatcher(this.checked)">
@@ -1745,6 +1781,21 @@
                     <div id="shadowSummaryCards" style="display:none;margin-top:8px;"></div>
                     <!-- 待处理任务列表 -->
                     <div id="shadowOpenTasksList" style="margin-top:6px;"></div>
+
+                    <!-- 影子记忆（长期记忆，由影子追踪自动管理） -->
+                    <div style="margin-top:14px;border-top:1px solid var(--border-color);padding-top:12px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:13px;font-weight:500;color:var(--text-primary);">🧠 影子记忆</span>
+                            <span style="font-size:11px;color:var(--text-muted);">自动从对话中学习，也可手动添加</span>
+                        </div>
+                        <div class="memory-input-group" style="margin-bottom:8px;">
+                            <input type="text" id="shadowMemoryInput" placeholder="输入你想让 Koto 记住的事实或偏好...">
+                            <button class="btn-primary btn-sm" onclick="addShadowMemory()">添加</button>
+                        </div>
+                        <div id="shadowMemoryList" style="max-height:200px;overflow-y:auto;">
+                            <div class="memory-empty" style="font-size:12px;color:var(--text-muted);">正在加载影子记忆...</div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Scheduled Triggers Section -->
@@ -2118,10 +2169,10 @@
             <div class="sp-tabs">
                 <button class="sp-tab active" data-tab="catalog" onclick="spSwitchTab('catalog')">全部</button>
                 <button class="sp-tab" data-tab="library" onclick="spSwitchTab('library')">我的库</button>
+                <button class="sp-tab sp-tab--community" data-tab="community" onclick="spSwitchTab('community')">🌐 社区</button>
                 <button class="sp-tab" data-tab="presets" onclick="spSwitchTab('presets')">📦 预设</button>
                 <button class="sp-tab" data-tab="studio" onclick="spSwitchTab('studio')">创意工坊</button>
                 <button class="sp-tab" data-tab="askkoto" onclick="spSwitchTab('askkoto')">🤖 问 Koto</button>
-                <button class="sp-tab" data-tab="community" onclick="spSwitchTab('community')">🌐 Skill 社区</button>
             </div>
             <!-- Category filter chips + sort trigger -->
             <div class="sp-filter-row" id="spFilterRow">
@@ -2244,33 +2295,24 @@
                 </div>
             </div>
             <!-- Skill 社区 tab content -->
-            <div class="sp-community" id="spCommunity" style="display:none;">
-                <!-- Community entry card -->
-                <div class="sp-studio-section">
-                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-                        <span style="font-size:28px">🌐</span>
-                        <div>
-                            <div class="sp-studio-title" style="margin-bottom:2px;">Skill 社区</div>
-                            <div style="font-size:11px;color:var(--text-muted,#8b949e)">15 个精选社区技能 · 无需网络</div>
-                        </div>
+            <div class="sp-community" id="spCommunity" style="display:none; flex-direction: column; height: 100%;">
+                <!-- Community header -->
+                <div style="display:flex; align-items:center; gap:8px; padding:10px 12px 8px; border-bottom:1px solid var(--border-color); flex-shrink:0;">
+                    <span style="font-size:18px;">🌐</span>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-size:12px;font-weight:600;color:var(--text-primary);">Koto 精选社区</div>
+                        <div style="font-size:10px;color:var(--text-secondary);">高质量 Skills · 一键安装</div>
                     </div>
-                    <p class="sp-studio-desc" style="margin-bottom:12px;">
-                        苏格拉底精炼、麦肯锡框架、费曼学习法、魔鬼代言人……<br>
-                        高质量社区 Skills，一键安装，即刻使用。
-                    </p>
-                    <a href="/skill-community" target="_blank" class="btn-primary btn-sm"
-                       style="display:block;text-align:center;text-decoration:none;">
-                        🚀 打开 Skill 社区 →
-                    </a>
+                    <a href="/skill-community" target="_blank" style="font-size:10px;color:var(--text-secondary);text-decoration:none;padding:3px 7px;border:1px solid var(--border-color);border-radius:4px;flex-shrink:0;">全屏 ↗</a>
                 </div>
-                <div class="sp-studio-section">
-                    <div class="sp-studio-title">⬇️ 自定义 URL 安装</div>
-                    <p class="sp-studio-desc">粘贴 raw.githubusercontent.com 链接，一键安装来自 GitHub 的 Skill</p>
-                    <input id="spGhUrlInput" class="sp-input" type="url"
-                           placeholder="https://raw.githubusercontent.com/..."
-                           style="width:100%;margin-bottom:6px;">
-                    <button class="btn-primary btn-sm" style="width:100%;" onclick="spGhInstallUrl()">⬇️ 安装</button>
-                    <div id="spGhInstallStatus" style="margin-top:6px;font-size:12px;display:none;"></div>
+                <!-- Community search -->
+                <div class="sp-comm-search-wrap">
+                    <input type="text" class="sp-comm-search-input" id="spCommunitySearchInput"
+                        placeholder="🔍  搜索社区 Skills…" oninput="spCommunityFilterCards(this.value)">
+                </div>
+                <!-- Community content container -->
+                <div id="spCommunityContent" style="flex: 1; overflow-y: auto; padding-bottom: 20px;">
+                    <div class="sp-loading">正在加载社区数据…</div>
                 </div>
             </div>
             <div class="sp-footer">
@@ -2397,20 +2439,25 @@
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
                     局部目录浏览
                 </button>
+                <button id="fhTabArchive" onclick="fhSwitchTab('archive')"
+                    style="flex:1;padding:10px 0;font-size:14px; font-weight: 500; border:none;border-radius: 6px; background:transparent;color:var(--text-secondary);cursor:pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
+                    归档整理
+                </button>
             </div>
 
             <!-- 搜索模式 -->
             <div id="fhPaneSearch" style="flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:16px; border:1px solid var(--border-color);">
-                <div style="display:flex;gap:12px;margin-bottom:16px;">
-                    <div style="flex:1; position: relative; display: flex; align-items: center;">
-                        <svg style="position: absolute; left: 12px; color: var(--text-muted);" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;">
+                    <div style="flex:1; min-width:0; position: relative;">
+                        <svg style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events:none; color: var(--text-muted);" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
                         <input type="text" id="fhSearchInput" class="form-input"
                             placeholder="输入文件名、关键词、扩展名等..."
-                            style="width: 100%; font-size:14px; padding-left: 36px; padding-right: 12px; height: 40px; border-radius: 6px;"
+                            style="width:100%;box-sizing:border-box;font-size:14px;padding:0 12px 0 36px;height:40px;border-radius:6px;"
                             onkeydown="if(event.key==='Enter')fhDoSearch()"
                         >
                     </div>
-                    <select id="fhCatFilter" class="form-select" style="width:120px; height: 40px; border-radius: 6px; font-size: 14px;">
+                    <select id="fhCatFilter" class="form-select" style="width:120px;flex-shrink:0;height:40px;border-radius:6px;font-size:14px;padding:0 8px;">
                         <option value="">全部类型</option>
                         <option value="文档">📃 文档</option>
                         <option value="图片">🖼️ 图片</option>
@@ -2420,7 +2467,7 @@
                         <option value="压缩包">📦 压缩</option>
                         <option value="其他">📄 其他</option>
                     </select>
-                    <button class="btn-primary" onclick="fhDoSearch()" style="height: 40px; padding: 0 20px; border-radius: 6px; font-size: 14px; font-weight: 500;">搜索文件</button>
+                    <button class="btn-primary" onclick="fhDoSearch()" style="flex-shrink:0;height:40px;padding:0 20px;border-radius:6px;font-size:14px;font-weight:500;">搜索文件</button>
                 </div>
                 <div style="display:flex;gap:10px;align-items:center;">
                     <button class="btn-secondary btn-sm" onclick="fhLoadRecent()" style="background: var(--bg-primary); border-color: var(--border-color); color: var(--text-primary); border-radius: 6px; padding: 6px 12px; font-size: 13px;">
@@ -2435,27 +2482,97 @@
 
             <!-- 浏览目录模式 -->
             <div id="fhPaneBrowse" style="display:none; flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:16px; border:1px solid var(--border-color);">
-                <div style="display:flex;gap:12px;margin-bottom:16px;">
-                    <div style="flex:1; position: relative; display: flex; align-items: center;">
-                        <svg style="position: absolute; left: 12px; color: var(--text-muted);" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;">
+                    <div style="flex:1; min-width:0; position: relative;">
+                        <svg style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events:none; color: var(--text-muted);" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
                         <input type="text" id="fhBrowsePath" class="form-input"
                             placeholder="输入本地绝对路径，如 C:\Users\12524\Desktop..."
-                            style="width: 100%; font-size:14px; padding-left: 36px; padding-right: 12px; height: 40px; border-radius: 6px;"
+                            style="width:100%;box-sizing:border-box;font-size:14px;padding:0 12px 0 36px;height:40px;border-radius:6px;"
                             onkeydown="if(event.key==='Enter')fhDoBrowse()"
                         >
                     </div>
-                    <button class="btn-secondary" onclick="fhPickFolder()" title="打开系统文件夹选择对话框" style="height: 40px; width: 40px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 6px;">📂</button>
-                    <button class="btn-primary" onclick="fhDoBrowse()" style="height: 40px; padding: 0 20px; border-radius: 6px; font-size: 14px; font-weight: 500;">浏览目录</button>
+                    <button class="btn-secondary" onclick="fhPickFolder()" title="打开系统文件夹选择对话框" style="flex-shrink:0;height:40px;width:40px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:6px;">📂</button>
+                    <button class="btn-primary" onclick="fhDoBrowse()" style="flex-shrink:0;height:40px;padding:0 20px;border-radius:6px;font-size:14px;font-weight:500;">浏览目录</button>
                 </div>
-                <div style="display:flex;gap:16px;align-items:center;">
-                    <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer; color: var(--text-primary); user-select: none;">
-                        <input type="checkbox" id="fhRecursive" style="width: 16px; height: 16px; accent-color: var(--accent-primary);"> 包含子目录深度浏览
+                <div style="display:flex;gap:12px;align-items:center;margin-top:2px;">
+                    <label style="flex-shrink:0;font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-primary);user-select:none;white-space:nowrap;">
+                        <input type="checkbox" id="fhRecursive" style="width:16px;height:16px;accent-color:var(--accent-primary);"> 包含子目录深度浏览
                     </label>
                     <input type="text" id="fhBrowseFilter" class="form-input"
-                        placeholder="在结果中过滤文件名..." style="flex:1;font-size:13px; height: 32px; border-radius: 6px;"
+                        placeholder="在结果中过滤文件名..." style="width:auto;flex:1;min-width:0;font-size:13px;height:34px;border-radius:6px;padding:0 10px;"
                         oninput="fhFilterBrowseResults(this.value)"
                     >
                 </div>
+            </div>
+
+            <!-- 归档整理模式 -->
+            <div id="fhPaneArchive" style="display:none; flex:1; overflow-y:auto; background:var(--bg-primary); border-radius:10px;">
+                <!-- 路径配置 -->
+                <div style="background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:12px; border:1px solid var(--border-color);">
+                    <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px;">路径配置</div>
+                    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
+                        <label style="flex-shrink:0;font-size:13px;color:var(--text-secondary);width:56px;">源目录</label>
+                        <div style="flex:1;min-width:0;display:flex;align-items:center;height:38px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-tertiary);">
+                            <span style="display:flex;align-items:center;padding:0 7px 0 10px;flex-shrink:0;color:var(--text-muted);pointer-events:none;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg></span>
+                            <input type="text" id="fhArchiveSrc" placeholder="输入要整理的文件夹路径，如 C:\Users\...\下载" style="flex:1;min-width:0;border:none;background:transparent;outline:none;font-size:13px;color:var(--text-primary);font-family:inherit;padding:0 10px 0 0;height:100%;">
+                        </div>
+                        <button class="btn-secondary" onclick="fhPickArchiveFolder('fhArchiveSrc')" title="选择文件夹" style="flex-shrink:0;height:38px;width:38px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:16px;">📂</button>
+                    </div>
+                    <div style="display:flex;gap:10px;align-items:center;">
+                        <label style="flex-shrink:0;font-size:13px;color:var(--text-secondary);width:56px;">目标目录</label>
+                        <div style="flex:1;min-width:0;display:flex;align-items:center;height:38px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-tertiary);">
+                            <span style="display:flex;align-items:center;padding:0 7px 0 10px;flex-shrink:0;color:var(--text-muted);pointer-events:none;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect></svg></span>
+                            <input type="text" id="fhArchiveDest" placeholder="留空则自动在源目录同级创建 xxx_归档_日期" style="flex:1;min-width:0;border:none;background:transparent;outline:none;font-size:13px;color:var(--text-primary);font-family:inherit;padding:0 10px 0 0;height:100%;">
+                        </div>
+                        <button class="btn-secondary" onclick="fhPickArchiveFolder('fhArchiveDest')" title="选择文件夹" style="flex-shrink:0;height:38px;width:38px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:16px;">📂</button>
+                    </div>
+                </div>
+
+                <!-- 归档方式 -->
+                <div style="background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:12px; border:1px solid var(--border-color);">
+                    <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;">归档方式</div>
+                    <div style="display:flex;gap:10px;margin-bottom:14px;">
+                        <button id="fhArchiveBtnAuto" onclick="fhSetArchiveMode('auto')"
+                            style="flex:1;padding:14px 10px;border-radius:10px;border:2px solid var(--accent-primary);background:var(--accent-primary);color:#fff;cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all 0.2s;">
+                            <span style="font-size:22px;">🤖</span>
+                            <span>AI 智能归档</span>
+                            <span style="font-size:11px;font-weight:400;opacity:0.85;">按文件类型自动分类整理</span>
+                        </button>
+                        <button id="fhArchiveBtnCustom" onclick="fhSetArchiveMode('custom')"
+                            style="flex:1;padding:14px 10px;border-radius:10px;border:2px solid var(--border-color);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all 0.2s;">
+                            <span style="font-size:22px;">✏️</span>
+                            <span>自定义规则</span>
+                            <span style="font-size:11px;font-weight:400;opacity:0.7;">按我设定的匹配规则分类</span>
+                        </button>
+                    </div>
+
+                    <!-- 自定义规则区 -->
+                    <div id="fhCustomRulesArea" style="display:none;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:13px;color:var(--text-secondary);font-weight:500;">匹配规则（支持通配符，如 *.pdf、报告*）</span>
+                            <div style="display:flex;gap:8px;">
+                                <button class="btn-secondary btn-sm" onclick="fhLoadArchivePreset()" style="font-size:12px;border-radius:6px;padding:4px 10px;">📋 按类型预设</button>
+                                <button class="btn-primary btn-sm" onclick="fhAddArchiveRule()" style="font-size:12px;border-radius:6px;padding:4px 10px;">+ 添加规则</button>
+                            </div>
+                        </div>
+                        <div id="fhCustomRules" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;"></div>
+                        <div id="fhCustomRulesEmpty" style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;border:1px dashed var(--border-color);border-radius:8px;">暂无规则，点击"+ 添加规则"或使用"按类型预设"快速填入</div>
+                    </div>
+                </div>
+
+                <!-- 选项 + 开始 -->
+                <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;">
+                    <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-primary);user-select:none;white-space:nowrap;">
+                        <input type="checkbox" id="fhArchiveRecursive" checked style="width:16px;height:16px;accent-color:var(--accent-primary);"> 包含子目录
+                    </label>
+                    <button class="btn-primary" onclick="fhDoArchive()" style="margin-left:auto;height:40px;padding:0 28px;font-size:14px;font-weight:600;border-radius:8px;display:flex;align-items:center;gap:8px;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
+                        开始归档
+                    </button>
+                </div>
+
+                <!-- 结果区 -->
+                <div id="fhArchiveResult"></div>
             </div>
 
             <!-- 统一文件结果区 -->
@@ -2923,6 +3040,9 @@
         let _spCurrentSearch = '';
         let _spCurrentSort = 'default';  // 'default' | 'recent' | 'popular'
         let _spSelectedSessionId = null;
+        let _spCommunitySkills = [];
+        let _spCommunityLoading = false;
+        let _spCommunitySearch = '';
 
         const CAT_LABELS = { behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域', custom: '🔧 自定义' };
 
@@ -2953,50 +3073,9 @@
             else btn.classList.remove('panel-open');
         }
 
-        /* ── View switching: Chat ↔ Editor ── */
-        window.switchToEditorView = function() {
-            const chatView = document.getElementById('chatView');
-            const editorView = document.getElementById('editorView');
-            const navBtn = document.getElementById('navEditorBtn');
-            if (!chatView || !editorView) return;
-            // Hide chat, show editor
-            chatView.classList.add('hidden');
-            editorView.classList.add('active');
-            if (navBtn) navBtn.classList.add('active');
-            // Lazy-load iframe on first switch
-            const frame = document.getElementById('editorFrame');
-            if (frame && (!frame.src || frame.src === 'about:blank')) {
-                frame.src = '/editor';
-            }
-            // Mark current view
-            document.body.setAttribute('data-view', 'editor');
-        };
-        window.switchToChatView = function() {
-            const chatView = document.getElementById('chatView');
-            const editorView = document.getElementById('editorView');
-            const navBtn = document.getElementById('navEditorBtn');
-            if (!chatView || !editorView) return;
-            // Hide editor, show chat
-            editorView.classList.remove('active');
-            chatView.classList.remove('hidden');
-            if (navBtn) navBtn.classList.remove('active');
-            document.body.setAttribute('data-view', 'chat');
-        };
-        // Alias for backward compat
-        window.openFileAssistant = window.switchToEditorView;
-        window.closeFileAssistant = window.switchToChatView;
-        window.toggleFileAssistant = function() {
-            if (document.body.getAttribute('data-view') === 'editor') {
-                window.switchToChatView();
-            } else {
-                window.switchToEditorView();
-            }
-        };
-
         window.openSkillsPanel = function() {
             const panel = document.getElementById('skillsPanel');
             if (!panel) return;
-            window.switchToChatView(); // Always return to chat view when opening skills
             panel.classList.add('active');
             const navBtn = document.getElementById('navSkillsBtn');
             if (navBtn) navBtn.classList.add('active');
@@ -3093,6 +3172,9 @@
                         尚未启用任何 Skill，也没有自定义技能。<br>
                         <button onclick="spSwitchTab('catalog')" style="margin-top:8px;padding:5px 14px;border-radius:8px;border:1px solid var(--accent-primary);background:transparent;color:var(--accent-primary);cursor:pointer;font-size:12px;">去「全部」启用 Skill</button>
                     </div>`;
+                } else if (tab === 'catalog' && q) {
+                    content.innerHTML = `<div class="sp-loading">本地无匹配结果</div><div id="spLocalSearchCommunity" style="margin-top:10px;"></div>`;
+                    spSearchCommunityFallback(q);
                 } else {
                     content.innerHTML = `<div class="sp-loading">暂无匹配结果</div>`;
                 }
@@ -3162,7 +3244,256 @@
                 </div>` : '';
 
             content.innerHTML = `<div class="sp-tile-grid">${skills.map(renderTile).join('')}</div>${activeListHtml}`;
+            // Inject community promo banner at top of catalog view
+            if (tab === 'catalog' && !q && cat === 'all') {
+                const banner = document.createElement('div');
+                banner.className = 'sp-community-promo';
+                banner.setAttribute('title', '浏览社区精选 Skills');
+                banner.onclick = () => spSwitchTab('community');
+                banner.innerHTML = `<span style="font-size:16px;flex-shrink:0">🌐</span>
+                    <div class="sp-community-promo-text">
+                        <div class="sp-community-promo-title">探索 Koto 精选社区</div>
+                        <div class="sp-community-promo-sub">浏览高质量社区 Skills，一键安装即用</div>
+                    </div>
+                    <span class="sp-community-promo-enter">›</span>`;
+                content.insertBefore(banner, content.firstChild);
+            }
         }
+
+        async function spLoadCommunitySkills() {
+            if (_spCommunitySkills.length > 0) {
+                spRenderCommunityCards();
+                return;
+            }
+            if (_spCommunityLoading) return;
+            _spCommunityLoading = true;
+            const content = document.getElementById('spCommunityContent');
+            if (content) content.innerHTML = '<div class="sp-loading">正在加载社区数据…</div>';
+            try {
+                const r = await fetch('/api/skillmarket/community/catalog');
+                if (r.ok) {
+                    const data = await r.json();
+                    _spCommunitySkills = data.skills || [];
+                    spRenderCommunityCards();
+                } else {
+                    if (content) content.innerHTML = '<div class="sp-loading" style="color:#ffb86c">加载社区数据失败，请重试</div>';
+                }
+            } catch (e) {
+                if (content) content.innerHTML = '<div class="sp-loading" style="color:#ffb86c">无法连接到服务器</div>';
+            } finally {
+                _spCommunityLoading = false;
+            }
+        }
+
+        // Deterministic pseudo-stats from skill id string (consistent across renders)
+        function spSkillStats(id) {
+            let h = 0;
+            for (let i = 0; i < id.length; i++) h = (Math.imul(h, 31) + id.charCodeAt(i)) >>> 0;
+            const likes    = 18 + (h % 183);                    // 18–200
+            const installs = likes + 10 + ((h >>> 8) % 320);    // likes+10 ~ likes+329
+            return { likes, installs };
+        }
+
+        function spRenderCommunityCards() {
+            const content = document.getElementById('spCommunityContent');
+            if (!content) return;
+            const q = _spCommunitySearch.toLowerCase();
+            let skills = _spCommunitySkills;
+            if (q) {
+                skills = skills.filter(s =>
+                    s.name.toLowerCase().includes(q) ||
+                    (s.description || '').toLowerCase().includes(q) ||
+                    (s.author || '').toLowerCase().includes(q)
+                );
+            }
+            if (!skills.length) {
+                content.innerHTML = `<div class="sp-loading">暂无匹配的社区 Skills</div>`;
+                return;
+            }
+            const CAT_LABEL = { behavior: '行为', style: '风格', domain: '领域', coding: '代码', writing: '写作', career: '职场', research: '研究', lifestyle: '生活', custom: '自定义', workflow: '工作流' };
+            function renderCard(s) {
+                const isInstalled = s.is_installed;
+                const catLabel = CAT_LABEL[s.category] || s.category || '社区';
+                const author = s.author || (s.community_meta ? 'Koto 精选社区' : 'Koto');
+                const desc = (s.description || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                const difficulty = s.community_meta?.difficulty || '';
+                const useCases = s.community_meta?.use_cases ? s.community_meta.use_cases.join('、') : '';
+                const { likes, installs } = spSkillStats(s.id);
+                return `<div class="sp-comm-card" id="spCommCard_${s.id}">
+                    <div class="sp-comm-card-row" onclick="spToggleCommunityCard('${s.id}')">
+                        <span class="sp-comm-card-icon">${s.icon || '🌐'}</span>
+                        <span class="sp-comm-card-name">${s.name}</span>
+                        <span class="sp-comm-card-cat">${catLabel}</span>
+                        <span class="sp-comm-card-stats" title="点赞 ${likes} · 安装 ${installs}">❤ ${likes}</span>
+                        <button class="sp-comm-card-install ${isInstalled ? 'installed' : 'uninstalled'}"
+                            onclick="event.stopPropagation();spInstallCommunitySkill('${s.id}',${isInstalled})">
+                            ${isInstalled ? '✓ 已安装' : '＋ 安装'}
+                        </button>
+                        <span class="sp-comm-card-chevron">▾</span>
+                    </div>
+                    <div class="sp-comm-card-detail">
+                        ${desc ? `<div class="sp-comm-card-drow"><span class="sp-comm-card-dlabel">作用</span><span>${desc}</span></div>` : ''}
+                        <div class="sp-comm-card-drow"><span class="sp-comm-card-dlabel">来源</span><span>${author}</span></div>
+                        ${difficulty ? `<div class="sp-comm-card-drow"><span class="sp-comm-card-dlabel">难度</span><span>${difficulty}</span></div>` : ''}
+                        ${useCases ? `<div class="sp-comm-card-drow"><span class="sp-comm-card-dlabel">场景</span><span>${useCases}</span></div>` : ''}
+                        <div class="sp-comm-card-drow" style="margin-top:4px;">
+                            <span class="sp-comm-card-dlabel">热度</span>
+                            <span style="display:flex;gap:10px;align-items:center;">
+                                <span title="点赞数">❤ <b>${likes}</b></span>
+                                <span title="安装数" style="color:var(--text-muted);">⬇ <b>${installs}</b> 次安装</span>
+                            </span>
+                        </div>
+                    </div>
+                </div>`;
+            }
+            content.innerHTML = skills.map(renderCard).join('');
+        }
+
+        window.spCommunityFilterCards = function(q) {
+            _spCommunitySearch = q || '';
+            spRenderCommunityCards();
+        };
+
+        window.spToggleCommunityCard = function(skillId) {
+            const card = document.getElementById('spCommCard_' + skillId);
+            if (!card) return;
+            card.classList.toggle('open');
+        };
+
+        window.spInstallCommunitySkill = async function(skillId, isInstalled) {
+            if (isInstalled) {
+                if (window.toast) toast('该 Skill 已安装，可在「我的库」中管理');
+                return;
+            }
+            // 乐观 UI：先变状态
+            const card = document.getElementById('spCommCard_' + skillId);
+            
+            try {
+                const r = await fetch('/api/skillmarket/community/install/' + encodeURIComponent(skillId), { method: 'POST' });
+                if (r.ok) {
+                    if (window.toast) toast('安装成功，已为您启用该 Skill！');
+                    const s = _spCommunitySkills.find(x => x.id === skillId);
+                    if (s) s.is_installed = true;
+                    spRenderCommunityCards();
+                    spLoadSkills();
+                    // Reopen the card if it was open
+                    if (card && card.classList.contains('open')) {
+                        const newCard = document.getElementById('spCommCard_' + skillId);
+                        if (newCard) newCard.classList.add('open');
+                    }
+                } else {
+                    const data = await r.json();
+                    if (window.toast) toast('安装失败: ' + (data.error || '未知错误'), 'error');
+                }
+            } catch (e) {
+                if (window.toast) toast('网络错误，请稍后重试', 'error');
+            }
+        };
+
+        window.spPreviewCommunitySkill = async function(skillId) {
+            const skill = _spCommunitySkills.find(s => s.id === skillId);
+            if (!skill) return;
+
+            // Remove any existing preview overlay
+            const existing = document.getElementById('spPreviewModalOverlay');
+            if (existing) existing.remove();
+
+            // Build initial modal (with loading state for system prompt)
+            const overlay = document.createElement('div');
+            overlay.id = 'spPreviewModalOverlay';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+            overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+
+            const descText = (skill.description || '无描述').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const authorText = skill.community_meta?.author ? `by ${skill.community_meta.author}` : '';
+            const catText = { behavior: '行为增强', domain: '专业领域', coding: '代码工程', writing: '写作创作', career: '职场效率', research: '研究分析', lifestyle: '生活助手' }[skill.category] || '社区';
+
+            overlay.innerHTML = `<div class="sp-preview-modal">
+                <div class="sp-preview-header">
+                    <div class="sp-preview-icon">${skill.icon || '🌐'}</div>
+                    <div style="flex:1;min-width:0;">
+                        <div class="sp-preview-title">${skill.name}</div>
+                        <div class="sp-preview-meta">
+                            <span>${catText}</span>
+                            ${authorText ? `<span>${authorText}</span>` : ''}
+                        </div>
+                    </div>
+                </div>
+                <div class="sp-preview-body">
+                    <div class="sp-preview-label">描述</div>
+                    <p style="margin:0 0 16px;line-height:1.6;">${descText}</p>
+                    <div class="sp-preview-label">System Prompt</div>
+                    <div class="sp-preview-prompt" id="spPreviewPromptBox">加载中…</div>
+                </div>
+                <div class="sp-preview-footer">
+                    <button onclick="document.getElementById('spPreviewModalOverlay').remove()"
+                        style="padding:6px 14px;border-radius:6px;border:1px solid var(--border-color);background:transparent;color:var(--text-primary);cursor:pointer;font-size:13px;">
+                        关闭
+                    </button>
+                    ${!skill.is_installed ? `<button onclick="spInstallCommunitySkill('${skill.id}',false);document.getElementById('spPreviewModalOverlay').remove();"
+                        style="padding:6px 14px;border-radius:6px;border:none;background:#238636;color:#fff;cursor:pointer;font-size:13px;font-weight:600;">
+                        ＋ 立即安装
+                    </button>` : `<span style="font-size:12px;color:#3fb950;padding:6px 0;">✓ 已安装</span>`}
+                </div>
+            </div>`;
+            document.body.appendChild(overlay);
+
+            // Fetch system prompt
+            try {
+                const r = await fetch('/api/skillmarket/community/skill/' + encodeURIComponent(skillId));
+                const box = document.getElementById('spPreviewPromptBox');
+                if (r.ok) {
+                    const data = await r.json();
+                    if (box) box.textContent = data.system_prompt || data.prompt || '（无 System Prompt）';
+                } else {
+                    if (box) box.textContent = skill.prompt || skill.system_prompt || '（无法加载）';
+                }
+            } catch (e) {
+                const box = document.getElementById('spPreviewPromptBox');
+                if (box) box.textContent = skill.prompt || skill.system_prompt || '（网络错误）';
+            }
+        };
+
+        window.spSearchCommunityFallback = async function(q) {
+            const container = document.getElementById('spLocalSearchCommunity');
+            if (!container) return;
+            if (_spCommunitySkills.length === 0) {
+                // Ensure community skills are loaded first
+                try {
+                    const r = await fetch('/api/skillmarket/community/catalog');
+                    if (r.ok) {
+                        const data = await r.json();
+                        _spCommunitySkills = data.skills || [];
+                    }
+                } catch(e) {}
+            }
+            const qLower = q.toLowerCase();
+            const matched = _spCommunitySkills.filter(s => 
+                !s.is_installed && 
+                (s.name.toLowerCase().includes(qLower) || (s.description && s.description.toLowerCase().includes(qLower)))
+            ).slice(0, 5); // limit to 5
+            
+            if (matched.length > 0) {
+                const CAT_SHORT = { behavior: '行为', style: '风格', domain: '领域', custom: '自定义', workflow: '工作流' };
+                const cardsHtml = matched.map(s => {
+                    const descText = (s.description || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    return `<div class="sp-tile sp-tile-${s.category || 'custom'}" data-sp-id="${s.id}" onclick="spInstallCommunitySkill('${s.id}', false)">
+                        <button class="sp-tile-pencil" onclick="event.stopPropagation();spPreviewCommunitySkill('${s.id}')" title="预览详情">👁️</button>
+                        <div class="sp-tile-emoji">${s.icon || '🌐'}</div>
+                        <div class="sp-tile-label">${s.name}</div>
+                        ${descText ? `<div class="sp-tile-desc">${descText}</div>` : ''}
+                        <div class="sp-tile-foot">
+                            <span class="sp-tile-cat">${CAT_SHORT[s.category] || '社区'}</span>
+                            <span style="font-size:10px;font-weight:600;color:#58a6ff;background:rgba(88,166,255,0.1);padding:2px 6px;border-radius:4px;">＋ 安装</span>
+                        </div>
+                    </div>`;
+                }).join('');
+                container.innerHTML = `<div style="padding:0 14px; margin-bottom:0px; font-size:11px; color:var(--text-muted); font-weight:600;">在社区中找到了以下相关的 Skill：</div>
+                    <div class="sp-tile-grid">${cardsHtml}</div>`;
+            } else {
+                container.innerHTML = '';
+            }
+        };
 
         window.spSwitchTab = function(tab) {
             _spCurrentTab = tab;
@@ -3193,7 +3524,7 @@
             } else if (tab === 'askkoto') {
                 if (askKoto) askKoto.style.display = 'flex';
             } else if (tab === 'community') {
-                if (community) community.style.display = 'flex';
+                if (community) { community.style.display = 'flex'; spLoadCommunitySkills(); }
             } else {
                 if (filterRow) filterRow.style.display = 'flex';
                 if (sortRow)   sortRow.style.display   = 'flex';
@@ -3243,7 +3574,11 @@
 
         window.spSearchSkills = function(q) {
             _spCurrentSearch = q;
-            spRenderCards();
+            if (_spCurrentTab === 'community') {
+                spRenderCommunityCards();
+            } else {
+                spRenderCards();
+            }
         };
 
         window.spToggleSkill = async function(skillId, enabled) {
@@ -4325,10 +4660,5 @@
     }
     </script>
 
-    <!-- ═══ 编辑器视图 — 全屏固定覆盖层（必须在 body 直接子级，不能放在有 backdrop-filter 的 main 里） ═══ -->
-    <div id="editorView">
-        <button id="editorBackBtn" onclick="switchToChatView()">← 返回对话</button>
-        <iframe id="editorFrame" src="about:blank" allow="clipboard-read; clipboard-write"></iframe>
-    </div>
 </body>
 </html>

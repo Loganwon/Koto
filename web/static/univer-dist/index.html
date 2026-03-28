@@ -24,11 +24,11 @@
   <!-- socket.io CDN (esbuild external) -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <!-- 合并后的 CSS -->
-  <link rel="stylesheet" crossorigin href="/editor/assets/main.css?v=20260328a">
+  <link rel="stylesheet" crossorigin href="/editor/assets/main.css?v=20260328g">
   <!-- 主入口 JS (ES Module) -->
-  <script type="module" crossorigin src="/editor/assets/main.js?v=20260328a"></script>
+  <script type="module" crossorigin src="/editor/assets/main.js?v=20260328g"></script>
   <!-- 运行时扩展补丁（快捷键 + 浮动工具栏 + 多格式查看器）-->
-  <script defer src="/editor/assets/koto-patch.js?v=20260328a"></script>
+  <script defer src="/editor/assets/koto-patch.js?v=20260328g"></script>
   <style>
     /* ── 快捷键提示栏 ── */
     .koto-shortcut-hint {
@@ -222,6 +222,7 @@
           <span id="koto-viewer-filename"></span>
           <div style="flex:1"></div>
           <button id="koto-viewer-to-text" title="将文件内容载入文字编辑器">📝 转为可编辑文本</button>
+          <button id="koto-viewer-save" style="display:none" title="保存对表格/幻灯片的修改">💾 保存</button>
           <button id="koto-viewer-ai" title="用 AI 分析文件内容">🤖 用 AI 分析</button>
         </div>
         <div id="koto-viewer-body"></div>

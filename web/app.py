@@ -20,6 +20,13 @@ _web_dir = os.path.dirname(os.path.abspath(__file__))
 if _web_dir not in sys.path:
     sys.path.append(_web_dir)
 
+# 确保 Koto 根目录（web/ 的父目录）在 sys.path 最前面，
+# 避免 web/app.py 文件名与 app/ 包名冲突（'app' is not a package 错误）
+_koto_root = os.path.dirname(_web_dir)
+if _koto_root in sys.path:
+    sys.path.remove(_koto_root)
+sys.path.insert(0, _koto_root)
+
 from dotenv import load_dotenv
 from flask import (
     Flask,
@@ -2043,9 +2050,9 @@ def _register_blueprints_deferred():
         ("web.blueprints.execution", "execution_bp", None, "Execution"),
         ("web.blueprints.file_editor", "file_editor_bp", None, "FileEditor"),
         ("web.blueprints.file_organize", "file_organize_bp", None, "FileOrganize"),
-        ("web.blueprints.editor_docs", "editor_docs_bp", None, "EditorDocs"),
         ("web.blueprints.dev", "dev_bp", None, "Dev"),
         ("web.blueprints.chat", "chat_bp", None, "Chat"),
+        ("web.blueprints.workspace_assistant", "workspace_assistant_bp", None, "WorkspaceAssistant"),
     ]
     import importlib as _il
 
@@ -2221,8 +2228,9 @@ try:
 except Exception as _e:
     _app_logger.debug("[startup] Vosk 预加载跳过: %s", _e)
 
-CHAT_DIR = os.path.join(PROJECT_ROOT, "chats")
 WORKSPACE_DIR = get_workspace_root()
+_chats_from_settings = settings_manager.chats_dir
+CHAT_DIR = _chats_from_settings if _chats_from_settings else os.path.join(PROJECT_ROOT, "chats")
 UPLOAD_DIR = os.path.join(PROJECT_ROOT, "web", "uploads")
 os.makedirs(CHAT_DIR, exist_ok=True)
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
@@ -17344,7 +17352,13 @@ if __name__ == "__main__":
     try:
         debug_mode = os.environ.get("KOTO_DEBUG", "false").lower() == "true"
         port = int(os.environ.get("KOTO_PORT", "5000"))
-        app.run(debug=debug_mode, host="0.0.0.0", port=port, threaded=True)
+        # Must use socketio.run() (not app.run()) so Flask-SocketIO controls the
+        # server event loop and WebSocket connections can be established.
+        if socketio is not None:
+            socketio.run(app, debug=debug_mode, host="0.0.0.0", port=port,
+                         allow_unsafe_werkzeug=True)
+        else:
+            app.run(debug=debug_mode, host="0.0.0.0", port=port, threaded=True)
     finally:
         # 应用关闭时清理并行执行系统
         if PARALLEL_SYSTEM_ENABLED:
