@@ -568,6 +568,8 @@ def setup_api_key() -> Response:
         os.environ["GEMINI_API_KEY"] = api_key
         os.environ["API_KEY"] = api_key
         mod.API_KEY = api_key
+        # Reset cached client so get_client() rebuilds with the new key
+        mod._client = None
         mod.client = mod.create_client()
 
         return jsonify({"success": True})

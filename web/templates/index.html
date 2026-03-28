@@ -1437,6 +1437,18 @@
                 <button class="close-panel" onclick="closeSettings()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="settings-content">
+                <!-- ── API 配置 ── -->
+                <div class="settings-section">
+                    <h4>🔑 API 配置</h4>
+                    <p class="setting-desc">更新 Gemini API 密钥。从 <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent-primary)">Google AI Studio</a> 获取。</p>
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+                        <input type="password" id="settingsApiKeyInput" placeholder="粘贴新的 API Key…"
+                               style="flex:1;padding:7px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;">
+                        <button onclick="saveSettingsApiKey()"
+                                style="padding:7px 14px;background:var(--accent-primary);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;">保存</button>
+                    </div>
+                    <div id="settingsApiKeyStatus" style="font-size:12px;margin-top:6px;color:var(--text-secondary);"></div>
+                </div>
                 <div class="settings-section">
                     <h4>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
