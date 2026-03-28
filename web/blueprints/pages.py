@@ -128,3 +128,21 @@ def doc_compare_ui() -> str:
     return render_template("doc_compare.html")
 
 
+@pages_bp.route("/editor")
+def editor_page() -> Response:
+    """Univer Canvas 文件助手主页"""
+    return send_from_directory(
+        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist"),
+        "index.html",
+    )
+
+
+@pages_bp.route("/editor/assets/<path:filename>")
+def editor_assets(filename: str) -> Response:
+    """Serve Univer editor static assets (JS/CSS/chunks)."""
+    return send_from_directory(
+        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist", "assets"),
+        filename,
+    )
+
+
