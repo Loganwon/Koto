@@ -1843,7 +1843,7 @@ window.WA = window.WA || {};
          // Write the saved bytes to the chosen local file
          if (_saveFsHandle) {
            try {
-             const rawRes = await fetch(`/api/v1/workspace/raw/${_saveFileId}`);
+             const rawRes = await fetch(`/api/v1/workspace/raw/${_saveFileId}?_=${Date.now()}`);
              if (rawRes.ok) {
                const bytes = await rawRes.arrayBuffer();
                await _writeToFileHandle(_saveFsHandle, bytes);

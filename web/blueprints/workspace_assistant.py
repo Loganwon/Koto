@@ -245,7 +245,11 @@ def raw_file(file_id: str):
         ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }
     mime = mime_map.get(target.suffix.lower(), "application/octet-stream")
-    return send_file(str(target), mimetype=mime)
+    resp = send_file(str(target), mimetype=mime)
+    # Prevent browser from caching — each save produces new bytes at the same URL
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 # ─────────────────────────────────────────────────────────────────────────────
