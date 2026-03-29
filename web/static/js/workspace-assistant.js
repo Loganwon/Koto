@@ -839,12 +839,13 @@ window.WA = window.WA || {};
     serialize() {
       if (!this.editor) return this._lastHtml || "";
       const html = this.editor.getHtml();
-      // WangEditor empty-doc pattern: only <p><br></p> — fall back to original HTML
+      // WangEditor empty-doc pattern: only <p><br></p> — fall back to last known HTML
       const stripped = html.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
       if (!stripped) {
-        console.warn('[KotoDocxEditor] getHtml() returned empty content, using stored HTML');
+        console.warn('[KotoDocxEditor] getHtml() returned empty, using _lastHtml:', this._lastHtml?.substring(0, 80));
         return this._lastHtml || html;
       }
+      console.log('[KotoDocxEditor] serialize() len=' + html.length + ' preview=' + html.substring(0, 80));
       return html;
     }
 
@@ -1729,7 +1730,11 @@ window.WA = window.WA || {};
       if (!res.ok) throw new Error((await res.json()).error || '自动保存失败');
       const json = await res.json();
       const tab = state.openTabs.find(t => t.path === state.activeTabPath);
-      if (tab) { tab.modified = false; _renderTabs(); }
+      if (tab) {
+        tab.modified = false;
+        if (state.fileType === 'docx' && tab.serverData && data) tab.serverData.html = data;
+        _renderTabs();
+      }
       if (status) {
         status.className = 'saved';
         status.textContent = `✓ 已保存 ${json.saved_at}`;
@@ -1749,6 +1754,7 @@ window.WA = window.WA || {};
 
      try {
          const data = state.activeEditor.serialize();
+         console.log('[saveFile] data len=' + (data?.length || 0) + ' fileId=' + state.fileId + ' wsPath=' + state.wsSourcePath);
          const res = await fetch('/api/v1/workspace/auto_save', {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },
@@ -1768,7 +1774,12 @@ window.WA = window.WA || {};
 
          const json = await res.json();
          const tab = state.openTabs.find(t => t.path === state.activeTabPath);
-         if (tab) { tab.modified = false; _renderTabs(); }
+         if (tab) {
+           tab.modified = false;
+           // Update serverData so tab restore never uses stale initial content
+           if (state.fileType === 'docx' && tab.serverData) tab.serverData.html = data;
+           _renderTabs();
+         }
 
          // If we have a FileSystemFileHandle, write bytes directly to the original file on disk
          if (tab && tab.fsHandle) {
