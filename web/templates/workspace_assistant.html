@@ -729,25 +729,59 @@
       flex-direction: column;
     }
 
-    /* Override WangEditor dark styles */
+    /* ── Word-like document editor ── */
+
+    /* Toolbar: light ribbon style */
     #wa-docx-editor .w-e-toolbar {
       flex-shrink: 0;
-      background: var(--surface) !important;
-      border-bottom: 1px solid var(--border) !important;
+      background: #f3f3f3 !important;
+      border-bottom: 1px solid #d4d4d4 !important;
+    }
+    #wa-docx-editor .w-e-bar-item button,
+    #wa-docx-editor .w-e-bar-item-group > .w-e-bar-item button {
+      color: #333 !important;
+    }
+    #wa-docx-editor .w-e-bar-item button:hover {
+      background: #e0e0e0 !important;
     }
 
-    /* WangEditor's outer wrapper: fill the #wa-editor-content flex column */
+    /* Canvas: gray background like Word's page layout view */
     #wa-docx-editor .w-e-text-container {
-      background: #fff !important;
+      background: #525659 !important;
       flex: 1;
       min-height: 0;
       overflow: hidden !important;
     }
 
-    /* WangEditor's actual scroll element — this is what the user scrolls */
+    /* Scrollable area with padding around the page */
     #wa-docx-editor .w-e-scroll {
       overflow-y: auto !important;
       height: 100%;
+      padding: 32px 24px;
+      box-sizing: border-box;
+    }
+
+    /* The white page — US Letter size with margins */
+    #wa-docx-editor [data-slate-editor],
+    #wa-docx-editor [contenteditable="true"] {
+      background: #fff !important;
+      max-width: 816px;        /* US Letter at 96 dpi */
+      min-height: 1056px;      /* US Letter height */
+      margin: 0 auto !important;
+      padding: 96px !important; /* 1-inch margins */
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35), 0 6px 24px rgba(0,0,0,0.2);
+      box-sizing: border-box !important;
+      font-family: 'Calibri', 'Segoe UI', Arial, sans-serif !important;
+      font-size: 16px !important;
+      line-height: 1.6 !important;
+      color: #000 !important;
+      outline: none;
+    }
+
+    /* Paragraph spacing */
+    #wa-docx-editor [data-slate-editor] p,
+    #wa-docx-editor [contenteditable="true"] p {
+      margin: 0 0 10px 0;
     }
 
     /* XLSX: Luckysheet container */
