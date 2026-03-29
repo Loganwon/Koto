@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Koto Workspace Assistant - Frontend Controllers & Adapters
  * Includes Phase 3 (Polymorphic Adapters) & Phase 4 (Human-AI Link)
  */
@@ -1822,7 +1822,7 @@ window.WA = window.WA || {};
              status.textContent = `✓ 已保存`;
              setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 3000);
            }
-           showToast(\已保存 (\ chars)\, 'success');
+           showToast(`已保存 (${data.length} chars)`, 'success');
          }
      } catch(e) {
          showToast(e.message, 'error');
