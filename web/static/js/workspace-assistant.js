@@ -503,6 +503,40 @@ window.WA = window.WA || {};
   // ── Global Selection Tooltip ──
   let lastSelectionText = "";
 
+  // CSS Custom Highlights API — non-destructively marks pinned selection in doc
+  // Supported: Chrome 105+, Edge 105+, Safari 17.2+
+  function _applyPinnedHighlight() {
+    if (!window.CSS || !CSS.highlights) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    try {
+      const range = sel.getRangeAt(0).cloneRange();
+      CSS.highlights.set('wa-pinned', new Highlight(range));
+    } catch (e) { /* ignore if API unavailable */ }
+  }
+
+  function _clearPinnedHighlight() {
+    if (window.CSS && CSS.highlights) CSS.highlights.delete('wa-pinned');
+  }
+
+  // Update the selection chip UI with new text (used in multiple places)
+  function _pinSelectionChip(text) {
+    state.pinnedSelection = text;
+    const preview = text.length > 200 ? text.substring(0, 200) + '…' : text;
+    $('wa-selection-preview').textContent = preview;
+    $('wa-selection-chip').style.display = 'flex';
+  }
+
+  // Save WangEditor Slate selection before focus leaves the editor
+  function _saveEditorRange() {
+    if (state.activeEditor && state.activeEditor.editor && state.fileType === 'docx') {
+      const slateSelection = state.activeEditor.editor.selection;
+      if (slateSelection) {
+        state.activeEditor._savedRange = JSON.parse(JSON.stringify(slateSelection));
+      }
+    }
+  }
+
   document.addEventListener('mouseup', (e) => {
     if (e.target.id === 'wa-pdf-tooltip') return;
     
@@ -517,6 +551,15 @@ window.WA = window.WA || {};
       tt.style.display = 'flex';
       tt.style.left = e.pageX + 10 + 'px';
       tt.style.top = e.pageY + 10 + 'px';
+
+      // If the chip is already showing (prior pinned context), update it immediately
+      // so user sees the new selection reflected without needing to click the chat input again
+      if ($('wa-selection-chip').style.display !== 'none') {
+        _saveEditorRange();
+        _pinSelectionChip(sel);
+        _clearPinnedHighlight();
+        _applyPinnedHighlight();
+      }
     } else {
       tt.style.display = 'none';
       lastSelectionText = "";
@@ -551,18 +594,10 @@ window.WA = window.WA || {};
       if (!rangeText.includes('未选中区域')) sel = rangeText;
     }
     if (!sel) return;
-    // Save WangEditor Slate selection before we move focus to chat input
-    if (state.activeEditor && state.activeEditor.editor && state.fileType === 'docx') {
-      const slateSelection = state.activeEditor.editor.selection;
-      if (slateSelection) {
-        state.activeEditor._savedRange = JSON.parse(JSON.stringify(slateSelection));
-      }
-    }
+    _saveEditorRange();
+    _applyPinnedHighlight();
     // Pin as Copilot-style chip — user types their question separately
-    state.pinnedSelection = sel;
-    const preview = sel.length > 200 ? sel.substring(0, 200) + '…' : sel;
-    $('wa-selection-preview').textContent = preview;
-    $('wa-selection-chip').style.display = 'flex';
+    _pinSelectionChip(sel);
     $('wa-pdf-tooltip').style.display = 'none';
     $('wa-user-input').focus();
   };
@@ -571,6 +606,7 @@ window.WA = window.WA || {};
     state.pinnedSelection = '';
     lastSelectionText = '';
     $('wa-selection-chip').style.display = 'none';
+    _clearPinnedHighlight();
   };
 
   // Auto-pin selection when user clicks/focuses the chat input.
@@ -581,22 +617,10 @@ window.WA = window.WA || {};
     _waInput.addEventListener('mousedown', () => {
       if (lastSelectionText) {
         // Always update chip — reselecting new text replaces the old context
-        state.pinnedSelection = lastSelectionText;
-        const preview = lastSelectionText.length > 200
-          ? lastSelectionText.substring(0, 200) + '…'
-          : lastSelectionText;
-        $('wa-selection-preview').textContent = preview;
-        $('wa-selection-chip').style.display = 'flex';
+        _saveEditorRange();
+        _applyPinnedHighlight();
+        _pinSelectionChip(lastSelectionText);
         $('wa-pdf-tooltip').style.display = 'none';
-
-        // Save the WangEditor internal Slate selection so applyToolCall can restore it.
-        // Must be done here — BEFORE the editor loses focus and browser clears the range.
-        if (state.activeEditor && state.activeEditor.editor && state.fileType === 'docx') {
-          const slateSelection = state.activeEditor.editor.selection;
-          if (slateSelection) {
-            state.activeEditor._savedRange = JSON.parse(JSON.stringify(slateSelection));
-          }
-        }
       }
     });
   }
