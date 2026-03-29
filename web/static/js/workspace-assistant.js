@@ -335,13 +335,17 @@ window.WA = window.WA || {};
   };
 
   window.WA.openWorkspaceFile = async (filename) => {
-    showToast('正在加载 ' + filename, 'success');
+    const baseName = filename.split('/').pop();
+    showToast('正在加载 ' + baseName, 'success');
     try {
       const encodedPath = filename.split('/').map(p => encodeURIComponent(p)).join('/');
       const res = await fetch('/api/v1/workspace/file/' + encodedPath);
       if (!res.ok) throw new Error('File not found');
       const blob = await res.blob();
-      const file = new File([blob], filename);
+      // Use basename only so the title bar doesn't show "uploads/foo.docx".
+      // Tag the file object with _wsPath so Router.load knows the workspace path.
+      const file = new File([blob], baseName);
+      file._wsPath = filename;   // full workspace-relative path
       await Router.load(file);
     } catch (e) {
       console.error('[WA openWorkspaceFile]', e);
@@ -918,8 +922,8 @@ window.WA = window.WA || {};
          state.fileName = json.file_name;
          // Save to recent files with workspace path so re-opening works
          const ext = json.file_name.split('.').pop().toLowerCase();
-         // file.name is 'uploads/foo.docx' when opened from workspace tree, or just 'foo.docx' from local upload
-         const wsPath = file.name.includes('/') ? file.name : ('uploads/' + json.file_name);
+         // file._wsPath is set by openWorkspaceFile; for local uploads use uploads/<name>
+         const wsPath = file._wsPath || ('uploads/' + json.file_name);
          _saveRecentFile(json.file_name, ext, wsPath);
          $('wa-file-name').textContent = state.fileName;
          $('wa-save-btn').disabled = (state.fileType === 'pdf');

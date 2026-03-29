@@ -290,8 +290,16 @@ class TestRecentFilesJsFix:
             "Fallback for legacy entries without .path must prepend 'uploads/'"
 
     def test_router_load_detects_workspace_path(self):
-        assert "file.name.includes('/')" in self.src, \
-            "Router.load must detect workspace paths via file.name.includes('/')"
+        assert "file._wsPath" in self.src, \
+            "Router.load must use file._wsPath (set by openWorkspaceFile) to get workspace path"
+
+    def test_open_workspace_file_sets_ws_path(self):
+        assert "file._wsPath = filename" in self.src, \
+            "openWorkspaceFile must tag the File object with _wsPath = filename"
+
+    def test_open_workspace_file_uses_basename(self):
+        assert "filename.split('/').pop()" in self.src, \
+            "openWorkspaceFile must pass only the basename to new File() to avoid 'uploads/name' in title bar"
 
     def test_router_load_calls_save_with_path(self):
         assert "_saveRecentFile(json.file_name, ext, wsPath)" in self.src, \
