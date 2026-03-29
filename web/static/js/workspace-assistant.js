@@ -95,10 +95,14 @@ window.WA = window.WA || {};
     const data = tab.cache;
     if (tab.fileType === 'docx') {
       state.activeEditor = new KotoDocxEditor();
-      state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData.html);
+      // Use cache if it has real content, otherwise fall back to server HTML
+      const docxHtml = (data && typeof data === 'string' && data.replace(/<p><br\s*\/?><\/p>/gi,'').trim()) ? data : tab.serverData.html;
+      state.activeEditor.render(docxHtml);
     } else if (tab.fileType === 'xlsx') {
       state.activeEditor = new KotoXlsxEditor();
-      state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData);
+      // cache is {sheets, _images} — extract sheets array for render
+      const xlsxSheets = data ? (Array.isArray(data) ? data : (data.sheets || data)) : tab.serverData;
+      state.activeEditor.render(xlsxSheets);
     } else if (tab.fileType === 'pptx') {
       state.activeEditor = new KotoPptxEditor();
       state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData);
