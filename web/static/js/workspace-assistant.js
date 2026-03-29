@@ -20,6 +20,7 @@ window.WA = window.WA || {};
     sectionOpen: JSON.parse(localStorage.getItem('wa_sections') || '{"recent":true,"workspace":true}'),
     searchQuery: '',
     _allFiles: [],  // full file tree cached for client-side filter
+    pinnedSelection: '',  // text pinned as Copilot-style context chip
   };
 
   // ── Utility ──
@@ -401,19 +402,22 @@ window.WA = window.WA || {};
     let sel = lastSelectionText;
     if (state.fileType === 'xlsx' && state.activeEditor) {
       const rangeText = state.activeEditor.getContent();
-      if (!rangeText.includes('未选中区域')) {
-         sel = rangeText;
-      }
+      if (!rangeText.includes('未选中区域')) sel = rangeText;
     }
-    if (sel) {
-      $('wa-user-input').value = `"${sel.substring(0, 300)}${sel.length > 300 ? '…' : '"'}\n\n请处理以上选中内容：`;
-      $('wa-pdf-tooltip').style.display = 'none';
-      $('wa-user-input').focus();
-      // Auto-resize textarea
-      const ta = $('wa-user-input');
-      ta.style.height = 'auto';
-      ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
-    }
+    if (!sel) return;
+    // Pin as Copilot-style chip — user types their question separately
+    state.pinnedSelection = sel;
+    const preview = sel.length > 200 ? sel.substring(0, 200) + '…' : sel;
+    $('wa-selection-preview').textContent = preview;
+    $('wa-selection-chip').style.display = 'flex';
+    $('wa-pdf-tooltip').style.display = 'none';
+    $('wa-user-input').focus();
+  };
+
+  window.WA.clearSelection = () => {
+    state.pinnedSelection = '';
+    lastSelectionText = '';
+    $('wa-selection-chip').style.display = 'none';
   };
 
   // ── Split.js Init ──
@@ -1232,12 +1236,26 @@ window.WA = window.WA || {};
       const text = input.value.trim();
       if (!text) return;
 
+      // Capture and clear pinned selection before rendering
+      const pinnedSel = state.pinnedSelection;
+      if (pinnedSel) WA.clearSelection();
+
       const msgs = $('wa-ai-messages');
 
-      // Add user message bubble
+      // Add user message bubble — with optional Copilot-style quote block
       const uMsg = document.createElement('div');
       uMsg.className = 'wa-msg user';
-      uMsg.textContent = text;
+      if (pinnedSel) {
+        const quote = document.createElement('div');
+        quote.className = 'wa-msg-quote';
+        quote.textContent = pinnedSel.length > 240 ? pinnedSel.substring(0, 240) + '…' : pinnedSel;
+        uMsg.appendChild(quote);
+        const content = document.createElement('div');
+        content.textContent = text;
+        uMsg.appendChild(content);
+      } else {
+        uMsg.textContent = text;
+      }
       msgs.appendChild(uMsg);
 
       // Add loading bubble
@@ -1282,6 +1300,7 @@ window.WA = window.WA || {};
         state.socket.emit('doc_ai_request', {
            prompt: text,
            context: context,
+           selection: pinnedSel,
            file_type: fileType,
            file_id: state.fileId || '',
            file_name: state.fileName || '',

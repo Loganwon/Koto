@@ -82,6 +82,7 @@ def register_socket_events(socketio):
         sid = _req.sid
         prompt = data.get("prompt", "")
         context = data.get("context", "")          # document context (sent separately)
+        selection = data.get("selection", "")      # Copilot-style pinned selection text
         file_type = data.get("file_type", "unknown")
         file_name = data.get("file_name", "")        # filename for system prompt context
         has_selection = data.get("has_selection", False)  # whether editor has a text selection
@@ -90,7 +91,7 @@ def register_socket_events(socketio):
         csv_data = data.get("csv_data", "")          # table CSV for chart context
         if not prompt:
             return
-        # Combine context with prompt for display
+        # Combine document context with prompt
         if context:
             prompt = f"{context}\n[用户请求]: {prompt}"
 
@@ -198,7 +199,14 @@ def register_socket_events(socketio):
                         parts.append(f"Koto AI：{content}")
                 history_text = "\n".join(parts) + "\n\n"
 
-            full_prompt = f"{history_text}用户：{prompt}"
+            # Build full prompt: optional selection context first, then history, then user message
+            if selection:
+                full_prompt = (
+                    f"[用户选中的文字]\n\"{selection}\"\n\n"
+                    f"{history_text}用户：{prompt}"
+                )
+            else:
+                full_prompt = f"{history_text}用户：{prompt}"
             online_model = _pick_online_model()
             logger.warning("[DocAI] model=%s prompt_len=%d history_turns=%d sid=%s",
                            online_model, len(full_prompt), len(recent_history) // 2, sid)
