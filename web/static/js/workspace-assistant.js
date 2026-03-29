@@ -27,6 +27,9 @@ window.WA = window.WA || {};
     activeTabPath: null,   // path of the currently active tab
   };
 
+  // Persistent fsHandle map — survives tab entry replacement
+  const _fsHandleMap = new Map();
+
   // ── Tab management (VS Code style) ──────────────────────────────────────────
 
   function _renderTabs() {
@@ -1317,6 +1320,8 @@ window.WA = window.WA || {};
            modified: false,
            fsHandle: file._fsHandle || null,  // FileSystemFileHandle for write-back to original path
          };
+         // Persist fsHandle so it survives tab replacement
+         if (file._fsHandle) _fsHandleMap.set(wsPath, file._fsHandle);
          if (existingTabIdx >= 0) {
            state.openTabs[existingTabIdx] = tabEntry;
          } else {
@@ -1774,10 +1779,10 @@ window.WA = window.WA || {};
      // Capture state BEFORE any awaits — async gaps can lose tab/fsHandle references
      const _saveTabPath  = state.activeTabPath;
      const _saveTab      = state.openTabs.find(t => t.path === _saveTabPath);
-     const _saveFsHandle = _saveTab ? _saveTab.fsHandle : null;
      const _saveFileId   = state.fileId;
      const _saveFileType = state.fileType;
      const _saveWsPath   = state.wsSourcePath;
+     const _saveFsHandle = (_saveTab && _saveTab.fsHandle) || _fsHandleMap.get(_saveWsPath) || null;
 
      try {
          const data = state.activeEditor.serialize();
