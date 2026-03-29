@@ -623,6 +623,12 @@ window.WA = window.WA || {};
     if (!e.target.closest('#wa-ctx-menu')) _closeCtxMenu();
   }, true);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeCtxMenu(); });
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      WA.saveFile();
+    }
+  });
 
   window.WA._ctxOpen = () => { _closeCtxMenu(); if (_ctxTarget.path) WA.openWorkspaceFile(_ctxTarget.path); };
   window.WA._ctxRename = () => { _closeCtxMenu(); if (_ctxTarget.path) WA.renameWorkspaceFile(_ctxTarget.path, _ctxTarget.name); };
