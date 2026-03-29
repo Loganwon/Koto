@@ -18,13 +18,26 @@ window.WA = window.WA || {};
     conversation: [],   // [{role:'user'|'assistant', content:string}] — multi-turn history
     recentFiles: JSON.parse(localStorage.getItem('wa_recent_files') || '[]'),  // [{name, ext, path, time}]
     sortBy: localStorage.getItem('wa_sort_by') || 'name',   // 'name' | 'date' | 'type'
-    sectionOpen: JSON.parse(localStorage.getItem('wa_sections') || '{"recent":true,"workspace":true}'),
+    sectionOpen:JSON.parse(localStorage.getItem('wa_sections') || '{"recent":true,"workspace":true}'),
     searchQuery: '',
     _allFiles: [],  // full file tree cached for client-side filter
     pinnedSelection: '',  // text pinned as Copilot-style context chip
     selectMode: false,  // multi-select mode
     selectedFiles: new Set(),  // paths of selected files
   };
+
+  // ── Migrate stale localStorage paths (strip old 'uploads/' prefix) ──
+  (function _migrateRecentFilePaths() {
+    let changed = false;
+    state.recentFiles = state.recentFiles.map(f => {
+      if (f.path && f.path.startsWith('uploads/')) {
+        changed = true;
+        return { ...f, path: f.path.slice('uploads/'.length) };
+      }
+      return f;
+    });
+    if (changed) localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
+  })();
 
   // ── Utility ──
   const $ = id => document.getElementById(id);
@@ -85,7 +98,7 @@ window.WA = window.WA || {};
       return;
     }
     el.innerHTML = state.recentFiles.map(f => {
-      const wsPath = f.path || f.name;
+      const wsPath = (f.path || f.name).replace(/^uploads\//, '');  // strip stale prefix
       const esc = wsPath.replace(/'/g, "\\'");
       const nameEsc = f.name.replace(/'/g, "\\'");
       const isActive = (state.fileName && f.name === state.fileName) ? ' active' : '';
@@ -344,8 +357,26 @@ window.WA = window.WA || {};
     try {
       const res = await fetch('/api/v1/workspace/file?path=' + encodeURIComponent(filepath), { method: 'DELETE' });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || '删除失败');
+      if (!res.ok) {
+        if (res.status === 404) {
+          // File doesn't exist on disk — clean it from the recent list and refresh panel
+          const fname = filepath.split('/').pop();
+          state.recentFiles = state.recentFiles.filter(f => f.name !== fname);
+          localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
+          renderRecentFiles();
+          loadWorkspaceFiles();
+          showToast('文件已不存在，已从列表移除', 'info');
+        } else {
+          throw new Error(json.error || '删除失败');
+        }
+        return;
+      }
       showToast('已删除 ' + filepath.split('/').pop(), 'success');
+      // Also remove from recent files list
+      const fname = filepath.split('/').pop();
+      state.recentFiles = state.recentFiles.filter(f => f.name !== fname);
+      localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
+      renderRecentFiles();
       loadWorkspaceFiles();
     } catch (e) {
       showToast(e.message, 'error');
