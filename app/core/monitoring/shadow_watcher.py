@@ -336,7 +336,7 @@ class ShadowWatcher:
     _lock = threading.Lock()
 
     def __init__(self):
-        self._obs_lock = threading.Lock()
+        self._obs_lock = threading.RLock()
         self._obs: Dict[str, Any] = _default_obs()
         # 会话轮次计数（内存中，重启清零）
         self._session_exchanges: Dict[str, int] = {}

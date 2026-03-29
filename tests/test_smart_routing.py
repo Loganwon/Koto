@@ -19,28 +19,112 @@ def _is_analysis_request(requirement: str) -> bool:
     requirement_lower = requirement.lower()
 
     analysis_actions = [
-        "分析", "总结", "概述", "梳理", "解读", "评估", "对比", "提炼", "归纳",
-        "主要观点", "核心观点", "要点", "重点", "亮点",
-        "告诉我", "告诉", "是什么", "做什么", "想做什么", "在做什么", "是否",
-        "有没有", "值不值", "值不值得", "投资价值", "投资建议", "是否值得",
-        "值得投资", "有无价值", "有价值吗", "值得关注",
-        "讲讲", "讲一下", "说说", "说一下", "介绍", "介绍一下", "介绍下",
-        "解释", "解释一下", "帮我解释", "了解", "看看", "看一看",
-        "读一读", "读一下", "什么是", "怎么看", "怎么样", "如何", "什么情况",
-        "帮我看", "帮我读", "帮我理解", "帮我了解", "帮我评估", "帮我判断",
-        "这份", "这个", "检查一下", "查看一下", "看一下这",
-        "他们想", "他想", "它想", "该公司", "该项目",
-        "review", "analysis", "summary", "summarize", "analyze", "explain",
-        "understand", "evaluate", "assess", "what is", "what does", "how does",
-        "tell me", "should i", "is it worth", "investment value",
-        "check", "read this", "look at",
+        "分析",
+        "总结",
+        "概述",
+        "梳理",
+        "解读",
+        "评估",
+        "对比",
+        "提炼",
+        "归纳",
+        "主要观点",
+        "核心观点",
+        "要点",
+        "重点",
+        "亮点",
+        "告诉我",
+        "告诉",
+        "是什么",
+        "做什么",
+        "想做什么",
+        "在做什么",
+        "是否",
+        "有没有",
+        "值不值",
+        "值不值得",
+        "投资价值",
+        "投资建议",
+        "是否值得",
+        "值得投资",
+        "有无价值",
+        "有价值吗",
+        "值得关注",
+        "讲讲",
+        "讲一下",
+        "说说",
+        "说一下",
+        "介绍",
+        "介绍一下",
+        "介绍下",
+        "解释",
+        "解释一下",
+        "帮我解释",
+        "了解",
+        "看看",
+        "看一看",
+        "读一读",
+        "读一下",
+        "什么是",
+        "怎么看",
+        "怎么样",
+        "如何",
+        "什么情况",
+        "帮我看",
+        "帮我读",
+        "帮我理解",
+        "帮我了解",
+        "帮我评估",
+        "帮我判断",
+        "这份",
+        "这个",
+        "检查一下",
+        "查看一下",
+        "看一下这",
+        "他们想",
+        "他想",
+        "它想",
+        "该公司",
+        "该项目",
+        "review",
+        "analysis",
+        "summary",
+        "summarize",
+        "analyze",
+        "explain",
+        "understand",
+        "evaluate",
+        "assess",
+        "what is",
+        "what does",
+        "how does",
+        "tell me",
+        "should i",
+        "is it worth",
+        "investment value",
+        "check",
+        "read this",
+        "look at",
     ]
 
     generation_words = [
-        "生成一份", "生成一个", "帮我生成", "写一份", "写一个", "帮我写",
-        "改善", "改进", "优化", "润色", "重写",
-        "帮我做一份", "做一个报告", "做一份报告",
-        "create a document", "generate a report", "write a report",
+        "生成一份",
+        "生成一个",
+        "帮我生成",
+        "写一份",
+        "写一个",
+        "帮我写",
+        "改善",
+        "改进",
+        "优化",
+        "润色",
+        "重写",
+        "帮我做一份",
+        "做一个报告",
+        "做一份报告",
+        "create a document",
+        "generate a report",
+        "write a report",
     ]
 
     has_analysis = any(kw in requirement_lower for kw in analysis_actions)
@@ -66,19 +150,43 @@ def test_analysis_request():
         ("润色这段话", False),
     ]
     for text, expected in cases:
-        assert _is_analysis_request(text) == expected, (
-            f'_is_analysis_request({text!r}) expected {expected}'
-        )
+        assert (
+            _is_analysis_request(text) == expected
+        ), f"_is_analysis_request({text!r}) expected {expected}"
 
 
 def test_intelligent_analyzer_routing():
     """测试文档上传时智能分析器是否正确触发"""
     _doc_intent_keywords = [
-        "写", "生成", "帮我写", "写一段", "写个",
-        "改", "改善", "改进", "优化", "润色", "重写", "修改", "提升",
-        "摘要", "引言", "结论", "abstract", "前言", "导言",
-        "分析", "总结", "梳理", "概述", "评估",
-        "不满意", "不好", "不够", "需要改", "有问题",
+        "写",
+        "生成",
+        "帮我写",
+        "写一段",
+        "写个",
+        "改",
+        "改善",
+        "改进",
+        "优化",
+        "润色",
+        "重写",
+        "修改",
+        "提升",
+        "摘要",
+        "引言",
+        "结论",
+        "abstract",
+        "前言",
+        "导言",
+        "分析",
+        "总结",
+        "梳理",
+        "概述",
+        "评估",
+        "不满意",
+        "不好",
+        "不够",
+        "需要改",
+        "有问题",
     ]
 
     cases = [
@@ -99,11 +207,10 @@ def test_intelligent_analyzer_routing():
 
     for text, expected in cases:
         result = any(kw in text.lower() for kw in _doc_intent_keywords)
-        assert result == expected, (
-            f'routing({text!r}) expected {expected}'
-        )
+        assert result == expected, f"routing({text!r}) expected {expected}"
 
 
 if __name__ == "__main__":
     import pytest
+
     raise SystemExit(pytest.main([__file__, "-v"]))
