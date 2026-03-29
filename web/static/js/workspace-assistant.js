@@ -420,6 +420,24 @@ window.WA = window.WA || {};
     $('wa-selection-chip').style.display = 'none';
   };
 
+  // Auto-pin selection when user clicks/focuses the chat input.
+  // The browser clears document selection on click, so we capture it here
+  // before it disappears — same effect as clicking "💬 转交 AI" manually.
+  const _waInput = $('wa-user-input');
+  if (_waInput) {
+    _waInput.addEventListener('mousedown', () => {
+      if (lastSelectionText && !state.pinnedSelection) {
+        state.pinnedSelection = lastSelectionText;
+        const preview = lastSelectionText.length > 200
+          ? lastSelectionText.substring(0, 200) + '…'
+          : lastSelectionText;
+        $('wa-selection-preview').textContent = preview;
+        $('wa-selection-chip').style.display = 'flex';
+        $('wa-pdf-tooltip').style.display = 'none';
+      }
+    });
+  }
+
   // ── Split.js Init ──
   Split(['#wa-left', '#wa-canvas', '#wa-ai'], {
     sizes: [15, 55, 30],
