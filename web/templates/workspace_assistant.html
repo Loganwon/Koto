@@ -556,6 +556,43 @@
     .wa-file-item:hover .wa-file-del { display: flex; }
     .wa-file-del:hover { opacity: 1; background: rgba(255,92,92,0.15); }
 
+    /* Multi-select toggle button */
+    #wa-select-toggle { font-size: 13px; }
+    #wa-select-toggle.active { color: var(--accent); }
+
+    /* Multi-select action bar */
+    #wa-select-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      background: rgba(77,163,255,0.08);
+      border-bottom: 1px solid rgba(77,163,255,0.2);
+      font-size: 12px;
+    }
+    #wa-select-count { flex: 1; color: var(--text-2); }
+    #wa-select-bar button {
+      padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--text); cursor: pointer; font-size: 11px;
+    }
+    #wa-select-bar button:hover { background: var(--surface3); }
+    #wa-select-bar button.danger { border-color: var(--danger); color: var(--danger); }
+    #wa-select-bar button.danger:disabled { opacity: 0.4; cursor: default; }
+    #wa-select-bar button.danger:not(:disabled):hover { background: rgba(255,92,92,0.15); }
+
+    /* Checkbox on each file row in select mode */
+    .wa-file-item .wa-file-check {
+      display: none;
+      width: 14px; height: 14px;
+      margin-right: 4px; flex-shrink: 0;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    body.select-mode .wa-file-item.file .wa-file-check { display: inline-block; }
+    body.select-mode .wa-file-item.file .wa-file-del,
+    body.select-mode .wa-file-item.file .wa-file-rename { display: none !important; }
+    body.select-mode .wa-file-item.file.selected { background: rgba(77,163,255,0.15); }
+
     /* Active file highlight */
     .wa-file-item.active {
       background: rgba(77,163,255,0.12);
@@ -1306,6 +1343,14 @@
         </button>
         <label class="wa-add-btn" for="wa-file-input-left" title="上传文件到工作区">+</label>
         <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
+        <button class="wa-icon-btn" id="wa-select-toggle" onclick="WA.toggleSelectMode()" title="多选">☑</button>
+      </div>
+      <!-- Multi-select action bar (hidden until select mode active) -->
+      <div id="wa-select-bar" style="display:none">
+        <span id="wa-select-count">0 已选</span>
+        <button onclick="WA.selectAll()" title="全选">全选</button>
+        <button class="danger" id="wa-delete-selected" onclick="WA.deleteSelected()" disabled>🗑 删除</button>
+        <button onclick="WA.toggleSelectMode()">取消</button>
       </div>
       <!-- Search -->
       <div id="wa-search-wrap">

@@ -22,6 +22,8 @@ window.WA = window.WA || {};
     searchQuery: '',
     _allFiles: [],  // full file tree cached for client-side filter
     pinnedSelection: '',  // text pinned as Copilot-style context chip
+    selectMode: false,  // multi-select mode
+    selectedFiles: new Set(),  // paths of selected files
   };
 
   // ── Utility ──
@@ -198,7 +200,8 @@ window.WA = window.WA || {};
           const isActive = (state.fileName && item.name === state.fileName) ? ' active' : '';
           const meta = [item.size, _formatDate(item.mtime)].filter(Boolean).join(' · ');
           return `<div class="wa-file-item file${isActive}" data-depth="${depth}" data-path="${esc}"
-              onclick="WA.openWorkspaceFile('${esc}')" title="${item.path}&#10;${item.size || ''} · ${_formatDate(item.mtime)}">
+              onclick="WA._fileRowClick(event,'${esc}')" title="${item.path}&#10;${item.size || ''} · ${_formatDate(item.mtime)}">
+            <input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleFileCheck(this,'${esc}')">
             <span class="wa-file-icon">${icon}</span>
             <span style="overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0">
               <span class="wa-file-label">${item.name}</span>
@@ -212,6 +215,17 @@ window.WA = window.WA || {};
     }
 
     list.innerHTML = renderTree(items);
+    // restore checkboxes if still in select mode
+    if (state.selectMode) {
+      list.querySelectorAll('.wa-file-item.file').forEach(el => {
+        const p = el.dataset.path;
+        if (p && state.selectedFiles.has(p)) {
+          el.classList.add('selected');
+          const cb = el.querySelector('.wa-file-check');
+          if (cb) cb.checked = true;
+        }
+      });
+    }
   }
 
   window.WA.refreshFiles = async () => {
@@ -310,6 +324,72 @@ window.WA = window.WA || {};
     } catch (e) {
       showToast(e.message, 'error');
     }
+  };
+
+  // ── Multi-select helpers ──────────────────────────────────────────────
+  window.WA._fileRowClick = (event, path) => {
+    if (state.selectMode) {
+      const cb = event.currentTarget.querySelector('.wa-file-check');
+      const checked = !cb.checked;
+      cb.checked = checked;
+      WA._toggleFileCheck(cb, path);
+    } else {
+      WA.openWorkspaceFile(path);
+    }
+  };
+
+  window.WA._toggleFileCheck = (cb, path) => {
+    cb.checked ? state.selectedFiles.add(path) : state.selectedFiles.delete(path);
+    cb.closest('.wa-file-item').classList.toggle('selected', cb.checked);
+    WA._updateSelectBar();
+  };
+
+  window.WA._updateSelectBar = () => {
+    const n = state.selectedFiles.size;
+    document.getElementById('wa-select-count').textContent = n + ' 已选';
+    const btn = document.getElementById('wa-delete-selected');
+    if (btn) { btn.disabled = n === 0; }
+  };
+
+  window.WA.toggleSelectMode = () => {
+    state.selectMode = !state.selectMode;
+    state.selectedFiles.clear();
+    document.body.classList.toggle('select-mode', state.selectMode);
+    const bar = document.getElementById('wa-select-bar');
+    const tog = document.getElementById('wa-select-toggle');
+    if (bar) bar.style.display = state.selectMode ? 'flex' : 'none';
+    if (tog) tog.classList.toggle('active', state.selectMode);
+    // uncheck all checkboxes
+    document.querySelectorAll('.wa-file-check').forEach(cb => { cb.checked = false; });
+    document.querySelectorAll('.wa-file-item.selected').forEach(el => el.classList.remove('selected'));
+    WA._updateSelectBar();
+  };
+
+  window.WA.selectAll = () => {
+    document.querySelectorAll('.wa-file-item.file .wa-file-check').forEach(cb => {
+      const path = cb.closest('.wa-file-item').dataset.path;
+      if (path) { cb.checked = true; state.selectedFiles.add(path); cb.closest('.wa-file-item').classList.add('selected'); }
+    });
+    WA._updateSelectBar();
+  };
+
+  window.WA.deleteSelected = async () => {
+    const paths = [...state.selectedFiles];
+    if (!paths.length) return;
+    const openInPaths = paths.filter(p => state.wsSourcePath && (p === state.wsSourcePath || p.endsWith('/' + state.fileName)));
+    if (openInPaths.length) {
+      if (!confirm(`所选文件中包含当前打开的文件，确定要删除吗？`)) return;
+    } else if (!confirm(`确定要删除选中的 ${paths.length} 个文件吗？`)) return;
+    let failed = 0;
+    for (const p of paths) {
+      try {
+        const res = await fetch('/api/v1/workspace/file?path=' + encodeURIComponent(p), { method: 'DELETE' });
+        if (!res.ok) failed++;
+      } catch { failed++; }
+    }
+    showToast(failed ? `已删除 ${paths.length - failed} 个，${failed} 个失败` : `已删除 ${paths.length} 个文件`, failed ? 'error' : 'success');
+    WA.toggleSelectMode();
+    await loadWorkspaceFiles();
   };
 
   window.WA.toggleFolder = (el) => {
