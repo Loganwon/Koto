@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Koto Workspace Assistant - Frontend Controllers & Adapters
  * Includes Phase 3 (Polymorphic Adapters) & Phase 4 (Human-AI Link)
  */
@@ -863,7 +863,6 @@ window.WA = window.WA || {};
       // on the very first save _lastHtml may still be initial; editor.getHtml() is always current.
       const best = (editorHtml.length >= domHtml.length) ? editorHtml : domHtml;
       const stripped = best.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
-      console.log('[KotoDocxEditor] serialize() best=' + best.length + ' domHtml=' + domHtml.length + ' editorHtml=' + editorHtml.length + ' preview=' + best.substring(0, 80));
       return stripped ? best : (domHtml || editorHtml || "");
     }
 
@@ -1380,7 +1379,6 @@ window.WA = window.WA || {};
      });
      
      state.socket.on('connect', () => {
-       console.log('WA AI Socket connected, id:', state.socket.id);
        const b = $('wa-ai-model-badge');
        if (b) b.textContent = 'Koto AI ●';
      });
@@ -1815,7 +1813,6 @@ window.WA = window.WA || {};
          }
 
          const data = state.activeEditor.serialize();
-         console.log('[saveFile] len=' + (data?.length || 0) + ' fsHandle=' + !!_saveFsHandle + ' fileId=' + _saveFileId);
          const res = await fetch('/api/v1/workspace/auto_save', {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },

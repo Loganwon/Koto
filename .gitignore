@@ -32,6 +32,8 @@ config/jwt_secret.txt
 # Runtime / personal data (generated at runtime, not for repo)
 config/proactive_queue.json
 config/shadow_observations.json
+config/skill_usage_log.json
+config/triggers.json
 config/notifications.db
 config/proactive_dialogue.db
 config/proactive_triggers.db
