@@ -611,12 +611,104 @@
     .wa-ctx-item.danger { color: var(--danger); }
     .wa-ctx-separator { height: 1px; background: var(--border); margin: 3px 0; }
 
+    /* ── VS Code-style tab bar ── */
+    #wa-tab-bar {
+      height: 35px;
+      background: #252526;
+      display: flex;
+      align-items: stretch;
+      overflow-x: auto;
+      overflow-y: hidden;
+      flex-shrink: 0;
+      border-bottom: 1px solid #1e1e1e;
+      scrollbar-width: none;
+    }
+    #wa-tab-bar::-webkit-scrollbar { display: none; }
+    #wa-tab-bar:empty { display: none; }
+
+    .wa-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 8px 0 12px;
+      min-width: 80px;
+      max-width: 180px;
+      height: 35px;
+      flex-shrink: 0;
+      cursor: pointer;
+      background: #2d2d2d;
+      border-right: 1px solid #1e1e1e;
+      color: #8f8f8f;
+      font-size: 12px;
+      white-space: nowrap;
+      position: relative;
+      user-select: none;
+      transition: background 0.1s;
+    }
+    .wa-tab:hover { background: #2a2d2e; color: #ccc; }
+    .wa-tab.active {
+      background: #1e1e1e;
+      color: #fff;
+      border-top: 1px solid #0078d4;
+      padding-top: 1px;
+    }
+    .wa-tab .tab-icon { width: 14px; height: 14px; flex-shrink: 0; display: flex; align-items: center; }
+    .wa-tab .tab-icon svg { width: 14px; height: 14px; }
+    .wa-tab .tab-label {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+    .wa-tab .tab-dirty {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #e2c08d;
+      flex-shrink: 0;
+      display: none;
+    }
+    .wa-tab.modified .tab-dirty { display: block; }
+    .wa-tab .tab-close {
+      width: 18px;
+      height: 18px;
+      border-radius: 3px;
+      border: none;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      opacity: 0;
+      font-size: 16px;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: background 0.1s, opacity 0.1s;
+    }
+    .wa-tab:hover .tab-close,
+    .wa-tab.active .tab-close { opacity: 0.7; }
+    .wa-tab.modified .tab-close { opacity: 0; }
+    .wa-tab.modified:hover .tab-close { opacity: 0; }
+    .wa-tab.modified:hover .tab-dirty { display: block; }
+    .wa-tab .tab-close:hover { background: rgba(255,255,255,0.15); opacity: 1 !important; }
+
     /* ── Center canvas ── */
     #wa-canvas {
       flex: 1;
       overflow: hidden;
       background: var(--bg);
+      display: flex;
+      flex-direction: column;
+    }
+
+    #wa-canvas-body {
+      flex: 1;
       position: relative;
+      overflow: hidden;
+      min-height: 0;
     }
 
     /* DOCX: WangEditor fills the canvas */
@@ -1427,34 +1519,39 @@
 
     <!-- Center: polymorphic canvas -->
     <div id="wa-canvas">
-      <!-- Loading overlay (shown during file switch) -->
-      <div id="wa-canvas-loading">
-        <div class="wa-loading-spinner"></div>
-        <div class="wa-loading-text">加载中...</div>
-      </div>
-      <!-- ── Drop zone (no file loaded) ── -->
-      <div id="wa-drop-zone">
-        <div class="wa-drop-inner" id="wa-drop-inner">
-          <div class="wa-drop-icon">📂</div>
-          <div class="wa-drop-title">拖拽文件，或点击"打开文件"</div>
-          <div class="wa-drop-sub">支持 DOCX / XLSX / PPTX / PDF</div>
-          <div id="upload-progress"></div>
+      <!-- VS Code-style tab bar -->
+      <div id="wa-tab-bar"></div>
+      <!-- Canvas body: all editors positioned relative to this -->
+      <div id="wa-canvas-body">
+        <!-- Loading overlay (shown during file switch) -->
+        <div id="wa-canvas-loading">
+          <div class="wa-loading-spinner"></div>
+          <div class="wa-loading-text">加载中...</div>
         </div>
+        <!-- ── Drop zone (no file loaded) ── -->
+        <div id="wa-drop-zone">
+          <div class="wa-drop-inner" id="wa-drop-inner">
+            <div class="wa-drop-icon">📂</div>
+            <div class="wa-drop-title">拖拽文件，或点击"打开文件"</div>
+            <div class="wa-drop-sub">支持 DOCX / XLSX / PPTX / PDF</div>
+            <div id="upload-progress"></div>
+          </div>
+        </div>
+        <!-- DOCX: WangEditor -->
+        <div id="wa-docx-editor">
+          <div id="wa-editor-toolbar"></div>
+          <div id="wa-editor-content"></div>
+        </div>
+
+        <!-- XLSX: Luckysheet -->
+        <div id="wa-xlsx-editor"></div>
+
+        <!-- PPTX: card editor -->
+        <div id="wa-pptx-editor"></div>
+
+        <!-- PDF: PDF.js viewer -->
+        <div id="wa-pdf-viewer"></div>
       </div>
-      <!-- DOCX: WangEditor -->
-      <div id="wa-docx-editor">
-        <div id="wa-editor-toolbar"></div>
-        <div id="wa-editor-content"></div>
-      </div>
-
-      <!-- XLSX: Luckysheet -->
-      <div id="wa-xlsx-editor"></div>
-
-      <!-- PPTX: card editor -->
-      <div id="wa-pptx-editor"></div>
-
-      <!-- PDF: PDF.js viewer -->
-      <div id="wa-pdf-viewer"></div>
     </div>
 
     <!-- Right: AI chat -->

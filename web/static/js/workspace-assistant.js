@@ -24,6 +24,8 @@ window.WA = window.WA || {};
     pinnedSelection: '',  // text pinned as Copilot-style context chip
     selectMode: false,  // multi-select mode
     selectedFiles: new Set(),  // paths of selected files
+    openTabs: [],          // [{path,name,ext,fileType,fileId,serverData,cache,modified}]
+    activeTabPath: null,   // path of the currently active tab
   };
 
   // ── Migrate stale localStorage paths (strip old 'uploads/' prefix) ──
@@ -38,6 +40,150 @@ window.WA = window.WA || {};
     });
     if (changed) localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
   })();
+
+  // ── Tab management (VS Code style) ──────────────────────────────────────────
+
+  function _renderTabs() {
+    const bar = $('wa-tab-bar');
+    if (!bar) return;
+    bar.innerHTML = state.openTabs.map(tab => {
+      const active = tab.path === state.activeTabPath ? ' active' : '';
+      const modified = tab.modified ? ' modified' : '';
+      const pathEsc = tab.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      return `<div class="wa-tab${active}${modified}" data-path="${tab.path.replace(/"/g, '&quot;')}"
+          onclick="WA._tabClick('${pathEsc}')" title="${tab.name}">
+        <span class="tab-icon">${_fileIcon(tab.ext)}</span>
+        <span class="tab-label">${tab.name}</span>
+        <span class="tab-dirty"></span>
+        <button class="tab-close" onclick="event.stopPropagation();WA._closeTab('${pathEsc}')" title="关闭">×</button>
+      </div>`;
+    }).join('');
+  }
+
+  async function _switchToTab(path) {
+    if (state.activeTabPath === path) return;
+
+    // Serialize + cache current tab before switching
+    if (state.activeEditor && state.activeTabPath) {
+      const curTab = state.openTabs.find(t => t.path === state.activeTabPath);
+      if (curTab && state.fileType !== 'pdf') {
+        curTab.cache = state.activeEditor.serialize();
+      }
+      // Background disk save
+      if (curTab && state.fileType !== 'pdf' && state.fileId && curTab.cache !== null) {
+        clearTimeout(_autoSaveTimer);
+        _autoSaveTimer = null;
+        const savedCache = curTab.cache;
+        const savedType = state.fileType;
+        const savedId = state.fileId;
+        const savedPath = state.wsSourcePath;
+        fetch('/api/v1/workspace/auto_save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_type: savedType,
+            file_id: savedId,
+            ws_source_path: savedPath || null,
+            data: savedCache,
+          }),
+        }).then(() => { if (curTab) { curTab.modified = false; _renderTabs(); } })
+          .catch(e => console.warn('[switchToTab diskSave]', e));
+      }
+      try { state.activeEditor.destroy(); } catch(e) {}
+      state.activeEditor = null;
+    }
+
+    state.activeTabPath = path;
+    const tab = state.openTabs.find(t => t.path === path);
+    if (!tab) return;
+
+    state.fileId = tab.fileId;
+    state.fileType = tab.fileType;
+    state.fileName = tab.name;
+    state.wsSourcePath = tab.path;
+
+    $('wa-file-name').textContent = tab.name;
+    $('wa-save-btn').disabled = (tab.fileType === 'pdf');
+    toggleWorkspace(true);
+
+    const data = tab.cache;
+    if (tab.fileType === 'docx') {
+      state.activeEditor = new KotoDocxEditor();
+      state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData.html);
+    } else if (tab.fileType === 'xlsx') {
+      state.activeEditor = new KotoXlsxEditor();
+      state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData);
+    } else if (tab.fileType === 'pptx') {
+      state.activeEditor = new KotoPptxEditor();
+      state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData);
+    } else if (tab.fileType === 'pdf') {
+      state.activeEditor = new KotoPdfViewer();
+      state.activeEditor.render(tab.serverData.raw_url, tab.serverData.pages);
+    }
+
+    _renderTabs();
+    renderRecentFiles();
+    // highlight active file in left panel
+    document.querySelectorAll('.wa-file-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.path === path || el.title === tab.name);
+    });
+  }
+
+  window.WA._tabClick = async (path) => {
+    await _switchToTab(path);
+  };
+
+  window.WA._closeTab = async (path) => {
+    const idx = state.openTabs.findIndex(t => t.path === path);
+    if (idx < 0) return;
+    const tab = state.openTabs[idx];
+
+    // Save to disk if modified
+    if (tab.modified && tab.fileType !== 'pdf' && tab.fileId) {
+      const data = (tab.path === state.activeTabPath && state.activeEditor)
+        ? state.activeEditor.serialize()
+        : tab.cache;
+      if (data) {
+        try {
+          await fetch('/api/v1/workspace/auto_save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_type: tab.fileType, file_id: tab.fileId, ws_source_path: tab.path, data }),
+          });
+        } catch(e) { console.warn('[closeTab diskSave]', e); }
+      }
+    }
+
+    const isActive = tab.path === state.activeTabPath;
+
+    if (isActive) {
+      if (state.activeEditor) {
+        try { state.activeEditor.destroy(); } catch(e) {}
+        state.activeEditor = null;
+      }
+      state.activeTabPath = null;
+      state.fileId = null;
+      state.fileType = null;
+      state.fileName = null;
+      state.wsSourcePath = null;
+      $('wa-file-name').textContent = '全格式 AI 工作区';
+      $('wa-save-btn').disabled = true;
+    }
+
+    state.openTabs.splice(idx, 1);
+
+    if (isActive) {
+      if (state.openTabs.length > 0) {
+        const neighborIdx = Math.min(idx, state.openTabs.length - 1);
+        await _switchToTab(state.openTabs[neighborIdx].path);
+      } else {
+        toggleWorkspace(false);
+        _renderTabs();
+      }
+    } else {
+      _renderTabs();
+    }
+  };
 
   // ── Utility ──
   const $ = id => document.getElementById(id);
@@ -515,18 +661,21 @@ window.WA = window.WA || {};
     }
   };
 
-  window.WA.openWorkspaceFile = async (filename) => {
-    const baseName = filename.split('/').pop();
+  window.WA.openWorkspaceFile = async (path) => {
+    // If already open in a tab, switch instantly (no server fetch)
+    if (state.openTabs.some(t => t.path === path)) {
+      await _switchToTab(path);
+      return;
+    }
+    const baseName = path.split('/').pop();
     showToast('正在加载 ' + baseName, 'success');
     try {
-      const encodedPath = filename.split('/').map(p => encodeURIComponent(p)).join('/');
+      const encodedPath = path.split('/').map(p => encodeURIComponent(p)).join('/');
       const res = await fetch('/api/v1/workspace/file/' + encodedPath);
       if (!res.ok) throw new Error('File not found');
       const blob = await res.blob();
-      // Use basename only so the title bar doesn't show "uploads/foo.docx".
-      // Tag the file object with _wsPath so Router.load knows the workspace path.
       const file = new File([blob], baseName);
-      file._wsPath = filename;   // full workspace-relative path
+      file._wsPath = path;
       await Router.load(file);
     } catch (e) {
       console.error('[WA openWorkspaceFile]', e);
@@ -1148,28 +1297,6 @@ window.WA = window.WA || {};
         showToast('文件正在加载中，请稍候...', 'error');
         return;
       }
-
-      // ── Flush current file before switching ──
-      if (state.activeEditor && state.fileId && state.fileType && state.fileType !== 'pdf') {
-        clearTimeout(_autoSaveTimer);
-        _autoSaveTimer = null;
-        try {
-          const data = state.activeEditor.serialize();
-          await fetch('/api/v1/workspace/auto_save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              file_type: state.fileType,
-              file_id: state.fileId,
-              ws_source_path: state.wsSourcePath || null,
-              data,
-            }),
-          });
-        } catch (e) {
-          console.warn('[Router.load pre-save]', e.message);
-        }
-      }
-
       state.isLoading = true;
       setLoading(true, `正在打开 ${file.name}…`);
       $('upload-progress').style.width = '30%';
@@ -1189,18 +1316,37 @@ window.WA = window.WA || {};
          state.fileId = json.file_id;
          state.fileType = json.file_type;
          state.fileName = json.file_name;
-         // Save workspace source path so auto-save can write back to the original file
          const ext = json.file_name.split('.').pop().toLowerCase();
-         const wsPath = file._wsPath || ('uploads/' + json.file_name);
+         const wsPath = file._wsPath || json.file_name;   // no uploads/ prefix
          state.wsSourcePath = wsPath;
+         state.activeTabPath = wsPath;
          _saveRecentFile(json.file_name, ext, wsPath);
          $('wa-file-name').textContent = state.fileName;
          $('wa-save-btn').disabled = (state.fileType === 'pdf');
 
+         // Destroy old editor if it was a different file (not a tab switch)
          if (state.activeEditor) {
            try { state.activeEditor.destroy(); } catch(e) { console.warn('[destroy old editor]', e); }
          }
          state.activeEditor = null;
+
+         // Create/update tab entry
+         const existingTabIdx = state.openTabs.findIndex(t => t.path === wsPath);
+         const tabEntry = {
+           path: wsPath,
+           name: json.file_name,
+           ext,
+           fileType: json.file_type,
+           fileId: json.file_id,
+           serverData: json.data,
+           cache: null,
+           modified: false,
+         };
+         if (existingTabIdx >= 0) {
+           state.openTabs[existingTabIdx] = tabEntry;
+         } else {
+           state.openTabs.push(tabEntry);
+         }
 
          toggleWorkspace(true);
 
@@ -1218,6 +1364,7 @@ window.WA = window.WA || {};
             state.activeEditor.render(json.data.raw_url, json.data.pages);
          }
 
+         _renderTabs();
          // Refresh left panel to highlight/show newly-added file
          setTimeout(loadWorkspaceFiles, 600);
 
@@ -1597,6 +1744,9 @@ window.WA = window.WA || {};
 
   window.WA.scheduleAutoSave = () => {
     if (!state.fileId || !state.fileType || state.fileType === 'pdf') return;
+    // Mark active tab as modified (dirty indicator)
+    const tab = state.openTabs.find(t => t.path === state.activeTabPath);
+    if (tab && !tab.modified) { tab.modified = true; _renderTabs(); }
     clearTimeout(_autoSaveTimer);
     const status = $('wa-autosave-status');
     if (status) { status.className = 'saving'; status.textContent = '保存中…'; }
@@ -1620,6 +1770,8 @@ window.WA = window.WA || {};
       });
       if (!res.ok) throw new Error((await res.json()).error || '自动保存失败');
       const json = await res.json();
+      const tab = state.openTabs.find(t => t.path === state.activeTabPath);
+      if (tab) { tab.modified = false; _renderTabs(); }
       if (status) {
         status.className = 'saved';
         status.textContent = `✓ 已保存 ${json.saved_at}`;
