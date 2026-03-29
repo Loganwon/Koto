@@ -476,11 +476,15 @@ def _parse_tool_calls(text: str):
         return False
 
     # Pass 1: explicit <TOOL>…</TOOL> wrapper (preferred format)
-    pattern = re.compile(r'<TOOL>(.*?)</TOOL>', re.DOTALL)
+    # Accept closing tag variants: </TOOL>, </ TOOL>, </tool>
+    pattern = re.compile(r'<TOOL>(.*?)<\s*/\s*TOOL>', re.DOTALL | re.IGNORECASE)
     def _replace(m):
         _try_parse(m.group(1))
         return ""
     text = pattern.sub(_replace, text).strip()
+
+    # Strip any orphaned opening/closing TOOL tags that didn't pair (model error)
+    text = re.sub(r'<\s*/?\s*TOOL\s*>', '', text, flags=re.IGNORECASE).strip()
 
     # Pass 2: code-fenced JSON block  ```json {...} ```  or  ``` {...} ```
     fence_pat = re.compile(r'```(?:json)?\s*(\{[^`]+\})\s*```', re.DOTALL)
