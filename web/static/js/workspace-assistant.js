@@ -1808,7 +1808,7 @@ window.WA = window.WA || {};
              status.textContent = `✓ 已保存`;
              setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 3000);
            }
-           showToast('已保存', 'success');
+           showToast(\已保存 (\ chars)\, 'success');
          }
      } catch(e) {
          showToast(e.message, 'error');

@@ -352,6 +352,12 @@ def auto_save():
     if not file_id.isalnum():
         return jsonify({"error": "无效的 file_id"}), 400
 
+    explicit = body.get("explicit", False)
+    data_len = len(data) if isinstance(data, str) else (len(str(data)) if data else 0)
+    logger.info("[auto_save] explicit=%s file_id=%s...%s data_len=%d preview=%.120s",
+                explicit, file_id[:8], file_id[-4:], data_len,
+                (data[:120] if isinstance(data, str) else str(data)[:120]))
+
     try:
         from app.core.file.file_parser import export_docx, export_pptx, export_xlsx
 
@@ -383,7 +389,6 @@ def auto_save():
     logger.info("[WorkspaceAssistant] auto_save tmp → %s (%d bytes)", tmp_path, len(raw_bytes))
 
     # 2. Write back to the original workspace file so re-opening loads latest content.
-    explicit = body.get("explicit", False)  # True when triggered by user Save action
     src_written = False
     if ws_source_path:
         try:
