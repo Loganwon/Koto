@@ -1762,15 +1762,18 @@ window.WA = window.WA || {};
     }
   };
 
+  let _isSaving = false;
   window.WA.saveFile = async () => {
      if (!state.activeEditor || !state.fileType || state.fileType === 'pdf') return;
+     if (_isSaving) return;
+     _isSaving = true;
      const btn = $('wa-save-btn');
-     if (btn.disabled) return;  // already saving
      btn.disabled = true;
      btn.innerHTML = '保存中...';
 
      try {
          const data = state.activeEditor.serialize();
+         document.title = '[SAVE] ' + (data ? data.length : 0) + ' chars';
          console.log('[saveFile] data len=' + (data?.length || 0) + ' fileId=' + state.fileId + ' wsPath=' + state.wsSourcePath);
          const res = await fetch('/api/v1/workspace/auto_save', {
              method: 'POST',
@@ -1827,6 +1830,7 @@ window.WA = window.WA || {};
      } catch(e) {
          showToast(e.message, 'error');
      } finally {
+         _isSaving = false;
          btn.disabled = false;
          btn.innerHTML = `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> 保存`;
      }
