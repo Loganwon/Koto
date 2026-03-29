@@ -343,3 +343,107 @@ class TestRoundTrip:
             "GET /api/v1/workspace/file/uploads/<name> must return 200 — "
             "this is the path used by the recent-files fix to re-open a file."
         )
+
+
+# ── 6. list_files: size + mtime metadata ─────────────────────────────────────
+
+class TestListFilesMetadata:
+
+    def test_list_files_returns_size_and_mtime_for_files(self, wa_client):
+        """
+        After the panel-improvements commit, list_files must return size
+        (human-readable string) and mtime (milliseconds int) for every file entry.
+        """
+        client, _, workspace_dir = wa_client
+        # plant a file directly in the workspace dir so list_files picks it up
+        uploads = workspace_dir / "uploads"
+        uploads.mkdir(exist_ok=True)
+        (uploads / "meta_test.pdf").write_bytes(b"%PDF-1.0 test")
+
+        resp = client.get("/api/v1/workspace/list_files")
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        # find our test file in the tree
+        found = None
+        for node in data.get("files", []):
+            if node["type"] == "folder" and node["name"] == "uploads":
+                for child in node.get("children", []):
+                    if child["name"] == "meta_test.pdf":
+                        found = child
+                        break
+        assert found is not None, "meta_test.pdf not found in list_files response"
+        assert "size" in found, "list_files must include 'size' field for each file"
+        assert "mtime" in found, "list_files must include 'mtime' field for each file"
+        assert isinstance(found["size"], str), "'size' should be a human-readable string"
+        assert isinstance(found["mtime"], (int, float)), "'mtime' should be a numeric timestamp"
+
+
+# ── 7. PATCH /api/v1/workspace/rename ────────────────────────────────────────
+
+class TestRenameEndpoint:
+
+    def test_rename_nonexistent_file_returns_404(self, wa_client):
+        client, _, _ = wa_client
+        resp = client.patch(
+            "/api/v1/workspace/rename",
+            json={"path": "uploads/does_not_exist.pdf", "name": "new_name"},
+        )
+        assert resp.status_code == 404
+
+    def test_rename_path_traversal_rejected(self, wa_client):
+        client, _, _ = wa_client
+        resp = client.patch(
+            "/api/v1/workspace/rename",
+            json={"path": "uploads/legit.pdf", "name": "../evil"},
+        )
+        # name contains '/' or '\\' → 400
+        assert resp.status_code == 400
+
+    def test_rename_preserves_extension(self, wa_client):
+        client, _, workspace_dir = wa_client
+        uploads = workspace_dir / "uploads"
+        uploads.mkdir(exist_ok=True)
+        src = uploads / "to_rename.pdf"
+        src.write_bytes(b"%PDF-1.0")
+
+        resp = client.patch(
+            "/api/v1/workspace/rename",
+            json={"path": "uploads/to_rename.pdf", "name": "renamed_file"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        # Extension must be preserved even though user didn't supply it
+        assert data["path"].endswith(".pdf"), \
+            "Rename must preserve original file extension"
+        assert not (uploads / "to_rename.pdf").exists(), "Old file should be gone"
+        assert (uploads / "renamed_file.pdf").exists(), "Renamed file should exist"
+
+    def test_rename_duplicate_name_returns_409(self, wa_client):
+        client, _, workspace_dir = wa_client
+        uploads = workspace_dir / "uploads"
+        uploads.mkdir(exist_ok=True)
+        (uploads / "dup_src.docx").write_bytes(b"PK content")
+        (uploads / "dup_target.docx").write_bytes(b"PK content")
+
+        resp = client.patch(
+            "/api/v1/workspace/rename",
+            json={"path": "uploads/dup_src.docx", "name": "dup_target"},
+        )
+        assert resp.status_code == 409, \
+            "Rename to an existing filename must return 409 Conflict"
+
+    def test_rename_success_response_shape(self, wa_client):
+        client, _, workspace_dir = wa_client
+        uploads = workspace_dir / "uploads"
+        uploads.mkdir(exist_ok=True)
+        (uploads / "shape_test.docx").write_bytes(b"PK content")
+
+        resp = client.patch(
+            "/api/v1/workspace/rename",
+            json={"path": "uploads/shape_test.docx", "name": "shape_renamed"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert "path" in data, "Rename response must include 'path'"
+        assert "name" in data, "Rename response must include 'name'"
