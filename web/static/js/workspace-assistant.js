@@ -11,7 +11,7 @@ window.WA = window.WA || {};
     fileId: null,
     fileType: null,
     fileName: null,
-    wsSourcePath: null,  // workspace-relative path of the open file (e.g. "uploads/foo.docx")
+    wsSourcePath: null,  // workspace-relative path of the open file (e.g. "foo.docx")
     activeEditor: null,
     socket: null,
     isLoading: false,
@@ -1148,6 +1148,28 @@ window.WA = window.WA || {};
         showToast('文件正在加载中，请稍候...', 'error');
         return;
       }
+
+      // ── Flush current file before switching ──
+      if (state.activeEditor && state.fileId && state.fileType && state.fileType !== 'pdf') {
+        clearTimeout(_autoSaveTimer);
+        _autoSaveTimer = null;
+        try {
+          const data = state.activeEditor.serialize();
+          await fetch('/api/v1/workspace/auto_save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              file_type: state.fileType,
+              file_id: state.fileId,
+              ws_source_path: state.wsSourcePath || null,
+              data,
+            }),
+          });
+        } catch (e) {
+          console.warn('[Router.load pre-save]', e.message);
+        }
+      }
+
       state.isLoading = true;
       setLoading(true, `正在打开 ${file.name}…`);
       $('upload-progress').style.width = '30%';
