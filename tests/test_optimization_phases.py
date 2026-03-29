@@ -17,7 +17,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # Phase 1: AppContext Tests
 # ══════════════════════════════════════════════════════════════════════════════
@@ -331,7 +330,9 @@ class TestCWMSmartFilter:
     def test_smart_filter_max_results(self):
         from app.core.memory.context_window_manager import _smart_filter_page_in
 
-        hits = [{"content": f"记忆内容{i}，完全不同的主题{i}", "id": i} for i in range(10)]
+        hits = [
+            {"content": f"记忆内容{i}，完全不同的主题{i}", "id": i} for i in range(10)
+        ]
         result = _smart_filter_page_in(hits, "记忆", max_results=3)
         assert len(result) <= 3
 
@@ -449,9 +450,7 @@ class TestSkillSuggesterEnhancements:
     def test_enrich_limits_to_3_turns(self):
         from app.core.skills.skill_suggester import SkillSuggester
 
-        history = [
-            {"role": "user", "parts": [f"消息{i}"]} for i in range(20)
-        ]
+        history = [{"role": "user", "parts": [f"消息{i}"]} for i in range(20)]
         result = SkillSuggester._enrich_with_history("最新", history)
         # Only last 3 user messages should be included
         assert "消息19" in result
@@ -464,6 +463,7 @@ class TestSkillSuggesterIntegration:
     def test_suggest_signature_accepts_history(self):
         """suggest() should accept conversation_history parameter."""
         import inspect
+
         from app.core.skills.skill_suggester import SkillSuggester
 
         sig = inspect.signature(SkillSuggester.suggest)

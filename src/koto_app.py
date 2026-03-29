@@ -401,6 +401,7 @@ class WindowAPI:
 
             def _do_switch():
                 import time
+
                 time.sleep(0.15)
                 try:
                     # 先移动再调整大小，确保位置正确
@@ -412,6 +413,7 @@ class WindowAPI:
                     logger.debug("Failed to switch to mini mode ui: %s", ex)
 
             import threading
+
             threading.Thread(target=_do_switch, daemon=True).start()
 
             return {
@@ -443,6 +445,7 @@ class WindowAPI:
 
             def _do_switch():
                 import time
+
                 time.sleep(0.15)
                 try:
                     self.window.on_top = False
@@ -453,6 +456,7 @@ class WindowAPI:
                     logger.debug("Failed to switch to full mode ui: %s", ex)
 
             import threading
+
             threading.Thread(target=_do_switch, daemon=True).start()
 
             return {"success": True, "mode": "full"}

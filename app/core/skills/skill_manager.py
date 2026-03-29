@@ -1962,7 +1962,9 @@ class SkillManager:
         return conflicts
 
     @classmethod
-    def _normalize_divination_prompt(cls, prompt: str, user_input: Optional[str] = None) -> str:
+    def _normalize_divination_prompt(
+        cls, prompt: str, user_input: Optional[str] = None
+    ) -> str:
         """统一占卜提示词风格：弱化“神谕”措辞，并默认按问题起牌。"""
         if not prompt:
             return prompt
@@ -2001,15 +2003,15 @@ class SkillManager:
         """根据用户输入检测是否应该提供数据驱动的占卜分析指导"""
         if not user_input:
             return ""
-        
+
         try:
             from app.core.skills.divination_data_handler import DivinationDataHandler
-            
+
             handler = DivinationDataHandler()
             context = handler.analyze_divination_question(user_input)
-            
+
             # 仅对有数据可用的问题提供指导
-            if context.is_data_available and context.domain != 'general':
+            if context.is_data_available and context.domain != "general":
                 prediction = handler.generate_data_driven_prediction(context, [])
                 guidance = f"""
 **【数据驱动分析提示】**
@@ -2023,7 +2025,7 @@ class SkillManager:
                 return guidance
         except Exception as e:
             logger.debug(f"[SkillManager] 数据驱动分析失败（非致命）: {e}")
-        
+
         return ""
 
     @classmethod
@@ -2116,7 +2118,10 @@ class SkillManager:
             if skill_id == "long_term_memory":
                 try:
                     from app.core.monitoring.shadow_watcher import get_shadow_watcher
-                    ctx = get_shadow_watcher().get_memories_context_string(user_input or "")
+
+                    ctx = get_shadow_watcher().get_memories_context_string(
+                        user_input or ""
+                    )
                     if ctx.strip():
                         memory_block = ctx
                 except Exception as _me:
@@ -2124,6 +2129,7 @@ class SkillManager:
                     # 回退：旧 MemoryManager
                     try:
                         from web.memory_manager import MemoryManager
+
                         _mm = MemoryManager()
                         ctx = _mm.get_context_string(user_input or "")
                         if ctx.strip():
@@ -2428,12 +2434,12 @@ class SkillManager:
         从内存注销并删除 config/skills/{id}.json，同时清除对应的配置。
         """
         cls._ensure_init()
-        
+
         # 1. 检查是否存在且非内置
         skill_def = cls._def_registry.get(skill_id)
         if not skill_def:
             return False
-            
+
         if getattr(skill_def, "author", "") == "builtin":
             logger.warning(f"[SkillManager] 拒绝卸载内置 Skill: {skill_id}")
             return False
@@ -2464,15 +2470,20 @@ class SkillManager:
         except Exception as e:
             logger.error(f"[SkillManager] 卸载时删除物理文件失败: {e}")
             return False
-            
+
         # 5. 解绑绑定的触发器（可选，如果不在此处处理也OK，依赖系统的懒惰清理）
         try:
             from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+
             binding_manager = get_skill_binding_manager()
             binding_manager.unbind_all_for_skill(skill_id)
         except Exception as exc:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 若没启用该管理器也不影响
-            
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )  # 若没启用该管理器也不影响
+
         logger.info(f"[SkillManager] ✅ 成功卸载自定义 Skill: {skill_id}")
         return True
 

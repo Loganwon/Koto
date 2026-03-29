@@ -1070,7 +1070,11 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
                 )
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
 
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
@@ -1088,7 +1092,11 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
                 )
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
         """递归将依赖 failed_name 的步骤设为 SKIPPED。"""
         changed = True
         while changed:
@@ -1121,7 +1129,11 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
                 )
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
 
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
@@ -1139,7 +1151,11 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
                 )
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
         """递归将依赖 failed_name 的步骤设为 SKIPPED。"""
         changed = True
         while changed:
@@ -1172,7 +1188,11 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
                 )
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
 
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
@@ -1190,7 +1210,11 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
                 )
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
         """递归将依赖 failed_name 的步骤设为 SKIPPED。"""
         changed = True
         while changed:
@@ -1223,7 +1247,11 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
                 )
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
 
     @staticmethod
     def _publish_plan_event(plan: Plan, event_type: str, message: str):
@@ -1241,4 +1269,8 @@ context_keys, result_schema, success_criteria, suggested_tools, expected_output�
                 )
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )

@@ -132,9 +132,12 @@ if __name__ == "__main__":
     # 优先使用 SocketIO 启动（支持文件助手全双工通信）
     try:
         from web.app import socketio as _sio
+
         if _sio is not None:
             logger.info("[Server] 使用 Flask-SocketIO 启动（WebSocket 支持已启用）")
-            _sio.run(app, host="0.0.0.0", port=PORT, debug=False, allow_unsafe_werkzeug=True)  # nosec B104
+            _sio.run(
+                app, host="0.0.0.0", port=PORT, debug=False, allow_unsafe_werkzeug=True
+            )  # nosec B104
         else:
             raise ImportError("socketio is None")
     except (ImportError, AttributeError):

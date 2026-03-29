@@ -215,7 +215,11 @@ def _setup_default_subscriptions(bus: OpsEventBus):
                 }
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
 
     def _remediation_handler(event: OpsEvent):
         try:
@@ -223,7 +227,11 @@ def _setup_default_subscriptions(bus: OpsEventBus):
 
             get_remediation_policy().handle(event)
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
 
     bus.subscribe("*", _alert_handler)
     bus.subscribe("*", _remediation_handler)

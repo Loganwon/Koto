@@ -477,7 +477,11 @@ class ShadowWatcher:
             q_lower = query.lower()
             memories = sorted(
                 memories,
-                key=lambda m: -(1 if any(w in m.get("content", "").lower() for w in q_lower.split()) else 0),
+                key=lambda m: -(
+                    1
+                    if any(w in m.get("content", "").lower() for w in q_lower.split())
+                    else 0
+                ),
             )
         lines = [f"- {m['content']}" for m in memories[:20]]
         return "用户记忆（来自影子追踪）：\n" + "\n".join(lines)
@@ -883,9 +887,7 @@ class ShadowWatcher:
                     existing_contents.add(content)
         if new_entries:
             memories.extend(new_entries)
-            logger.debug(
-                "[ShadowWatcher] 🧠 自动捕获 %d 条记忆", len(new_entries)
-            )
+            logger.debug("[ShadowWatcher] 🧠 自动捕获 %d 条记忆", len(new_entries))
 
     def _detect_failed_request(
         self, user_msg: str, ai_msg: str, session_id: str, now: datetime

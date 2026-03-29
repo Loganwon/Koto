@@ -3,6 +3,8 @@ import logging
 import os
 import sys
 
+import pytest
+
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
@@ -15,14 +17,11 @@ from app.core.llm.gemini import GeminiProvider
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
+@pytest.mark.live_api
 def test_agent():
-    print("Initializing Agent...")
-
-    # Initialize Provider (ensure GOOGLE_API_KEY is in env)
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        print("Warning: GOOGLE_API_KEY not found in environment variables.")
-        # Attempt to load from .env or similar if needed, or rely on user having it set
+        pytest.skip("Requires GOOGLE_API_KEY environment variable")
 
     provider = GeminiProvider(api_key=api_key)
 

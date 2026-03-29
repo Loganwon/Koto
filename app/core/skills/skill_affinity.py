@@ -140,9 +140,7 @@ class SkillAffinityTracker:
                 raw = json.loads(self._path.read_text(encoding="utf-8"))
                 if isinstance(raw, dict):
                     self._data = raw
-                    logger.debug(
-                        f"[SkillAffinity] 加载 {len(self._data)} 条亲和度记录"
-                    )
+                    logger.debug(f"[SkillAffinity] 加载 {len(self._data)} 条亲和度记录")
         except Exception as e:
             logger.debug(f"[SkillAffinity] 加载失败: {e}")
             self._data = {}

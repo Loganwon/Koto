@@ -222,7 +222,11 @@ class UnifiedAgent(Agent):
                     tool_name=tool_name,
                 )
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
 
         # ── 1. PII 脱敏 ─────────────────────────────────────────────
         mask_result = None
@@ -420,7 +424,11 @@ class UnifiedAgent(Agent):
             _planning_msg = "正在分析请求" + _skill_part + _tool_part
             _pub("THOUGHT", _planning_msg)
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
 
         while steps_taken < self.MAX_STEPS:
             steps_taken += 1
@@ -690,7 +698,11 @@ class UnifiedAgent(Agent):
                                 _task_id, result_summary=(final_answer or "")[:500]
                             )
                     except Exception:
-                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                        import logging
+
+                        logging.getLogger(__name__).warning(
+                            "Silenced exception caught", exc_info=True
+                        )
                     break
 
                 # ── 取消 / 打断检查（在工具调用前）──────────────────────────────
@@ -881,7 +893,11 @@ class UnifiedAgent(Agent):
                             if _ledger:
                                 _ledger.increment_retries(_task_id)
                         except Exception:
-                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                            import logging
+
+                            logging.getLogger(__name__).warning(
+                                "Silenced exception caught", exc_info=True
+                            )
                         continue  # 重新进入循环，使用升级后的模型
 
                 yield AgentStep(
@@ -893,7 +909,11 @@ class UnifiedAgent(Agent):
                     if _ledger:
                         _ledger.mark_failed(_task_id, error=err_msg)
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "Silenced exception caught", exc_info=True
+                    )
                 break
 
     # ─── v2 新增公开方法 ────────────────────────────────────────────────

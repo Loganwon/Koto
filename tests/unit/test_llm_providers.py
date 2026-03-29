@@ -41,10 +41,14 @@ class TestGeminiProviderBasic:
             }
         )
         provider._format_tools = MagicMock(return_value=None)
-        provider._format_prompt = MagicMock(return_value=[{"role": "user", "parts": []}])
+        provider._format_prompt = MagicMock(
+            return_value=[{"role": "user", "parts": []}]
+        )
         provider._track_usage = MagicMock()
 
-        with patch("app.core.llm.gemini.types.GenerateContentConfig", return_value=object()):
+        with patch(
+            "app.core.llm.gemini.types.GenerateContentConfig", return_value=object()
+        ):
             result = provider.generate_content(
                 prompt="hello",
                 model="gemini-2.5-flash",
@@ -68,7 +72,9 @@ class TestOpenAIProviderTracking:
 
         provider = OpenAIProvider.__new__(OpenAIProvider)
         provider.client = MagicMock()
-        provider._build_messages = MagicMock(return_value=[{"role": "user", "content": "hi"}])
+        provider._build_messages = MagicMock(
+            return_value=[{"role": "user", "content": "hi"}]
+        )
         provider._format_tools = MagicMock(return_value=None)
         provider._format_response = MagicMock(
             return_value={
@@ -101,7 +107,9 @@ class TestAnthropicProviderTracking:
 
         provider = AnthropicProvider.__new__(AnthropicProvider)
         provider.client = MagicMock()
-        provider._build_messages = MagicMock(return_value=[{"role": "user", "content": "hi"}])
+        provider._build_messages = MagicMock(
+            return_value=[{"role": "user", "content": "hi"}]
+        )
         provider._format_tools = MagicMock(return_value=None)
         provider._format_response = MagicMock(
             return_value={
@@ -185,6 +193,7 @@ class TestGeminiFormatPromptRoles:
     @staticmethod
     def _provider():
         from app.core.llm.gemini import GeminiProvider
+
         return GeminiProvider.__new__(GeminiProvider)
 
     def test_assistant_mapped_to_model(self):
@@ -195,9 +204,11 @@ class TestGeminiFormatPromptRoles:
 
     def test_function_mapped_to_user_with_function_response(self):
         prov = self._provider()
-        contents = prov._format_prompt([
-            {"role": "function", "name": "search", "content": "result"},
-        ])
+        contents = prov._format_prompt(
+            [
+                {"role": "function", "name": "search", "content": "result"},
+            ]
+        )
         assert contents[0]["role"] == "user"
         assert any("function_response" in p for p in contents[0]["parts"])
 
@@ -206,7 +217,11 @@ class TestGeminiFormatPromptRoles:
         prov = self._provider()
         messages = [
             {"role": "user", "content": "hi"},
-            {"role": "assistant", "content": "calling tool", "tool_calls": [{"name": "f", "args": {}}]},
+            {
+                "role": "assistant",
+                "content": "calling tool",
+                "tool_calls": [{"name": "f", "args": {}}],
+            },
             {"role": "function", "name": "f", "content": "done"},
         ]
         contents = prov._format_prompt(messages)
@@ -224,6 +239,7 @@ class TestOllamaAutoDetectExtended:
     @staticmethod
     def _get_provider(model):
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
         return OllamaLLMProvider(model=model)
 
     def test_expired_cache_triggers_re_detection(self):

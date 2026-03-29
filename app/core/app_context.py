@@ -273,7 +273,9 @@ def _make_task_ledger():
     if getattr(sys, "frozen", False):
         root = os.path.dirname(sys.executable)
     else:
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
     db_path = os.path.join(root, "config", "task_ledger.sqlite")
     logger.debug("[AppContext] 创建 TaskLedger")
     return TaskLedger(db_path)
@@ -293,7 +295,9 @@ def _make_notification_manager():
     if getattr(sys, "frozen", False):
         root = os.path.dirname(sys.executable)
     else:
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
     db_path = os.path.join(root, "config", "notifications.sqlite")
     try:
         from web.notification_manager import NotificationManager
@@ -312,7 +316,9 @@ def _make_checkpointer():
     if getattr(sys, "frozen", False):
         root = os.path.dirname(sys.executable)
     else:
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        root = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        )
     db_path = os.path.join(root, "config", "koto_checkpoints.sqlite")
     try:
         from app.core.agent.checkpoint_manager import get_checkpointer

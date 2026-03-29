@@ -19,6 +19,7 @@ Note: recent-files panel feature was removed ("recent files not needed").
 Tests for that feature (TestRecentFilesJsFix, uploads-path re-open) are
 intentionally absent.
 """
+
 from __future__ import annotations
 
 import io
@@ -28,8 +29,8 @@ from pathlib import Path
 
 import pytest
 
-
 # ── Fixture: minimal Flask app with only workspace_assistant_bp ──────────────
+
 
 @pytest.fixture(scope="module")
 def wa_client(tmp_path_factory):
@@ -54,6 +55,7 @@ def wa_client(tmp_path_factory):
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
@@ -74,8 +76,10 @@ def _fake_pdf_bytes() -> bytes:
 
 def _fake_docx_bytes() -> bytes:
     try:
-        import docx
         from io import BytesIO
+
+        import docx
+
         doc = docx.Document()
         doc.add_paragraph("Hello world")
         buf = BytesIO()
@@ -86,6 +90,7 @@ def _fake_docx_bytes() -> bytes:
 
 
 # ── 1. GET /api/v1/workspace/raw/<file_id> ───────────────────────────────────
+
 
 class TestRawFile:
     """Fix: send_file must receive an absolute path (Flask 3.1 requirement)."""
@@ -107,13 +112,16 @@ class TestRawFile:
 
         captured = {}
         import flask
+
         real_send_file = flask.send_file
 
         def spy_send_file(path_or_file, *args, **kwargs):
             captured["path"] = str(path_or_file)
             return real_send_file(path_or_file, *args, **kwargs)
 
-        monkeypatch.setattr("web.blueprints.workspace_assistant.send_file", spy_send_file)
+        monkeypatch.setattr(
+            "web.blueprints.workspace_assistant.send_file", spy_send_file
+        )
         resp = client.get(f"/api/v1/workspace/raw/{file_id}")
 
         assert resp.status_code == 200
@@ -142,6 +150,7 @@ class TestRawFile:
 
 
 # ── 2. POST /api/v1/workspace/open_file ──────────────────────────────────────
+
 
 class TestOpenFile:
 
@@ -208,6 +217,7 @@ class TestOpenFile:
 
 # ── 3. GET /api/v1/workspace/file/<path> ─────────────────────────────────────
 
+
 class TestServeWorkspaceFile:
 
     def test_serves_pdf_from_workspace_root(self, wa_client):
@@ -249,6 +259,7 @@ class TestServeWorkspaceFile:
 
 # ── 5. Round-trip: upload → raw endpoint ─────────────────────────────────────
 
+
 class TestRoundTrip:
 
     def test_upload_pdf_then_fetch_via_raw(self, wa_client):
@@ -275,6 +286,7 @@ class TestRoundTrip:
 
 
 # ── 6. list_files: size + mtime metadata ─────────────────────────────────────
+
 
 class TestListFilesMetadata:
 
@@ -304,11 +316,16 @@ class TestListFilesMetadata:
         assert found is not None, "meta_test.pdf not found in list_files response"
         assert "size" in found, "list_files must include 'size' field for each file"
         assert "mtime" in found, "list_files must include 'mtime' field for each file"
-        assert isinstance(found["size"], str), "'size' should be a human-readable string"
-        assert isinstance(found["mtime"], (int, float)), "'mtime' should be a numeric timestamp"
+        assert isinstance(
+            found["size"], str
+        ), "'size' should be a human-readable string"
+        assert isinstance(
+            found["mtime"], (int, float)
+        ), "'mtime' should be a numeric timestamp"
 
 
 # ── 7. PATCH /api/v1/workspace/rename ────────────────────────────────────────
+
 
 class TestRenameEndpoint:
 
@@ -343,8 +360,9 @@ class TestRenameEndpoint:
         assert resp.status_code == 200
         data = resp.get_json()
         # Extension must be preserved even though user didn't supply it
-        assert data["path"].endswith(".pdf"), \
-            "Rename must preserve original file extension"
+        assert data["path"].endswith(
+            ".pdf"
+        ), "Rename must preserve original file extension"
         assert not (uploads / "to_rename.pdf").exists(), "Old file should be gone"
         assert (uploads / "renamed_file.pdf").exists(), "Renamed file should exist"
 
@@ -359,8 +377,9 @@ class TestRenameEndpoint:
             "/api/v1/workspace/rename",
             json={"path": "uploads/dup_src.docx", "name": "dup_target"},
         )
-        assert resp.status_code == 409, \
-            "Rename to an existing filename must return 409 Conflict"
+        assert (
+            resp.status_code == 409
+        ), "Rename to an existing filename must return 409 Conflict"
 
     def test_rename_success_response_shape(self, wa_client):
         client, _, workspace_dir = wa_client
@@ -379,6 +398,7 @@ class TestRenameEndpoint:
 
 
 # ── helpers shared by new test classes ───────────────────────────────────────
+
 
 def _make_docx_bytes(text: str = "Test") -> bytes:
     """Minimal valid .docx (ZIP) with a single paragraph of text."""
@@ -422,6 +442,7 @@ def _make_docx_bytes(text: str = "Test") -> bytes:
 
 
 # ── 8. POST /api/v1/workspace/auto_save ──────────────────────────────────────
+
 
 class TestAutoSave:
     """
@@ -489,8 +510,10 @@ class TestAutoSave:
         client.post(
             "/api/v1/workspace/auto_save",
             json={
-                "file_type": "docx", "file_id": fid,
-                "ws_source_path": "save_test.docx", "explicit": True,
+                "file_type": "docx",
+                "file_id": fid,
+                "ws_source_path": "save_test.docx",
+                "explicit": True,
                 "data": "<p>first edit</p>",
             },
         )
@@ -499,8 +522,10 @@ class TestAutoSave:
         client.post(
             "/api/v1/workspace/auto_save",
             json={
-                "file_type": "docx", "file_id": fid,
-                "ws_source_path": "save_test.docx", "explicit": True,
+                "file_type": "docx",
+                "file_id": fid,
+                "ws_source_path": "save_test.docx",
+                "explicit": True,
                 "data": "<p>second edit with substantially more text appended</p>",
             },
         )
@@ -523,8 +548,10 @@ class TestAutoSave:
         client.post(
             "/api/v1/workspace/auto_save",
             json={
-                "file_type": "docx", "file_id": fid,
-                "ws_source_path": "save_test.docx", "explicit": True,
+                "file_type": "docx",
+                "file_id": fid,
+                "ws_source_path": "save_test.docx",
+                "explicit": True,
                 "data": "<p>save A</p>",
             },
         )
@@ -533,16 +560,18 @@ class TestAutoSave:
         client.post(
             "/api/v1/workspace/auto_save",
             json={
-                "file_type": "docx", "file_id": fid,
-                "ws_source_path": "save_test.docx", "explicit": True,
+                "file_type": "docx",
+                "file_id": fid,
+                "ws_source_path": "save_test.docx",
+                "explicit": True,
                 "data": "<p>save B with much more text to ensure size increases</p>",
             },
         )
         size2 = (workspace_dir / "save_test.docx").stat().st_size
 
-        assert size2 != size1, (
-            f"workspace file unchanged after second save ({size1} bytes both times)"
-        )
+        assert (
+            size2 != size1
+        ), f"workspace file unchanged after second save ({size1} bytes both times)"
 
     def test_auto_save_implicit_succeeds(self, wa_client):
         """explicit=False (background auto-save) must also return 200."""
@@ -561,8 +590,10 @@ class TestAutoSave:
         resp = client.post(
             "/api/v1/workspace/auto_save",
             json={
-                "file_type": "docx", "file_id": fid,
-                "ws_source_path": "save_test.docx", "explicit": True,
+                "file_type": "docx",
+                "file_id": fid,
+                "ws_source_path": "save_test.docx",
+                "explicit": True,
                 "data": "<p>check src_written</p>",
             },
         )
@@ -571,6 +602,7 @@ class TestAutoSave:
 
 
 # ── 9. raw_file: Cache-Control no-store ──────────────────────────────────────
+
 
 class TestRawFileNoCacheHeaders:
     """
@@ -600,9 +632,7 @@ class TestRawFileNoCacheHeaders:
 
         resp = client.get(f"/api/v1/workspace/raw/{fid}")
         cc = resp.headers.get("Cache-Control", "")
-        assert "no-cache" in cc, (
-            f"Cache-Control must contain 'no-cache' (got {cc!r})"
-        )
+        assert "no-cache" in cc, f"Cache-Control must contain 'no-cache' (got {cc!r})"
 
     def test_pragma_no_cache_present(self, wa_client):
         client, tmp_dir, _ = wa_client
@@ -611,12 +641,13 @@ class TestRawFileNoCacheHeaders:
 
         resp = client.get(f"/api/v1/workspace/raw/{fid}")
         pragma = resp.headers.get("Pragma", "")
-        assert "no-cache" in pragma, (
-            f"Pragma: no-cache header required for HTTP/1.0 compatibility (got {pragma!r})"
-        )
+        assert (
+            "no-cache" in pragma
+        ), f"Pragma: no-cache header required for HTTP/1.0 compatibility (got {pragma!r})"
 
 
 # ── 10. JS source: save-flow fixes ───────────────────────────────────────────
+
 
 class TestSaveFlowJsFixes:
     """
@@ -627,7 +658,9 @@ class TestSaveFlowJsFixes:
       (d) _isSaving guard with finally-block reset
     """
 
-    JS_PATH = Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
+    JS_PATH = (
+        Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
+    )
 
     @property
     def src(self) -> str:
@@ -636,61 +669,72 @@ class TestSaveFlowJsFixes:
     # (a) pre-await state capture -----------------------------------------
 
     def test_save_tab_captured_before_await(self):
-        assert "_saveTab" in self.src, \
-            "saveFile must capture _saveTab before any await"
+        assert "_saveTab" in self.src, "saveFile must capture _saveTab before any await"
 
     def test_save_fshandle_captured_before_await(self):
-        assert "_saveFsHandle" in self.src, \
-            "saveFile must capture _saveFsHandle before any await"
+        assert (
+            "_saveFsHandle" in self.src
+        ), "saveFile must capture _saveFsHandle before any await"
 
     def test_save_file_id_captured_before_await(self):
-        assert "_saveFileId" in self.src, \
-            "saveFile must capture _saveFileId before any await"
+        assert (
+            "_saveFileId" in self.src
+        ), "saveFile must capture _saveFileId before any await"
 
     def test_save_file_type_captured_before_await(self):
-        assert "_saveFileType" in self.src, \
-            "saveFile must capture _saveFileType before any await"
+        assert (
+            "_saveFileType" in self.src
+        ), "saveFile must capture _saveFileType before any await"
 
     def test_save_ws_path_captured_before_await(self):
-        assert "_saveWsPath" in self.src, \
-            "saveFile must capture _saveWsPath before any await"
+        assert (
+            "_saveWsPath" in self.src
+        ), "saveFile must capture _saveWsPath before any await"
 
     # (b) showSaveFilePicker on first save ---------------------------------
 
     def test_show_save_file_picker_used(self):
-        assert "showSaveFilePicker" in self.src, \
-            "saveFile must call showSaveFilePicker to get a write handle on first save"
+        assert (
+            "showSaveFilePicker" in self.src
+        ), "saveFile must call showSaveFilePicker to get a write handle on first save"
 
     def test_abort_error_handled(self):
-        assert "AbortError" in self.src, \
-            "saveFile must handle AbortError (user cancelled the picker)"
+        assert (
+            "AbortError" in self.src
+        ), "saveFile must handle AbortError (user cancelled the picker)"
 
     def test_handle_persisted_in_map(self):
-        assert "_fsHandleMap.set(" in self.src, \
-            "Acquired fsHandle must be stored in _fsHandleMap so future saves reuse it"
+        assert (
+            "_fsHandleMap.set(" in self.src
+        ), "Acquired fsHandle must be stored in _fsHandleMap so future saves reuse it"
 
     def test_handle_stored_on_tab_after_picker(self):
-        assert "_saveTab.fsHandle = _saveFsHandle" in self.src, \
-            "Acquired fsHandle must be stored on the tab object for the next save"
+        assert (
+            "_saveTab.fsHandle = _saveFsHandle" in self.src
+        ), "Acquired fsHandle must be stored on the tab object for the next save"
 
     # (c) cache-buster on raw fetch ----------------------------------------
 
     def test_raw_fetch_has_timestamp_cache_buster(self):
-        assert "Date.now()" in self.src, \
-            "raw bytes fetch URL must include Date.now() as a cache-buster query param"
+        assert (
+            "Date.now()" in self.src
+        ), "raw bytes fetch URL must include Date.now() as a cache-buster query param"
 
     def test_raw_fetch_url_has_query_param(self):
-        assert "?_=${Date.now()}" in self.src, \
-            "raw fetch URL must contain ?_=${Date.now()} to prevent browser caching"
+        assert (
+            "?_=${Date.now()}" in self.src
+        ), "raw fetch URL must contain ?_=${Date.now()} to prevent browser caching"
 
     # (d) _isSaving guard --------------------------------------------------
 
     def test_is_saving_flag_present(self):
-        assert "_isSaving" in self.src, \
-            "_isSaving flag must exist to prevent concurrent double-saves"
+        assert (
+            "_isSaving" in self.src
+        ), "_isSaving flag must exist to prevent concurrent double-saves"
 
     def test_is_saving_reset_in_finally(self):
         finally_idx = self.src.rfind("finally {")
         assert finally_idx != -1, "saveFile must have a finally block"
-        assert "_isSaving = false" in self.src[finally_idx:], \
-            "_isSaving must be reset to false in the finally block"
+        assert (
+            "_isSaving = false" in self.src[finally_idx:]
+        ), "_isSaving must be reset to false in the finally block"

@@ -169,9 +169,7 @@ class MemoryRouter:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def _retrieve_candidates(
-    mgr: Any, query: str, boost_cats: list
-) -> List[Dict]:
+def _retrieve_candidates(mgr: Any, query: str, boost_cats: list) -> List[Dict]:
     """Gather raw candidates from vector + keyword search, deduplicated by id."""
     hits: list = []
     seen_ids: set = set()
@@ -250,9 +248,7 @@ def _score_and_rank(
             content = (h.get("content") or "").lower()
             content_tokens = set(_bigrams(content))
             if query_tokens and content_tokens:
-                overlap = len(query_tokens & content_tokens) / max(
-                    len(query_tokens), 1
-                )
+                overlap = len(query_tokens & content_tokens) / max(len(query_tokens), 1)
                 semantic = 0.4 + min(overlap * 0.6, 0.5)
             else:
                 semantic = 0.4

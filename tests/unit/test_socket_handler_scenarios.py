@@ -39,22 +39,25 @@ Scenarios covered:
      a. selection text is prepended to full_prompt in [用户选中的文字] block
      b. no selection → plain prompt with history
 """
+
 from __future__ import annotations
 
+import importlib
 import json
 import sys
 import types
-import importlib
 from unittest.mock import MagicMock, patch
 
-
 # ─── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _import_parse_tool_calls():
     """Import _parse_tool_calls without requiring the full Flask/SocketIO stack."""
     # Stub heavy deps so the module can be imported in a bare test environment
     for mod_name in (
-        "flask_socketio", "flask", "flask.request",
+        "flask_socketio",
+        "flask",
+        "flask.request",
         "app.core.llm.provider_factory",
         "app.core.llm.ollama_llm_provider",
         "app.core.sandbox",
@@ -69,6 +72,7 @@ def _import_parse_tool_calls():
     fsi.SocketIO = MagicMock
 
     import importlib as _il
+
     spec = _il.util.spec_from_file_location(
         "socket_handler_test",
         "app/core/socket_handler.py",
@@ -82,6 +86,7 @@ def _import_parse_tool_calls():
 
 _sh = None
 
+
 def _get_sh():
     global _sh
     if _sh is None:
@@ -90,6 +95,7 @@ def _get_sh():
 
 
 # ─── 1. _parse_tool_calls ─────────────────────────────────────────────────────
+
 
 class TestParseToolCalls:
 
@@ -156,15 +162,15 @@ class TestParseToolCalls:
 
     # 1h — invalid JSON is ignored
     def test_invalid_json_ignored(self):
-        text = '<TOOL>not json at all</TOOL>'
+        text = "<TOOL>not json at all</TOOL>"
         clean, calls = self._parse(text)
         assert calls == []
-        assert clean == ""   # tag body stripped regardless
+        assert clean == ""  # tag body stripped regardless
 
     # 1i — multi-line value inside TOOL tag
     def test_multiline_value(self):
         payload = {"type": "set_html", "value": "<p>line1</p><p>line2</p>"}
-        text = f'<TOOL>{json.dumps(payload)}</TOOL>'
+        text = f"<TOOL>{json.dumps(payload)}</TOOL>"
         clean, calls = self._parse(text)
         assert len(calls) == 1
         assert calls[0]["value"] == "<p>line1</p><p>line2</p>"
@@ -173,7 +179,7 @@ class TestParseToolCalls:
     def test_multiple_tool_calls(self):
         tc1 = json.dumps({"type": "set_html", "value": "<p>a</p>"})
         tc2 = json.dumps({"type": "set_cell", "r": 0, "c": 0, "value": "v"})
-        text = f'<TOOL>{tc1}</TOOL> then <TOOL>{tc2}</TOOL>'
+        text = f"<TOOL>{tc1}</TOOL> then <TOOL>{tc2}</TOOL>"
         clean, calls = self._parse(text)
         assert len(calls) == 2
         assert calls[0]["type"] == "set_html"
@@ -191,6 +197,7 @@ class TestParseToolCalls:
 
 
 # ─── 2. _is_online_failure ────────────────────────────────────────────────────
+
 
 class TestIsOnlineFailure:
 
@@ -239,23 +246,36 @@ class TestIsOnlineFailure:
 
 # ─── 3. _get_local_provider ───────────────────────────────────────────────────
 
+
 class TestGetLocalProvider:
 
     def _run(self, models_list):
         """Call _get_local_provider with a faked /api/tags response."""
         sh = _get_sh()
-        fake_response_body = json.dumps({"models": [{"name": m} for m in models_list]}).encode()
+        fake_response_body = json.dumps(
+            {"models": [{"name": m} for m in models_list]}
+        ).encode()
 
         class FakeResponse:
-            def read(self): return fake_response_body
-            def close(self): pass
-            def __enter__(self): return self
-            def __exit__(self, *a): pass
+            def read(self):
+                return fake_response_body
+
+            def close(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
 
         mock_provider = MagicMock(name="OllamaLLMProvider_instance")
         mock_cls = MagicMock(return_value=mock_provider)
 
-        with patch.dict(sys.modules, {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)}):
+        with patch.dict(
+            sys.modules,
+            {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)},
+        ):
             with patch("urllib.request.urlopen", return_value=FakeResponse()):
                 result = sh._get_local_provider()
 
@@ -280,13 +300,19 @@ class TestGetLocalProvider:
     def test_falls_back_to_none_on_network_error(self):
         sh = _get_sh()
         mock_cls = MagicMock()
-        with patch.dict(sys.modules, {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)}):
-            with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
+        with patch.dict(
+            sys.modules,
+            {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)},
+        ):
+            with patch(
+                "urllib.request.urlopen", side_effect=OSError("connection refused")
+            ):
                 sh._get_local_provider()
         mock_cls.assert_called_once_with(model=None)
 
 
 # ─── 4. Insert-at-cursor fallback logic ───────────────────────────────────────
+
 
 class TestInsertAtCursorFallback:
     """
@@ -299,25 +325,37 @@ class TestInsertAtCursorFallback:
         Reproduce the fallback block from socket_handler._task() in isolation.
         Returns (tool_calls_after_fallback, synthesised).
         """
-        import re
         import html as _html
+        import re
 
-        _INSERT_TRIGGERS = ("在光标处插入", "插入文档", "插入到文档", "请插入", "插入内容")
+        _INSERT_TRIGGERS = (
+            "在光标处插入",
+            "插入文档",
+            "插入到文档",
+            "请插入",
+            "插入内容",
+        )
         synthesised = False
 
-        if (not tool_calls
-                and file_type in ("docx", "pptx")
-                and any(t in prompt for t in _INSERT_TRIGGERS)):
+        if (
+            not tool_calls
+            and file_type in ("docx", "pptx")
+            and any(t in prompt for t in _INSERT_TRIGGERS)
+        ):
             last_ai_content = ""
             for turn in reversed(history or []):
                 if turn.get("role") == "assistant":
                     c = turn.get("content", "").strip()
-                    c_clean = re.sub(r'<TOOL>.*?</TOOL>', '', c, flags=re.DOTALL).strip()
+                    c_clean = re.sub(
+                        r"<TOOL>.*?</TOOL>", "", c, flags=re.DOTALL
+                    ).strip()
                     if len(c_clean) > 10:
                         last_ai_content = c_clean
                         break
             if last_ai_content:
-                paragraphs = [p.strip() for p in last_ai_content.split('\n') if p.strip()]
+                paragraphs = [
+                    p.strip() for p in last_ai_content.split("\n") if p.strip()
+                ]
                 html_val = "".join(f"<p>{_html.escape(p)}</p>" for p in paragraphs)
                 tool_calls = [{"type": "set_html", "value": html_val}]
                 synthesised = True
@@ -342,7 +380,7 @@ class TestInsertAtCursorFallback:
         existing = [{"type": "set_html", "value": "<p>content</p>"}]
         calls, syn = self._run_fallback("请在光标处插入", "docx", existing, history)
         assert syn is False
-        assert calls == existing   # unchanged
+        assert calls == existing  # unchanged
 
     # 4c — skips for non-docx/pptx types (e.g. xlsx)
     def test_skips_non_docx_type(self):
@@ -375,14 +413,21 @@ class TestInsertAtCursorFallback:
 
     # 4f — trigger keywords all work
     def test_various_trigger_keywords(self):
-        history = [{"role": "assistant", "content": "写好了，内容如下：Hello World！！！！！！"}]
+        history = [
+            {
+                "role": "assistant",
+                "content": "写好了，内容如下：Hello World！！！！！！",
+            }
+        ]
         for trigger in ("在光标处插入", "插入文档", "插入到文档", "请插入", "插入内容"):
             calls, syn = self._run_fallback(trigger, "docx", [], history)
             assert syn is True, f"trigger '{trigger}' should fire fallback"
 
     # 4g — HTML-escapes special chars in content
     def test_html_escapes_content(self):
-        history = [{"role": "assistant", "content": "1 < 2 & 3 > 0 — this is a long sentence"}]
+        history = [
+            {"role": "assistant", "content": "1 < 2 & 3 > 0 — this is a long sentence"}
+        ]
         calls, syn = self._run_fallback("请在光标处插入", "docx", [], history)
         assert syn is True
         assert "&lt;" in calls[0]["value"]
@@ -391,6 +436,7 @@ class TestInsertAtCursorFallback:
 
 
 # ─── 5. Selection context — prompt construction ───────────────────────────────
+
 
 class TestSelectionContext:
     """
@@ -401,7 +447,7 @@ class TestSelectionContext:
     def _build_prompt(self, selection: str, user_prompt: str, history=None):
         """Reproduce the prompt-building block from _task()."""
         MAX_HISTORY_TURNS = 10
-        recent_history = (history or [])[-MAX_HISTORY_TURNS * 2:]
+        recent_history = (history or [])[-MAX_HISTORY_TURNS * 2 :]
         history_text = ""
         if recent_history:
             parts = []
@@ -416,7 +462,7 @@ class TestSelectionContext:
 
         if selection:
             full_prompt = (
-                f"[用户选中的文字]\n\"{selection}\"\n\n"
+                f'[用户选中的文字]\n"{selection}"\n\n'
                 f"{history_text}用户：{user_prompt}"
             )
         else:
@@ -435,7 +481,10 @@ class TestSelectionContext:
         assert "用户：写个冷笑话" in prompt
 
     def test_selection_appears_before_history(self):
-        history = [{"role": "user", "content": "上一条"}, {"role": "assistant", "content": "好的"}]
+        history = [
+            {"role": "user", "content": "上一条"},
+            {"role": "assistant", "content": "好的"},
+        ]
         prompt = self._build_prompt("选中文字", "分析", history)
         sel_pos = prompt.index("[用户选中的文字]")
         hist_pos = prompt.index("Koto AI：好的")
@@ -453,4 +502,6 @@ class TestSelectionContext:
 
     def test_empty_selection_not_injected(self):
         prompt = self._build_prompt("", "just chat")
-        assert '"' not in prompt.split("用户：")[0]  # no quoted block before first user turn
+        assert (
+            '"' not in prompt.split("用户：")[0]
+        )  # no quoted block before first user turn

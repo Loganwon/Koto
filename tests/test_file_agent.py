@@ -3,6 +3,8 @@ import logging
 import os
 import sys
 
+import pytest
+
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
@@ -15,13 +17,11 @@ from app.core.llm.gemini import GeminiProvider
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
 
+@pytest.mark.live_api
 def test_file_agent():
-    print("Initializing File Agent...")
-
-    # Initialize Provider
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
-        print("Warning: GOOGLE_API_KEY not found. Agent will fail at generation step.")
+        pytest.skip("Requires GOOGLE_API_KEY environment variable")
 
     provider = GeminiProvider(api_key=api_key)
 
@@ -54,9 +54,6 @@ def test_file_agent():
 
     query = "Create a file named 'hello_agent.txt' with content 'Hello from Koto Agent!' and then read it back."
     print(f"\nQuery: {query}\n")
-
-    if not api_key:
-        return
 
     print("--- Start Agent Loop ---")
     try:
