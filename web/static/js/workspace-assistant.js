@@ -81,21 +81,41 @@ window.WA = window.WA || {};
     if (badge) badge.textContent = state.recentFiles.length || '';
 
     if (!state.recentFiles.length) {
-      el.innerHTML = '<div style="padding:4px 14px;color:var(--text-muted);font-size:11px;">暂无最近文件</div>';
+      el.innerHTML = '<div style="padding:6px 14px;color:var(--text-muted);font-size:11px;opacity:0.6">暂无最近文件</div>';
       return;
     }
     el.innerHTML = state.recentFiles.map(f => {
-      const icon = _EXT_ICON[f.ext] || '📄';
       const wsPath = f.path || ('uploads/' + f.name);
       const esc = wsPath.replace(/'/g, "\\'");
       const nameEsc = f.name.replace(/'/g, "\\'");
-      return `<div class="wa-file-item file" data-depth="0" onclick="WA.openWorkspaceFile('${esc}')" title="${f.name}">
-        <span class="wa-file-icon">${icon}</span>
-        <span style="overflow:hidden;text-overflow:ellipsis;flex:1;font-size:12px">${f.name}</span>
-        <button class="wa-file-del" onclick="event.stopPropagation();WA.removeRecentFile('${nameEsc}')" title="从列表移除">×</button>
+      const isActive = (state.fileName && f.name === state.fileName) ? ' active' : '';
+      return `<div class="wa-file-item file${isActive}" data-depth="0" data-path="${esc}"
+          onclick="WA._fileRowClick(event,'${esc}')"
+          oncontextmenu="WA._showCtxMenu(event,'${esc}','${nameEsc}')"
+          title="${f.name}">
+        <input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleFileCheck(this,'${esc}')">
+        ${_fileIcon(f.ext)}
+        <span class="wa-file-label">${f.name}</span>
+        <div class="wa-file-actions">
+          <button class="del" onclick="event.stopPropagation();WA.removeRecentFile('${nameEsc}')" title="从列表移除">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
+        </div>
       </div>`;
     }).join('');
   }
+
+  // VS Code-style SVG file type icons
+  const _FILE_SVGS = {
+    docx: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#2b579a"/><path d="M11 1l3 3v10H11V1z" fill="#1a3f6f"/><path d="M11 1v3h3" fill="none" stroke="white" stroke-width="0.5" opacity="0.4"/><rect x="4" y="5" width="5" height="1" rx="0.4" fill="white" opacity="0.85"/><rect x="4" y="7" width="5" height="1" rx="0.4" fill="white" opacity="0.85"/><rect x="4" y="9" width="3.5" height="1" rx="0.4" fill="white" opacity="0.6"/></svg>`,
+    xlsx: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#217346"/><path d="M11 1l3 3v10H11V1z" fill="#165b32"/><path d="M4.5 5.5l1.5 2-1.5 2M7 5.5l1.5 2-1.5 2" stroke="white" stroke-width="0.9" stroke-linecap="round" fill="none" opacity="0.85"/></svg>`,
+    pptx: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#c43e1c"/><path d="M11 1l3 3v10H11V1z" fill="#8c2d13"/><rect x="3.5" y="4.5" width="6" height="3.5" rx="0.5" fill="white" opacity="0.7"/><rect x="3.5" y="9.5" width="5" height="0.8" rx="0.3" fill="white" opacity="0.5"/><rect x="3.5" y="11" width="3.5" height="0.8" rx="0.3" fill="white" opacity="0.5"/></svg>`,
+    pdf: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#e74c3c"/><path d="M11 1l3 3v10H11V1z" fill="#a93226"/><text x="3.2" y="10.5" font-size="4.5" font-family="sans-serif" font-weight="bold" fill="white" opacity="0.9">PDF</text></svg>`,
+  };
+  const _DEFAULT_FILE_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#75828d"/><path d="M10 2v3h3" fill="none" stroke="white" stroke-width="0.7" opacity="0.5"/></svg>`;
+  const _FOLDER_OPEN_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z" fill="#dcb67a"/><path d="M1.5 6.5h13" stroke="white" stroke-width="0.5" opacity="0.3"/></svg>`;
+  const _FOLDER_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z" fill="#c09a5a"/></svg>`;
+  function _fileIcon(ext) { return `<span class="wa-file-icon">${_FILE_SVGS[ext] || _DEFAULT_FILE_SVG}</span>`; }
 
   const _EXT_ICON = { 'docx': '📘', 'xlsx': '📗', 'pptx': '📙', 'pdf': '📕' };
   const _SORT_LABELS = { name: '名称', date: '日期', type: '类型' };
@@ -163,7 +183,7 @@ window.WA = window.WA || {};
 
     // Update sort button label
     const sortBtn = $('wa-sort-btn');
-    if (sortBtn) sortBtn.textContent = '↕ ' + _SORT_LABELS[state.sortBy];
+    if (sortBtn) sortBtn.title = '切换排序: ' + _SORT_LABELS[state.sortBy];
 
     // Count total files in tree
     const countFiles = (arr) => arr.reduce((n, i) => n + (i.type === 'file' ? 1 : countFiles(i.children || [])), 0);
@@ -185,30 +205,36 @@ window.WA = window.WA || {};
           const children = q ? (item._filteredChildren || []) : (item.children || []);
           const childrenHtml = renderTree(children, depth + 1);
           const isOpen = q ? true : !!openFolders[item.path];
+          const folderIconSvg = isOpen ? _FOLDER_OPEN_SVG : _FOLDER_SVG;
           return `<div class="wa-folder-group" data-folder="${item.path}">
             <div class="wa-file-item folder" data-depth="${depth}" onclick="WA.toggleFolder(this)">
-              <span class="wa-folder-arrow${isOpen ? ' open' : ''}">▶</span>
-              <span class="wa-file-icon">📁</span>
-              <span style="overflow:hidden;text-overflow:ellipsis;flex:1">${item.name}</span>
+              <span class="wa-folder-arrow${isOpen ? ' open' : ''}">›</span>
+              <span class="wa-file-icon">${folderIconSvg}</span>
+              <span class="wa-file-label">${item.name}</span>
             </div>
             <div class="wa-folder-children" style="display:${isOpen ? 'block' : 'none'};">${childrenHtml}</div>
           </div>`;
         } else {
-          const icon = _EXT_ICON[item.ext] || '📄';
           const esc = item.path.replace(/'/g, "\\'");
           const nameEsc = item.name.replace(/'/g, "\\'");
           const isActive = (state.fileName && item.name === state.fileName) ? ' active' : '';
           const meta = [item.size, _formatDate(item.mtime)].filter(Boolean).join(' · ');
           return `<div class="wa-file-item file${isActive}" data-depth="${depth}" data-path="${esc}"
-              onclick="WA._fileRowClick(event,'${esc}')" title="${item.path}&#10;${item.size || ''} · ${_formatDate(item.mtime)}">
+              onclick="WA._fileRowClick(event,'${esc}')"
+              oncontextmenu="WA._showCtxMenu(event,'${esc}','${nameEsc}')"
+              title="${item.name}${meta ? '\n' + meta : ''}">
             <input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleFileCheck(this,'${esc}')">
-            <span class="wa-file-icon">${icon}</span>
-            <span style="overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0">
-              <span class="wa-file-label">${item.name}</span>
-              ${meta ? `<span class="wa-file-meta">${meta}</span>` : ''}
-            </span>
-            <button class="wa-file-rename" onclick="event.stopPropagation();WA.renameWorkspaceFile('${esc}','${nameEsc}')" title="重命名">✎</button>
-            <button class="wa-file-del" onclick="event.stopPropagation();WA.deleteWorkspaceFile('${esc}')" title="删除">×</button>
+            ${_fileIcon(item.ext)}
+            <span class="wa-file-label">${item.name}</span>
+            ${meta ? `<span class="wa-file-meta">${meta}</span>` : ''}
+            <div class="wa-file-actions">
+              <button onclick="event.stopPropagation();WA.renameWorkspaceFile('${esc}','${nameEsc}')" title="重命名">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+              <button class="del" onclick="event.stopPropagation();WA.deleteWorkspaceFile('${esc}')" title="删除">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+              </button>
+            </div>
           </div>`;
         }
       }).join('');
@@ -392,14 +418,52 @@ window.WA = window.WA || {};
     await loadWorkspaceFiles();
   };
 
+  // ── Context menu ──────────────────────────────────────────────────────
+  let _ctxTarget = { path: null, name: null };
+
+  window.WA._showCtxMenu = (event, path, name) => {
+    event.preventDefault();
+    event.stopPropagation();
+    _ctxTarget = { path, name };
+    const menu = document.getElementById('wa-ctx-menu');
+    if (!menu) return;
+    menu.classList.add('open');
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = event.clientX, y = event.clientY;
+    if (x + 180 > vw) x = vw - 184;
+    if (y + 160 > vh) y = vh - 164;
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+  };
+
+  function _closeCtxMenu() {
+    const menu = document.getElementById('wa-ctx-menu');
+    if (menu) menu.classList.remove('open');
+  }
+
+  document.addEventListener('click', _closeCtxMenu, true);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeCtxMenu(); });
+
+  window.WA._ctxOpen = () => { _closeCtxMenu(); if (_ctxTarget.path) WA.openWorkspaceFile(_ctxTarget.path); };
+  window.WA._ctxRename = () => { _closeCtxMenu(); if (_ctxTarget.path) WA.renameWorkspaceFile(_ctxTarget.path, _ctxTarget.name); };
+  window.WA._ctxCopyPath = () => {
+    _closeCtxMenu();
+    if (_ctxTarget.path) {
+      navigator.clipboard.writeText(_ctxTarget.path).then(() => showToast('路径已复制', 'success')).catch(() => showToast(_ctxTarget.path, 'info'));
+    }
+  };
+  window.WA._ctxDelete = () => { _closeCtxMenu(); if (_ctxTarget.path) WA.deleteWorkspaceFile(_ctxTarget.path); };
+
   window.WA.toggleFolder = (el) => {
     const arrow = el.querySelector('.wa-folder-arrow');
+    const iconEl = el.querySelector('.wa-file-icon');
     const children = el.nextElementSibling;
     const folderPath = el.closest('.wa-folder-group') && el.closest('.wa-folder-group').dataset.folder;
     const isOpen = children.style.display !== 'none';
     if (!isOpen) {
       children.style.display = 'block';
       arrow.classList.add('open');
+      if (iconEl) iconEl.innerHTML = _FOLDER_OPEN_SVG;
       if (folderPath) {
         const openFolders = JSON.parse(localStorage.getItem('wa_open_folders') || '{}');
         openFolders[folderPath] = true;
@@ -408,6 +472,7 @@ window.WA = window.WA || {};
     } else {
       children.style.display = 'none';
       arrow.classList.remove('open');
+      if (iconEl) iconEl.innerHTML = _FOLDER_SVG;
       if (folderPath) {
         const openFolders = JSON.parse(localStorage.getItem('wa_open_folders') || '{}');
         delete openFolders[folderPath];
