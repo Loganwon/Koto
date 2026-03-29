@@ -68,11 +68,26 @@ def list_workspace_files():
                             "children": children
                         })
                 elif p.is_file() and p.suffix.lower() in _ALLOWED_EXT:
+                    try:
+                        stat = p.stat()
+                        size_b = stat.st_size
+                        if size_b < 1024:
+                            size_str = f"{size_b}B"
+                        elif size_b < 1024 * 1024:
+                            size_str = f"{size_b / 1024:.1f}KB"
+                        else:
+                            size_str = f"{size_b / 1024 / 1024:.1f}MB"
+                        mtime_ms = int(stat.st_mtime * 1000)
+                    except OSError:
+                        size_str = ""
+                        mtime_ms = 0
                     items.append({
                         "name": p.name,
                         "type": "file",
                         "ext": p.suffix.lower().replace(".", ""),
-                        "path": rel_path
+                        "path": rel_path,
+                        "size": size_str,
+                        "mtime": mtime_ms,
                     })
         except PermissionError:
             pass
@@ -341,3 +356,52 @@ def delete_workspace_file():
     target.unlink()
     logger.info(f"[WorkspaceAssistant] 删除文件: {target}")
     return jsonify({"ok": True})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATCH /api/v1/workspace/rename
+# ─────────────────────────────────────────────────────────────────────────────
+
+@workspace_assistant_bp.route("/api/v1/workspace/rename", methods=["PATCH"])
+def rename_workspace_file():
+    """
+    重命名工作区文件。
+    Body (JSON): {"path": "uploads/old.docx", "name": "new_name.docx"}
+    Extension must stay the same; new_name must not contain path separators.
+    """
+    from web.shared import WORKSPACE_DIR
+    root = Path(WORKSPACE_DIR).resolve()
+    body = request.get_json(silent=True) or {}
+    old_path = body.get("path", "").strip()
+    new_name = body.get("name", "").strip()
+
+    if not old_path or not new_name:
+        return jsonify({"error": "缺少 path 或 name 参数"}), 400
+
+    if "/" in new_name or "\\" in new_name:
+        return jsonify({"error": "文件名不能包含路径分隔符"}), 400
+
+    old_target = root.joinpath(old_path).resolve()
+    try:
+        old_target.relative_to(root)
+    except ValueError:
+        return jsonify({"error": "路径不合法"}), 403
+
+    if not old_target.is_file():
+        return jsonify({"error": "文件不存在"}), 404
+
+    # Preserve original extension even if user omitted/changed it
+    old_ext = old_target.suffix.lower()
+    stem = Path(new_name).stem
+    if not stem:
+        return jsonify({"error": "文件名无效"}), 400
+    final_name = stem + old_ext
+
+    new_target = old_target.parent / final_name
+    if new_target.exists():
+        return jsonify({"error": "文件名已存在"}), 409
+
+    old_target.rename(new_target)
+    new_rel = new_target.relative_to(root).as_posix()
+    logger.info(f"[WorkspaceAssistant] 重命名: {old_path} -> {new_rel}")
+    return jsonify({"ok": True, "path": new_rel, "name": final_name})

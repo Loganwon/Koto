@@ -15,7 +15,11 @@ window.WA = window.WA || {};
     socket: null,
     isLoading: false,
     conversation: [],   // [{role:'user'|'assistant', content:string}] — multi-turn history
-    recentFiles: JSON.parse(localStorage.getItem('wa_recent_files') || '[]'),  // [{name, ext, time}]
+    recentFiles: JSON.parse(localStorage.getItem('wa_recent_files') || '[]'),  // [{name, ext, path, time}]
+    sortBy: localStorage.getItem('wa_sort_by') || 'name',   // 'name' | 'date' | 'type'
+    sectionOpen: JSON.parse(localStorage.getItem('wa_sections') || '{"recent":true,"workspace":true}'),
+    searchQuery: '',
+    _allFiles: [],  // full file tree cached for client-side filter
   };
 
   // ── Utility ──
@@ -62,69 +66,236 @@ window.WA = window.WA || {};
   function renderRecentFiles() {
     const el = $('wa-recent-list');
     if (!el) return;
+
+    // Update section visibility
+    el.style.display = state.sectionOpen.recent ? '' : 'none';
+    const arrow = $('wa-recent-arrow');
+    if (arrow) arrow.className = 'wa-section-arrow' + (state.sectionOpen.recent ? ' open' : '');
+
+    // Update count badge
+    const badge = $('wa-recent-badge');
+    if (badge) badge.textContent = state.recentFiles.length || '';
+
     if (!state.recentFiles.length) {
       el.innerHTML = '<div style="padding:4px 14px;color:var(--text-muted);font-size:11px;">暂无最近文件</div>';
       return;
     }
     el.innerHTML = state.recentFiles.map(f => {
       const icon = _EXT_ICON[f.ext] || '📄';
-      // Use stored path (workspace-relative) so re-opening works correctly
       const wsPath = f.path || ('uploads/' + f.name);
       const esc = wsPath.replace(/'/g, "\\'");
+      const nameEsc = f.name.replace(/'/g, "\\'");
       return `<div class="wa-file-item file" data-depth="0" onclick="WA.openWorkspaceFile('${esc}')" title="${f.name}">
         <span class="wa-file-icon">${icon}</span>
         <span style="overflow:hidden;text-overflow:ellipsis;flex:1;font-size:12px">${f.name}</span>
+        <button class="wa-file-del" onclick="event.stopPropagation();WA.removeRecentFile('${nameEsc}')" title="从列表移除">×</button>
       </div>`;
     }).join('');
   }
 
   const _EXT_ICON = { 'docx': '📘', 'xlsx': '📗', 'pptx': '📙', 'pdf': '📕' };
+  const _SORT_LABELS = { name: '名称', date: '日期', type: '类型' };
+
+  function _applySort(items) {
+    const by = state.sortBy;
+    return [...items].sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+      if (by === 'date') return (b.mtime || 0) - (a.mtime || 0);
+      if (by === 'type') return (a.ext || '').localeCompare(b.ext || '') || a.name.localeCompare(b.name);
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  function _matchesSearch(item, q) {
+    if (!q) return true;
+    q = q.toLowerCase();
+    if (item.type === 'file') return item.name.toLowerCase().includes(q);
+    // For folders: keep if any child matches
+    if (item.children) item._filteredChildren = item.children.filter(c => _matchesSearch(c, q));
+    return item._filteredChildren && item._filteredChildren.length > 0;
+  }
+
+  function _formatDate(mtime) {
+    if (!mtime) return '';
+    const d = new Date(mtime);
+    const now = new Date();
+    const diff = (now - d) / 1000;
+    if (diff < 60) return '刚才';
+    if (diff < 3600) return Math.floor(diff / 60) + '分钟前';
+    if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
+    if (diff < 7 * 86400) return Math.floor(diff / 86400) + '天前';
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  }
 
   async function loadWorkspaceFiles() {
+    const list = $('wa-files-list');
+    if (!list) return;
     try {
       const res = await fetch('/api/v1/workspace/list_files');
       const data = await res.json();
-      const list = $('wa-files-list');
 
-      if (!data.files || data.files.length === 0) {
-        list.innerHTML = '<div style="padding:20px 12px;color:var(--text-muted);font-size:12px;text-align:center;">暂无文件<br>点击 + 或拖拽添加</div>';
-        return;
-      }
-
-      function renderTree(items, depth = 0) {
-        const openFolders = JSON.parse(localStorage.getItem('wa_open_folders') || '{}');
-        return items.map(item => {
-          if (item.type === 'folder') {
-            const childrenHtml = renderTree(item.children, depth + 1);
-            const isOpen = !!openFolders[item.path];
-            const displayStyle = isOpen ? 'block' : 'none';
-            const arrowClass = isOpen ? ' open' : '';
-            return `<div class="wa-folder-group" data-folder="${item.path}">
-              <div class="wa-file-item folder" data-depth="${depth}" onclick="WA.toggleFolder(this)">
-                <span class="wa-folder-arrow${arrowClass}">▶</span>
-                <span class="wa-file-icon">📁</span>
-                <span style="overflow:hidden;text-overflow:ellipsis;flex:1">${item.name}</span>
-              </div>
-              <div class="wa-folder-children" style="display:${displayStyle};">${childrenHtml}</div>
-            </div>`;
-          } else {
-            const icon = _EXT_ICON[item.ext] || '📄';
-            const esc = item.path.replace(/'/g, "\\'");
-            const isActive = (state.fileName && item.name === state.fileName) ? ' active' : '';
-            return `<div class="wa-file-item file${isActive}" data-depth="${depth}" data-path="${esc}" onclick="WA.openWorkspaceFile('${esc}')" title="${item.path}">
-              <span class="wa-file-icon">${icon}</span>
-              <span style="overflow:hidden;text-overflow:ellipsis;flex:1">${item.name}</span>
-              <button class="wa-file-del" onclick="event.stopPropagation();WA.deleteWorkspaceFile('${esc}')" title="删除">×</button>
-            </div>`;
-          }
-        }).join('');
-      }
-
-      list.innerHTML = renderTree(data.files);
+      state._allFiles = data.files || [];
+      _renderWorkspaceTree();
     } catch (e) {
       console.error('Failed to load files', e);
     }
   }
+
+  function _renderWorkspaceTree() {
+    const list = $('wa-files-list');
+    if (!list) return;
+
+    // Apply search filter
+    const q = state.searchQuery;
+    let items = state._allFiles;
+    if (q) {
+      items = items.filter(i => _matchesSearch(i, q));
+    }
+
+    // Update workspace section visibility
+    list.style.display = state.sectionOpen.workspace ? '' : 'none';
+    const arrow = $('wa-ws-arrow');
+    if (arrow) arrow.className = 'wa-section-arrow' + (state.sectionOpen.workspace ? ' open' : '');
+
+    // Update sort button label
+    const sortBtn = $('wa-sort-btn');
+    if (sortBtn) sortBtn.textContent = '↕ ' + _SORT_LABELS[state.sortBy];
+
+    // Count total files in tree
+    const countFiles = (arr) => arr.reduce((n, i) => n + (i.type === 'file' ? 1 : countFiles(i.children || [])), 0);
+    const badge = $('wa-ws-badge');
+    if (badge) badge.textContent = countFiles(state._allFiles) || '';
+
+    if (!items.length) {
+      list.innerHTML = q
+        ? `<div style="padding:16px 12px;color:var(--text-muted);font-size:12px;text-align:center;">未找到 "${q}"</div>`
+        : '<div style="padding:20px 12px;color:var(--text-muted);font-size:12px;text-align:center;">暂无文件<br>点击 + 或拖拽添加</div>';
+      return;
+    }
+
+    function renderTree(rawItems, depth = 0) {
+      const openFolders = JSON.parse(localStorage.getItem('wa_open_folders') || '{}');
+      const sorted = _applySort(rawItems);
+      return sorted.map(item => {
+        if (item.type === 'folder') {
+          const children = q ? (item._filteredChildren || []) : (item.children || []);
+          const childrenHtml = renderTree(children, depth + 1);
+          const isOpen = q ? true : !!openFolders[item.path];
+          return `<div class="wa-folder-group" data-folder="${item.path}">
+            <div class="wa-file-item folder" data-depth="${depth}" onclick="WA.toggleFolder(this)">
+              <span class="wa-folder-arrow${isOpen ? ' open' : ''}">▶</span>
+              <span class="wa-file-icon">📁</span>
+              <span style="overflow:hidden;text-overflow:ellipsis;flex:1">${item.name}</span>
+            </div>
+            <div class="wa-folder-children" style="display:${isOpen ? 'block' : 'none'};">${childrenHtml}</div>
+          </div>`;
+        } else {
+          const icon = _EXT_ICON[item.ext] || '📄';
+          const esc = item.path.replace(/'/g, "\\'");
+          const nameEsc = item.name.replace(/'/g, "\\'");
+          const isActive = (state.fileName && item.name === state.fileName) ? ' active' : '';
+          const meta = [item.size, _formatDate(item.mtime)].filter(Boolean).join(' · ');
+          return `<div class="wa-file-item file${isActive}" data-depth="${depth}" data-path="${esc}"
+              onclick="WA.openWorkspaceFile('${esc}')" title="${item.path}&#10;${item.size || ''} · ${_formatDate(item.mtime)}">
+            <span class="wa-file-icon">${icon}</span>
+            <span style="overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0">
+              <span class="wa-file-label">${item.name}</span>
+              ${meta ? `<span class="wa-file-meta">${meta}</span>` : ''}
+            </span>
+            <button class="wa-file-rename" onclick="event.stopPropagation();WA.renameWorkspaceFile('${esc}','${nameEsc}')" title="重命名">✎</button>
+            <button class="wa-file-del" onclick="event.stopPropagation();WA.deleteWorkspaceFile('${esc}')" title="删除">×</button>
+          </div>`;
+        }
+      }).join('');
+    }
+
+    list.innerHTML = renderTree(items);
+  }
+
+  window.WA.refreshFiles = async () => {
+    const btn = document.querySelector('.wa-icon-btn');
+    if (btn) { btn.classList.add('spinning'); setTimeout(() => btn.classList.remove('spinning'), 700); }
+    await loadWorkspaceFiles();
+  };
+
+  window.WA.filterFiles = (q) => {
+    state.searchQuery = q.trim();
+    const clear = $('wa-search-clear');
+    if (clear) clear.style.display = state.searchQuery ? '' : 'none';
+    _renderWorkspaceTree();
+  };
+
+  window.WA.clearSearch = () => {
+    const input = $('wa-search');
+    if (input) input.value = '';
+    WA.filterFiles('');
+  };
+
+  window.WA.toggleSection = (id) => {
+    state.sectionOpen[id] = !state.sectionOpen[id];
+    localStorage.setItem('wa_sections', JSON.stringify(state.sectionOpen));
+    if (id === 'recent') renderRecentFiles();
+    else _renderWorkspaceTree();
+  };
+
+  window.WA.cycleSortOrder = () => {
+    const order = ['name', 'date', 'type'];
+    const idx = order.indexOf(state.sortBy);
+    state.sortBy = order[(idx + 1) % order.length];
+    localStorage.setItem('wa_sort_by', state.sortBy);
+    _renderWorkspaceTree();
+  };
+
+  window.WA.removeRecentFile = (name) => {
+    state.recentFiles = state.recentFiles.filter(f => f.name !== name);
+    localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
+    renderRecentFiles();
+  };
+
+  window.WA.renameWorkspaceFile = async (path, currentName) => {
+    // Find the file item and do inline editing
+    const item = document.querySelector(`.wa-file-item[data-path="${CSS.escape(path)}"]`);
+    if (!item) return;
+    const labelSpan = item.querySelector('.wa-file-label');
+    if (!labelSpan) return;
+
+    const stem = currentName.includes('.') ? currentName.slice(0, currentName.lastIndexOf('.')) : currentName;
+    const input = document.createElement('input');
+    input.className = 'wa-rename-input';
+    input.value = stem;
+    labelSpan.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const commit = async () => {
+      const newName = input.value.trim();
+      if (!newName || newName === stem) { await loadWorkspaceFiles(); return; }
+      try {
+        const res = await fetch('/api/v1/workspace/rename', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path, name: newName }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || '重命名失败');
+        showToast('已重命名为 ' + json.name, 'success');
+        // Update recent files if the old name was there
+        state.recentFiles = state.recentFiles.map(f =>
+          f.name === currentName ? { ...f, name: json.name, path: json.path } : f
+        );
+        localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+      await loadWorkspaceFiles();
+    };
+
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { loadWorkspaceFiles(); }
+    });
+    input.addEventListener('blur', commit);
+  };
 
   window.WA.deleteWorkspaceFile = async (filepath) => {
     if (!confirm(`确定要删除 "${filepath.split('/').pop()}" 吗？`)) return;

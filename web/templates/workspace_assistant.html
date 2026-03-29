@@ -237,6 +237,165 @@
       color: var(--accent);
     }
 
+    /* Refresh / icon buttons in header */
+    .wa-icon-btn {
+      width: 22px; height: 22px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+      padding: 0;
+      flex-shrink: 0;
+    }
+    .wa-icon-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .wa-icon-btn.spinning svg { animation: wa-spin 0.6s linear; }
+    @keyframes wa-spin { to { transform: rotate(360deg); } }
+
+    /* Search box */
+    #wa-search-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 8px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+      flex-shrink: 0;
+    }
+    .wa-search-icon { color: var(--text-muted); flex-shrink: 0; }
+    #wa-search {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-size: 12px;
+      min-width: 0;
+    }
+    #wa-search::placeholder { color: var(--text-muted); }
+    #wa-search-clear {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0;
+      line-height: 1;
+      flex-shrink: 0;
+    }
+    #wa-search-clear:hover { color: var(--danger); }
+
+    /* Collapsible section labels */
+    .wa-section-label.collapsible { cursor: pointer; user-select: none; }
+    .wa-section-label.collapsible:hover { color: var(--accent); }
+    .wa-section-arrow {
+      font-size: 8px;
+      color: var(--text-muted);
+      transition: transform 0.18s;
+      display: inline-block;
+      margin-right: 2px;
+    }
+    .wa-section-arrow.open { transform: rotate(90deg); }
+
+    /* File-count badge on section labels */
+    .wa-section-badge {
+      font-size: 10px;
+      font-weight: 600;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0 5px;
+      color: var(--text-muted);
+      margin-left: 4px;
+      line-height: 16px;
+    }
+
+    /* Sort cycle button */
+    .wa-sort-btn {
+      font-size: 10px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 1px 5px;
+      margin-left: auto;
+      white-space: nowrap;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .wa-sort-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* Workspace section label needs flex for sort button */
+    #wa-ws-label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding-right: 8px;
+    }
+
+    /* Rename button (shown on hover next to delete) */
+    .wa-file-rename {
+      display: none;
+      position: absolute;
+      right: 26px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 16px; height: 16px;
+      border-radius: 3px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 11px;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      opacity: 0.7;
+      line-height: 1;
+    }
+    .wa-file-item:hover .wa-file-rename { display: flex; }
+    .wa-file-rename:hover { opacity: 1; background: rgba(77,163,255,0.15); color: var(--accent); }
+
+    /* Inline rename input */
+    .wa-rename-input {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      border-radius: 3px;
+      color: var(--text);
+      font-size: 12px;
+      padding: 1px 4px;
+      outline: none;
+      min-width: 0;
+    }
+
+    /* File metadata line (size + date) */
+    .wa-file-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.15s;
+      display: block;
+    }
+    .wa-file-item:hover .wa-file-meta { opacity: 1; }
+    /* Label + meta stacked in the file name column */
+    .wa-file-item .wa-file-label {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      line-height: 1.3;
+    }
+
     #wa-files-list {
       flex: 0 0 auto;
       max-height: 40%;
@@ -1074,10 +1233,20 @@
   <div id="wa-workspace">
     <!-- Left: file manager -->
     <div id="wa-left">
+      <!-- Header -->
       <div id="wa-left-header">
         <span class="wa-panel-title">文件管理</span>
+        <button class="wa-icon-btn" onclick="WA.refreshFiles()" title="刷新">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        </button>
         <label class="wa-add-btn" for="wa-file-input-left" title="上传文件到工作区">+</label>
         <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
+      </div>
+      <!-- Search -->
+      <div id="wa-search-wrap">
+        <svg class="wa-search-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="wa-search" type="text" placeholder="搜索文件…" autocomplete="off" oninput="WA.filterFiles(this.value)" onkeydown="if(event.key==='Escape')WA.clearSearch()">
+        <button id="wa-search-clear" onclick="WA.clearSearch()" title="清除" style="display:none">×</button>
       </div>
       <!-- Local pickers -->
       <div id="wa-local-btns">
@@ -1086,11 +1255,20 @@
         <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
         <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
       </div>
-      <!-- Recent files -->
-      <div class="wa-section-label">最近文件</div>
+      <!-- Recent files (collapsible) -->
+      <div class="wa-section-label collapsible" onclick="WA.toggleSection('recent')">
+        <span class="wa-section-arrow open" id="wa-recent-arrow">▶</span>
+        <span>最近文件</span>
+        <span class="wa-section-badge" id="wa-recent-badge"></span>
+      </div>
       <div id="wa-recent-list"></div>
-      <!-- Workspace files -->
-      <div class="wa-section-label" style="margin-top:4px;">工作区</div>
+      <!-- Workspace files (collapsible + sortable) -->
+      <div class="wa-section-label collapsible" id="wa-ws-label">
+        <span class="wa-section-arrow open" id="wa-ws-arrow" onclick="WA.toggleSection('workspace')">▶</span>
+        <span onclick="WA.toggleSection('workspace')" style="flex:1">工作区</span>
+        <span class="wa-section-badge" id="wa-ws-badge"></span>
+        <button class="wa-sort-btn" id="wa-sort-btn" onclick="event.stopPropagation();WA.cycleSortOrder()" title="切换排序">↕ 名称</button>
+      </div>
       <div id="wa-files-list"></div>
       <div id="wa-left-drop">📂 拖拽文件至此处<br><span style="font-size:11px">DOCX / XLSX / PPTX / PDF</span></div>
     </div>
