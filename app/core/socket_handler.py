@@ -240,28 +240,47 @@ def register_socket_events(socketio):
                 return "".join(full)
 
             result_text = None
+            # Respect "use local only" setting — skip online entirely
+            use_local_only = False
             try:
-                result_text = _try_online()
-            except Exception as exc:
-                logger.warning("[DocAI] online failed: %s: %s", type(exc).__name__, exc)
-                if _is_online_failure(exc):
-                    logger.warning("[WorkspaceAssistant] Online AI failed (%s), trying local…", exc)
-                    try:
-                        result_text = _try_local()
-                    except Exception as exc2:
-                        logger.error("[WorkspaceAssistant] Local fallback failed: %s", exc2)
-                        result_text = None
-                    if result_text is None:
-                        socketio.emit("agent_task_complete",
-                                      {"result": f"❌ AI 暂时不可用（{type(exc).__name__}: {exc}），本地模型也未运行，请稍后重试。"},
-                                      namespace="/doc", to=sid)
-                        return
-                else:
-                    logger.error("[WorkspaceAssistant] AI task failed: %s", exc, exc_info=True)
+                from web.settings import SettingsManager as _SM
+                use_local_only = bool(_SM().get("ai", "use_local_only"))
+            except Exception:
+                pass
+
+            if use_local_only:
+                try:
+                    result_text = _try_local()
+                except Exception as exc2:
+                    logger.error("[WorkspaceAssistant] Local-only mode, local failed: %s", exc2)
+                if not result_text:
                     socketio.emit("agent_task_complete",
-                                  {"result": f"❌ AI 处理失败：{exc}"},
+                                  {"result": "❌ 本地模型不可用，请确认 Ollama 已启动并加载了模型。"},
                                   namespace="/doc", to=sid)
                     return
+            else:
+                try:
+                    result_text = _try_online()
+                except Exception as exc:
+                    logger.warning("[DocAI] online failed: %s: %s", type(exc).__name__, exc)
+                    if _is_online_failure(exc):
+                        logger.warning("[WorkspaceAssistant] Online AI failed (%s), trying local…", exc)
+                        try:
+                            result_text = _try_local()
+                        except Exception as exc2:
+                            logger.error("[WorkspaceAssistant] Local fallback failed: %s", exc2)
+                            result_text = None
+                        if result_text is None:
+                            socketio.emit("agent_task_complete",
+                                          {"result": f"❌ AI 暂时不可用（在线模型不可用，本地模型也未运行）。请启动 Ollama 或配置有效的 API 密钥。"},
+                                          namespace="/doc", to=sid)
+                            return
+                    else:
+                        logger.error("[WorkspaceAssistant] AI task failed: %s", exc, exc_info=True)
+                        socketio.emit("agent_task_complete",
+                                      {"result": f"❌ AI 处理失败：{exc}"},
+                                      namespace="/doc", to=sid)
+                        return
 
             # ── Parse and emit any embedded tool calls ────────────────────
             clean_text, tool_calls = _parse_tool_calls(result_text or "")
@@ -464,7 +483,12 @@ def _get_local_provider():
 
 
 def _is_online_failure(exc: Exception) -> bool:
-    """Return True if the exception is a recoverable online-availability failure."""
+    """Return True if the exception is a recoverable online-availability failure.
+
+    Includes hard API-key failures (400 INVALID_ARGUMENT / expired) so the
+    handler automatically falls back to local Ollama instead of showing a raw
+    error to the user.
+    """
     s = str(exc).lower()
     return (
         "timed out" in s
@@ -477,6 +501,12 @@ def _is_online_failure(exc: Exception) -> bool:
         or "429" in s
         or "overloaded" in s
         or "quota" in s
+        # API key issues — treat as "online unavailable" so local Ollama takes over
+        or "invalid_argument" in s
+        or "api key" in s
+        or "api_key" in s
+        or "expired" in s
+        or "400" in s
     )
 
 
