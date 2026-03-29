@@ -441,7 +441,10 @@ window.WA = window.WA || {};
     if (menu) menu.classList.remove('open');
   }
 
-  document.addEventListener('click', _closeCtxMenu, true);
+  document.addEventListener('click', (e) => {
+    // Don't close when clicking on a menu item — let the item's onclick fire first
+    if (!e.target.closest('#wa-ctx-menu')) _closeCtxMenu();
+  }, true);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeCtxMenu(); });
 
   window.WA._ctxOpen = () => { _closeCtxMenu(); if (_ctxTarget.path) WA.openWorkspaceFile(_ctxTarget.path); };
