@@ -1272,6 +1272,7 @@ window.WA = window.WA || {};
            serverData: json.data,
            cache: null,
            modified: false,
+           fsHandle: file._fsHandle || null,  // FileSystemFileHandle for write-back to original path
          };
          if (existingTabIdx >= 0) {
            state.openTabs[existingTabIdx] = tabEntry;
@@ -1740,21 +1741,34 @@ window.WA = window.WA || {};
          }
 
          const json = await res.json();
-         // Clear dirty flag on active tab
          const tab = state.openTabs.find(t => t.path === state.activeTabPath);
          if (tab) { tab.modified = false; _renderTabs(); }
 
-         const status = $('wa-autosave-status');
-         if (json.src_written === false) {
-           // Saved to tmp but not to workspace source — offer download fallback
-           showToast('⚠️ 无法写入原文件，请用"导出"下载', 'error');
+         // If we have a FileSystemFileHandle, write bytes directly to the original file on disk
+         if (tab && tab.fsHandle) {
+           try {
+             // Fetch the saved bytes from tmp
+             const rawRes = await fetch(`/api/v1/workspace/raw/${state.fileId}`);
+             if (rawRes.ok) {
+               const bytes = await rawRes.arrayBuffer();
+               await _writeToFileHandle(tab.fsHandle, bytes);
+               showToast('✓ 已保存到原始文件', 'success');
+             } else {
+               showToast('已保存到工作区 (无法写回原始位置)', 'success');
+             }
+           } catch (fsErr) {
+             // User may have denied write permission
+             console.warn('[saveFile] FileSystem write failed:', fsErr);
+             showToast('已保存到工作区 (原始文件写入被拒绝)', 'success');
+           }
          } else {
+           const status = $('wa-autosave-status');
            if (status) {
              status.className = 'saved';
              status.textContent = `✓ 已保存`;
              setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 3000);
            }
-           showToast('已保存到 ' + (state.wsSourcePath || state.fileName), 'success');
+           showToast('已保存', 'success');
          }
      } catch(e) {
          showToast(e.message, 'error');
@@ -1765,6 +1779,41 @@ window.WA = window.WA || {};
   };
 
   // ── Drag & Drop Events ──
+  // ── File System Access API helpers ──
+  // When a file is opened via the picker we store its FileSystemFileHandle so Ctrl+S
+  // can write bytes directly back to the user's original file on disk.
+  async function _openFilePicker() {
+    if (window.showOpenFilePicker) {
+      try {
+        const handles = await window.showOpenFilePicker({
+          multiple: false,
+          types: [{ description: 'Documents', accept: {
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+            'application/pdf': ['.pdf'],
+          }}],
+        });
+        if (!handles.length) return;
+        const handle = handles[0];
+        const file = await handle.getFile();
+        file._fsHandle = handle;  // attach handle so Router.load can store it
+        Router.load(file);
+      } catch (e) {
+        if (e.name !== 'AbortError') showToast('无法打开文件: ' + e.message, 'error');
+      }
+    } else {
+      fileInput.click();
+    }
+  }
+
+  // Write bytes to the stored FileSystemFileHandle (original file on disk)
+  async function _writeToFileHandle(handle, bytes) {
+    const writable = await handle.createWritable();
+    await writable.write(bytes);
+    await writable.close();
+  }
+
   function loadFiles(files) {
     Array.from(files).forEach(f => Router.load(f));
   }
@@ -1780,7 +1829,7 @@ window.WA = window.WA || {};
      dropZone.classList.remove('drag-over');
      if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
   });
-  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('click', () => _openFilePicker());
   fileInput.addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); });
 
   // Left panel drop zone
@@ -1794,7 +1843,7 @@ window.WA = window.WA || {};
      leftDrop.classList.remove('drag-over');
      if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
   });
-  leftDrop.addEventListener('click', () => fileInputLeft.click());
+  leftDrop.addEventListener('click', () => _openFilePicker());
   fileInputLeft.addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); });
 
   // Whole-canvas drag-drop (works even when a file is already open)
@@ -1813,7 +1862,7 @@ window.WA = window.WA || {};
   const localFileInput = $('wa-local-file-input');
   const localFolderInput = $('wa-local-folder-input');
 
-  $('wa-pick-local-file-btn').addEventListener('click', () => localFileInput.click());
+  $('wa-pick-local-file-btn').addEventListener('click', () => _openFilePicker());
   $('wa-pick-local-folder-btn').addEventListener('click', () => localFolderInput.click());
 
   localFileInput.addEventListener('change', (e) => {
