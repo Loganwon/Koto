@@ -378,9 +378,11 @@ def auto_save():
     # 1. Overwrite the tmp file so raw/<file_id> still works for PDF.js etc.
     tmp_path = _ensure_tmp_dir() / f"{file_id}{suffix}"
     tmp_path.write_bytes(raw_bytes)
-    logger.debug("[WorkspaceAssistant] auto_save tmp → %s (%d bytes)", tmp_path, len(raw_bytes))
+    logger.info("[WorkspaceAssistant] auto_save tmp → %s (%d bytes)", tmp_path, len(raw_bytes))
 
     # 2. Write back to the original workspace file so re-opening loads latest content.
+    explicit = body.get("explicit", False)  # True when triggered by user Save action
+    src_written = False
     if ws_source_path:
         try:
             from web.shared import WORKSPACE_DIR
@@ -389,13 +391,17 @@ def auto_save():
             # Path-traversal guard
             src_path.relative_to(ws_root)
             if src_path.suffix.lower() in _ALLOWED_EXT:
+                src_path.parent.mkdir(parents=True, exist_ok=True)
                 src_path.write_bytes(raw_bytes)
-                logger.debug("[WorkspaceAssistant] auto_save src → %s", src_path)
+                src_written = True
+                logger.info("[WorkspaceAssistant] auto_save src → %s (%d bytes)", src_path, len(raw_bytes))
         except Exception as e:
             logger.warning("[WorkspaceAssistant] auto_save: could not write source file: %s", e)
+            if explicit:
+                return jsonify({"error": f"保存失败: {str(e)}"}), 500
 
     saved_at = datetime.datetime.now().strftime("%H:%M")
-    return jsonify({"ok": True, "saved_at": saved_at})
+    return jsonify({"ok": True, "saved_at": saved_at, "src_written": src_written})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

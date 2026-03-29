@@ -1804,6 +1804,7 @@ window.WA = window.WA || {};
                file_type: state.fileType,
                file_id: state.fileId,
                ws_source_path: state.wsSourcePath || null,
+               explicit: true,
                data,
              }),
          });
@@ -1813,17 +1814,23 @@ window.WA = window.WA || {};
              throw new Error(json.error || '保存失败');
          }
 
+         const json = await res.json();
          // Clear dirty flag on active tab
          const tab = state.openTabs.find(t => t.path === state.activeTabPath);
          if (tab) { tab.modified = false; _renderTabs(); }
 
          const status = $('wa-autosave-status');
-         if (status) {
-           status.className = 'saved';
-           status.textContent = `✓ 已保存`;
-           setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 3000);
+         if (json.src_written === false) {
+           // Saved to tmp but not to workspace source — offer download fallback
+           showToast('⚠️ 无法写入原文件，请用"导出"下载', 'error');
+         } else {
+           if (status) {
+             status.className = 'saved';
+             status.textContent = `✓ 已保存`;
+             setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 3000);
+           }
+           showToast('已保存到 ' + (state.wsSourcePath || state.fileName), 'success');
          }
-         showToast('已保存到 ' + (state.wsSourcePath || state.fileName), 'success');
      } catch(e) {
          showToast(e.message, 'error');
      } finally {
