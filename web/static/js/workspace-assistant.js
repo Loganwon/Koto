@@ -426,7 +426,8 @@ window.WA = window.WA || {};
   const _waInput = $('wa-user-input');
   if (_waInput) {
     _waInput.addEventListener('mousedown', () => {
-      if (lastSelectionText && !state.pinnedSelection) {
+      if (lastSelectionText) {
+        // Always update chip — reselecting new text replaces the old context
         state.pinnedSelection = lastSelectionText;
         const preview = lastSelectionText.length > 200
           ? lastSelectionText.substring(0, 200) + '…'
