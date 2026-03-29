@@ -326,6 +326,66 @@ def save_file():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/auto_save
+# ─────────────────────────────────────────────────────────────────────────────
+
+@workspace_assistant_bp.route("/api/v1/workspace/auto_save", methods=["POST"])
+def auto_save():
+    """
+    Silently save edited content back to the workspace tmp file.
+    No download — just persists the current state so it survives a reload.
+    Body (JSON):
+      {"file_type": "docx"|"xlsx"|"pptx",
+       "file_id": str,
+       "data": <editor_payload>}
+    Returns: {"ok": true, "saved_at": "<ISO timestamp>"}
+    """
+    import datetime, io as _io
+    body = request.get_json(force=True, silent=True) or {}
+    file_type = body.get("file_type", "").lower()
+    file_id = body.get("file_id", "")
+    data = body.get("data")
+
+    if not file_type or not file_id or data is None:
+        return jsonify({"error": "缺少必要字段"}), 400
+    if not file_id.isalnum():
+        return jsonify({"error": "无效的 file_id"}), 400
+
+    try:
+        from app.core.file.file_parser import export_docx, export_pptx, export_xlsx
+
+        if file_type == "docx":
+            raw_bytes = export_docx(data)
+            suffix = ".docx"
+        elif file_type == "xlsx":
+            sheets_data = data.get("sheets", data) if isinstance(data, dict) else data
+            images_data = data.get("_images", []) if isinstance(data, dict) else []
+            raw_bytes = export_xlsx(sheets_data, images_data)
+            suffix = ".xlsx"
+        elif file_type == "pptx":
+            tmp_dir = _ensure_tmp_dir()
+            matches = list(tmp_dir.glob(f"{file_id}.pptx"))
+            if not matches:
+                return jsonify({"error": "原始 PPTX 文件不存在或已过期"}), 404
+            raw_bytes = export_pptx(str(matches[0]), data)
+            suffix = ".pptx"
+        else:
+            return jsonify({"error": f"不支持的格式: {file_type}"}), 400
+
+    except Exception as e:
+        logger.error("[WorkspaceAssistant] auto_save 失败 %s: %s", file_type, e, exc_info=True)
+        return jsonify({"error": f"自动保存失败: {str(e)}"}), 500
+
+    # Overwrite the tmp file in-place so raw/<file_id> still works
+    tmp_path = _ensure_tmp_dir() / f"{file_id}{suffix}"
+    tmp_path.write_bytes(raw_bytes)
+    logger.debug("[WorkspaceAssistant] auto_save wrote %d bytes → %s", len(raw_bytes), tmp_path)
+
+    saved_at = datetime.datetime.now().strftime("%H:%M")
+    return jsonify({"ok": True, "saved_at": saved_at})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # DELETE /api/v1/workspace/file  ?path=<relative_path>
 # ─────────────────────────────────────────────────────────────────────────────
 

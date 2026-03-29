@@ -105,6 +105,15 @@
 
     .wa-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
+    #wa-autosave-status {
+      font-size: 11px;
+      color: var(--text-muted, #888);
+      white-space: nowrap;
+      transition: opacity 0.4s;
+    }
+    #wa-autosave-status.saving { color: var(--accent); }
+    #wa-autosave-status.saved  { color: #4caf50; }
+
     /* ── Upload drag zone (shown when no file loaded) ── */
     #wa-drop-zone {
       position: absolute;
@@ -1281,6 +1290,7 @@
         </svg>
         保存 / 导出
       </button>
+      <span id="wa-autosave-status"></span>
     </div>
   </div>
 

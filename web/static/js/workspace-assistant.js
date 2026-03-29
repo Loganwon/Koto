@@ -510,6 +510,7 @@ window.WA = window.WA || {};
               checkImage(src) { return true; },
             },
           },
+          onChange: () => { WA.scheduleAutoSave(); },
         }
       });
       this.toolbar = createToolbar({
@@ -548,6 +549,7 @@ window.WA = window.WA || {};
         this.editor.dangerouslyInsertHtml(val);
         this._savedRange = null;
         showToast('AI 已更新文档', 'success');
+        WA.scheduleAutoSave();
       }
     }
 
@@ -748,11 +750,13 @@ window.WA = window.WA || {};
       if (cmd.type === 'set_cell' && window.luckysheet) {
         window.luckysheet.setCellValue(cmd.r, cmd.c, cmd.value);
         showToast(`AI 已更新单元格 (${cmd.r}, ${cmd.c})`, 'success');
+        WA.scheduleAutoSave();
       } else if (cmd.type === 'set_cells' && window.luckysheet && Array.isArray(cmd.cells)) {
         cmd.cells.forEach(cell => {
           window.luckysheet.setCellValue(cell.r, cell.c, cell.value);
         });
         showToast(`AI 已批量更新 ${cmd.cells.length} 个单元格`, 'success');
+        WA.scheduleAutoSave();
       }
     }
 
@@ -841,6 +845,7 @@ window.WA = window.WA || {};
              ta.value = cmd.value;
              this.sync(ta);
              showToast('AI 已更新 PPT 文本', 'success');
+             WA.scheduleAutoSave();
          }
       }
     }
@@ -1359,6 +1364,40 @@ window.WA = window.WA || {};
           }
         }, 200);
       }
+  };
+
+  // ── Auto-save ──────────────────────────────────────────────────────────────
+  let _autoSaveTimer = null;
+
+  window.WA.scheduleAutoSave = () => {
+    if (!state.fileId || !state.fileType || state.fileType === 'pdf') return;
+    clearTimeout(_autoSaveTimer);
+    const status = $('wa-autosave-status');
+    if (status) { status.className = 'saving'; status.textContent = '保存中…'; }
+    _autoSaveTimer = setTimeout(WA.autoSave, 2000);
+  };
+
+  window.WA.autoSave = async () => {
+    if (!state.activeEditor || !state.fileId || !state.fileType || state.fileType === 'pdf') return;
+    const status = $('wa-autosave-status');
+    try {
+      const data = state.activeEditor.serialize();
+      const res = await fetch('/api/v1/workspace/auto_save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_type: state.fileType, file_id: state.fileId, data }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || '自动保存失败');
+      const json = await res.json();
+      if (status) {
+        status.className = 'saved';
+        status.textContent = `✓ 已保存 ${json.saved_at}`;
+        setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 4000);
+      }
+    } catch (e) {
+      if (status) { status.className = ''; status.textContent = ''; }
+      console.warn('[AutoSave]', e.message);
+    }
   };
 
   window.WA.saveFile = async () => {
