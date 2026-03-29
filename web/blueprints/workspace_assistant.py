@@ -332,18 +332,21 @@ def save_file():
 @workspace_assistant_bp.route("/api/v1/workspace/auto_save", methods=["POST"])
 def auto_save():
     """
-    Silently save edited content back to the workspace tmp file.
+    Silently save edited content back to the workspace tmp file AND the original
+    workspace source file (so switching back to the file shows latest changes).
     No download — just persists the current state so it survives a reload.
     Body (JSON):
       {"file_type": "docx"|"xlsx"|"pptx",
        "file_id": str,
+       "ws_source_path": str,   # optional: workspace-relative path to overwrite
        "data": <editor_payload>}
     Returns: {"ok": true, "saved_at": "<ISO timestamp>"}
     """
-    import datetime, io as _io
+    import datetime
     body = request.get_json(force=True, silent=True) or {}
     file_type = body.get("file_type", "").lower()
     file_id = body.get("file_id", "")
+    ws_source_path = body.get("ws_source_path", "")  # e.g. "uploads/foo.docx"
     data = body.get("data")
 
     if not file_type or not file_id or data is None:
@@ -376,10 +379,24 @@ def auto_save():
         logger.error("[WorkspaceAssistant] auto_save 失败 %s: %s", file_type, e, exc_info=True)
         return jsonify({"error": f"自动保存失败: {str(e)}"}), 500
 
-    # Overwrite the tmp file in-place so raw/<file_id> still works
+    # 1. Overwrite the tmp file so raw/<file_id> still works for PDF.js etc.
     tmp_path = _ensure_tmp_dir() / f"{file_id}{suffix}"
     tmp_path.write_bytes(raw_bytes)
-    logger.debug("[WorkspaceAssistant] auto_save wrote %d bytes → %s", len(raw_bytes), tmp_path)
+    logger.debug("[WorkspaceAssistant] auto_save tmp → %s (%d bytes)", tmp_path, len(raw_bytes))
+
+    # 2. Write back to the original workspace file so re-opening loads latest content.
+    if ws_source_path:
+        try:
+            from web.shared import WORKSPACE_DIR
+            ws_root = Path(WORKSPACE_DIR).resolve()
+            src_path = ws_root.joinpath(ws_source_path).resolve()
+            # Path-traversal guard
+            src_path.relative_to(ws_root)
+            if src_path.suffix.lower() in _ALLOWED_EXT:
+                src_path.write_bytes(raw_bytes)
+                logger.debug("[WorkspaceAssistant] auto_save src → %s", src_path)
+        except Exception as e:
+            logger.warning("[WorkspaceAssistant] auto_save: could not write source file: %s", e)
 
     saved_at = datetime.datetime.now().strftime("%H:%M")
     return jsonify({"ok": True, "saved_at": saved_at})

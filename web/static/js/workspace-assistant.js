@@ -11,6 +11,7 @@ window.WA = window.WA || {};
     fileId: null,
     fileType: null,
     fileName: null,
+    wsSourcePath: null,  // workspace-relative path of the open file (e.g. "uploads/foo.docx")
     activeEditor: null,
     socket: null,
     isLoading: false,
@@ -963,10 +964,10 @@ window.WA = window.WA || {};
          state.fileId = json.file_id;
          state.fileType = json.file_type;
          state.fileName = json.file_name;
-         // Save to recent files with workspace path so re-opening works
+         // Save workspace source path so auto-save can write back to the original file
          const ext = json.file_name.split('.').pop().toLowerCase();
-         // file._wsPath is set by openWorkspaceFile; for local uploads use uploads/<name>
          const wsPath = file._wsPath || ('uploads/' + json.file_name);
+         state.wsSourcePath = wsPath;
          _saveRecentFile(json.file_name, ext, wsPath);
          $('wa-file-name').textContent = state.fileName;
          $('wa-save-btn').disabled = (state.fileType === 'pdf');
@@ -1385,7 +1386,12 @@ window.WA = window.WA || {};
       const res = await fetch('/api/v1/workspace/auto_save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_type: state.fileType, file_id: state.fileId, data }),
+        body: JSON.stringify({
+          file_type: state.fileType,
+          file_id: state.fileId,
+          ws_source_path: state.wsSourcePath || null,  // write back to original file
+          data,
+        }),
       });
       if (!res.ok) throw new Error((await res.json()).error || '自动保存失败');
       const json = await res.json();
