@@ -69,8 +69,8 @@ window.WA = window.WA || {};
       if (curTab && state.fileType !== 'pdf') {
         curTab.cache = state.activeEditor.serialize();
       }
-      // Background disk save
-      if (curTab && state.fileType !== 'pdf' && state.fileId && curTab.cache !== null) {
+      // Background disk save (only if cache has actual content)
+      if (curTab && state.fileType !== 'pdf' && state.fileId && curTab.cache) {
         clearTimeout(_autoSaveTimer);
         _autoSaveTimer = null;
         const savedCache = curTab.cache;
@@ -869,7 +869,12 @@ window.WA = window.WA || {};
               checkImage(src) { return true; },
             },
           },
-          onChange: () => { WA.scheduleAutoSave(); },
+          onChange: () => {
+            // Keep _lastHtml in sync so serialize() fallback is always current
+            const _h = this.editor && this.editor.getHtml ? this.editor.getHtml() : null;
+            if (_h) this._lastHtml = _h;
+            WA.scheduleAutoSave();
+          },
         }
       });
       this.toolbar = createToolbar({
