@@ -56,10 +56,10 @@ window.WA = window.WA || {};
   }
 
   // ── Recent files helpers ──
-  // path: workspace-relative path used to re-open the file (e.g. "uploads/foo.docx")
+  // path: workspace-relative path used to re-open the file (e.g. "foo.docx")
   function _saveRecentFile(name, ext, path) {
     const MAX_RECENT = 8;
-    const wsPath = path || ('uploads/' + name);
+    const wsPath = path || name;   // files now live at workspace root, not uploads/
     state.recentFiles = state.recentFiles.filter(f => f.name !== name);
     state.recentFiles.unshift({ name, ext, path: wsPath, time: Date.now() });
     if (state.recentFiles.length > MAX_RECENT) state.recentFiles.length = MAX_RECENT;
@@ -85,7 +85,7 @@ window.WA = window.WA || {};
       return;
     }
     el.innerHTML = state.recentFiles.map(f => {
-      const wsPath = f.path || ('uploads/' + f.name);
+      const wsPath = f.path || f.name;
       const esc = wsPath.replace(/'/g, "\\'");
       const nameEsc = f.name.replace(/'/g, "\\'");
       const isActive = (state.fileName && f.name === state.fileName) ? ' active' : '';

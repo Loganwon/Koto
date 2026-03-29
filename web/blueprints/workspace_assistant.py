@@ -163,16 +163,16 @@ def open_file():
     tmp_path = _ensure_tmp_dir() / f"{file_id}{ext}"
     uploaded.save(str(tmp_path))
 
-    # 持久化保存到 workspace/uploads/（重启后仍可在左侧面板看到）
+    # 持久化保存到 workspace/ 根目录（直接可见，无需子文件夹）
     try:
         from web.shared import WORKSPACE_DIR
-        uploads_dir = Path(WORKSPACE_DIR) / "uploads"
-        uploads_dir.mkdir(parents=True, exist_ok=True)
+        root_dir = Path(WORKSPACE_DIR)
+        root_dir.mkdir(parents=True, exist_ok=True)
         stem = Path(original_name).stem
-        persistent_path = uploads_dir / original_name
+        persistent_path = root_dir / original_name
         counter = 1
         while persistent_path.exists():
-            persistent_path = uploads_dir / f"{stem}_{counter}{ext}"
+            persistent_path = root_dir / f"{stem}_{counter}{ext}"
             counter += 1
         import shutil
         shutil.copy2(str(tmp_path), str(persistent_path))
@@ -346,7 +346,7 @@ def auto_save():
     body = request.get_json(force=True, silent=True) or {}
     file_type = body.get("file_type", "").lower()
     file_id = body.get("file_id", "")
-    ws_source_path = body.get("ws_source_path", "")  # e.g. "uploads/foo.docx"
+    ws_source_path = body.get("ws_source_path", "")  # e.g. "foo.docx"
     data = body.get("data")
 
     if not file_type or not file_id or data is None:
