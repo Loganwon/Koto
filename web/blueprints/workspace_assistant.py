@@ -164,16 +164,18 @@ def open_file():
     uploaded.save(str(tmp_path))
 
     # 持久化保存到 workspace/ 根目录（直接可见，无需子文件夹）
-    # Overwrite if a file with the same name exists — no numbered clones.
-    try:
-        from web.shared import WORKSPACE_DIR
-        root_dir = Path(WORKSPACE_DIR)
-        root_dir.mkdir(parents=True, exist_ok=True)
-        persistent_path = root_dir / original_name
-        import shutil
-        shutil.copy2(str(tmp_path), str(persistent_path))
-    except Exception as pe:
-        logger.warning(f"[WorkspaceAssistant] 持久化失败 {original_name}: {pe}")
+    # Skip copy if the file already lives in the workspace (opened via workspace panel).
+    ws_path = request.form.get("ws_path", "").strip()
+    if not ws_path:
+        try:
+            from web.shared import WORKSPACE_DIR
+            root_dir = Path(WORKSPACE_DIR)
+            root_dir.mkdir(parents=True, exist_ok=True)
+            persistent_path = root_dir / original_name
+            import shutil
+            shutil.copy2(str(tmp_path), str(persistent_path))
+        except Exception as pe:
+            logger.warning(f"[WorkspaceAssistant] 持久化失败 {original_name}: {pe}")
 
     try:
         from app.core.file.file_parser import (

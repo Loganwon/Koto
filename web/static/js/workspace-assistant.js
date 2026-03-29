@@ -432,13 +432,37 @@ window.WA = window.WA || {};
       const json = await res.json();
       if (!res.ok) {
         if (res.status === 404) {
-          // File doesn't exist on disk — refresh panel
           loadWorkspaceFiles();
           showToast('文件已不存在，已从列表移除', 'info');
         } else {
           throw new Error(json.error || '删除失败');
         }
         return;
+      }
+      // Remove from open tabs so auto-save can't recreate the file
+      const tabIdx = state.openTabs.findIndex(t => t.path === filepath);
+      if (tabIdx >= 0) {
+        const wasActive = state.openTabs[tabIdx].path === state.activeTabPath;
+        if (wasActive && state.activeEditor) {
+          try { state.activeEditor.destroy(); } catch(e) {}
+          state.activeEditor = null;
+          state.activeTabPath = null;
+          state.fileId = null;
+          state.fileType = null;
+          state.fileName = null;
+          state.wsSourcePath = null;
+        }
+        state.openTabs.splice(tabIdx, 1);
+        clearTimeout(_autoSaveTimer);
+        _autoSaveTimer = null;
+        _renderTabs();
+        if (state.openTabs.length > 0) {
+          await _switchToTab(state.openTabs[Math.max(0, tabIdx - 1)].path);
+        } else {
+          toggleWorkspace(false);
+          $('wa-file-name').textContent = '全格式 AI 工作区';
+          $('wa-save-btn').disabled = true;
+        }
       }
       showToast('已删除 ' + filepath.split('/').pop(), 'success');
       loadWorkspaceFiles();
@@ -1234,6 +1258,8 @@ window.WA = window.WA || {};
       $('upload-progress').style.width = '30%';
       const formData = new FormData();
       formData.append('file', file);
+      // Tell server not to re-copy if this file already lives in the workspace
+      if (file._wsPath) formData.append('ws_path', file._wsPath);
 
       try {
          const res = await fetch('/api/v1/workspace/open_file', {
