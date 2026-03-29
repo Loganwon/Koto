@@ -25,6 +25,8 @@ window.WA = window.WA || {};
     selectedFiles: new Set(),  // paths of selected files
     openTabs: [],          // [{path,name,ext,fileType,fileId,serverData,cache,modified}]
     activeTabPath: null,   // path of the currently active tab
+    aiOutputMode: localStorage.getItem('wa_ai_output_mode') || 'inline',  // 'inline'|'chat'
+    _fileSummaries: {},    // path → summary string (cached)
   };
 
   // Persistent fsHandle map — survives tab entry replacement
@@ -94,6 +96,7 @@ window.WA = window.WA || {};
     $('wa-file-name').textContent = tab.name;
     $('wa-save-btn').disabled = (tab.fileType === 'pdf');
     toggleWorkspace(true);
+    _updateSubjectBar();
 
     const data = tab.cache;
     if (tab.fileType === 'docx') {
@@ -158,8 +161,9 @@ window.WA = window.WA || {};
       state.fileType = null;
       state.fileName = null;
       state.wsSourcePath = null;
-      $('wa-file-name').textContent = '全格式 AI 工作区';
+      $('wa-file-name').textContent = '文件工作站';
       $('wa-save-btn').disabled = true;
+      _updateSubjectBar();
     }
 
     state.openTabs.splice(idx, 1);
@@ -320,6 +324,7 @@ window.WA = window.WA || {};
           const nameEsc = item.name.replace(/'/g, "\\'");
           const isActive = (state.fileName && item.name === state.fileName) ? ' active' : '';
           const meta = [item.size, _formatDate(item.mtime)].filter(Boolean).join(' · ');
+          const safeId = item.path.replace(/[^a-zA-Z0-9]/g, '_');
           return `<div class="wa-file-item file${isActive}" data-depth="${depth}" data-path="${esc}"
               onclick="WA._fileRowClick(event,'${esc}')"
               oncontextmenu="WA._showCtxMenu(event,'${esc}','${nameEsc}')"
@@ -329,6 +334,7 @@ window.WA = window.WA || {};
             <span class="wa-file-label">${item.name}</span>
             ${meta ? `<span class="wa-file-meta">${meta}</span>` : ''}
             <div class="wa-file-actions">
+              <button class="wa-file-summary-btn" data-path="${esc}" onclick="event.stopPropagation();WA.toggleFileSummary('${esc}')" title="快速预览">›</button>
               <button onclick="event.stopPropagation();WA.renameWorkspaceFile('${esc}','${nameEsc}')" title="重命名">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button>
@@ -336,7 +342,8 @@ window.WA = window.WA || {};
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
               </button>
             </div>
-          </div>`;
+          </div>
+          <div class="wa-file-summary-row" id="wa-sum-${safeId}">${state._fileSummaries[item.path] ? '' : ''}</div>`;
         }
       }).join('');
     }
@@ -454,6 +461,7 @@ window.WA = window.WA || {};
           state.fileType = null;
           state.fileName = null;
           state.wsSourcePath = null;
+          _updateSubjectBar();
         }
         state.openTabs.splice(tabIdx, 1);
         clearTimeout(_autoSaveTimer);
@@ -463,7 +471,7 @@ window.WA = window.WA || {};
           await _switchToTab(state.openTabs[Math.max(0, tabIdx - 1)].path);
         } else {
           toggleWorkspace(false);
-          $('wa-file-name').textContent = '全格式 AI 工作区';
+          $('wa-file-name').textContent = '文件工作站';
           $('wa-save-btn').disabled = true;
         }
       }
@@ -661,6 +669,7 @@ window.WA = window.WA || {};
     const preview = text.length > 200 ? text.substring(0, 200) + '…' : text;
     $('wa-selection-preview').textContent = preview;
     $('wa-selection-chip').style.display = 'flex';
+    _updateSubjectBar();
   }
 
   // Save WangEditor Slate selection before focus leaves the editor
@@ -743,6 +752,7 @@ window.WA = window.WA || {};
     lastSelectionText = '';
     $('wa-selection-chip').style.display = 'none';
     _clearPinnedHighlight();
+    _updateSubjectBar();
   };
 
   // Auto-pin selection when user clicks/focuses the chat input.
@@ -762,12 +772,24 @@ window.WA = window.WA || {};
   }
 
   // ── Split.js Init ──
-  Split(['#wa-left', '#wa-canvas', '#wa-ai'], {
-    sizes: [15, 55, 30],
-    minSize: [150, 400, 250],
-    gutterSize: 6,
-    snapOffset: 0
-  });
+  // Wrapped in try/catch: if Split.js somehow fails (e.g. load error), the
+  // rest of the IIFE (event listeners, Router.load, etc.) must still execute.
+  try {
+    Split(['#wa-left', '#wa-canvas', '#wa-ai'], {
+      sizes: [15, 55, 30],
+      minSize: [150, 400, 250],
+      gutterSize: 6,
+      snapOffset: 0
+    });
+  } catch (splitErr) {
+    console.warn('[Split.js] panel splitter failed, using fallback widths:', splitErr);
+    const wa_left = document.getElementById('wa-left');
+    const wa_canvas = document.getElementById('wa-canvas');
+    const wa_ai = document.getElementById('wa-ai');
+    if (wa_left)   { wa_left.style.width   = '15%'; wa_left.style.flexShrink   = '0'; }
+    if (wa_canvas) { wa_canvas.style.width = '55%'; wa_canvas.style.flexGrow   = '1'; }
+    if (wa_ai)     { wa_ai.style.width     = '30%'; wa_ai.style.flexShrink     = '0'; }
+  }
 
   // ── Editor Adapters (Phase 3) ──
 
@@ -876,6 +898,14 @@ window.WA = window.WA || {};
         this.editor.dangerouslyInsertHtml(val);
         this._savedRange = null;
         showToast('AI 已更新文档', 'success');
+        WA.scheduleAutoSave();
+      } else if (cmd.type === 'insert_image') {
+        const src = cmd.src || cmd.value || '';
+        if (!src) return;
+        this.editor.focus();
+        this.editor.dangerouslyInsertHtml(`<img src="${src}" style="max-width:100%">`);
+        this._savedRange = null;
+        showToast('图片已插入文档', 'success');
         WA.scheduleAutoSave();
       }
     }
@@ -1075,6 +1105,12 @@ window.WA = window.WA || {};
     }
 
     applyToolCall(cmd) {
+      if (cmd.type === 'insert_image') {
+        const src = cmd.src || cmd.value || '';
+        const layer = document.getElementById('wa-xlsx-img-layer');
+        if (src && layer) this._addImageOverlay(src, layer);
+        return;
+      }
       if (cmd.type === 'set_cell' && window.luckysheet) {
         window.luckysheet.setCellValue(cmd.r, cmd.c, cmd.value);
         showToast(`AI 已更新单元格 (${cmd.r}, ${cmd.c})`, 'success');
@@ -1100,81 +1136,298 @@ window.WA = window.WA || {};
   class KotoPptxEditor {
     constructor() {
       this.containerId = 'wa-pptx-editor';
-      this.data = null;
+      this.data = null;         // raw geometry JSON from server
+      this._serialized = null;  // working copy tracking edits
       $(this.containerId).classList.add('active');
     }
 
-    render(slidesJson) {
-      this.data = slidesJson;
+    render(geoJson) {
+      this.data = geoJson;
+      // Build serialized working copy for export (text + table cells only)
+      this._serialized = {
+        slides: (geoJson.slides || []).map(s => ({
+          slide_index: s.slide_index,
+          shapes: (s.shapes || [])
+            .filter(sh => sh._type === 'TEXT' || sh._type === 'TABLE')
+            .map(sh => {
+              if (sh._type === 'TEXT') {
+                const text = (sh.paragraphs || [])
+                  .map(p => (p.runs || []).map(r => r.text).join('')).join('\n');
+                return { _type: 'TEXT', id: sh.id, text };
+              } else {
+                return { _type: 'TABLE', id: sh.id, cells: (sh.cells || []).map(c => ({ ...c })) };
+              }
+            })
+        }))
+      };
+
       const c = $(this.containerId);
       c.innerHTML = '';
+      const sw = geoJson.slide_width_emu || 9144000;
+      const sh_emu = geoJson.slide_height_emu || 6858000;
 
-      slidesJson.forEach(slide => {
-        // Canvas Card
+      (geoJson.slides || []).forEach(slide => {
         const card = document.createElement('div');
         card.className = 'wa-slide-card';
         card.id = `slide-card-${slide.slide_id}`;
-        
-        let html = `<div class="wa-slide-card-header">
-                      <span class="wa-slide-badge">${slide.slide_id}</span>
-                      <span>幻灯片内容区</span>
-                    </div>`;
-        
-        slide.texts.forEach(shape => {
-            const badge = shape.is_title ? `<span class="wa-shape-title-badge">Title</span>` : '';
-            html += `
-              <div class="wa-shape-row">
-                <div class="wa-shape-label">
-                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
-                   ${shape.shape_name} ${badge}
-                </div>
-                <textarea class="wa-shape-textarea" data-slide-idx="${slide.slide_index}" data-shape-id="${shape.shape_id}" onchange="WA.pptxSync(this)">${shape.text}</textarea>
-              </div>`;
+
+        // Header bar
+        const header = document.createElement('div');
+        header.className = 'wa-slide-card-header';
+        header.innerHTML = `<span class="wa-slide-badge">${slide.slide_id}</span><span>幻灯片 ${slide.slide_id}</span>`;
+        card.appendChild(header);
+
+        // 16:9 canvas
+        const canvas = document.createElement('div');
+        canvas.className = 'wa-slide-canvas';
+        canvas.style.cssText = `aspect-ratio: ${sw} / ${sh_emu}; background: ${slide.background || '#fff'};`;
+
+        const shapes = (slide.shapes || []).slice().sort((a, b) => (a.z_order || 0) - (b.z_order || 0));
+
+        shapes.forEach(shape => {
+          const lp = (shape.left / sw * 100).toFixed(4);
+          const tp = (shape.top / sh_emu * 100).toFixed(4);
+          const wp = (shape.width / sw * 100).toFixed(4);
+          const hp = (shape.height / sh_emu * 100).toFixed(4);
+          const posStyle = `left:${lp}%; top:${tp}%; width:${wp}%; height:${hp}%;`;
+
+          if (shape._type === 'TEXT') {
+            const el = document.createElement('div');
+            el.className = 'wa-shape-text';
+            el.contentEditable = 'true';
+            el.setAttribute('data-slide-idx', slide.slide_index);
+            el.setAttribute('data-shape-id', shape.id);
+            el.style.cssText = posStyle;
+            if (shape.fill) el.style.background = shape.fill;
+
+            (shape.paragraphs || []).forEach((para, pIdx) => {
+              if (pIdx > 0) el.appendChild(document.createElement('br'));
+              (para.runs || []).forEach(run => {
+                if (!run.text) return;
+                const span = document.createElement('span');
+                span.textContent = run.text;
+                let css = '';
+                if (run.size) css += `font-size:${run.size}pt;`;
+                if (run.bold) css += 'font-weight:bold;';
+                if (run.italic) css += 'font-style:italic;';
+                if (run.underline) css += 'text-decoration:underline;';
+                if (run.color) css += `color:${run.color};`;
+                if (css) span.style.cssText = css;
+                el.appendChild(span);
+              });
+            });
+
+            el.addEventListener('input', () => this._syncShape(slide.slide_index, shape.id, el));
+            canvas.appendChild(el);
+
+          } else if (shape._type === 'PICTURE') {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'wa-shape-img';
+            wrapper.setAttribute('data-slide-idx', slide.slide_index);
+            wrapper.setAttribute('data-shape-id', shape.id);
+            wrapper.style.cssText = posStyle;
+
+            const img = document.createElement('img');
+            img.src = shape.image_b64 || '';
+            img.alt = shape.name || '';
+            wrapper.appendChild(img);
+
+            const btn = document.createElement('button');
+            btn.className = 'wa-img-replace-btn';
+            btn.textContent = '替换';
+            btn.addEventListener('click', () => this._openImageReplace(slide.slide_index, shape.id));
+            wrapper.appendChild(btn);
+            canvas.appendChild(wrapper);
+
+          } else if (shape._type === 'TABLE') {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'wa-shape-table';
+            wrapper.setAttribute('data-slide-idx', slide.slide_index);
+            wrapper.setAttribute('data-shape-id', shape.id);
+            wrapper.style.cssText = posStyle;
+
+            const tbl = document.createElement('table');
+            const rowMap = {};
+            (shape.cells || []).forEach(cell => {
+              if (!rowMap[cell.row]) rowMap[cell.row] = [];
+              rowMap[cell.row][cell.col] = cell.text;
+            });
+            const nRows = shape.table_rows || Object.keys(rowMap).length;
+            const nCols = shape.table_cols || Math.max(...Object.values(rowMap).map(r => r.length), 0);
+            for (let r = 0; r < nRows; r++) {
+              const tr = document.createElement('tr');
+              for (let c = 0; c < nCols; c++) {
+                const td = document.createElement('td');
+                td.contentEditable = 'true';
+                td.setAttribute('data-slide-idx', slide.slide_index);
+                td.setAttribute('data-shape-id', shape.id);
+                td.setAttribute('data-row', r);
+                td.setAttribute('data-col', c);
+                td.textContent = (rowMap[r] && rowMap[r][c] != null) ? rowMap[r][c] : '';
+                td.addEventListener('input', () => this._syncCell(slide.slide_index, shape.id, r, c, td));
+                tr.appendChild(td);
+              }
+              tbl.appendChild(tr);
+            }
+            wrapper.appendChild(tbl);
+            canvas.appendChild(wrapper);
+          }
         });
-        
-        if(slide.texts.length === 0) {
-           html += `<div class="wa-shape-row" style="color:var(--text-muted);font-size:12px;text-align:center;">此幻灯片没有可编辑的文本框。</div>`;
+
+        card.appendChild(canvas);
+
+        // Speaker notes (collapsible)
+        if (slide.notes) {
+          const details = document.createElement('details');
+          details.className = 'wa-slide-notes';
+          const safe = slide.notes.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+          details.innerHTML = `<summary>备注</summary><p>${safe}</p>`;
+          card.appendChild(details);
         }
 
-        card.innerHTML = html;
         c.appendChild(card);
       });
+
+      // Ensure hidden file input exists for image replacement
+      let fi = document.getElementById('wa-img-replace-input');
+      if (fi) fi.remove();
+      fi = document.createElement('input');
+      fi.type = 'file';
+      fi.id = 'wa-img-replace-input';
+      fi.accept = 'image/*';
+      fi.style.display = 'none';
+      fi.addEventListener('change', () => this._doImageReplace(fi));
+      document.body.appendChild(fi);
     }
 
-    sync(textarea) {
-      const sIdx = parseInt(textarea.getAttribute('data-slide-idx'));
-      const shId = parseInt(textarea.getAttribute('data-shape-id'));
-      const val = textarea.value;
-      const slide = this.data.find(s => s.slide_index === sIdx);
-      if (slide) {
-         const shape = slide.texts.find(t => t.shape_id === shId);
-         if (shape) shape.text = val;
+    _syncShape(slideIdx, shapeId, el) {
+      const slide = this._serialized && this._serialized.slides.find(s => s.slide_index === slideIdx);
+      if (!slide) return;
+      const shape = slide.shapes.find(s => s.id === shapeId);
+      if (shape) shape.text = el.innerText;
+      WA.scheduleAutoSave();
+    }
+
+    _syncCell(slideIdx, shapeId, row, col, td) {
+      const slide = this._serialized && this._serialized.slides.find(s => s.slide_index === slideIdx);
+      if (!slide) return;
+      const shape = slide.shapes.find(s => s.id === shapeId);
+      if (shape && shape.cells) {
+        const cell = shape.cells.find(c => c.row === row && c.col === col);
+        if (cell) cell.text = td.innerText;
+      }
+      WA.scheduleAutoSave();
+    }
+
+    _openImageReplace(slideIdx, shapeId) {
+      window._imgReplaceCtx = { slideIdx, shapeId, fileId: state.fileId };
+      const fi = document.getElementById('wa-img-replace-input');
+      if (fi) fi.click();
+    }
+
+    async _doImageReplace(fi) {
+      const file = fi.files && fi.files[0];
+      if (!file || !window._imgReplaceCtx) return;
+      const { slideIdx, shapeId, fileId } = window._imgReplaceCtx;
+      window._imgReplaceCtx = null;
+      fi.value = '';
+
+      const formData = new FormData();
+      formData.append('file_id', fileId);
+      formData.append('slide_index', slideIdx);
+      formData.append('shape_id', shapeId);
+      formData.append('image', file);
+
+      try {
+        const resp = await fetch('/api/v1/workspace/replace_image', { method: 'POST', body: formData });
+        const result = await resp.json();
+        if (!result.ok) { showToast('图片替换失败: ' + (result.error || '未知错误'), 'error'); return; }
+        const wrapper = document.querySelector(`.wa-shape-img[data-slide-idx="${slideIdx}"][data-shape-id="${shapeId}"]`);
+        if (wrapper) {
+          const img = wrapper.querySelector('img');
+          if (img) img.src = result.image_b64;
+        }
+        showToast('图片替换成功', 'success');
+      } catch (e) {
+        showToast('图片替换失败: ' + e.message, 'error');
+      }
+    }
+
+    // Legacy callback support — called from WA.pptxSync
+    sync(el) {
+      if (el.tagName === 'TD') {
+        this._syncCell(
+          parseInt(el.getAttribute('data-slide-idx')),
+          parseInt(el.getAttribute('data-shape-id')),
+          parseInt(el.getAttribute('data-row')),
+          parseInt(el.getAttribute('data-col')),
+          el
+        );
+      } else {
+        this._syncShape(
+          parseInt(el.getAttribute('data-slide-idx')),
+          parseInt(el.getAttribute('data-shape-id')),
+          el
+        );
       }
     }
 
     getContent() {
-      // Return focused textarea or all text
+      if (!this._serialized) return '[PPT 内容加载中...]';
       const active = document.activeElement;
-      if (active && active.classList.contains('wa-shape-textarea')) {
-         const sel = active.value.substring(active.selectionStart, active.selectionEnd);
-         return sel ? `[当前选中 PPT 文本]:\n${sel}\n` : `[当前光标所在 PPT 文本框]:\n${active.value}\n`;
+      if (active) {
+        if (active.classList.contains('wa-shape-text')) {
+          const sel = window.getSelection();
+          const selText = sel ? sel.toString() : '';
+          return selText
+            ? `[当前选中 PPT 文本]:\n${selText}\n`
+            : `[当前光标所在 PPT 文本框]:\n${active.innerText}\n`;
+        }
+        if (active.tagName === 'TD') {
+          return `[当前光标所在 PPT 表格单元格]:\n${active.innerText}\n`;
+        }
       }
-      return `[PPT 大纲信息已省略，请提示用户选中特定的文本框发问]`;
+      // Return full deck outline for AI context
+      const lines = [];
+      this._serialized.slides.forEach(slide => {
+        lines.push(`\n[幻灯片 ${slide.slide_index + 1}]`);
+        slide.shapes.forEach(shape => {
+          if (shape._type === 'TEXT' && shape.text) {
+            lines.push(shape.text);
+          } else if (shape._type === 'TABLE' && shape.cells) {
+            const rowMap = {};
+            shape.cells.forEach(c => {
+              if (!rowMap[c.row]) rowMap[c.row] = [];
+              rowMap[c.row][c.col] = c.text;
+            });
+            Object.values(rowMap).forEach(row => lines.push(row.join(' | ')));
+          }
+        });
+      });
+      return `[PPT 全文大纲]:\n${lines.join('\n')}`;
     }
 
     serialize() {
-      return this.data; // Already synced via WA.pptxSync
+      return this._serialized;
     }
 
     applyToolCall(cmd) {
       if (cmd.type === 'set_pptx_text') {
-         const ta = document.querySelector(`textarea[data-slide-idx="${cmd.slide_index}"][data-shape-id="${cmd.shape_id}"]`);
-         if (ta) {
-             ta.value = cmd.value;
-             this.sync(ta);
-             showToast('AI 已更新 PPT 文本', 'success');
-             WA.scheduleAutoSave();
-         }
+        const el = document.querySelector(`.wa-shape-text[data-slide-idx="${cmd.slide_index}"][data-shape-id="${cmd.shape_id}"]`);
+        if (el) {
+          el.innerText = cmd.value;
+          this._syncShape(cmd.slide_index, cmd.shape_id, el);
+          showToast('AI 已更新 PPT 文本', 'success');
+          WA.scheduleAutoSave();
+        }
+      } else if (cmd.type === 'set_pptx_table_cell') {
+        const td = document.querySelector(`td[data-slide-idx="${cmd.slide_index}"][data-shape-id="${cmd.shape_id}"][data-row="${cmd.row}"][data-col="${cmd.col}"]`);
+        if (td) {
+          td.innerText = cmd.value;
+          this._syncCell(cmd.slide_index, cmd.shape_id, cmd.row, cmd.col, td);
+          showToast('AI 已更新表格', 'success');
+          WA.scheduleAutoSave();
+        }
       }
     }
 
@@ -1182,6 +1435,9 @@ window.WA = window.WA || {};
       $(this.containerId).classList.remove('active');
       $(this.containerId).innerHTML = '';
       this.data = null;
+      this._serialized = null;
+      const fi = document.getElementById('wa-img-replace-input');
+      if (fi) fi.remove();
     }
   }
 
@@ -1273,14 +1529,13 @@ window.WA = window.WA || {};
         return;
       }
       state.isLoading = true;
-      setLoading(true, `正在打开 ${file.name}…`);
-      $('upload-progress').style.width = '30%';
-      const formData = new FormData();
-      formData.append('file', file);
-      // Tell server not to re-copy if this file already lives in the workspace
-      if (file._wsPath) formData.append('ws_path', file._wsPath);
-
       try {
+        setLoading(true, `正在打开 ${file.name}…`);
+        $('upload-progress').style.width = '30%';
+        const formData = new FormData();
+        formData.append('file', file);
+        // Tell server not to re-copy if this file already lives in the workspace
+        if (file._wsPath) formData.append('ws_path', file._wsPath);
          const res = await fetch('/api/v1/workspace/open_file', {
             method: 'POST',
             body: formData
@@ -1299,6 +1554,8 @@ window.WA = window.WA || {};
          state.activeTabPath = wsPath;
          $('wa-file-name').textContent = state.fileName;
          $('wa-save-btn').disabled = (state.fileType === 'pdf');
+         _updateSubjectBar();
+         _prefetchSummary(wsPath);
 
          // Destroy old editor if it was a different file (not a tab switch)
          if (state.activeEditor) {
@@ -1439,17 +1696,65 @@ window.WA = window.WA || {};
         }
         state.isLoading = false;
         msgs.scrollTop = msgs.scrollHeight;
+
+        // Auto-execute Python/R code blocks embedded in the AI reply when in chat mode.
+        // This handles the case where user asks "draw a chart" in the chat box instead of
+        // using the dedicated chart dialog buttons.
+        if (data.result && state.aiOutputMode !== 'inline') {
+           const pyMatch = data.result.match(/```(?:python|py)\r?\n([\s\S]+?)```/i);
+           const rMatch  = !pyMatch && data.result.match(/```(?:r|R)\r?\n([\s\S]+?)```/);
+           const lang = pyMatch ? 'python' : (rMatch ? 'r' : null);
+           const codeBlock = pyMatch ? pyMatch[1] : (rMatch ? rMatch[1] : null);
+           if (lang && codeBlock && state.socket && state.socket.connected) {
+             let csvData = '';
+             if (state.activeEditor && typeof state.activeEditor.getContent === 'function') {
+               const ct = state.activeEditor.getContent();
+               if (ct && !ct.includes('未选中区域')) csvData = ct;
+             }
+             state.socket.emit('doc_ai_request', {
+               prompt: `执行以下${lang}代码并生成图表:\n${codeBlock}`,
+               file_type: state.fileType || 'general',
+               file_id: state.fileId || '',
+               language: lang,
+               csv_data: csvData,
+             });
+           }
+        }
      });
 
      state.socket.on('doc_tool_call', (cmd) => {
          const msgs = $('wa-ai-messages');
-         const note = document.createElement('div');
-         note.className = 'wa-tool-notification';
-         note.innerHTML = `✨ <b>AI 执行了操作</b>: ${cmd.type}`;
-         msgs.appendChild(note);
+         if (state.aiOutputMode === 'inline') {
+           const note = document.createElement('div');
+           note.className = 'wa-tool-notification';
+           note.innerHTML = `✨ <b>AI 已写入文档</b>: ${cmd.type}`;
+           msgs.appendChild(note);
+           if (state.activeEditor) state.activeEditor.applyToolCall(cmd);
+         } else {
+           // Chat-only mode: render HTML content as an in-chat preview instead of discarding it
+           if ((cmd.type === 'set_html' || cmd.type === 'insert_text') && cmd.value) {
+             const preview = document.createElement('div');
+             preview.className = 'wa-msg ai wa-tool-preview';
+             preview.innerHTML = cmd.value;
+             msgs.appendChild(preview);
+           } else if (cmd.type === 'insert_image' && (cmd.src || cmd.value)) {
+             const preview = document.createElement('div');
+             preview.className = 'wa-msg ai wa-tool-preview';
+             const img = document.createElement('img');
+             const imgSrc = cmd.src || cmd.value;
+             img.src = imgSrc;
+             img.style.cssText = 'max-width:100%;border-radius:6px;border:1px solid var(--border)';
+             _makeAIImgDraggable(img, imgSrc);
+             const dragHint2 = document.createElement('div');
+             dragHint2.className = 'wa-chart-drag-hint';
+             dragHint2.textContent = '拖动图片即可投放到文档';
+             preview.appendChild(img);
+             preview.appendChild(dragHint2);
+             msgs.appendChild(preview);
+           }
+           // No notification shown — content speaks for itself
+         }
          msgs.scrollTop = msgs.scrollHeight;
-
-         if (state.activeEditor) state.activeEditor.applyToolCall(cmd);
      });
 
      // ── Code / Chart execution result ──
@@ -1486,9 +1791,13 @@ window.WA = window.WA || {};
               const img = document.createElement('img');
               img.src = files[fname];
               img.alt = fname;
+              _makeAIImgDraggable(img, files[fname]);
               const caption = document.createElement('div');
               caption.className = 'wa-chart-caption';
               caption.textContent = fname;
+              const dragHint = document.createElement('div');
+              dragHint.className = 'wa-chart-drag-hint';
+              dragHint.textContent = '拖动图片即可投放到文档';
               const dl = document.createElement('div');
               dl.className = 'wa-chart-download';
               dl.textContent = '⬇ 下载图表';
@@ -1498,9 +1807,19 @@ window.WA = window.WA || {};
                  a.download = fname;
                  a.click();
               };
+              const ins = document.createElement('div');
+              ins.className = 'wa-chart-insert';
+              ins.textContent = '📎 插入到文档';
+              ins.onclick = () => {
+                 if (state.activeEditor) {
+                    state.activeEditor.applyToolCall({ type: 'insert_image', src: files[fname] });
+                 }
+              };
               wrapper.appendChild(img);
               wrapper.appendChild(caption);
+              wrapper.appendChild(dragHint);
               wrapper.appendChild(dl);
+              wrapper.appendChild(ins);
               msgs.appendChild(wrapper);
            });
         } else if (!result.error) {
@@ -1514,7 +1833,26 @@ window.WA = window.WA || {};
      });
   }
 
-  // ── Exports to Window ──
+  // ─── AI-image drag-to-document ────────────────────────────────────────────
+  // Makes an <img> element draggable from the chat panel into the document editor.
+  // Stores the image src in the custom dataTransfer type 'text/ai-image-src'.
+  function _makeAIImgDraggable(img, src) {
+    img.draggable = true;
+    img.classList.add('wa-ai-draggable-img');
+    img.addEventListener('dragstart', (e) => {
+      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/ai-image-src', src);
+      // Use the image itself as the drag ghost
+      try { e.dataTransfer.setDragImage(img, img.naturalWidth / 4, img.naturalHeight / 4); } catch (_) {}
+      // Show the drop-hint overlay on the document canvas
+      const hint = document.getElementById('wa-ai-img-drop-hint');
+      if (hint) hint.classList.add('active');
+    });
+    img.addEventListener('dragend', () => {
+      const hint = document.getElementById('wa-ai-img-drop-hint');
+      if (hint) hint.classList.remove('active');
+    });
+  }
   
   window.WA.handleInputKeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1696,6 +2034,7 @@ window.WA = window.WA || {};
            file_name: state.fileName || '',
            history: state.conversation.slice(-20),
            has_selection: hasSelection,
+           output_mode: state.aiOutputMode,
         });
       }
 
@@ -1909,40 +2248,75 @@ window.WA = window.WA || {};
   const fileInput = $('wa-file-input');
 
   dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  // relatedTarget check prevents dragleave from firing when cursor moves over child elements
+  dropZone.addEventListener('dragleave', (e) => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over'); });
   dropZone.addEventListener('drop', (e) => {
      e.preventDefault();
      dropZone.classList.remove('drag-over');
      if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
   });
   dropZone.addEventListener('click', () => _openFilePicker());
-  fileInput.addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); });
+  fileInput.addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); e.target.value = ''; });
 
   // Left panel drop zone
   const leftDrop = $('wa-left-drop');
   const fileInputLeft = $('wa-file-input-left');
 
   leftDrop.addEventListener('dragover', (e) => { e.preventDefault(); leftDrop.classList.add('drag-over'); });
-  leftDrop.addEventListener('dragleave', () => leftDrop.classList.remove('drag-over'));
+  leftDrop.addEventListener('dragleave', (e) => { if (!leftDrop.contains(e.relatedTarget)) leftDrop.classList.remove('drag-over'); });
   leftDrop.addEventListener('drop', (e) => {
      e.preventDefault();
      leftDrop.classList.remove('drag-over');
      if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
   });
   leftDrop.addEventListener('click', () => _openFilePicker());
-  fileInputLeft.addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); });
+  fileInputLeft.addEventListener('change', (e) => { if (e.target.files.length) loadFiles(e.target.files); e.target.value = ''; });
 
-  // Whole-canvas drag-drop (works even when a file is already open)
+  // Whole-canvas drag-drop (works even when a file is already open).
+  // capture=true so we intercept BEFORE WangEditor/PDF.js inner handlers call stopPropagation().
+  // Handles two drag types:
+  //   1. Files from OS  → open the file
+  //   2. AI chat images → insert into the active document
   const canvas = $('wa-canvas');
-  canvas.addEventListener('dragover', (e) => { e.preventDefault(); });
+  canvas.addEventListener('dragover', (e) => {
+    const types = e.dataTransfer.types ? Array.from(e.dataTransfer.types) : [];
+    if (types.includes('text/ai-image-src') || types.includes('Files')) {
+      e.preventDefault();
+    }
+  }, true);
   canvas.addEventListener('drop', (e) => {
-    e.preventDefault();
-    if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
-  });
+    // Priority 1: AI chat image drag
+    const aiSrc = e.dataTransfer.getData('text/ai-image-src');
+    if (aiSrc && state.activeEditor) {
+      e.preventDefault();
+      e.stopPropagation();
+      state.activeEditor.applyToolCall({ type: 'insert_image', src: aiSrc });
+      const hint = $('wa-ai-img-drop-hint');
+      if (hint) hint.classList.remove('active');
+      return;
+    }
+    // Priority 2: OS file drag → open new file
+    if (e.dataTransfer.files && e.dataTransfer.files.length) {
+      e.preventDefault();
+      e.stopPropagation();
+      loadFiles(e.dataTransfer.files);
+    }
+  }, true);
+  // Safety: always clear hint if drag leaves canvas entirely
+  canvas.addEventListener('dragleave', (e) => {
+    if (!canvas.contains(e.relatedTarget)) {
+      const hint = $('wa-ai-img-drop-hint');
+      if (hint) hint.classList.remove('active');
+    }
+  }, true);
 
   // Init
   initSocket();
   loadWorkspaceFiles();
+  // Sync output-mode toggle button state on load
+  document.querySelectorAll('.wa-output-mode-toggle button').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === state.aiOutputMode);
+  });
 
   // ── Local file / folder pickers ──
   const localFileInput = $('wa-local-file-input');
@@ -1978,5 +2352,89 @@ window.WA = window.WA || {};
       e.target.value = '';
     };
   });
+
+  // ─── Analysis Subject Bar ──────────────────────────────────────────────────
+  function _updateSubjectBar() {
+    const bar = $('wa-subject-bar');
+    if (!bar) return;
+    const tagEl = document.getElementById('wa-subject-tag');
+    const textEl = document.getElementById('wa-subject-text');
+    if (!tagEl || !textEl) return;
+    if (state.pinnedSelection && state.pinnedSelection.length > 0) {
+      const preview = state.pinnedSelection.length > 70
+        ? state.pinnedSelection.substring(0, 70) + '…'
+        : state.pinnedSelection;
+      tagEl.textContent = '选区';
+      textEl.textContent = preview;
+      bar.style.display = 'flex';
+    } else if (state.fileName) {
+      tagEl.textContent = '文件';
+      textEl.textContent = state.fileName;
+      bar.style.display = 'flex';
+    } else {
+      bar.style.display = 'none';
+    }
+  }
+
+  // ─── Background Summary Prefetch ───────────────────────────────────────────
+  function _prefetchSummary(wsPath) {
+    if (!wsPath || state._fileSummaries[wsPath]) return;
+    const ext = wsPath.split('.').pop().toLowerCase();
+    if (!['docx', 'xlsx', 'pptx', 'pdf'].includes(ext)) return;
+    fetch(`/api/v1/workspace/summarize?path=${encodeURIComponent(wsPath)}`)
+      .then(r => r.json())
+      .then(data => { if (data.summary) state._fileSummaries[wsPath] = data.summary; })
+      .catch(() => {});
+  }
+
+  // ─── Settings Panel ────────────────────────────────────────────────────────
+  window.WA.toggleSettings = () => {
+    const panel = $('wa-ai-settings-panel');
+    if (!panel) return;
+    panel.classList.toggle('open');
+  };
+
+  window.WA.setOutputMode = (mode) => {
+    state.aiOutputMode = mode;
+    localStorage.setItem('wa_ai_output_mode', mode);
+    document.querySelectorAll('.wa-output-mode-toggle button').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+  };
+
+  // ─── File Summary Preview ──────────────────────────────────────────────────
+  window.WA.toggleFileSummary = async (path) => {
+    const safeId = path.replace(/[^a-zA-Z0-9]/g, '_');
+    const row = document.getElementById(`wa-sum-${safeId}`);
+    const btn = document.querySelector(`.wa-file-summary-btn[data-path="${CSS.escape(path)}"]`);
+    if (!row) return;
+    const isOpen = row.classList.toggle('open');
+    if (btn) btn.classList.toggle('open', isOpen);
+    if (!isOpen) return;
+
+    if (state._fileSummaries[path]) {
+      row.textContent = state._fileSummaries[path];
+      return;
+    }
+
+    row.classList.add('loading');
+    row.textContent = '正在生成摘要…';
+    try {
+      const res = await fetch(`/api/v1/workspace/summarize?path=${encodeURIComponent(path)}`);
+      const data = await res.json();
+      row.classList.remove('loading');
+      if (data.summary) {
+        state._fileSummaries[path] = data.summary;
+        row.textContent = data.summary;
+      } else if (data.error) {
+        row.textContent = `摘要暂不可用 (${data.error})`;
+      } else {
+        row.textContent = '无法生成摘要';
+      }
+    } catch (e) {
+      row.classList.remove('loading');
+      row.textContent = '摘要加载失败';
+    }
+  };
 
 })();

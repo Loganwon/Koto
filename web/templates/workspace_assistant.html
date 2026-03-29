@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>全格式工作区 — Koto</title>
+  <title>文件工作站 — Koto</title>
 
   <!-- ── Split.js ── -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.css">
@@ -20,17 +20,24 @@
   <!-- ── App styles ── -->
   <style>
     :root {
-      --bg: #1a1b1e;
-      --surface: #25262b;
-      --surface2: #2c2e33;
-      --border: #3a3b40;
-      --hover: rgba(255,255,255,0.06);
-      --accent: #4da3ff;
-      --accent-hover: #66b3ff;
-      --text: #e0e0e5;
-      --text-muted: #8b8c91;
-      --danger: #ff5c5c;
-      --success: #4caf7d;
+      --bg: #13141b;
+      --surface: #1d1f28;
+      --surface2: #252834;
+      --border: #2e3140;
+      --hover: rgba(255,255,255,0.05);
+      --accent: #4f7eff;
+      --accent-hover: #6890ff;
+      --text: #e4e5f0;
+      --text-muted: #7a7d9a;
+      --danger: #f05070;
+      --success: #3ec87a;
+      /* AI panel specific */
+      --ai-bg: #181a23;
+      --ai-surface: #1e2030;
+      --ai-border: #282b3a;
+      --msg-ai-bg: #21243200;
+      --msg-user-from: #4f7eff;
+      --msg-user-to: #3b5fe0;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -46,54 +53,71 @@
 
     /* ── Top header ── */
     #wa-header {
-      height: 48px;
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
+      height: 44px;
+      background: linear-gradient(180deg, #1e2030 0%, #1a1c28 100%);
+      border-bottom: 1px solid var(--ai-border);
       display: flex;
       align-items: center;
-      padding: 0 16px;
-      gap: 12px;
+      padding: 0 14px;
+      gap: 10px;
       position: relative;
       z-index: 100;
     }
 
     #wa-header .wa-logo {
       font-weight: 700;
-      font-size: 15px;
-      color: var(--accent);
+      font-size: 14px;
+      color: var(--text-muted);
       text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      letter-spacing: -0.01em;
+      transition: color 0.15s;
+    }
+    #wa-header .wa-logo:hover { color: var(--text); }
+
+    /* Divider pipe between logo and filename */
+    #wa-header .wa-header-sep {
+      width: 1px;
+      height: 18px;
+      background: var(--border);
+      flex-shrink: 0;
     }
 
     #wa-header .wa-file-name {
       font-size: 13px;
-      color: var(--text-muted);
+      color: var(--text);
       flex: 1;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      font-weight: 500;
+      letter-spacing: -0.01em;
     }
 
     #wa-header .wa-header-actions {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       align-items: center;
     }
 
     .wa-btn {
-      padding: 5px 14px;
+      padding: 5px 13px;
       border-radius: 6px;
       border: 1px solid var(--border);
-      background: var(--surface2);
+      background: rgba(255,255,255,0.05);
       color: var(--text);
-      font-size: 13px;
+      font-size: 12.5px;
       cursor: pointer;
       transition: background 0.15s, border-color 0.15s;
       display: inline-flex;
       align-items: center;
       gap: 5px;
+      font-weight: 500;
     }
 
-    .wa-btn:hover { background: var(--border); }
+    .wa-btn:hover { background: rgba(255,255,255,0.1); border-color: var(--text-muted); }
 
     .wa-btn.primary {
       background: var(--accent);
@@ -101,9 +125,9 @@
       color: #fff;
     }
 
-    .wa-btn.primary:hover { background: var(--accent-hover); }
+    .wa-btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
-    .wa-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .wa-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
     #wa-autosave-status {
       font-size: 11px;
@@ -122,7 +146,7 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 20px;
+      gap: 24px;
       background: var(--bg);
       z-index: 50;
     }
@@ -131,21 +155,27 @@
 
     .wa-drop-inner {
       border: 2px dashed var(--border);
-      border-radius: 16px;
-      padding: 56px 72px;
+      border-radius: 18px;
+      padding: 52px 80px;
       text-align: center;
-      transition: border-color 0.2s, background 0.2s;
+      transition: border-color 0.2s, background 0.2s, transform 0.2s;
       cursor: pointer;
     }
 
     .wa-drop-inner:hover,
     .wa-drop-inner.drag-over {
       border-color: var(--accent);
-      background: rgba(77, 163, 255, 0.06);
+      background: rgba(79, 126, 255, 0.05);
+      transform: translateY(-2px);
     }
 
-    .wa-drop-icon { font-size: 48px; line-height: 1; margin-bottom: 12px; }
-    .wa-drop-title { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    .wa-drop-icon {
+      font-size: 52px;
+      line-height: 1;
+      margin-bottom: 16px;
+      filter: drop-shadow(0 4px 12px rgba(79,126,255,0.25));
+    }
+    .wa-drop-title { font-size: 17px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
     .wa-drop-sub { color: var(--text-muted); font-size: 13px; }
 
     .wa-format-chips {
@@ -156,16 +186,17 @@
     }
 
     .wa-chip {
-      padding: 4px 12px;
+      padding: 5px 14px;
       border-radius: 20px;
-      font-size: 12px;
+      font-size: 11.5px;
       border: 1px solid;
+      font-weight: 500;
     }
 
-    .wa-chip.docx { border-color: #4da3ff; color: #4da3ff; }
-    .wa-chip.xlsx { border-color: #4caf7d; color: #4caf7d; }
-    .wa-chip.pptx { border-color: #ff8c42; color: #ff8c42; }
-    .wa-chip.pdf  { border-color: #ff5c5c; color: #ff5c5c; }
+    .wa-chip.docx { border-color: #4f7eff55; color: #4f7eff; background: rgba(79,126,255,0.07); }
+    .wa-chip.xlsx { border-color: #3ec87a55; color: #3ec87a; background: rgba(62,200,122,0.07); }
+    .wa-chip.pptx { border-color: #ff8c4255; color: #ff8c42; background: rgba(255,140,66,0.07); }
+    .wa-chip.pdf  { border-color: #f0507055; color: #f05070; background: rgba(240,80,112,0.07); }
 
     #upload-progress {
       position: absolute;
@@ -180,7 +211,7 @@
     /* ── Three-column workspace ── */
     #wa-workspace {
       position: absolute;
-      inset: 48px 0 0 0;
+      inset: 44px 0 0 0;
       display: flex;
     }
 
@@ -191,13 +222,14 @@
       background: var(--border);
       background-clip: padding-box;
       cursor: col-resize;
+      transition: background 0.15s;
     }
 
-    .gutter:hover { background: var(--accent); opacity: 0.6; }
+    .gutter:hover { background: var(--accent); opacity: 0.5; }
 
-    /* ── Left panel — faithful VS Code Dark+ explorer ── */
+    /* ── Left panel — VS Code Dark Explorer style ── */
     #wa-left {
-      background: var(--surface);   /* #25262b ≈ VS Code sideBar.background #252526 */
+      background: var(--surface);
       border-right: 1px solid var(--border);
       overflow-y: hidden;
       display: flex;
@@ -559,7 +591,7 @@
     .wa-file-item:hover .wa-indent-guide,
     .wa-folder-group:hover > .wa-folder-children .wa-indent-guide { opacity: 1; }
 
-    /* ── Drop zone ── */
+    /* ── Left panel drop zone ── */
     #wa-left-drop {
       padding: 10px 12px;
       text-align: center;
@@ -569,11 +601,15 @@
       color: var(--text-muted);
       font-size: 11px;
       cursor: pointer;
-      transition: border-color 0.18s, color 0.18s;
+      transition: border-color 0.18s, color 0.18s, background 0.18s;
       flex-shrink: 0;
       line-height: 1.8;
     }
-    #wa-left-drop:hover, #wa-left-drop.drag-over { border-color: var(--accent); color: var(--accent); }
+    #wa-left-drop:hover, #wa-left-drop.drag-over {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(79,126,255,0.04);
+    }
 
     /* ── Right-click context menu ── */
     #wa-ctx-menu {
@@ -605,14 +641,14 @@
 
     /* ── VS Code-style tab bar ── */
     #wa-tab-bar {
-      height: 35px;
-      background: #252526;
+      height: 36px;
+      background: #1a1c26;
       display: flex;
       align-items: stretch;
       overflow-x: auto;
       overflow-y: hidden;
       flex-shrink: 0;
-      border-bottom: 1px solid #1e1e1e;
+      border-bottom: 1px solid #13141d;
       scrollbar-width: none;
     }
     #wa-tab-bar::-webkit-scrollbar { display: none; }
@@ -624,25 +660,24 @@
       gap: 6px;
       padding: 0 8px 0 12px;
       min-width: 80px;
-      max-width: 180px;
-      height: 35px;
+      max-width: 200px;
+      height: 36px;
       flex-shrink: 0;
       cursor: pointer;
-      background: #2d2d2d;
-      border-right: 1px solid #1e1e1e;
-      color: #8f8f8f;
+      background: #20222e;
+      border-right: 1px solid #13141d;
+      color: #7a7d9a;
       font-size: 12px;
       white-space: nowrap;
       position: relative;
       user-select: none;
-      transition: background 0.1s;
+      transition: background 0.1s, color 0.1s;
     }
-    .wa-tab:hover { background: #2a2d2e; color: #ccc; }
+    .wa-tab:hover { background: #252838; color: #c0c2d4; }
     .wa-tab.active {
-      background: #1e1e1e;
-      color: #fff;
-      border-top: 1px solid #0078d4;
-      padding-top: 1px;
+      background: var(--bg);
+      color: #e4e5f0;
+      border-top: 2px solid var(--accent);
     }
     .wa-tab .tab-icon { width: 14px; height: 14px; flex-shrink: 0; display: flex; align-items: center; }
     .wa-tab .tab-icon svg { width: 14px; height: 14px; }
@@ -685,7 +720,7 @@
     .wa-tab.modified .tab-close { opacity: 0; }
     .wa-tab.modified:hover .tab-close { opacity: 0; }
     .wa-tab.modified:hover .tab-dirty { display: block; }
-    .wa-tab .tab-close:hover { background: rgba(255,255,255,0.15); opacity: 1 !important; }
+    .wa-tab .tab-close:hover { background: rgba(255,255,255,0.12); opacity: 1 !important; }
 
     /* ── Center canvas ── */
     #wa-canvas {
@@ -723,57 +758,73 @@
 
     /* ── Word-like document editor ── */
 
-    /* Toolbar: light ribbon style */
+    /* Toolbar: Word-style light ribbon */
     #wa-docx-editor .w-e-toolbar {
       flex-shrink: 0;
-      background: #f3f3f3 !important;
-      border-bottom: 1px solid #d4d4d4 !important;
+      background: #f5f6fa !important;
+      border-bottom: 1px solid #d8dae5 !important;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
     }
     #wa-docx-editor .w-e-bar-item button,
     #wa-docx-editor .w-e-bar-item-group > .w-e-bar-item button {
-      color: #333 !important;
+      color: #2d2f3a !important;
     }
     #wa-docx-editor .w-e-bar-item button:hover {
-      background: #e0e0e0 !important;
+      background: #e5e7f0 !important;
+      border-radius: 4px;
     }
 
-    /* Canvas: gray background like Word's page layout view */
+    /* Canvas: Office gray background like Word's print layout view */
     #wa-docx-editor .w-e-text-container {
-      background: #525659 !important;
+      background: #5c6070 !important;
       flex: 1;
       min-height: 0;
       overflow: hidden !important;
     }
 
-    /* Scrollable area with padding around the page */
+    /* Scrollable area with breathing room around the page */
     #wa-docx-editor .w-e-scroll {
       overflow-y: auto !important;
       height: 100%;
-      padding: 32px 24px;
+      padding: 32px 28px;
       box-sizing: border-box;
     }
 
-    /* The white page — US Letter size with margins */
+    /* The white page — A4 / US Letter with proper margins */
     #wa-docx-editor [data-slate-editor],
     #wa-docx-editor [contenteditable="true"] {
       background: #fff !important;
-      max-width: 816px;        /* US Letter at 96 dpi */
+      max-width: 816px;        /* US Letter at 96dpi */
       min-height: 1056px;      /* US Letter height */
       margin: 0 auto !important;
-      padding: 96px !important; /* 1-inch margins */
-      box-shadow: 0 1px 4px rgba(0,0,0,0.35), 0 6px 24px rgba(0,0,0,0.2);
+      padding: 96px 96px 80px !important;   /* ~1in margins */
+      box-shadow: 0 2px 8px rgba(0,0,0,0.25), 0 8px 32px rgba(0,0,0,0.18);
       box-sizing: border-box !important;
-      font-family: 'Calibri', 'Segoe UI', Arial, sans-serif !important;
+      font-family: 'Calibri', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif !important;
       font-size: 16px !important;
-      line-height: 1.6 !important;
-      color: #000 !important;
+      line-height: 1.7 !important;
+      color: #1a1a28 !important;
       outline: none;
     }
 
-    /* Paragraph spacing */
+    /* Paragraph and heading spacing in the Word page */
     #wa-docx-editor [data-slate-editor] p,
     #wa-docx-editor [contenteditable="true"] p {
       margin: 0 0 10px 0;
+    }
+    #wa-docx-editor [data-slate-editor] h1,
+    #wa-docx-editor [contenteditable="true"] h1 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #12264a;
+      margin: 20px 0 10px;
+    }
+    #wa-docx-editor [data-slate-editor] h2,
+    #wa-docx-editor [contenteditable="true"] h2 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #1f3d6b;
+      margin: 16px 0 8px;
     }
 
     /* XLSX: Luckysheet container */
@@ -807,32 +858,34 @@
       color: var(--accent);
     }
 
-    /* PPTX: scrollable card list */
+    /* PPTX: geometric canvas editor */
     #wa-pptx-editor {
       height: 100%;
       overflow-y: auto;
-      padding: 16px;
+      padding: 24px 32px;
       display: none;
       flex-direction: column;
-      gap: 12px;
+      gap: 20px;
+      background: #3a3d4a;
     }
 
     #wa-pptx-editor.active { display: flex; }
 
     .wa-slide-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
+      background: #fff;
+      border: none;
+      border-radius: 6px;
       overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 1px 4px rgba(0,0,0,0.3);
     }
 
     .wa-slide-card-header {
-      padding: 8px 14px;
-      background: var(--surface2);
-      border-bottom: 1px solid var(--border);
-      font-size: 12px;
+      padding: 8px 16px;
+      background: #f1f3f8;
+      border-bottom: 1px solid #dde0e8;
+      font-size: 11.5px;
       font-weight: 600;
-      color: var(--text-muted);
+      color: #555;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -846,49 +899,110 @@
       border-radius: 10px;
     }
 
-    .wa-shape-row {
-      padding: 8px 14px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .wa-shape-row:last-child { border-bottom: none; }
-
-    .wa-shape-label {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-bottom: 4px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .wa-shape-title-badge {
-      background: #ff8c4222;
-      color: #ff8c42;
-      border: 1px solid #ff8c4255;
-      padding: 0 5px;
-      border-radius: 3px;
-      font-size: 10px;
-    }
-
-    .wa-shape-textarea {
+    /* 16:9 canvas — shapes are absolutely positioned inside */
+    .wa-slide-canvas {
+      position: relative;
       width: 100%;
-      background: var(--bg);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      padding: 7px 10px;
-      font-size: 13px;
-      line-height: 1.55;
-      resize: vertical;
-      font-family: inherit;
-      min-height: 40px;
-      transition: border-color 0.15s;
+      overflow: hidden;
+      background: #fff;
     }
 
-    .wa-shape-textarea:focus {
+    .wa-shape-text {
+      position: absolute;
+      box-sizing: border-box;
+      overflow: hidden;
       outline: none;
-      border-color: var(--accent);
+      cursor: text;
+      white-space: pre-wrap;
+      word-break: break-word;
+      padding: 3px 5px;
+      line-height: 1.35;
+    }
+
+    .wa-shape-text:hover {
+      outline: 1px dashed rgba(79,126,255,0.35);
+    }
+
+    .wa-shape-text:focus {
+      outline: 1.5px solid var(--accent);
+      background: rgba(79,126,255,0.04) !important;
+    }
+
+    .wa-shape-img {
+      position: absolute;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .wa-shape-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .wa-img-replace-btn {
+      display: none;
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      background: rgba(0,0,0,0.62);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      padding: 3px 9px;
+      cursor: pointer;
+    }
+
+    .wa-shape-img:hover .wa-img-replace-btn { display: block; }
+
+    .wa-shape-table {
+      position: absolute;
+      overflow: auto;
+      box-sizing: border-box;
+    }
+
+    .wa-shape-table table {
+      border-collapse: collapse;
+      width: 100%;
+      height: 100%;
+    }
+
+    .wa-shape-table td {
+      border: 1px solid #d0d0d0;
+      padding: 3px 6px;
+      vertical-align: top;
+      min-width: 40px;
+      outline: none;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .wa-shape-table td:focus {
+      background: rgba(79,126,255,0.07);
+      outline: 1.5px solid var(--accent);
+    }
+
+    .wa-slide-notes {
+      background: #f8f9fb;
+      font-size: 11px;
+      color: #666;
+      padding: 6px 14px;
+      border-top: 1px solid #e8eaf0;
+    }
+
+    .wa-slide-notes summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #888;
+      user-select: none;
+    }
+
+    .wa-slide-notes p {
+      margin: 6px 0 2px;
+      line-height: 1.5;
     }
 
     /* PDF: canvas stack */
@@ -952,109 +1066,280 @@
       margin: 0 2px;
     }
 
-    /* ── Right AI panel ── */
+    /* ═══════════════════════════════
+       RIGHT AI PANEL — Full Redesign
+       ═══════════════════════════════ */
     #wa-ai {
-      background: var(--surface);
-      border-left: 1px solid var(--border);
+      background: var(--ai-bg);
+      border-left: 1px solid var(--ai-border);
       display: flex;
       flex-direction: column;
       overflow: hidden;
     }
 
+    /* ── AI Header ── */
     #wa-ai-header {
-      padding: 10px 14px;
-      border-bottom: 1px solid var(--border);
+      padding: 0 12px;
+      height: 48px;
+      border-bottom: 1px solid var(--ai-border);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
       flex-shrink: 0;
-      background: var(--surface2);
+      background: linear-gradient(180deg, #22253480 0%, transparent 100%);
+    }
+
+    /* Animated AI logo icon */
+    .wa-ai-logo {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #4f7eff 0%, #7c55ff 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 2px 10px rgba(79,126,255,0.35);
+    }
+
+    .wa-ai-logo svg { display: block; }
+
+    .wa-ai-header-main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
     }
 
     #wa-ai-header .wa-ai-title {
-      font-size: 13px;
+      font-size: 13.5px;
       font-weight: 700;
-      flex: 1;
-      letter-spacing: 0.03em;
+      letter-spacing: -0.01em;
+      color: var(--text);
+      flex-shrink: 0;
     }
 
     #wa-ai-model-badge {
-      font-size: 10px;
-      color: var(--text-muted);
-      background: var(--surface);
-      border: 1px solid var(--border);
+      font-size: 10.5px;
+      color: #6a7fff;
+      background: rgba(100,127,255,0.12);
+      border: 1px solid rgba(100,127,255,0.22);
       padding: 2px 8px;
-      border-radius: 10px;
-      letter-spacing: 0.04em;
+      border-radius: 20px;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
     }
 
-    /* Clear chat button */
-    #wa-clear-chat-btn {
+    .wa-ai-header-btns {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    /* Header icon buttons */
+    .wa-ai-icon-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
       background: transparent;
-      border: 1px solid var(--border);
-      border-radius: 5px;
       color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      transition: background 0.12s, color 0.12s;
+    }
+    .wa-ai-icon-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+
+    /* Keep old IDs working */
+    #wa-settings-btn {
+      width: 28px;
+      height: 28px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: background 0.12s, color 0.12s;
+      padding: 0;
+    }
+    #wa-settings-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+
+    #wa-clear-chat-btn {
+      width: 28px;
+      height: 28px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
       font-size: 11px;
-      padding: 2px 7px;
+      transition: background 0.12s, color 0.12s;
+      padding: 0;
+    }
+    #wa-clear-chat-btn:hover { background: rgba(240,80,112,0.12); color: var(--danger); }
+
+    /* ── AI Settings Panel ── */
+    #wa-ai-settings-panel {
+      display: none;
+      background: var(--ai-surface);
+      border-bottom: 1px solid var(--ai-border);
+      padding: 12px 14px;
+      flex-shrink: 0;
+    }
+    #wa-ai-settings-panel.open { display: block; }
+    #wa-ai-settings-panel .wa-setting-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    .wa-output-mode-toggle {
+      display: flex;
+      border: 1px solid var(--ai-border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .wa-output-mode-toggle button {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11.5px;
+      padding: 6px 10px;
       cursor: pointer;
       transition: all 0.15s;
     }
-    #wa-clear-chat-btn:hover { border-color: var(--danger); color: var(--danger); }
+    .wa-output-mode-toggle button.active {
+      background: var(--accent);
+      color: #fff;
+    }
+    .wa-output-mode-toggle button:hover:not(.active) {
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+    }
 
+    /* ── Analysis Subject Bar ── */
+    #wa-subject-bar {
+      display: none;
+      padding: 6px 14px;
+      background: rgba(79,126,255,0.07);
+      border-bottom: 1px solid rgba(79,126,255,0.12);
+      flex-shrink: 0;
+      font-size: 11px;
+      color: var(--text-muted);
+      align-items: center;
+      gap: 6px;
+      overflow: hidden;
+    }
+    #wa-subject-bar .subject-tag {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      background: rgba(79,126,255,0.18);
+      color: var(--accent);
+      padding: 1px 6px;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+    #wa-subject-bar .subject-text {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ── Messages Area ── */
     #wa-ai-messages {
       flex: 1;
       overflow-y: auto;
-      padding: 14px 12px;
+      padding: 16px 12px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
     }
 
+    /* Scrollbar */
+    #wa-ai-messages::-webkit-scrollbar { width: 4px; }
+    #wa-ai-messages::-webkit-scrollbar-track { background: transparent; }
+    #wa-ai-messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
     .wa-msg {
-      max-width: 92%;
-      padding: 9px 13px;
-      border-radius: 12px;
+      max-width: 93%;
+      padding: 10px 14px;
+      border-radius: 14px;
       font-size: 13px;
-      line-height: 1.6;
+      line-height: 1.65;
       word-break: break-word;
     }
 
+    /* User bubble — right-aligned gradient */
     .wa-msg.user {
       align-self: flex-end;
-      background: linear-gradient(135deg, #4da3ff, #3b8fe8);
+      background: linear-gradient(135deg, var(--msg-user-from), var(--msg-user-to));
       color: #fff;
-      border-bottom-right-radius: 3px;
-      box-shadow: 0 1px 4px rgba(77,163,255,0.25);
+      border-bottom-right-radius: 4px;
+      box-shadow: 0 2px 12px rgba(79,126,255,0.3);
+      font-size: 13px;
+      max-width: 86%;
     }
 
-    /* Quote block inside user bubble (Copilot-style selection context) */
+    /* Quote block inside user bubble */
     .wa-msg-quote {
-      border-left: 3px solid rgba(255,255,255,0.55);
-      padding-left: 8px;
-      margin-bottom: 6px;
+      border-left: 3px solid rgba(255,255,255,0.5);
+      padding-left: 9px;
+      margin-bottom: 7px;
       font-style: italic;
-      font-size: 11px;
+      font-size: 11.5px;
       opacity: 0.85;
-      line-height: 1.4;
+      line-height: 1.45;
       overflow: hidden;
       display: -webkit-box;
       -webkit-line-clamp: 3;
       -webkit-box-orient: vertical;
     }
 
+    /* AI bubble — left-aligned with subtle left accent */
     .wa-msg.ai {
       align-self: flex-start;
-      background: var(--surface2);
+      background: var(--ai-surface);
       color: var(--text);
-      border-bottom-left-radius: 3px;
+      border: 1px solid var(--ai-border);
+      border-bottom-left-radius: 4px;
+      position: relative;
+      max-width: 93%;
+    }
+
+    /* AI indicator dot */
+    .wa-msg.ai::before {
+      content: '✦';
+      position: absolute;
+      left: -20px;
+      top: 10px;
+      font-size: 9px;
+      color: #6a7fff;
+      opacity: 0.7;
     }
 
     /* Markdown inside AI bubble */
-    .wa-msg.ai p { margin: 0 0 6px; }
+    .wa-msg.ai p { margin: 0 0 7px; }
     .wa-msg.ai p:last-child { margin-bottom: 0; }
     .wa-msg.ai h1, .wa-msg.ai h2, .wa-msg.ai h3,
     .wa-msg.ai h4, .wa-msg.ai h5, .wa-msg.ai h6 {
-      margin: 8px 0 4px;
+      margin: 10px 0 5px;
       font-weight: 700;
       line-height: 1.3;
       color: var(--text);
@@ -1064,25 +1349,25 @@
     .wa-msg.ai h3, .wa-msg.ai h4 { font-size: 13px; }
     .wa-msg.ai ul, .wa-msg.ai ol {
       padding-left: 18px;
-      margin: 4px 0;
+      margin: 5px 0;
     }
-    .wa-msg.ai li { margin: 2px 0; }
-    .wa-msg.ai strong { color: #e0e0ff; font-weight: 700; }
+    .wa-msg.ai li { margin: 3px 0; }
+    .wa-msg.ai strong { color: #c5ccff; font-weight: 700; }
     .wa-msg.ai em { color: var(--text-muted); }
     .wa-msg.ai code {
-      background: rgba(0,0,0,0.3);
+      background: rgba(0,0,0,0.35);
       border-radius: 4px;
-      padding: 1px 5px;
+      padding: 2px 6px;
       font-family: 'Cascadia Code', 'Consolas', monospace;
       font-size: 11.5px;
-      color: #a8d8ff;
+      color: #85c1ff;
     }
     .wa-msg.ai pre {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: 7px;
-      padding: 10px 12px;
-      margin: 6px 0;
+      background: #0d1017;
+      border: 1px solid var(--ai-border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin: 8px 0;
       overflow-x: auto;
     }
     .wa-msg.ai pre code {
@@ -1093,42 +1378,42 @@
     }
     .wa-msg.ai blockquote {
       border-left: 3px solid var(--accent);
-      margin: 6px 0;
-      padding: 4px 10px;
+      margin: 7px 0;
+      padding: 5px 12px;
       color: var(--text-muted);
       font-style: italic;
     }
     .wa-msg.ai table {
       border-collapse: collapse;
       width: 100%;
-      margin: 6px 0;
+      margin: 8px 0;
       font-size: 12px;
     }
     .wa-msg.ai th, .wa-msg.ai td {
-      border: 1px solid var(--border);
-      padding: 4px 8px;
+      border: 1px solid var(--ai-border);
+      padding: 5px 9px;
       text-align: left;
     }
-    .wa-msg.ai th { background: var(--surface); font-weight: 700; }
+    .wa-msg.ai th { background: rgba(255,255,255,0.05); font-weight: 700; }
     .wa-msg.ai a { color: var(--accent); text-decoration: underline; }
 
     .wa-msg.ai.streaming {
-      /* streaming: show raw text */
       white-space: pre-wrap;
     }
     .wa-msg.ai.streaming::after {
       content: '▌';
       animation: blink 0.8s step-end infinite;
+      color: var(--accent);
     }
 
     @keyframes blink { 50% { opacity: 0; } }
 
     .wa-msg-context-hint {
-      font-size: 10px;
+      font-size: 10.5px;
       color: var(--text-muted);
-      padding: 3px 10px;
-      background: var(--surface2);
-      border-radius: 4px;
+      padding: 4px 10px;
+      background: var(--ai-surface);
+      border-radius: 6px;
       border-left: 2px solid var(--accent);
       align-self: flex-start;
       max-width: 90%;
@@ -1137,74 +1422,185 @@
     /* Tool call notification */
     .wa-tool-notification {
       align-self: center;
-      background: rgba(76, 175, 125, 0.15);
-      border: 1px solid var(--success);
+      background: rgba(62, 200, 122, 0.1);
+      border: 1px solid rgba(62,200,122,0.3);
       color: var(--success);
-      border-radius: 6px;
-      padding: 5px 12px;
+      border-radius: 8px;
+      padding: 5px 14px;
       font-size: 11px;
     }
 
+    /* Chat-mode preview */
+    .wa-tool-preview {
+      max-width: 95%;
+      overflow-x: auto;
+    }
+    .wa-tool-preview img { max-width: 100%; border-radius: 8px; display: block; }
+
+    /* ── AI Input Area ── */
     #wa-ai-input-area {
-      padding: 12px;
-      border-top: 1px solid var(--border);
+      padding: 8px 12px 12px;
+      border-top: 1px solid var(--ai-border);
       flex-shrink: 0;
+      background: var(--ai-bg);
     }
 
+    /* Quick action chips — scrollable horizontal row */
     .wa-ai-quick-actions {
       display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-      margin-bottom: 8px;
+      gap: 5px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      scrollbar-width: none;
     }
+    .wa-ai-quick-actions::-webkit-scrollbar { display: none; }
 
     .wa-quick-btn {
-      padding: 3px 10px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: transparent;
+      padding: 4px 12px;
+      border: 1px solid var(--ai-border);
+      border-radius: 20px;
+      background: var(--ai-surface);
       color: var(--text-muted);
-      font-size: 11px;
+      font-size: 11.5px;
       cursor: pointer;
       transition: all 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .wa-quick-btn:hover {
       border-color: var(--accent);
       color: var(--accent);
+      background: rgba(79,126,255,0.08);
+    }
+
+    .wa-quick-btn.chart-btn {
+      border-color: rgba(62,200,122,0.3);
+      color: #3ec87a;
+    }
+    .wa-quick-btn.chart-btn:hover {
+      border-color: var(--success);
+      background: rgba(62,200,122,0.08);
+      color: var(--success);
+    }
+
+    /* ── Selection chip ── */
+    #wa-selection-chip {
+      display: flex;
+      align-items: flex-start;
+      gap: 7px;
+      margin-bottom: 7px;
+      padding: 7px 9px;
+      background: rgba(79,126,255,0.08);
+      border-radius: 8px;
+      border: 1px solid rgba(79,126,255,0.2);
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      overflow: hidden;
+      animation: chipIn 0.15s ease;
+    }
+    @keyframes chipIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+    .chip-quote-bar { display: none; }
+    #wa-selection-preview {
+      flex: 1;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      font-style: italic;
+      padding-left: 4px;
+      color: #9aabff;
+    }
+    .chip-clear {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 15px;
+      padding: 0 4px 0 0;
+      line-height: 1;
+      flex-shrink: 0;
+      opacity: 0.6;
+    }
+    .chip-clear:hover { opacity: 1; color: var(--danger); }
+
+    /* ── Context indicator ── */
+    #wa-context-indicator {
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 2px 0 7px 0;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    #wa-context-indicator .ctx-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+      flex-shrink: 0;
+    }
+
+    /* ── Input box wrapper ── */
+    .wa-input-box {
+      background: var(--ai-surface);
+      border: 1px solid var(--ai-border);
+      border-radius: 12px;
+      overflow: hidden;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .wa-input-box:focus-within {
+      border-color: rgba(79,126,255,0.45);
+      box-shadow: 0 0 0 3px rgba(79,126,255,0.08);
     }
 
     #wa-input-row {
       display: flex;
-      gap: 8px;
+      gap: 0;
       align-items: flex-end;
     }
 
     #wa-user-input {
       flex: 1;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 8px;
+      background: transparent;
+      border: none;
+      border-radius: 12px 0 0 12px;
       color: var(--text);
-      padding: 8px 12px;
+      padding: 10px 14px;
       font-size: 13px;
       font-family: inherit;
       resize: none;
       line-height: 1.5;
-      min-height: 36px;
+      min-height: 40px;
       max-height: 120px;
       overflow-y: auto;
-      transition: border-color 0.15s;
+      outline: none;
     }
 
-    #wa-user-input:focus {
-      outline: none;
-      border-color: var(--accent);
+    #wa-user-input::placeholder { color: var(--text-muted); }
+
+    /* Footer row inside input box */
+    .wa-input-box-footer {
+      display: flex;
+      align-items: center;
+      padding: 4px 8px 6px;
+      border-top: 1px solid rgba(255,255,255,0.04);
+      gap: 6px;
+    }
+
+    .wa-input-hint {
+      flex: 1;
+      font-size: 10.5px;
+      color: var(--text-muted);
+      opacity: 0.6;
+      user-select: none;
     }
 
     #wa-send-btn {
-      width: 36px;
-      height: 36px;
+      width: 30px;
+      height: 30px;
       border-radius: 8px;
       background: var(--accent);
       border: none;
@@ -1214,29 +1610,20 @@
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      transition: background 0.15s;
+      transition: background 0.15s, transform 0.1s;
     }
 
-    #wa-send-btn:hover { background: var(--accent-hover); }
-    #wa-send-btn:disabled { background: var(--border); cursor: not-allowed; }
+    #wa-send-btn:hover { background: var(--accent-hover); transform: scale(1.06); }
+    #wa-send-btn:active { transform: scale(0.94); }
+    #wa-send-btn:disabled { background: var(--ai-border); cursor: not-allowed; transform: none; }
 
-    /* ── Chart quick buttons ── */
-    .wa-quick-btn.chart-btn {
-      border-color: #4caf7d55;
-      color: #4caf7d;
-    }
-    .wa-quick-btn.chart-btn:hover {
-      border-color: #4caf7d;
-      background: rgba(76,175,125,0.08);
-    }
-
-    /* ── Code block inside AI messages ── */
+    /* ── Code block ── */
     .wa-msg-code {
       align-self: flex-start;
-      background: #0d1117;
-      border: 1px solid var(--border);
+      background: #0d1017;
+      border: 1px solid var(--ai-border);
       border-radius: 8px;
-      padding: 10px 14px;
+      padding: 12px 14px;
       font-family: 'Cascadia Code', 'Consolas', monospace;
       font-size: 12px;
       white-space: pre-wrap;
@@ -1246,7 +1633,7 @@
       overflow-x: auto;
     }
 
-    /* ── Chart result image ── */
+    /* ── Chart result ── */
     .wa-chart-result {
       align-self: flex-start;
       max-width: 95%;
@@ -1254,13 +1641,13 @@
     .wa-chart-result img {
       max-width: 100%;
       border-radius: 8px;
-      border: 1px solid var(--border);
+      border: 1px solid var(--ai-border);
       display: block;
     }
     .wa-chart-result .wa-chart-caption {
       font-size: 11px;
       color: var(--text-muted);
-      margin-top: 4px;
+      margin-top: 5px;
       text-align: center;
     }
     .wa-chart-result .wa-chart-download {
@@ -1276,111 +1663,141 @@
     #wa-chart-dialog {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.55);
+      background: rgba(0,0,0,0.65);
       display: none;
       align-items: center;
       justify-content: center;
       z-index: 99999;
+      backdrop-filter: blur(4px);
     }
     #wa-chart-dialog.open { display: flex; }
     #wa-chart-dialog .wa-dialog-box {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 14px;
       padding: 24px;
       width: min(500px, 90vw);
       display: flex;
       flex-direction: column;
       gap: 14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
     }
     #wa-chart-dialog h3 { font-size: 15px; font-weight: 700; }
     #wa-chart-dialog textarea {
       background: var(--surface2);
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: 8px;
       color: var(--text);
-      padding: 10px;
+      padding: 10px 12px;
       font-size: 13px;
       font-family: inherit;
       resize: vertical;
       min-height: 80px;
+      transition: border-color 0.15s;
     }
     #wa-chart-dialog textarea:focus { outline: none; border-color: var(--accent); }
     #wa-chart-dialog .wa-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
-    /* ── Context indicator ── */
-    #wa-context-indicator {
-      font-size: 11px;
-      color: var(--text-muted);
-      padding: 3px 0 8px 0;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    #wa-context-indicator .ctx-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--success);
-    }
-
-    /* ── Copilot-style selection chip ── */
-    /* CSS Custom Highlight API — non-destructive pinned text marker in the doc */
-    ::highlight(wa-pinned) {
-      background-color: rgba(77, 163, 255, 0.18);
-    }
-
-    #wa-selection-chip {
-      display: flex;
-      align-items: flex-start;
-      gap: 7px;
-      margin-bottom: 6px;
-      padding: 6px 8px 6px 0;
-      background: var(--hover);
-      border-radius: 6px;
-      border-left: 3px solid var(--accent);
-      font-size: 11px;
-      color: var(--text-muted);
-      line-height: 1.4;
-      overflow: hidden;
-      animation: chipIn 0.15s ease;
-    }
-    @keyframes chipIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
-    .chip-quote-bar { display: none; } /* bar is the left border */
-    #wa-selection-preview {
-      flex: 1;
-      overflow: hidden;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      font-style: italic;
-      padding-left: 8px;
-    }
-    .chip-clear {
-      background: none;
+    /* ── File Summary Row ── */
+    .wa-file-item-wrap { display: contents; }
+    .wa-file-summary-btn {
+      background: transparent;
       border: none;
-      cursor: pointer;
       color: var(--text-muted);
-      font-size: 15px;
-      padding: 0 6px 0 0;
-      line-height: 1;
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 3px;
+      opacity: 0;
+      transition: opacity 0.15s, transform 0.15s, color 0.15s;
       flex-shrink: 0;
-      opacity: 0.6;
+      line-height: 1;
     }
-    .chip-clear:hover { opacity: 1; color: var(--text); }
+    .wa-file-item:hover .wa-file-summary-btn { opacity: 0.6; }
+    .wa-file-summary-btn:hover { opacity: 1 !important; color: var(--accent) !important; }
+    .wa-file-summary-btn.open { opacity: 1; color: var(--accent); transform: rotate(90deg); }
+    .wa-file-summary-row {
+      display: none;
+      padding: 7px 12px 7px 32px;
+      font-size: 11px;
+      color: var(--text-muted);
+      background: rgba(255,255,255,0.025);
+      border-bottom: 1px solid var(--border);
+      line-height: 1.55;
+    }
+    .wa-file-summary-row.open { display: block; animation: fadeInDown 0.18s ease; }
+    .wa-file-summary-row.loading { font-style: italic; opacity: 0.65; }
+    @keyframes fadeInDown { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+
+    /* ── Chart insert button ── */
+    .wa-chart-insert {
+      font-size: 11px;
+      color: var(--success);
+      cursor: pointer;
+      padding: 3px 0;
+      user-select: none;
+    }
+    .wa-chart-insert:hover { text-decoration: underline; }
+
+    /* ── AI image drag-to-doc hint overlay ── */
+    #wa-ai-img-drop-hint {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(79,126,255,0.10);
+      border: 2px dashed var(--accent);
+      border-radius: 6px;
+      z-index: 300;
+      pointer-events: none;
+      transition: opacity 0.15s;
+    }
+    #wa-ai-img-drop-hint.active { display: flex; }
+    #wa-ai-img-drop-hint span {
+      background: var(--surface2);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-size: 15px;
+      font-weight: 600;
+      padding: 10px 22px;
+      border-radius: 8px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    }
+
+    /* Draggable AI image cursor + drag badge */
+    .wa-ai-draggable-img {
+      cursor: grab;
+      transition: box-shadow 0.15s, transform 0.15s;
+    }
+    .wa-ai-draggable-img:hover {
+      box-shadow: 0 0 0 2px var(--accent);
+      transform: scale(1.01);
+    }
+    .wa-ai-draggable-img:active { cursor: grabbing; }
+    .wa-chart-drag-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: 3px;
+      opacity: 0.7;
+      user-select: none;
+    }
+
+    /* CSS Custom Highlight API */
+    ::highlight(wa-pinned) { background-color: rgba(79,126,255,0.18); }
 
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
     ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
 
     /* ── Toast notification ── */
     #wa-toast {
       position: fixed;
       bottom: 20px;
       left: 50%;
-      transform: translateX(-50%) translateY(20px);
+      transform: translateX(-50%) translateY(16px);
       background: var(--surface2);
       border: 1px solid var(--border);
       color: var(--text);
@@ -1412,19 +1829,19 @@
       justify-content: center;
       gap: 14px;
       z-index: 200;
-      backdrop-filter: blur(3px);
+      backdrop-filter: blur(4px);
     }
     .wa-loading-spinner {
-      width: 38px;
-      height: 38px;
-      border: 3px solid rgba(99,102,241,0.25);
-      border-top-color: #6366f1;
+      width: 36px;
+      height: 36px;
+      border: 3px solid rgba(79,126,255,0.2);
+      border-top-color: var(--accent);
       border-radius: 50%;
-      animation: wa-spin 0.75s linear infinite;
+      animation: wa-spin 0.7s linear infinite;
     }
     @keyframes wa-spin { to { transform: rotate(360deg); } }
     .wa-loading-text {
-      color: var(--text-secondary);
+      color: var(--text-muted);
       font-size: 13px;
       letter-spacing: 0.02em;
     }
@@ -1439,18 +1856,24 @@
 
   <!-- ── Header ── -->
   <div id="wa-header">
-    <a class="wa-logo" href="/">← Koto</a>
-    <span class="wa-file-name" id="wa-file-name">全格式 AI 工作区</span>
+    <a class="wa-logo" href="/">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" opacity="0.7">
+        <path d="M3 7C3 5.9 3.9 5 5 5h6l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+      </svg>
+      Koto
+    </a>
+    <span class="wa-header-sep"></span>
+    <span class="wa-file-name" id="wa-file-name">文件工作站</span>
     <div class="wa-header-actions">
       <label class="wa-btn" for="wa-file-input" title="打开文件">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
         </svg>
         打开文件
       </label>
       <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf" style="display:none">
       <button class="wa-btn primary" id="wa-save-btn" disabled onclick="WA.saveFile()">
-        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
           <polyline points="17 21 17 13 7 13 7 21"/>
           <polyline points="7 3 7 8 15 8"/>
@@ -1511,7 +1934,10 @@
         </div>
       </div>
       <div id="wa-files-list"></div>
-      <div id="wa-left-drop">📂 拖拽文件至此处<br><span style="font-size:10px;opacity:0.6">DOCX / XLSX / PPTX / PDF</span></div>
+      <div id="wa-left-drop">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:4px;opacity:0.7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><br>
+        拖拽文件至此<br><span style="font-size:10px;opacity:0.55">DOCX · XLSX · PPTX · PDF</span>
+      </div>
     </div>
 
     <!-- Right-click context menu -->
@@ -1542,6 +1968,8 @@
       <div id="wa-tab-bar"></div>
       <!-- Canvas body: all editors positioned relative to this -->
       <div id="wa-canvas-body">
+        <!-- AI-image drag-to-document overlay -->
+        <div id="wa-ai-img-drop-hint"><span>📥 释放即可插入图片</span></div>
         <!-- Loading overlay (shown during file switch) -->
         <div id="wa-canvas-loading">
           <div class="wa-loading-spinner"></div>
@@ -1551,9 +1979,15 @@
         <div id="wa-drop-zone">
           <div class="wa-drop-inner" id="wa-drop-inner">
             <div class="wa-drop-icon">📂</div>
-            <div class="wa-drop-title">拖拽文件，或点击"打开文件"</div>
-            <div class="wa-drop-sub">支持 DOCX / XLSX / PPTX / PDF</div>
+            <div class="wa-drop-title">拖拽文件到此处，或点击"打开文件"</div>
+            <div class="wa-drop-sub">支持所有常见办公文档格式</div>
             <div id="upload-progress"></div>
+          </div>
+          <div class="wa-format-chips">
+            <span class="wa-chip docx">📘 Word / DOCX</span>
+            <span class="wa-chip xlsx">📗 Excel / XLSX</span>
+            <span class="wa-chip pptx">📙 PowerPoint / PPTX</span>
+            <span class="wa-chip pdf">📕 PDF</span>
           </div>
         </div>
         <!-- DOCX: WangEditor -->
@@ -1573,23 +2007,60 @@
       </div>
     </div>
 
-    <!-- Right: AI chat -->
+    <!-- Right: AI assistant -->
     <div id="wa-ai">
+      <!-- Header -->
       <div id="wa-ai-header">
-        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
-        </svg>
-        <span class="wa-ai-title">AI 助手</span>
-        <span id="wa-ai-model-badge">Koto AI</span>
-        <button id="wa-clear-chat-btn" title="清空对话" onclick="WA.clearChat()">清空</button>
+        <div class="wa-ai-logo">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3-3.8-2.8-3.8 2.8 1.4-4.3-3.6-2.7h4.5Z" fill="#fff" opacity="0.9"/>
+          </svg>
+        </div>
+        <div class="wa-ai-header-main">
+          <span class="wa-ai-title">AI 助手</span>
+          <span id="wa-ai-model-badge">Koto AI</span>
+        </div>
+        <div class="wa-ai-header-btns">
+          <button id="wa-settings-btn" title="AI 输出设置" onclick="WA.toggleSettings()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
+          <button id="wa-clear-chat-btn" title="清空对话" onclick="WA.clearChat()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6M14 11v6"/>
+              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
+      <!-- Settings panel (collapsible) -->
+      <div id="wa-ai-settings-panel">
+        <div class="wa-setting-label">AI 输出模式</div>
+        <div class="wa-output-mode-toggle">
+          <button data-mode="inline" class="active" onclick="WA.setOutputMode('inline')">✏️ 写入文档</button>
+          <button data-mode="chat" onclick="WA.setOutputMode('chat')">💬 仅对话框</button>
+        </div>
+      </div>
+
+      <!-- Current analysis subject indicator -->
+      <div id="wa-subject-bar">
+        <span class="subject-tag" id="wa-subject-tag">文件</span>
+        <span class="subject-text" id="wa-subject-text"></span>
+      </div>
+
+      <!-- Messages -->
       <div id="wa-ai-messages">
-        <div class="wa-msg ai">你好！请打开一个文件，我会帮你分析、编辑和优化内容。<br><br>选中文档中的文字后，可快速发送给我处理。选中内容时 AI 会直接替换选区。</div>
+        <div class="wa-msg ai">你好！请从左侧打开一个文件，我可以帮你<strong>分析内容</strong>、<strong>润色文字</strong>、<strong>总结要点</strong>或<strong>翻译段落</strong>。<br><br>选中文档中的文字后，可快速将选区发送给我处理。</div>
       </div>
 
+      <!-- Input area -->
       <div id="wa-ai-input-area">
-        <!-- Copilot-style selection chip: shows pinned text above input -->
+        <!-- Selection chip -->
         <div id="wa-selection-chip" style="display:none">
           <span class="chip-quote-bar"></span>
           <span id="wa-selection-preview"></span>
@@ -1599,23 +2070,30 @@
           <div class="ctx-dot"></div>
           <span id="wa-ctx-label">已附加上下文</span>
         </div>
+        <!-- Quick action chips -->
         <div class="wa-ai-quick-actions" id="wa-quick-actions">
           <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容')">✨ 润色</button>
           <button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结文档要点')">📋 总结</button>
           <button class="wa-quick-btn" onclick="WA.quickAction('请检查语法和错别字')">🔍 检查</button>
           <button class="wa-quick-btn" onclick="WA.quickAction('请翻译选中内容为英文')">🌐 翻译</button>
-          <button class="wa-quick-btn chart-btn" onclick="WA.openChartDialog('python')" title="让 AI 用 Python/matplotlib 帮你画图">📊 Python 画图</button>
-          <button class="wa-quick-btn chart-btn" onclick="WA.openChartDialog('r')" title="让 AI 用 R/ggplot2 帮你画图">📈 R 画图</button>
+          <button class="wa-quick-btn chart-btn" onclick="WA.openChartDialog('python')" title="让 AI 用 Python 帮你画图">📊 Python图</button>
+          <button class="wa-quick-btn chart-btn" onclick="WA.openChartDialog('r')" title="让 AI 用 R 帮你画图">📈 R图</button>
         </div>
-        <div id="wa-input-row">
-          <textarea id="wa-user-input" placeholder="输入指令… (Enter 发送, Shift+Enter 换行)"
-                    onkeydown="WA.handleInputKeydown(event)" rows="1"></textarea>
-          <button id="wa-send-btn" onclick="WA.sendMessage()" title="发送">
-            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-              <line x1="22" y1="2" x2="11" y2="13"/>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-            </svg>
-          </button>
+        <!-- Input box -->
+        <div class="wa-input-box">
+          <div id="wa-input-row">
+            <textarea id="wa-user-input" placeholder="有什么需要帮忙的？"
+                      onkeydown="WA.handleInputKeydown(event)" rows="1"></textarea>
+          </div>
+          <div class="wa-input-box-footer">
+            <span class="wa-input-hint">Enter 发送 · Shift+Enter 换行</span>
+            <button id="wa-send-btn" onclick="WA.sendMessage()" title="发送">
+              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1649,7 +2127,8 @@
   <div id="wa-toast"></div>
 
   <!-- ── CDN Scripts ── -->
-  <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
+  <!-- Split.js served locally so a CDN failure cannot crash the IIFE -->
+  <script src="/static/vendor/split.min.js"></script>
 
   <!-- WangEditor 5 -->
   <script src="https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/index.js"></script>

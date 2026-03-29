@@ -5,13 +5,23 @@
     "decay_score": 0.0
   },
   "step_by_step": {
-    "activations": 1,
-    "last_used": "2026-03-26T22:17:55.751887",
+    "activations": 8,
+    "last_used": "2026-03-29T14:38:53.502227",
     "decay_score": 0.0
   },
   "strict_mode": {
     "activations": 1,
     "last_used": "2026-03-26T22:17:57.014681",
+    "decay_score": 0.0
+  },
+  "concise_mode": {
+    "activations": 4,
+    "last_used": "2026-03-29T14:38:51.697651",
+    "decay_score": 0.0
+  },
+  "deep_thinking": {
+    "activations": 7,
+    "last_used": "2026-03-29T14:38:53.515227",
     "decay_score": 0.0
   }
 }

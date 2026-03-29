@@ -3027,7 +3027,9 @@ async function sendMessage(event) {
                         type: 'done',
                         content: evt.data.result || '',
                         steps: Array.isArray(evt.data.steps) ? evt.data.steps.length : undefined,
-                        elapsed_time: evt.data.elapsed_time
+                        elapsed_time: evt.data.elapsed_time,
+                        skill_id: evt.data.meta?.skill_id || null,
+                        auto_skill_ids: evt.data.meta?.auto_skill_ids || []
                     };
                 }
 
@@ -3617,7 +3619,9 @@ async function sendMessage(event) {
                                         kotoSteps.open = false;
                                         const ksSummary = kotoSteps.querySelector('.koto-steps-summary');
                                         if (ksSummary) {
-                                            ksSummary.innerHTML = `<span class="koto-steps-done-icon">✓</span><span class="koto-steps-meta">${realStepCount > 0 ? realStepCount + ' 步 · ' : ''}${backendTime}s</span>`;
+                                            const _skillsEl = ksSummary.querySelector('.koto-steps-skills');
+                                            const _skillsHtml = _skillsEl ? _skillsEl.innerHTML.trim() : '';
+                                            ksSummary.innerHTML = `<span class="koto-steps-done-icon">✓</span><span class="koto-steps-meta">${realStepCount > 0 ? realStepCount + ' 步 · ' : ''}${backendTime}s</span>${_skillsHtml ? '<span class="koto-steps-skills koto-steps-skills-done">' + _skillsHtml + '</span>' : ''}`;
                                         }
                                         // 渲染回复区
                                         let answerDiv = bodyEl.querySelector('.agent-answer');

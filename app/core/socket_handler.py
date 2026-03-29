@@ -90,6 +90,7 @@ def register_socket_events(socketio):
         history = data.get("history", [])            # [{role, content}] multi-turn history
         language = data.get("language", "")          # "python" | "r" | "" → text mode
         csv_data = data.get("csv_data", "")          # table CSV for chart context
+        output_mode = data.get("output_mode", "inline")  # 'inline' | 'chat'
         if not prompt:
             return
         # Combine document context with prompt
@@ -166,28 +167,37 @@ def register_socket_events(socketio):
             else:
                 action_hint = "用户当前无选区。修改时用 set_html 在光标处插入内容。"
 
-            # Concise, example-driven prompt that small local models can follow reliably
-            system_instruction = (
-                f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n\n"
-                "【重要规则】\n"
-                "当用户要求插入、修改、翻译、润色等文档操作时，你必须在回复末尾输出修改指令。\n"
-                "不要只描述你会做什么——直接输出指令，让程序执行。\n\n"
-                "修改指令格式（必须完整、一行输出）：\n"
-                "<TOOL>{\"type\": \"set_html\", \"value\": \"<p>内容</p>\"}</TOOL>\n\n"
-                "示例 1 — 用户让你插入内容：\n"
-                "用户：写一行「你好世界」插入文档\n"
-                "AI：已插入。<TOOL>{\"type\": \"set_html\", \"value\": \"<p>你好世界</p>\"}</TOOL>\n\n"
-                "示例 2 — 用户让你翻译并插入：\n"
-                "用户：翻译成英文插入文档\n"
-                "AI：<TOOL>{\"type\": \"set_html\", \"value\": \"<p>Hello world</p>\"}</TOOL>\n\n"
-                "示例 3 — 用户说「在光标处插入」（明确插入指令）：\n"
-                "用户：请在光标处插入\n"
-                "AI：已插入。<TOOL>{\"type\": \"set_html\", \"value\": \"<p>上一步生成的内容</p>\"}</TOOL>\n\n"
-                f"{action_hint}\n"
-                "其他文件类型指令：\n"
-                "  XLSX → <TOOL>{\"type\":\"set_cell\",\"r\":0,\"c\":0,\"value\":\"值\"}</TOOL>\n"
-                "  PPTX → <TOOL>{\"type\":\"set_pptx_text\",\"slide_index\":0,\"shape_id\":1,\"value\":\"新文字\"}</TOOL>"
-            )
+            if output_mode == "chat":
+                # Chat-only mode: plain conversation, no tool calls
+                system_instruction = (
+                    f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n"
+                    "用户当前处于【仅对话模式】，你的回复只会显示在聊天栏，不会修改文档。\n"
+                    "请直接用自然语言回答用户的问题或提供建议，支持 Markdown 格式。\n"
+                    "不要输出任何 <TOOL> 标签或 JSON 指令。"
+                )
+            else:
+                # Concise, example-driven prompt that small local models can follow reliably
+                system_instruction = (
+                    f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n\n"
+                    "【重要规则】\n"
+                    "当用户要求插入、修改、翻译、润色等文档操作时，你必须在回复末尾输出修改指令。\n"
+                    "不要只描述你会做什么——直接输出指令，让程序执行。\n\n"
+                    "修改指令格式（必须完整、一行输出）：\n"
+                    "<TOOL>{\"type\": \"set_html\", \"value\": \"<p>内容</p>\"}</TOOL>\n\n"
+                    "示例 1 — 用户让你插入内容：\n"
+                    "用户：写一行「你好世界」插入文档\n"
+                    "AI：已插入。<TOOL>{\"type\": \"set_html\", \"value\": \"<p>你好世界</p>\"}</TOOL>\n\n"
+                    "示例 2 — 用户让你翻译并插入：\n"
+                    "用户：翻译成英文插入文档\n"
+                    "AI：<TOOL>{\"type\": \"set_html\", \"value\": \"<p>Hello world</p>\"}</TOOL>\n\n"
+                    "示例 3 — 用户说「在光标处插入」（明确插入指令）：\n"
+                    "用户：请在光标处插入\n"
+                    "AI：已插入。<TOOL>{\"type\": \"set_html\", \"value\": \"<p>上一步生成的内容</p>\"}</TOOL>\n\n"
+                    f"{action_hint}\n"
+                    "其他文件类型指令：\n"
+                    "  XLSX → <TOOL>{\"type\":\"set_cell\",\"r\":0,\"c\":0,\"value\":\"值\"}</TOOL>\n"
+                    "  PPTX → <TOOL>{\"type\":\"set_pptx_text\",\"slide_index\":0,\"shape_id\":1,\"value\":\"新文字\"}</TOOL>"
+                )
 
             # ── Build prompt with multi-turn history ──────────────────────
             # Assemble history (最多保留最近 10 轮，防止 token 超限)
@@ -324,8 +334,9 @@ def register_socket_events(socketio):
             socketio.emit("agent_task_complete", {"result": clean_text},
                           namespace="/doc", to=sid)
 
-            for tc in tool_calls:
-                socketio.emit("doc_tool_call", tc, namespace="/doc", to=sid)
+            if output_mode != "chat":
+                for tc in tool_calls:
+                    socketio.emit("doc_tool_call", tc, namespace="/doc", to=sid)
 
         socketio.start_background_task(_task)
 

@@ -3464,6 +3464,14 @@ body.desktop-mode .pill-btn {
     font-size: 0.80em;
     color: var(--text-muted);
 }
+.koto-steps-skills-done {
+    display: flex; gap: 3px; flex-wrap: wrap; margin-left: 6px;
+}
+.koto-steps-skills-done .skill-badge {
+    font-size: 0.72em;
+    padding: 1px 6px;
+    opacity: 0.75;
+}
 .koto-steps[open] .koto-steps-summary {
     margin-bottom: 5px;
 }

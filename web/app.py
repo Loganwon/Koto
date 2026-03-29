@@ -1584,6 +1584,8 @@ except Exception:
     APP_VERSION = "unknown"
 # 静态资源缓存，减少重复加载
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
+# Always re-check templates on disk so edits take effect without server restart
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 # ✅ 允许最大 20MB 请求体（语音 base64 约 1-5MB，留足余量）
 app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 # Session cookie security hardening
