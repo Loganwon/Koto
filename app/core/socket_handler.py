@@ -477,8 +477,28 @@ def _is_ollama_alive() -> bool:
 
 
 def _get_local_provider():
-    """Return OllamaLLMProvider with auto-selected best local model."""
+    """Return OllamaLLMProvider with the best available local model.
+
+    Queries /api/tags directly to avoid depending on LocalModelRouter which
+    may not have a pick_best_chat_model() method.  Falls back to model=None
+    (which uses OllamaLLMProvider's own auto-selection) if the query fails.
+    """
     from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+    try:
+        import urllib.request as _ur, json as _json
+        with _ur.urlopen("http://localhost:11434/api/tags", timeout=3) as r:
+            tags = _json.loads(r.read())
+        models = [m["name"] for m in tags.get("models", [])]
+        if models:
+            # Prefer larger/better models by simple heuristic
+            preferred = next(
+                (m for m in models if any(k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b"))),
+                models[0]
+            )
+            logger.info("[DocAI] Using local model: %s", preferred)
+            return OllamaLLMProvider(model=preferred)
+    except Exception as e:
+        logger.warning("[DocAI] Could not query Ollama model list: %s", e)
     return OllamaLLMProvider(model=None)
 
 
