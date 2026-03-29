@@ -405,6 +405,13 @@ window.WA = window.WA || {};
       if (!rangeText.includes('未选中区域')) sel = rangeText;
     }
     if (!sel) return;
+    // Save WangEditor Slate selection before we move focus to chat input
+    if (state.activeEditor && state.activeEditor.editor && state.fileType === 'docx') {
+      const slateSelection = state.activeEditor.editor.selection;
+      if (slateSelection) {
+        state.activeEditor._savedRange = JSON.parse(JSON.stringify(slateSelection));
+      }
+    }
     // Pin as Copilot-style chip — user types their question separately
     state.pinnedSelection = sel;
     const preview = sel.length > 200 ? sel.substring(0, 200) + '…' : sel;
@@ -435,6 +442,15 @@ window.WA = window.WA || {};
         $('wa-selection-preview').textContent = preview;
         $('wa-selection-chip').style.display = 'flex';
         $('wa-pdf-tooltip').style.display = 'none';
+
+        // Save the WangEditor internal Slate selection so applyToolCall can restore it.
+        // Must be done here — BEFORE the editor loses focus and browser clears the range.
+        if (state.activeEditor && state.activeEditor.editor && state.fileType === 'docx') {
+          const slateSelection = state.activeEditor.editor.selection;
+          if (slateSelection) {
+            state.activeEditor._savedRange = JSON.parse(JSON.stringify(slateSelection));
+          }
+        }
       }
     });
   }
@@ -526,12 +542,11 @@ window.WA = window.WA || {};
       if (!this.editor) return;
       if (cmd.type === 'set_html' || cmd.type === 'insert_text') {
         const val = cmd.value || '';
-        if (cmd.mode === 'replace' && this.editor.getSelectionText && this.editor.getSelectionText()) {
-          // Replace selected text: WangEditor handles selection replacement via dangerouslyInsertHtml when selection active
-          this.editor.dangerouslyInsertHtml(val);
-        } else {
-          this.editor.dangerouslyInsertHtml(val);
-        }
+        // Restore editor focus so WangEditor re-activates its saved Slate selection/cursor.
+        // Without this, dangerouslyInsertHtml has no target and silently does nothing.
+        this.editor.focus();
+        this.editor.dangerouslyInsertHtml(val);
+        this._savedRange = null;
         showToast('AI 已更新文档', 'success');
       }
     }
