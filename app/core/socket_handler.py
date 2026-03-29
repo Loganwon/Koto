@@ -231,9 +231,6 @@ def register_socket_events(socketio):
             def _try_local():
                 if not _is_ollama_alive():
                     return None
-                socketio.emit("agent_stream_chunk",
-                              {"chunk": "⚡ 在线模型暂时繁忙，已切换至本地 AI…\n\n"},
-                              namespace="/doc", to=sid)
                 local = _get_local_provider()
                 # Local Ollama: fold system_instruction into the prompt
                 local_prompt = f"[系统指令]\n{system_instruction}\n\n{full_prompt}"
@@ -586,9 +583,6 @@ def _stream_llm(emit, prompt, text):
         return None
 
     try:
-        emit("agent_stream_chunk",
-             {"chunk": "⚡ 在线模型暂时繁忙，已切换至本地 AI…\n\n"},
-             namespace="/doc")
         local = _get_local_provider()
         gen = local.generate_content(prompt=full_prompt, stream=True)
         full = []
