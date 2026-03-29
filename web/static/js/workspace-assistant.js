@@ -1791,43 +1791,38 @@ window.WA = window.WA || {};
 
      try {
          const data = state.activeEditor.serialize();
-         const payload = {
-            file_type: state.fileType,
-            file_id: state.fileId,
-            file_name: state.fileName,
-            data: data
-         };
-
-         const res = await fetch('/api/v1/workspace/save_file', {
+         const res = await fetch('/api/v1/workspace/auto_save', {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify(payload)
+             body: JSON.stringify({
+               file_type: state.fileType,
+               file_id: state.fileId,
+               ws_source_path: state.wsSourcePath || null,
+               data,
+             }),
          });
 
          if (!res.ok) {
              const json = await res.json();
-             throw new Error(json.error || '导出失败');
+             throw new Error(json.error || '保存失败');
          }
 
-         // Trigger download
-         const blob = await res.blob();
-         const url = window.URL.createObjectURL(blob);
-         const a = document.createElement('a');
-         a.href = url;
-         a.download = state.fileName.includes('.') ? 
-             state.fileName.substring(0, state.fileName.lastIndexOf('.')) + '_modified.' + state.fileType : 
-             `koto_export.${state.fileType}`;
-         document.body.appendChild(a);
-         a.click();
-         a.remove();
-         window.URL.revokeObjectURL(url);
-         
-         showToast('导出成功', 'success');
+         // Clear dirty flag on active tab
+         const tab = state.openTabs.find(t => t.path === state.activeTabPath);
+         if (tab) { tab.modified = false; _renderTabs(); }
+
+         const status = $('wa-autosave-status');
+         if (status) {
+           status.className = 'saved';
+           status.textContent = `✓ 已保存`;
+           setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 3000);
+         }
+         showToast('已保存到 ' + (state.wsSourcePath || state.fileName), 'success');
      } catch(e) {
          showToast(e.message, 'error');
      } finally {
          btn.disabled = false;
-         btn.innerHTML = `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> 保存 / 导出`;
+         btn.innerHTML = `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> 保存`;
      }
   };
 
