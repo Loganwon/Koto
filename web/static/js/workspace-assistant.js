@@ -565,12 +565,14 @@ window.WA = window.WA || {};
     if (!e.target.closest('#wa-ctx-menu')) _closeCtxMenu();
   }, true);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeCtxMenu(); });
+  // Use capture:true so this fires BEFORE WangEditor can call stopPropagation()
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
       e.preventDefault();
+      e.stopPropagation();
       WA.saveFile();
     }
-  });
+  }, true);
 
   window.WA._ctxOpen = () => { _closeCtxMenu(); if (_ctxTarget.path) WA.openWorkspaceFile(_ctxTarget.path); };
   window.WA._ctxRename = () => { _closeCtxMenu(); if (_ctxTarget.path) WA.renameWorkspaceFile(_ctxTarget.path, _ctxTarget.name); };
@@ -1749,6 +1751,7 @@ window.WA = window.WA || {};
   window.WA.saveFile = async () => {
      if (!state.activeEditor || !state.fileType || state.fileType === 'pdf') return;
      const btn = $('wa-save-btn');
+     if (btn.disabled) return;  // already saving
      btn.disabled = true;
      btn.innerHTML = '保存中...';
 
