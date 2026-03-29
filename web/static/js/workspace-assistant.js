@@ -48,10 +48,12 @@ window.WA = window.WA || {};
   }
 
   // ── Recent files helpers ──
-  function _saveRecentFile(name, ext) {
+  // path: workspace-relative path used to re-open the file (e.g. "uploads/foo.docx")
+  function _saveRecentFile(name, ext, path) {
     const MAX_RECENT = 8;
+    const wsPath = path || ('uploads/' + name);
     state.recentFiles = state.recentFiles.filter(f => f.name !== name);
-    state.recentFiles.unshift({ name, ext, time: Date.now() });
+    state.recentFiles.unshift({ name, ext, path: wsPath, time: Date.now() });
     if (state.recentFiles.length > MAX_RECENT) state.recentFiles.length = MAX_RECENT;
     localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
     renderRecentFiles();
@@ -66,7 +68,9 @@ window.WA = window.WA || {};
     }
     el.innerHTML = state.recentFiles.map(f => {
       const icon = _EXT_ICON[f.ext] || '📄';
-      const esc = f.name.replace(/'/g, "\\'");
+      // Use stored path (workspace-relative) so re-opening works correctly
+      const wsPath = f.path || ('uploads/' + f.name);
+      const esc = wsPath.replace(/'/g, "\\'");
       return `<div class="wa-file-item file" data-depth="0" onclick="WA.openWorkspaceFile('${esc}')" title="${f.name}">
         <span class="wa-file-icon">${icon}</span>
         <span style="overflow:hidden;text-overflow:ellipsis;flex:1;font-size:12px">${f.name}</span>
@@ -741,9 +745,11 @@ window.WA = window.WA || {};
          state.fileId = json.file_id;
          state.fileType = json.file_type;
          state.fileName = json.file_name;
-         // Save to recent files
+         // Save to recent files with workspace path so re-opening works
          const ext = json.file_name.split('.').pop().toLowerCase();
-         _saveRecentFile(json.file_name, ext);
+         // file.name is 'uploads/foo.docx' when opened from workspace tree, or just 'foo.docx' from local upload
+         const wsPath = file.name.includes('/') ? file.name : ('uploads/' + json.file_name);
+         _saveRecentFile(json.file_name, ext, wsPath);
          $('wa-file-name').textContent = state.fileName;
          $('wa-save-btn').disabled = (state.fileType === 'pdf');
 
