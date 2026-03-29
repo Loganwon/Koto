@@ -1767,6 +1767,13 @@ window.WA = window.WA || {};
     }
   };
 
+  // MIME types for showSaveFilePicker
+  const _MIME = {
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  };
+
   let _isSaving = false;
   window.WA.saveFile = async () => {
      if (!state.activeEditor || !state.fileType || state.fileType === 'pdf') return;
@@ -1776,18 +1783,39 @@ window.WA = window.WA || {};
      btn.disabled = true;
      btn.innerHTML = '保存中...';
 
-     // Capture state BEFORE any awaits — async gaps can lose tab/fsHandle references
+     // Capture all mutable state NOW, before any awaits
      const _saveTabPath  = state.activeTabPath;
      const _saveTab      = state.openTabs.find(t => t.path === _saveTabPath);
      const _saveFileId   = state.fileId;
      const _saveFileType = state.fileType;
      const _saveWsPath   = state.wsSourcePath;
-     const _saveFsHandle = (_saveTab && _saveTab.fsHandle) || _fsHandleMap.get(_saveWsPath) || null;
+     let   _saveFsHandle = (_saveTab && _saveTab.fsHandle) || _fsHandleMap.get(_saveWsPath) || null;
 
      try {
+         // ── Acquire a FileSystemFileHandle if we don't have one yet ──
+         // This must happen BEFORE any other await so the browser's user-gesture
+         // activation (from Ctrl+S) is still live when showSaveFilePicker is called.
+         if (!_saveFsHandle && window.showSaveFilePicker && _saveFileType !== 'pdf') {
+           try {
+             const ext  = (_saveWsPath || state.fileName || 'file.docx').split('.').pop().toLowerCase();
+             const mime = _MIME[ext] || 'application/octet-stream';
+             _saveFsHandle = await window.showSaveFilePicker({
+               suggestedName: state.fileName || _saveWsPath || `document.${ext}`,
+               types: [{ description: '文档', accept: { [mime]: ['.' + ext] } }],
+               excludeAcceptAllOption: false,
+             });
+             // Persist so every future Ctrl+S reuses the same location
+             if (_saveTab) _saveTab.fsHandle = _saveFsHandle;
+             _fsHandleMap.set(_saveWsPath, _saveFsHandle);
+           } catch (pickerErr) {
+             if (pickerErr.name === 'AbortError') return; // user cancelled — do nothing
+             console.warn('[saveFile] showSaveFilePicker:', pickerErr);
+             // not fatal — fall through and do workspace-only save
+           }
+         }
+
          const data = state.activeEditor.serialize();
-         document.title = '[SAVE] ' + (data ? data.length : 0) + ' chars | fsHandle=' + !!_saveFsHandle;
-         console.log('[saveFile] data len=' + (data?.length || 0) + ' fsHandle=' + !!_saveFsHandle + ' fileId=' + _saveFileId);
+         console.log('[saveFile] len=' + (data?.length || 0) + ' fsHandle=' + !!_saveFsHandle + ' fileId=' + _saveFileId);
          const res = await fetch('/api/v1/workspace/auto_save', {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },
@@ -1812,29 +1840,23 @@ window.WA = window.WA || {};
            _renderTabs();
          }
 
-         // Write directly to original file via FileSystemFileHandle (captured before await)
+         // Write the saved bytes to the chosen local file
          if (_saveFsHandle) {
            try {
              const rawRes = await fetch(`/api/v1/workspace/raw/${_saveFileId}`);
              if (rawRes.ok) {
                const bytes = await rawRes.arrayBuffer();
                await _writeToFileHandle(_saveFsHandle, bytes);
-               showToast('✓ 已保存到原始文件', 'success');
+               showToast('✓ 已保存', 'success');
              } else {
                showToast('已保存到工作区 (无法写回原始位置)', 'success');
              }
            } catch (fsErr) {
              console.warn('[saveFile] FileSystem write failed:', fsErr);
-             showToast('已保存到工作区 (原始文件写入被拒绝)', 'success');
+             showToast('已保存到工作区 (原始文件写入失败)', 'success');
            }
          } else {
-           const status = $('wa-autosave-status');
-           if (status) {
-             status.className = 'saved';
-             status.textContent = `✓ 已保存`;
-             setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 3000);
-           }
-           showToast(`已保存 (${data.length} chars)`, 'success');
+           showToast(`已保存`, 'success');
          }
      } catch(e) {
          showToast(e.message, 'error');
