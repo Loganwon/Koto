@@ -164,16 +164,12 @@ def open_file():
     uploaded.save(str(tmp_path))
 
     # 持久化保存到 workspace/ 根目录（直接可见，无需子文件夹）
+    # Overwrite if a file with the same name exists — no numbered clones.
     try:
         from web.shared import WORKSPACE_DIR
         root_dir = Path(WORKSPACE_DIR)
         root_dir.mkdir(parents=True, exist_ok=True)
-        stem = Path(original_name).stem
         persistent_path = root_dir / original_name
-        counter = 1
-        while persistent_path.exists():
-            persistent_path = root_dir / f"{stem}_{counter}{ext}"
-            counter += 1
         import shutil
         shutil.copy2(str(tmp_path), str(persistent_path))
     except Exception as pe:
