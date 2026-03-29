@@ -1771,17 +1771,25 @@ window.WA = window.WA || {};
      btn.disabled = true;
      btn.innerHTML = '保存中...';
 
+     // Capture state BEFORE any awaits — async gaps can lose tab/fsHandle references
+     const _saveTabPath  = state.activeTabPath;
+     const _saveTab      = state.openTabs.find(t => t.path === _saveTabPath);
+     const _saveFsHandle = _saveTab ? _saveTab.fsHandle : null;
+     const _saveFileId   = state.fileId;
+     const _saveFileType = state.fileType;
+     const _saveWsPath   = state.wsSourcePath;
+
      try {
          const data = state.activeEditor.serialize();
-         document.title = '[SAVE] ' + (data ? data.length : 0) + ' chars';
-         console.log('[saveFile] data len=' + (data?.length || 0) + ' fileId=' + state.fileId + ' wsPath=' + state.wsSourcePath);
+         document.title = '[SAVE] ' + (data ? data.length : 0) + ' chars | fsHandle=' + !!_saveFsHandle;
+         console.log('[saveFile] data len=' + (data?.length || 0) + ' fsHandle=' + !!_saveFsHandle + ' fileId=' + _saveFileId);
          const res = await fetch('/api/v1/workspace/auto_save', {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },
              body: JSON.stringify({
-               file_type: state.fileType,
-               file_id: state.fileId,
-               ws_source_path: state.wsSourcePath || null,
+               file_type: _saveFileType,
+               file_id: _saveFileId,
+               ws_source_path: _saveWsPath || null,
                explicit: true,
                data,
              }),
@@ -1792,29 +1800,25 @@ window.WA = window.WA || {};
              throw new Error(json.error || '保存失败');
          }
 
-         const json = await res.json();
-         const tab = state.openTabs.find(t => t.path === state.activeTabPath);
-         if (tab) {
-           tab.modified = false;
-           // Update serverData so tab restore never uses stale initial content
-           if (state.fileType === 'docx' && tab.serverData) tab.serverData.html = data;
+         await res.json();
+         if (_saveTab) {
+           _saveTab.modified = false;
+           if (_saveFileType === 'docx' && _saveTab.serverData) _saveTab.serverData.html = data;
            _renderTabs();
          }
 
-         // If we have a FileSystemFileHandle, write bytes directly to the original file on disk
-         if (tab && tab.fsHandle) {
+         // Write directly to original file via FileSystemFileHandle (captured before await)
+         if (_saveFsHandle) {
            try {
-             // Fetch the saved bytes from tmp
-             const rawRes = await fetch(`/api/v1/workspace/raw/${state.fileId}`);
+             const rawRes = await fetch(`/api/v1/workspace/raw/${_saveFileId}`);
              if (rawRes.ok) {
                const bytes = await rawRes.arrayBuffer();
-               await _writeToFileHandle(tab.fsHandle, bytes);
+               await _writeToFileHandle(_saveFsHandle, bytes);
                showToast('✓ 已保存到原始文件', 'success');
              } else {
                showToast('已保存到工作区 (无法写回原始位置)', 'success');
              }
            } catch (fsErr) {
-             // User may have denied write permission
              console.warn('[saveFile] FileSystem write failed:', fsErr);
              showToast('已保存到工作区 (原始文件写入被拒绝)', 'success');
            }
