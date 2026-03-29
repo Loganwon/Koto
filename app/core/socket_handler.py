@@ -11,6 +11,7 @@
 # ══════════════════════════════════════════════════════════════
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -158,29 +159,34 @@ def register_socket_events(socketio):
 
         # ── Normal text chat mode ──────────────────────────────────────────
         def _task():
-            # ── Build system instruction (Koto-aligned, document-aware) ──
+            # ── Build system instruction ──────────────────────────────────────
             file_ctx = f"文件名：{file_name}，" if file_name else ""
-            selection_hint = (
-                "用户当前有选中文字，如需修改文档请在回复后附带 <TOOL> 指令替换选区。"
-                if has_selection else
-                "用户当前无选区，如需修改文档请在回复后附带 <TOOL> 指令在光标处插入。"
-            )
+            if has_selection:
+                action_hint = "用户当前有选中文字。修改时用 set_html 替换选区内容。"
+            else:
+                action_hint = "用户当前无选区。修改时用 set_html 在光标处插入内容。"
+
+            # Concise, example-driven prompt that small local models can follow reliably
             system_instruction = (
-                "你是 Koto 文档 AI 助手，直接运行在用户的文件工作区中。\n"
-                f"当前文件类型：{file_type}。{file_ctx}\n"
-                "你的职责：\n"
-                "  1. 直接、准确地回答用户关于文档的问题。\n"
-                "  2. 当用户要求修改文档内容时，在回复末尾附上操作指令（见下方格式）。\n"
-                "  3. 回复使用 Markdown 格式，结构清晰。\n\n"
-                "【文档修改指令格式】\n"
-                "当需要修改文档时，在回复结尾单独一行附上：\n"
-                "<TOOL>{\"type\": \"set_html\", \"value\": \"<p>新内容</p>\"}</TOOL>\n"
-                "指令类型说明：\n"
-                "  DOCX → set_html: value 为完整的 HTML 片段（支持 <h1>~<h6>, <p>, <strong>, <em>, <ul>, <ol>, <li>, <table>）\n"
-                "  XLSX → set_cell: {\"type\":\"set_cell\",\"r\":行号,\"c\":列号,\"value\":\"值\"}\n"
-                "         set_cells: {\"type\":\"set_cells\",\"cells\":[{\"r\":0,\"c\":0,\"value\":\"A1\"}]}\n"
-                "  PPTX → set_pptx_text: {\"type\":\"set_pptx_text\",\"slide_index\":0,\"shape_id\":1,\"value\":\"新文字\"}\n"
-                f"{selection_hint}"
+                f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n\n"
+                "【重要规则】\n"
+                "当用户要求插入、修改、翻译、润色等文档操作时，你必须在回复末尾输出修改指令。\n"
+                "不要只描述你会做什么——直接输出指令，让程序执行。\n\n"
+                "修改指令格式（必须完整、一行输出）：\n"
+                "<TOOL>{\"type\": \"set_html\", \"value\": \"<p>内容</p>\"}</TOOL>\n\n"
+                "示例 1 — 用户让你插入内容：\n"
+                "用户：写一行「你好世界」插入文档\n"
+                "AI：已插入。<TOOL>{\"type\": \"set_html\", \"value\": \"<p>你好世界</p>\"}</TOOL>\n\n"
+                "示例 2 — 用户让你翻译并插入：\n"
+                "用户：翻译成英文插入文档\n"
+                "AI：<TOOL>{\"type\": \"set_html\", \"value\": \"<p>Hello world</p>\"}</TOOL>\n\n"
+                "示例 3 — 用户说「在光标处插入」（明确插入指令）：\n"
+                "用户：请在光标处插入\n"
+                "AI：已插入。<TOOL>{\"type\": \"set_html\", \"value\": \"<p>上一步生成的内容</p>\"}</TOOL>\n\n"
+                f"{action_hint}\n"
+                "其他文件类型指令：\n"
+                "  XLSX → <TOOL>{\"type\":\"set_cell\",\"r\":0,\"c\":0,\"value\":\"值\"}</TOOL>\n"
+                "  PPTX → <TOOL>{\"type\":\"set_pptx_text\",\"slide_index\":0,\"shape_id\":1,\"value\":\"新文字\"}</TOOL>"
             )
 
             # ── Build prompt with multi-turn history ──────────────────────
@@ -289,6 +295,31 @@ def register_socket_events(socketio):
 
             # ── Parse and emit any embedded tool calls ────────────────────
             clean_text, tool_calls = _parse_tool_calls(result_text or "")
+
+            # ── Fallback: user said "insert at cursor" but AI produced no tool call ──
+            # Synthesise a set_html from the last assistant turn in history so the
+            # content actually lands in the document instead of just being echoed.
+            _INSERT_TRIGGERS = ("在光标处插入", "插入文档", "插入到文档", "请插入", "插入内容")
+            if (not tool_calls
+                    and file_type in ("docx", "pptx")
+                    and any(t in prompt for t in _INSERT_TRIGGERS)):
+                # Find the last assistant message that has substantive content
+                last_ai_content = ""
+                for turn in reversed(history or []):
+                    if turn.get("role") == "assistant":
+                        c = turn.get("content", "").strip()
+                        # Strip any existing TOOL tags and short ack messages
+                        c_clean = re.sub(r'<TOOL>.*?</TOOL>', '', c, flags=re.DOTALL).strip()
+                        if len(c_clean) > 10:
+                            last_ai_content = c_clean
+                            break
+                if last_ai_content:
+                    import html as _html
+                    # Convert plain markdown-ish text to minimal HTML paragraphs
+                    paragraphs = [p.strip() for p in last_ai_content.split('\n') if p.strip()]
+                    html_val = "".join(f"<p>{_html.escape(p)}</p>" for p in paragraphs)
+                    tool_calls = [{"type": "set_html", "value": html_val}]
+                    logger.info("[DocAI] Synthesised set_html from last assistant turn (insert fallback)")
 
             socketio.emit("agent_task_complete", {"result": clean_text},
                           namespace="/doc", to=sid)
@@ -422,6 +453,8 @@ def _handle_code_exec(emit, payload):
 def _parse_tool_calls(text: str):
     """
     Parse embedded <TOOL>JSON</TOOL> blocks from AI response text.
+    Also catches bare JSON and code-fenced JSON emitted by smaller local models
+    that don't reliably wrap with <TOOL> tags.
     Returns (clean_text, list_of_tool_call_dicts).
     Tool calls are stripped from the visible text before display.
     """
@@ -429,20 +462,47 @@ def _parse_tool_calls(text: str):
     import json as _json
 
     tool_calls = []
-    pattern = re.compile(r'<TOOL>(.*?)</TOOL>', re.DOTALL)
+    _KNOWN_TYPES = {"set_html", "set_cell", "set_cells", "set_pptx_text"}
 
-    def _replace(m):
-        raw = m.group(1).strip()
+    def _try_parse(raw: str):
+        raw = raw.strip()
         try:
             tc = _json.loads(raw)
-            if isinstance(tc, dict) and "type" in tc:
+            if isinstance(tc, dict) and tc.get("type") in _KNOWN_TYPES:
                 tool_calls.append(tc)
+                return True
         except Exception:
-            logger.warning("[DocAI] Failed to parse tool call JSON: %.100s", raw)
-        return ""  # remove from displayed text
+            pass
+        return False
 
-    clean = pattern.sub(_replace, text).strip()
-    return clean, tool_calls
+    # Pass 1: explicit <TOOL>…</TOOL> wrapper (preferred format)
+    pattern = re.compile(r'<TOOL>(.*?)</TOOL>', re.DOTALL)
+    def _replace(m):
+        _try_parse(m.group(1))
+        return ""
+    text = pattern.sub(_replace, text).strip()
+
+    # Pass 2: code-fenced JSON block  ```json {...} ```  or  ``` {...} ```
+    fence_pat = re.compile(r'```(?:json)?\s*(\{[^`]+\})\s*```', re.DOTALL)
+    def _replace_fence(m):
+        if _try_parse(m.group(1)):
+            return ""
+        return m.group(0)
+    text = fence_pat.sub(_replace_fence, text).strip()
+
+    # Pass 3: bare JSON on its own line that looks like a tool call
+    # Match lines starting with {"type": "set_html" ...} (greedy to closing brace)
+    line_pat = re.compile(
+        r'(?:^|\n)\s*(\{"type":\s*"(?:set_html|set_cell|set_cells|set_pptx_text)".*?\})\s*(?=\n|$)',
+        re.DOTALL
+    )
+    def _replace_line(m):
+        if _try_parse(m.group(1)):
+            return ""
+        return m.group(0)
+    text = line_pat.sub(_replace_line, text).strip()
+
+    return text, tool_calls
 
 
 
