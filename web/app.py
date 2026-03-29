@@ -2054,6 +2054,7 @@ def _register_blueprints_deferred():
         ("web.blueprints.chat", "chat_bp", None, "Chat"),
         ("web.blueprints.workspace_assistant", "workspace_assistant_bp", None, "WorkspaceAssistant"),
         ("web.blueprints.editor_docs", "editor_docs_bp", None, "EditorDocs"),
+        ("web.blueprints.pptx_editor", "pptx_editor_bp", None, "PptxEditor"),
     ]
     import importlib as _il
 
