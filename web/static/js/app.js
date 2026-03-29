@@ -631,9 +631,14 @@ function finishSetup() {
 function browseSetupFolder() {
     // 使用现有的文件夹浏览功能
     currentBrowseTarget = 'setup_workspace';
-    currentBrowsePath = 'C:\\';
-    document.getElementById('manualPathInput').value = currentBrowsePath;
-    loadFolderList(currentBrowsePath);
+    const startPath = document.getElementById('setupWorkspacePath')?.value.trim() || browseHomeDir || '';
+    currentBrowsePath = startPath;
+    document.getElementById('manualPathInput').value = startPath;
+    if (startPath) {
+        loadFolderList(startPath);
+    } else {
+        loadFolderDrives();
+    }
     document.getElementById('folderModal').classList.add('active');
 }
 
@@ -5087,6 +5092,8 @@ function applySettingsToUI() {
     document.getElementById('settingDocumentsDir').value = currentSettings.storage?.documents_dir || '';
     document.getElementById('settingImagesDir').value = currentSettings.storage?.images_dir || '';
     document.getElementById('settingChatsDir').value = currentSettings.storage?.chats_dir || '';
+    // Cache home dir for folder browser fallback
+    browseHomeDir = currentSettings.storage?.workspace_dir || '';
     
     // Appearance settings - update theme selector
     const currentTheme = currentSettings.appearance?.theme || 'light';
@@ -5173,12 +5180,11 @@ function selectTheme(theme) {
 
 function openSettings() {
     loadSettings();
-    loadMemories(); // Load memories when opening settings
     loadSkills();   // Load skills when opening settings
     loadSkillBindings();    // Load intent bindings
     loadTriggers();         // Load scheduled triggers
     fileHubLoadStats();     // Load file registry stats
-    loadShadowStatus();     // Load shadow watcher status
+    loadShadowStatus();     // Load shadow watcher status (includes shadow memories)
     detectLocalModels();    // 自动扫描本地 Ollama 模型
     document.getElementById('settingsPanel').classList.add('active');
     document.body.classList.add('settings-panel-open');
@@ -5897,6 +5903,80 @@ async function batchExtractMemories() {
     }
 }
 
+// ================= Shadow Memory Management (替代独立长期记忆) =================
+
+async function loadShadowMemories() {
+    const listEl = document.getElementById('shadowMemoryList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="memory-empty" style="font-size:12px;color:var(--text-muted);">正在加载...</div>';
+    try {
+        const resp = await fetch('/api/shadow/memories');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '加载失败');
+        renderShadowMemories(data.data || []);
+    } catch (e) {
+        listEl.innerHTML = `<div class="memory-empty" style="font-size:12px;color:var(--accent-danger)">加载失败: ${e.message}</div>`;
+    }
+}
+
+function renderShadowMemories(memories) {
+    const listEl = document.getElementById('shadowMemoryList');
+    if (!listEl) return;
+    if (!memories || memories.length === 0) {
+        listEl.innerHTML = '<div class="memory-empty" style="font-size:12px;color:var(--text-muted);">暂无影子记忆。Koto 会在对话中自动学习，也可手动添加。</div>';
+        return;
+    }
+    // 按来源分组显示
+    const sorted = [...memories].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    listEl.innerHTML = sorted.map(m => `
+        <div class="memory-item" style="padding:5px 6px;display:flex;align-items:flex-start;gap:6px;border-radius:4px;margin-bottom:3px;background:var(--bg-hover);">
+            <div style="flex:1;min-width:0;">
+                <div style="font-size:12px;color:var(--text-primary);line-height:1.4;">${escapeHtml(m.content)}</div>
+                <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">
+                    ${escapeHtml(m.created_at || '')} · ${m.source === 'shadow' ? '🤖 自动' : '✍️ 手动'} · ${escapeHtml(m.category || '')}
+                </div>
+            </div>
+            <button onclick="deleteShadowMemory('${m.id}')" title="忘记" style="background:none;border:none;cursor:pointer;color:var(--text-muted);padding:2px;flex-shrink:0;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+            </button>
+        </div>
+    `).join('');
+}
+
+async function addShadowMemory() {
+    const input = document.getElementById('shadowMemoryInput');
+    const content = (input?.value || '').trim();
+    if (!content) return;
+    try {
+        const resp = await fetch('/api/shadow/memories', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, category: 'user_preference' }),
+        });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '添加失败');
+        if (input) input.value = '';
+        loadShadowMemories();
+    } catch (e) {
+        alert('添加失败: ' + e.message);
+    }
+}
+
+async function deleteShadowMemory(id) {
+    if (!confirm('确定要忘记这条记忆吗？')) return;
+    try {
+        const resp = await fetch(`/api/shadow/memories/${id}`, { method: 'DELETE' });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '删除失败');
+        loadShadowMemories();
+    } catch (e) {
+        alert('删除失败: ' + e.message);
+    }
+}
+
 // 等待 pywebview API 就绪（pywebviewready 在每次页面导航后重新触发）
 function waitForPywebviewApi(apiName, timeout) {
     return new Promise((resolve) => {
@@ -6022,35 +6102,91 @@ function updateCodeTheme(theme) {
 // 主题已在主初始化流程中统一加载和应用，无需额外的 DOMContentLoaded 监听器
 
 // ================= Folder Browser =================
+let browseHomeDir = '';  // resolved from settings on first use
+
 async function browseFolder(target) {
     currentBrowseTarget = target;
     
-    // Get current path for this setting
+    // Use current value of the input, or fall back to the setting from server, or home dir
     let startPath = '';
     switch(target) {
-        case 'workspace_dir':
-            startPath = document.getElementById('settingWorkspaceDir').value;
-            break;
-        case 'documents_dir':
-            startPath = document.getElementById('settingDocumentsDir').value;
-            break;
-        case 'images_dir':
-            startPath = document.getElementById('settingImagesDir').value;
-            break;
-        case 'chats_dir':
-            startPath = document.getElementById('settingChatsDir').value;
-            break;
+        case 'workspace_dir':   startPath = document.getElementById('settingWorkspaceDir').value; break;
+        case 'documents_dir':   startPath = document.getElementById('settingDocumentsDir').value; break;
+        case 'images_dir':      startPath = document.getElementById('settingImagesDir').value;    break;
+        case 'chats_dir':       startPath = document.getElementById('settingChatsDir').value;     break;
+        case 'setup_workspace': startPath = document.getElementById('setupWorkspacePath')?.value; break;
+    }
+    // If the input is still empty, fall back to the workspace dir from settings, then home
+    if (!startPath && currentSettings?.storage?.workspace_dir) {
+        startPath = currentSettings.storage.workspace_dir;
     }
     
-    currentBrowsePath = startPath || 'C:\\';
+    currentBrowsePath = startPath || browseHomeDir || '';
     document.getElementById('manualPathInput').value = currentBrowsePath;
     
-    await loadFolderList(currentBrowsePath);
+    if (currentBrowsePath) {
+        await loadFolderList(currentBrowsePath);
+    } else {
+        await loadFolderDrives();
+    }
     document.getElementById('folderModal').classList.add('active');
 }
 
+async function loadFolderDrives() {
+    const container = document.getElementById('folderList');
+    const pathEl = document.getElementById('currentBrowsePath');
+    pathEl.textContent = '我的电脑';
+    container.innerHTML = '<div style="padding:12px; color:var(--text-muted)">正在加载磁盘...</div>';
+    try {
+        const r = await fetch('/api/browse/drives');
+        const d = await r.json();
+        let html = '';
+
+        const quickAccess = d.quick_access || [];
+        if (quickAccess.length) {
+            html += '<div class="folder-group-label">快速访问</div>';
+            for (const loc of quickAccess) {
+                const icon = _quickAccessIcon(loc.name);
+                html += `<div class="folder-item" onclick="loadFolderList('${escapeAttr(loc.path)}')">${icon}<span>${escapeHtml(loc.name)}</span><small style="color:var(--text-muted);margin-left:auto;font-size:11px">${escapeHtml(loc.path)}</small></div>`;
+            }
+        }
+
+        const drives = d.drives || [];
+        if (drives.length) {
+            html += '<div class="folder-group-label">设备和驱动器</div>';
+            for (const drv of drives) {
+                html += `<div class="folder-item" onclick="loadFolderList('${escapeAttr(drv.path)}')">${_driveIcon()}<span>${escapeHtml(drv.name)}</span></div>`;
+            }
+        }
+
+        if (!html) html = '<div style="padding:16px;color:var(--text-muted)">未找到磁盘</div>';
+        container.innerHTML = html;
+        currentBrowsePath = '';
+        document.getElementById('manualPathInput').value = '';
+    } catch(e) {
+        container.innerHTML = `<div style="padding:16px;color:var(--accent-danger)">加载失败: ${escapeHtml(e.message)}</div>`;
+    }
+}
+
+function _quickAccessIcon(name) {
+    const icons = {
+        'Koto 工作区': '🗂️',
+        '桌面': '🖥️', '文档': '📄', '下载': '⬇️', '图片': '🖼️',
+        '视频': '🎬', '音乐': '🎵', '用户主目录': '🏠',
+    };
+    const emoji = icons[name] || '📁';
+    return `<span style="font-size:16px;margin-right:8px;min-width:20px;flex-shrink:0">${emoji}</span>`;
+}
+
+function _driveIcon() {
+    return `<span style="font-size:16px;margin-right:8px;min-width:20px;flex-shrink:0">💽</span>`;
+}
+
 async function loadFolderList(path) {
-    document.getElementById('currentBrowsePath').textContent = path;
+    if (!path || !path.trim()) { await loadFolderDrives(); return; }
+    path = path.trim();
+    const pathEl = document.getElementById('currentBrowsePath');
+    pathEl.textContent = path;
     
     try {
         const response = await fetch(`/api/browse?path=${encodeURIComponent(path)}`);
@@ -6059,34 +6195,23 @@ async function loadFolderList(path) {
         const container = document.getElementById('folderList');
         
         if (data.error) {
-            container.innerHTML = `<div style="padding: 20px; color: var(--accent-danger);">${data.error}</div>`;
+            container.innerHTML = `<div style="padding: 20px; color: var(--accent-danger);">${escapeHtml(data.error)}</div>`;
             return;
         }
         
         let html = '';
         
+        // Back to My Computer
+        html += `<div class="folder-item folder-item-computer" onclick="loadFolderDrives()"><span style="font-size:15px;margin-right:6px">🖥️</span><span>我的电脑</span></div>`;
+
         // Parent folder
         if (data.parent) {
-            html += `
-                <div class="folder-item" onclick="loadFolderList('${escapeAttr(data.parent)}')">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="15 18 9 12 15 6"></polyline>
-                    </svg>
-                    <span>..</span>
-                </div>
-            `;
+            html += `<div class="folder-item" onclick="loadFolderList('${escapeAttr(data.parent)}')"><span style="font-size:15px;margin-right:8px;flex-shrink:0">↩</span><span>上级目录</span></div>`;
         }
         
         // Folders
         for (const folder of data.folders) {
-            html += `
-                <div class="folder-item" onclick="selectFolder('${escapeAttr(folder.path)}')">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                    </svg>
-                    <span>${escapeHtml(folder.name)}</span>
-                </div>
-            `;
+            html += `<div class="folder-item" onclick="selectFolder('${escapeAttr(folder.path)}')"><span style="font-size:16px;margin-right:8px;min-width:20px;flex-shrink:0">📁</span><span>${escapeHtml(folder.name)}</span></div>`;
         }
         
         if (data.folders.length === 0 && !data.parent) {
@@ -6138,21 +6263,14 @@ async function confirmFolderSelect() {
     
     // Update the input field
     switch(currentBrowseTarget) {
-        case 'workspace_dir':
-            document.getElementById('settingWorkspaceDir').value = path;
-            break;
-        case 'documents_dir':
-            document.getElementById('settingDocumentsDir').value = path;
-            break;
-        case 'images_dir':
-            document.getElementById('settingImagesDir').value = path;
-            break;
-        case 'chats_dir':
-            document.getElementById('settingChatsDir').value = path;
-            break;
+        case 'workspace_dir': document.getElementById('settingWorkspaceDir').value = path; break;
+        case 'documents_dir': document.getElementById('settingDocumentsDir').value  = path; break;
+        case 'images_dir':    document.getElementById('settingImagesDir').value     = path; break;
+        case 'chats_dir':     document.getElementById('settingChatsDir').value      = path; break;
     }
     
     closeFolderModal();
+
 }
 
 function escapeAttr(str) {
@@ -8381,18 +8499,29 @@ const _FILE_CAT_ICONS = {
 
 // ---- Mode switch ----
 function fhSwitchTab(tab) {
-    const isSearch = tab === 'search';
-    document.getElementById('fhTabSearch').style.background = isSearch ? 'var(--accent-primary)' : 'transparent';
-    document.getElementById('fhTabSearch').style.color       = isSearch ? '#ffffff' : 'var(--text-secondary)';
-    document.getElementById('fhTabSearch').style.boxShadow = isSearch ? '0 2px 4px rgba(0,0,0,0.1)' : 'none';
-    
-    document.getElementById('fhTabBrowse').style.background = isSearch ? 'transparent' : 'var(--accent-primary)';
-    document.getElementById('fhTabBrowse').style.color       = isSearch ? 'var(--text-secondary)' : '#ffffff';
-    document.getElementById('fhTabBrowse').style.boxShadow = isSearch ? 'none' : '0 2px 4px rgba(0,0,0,0.1)';
-    
-    document.getElementById('fhPaneSearch').style.display = isSearch ? '' : 'none';
-    document.getElementById('fhPaneBrowse').style.display = isSearch ? 'none' : '';
-    document.getElementById('fhFileList').innerHTML = `
+    const tabs = ['search', 'browse', 'archive'];
+    tabs.forEach(t => {
+        const btn = document.getElementById('fhTab' + t.charAt(0).toUpperCase() + t.slice(1));
+        if (!btn) return;
+        const active = t === tab;
+        btn.style.background  = active ? 'var(--accent-primary)' : 'transparent';
+        btn.style.color       = active ? '#ffffff' : 'var(--text-secondary)';
+        btn.style.boxShadow   = active ? '0 2px 4px rgba(0,0,0,0.1)' : 'none';
+    });
+
+    document.getElementById('fhPaneSearch').style.display  = tab === 'search'  ? '' : 'none';
+    document.getElementById('fhPaneBrowse').style.display  = tab === 'browse'  ? '' : 'none';
+    document.getElementById('fhPaneArchive').style.display = tab === 'archive' ? '' : 'none';
+
+    // hide the unified file list area when on archive tab
+    const fileListWrap = document.getElementById('fhFileList');
+    const resultHeader = document.getElementById('fhResultHeader');
+    if (tab === 'archive') {
+        if (fileListWrap) fileListWrap.style.display = 'none';
+        if (resultHeader) resultHeader.style.display = 'none';
+    } else {
+        if (fileListWrap) fileListWrap.style.display = '';
+        document.getElementById('fhFileList').innerHTML = `
         <div class="memory-empty" style="margin-top:40px; padding: 40px 0; background: var(--bg-elevated); border-radius: 12px; border: 1px dashed var(--border-color); display: flex; flex-direction: column; align-items: center;">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" stroke-width="1.5" style="margin-bottom: 16px;">
                 <circle cx="11" cy="11" r="8"></circle>
@@ -8400,8 +8529,198 @@ function fhSwitchTab(tab) {
             </svg>
             <span style="color: var(--text-muted); font-size: 14px;">在上方选择搜索或浏览模式</span>
         </div>`;
-    document.getElementById('fhResultHeader').style.display = 'none';
+        if (resultHeader) resultHeader.style.display = 'none';
+    }
 }
+
+// ---- Archive mode ----
+let _fhArchiveMode = 'auto';
+let _fhArchiveRules = [];
+
+function fhSetArchiveMode(mode) {
+    _fhArchiveMode = mode;
+    const btnAuto   = document.getElementById('fhArchiveBtnAuto');
+    const btnCustom = document.getElementById('fhArchiveBtnCustom');
+    const rulesArea = document.getElementById('fhCustomRulesArea');
+    if (!btnAuto || !btnCustom) return;
+    if (mode === 'auto') {
+        btnAuto.style.background  = 'var(--accent-primary)';
+        btnAuto.style.color       = '#fff';
+        btnAuto.style.borderColor = 'var(--accent-primary)';
+        btnCustom.style.background  = 'transparent';
+        btnCustom.style.color       = 'var(--text-secondary)';
+        btnCustom.style.borderColor = 'var(--border-color)';
+        if (rulesArea) rulesArea.style.display = 'none';
+    } else {
+        btnCustom.style.background  = 'var(--accent-primary)';
+        btnCustom.style.color       = '#fff';
+        btnCustom.style.borderColor = 'var(--accent-primary)';
+        btnAuto.style.background  = 'transparent';
+        btnAuto.style.color       = 'var(--text-secondary)';
+        btnAuto.style.borderColor = 'var(--border-color)';
+        if (rulesArea) rulesArea.style.display = '';
+        fhRenderArchiveRules();
+    }
+}
+
+function fhRenderArchiveRules() {
+    const container = document.getElementById('fhCustomRules');
+    const empty     = document.getElementById('fhCustomRulesEmpty');
+    if (!container) return;
+    if (_fhArchiveRules.length === 0) {
+        container.innerHTML = '';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    container.innerHTML = _fhArchiveRules.map((r, i) => `
+        <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" value="${escapeHtml(r.match)}" placeholder="匹配模式，如 *.pdf"
+                oninput="_fhArchiveRules[${i}].match=this.value"
+                style="flex:1;min-width:0;font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);height:34px;box-sizing:border-box;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="flex-shrink:0;"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            <input type="text" value="${escapeHtml(r.folder)}" placeholder="目标文件夹名"
+                oninput="_fhArchiveRules[${i}].folder=this.value"
+                style="flex:1;min-width:0;font-size:13px;padding:6px 10px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);height:34px;box-sizing:border-box;">
+            <button onclick="fhRemoveArchiveRule(${i})" title="删除此规则"
+                style="flex-shrink:0;width:30px;height:30px;border:none;border-radius:6px;background:var(--bg-elevated);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;line-height:1;transition:all 0.15s;"
+                onmouseover="this.style.background='#fee2e2';this.style.color='#dc2626';" onmouseout="this.style.background='var(--bg-elevated)';this.style.color='var(--text-muted)';">×</button>
+        </div>`).join('');
+}
+
+function fhAddArchiveRule() {
+    _fhArchiveRules.push({ match: '', folder: '' });
+    fhRenderArchiveRules();
+}
+
+function fhRemoveArchiveRule(idx) {
+    _fhArchiveRules.splice(idx, 1);
+    fhRenderArchiveRules();
+}
+
+function fhLoadArchivePreset() {
+    _fhArchiveRules = [
+        { match: '*.docx', folder: 'Word文档' },
+        { match: '*.doc',  folder: 'Word文档' },
+        { match: '*.pdf',  folder: 'PDF文档'  },
+        { match: '*.xlsx', folder: '表格'     },
+        { match: '*.xls',  folder: '表格'     },
+        { match: '*.csv',  folder: '表格'     },
+        { match: '*.pptx', folder: '演示文稿' },
+        { match: '*.ppt',  folder: '演示文稿' },
+        { match: '*.jpg',  folder: '图片'     },
+        { match: '*.jpeg', folder: '图片'     },
+        { match: '*.png',  folder: '图片'     },
+        { match: '*.gif',  folder: '图片'     },
+        { match: '*.mp4',  folder: '视频'     },
+        { match: '*.mov',  folder: '视频'     },
+        { match: '*.mp3',  folder: '音频'     },
+        { match: '*.wav',  folder: '音频'     },
+        { match: '*.zip',  folder: '压缩包'   },
+        { match: '*.rar',  folder: '压缩包'   },
+        { match: '*.7z',   folder: '压缩包'   },
+    ];
+    fhSetArchiveMode('custom');
+    fhRenderArchiveRules();
+}
+
+async function fhPickArchiveFolder(inputId) {
+    try {
+        const r = await fetch('/api/files/pick-folder');
+        const d = await r.json();
+        if (d.path) {
+            const el = document.getElementById(inputId);
+            if (el) el.value = d.path;
+        }
+    } catch (e) { /* user cancelled or API not available */ }
+}
+
+async function fhDoArchive() {
+    const srcEl  = document.getElementById('fhArchiveSrc');
+    const destEl = document.getElementById('fhArchiveDest');
+    const recEl  = document.getElementById('fhArchiveRecursive');
+    const resultEl = document.getElementById('fhArchiveResult');
+    if (!srcEl || !resultEl) return;
+
+    const src = srcEl.value.trim();
+    if (!src) {
+        srcEl.focus();
+        resultEl.innerHTML = `<div style="padding:14px;border-radius:8px;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;font-size:13px;">请先填写源目录路径</div>`;
+        return;
+    }
+
+    resultEl.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;padding:16px;border-radius:8px;background:var(--bg-elevated);border:1px solid var(--border-color);">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2" style="animation:spin 1s linear infinite;flex-shrink:0;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+            <span style="color:var(--text-secondary);font-size:14px;">正在归档中，请稍候...</span>
+        </div>`;
+
+    try {
+        const body = {
+            source_dir: src,
+            dest_dir:   (destEl?.value || '').trim(),
+            mode:       _fhArchiveMode,
+            recursive:  recEl?.checked !== false,
+            rules:      _fhArchiveMode === 'custom' ? _fhArchiveRules.filter(r => r.match.trim()) : [],
+        };
+        const resp = await fetch('/api/files/archive', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        const d = await resp.json();
+        if (!resp.ok || d.error) {
+            resultEl.innerHTML = `<div style="padding:14px;border-radius:8px;background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;font-size:13px;">归档失败：${escapeHtml(d.error || resp.statusText)}</div>`;
+            return;
+        }
+
+        // Group report by folder
+        const byFolder = {};
+        (d.report || []).forEach(item => {
+            if (!byFolder[item.folder]) byFolder[item.folder] = [];
+            byFolder[item.folder].push(item.src);
+        });
+
+        const folderCards = Object.entries(byFolder).map(([folder, files]) => `
+            <div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:8px;padding:12px;margin-top:8px;">
+                <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:6px;display:flex;align-items:center;gap:6px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+                    ${escapeHtml(folder)} <span style="font-weight:400;color:var(--text-muted);font-size:12px;">(${files.length} 个文件)</span>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);display:flex;flex-direction:column;gap:2px;max-height:80px;overflow-y:auto;">
+                    ${files.slice(0, 8).map(f => `<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(f.split(/[\\/]/).pop())}</span>`).join('')}
+                    ${files.length > 8 ? `<span style="color:var(--text-muted);font-style:italic;">...另 ${files.length - 8} 个文件</span>` : ''}
+                </div>
+            </div>`).join('');
+
+        const errHtml = d.errors?.length ? `
+            <div style="margin-top:10px;padding:10px 14px;border-radius:8px;background:#fef3c7;border:1px solid #f59e0b;font-size:12px;color:#92400e;">
+                <strong>⚠ ${d.errors.length} 个文件处理失败：</strong><br>
+                ${d.errors.map(e => `<span>${escapeHtml(e)}</span>`).join('<br>')}
+            </div>` : '';
+
+        resultEl.innerHTML = `
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:10px;padding:16px;">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    <div>
+                        <div style="font-size:15px;font-weight:600;color:var(--text-primary);">归档完成</div>
+                        <div style="font-size:12px;color:var(--text-muted);">共 ${d.total} 个文件 · 成功 ${d.copied} 个 · 跳过 ${d.skipped} 个</div>
+                    </div>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);padding:8px 12px;background:var(--bg-primary);border-radius:6px;display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="navigator.clipboard.writeText('${d.dest_dir.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect></svg>
+                    目标目录：${escapeHtml(d.dest_dir)}
+                </div>
+                ${folderCards}
+                ${errHtml}
+            </div>`;
+    } catch (e) {
+        resultEl.innerHTML = `<div style="padding:14px;border-radius:8px;background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;font-size:13px;">请求失败：${escapeHtml(e.message)}</div>`;
+    }
+}
+
+
 
 // ---- Search mode ----
 async function fhDoSearch() {
@@ -8600,20 +8919,26 @@ function _fhRenderFiles(files, container, showPath) {
             ? (f.size_bytes > 1048576 ? (f.size_bytes / 1048576).toFixed(1) + ' MB' : Math.round(f.size_bytes / 1024) + ' KB')
             : '';
         const date = f.mtime ? new Date(f.mtime * 1000).toLocaleDateString('zh-CN') : '';
+        const isFs = f.source === 'fs';
         const sub  = showPath
             ? (f.path || '')
-            : [f.category, size, date].filter(Boolean).join(' · ');
+            : [f.category, size, date, isFs ? '(文件系统)' : ''].filter(Boolean).join(' · ');
         const path = _esc(f.path || '');
-        return `<div class="fh-card" title="${path}" onclick="_fhOpenFile(${JSON.stringify(f.path||'')})">
+        const asst_exts = /\.(docx?|pdf|xlsx?|pptx?|csv|txt|md|html?|json|rtf)$/i;
+        const canInAsst = asst_exts.test(f.name || f.path || '');
+        const openLabel = canInAsst ? '在助手中打开' : '系统打开';
+        const openFn    = canInAsst ? `_fhOpenInAssistant` : `_fhOpenFile`;
+        return `<div class="fh-card" title="${path}" onclick="${openFn}(${JSON.stringify(f.path||'')})">
             <span class="fh-icon">${icon}</span>
             <div class="fh-meta" style="min-width:0;">
                 <div class="fh-name" style="margin-bottom: 2px;">${_esc(f.name || f.path || '')}</div>
                 <div class="fh-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size: 11px; opacity: 0.85;">${_esc(sub)}</div>
             </div>
-            <div style="display: flex; gap: 4px;" onclick="event.stopPropagation()">
-                <button class="fh-action-btn" onclick="_fhOpenFile(${JSON.stringify(f.path||'')})"
-                    title="打开文件">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+            <div style="display: flex; gap: 4px; align-items: center;" onclick="event.stopPropagation()">
+                <button class="fh-action-btn fh-action-primary" onclick="${openFn}(${JSON.stringify(f.path||'')})"
+                    title="${openLabel}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:13px;height:13px;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                    ${openLabel}
                 </button>
                 <button class="fh-action-btn" onclick="_fhCopyPath(${JSON.stringify(f.path||'')})"
                     title="复制路径">
@@ -8641,6 +8966,35 @@ function _fhOpenFile(path) {
         if (d.status === 'ok') _showToast('已打开');
         else _showToast('打开失败：' + (d.error || '未知错误'));
     }).catch(() => _showToast('请求失败'));
+}
+
+async function _fhOpenInAssistant(path) {
+    if (!path) return;
+    const asst_exts = /\.(docx?|pdf|xlsx?|pptx?|csv|txt|md|html?|json|rtf)$/i;
+    if (!asst_exts.test(path)) {
+        // 不支持的格式，直接用系统打开
+        _fhOpenFile(path);
+        return;
+    }
+    _showToast('正在导入文件…');
+    try {
+        const r = await fetch('/api/editor/docs/import_path', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path })
+        });
+        const d = await r.json();
+        if (!r.ok || !d.id) {
+            _showToast('导入失败：' + (d.error || '未知错误'));
+            return;
+        }
+        // 关闭文件管理弹窗（如存在）
+        const modal = document.getElementById('fileHubModal');
+        if (modal) modal.style.display = 'none';
+        _showToast('文件已导入：' + d.name);
+    } catch(e) {
+        _showToast('请求失败：' + e.message);
+    }
 }
 
 function _fhCopyPath(path) {
@@ -9117,6 +9471,8 @@ async function loadShadowStatus() {
 
         // 加载开放任务列表
         await loadShadowOpenTasks();
+        // 加载影子记忆
+        await loadShadowMemories();
     } catch(e) { /* 静默 */ }
 }
 

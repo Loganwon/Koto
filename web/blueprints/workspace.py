@@ -124,9 +124,70 @@ def open_workspace() -> Response:
 # ─── Folder browsing ─────────────────────────────────────────────────────────
 
 
+def _list_drives():
+    """Return list of available drive letters on Windows."""
+    drives = []
+    if sys.platform == "win32":
+        import string
+        for letter in string.ascii_uppercase:
+            drive = f"{letter}:\\"
+            if os.path.exists(drive):
+                import ctypes
+                try:
+                    drive_type = ctypes.windll.kernel32.GetDriveTypeW(drive)
+                    # 2=removable, 3=fixed, 4=remote/network, 5=CD, 6=ramdisk
+                    type_map = {2: "移动磁盘", 3: "本地磁盘", 4: "网络驱动器", 5: "光驱", 6: "RAM"}
+                    drive_type_name = type_map.get(drive_type, "磁盘")
+                    # Try to get volume label
+                    buf = ctypes.create_unicode_buffer(256)
+                    ctypes.windll.kernel32.GetVolumeInformationW(
+                        drive, buf, 256, None, None, None, None, 0
+                    )
+                    label = buf.value or drive_type_name
+                    drives.append({"name": f"{label} ({letter}:)", "path": drive, "type": "drive"})
+                except Exception:
+                    drives.append({"name": f"本地磁盘 ({letter}:)", "path": drive, "type": "drive"})
+    return drives
+
+
+def _quick_access_locations():
+    """Return Windows quick-access shortcuts: Desktop, Documents, Downloads, etc."""
+    locations = []
+    ws = str(WORKSPACE_DIR)
+    if os.path.isdir(ws):
+        locations.append({"name": "Koto 工作区", "path": ws, "type": "quick"})
+    if sys.platform == "win32":
+        home = os.path.expanduser("~")
+        shortcuts = [
+            ("桌面", os.path.join(home, "Desktop")),
+            ("文档", os.path.join(home, "Documents")),
+            ("下载", os.path.join(home, "Downloads")),
+            ("图片", os.path.join(home, "Pictures")),
+            ("视频", os.path.join(home, "Videos")),
+            ("音乐", os.path.join(home, "Music")),
+            ("用户主目录", home),
+        ]
+        for label, p in shortcuts:
+            if os.path.isdir(p):
+                locations.append({"name": label, "path": p, "type": "quick"})
+    return locations
+
+
+@workspace_bp.route("/api/browse/drives", methods=["GET"])
+def browse_drives() -> Response:
+    """列出所有可用磁盘驱动器及快速访问位置（仅 Windows）。"""
+    return jsonify({
+        "drives": _list_drives(),
+        "quick_access": _quick_access_locations(),
+    })
+
+
 @workspace_bp.route("/api/browse", methods=["GET"])
 def browse_folders() -> Response:
-    path = request.args.get("path", "C:\\")
+    # 当 path 为空时，回退到用户主目录，而不是 C:\
+    path = request.args.get("path", "").strip()
+    if not path:
+        path = os.path.expanduser("~")
 
     try:
         if not os.path.exists(path):

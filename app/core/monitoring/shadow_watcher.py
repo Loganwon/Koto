@@ -317,6 +317,7 @@ def _default_obs() -> Dict[str, Any]:
         "hourly_task_type": {},  # {"9": {"代码": 3, "分析": 1}} — 时段×任务交叉
         "corrections": 0,  # 用户修正 AI 次数（质量信号）
         "recent_snippets": [],  # 最近 20 条对话摘要 [{user, ai, ts}]（截断至 120 字，供影子消息引用）
+        "user_memories": [],  # 用户记忆 [{id, content, category, source, created_at}]
     }
 
 
@@ -421,6 +422,66 @@ class ShadowWatcher:
         with self._obs_lock:
             return list(self._obs.get("recent_snippets", []))[-n:]
 
+    # ── 用户记忆（长期记忆，嵌入影子追踪存储）────────────────────────────────
+
+    def get_user_memories(self) -> List[Dict]:
+        """返回所有用户记忆列表。"""
+        with self._obs_lock:
+            return list(self._obs.get("user_memories", []))
+
+    def add_user_memory(
+        self,
+        content: str,
+        category: str = "user_preference",
+        source: str = "user",
+    ) -> Dict:
+        """添加一条用户记忆；去重（相同内容不重复添加）。"""
+        content = content.strip()
+        if not content:
+            raise ValueError("记忆内容不能为空")
+        mem_id = str(uuid.uuid4())[:8]
+        entry = {
+            "id": mem_id,
+            "content": content,
+            "category": category,
+            "source": source,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        with self._obs_lock:
+            memories: List[Dict] = self._obs.setdefault("user_memories", [])
+            # 去重
+            if any(m.get("content") == content for m in memories):
+                return next(m for m in memories if m.get("content") == content)
+            memories.append(entry)
+        self._save()
+        return entry
+
+    def delete_user_memory(self, mem_id: str) -> bool:
+        """按 id 删除记忆，返回是否成功。"""
+        with self._obs_lock:
+            memories: List[Dict] = self._obs.get("user_memories", [])
+            before = len(memories)
+            self._obs["user_memories"] = [m for m in memories if m.get("id") != mem_id]
+            deleted = len(self._obs["user_memories"]) < before
+        if deleted:
+            self._save()
+        return deleted
+
+    def get_memories_context_string(self, query: str = "") -> str:
+        """返回适合注入上下文的记忆摘要字符串（最多 20 条相关记忆）。"""
+        memories = self.get_user_memories()
+        if not memories:
+            return ""
+        # 相关性：包含关键词的排前
+        if query:
+            q_lower = query.lower()
+            memories = sorted(
+                memories,
+                key=lambda m: -(1 if any(w in m.get("content", "").lower() for w in q_lower.split()) else 0),
+            )
+        lines = [f"- {m['content']}" for m in memories[:20]]
+        return "用户记忆（来自影子追踪）：\n" + "\n".join(lines)
+
     def dismiss_task(self, task_id: str):
         with self._obs_lock:
             for t in self._obs.get("open_tasks", []):
@@ -513,6 +574,9 @@ class ShadowWatcher:
                 )
                 if len(snippets) > 20:
                     snippets[:] = snippets[-20:]
+
+                # 自动捕获记忆（从对话中被动提取用户偏好和事实）
+                self._auto_capture_memories(user_msg, ai_msg, now)
 
             # 会话轮次计数（无需持锁）
             _session_ex = self._inc_session_exchanges(session_id)
@@ -782,6 +846,47 @@ class ShadowWatcher:
             if any(kw in lower for kw in keywords):
                 slot[t_name] = slot.get(t_name, 0) + 1
 
+    # ── 自动记忆提取（无需 LLM，基于规则）────────────────────────────────────
+
+    # 明确偏好陈述模式
+    _MEM_PREF_PATTERNS = [
+        r"我(?:比较|很|非常|特别)?(?:喜欢|偏好|习惯|倾向于)(.{3,40})",
+        r"我(?:不喜欢|不想|不要|讨厌|不习惯)(.{3,40})",
+        r"我(?:的|目前的)?(?:工作|项目|任务)(?:是|叫|主要是)(.{4,50})",
+        r"我(?:用|在用|主要用|常用)([A-Za-z\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff\s\+]{1,30})(?:来|做|开发|写|处理)",
+        r"(?:请|以后|以后)(?:记住|记一下|帮我记)[：:]\s*(.{4,80})",
+        r"(?:记住|记一下)[：:，,\s]+(.{4,80})",
+        r"我(?:叫|名字是|的名字|是)([^\s，。！？]{2,20})",
+        r"我(?:是|做)([^\s，。！？]{2,20})(?:的|工程师|开发者|研究员|设计师|学生|老师)",
+    ]
+
+    def _auto_capture_memories(self, user_msg: str, ai_msg: str, now: datetime):
+        """从对话中规则匹配用户明确陈述的偏好/事实，自动写入 user_memories。"""
+        memories: List[Dict] = self._obs.setdefault("user_memories", [])
+        # 上限 200 条，防止无限膨胀
+        if len(memories) >= 200:
+            return
+        existing_contents = {m.get("content", "") for m in memories}
+        new_entries: List[Dict] = []
+        for pattern in self._MEM_PREF_PATTERNS:
+            for match in re.finditer(pattern, user_msg):
+                content = match.group(0).strip()[:120]
+                if content and content not in existing_contents:
+                    entry = {
+                        "id": str(uuid.uuid4())[:8],
+                        "content": content,
+                        "category": "auto_captured",
+                        "source": "shadow",
+                        "created_at": now.strftime("%Y-%m-%d %H:%M"),
+                    }
+                    new_entries.append(entry)
+                    existing_contents.add(content)
+        if new_entries:
+            memories.extend(new_entries)
+            logger.debug(
+                "[ShadowWatcher] 🧠 自动捕获 %d 条记忆", len(new_entries)
+            )
+
     def _detect_failed_request(
         self, user_msg: str, ai_msg: str, session_id: str, now: datetime
     ):
@@ -806,6 +911,8 @@ class ShadowWatcher:
                 "resolved": False,
             }
         )
+        # 立即写盘，防止 _dirty_save 批量写入前服务重启导致数据丢失
+        self._save()
 
     # ── 持久化 ────────────────────────────────────────────────────────────────
 

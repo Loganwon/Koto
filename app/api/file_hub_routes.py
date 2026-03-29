@@ -127,6 +127,78 @@ def _watcher():
 # ── 端点 ─────────────────────────────────────────────────────────────────────
 
 
+_FS_SEARCH_EXT_CAT = {
+    ".doc": "文档", ".docx": "文档", ".pdf": "文档", ".txt": "文档",
+    ".md": "文档", ".rtf": "文档", ".odt": "文档", ".wps": "文档",
+    ".ppt": "文档", ".pptx": "文档", ".odp": "文档",
+    ".xls": "表格", ".xlsx": "表格", ".ods": "表格", ".csv": "表格",
+    ".jpg": "图片", ".jpeg": "图片", ".png": "图片", ".gif": "图片",
+    ".bmp": "图片", ".webp": "图片", ".svg": "图片", ".heic": "图片",
+    ".mp4": "视频", ".mov": "视频", ".avi": "视频", ".mkv": "视频",
+    ".mp3": "音频", ".wav": "音频", ".flac": "音频", ".m4a": "音频",
+    ".py": "代码", ".js": "代码", ".ts": "代码", ".java": "代码",
+    ".cpp": "代码", ".c": "代码", ".go": "代码", ".rs": "代码",
+    ".zip": "压缩包", ".rar": "压缩包", ".7z": "压缩包", ".tar": "压缩包",
+}
+
+
+def _fs_search_fallback(query: str, limit: int, seen_paths: set) -> list:
+    """在用户常用目录中搜索文件名含 query 的文件，作为注册表的补充。"""
+    import time
+
+    results: list = []
+    q_lower = query.lower()
+    home = Path.home()
+
+    # 常用搜索目录（按优先级排序）
+    search_dirs = []
+    for d in ["Desktop", "Documents", "Downloads", "OneDrive", "文档", "桌面", "下载"]:
+        p = home / d
+        if p.is_dir():
+            search_dirs.append(p)
+    # OneDrive 可能带版本号后缀（如 OneDrive - 公司名）
+    for p in home.iterdir():
+        if p.is_dir() and p.name.startswith("OneDrive") and p not in search_dirs:
+            search_dirs.append(p)
+    if not search_dirs:
+        search_dirs = [home]
+
+    deadline = time.monotonic() + 4.0  # 最多 4 秒
+    for search_dir in search_dirs:
+        if time.monotonic() > deadline or len(results) >= limit:
+            break
+        try:
+            for fp in search_dir.rglob("*"):
+                if time.monotonic() > deadline or len(results) >= limit:
+                    break
+                if not fp.is_file():
+                    continue
+                if str(fp) in seen_paths:
+                    continue
+                if q_lower not in fp.name.lower():
+                    continue
+                try:
+                    stat = fp.stat()
+                    ext = fp.suffix.lower()
+                    results.append({
+                        "file_id": None,
+                        "name": fp.name,
+                        "path": str(fp),
+                        "size_bytes": stat.st_size,
+                        "mtime": stat.st_mtime,
+                        "category": _FS_SEARCH_EXT_CAT.get(ext, "其他"),
+                        "source": "fs",
+                        "tags": [],
+                    })
+                    seen_paths.add(str(fp))
+                except (PermissionError, OSError):
+                    pass
+        except (PermissionError, OSError):
+            pass
+
+    return results
+
+
 @file_hub_bp.route("/search", methods=["GET"])
 def search_files():
     """
@@ -150,11 +222,21 @@ def search_files():
         )
 
     entries = _reg().search(q or "", category=category, limit=limit)
+    results = [e.to_dict(include_preview=False) for e in entries]
+
+    # 当注册表结果不足时，补充文件系统搜索（仅按文件名匹配，不过滤 category）
+    if q and len(results) < limit:
+        seen = {r["path"] for r in results if r.get("path")}
+        fs_hits = _fs_search_fallback(q, limit - len(results), seen)
+        if category:
+            fs_hits = [h for h in fs_hits if h.get("category") == category]
+        results.extend(fs_hits)
+
     return jsonify(
         {
             "query": q,
-            "total": len(entries),
-            "results": [e.to_dict(include_preview=False) for e in entries],
+            "total": len(results),
+            "results": results,
         }
     )
 
@@ -260,6 +342,105 @@ def scan_directory():
             "registered": count,
         }
     )
+
+
+@file_hub_bp.route("/archive", methods=["POST"])
+def archive_files():
+    """
+    归档整理：将源目录文件按规则复制到目标目录（不删除源文件）。
+
+    Body JSON:
+      source_dir  str   必填，源目录绝对路径
+      dest_dir    str   可选，默认在源目录同级创建 "<源目录名>_归档_YYYYMMDD"
+      mode        str   "auto"（按文件类型自动分类）| "custom"（按自定义规则）
+      recursive   bool  是否递归扫描子目录，默认 True
+      rules       list  mode="custom" 时的规则列表，每项为 {"match": "*.pdf", "folder": "PDF文档"}
+    """
+    import shutil
+    import fnmatch
+    from datetime import datetime
+
+    data = request.get_json(silent=True) or {}
+    source_dir = (data.get("source_dir") or "").strip()
+    dest_dir   = (data.get("dest_dir") or "").strip()
+    mode       = (data.get("mode") or "auto").strip()
+    recursive  = bool(data.get("recursive", True))
+    rules      = data.get("rules") or []
+
+    # --- validate source ---
+    if not source_dir:
+        return jsonify({"error": "缺少 source_dir"}), 400
+    src = Path(source_dir).resolve()
+    if not src.is_dir():
+        return jsonify({"error": f"目录不存在: {source_dir}"}), 404
+
+    # --- resolve dest ---
+    if dest_dir:
+        dest = Path(dest_dir).resolve()
+    else:
+        stamp = datetime.now().strftime("%Y%m%d")
+        dest = src.parent / f"{src.name}_归档_{stamp}"
+
+    # Prevent archiving into itself
+    try:
+        dest.relative_to(src)
+        return jsonify({"error": "目标目录不能是源目录的子目录"}), 400
+    except ValueError:
+        pass
+
+    dest.mkdir(parents=True, exist_ok=True)
+
+    # --- collect files ---
+    glob_pattern = "**/*" if recursive else "*"
+    all_files = [f for f in src.glob(glob_pattern) if f.is_file()]
+
+    total  = len(all_files)
+    copied = 0
+    skipped = 0
+    errors  = []
+    report  = []
+
+    for fp in all_files:
+        try:
+            if mode == "auto":
+                ext = fp.suffix.lower()
+                folder = _FS_SEARCH_EXT_CAT.get(ext, "其他")
+            else:
+                folder = "其他"
+                for rule in rules:
+                    pat = (rule.get("match") or "").strip()
+                    if pat and fnmatch.fnmatch(fp.name, pat):
+                        folder = (rule.get("folder") or "其他").strip()
+                        break
+
+            target_dir = dest / folder
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / fp.name
+
+            # avoid overwriting same-name file
+            if target.exists():
+                stem, suffix = fp.stem, fp.suffix
+                idx = 1
+                while target.exists():
+                    target = target_dir / f"{stem}_{idx}{suffix}"
+                    idx += 1
+
+            shutil.copy2(str(fp), str(target))
+            copied += 1
+            report.append({"src": str(fp), "dest": str(target), "folder": folder})
+        except Exception as exc:
+            errors.append(f"{fp.name}: {exc}")
+            skipped += 1
+
+    return jsonify({
+        "status":   "ok",
+        "dest_dir": str(dest),
+        "total":    total,
+        "copied":   copied,
+        "skipped":  skipped,
+        "errors":   errors[:20],
+        "report":   report[:200],
+    })
 
 
 @file_hub_bp.route("/<file_id>", methods=["GET"])

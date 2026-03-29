@@ -609,6 +609,7 @@ class ProactiveAgent:
             ttl_hours=48,
         )
         msg["task_id"] = task["id"]  # 方便前端直接取用，无需解析 triggered_by
+        msg["original_text"] = task.get("full_text") or task.get("text", "")  # 直接持久化原始文本，防止 watcher 数据丢失
         return msg
 
     # ── 队列管理 ──────────────────────────────────────────────────────────────

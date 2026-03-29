@@ -399,6 +399,17 @@ def update_settings() -> Response:
         sm.ensure_directories()
         # 使 _load_user_settings 缓存失效，确保后续读取获得最新值
         mod._user_settings_cache.clear()
+        # 存储路径变更时立即更新模块级全局变量，让运行时路径即时生效
+        if category == "storage" and key in ("workspace_dir", "chats_dir", "documents_dir", "images_dir"):
+            import web.app as _app_mod
+            if key == "workspace_dir":
+                _app_mod.WORKSPACE_DIR = sm.workspace_dir
+                import os as _os
+                _os.makedirs(_app_mod.WORKSPACE_DIR, exist_ok=True)
+            elif key == "chats_dir":
+                _app_mod.CHAT_DIR = sm.chats_dir
+                import os as _os
+                _os.makedirs(_app_mod.CHAT_DIR, exist_ok=True)
         # 代理设置变更时立即重新检测
         if category == "proxy":
             mod._proxy_checked = False

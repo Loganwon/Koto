@@ -438,10 +438,17 @@ def _handle_auto_catalog(ctx: JobContext) -> Optional[str]:
     source_dir = ctx.payload.get("source_dir", "")
     ctx.step("THOUGHT", f"自动整理: {source_dir or '默认目录'}", progress=5)
     try:
-        from web.auto_catalog_scheduler import AutoCatalogWorker  # type: ignore
+        from web.auto_catalog_scheduler import AutoCatalogScheduler
 
-        worker = AutoCatalogWorker(source_dir=source_dir or None)
-        result = worker.run_once()
+        scheduler = AutoCatalogScheduler()
+        # 如果指定了 source_dir，临时覆盖配置
+        if source_dir:
+            scheduler.config.setdefault("auto_catalog", {}).setdefault(
+                "source_directories", []
+            )
+            if source_dir not in scheduler.config["auto_catalog"]["source_directories"]:
+                scheduler.config["auto_catalog"]["source_directories"].insert(0, source_dir)
+        result = scheduler.execute_auto_catalog()
         summary = str(result)[:300] if result else "整理完成"
         ctx.step("ANSWER", summary, progress=100)
         return summary

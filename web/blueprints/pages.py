@@ -17,12 +17,11 @@ Routes:
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
-  GET /editor                  — file_assistant
 """
 
 import os
 
-from flask import Blueprint, Response, render_template, send_from_directory
+from flask import Blueprint, Response, make_response, render_template, send_from_directory
 
 pages_bp = Blueprint("pages", __name__)
 
@@ -117,6 +116,12 @@ def notebook_ui() -> str:
     return render_template("notebook_lm.html")
 
 
+@pages_bp.route("/workspace-assistant")
+def workspace_assistant_page() -> str:
+    """全格式 AI 原生工作区"""
+    return render_template("workspace_assistant.html")
+
+
 @pages_bp.route("/doc-compare")
 def doc_compare_ui() -> str:
     """多文档对比界面"""
@@ -124,18 +129,20 @@ def doc_compare_ui() -> str:
 
 
 @pages_bp.route("/editor")
-def file_assistant() -> Response:
-    """文件助手 — Univer Canvas 编辑器 + AI 面板"""
+def editor_page() -> Response:
+    """Univer Canvas 文件助手主页"""
     return send_from_directory(
         os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist"),
         "index.html",
     )
 
 
-@pages_bp.route("/editor/<path:subpath>")
-def file_assistant_assets(subpath: str) -> Response:
-    """文件助手静态资源（JS/CSS）"""
+@pages_bp.route("/editor/assets/<path:filename>")
+def editor_assets(filename: str) -> Response:
+    """Serve Univer editor static assets (JS/CSS/chunks)."""
     return send_from_directory(
-        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist"),
-        subpath,
+        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist", "assets"),
+        filename,
     )
+
+

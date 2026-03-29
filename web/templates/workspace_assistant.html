@@ -1,0 +1,1679 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>全格式工作区 — Koto</title>
+
+  <!-- ── Split.js ── -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.css">
+
+  <!-- ── WangEditor 5 (DOCX editor) ── -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/css/style.css">
+
+  <!-- ── Luckysheet (XLSX editor) ── -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/css/pluginsCss.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/plugins.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/css/luckysheet.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/assets/iconfont/iconfont.css">
+
+  <!-- ── App styles ── -->
+  <style>
+    :root {
+      --bg: #1a1b1e;
+      --surface: #25262b;
+      --surface2: #2c2e33;
+      --border: #3a3b40;
+      --hover: rgba(255,255,255,0.06);
+      --accent: #4da3ff;
+      --accent-hover: #66b3ff;
+      --text: #e0e0e5;
+      --text-muted: #8b8c91;
+      --danger: #ff5c5c;
+      --success: #4caf7d;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%; width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      overflow: hidden;
+    }
+
+    /* ── Top header ── */
+    #wa-header {
+      height: 48px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      position: relative;
+      z-index: 100;
+    }
+
+    #wa-header .wa-logo {
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    #wa-header .wa-file-name {
+      font-size: 13px;
+      color: var(--text-muted);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #wa-header .wa-header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .wa-btn {
+      padding: 5px 14px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .wa-btn:hover { background: var(--border); }
+
+    .wa-btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .wa-btn.primary:hover { background: var(--accent-hover); }
+
+    .wa-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    #wa-autosave-status {
+      font-size: 11px;
+      color: var(--text-muted, #888);
+      white-space: nowrap;
+      transition: opacity 0.4s;
+    }
+    #wa-autosave-status.saving { color: var(--accent); }
+    #wa-autosave-status.saved  { color: #4caf50; }
+
+    /* ── Upload drag zone (shown when no file loaded) ── */
+    #wa-drop-zone {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background: var(--bg);
+      z-index: 50;
+    }
+
+    #wa-drop-zone.hidden { display: none; }
+
+    .wa-drop-inner {
+      border: 2px dashed var(--border);
+      border-radius: 16px;
+      padding: 56px 72px;
+      text-align: center;
+      transition: border-color 0.2s, background 0.2s;
+      cursor: pointer;
+    }
+
+    .wa-drop-inner:hover,
+    .wa-drop-inner.drag-over {
+      border-color: var(--accent);
+      background: rgba(77, 163, 255, 0.06);
+    }
+
+    .wa-drop-icon { font-size: 48px; line-height: 1; margin-bottom: 12px; }
+    .wa-drop-title { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+    .wa-drop-sub { color: var(--text-muted); font-size: 13px; }
+
+    .wa-format-chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .wa-chip {
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      border: 1px solid;
+    }
+
+    .wa-chip.docx { border-color: #4da3ff; color: #4da3ff; }
+    .wa-chip.xlsx { border-color: #4caf7d; color: #4caf7d; }
+    .wa-chip.pptx { border-color: #ff8c42; color: #ff8c42; }
+    .wa-chip.pdf  { border-color: #ff5c5c; color: #ff5c5c; }
+
+    #upload-progress {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 3px;
+      background: var(--accent);
+      width: 0%;
+      transition: width 0.3s;
+    }
+
+    /* ── Three-column workspace ── */
+    #wa-workspace {
+      position: absolute;
+      inset: 48px 0 0 0;
+      display: flex;
+    }
+
+    #wa-workspace.hidden { display: none; }
+
+    /* Split.js gutter */
+    .gutter {
+      background: var(--border);
+      background-clip: padding-box;
+      cursor: col-resize;
+    }
+
+    .gutter:hover { background: var(--accent); opacity: 0.6; }
+
+    /* ── Left panel — faithful VS Code Dark+ explorer ── */
+    #wa-left {
+      background: var(--surface);   /* #25262b ≈ VS Code sideBar.background #252526 */
+      border-right: 1px solid var(--border);
+      overflow-y: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Thin scrollbar (VS Code style) ── */
+    #wa-files-list::-webkit-scrollbar { width: 4px; }
+    #wa-files-list::-webkit-scrollbar-track { background: transparent; }
+    #wa-files-list::-webkit-scrollbar-thumb { background: rgba(121,121,121,0.4); border-radius: 2px; }
+
+    /* ── Panel title header ── */
+    #wa-left-header {
+      display: flex;
+      align-items: center;
+      padding: 0 4px 0 12px;
+      height: 35px;
+      flex-shrink: 0;
+    }
+    .wa-panel-title {
+      flex: 1;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+    /* Action icons fade-in on header hover */
+    #wa-left-header .wa-header-actions {
+      display: flex;
+      align-items: center;
+      opacity: 0;
+      transition: opacity 0.12s;
+    }
+    #wa-left-header:hover .wa-header-actions { opacity: 1; }
+
+    /* ── Icon buttons — borderless, VS Code toolbar style ── */
+    .wa-icon-btn, .wa-add-btn {
+      width: 22px; height: 22px;
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 5px;
+      padding: 3px;
+      flex-shrink: 0;
+      font-size: 16px;
+      line-height: 1;
+      user-select: none;
+      transition: background 0.1s, color 0.1s;
+    }
+    .wa-icon-btn:hover, .wa-add-btn:hover {
+      background: rgba(90,93,94,0.31);  /* VS Code toolbar btn hover */
+      color: var(--text);
+    }
+    .wa-icon-btn.active { color: var(--accent); }
+    .wa-icon-btn.spinning svg { animation: wa-spin 0.6s linear; }
+    @keyframes wa-spin { to { transform: rotate(360deg); } }
+
+    /* ── Search bar — VS Code filter box ── */
+    #wa-search-wrap {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin: 0 8px 4px;
+      padding: 3px 7px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--surface2);
+      flex-shrink: 0;
+      transition: border-color 0.12s;
+    }
+    #wa-search-wrap:focus-within { border-color: var(--accent); }
+    .wa-search-icon { color: var(--text-muted); flex-shrink: 0; }
+    #wa-search {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-size: 13px;
+      min-width: 0;
+    }
+    #wa-search::placeholder { color: var(--text-muted); }
+    #wa-search-clear {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0;
+      line-height: 1;
+    }
+    #wa-search-clear:hover { color: var(--danger); }
+
+    /* ── Local file picker buttons ── */
+    #wa-local-btns {
+      display: flex;
+      gap: 4px;
+      padding: 0 8px 6px;
+      flex-shrink: 0;
+    }
+    #wa-local-btns button {
+      flex: 1;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 3px 6px;
+      cursor: pointer;
+      transition: border-color 0.12s, color 0.12s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #wa-local-btns button:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Section headers — VS Code sideBarSectionHeader style ── */
+    /* VS Code: sideBarSectionHeader.background = rgba(128,128,128,0.2) */
+    .wa-section-label {
+      display: flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text);                          /* VS Code: sideBarSectionHeader.foreground = #ccc */
+      background: rgba(128,128,128,0.2);           /* VS Code: sideBarSectionHeader.background  */
+      flex-shrink: 0;
+      user-select: none;
+      cursor: pointer;
+    }
+    .wa-section-label:hover { background: rgba(128,128,128,0.28); }
+    .wa-section-label .wa-section-actions {
+      display: flex;
+      opacity: 0;
+      transition: opacity 0.12s;
+      margin-left: 2px;
+    }
+    .wa-section-label:hover .wa-section-actions { opacity: 1; }
+
+    /* Section chevron — VS Code codicon style (points down ▼ when open) */
+    .wa-section-arrow {
+      width: 16px;
+      font-size: 11px;
+      color: var(--text-muted);
+      transition: transform 0.12s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    /* collapsed = no rotation (› points right), open = 90° (points down) */
+    .wa-section-arrow.open { transform: rotate(90deg); }
+
+    .wa-section-badge {
+      font-size: 10px;
+      color: var(--text-muted);
+      opacity: 0.7;
+      margin-left: 3px;
+    }
+
+    /* Sort/action button inside section header */
+    .wa-sort-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 2px 4px;
+      font-size: 11px;
+      border-radius: 3px;
+      white-space: nowrap;
+      transition: background 0.1s, color 0.1s;
+    }
+    .wa-sort-btn:hover { background: rgba(90,93,94,0.31); color: var(--text); }
+    #wa-ws-label { gap: 2px; }
+
+    /* Inline rename input */
+    .wa-rename-input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--accent);
+      border-radius: 2px;
+      color: var(--text);
+      font-size: 13px;
+      padding: 1px 4px;
+      outline: none;
+      min-width: 0;
+      height: 18px;
+    }
+
+    /* ── File rows — VS Code explorer 22px height ── */
+    .wa-file-item {
+      position: relative;
+      height: 22px;
+      padding: 0;
+      cursor: pointer;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      transition: background 0.05s;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    /* VS Code list.hoverBackground ≈ rgba(255,255,255,0.06) on dark sidebar */
+    .wa-file-item:hover { background: var(--hover); }
+    .wa-file-item.folder { color: var(--text); }
+
+    /* Indentation: 8px base + 16px per depth level (VS Code uses 8px per indent unit) */
+    .wa-file-item[data-depth="0"] { padding-left: 8px; }
+    .wa-file-item[data-depth="1"] { padding-left: 24px; }
+    .wa-file-item[data-depth="2"] { padding-left: 40px; }
+    .wa-file-item[data-depth="3"] { padding-left: 56px; }
+
+    /* File type icon (16×16) */
+    .wa-file-icon {
+      width: 16px; height: 16px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 6px;   /* VS Code: padding-right: 6px on icon */
+    }
+    .wa-file-icon svg { width: 16px; height: 16px; display: block; }
+
+    /* Folder twisty — VS Code .monaco-tl-twistie pattern */
+    /* Using › (right-pointing): no rotation = collapsed (→), rotate(90°) = expanded (↓) */
+    .wa-folder-arrow {
+      width: 16px;
+      flex-shrink: 0;
+      font-size: 11px;
+      color: var(--text-muted);
+      transition: transform 0.12s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 0;
+    }
+    .wa-folder-arrow.open { transform: rotate(90deg); }
+
+    /* File/folder label */
+    .wa-file-item .wa-file-label {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+      line-height: 22px;
+    }
+
+    /* File metadata — hidden (tooltip-only, VS Code doesn't show inline) */
+    .wa-file-meta { display: none; }
+
+    /* ── Hover action buttons — VS Code .actions pattern ── */
+    /* Background matches hover background so they blend in */
+    .wa-file-actions {
+      position: absolute;
+      right: 0;
+      top: 0;
+      height: 100%;
+      display: none;
+      align-items: center;
+      gap: 0;
+      padding-left: 4px;
+      background: var(--hover);   /* VS Code: background-color: var(--vscode-list-hoverBackground) */
+    }
+    .wa-file-item:hover .wa-file-actions { display: flex; }
+    .wa-file-actions button {
+      width: 22px; height: 22px;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      padding: 3px;
+    }
+    .wa-file-actions button:hover { background: rgba(90,93,94,0.31); color: var(--text); }
+    .wa-file-actions button.del:hover { color: var(--danger); }
+
+    /* Hide old buttons (superseded by .wa-file-actions) */
+    .wa-file-rename, .wa-file-del { display: none !important; }
+
+    /* ── Active/selected file — VS Code list.inactiveSelectionBackground ── */
+    /* VS Code Dark+: inactive = #37373d, active/focused = #094771 */
+    .wa-file-item.active {
+      background: #37373d !important;
+    }
+    .wa-file-item.active::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 2px;
+      background: var(--accent);   /* VS Code uses focusBorder color */
+    }
+    .wa-file-item.active:hover { background: #3f3f3f !important; }
+
+    /* ── Multi-select bar ── */
+    #wa-select-toggle.active { color: var(--accent); }
+    #wa-select-bar {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      background: rgba(128,128,128,0.15);
+      border-bottom: 1px solid var(--border);
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    #wa-select-count { flex: 1; color: var(--text-muted); }
+    #wa-select-bar button {
+      padding: 2px 8px; border-radius: 3px; border: none;
+      background: rgba(90,93,94,0.31); color: var(--text);
+      cursor: pointer; font-size: 11px; transition: background 0.1s;
+    }
+    #wa-select-bar button:hover { background: rgba(90,93,94,0.5); }
+    #wa-select-bar button.danger { background: rgba(255,92,92,0.12); color: var(--danger); }
+    #wa-select-bar button.danger:disabled { opacity: 0.35; cursor: default; }
+    #wa-select-bar button.danger:not(:disabled):hover { background: rgba(255,92,92,0.25); }
+
+    /* Checkboxes in select mode */
+    .wa-file-item .wa-file-check {
+      display: none;
+      width: 14px; height: 14px;
+      flex-shrink: 0;
+      margin-right: 4px;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    body.select-mode .wa-file-item.file .wa-file-check { display: inline-block; }
+    body.select-mode .wa-file-item.file .wa-file-actions { display: none !important; }
+    body.select-mode .wa-file-item.file.selected { background: rgba(77,163,255,0.12) !important; }
+
+    /* ── File lists ── */
+    #wa-files-list {
+      flex: 1;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    /* ── Indent guides (VS Code .monaco-tl-indent > .indent-guide) ── */
+    .wa-indent-guide {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 1px;
+      background: var(--border);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.1s;
+    }
+    .wa-file-item:hover .wa-indent-guide,
+    .wa-folder-group:hover > .wa-folder-children .wa-indent-guide { opacity: 1; }
+
+    /* ── Drop zone ── */
+    #wa-left-drop {
+      padding: 10px 12px;
+      text-align: center;
+      border: 1.5px dashed var(--border);
+      border-radius: 6px;
+      margin: 6px 8px;
+      color: var(--text-muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: border-color 0.18s, color 0.18s;
+      flex-shrink: 0;
+      line-height: 1.8;
+    }
+    #wa-left-drop:hover, #wa-left-drop.drag-over { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Right-click context menu ── */
+    #wa-ctx-menu {
+      position: fixed;
+      z-index: 9999;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+      padding: 4px 0;
+      min-width: 160px;
+      font-size: 13px;
+      display: none;
+    }
+    #wa-ctx-menu.open { display: block; }
+    .wa-ctx-item {
+      padding: 6px 16px;
+      cursor: pointer;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+      transition: background 0.08s;
+    }
+    .wa-ctx-item:hover { background: var(--hover); }
+    .wa-ctx-item.danger { color: var(--danger); }
+    .wa-ctx-separator { height: 1px; background: var(--border); margin: 3px 0; }
+
+    /* ── VS Code-style tab bar ── */
+    #wa-tab-bar {
+      height: 35px;
+      background: #252526;
+      display: flex;
+      align-items: stretch;
+      overflow-x: auto;
+      overflow-y: hidden;
+      flex-shrink: 0;
+      border-bottom: 1px solid #1e1e1e;
+      scrollbar-width: none;
+    }
+    #wa-tab-bar::-webkit-scrollbar { display: none; }
+    #wa-tab-bar:empty { display: none; }
+
+    .wa-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 8px 0 12px;
+      min-width: 80px;
+      max-width: 180px;
+      height: 35px;
+      flex-shrink: 0;
+      cursor: pointer;
+      background: #2d2d2d;
+      border-right: 1px solid #1e1e1e;
+      color: #8f8f8f;
+      font-size: 12px;
+      white-space: nowrap;
+      position: relative;
+      user-select: none;
+      transition: background 0.1s;
+    }
+    .wa-tab:hover { background: #2a2d2e; color: #ccc; }
+    .wa-tab.active {
+      background: #1e1e1e;
+      color: #fff;
+      border-top: 1px solid #0078d4;
+      padding-top: 1px;
+    }
+    .wa-tab .tab-icon { width: 14px; height: 14px; flex-shrink: 0; display: flex; align-items: center; }
+    .wa-tab .tab-icon svg { width: 14px; height: 14px; }
+    .wa-tab .tab-label {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+    .wa-tab .tab-dirty {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #e2c08d;
+      flex-shrink: 0;
+      display: none;
+    }
+    .wa-tab.modified .tab-dirty { display: block; }
+    .wa-tab .tab-close {
+      width: 18px;
+      height: 18px;
+      border-radius: 3px;
+      border: none;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      opacity: 0;
+      font-size: 16px;
+      line-height: 1;
+      flex-shrink: 0;
+      transition: background 0.1s, opacity 0.1s;
+    }
+    .wa-tab:hover .tab-close,
+    .wa-tab.active .tab-close { opacity: 0.7; }
+    .wa-tab.modified .tab-close { opacity: 0; }
+    .wa-tab.modified:hover .tab-close { opacity: 0; }
+    .wa-tab.modified:hover .tab-dirty { display: block; }
+    .wa-tab .tab-close:hover { background: rgba(255,255,255,0.15); opacity: 1 !important; }
+
+    /* ── Center canvas ── */
+    #wa-canvas {
+      flex: 1;
+      overflow: hidden;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+    }
+
+    #wa-canvas-body {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      min-height: 0;
+    }
+
+    /* DOCX: WangEditor fills the canvas */
+    #wa-docx-editor {
+      height: 100%;
+      display: none;
+    }
+
+    #wa-docx-editor.active { display: flex; flex-direction: column; }
+
+    /* #wa-editor-content must be a flex-growing child so its inner scroll element
+       gets a bounded height and can actually overflow */
+    #wa-editor-content {
+      flex: 1;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Word-like document editor ── */
+
+    /* Toolbar: light ribbon style */
+    #wa-docx-editor .w-e-toolbar {
+      flex-shrink: 0;
+      background: #f3f3f3 !important;
+      border-bottom: 1px solid #d4d4d4 !important;
+    }
+    #wa-docx-editor .w-e-bar-item button,
+    #wa-docx-editor .w-e-bar-item-group > .w-e-bar-item button {
+      color: #333 !important;
+    }
+    #wa-docx-editor .w-e-bar-item button:hover {
+      background: #e0e0e0 !important;
+    }
+
+    /* Canvas: gray background like Word's page layout view */
+    #wa-docx-editor .w-e-text-container {
+      background: #525659 !important;
+      flex: 1;
+      min-height: 0;
+      overflow: hidden !important;
+    }
+
+    /* Scrollable area with padding around the page */
+    #wa-docx-editor .w-e-scroll {
+      overflow-y: auto !important;
+      height: 100%;
+      padding: 32px 24px;
+      box-sizing: border-box;
+    }
+
+    /* The white page — US Letter size with margins */
+    #wa-docx-editor [data-slate-editor],
+    #wa-docx-editor [contenteditable="true"] {
+      background: #fff !important;
+      max-width: 816px;        /* US Letter at 96 dpi */
+      min-height: 1056px;      /* US Letter height */
+      margin: 0 auto !important;
+      padding: 96px !important; /* 1-inch margins */
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35), 0 6px 24px rgba(0,0,0,0.2);
+      box-sizing: border-box !important;
+      font-family: 'Calibri', 'Segoe UI', Arial, sans-serif !important;
+      font-size: 16px !important;
+      line-height: 1.6 !important;
+      color: #000 !important;
+      outline: none;
+    }
+
+    /* Paragraph spacing */
+    #wa-docx-editor [data-slate-editor] p,
+    #wa-docx-editor [contenteditable="true"] p {
+      margin: 0 0 10px 0;
+    }
+
+    /* XLSX: Luckysheet container */
+    #wa-xlsx-editor {
+      position: absolute;
+      inset: 0;
+      display: none;
+    }
+
+    #wa-xlsx-editor.active { display: block; }
+
+    /* XLSX image insertion toolbar */
+    .wa-xlsx-imgbar {
+      position: absolute;
+      top: 4px;
+      right: 8px;
+      z-index: 20;
+    }
+    .wa-xlsx-imgbtn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 3px 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .wa-xlsx-imgbtn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* PPTX: scrollable card list */
+    #wa-pptx-editor {
+      height: 100%;
+      overflow-y: auto;
+      padding: 16px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    #wa-pptx-editor.active { display: flex; }
+
+    .wa-slide-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .wa-slide-card-header {
+      padding: 8px 14px;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .wa-slide-badge {
+      background: var(--accent);
+      color: #fff;
+      font-size: 10px;
+      padding: 1px 7px;
+      border-radius: 10px;
+    }
+
+    .wa-shape-row {
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .wa-shape-row:last-child { border-bottom: none; }
+
+    .wa-shape-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .wa-shape-title-badge {
+      background: #ff8c4222;
+      color: #ff8c42;
+      border: 1px solid #ff8c4255;
+      padding: 0 5px;
+      border-radius: 3px;
+      font-size: 10px;
+    }
+
+    .wa-shape-textarea {
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 7px 10px;
+      font-size: 13px;
+      line-height: 1.55;
+      resize: vertical;
+      font-family: inherit;
+      min-height: 40px;
+      transition: border-color 0.15s;
+    }
+
+    .wa-shape-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    /* PDF: canvas stack */
+    #wa-pdf-viewer {
+      height: 100%;
+      overflow-y: auto;
+      padding: 16px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      align-items: center;
+      background: #6c6c6c;
+    }
+
+    #wa-pdf-viewer.active { display: flex; }
+
+    .wa-pdf-page-wrap {
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+
+    .wa-pdf-page-wrap canvas {
+      display: block;
+      max-width: 100%;
+    }
+
+    /* ── Floating Selection Toolbar ── */
+    .wa-selection-toolbar {
+      position: fixed;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      display: none;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+      padding: 4px;
+      z-index: 9999;
+      pointer-events: all;
+      align-items: center;
+      gap: 4px;
+    }
+    
+    .wa-selection-toolbar button {
+      background: transparent;
+      border: none;
+      color: var(--text);
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    
+    .wa-selection-toolbar button:hover {
+      background: var(--border);
+    }
+    
+    .wa-selection-toolbar .divider {
+      width: 1px;
+      height: 16px;
+      background: var(--border);
+      margin: 0 2px;
+    }
+
+    /* ── Right AI panel ── */
+    #wa-ai {
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #wa-ai-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+      background: var(--surface2);
+    }
+
+    #wa-ai-header .wa-ai-title {
+      font-size: 13px;
+      font-weight: 700;
+      flex: 1;
+      letter-spacing: 0.03em;
+    }
+
+    #wa-ai-model-badge {
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 2px 8px;
+      border-radius: 10px;
+      letter-spacing: 0.04em;
+    }
+
+    /* Clear chat button */
+    #wa-clear-chat-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text-muted);
+      font-size: 11px;
+      padding: 2px 7px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    #wa-clear-chat-btn:hover { border-color: var(--danger); color: var(--danger); }
+
+    #wa-ai-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .wa-msg {
+      max-width: 92%;
+      padding: 9px 13px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-word;
+    }
+
+    .wa-msg.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #4da3ff, #3b8fe8);
+      color: #fff;
+      border-bottom-right-radius: 3px;
+      box-shadow: 0 1px 4px rgba(77,163,255,0.25);
+    }
+
+    /* Quote block inside user bubble (Copilot-style selection context) */
+    .wa-msg-quote {
+      border-left: 3px solid rgba(255,255,255,0.55);
+      padding-left: 8px;
+      margin-bottom: 6px;
+      font-style: italic;
+      font-size: 11px;
+      opacity: 0.85;
+      line-height: 1.4;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+
+    .wa-msg.ai {
+      align-self: flex-start;
+      background: var(--surface2);
+      color: var(--text);
+      border-bottom-left-radius: 3px;
+    }
+
+    /* Markdown inside AI bubble */
+    .wa-msg.ai p { margin: 0 0 6px; }
+    .wa-msg.ai p:last-child { margin-bottom: 0; }
+    .wa-msg.ai h1, .wa-msg.ai h2, .wa-msg.ai h3,
+    .wa-msg.ai h4, .wa-msg.ai h5, .wa-msg.ai h6 {
+      margin: 8px 0 4px;
+      font-weight: 700;
+      line-height: 1.3;
+      color: var(--text);
+    }
+    .wa-msg.ai h1 { font-size: 15px; }
+    .wa-msg.ai h2 { font-size: 14px; }
+    .wa-msg.ai h3, .wa-msg.ai h4 { font-size: 13px; }
+    .wa-msg.ai ul, .wa-msg.ai ol {
+      padding-left: 18px;
+      margin: 4px 0;
+    }
+    .wa-msg.ai li { margin: 2px 0; }
+    .wa-msg.ai strong { color: #e0e0ff; font-weight: 700; }
+    .wa-msg.ai em { color: var(--text-muted); }
+    .wa-msg.ai code {
+      background: rgba(0,0,0,0.3);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-size: 11.5px;
+      color: #a8d8ff;
+    }
+    .wa-msg.ai pre {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 10px 12px;
+      margin: 6px 0;
+      overflow-x: auto;
+    }
+    .wa-msg.ai pre code {
+      background: transparent;
+      padding: 0;
+      font-size: 11.5px;
+      color: #c9d1d9;
+    }
+    .wa-msg.ai blockquote {
+      border-left: 3px solid var(--accent);
+      margin: 6px 0;
+      padding: 4px 10px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+    .wa-msg.ai table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 6px 0;
+      font-size: 12px;
+    }
+    .wa-msg.ai th, .wa-msg.ai td {
+      border: 1px solid var(--border);
+      padding: 4px 8px;
+      text-align: left;
+    }
+    .wa-msg.ai th { background: var(--surface); font-weight: 700; }
+    .wa-msg.ai a { color: var(--accent); text-decoration: underline; }
+
+    .wa-msg.ai.streaming {
+      /* streaming: show raw text */
+      white-space: pre-wrap;
+    }
+    .wa-msg.ai.streaming::after {
+      content: '▌';
+      animation: blink 0.8s step-end infinite;
+    }
+
+    @keyframes blink { 50% { opacity: 0; } }
+
+    .wa-msg-context-hint {
+      font-size: 10px;
+      color: var(--text-muted);
+      padding: 3px 10px;
+      background: var(--surface2);
+      border-radius: 4px;
+      border-left: 2px solid var(--accent);
+      align-self: flex-start;
+      max-width: 90%;
+    }
+
+    /* Tool call notification */
+    .wa-tool-notification {
+      align-self: center;
+      background: rgba(76, 175, 125, 0.15);
+      border: 1px solid var(--success);
+      color: var(--success);
+      border-radius: 6px;
+      padding: 5px 12px;
+      font-size: 11px;
+    }
+
+    #wa-ai-input-area {
+      padding: 12px;
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .wa-ai-quick-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+
+    .wa-quick-btn {
+      padding: 3px 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: transparent;
+      color: var(--text-muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .wa-quick-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    #wa-input-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-end;
+    }
+
+    #wa-user-input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 8px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      resize: none;
+      line-height: 1.5;
+      min-height: 36px;
+      max-height: 120px;
+      overflow-y: auto;
+      transition: border-color 0.15s;
+    }
+
+    #wa-user-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    #wa-send-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--accent);
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+
+    #wa-send-btn:hover { background: var(--accent-hover); }
+    #wa-send-btn:disabled { background: var(--border); cursor: not-allowed; }
+
+    /* ── Chart quick buttons ── */
+    .wa-quick-btn.chart-btn {
+      border-color: #4caf7d55;
+      color: #4caf7d;
+    }
+    .wa-quick-btn.chart-btn:hover {
+      border-color: #4caf7d;
+      background: rgba(76,175,125,0.08);
+    }
+
+    /* ── Code block inside AI messages ── */
+    .wa-msg-code {
+      align-self: flex-start;
+      background: #0d1117;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #c9d1d9;
+      max-width: 95%;
+      overflow-x: auto;
+    }
+
+    /* ── Chart result image ── */
+    .wa-chart-result {
+      align-self: flex-start;
+      max-width: 95%;
+    }
+    .wa-chart-result img {
+      max-width: 100%;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: block;
+    }
+    .wa-chart-result .wa-chart-caption {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      text-align: center;
+    }
+    .wa-chart-result .wa-chart-download {
+      font-size: 11px;
+      color: var(--accent);
+      cursor: pointer;
+      text-align: center;
+      margin-top: 2px;
+      text-decoration: underline;
+    }
+
+    /* ── Chart dialog ── */
+    #wa-chart-dialog {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 99999;
+    }
+    #wa-chart-dialog.open { display: flex; }
+    #wa-chart-dialog .wa-dialog-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      width: min(500px, 90vw);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    #wa-chart-dialog h3 { font-size: 15px; font-weight: 700; }
+    #wa-chart-dialog textarea {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 10px;
+      font-size: 13px;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 80px;
+    }
+    #wa-chart-dialog textarea:focus { outline: none; border-color: var(--accent); }
+    #wa-chart-dialog .wa-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+    /* ── Context indicator ── */
+    #wa-context-indicator {
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 3px 0 8px 0;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    #wa-context-indicator .ctx-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+
+    /* ── Copilot-style selection chip ── */
+    /* CSS Custom Highlight API — non-destructive pinned text marker in the doc */
+    ::highlight(wa-pinned) {
+      background-color: rgba(77, 163, 255, 0.18);
+    }
+
+    #wa-selection-chip {
+      display: flex;
+      align-items: flex-start;
+      gap: 7px;
+      margin-bottom: 6px;
+      padding: 6px 8px 6px 0;
+      background: var(--hover);
+      border-radius: 6px;
+      border-left: 3px solid var(--accent);
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      overflow: hidden;
+      animation: chipIn 0.15s ease;
+    }
+    @keyframes chipIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+    .chip-quote-bar { display: none; } /* bar is the left border */
+    #wa-selection-preview {
+      flex: 1;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      font-style: italic;
+      padding-left: 8px;
+    }
+    .chip-clear {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--text-muted);
+      font-size: 15px;
+      padding: 0 6px 0 0;
+      line-height: 1;
+      flex-shrink: 0;
+      opacity: 0.6;
+    }
+    .chip-clear:hover { opacity: 1; color: var(--text); }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+    /* ── Toast notification ── */
+    #wa-toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 20px;
+      border-radius: 8px;
+      font-size: 13px;
+      z-index: 9999;
+      opacity: 0;
+      transition: opacity 0.25s, transform 0.25s;
+      pointer-events: none;
+    }
+
+    #wa-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    #wa-toast.success { border-color: var(--success); color: var(--success); }
+    #wa-toast.error { border-color: var(--danger); color: var(--danger); }
+
+    /* ── File-switch loading overlay ── */
+    #wa-canvas-loading {
+      position: absolute;
+      inset: 0;
+      background: rgba(13, 13, 20, 0.82);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      z-index: 200;
+      backdrop-filter: blur(3px);
+    }
+    .wa-loading-spinner {
+      width: 38px;
+      height: 38px;
+      border: 3px solid rgba(99,102,241,0.25);
+      border-top-color: #6366f1;
+      border-radius: 50%;
+      animation: wa-spin 0.75s linear infinite;
+    }
+    @keyframes wa-spin { to { transform: rotate(360deg); } }
+    .wa-loading-text {
+      color: var(--text-secondary);
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+    /* Disable file list while loading */
+    #wa-files-list.loading {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Header ── -->
+  <div id="wa-header">
+    <a class="wa-logo" href="/">← Koto</a>
+    <span class="wa-file-name" id="wa-file-name">全格式 AI 工作区</span>
+    <div class="wa-header-actions">
+      <label class="wa-btn" for="wa-file-input" title="打开文件">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+        打开文件
+      </label>
+      <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf" style="display:none">
+      <button class="wa-btn primary" id="wa-save-btn" disabled onclick="WA.saveFile()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+          <polyline points="17 21 17 13 7 13 7 21"/>
+          <polyline points="7 3 7 8 15 8"/>
+        </svg>
+        保存
+      </button>
+      <span id="wa-autosave-status"></span>
+    </div>
+  </div>
+
+  <!-- ── Three-column workspace ── -->
+  <div id="wa-workspace">
+    <!-- Left: file manager -->
+    <div id="wa-left">
+      <!-- Header — VS Code style with hover-reveal actions -->
+      <div id="wa-left-header">
+        <span class="wa-panel-title">文件管理</span>
+        <div class="wa-header-actions">
+          <label class="wa-icon-btn" for="wa-file-input-left" title="上传文件到工作区">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          </label>
+          <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
+          <button class="wa-icon-btn" onclick="WA.refreshFiles()" title="刷新">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+          </button>
+          <button class="wa-icon-btn" id="wa-select-toggle" onclick="WA.toggleSelectMode()" title="多选模式">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </button>
+        </div>
+      </div>
+      <!-- Multi-select action bar (hidden until select mode active) -->
+      <div id="wa-select-bar" style="display:none">
+        <span id="wa-select-count">0 已选</span>
+        <button onclick="WA.selectAll()">全选</button>
+        <button class="danger" id="wa-delete-selected" onclick="WA.deleteSelected()" disabled>🗑 删除</button>
+        <button onclick="WA.toggleSelectMode()">取消</button>
+      </div>
+      <!-- Search -->
+      <div id="wa-search-wrap">
+        <svg class="wa-search-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="wa-search" type="text" placeholder="搜索文件…" autocomplete="off" oninput="WA.filterFiles(this.value)" onkeydown="if(event.key==='Escape')WA.clearSearch()">
+        <button id="wa-search-clear" onclick="WA.clearSearch()" title="清除" style="display:none">×</button>
+      </div>
+      <!-- Local pickers -->
+      <div id="wa-local-btns">
+        <button id="wa-pick-local-file-btn" title="打开本地文件（不上传到工作区）">📄 本地文件</button>
+        <button id="wa-pick-local-folder-btn" title="打开本地文件夹">📁 本地文件夹</button>
+        <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
+        <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
+      </div>
+      <!-- Workspace files (collapsible + sortable) -->
+      <div class="wa-section-label collapsible" id="wa-ws-label">
+        <span class="wa-section-arrow open" id="wa-ws-arrow" onclick="WA.toggleSection('workspace')">›</span>
+        <span onclick="WA.toggleSection('workspace')" style="flex:1">工作区</span>
+        <span class="wa-section-badge" id="wa-ws-badge"></span>
+        <div class="wa-section-actions">
+          <button class="wa-icon-btn wa-sort-btn" id="wa-sort-btn" onclick="event.stopPropagation();WA.cycleSortOrder()" title="切换排序" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">↕</button>
+        </div>
+      </div>
+      <div id="wa-files-list"></div>
+      <div id="wa-left-drop">📂 拖拽文件至此处<br><span style="font-size:10px;opacity:0.6">DOCX / XLSX / PPTX / PDF</span></div>
+    </div>
+
+    <!-- Right-click context menu -->
+    <div id="wa-ctx-menu">
+      <div class="wa-ctx-item" id="wa-ctx-open" onclick="WA._ctxOpen()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        打开
+      </div>
+      <div class="wa-ctx-separator"></div>
+      <div class="wa-ctx-item" id="wa-ctx-rename" onclick="WA._ctxRename()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        重命名
+      </div>
+      <div class="wa-ctx-item" id="wa-ctx-copy-path" onclick="WA._ctxCopyPath()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        复制路径
+      </div>
+      <div class="wa-ctx-separator"></div>
+      <div class="wa-ctx-item danger" id="wa-ctx-delete" onclick="WA._ctxDelete()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        删除
+      </div>
+    </div>
+
+    <!-- Center: polymorphic canvas -->
+    <div id="wa-canvas">
+      <!-- VS Code-style tab bar -->
+      <div id="wa-tab-bar"></div>
+      <!-- Canvas body: all editors positioned relative to this -->
+      <div id="wa-canvas-body">
+        <!-- Loading overlay (shown during file switch) -->
+        <div id="wa-canvas-loading">
+          <div class="wa-loading-spinner"></div>
+          <div class="wa-loading-text">加载中...</div>
+        </div>
+        <!-- ── Drop zone (no file loaded) ── -->
+        <div id="wa-drop-zone">
+          <div class="wa-drop-inner" id="wa-drop-inner">
+            <div class="wa-drop-icon">📂</div>
+            <div class="wa-drop-title">拖拽文件，或点击"打开文件"</div>
+            <div class="wa-drop-sub">支持 DOCX / XLSX / PPTX / PDF</div>
+            <div id="upload-progress"></div>
+          </div>
+        </div>
+        <!-- DOCX: WangEditor -->
+        <div id="wa-docx-editor">
+          <div id="wa-editor-toolbar"></div>
+          <div id="wa-editor-content"></div>
+        </div>
+
+        <!-- XLSX: Luckysheet -->
+        <div id="wa-xlsx-editor"></div>
+
+        <!-- PPTX: card editor -->
+        <div id="wa-pptx-editor"></div>
+
+        <!-- PDF: PDF.js viewer -->
+        <div id="wa-pdf-viewer"></div>
+      </div>
+    </div>
+
+    <!-- Right: AI chat -->
+    <div id="wa-ai">
+      <div id="wa-ai-header">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/>
+        </svg>
+        <span class="wa-ai-title">AI 助手</span>
+        <span id="wa-ai-model-badge">Koto AI</span>
+        <button id="wa-clear-chat-btn" title="清空对话" onclick="WA.clearChat()">清空</button>
+      </div>
+
+      <div id="wa-ai-messages">
+        <div class="wa-msg ai">你好！请打开一个文件，我会帮你分析、编辑和优化内容。<br><br>选中文档中的文字后，可快速发送给我处理。选中内容时 AI 会直接替换选区。</div>
+      </div>
+
+      <div id="wa-ai-input-area">
+        <!-- Copilot-style selection chip: shows pinned text above input -->
+        <div id="wa-selection-chip" style="display:none">
+          <span class="chip-quote-bar"></span>
+          <span id="wa-selection-preview"></span>
+          <button class="chip-clear" onclick="WA.clearSelection()" title="取消选区">×</button>
+        </div>
+        <div id="wa-context-indicator" style="display:none">
+          <div class="ctx-dot"></div>
+          <span id="wa-ctx-label">已附加上下文</span>
+        </div>
+        <div class="wa-ai-quick-actions" id="wa-quick-actions">
+          <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容')">✨ 润色</button>
+          <button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结文档要点')">📋 总结</button>
+          <button class="wa-quick-btn" onclick="WA.quickAction('请检查语法和错别字')">🔍 检查</button>
+          <button class="wa-quick-btn" onclick="WA.quickAction('请翻译选中内容为英文')">🌐 翻译</button>
+          <button class="wa-quick-btn chart-btn" onclick="WA.openChartDialog('python')" title="让 AI 用 Python/matplotlib 帮你画图">📊 Python 画图</button>
+          <button class="wa-quick-btn chart-btn" onclick="WA.openChartDialog('r')" title="让 AI 用 R/ggplot2 帮你画图">📈 R 画图</button>
+        </div>
+        <div id="wa-input-row">
+          <textarea id="wa-user-input" placeholder="输入指令… (Enter 发送, Shift+Enter 换行)"
+                    onkeydown="WA.handleInputKeydown(event)" rows="1"></textarea>
+          <button id="wa-send-btn" onclick="WA.sendMessage()" title="发送">
+            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Selection Toolbar -->
+  <div id="wa-pdf-tooltip" class="wa-selection-toolbar">
+    <button onclick="WA.sendQuickAction('润色')">✨ 润色</button>
+    <button onclick="WA.sendQuickAction('翻译')">🌐 翻译</button>
+    <button onclick="WA.sendQuickAction('总结')">📋 总结</button>
+    <div class="divider"></div>
+    <button onclick="WA.sendSelectionToAI()">💬 转交 AI</button>
+  </div>
+
+  <!-- Chart Generation Dialog -->
+  <div id="wa-chart-dialog">
+    <div class="wa-dialog-box">
+      <h3 id="wa-chart-dialog-title">📊 Python 画图</h3>
+      <textarea id="wa-chart-prompt" placeholder="描述你想要的图表，例如：&#10;用柱状图显示各季度的销售额对比&#10;画一个折线图显示时间趋势&#10;用饼图展示各类别占比"></textarea>
+      <div style="font-size:12px;color:var(--text-muted)">
+        <span id="wa-chart-data-hint">💡 将使用当前表格的全量数据</span>
+      </div>
+      <div class="wa-dialog-actions">
+        <button class="wa-btn" onclick="WA.closeChartDialog()">取消</button>
+        <button class="wa-btn primary" onclick="WA.submitChartRequest()">🚀 生成图表</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="wa-toast"></div>
+
+  <!-- ── CDN Scripts ── -->
+  <script src="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.min.js"></script>
+
+  <!-- WangEditor 5 -->
+  <script src="https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/index.js"></script>
+
+  <!-- Luckysheet dependencies -->
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/js/plugin.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/luckysheet.umd.js"></script>
+
+  <!-- PDF.js -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script>
+    if (typeof pdfjsLib !== 'undefined') {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    }
+  </script>
+
+  <!-- Socket.IO: load from CDN (vendor file not bundled) -->
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
+  <!-- Markdown renderer -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+
+  <!-- ── App JS ── -->
+  <script src="/static/js/workspace-assistant.js?v={{ range(100000,999999)|random }}"></script>
+</body>
+</html>

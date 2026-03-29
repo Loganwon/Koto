@@ -89,7 +89,8 @@ class SettingsManager:
         import copy
         if os.path.exists(SETTINGS_FILE):
             try:
-                with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                # utf-8-sig handles both plain UTF-8 and UTF-8 with BOM (PowerShell default)
+                with open(SETTINGS_FILE, "r", encoding="utf-8-sig") as f:
                     raw = json.load(f)
                 # 合并默认设置（处理新增的设置项）
                 self._settings = self._merge_settings(DEFAULT_SETTINGS, raw)
@@ -157,7 +158,7 @@ class SettingsManager:
             on_disk = {}
             if os.path.exists(SETTINGS_FILE):
                 try:
-                    with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    with open(SETTINGS_FILE, "r", encoding="utf-8-sig") as f:
                         on_disk = json.load(f)
                 except Exception:
                     pass

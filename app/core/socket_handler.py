@@ -11,6 +11,7 @@
 # ══════════════════════════════════════════════════════════════
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,259 @@ def register_socket_events(socketio):
                 "text": f"服务端处理失败: {exc}",
                 "is_error": True,
             }, namespace="/doc")
+
+    @socketio.on("doc_ai_request", namespace="/doc")
+    def on_doc_ai_request(data):
+        """全格式工作区 AI 交互 — streaming text or code-exec (chart generation)."""
+        from flask import request as _req
+        sid = _req.sid
+        prompt = data.get("prompt", "")
+        context = data.get("context", "")          # document context (sent separately)
+        selection = data.get("selection", "")      # Copilot-style pinned selection text
+        file_type = data.get("file_type", "unknown")
+        file_name = data.get("file_name", "")        # filename for system prompt context
+        has_selection = data.get("has_selection", False)  # whether editor has a text selection
+        history = data.get("history", [])            # [{role, content}] multi-turn history
+        language = data.get("language", "")          # "python" | "r" | "" → text mode
+        csv_data = data.get("csv_data", "")          # table CSV for chart context
+        if not prompt:
+            return
+        # Combine document context with prompt
+        if context:
+            prompt = f"{context}\n[用户请求]: {prompt}"
+
+        # ── Chart / code-exec mode ─────────────────────────────────────────
+        if language in ("python", "r"):
+            def _code_task():
+                try:
+                    from app.core.sandbox import run_python, run_r
+                except ImportError as e:
+                    socketio.emit("code_result",
+                                  {"error": f"Sandbox 模块加载失败: {e}", "stdout": "",
+                                   "stderr": "", "files": {}},
+                                  namespace="/doc", to=sid)
+                    return
+
+                # Ask AI to write the code
+                lang_label = "Python (matplotlib/pandas)" if language == "python" else "R (ggplot2)"
+                gen_prompt = (
+                    f"请根据以下任务，编写一段可以直接运行的 {lang_label} 代码。\n"
+                    "要求：\n"
+                    "1. 使用 matplotlib 或 pandas 绘图（Python）/ ggplot2（R）\n"
+                    "2. 将生成的图表保存为当前目录下的 chart.png 文件\n"
+                    "3. 对于 Python：使用 plt.savefig('chart.png', dpi=150, bbox_inches='tight')\n"
+                    "4. 对于 R：使用 ggsave('chart.png', dpi=150)\n"
+                    "5. 不要用 plt.show() 或任何 GUI 调用\n"
+                    "6. 只输出代码，不要任何 markdown 代码块标记（不要 ```）\n\n"
+                    f"任务描述：{prompt}\n"
+                )
+                if csv_data:
+                    gen_prompt += f"\n表格数据（CSV 格式）：\n{csv_data}\n"
+
+                # Emit "正在生成代码..." hint
+                socketio.emit("agent_stream_chunk", {"chunk": f"🤖 正在为你生成 {language.upper()} 代码…\n"},
+                              namespace="/doc", to=sid)
+
+                code = _call_llm_sync(gen_prompt)
+                if not code:
+                    socketio.emit("code_result",
+                                  {"error": "AI 代码生成失败，请检查 API Key 配置。",
+                                   "stdout": "", "stderr": "", "files": {}},
+                                  namespace="/doc", to=sid)
+                    return
+
+                # Strip markdown fences if model added them despite instructions
+                import re as _re
+                code = _re.sub(r'^```[a-z]*\n?', '', code.strip(), flags=_re.MULTILINE)
+                code = code.strip().strip('`')
+
+                # Echo generated code
+                socketio.emit("agent_stream_chunk",
+                              {"chunk": f"\n```{language}\n{code}\n```\n\n▶ 正在执行…\n"},
+                              namespace="/doc", to=sid)
+
+                # Execute
+                if language == "python":
+                    result = run_python(code)
+                else:
+                    result = run_r(code)
+
+                socketio.emit("code_result", result, namespace="/doc", to=sid)
+
+            socketio.start_background_task(_code_task)
+            return
+
+        # ── Normal text chat mode ──────────────────────────────────────────
+        def _task():
+            # ── Build system instruction ──────────────────────────────────────
+            file_ctx = f"文件名：{file_name}，" if file_name else ""
+            if has_selection:
+                action_hint = "用户当前有选中文字。修改时用 set_html 替换选区内容。"
+            else:
+                action_hint = "用户当前无选区。修改时用 set_html 在光标处插入内容。"
+
+            # Concise, example-driven prompt that small local models can follow reliably
+            system_instruction = (
+                f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n\n"
+                "【重要规则】\n"
+                "当用户要求插入、修改、翻译、润色等文档操作时，你必须在回复末尾输出修改指令。\n"
+                "不要只描述你会做什么——直接输出指令，让程序执行。\n\n"
+                "修改指令格式（必须完整、一行输出）：\n"
+                "<TOOL>{\"type\": \"set_html\", \"value\": \"<p>内容</p>\"}</TOOL>\n\n"
+                "示例 1 — 用户让你插入内容：\n"
+                "用户：写一行「你好世界」插入文档\n"
+                "AI：已插入。<TOOL>{\"type\": \"set_html\", \"value\": \"<p>你好世界</p>\"}</TOOL>\n\n"
+                "示例 2 — 用户让你翻译并插入：\n"
+                "用户：翻译成英文插入文档\n"
+                "AI：<TOOL>{\"type\": \"set_html\", \"value\": \"<p>Hello world</p>\"}</TOOL>\n\n"
+                "示例 3 — 用户说「在光标处插入」（明确插入指令）：\n"
+                "用户：请在光标处插入\n"
+                "AI：已插入。<TOOL>{\"type\": \"set_html\", \"value\": \"<p>上一步生成的内容</p>\"}</TOOL>\n\n"
+                f"{action_hint}\n"
+                "其他文件类型指令：\n"
+                "  XLSX → <TOOL>{\"type\":\"set_cell\",\"r\":0,\"c\":0,\"value\":\"值\"}</TOOL>\n"
+                "  PPTX → <TOOL>{\"type\":\"set_pptx_text\",\"slide_index\":0,\"shape_id\":1,\"value\":\"新文字\"}</TOOL>"
+            )
+
+            # ── Build prompt with multi-turn history ──────────────────────
+            # Assemble history (最多保留最近 10 轮，防止 token 超限)
+            MAX_HISTORY_TURNS = 10
+            recent_history = history[-MAX_HISTORY_TURNS * 2:] if history else []
+            history_text = ""
+            if recent_history:
+                parts = []
+                for turn in recent_history:
+                    role = turn.get("role", "")
+                    content = turn.get("content", "")
+                    if role == "user":
+                        parts.append(f"用户：{content}")
+                    elif role == "assistant":
+                        parts.append(f"Koto AI：{content}")
+                history_text = "\n".join(parts) + "\n\n"
+
+            # Build full prompt: optional selection context first, then history, then user message
+            if selection:
+                full_prompt = (
+                    f"[用户选中的文字]\n\"{selection}\"\n\n"
+                    f"{history_text}用户：{prompt}"
+                )
+            else:
+                full_prompt = f"{history_text}用户：{prompt}"
+            online_model = _pick_online_model()
+            logger.warning("[DocAI] model=%s prompt_len=%d history_turns=%d sid=%s",
+                           online_model, len(full_prompt), len(recent_history) // 2, sid)
+
+            def _try_online():
+                provider = _get_provider()
+                gen = provider.generate_content(
+                    prompt=full_prompt,
+                    model=online_model,
+                    system_instruction=system_instruction,
+                    stream=True,
+                )
+                full = []
+                for chunk in gen:
+                    part = chunk.get("content", "")
+                    if part:
+                        full.append(part)
+                        socketio.emit("agent_stream_chunk", {"chunk": part},
+                                      namespace="/doc", to=sid)
+                return "".join(full)
+
+            def _try_local():
+                if not _is_ollama_alive():
+                    return None
+                local = _get_local_provider()
+                # Local Ollama: fold system_instruction into the prompt
+                local_prompt = f"[系统指令]\n{system_instruction}\n\n{full_prompt}"
+                gen = local.generate_content(prompt=local_prompt, stream=True)
+                full = []
+                for chunk in gen:
+                    part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
+                    if part:
+                        full.append(part)
+                        socketio.emit("agent_stream_chunk", {"chunk": part},
+                                      namespace="/doc", to=sid)
+                return "".join(full)
+
+            result_text = None
+            # Respect "use local only" setting — skip online entirely
+            use_local_only = False
+            try:
+                from web.settings import SettingsManager as _SM
+                use_local_only = bool(_SM().get("ai", "use_local_only"))
+            except Exception:
+                pass
+
+            if use_local_only:
+                try:
+                    result_text = _try_local()
+                except Exception as exc2:
+                    logger.error("[WorkspaceAssistant] Local-only mode, local failed: %s", exc2)
+                if not result_text:
+                    socketio.emit("agent_task_complete",
+                                  {"result": "❌ 本地模型不可用，请确认 Ollama 已启动并加载了模型。"},
+                                  namespace="/doc", to=sid)
+                    return
+            else:
+                try:
+                    result_text = _try_online()
+                except Exception as exc:
+                    logger.warning("[DocAI] online failed: %s: %s", type(exc).__name__, exc)
+                    if _is_online_failure(exc):
+                        logger.warning("[WorkspaceAssistant] Online AI failed (%s), trying local…", exc)
+                        try:
+                            result_text = _try_local()
+                        except Exception as exc2:
+                            logger.error("[WorkspaceAssistant] Local fallback failed: %s", exc2)
+                            result_text = None
+                        if result_text is None:
+                            socketio.emit("agent_task_complete",
+                                          {"result": f"❌ AI 暂时不可用（在线模型不可用，本地模型也未运行）。请启动 Ollama 或配置有效的 API 密钥。"},
+                                          namespace="/doc", to=sid)
+                            return
+                    else:
+                        logger.error("[WorkspaceAssistant] AI task failed: %s", exc, exc_info=True)
+                        socketio.emit("agent_task_complete",
+                                      {"result": f"❌ AI 处理失败：{exc}"},
+                                      namespace="/doc", to=sid)
+                        return
+
+            # ── Parse and emit any embedded tool calls ────────────────────
+            clean_text, tool_calls = _parse_tool_calls(result_text or "")
+
+            # ── Fallback: user said "insert at cursor" but AI produced no tool call ──
+            # Synthesise a set_html from the last assistant turn in history so the
+            # content actually lands in the document instead of just being echoed.
+            _INSERT_TRIGGERS = ("在光标处插入", "插入文档", "插入到文档", "请插入", "插入内容")
+            if (not tool_calls
+                    and file_type in ("docx", "pptx")
+                    and any(t in prompt for t in _INSERT_TRIGGERS)):
+                # Find the last assistant message that has substantive content
+                last_ai_content = ""
+                for turn in reversed(history or []):
+                    if turn.get("role") == "assistant":
+                        c = turn.get("content", "").strip()
+                        # Strip any existing TOOL tags and short ack messages
+                        c_clean = re.sub(r'<TOOL>.*?</TOOL>', '', c, flags=re.DOTALL).strip()
+                        if len(c_clean) > 10:
+                            last_ai_content = c_clean
+                            break
+                if last_ai_content:
+                    import html as _html
+                    # Convert plain markdown-ish text to minimal HTML paragraphs
+                    paragraphs = [p.strip() for p in last_ai_content.split('\n') if p.strip()]
+                    html_val = "".join(f"<p>{_html.escape(p)}</p>" for p in paragraphs)
+                    tool_calls = [{"type": "set_html", "value": html_val}]
+                    logger.info("[DocAI] Synthesised set_html from last assistant turn (insert fallback)")
+
+            socketio.emit("agent_task_complete", {"result": clean_text},
+                          namespace="/doc", to=sid)
+
+            for tc in tool_calls:
+                socketio.emit("doc_tool_call", tc, namespace="/doc", to=sid)
+
+        socketio.start_background_task(_task)
 
 
 # ── Core text handler (streaming) ─────────────────────────────
@@ -196,26 +450,171 @@ def _handle_code_exec(emit, payload):
 
 # ── LLM helpers — 使用 Koto 统一 LLM Provider 体系 ────────────
 
-_DOC_MODEL = "gemini-3-flash-preview"
+def _parse_tool_calls(text: str):
+    """
+    Parse embedded <TOOL>JSON</TOOL> blocks from AI response text.
+    Also catches bare JSON and code-fenced JSON emitted by smaller local models
+    that don't reliably wrap with <TOOL> tags.
+    Returns (clean_text, list_of_tool_call_dicts).
+    Tool calls are stripped from the visible text before display.
+    """
+    import re
+    import json as _json
+
+    tool_calls = []
+    _KNOWN_TYPES = {"set_html", "set_cell", "set_cells", "set_pptx_text"}
+
+    def _try_parse(raw: str):
+        raw = raw.strip()
+        try:
+            tc = _json.loads(raw)
+            if isinstance(tc, dict) and tc.get("type") in _KNOWN_TYPES:
+                tool_calls.append(tc)
+                return True
+        except Exception:
+            pass
+        return False
+
+    # Pass 1: explicit <TOOL>…</TOOL> wrapper (preferred format)
+    # Accept closing tag variants: </TOOL>, </ TOOL>, </tool>
+    pattern = re.compile(r'<TOOL>(.*?)<\s*/\s*TOOL>', re.DOTALL | re.IGNORECASE)
+    def _replace(m):
+        _try_parse(m.group(1))
+        return ""
+    text = pattern.sub(_replace, text).strip()
+
+    # Strip any orphaned opening/closing TOOL tags that didn't pair (model error)
+    text = re.sub(r'<\s*/?\s*TOOL\s*>', '', text, flags=re.IGNORECASE).strip()
+
+    # Pass 2: code-fenced JSON block  ```json {...} ```  or  ``` {...} ```
+    fence_pat = re.compile(r'```(?:json)?\s*(\{[^`]+\})\s*```', re.DOTALL)
+    def _replace_fence(m):
+        if _try_parse(m.group(1)):
+            return ""
+        return m.group(0)
+    text = fence_pat.sub(_replace_fence, text).strip()
+
+    # Pass 3: bare JSON on its own line that looks like a tool call
+    # Match lines starting with {"type": "set_html" ...} (greedy to closing brace)
+    line_pat = re.compile(
+        r'(?:^|\n)\s*(\{"type":\s*"(?:set_html|set_cell|set_cells|set_pptx_text)".*?\})\s*(?=\n|$)',
+        re.DOTALL
+    )
+    def _replace_line(m):
+        if _try_parse(m.group(1)):
+            return ""
+        return m.group(0)
+    text = line_pat.sub(_replace_line, text).strip()
+
+    return text, tool_calls
+
+
+
+_ONLINE_DOC_MODELS = [
+    "gemini-3-flash-preview",  # 首选：最新快速模型
+    "gemini-2.5-flash",        # 备用稳定模型
+    "gemini-2.0-flash-lite",   # 轻量兜底
+]
+
+
+def _pick_online_model() -> str:
+    """直接使用 MODEL_MAP[CHAT]，保持与 Koto 主体一致；若取不到则用首选。"""
+    try:
+        from web.app import MODEL_MAP  # type: ignore
+        m = MODEL_MAP.get("CHAT", "")
+        if m:
+            return m
+    except Exception:
+        pass
+    return _ONLINE_DOC_MODELS[0]
 
 
 def _get_provider():
-    """Return the configured LLMProvider (respects API key, retries, fallbacks)."""
+    """Return the configured online LLMProvider."""
     from app.core.llm.provider_factory import get_llm_provider
     return get_llm_provider()
 
 
+def _is_ollama_alive() -> bool:
+    """True if local Ollama is reachable within 2 seconds."""
+    try:
+        import urllib.request as _ur
+        _ur.urlopen("http://localhost:11434/api/tags", timeout=2).close()
+        return True
+    except Exception:
+        return False
+
+
+def _get_local_provider():
+    """Return OllamaLLMProvider with the best available local model.
+
+    Queries /api/tags directly to avoid depending on LocalModelRouter which
+    may not have a pick_best_chat_model() method.  Falls back to model=None
+    (which uses OllamaLLMProvider's own auto-selection) if the query fails.
+    """
+    from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+    try:
+        import urllib.request as _ur, json as _json
+        with _ur.urlopen("http://localhost:11434/api/tags", timeout=3) as r:
+            tags = _json.loads(r.read())
+        models = [m["name"] for m in tags.get("models", [])]
+        if models:
+            # Prefer larger/better models by simple heuristic
+            preferred = next(
+                (m for m in models if any(k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b"))),
+                models[0]
+            )
+            logger.info("[DocAI] Using local model: %s", preferred)
+            return OllamaLLMProvider(model=preferred)
+    except Exception as e:
+        logger.warning("[DocAI] Could not query Ollama model list: %s", e)
+    return OllamaLLMProvider(model=None)
+
+
+def _is_online_failure(exc: Exception) -> bool:
+    """Return True if the exception is a recoverable online-availability failure.
+
+    Includes hard API-key failures (400 INVALID_ARGUMENT / expired) so the
+    handler automatically falls back to local Ollama instead of showing a raw
+    error to the user.
+    """
+    s = str(exc).lower()
+    return (
+        "timed out" in s
+        or "stream stalled" in s
+        or "503" in s
+        or "unavailable" in s
+        or "timeout" in s
+        or "resourceexhausted" in s
+        or "resource_exhausted" in s
+        or "429" in s
+        or "overloaded" in s
+        or "quota" in s
+        # API key issues — treat as "online unavailable" so local Ollama takes over
+        or "invalid_argument" in s
+        or "api key" in s
+        or "api_key" in s
+        or "expired" in s
+        or "400" in s
+    )
+
+
 def _stream_llm(emit, prompt, text):
     """
-    Stream LLM output chunk-by-chunk via agent_stream_chunk events.
-    Uses Koto's GeminiProvider with retry/fallback support.
+    Stream LLM output with dual-mode fallback:
+      1. Try the best available online Gemini model.
+      2. On timeout/503/unavailable → fall back to local Ollama if running.
     Returns the full assembled text on success, or None on failure.
     """
+    full_prompt = f"{prompt}\n\n{text}"
+    online_model = _pick_online_model()
+
+    # ── Attempt 1: Online ────────────────────────────────────────────────────
     try:
         provider = _get_provider()
         gen = provider.generate_content(
-            prompt=f"{prompt}\n\n{text}",
-            model=_DOC_MODEL,
+            prompt=full_prompt,
+            model=online_model,
             stream=True,
         )
         full = []
@@ -226,27 +625,75 @@ def _stream_llm(emit, prompt, text):
                 emit("agent_stream_chunk", {"chunk": part}, namespace="/doc")
         return "".join(full) if full else ""
     except Exception as exc:
-        logger.error("[DocAssistant] LLM streaming failed: %s", exc)
+        if not _is_online_failure(exc):
+            logger.error("[DocAssistant] LLM streaming failed (non-recoverable): %s", exc)
+            emit("agent_execute_command", {
+                "action": "show_message",
+                "text": f"❌ AI 调用失败：{exc}",
+                "is_error": True,
+            }, namespace="/doc")
+            emit("agent_task_complete", {"full_text": "", "error": str(exc)}, namespace="/doc")
+            return None
+        logger.warning("[DocAssistant] Online AI unavailable (%s), trying local…", exc)
+
+    # ── Attempt 2: Local (Ollama) fallback ───────────────────────────────────
+    if not _is_ollama_alive():
         emit("agent_execute_command", {
             "action": "show_message",
-            "text": f"❌ AI 调用失败：{exc}",
+            "text": "❌ 在线 AI 暂时不可用，本地模型也未运行。请稍后重试或启动 Ollama。",
             "is_error": True,
         }, namespace="/doc")
-        emit("agent_task_complete", {"full_text": "", "error": str(exc)}, namespace="/doc")
+        emit("agent_task_complete", {"full_text": "", "error": "all providers failed"}, namespace="/doc")
+        return None
+
+    try:
+        local = _get_local_provider()
+        gen = local.generate_content(prompt=full_prompt, stream=True)
+        full = []
+        for chunk in gen:
+            part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
+            if part:
+                full.append(part)
+                emit("agent_stream_chunk", {"chunk": part}, namespace="/doc")
+        return "".join(full) if full else ""
+    except Exception as exc2:
+        logger.error("[DocAssistant] Local fallback also failed: %s", exc2)
+        emit("agent_execute_command", {
+            "action": "show_message",
+            "text": f"❌ 在线和本地 AI 均不可用，请检查网络和 Ollama 状态。",
+            "is_error": True,
+        }, namespace="/doc")
+        emit("agent_task_complete", {"full_text": "", "error": str(exc2)}, namespace="/doc")
         return None
 
 
-def _call_llm_sync(prompt):
-    """Non-streaming LLM call (e.g. code generation). Returns text or None."""
+def _call_llm_sync(prompt: str) -> str | None:
+    """Non-streaming LLM call (e.g. code generation). Falls back to Ollama on failure."""
+    online_model = _pick_online_model()
+    # ── Attempt 1: Online ────────────────────────────────────────────────────
     try:
         provider = _get_provider()
         result = provider.generate_content(
             prompt=prompt,
-            model=_DOC_MODEL,
+            model=online_model,
             stream=False,
         )
         return result.get("content", "")
     except Exception as exc:
-        logger.error("[DocAssistant] LLM sync call failed: %s", exc)
+        if not _is_online_failure(exc):
+            logger.error("[DocAssistant] LLM sync call failed: %s", exc)
+            return None
+        logger.warning("[DocAssistant] Online sync AI failed (%s), trying local…", exc)
+
+    # ── Attempt 2: Local fallback ─────────────────────────────────────────────
+    if not _is_ollama_alive():
+        logger.error("[DocAssistant] No online model and Ollama unavailable")
+        return None
+    try:
+        local = _get_local_provider()
+        result = local.generate_content(prompt=prompt, stream=False)
+        return result.get("content", "") if isinstance(result, dict) else str(result)
+    except Exception as exc2:
+        logger.error("[DocAssistant] Local sync fallback failed: %s", exc2)
         return None
 

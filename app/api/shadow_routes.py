@@ -216,16 +216,29 @@ def shadow_retry_context(task_id: str):
     """返回失败任务的完整原始用户消息，供前端一键重试。"""
     try:
         ctx = _get_watcher().get_failed_task_context(task_id)
-        if not ctx:
-            return _err("Task not found", 404)
-        return _ok(
-            {
-                "task_id": task_id,
-                "original_text": ctx.get("full_text") or ctx.get("text", ""),
-                "session": ctx.get("session", ""),
-                "asked_at": ctx.get("asked_at", ""),
-            }
-        )
+        if ctx:
+            return _ok(
+                {
+                    "task_id": task_id,
+                    "original_text": ctx.get("full_text") or ctx.get("text", ""),
+                    "session": ctx.get("session", ""),
+                    "asked_at": ctx.get("asked_at", ""),
+                }
+            )
+        # Fallback：watcher 数据可能因 dirty_save 未写盘而丢失，改从 proactive 队列中取原始文本
+        for pending_msg in _get_agent().pending():
+            if pending_msg.get("task_id") == task_id:
+                original_text = pending_msg.get("original_text", "")
+                if original_text:
+                    return _ok(
+                        {
+                            "task_id": task_id,
+                            "original_text": original_text,
+                            "session": "",
+                            "asked_at": pending_msg.get("created_at", ""),
+                        }
+                    )
+        return _err("Task not found", 404)
     except Exception as exc:
         logger.exception("[shadow/retry-context] error")
         return _err(str(exc), 500)
@@ -312,4 +325,49 @@ def shadow_reset():
         _get_watcher().reset()
         return _ok({"reset": True})
     except Exception as exc:
+        return _err(str(exc), 500)
+
+
+# ── 影子记忆 API（替代独立的长期记忆设置面板）────────────────────────────────
+
+
+@shadow_bp.get("/memories")
+def shadow_get_memories():
+    """获取所有用户记忆（由影子追踪管理）。"""
+    try:
+        memories = _get_watcher().get_user_memories()
+        return _ok(memories)
+    except Exception as exc:
+        logger.exception("[shadow/memories GET] error")
+        return _err(str(exc), 500)
+
+
+@shadow_bp.post("/memories")
+def shadow_add_memory():
+    """手动添加一条用户记忆。Body: {content, category?}"""
+    try:
+        body = request.get_json(force=True, silent=True) or {}
+        content = (body.get("content") or "").strip()
+        category = (body.get("category") or "user_preference").strip()
+        if not content:
+            return _err("content 不能为空", 400)
+        mem = _get_watcher().add_user_memory(content, category, source="user")
+        return _ok(mem)
+    except ValueError as exc:
+        return _err(str(exc), 400)
+    except Exception as exc:
+        logger.exception("[shadow/memories POST] error")
+        return _err(str(exc), 500)
+
+
+@shadow_bp.delete("/memories/<mem_id>")
+def shadow_delete_memory(mem_id: str):
+    """删除指定 id 的记忆。"""
+    try:
+        deleted = _get_watcher().delete_user_memory(mem_id)
+        if deleted:
+            return _ok({"deleted": mem_id})
+        return _err("记忆不存在", 404)
+    except Exception as exc:
+        logger.exception("[shadow/memories DELETE] error")
         return _err(str(exc), 500)
