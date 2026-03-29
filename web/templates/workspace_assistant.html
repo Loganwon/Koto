@@ -205,12 +205,9 @@
     }
 
     /* ── Thin scrollbar (VS Code style) ── */
-    #wa-files-list::-webkit-scrollbar,
-    #wa-recent-list::-webkit-scrollbar { width: 4px; }
-    #wa-files-list::-webkit-scrollbar-track,
-    #wa-recent-list::-webkit-scrollbar-track { background: transparent; }
-    #wa-files-list::-webkit-scrollbar-thumb,
-    #wa-recent-list::-webkit-scrollbar-thumb { background: rgba(121,121,121,0.4); border-radius: 2px; }
+    #wa-files-list::-webkit-scrollbar { width: 4px; }
+    #wa-files-list::-webkit-scrollbar-track { background: transparent; }
+    #wa-files-list::-webkit-scrollbar-thumb { background: rgba(121,121,121,0.4); border-radius: 2px; }
 
     /* ── Panel title header ── */
     #wa-left-header {
@@ -547,11 +544,6 @@
       flex: 1;
       overflow-y: auto;
       min-height: 0;
-    }
-    #wa-recent-list {
-      flex: 0 0 auto;
-      max-height: 35%;
-      overflow-y: auto;
     }
 
     /* ── Indent guides (VS Code .monaco-tl-indent > .indent-guide) ── */
@@ -1509,13 +1501,6 @@
         <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
         <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
       </div>
-      <!-- Recent files (collapsible) -->
-      <div class="wa-section-label collapsible" onclick="WA.toggleSection('recent')">
-        <span class="wa-section-arrow open" id="wa-recent-arrow">›</span>
-        <span style="flex:1">最近文件</span>
-        <span class="wa-section-badge" id="wa-recent-badge"></span>
-      </div>
-      <div id="wa-recent-list"></div>
       <!-- Workspace files (collapsible + sortable) -->
       <div class="wa-section-label collapsible" id="wa-ws-label">
         <span class="wa-section-arrow open" id="wa-ws-arrow" onclick="WA.toggleSection('workspace')">›</span>

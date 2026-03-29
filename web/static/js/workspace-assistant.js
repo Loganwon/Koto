@@ -16,9 +16,8 @@ window.WA = window.WA || {};
     socket: null,
     isLoading: false,
     conversation: [],   // [{role:'user'|'assistant', content:string}] — multi-turn history
-    recentFiles: JSON.parse(localStorage.getItem('wa_recent_files') || '[]'),  // [{name, ext, path, time}]
     sortBy: localStorage.getItem('wa_sort_by') || 'name',   // 'name' | 'date' | 'type'
-    sectionOpen:JSON.parse(localStorage.getItem('wa_sections') || '{"recent":true,"workspace":true}'),
+    sectionOpen:JSON.parse(localStorage.getItem('wa_sections') || '{"workspace":true}'),
     searchQuery: '',
     _allFiles: [],  // full file tree cached for client-side filter
     pinnedSelection: '',  // text pinned as Copilot-style context chip
@@ -27,19 +26,6 @@ window.WA = window.WA || {};
     openTabs: [],          // [{path,name,ext,fileType,fileId,serverData,cache,modified}]
     activeTabPath: null,   // path of the currently active tab
   };
-
-  // ── Migrate stale localStorage paths (strip old 'uploads/' prefix) ──
-  (function _migrateRecentFilePaths() {
-    let changed = false;
-    state.recentFiles = state.recentFiles.map(f => {
-      if (f.path && f.path.startsWith('uploads/')) {
-        changed = true;
-        return { ...f, path: f.path.slice('uploads/'.length) };
-      }
-      return f;
-    });
-    if (changed) localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
-  })();
 
   // ── Tab management (VS Code style) ──────────────────────────────────────────
 
@@ -122,7 +108,6 @@ window.WA = window.WA || {};
     }
 
     _renderTabs();
-    renderRecentFiles();
     // highlight active file in left panel
     document.querySelectorAll('.wa-file-item').forEach(el => {
       el.classList.toggle('active', el.dataset.path === path || el.title === tab.name);
@@ -212,56 +197,6 @@ window.WA = window.WA || {};
       if (overlay) overlay.style.display = 'none';
       if (list) list.classList.remove('loading');
     }
-  }
-
-  // ── Recent files helpers ──
-  // path: workspace-relative path used to re-open the file (e.g. "foo.docx")
-  function _saveRecentFile(name, ext, path) {
-    const MAX_RECENT = 8;
-    const wsPath = path || name;   // files now live at workspace root, not uploads/
-    state.recentFiles = state.recentFiles.filter(f => f.name !== name);
-    state.recentFiles.unshift({ name, ext, path: wsPath, time: Date.now() });
-    if (state.recentFiles.length > MAX_RECENT) state.recentFiles.length = MAX_RECENT;
-    localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
-    renderRecentFiles();
-  }
-
-  function renderRecentFiles() {
-    const el = $('wa-recent-list');
-    if (!el) return;
-
-    // Update section visibility
-    el.style.display = state.sectionOpen.recent ? '' : 'none';
-    const arrow = $('wa-recent-arrow');
-    if (arrow) arrow.className = 'wa-section-arrow' + (state.sectionOpen.recent ? ' open' : '');
-
-    // Update count badge
-    const badge = $('wa-recent-badge');
-    if (badge) badge.textContent = state.recentFiles.length || '';
-
-    if (!state.recentFiles.length) {
-      el.innerHTML = '<div style="padding:6px 14px;color:var(--text-muted);font-size:11px;opacity:0.6">暂无最近文件</div>';
-      return;
-    }
-    el.innerHTML = state.recentFiles.map(f => {
-      const wsPath = (f.path || f.name).replace(/^uploads\//, '');  // strip stale prefix
-      const esc = wsPath.replace(/'/g, "\\'");
-      const nameEsc = f.name.replace(/'/g, "\\'");
-      const isActive = (state.fileName && f.name === state.fileName) ? ' active' : '';
-      return `<div class="wa-file-item file${isActive}" data-depth="0" data-path="${esc}"
-          onclick="WA._fileRowClick(event,'${esc}')"
-          oncontextmenu="WA._showCtxMenu(event,'${esc}','${nameEsc}')"
-          title="${f.name}">
-        <input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleFileCheck(this,'${esc}')">
-        ${_fileIcon(f.ext)}
-        <span class="wa-file-label">${f.name}</span>
-        <div class="wa-file-actions">
-          <button class="del" onclick="event.stopPropagation();WA.removeRecentFile('${nameEsc}')" title="从列表移除">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-          </button>
-        </div>
-      </div>`;
-    }).join('');
   }
 
   // VS Code-style SVG file type icons
@@ -435,8 +370,7 @@ window.WA = window.WA || {};
   window.WA.toggleSection = (id) => {
     state.sectionOpen[id] = !state.sectionOpen[id];
     localStorage.setItem('wa_sections', JSON.stringify(state.sectionOpen));
-    if (id === 'recent') renderRecentFiles();
-    else _renderWorkspaceTree();
+    _renderWorkspaceTree();
   };
 
   window.WA.cycleSortOrder = () => {
@@ -445,12 +379,6 @@ window.WA = window.WA || {};
     state.sortBy = order[(idx + 1) % order.length];
     localStorage.setItem('wa_sort_by', state.sortBy);
     _renderWorkspaceTree();
-  };
-
-  window.WA.removeRecentFile = (name) => {
-    state.recentFiles = state.recentFiles.filter(f => f.name !== name);
-    localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
-    renderRecentFiles();
   };
 
   window.WA.renameWorkspaceFile = async (path, currentName) => {
@@ -480,11 +408,6 @@ window.WA = window.WA || {};
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || '重命名失败');
         showToast('已重命名为 ' + json.name, 'success');
-        // Update recent files if the old name was there
-        state.recentFiles = state.recentFiles.map(f =>
-          f.name === currentName ? { ...f, name: json.name, path: json.path } : f
-        );
-        localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
       } catch (e) {
         showToast(e.message, 'error');
       }
@@ -505,11 +428,7 @@ window.WA = window.WA || {};
       const json = await res.json();
       if (!res.ok) {
         if (res.status === 404) {
-          // File doesn't exist on disk — clean it from the recent list and refresh panel
-          const fname = filepath.split('/').pop();
-          state.recentFiles = state.recentFiles.filter(f => f.name !== fname);
-          localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
-          renderRecentFiles();
+          // File doesn't exist on disk — refresh panel
           loadWorkspaceFiles();
           showToast('文件已不存在，已从列表移除', 'info');
         } else {
@@ -518,11 +437,6 @@ window.WA = window.WA || {};
         return;
       }
       showToast('已删除 ' + filepath.split('/').pop(), 'success');
-      // Also remove from recent files list
-      const fname = filepath.split('/').pop();
-      state.recentFiles = state.recentFiles.filter(f => f.name !== fname);
-      localStorage.setItem('wa_recent_files', JSON.stringify(state.recentFiles));
-      renderRecentFiles();
       loadWorkspaceFiles();
     } catch (e) {
       showToast(e.message, 'error');
@@ -870,9 +784,12 @@ window.WA = window.WA || {};
             },
           },
           onChange: () => {
-            // Keep _lastHtml in sync so serialize() fallback is always current
-            const _h = this.editor && this.editor.getHtml ? this.editor.getHtml() : null;
-            if (_h) this._lastHtml = _h;
+            // Keep _lastHtml in sync so serialize() fallback is always latest user content
+            if (this.editor && this.editor.getHtml) {
+              const _h = this.editor.getHtml();
+              const _stripped = _h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
+              if (_stripped) this._lastHtml = _h;  // only update when there is real content
+            }
             WA.scheduleAutoSave();
           },
         }
@@ -1331,7 +1248,6 @@ window.WA = window.WA || {};
          const wsPath = file._wsPath || json.file_name;   // no uploads/ prefix
          state.wsSourcePath = wsPath;
          state.activeTabPath = wsPath;
-         _saveRecentFile(json.file_name, ext, wsPath);
          $('wa-file-name').textContent = state.fileName;
          $('wa-save-btn').disabled = (state.fileType === 'pdf');
 
@@ -1888,7 +1804,6 @@ window.WA = window.WA || {};
   // Init
   initSocket();
   loadWorkspaceFiles();
-  renderRecentFiles();
 
   // ── Local file / folder pickers ──
   const localFileInput = $('wa-local-file-input');
