@@ -778,6 +778,7 @@ window.WA = window.WA || {};
 
     render(html) {
       // Safely destroy previous instances first
+      if (this._mutationObs) { this._mutationObs.disconnect(); this._mutationObs = null; }
       if (this.editor) { try { this.editor.destroy(); } catch(e) { console.warn('[WangEditor destroy]', e); } }
       if (this.toolbar) { try { this.toolbar.destroy(); } catch(e) {} }
       this.editor = null;
@@ -785,7 +786,7 @@ window.WA = window.WA || {};
 
       // CRITICAL: Always recreate inner containers.
       // WangEditor modifies/replaces the selector's children on destroy().
-      this._lastHtml = html;  // Fallback if getHtml() returns empty
+      this._lastHtml = html;  // Fallback / initial snapshot
 
       const wrapper = $(this.containerId);
       wrapper.innerHTML = '';
@@ -804,24 +805,10 @@ window.WA = window.WA || {};
           placeholder: '开始编辑文档...',
           hoverbarKeys: {},
           MENU_CONF: {
-            // Allow base64 images up to 5 MB — no upload server needed
-            uploadImage: {
-              base64LimitSize: 5 * 1024 * 1024,
-            },
-            insertImage: {
-              // Accept all common image types
-              checkImage(src) { return true; },
-            },
+            uploadImage: { base64LimitSize: 5 * 1024 * 1024 },
+            insertImage: { checkImage(src) { return true; } },
           },
-          onChange: () => {
-            // Keep _lastHtml in sync so serialize() fallback is always latest user content
-            if (this.editor && this.editor.getHtml) {
-              const _h = this.editor.getHtml();
-              const _stripped = _h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
-              if (_stripped) this._lastHtml = _h;  // only update when there is real content
-            }
-            WA.scheduleAutoSave();
-          },
+          onChange: () => { WA.scheduleAutoSave(); },
         }
       });
       this.toolbar = createToolbar({
@@ -829,6 +816,19 @@ window.WA = window.WA || {};
         selector: '#wa-editor-toolbar',
         config: { excludeKeys: ['fullScreen'] }
       });
+
+      // Use MutationObserver on the editable DOM directly — more reliable than
+      // WangEditor's onChange for tracking current HTML.
+      const editorEl = ct.querySelector('[contenteditable="true"]') || ct;
+      this._mutationObs = new MutationObserver(() => {
+        if (!this.editor) return;
+        try {
+          const h = this.editor.getHtml();
+          const stripped = h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
+          if (stripped) this._lastHtml = h;
+        } catch(e) {}
+      });
+      this._mutationObs.observe(editorEl, { childList: true, subtree: true, characterData: true });
     }
 
     getContent() {
@@ -840,15 +840,16 @@ window.WA = window.WA || {};
 
     serialize() {
       if (!this.editor) return this._lastHtml || "";
-      const html = this.editor.getHtml();
-      // WangEditor empty-doc pattern: only <p><br></p> — fall back to last known HTML
-      const stripped = html.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
-      if (!stripped) {
-        console.warn('[KotoDocxEditor] getHtml() returned empty, using _lastHtml:', this._lastHtml?.substring(0, 80));
-        return this._lastHtml || html;
-      }
-      console.log('[KotoDocxEditor] serialize() len=' + html.length + ' preview=' + html.substring(0, 80));
-      return html;
+      // Prefer MutationObserver-tracked _lastHtml — it's updated synchronously on every DOM change.
+      // getHtml() is called as a secondary source in case _lastHtml is stale.
+      const domHtml = this._lastHtml || "";
+      const editorHtml = (() => { try { return this.editor.getHtml(); } catch(e) { return ""; } })();
+      // Pick whichever is longer (more content) — MutationObserver runs async so
+      // on the very first save _lastHtml may still be initial; editor.getHtml() is always current.
+      const best = (editorHtml.length >= domHtml.length) ? editorHtml : domHtml;
+      const stripped = best.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
+      console.log('[KotoDocxEditor] serialize() best=' + best.length + ' domHtml=' + domHtml.length + ' editorHtml=' + editorHtml.length + ' preview=' + best.substring(0, 80));
+      return stripped ? best : (domHtml || editorHtml || "");
     }
 
     applyToolCall(cmd) {
@@ -866,6 +867,7 @@ window.WA = window.WA || {};
     }
 
     destroy() {
+      if (this._mutationObs) { this._mutationObs.disconnect(); this._mutationObs = null; }
       if (this.editor) { try { this.editor.destroy(); } catch(e) {} }
       if (this.toolbar) { try { this.toolbar.destroy(); } catch(e) {} }
       this.editor = null;
