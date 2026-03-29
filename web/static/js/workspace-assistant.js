@@ -808,7 +808,15 @@ window.WA = window.WA || {};
             uploadImage: { base64LimitSize: 5 * 1024 * 1024 },
             insertImage: { checkImage(src) { return true; } },
           },
-          onChange: () => { WA.scheduleAutoSave(); },
+          onChange: (editor) => {
+            // WangEditor v5 passes the editor instance as argument — use it directly.
+            try {
+              const h = editor.getHtml();
+              const stripped = h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
+              if (stripped) this._lastHtml = h;
+            } catch(e) {}
+            WA.scheduleAutoSave();
+          },
         }
       });
       this.toolbar = createToolbar({
@@ -817,18 +825,22 @@ window.WA = window.WA || {};
         config: { excludeKeys: ['fullScreen'] }
       });
 
-      // Use MutationObserver on the editable DOM directly — more reliable than
-      // WangEditor's onChange for tracking current HTML.
-      const editorEl = ct.querySelector('[contenteditable="true"]') || ct;
-      this._mutationObs = new MutationObserver(() => {
+      // MutationObserver as backup — fires even when WangEditor doesn't trigger onChange.
+      // Attach after createEditor() so WangEditor has created its DOM.
+      setTimeout(() => {
         if (!this.editor) return;
-        try {
-          const h = this.editor.getHtml();
-          const stripped = h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
-          if (stripped) this._lastHtml = h;
-        } catch(e) {}
-      });
-      this._mutationObs.observe(editorEl, { childList: true, subtree: true, characterData: true });
+        const editable = ct.querySelector('[contenteditable="true"]');
+        if (!editable) return;
+        this._mutationObs = new MutationObserver(() => {
+          if (!this.editor) return;
+          try {
+            const h = this.editor.getHtml();
+            const s = h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
+            if (s) this._lastHtml = h;
+          } catch(e) {}
+        });
+        this._mutationObs.observe(editable, { childList: true, subtree: true, characterData: true });
+      }, 300);
     }
 
     getContent() {
