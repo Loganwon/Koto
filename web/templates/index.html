@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN" data-theme="{{ initial_theme | default('light') }}">
 <head>
     <meta charset="UTF-8">
@@ -7,6 +7,7 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/koto_icon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260323a">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/skill-ui-extensions.css') }}?v=20260526">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20260331b">
     <!-- Restore UI zoom before first paint to avoid flash -->
     <script>(function(){
         var z=parseFloat(localStorage.getItem('koto.uiZoom')||'1');
@@ -1218,7 +1219,7 @@
                 </div>
 
                 <!-- 文件工作站 -->
-                <div class="sb-nav-item" id="navWorkspaceBtn" onclick="window.open('/workspace-assistant','_blank')" title="文件工作站">
+                <div class="sb-nav-item" id="navWorkspaceBtn" onclick="typeof WA!=='undefined'&&WA.openInMainView?WA.openInMainView():window.open('/workspace-assistant','_blank')" title="文件工作站">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
                     <span class="sidebar-text" style="flex:1;">文件工作站</span>
                     <svg class="sb-arrow sidebar-text" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1483,7 +1484,154 @@
                 <div class="input-meta-bar"></div>
                 <p class="input-hint">Enter 发送 · Shift+Enter 换行 · Ctrl+/ 快捷键</p>
             </div>
-            </div><!-- /chatView -->
+                        </div><!-- /chatView -->
+
+            <!-- ═══ 文件工作站视图 ═══ -->
+            <div id="workspaceView" class="wa-embedded" style="display:none">
+              <div id="wa-topbar">
+                <button class="wa-topbar-back" onclick="WA.closeInMainView()" title="返回对话">
+                  <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+                  返回对话
+                </button>
+                <span class="wa-topbar-sep"></span>
+                <span class="wa-topbar-filename" id="wa-file-name">文件工作站</span>
+                <div class="wa-topbar-actions">
+                  <label class="wa-btn" for="wa-file-input" title="打开文件">
+                    <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                    打开文件
+                  </label>
+                  <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf" style="display:none">
+                  <button class="wa-btn primary" id="wa-save-btn" disabled onclick="WA.saveFile()">保存</button>
+                  <span id="wa-autosave-status"></span>
+                </div>
+              </div><!-- /wa-topbar -->
+              <div id="wa-workspace">
+                <div id="wa-left">
+                  <div id="wa-left-header">
+                    <span class="wa-panel-title">文件管理</span>
+                    <div class="wa-header-actions">
+                      <label class="wa-icon-btn" for="wa-file-input-left" title="上传文件到工作区">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                      </label>
+                      <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
+                      <button class="wa-icon-btn" onclick="WA.refreshFiles()" title="刷新">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                      </button>
+                      <button class="wa-icon-btn" id="wa-select-toggle" onclick="WA.toggleSelectMode()" title="多选模式">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div id="wa-select-bar" style="display:none">
+                    <span id="wa-select-count">0 已选</span>
+                    <button onclick="WA.selectAll()">全选</button>
+                    <button class="danger" id="wa-delete-selected" onclick="WA.deleteSelected()" disabled>删除</button>
+                    <button onclick="WA.toggleSelectMode()">取消</button>
+                  </div>
+                  <div id="wa-search-wrap">
+                    <svg class="wa-search-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                    <input id="wa-search" type="text" placeholder="搜索文件" autocomplete="off" oninput="WA.filterFiles(this.value)" onkeydown="if(event.key==='Escape')WA.clearSearch()">
+                    <button id="wa-search-clear" onclick="WA.clearSearch()" title="清除" style="display:none">x</button>
+                  </div>
+                  <div id="wa-local-btns">
+                    <button id="wa-pick-local-file-btn" title="打开本地文件">本地文件</button>
+                    <button id="wa-pick-local-folder-btn" title="打开本地文件夹">本地文件夹</button>
+                    <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
+                    <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
+                  </div>
+                  <div class="wa-section-label collapsible" id="wa-ws-label">
+                    <span class="wa-section-arrow open" id="wa-ws-arrow" onclick="WA.toggleSection('workspace')">&#8250;</span>
+                    <span onclick="WA.toggleSection('workspace')" style="flex:1">工作区</span>
+                    <span class="wa-section-badge" id="wa-ws-badge"></span>
+                    <div class="wa-section-actions">
+                      <button class="wa-icon-btn wa-sort-btn" id="wa-sort-btn" onclick="event.stopPropagation();WA.cycleSortOrder()" title="切换排序" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">&#8597;</button>
+                    </div>
+                  </div>
+                  <div id="wa-files-list"></div>
+                  <div id="wa-left-drop">拖拽文件至此<br><span style="font-size:10px;opacity:0.55">DOCX XLSX PPTX PDF</span></div>
+                </div>
+                <div id="wa-ctx-menu">
+                  <div class="wa-ctx-item" id="wa-ctx-open" onclick="WA._ctxOpen()">打开</div>
+                  <div class="wa-ctx-separator"></div>
+                  <div class="wa-ctx-item" id="wa-ctx-rename" onclick="WA._ctxRename()">重命名</div>
+                  <div class="wa-ctx-item" id="wa-ctx-copy-path" onclick="WA._ctxCopyPath()">复制路径</div>
+                  <div class="wa-ctx-separator"></div>
+                  <div class="wa-ctx-item danger" id="wa-ctx-delete" onclick="WA._ctxDelete()">删除</div>
+                </div>
+                <div id="wa-canvas">
+                  <div id="wa-tab-bar"></div>
+                  <div id="wa-canvas-body">
+                    <div id="wa-ai-img-drop-hint"><span>释放即可插入图片</span></div>
+                    <div id="wa-canvas-loading"><div class="wa-loading-spinner"></div><div class="wa-loading-text">加载中...</div></div>
+                    <div id="wa-drop-zone">
+                      <div class="wa-drop-inner" id="wa-drop-inner">
+                        <div class="wa-drop-icon">&#128194;</div>
+                        <div class="wa-drop-title">拖拽文件到此处，或点击"打开文件"</div>
+                        <div class="wa-drop-sub">支持所有常见办公文档格式</div>
+                        <div id="upload-progress"></div>
+                      </div>
+                      <div class="wa-format-chips">
+                        <span class="wa-chip docx">Word / DOCX</span>
+                        <span class="wa-chip xlsx">Excel / XLSX</span>
+                        <span class="wa-chip pptx">PowerPoint / PPTX</span>
+                        <span class="wa-chip pdf">PDF</span>
+                      </div>
+                    </div>
+                    <div id="wa-docx-editor"><div id="wa-editor-toolbar"></div><div id="wa-editor-content"></div></div>
+                    <div id="wa-xlsx-editor"></div>
+                    <div id="wa-pptx-editor"></div>
+                    <div id="wa-pdf-viewer"></div>
+                  </div>
+                </div>
+                <div id="wa-ai">
+                  <div id="wa-ai-header">
+                    <div class="wa-ai-logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3-3.8-2.8-3.8 2.8 1.4-4.3-3.6-2.7h4.5Z" fill="#fff" opacity="0.9"/></svg></div>
+                    <div class="wa-ai-header-main"><span class="wa-ai-title">AI 助手</span><span id="wa-ai-model-badge">Koto AI</span></div>
+                    <div class="wa-ai-header-btns">
+                      <button id="wa-settings-btn" title="AI 输出设置" onclick="WA.toggleSettings()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+                      <button id="wa-clear-chat-btn" title="清空对话" onclick="WA.clearChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
+                    </div>
+                  </div>
+                  <div id="wa-ai-settings-panel">
+                    <div class="wa-setting-label">AI 输出模式</div>
+                    <div class="wa-output-mode-toggle">
+                      <button data-mode="inline" class="active" onclick="WA.setOutputMode('inline')">写入文档</button>
+                      <button data-mode="chat" onclick="WA.setOutputMode('chat')">仅对话框</button>
+                    </div>
+                  </div>
+                  <div id="wa-subject-bar"><span class="subject-tag" id="wa-subject-tag">文件</span><span class="subject-text" id="wa-subject-text"></span></div>
+                  <div id="wa-ai-messages"><div class="wa-msg ai">你好！请从左侧打开一个文件，我可以帮你分析内容、润色文字、总结要点或翻译段落。</div></div>
+                  <div id="wa-ai-input-area">
+                    <div id="wa-selection-chip" style="display:none"><span class="chip-quote-bar"></span><span id="wa-selection-preview"></span><button class="chip-clear" onclick="WA.clearSelection()" title="取消选区">x</button></div>
+                    <div id="wa-context-indicator" style="display:none"><div class="ctx-dot"></div><span id="wa-ctx-label">已附加上下文</span></div>
+                    <div class="wa-ai-quick-actions" id="wa-quick-actions">
+                      <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容')">润色</button>
+                      <button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结文档要点')">总结</button>
+                      <button class="wa-quick-btn" onclick="WA.quickAction('请检查语法和错别字')">检查</button>
+                      <button class="wa-quick-btn" onclick="WA.quickAction('请翻译选中内容为英文')">翻译</button>
+                      <button class="wa-quick-btn chart-btn" onclick="WA.openChartDialog('python')">Python图</button>
+                      <button class="wa-quick-btn chart-btn" onclick="WA.openChartDialog('r')">R图</button>
+                    </div>
+                    <div class="wa-input-box">
+                      <div id="wa-input-row"><textarea id="wa-user-input" placeholder="有什么需要帮忙的？" onkeydown="WA.handleInputKeydown(event)" rows="1"></textarea></div>
+                      <div class="wa-input-box-footer">
+                        <span class="wa-input-hint">Enter 发送 Shift+Enter 换行</span>
+                        <button id="wa-send-btn" onclick="WA.sendMessage()" title="发送"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div><!-- /wa-workspace -->
+              <div id="wa-pdf-tooltip" class="wa-selection-toolbar">
+                <button onclick="WA.sendQuickAction('润色')">润色</button>
+                <button onclick="WA.sendQuickAction('翻译')">翻译</button>
+                <button onclick="WA.sendQuickAction('总结')">总结</button>
+                <div class="divider"></div>
+                <button onclick="WA.sendSelectionToAI()">转交 AI</button>
+              </div>
+              <div id="wa-chart-dialog"><div class="wa-dialog-box"><h3 id="wa-chart-dialog-title">Python 画图</h3><textarea id="wa-chart-prompt" placeholder="描述你想要的图表"></textarea><div style="font-size:12px;color:var(--text-muted)"><span id="wa-chart-data-hint">将使用当前表格的全量数据</span></div><div class="wa-dialog-actions"><button class="wa-btn" onclick="WA.closeChartDialog()">取消</button><button class="wa-btn primary" onclick="WA.submitChartRequest()">生成图表</button></div></div></div>
+              <div id="wa-toast"></div>
+            </div><!-- /workspaceView -->
         </main>
 
         <aside class="workspace-panel" id="workspacePanel">
@@ -4687,6 +4835,10 @@
         }
     }
     </script>
+
+    <!-- ── 文件工作站 CDN deps (lazy-loaded by WA.openInMainView) ── -->
+    <script src="/static/vendor/split.min.js"></script>
+    <script src="{{ url_for('static', filename='js/workspace-assistant.js') }}?v={{ range(100000,999999)|random }}"></script>
 
 </body>
 </html>

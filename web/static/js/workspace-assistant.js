@@ -6,6 +6,73 @@
 window.WA = window.WA || {};
 
 (function() {
+  // ── Embedded mode detection ──
+  // If this script runs on index.html, #workspaceView exists at load time.
+  const _isEmbedded = !!document.getElementById('workspaceView');
+  let _waInited = false;
+
+  // ── Lazy CDN deps loader ──
+  function _loadScript(url) {
+    return new Promise((resolve) => {
+      // If a script with this src already exists and has loaded, resolve immediately
+      const existing = document.querySelector(`script[src="${url}"]`);
+      if (existing) { resolve(); return; }
+      const s = document.createElement('script');
+      s.src = url;
+      s.onload = resolve;
+      s.onerror = resolve; // resolve even on error so Promise.all doesn't hang
+      document.head.appendChild(s);
+    });
+  }
+
+  function _loadStyle(url) {
+    return new Promise((resolve) => {
+      // Skip if already loaded
+      if (document.querySelector(`link[href="${url}"]`)) { resolve(); return; }
+      const l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = url;
+      l.onload = resolve;
+      l.onerror = resolve;
+      document.head.appendChild(l);
+    });
+  }
+
+  function _loadWADeps() {
+    // ── Step 0: inject CSS that the standalone page has but index.html doesn't ──
+    // Without WangEditor / Luckysheet CSS, the toolbar renders as a vertical strip
+    // and the spreadsheet grid collapses to a tiny box.
+    const cssDeps = [
+      'https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/css/style.css',
+      'https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.css',
+      'https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/css/pluginsCss.css',
+      'https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/plugins.css',
+      'https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/css/luckysheet.css',
+      'https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/assets/iconfont/iconfont.css',
+    ];
+    cssDeps.forEach(_loadStyle);   // fire-and-forget; CSS loads in parallel with JS
+
+    return Promise.all([
+      _loadScript('https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/index.js'),
+      _loadScript('https://cdn.jsdelivr.net/npm/jquery@3/dist/jquery.min.js'),
+      _loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js'),
+      _loadScript('https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js'),
+      _loadScript('https://cdn.jsdelivr.net/npm/marked@12/marked.min.js'),
+      // Also load Split.js so panel resizing works in embedded mode
+      _loadScript('/static/vendor/split.min.js'),
+    ]).then(() => {
+      // Luckysheet depends on jQuery — load after jQuery resolves
+      return _loadScript('https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/plugins/js/plugin.js');
+    }).then(() => {
+      return _loadScript('https://cdn.jsdelivr.net/npm/luckysheet@2.1.13/dist/luckysheet.umd.js');
+    }).then(() => {
+      if (typeof pdfjsLib !== 'undefined') {
+        pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      }
+    });
+  }
+
   // ── Global State ──
   const state = {
     fileId: null,
@@ -630,17 +697,91 @@ window.WA = window.WA || {};
     }
     const baseName = path.split('/').pop();
     showToast('正在加载 ' + baseName, 'success');
+    if (state.isLoading) {
+      showToast('文件正在加载中，请稍候...', 'error');
+      return;
+    }
+    state.isLoading = true;
     try {
-      const encodedPath = path.split('/').map(p => encodeURIComponent(p)).join('/');
-      const res = await fetch('/api/v1/workspace/file/' + encodedPath);
-      if (!res.ok) throw new Error('File not found');
-      const blob = await res.blob();
-      const file = new File([blob], baseName);
-      file._wsPath = path;
-      await Router.load(file);
+      setLoading(true, `正在打开 ${baseName}…`);
+      $('upload-progress').style.width = '30%';
+
+      // Single-step: send path to server and get parsed data directly.
+      // Avoids the fragile download-then-reupload round-trip that causes
+      // "Failed to fetch" when the GET /file/<path> or the subsequent POST fails.
+      const res = await fetch('/api/v1/workspace/open_file_by_path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || '无法打开文件');
+
+      $('upload-progress').style.width = '100%';
+
+      state.fileId = json.file_id;
+      state.fileType = json.file_type;
+      state.fileName = json.file_name;
+      const ext = json.file_name.split('.').pop().toLowerCase();
+      state.wsSourcePath = path;
+      state.activeTabPath = path;
+      $('wa-file-name').textContent = state.fileName;
+      $('wa-save-btn').disabled = (state.fileType === 'pdf');
+      _updateSubjectBar();
+      _prefetchSummary(path);
+
+      if (state.activeEditor) {
+        try { state.activeEditor.destroy(); } catch(e) { console.warn('[destroy old editor]', e); }
+      }
+      state.activeEditor = null;
+
+      const existingTabIdx = state.openTabs.findIndex(t => t.path === path);
+      const tabEntry = {
+        path,
+        name: json.file_name,
+        ext,
+        fileType: json.file_type,
+        fileId: json.file_id,
+        serverData: json.data,
+        cache: null,
+        modified: false,
+        fsHandle: null,
+      };
+      if (existingTabIdx >= 0) {
+        state.openTabs[existingTabIdx] = tabEntry;
+      } else {
+        state.openTabs.push(tabEntry);
+      }
+
+      toggleWorkspace(true);
+
+      if (state.fileType === 'docx') {
+        state.activeEditor = new KotoDocxEditor();
+        state.activeEditor.render(json.data.html);
+      } else if (state.fileType === 'xlsx') {
+        state.activeEditor = new KotoXlsxEditor();
+        state.activeEditor.render(json.data);
+      } else if (state.fileType === 'pptx') {
+        state.activeEditor = new KotoPptxEditor();
+        state.activeEditor.render(json.data);
+      } else if (state.fileType === 'pdf') {
+        state.activeEditor = new KotoPdfViewer();
+        state.activeEditor.render(json.data.raw_url, json.data.pages);
+      }
+
+      _renderTabs();
+      setTimeout(loadWorkspaceFiles, 600);
     } catch (e) {
       console.error('[WA openWorkspaceFile]', e);
-      showToast('无法打开文件: ' + e.message, 'error');
+      // Distinguish network errors from server/parse errors for clearer UX
+      const msg = (e instanceof TypeError && e.message === 'Failed to fetch')
+        ? '服务器无响应，请确认服务器正在运行'
+        : e.message;
+      showToast('无法打开文件: ' + msg, 'error');
+      $('upload-progress').style.width = '0%';
+    } finally {
+      state.isLoading = false;
+      setLoading(false);
     }
   };
 
@@ -772,24 +913,28 @@ window.WA = window.WA || {};
   }
 
   // ── Split.js Init ──
-  // Wrapped in try/catch: if Split.js somehow fails (e.g. load error), the
-  // rest of the IIFE (event listeners, Router.load, etc.) must still execute.
-  try {
-    Split(['#wa-left', '#wa-canvas', '#wa-ai'], {
-      sizes: [15, 55, 30],
-      minSize: [150, 400, 250],
-      gutterSize: 6,
-      snapOffset: 0
-    });
-  } catch (splitErr) {
-    console.warn('[Split.js] panel splitter failed, using fallback widths:', splitErr);
-    const wa_left = document.getElementById('wa-left');
-    const wa_canvas = document.getElementById('wa-canvas');
-    const wa_ai = document.getElementById('wa-ai');
-    if (wa_left)   { wa_left.style.width   = '15%'; wa_left.style.flexShrink   = '0'; }
-    if (wa_canvas) { wa_canvas.style.width = '55%'; wa_canvas.style.flexGrow   = '1'; }
-    if (wa_ai)     { wa_ai.style.width     = '30%'; wa_ai.style.flexShrink     = '0'; }
+  // In embedded mode this is deferred to _waInit() (called when the view is first shown).
+  // On the standalone page it runs immediately.
+  function _initSplit() {
+    try {
+      Split(['#wa-left', '#wa-canvas', '#wa-ai'], {
+        sizes: [15, 55, 30],
+        minSize: [150, 400, 250],
+        gutterSize: 6,
+        snapOffset: 0
+      });
+    } catch (splitErr) {
+      console.warn('[Split.js] panel splitter failed, using fallback widths:', splitErr);
+      const wa_left = document.getElementById('wa-left');
+      const wa_canvas = document.getElementById('wa-canvas');
+      const wa_ai = document.getElementById('wa-ai');
+      if (wa_left)   { wa_left.style.width   = '15%'; wa_left.style.flexShrink   = '0'; }
+      if (wa_canvas) { wa_canvas.style.width = '55%'; wa_canvas.style.flexGrow   = '1'; }
+      if (wa_ai)     { wa_ai.style.width     = '30%'; wa_ai.style.flexShrink     = '0'; }
+    }
   }
+
+  if (!_isEmbedded) _initSplit();
 
   // ── Editor Adapters (Phase 3) ──
 
@@ -823,49 +968,57 @@ window.WA = window.WA || {};
       wrapper.appendChild(ct);
 
       const { createEditor, createToolbar } = window.wangEditor;
-      this.editor = createEditor({
-        selector: '#wa-editor-content',
-        html: html,
-        config: {
-          placeholder: '开始编辑文档...',
-          hoverbarKeys: {},
-          MENU_CONF: {
-            uploadImage: { base64LimitSize: 5 * 1024 * 1024 },
-            insertImage: { checkImage(src) { return true; } },
-          },
-          onChange: (editor) => {
-            // WangEditor v5 passes the editor instance as argument — use it directly.
-            try {
-              const h = editor.getHtml();
-              const stripped = h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
-              if (stripped) this._lastHtml = h;
-            } catch(e) {}
-            WA.scheduleAutoSave();
-          },
-        }
-      });
-      this.toolbar = createToolbar({
-        editor: this.editor,
-        selector: '#wa-editor-toolbar',
-        config: { excludeKeys: ['fullScreen'] }
-      });
-
-      // MutationObserver as backup — fires even when WangEditor doesn't trigger onChange.
-      // Attach after createEditor() so WangEditor has created its DOM.
-      setTimeout(() => {
-        if (!this.editor) return;
-        const editable = ct.querySelector('[contenteditable="true"]');
-        if (!editable) return;
-        this._mutationObs = new MutationObserver(() => {
-          if (!this.editor) return;
-          try {
-            const h = this.editor.getHtml();
-            const s = h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
-            if (s) this._lastHtml = h;
-          } catch(e) {}
+      // Defer editor creation by one animation frame so the browser has
+      // settled the layout (important in embedded / lazy-loaded context).
+      requestAnimationFrame(() => {
+        this.editor = createEditor({
+          selector: '#wa-editor-content',
+          html: html,
+          config: {
+            placeholder: '开始编辑文档...',
+            hoverbarKeys: {},
+            MENU_CONF: {
+              uploadImage: { base64LimitSize: 5 * 1024 * 1024 },
+              insertImage: { checkImage(src) { return true; } },
+            },
+            onChange: (editor) => {
+              // WangEditor v5 passes the editor instance as argument — use it directly.
+              try {
+                const h = editor.getHtml();
+                const stripped = h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
+                if (stripped) this._lastHtml = h;
+              } catch(e) {}
+              WA.scheduleAutoSave();
+            },
+          }
         });
-        this._mutationObs.observe(editable, { childList: true, subtree: true, characterData: true });
-      }, 300);
+        this.toolbar = createToolbar({
+          editor: this.editor,
+          selector: '#wa-editor-toolbar',
+          config: { excludeKeys: ['fullScreen'] }
+        });
+        // Dispatch a resize event so WangEditor recalculates toolbar layout.
+        // Without this, the toolbar container may have been measured at 0-width
+        // (CSS just injected) and all toolbar buttons stack vertically.
+        window.dispatchEvent(new Event('resize'));
+
+        // MutationObserver as backup — fires even when WangEditor doesn't trigger onChange.
+        // Attach after createEditor() so WangEditor has created its DOM.
+        setTimeout(() => {
+          if (!this.editor) return;
+          const editable = ct.querySelector('[contenteditable="true"]');
+          if (!editable) return;
+          this._mutationObs = new MutationObserver(() => {
+            if (!this.editor) return;
+            try {
+              const h = this.editor.getHtml();
+              const s = h.replace(/<p><br\s*\/?><\/p>/gi, '').replace(/<p>\s*<\/p>/gi, '').trim();
+              if (s) this._lastHtml = h;
+            } catch(e) {}
+          });
+          this._mutationObs.observe(editable, { childList: true, subtree: true, characterData: true });
+        }, 300);
+      });
     }
 
     getContent() {
@@ -959,44 +1112,58 @@ window.WA = window.WA || {};
       overlayLayer.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;';
       sheetEl.appendChild(overlayLayer);
 
-      window.luckysheet.create({
-        container: 'wa-xlsx-sheet',
-        lang: 'zh',
-        data: sheetsJson,
-        showinfobar: false,
-        showsheetbar: true,
-        showstatisticBar: false,
-        sheetFormulaBar: false,
-        hook: {
-           rangeSelect: (sheet, range) => {
-              const tt = $('wa-pdf-tooltip');
-              tt.style.display = 'flex';
-              tt.style.left = '50%';
-              tt.style.top = '100px';
-              lastSelectionText = '表格数据';
-           }
-        }
-      });
-      this.created = true;
+      // Defer Luckysheet creation to the next animation frame so the browser
+      // has computed the container's dimensions (position:absolute; inset:0)
+      // from the Luckysheet/WangEditor CSS that was just injected dynamically.
+      // Without this defer, luckysheet.create() reads clientWidth/Height = 0
+      // and renders a tiny collapsed grid.
+      const _sheetsJson = sheetsJson;
+      const _imgBar = imgBar;
+      const _overlayLayer = overlayLayer;
+      requestAnimationFrame(() => {
+        window.luckysheet.create({
+          container: 'wa-xlsx-sheet',
+          lang: 'zh',
+          data: _sheetsJson,
+          showinfobar: false,
+          showsheetbar: true,
+          showstatisticBar: false,
+          sheetFormulaBar: false,
+          hook: {
+             rangeSelect: (sheet, range) => {
+                const tt = $('wa-pdf-tooltip');
+                tt.style.display = 'flex';
+                tt.style.left = '50%';
+                tt.style.top = '100px';
+                lastSelectionText = '表格数据';
+             }
+          }
+        });
+        this.created = true;
+        // Give Luckysheet a moment to finish its own internal layout,
+        // then resize to fill the container correctly.
+        setTimeout(() => { try { window.luckysheet.resize(); } catch(e) {} }, 300);
 
-      // Wire up image button
-      imgBar.querySelector('.wa-xlsx-imgbtn').addEventListener('click', () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/png,image/jpeg,image/gif,image/webp';
-        input.onchange = (e) => {
-          const file = e.target.files[0];
-          if (!file) return;
-          if (file.size > 5 * 1024 * 1024) { showToast('图片不能超过 5 MB', 'error'); return; }
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            const src = ev.target.result;
-            this._addImageOverlay(src, overlayLayer);
+        // Wire up image button (moved inside rAF so imgBar closure is valid)
+        _imgBar.querySelector('.wa-xlsx-imgbtn').addEventListener('click', () => {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/png,image/jpeg,image/gif,image/webp';
+          input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (file.size > 5 * 1024 * 1024) { showToast('图片不能超过 5 MB', 'error'); return; }
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const src = ev.target.result;
+              this._addImageOverlay(src, _overlayLayer);
+            };
+            reader.readAsDataURL(file);
           };
-          reader.readAsDataURL(file);
-        };
-        input.click();
+          input.click();
+        });
       });
+      // image button wiring is inside the requestAnimationFrame above
     }
 
     _addImageOverlay(src, layer) {
@@ -1171,16 +1338,35 @@ window.WA = window.WA || {};
         card.className = 'wa-slide-card';
         card.id = `slide-card-${slide.slide_id}`;
 
-        // Header bar
+        // Header bar — show slide number + extracted title (if any)
+        const _titleShape = (slide.shapes || []).find(sh => sh._type === 'TEXT' && sh.is_title);
+        const _titleText = _titleShape
+          ? ((_titleShape.paragraphs || []).flatMap(p => (p.runs || []).map(r => r.text)).join('') || '').trim().substring(0, 50)
+          : '';
         const header = document.createElement('div');
         header.className = 'wa-slide-card-header';
-        header.innerHTML = `<span class="wa-slide-badge">${slide.slide_id}</span><span>幻灯片 ${slide.slide_id}</span>`;
+        header.innerHTML = `<span class="wa-slide-badge">${slide.slide_id}</span>
+          <span class="wa-slide-num">幻灯片 ${slide.slide_id}</span>
+          ${_titleText ? `<span class="wa-slide-title-preview">${_titleText.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</span>` : ''}`;
         card.appendChild(header);
 
-        // 16:9 canvas
+        // 16:9 canvas — aspect-ratio must be a decimal, not raw EMU integers
+        // (browsers silently fail on huge integers like "9144000 / 6858000")
         const canvas = document.createElement('div');
         canvas.className = 'wa-slide-canvas';
-        canvas.style.cssText = `aspect-ratio: ${sw} / ${sh_emu}; background: ${slide.background || '#fff'};`;
+        canvas.style.aspectRatio = (sw / sh_emu).toFixed(6);
+        canvas.style.background = slide.background || '#fff';
+
+        // Font scaling: python-pptx returns pt sizes designed for ~10-inch native width.
+        // As the canvas is narrower, we scale fonts by (renderedWidth / nativePxWidth).
+        // CSS variable --slide-scale is updated live via ResizeObserver.
+        const nativePxW = sw / 914400 * 96;  // EMU → inches → px at 96 dpi
+        canvas.style.setProperty('--slide-scale', '1');
+        const _ro = new ResizeObserver(entries => {
+          const w = entries[0] && entries[0].contentRect.width;
+          if (w > 0) canvas.style.setProperty('--slide-scale', (w / nativePxW).toFixed(6));
+        });
+        _ro.observe(canvas);
 
         const shapes = (slide.shapes || []).slice().sort((a, b) => (a.z_order || 0) - (b.z_order || 0));
 
@@ -1207,7 +1393,7 @@ window.WA = window.WA || {};
                 const span = document.createElement('span');
                 span.textContent = run.text;
                 let css = '';
-                if (run.size) css += `font-size:${run.size}pt;`;
+                if (run.size) css += `font-size:calc(${run.size}pt * var(--slide-scale, 1));`;
                 if (run.bold) css += 'font-weight:bold;';
                 if (run.italic) css += 'font-style:italic;';
                 if (run.underline) css += 'text-decoration:underline;';
@@ -1606,7 +1792,10 @@ window.WA = window.WA || {};
 
       } catch (err) {
          console.error('[WA Router.load]', err);
-         showToast(err.message, 'error');
+         const msg = (err instanceof TypeError && err.message === 'Failed to fetch')
+           ? '服务器无响应，请确认服务器正在运行'
+           : err.message;
+         showToast(msg, 'error');
          $('upload-progress').style.width = '0%';
       } finally {
          state.isLoading = false;
@@ -2311,8 +2500,10 @@ window.WA = window.WA || {};
   }, true);
 
   // Init
-  initSocket();
-  loadWorkspaceFiles();
+  if (!_isEmbedded) {
+    initSocket();
+    loadWorkspaceFiles();
+  }
   // Sync output-mode toggle button state on load
   document.querySelectorAll('.wa-output-mode-toggle button').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === state.aiOutputMode);
@@ -2426,15 +2617,73 @@ window.WA = window.WA || {};
       if (data.summary) {
         state._fileSummaries[path] = data.summary;
         row.textContent = data.summary;
-      } else if (data.error) {
-        row.textContent = `摘要暂不可用 (${data.error})`;
       } else {
-        row.textContent = '无法生成摘要';
+        // Error or empty — close the row silently instead of showing raw error text
+        row.classList.remove('open');
+        if (btn) btn.classList.remove('open');
+        if (data.error) showToast('AI 摘要暂不可用', 'error');
       }
     } catch (e) {
       row.classList.remove('loading');
       row.textContent = '摘要加载失败';
     }
   };
+
+  // ─── Embedded-mode: lazy workspace initializer ───────────────────────────
+  function _waInit() {
+    if (_waInited) return Promise.resolve();
+    _waInited = true;
+    const depsReady = _isEmbedded ? _loadWADeps() : Promise.resolve();
+    return depsReady.then(() => {
+      _initSplit();
+      initSocket();
+      loadWorkspaceFiles();
+      // Sync output-mode toggle state
+      document.querySelectorAll('.wa-output-mode-toggle button').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.mode === state.aiOutputMode);
+      });
+    });
+  }
+
+  // ─── Embedded-mode public API ──────────────────────────────────────────────
+  window.WA.openInMainView = function() {
+    const shell = document.querySelector('.app-shell');
+    const chatView = document.getElementById('chatView');
+    const wsView = document.getElementById('workspaceView');
+    if (!wsView) {
+      window.open('/workspace-assistant', '_blank');
+      return;
+    }
+    // Collapse sidebar
+    if (shell && !shell.classList.contains('sidebar-collapsed')) {
+      if (typeof toggleSidebar === 'function') toggleSidebar();
+      else shell.classList.add('sidebar-collapsed');
+    }
+    // Highlight active nav button
+    document.querySelectorAll('.sb-nav-item').forEach(el => el.classList.remove('active'));
+    const navBtn = document.getElementById('navWorkspaceBtn');
+    if (navBtn) navBtn.classList.add('active');
+    // Swap views
+    if (chatView) chatView.style.display = 'none';
+    wsView.style.display = 'flex';
+    localStorage.setItem('koto.inWorkspace', '1');
+    // Init workspace deps on first open
+    _waInit();
+  };
+
+  window.WA.closeInMainView = function() {
+    const chatView = document.getElementById('chatView');
+    const wsView = document.getElementById('workspaceView');
+    if (wsView) wsView.style.display = 'none';
+    if (chatView) chatView.style.display = '';
+    localStorage.removeItem('koto.inWorkspace');
+    // Restore nav highlight
+    document.querySelectorAll('.sb-nav-item').forEach(el => el.classList.remove('active'));
+  };
+
+  // Auto-restore workspace view if user reloads while in workspace
+  if (_isEmbedded && localStorage.getItem('koto.inWorkspace') === '1') {
+    requestAnimationFrame(() => window.WA.openInMainView());
+  }
 
 })();

@@ -137,6 +137,88 @@ def serve_workspace_file(filepath: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/open_file_by_path
+# ─────────────────────────────────────────────────────────────────────────────
+
+@workspace_assistant_bp.route("/api/v1/workspace/open_file_by_path", methods=["POST"])
+def open_file_by_path():
+    """
+    直接从工作区路径打开并解析文件，无需先下载再上传。
+    比 open_file 更高效，用于工作区文件树点击打开。
+    Body (JSON): {"path": "relative/path/to/file.docx"}
+    Response: 同 open_file
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    rel_path = (body.get("path") or "").strip()
+    if not rel_path:
+        return jsonify({"error": "缺少 path 字段"}), 400
+
+    from web.shared import WORKSPACE_DIR
+    root = Path(WORKSPACE_DIR).resolve()
+    target = root.joinpath(rel_path).resolve()
+
+    # Security: prevent path traversal
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return jsonify({"error": "路径不合法"}), 403
+
+    if not target.is_file():
+        return jsonify({"error": "文件不存在"}), 404
+
+    ext = target.suffix.lower()
+    if ext not in _ALLOWED_EXT:
+        return jsonify({"error": f"不支持的格式: {ext}"}), 400
+
+    # Copy to tmp so editor can work with it (same as open_file)
+    file_id = uuid.uuid4().hex
+    tmp_path = _ensure_tmp_dir() / f"{file_id}{ext}"
+    try:
+        import shutil
+        shutil.copy2(str(target), str(tmp_path))
+    except Exception as ce:
+        return jsonify({"error": f"文件复制失败: {ce}"}), 500
+
+    try:
+        from app.core.file.file_parser import (
+            parse_docx,
+            parse_pdf,
+            parse_pptx_geometry,
+            parse_xlsx,
+        )
+
+        if ext == ".docx":
+            data = parse_docx(str(tmp_path))
+            file_type = "docx"
+        elif ext == ".xlsx":
+            data = parse_xlsx(str(tmp_path))
+            file_type = "xlsx"
+        elif ext == ".pptx":
+            data = parse_pptx_geometry(str(tmp_path))
+            file_type = "pptx"
+        elif ext == ".pdf":
+            data = parse_pdf(str(tmp_path), file_id)
+            file_type = "pdf"
+        else:
+            return jsonify({"error": "内部格式路由错误"}), 500
+
+    except Exception as e:
+        logger.error(f"[WorkspaceAssistant] 解析失败 {target.name}: {e}", exc_info=True)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return jsonify({"error": f"文件解析失败: {str(e)}"}), 500
+
+    return jsonify({
+        "file_id": file_id,
+        "file_name": target.name,
+        "file_type": file_type,
+        "data": data,
+    })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # POST /api/v1/workspace/open_file
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -666,31 +748,30 @@ def summarize_workspace_file():
         return jsonify({"summary": "（文件内容为空）", "path": path})
 
     # ── Call LLM for summary ───────────────────────────────────────────────
+    # Use the app's get_client() — it inherits the proxy/relay config that
+    # makes Gemini reachable in restricted regions (same client as main chat).
     try:
-        from app.core.llm.provider_factory import get_llm_provider
+        from web.app import get_client, MODEL_MAP as _MM
 
-        # resolve model name without importing socket_handler (avoids circular import)
         _DOC_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
-        try:
-            from web.app import MODEL_MAP as _MM
-            _model = _MM.get("CHAT") or _DOC_MODELS[0]
-        except Exception:
+        _model = _MM.get("CHAT") or _DOC_MODELS[0]
+        # Interactions-only models can't do simple generate_content; use flash fallback
+        if _model.startswith("deep-research"):
             _model = _DOC_MODELS[0]
 
-        provider = get_llm_provider()
+        client = get_client()
         sum_prompt = (
             "请用2-3句话简洁概括以下文档内容，只输出摘要文字，不要解释或标题。\n\n"
             f"文档内容：{text}\n\n摘要："
         )
-        result = provider.generate_content(
-            prompt=sum_prompt,
+        response = client.models.generate_content(
             model=_model,
-            stream=False,
+            contents=sum_prompt,
         )
-        summary = (result.get("content") or "").strip()
+        summary = (getattr(response, "text", None) or "").strip()
         if not summary:
             raise ValueError("AI 返回空内容")
         return jsonify({"summary": summary, "path": path})
     except Exception as e:
         logger.warning("[summarize] AI 摘要失败 %s: %s", path, e)
-        return jsonify({"error": f"AI 摘要暂不可用：{e}", "path": path})
+        return jsonify({"error": "AI 摘要暂不可用", "path": path})

@@ -4821,6 +4821,7 @@ body.desktop-mode .pill-btn {
 .sidebar-collapsed .sidebar-search-wrap { display: none !important; }
 .sidebar-collapsed .sb-section-head { display: none !important; }
 .sidebar-collapsed .sb-divider { display: none !important; }
+.sidebar-collapsed .sidebar-topbar { justify-content: center; padding: 10px 8px; }
 .sidebar-collapsed .sb-new-chat { justify-content: center; padding: 10px; }
 .sidebar-collapsed .sb-nav-item { justify-content: center; padding: 10px; }
 .sidebar-collapsed .sidebar-footer { padding: 8px 6px; align-items: center; }

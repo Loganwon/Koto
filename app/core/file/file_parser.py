@@ -60,7 +60,32 @@ def parse_docx(file_path: str) -> dict[str, Any]:
         for msg in result.messages:
             messages_out.append(str(msg))
 
-        return {"html": result.value, "messages": messages_out}
+        # ── Pass 1: strip <style>/<script> tags emitted by mammoth ──────────
+        # WangEditor v5 strips the <style> tag itself but leaks the CSS text
+        # content as visible document text.
+        clean_html = re.sub(
+            r"<style[^>]*>.*?</style>|<script[^>]*>.*?</script>",
+            "",
+            result.value,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+
+        # ── Pass 2: strip CSS-as-text (auto-save corruption artifact) ────────
+        # If this DOCX was previously auto-saved while CSS text was visible in
+        # the editor, the CSS strings get baked into the DOCX as real paragraph
+        # text, e.g.: <p>body{font-family:...}h1{font-size:20pt}文档标题</p>
+        # Remove any CSS rule blocks (selector{props}) at the START of a <p>.
+        # The [^{}]* inner match is safe because mammoth CSS rules are flat.
+        clean_html = re.sub(
+            r"(<p[^>]*>)(?:(?:body|h[1-6]|blockquote|strong|em|code|pre|table|td|th|ul|ol|li)\s*\{[^{}]*\})+",
+            r"\1",
+            clean_html,
+            flags=re.IGNORECASE,
+        )
+        # Remove empty paragraphs left after the above strip
+        clean_html = re.sub(r"<p[^>]*>\s*</p>", "", clean_html)
+
+        return {"html": clean_html, "messages": messages_out}
     except Exception as e:
         logger.error(f"[DocxParser] 解析失败: {e}")
         raise
@@ -392,6 +417,19 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
             if getattr(shape, "has_text_frame", False) and shape.text_frame:
                 s["_type"] = "TEXT"
                 s["has_text"] = True
+                # Detect title placeholder (same logic as in parse_pptx)
+                is_title = False
+                try:
+                    from pptx.enum.shapes import PP_PLACEHOLDER
+                    ph = shape.placeholder_format
+                    if ph is not None:
+                        is_title = ph.type in (
+                            PP_PLACEHOLDER.TITLE,
+                            PP_PLACEHOLDER.CENTER_TITLE,
+                        )
+                except Exception:
+                    pass
+                s["is_title"] = is_title
                 paras: list[dict[str, Any]] = []
                 for para in shape.text_frame.paragraphs:
                     align_name = "LEFT"
