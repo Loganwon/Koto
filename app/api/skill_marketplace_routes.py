@@ -2477,7 +2477,7 @@ def github_install():
       "branch": "main",                      # 分支（可选，默认 main）
       "overwrite": false,                    # 是否覆盖已安装的同名 Skill
 
-      # --- 或者使用自定义 URL 模式 ---
+      # 或者使用自定义 URL 模式
       "raw_url": "https://raw.githubusercontent.com/owner/repo/main/path/SKILL.md"
     }
 
