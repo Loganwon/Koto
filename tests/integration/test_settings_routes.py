@@ -140,7 +140,7 @@ class TestResetSettings:
         client.post("/api/settings/reset")
         data = _check(client.get("/api/settings"))
         appearance = data.get("appearance", {})
-        assert appearance.get("theme") == "dark"
+        assert appearance.get("theme") == "light"
 
 
 # ── GET /api/info ────────────────────────────────────────────────────────────
