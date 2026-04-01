@@ -53,8 +53,7 @@ def _run_and_capture_user_message(agent: UnifiedAgent, message: str = "hello") -
     The datetime is injected into system_instruction (not user message) to keep
     Gemini context caching stable. We check system_instruction first.
     """
-    for _ in agent.run(input_text=message):
-        break
+    list(agent.run(input_text=message))  # consume all steps so LLM is actually called
     call_kwargs = agent.llm.generate_content.call_args
     if call_kwargs is None:
         return ""

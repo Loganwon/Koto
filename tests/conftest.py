@@ -75,7 +75,16 @@ def _reset_model_fallback_executor():
     timestamps and circuit-breaker counters across tests.  Left uncleaned,
     tests that mock failing LLM calls poison later tests whose LLM calls are
     expected to succeed (e.g. TestDatetimeInjection).
+
+    Also re-clears Google API keys here to counteract module-level
+    ``os.environ.setdefault("GEMINI_API_KEY", ...)`` calls in test files that
+    run during pytest's collection phase (after pytest_configure already cleared
+    them), permanently re-injecting an invalid key for the whole session.
     """
+    import os as _os
+
+    for _key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
+        _os.environ.pop(_key, None)
     try:
         import app.core.llm.model_fallback as _mf  # noqa: PLC0415
 
@@ -85,6 +94,22 @@ def _reset_model_fallback_executor():
             _mf._executor._unavailable.clear()
     except Exception:  # pragma: no cover — module may not be importable yet
         pass
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Force-exit the process after all tests to prevent background threads
+    from blocking process shutdown.
+
+    Without this, non-daemon threads (e.g. ThreadPoolExecutor workers in
+    JobRunner, timer threads) keep the process alive for 15+ minutes after
+    tests finish, causing CI jobs to be cancelled by the 20-minute timeout.
+
+    Coverage.xml is written by pytest-cov's pytest_terminal_summary hook,
+    which runs before this hook, so it is safe to hard-exit here.
+    """
+    import os as _os
+
+    _os._exit(int(exitstatus))
 
 
 @pytest.fixture(scope="session")
