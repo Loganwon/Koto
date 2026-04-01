@@ -82,7 +82,10 @@ class SettingsManager:
 
     def flush(self):
         """Write to disk now (kept for backwards compatibility)."""
-        return self._save_settings()
+        result = self._save_settings()
+        if result:
+            self._dirty = False
+        return result
 
     def _load_settings(self):
         """加载设置"""
@@ -206,6 +209,7 @@ class SettingsManager:
 
         self._settings[category][key] = value
         self._normalize_storage()
+        self._dirty = True
         return self._save_settings()
 
     def update(self, category, values):

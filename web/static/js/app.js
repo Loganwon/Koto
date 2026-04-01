@@ -1249,7 +1249,8 @@ async function selectSession(sessionName) {
     if (currentSession && currentSession !== sessionName && isSessionGenerating(currentSession)) {
         const _chatContainer = document.getElementById('chatMessages');
         const _frag = document.createDocumentFragment();
-        while (_chatContainer.firstChild) _frag.appendChild(_chatContainer.firstChild);
+        // 只移动消息节点，保留 #dragOverlay / #welcomeScreen 等结构元素
+        _chatContainer.querySelectorAll('.message, .chat-date-sep').forEach(node => _frag.appendChild(node));
         sessionDomCache.set(currentSession, _frag);
         console.log(`[SWITCH] DOM 已缓存 session: ${currentSession}`);
     }
@@ -1287,7 +1288,10 @@ async function selectSession(sessionName) {
         // 从缓存恢复 DOM（stream 仍在向 bodyEl 写入，节点引用未变）
         const _frag = sessionDomCache.get(sessionName);
         sessionDomCache.delete(sessionName);
-        _chatContainer.innerHTML = '';
+        // 只清除消息节点，保留 #dragOverlay / #welcomeScreen
+        _chatContainer.querySelectorAll('.message, .chat-date-sep').forEach(el => el.remove());
+        const _ws = document.getElementById('welcomeScreen');
+        if (_ws) _ws.style.display = 'none';
         _chatContainer.appendChild(_frag);
         scrollToBottomForce();
         console.log(`[SWITCH] DOM 从缓存恢复 session: ${sessionName}`);
@@ -3027,7 +3031,9 @@ async function sendMessage(event) {
                         type: 'done',
                         content: evt.data.result || '',
                         steps: Array.isArray(evt.data.steps) ? evt.data.steps.length : undefined,
-                        elapsed_time: evt.data.elapsed_time
+                        elapsed_time: evt.data.elapsed_time,
+                        skill_id: evt.data.meta?.skill_id || null,
+                        auto_skill_ids: evt.data.meta?.auto_skill_ids || []
                     };
                 }
 
@@ -3617,7 +3623,9 @@ async function sendMessage(event) {
                                         kotoSteps.open = false;
                                         const ksSummary = kotoSteps.querySelector('.koto-steps-summary');
                                         if (ksSummary) {
-                                            ksSummary.innerHTML = `<span class="koto-steps-done-icon">✓</span><span class="koto-steps-meta">${realStepCount > 0 ? realStepCount + ' 步 · ' : ''}${backendTime}s</span>`;
+                                            const _skillsEl = ksSummary.querySelector('.koto-steps-skills');
+                                            const _skillsHtml = _skillsEl ? _skillsEl.innerHTML.trim() : '';
+                                            ksSummary.innerHTML = `<span class="koto-steps-done-icon">✓</span><span class="koto-steps-meta">${realStepCount > 0 ? realStepCount + ' 步 · ' : ''}${backendTime}s</span>${_skillsHtml ? '<span class="koto-steps-skills koto-steps-skills-done">' + _skillsHtml + '</span>' : ''}`;
                                         }
                                         // 渲染回复区
                                         let answerDiv = bodyEl.querySelector('.agent-answer');
@@ -6738,21 +6746,24 @@ async function toggleVoice() {
 
 // ── 停止所有录音模式 ─────────────────────────────────────────────────────────
 function _stopVoice() {
+    let mediaRecorderWillProcess = false;
     // 1. Web Speech
     if (browserRecognition) {
         try { browserRecognition.stop(); } catch(_) {}
         browserRecognition = null;
+        // onend fires async and will call setVoiceState('idle')
     }
-    // 2. SSE
+    // 2. SSE — manually closed, so done() will never fire; reset state here
     if (_sseSource) {
         try { _sseSource.close(); } catch(_) {}
         _sseSource = null;
         // 告知后端停止录音
         fetch('/api/voice/stop', { method: 'POST' }).catch(() => {});
     }
-    // 3. MediaRecorder
+    // 3. MediaRecorder — onstop fires _processAudioWithGemini which manages state
     if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
         _mediaRecorder.stop();
+        mediaRecorderWillProcess = true;
     }
     if (_mediaStream) {
         _mediaStream.getTracks().forEach(t => t.stop());
@@ -6760,6 +6771,11 @@ function _stopVoice() {
     }
     _stopWaveAnimation();
     _hideVoiceToast();
+    // For SSE and any other stray state, reset immediately.
+    // MediaRecorder is handled by _processAudioWithGemini callback.
+    if (!mediaRecorderWillProcess) {
+        setVoiceState('idle');
+    }
 }
 
 // ── 方案一：Web Speech API（实时 interim 反馈）──────────────────────────────
@@ -6971,6 +6987,8 @@ async function _processAudioWithGemini(mimeType) {
         showNotification('录音太短，请重说', 'warning', 1500);
         return;
     }
+    setVoiceState('processing');  // 识别中，防止按钮卡在 listening 状态
+    _audioChunks = [];            // 释放内存
     try {
         const b64 = await _blobToBase64(blob);
         const resp = await fetch('/api/voice/stt', {

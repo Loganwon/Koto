@@ -33,6 +33,14 @@ PROMPTS = {
         "你是一名优秀的写作助手。请根据以下已有文本，自然地继续写下去（100-200字），"
         "保持语气和风格一致，衔接流畅。直接输出续写内容，不要重复原文："
     ),
+    "rewrite": (
+        "请对以下文本进行改写，保留核心意思，但用不同的措辞和句式重新表达，"
+        "使语言更加多样化。只输出改写后的文本，不要添加任何说明："
+    ),
+    "annotate": (
+        "请为以下文本添加简洁的注释，解释关键概念、术语或难点，"
+        "注释用【】标注，插入相应位置。只输出带注释的文本："
+    ),
 }
 
 
@@ -107,6 +115,7 @@ def register_socket_events(socketio):
         history = data.get("history", [])  # [{role, content}] multi-turn history
         language = data.get("language", "")  # "python" | "r" | "" → text mode
         csv_data = data.get("csv_data", "")  # table CSV for chart context
+        output_mode = data.get("output_mode", "inline")  # 'inline' | 'chat'
         if not prompt:
             return
         # Combine document context with prompt
@@ -219,7 +228,15 @@ def register_socket_events(socketio):
             # ── Build system instruction ──────────────────────────────────────
             file_ctx = f"文件名：{file_name}，" if file_name else ""
 
-            if file_type == "pptx":
+            if output_mode == "chat":
+                # Chat-only mode: plain conversation, no tool calls
+                system_instruction = (
+                    f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n"
+                    "用户当前处于【仅对话模式】，你的回复只会显示在聊天栏，不会修改文档。\n"
+                    "请直接用自然语言回答用户的问题或提供建议，支持 Markdown 格式。\n"
+                    "不要输出任何 <TOOL> 标签或 JSON 指令。"
+                )
+            elif file_type == "pptx":
                 # PPTX-specific: use set_pptx_text exclusively — never set_html
                 if has_selection:
                     action_hint = (
@@ -251,7 +268,6 @@ def register_socket_events(socketio):
                     action_hint = "用户当前有选中文字。修改时用 set_html 替换选区内容。"
                 else:
                     action_hint = "用户当前无选区。修改时用 set_html 在光标处插入内容。"
-
                 # Concise, example-driven prompt that small local models can follow reliably
                 system_instruction = (
                     f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n\n"
@@ -272,6 +288,7 @@ def register_socket_events(socketio):
                     f"{action_hint}\n"
                     "其他文件类型指令：\n"
                     '  XLSX → <TOOL>{"type":"set_cell","r":0,"c":0,"value":"值"}</TOOL>\n'
+                    '  PPTX → <TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":1,"value":"新文字"}</TOOL>'
                 )
 
             # ── Build prompt with multi-turn history ──────────────────────
@@ -465,11 +482,12 @@ def register_socket_events(socketio):
 
             # Emit tool calls BEFORE task_complete so the browser has
             # pendingToolCall set when agent_task_complete fires.
-            for tc in tool_calls:
-                socketio.emit("doc_tool_call", tc, namespace="/doc")
+            if output_mode != "chat":
+                for tc in tool_calls:
+                    socketio.emit("doc_tool_call", tc, namespace="/doc", to=sid)
 
             socketio.emit(
-                "agent_task_complete", {"result": clean_text}, namespace="/doc"
+                "agent_task_complete", {"result": clean_text}, namespace="/doc", to=sid
             )
 
         socketio.start_background_task(_task)

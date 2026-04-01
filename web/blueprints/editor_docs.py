@@ -214,6 +214,55 @@ def import_doc() -> Response:
     return jsonify({"id": doc["id"], "name": doc_name, "size": len(text)}), 201
 
 
+@editor_docs_bp.route("/api/editor/docs/import_path", methods=["POST"])
+def import_doc_from_path() -> Response:
+    """Import a document from a server-side file path (JSON body: {"path": "..."})."""
+    data = request.get_json(silent=True) or {}
+    file_path = data.get("path", "")
+    if not file_path:
+        return jsonify({"error": "Missing 'path' in request body"}), 400
+
+    try:
+        with open(file_path, "rb") as fh:
+            raw = fh.read()
+    except FileNotFoundError:
+        return jsonify({"error": f"File not found: {file_path}"}), 404
+    except OSError as e:
+        return jsonify({"error": str(e)}), 400
+
+    original_name = os.path.basename(file_path)
+    ext = os.path.splitext(original_name)[1].lower()
+
+    text = ""
+    try:
+        if ext in (".txt", ".md", ".csv", ".json", ".html", ".rtf"):
+            text = raw.decode("utf-8", errors="replace")
+        elif ext == ".docx":
+            text = _extract_docx(raw)
+        elif ext == ".pdf":
+            text = _extract_pdf(raw)
+        else:
+            text = raw.decode("utf-8", errors="replace")
+    except Exception as e:
+        _logger.error("Import_path parse error for %s: %s", file_path, e)
+        return jsonify({"error": f"无法解析文件: {e}"}), 400
+
+    now = time.strftime("%Y-%m-%dT%H:%M:%S")
+    doc_name = os.path.splitext(original_name)[0][:200]
+    doc = {
+        "id": _new_id(),
+        "name": doc_name,
+        "content": text,
+        "snapshot": None,
+        "createdAt": now,
+        "updatedAt": now,
+        "importedFrom": original_name,
+    }
+    _write_doc(doc)
+    _logger.info("Imported path %s → doc %s (%d chars)", file_path, doc["id"], len(text))
+    return jsonify({"id": doc["id"], "name": doc_name, "size": len(text)}), 201
+
+
 # ── Text extraction helpers ──
 
 def _extract_docx(raw_bytes: bytes) -> str:

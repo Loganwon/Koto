@@ -44,6 +44,8 @@ click==8.3.1
     # via flask
 clr-loader==0.2.10
     # via pythonnet
+cobble==0.1.4
+    # via mammoth
 colorama==0.4.6
     # via
     #   click
@@ -167,6 +169,8 @@ lxml==6.0.2
     #   python-docx
     #   python-pptx
 markdown==3.10.2
+    # via -r config/requirements.txt
+mammoth==1.12.0
     # via -r config/requirements.txt
 markupsafe==3.0.3
     # via

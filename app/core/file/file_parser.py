@@ -61,7 +61,32 @@ def parse_docx(file_path: str) -> dict[str, Any]:
         for msg in result.messages:
             messages_out.append(str(msg))
 
-        return {"html": result.value, "messages": messages_out}
+        # ── Pass 1: strip <style>/<script> tags emitted by mammoth ──────────
+        # WangEditor v5 strips the <style> tag itself but leaks the CSS text
+        # content as visible document text.
+        clean_html = re.sub(
+            r"<style[^>]*>.*?</style>|<script[^>]*>.*?</script>",
+            "",
+            result.value,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+
+        # ── Pass 2: strip CSS-as-text (auto-save corruption artifact) ────────
+        # If this DOCX was previously auto-saved while CSS text was visible in
+        # the editor, the CSS strings get baked into the DOCX as real paragraph
+        # text, e.g.: <p>body{font-family:...}h1{font-size:20pt}文档标题</p>
+        # Remove any CSS rule blocks (selector{props}) at the START of a <p>.
+        # The [^{}]* inner match is safe because mammoth CSS rules are flat.
+        clean_html = re.sub(
+            r"(<p[^>]*>)(?:(?:body|h[1-6]|blockquote|strong|em|code|pre|table|td|th|ul|ol|li)\s*\{[^{}]*\})+",
+            r"\1",
+            clean_html,
+            flags=re.IGNORECASE,
+        )
+        # Remove empty paragraphs left after the above strip
+        clean_html = re.sub(r"<p[^>]*>\s*</p>", "", clean_html)
+
+        return {"html": clean_html, "messages": messages_out}
     except Exception as e:
         logger.error(f"[DocxParser] 解析失败: {e}")
         raise
@@ -279,6 +304,210 @@ def parse_pptx(file_path: str) -> list[dict[str, Any]]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# PPTX → 几何画布 JSON (含图片/表格/备注)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
+    """
+    使用 python-pptx 提取每个 Slide 的完整几何数据，供前端画布编辑器渲染。
+    包含文本框 (含字体样式)、图片 (base64 data URI)、表格 (单元格文本)、备注。
+
+    Returns:
+        {
+          "slide_width_emu": int,
+          "slide_height_emu": int,
+          "slides": [
+            {
+              "slide_index": int, "slide_id": int,
+              "background": "#xxxxxx", "notes": str,
+              "shapes": [
+                {
+                  "id": int, "name": str,
+                  "_type": "TEXT" | "PICTURE" | "TABLE",
+                  "left": int, "top": int, "width": int, "height": int,
+                  "z_order": int, "fill": str | null,
+                  # TEXT:    "has_text": true, "paragraphs": [{"align": str, "runs": [...]}]
+                  # PICTURE: "image_b64": "data:image/...;base64,..."
+                  # TABLE:   "table_rows": int, "table_cols": int,
+                  #          "cells": [{"row": int, "col": int, "text": str}]
+                }
+              ]
+            }
+          ]
+        }
+    """
+    try:
+        from pptx import Presentation
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
+    except ImportError:
+        raise RuntimeError("python-pptx 未安装，请执行: pip install python-pptx")
+
+    prs = Presentation(file_path)
+    slide_w: int = prs.slide_width or 9144000
+    slide_h: int = prs.slide_height or 6858000
+    slides_data: list[dict[str, Any]] = []
+
+    for slide_idx, slide in enumerate(prs.slides):
+        # Background fill colour
+        bg_hex = "#FFFFFF"
+        try:
+            bg_fill = slide.background.fill
+            if bg_fill.type is not None and str(bg_fill.type) in ("SOLID", "1"):
+                bg_hex = "#{:06x}".format(int(bg_fill.fore_color.rgb))
+        except Exception:
+            pass
+
+        # Speaker notes
+        notes_text = ""
+        try:
+            if slide.has_notes_slide:
+                notes_text = slide.notes_slide.notes_text_frame.text.strip()
+        except Exception:
+            pass
+
+        shapes_data: list[dict[str, Any]] = []
+
+        for z_idx, shape in enumerate(slide.shapes):
+            s: dict[str, Any] = {
+                "id": shape.shape_id,
+                "name": shape.name,
+                "left": shape.left or 0,
+                "top": shape.top or 0,
+                "width": shape.width or 0,
+                "height": shape.height or 0,
+                "z_order": z_idx,
+                "fill": None,
+            }
+
+            # Shape fill colour
+            try:
+                fill = shape.fill
+                if fill.type is not None and str(fill.type) in ("SOLID", "1"):
+                    s["fill"] = "#{:06x}".format(int(fill.fore_color.rgb))
+            except Exception:
+                pass
+
+            # ── Picture ──
+            try:
+                if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                    img_blob = shape.image.blob
+                    img_mime = shape.image.content_type or "image/png"
+                    b64 = base64.b64encode(img_blob).decode("ascii")
+                    s["_type"] = "PICTURE"
+                    s["image_b64"] = f"data:{img_mime};base64,{b64}"
+                    shapes_data.append(s)
+                    continue
+            except Exception:
+                pass
+
+            # ── Table ──
+            try:
+                if shape.has_table:
+                    tbl = shape.table
+                    cells: list[dict[str, Any]] = []
+                    for r_idx, row in enumerate(tbl.rows):
+                        for c_idx, cell in enumerate(row.cells):
+                            cell_text = ""
+                            try:
+                                cell_text = (
+                                    cell.text_frame.text if cell.text_frame else ""
+                                )
+                            except Exception:
+                                pass
+                            cells.append(
+                                {"row": r_idx, "col": c_idx, "text": cell_text}
+                            )
+                    s["_type"] = "TABLE"
+                    s["table_rows"] = len(tbl.rows)
+                    s["table_cols"] = len(tbl.columns)
+                    s["cells"] = cells
+                    shapes_data.append(s)
+                    continue
+            except Exception:
+                pass
+
+            # ── Text frame ──
+            if getattr(shape, "has_text_frame", False) and shape.text_frame:
+                s["_type"] = "TEXT"
+                s["has_text"] = True
+                # Detect title placeholder (same logic as in parse_pptx)
+                is_title = False
+                try:
+                    from pptx.enum.shapes import PP_PLACEHOLDER
+
+                    ph = shape.placeholder_format
+                    if ph is not None:
+                        is_title = ph.type in (
+                            PP_PLACEHOLDER.TITLE,
+                            PP_PLACEHOLDER.CENTER_TITLE,
+                        )
+                except Exception:
+                    pass
+                s["is_title"] = is_title
+                paras: list[dict[str, Any]] = []
+                for para in shape.text_frame.paragraphs:
+                    align_name = "LEFT"
+                    try:
+                        if para.alignment:
+                            align_name = para.alignment.name
+                    except Exception:
+                        pass
+                    p_obj: dict[str, Any] = {"align": align_name, "runs": []}
+                    for run in para.runs:
+                        r: dict[str, Any] = {"text": run.text}
+                        try:
+                            if run.font.size:
+                                r["size"] = round(run.font.size.pt, 1)
+                        except Exception:
+                            pass
+                        try:
+                            if run.font.bold:
+                                r["bold"] = True
+                        except Exception:
+                            pass
+                        try:
+                            if run.font.italic:
+                                r["italic"] = True
+                        except Exception:
+                            pass
+                        try:
+                            if run.font.underline:
+                                r["underline"] = True
+                        except Exception:
+                            pass
+                        try:
+                            if run.font.color and run.font.color.type is not None:
+                                r["color"] = "#{:06x}".format(int(run.font.color.rgb))
+                        except Exception:
+                            pass
+                        p_obj["runs"].append(r)
+                    paras.append(p_obj)
+                s["paragraphs"] = paras
+            else:
+                # Connectors, groups, or other unsupported shapes — skip
+                continue
+
+            shapes_data.append(s)
+
+        slides_data.append(
+            {
+                "slide_index": slide_idx,
+                "slide_id": slide_idx + 1,
+                "background": bg_hex,
+                "notes": notes_text,
+                "shapes": shapes_data,
+            }
+        )
+
+    return {
+        "slide_width_emu": int(slide_w),
+        "slide_height_emu": int(slide_h),
+        "slides": slides_data,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PDF → 文本提取 + 原始 URL
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -341,7 +570,15 @@ def export_docx(html_content: str) -> bytes:
     try:
         from html2docx import html2docx
 
-        buf = html2docx(html_content, title="Koto 导出文档")
+        # Wrap with a default font style so html2docx preserves a consistent CJK-friendly font
+        wrapped_html = (
+            '<html><head><meta charset="utf-8">'
+            '<style>body{font-family:"Microsoft YaHei","PingFang SC","SimHei",Arial,sans-serif;'
+            "font-size:11pt;line-height:1.6;}"
+            "h1{font-size:20pt}h2{font-size:16pt}h3{font-size:14pt}"
+            "</style></head><body>" + html_content + "</body></html>"
+        )
+        buf = html2docx(wrapped_html, title="Koto 导出文档")
         buf.seek(0)  # html2docx returns BytesIO at EOF — must rewind before reading
         data = buf.read()
         if data:
@@ -444,15 +681,19 @@ def export_xlsx(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def export_pptx(original_path: str, slides_json: list[dict[str, Any]]) -> bytes:
+def export_pptx(original_path: str, slides_json: Any) -> bytes:
     """
-    在原始 PPTX 文件上就地替换文字内容，不重建 PPT 结构。
-    这样可以完整保留原 PPT 的主题背景、图片、动画等。
+    在原始 PPTX 文件上就地替换文字/表格内容，不重建 PPT 结构。
+    保留原 PPT 的主题背景、图片、动画等。
 
     Args:
         original_path: 暂存的原始 .pptx 文件路径
-        slides_json: 前端卡片编辑器序列化数据
-                     [{"slide_index": int, "texts": [{"shape_id": int, "text": str}]}]
+        slides_json: 画布编辑器序列化数据（两种格式）:
+          - 新格式 (几何画布): {"slides": [{"slide_index": int, "shapes": [
+              {"_type": "TEXT", "id": int, "text": str} |
+              {"_type": "TABLE", "id": int, "cells": [{"row", "col", "text"}]}
+            ]}]}
+          - 旧格式 (文本卡片): [{"slide_index": int, "texts": [{"shape_id": int, "text": str}]}]
 
     Returns:
         bytes — 修改后的 .pptx 文件内容
@@ -464,47 +705,70 @@ def export_pptx(original_path: str, slides_json: list[dict[str, Any]]) -> bytes:
 
     prs = Presentation(original_path)
 
-    # 构建 shape lookup: slide_index → shape_id → shape
+    # 构建 shape lookup: slide_index → shape_id → shape (all shapes, not just text)
     slides_map: dict[int, dict[int, Any]] = {}
     for slide_idx, slide in enumerate(prs.slides):
-        shape_map: dict[int, Any] = {}
-        for shape in slide.shapes:
-            if shape.has_text_frame:
-                shape_map[shape.shape_id] = shape
+        shape_map: dict[int, Any] = {shape.shape_id: shape for shape in slide.shapes}
         slides_map[slide_idx] = shape_map
 
-    # 逐一替换文字 (只改文字，保留字体样式)
-    for slide_data in slides_json:
-        slide_idx = slide_data.get("slide_index", 0)
-        shape_map = slides_map.get(slide_idx, {})
+    def _replace_text_frame(tf: Any, new_text: str) -> None:
+        """Replace all text in a text frame preserving the first run's style."""
+        if not tf.paragraphs:
+            return
+        first_para = tf.paragraphs[0]
+        if first_para.runs:
+            first_para.runs[0].text = new_text
+            for run in first_para.runs[1:]:
+                run.text = ""
+        else:
+            # No existing runs — add one rather than using para.text= (which destroys XML)
+            run = first_para.add_run()
+            run.text = new_text
+        for para in tf.paragraphs[1:]:
+            for run in para.runs:
+                run.text = ""
 
-        for text_entry in slide_data.get("texts", []):
-            shape_id = text_entry.get("shape_id")
-            new_text = text_entry.get("text", "")
-            shape = shape_map.get(shape_id)
-
-            if shape is None or not shape.has_text_frame:
-                continue
-
-            tf = shape.text_frame
-            # 清除所有 run 的文字，只保留第一个 paragraph/run 的样式
-            if tf.paragraphs:
-                first_para = tf.paragraphs[0]
-                # 设置第一段第一 run
-                if first_para.runs:
-                    first_para.runs[0].text = new_text
-                    # 清空后续 runs
-                    for run in first_para.runs[1:]:
-                        run.text = ""
-                else:
-                    # 无 run，直接加段落文字
-                    from pptx.util import Pt
-
-                    first_para.text = new_text
-                # 清空后续段落
-                for para in tf.paragraphs[1:]:
-                    for run in para.runs:
-                        run.text = ""
+    # Detect format: new geometry canvas dict vs legacy text-card list
+    if isinstance(slides_json, dict) and "slides" in slides_json:
+        # ── New geometry canvas format ──
+        for slide_data in slides_json["slides"]:
+            slide_idx = slide_data.get("slide_index", 0)
+            shape_map = slides_map.get(slide_idx, {})
+            for shape_entry in slide_data.get("shapes", []):
+                shape_id = shape_entry.get("id") or shape_entry.get("shape_id")
+                shape = shape_map.get(shape_id)
+                if shape is None:
+                    continue
+                stype = shape_entry.get("_type", "TEXT")
+                if stype == "TEXT":
+                    if shape.has_text_frame:
+                        _replace_text_frame(
+                            shape.text_frame, shape_entry.get("text", "")
+                        )
+                elif stype == "TABLE":
+                    if shape.has_table:
+                        tbl = shape.table
+                        for cell_data in shape_entry.get("cells", []):
+                            r, c = cell_data.get("row", 0), cell_data.get("col", 0)
+                            try:
+                                cell = tbl.cell(r, c)
+                                if cell.text_frame:
+                                    _replace_text_frame(
+                                        cell.text_frame, cell_data.get("text", "")
+                                    )
+                            except Exception:
+                                pass
+    else:
+        # ── Legacy text-card format ──
+        for slide_data in slides_json or []:
+            slide_idx = slide_data.get("slide_index", 0)
+            shape_map = slides_map.get(slide_idx, {})
+            for text_entry in slide_data.get("texts", []):
+                shape_id = text_entry.get("shape_id")
+                shape = shape_map.get(shape_id)
+                if shape is None or not shape.has_text_frame:
+                    continue
+                _replace_text_frame(shape.text_frame, text_entry.get("text", ""))
 
     buf = io.BytesIO()
     prs.save(buf)

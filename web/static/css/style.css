@@ -3464,6 +3464,14 @@ body.desktop-mode .pill-btn {
     font-size: 0.80em;
     color: var(--text-muted);
 }
+.koto-steps-skills-done {
+    display: flex; gap: 3px; flex-wrap: wrap; margin-left: 6px;
+}
+.koto-steps-skills-done .skill-badge {
+    font-size: 0.72em;
+    padding: 1px 6px;
+    opacity: 0.75;
+}
 .koto-steps[open] .koto-steps-summary {
     margin-bottom: 5px;
 }
@@ -4813,6 +4821,7 @@ body.desktop-mode .pill-btn {
 .sidebar-collapsed .sidebar-search-wrap { display: none !important; }
 .sidebar-collapsed .sb-section-head { display: none !important; }
 .sidebar-collapsed .sb-divider { display: none !important; }
+.sidebar-collapsed .sidebar-topbar { justify-content: center; padding: 10px 8px; }
 .sidebar-collapsed .sb-new-chat { justify-content: center; padding: 10px; }
 .sidebar-collapsed .sb-nav-item { justify-content: center; padding: 10px; }
 .sidebar-collapsed .sidebar-footer { padding: 8px 6px; align-items: center; }

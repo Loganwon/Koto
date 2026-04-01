@@ -184,22 +184,22 @@ class TestHasActiveSkillsForTask:
 class TestOllamaFallback:
     def test_falls_back_to_patterns_when_ollama_returns_none(self, mocker):
         matcher = _get_matcher()
-        mocker.patch.object(matcher, "_has_active_skills_for_task", return_value=False)
         mocker.patch.object(
             matcher,
             "_build_skill_catalog",
             return_value=([{"id": "concise_mode", "description": "x"}], "catalog"),
         )
         mocker.patch.object(matcher, "_match_with_local_model", return_value=None)
+        mocker.patch.object(matcher, "_match_with_gemini", return_value=None)
+        mocker.patch.object(matcher, "_match_with_intent_ngram", return_value=[])
         mocker.patch.object(
             matcher, "_match_with_patterns", return_value=["concise_mode"]
         )
-        result = matcher.match("be brief please")
-        assert result == ["concise_mode"]
+        result = matcher.match("be brief please", force=True)
+        assert "concise_mode" in result
 
     def test_uses_ollama_result_when_available(self, mocker):
         matcher = _get_matcher()
-        mocker.patch.object(matcher, "_has_active_skills_for_task", return_value=False)
         mocker.patch.object(
             matcher,
             "_build_skill_catalog",
@@ -208,5 +208,5 @@ class TestOllamaFallback:
         mocker.patch.object(
             matcher, "_match_with_local_model", return_value=["step_by_step"]
         )
-        result = matcher.match("explain it step by step")
+        result = matcher.match("explain it step by step", force=True)
         assert "step_by_step" in result

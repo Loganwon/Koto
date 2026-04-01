@@ -25,6 +25,7 @@ window.WA = window.WA || {};
     selectedFiles: new Set(),  // paths of selected files
     openTabs: [],          // [{path,name,ext,fileType,fileId,serverData,cache,modified}]
     activeTabPath: null,   // path of the currently active tab
+    aiOutputMode: localStorage.getItem('wa_ai_output_mode') || 'inline',  // 'inline'|'chat'
   };
 
   // Persistent fsHandle map — survives tab entry replacement
@@ -2363,14 +2364,44 @@ window.WA = window.WA || {};
      });
 
      state.socket.on('doc_tool_call', (cmd) => {
-        if (!state.lastPinnedSel && state.activeEditor) {
-           // No user selection — auto-apply directly into the document
-           try { state.activeEditor.applyToolCall(cmd); } catch(e) { console.warn('applyToolCall failed:', e); }
-           state.pendingToolCall = null;
+        const msgs = $('wa-ai-messages');
+        if (state.aiOutputMode === 'inline') {
+           if (!state.lastPinnedSel && state.activeEditor) {
+              // No user selection — auto-apply directly into the document
+              const note = document.createElement('div');
+              note.className = 'wa-tool-notification';
+              note.innerHTML = `✨ <b>AI 已写入文档</b>: ${cmd.type}`;
+              msgs.appendChild(note);
+              try { state.activeEditor.applyToolCall(cmd); } catch(e) { console.warn('applyToolCall failed:', e); }
+              state.pendingToolCall = null;
+           } else {
+              // User had a pinned selection — store and let the action bar handle it
+              state.pendingToolCall = cmd;
+           }
         } else {
-           // User had a pinned selection — store and let the action bar handle it
-           state.pendingToolCall = cmd;
+           // Chat-only mode: render HTML content as an in-chat preview instead of writing to document
+           if ((cmd.type === 'set_html' || cmd.type === 'insert_text') && cmd.value) {
+              const preview = document.createElement('div');
+              preview.className = 'wa-msg ai wa-tool-preview';
+              preview.innerHTML = cmd.value;
+              msgs.appendChild(preview);
+           } else if (cmd.type === 'insert_image' && (cmd.src || cmd.value)) {
+              const preview = document.createElement('div');
+              preview.className = 'wa-msg ai wa-tool-preview';
+              const img = document.createElement('img');
+              const imgSrc = cmd.src || cmd.value;
+              img.src = imgSrc;
+              img.style.cssText = 'max-width:100%;border-radius:6px;border:1px solid var(--border)';
+              _makeAIImgDraggable(img, imgSrc);
+              const dragHint2 = document.createElement('div');
+              dragHint2.className = 'wa-chart-drag-hint';
+              dragHint2.textContent = '拖动图片即可投放到文档';
+              preview.appendChild(img);
+              preview.appendChild(dragHint2);
+              msgs.appendChild(preview);
+           }
         }
+        msgs.scrollTop = msgs.scrollHeight;
      });
 
      // ── Code / Chart execution result ──
@@ -2808,6 +2839,7 @@ window.WA = window.WA || {};
            file_name: state.fileName || '',
            history: state.conversation.slice(-20),
            has_selection: hasSelection,
+           output_mode: state.aiOutputMode,
         });
       }
 
@@ -2831,6 +2863,15 @@ window.WA = window.WA || {};
 
   // ── Auto-save ──────────────────────────────────────────────────────────────
   let _autoSaveTimer = null;
+
+  window.WA.setOutputMode = (mode) => {
+    state.aiOutputMode = mode;
+    localStorage.setItem('wa_ai_output_mode', mode);
+    // Update toggle buttons if any exist
+    document.querySelectorAll('.wa-output-mode-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+  };
 
   window.WA.scheduleAutoSave = () => {
     if (!state.fileId || !state.fileType || state.fileType === 'pdf') return;

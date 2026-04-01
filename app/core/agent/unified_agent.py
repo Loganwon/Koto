@@ -423,6 +423,11 @@ class UnifiedAgent(Agent):
             _tool_part = (f"，{_tool_count} 个工具可用") if _tool_count else ""
             _planning_msg = "正在分析请求" + _skill_part + _tool_part
             _pub("THOUGHT", _planning_msg)
+            yield AgentStep(
+                step_type=AgentStepType.THOUGHT,
+                content=_planning_msg,
+                metadata={"phase": "planning", "skill_labels": list(_skill_display)},
+            )
         except Exception:
             import logging
 
