@@ -200,11 +200,20 @@ def register_socket_events(socketio):
         # ── Normal text chat mode ──────────────────────────────────────────
         def _task():
             import sys as _sys
+
             try:
                 _task_body()
             except Exception as _task_exc:
-                print(f"[DocAI] _task EXCEPTION: {_task_exc!r}", file=_sys.stderr, flush=True)
-                socketio.emit("agent_task_complete", {"result": f"❌ 内部错误：{_task_exc}"}, namespace="/doc")
+                print(
+                    f"[DocAI] _task EXCEPTION: {_task_exc!r}",
+                    file=_sys.stderr,
+                    flush=True,
+                )
+                socketio.emit(
+                    "agent_task_complete",
+                    {"result": f"❌ 内部错误：{_task_exc}"},
+                    namespace="/doc",
+                )
 
         def _task_body():
             # ── Build system instruction ──────────────────────────────────────
@@ -232,7 +241,7 @@ def register_socket_events(socketio):
                     '<TOOL>{"type":"set_pptx_text","slide_index":N,"shape_id":M,"value":"新内容"}</TOOL>\n\n'
                     "示例 — 修改标题：\n"
                     "上下文：[PPT幻灯片1内容, slide_index=0]\n"
-                    "[shape_id=2 name=\"标题\"]: 原标题\n"
+                    '[shape_id=2 name="标题"]: 原标题\n'
                     "用户：把标题改成「季度总结」\n"
                     'AI：好的。<TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":2,"value":"季度总结"}</TOOL>\n\n'
                     f"{action_hint}\n"
