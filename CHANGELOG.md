@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.6.5] - 2026-03-24
+## [1.7.0] - 2026-04-01
+
+### Fixed
+- **CI hang resolved**: `pytest_sessionfinish` now calls `os._exit()` after
+  artifact cleanup, immediately terminating the process after all tests
+  complete. Previously, ThreadPoolExecutor workers (JobRunner `proactive_tick`
+  tasks) blocked on outbound HTTP kept the process alive for 15+ minutes,
+  causing the CI job to be cancelled by the 20-minute timeout.
+- **TestDatetimeInjection failures fixed**: `unified_agent.run()` yields a
+  planning THOUGHT step before the LLM is called. Tests that used
+  `for _ in agent.run(...): break` captured only that planning step, leaving
+  `generate_content.call_args` as `None`. All three affected code paths
+  changed to `list(agent.run(...))` to consume the full generator before
+  inspecting call args.
+- **Cross-test API key pollution**: Module-level
+  `os.environ.setdefault("GEMINI_API_KEY", ...)` in test files runs during
+  pytest collection (after `pytest_configure` cleared the key), permanently
+  re-injecting an invalid key. The autouse `_reset_model_fallback_executor`
+  fixture now re-clears all Google API keys before each test.
+- **HuggingFace offline mode**: Added `HF_HUB_OFFLINE=1`,
+  `TRANSFORMERS_OFFLINE=1`, `HF_DATASETS_OFFLINE=1` to prevent background
+  RAG threads from attempting to download `BAAI/bge-m3` (~570 MB) when no
+  Google API key is set, which would block the process for 15+ minutes.
+- **ModelFallbackExecutor state isolation**: Added autouse fixture to clear
+  class-level `_cascade_failures` / `_cascade_failure_times` dicts and
+  instance-level `_unavailable` dict before each test, preventing circuit
+  breaker state from poisoning subsequent tests.
+
+
 
 ### Security & Fixes
 - **Critical Security Fix**: Removed tracked `_license.py` from the Git repository to secure the XOR-obfuscated system API Key from source leaks.
