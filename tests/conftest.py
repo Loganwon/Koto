@@ -49,6 +49,13 @@ def pytest_configure(config):
         except ImportError:
             pass
 
+    # Prevent Google/Gemini API calls in tests — avoids tenacity retry hangs
+    # when GEMINI_API_KEY is set but invalid (e.g. in CI without secrets).
+    import os as _os
+
+    for _key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
+        _os.environ.pop(_key, None)
+
 
 @pytest.fixture(scope="session")
 def _koto_tmp_db(tmp_path_factory):
