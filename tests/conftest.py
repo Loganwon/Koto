@@ -96,22 +96,6 @@ def _reset_model_fallback_executor():
         pass
 
 
-def pytest_sessionfinish(session, exitstatus):
-    """Force-exit the process after all tests to prevent background threads
-    from blocking process shutdown.
-
-    Without this, non-daemon threads (e.g. ThreadPoolExecutor workers in
-    JobRunner, timer threads) keep the process alive for 15+ minutes after
-    tests finish, causing CI jobs to be cancelled by the 20-minute timeout.
-
-    Coverage.xml is written by pytest-cov's pytest_terminal_summary hook,
-    which runs before this hook, so it is safe to hard-exit here.
-    """
-    import os as _os
-
-    _os._exit(int(exitstatus))
-
-
 @pytest.fixture(scope="session")
 def _koto_tmp_db(tmp_path_factory):
     """Isolated temp DB dir for the whole session."""
@@ -226,9 +210,15 @@ def tmp_workspace(tmp_path):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    if os.getenv("KOTO_KEEP_TEST_ARTIFACTS", "0") == "1":
-        return
-    _cleanup_test_artifacts()
+    if os.getenv("KOTO_KEEP_TEST_ARTIFACTS", "0") != "1":
+        _cleanup_test_artifacts()
+    # Hard-exit to prevent background threads (JobRunner, ThreadPoolExecutor
+    # workers blocked on outbound HTTP) from keeping the process alive for
+    # 15+ minutes after all tests finish, causing CI timeout cancellation.
+    # Coverage.xml is written by pytest-cov before this hook runs.
+    import os as _os
+
+    _os._exit(int(exitstatus))
 
 
 def pytest_unconfigure(config):

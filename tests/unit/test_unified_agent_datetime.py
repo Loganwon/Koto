@@ -101,8 +101,7 @@ class TestDatetimeInjection:
         """The original user input must still be present in the prompt."""
         custom_input = "You are a specialized assistant for tests."
         agent = _make_agent()
-        for _ in agent.run(input_text=custom_input):
-            break
+        list(agent.run(input_text=custom_input))  # consume all steps so LLM is called
         call_kwargs = agent.llm.generate_content.call_args
         prompt = call_kwargs.kwargs.get("prompt") or (
             call_kwargs.args[0] if call_kwargs.args else []
@@ -152,8 +151,7 @@ class TestDatetimeInjection:
 
         with patch("app.core.agent.unified_agent.datetime") as mock_dt:
             mock_dt.now.return_value = dt1
-            for _ in agent.run(input_text="first call"):
-                break
+            list(agent.run(input_text="first call"))  # consume all steps
             call1 = agent.llm.generate_content.call_args
             instr1 = call1.kwargs.get("system_instruction", "")
             if not instr1:
@@ -164,8 +162,7 @@ class TestDatetimeInjection:
 
         with patch("app.core.agent.unified_agent.datetime") as mock_dt:
             mock_dt.now.return_value = dt2
-            for _ in agent.run(input_text="second call"):
-                break
+            list(agent.run(input_text="second call"))  # consume all steps
             call2 = agent.llm.generate_content.call_args
             instr2 = call2.kwargs.get("system_instruction", "")
             if not instr2:
