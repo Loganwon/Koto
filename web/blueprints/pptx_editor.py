@@ -193,15 +193,27 @@ def _parse_slides(raw_bytes: bytes) -> dict:
 
 def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
     """
-    Apply text edits to an existing .pptx, preserving all formatting.
+    Apply text and formatting edits to an existing .pptx, preserving everything else.
 
-    `slides_edits` is the `slides` array from the stored JSON; each entry
-    carries the same shape structure produced by _parse_slides().  Text runs
-    are matched by (slide_index, shape_id, paragraph_index, run_index) and
-    the `.text` field is written back.  Runs that are not found in the edits
-    are left untouched, so images / animations / themes are fully preserved.
+    `slides_edits` is the `slides` array produced by _parse_slides().
+    Runs are matched by (slide_index, shape_id, paragraph_index, run_index).
+    Writes back: text, bold, italic, underline, color, size.
+    Paragraph alignment is also applied where present.
+    Runs not present in edits are left untouched.
     """
     from pptx import Presentation
+    from pptx.dml.color import RGBColor
+    from pptx.enum.text import PP_ALIGN
+    from pptx.util import Pt
+
+    _ALIGN_MAP = {
+        "LEFT": PP_ALIGN.LEFT,
+        "CENTER": PP_ALIGN.CENTER,
+        "RIGHT": PP_ALIGN.RIGHT,
+        "JUSTIFY": PP_ALIGN.JUSTIFY,
+        "DISTRIBUTE": PP_ALIGN.DISTRIBUTE,
+        "THAI_DISTRIBUTE": PP_ALIGN.THAI_DISTRIBUTE,
+    }
 
     prs = Presentation(io.BytesIO(orig_bytes))
     slide_map = {edit["index"]: edit for edit in slides_edits}
@@ -223,13 +235,107 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
             for p_idx, para in enumerate(shape.text_frame.paragraphs):
                 if p_idx >= len(edit_paras):
                     break
-                edit_runs = edit_paras[p_idx].get("runs", [])
+                ep = edit_paras[p_idx]
+
+                # Paragraph alignment
+                align_str = ep.get("align", "").upper()
+                if align_str in _ALIGN_MAP:
+                    try:
+                        para.alignment = _ALIGN_MAP[align_str]
+                    except Exception:
+                        pass
+
+                edit_runs = ep.get("runs", [])
                 for r_idx, run in enumerate(para.runs):
                     if r_idx >= len(edit_runs):
                         break
-                    new_text = edit_runs[r_idx].get("text", run.text)
+                    er = edit_runs[r_idx]
+
+                    # Text
+                    new_text = er.get("text", run.text)
                     if new_text != run.text:
                         run.text = new_text
+
+                    # Bold
+                    if "bold" in er:
+                        try:
+                            run.font.bold = er["bold"]
+                        except Exception:
+                            pass
+
+                    # Italic
+                    if "italic" in er:
+                        try:
+                            run.font.italic = er["italic"]
+                        except Exception:
+                            pass
+
+                    # Underline
+                    if "underline" in er:
+                        try:
+                            run.font.underline = er["underline"]
+                        except Exception:
+                            pass
+
+                    # Font size
+                    if "size" in er and er["size"]:
+                        try:
+                            run.font.size = Pt(float(er["size"]))
+                        except Exception:
+                            pass
+
+                    # Font color
+                    if "color" in er and er["color"]:
+                        try:
+                            hex_color = er["color"].lstrip("#")
+                            r_val = int(hex_color[0:2], 16)
+                            g_val = int(hex_color[2:4], 16)
+                            b_val = int(hex_color[4:6], 16)
+                            run.font.color.rgb = RGBColor(r_val, g_val, b_val)
+                        except Exception:
+                            pass
+
+        # ── New shapes (negative IDs = inserted on frontend) ─────────────────
+        existing_ids = {s.shape_id for s in slide.shapes}
+        for edit_shape in edit_slide.get("shapes", []):
+            try:
+                sid = int(edit_shape.get("id", 0))
+            except (ValueError, TypeError):
+                sid = -1
+            if sid >= 0 and sid in existing_ids:
+                continue  # already handled above
+            if not edit_shape.get("has_text"):
+                continue
+            from pptx.util import Emu
+            txBox = slide.shapes.add_textbox(
+                Emu(edit_shape.get("left", 0)),
+                Emu(edit_shape.get("top", 0)),
+                Emu(edit_shape.get("width", 2743200)),
+                Emu(edit_shape.get("height", 914400)),
+            )
+            tf = txBox.text_frame
+            tf.word_wrap = True
+            for p_idx, ep in enumerate(edit_shape.get("paragraphs", [])):
+                para = tf.paragraphs[0] if p_idx == 0 else tf.add_paragraph()
+                align_str = ep.get("align", "LEFT").upper()
+                if align_str in _ALIGN_MAP:
+                    try:
+                        para.alignment = _ALIGN_MAP[align_str]
+                    except Exception:
+                        pass
+                for er in ep.get("runs", []):
+                    run = para.add_run()
+                    run.text = er.get("text", "")
+                    try:
+                        if er.get("bold"):      run.font.bold = True
+                        if er.get("italic"):    run.font.italic = True
+                        if er.get("underline"): run.font.underline = True
+                        if er.get("size"):      run.font.size = Pt(float(er["size"]))
+                        if er.get("color"):
+                            h = er["color"].lstrip("#")
+                            run.font.color.rgb = RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+                    except Exception:
+                        pass
 
     buf = io.BytesIO()
     prs.save(buf)

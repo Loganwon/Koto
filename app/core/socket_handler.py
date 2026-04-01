@@ -39,6 +39,12 @@ PROMPTS = {
 def register_socket_events(socketio):
     """Register all /doc namespace WebSocket event handlers."""
 
+    # Default namespace connect/disconnect (required so python-socketio test clients
+    # don't raise ConnectionError when they implicitly join the default namespace)
+    @socketio.on("connect")
+    def on_default_connect():
+        pass
+
     @socketio.on("connect", namespace="/doc")
     def on_connect():
         logger.info("[DocAssistant] client connected")
@@ -123,7 +129,6 @@ def register_socket_events(socketio):
                             "files": {},
                         },
                         namespace="/doc",
-                        to=sid,
                     )
                     return
 
@@ -152,7 +157,6 @@ def register_socket_events(socketio):
                     "agent_stream_chunk",
                     {"chunk": f"🤖 正在为你生成 {language.upper()} 代码…\n"},
                     namespace="/doc",
-                    to=sid,
                 )
 
                 code = _call_llm_sync(gen_prompt)
@@ -166,7 +170,6 @@ def register_socket_events(socketio):
                             "files": {},
                         },
                         namespace="/doc",
-                        to=sid,
                     )
                     return
 
@@ -181,7 +184,6 @@ def register_socket_events(socketio):
                     "agent_stream_chunk",
                     {"chunk": f"\n```{language}\n{code}\n```\n\n▶ 正在执行…\n"},
                     namespace="/doc",
-                    to=sid,
                 )
 
                 # Execute
@@ -190,42 +192,78 @@ def register_socket_events(socketio):
                 else:
                     result = run_r(code)
 
-                socketio.emit("code_result", result, namespace="/doc", to=sid)
+                socketio.emit("code_result", result, namespace="/doc")
 
             socketio.start_background_task(_code_task)
             return
 
         # ── Normal text chat mode ──────────────────────────────────────────
         def _task():
+            import sys as _sys
+            try:
+                _task_body()
+            except Exception as _task_exc:
+                print(f"[DocAI] _task EXCEPTION: {_task_exc!r}", file=_sys.stderr, flush=True)
+                socketio.emit("agent_task_complete", {"result": f"❌ 内部错误：{_task_exc}"}, namespace="/doc")
+
+        def _task_body():
             # ── Build system instruction ──────────────────────────────────────
             file_ctx = f"文件名：{file_name}，" if file_name else ""
-            if has_selection:
-                action_hint = "用户当前有选中文字。修改时用 set_html 替换选区内容。"
-            else:
-                action_hint = "用户当前无选区。修改时用 set_html 在光标处插入内容。"
 
-            # Concise, example-driven prompt that small local models can follow reliably
-            system_instruction = (
-                f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n\n"
-                "【重要规则】\n"
-                "当用户要求插入、修改、翻译、润色等文档操作时，你必须在回复末尾输出修改指令。\n"
-                "不要只描述你会做什么——直接输出指令，让程序执行。\n\n"
-                "修改指令格式（必须完整、一行输出）：\n"
-                '<TOOL>{"type": "set_html", "value": "<p>内容</p>"}</TOOL>\n\n'
-                "示例 1 — 用户让你插入内容：\n"
-                "用户：写一行「你好世界」插入文档\n"
-                'AI：已插入。<TOOL>{"type": "set_html", "value": "<p>你好世界</p>"}</TOOL>\n\n'
-                "示例 2 — 用户让你翻译并插入：\n"
-                "用户：翻译成英文插入文档\n"
-                'AI：<TOOL>{"type": "set_html", "value": "<p>Hello world</p>"}</TOOL>\n\n'
-                "示例 3 — 用户说「在光标处插入」（明确插入指令）：\n"
-                "用户：请在光标处插入\n"
-                'AI：已插入。<TOOL>{"type": "set_html", "value": "<p>上一步生成的内容</p>"}</TOOL>\n\n'
-                f"{action_hint}\n"
-                "其他文件类型指令：\n"
-                '  XLSX → <TOOL>{"type":"set_cell","r":0,"c":0,"value":"值"}</TOOL>\n'
-                '  PPTX → <TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":1,"value":"新文字"}</TOOL>'
-            )
+            if file_type == "pptx":
+                # PPTX-specific: use set_pptx_text exclusively — never set_html
+                if has_selection:
+                    action_hint = (
+                        "用户选中了某个文本框的文字（见[用户选中的文字]）。"
+                        "修改时必须使用 set_pptx_text 指令，"
+                        "slide_index 和 shape_id 从[PPT幻灯片内容]中读取，禁止使用 set_html。"
+                    )
+                else:
+                    action_hint = (
+                        "修改幻灯片文字必须使用 set_pptx_text 指令，"
+                        "slide_index 和 shape_id 从[PPT幻灯片内容]中读取，禁止使用 set_html。"
+                    )
+                system_instruction = (
+                    f"你是 Koto PPT AI 助手。当前文件：{file_ctx}类型 pptx。\n\n"
+                    "【重要规则】\n"
+                    "当用户要求修改、翻译、润色幻灯片文字时，必须在回复末尾输出修改指令。\n"
+                    "不要只描述——直接输出指令让程序执行。\n\n"
+                    "指令格式（必须一行完整输出）：\n"
+                    '<TOOL>{"type":"set_pptx_text","slide_index":N,"shape_id":M,"value":"新内容"}</TOOL>\n\n'
+                    "示例 — 修改标题：\n"
+                    "上下文：[PPT幻灯片1内容, slide_index=0]\n"
+                    "[shape_id=2 name=\"标题\"]: 原标题\n"
+                    "用户：把标题改成「季度总结」\n"
+                    'AI：好的。<TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":2,"value":"季度总结"}</TOOL>\n\n'
+                    f"{action_hint}\n"
+                )
+            else:
+                if has_selection:
+                    action_hint = "用户当前有选中文字。修改时用 set_html 替换选区内容。"
+                else:
+                    action_hint = "用户当前无选区。修改时用 set_html 在光标处插入内容。"
+
+                # Concise, example-driven prompt that small local models can follow reliably
+                system_instruction = (
+                    f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n\n"
+                    "【重要规则】\n"
+                    "当用户要求插入、修改、翻译、润色等文档操作时，你必须在回复末尾输出修改指令。\n"
+                    "不要只描述你会做什么——直接输出指令，让程序执行。\n\n"
+                    "修改指令格式（必须完整、一行输出）：\n"
+                    '<TOOL>{"type": "set_html", "value": "<p>内容</p>"}</TOOL>\n\n'
+                    "示例 1 — 用户让你插入内容：\n"
+                    "用户：写一行「你好世界」插入文档\n"
+                    'AI：已插入。<TOOL>{"type": "set_html", "value": "<p>你好世界</p>"}</TOOL>\n\n'
+                    "示例 2 — 用户让你翻译并插入：\n"
+                    "用户：翻译成英文插入文档\n"
+                    'AI：<TOOL>{"type": "set_html", "value": "<p>Hello world</p>"}</TOOL>\n\n'
+                    "示例 3 — 用户说「在光标处插入」（明确插入指令）：\n"
+                    "用户：请在光标处插入\n"
+                    'AI：已插入。<TOOL>{"type": "set_html", "value": "<p>上一步生成的内容</p>"}</TOOL>\n\n'
+                    f"{action_hint}\n"
+                    "其他文件类型指令：\n"
+                    '  XLSX → <TOOL>{"type":"set_cell","r":0,"c":0,"value":"值"}</TOOL>\n'
+                )
 
             # ── Build prompt with multi-turn history ──────────────────────
             # Assemble history (最多保留最近 10 轮，防止 token 超限)
@@ -277,7 +315,6 @@ def register_socket_events(socketio):
                             "agent_stream_chunk",
                             {"chunk": part},
                             namespace="/doc",
-                            to=sid,
                         )
                 return "".join(full)
 
@@ -301,7 +338,6 @@ def register_socket_events(socketio):
                             "agent_stream_chunk",
                             {"chunk": part},
                             namespace="/doc",
-                            to=sid,
                         )
                 return "".join(full)
 
@@ -329,7 +365,6 @@ def register_socket_events(socketio):
                             "result": "❌ 本地模型不可用，请确认 Ollama 已启动并加载了模型。"
                         },
                         namespace="/doc",
-                        to=sid,
                     )
                     return
             else:
@@ -340,27 +375,7 @@ def register_socket_events(socketio):
                         "[DocAI] online failed: %s: %s", type(exc).__name__, exc
                     )
                     if _is_online_failure(exc):
-                        logger.warning(
-                            "[WorkspaceAssistant] Online AI failed (%s), trying local…",
-                            exc,
-                        )
-                        try:
-                            result_text = _try_local()
-                        except Exception as exc2:
-                            logger.error(
-                                "[WorkspaceAssistant] Local fallback failed: %s", exc2
-                            )
-                            result_text = None
-                        if result_text is None:
-                            socketio.emit(
-                                "agent_task_complete",
-                                {
-                                    "result": f"❌ AI 暂时不可用（在线模型不可用，本地模型也未运行）。请启动 Ollama 或配置有效的 API 密钥。"
-                                },
-                                namespace="/doc",
-                                to=sid,
-                            )
-                            return
+                        result_text = None  # will fall through to local below
                     else:
                         logger.error(
                             "[WorkspaceAssistant] AI task failed: %s",
@@ -371,7 +386,28 @@ def register_socket_events(socketio):
                             "agent_task_complete",
                             {"result": f"❌ AI 处理失败：{exc}"},
                             namespace="/doc",
-                            to=sid,
+                        )
+                        return
+
+                # Fall back to local if online returned nothing (silent error) or failed
+                if not result_text:
+                    logger.warning(
+                        "[WorkspaceAssistant] Online AI returned empty, trying local…"
+                    )
+                    try:
+                        result_text = _try_local()
+                    except Exception as exc2:
+                        logger.error(
+                            "[WorkspaceAssistant] Local fallback failed: %s", exc2
+                        )
+                        result_text = None
+                    if not result_text:
+                        socketio.emit(
+                            "agent_task_complete",
+                            {
+                                "result": "❌ AI 暂时不可用（在线模型不可用，本地模型也未运行）。请启动 Ollama 或配置有效的 API 密钥。"
+                            },
+                            namespace="/doc",
                         )
                         return
 
@@ -418,12 +454,14 @@ def register_socket_events(socketio):
                         "[DocAI] Synthesised set_html from last assistant turn (insert fallback)"
                     )
 
-            socketio.emit(
-                "agent_task_complete", {"result": clean_text}, namespace="/doc", to=sid
-            )
-
+            # Emit tool calls BEFORE task_complete so the browser has
+            # pendingToolCall set when agent_task_complete fires.
             for tc in tool_calls:
-                socketio.emit("doc_tool_call", tc, namespace="/doc", to=sid)
+                socketio.emit("doc_tool_call", tc, namespace="/doc")
+
+            socketio.emit(
+                "agent_task_complete", {"result": clean_text}, namespace="/doc"
+            )
 
         socketio.start_background_task(_task)
 

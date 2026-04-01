@@ -1607,6 +1607,8 @@ if _has_socketio and SocketIO is not None:
         async_mode="threading",
         logger=False,
         engineio_logger=False,
+        ping_timeout=120,
+        ping_interval=30,
     )
     try:
         from app.core.socket_handler import register_socket_events

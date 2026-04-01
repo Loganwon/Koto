@@ -1,578 +1,658 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Koto PPTX 编辑器</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-           background: #f0f2f5; height: 100vh; display: flex; flex-direction: column; }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Koto PPTX 编辑器</title>
+<style>
+/* ── Reset ── */
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:"Segoe UI",system-ui,sans-serif;background:#f3f3f3;
+     display:flex;flex-direction:column;height:100vh;overflow:hidden;user-select:none;}
 
-    /* ── Top bar ── */
-    .topbar {
-      display: flex; align-items: center; gap: 12px; padding: 0 20px;
-      height: 52px; background: #1a1a2e; color: #fff; flex-shrink: 0;
-      box-shadow: 0 2px 6px rgba(0,0,0,.3);
-    }
-    .topbar-logo { font-size: 16px; font-weight: 700; color: #7c83fd; letter-spacing: .5px; }
-    .topbar-name { font-size: 15px; font-weight: 500; flex: 1; white-space: nowrap;
-                   overflow: hidden; text-overflow: ellipsis; }
-    .topbar-badge { font-size: 11px; background: #7c83fd22; color: #a5abff;
-                    padding: 2px 8px; border-radius: 12px; border: 1px solid #7c83fd44; }
-    .btn { padding: 7px 16px; border: none; border-radius: 6px; font-size: 13px;
-           font-weight: 500; cursor: pointer; transition: all .15s; white-space: nowrap; }
-    .btn-primary { background: #7c83fd; color: #fff; }
-    .btn-primary:hover { background: #636af5; }
-    .btn-secondary { background: #2a2a4a; color: #c8ccff; border: 1px solid #3a3a6a; }
-    .btn-secondary:hover { background: #353560; }
-    .btn-danger { background: #c0392b; color: #fff; }
-    .btn-danger:hover { background: #a93226; }
+/* ── Upload screen ── */
+#upload-screen{
+  position:fixed;inset:0;z-index:200;
+  background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;
+}
+.up-logo{font-size:20px;font-weight:700;color:#d04f20;display:flex;align-items:center;gap:8px;}
+.up-logo span{font-size:28px;}
+.up-drop{
+  width:480px;max-width:92vw;border:2px dashed #c8c8c8;border-radius:10px;
+  padding:52px 32px;text-align:center;cursor:pointer;transition:all .2s;background:#fafafa;
+}
+.up-drop:hover,.up-drop.drag{border-color:#d04f20;background:#fff5f0;}
+.up-drop-icon{font-size:52px;margin-bottom:12px;}
+.up-drop-title{font-size:17px;font-weight:600;color:#222;margin-bottom:6px;}
+.up-drop-sub{font-size:13px;color:#888;}
+#up-input{display:none;}
+.up-btn{
+  padding:10px 32px;background:#d04f20;color:#fff;border:none;border-radius:6px;
+  font-size:15px;font-weight:600;cursor:pointer;transition:background .15s;
+}
+.up-btn:hover{background:#b8401a;}
+.up-recent{font-size:13px;color:#888;cursor:pointer;text-decoration:underline;}
+.up-recent:hover{color:#d04f20;}
 
-    /* ── Upload overlay (shown when no file loaded) ── */
-    #upload-overlay {
-      position: fixed; inset: 0; z-index: 100;
-      background: #0d0d1a;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 24px;
-    }
-    .upload-logo { font-size: 24px; font-weight: 800; color: #7c83fd; }
-    .upload-zone {
-      width: 480px; max-width: 90vw;
-      border: 2px dashed #7c83fd88; border-radius: 16px;
-      padding: 48px 32px; text-align: center;
-      color: #a5abff; background: #13132a;
-      cursor: pointer; transition: all .2s;
-    }
-    .upload-zone:hover, .upload-zone.drag-over { border-color: #7c83fd; background: #1a1a3a; }
-    .upload-zone-icon { font-size: 48px; margin-bottom: 16px; }
-    .upload-zone-title { font-size: 18px; font-weight: 600; color: #c8ccff; margin-bottom: 8px; }
-    .upload-zone-sub { font-size: 13px; color: #6668aa; }
-    .upload-or { font-size: 13px; color: #6668aa; }
-    #upload-input { display: none; }
-    .upload-select-btn {
-      padding: 10px 28px; background: #7c83fd; color: #fff;
-      border: none; border-radius: 8px; font-size: 15px; cursor: pointer;
-      transition: background .15s;
-    }
-    .upload-select-btn:hover { background: #636af5; }
-    .upload-list-link {
-      font-size: 13px; color: #7c83fd88; cursor: pointer;
-      text-decoration: underline; text-underline-offset: 3px;
-    }
-    .upload-list-link:hover { color: #7c83fd; }
+/* ── Title bar (mimics Office) ── */
+#titlebar{
+  display:none;flex-shrink:0;
+  background:#d04f20;color:#fff;height:36px;
+  align-items:center;padding:0 12px;gap:10px;
+}
+.tb-logo{font-size:14px;font-weight:700;letter-spacing:.3px;opacity:.95;}
+.tb-name{
+  flex:1;font-size:13px;font-weight:400;text-align:center;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.tb-btn{
+  padding:4px 12px;background:rgba(255,255,255,.15);color:#fff;border:none;
+  border-radius:3px;font-size:12px;cursor:pointer;transition:background .12s;white-space:nowrap;
+}
+.tb-btn:hover{background:rgba(255,255,255,.28);}
+.tb-btn.accent{background:rgba(255,255,255,.25);}
 
-    /* ── Main layout ── */
-    .main { display: flex; flex: 1; overflow: hidden; }
+/* ── Ribbon ── */
+#ribbon{
+  display:none;flex-shrink:0;
+  background:#fff;border-bottom:1px solid #d0d0d0;height:46px;
+  align-items:center;padding:0 10px;gap:2px;
+}
+.rib-group{display:flex;align-items:center;gap:2px;padding:0 6px;
+           border-right:1px solid #e0e0e0;}
+.rib-group:last-child{border:none;}
+.rib-btn{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:4px 8px;border:none;background:transparent;border-radius:3px;
+  font-size:11px;color:#333;cursor:pointer;gap:2px;min-width:36px;
+  transition:background .12s;
+}
+.rib-btn:hover{background:#e8e8e8;}
+.rib-btn .ri{font-size:18px;line-height:1;}
+.rib-sep{width:1px;height:28px;background:#e0e0e0;margin:0 2px;}
+.rib-zoom{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:#555;}
+.rib-zoom input[type=range]{width:80px;accent-color:#d04f20;}
 
-    /* ── Sidebar: slide list ── */
-    .sidebar {
-      width: 220px; flex-shrink: 0; background: #1a1a2e;
-      display: flex; flex-direction: column; overflow: hidden;
-      border-right: 1px solid #2a2a4a;
-    }
-    .sidebar-header {
-      padding: 12px 14px; border-bottom: 1px solid #2a2a4a;
-      font-size: 12px; font-weight: 600; color: #7c83fd; text-transform: uppercase;
-      letter-spacing: .6px; display: flex; align-items: center; justify-content: space-between;
-    }
-    .slide-count-badge { background: #7c83fd22; color: #a5abff;
-                         padding: 1px 7px; border-radius: 10px; font-size: 11px; }
-    .slides-list { flex: 1; overflow-y: auto; padding: 8px 6px; }
-    .slide-thumb {
-      padding: 8px 10px; margin-bottom: 4px; border-radius: 6px;
-      cursor: pointer; transition: all .15s; border: 2px solid transparent;
-      background: #13132a;
-    }
-    .slide-thumb:hover { background: #20204a; }
-    .slide-thumb.active { background: #1e1e42; border-color: #7c83fd; }
-    .slide-thumb-num { font-size: 10px; color: #6668aa; font-weight: 600; }
-    .slide-thumb-title { font-size: 12px; color: #c8ccff; white-space: nowrap;
-                         overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-    .slide-thumb-shapes { font-size: 10px; color: #6668aa; margin-top: 2px; }
+/* ── Main workspace ── */
+#workspace{display:none;flex:1;overflow:hidden;display:none;flex-direction:row;}
 
-    /* ── Editor panel ── */
-    .editor-panel {
-      flex: 1; display: flex; flex-direction: column; overflow: hidden;
-      background: #0d0d1a;
-    }
-    .editor-toolbar {
-      display: flex; align-items: center; gap: 10px; padding: 10px 20px;
-      border-bottom: 1px solid #2a2a4a; flex-shrink: 0;
-    }
-    .editor-toolbar-title { font-size: 14px; font-weight: 600; color: #c8ccff; flex: 1; }
-    .editor-body { flex: 1; overflow-y: auto; padding: 24px 32px; }
-    .editor-empty {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      height: 100%; color: #44447a; font-size: 15px; gap: 12px;
-    }
-    .editor-empty-icon { font-size: 48px; }
+/* ── Slide panel (left thumbnails) ── */
+#slide-panel{
+  width:160px;flex-shrink:0;background:#f0f0f0;
+  border-right:1px solid #d0d0d0;overflow-y:auto;padding:8px 6px;
+  display:flex;flex-direction:column;gap:6px;
+}
+.slide-thumb{
+  position:relative;cursor:pointer;border:2px solid transparent;
+  border-radius:3px;overflow:hidden;background:#fff;
+  box-shadow:0 1px 3px rgba(0,0,0,.15);transition:all .12s;
+}
+.slide-thumb:hover{border-color:#aaa;}
+.slide-thumb.active{border-color:#d04f20;box-shadow:0 0 0 2px #d04f2044;}
+.slide-thumb canvas{width:100%;display:block;}
+.slide-thumb-num{
+  position:absolute;bottom:2px;right:4px;font-size:9px;color:#888;
+  text-shadow:0 0 3px #fff;
+}
 
-    /* ── Shape cards ── */
-    .shape-card {
-      background: #13132a; border: 1px solid #2a2a4a; border-radius: 10px;
-      padding: 16px 18px; margin-bottom: 16px; transition: border-color .15s;
-    }
-    .shape-card:hover { border-color: #7c83fd55; }
-    .shape-card-header {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
-    }
-    .shape-icon { font-size: 16px; }
-    .shape-name { font-size: 12px; font-weight: 600; color: #7c83fd; }
-    .shape-type { font-size: 11px; color: #6668aa; margin-left: auto; }
-    .para-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
-    .para-run-label { font-size: 10px; color: #44447a; width: 42px;
-                      flex-shrink: 0; margin-top: 9px; }
-    .run-input {
-      flex: 1; background: #0d0d1a; color: #e0e3ff; border: 1px solid #2a2a4a;
-      border-radius: 5px; padding: 7px 10px; font-size: 13px;
-      resize: vertical; min-height: 36px; font-family: inherit;
-      transition: border-color .15s;
-    }
-    .run-input:focus { outline: none; border-color: #7c83fd; }
-    .run-badges { display: flex; gap: 4px; align-items: center; flex-shrink: 0; margin-top: 9px; }
-    .badge {
-      font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 600;
-      color: #a5abff; background: #7c83fd22;
-    }
-    .no-text-note { font-size: 12px; color: #44447a; font-style: italic; }
+/* ── Canvas area ── */
+#canvas-area{
+  flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;
+  padding:20px;background:#737373;
+}
+/* The slide wrapper (white rectangle) */
+#slide-wrapper{
+  position:relative;background:#fff;box-shadow:0 4px 24px rgba(0,0,0,.45);
+  flex-shrink:0;
+}
+/* Each shape div */
+.shape{
+  position:absolute;overflow:hidden;cursor:default;
+}
+.shape.has-text{cursor:text;}
+.shape-inner{
+  width:100%;height:100%;padding:4px 6px;
+  display:flex;flex-direction:column;justify-content:flex-start;
+}
+/* Paragraph inside shape */
+.shape-para{line-height:1.3;white-space:pre-wrap;word-break:break-word;}
+/* Inline run spans (preserve bold/italic/underline) */
+.run-span{outline:none;}
+.run-span[contenteditable="true"]:focus{
+  outline:none;
+}
+/* Selection glow on shape */
+.shape.selected{
+  outline:2px solid #0078d4;
+  outline-offset:0px;
+}
+.shape.selected::after{
+  content:'';position:absolute;inset:-1px;pointer-events:none;
+  border:1px solid #0078d4;
+}
+/* Resize handles (decorative only for now) */
+.handle{
+  position:absolute;width:8px;height:8px;background:#0078d4;border:1px solid #fff;
+  border-radius:1px;display:none;
+}
+.shape.selected .handle{display:block;}
+.handle.tl{top:-4px;left:-4px;cursor:nw-resize;}
+.handle.tr{top:-4px;right:-4px;cursor:ne-resize;}
+.handle.bl{bottom:-4px;left:-4px;cursor:sw-resize;}
+.handle.br{bottom:-4px;right:-4px;cursor:se-resize;}
+.handle.tm{top:-4px;left:50%;transform:translateX(-50%);cursor:n-resize;}
+.handle.bm{bottom:-4px;left:50%;transform:translateX(-50%);cursor:s-resize;}
+.handle.ml{left:-4px;top:50%;transform:translateY(-50%);cursor:w-resize;}
+.handle.mr{right:-4px;top:50%;transform:translateY(-50%);cursor:e-resize;}
 
-    /* ── Toast ── */
-    #toast {
-      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
-      background: #1a1a3a; color: #c8ccff; padding: 10px 18px;
-      border-radius: 8px; font-size: 13px; border: 1px solid #7c83fd44;
-      box-shadow: 0 4px 16px rgba(0,0,0,.4);
-      opacity: 0; transform: translateY(12px);
-      transition: opacity .25s, transform .25s; pointer-events: none;
-    }
-    #toast.show { opacity: 1; transform: none; }
-    #toast.error { border-color: #c0392b44; color: #f1948a; }
+/* ── Status bar ── */
+#statusbar{
+  display:none;flex-shrink:0;height:22px;background:#f0f0f0;border-top:1px solid #d0d0d0;
+  display:none;align-items:center;padding:0 12px;gap:16px;font-size:11px;color:#555;
+}
 
-    /* ── Saved files list modal ── */
-    .modal-overlay {
-      display: none; position: fixed; inset: 0; z-index: 200;
-      background: rgba(0,0,0,.65); align-items: center; justify-content: center;
-    }
-    .modal-overlay.show { display: flex; }
-    .modal-box {
-      background: #1a1a2e; border: 1px solid #2a2a4a; border-radius: 12px;
-      padding: 24px; width: 520px; max-width: 95vw; max-height: 80vh;
-      display: flex; flex-direction: column; gap: 16px;
-    }
-    .modal-title { font-size: 16px; font-weight: 700; color: #c8ccff; }
-    .file-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-    .file-row {
-      display: flex; align-items: center; gap: 10px; padding: 10px 12px;
-      background: #13132a; border-radius: 8px; border: 1px solid #2a2a4a;
-    }
-    .file-row-name { flex: 1; font-size: 13px; color: #c8ccff; white-space: nowrap;
-                      overflow: hidden; text-overflow: ellipsis; }
-    .file-row-meta { font-size: 11px; color: #6668aa; }
-    .file-row-open { padding: 4px 12px; font-size: 12px; background: #7c83fd;
-                     color: #fff; border: none; border-radius: 5px; cursor: pointer; }
-    .file-row-open:hover { background: #636af5; }
-    .file-row-del { padding: 4px 10px; font-size: 12px; background: #c0392b22;
-                    color: #f1948a; border: 1px solid #c0392b44; border-radius: 5px; cursor: pointer; }
-    .file-row-del:hover { background: #c0392b44; }
-    .loading-msg { color: #6668aa; font-size: 13px; text-align: center; padding: 20px; }
-  </style>
+/* ── Toast ── */
+#toast{
+  position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(12px);
+  background:#323130;color:#fff;padding:8px 18px;border-radius:4px;font-size:13px;
+  opacity:0;transition:all .22s;pointer-events:none;z-index:9999;white-space:nowrap;
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+#toast.err{background:#a4262c;}
+
+/* ── File list modal ── */
+.modal-bg{
+  display:none;position:fixed;inset:0;z-index:300;
+  background:rgba(0,0,0,.4);align-items:center;justify-content:center;
+}
+.modal-bg.show{display:flex;}
+.modal{
+  background:#fff;border-radius:4px;width:520px;max-width:95vw;max-height:80vh;
+  display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.28);
+}
+.modal-head{
+  padding:16px 20px;border-bottom:1px solid #e0e0e0;
+  font-size:15px;font-weight:600;color:#111;display:flex;align-items:center;
+  justify-content:space-between;
+}
+.modal-close{background:none;border:none;font-size:18px;cursor:pointer;color:#555;}
+.modal-body{flex:1;overflow-y:auto;padding:10px 16px;display:flex;flex-direction:column;gap:6px;}
+.frow{
+  display:flex;align-items:center;gap:8px;padding:8px 10px;
+  border:1px solid #e0e0e0;border-radius:3px;
+}
+.frow-icon{font-size:22px;}
+.frow-name{flex:1;font-size:13px;color:#222;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.frow-meta{font-size:11px;color:#888;white-space:nowrap;}
+.frow-open{
+  padding:4px 12px;background:#d04f20;color:#fff;border:none;border-radius:3px;
+  font-size:12px;cursor:pointer;
+}
+.frow-del{
+  padding:4px 10px;background:#fff;color:#a4262c;border:1px solid #a4262c;
+  border-radius:3px;font-size:12px;cursor:pointer;
+}
+.modal-foot{padding:12px 16px;border-top:1px solid #e0e0e0;display:flex;justify-content:flex-end;}
+
+/* scrollbar */
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:#f0f0f0;}
+::-webkit-scrollbar-thumb{background:#bbb;border-radius:3px;}
+</style>
 </head>
 <body>
 
-<!-- ── Upload overlay ── -->
-<div id="upload-overlay">
-  <div class="upload-logo">📊 Koto PPTX 编辑器</div>
-  <div class="upload-zone" id="upload-zone"
-       ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
-    <div class="upload-zone-icon">📂</div>
-    <div class="upload-zone-title">拖放 PPTX 文件到此处</div>
-    <div class="upload-zone-sub">.pptx / .pptm / .ppt</div>
+<!-- ═══════════════════════════════ UPLOAD SCREEN ═════════════════════════════ -->
+<div id="upload-screen">
+  <div class="up-logo"><span>📊</span> Koto PPTX 编辑器</div>
+  <div class="up-drop" id="up-drop"
+       ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)"
+       onclick="document.getElementById('up-input').click()">
+    <div class="up-drop-icon">📂</div>
+    <div class="up-drop-title">拖放 PowerPoint 文件</div>
+    <div class="up-drop-sub">.pptx &nbsp;·&nbsp; .pptm &nbsp;·&nbsp; .ppt</div>
   </div>
-  <div class="upload-or">— 或 —</div>
-  <button class="upload-select-btn" onclick="document.getElementById('upload-input').click()">
-    选择文件
-  </button>
-  <input id="upload-input" type="file" accept=".pptx,.pptm,.ppt" onchange="onFileSelected(event)" />
-  <span class="upload-list-link" onclick="openFileListModal()">📋 打开已保存的演示文稿</span>
+  <input id="up-input" type="file" accept=".pptx,.pptm,.ppt" onchange="onFilePick(event)"/>
+  <button class="up-btn" onclick="document.getElementById('up-input').click()">选择文件…</button>
+  <span class="up-recent" onclick="openFileMgr()">📋 打开已保存的文件</span>
 </div>
 
-<!-- ── Main editor (hidden until file loaded) ── -->
-<div id="main-editor" style="display:none; flex-direction:column; flex:1; overflow:hidden;">
-  <!-- Top bar -->
-  <div class="topbar">
-    <span class="topbar-logo">📊</span>
-    <span class="topbar-name" id="topbar-name">演示文稿</span>
-    <span class="topbar-badge" id="topbar-badge">0 页</span>
-    <button class="btn btn-secondary" onclick="showUploadOverlay()">📂 重新上传</button>
-    <button class="btn btn-secondary" onclick="openFileListModal()">📋 文件列表</button>
-    <button class="btn btn-primary" onclick="saveEdits()">💾 保存</button>
-    <button class="btn btn-primary" onclick="downloadPptx()">⬇️ 下载</button>
+<!-- ═══════════════════════════════ TITLE BAR ═════════════════════════════════ -->
+<div id="titlebar">
+  <span class="tb-logo">📊 Koto</span>
+  <span class="tb-name" id="tb-name">演示文稿</span>
+  <button class="tb-btn" onclick="document.getElementById('up-input').click()">打开</button>
+  <button class="tb-btn" onclick="openFileMgr()">文件列表</button>
+  <button class="tb-btn accent" onclick="doSave()">保存</button>
+  <button class="tb-btn accent" onclick="doDownload()">⬇ 下载 .pptx</button>
+</div>
+
+<!-- ═══════════════════════════════ RIBBON ════════════════════════════════════ -->
+<div id="ribbon">
+  <div class="rib-group">
+    <button class="rib-btn" onclick="document.getElementById('up-input').click()"><span class="ri">📂</span>打开</button>
+    <button class="rib-btn" onclick="doSave()"><span class="ri">💾</span>保存</button>
+    <button class="rib-btn" onclick="doDownload()"><span class="ri">⬇️</span>下载</button>
   </div>
-
-  <!-- Main layout -->
-  <div class="main">
-    <!-- Sidebar -->
-    <div class="sidebar">
-      <div class="sidebar-header">
-        幻灯片
-        <span class="slide-count-badge" id="slide-count-badge">0</span>
-      </div>
-      <div class="slides-list" id="slides-list"></div>
-    </div>
-
-    <!-- Editor -->
-    <div class="editor-panel">
-      <div class="editor-toolbar">
-        <span class="editor-toolbar-title" id="editor-toolbar-title">选择一页幻灯片进行编辑</span>
-        <button class="btn btn-secondary" onclick="prevSlide()">◀</button>
-        <button class="btn btn-secondary" onclick="nextSlide()">▶</button>
-      </div>
-      <div class="editor-body" id="editor-body">
-        <div class="editor-empty">
-          <div class="editor-empty-icon">🖱️</div>
-          <div>点击左侧幻灯片缩略图开始编辑</div>
-        </div>
-      </div>
-    </div>
+  <div class="rib-group">
+    <button class="rib-btn" onclick="prevSlide()" title="上一张"><span class="ri">◀</span>上一张</button>
+    <button class="rib-btn" onclick="nextSlide()" title="下一张"><span class="ri">▶</span>下一张</button>
+  </div>
+  <div class="rib-group">
+    <button class="rib-btn" id="btn-bold" onclick="execFmt('bold')"><span class="ri">𝐁</span>加粗</button>
+    <button class="rib-btn" id="btn-italic" onclick="execFmt('italic')"><span class="ri">𝐼</span>斜体</button>
+    <button class="rib-btn" id="btn-underline" onclick="execFmt('underline')"><span class="ri">U̲</span>下划线</button>
+  </div>
+  <div class="rib-zoom">
+    <span id="zoom-label">100%</span>
+    <input type="range" id="zoom-range" min="40" max="200" value="100" oninput="setZoom(this.value)"/>
   </div>
 </div>
 
-<!-- ── File list modal ── -->
-<div class="modal-overlay" id="file-list-modal" onclick="closeFileListModal(event)">
-  <div class="modal-box" onclick="event.stopPropagation()">
-    <div class="modal-title">📋 已保存的演示文稿</div>
-    <div class="file-list" id="file-list-content">
-      <div class="loading-msg">正在加载…</div>
-    </div>
-    <button class="btn btn-secondary" onclick="closeFileListModal()">关闭</button>
+<!-- ═══════════════════════════════ WORKSPACE ════════════════════════════════ -->
+<div id="workspace">
+  <!-- Left: slide thumbnails -->
+  <div id="slide-panel" id="slide-panel"></div>
+
+  <!-- Center: editable canvas -->
+  <div id="canvas-area" onclick="onCanvasAreaClick(event)">
+    <div id="slide-wrapper"></div>
   </div>
 </div>
 
-<!-- ── Toast ── -->
+<!-- ═══════════════════════════════ STATUS BAR ═══════════════════════════════ -->
+<div id="statusbar">
+  <span id="sb-slide">幻灯片 1 / 1</span>
+  <span id="sb-shape"></span>
+</div>
+
+<!-- ═══════════════════════════════ FILE MANAGER MODAL ═══════════════════════ -->
+<div class="modal-bg" id="filemgr-bg" onclick="closeFileMgr(event)">
+  <div class="modal">
+    <div class="modal-head">
+      📋 已保存的演示文稿
+      <button class="modal-close" onclick="closeFileMgr()">✕</button>
+    </div>
+    <div class="modal-body" id="filemgr-list"><em style="color:#888">加载中…</em></div>
+    <div class="modal-foot">
+      <button class="up-btn" style="font-size:13px;padding:6px 18px" onclick="closeFileMgr()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ TOAST ════════════════════════════════════ -->
 <div id="toast"></div>
 
+<!-- ═══════════════════════════════ SCRIPT ═══════════════════════════════════ -->
 <script>
 "use strict";
 
-let _fileId = null;
-let _meta = null;         // full session JSON from the API
-let _currentSlide = 0;
+/* ──────────────────────── State ──────────────────────── */
+let _fid     = null;   // file id
+let _meta    = null;   // full JSON from API
+let _curIdx  = 0;      // current slide index
+let _zoom    = 1.0;    // current zoom factor
+let _selShape = null;  // currently selected shape div
+const EMU_PER_PX = 9525; // 1 px = 9525 EMU at 96 dpi
 
-// ── Init from URL (e.g. /pptx-editor/abc123) ─────────────────────────────
-(function init() {
+/* ──────────────────────── Boot ─────────────────────── */
+(function boot(){
   const m = location.pathname.match(/\/pptx-editor\/([a-zA-Z0-9_-]+)/);
-  if (m) {
-    _fileId = m[1];
-    loadFileById(_fileId);
-  }
+  if(m){ _fid=m[1]; loadFile(_fid); }
 })();
 
-// ── Upload helpers ────────────────────────────────────────────────────────
-function showUploadOverlay() {
-  document.getElementById('upload-overlay').style.display = 'flex';
-  document.getElementById('main-editor').style.display = 'none';
-}
-
-function onDragOver(e) {
+/* ──────────────────────── Upload ───────────────────── */
+function onDragOver(e){ e.preventDefault(); document.getElementById('up-drop').classList.add('drag'); }
+function onDragLeave(){ document.getElementById('up-drop').classList.remove('drag'); }
+function onDrop(e){
   e.preventDefault();
-  document.getElementById('upload-zone').classList.add('drag-over');
+  document.getElementById('up-drop').classList.remove('drag');
+  if(e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
 }
-function onDragLeave() {
-  document.getElementById('upload-zone').classList.remove('drag-over');
-}
-function onDrop(e) {
-  e.preventDefault();
-  document.getElementById('upload-zone').classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file) uploadFile(file);
-}
-function onFileSelected(e) {
-  const file = e.target.files[0];
-  if (file) uploadFile(file);
-}
+function onFilePick(e){ if(e.target.files[0]) upload(e.target.files[0]); e.target.value=''; }
 
-async function uploadFile(file) {
-  const allowed = ['.pptx', '.ppt', '.pptm'];
-  const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
-  if (!allowed.includes(ext)) {
-    toast('只支持 .pptx / .pptm / .ppt 文件', true);
-    return;
+async function upload(file){
+  const ok=['.pptx','.pptm','.ppt'];
+  if(!ok.includes(file.name.slice(file.name.lastIndexOf('.')).toLowerCase())){
+    toast('只支持 .pptx / .pptm / .ppt',true); return;
   }
-
-  toast('正在上传并解析…');
-  const fd = new FormData();
-  fd.append('file', file);
-  try {
-    const res = await fetch('/api/pptx/upload', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (!res.ok) { toast(data.error || '上传失败', true); return; }
-    _fileId = data.id;
-    history.replaceState({}, '', `/pptx-editor/${_fileId}`);
-    await loadFileById(_fileId);
-  } catch (err) {
-    toast('上传出错: ' + err.message, true);
-  }
+  toast('正在解析…');
+  const fd=new FormData(); fd.append('file',file);
+  try{
+    const r=await fetch('/api/pptx/upload',{method:'POST',body:fd});
+    const d=await r.json();
+    if(!r.ok){toast(d.error||'上传失败',true);return;}
+    _fid=d.id;
+    history.replaceState({},'',`/pptx-editor/${_fid}`);
+    await loadFile(_fid);
+  }catch(e){toast('上传出错: '+e.message,true);}
 }
 
-async function loadFileById(id) {
+/* ──────────────────────── Load ─────────────────────── */
+async function loadFile(id){
   toast('正在加载…');
-  try {
-    const res = await fetch(`/api/pptx/${id}`);
-    if (!res.ok) { toast('文件不存在或已被删除', true); return; }
-    _meta = await res.json();
-    _currentSlide = 0;
-    renderEditor();
-    document.getElementById('upload-overlay').style.display = 'none';
-    const me = document.getElementById('main-editor');
-    me.style.display = 'flex';
-    me.style.flexDirection = 'column';
+  try{
+    const r=await fetch(`/api/pptx/${id}`);
+    if(!r.ok){toast('文件不存在',true);return;}
+    _meta=await r.json();
+    _curIdx=0;
+    showEditor();
+    buildThumbs();
+    renderSlide(_curIdx);
     toast(`已加载 ${_meta.slides.length} 页幻灯片`);
-  } catch (err) {
-    toast('加载出错: ' + err.message, true);
-  }
+  }catch(e){toast('加载出错: '+e.message,true);}
 }
 
-// ── Render ───────────────────────────────────────────────────────────────
-function renderEditor() {
-  if (!_meta) return;
+/* ──────────────────────── Show editor chrome ────────── */
+function showEditor(){
+  document.getElementById('upload-screen').style.display='none';
+  show('titlebar'); show('ribbon'); show('workspace'); show('statusbar');
+  document.getElementById('tb-name').textContent=_meta.name||'演示文稿';
+}
+function show(id){
+  const el=document.getElementById(id);
+  el.style.display='flex';
+}
 
-  document.getElementById('topbar-name').textContent = _meta.name || '演示文稿';
-  document.getElementById('topbar-badge').textContent = `${_meta.slides.length} 页`;
-  document.getElementById('slide-count-badge').textContent = _meta.slides.length;
+/* ──────────────────────── Thumbnails ───────────────── */
+function buildThumbs(){
+  const panel=document.getElementById('slide-panel');
+  panel.innerHTML='';
+  const W=_meta.slideWidthEmu, H=_meta.slideHeightEmu;
+  const THUMB_W=148;
+  const THUMB_H=Math.round(THUMB_W*H/W);
 
-  // Sidebar
-  const list = document.getElementById('slides-list');
-  list.innerHTML = '';
-  _meta.slides.forEach((slide, idx) => {
-    const firstTextShape = slide.shapes.find(s => s.has_text && s.paragraphs.length);
-    const firstText = firstTextShape
-      ? (firstTextShape.paragraphs[0]?.runs?.map(r => r.text).join('') || '').trim()
-      : '';
-    const thumb = document.createElement('div');
-    thumb.className = 'slide-thumb' + (idx === _currentSlide ? ' active' : '');
-    thumb.innerHTML = `
-      <div class="slide-thumb-num">第 ${idx + 1} 页</div>
-      <div class="slide-thumb-title">${esc(firstText || '(空白幻灯片)')}</div>
-      <div class="slide-thumb-shapes">${slide.shapes.filter(s=>s.has_text).length} 个文字框</div>
-    `;
-    thumb.onclick = () => selectSlide(idx);
-    list.appendChild(thumb);
+  _meta.slides.forEach((slide,idx)=>{
+    const wrap=document.createElement('div');
+    wrap.className='slide-thumb'+(idx===_curIdx?' active':'');
+    wrap.onclick=()=>selectSlide(idx);
+
+    const cv=document.createElement('canvas');
+    cv.width=THUMB_W; cv.height=THUMB_H;
+    drawThumb(cv,slide,W,H);
+
+    const num=document.createElement('div');
+    num.className='slide-thumb-num'; num.textContent=idx+1;
+
+    wrap.appendChild(cv); wrap.appendChild(num);
+    panel.appendChild(wrap);
   });
-
-  renderSlideEditor();
 }
 
-function selectSlide(idx) {
-  _currentSlide = idx;
-  document.querySelectorAll('.slide-thumb').forEach((el, i) => {
-    el.classList.toggle('active', i === idx);
-  });
-  renderSlideEditor();
-}
+function drawThumb(canvas,slide,slideW,slideH){
+  const ctx=canvas.getContext('2d');
+  const sw=canvas.width, sh=canvas.height;
+  const scaleX=sw/slideW, scaleY=sh/slideH;
 
-function prevSlide() { if (_currentSlide > 0) selectSlide(_currentSlide - 1); }
-function nextSlide() { if (_meta && _currentSlide < _meta.slides.length - 1) selectSlide(_currentSlide + 1); }
+  // background
+  ctx.fillStyle=slide.background||'#ffffff';
+  ctx.fillRect(0,0,sw,sh);
 
-function renderSlideEditor() {
-  const body = document.getElementById('editor-body');
-  const titleEl = document.getElementById('editor-toolbar-title');
-  if (!_meta || _meta.slides.length === 0) {
-    body.innerHTML = '<div class="editor-empty"><div class="editor-empty-icon">📭</div><div>无幻灯片</div></div>';
-    return;
-  }
-
-  const slide = _meta.slides[_currentSlide];
-  titleEl.textContent = `第 ${_currentSlide + 1} 页  ·  ${slide.shapes.filter(s=>s.has_text).length} 个文字区域`;
-
-  const textShapes = slide.shapes.filter(s => s.has_text);
-  if (textShapes.length === 0) {
-    body.innerHTML = '<div class="editor-empty"><div class="editor-empty-icon">🖼️</div><div>此页无文字内容（含图片/形状）</div></div>';
-    return;
-  }
-
-  let html = '';
-  textShapes.forEach((shape, si) => {
-    const icon = shapeIcon(shape.type);
-    html += `<div class="shape-card" data-shape-id="${shape.id}" data-shape-idx="${si}">`;
-    html += `<div class="shape-card-header">
-      <span class="shape-icon">${icon}</span>
-      <span class="shape-name">${esc(shape.name)}</span>
-      <span class="shape-type">${esc(shape.type)}</span>
-    </div>`;
-
-    shape.paragraphs.forEach((para, pi) => {
-      para.runs.forEach((run, ri) => {
-        const badges = [];
-        if (run.bold) badges.push('<span class="badge">B</span>');
-        if (run.italic) badges.push('<span class="badge">I</span>');
-        if (run.underline) badges.push('<span class="badge">U</span>');
-        if (run.size) badges.push(`<span class="badge">${run.size}pt</span>`);
-
-        html += `<div class="para-row">
-          <span class="para-run-label">P${pi+1}·R${ri+1}</span>
-          <textarea class="run-input"
-            data-slide="${_currentSlide}" data-shape-id="${shape.id}"
-            data-para="${pi}" data-run="${ri}"
-            rows="1"
-            oninput="autoResize(this); onRunInput(this)"
-          >${esc(run.text)}</textarea>
-          <span class="run-badges">${badges.join('')}</span>
-        </div>`;
+  slide.shapes.forEach(shape=>{
+    const x=shape.left*scaleX, y=shape.top*scaleY;
+    const w=shape.width*scaleX, h=shape.height*scaleY;
+    // fill
+    if(shape.fill){
+      ctx.fillStyle=shape.fill;
+      ctx.fillRect(x,y,w,h);
+    }
+    // text (simplified)
+    if(shape.has_text && shape.paragraphs){
+      ctx.save();
+      ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+      let ty=y+3;
+      shape.paragraphs.forEach(para=>{
+        let lineText=(para.runs||[]).map(r=>r.text).join('');
+        if(!lineText.trim()){ty+=6;return;}
+        const firstRun=para.runs&&para.runs[0]||{};
+        const ptSize=firstRun.size||14;
+        const px=Math.max(ptSize*scaleY*0.85,5);
+        ctx.font=`${firstRun.bold?'bold ':''}${px}px Segoe UI,sans-serif`;
+        ctx.fillStyle='#222';
+        ctx.fillText(lineText,x+3,ty+px);
+        ty+=px*1.4;
       });
-      if (para.runs.length === 0) {
-        html += `<div class="para-row"><span class="para-run-label">P${pi+1}</span>
-          <span class="no-text-note">(空段落)</span></div>`;
-      }
-    });
+      ctx.restore();
+    }
+  });
+}
 
-    html += '</div>';
+/* ──────────────────────── Slide render ─────────────── */
+function renderSlide(idx){
+  _curIdx=idx;
+  _selShape=null;
+
+  // update thumbnail highlight
+  document.querySelectorAll('.slide-thumb').forEach((el,i)=>{
+    el.classList.toggle('active',i===idx);
   });
 
-  body.innerHTML = html;
-  body.querySelectorAll('.run-input').forEach(autoResize);
+  const slide=_meta.slides[idx];
+  const W=_meta.slideWidthEmu, H=_meta.slideHeightEmu;
+
+  // Compute canvas pixel size based on zoom and available width
+  const area=document.getElementById('canvas-area');
+  const maxW=area.clientWidth-40;
+  const baseW=Math.min(maxW, 960);
+  const scale=(_zoom*baseW)/W;
+  const pxW=Math.round(W*scale), pxH=Math.round(H*scale);
+
+  const wrapper=document.getElementById('slide-wrapper');
+  wrapper.style.width=pxW+'px';
+  wrapper.style.height=pxH+'px';
+  wrapper.style.background=slide.background||'#ffffff';
+  wrapper.innerHTML='';
+
+  // Render shapes
+  slide.shapes.forEach(shape=>{
+    const el=document.createElement('div');
+    el.className='shape'+(shape.has_text?' has-text':'');
+    el.dataset.shapeId=shape.id;
+    el.style.left  =Math.round(shape.left  *scale)+'px';
+    el.style.top   =Math.round(shape.top   *scale)+'px';
+    el.style.width =Math.round(shape.width *scale)+'px';
+    el.style.height=Math.round(shape.height*scale)+'px';
+
+    if(shape.fill) el.style.background=shape.fill;
+
+    if(shape.has_text && shape.paragraphs){
+      const inner=document.createElement('div');
+      inner.className='shape-inner';
+      shape.paragraphs.forEach((para,pi)=>{
+        const pEl=document.createElement('div');
+        pEl.className='shape-para';
+        pEl.style.textAlign=(para.align||'LEFT').toLowerCase();
+        (para.runs||[]).forEach((run,ri)=>{
+          const span=document.createElement('span');
+          span.className='run-span';
+          span.contentEditable='true';
+          span.dataset.pi=pi; span.dataset.ri=ri;
+          span.textContent=run.text;
+          // Sizing: clamp rendered font to reasonable bounds
+          const ptSize=run.size||14;
+          span.style.fontSize=Math.round(ptSize*scale*1.33)+'px';
+          if(run.bold)      span.style.fontWeight='bold';
+          if(run.italic)    span.style.fontStyle='italic';
+          if(run.underline) span.style.textDecoration='underline';
+          if(run.color)     span.style.color=run.color;
+          span.style.whiteSpace='pre-wrap';
+          span.style.display='inline';
+          // Events
+          span.addEventListener('focus',()=>onRunFocus(el,shape,pi,ri));
+          span.addEventListener('input',()=>onRunInput(span,shape,pi,ri));
+          span.addEventListener('keydown', e=>{ if(e.key==='Escape') span.blur(); });
+          pEl.appendChild(span);
+        });
+        if((para.runs||[]).length===0){
+          // Empty paragraph → spacer
+          const br=document.createElement('br');
+          pEl.appendChild(br);
+        }
+        inner.appendChild(pEl);
+      });
+      el.appendChild(inner);
+      // Handles
+      ['tl','tr','bl','br','tm','bm','ml','mr'].forEach(c=>{
+        const h=document.createElement('div'); h.className='handle '+c; el.appendChild(h);
+      });
+      el.addEventListener('mousedown', e=>{ if(!e.target.classList.contains('run-span')) selectShape(el); });
+    }
+
+    wrapper.appendChild(el);
+  });
+
+  // Update statusbar
+  document.getElementById('sb-slide').textContent=`幻灯片 ${idx+1} / ${_meta.slides.length}`;
+  document.getElementById('sb-shape').textContent='';
 }
 
-// ── Data binding ─────────────────────────────────────────────────────────
-function onRunInput(el) {
-  const slideIdx = parseInt(el.dataset.slide, 10);
-  const shapeId  = parseInt(el.dataset.shapeId, 10);
-  const paraIdx  = parseInt(el.dataset.para, 10);
-  const runIdx   = parseInt(el.dataset.run, 10);
+/* ──────────────────────── Shape selection ───────────── */
+function selectShape(el){
+  if(_selShape) _selShape.classList.remove('selected');
+  _selShape=el;
+  el.classList.add('selected');
+  const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(el.dataset.shapeId));
+  if(shape) document.getElementById('sb-shape').textContent=shape.name||'';
+}
 
-  const shape = _meta.slides[slideIdx].shapes.find(s => s.id === shapeId);
-  if (!shape) return;
-  if (shape.paragraphs[paraIdx] && shape.paragraphs[paraIdx].runs[runIdx] !== undefined) {
-    shape.paragraphs[paraIdx].runs[runIdx].text = el.value;
+function onCanvasAreaClick(e){
+  if(e.target===document.getElementById('canvas-area')){
+    if(_selShape){ _selShape.classList.remove('selected'); _selShape=null; }
   }
 }
 
-function autoResize(el) {
-  el.style.height = 'auto';
-  el.style.height = (el.scrollHeight) + 'px';
+/* ──────────────────────── Editing ──────────────────── */
+function onRunFocus(shapeEl, shape, pi, ri){
+  selectShape(shapeEl);
 }
 
-// ── Save & Download ───────────────────────────────────────────────────────
-async function saveEdits() {
-  if (!_meta) return;
-  toast('正在保存…');
-  try {
-    const res = await fetch(`/api/pptx/${_fileId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slides: _meta.slides }),
+function onRunInput(span, shape, pi, ri){
+  // Write back immediately to _meta
+  if(shape.paragraphs[pi] && shape.paragraphs[pi].runs[ri] !== undefined){
+    shape.paragraphs[pi].runs[ri].text = span.textContent;
+  }
+  // Redraw thumb for current slide (debounced)
+  scheduleThumbUpdate(_curIdx);
+}
+
+let _thumbTimer=null;
+function scheduleThumbUpdate(idx){
+  clearTimeout(_thumbTimer);
+  _thumbTimer=setTimeout(()=>{
+    const thumbs=document.querySelectorAll('.slide-thumb canvas');
+    if(thumbs[idx]){
+      const slide=_meta.slides[idx];
+      drawThumb(thumbs[idx],slide,_meta.slideWidthEmu,_meta.slideHeightEmu);
+    }
+  },300);
+}
+
+/* ──────────────────────── Navigation ────────────────── */
+function selectSlide(idx){ renderSlide(idx); }
+function prevSlide(){ if(_curIdx>0) renderSlide(_curIdx-1); }
+function nextSlide(){ if(_meta&&_curIdx<_meta.slides.length-1) renderSlide(_curIdx+1); }
+
+/* ──────────────────────── Zoom ─────────────────────── */
+function setZoom(v){
+  _zoom=v/100;
+  document.getElementById('zoom-label').textContent=v+'%';
+  if(_meta) renderSlide(_curIdx);
+}
+
+/* ──────────────────────── Formatting ───────────────── */
+function execFmt(cmd){
+  document.execCommand(cmd);
+}
+
+/* ──────────────────────── Save ─────────────────────── */
+async function doSave(){
+  if(!_meta) return;
+  toast('保存中…');
+  try{
+    const r=await fetch(`/api/pptx/${_fid}`,{
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({slides:_meta.slides}),
     });
-    const data = await res.json();
-    if (!res.ok) { toast(data.error || '保存失败', true); return; }
-    toast('✅ 已保存');
-  } catch (err) {
-    toast('保存出错: ' + err.message, true);
-  }
+    const d=await r.json();
+    if(!r.ok){toast(d.error||'保存失败',true);return;}
+    toast('✓ 已保存');
+  }catch(e){toast('保存出错: '+e.message,true);}
 }
 
-async function downloadPptx() {
-  if (!_meta) return;
-  // Save first, then download
-  await saveEdits();
-  toast('正在生成 PPTX…');
-  try {
-    const res = await fetch(`/api/pptx/${_fileId}/download`);
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      toast(d.error || '下载失败', true);
-      return;
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${_meta.name || 'presentation'}_edited.pptx`;
-    a.click();
+/* ──────────────────────── Download ─────────────────── */
+async function doDownload(){
+  if(!_meta) return;
+  await doSave();
+  toast('正在生成文件…');
+  try{
+    const r=await fetch(`/api/pptx/${_fid}/download`);
+    if(!r.ok){const d=await r.json().catch(()=>({}));toast(d.error||'下载失败',true);return;}
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url;
+    a.download=`${_meta.name||'presentation'}_edited.pptx`; a.click();
     URL.revokeObjectURL(url);
-    toast('⬇️ 下载开始');
-  } catch (err) {
-    toast('下载出错: ' + err.message, true);
-  }
+    toast('⬇ 下载开始');
+  }catch(e){toast('下载出错: '+e.message,true);}
 }
 
-// ── File list modal ───────────────────────────────────────────────────────
-async function openFileListModal() {
-  document.getElementById('file-list-modal').classList.add('show');
-  const content = document.getElementById('file-list-content');
-  content.innerHTML = '<div class="loading-msg">正在加载…</div>';
-  try {
-    const res = await fetch('/api/pptx/list');
-    const data = await res.json();
-    if (data.files.length === 0) {
-      content.innerHTML = '<div class="loading-msg">暂无已保存的演示文稿</div>';
-      return;
-    }
-    content.innerHTML = data.files.map(f => `
-      <div class="file-row">
-        <span class="file-row-name">📊 ${esc(f.name || f.originalFilename)}</span>
-        <span class="file-row-meta">${f.slideCount} 页</span>
-        <button class="file-row-open" onclick="openFileFromList('${f.id}')">打开</button>
-        <button class="file-row-del" onclick="deleteFileFromList('${f.id}', this)">删除</button>
+/* ──────────────────────── File manager ─────────────── */
+async function openFileMgr(){
+  document.getElementById('filemgr-bg').classList.add('show');
+  const list=document.getElementById('filemgr-list');
+  list.innerHTML='<em style="color:#888">加载中…</em>';
+  try{
+    const r=await fetch('/api/pptx/list'); const d=await r.json();
+    if(d.files.length===0){list.innerHTML='<em style="color:#888">暂无已保存的文件</em>';return;}
+    list.innerHTML=d.files.map(f=>`
+      <div class="frow">
+        <span class="frow-icon">📊</span>
+        <span class="frow-name">${esc(f.name||f.originalFilename)}</span>
+        <span class="frow-meta">${f.slideCount}页</span>
+        <button class="frow-open" onclick="fmgrOpen('${f.id}')">打开</button>
+        <button class="frow-del"  onclick="fmgrDel('${f.id}',this)">删除</button>
       </div>`).join('');
-  } catch (err) {
-    content.innerHTML = `<div class="loading-msg" style="color:#f1948a">加载失败: ${esc(err.message)}</div>`;
-  }
+  }catch(e){list.innerHTML=`<em style="color:#a00">加载失败: ${esc(e.message)}</em>`;}
+}
+function closeFileMgr(e){
+  if(!e||e.target===document.getElementById('filemgr-bg'))
+    document.getElementById('filemgr-bg').classList.remove('show');
+}
+function fmgrOpen(id){
+  closeFileMgr(); _fid=id;
+  history.replaceState({},'',`/pptx-editor/${id}`);
+  loadFile(id);
+}
+async function fmgrDel(id,btn){
+  if(!confirm('确定删除此文件？')) return;
+  const r=await fetch(`/api/pptx/${id}`,{method:'DELETE'});
+  if(r.ok){ btn.closest('.frow').remove(); if(id===_fid){_meta=null; location.href='/pptx-editor/new';} }
+  else toast('删除失败',true);
 }
 
-function closeFileListModal(e) {
-  if (!e || e.target === document.getElementById('file-list-modal')) {
-    document.getElementById('file-list-modal').classList.remove('show');
-  }
+/* ──────────────────────── Toast ─────────────────────── */
+let _tt=null;
+function toast(msg,err=false){
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.className='show'+(err?' err':'');
+  clearTimeout(_tt); _tt=setTimeout(()=>el.className='',2800);
 }
 
-function openFileFromList(id) {
-  closeFileListModal();
-  _fileId = id;
-  history.replaceState({}, '', `/pptx-editor/${id}`);
-  loadFileById(id);
+/* ──────────────────────── Util ──────────────────────── */
+function esc(s){
+  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-async function deleteFileFromList(id, btn) {
-  if (!confirm('确定删除此演示文稿？此操作不可恢复。')) return;
-  try {
-    const res = await fetch(`/api/pptx/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      btn.closest('.file-row').remove();
-      if (id === _fileId) showUploadOverlay();
-    } else {
-      toast('删除失败', true);
-    }
-  } catch (err) {
-    toast('删除出错', true);
-  }
-}
+/* ──────────────────────── Keyboard ─────────────────── */
+document.addEventListener('keydown',e=>{
+  if(e.target.classList.contains('run-span')) return; // don't steal from editing
+  if(e.key==='ArrowLeft'||e.key==='PageUp')  prevSlide();
+  if(e.key==='ArrowRight'||e.key==='PageDown') nextSlide();
+  if((e.ctrlKey||e.metaKey)&&e.key==='s'){ e.preventDefault(); doSave(); }
+});
 
-// ── Utils ─────────────────────────────────────────────────────────────────
-function esc(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function shapeIcon(type) {
-  if (!type) return '📝';
-  const t = String(type).toUpperCase();
-  if (t.includes('PICTURE') || t.includes('13')) return '🖼️';
-  if (t.includes('TABLE') || t.includes('19')) return '📊';
-  if (t.includes('CHART') || t.includes('3')) return '📈';
-  return '📝';
-}
-
-let _toastTimer = null;
-function toast(msg, isError = false) {
-  const el = document.getElementById('toast');
-  el.textContent = msg;
-  el.className = 'show' + (isError ? ' error' : '');
-  clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => { el.className = ''; }, 3000);
-}
+/* ──────────────────────── Resize ────────────────────── */
+window.addEventListener('resize',()=>{ if(_meta) renderSlide(_curIdx); });
 </script>
 </body>
 </html>
