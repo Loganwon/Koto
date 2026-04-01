@@ -32,6 +32,7 @@ def pptx_app(tmp_path_factory):
     os.environ["KOTO_WORKSPACE"] = str(tmpdir)
 
     from flask import Flask
+
     from web.blueprints.pptx_editor import pptx_editor_bp
 
     app = Flask(__name__)

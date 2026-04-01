@@ -94,6 +94,7 @@ class TestParseSlides:
 
     def test_empty_pptx(self):
         from pptx import Presentation
+
         from web.blueprints.pptx_editor import _parse_slides
 
         prs = Presentation()
@@ -114,8 +115,9 @@ class TestParseSlides:
 
 class TestApplyEdits:
     def test_text_is_updated(self):
-        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
         from pptx import Presentation
+
+        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
 
         raw = _make_pptx([["Original Title"]])
         parsed = _parse_slides(raw)
@@ -178,8 +180,9 @@ class TestApplyEdits:
         assert len(result) > 0
 
     def test_multiple_slides_edited_independently(self):
-        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
         from pptx import Presentation
+
+        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
 
         raw = _make_pptx([["Slide One"], ["Slide Two"]])
         parsed = _parse_slides(raw)
