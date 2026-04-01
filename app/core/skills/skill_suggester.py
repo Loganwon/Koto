@@ -332,6 +332,7 @@ class SkillSuggester:
         """加载用户 Skill 亲和度分数。"""
         try:
             from app.core.skills.skill_affinity import SkillAffinityTracker
+
             return SkillAffinityTracker.get_instance().get_affinity_scores()
         except Exception as exc:
             logger.debug(f"[SkillSuggester] 亲和度加载失败: {exc}")

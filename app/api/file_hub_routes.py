@@ -94,7 +94,9 @@ def pick_folder():
             root = tk.Tk()
             root.withdraw()
             root.attributes("-topmost", True)
-            selected = filedialog.askdirectory(parent=root, title="选择目录", initialdir=initial_dir)
+            selected = filedialog.askdirectory(
+                parent=root, title="选择目录", initialdir=initial_dir
+            )
             root.destroy()
             result["path"] = selected or None
         except Exception as exc:
@@ -128,17 +130,49 @@ def _watcher():
 
 
 _FS_SEARCH_EXT_CAT = {
-    ".doc": "文档", ".docx": "文档", ".pdf": "文档", ".txt": "文档",
-    ".md": "文档", ".rtf": "文档", ".odt": "文档", ".wps": "文档",
-    ".ppt": "文档", ".pptx": "文档", ".odp": "文档",
-    ".xls": "表格", ".xlsx": "表格", ".ods": "表格", ".csv": "表格",
-    ".jpg": "图片", ".jpeg": "图片", ".png": "图片", ".gif": "图片",
-    ".bmp": "图片", ".webp": "图片", ".svg": "图片", ".heic": "图片",
-    ".mp4": "视频", ".mov": "视频", ".avi": "视频", ".mkv": "视频",
-    ".mp3": "音频", ".wav": "音频", ".flac": "音频", ".m4a": "音频",
-    ".py": "代码", ".js": "代码", ".ts": "代码", ".java": "代码",
-    ".cpp": "代码", ".c": "代码", ".go": "代码", ".rs": "代码",
-    ".zip": "压缩包", ".rar": "压缩包", ".7z": "压缩包", ".tar": "压缩包",
+    ".doc": "文档",
+    ".docx": "文档",
+    ".pdf": "文档",
+    ".txt": "文档",
+    ".md": "文档",
+    ".rtf": "文档",
+    ".odt": "文档",
+    ".wps": "文档",
+    ".ppt": "文档",
+    ".pptx": "文档",
+    ".odp": "文档",
+    ".xls": "表格",
+    ".xlsx": "表格",
+    ".ods": "表格",
+    ".csv": "表格",
+    ".jpg": "图片",
+    ".jpeg": "图片",
+    ".png": "图片",
+    ".gif": "图片",
+    ".bmp": "图片",
+    ".webp": "图片",
+    ".svg": "图片",
+    ".heic": "图片",
+    ".mp4": "视频",
+    ".mov": "视频",
+    ".avi": "视频",
+    ".mkv": "视频",
+    ".mp3": "音频",
+    ".wav": "音频",
+    ".flac": "音频",
+    ".m4a": "音频",
+    ".py": "代码",
+    ".js": "代码",
+    ".ts": "代码",
+    ".java": "代码",
+    ".cpp": "代码",
+    ".c": "代码",
+    ".go": "代码",
+    ".rs": "代码",
+    ".zip": "压缩包",
+    ".rar": "压缩包",
+    ".7z": "压缩包",
+    ".tar": "压缩包",
 }
 
 
@@ -180,16 +214,18 @@ def _fs_search_fallback(query: str, limit: int, seen_paths: set) -> list:
                 try:
                     stat = fp.stat()
                     ext = fp.suffix.lower()
-                    results.append({
-                        "file_id": None,
-                        "name": fp.name,
-                        "path": str(fp),
-                        "size_bytes": stat.st_size,
-                        "mtime": stat.st_mtime,
-                        "category": _FS_SEARCH_EXT_CAT.get(ext, "其他"),
-                        "source": "fs",
-                        "tags": [],
-                    })
+                    results.append(
+                        {
+                            "file_id": None,
+                            "name": fp.name,
+                            "path": str(fp),
+                            "size_bytes": stat.st_size,
+                            "mtime": stat.st_mtime,
+                            "category": _FS_SEARCH_EXT_CAT.get(ext, "其他"),
+                            "source": "fs",
+                            "tags": [],
+                        }
+                    )
                     seen_paths.add(str(fp))
                 except (PermissionError, OSError):
                     pass
@@ -356,16 +392,16 @@ def archive_files():
       recursive   bool  是否递归扫描子目录，默认 True
       rules       list  mode="custom" 时的规则列表，每项为 {"match": "*.pdf", "folder": "PDF文档"}
     """
-    import shutil
     import fnmatch
+    import shutil
     from datetime import datetime
 
     data = request.get_json(silent=True) or {}
     source_dir = (data.get("source_dir") or "").strip()
-    dest_dir   = (data.get("dest_dir") or "").strip()
-    mode       = (data.get("mode") or "auto").strip()
-    recursive  = bool(data.get("recursive", True))
-    rules      = data.get("rules") or []
+    dest_dir = (data.get("dest_dir") or "").strip()
+    mode = (data.get("mode") or "auto").strip()
+    recursive = bool(data.get("recursive", True))
+    rules = data.get("rules") or []
 
     # --- validate source ---
     if not source_dir:
@@ -394,11 +430,11 @@ def archive_files():
     glob_pattern = "**/*" if recursive else "*"
     all_files = [f for f in src.glob(glob_pattern) if f.is_file()]
 
-    total  = len(all_files)
+    total = len(all_files)
     copied = 0
     skipped = 0
-    errors  = []
-    report  = []
+    errors = []
+    report = []
 
     for fp in all_files:
         try:
@@ -432,15 +468,17 @@ def archive_files():
             errors.append(f"{fp.name}: {exc}")
             skipped += 1
 
-    return jsonify({
-        "status":   "ok",
-        "dest_dir": str(dest),
-        "total":    total,
-        "copied":   copied,
-        "skipped":  skipped,
-        "errors":   errors[:20],
-        "report":   report[:200],
-    })
+    return jsonify(
+        {
+            "status": "ok",
+            "dest_dir": str(dest),
+            "total": total,
+            "copied": copied,
+            "skipped": skipped,
+            "errors": errors[:20],
+            "report": report[:200],
+        }
+    )
 
 
 @file_hub_bp.route("/<file_id>", methods=["GET"])
@@ -1114,7 +1152,6 @@ def graph_data():
     center_id = request.args.get("center") or None
     limit = min(max(10, int(request.args.get("limit", 80))), 200)
 
-
     reg = _reg()
     conn = reg._conn
 
@@ -1145,7 +1182,11 @@ def graph_data():
             for e in similar:
                 neighbor_paths.add(e.path)
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
 
         # 取所有邻居的完整 entry
         entries = [center_entry]

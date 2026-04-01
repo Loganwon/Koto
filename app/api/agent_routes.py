@@ -134,7 +134,11 @@ def _build_skill_system_instruction(
                 user_input=user_input, task_type=task_type
             )
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
         return SkillManager.inject_into_prompt(
             _base,
             task_type=task_type,
@@ -179,7 +183,11 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
 
             active_skill_names = SkillManager.get_active_skill_names()
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
         if active_skill_names:
             logger.info(f"[fallback] 本地模型携带 Skills: {active_skill_names}")
 
@@ -480,6 +488,7 @@ def get_agent():
     if _agent_instance is None:
         try:
             from app.core.app_context import ctx
+
             _agent_instance = ctx.agent
         except Exception:
             _agent_instance = create_agent()
@@ -806,7 +815,11 @@ def chat():
                 try:
                     display_answer = mask_result.restore(validated_answer)
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "Silenced exception caught", exc_info=True
+                    )
 
             # ── 本地模型兜底提示前缀 ─────────────────────────────────────────
             if used_local_fallback:
@@ -1015,7 +1028,11 @@ def process_compat():
                 if _r:
                     task["result"] = _proc_mask.restore(_r)
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
         task["skill_id"] = skill_id
         task["auto_skill_ids"] = auto_skill_ids
         task["task_type"] = task_type
@@ -1208,7 +1225,11 @@ def process_stream_compat():
                 try:
                     final_answer = mask_result.restore(raw_final)
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "Silenced exception caught", exc_info=True
+                    )
 
             # ── 本地模型兜底提示前缀 ─────────────────────────────────────────
             if used_local_fallback:
@@ -1289,12 +1310,20 @@ def process_stream_compat():
                             )
                         _local_ans = _lv.text
                     except Exception:
-                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                        import logging
+
+                        logging.getLogger(__name__).warning(
+                            "Silenced exception caught", exc_info=True
+                        )
                     if mask_result and mask_result.has_pii:
                         try:
                             _local_ans = mask_result.restore(_local_ans)
                         except Exception:
-                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                            import logging
+
+                            logging.getLogger(__name__).warning(
+                                "Silenced exception caught", exc_info=True
+                            )
                     _lm = _local_mod or "本地模型"
                     _display = (
                         f"🔄 **[本地模型回复]** 云端服务不可用，"
@@ -1967,7 +1996,11 @@ def cost_stats():
                 "memory_total_mb": round(psutil.virtual_memory().total / 1024 / 1024),
             }
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
 
         # 组装面板数据
         panel = {
@@ -2048,7 +2081,9 @@ def hardware_info():
                 gpu_info["vram_gb"] = round(int(parts[1].strip()) / 1024, 1)
                 gpu_info["available"] = True
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+        import logging
+
+        logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # ── CPU & RAM ────────────────────────────────────────────────
     cpu_cores = 0
@@ -2059,7 +2094,9 @@ def hardware_info():
         cpu_cores = psutil.cpu_count(logical=False) or 0
         ram_gb = round(psutil.virtual_memory().total / (1024**3), 1)
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+        import logging
+
+        logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
     # ── 推荐逻辑 ─────────────────────────────────────────────────
     vram = gpu_info["vram_gb"]

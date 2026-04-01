@@ -277,7 +277,11 @@ class FileWatcher:
                 self._watchdog_observer.stop()
                 self._watchdog_observer.join(timeout=5)
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
         if self._thread:
             self._thread.join(timeout=5)
         logger.info("[FileWatcher] 已停止")

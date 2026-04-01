@@ -11,6 +11,7 @@ Verifies the full CRUD lifecycle for the Univer editor document store:
   DELETE /api/editor/docs/<id>         — delete
   POST   /api/editor/docs/import_path  — import from server path
 """
+
 from __future__ import annotations
 
 import json
@@ -19,7 +20,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
 
 # ── Minimal app fixture (editor_docs_bp only, no monolith) ───────────────────
 

@@ -228,15 +228,15 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     sep_row = tk.Frame(body, bg=BG)
     sep_row.pack(fill="x", pady=(4, 10))
     tk.Frame(sep_row, bg=BORDER, height=1).pack(side="left", fill="x", expand=True)
-    tk.Label(
-        sep_row, text="  或使用激活码  ", font=f_hint, bg=BG, fg=TEXT2
-    ).pack(side="left")
+    tk.Label(sep_row, text="  或使用激活码  ", font=f_hint, bg=BG, fg=TEXT2).pack(
+        side="left"
+    )
     tk.Frame(sep_row, bg=BORDER, height=1).pack(side="left", fill="x", expand=True)
 
     # ── 激活码输入 ──
-    tk.Label(
-        body, text="激活码", font=f_label, bg=BG, fg=TEXT2, anchor="w"
-    ).pack(fill="x", pady=(0, 4))
+    tk.Label(body, text="激活码", font=f_label, bg=BG, fg=TEXT2, anchor="w").pack(
+        fill="x", pady=(0, 4)
+    )
     code_var = tk.StringVar()
     code_frame = tk.Frame(body, bg=BORDER, padx=1, pady=1)
     code_frame.pack(fill="x", pady=(0, 4))
@@ -299,6 +299,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
         if code and not raw_key:
             try:
                 from app.core.llm._license import get_system_key
+
                 resolved = get_system_key(code)
             except Exception:
                 resolved = None

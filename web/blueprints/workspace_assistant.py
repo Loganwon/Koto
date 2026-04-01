@@ -192,7 +192,11 @@ def open_file():
             data = parse_xlsx(str(tmp_path))
             file_type = "xlsx"
         elif ext == ".pptx":
-            data = parse_pptx(str(tmp_path))
+            # Use rich parser to get coordinates, fonts, colors — full visual editing
+            from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
+            with open(str(tmp_path), "rb") as _f:
+                _raw = _f.read()
+            data = _pptx_rich_parse(_raw)
             file_type = "pptx"
         elif ext == ".pdf":
             data = parse_pdf(str(tmp_path), file_id)
@@ -306,7 +310,18 @@ def save_file():
             if not matches:
                 return jsonify({"error": "原始 PPTX 文件不存在或已过期"}), 404
             original_path = str(matches[0])
-            raw_bytes = export_pptx(original_path, data)  # data = slides JSON
+
+            # Rich format (from _parse_slides) has a 'slides' key with full shape data
+            if isinstance(data, dict) and "slides" in data:
+                from web.blueprints.pptx_editor import _apply_edits as _pptx_apply
+                with open(original_path, "rb") as _f:
+                    orig_bytes = _f.read()
+                raw_bytes = _pptx_apply(orig_bytes, data["slides"])
+            else:
+                # Legacy simple format fallback
+                from app.core.file.file_parser import export_pptx
+                raw_bytes = export_pptx(original_path, data)
+
             mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
             if not file_name.endswith(".pptx"):
                 file_name = Path(file_name).stem + ".pptx"
@@ -478,6 +493,17 @@ def rename_workspace_file():
         return jsonify({"error": "路径不合法"}), 403
 
     if not old_target.is_file():
+        if old_target.is_dir():
+            # Folder rename — no extension enforcement
+            if not new_name:
+                return jsonify({"error": "文件夹名无效"}), 400
+            new_target = old_target.parent / new_name
+            if new_target.exists():
+                return jsonify({"error": "名称已存在"}), 409
+            old_target.rename(new_target)
+            new_rel = new_target.relative_to(root).as_posix()
+            logger.info(f"[WorkspaceAssistant] 重命名文件夹: {old_path} -> {new_rel}")
+            return jsonify({"ok": True, "path": new_rel, "name": new_name})
         return jsonify({"error": "文件不存在"}), 404
 
     # Preserve original extension even if user omitted/changed it
@@ -495,3 +521,38 @@ def rename_workspace_file():
     new_rel = new_target.relative_to(root).as_posix()
     logger.info(f"[WorkspaceAssistant] 重命名: {old_path} -> {new_rel}")
     return jsonify({"ok": True, "path": new_rel, "name": final_name})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DELETE /api/v1/workspace/folder
+# ─────────────────────────────────────────────────────────────────────────────
+
+@workspace_assistant_bp.route("/api/v1/workspace/folder", methods=["DELETE"])
+def delete_workspace_folder():
+    """
+    递归删除工作区中的一个文件夹。
+    Query param:  path=relative/path/to/folder
+    """
+    import shutil
+    from web.shared import WORKSPACE_DIR
+    root = Path(WORKSPACE_DIR).resolve()
+    folderpath = request.args.get("path", "").strip()
+    if not folderpath:
+        return jsonify({"error": "缺少 path 参数"}), 400
+
+    target = root.joinpath(folderpath).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return jsonify({"error": "路径不合法"}), 403
+
+    if not target.is_dir():
+        return jsonify({"error": "文件夹不存在"}), 404
+
+    # Safety: never delete the workspace root itself
+    if target == root:
+        return jsonify({"error": "不能删除根工作区"}), 403
+
+    shutil.rmtree(target)
+    logger.info(f"[WorkspaceAssistant] 删除文件夹: {target}")
+    return jsonify({"ok": True})

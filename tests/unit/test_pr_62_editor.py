@@ -6,6 +6,7 @@ Unit tests for PR #62 fixes:
   3. editor_docs_bp is registered in _web_bp_configs
   4. socket_handler imports cleanly and registers /doc namespace events
 """
+
 from __future__ import annotations
 
 import os
@@ -14,7 +15,6 @@ import types
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ── Stub heavy optional deps so this file loads without a full runtime ────────
 
@@ -146,12 +146,12 @@ class TestEditorDocsBpRegistration:
 
         app_py = Path(__file__).resolve().parents[2] / "web" / "app.py"
         src = app_py.read_text(encoding="utf-8")
-        assert "editor_docs_bp" in src, (
-            "editor_docs_bp not found in web/app.py — blueprint was not registered"
-        )
-        assert "web.blueprints.editor_docs" in src, (
-            "web.blueprints.editor_docs module not referenced in web/app.py"
-        )
+        assert (
+            "editor_docs_bp" in src
+        ), "editor_docs_bp not found in web/app.py — blueprint was not registered"
+        assert (
+            "web.blueprints.editor_docs" in src
+        ), "web.blueprints.editor_docs module not referenced in web/app.py"
 
     def test_editor_docs_bp_importable(self):
         from web.blueprints.editor_docs import editor_docs_bp
@@ -195,6 +195,7 @@ class TestSocketHandler:
                 def decorator(fn):
                     recorded.append((event, namespace))
                     return fn
+
                 return decorator
 
         register_socket_events(_FakeSocketIO())
@@ -214,6 +215,7 @@ class TestSocketHandler:
                 def decorator(fn):
                     recorded.append((event, namespace))
                     return fn
+
                 return decorator
 
         register_socket_events(_FakeSocketIO())
@@ -223,5 +225,12 @@ class TestSocketHandler:
     def test_prompts_dict_has_required_keys(self):
         from app.core.socket_handler import PROMPTS
 
-        for key in ("polish", "translate", "summarize", "continue_writing", "rewrite", "annotate"):
+        for key in (
+            "polish",
+            "translate",
+            "summarize",
+            "continue_writing",
+            "rewrite",
+            "annotate",
+        ):
             assert key in PROMPTS, f"Missing prompt key: {key}"

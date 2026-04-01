@@ -44,6 +44,7 @@ def pytest_configure(config):
     for _pkg in ("docx",):
         try:
             import importlib
+
             importlib.import_module(_pkg)
         except ImportError:
             pass
@@ -179,6 +180,7 @@ def _mock_vosk_teardown(monkeypatch):
     """Prevents vosk segfaults in pytest by mocking out vosk Model if not strictly needed."""
     try:
         import vosk
+
         def dummy_del(self):
             pass
 

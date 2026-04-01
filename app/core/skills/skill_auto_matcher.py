@@ -1171,7 +1171,11 @@ class SkillAutoMatcher:
                 if not applicable or tt in applicable:
                     return True
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
         return False
 
     @classmethod
@@ -1495,6 +1499,7 @@ class SkillAutoMatcher:
         if not force:
             try:
                 from app.core.skills.skill_manager import SkillManager
+
                 SkillManager._ensure_init()
                 tt = (task_type or "").upper()
                 for sid, s in SkillManager._registry.items():
@@ -1506,9 +1511,15 @@ class SkillAutoMatcher:
                     if not applicable or tt in applicable:
                         _active_ids.add(sid)
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
             if _active_ids:
-                logger.debug("[AutoMatcher] 检测到用户已手动启用Skill，跳过自动匹配以尊重用户选择")  
+                logger.debug(
+                    "[AutoMatcher] 检测到用户已手动启用Skill，跳过自动匹配以尊重用户选择"
+                )
                 return []
         # ── 1. 优先尝试本地模型匹配（快、私密）─────────────────────────────
         model_result = cls._match_with_local_model(

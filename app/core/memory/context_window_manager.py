@@ -235,8 +235,8 @@ def _content_similarity(a: str, b: str) -> float:
     """Character-bigram Jaccard similarity."""
     if len(a) < 2 or len(b) < 2:
         return 1.0 if a == b else 0.0
-    bg_a = {a[i:i + 2] for i in range(len(a) - 1)}
-    bg_b = {b[i:i + 2] for i in range(len(b) - 1)}
+    bg_a = {a[i : i + 2] for i in range(len(a) - 1)}
+    bg_b = {b[i : i + 2] for i in range(len(b) - 1)}
     inter = len(bg_a & bg_b)
     union = len(bg_a | bg_b)
     return inter / max(union, 1)

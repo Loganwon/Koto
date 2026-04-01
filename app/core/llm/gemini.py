@@ -71,6 +71,7 @@ class GeminiProvider(LLMProvider):
         if self._api_base and genai:
             try:
                 from google.genai._api_client import HttpOptions as _HttpOptions
+
                 return genai.Client(
                     api_key=api_key,
                     http_options=_HttpOptions(
@@ -78,7 +79,11 @@ class GeminiProvider(LLMProvider):
                     ),
                 )
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
         return genai.Client(api_key=api_key)
 
     def _get_client(self):
@@ -101,7 +106,11 @@ class GeminiProvider(LLMProvider):
             try:
                 return self._make_client(request_key)
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
         return self.client
 
     def generate_content(
@@ -380,18 +389,23 @@ class GeminiProvider(LLMProvider):
         text = getattr(response, "text", "") or ""
 
         function_calls: List[Dict[str, Any]] = []
-        raw_parts: List[Dict[str, Any]] = []  # preserves thought_signature for multi-turn tool calling
+        raw_parts: List[Dict[str, Any]] = (
+            []
+        )  # preserves thought_signature for multi-turn tool calling
         candidates = getattr(response, "candidates", None) or []
         if candidates:
             parts = getattr(candidates[0].content, "parts", None) or []
             for part in parts:
                 # Preserve thought parts (including thought_signature) required by thinking models
                 if getattr(part, "thought", False):
-                    raw_parts.append({
-                        "thought": True,
-                        "text": getattr(part, "text", "") or "",
-                        "thought_signature": getattr(part, "thought_signature", "") or "",
-                    })
+                    raw_parts.append(
+                        {
+                            "thought": True,
+                            "text": getattr(part, "text", "") or "",
+                            "thought_signature": getattr(part, "thought_signature", "")
+                            or "",
+                        }
+                    )
                     continue
                 function_call = getattr(part, "function_call", None)
                 if function_call:
@@ -540,7 +554,11 @@ class GeminiProvider(LLMProvider):
             try:
                 rc.interactions.cancel(interaction_id)
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
             raise TimeoutError(
                 f"Interactions API timeout ({timeout}s) model={model_id}"
             )

@@ -22,7 +22,7 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-DEFAULT_TIMEOUT = 30   # seconds
+DEFAULT_TIMEOUT = 30  # seconds
 OUTPUT_SIZE_LIMIT = 512 * 1024  # 512 KB
 
 # Image extensions we capture automatically
@@ -30,6 +30,7 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"}
 
 
 # ── Python ────────────────────────────────────────────────────
+
 
 def run_python(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
     """
@@ -77,6 +78,7 @@ def run_python(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
 
 # ── R ─────────────────────────────────────────────────────────
 
+
 def run_r(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
     """
     Execute R code in an isolated temp directory.
@@ -98,7 +100,9 @@ def run_r(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
 
     full_code = preamble + "\n" + code + "\n\ntry(grDevices::dev.off(), silent=TRUE)\n"
 
-    with tempfile.NamedTemporaryFile(suffix=".R", delete=False, mode="w", encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        suffix=".R", delete=False, mode="w", encoding="utf-8"
+    ) as f:
         f.write(full_code)
         script_path = f.name
 
@@ -112,6 +116,7 @@ def run_r(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
 
 
 # ── Shared runner ─────────────────────────────────────────────
+
 
 def _run_in_tempdir(lang: str, cmd: list, timeout: int) -> dict:
     """
@@ -142,10 +147,10 @@ def _run_in_tempdir(lang: str, cmd: list, timeout: int) -> dict:
         except FileNotFoundError:
             stdout = ""
             stderr = ""
-            error = (
-                f"未找到 {lang} 解析器。"
-                + (" 请确保已安装 Python 并在 PATH 中。" if lang == "python" else
-                   " 请安装 R 并将 Rscript 加入 PATH。")
+            error = f"未找到 {lang} 解析器。" + (
+                " 请确保已安装 Python 并在 PATH 中。"
+                if lang == "python"
+                else " 请安装 R 并将 Rscript 加入 PATH。"
             )
         except Exception as exc:
             stdout = ""

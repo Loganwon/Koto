@@ -509,7 +509,11 @@ class SkillBindingManager:
                 try:
                     self.remove(old_binding.binding_id)
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "Silenced exception caught", exc_info=True
+                    )
             existing_by_skill.pop(skill_id, None)
 
             self.bind_intent(
@@ -574,7 +578,11 @@ class SkillBindingManager:
 
                 get_trigger_registry().remove(binding.trigger_id)
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
 
         self._persist()
         return True

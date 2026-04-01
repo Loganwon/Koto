@@ -312,7 +312,7 @@ class OpenAIProvider(LLMProvider):
                     skill_id=skill_id,
                     session_id=session_id,
                 )
-            
+
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta is None:
                 continue

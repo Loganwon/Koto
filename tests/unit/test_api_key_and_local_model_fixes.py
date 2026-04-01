@@ -9,10 +9,10 @@ Unit tests for:
 import importlib
 import sys
 import types
-from unittest.mock import MagicMock, patch, mock_open
-
+from unittest.mock import MagicMock, mock_open, patch
 
 # ── 1. _client cache reset on API key save ─────────────────────────────────
+
 
 class TestClientCacheReset:
     """settings_bp /api/setup/apikey must reset mod._client so the next
@@ -35,11 +35,12 @@ class TestClientCacheReset:
         # Simulate the fixed handler logic
         api_key = "AIzaSyNEWKEY_valid_enough"
         import os
+
         with patch("os.makedirs"), patch("builtins.open", mock_open()):
             os.environ["GEMINI_API_KEY"] = api_key
             os.environ["API_KEY"] = api_key
             mod.API_KEY = api_key
-            mod._client = None          # <-- our fix
+            mod._client = None  # <-- our fix
             mod.client = mod.create_client()
 
         assert mod._client is None or mod.create_client.called
@@ -57,6 +58,7 @@ class TestClientCacheReset:
     def test_env_vars_updated(self):
         """Both GEMINI_API_KEY and API_KEY env vars must be set."""
         import os
+
         new_key = "AIzaSyENV_valid_key_here"
         os.environ["GEMINI_API_KEY"] = new_key
         os.environ["API_KEY"] = new_key
@@ -65,6 +67,7 @@ class TestClientCacheReset:
 
 
 # ── 2. Windows stdout encoding fix ─────────────────────────────────────────
+
 
 class TestStdoutEncodingFix:
     """sys.stdout.reconfigure(encoding='utf-8') should be called on startup
@@ -96,6 +99,7 @@ class TestStdoutEncodingFix:
 
 # ── 3. API key settings panel HTML ─────────────────────────────────────────
 
+
 class TestApiKeySettingsPanelHtml:
     """index.html must contain the API key input section."""
 
@@ -120,6 +124,7 @@ class TestApiKeySettingsPanelHtml:
 
 
 # ── 4. saveSettingsApiKey JS function ──────────────────────────────────────
+
 
 class TestSaveSettingsApiKeyJs:
     """app.js must contain saveSettingsApiKey() with correct behaviour."""
@@ -146,6 +151,7 @@ class TestSaveSettingsApiKeyJs:
 
 
 # ── 5. Ollama validation in onLocalOnlyChange ───────────────────────────────
+
 
 class TestOllamaValidationJs:
     """app.js onLocalOnlyChange must be async and check Ollama before enabling."""

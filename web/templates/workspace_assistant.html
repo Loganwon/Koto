@@ -807,89 +807,339 @@
       color: var(--accent);
     }
 
-    /* PPTX: scrollable card list */
+    /* ── PPTX: PowerPoint-style editor ── */
+    /* ═══════════════════════════════════════════════════════════
+       PowerPoint-style PPTX Editor
+    ═══════════════════════════════════════════════════════════ */
     #wa-pptx-editor {
       height: 100%;
-      overflow-y: auto;
-      padding: 16px;
       display: none;
-      flex-direction: column;
-      gap: 12px;
+      flex-direction: row;
+      overflow: hidden;
+      background: #404040;
     }
-
     #wa-pptx-editor.active { display: flex; }
 
-    .wa-slide-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
+    /* ── Left thumbnail panel ── */
+    #wa-pptx-thumbstrip {
+      width: 160px;
+      flex-shrink: 0;
+      background: #2d2d2d;
+      border-right: 1px solid #1a1a1a;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 8px 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #wa-pptx-thumbstrip::-webkit-scrollbar { width: 4px; }
+    #wa-pptx-thumbstrip::-webkit-scrollbar-thumb { background: #555; border-radius: 2px; }
+
+    .wa-pptx-thumb-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      cursor: pointer;
+    }
+    .wa-pptx-thumb-idx {
+      font-size: 10px;
+      color: #888;
+      user-select: none;
+      align-self: flex-start;
+      padding-left: 2px;
+    }
+    .wa-pptx-thumb {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #fff;
+      border: 2px solid transparent;
+      border-radius: 2px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.5);
       overflow: hidden;
+      transition: border-color .12s;
+    }
+    .wa-pptx-thumb:hover { border-color: #8ab4f8; }
+    .wa-pptx-thumb.active { border-color: #c43e1c; box-shadow: 0 0 0 1px #c43e1c55, 0 2px 8px rgba(0,0,0,.5); }
+    .wa-pptx-thumb canvas { width: 100%; height: 100%; display: block; }
+
+    /* ── Main editing pane ── */
+    #wa-pptx-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: clip;
+      min-width: 0;
     }
 
-    .wa-slide-card-header {
-      padding: 8px 14px;
-      background: var(--surface2);
-      border-bottom: 1px solid var(--border);
+    /* ── Ribbon tabs bar ── */
+    #wa-pptx-ribbon-tabs {
+      display: flex;
+      align-items: flex-end;
+      background: #323232;
+      border-bottom: 2px solid #c43e1c;
+      padding: 0 6px;
+      flex-shrink: 0;
+      gap: 0;
+    }
+    .wa-pptx-rtab {
+      background: transparent;
+      border: none;
+      color: #bbb;
       font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
+      padding: 6px 14px 5px;
+      cursor: pointer;
+      border-radius: 3px 3px 0 0;
+      transition: background .12s, color .12s;
+      letter-spacing: 0.3px;
+    }
+    .wa-pptx-rtab:hover { background: rgba(255,255,255,.08); color: #eee; }
+    .wa-pptx-rtab.active {
+      background: #c43e1c;
+      color: #fff;
+      font-weight: 500;
+    }
+
+    /* ── Ribbon toolbar ── */
+    #wa-pptx-toolbar {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      background: #3c3c3c;
+      border-bottom: 1px solid #1f1f1f;
+      padding: 0 6px 0 4px;
+      flex-shrink: 0;
+      min-height: 52px;
+    }
+    .wa-pptx-tb-grp {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 6px 2px;
+    }
+    .wa-pptx-tb-grp-btns {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex: 1;
+    }
+    .wa-pptx-tb-grp-label {
+      font-size: 9px;
+      color: #888;
+      text-align: center;
+      padding-top: 2px;
+      letter-spacing: 0.4px;
+      user-select: none;
+    }
+    .wa-pptx-tb-sep {
+      width: 1px;
+      background: #555;
+      margin: 6px 2px;
+      align-self: stretch;
+      flex-shrink: 0;
+    }
+    .wa-pptx-tb-vsep {
+      width: 1px;
+      height: 18px;
+      background: #555;
+      margin: 0 2px;
+      flex-shrink: 0;
+    }
+    .wa-pptx-tb-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      padding: 4px 6px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      color: #ccc;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background .1s, border-color .1s, color .1s;
+      white-space: nowrap;
+      min-width: 26px;
+      user-select: none;
+    }
+    .wa-pptx-tb-btn:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); color: #fff; }
+    .wa-pptx-tb-btn.active { background: rgba(196,62,28,.25); border-color: #c43e1c; color: #fff; }
+    .wa-pptx-tb-btn.accent { background: #c43e1c; border-color: #a83418; color: #fff; }
+    .wa-pptx-tb-btn.danger:hover { color: #ff8080; border-color: rgba(255,128,128,.4); }
+    .wa-pptx-tb-counter {
+      font-size: 12px;
+      color: #ccc;
+      min-width: 48px;
+      text-align: center;
+      padding: 0 2px;
+    }
+    .wa-pptx-tb-input-font {
+      background: #2a2a2a;
+      color: #ddd;
+      border: 1px solid #555;
+      border-radius: 3px;
+      font-size: 12px;
+      padding: 3px 6px;
+      width: 90px;
+      outline: none;
+      transition: border-color .1s;
+    }
+    .wa-pptx-tb-input-font:focus { border-color: #c43e1c; }
+    .wa-pptx-tb-select {
+      background: #2a2a2a;
+      color: #ddd;
+      border: 1px solid #555;
+      border-radius: 3px;
+      font-size: 12px;
+      padding: 3px 4px;
+      width: 52px;
+      cursor: pointer;
+      outline: none;
+    }
+    .wa-pptx-tb-select:focus { border-color: #c43e1c; }
+    .wa-pptx-color-btn {
+      position: relative;
+      flex-direction: column;
+      padding: 3px 5px;
+      gap: 1px;
+      cursor: pointer;
+    }
+    .wa-pptx-color-swatch {
+      width: 14px;
+      height: 3px;
+      border-radius: 1px;
+      margin: 0 auto;
+    }
+
+    /* ── Slide canvas area ── */
+    #wa-pptx-slide-area {
+      flex: 1;
+      overflow: auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: #404040;
+    }
+    #wa-pptx-slide-area::-webkit-scrollbar { width: 8px; height: 8px; }
+    #wa-pptx-slide-area::-webkit-scrollbar-thumb { background: #666; border-radius: 4px; }
+    #wa-pptx-slide-canvas {
+      position: relative;
+      background: #fff;
+      box-shadow: 0 4px 32px rgba(0,0,0,.6), 0 1px 4px rgba(0,0,0,.4);
+      flex-shrink: 0;
+    }
+
+    /* ── Shape elements on canvas ── */
+    .wa-pptx-shape { position: absolute; box-sizing: border-box; overflow: hidden; }
+    .wa-pptx-shape:hover { outline: 1px dashed rgba(196,62,28,.5); }
+    .wa-pptx-selected {
+      outline: 2px solid #0078d4 !important;
+      cursor: move !important;
+    }
+    .wa-pptx-editing {
+      outline: 2px solid #ffa500 !important;
+      cursor: text !important;
+    }
+    .wa-pptx-editing .wa-pptx-run {
+      user-select: text !important;
+      -webkit-user-select: text !important;
+      cursor: text !important;
+    }
+    /* Resize handles on selected shape */
+    .wa-pptx-handle {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: #fff;
+      border: 2px solid #0078d4;
+      border-radius: 1px;
+      z-index: 10;
+      box-shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+    .wa-pptx-handle.nw { top: -4px; left: -4px; cursor: nw-resize; }
+    .wa-pptx-handle.ne { top: -4px; right: -4px; cursor: ne-resize; }
+    .wa-pptx-handle.sw { bottom: -4px; left: -4px; cursor: sw-resize; }
+    .wa-pptx-handle.se { bottom: -4px; right: -4px; cursor: se-resize; }
+    .wa-pptx-run {
+      outline: none;
+      display: inline;
+      white-space: pre-wrap;
+      cursor: text;
+    }
+    .wa-pptx-run:focus { background: rgba(0,120,212,.1); border-radius: 1px; }
+    .wa-pptx-empty-note { font-size: 12px; color: #aaa; text-align: center; margin: auto; font-style: italic; }
+
+    /* ── Context menu ── */
+    .wa-pptx-ctx-item { padding: 6px 16px; cursor: pointer; white-space: nowrap; }
+    .wa-pptx-ctx-item:hover { background: #3a3a3a; }
+    .wa-pptx-ctx-item.danger { color: #f87171; }
+    .wa-pptx-ctx-sep { height: 1px; background: #444; margin: 3px 0; }
+
+    /* ── Status bar ── */
+    #wa-pptx-statusbar {
       display: flex;
       align-items: center;
       gap: 8px;
-    }
-
-    .wa-slide-badge {
-      background: var(--accent);
-      color: #fff;
-      font-size: 10px;
-      padding: 1px 7px;
-      border-radius: 10px;
-    }
-
-    .wa-shape-row {
-      padding: 8px 14px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .wa-shape-row:last-child { border-bottom: none; }
-
-    .wa-shape-label {
+      background: #2b2b2b;
+      border-top: 1px solid #1a1a1a;
+      padding: 3px 12px;
+      flex-shrink: 0;
       font-size: 11px;
-      color: var(--text-muted);
-      margin-bottom: 4px;
+      color: #999;
+      user-select: none;
+      min-height: 24px;
+    }
+    #wa-pptx-statusbar-slide { font-size: 11px; color: #aaa; }
+    .wa-pptx-sb-sep { width: 1px; height: 12px; background: #555; margin: 0 4px; }
+    .wa-pptx-sb-nav {
+      background: none; border: none; cursor: pointer;
+      color: #aaa; padding: 2px 4px; border-radius: 3px;
+      display: flex; align-items: center;
+    }
+    .wa-pptx-sb-nav:hover { background: #3a3a3a; color: #fff; }
+    .wa-pptx-sb-counter { font-size: 11px; color: #ccc; min-width: 38px; text-align: center; user-select: none; }
+    .wa-pptx-newslide-btn {
+      flex-direction: column; height: 52px; min-width: 56px;
+      gap: 3px; font-size: 11px; padding: 4px 8px;
+    }
+    .wa-pptx-newslide-btn svg { flex-shrink: 0; }
+    .wa-pptx-sb-sep { width: 1px; height: 12px; background: #555; }
+    .wa-pptx-sb-view-btn {
       display: flex;
       align-items: center;
-      gap: 6px;
-    }
-
-    .wa-shape-title-badge {
-      background: #ff8c4222;
-      color: #ff8c42;
-      border: 1px solid #ff8c4255;
-      padding: 0 5px;
+      padding: 2px 4px;
       border-radius: 3px;
-      font-size: 10px;
+      cursor: pointer;
+      color: #999;
+      transition: color .1s;
     }
-
-    .wa-shape-textarea {
-      width: 100%;
-      background: var(--bg);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      padding: 7px 10px;
-      font-size: 13px;
-      line-height: 1.55;
-      resize: vertical;
-      font-family: inherit;
-      min-height: 40px;
-      transition: border-color 0.15s;
-    }
-
-    .wa-shape-textarea:focus {
+    .wa-pptx-sb-view-btn:hover, .wa-pptx-sb-view-btn.active { color: #fff; }
+    .wa-pptx-sb-spacer { flex: 1; }
+    .wa-pptx-sb-zoom-label { font-size: 11px; color: #aaa; min-width: 28px; text-align: right; }
+    .wa-pptx-sb-zoom-slider {
+      -webkit-appearance: none;
+      width: 80px;
+      height: 3px;
+      background: #555;
+      border-radius: 2px;
+      cursor: pointer;
       outline: none;
-      border-color: var(--accent);
     }
+    .wa-pptx-sb-zoom-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      background: #aaa;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: background .1s;
+    }
+    .wa-pptx-sb-zoom-slider::-webkit-slider-thumb:hover { background: #fff; }
+
 
     /* PDF: canvas stack */
     #wa-pdf-viewer {
@@ -1144,6 +1394,39 @@
       padding: 5px 12px;
       font-size: 11px;
     }
+
+    /* AI response action bar — shown when user had a pinned selection */
+    .wa-ai-action-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      margin: 2px 0 6px;
+      background: var(--hover);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .wa-ai-action-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      margin-right: 2px;
+    }
+    .wa-ai-action-btn {
+      padding: 3px 11px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+    .wa-ai-action-btn:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .wa-ai-action-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .wa-ai-action-btn.primary:hover { opacity: 0.85; }
+    .wa-ai-action-btn.muted { color: var(--text-muted); }
 
     #wa-ai-input-area {
       padding: 12px;
@@ -1515,26 +1798,7 @@
     </div>
 
     <!-- Right-click context menu -->
-    <div id="wa-ctx-menu">
-      <div class="wa-ctx-item" id="wa-ctx-open" onclick="WA._ctxOpen()">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        打开
-      </div>
-      <div class="wa-ctx-separator"></div>
-      <div class="wa-ctx-item" id="wa-ctx-rename" onclick="WA._ctxRename()">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        重命名
-      </div>
-      <div class="wa-ctx-item" id="wa-ctx-copy-path" onclick="WA._ctxCopyPath()">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        复制路径
-      </div>
-      <div class="wa-ctx-separator"></div>
-      <div class="wa-ctx-item danger" id="wa-ctx-delete" onclick="WA._ctxDelete()">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-        删除
-      </div>
-    </div>
+    <div id="wa-ctx-menu"></div>
 
     <!-- Center: polymorphic canvas -->
     <div id="wa-canvas">
@@ -1566,7 +1830,122 @@
         <div id="wa-xlsx-editor"></div>
 
         <!-- PPTX: card editor -->
-        <div id="wa-pptx-editor"></div>
+        <div id="wa-pptx-editor">
+          <!-- Left: Slide thumbnail panel -->
+          <div id="wa-pptx-thumbstrip"></div>
+
+          <!-- Right: Main editing pane -->
+          <div id="wa-pptx-main">
+
+            <!-- Ribbon tabs -->
+            <div id="wa-pptx-ribbon-tabs">
+              <button class="wa-pptx-rtab active" onclick="WA.pptxSwitchTab(this,'home')">开始</button>
+              <button class="wa-pptx-rtab" onclick="WA.pptxSwitchTab(this,'insert')">插入</button>
+            </div>
+
+            <!-- Ribbon toolbar -->
+            <div id="wa-pptx-toolbar">
+
+              <!-- Home tab: Slides group -->
+              <div class="wa-pptx-tb-grp" data-tab="home">
+                <div class="wa-pptx-tb-grp-btns">
+                  <button class="wa-pptx-tb-btn wa-pptx-newslide-btn" onclick="WA.pptxAddSlide()" title="新建幻灯片">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="9" y1="12" x2="15" y2="12"/></svg>
+                    <span>新建幻灯片</span>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onclick="WA.pptxDelSlide()" title="删除当前幻灯片">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                  </button>
+                </div>
+                <div class="wa-pptx-tb-grp-label">幻灯片</div>
+              </div>
+
+              <div class="wa-pptx-tb-sep" data-tab="home"></div>
+
+              <!-- Home tab: Font group -->
+              <div class="wa-pptx-tb-grp" data-tab="home">
+                <div class="wa-pptx-tb-grp-btns">
+                  <input id="wa-pptx-fontname" class="wa-pptx-tb-input-font" type="text" value="Calibri" title="字体" onchange="WA.pptxFontName(this.value)" onblur="WA.pptxFontName(this.value)" onkeydown="if(event.key==='Enter')WA.pptxFontName(this.value)">
+                  <select id="wa-pptx-fontsize" class="wa-pptx-tb-select" onchange="WA.pptxFontSize(this.value)" title="字号">
+                    <option>8</option><option>10</option><option>12</option><option>14</option>
+                    <option>16</option><option>18</option><option>20</option><option>24</option>
+                    <option>28</option><option>32</option><option>36</option><option>40</option><option>48</option><option>60</option><option>72</option>
+                  </select>
+                  <div class="wa-pptx-tb-vsep"></div>
+                  <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-bold" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('bold')" title="加粗 (Ctrl+B)"><b>B</b></button>
+                  <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-italic" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('italic')" title="斜体 (Ctrl+I)"><i>I</i></button>
+                  <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-underline" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('underline')" title="下划线 (Ctrl+U)" style="text-decoration:underline">U</button>
+                  <div class="wa-pptx-tb-vsep"></div>
+                  <label class="wa-pptx-tb-btn wa-pptx-color-btn" title="字体颜色">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><text x="2" y="18" font-size="18" font-weight="bold" font-family="Arial">A</text></svg>
+                    <input id="wa-pptx-fontcolor" type="color" value="#000000" style="width:0;height:0;opacity:0;position:absolute" onchange="WA.pptxFontColor(this.value)">
+                    <div id="wa-pptx-fontcolor-swatch" class="wa-pptx-color-swatch" style="background:#000"></div>
+                  </label>
+                </div>
+                <div class="wa-pptx-tb-grp-label">字体</div>
+              </div>
+
+              <div class="wa-pptx-tb-sep" data-tab="home"></div>
+
+              <!-- Home tab: Paragraph group -->
+              <div class="wa-pptx-tb-grp" data-tab="home">
+                <div class="wa-pptx-tb-grp-btns">
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('left')" title="左对齐">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('center')" title="居中">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('right')" title="右对齐">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>
+                  </button>
+                </div>
+                <div class="wa-pptx-tb-grp-label">段落</div>
+              </div>
+
+              <!-- Insert tab: Textbox group (hidden by default) -->
+              <div class="wa-pptx-tb-grp" data-tab="insert" style="display:none">
+                <div class="wa-pptx-tb-grp-btns">
+                  <button id="wa-pptx-insert-tb" class="wa-pptx-tb-btn wa-pptx-newslide-btn" onclick="WA.pptxInsertMode()" title="点击激活，然后在幻灯片上拖拽绘制文本框">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="12" y1="8" x2="12" y2="16"/></svg>
+                    <span>文本框</span>
+                  </button>
+                </div>
+                <div class="wa-pptx-tb-grp-label">文本</div>
+              </div>
+
+            </div>
+
+            <!-- Context menu -->
+            <div id="wa-pptx-ctx" style="display:none;position:fixed;background:#2b2b2b;border:1px solid #444;border-radius:4px;padding:4px 0;z-index:9999;min-width:140px;box-shadow:0 4px 16px rgba(0,0,0,.5);font-size:13px;color:#eee;"></div>
+
+            <!-- Slide canvas -->
+            <div id="wa-pptx-slide-area">
+              <div id="wa-pptx-slide-canvas"></div>
+            </div>
+
+            <!-- Status bar: navigation + zoom (like PowerPoint's bottom bar) -->
+            <div id="wa-pptx-statusbar">
+              <button class="wa-pptx-sb-nav" id="wa-pptx-prev" onclick="WA.pptxNav(-1)" title="上一张 (←)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <span id="wa-pptx-slide-counter" class="wa-pptx-sb-counter">1 / 1</span>
+              <button class="wa-pptx-sb-nav" id="wa-pptx-next" onclick="WA.pptxNav(1)" title="下一张 (→)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+              <span class="wa-pptx-sb-sep"></span>
+              <span class="wa-pptx-sb-view-btn active" title="普通视图">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="18" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
+              </span>
+              <div class="wa-pptx-sb-spacer"></div>
+              <span class="wa-pptx-sb-zoom-label" id="wa-pptx-zoom-label">75%</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <input type="range" id="wa-pptx-zoom" min="40" max="150" value="75" step="5" class="wa-pptx-sb-zoom-slider" oninput="WA.pptxZoom(this.value)">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </div>
+
+          </div>
+        </div>
 
         <!-- PDF: PDF.js viewer -->
         <div id="wa-pdf-viewer"></div>
@@ -1585,7 +1964,7 @@
       </div>
 
       <div id="wa-ai-messages">
-        <div class="wa-msg ai">你好！请打开一个文件，我会帮你分析、编辑和优化内容。<br><br>选中文档中的文字后，可快速发送给我处理。选中内容时 AI 会直接替换选区。</div>
+        <div class="wa-msg ai">你好！请打开一个文件，我会帮你分析、编辑和优化内容。<br><br>选中文档中的文字后，可快速发送给我处理。AI 回复后可选择<b>替换选区</b>、<b>插入到后面</b>或<b>仅查看</b>。</div>
       </div>
 
       <div id="wa-ai-input-area">
