@@ -14,9 +14,9 @@ import os
 import sys
 import types
 
-from web.settings import settings as web_settings
-
 import pytest
+
+from web.settings import settings as web_settings
 
 
 def _check(resp, ok_status=(200, 201)):
@@ -122,7 +122,9 @@ class TestFilePickFolder:
         assert data["path"] == "/tmp/selected"
         assert captured["initialdir"] == "/tmp/example"
 
-    def test_pick_folder_falls_back_to_workspace_directory(self, full_client, monkeypatch):
+    def test_pick_folder_falls_back_to_workspace_directory(
+        self, full_client, monkeypatch
+    ):
         captured = {}
 
         class FakeTk:

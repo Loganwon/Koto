@@ -343,7 +343,11 @@ class _WordGenerator:
                     try:
                         run._r.rPr.rFonts.set(qn("w:eastAsia"), "微软雅黑")
                     except Exception:
-                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                        import logging
+
+                        logging.getLogger(__name__).warning(
+                            "Silenced exception caught", exc_info=True
+                        )
 
             elif ct == ContentType.TEXT:
                 p = doc.add_paragraph(str(s.content))
@@ -354,7 +358,11 @@ class _WordGenerator:
                     try:
                         run._r.rPr.rFonts.set(qn("w:eastAsia"), "微软雅黑")
                     except Exception:
-                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                        import logging
+
+                        logging.getLogger(__name__).warning(
+                            "Silenced exception caught", exc_info=True
+                        )
 
             elif ct == ContentType.TABLE:
                 rows_data = s.content
@@ -381,7 +389,11 @@ class _WordGenerator:
                         try:
                             run._r.rPr.rFonts.set(qn("w:eastAsia"), "微软雅黑")
                         except Exception:
-                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                            import logging
+
+                            logging.getLogger(__name__).warning(
+                                "Silenced exception caught", exc_info=True
+                            )
                         if row_idx == 0:
                             run.bold = True
                             # 表头背景色
@@ -419,7 +431,11 @@ class _WordGenerator:
                         try:
                             run._r.rPr.rFonts.set(qn("w:eastAsia"), "微软雅黑")
                         except Exception:
-                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                            import logging
+
+                            logging.getLogger(__name__).warning(
+                                "Silenced exception caught", exc_info=True
+                            )
 
             elif ct == ContentType.CODE:
                 p = doc.add_paragraph()
@@ -1080,7 +1096,11 @@ class _PptxGenerator:
                 if color:
                     tf.color.rgb = _rgb(color)
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
 
         # ── 封面幻灯片 ─────────────────────────────────────────────────────
         title_slide = prs.slides.add_slide(slide_layouts[TITLE_LAYOUT])

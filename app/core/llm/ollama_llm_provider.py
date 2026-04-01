@@ -261,7 +261,11 @@ class OllamaLLMProvider(LLMProvider):
                 logger.info(f"[OllamaLLMProvider] 自动选择模型: {best}")
                 return best
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
         return "qwen3:8b"  # 绝对保底，实际运行时 Ollama 应已安装
 
     def generate_content(

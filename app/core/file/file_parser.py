@@ -24,6 +24,7 @@ logger = logging.getLogger(__name__)
 # DOCX → Semantic HTML
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def parse_docx(file_path: str) -> dict[str, Any]:
     """
     使用 mammoth 将 DOCX 转换为语义 HTML。
@@ -97,8 +98,8 @@ def parse_docx(file_path: str) -> dict[str, Any]:
 
 # Luckysheet 单元格数值类型映射
 _CELL_TYPE_MAP = {
-    "n": 1,   # numeric
-    "s": 0,   # string (general)
+    "n": 1,  # numeric
+    "s": 0,  # string (general)
     "b": "bool",
     "d": "date",
     "e": "error",
@@ -155,7 +156,10 @@ def _openpyxl_cell_to_luckysheet(cell: Any) -> dict[str, Any]:
                 style["fc"] = "#" + font.color.rgb[2:]  # strip alpha
         fill = cell.fill
         if fill and fill.fill_type not in (None, "none") and fill.fgColor:
-            if fill.fgColor.type == "rgb" and fill.fgColor.rgb not in ("00000000", "FFFFFFFF"):
+            if fill.fgColor.type == "rgb" and fill.fgColor.rgb not in (
+                "00000000",
+                "FFFFFFFF",
+            ):
                 style["bg"] = "#" + fill.fgColor.rgb[2:]
         ali = cell.alignment
         if ali:
@@ -235,6 +239,7 @@ def parse_xlsx(file_path: str) -> list[dict[str, Any]]:
 # PPTX → 结构化文本 JSON (卡片编辑模型)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def parse_pptx(file_path: str) -> list[dict[str, Any]]:
     """
     使用 python-pptx 提取每个 Slide 的文本框内容。
@@ -278,18 +283,22 @@ def parse_pptx(file_path: str) -> list[dict[str, Any]]:
             except Exception:
                 pass
 
-            texts.append({
-                "shape_id": shape.shape_id,
-                "shape_name": shape.name,
-                "text": text_content,
-                "is_title": is_title,
-            })
+            texts.append(
+                {
+                    "shape_id": shape.shape_id,
+                    "shape_name": shape.name,
+                    "text": text_content,
+                    "is_title": is_title,
+                }
+            )
 
-        slides_data.append({
-            "slide_id": slide_idx + 1,
-            "slide_index": slide_idx,
-            "texts": texts,
-        })
+        slides_data.append(
+            {
+                "slide_id": slide_idx + 1,
+                "slide_index": slide_idx,
+                "texts": texts,
+            }
+        )
 
     return slides_data
 
@@ -297,6 +306,7 @@ def parse_pptx(file_path: str) -> list[dict[str, Any]]:
 # ─────────────────────────────────────────────────────────────────────────────
 # PPTX → 几何画布 JSON (含图片/表格/备注)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
     """
@@ -400,10 +410,14 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                         for c_idx, cell in enumerate(row.cells):
                             cell_text = ""
                             try:
-                                cell_text = cell.text_frame.text if cell.text_frame else ""
+                                cell_text = (
+                                    cell.text_frame.text if cell.text_frame else ""
+                                )
                             except Exception:
                                 pass
-                            cells.append({"row": r_idx, "col": c_idx, "text": cell_text})
+                            cells.append(
+                                {"row": r_idx, "col": c_idx, "text": cell_text}
+                            )
                     s["_type"] = "TABLE"
                     s["table_rows"] = len(tbl.rows)
                     s["table_cols"] = len(tbl.columns)
@@ -421,6 +435,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                 is_title = False
                 try:
                     from pptx.enum.shapes import PP_PLACEHOLDER
+
                     ph = shape.placeholder_format
                     if ph is not None:
                         is_title = ph.type in (
@@ -475,13 +490,15 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
 
             shapes_data.append(s)
 
-        slides_data.append({
-            "slide_index": slide_idx,
-            "slide_id": slide_idx + 1,
-            "background": bg_hex,
-            "notes": notes_text,
-            "shapes": shapes_data,
-        })
+        slides_data.append(
+            {
+                "slide_index": slide_idx,
+                "slide_id": slide_idx + 1,
+                "background": bg_hex,
+                "notes": notes_text,
+                "shapes": shapes_data,
+            }
+        )
 
     return {
         "slide_width_emu": int(slide_w),
@@ -493,6 +510,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 # PDF → 文本提取 + 原始 URL
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
     """
@@ -535,6 +553,7 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
 # DOCX 导出: 修改后 HTML → .docx
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def export_docx(html_content: str) -> bytes:
     """
     将 WangEditor 产出的 HTML 转换为 .docx 字节流。
@@ -543,18 +562,21 @@ def export_docx(html_content: str) -> bytes:
     Returns:
         bytes — .docx 文件内容
     """
-    logger.info("[export_docx] html_content length=%d preview=%.200s", len(html_content or ""), (html_content or "")[:200])
+    logger.info(
+        "[export_docx] html_content length=%d preview=%.200s",
+        len(html_content or ""),
+        (html_content or "")[:200],
+    )
     try:
         from html2docx import html2docx
+
         # Wrap with a default font style so html2docx preserves a consistent CJK-friendly font
         wrapped_html = (
             '<html><head><meta charset="utf-8">'
             '<style>body{font-family:"Microsoft YaHei","PingFang SC","SimHei",Arial,sans-serif;'
-            'font-size:11pt;line-height:1.6;}'
-            'h1{font-size:20pt}h2{font-size:16pt}h3{font-size:14pt}'
-            '</style></head><body>'
-            + html_content
-            + '</body></html>'
+            "font-size:11pt;line-height:1.6;}"
+            "h1{font-size:20pt}h2{font-size:16pt}h3{font-size:14pt}"
+            "</style></head><body>" + html_content + "</body></html>"
         )
         buf = html2docx(wrapped_html, title="Koto 导出文档")
         buf.seek(0)  # html2docx returns BytesIO at EOF — must rewind before reading
@@ -567,8 +589,8 @@ def export_docx(html_content: str) -> bytes:
 
     # 回退方案：python-docx 纯文本提取
     try:
-        from docx import Document
         from bs4 import BeautifulSoup
+        from docx import Document
     except ImportError:
         raise RuntimeError("html2docx 或 (python-docx + beautifulsoup4) 未安装")
 
@@ -595,7 +617,10 @@ def export_docx(html_content: str) -> bytes:
 # XLSX 导出: Luckysheet JSON → .xlsx
 # ─────────────────────────────────────────────────────────────────────────────
 
-def export_xlsx(sheets_json: list[dict[str, Any]], images: list[dict] | None = None) -> bytes:
+
+def export_xlsx(
+    sheets_json: list[dict[str, Any]], images: list[dict] | None = None
+) -> bytes:
     """
     将 Luckysheet 序列化 JSON 重建为 .xlsx 字节流。
     按 celldata 数组写入每个工作表的单元格数据。
@@ -623,7 +648,9 @@ def export_xlsx(sheets_json: list[dict[str, Any]], images: list[dict] | None = N
 
     # Embed overlay images into the first sheet (if any)
     if images and wb.worksheets:
-        import base64, io as _io
+        import base64
+        import io as _io
+
         try:
             from openpyxl.drawing.image import Image as XlImage
         except ImportError:
@@ -652,6 +679,7 @@ def export_xlsx(sheets_json: list[dict[str, Any]], images: list[dict] | None = N
 # ─────────────────────────────────────────────────────────────────────────────
 # PPTX 导出: 仅替换文字 (保留主题/动画)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def export_pptx(original_path: str, slides_json: Any) -> bytes:
     """
@@ -700,7 +728,7 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
             for run in para.runs:
                 run.text = ""
 
-    # Detect format
+    # Detect format: new geometry canvas dict vs legacy text-card list
     if isinstance(slides_json, dict) and "slides" in slides_json:
         # ── New geometry canvas format ──
         for slide_data in slides_json["slides"]:
@@ -714,7 +742,9 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
                 stype = shape_entry.get("_type", "TEXT")
                 if stype == "TEXT":
                     if shape.has_text_frame:
-                        _replace_text_frame(shape.text_frame, shape_entry.get("text", ""))
+                        _replace_text_frame(
+                            shape.text_frame, shape_entry.get("text", "")
+                        )
                 elif stype == "TABLE":
                     if shape.has_table:
                         tbl = shape.table
@@ -723,12 +753,14 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
                             try:
                                 cell = tbl.cell(r, c)
                                 if cell.text_frame:
-                                    _replace_text_frame(cell.text_frame, cell_data.get("text", ""))
+                                    _replace_text_frame(
+                                        cell.text_frame, cell_data.get("text", "")
+                                    )
                             except Exception:
                                 pass
     else:
         # ── Legacy text-card format ──
-        for slide_data in (slides_json or []):
+        for slide_data in slides_json or []:
             slide_idx = slide_data.get("slide_index", 0)
             shape_map = slides_map.get(slide_idx, {})
             for text_entry in slide_data.get("texts", []):

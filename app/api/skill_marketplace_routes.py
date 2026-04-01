@@ -3684,7 +3684,13 @@ _COMMUNITY_SKILLS: List[Dict] = [
         ),
         "community_meta": {
             "quality": "精选",
-            "use_cases": ["代码 Review", "重构优化", "架构设计", "模块设计", "命名优化"],
+            "use_cases": [
+                "代码 Review",
+                "重构优化",
+                "架构设计",
+                "模块设计",
+                "命名优化",
+            ],
             "difficulty": "中等",
         },
     },
@@ -3738,7 +3744,13 @@ _COMMUNITY_SKILLS: List[Dict] = [
         ),
         "community_meta": {
             "quality": "精选",
-            "use_cases": ["Django 开发", "后端 API 设计", "数据库建模", "容器化部署", "Python 架构"],
+            "use_cases": [
+                "Django 开发",
+                "后端 API 设计",
+                "数据库建模",
+                "容器化部署",
+                "Python 架构",
+            ],
             "difficulty": "较难",
         },
     },
@@ -3822,7 +3834,13 @@ _COMMUNITY_SKILLS: List[Dict] = [
         ),
         "community_meta": {
             "quality": "精选",
-            "use_cases": ["API 文档", "开发者指南", "产品文档", "内部知识库", "开源项目 README"],
+            "use_cases": [
+                "API 文档",
+                "开发者指南",
+                "产品文档",
+                "内部知识库",
+                "开源项目 README",
+            ],
             "difficulty": "中等",
         },
     },
@@ -3875,7 +3893,13 @@ _COMMUNITY_SKILLS: List[Dict] = [
         ),
         "community_meta": {
             "quality": "精选",
-            "use_cases": ["重大决策", "复杂问题分析", "研究规划", "技术架构评估", "风险分析"],
+            "use_cases": [
+                "重大决策",
+                "复杂问题分析",
+                "研究规划",
+                "技术架构评估",
+                "风险分析",
+            ],
             "difficulty": "中等",
         },
     },
@@ -3946,7 +3970,13 @@ _COMMUNITY_SKILLS: List[Dict] = [
         ),
         "community_meta": {
             "quality": "精选",
-            "use_cases": ["学术阅读", "会议记录整理", "快速信息处理", "研究综述", "新闻摘要"],
+            "use_cases": [
+                "学术阅读",
+                "会议记录整理",
+                "快速信息处理",
+                "研究综述",
+                "新闻摘要",
+            ],
             "difficulty": "简单",
         },
     },
@@ -3997,11 +4027,17 @@ _COMMUNITY_SKILLS: List[Dict] = [
             "### 无障碍标准（a11y）\n"
             "- 交互元素必须有 `aria-label` 或可见文字\n"
             "- `onClick` 配套 `onKeyDown`（Enter/Space）实现键盘可访问\n"
-            "- 图片必须有 `alt`（装饰性图片用 `alt=\"\"`）"
+            '- 图片必须有 `alt`（装饰性图片用 `alt=""`）'
         ),
         "community_meta": {
             "quality": "精选",
-            "use_cases": ["React 组件开发", "前端架构", "性能优化", "Hook 设计", "TypeScript 前端"],
+            "use_cases": [
+                "React 组件开发",
+                "前端架构",
+                "性能优化",
+                "Hook 设计",
+                "TypeScript 前端",
+            ],
             "difficulty": "中等",
         },
     },
@@ -4045,11 +4081,11 @@ _COMMUNITY_SKILLS: List[Dict] = [
             "### 推荐 tsconfig\n"
             "```json\n"
             "{\n"
-            "  \"compilerOptions\": {\n"
-            "    \"strict\": true,\n"
-            "    \"noUncheckedIndexedAccess\": true,\n"
-            "    \"noImplicitReturns\": true,\n"
-            "    \"exactOptionalPropertyTypes\": true\n"
+            '  "compilerOptions": {\n'
+            '    "strict": true,\n'
+            '    "noUncheckedIndexedAccess": true,\n'
+            '    "noImplicitReturns": true,\n'
+            '    "exactOptionalPropertyTypes": true\n'
             "  }\n"
             "}\n"
             "```\n\n"
@@ -4060,7 +4096,13 @@ _COMMUNITY_SKILLS: List[Dict] = [
         ),
         "community_meta": {
             "quality": "精选",
-            "use_cases": ["TypeScript 项目", "类型设计", "Node.js 后端", "前端工程化", "API 类型安全"],
+            "use_cases": [
+                "TypeScript 项目",
+                "类型设计",
+                "Node.js 后端",
+                "前端工程化",
+                "API 类型安全",
+            ],
             "difficulty": "较难",
         },
     },
@@ -4085,6 +4127,7 @@ def community_catalog():
 
     skills_out = []
     import hashlib as _hl
+
     for skill in _COMMUNITY_SKILLS:
         if (
             category
@@ -4093,15 +4136,19 @@ def community_catalog():
         ):
             continue
         if q:
-            haystack = " ".join([
-                skill.get("name", ""),
-                skill.get("description", ""),
-                " ".join(skill.get("tags", [])),
-                skill.get("author", ""),
-            ]).lower()
+            haystack = " ".join(
+                [
+                    skill.get("name", ""),
+                    skill.get("description", ""),
+                    " ".join(skill.get("tags", [])),
+                    skill.get("author", ""),
+                ]
+            ).lower()
             if q not in haystack:
                 continue
-        entry = {k: v for k, v in skill.items() if k != "prompt"}  # 不暴露 prompt 在列表接口
+        entry = {
+            k: v for k, v in skill.items() if k != "prompt"
+        }  # 不暴露 prompt 在列表接口
         entry["is_installed"] = skill["id"] in installed_ids
         _h = int(_hl.md5(skill.get("name", "").encode("utf-8")).hexdigest(), 16)
         entry["likes"] = 100 + (_h % 900)
@@ -4129,7 +4176,7 @@ def community_skill_detail(skill_id: str):
     # 若在本地精选中找不到，尝试从在线缓存中查找
     if not skill and skill_id.startswith("online_"):
         cached = fetch_online_prompts()
-        for p in (cached or []):
+        for p in cached or []:
             if p.get("id") == skill_id:
                 skill = dict(p)
                 skill["category"] = "domain"
@@ -4148,6 +4195,7 @@ def community_skill_detail(skill_id: str):
     # 填充 likes
     if "likes" not in entry:
         import hashlib as _hl
+
         _h = int(_hl.md5(entry.get("name", "").encode("utf-8")).hexdigest(), 16)
         entry["likes"] = 100 + (_h % 900)
 
@@ -4263,20 +4311,33 @@ def fetch_online_prompts():
                 for i, row in enumerate(reader):
                     if len(row) >= 2 and row[0].strip() and row[1].strip():
                         import hashlib as _hl2
-                        _hv = int(_hl2.md5(row[0].strip().encode("utf-8")).hexdigest(), 16)
-                        prompts.append({
-                            "id": f"online_awesome_{i}",
-                            "name": row[0].strip(),
-                            "description": (row[1][:140] + "...") if len(row[1]) > 140 else row[1],
-                            "full_prompt": row[1],
-                            "author": (row[4].strip() if len(row) > 4 and row[4].strip() else "f/awesome-chatgpt-prompts"),
-                            "tags": ["开源推荐", "github"],
-                            "source_name": src["name"],
-                            "source_repo": src["repo"],
-                            "source_url": src["source_url"],
-                            "source_kind": "csv",
-                            "likes": 50 + (_hv % 3500),
-                        })
+
+                        _hv = int(
+                            _hl2.md5(row[0].strip().encode("utf-8")).hexdigest(), 16
+                        )
+                        prompts.append(
+                            {
+                                "id": f"online_awesome_{i}",
+                                "name": row[0].strip(),
+                                "description": (
+                                    (row[1][:140] + "...")
+                                    if len(row[1]) > 140
+                                    else row[1]
+                                ),
+                                "full_prompt": row[1],
+                                "author": (
+                                    row[4].strip()
+                                    if len(row) > 4 and row[4].strip()
+                                    else "f/awesome-chatgpt-prompts"
+                                ),
+                                "tags": ["开源推荐", "github"],
+                                "source_name": src["name"],
+                                "source_repo": src["repo"],
+                                "source_url": src["source_url"],
+                                "source_kind": "csv",
+                                "likes": 50 + (_hv % 3500),
+                            }
+                        )
                 if prompts:
                     csv_loaded = True
                     break
@@ -4303,21 +4364,24 @@ def fetch_online_prompts():
                 path = m.group("path").strip()
                 author = (m.group("author") or "linexjlin/GPTs contributors").strip()
                 import hashlib as _hl3
+
                 _hv2 = int(_hl3.md5(title.encode("utf-8")).hexdigest(), 16)
-                prompts.append({
-                    "id": f"online_gpts_{idx}",
-                    "name": title,
-                    "description": f"来自 GitHub 开源仓库 linexjlin/GPTs · {path}",
-                    "full_prompt": "",  # 安装时按路径抓取原文
-                    "author": author,
-                    "tags": ["开源推荐", "github", "gpts"],
-                    "source_name": "linexjlin/GPTs",
-                    "source_repo": "linexjlin/GPTs",
-                    "source_url": "https://github.com/linexjlin/GPTs",
-                    "source_kind": "markdown-index",
-                    "source_path": path,
-                    "likes": 50 + (_hv2 % 3500),
-                })
+                prompts.append(
+                    {
+                        "id": f"online_gpts_{idx}",
+                        "name": title,
+                        "description": f"来自 GitHub 开源仓库 linexjlin/GPTs · {path}",
+                        "full_prompt": "",  # 安装时按路径抓取原文
+                        "author": author,
+                        "tags": ["开源推荐", "github", "gpts"],
+                        "source_name": "linexjlin/GPTs",
+                        "source_repo": "linexjlin/GPTs",
+                        "source_url": "https://github.com/linexjlin/GPTs",
+                        "source_kind": "markdown-index",
+                        "source_path": path,
+                        "likes": 50 + (_hv2 % 3500),
+                    }
+                )
                 idx += 1
                 if idx >= 300:
                     break
@@ -4369,26 +4433,32 @@ def fetch_online_prompts():
                 meta_url = f"https://raw.githubusercontent.com/openclaw/skills/main/skills/{owner}/{slug}/_meta.json"
                 try:
                     import json as _json
+
                     meta_text = _fetch_text(meta_url, timeout=8)
                     meta = _json.loads(meta_text)
                     import hashlib as _hl4
+
                     _hv3 = int(_hl4.md5(slug.encode()).hexdigest(), 16)
-                    prompts.append({
-                        "id": f"online_oc_{owner}_{slug}".replace("-", "_"),
-                        "name": meta.get("displayName") or display_name,
-                        "description": f"来自 OpenClaw 开源社区 · {owner}/{slug}",
-                        "full_prompt": "",  # 安装时按 source_path 抓取 SKILL.md
-                        "author": owner,
-                        "tags": ["openclaw", "开源推荐", "github"],
-                        "source_name": "openclaw/skills",
-                        "source_repo": "openclaw/skills",
-                        "source_url": f"https://github.com/openclaw/skills/tree/main/skills/{owner}/{slug}",
-                        "source_kind": "openclaw-skill",
-                        "source_path": f"skills/{owner}/{slug}/SKILL.md",
-                        "likes": 100 + (_hv3 % 2000),
-                    })
+                    prompts.append(
+                        {
+                            "id": f"online_oc_{owner}_{slug}".replace("-", "_"),
+                            "name": meta.get("displayName") or display_name,
+                            "description": f"来自 OpenClaw 开源社区 · {owner}/{slug}",
+                            "full_prompt": "",  # 安装时按 source_path 抓取 SKILL.md
+                            "author": owner,
+                            "tags": ["openclaw", "开源推荐", "github"],
+                            "source_name": "openclaw/skills",
+                            "source_repo": "openclaw/skills",
+                            "source_url": f"https://github.com/openclaw/skills/tree/main/skills/{owner}/{slug}",
+                            "source_kind": "openclaw-skill",
+                            "source_path": f"skills/{owner}/{slug}/SKILL.md",
+                            "likes": 100 + (_hv3 % 2000),
+                        }
+                    )
                 except Exception as oc_item_exc:
-                    logger.debug("[online-prompts] openclaw %s/%s: %s", owner, slug, oc_item_exc)
+                    logger.debug(
+                        "[online-prompts] openclaw %s/%s: %s", owner, slug, oc_item_exc
+                    )
         except Exception as oc_exc:
             logger.warning("[online-prompts] openclaw source failed: %s", oc_exc)
 
@@ -4485,7 +4555,8 @@ def community_ai_recommend():
             keywords.extend(en_list)
     # 也把原始 query 里的英文词加上
     import re as _re
-    for w in _re.findall(r'[a-zA-Z]{2,}', query):
+
+    for w in _re.findall(r"[a-zA-Z]{2,}", query):
         keywords.append(w.lower())
     # 去重
     keywords = list(dict.fromkeys(keywords))
@@ -4510,6 +4581,7 @@ def community_ai_recommend():
     if candidates:
         try:
             from app.core.llm.gemini import GeminiProvider
+
             llm = GeminiProvider()
             catalog_lines = []
             for i, p in enumerate(candidates[:40]):
@@ -4528,7 +4600,11 @@ def community_ai_recommend():
                 temperature=0.1,
                 max_tokens=200,
             )
-            content = (res.get("content") or res.get("text") or "") if isinstance(res, dict) else str(res)
+            content = (
+                (res.get("content") or res.get("text") or "")
+                if isinstance(res, dict)
+                else str(res)
+            )
             content = content.replace("```json", "").replace("```", "").strip()
             recommended_indices = json.loads(content)
             if isinstance(recommended_indices, list):
@@ -4540,17 +4616,21 @@ def community_ai_recommend():
                     except (ValueError, TypeError):
                         pass
         except Exception as llm_err:
-            logger.warning("[ai-recommend] LLM ranking failed, using keyword fallback: %s", llm_err)
+            logger.warning(
+                "[ai-recommend] LLM ranking failed, using keyword fallback: %s", llm_err
+            )
 
     # 如果 LLM 没有返回结果，使用纯关键词匹配的 top 结果
     if not results and candidates:
         results = candidates[:6]
 
-    return jsonify({
-        "results": results,
-        "total_pool": len(prompts),
-        "used_fallback": used_fallback,
-    })
+    return jsonify(
+        {
+            "results": results,
+            "total_pool": len(prompts),
+            "used_fallback": used_fallback,
+        }
+    )
 
 
 # ── POST /api/skillmarket/community/online-install ────────────────────────
@@ -4592,27 +4672,37 @@ def community_install_online():
     source_kind = (data.get("source_kind") or "").strip()
     if full_prompt and source_kind == "openclaw-skill":
         import re as _re
+
         fm_match = _re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)", full_prompt, _re.DOTALL)
         if fm_match:
             fm_text = fm_match.group(1)
             body = fm_match.group(2).strip()
             # 从 frontmatter 提取 name 和 description（简单 key: value 解析，不依赖 PyYAML）
             fm_name_m = _re.search(r"^name:\s*(.+)$", fm_text, _re.MULTILINE)
-            fm_desc_m = _re.search(r"^description:\s*['\"]?(.*?)['\"]?\s*$", fm_text, _re.MULTILINE | _re.DOTALL)
+            fm_desc_m = _re.search(
+                r"^description:\s*['\"]?(.*?)['\"]?\s*$",
+                fm_text,
+                _re.MULTILINE | _re.DOTALL,
+            )
             if fm_name_m and not name:
                 name = fm_name_m.group(1).strip().strip("'\"")
             if fm_desc_m and not data.get("description"):
                 # 清理多行 description（可能有续行缩进）
                 raw_desc = fm_desc_m.group(1).strip().strip("'\"")
                 data = dict(data)
-                data["description"] = raw_desc[:300] if len(raw_desc) > 300 else raw_desc
+                data["description"] = (
+                    raw_desc[:300] if len(raw_desc) > 300 else raw_desc
+                )
             full_prompt = body  # 正文（去掉 frontmatter）作为真正的 prompt
 
             # ── 包裹 Koto 风格激活前缀，与 Koto 技能注入系统兼容 ──────────────
             # 若正文不以 ## 标题开头且没有 Koto 风格激活语，添加统一包装头
             _spi = (data.get("source_path") or "").replace("skills/", "").split("/")
             _owner_hint = f" · {_spi[0]}/{_spi[1]}" if len(_spi) >= 2 else ""
-            if not body.lstrip().startswith("##") and "当此技能激活时" not in body[:200]:
+            if (
+                not body.lstrip().startswith("##")
+                and "当此技能激活时" not in body[:200]
+            ):
                 full_prompt = (
                     f"\n\n## {name}\n\n"
                     f"**来源：OpenClaw 开源社区{_owner_hint}**\n\n"

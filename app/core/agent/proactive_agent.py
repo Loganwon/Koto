@@ -355,7 +355,11 @@ class ProactiveAgent:
                 if generated and 10 < len(generated) < 80:
                     content = generated.strip()
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # fallback to template
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )  # fallback to template
 
         return _make_msg(
             "greeting", content, priority="low", triggered_by="time_gap", ttl_hours=8
@@ -392,7 +396,11 @@ class ProactiveAgent:
                 if generated and 15 < len(generated) < 100:
                     content = generated.strip()
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
 
         msg = _make_msg(
             "follow_up",
@@ -599,7 +607,11 @@ class ProactiveAgent:
                 if generated and 15 < len(generated) < 100:
                     content = generated.strip()
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
 
         msg = _make_msg(
             "failed_retry",
@@ -609,7 +621,9 @@ class ProactiveAgent:
             ttl_hours=48,
         )
         msg["task_id"] = task["id"]  # 方便前端直接取用，无需解析 triggered_by
-        msg["original_text"] = task.get("full_text") or task.get("text", "")  # 直接持久化原始文本，防止 watcher 数据丢失
+        msg["original_text"] = task.get("full_text") or task.get(
+            "text", ""
+        )  # 直接持久化原始文本，防止 watcher 数据丢失
         return msg
 
     # ── 队列管理 ──────────────────────────────────────────────────────────────

@@ -75,6 +75,12 @@ def edit_ppt(session_id: str) -> str:
     return render_template("edit_ppt.html")
 
 
+@pages_bp.route("/pptx-editor/<file_id>")
+def pptx_editor(file_id: str) -> str:
+    """PPTX 文件编辑器 — 上传并编辑现有 PPTX 文件"""
+    return render_template("pptx_editor.html")
+
+
 @pages_bp.route("/skills")
 @pages_bp.route("/skill-marketplace")
 def skill_marketplace() -> str:

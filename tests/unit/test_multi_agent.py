@@ -112,6 +112,7 @@ class TestLlmCall:
     def setup_method(self):
         """Clear the LLM instance cache before each test to avoid cross-test pollution."""
         import app.core.agent.multi_agent as _mod
+
         _mod._llm_cache.clear()
 
     @patch(_LLM_CLS)

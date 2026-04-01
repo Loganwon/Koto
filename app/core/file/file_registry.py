@@ -293,7 +293,11 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
 
                 return docx2txt.process(path)[:max_chars]
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
             try:
                 import mammoth
 
@@ -332,7 +336,9 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
                 return ""
 
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+        import logging
+
+        logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
     return ""
 
 
@@ -449,7 +455,9 @@ def _extract_text_full(path: str, max_chars: int = 200_000) -> str:
                 return ""
 
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+        import logging
+
+        logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
     return ""
 
 
@@ -644,7 +652,11 @@ class FileRegistry:
             try:
                 content_preview = _extract_text_preview(path)
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
 
         now = _now_iso()
 

@@ -1609,6 +1609,8 @@ if _has_socketio and SocketIO is not None:
         async_mode="threading",
         logger=False,
         engineio_logger=False,
+        ping_timeout=120,
+        ping_interval=30,
     )
     try:
         from app.core.socket_handler import register_socket_events
@@ -2056,6 +2058,7 @@ def _register_blueprints_deferred():
         ("web.blueprints.chat", "chat_bp", None, "Chat"),
         ("web.blueprints.workspace_assistant", "workspace_assistant_bp", None, "WorkspaceAssistant"),
         ("web.blueprints.editor_docs", "editor_docs_bp", None, "EditorDocs"),
+        ("web.blueprints.pptx_editor", "pptx_editor_bp", None, "PptxEditor"),
     ]
     import importlib as _il
 

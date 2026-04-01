@@ -447,7 +447,9 @@ def _handle_auto_catalog(ctx: JobContext) -> Optional[str]:
                 "source_directories", []
             )
             if source_dir not in scheduler.config["auto_catalog"]["source_directories"]:
-                scheduler.config["auto_catalog"]["source_directories"].insert(0, source_dir)
+                scheduler.config["auto_catalog"]["source_directories"].insert(
+                    0, source_dir
+                )
         result = scheduler.execute_auto_catalog()
         summary = str(result)[:300] if result else "整理完成"
         ctx.step("ANSWER", summary, progress=100)
