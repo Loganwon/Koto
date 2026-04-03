@@ -1247,10 +1247,12 @@ window.WA = window.WA || {};
       }
       this._curIdx = 0;
       this._buildThumbs();
-      this._renderSlide(0);
       this._initKeyHandler();
       const zoomSlider = $('wa-pptx-zoom');
-      if (zoomSlider) { zoomSlider.value = 75; WA.pptxZoom(75); }
+      if (zoomSlider) { zoomSlider.value = 75; this._zoom = 0.75; }
+      // Defer first render until after the browser has laid out the flex container
+      // so that #wa-pptx-slide-area.clientWidth is non-zero.
+      requestAnimationFrame(() => { this._renderSlide(0); WA.pptxZoom && WA.pptxZoom(75); });
     }
 
     serialize() { return this.data; }
@@ -1549,6 +1551,25 @@ window.WA = window.WA || {};
         const x = shape.left * scX, y = shape.top * scY;
         const w = shape.width * scX, h = shape.height * scY;
         if (shape.fill) { ctx.fillStyle = shape.fill; ctx.fillRect(x, y, w, h); }
+        // ── Picture: draw image asynchronously onto this canvas ──
+        if (shape._type === 'PICTURE' && shape.image_b64) {
+          const img = new Image();
+          img.onload = () => { ctx.drawImage(img, x, y, w, h); };
+          img.src = shape.image_b64;
+          // Draw a light grey placeholder immediately (visible before image loads)
+          ctx.fillStyle = '#e8e8e8';
+          ctx.fillRect(x, y, w, h);
+          return;
+        }
+        // ── Table: draw a simple grid placeholder ──
+        if (shape._type === 'TABLE' && shape.cells) {
+          ctx.strokeStyle = '#bbb';
+          ctx.lineWidth = 0.5;
+          ctx.strokeRect(x, y, w, h);
+          ctx.fillStyle = '#f5f5f5';
+          ctx.fillRect(x, y, w, h);
+          return;
+        }
         if (shape.has_text && shape.paragraphs) {
           ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
           let ty = y + 2;
@@ -1556,7 +1577,8 @@ window.WA = window.WA || {};
             const lineText = (para.runs || []).map(r => r.text).join('');
             if (!lineText.trim()) { ty += 4; return; }
             const fr = para.runs[0] || {};
-            const px = Math.max((fr.size || 12) * scX * 12700, 4);
+            // Fixed scale: pt size relative to standard 540pt slide height
+            const px = Math.max(Math.round((fr.size || 12) * sh / 540), 5);
             ctx.font = (fr.bold ? 'bold ' : '') + px + 'px sans-serif';
             ctx.fillStyle = fr.color || '#222';
             ctx.fillText(lineText, x + 2, ty + px);
@@ -1674,23 +1696,57 @@ window.WA = window.WA || {};
             e.stopPropagation();
             this._enterEditMode(el);
           });
-        } else {
-          el.style.border = '1px dashed #ccc';
-          el.style.display = 'flex';
-          el.style.alignItems = 'center';
-          el.style.justifyContent = 'center';
-          const icon = document.createElement('span');
-          icon.textContent = '📷';
-          icon.style.fontSize = Math.max(10, Math.round(12 * scale)) + 'px';
-          icon.style.userSelect = 'none';
-          icon.style.color = '#aaa';
-          el.appendChild(icon);
-          // Non-text shapes are also draggable
+        } else if (shape._type === 'PICTURE' && shape.image_b64) {
+          // ── Image shape ─────────────────────────────────────────────────
+          const img = document.createElement('img');
+          img.src = shape.image_b64;
+          img.style.width = '100%';
+          img.style.height = '100%';
+          img.style.objectFit = 'contain';
+          img.style.display = 'block';
+          img.style.pointerEvents = 'none'; // let mousedown fall through to el
+          img.draggable = false;
+          el.appendChild(img);
+          el.style.cursor = 'default';
           el.addEventListener('mousedown', e => {
             if (this._insertMode) return;
             this._selectShape(el, shape);
             this._startMove(e, el, shape, canvas, scale);
           });
+        } else if (shape._type === 'TABLE' && shape.cells) {
+          // ── Table shape ──────────────────────────────────────────────────
+          const rows = shape.table_rows || 0;
+          const cols = shape.table_cols || 0;
+          const cellMap = {};
+          (shape.cells || []).forEach(c => { cellMap[c.row + '_' + c.col] = c.text; });
+          const tbl = document.createElement('table');
+          tbl.style.cssText = 'width:100%;height:100%;border-collapse:collapse;table-layout:fixed;pointer-events:none;';
+          // scale = px/EMU; 12pt at 96dpi ≈ 16px; use pt * 96/72 * scale * EMU_PER_PT
+          // Simplified: pt * 12700 EMU/pt * scale (px/EMU) = pt * scale * 12700
+          // BUT scale is already ~1.5e-4 so correct formula: 12pt * scale EMU/px = 12*scale*1EMU→
+          // Correct: 1pt = 12700 EMU; fontSize_px = pt * 12700 * scale
+          const baseFontPx = Math.max(Math.round(10 * 12700 * scale), 6);
+          for (let r = 0; r < rows; r++) {
+            const tr = document.createElement('tr');
+            for (let c = 0; c < cols; c++) {
+              const td = document.createElement('td');
+              td.style.cssText = `border:1px solid #d0d0d0;padding:2px 4px;overflow:hidden;font-size:${baseFontPx}px;vertical-align:top;word-break:break-word;`;
+              td.textContent = cellMap[r + '_' + c] || '';
+              tr.appendChild(td);
+            }
+            tbl.appendChild(tr);
+          }
+          el.appendChild(tbl);
+          el.style.overflow = 'hidden';
+          el.addEventListener('mousedown', e => {
+            if (this._insertMode) return;
+            this._selectShape(el, shape);
+            this._startMove(e, el, shape, canvas, scale);
+          });
+        } else {
+          // ── Unknown / connector / group — render invisibly (no dashed box clutter)
+          el.style.opacity = '0';
+          el.style.pointerEvents = 'none';
         }
         canvas.appendChild(el);
 
@@ -3131,5 +3187,51 @@ window.WA = window.WA || {};
       e.target.value = '';
     };
   });
+
+  // ─── Embedded-mode public API (文件工作站嵌入主窗口) ──────────────────────
+  // Detects whether this script is loaded inside /app (index.html) which
+  // contains #workspaceView, or on the standalone /workspace-assistant page.
+  const _isEmbedded = !!document.getElementById('workspaceView');
+
+  window.WA.openInMainView = function () {
+    const shell    = document.querySelector('.app-shell');
+    const chatView = document.getElementById('chatView');
+    const wsView   = document.getElementById('workspaceView');
+    if (!wsView) {
+      // Fallback: no embedded container → open standalone tab
+      window.open('/workspace-assistant', '_blank');
+      return;
+    }
+    // Collapse left sidebar so workspace gets full width
+    if (shell && !shell.classList.contains('sidebar-collapsed')) {
+      if (typeof toggleSidebar === 'function') toggleSidebar();
+      else shell.classList.add('sidebar-collapsed');
+    }
+    // Highlight active nav button
+    document.querySelectorAll('.sb-nav-item').forEach(el => el.classList.remove('active'));
+    const navBtn = document.getElementById('navWorkspaceBtn');
+    if (navBtn) navBtn.classList.add('active');
+    // Swap views
+    if (chatView) chatView.style.display = 'none';
+    wsView.style.display = 'flex';
+    localStorage.setItem('koto.inWorkspace', '1');
+    // Load workspace files on first open
+    if (typeof loadWorkspaceFiles === 'function') loadWorkspaceFiles();
+  };
+
+  window.WA.closeInMainView = function () {
+    const chatView = document.getElementById('chatView');
+    const wsView   = document.getElementById('workspaceView');
+    if (wsView)   wsView.style.display   = 'none';
+    if (chatView) chatView.style.display = '';
+    localStorage.removeItem('koto.inWorkspace');
+    // Restore nav highlight
+    document.querySelectorAll('.sb-nav-item').forEach(el => el.classList.remove('active'));
+  };
+
+  // Auto-restore workspace view after page reload while user was in workspace
+  if (_isEmbedded && localStorage.getItem('koto.inWorkspace') === '1') {
+    requestAnimationFrame(() => window.WA.openInMainView());
+  }
 
 })();
