@@ -56,6 +56,45 @@ def pytest_configure(config):
     for _key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
         _os.environ.pop(_key, None)
 
+    # Prevent HuggingFace model downloads in background threads (the fallback
+    # embedding path when no Google key is set).  Without these flags the
+    # thread tries to pull BAAI/bge-m3 (~570 MB) from the Hub, keeping its
+    # socket open and blocking coverage.py's atexit handler for 15+ minutes.
+    _os.environ.setdefault("HF_HUB_OFFLINE", "1")
+    _os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+    _os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+    # Suppress HuggingFace tokenizer parallelism warnings in CI
+    _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+
+@pytest.fixture(autouse=True)
+def _reset_model_fallback_executor():
+    """Clear ModelFallbackExecutor singleton state before each test.
+
+    The executor is a global singleton that accumulates unavailable-model
+    timestamps and circuit-breaker counters across tests.  Left uncleaned,
+    tests that mock failing LLM calls poison later tests whose LLM calls are
+    expected to succeed (e.g. TestDatetimeInjection).
+
+    Also re-clears Google API keys here to counteract module-level
+    ``os.environ.setdefault("GEMINI_API_KEY", ...)`` calls in test files that
+    run during pytest's collection phase (after pytest_configure already cleared
+    them), permanently re-injecting an invalid key for the whole session.
+    """
+    import os as _os
+
+    for _key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
+        _os.environ.pop(_key, None)
+    try:
+        import app.core.llm.model_fallback as _mf  # noqa: PLC0415
+
+        _mf.ModelFallbackExecutor._cascade_failures.clear()
+        _mf.ModelFallbackExecutor._cascade_failure_times.clear()
+        if _mf._executor is not None:
+            _mf._executor._unavailable.clear()
+    except Exception:  # pragma: no cover — module may not be importable yet
+        pass
+
 
 @pytest.fixture(scope="session")
 def _koto_tmp_db(tmp_path_factory):
@@ -171,9 +210,15 @@ def tmp_workspace(tmp_path):
 
 
 def pytest_sessionfinish(session, exitstatus):
-    if os.getenv("KOTO_KEEP_TEST_ARTIFACTS", "0") == "1":
-        return
-    _cleanup_test_artifacts()
+    if os.getenv("KOTO_KEEP_TEST_ARTIFACTS", "0") != "1":
+        _cleanup_test_artifacts()
+    # Hard-exit to prevent background threads (JobRunner, ThreadPoolExecutor
+    # workers blocked on outbound HTTP) from keeping the process alive for
+    # 15+ minutes after all tests finish, causing CI timeout cancellation.
+    # Coverage.xml is written by pytest-cov before this hook runs.
+    import os as _os
+
+    _os._exit(int(exitstatus))
 
 
 def pytest_unconfigure(config):
