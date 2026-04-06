@@ -45,6 +45,10 @@ logger = logging.getLogger(__name__)
 
 file_library_bp = Blueprint("file_library", __name__)
 
+# Explicitly whitelisted notebook columns that may be updated via PATCH.
+# Only these names are ever interpolated into SQL — values always use placeholders.
+_NOTEBOOK_EDITABLE_COLS: frozenset[str] = frozenset({"name", "description", "color"})
+
 # ─── Database Setup ────────────────────────────────────────────────────────
 
 
@@ -133,6 +137,21 @@ def get_mounts() -> list[dict]:
     """Return list of mounted folder dicts: {path, name, pinned}."""
     settings = _load_settings()
     return settings.get("file_library", {}).get("mounts", [])
+
+
+def _is_allowed_path(path: Path) -> bool:
+    """Return True only if *path* resolves to within a mounted directory."""
+    try:
+        resolved = path.resolve()
+    except Exception:
+        return False
+    for mount in get_mounts():
+        try:
+            resolved.relative_to(Path(mount["path"]).resolve())
+            return True
+        except ValueError:
+            continue
+    return False
 
 
 def set_mounts(mounts: list[dict]):
@@ -396,6 +415,8 @@ def api_get_tree():
     root_path = Path(root).resolve()
     if not root_path.is_dir():
         return jsonify({"error": "目录不存在"}), 404
+    if not _is_allowed_path(root_path):
+        return jsonify({"error": "路径不在已挂载目录中"}), 403
     tree = _build_tree(root_path, root_path)
     return jsonify({"root": str(root_path), "tree": tree})
 
@@ -411,9 +432,11 @@ def api_parse_file():
     if not file_path:
         return jsonify({"error": "path required"}), 400
 
-    p = Path(file_path)
+    p = Path(file_path).resolve()
     if not p.is_file():
         return jsonify({"error": "文件不存在"}), 404
+    if not _is_allowed_path(p):
+        return jsonify({"error": "路径不在已挂载目录中"}), 403
 
     ext = p.suffix.lower()
 
@@ -504,7 +527,7 @@ def api_create_notebook():
 def api_update_notebook(nb_id: int):
     data = request.get_json(force=True, silent=True) or {}
     fields, vals = [], []
-    for key in ("name", "description", "color"):
+    for key in _NOTEBOOK_EDITABLE_COLS:
         if key in data:
             fields.append(f"{key}=?")
             vals.append(data[key])
@@ -878,6 +901,8 @@ def api_open_native():
     path = data.get("path", "").strip()
     if not path or not os.path.exists(path):
         return jsonify({"success": False, "error": "路径不存在"}), 404
+    if not _is_allowed_path(Path(path)):
+        return jsonify({"success": False, "error": "路径不在已挂载目录中"}), 403
     try:
         if sys.platform == "win32":
             os.startfile(path)

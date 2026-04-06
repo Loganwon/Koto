@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from typing import Dict, List, Optional
 
@@ -193,6 +194,7 @@ class ModelFallbackExecutor:
     _cascade_failure_times: Dict[str, float] = (
         {}
     )  # task_type → timestamp of last cascade failure
+    _cascade_lock: threading.Lock = threading.Lock()  # guards _cascade_failures/_cascade_failure_times
     _CIRCUIT_BREAKER_BASE: float = 5.0  # initial backoff in seconds
     _CIRCUIT_BREAKER_CAP: float = 120.0  # max backoff in seconds
 
@@ -272,13 +274,15 @@ class ModelFallbackExecutor:
         last_exc: Exception = None
 
         # ── Circuit-breaker check ──────────────────────────────────────────
-        n = self._cascade_failures.get(task_type, 0)
+        with self._cascade_lock:
+            n = self._cascade_failures.get(task_type, 0)
+            last_failure_time = self._cascade_failure_times.get(task_type, 0.0)
         if n > 0:
             backoff = min(
                 self._CIRCUIT_BREAKER_BASE * (2.0 ** (n - 1)),
                 self._CIRCUIT_BREAKER_CAP,
             )
-            elapsed = time.time() - self._cascade_failure_times.get(task_type, 0.0)
+            elapsed = time.time() - last_failure_time
             if elapsed < backoff:
                 raise RuntimeError(
                     f"Circuit breaker open. task={task_type}, backing off {backoff:.0f}s"
@@ -306,7 +310,8 @@ class ModelFallbackExecutor:
                         f"(task={task_type})"
                     )
                 # Reset circuit breaker on success
-                self._cascade_failures[task_type] = 0
+                with self._cascade_lock:
+                    self._cascade_failures[task_type] = 0
                 return result
 
             except Exception as exc:
@@ -347,15 +352,17 @@ class ModelFallbackExecutor:
                         "[ModelFallback] ✅ 云端全部失败，Ollama 本地兜底成功 (task=%s)",
                         task_type,
                     )
-                    self._cascade_failures[task_type] = 0
+                    with self._cascade_lock:
+                        self._cascade_failures[task_type] = 0
                     return {"content": _content, "tool_calls": [], "model": "local/ollama"}
                 logger.warning("[ModelFallback] Ollama 兜底失败: %s", _err)
         except Exception as _le:
             logger.warning("[ModelFallback] Ollama 兜底异常: %s", _le)
 
         # 所有候选均失败 — record cascade failure for circuit breaker
-        self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1
-        self._cascade_failure_times[task_type] = time.time()
+        with self._cascade_lock:
+            self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1
+            self._cascade_failure_times[task_type] = time.time()
         if last_exc:
             raise last_exc
         raise RuntimeError(
