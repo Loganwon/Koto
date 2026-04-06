@@ -26,15 +26,28 @@ export class FloatingToolbar {
 
   // ══════════════════ DOM 创建 ══════════════════
 
+  // Full action list (also patched at runtime by koto-patch.js)
+  static ACTIONS = [
+    { action: 'translate',        icon: '🌐', label: '翻译' },
+    { action: 'rewrite',          icon: '✏️', label: '改写' },
+    { action: 'continue_writing', icon: '📝', label: '续写' },
+    { action: 'polish',           icon: '✨', label: '润色' },
+    { action: 'summarize',        icon: '📋', label: '摘要' },
+    { action: 'annotate',         icon: '🔖', label: '标注' },
+    { action: 'quote',            icon: '❝',  label: '引用' },
+    { action: 'custom',           icon: '💬', label: 'AI' },
+  ];
+
   _createDOM() {
     this._toolbar = document.createElement('div');
     this._toolbar.id = 'floating-ai-toolbar';
     this._toolbar.className = 'floating-toolbar hidden';
-    this._toolbar.innerHTML = `
-      <button class="ft-btn" data-action="polish" title="AI 润色">✨ 润色</button>
-      <button class="ft-btn" data-action="translate" title="翻译">🌐 翻译</button>
-      <button class="ft-btn" data-action="custom" title="自定义指令">💬 AI</button>
-    `;
+    this._toolbar.innerHTML = FloatingToolbar.ACTIONS.map(a =>
+      `<button class="ft-btn" data-action="${a.action}" title="${a.label}">${a.icon} ${a.label}</button>`
+    ).join('');
+    this._toolbar.style.flexWrap = 'wrap';
+    this._toolbar.style.maxWidth = '270px';
+    this._toolbar.style.gap = '4px';
     document.body.appendChild(this._toolbar);
 
     // 防止点击工具栏时丢失选区
@@ -170,23 +183,27 @@ export class FloatingToolbar {
       fullText: this._doc.getFullText(),
     };
 
-    if (action === 'polish') {
-      this._panel.addMessage(`AI 润色: "${this._truncate(this._selectedText, 50)}"`, 'user');
-      this._bridge.sendAction('polish', selData);
-    } else if (action === 'translate') {
-      this._panel.addMessage(`翻译: "${this._truncate(this._selectedText, 50)}"`, 'user');
-      this._bridge.sendAction('translate', selData);
+    const labelMap = {};
+    FloatingToolbar.ACTIONS.forEach(a => { labelMap[a.action] = a.label; });
+    const label = labelMap[action] || action;
+    const preview = this._truncate(this._selectedText, 40);
+
+    if (action === 'quote') {
+      const quoted = `\n「${this._selectedText}」\n`;
+      this._panel.addMessage('引用格式化', 'user');
+      this._panel.startStreamMessage?.();
+      this._panel.appendStreamChunk?.(quoted);
+      this._panel.finalizeStreamMessage?.(quoted, 'quote', selData);
     } else if (action === 'custom') {
-      const instruction = prompt('输入 AI 指令：');
+      const instruction = prompt('输入 AI 指令（将应用于选中文本）：');
       if (!instruction) return;
       this._panel.addMessage(instruction, 'user');
-      this._bridge.sendAction('custom_instruction', {
-        instruction,
-        context: selData,
-      });
+      this._bridge.sendAction('custom_instruction', { instruction, context: selData });
+    } else {
+      this._panel.addMessage(`${label}：「${preview}」`, 'user');
+      this._bridge.sendAction(action, selData);
     }
 
-    // 显示右侧面板（如果已折叠）
     this._showAIPanel();
     this.hide();
   }

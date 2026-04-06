@@ -32,5 +32,31 @@
   </div>
 
   <script type="module" src="./main.js"></script>
+  <!-- 运行时扩展补丁：浮动工具栏8项操作 + 键盘快捷键 + 导出功能 -->
+  <script src="/editor/assets/koto-patch.js" defer></script>
+  <!-- 自动激活文档：等待 FileManager 就绪后，自动加载最近的文档 -->
+  <script>
+    (function autoActivateDoc() {
+      var attempts = 0;
+      var timer = setInterval(function () {
+        attempts++;
+        var fm = window.__koto && window.__koto.fileManager;
+        if (!fm) { if (attempts > 40) clearInterval(timer); return; }
+        clearInterval(timer);
+        if (fm._activeId) return;
+        if (fm._files && fm._files.length > 0) {
+          fm._switchDoc(fm._files[0].id);
+        } else {
+          fetch('/api/editor/docs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: '快速笔记' })
+          }).then(function (r) { return r.json(); }).then(function (d) {
+            if (d.id) { fm._activeId = d.id; fm.refresh && fm.refresh(); }
+          }).catch(function () {});
+        }
+      }, 300);
+    })();
+  </script>
 </body>
 </html>
