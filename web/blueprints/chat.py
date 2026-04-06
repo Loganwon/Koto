@@ -186,15 +186,20 @@ def mini_chat() -> Response:
             )
             response_text = result.get("response", "")
             used_model = result.get("model", model)
-            is_error = response_text.startswith("Error:")
-            if is_error and "404" in response_text:
+            is_error = response_text.startswith("Error:") or response_text.startswith("❌")
+            # Fallback on HTTP errors (404 model unavailable, 503 overloaded, etc.)
+            _needs_fallback = is_error and any(
+                code in response_text for code in ("404", "503", "UNAVAILABLE", "INVALID")
+            )
+            if _needs_fallback:
                 for fallback_model in ["gemini-2.5-flash", "gemini-3-flash-preview"]:
                     try:
                         result = _a.brain.chat(
                             history, user_input, model=fallback_model, auto_model=False
                         )
-                        if not result.get("response", "").startswith("Error:"):
-                            response_text = result.get("response", "")
+                        _fb_resp = result.get("response", "")
+                        if _fb_resp and not _fb_resp.startswith("Error:") and not _fb_resp.startswith("❌"):
+                            response_text = _fb_resp
                             used_model = fallback_model
                             is_error = False
                             break

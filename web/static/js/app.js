@@ -399,6 +399,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         shadowPollPending();
         setInterval(shadowPollPending, 5 * 60 * 1000);
     }, 3000);
+
+    // 9. 深度链接：从文件管理跳转过来时自动打开"我的文件"面板
+    if (location.search.includes('my_files=1')) {
+        setTimeout(openFileHubModal, 400);
+        // 清理 URL，不留参数痕迹
+        history.replaceState({}, '', location.pathname);
+    }
 });
 
 function hideStartupSplash() {
@@ -1771,7 +1778,7 @@ function formatMessageTimestamp(ts) {
 }
 
 function renderMessage(role, content, meta = {}) {
-    const avatar = role === 'user' ? 'U' : '言';
+    const avatar = role === 'user' ? 'U' : `<img src="/static/assets/koto_chat_icon.png" alt="Koto" class="avatar-img">`;
     const sender = role === 'user' ? 'You' : 'Koto';
     
     // 模型名称简化显示 (2026-01)
@@ -2389,7 +2396,7 @@ async function sendMessage(event) {
         msgDiv.id = msgId;
         const _showTaskBadge = currentSettings?.ai?.show_task_type === true;
         msgDiv.innerHTML = `
-            <div class="message-avatar">言</div>
+            <div class="message-avatar"><img src="/static/assets/koto_chat_icon.png" alt="Koto" class="avatar-img"></div>
             <div class="message-content">
                 <div class="message-header">
                     <span class="message-sender">Koto</span>

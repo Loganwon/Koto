@@ -101,8 +101,8 @@ def _parse_slides(raw_bytes: bytes) -> dict:
         bg_hex = "#FFFFFF"
         try:
             bg_fill = slide.background.fill
-            if bg_fill.type is not None and str(bg_fill.type) in ("SOLID", "1"):
-                bg_hex = "#{:06x}".format(int(bg_fill.fore_color.rgb))
+            if bg_fill.type is not None and getattr(bg_fill.type, 'name', '') == 'SOLID':
+                bg_hex = "#" + str(bg_fill.fore_color.rgb).lower()
         except Exception:
             pass
 
@@ -124,8 +124,8 @@ def _parse_slides(raw_bytes: bytes) -> dict:
 
             try:
                 fill = shape.fill
-                if fill.type is not None and str(fill.type) in ("SOLID", "1"):
-                    s["fill"] = "#{:06x}".format(int(fill.fore_color.rgb))
+                if fill.type is not None and getattr(fill.type, 'name', '') == 'SOLID':
+                    s["fill"] = "#" + str(fill.fore_color.rgb).lower()
             except Exception:
                 pass
 
@@ -164,7 +164,7 @@ def _parse_slides(raw_bytes: bytes) -> dict:
                             pass
                         try:
                             if run.font.color and run.font.color.type is not None:
-                                r["color"] = "#{:06x}".format(int(run.font.color.rgb))
+                                r["color"] = "#" + str(run.font.color.rgb).lower()
                         except Exception:
                             pass
                         p_obj["runs"].append(r)
@@ -246,9 +246,15 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
                         pass
 
                 edit_runs = ep.get("runs", [])
-                for r_idx, run in enumerate(para.runs):
+                orig_runs = list(para.runs)
+                for r_idx, run in enumerate(orig_runs):
                     if r_idx >= len(edit_runs):
-                        break
+                        # Clear text from original runs that no longer have an edit
+                        try:
+                            run.text = ""
+                        except Exception:
+                            pass
+                        continue
                     er = edit_runs[r_idx]
 
                     # Text

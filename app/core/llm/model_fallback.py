@@ -45,7 +45,7 @@ _MODEL_NOT_FOUND_PATTERNS = [
     r"model.*not.*exist",
     r"model.*unavailable",
     r"does not exist",
-    r"not supported",
+    r"not supported for",  # 收窄：只匹配 "not supported for xxx" 场景，避免误匹配地区限制
     r"INVALID_ARGUMENT.*model",
     r"unknown model",
     r"model_not_found",
@@ -59,6 +59,22 @@ _MODEL_NOT_FOUND_PATTERNS = [
     r"only.*Interactions",
     r"use.*client\.interactions",
 ]
+
+# ── 地区/帐号限制错误（所有云端模型均受影响，换模型无用）────────────────────────
+# 应直接跳过剩余云端候选，进入本地模型兜底。
+_LOCATION_BLOCKED_PATTERNS = [
+    r"User location is not supported",
+    r"location.*not.*support",
+    r"FAILED_PRECONDITION.*location",
+    r"country.*not.*support",
+    r"region.*not.*support",
+]
+
+
+def _is_location_blocked_error(exc: Exception) -> bool:
+    """判断是否为地区/帐号限制错误（切换 Gemini 模型无用，需直接走本地兜底）。"""
+    msg = str(exc)
+    return any(re.search(p, msg, re.IGNORECASE) for p in _LOCATION_BLOCKED_PATTERNS)
 
 # ── 通用降级链（无任务信息时使用）──────────────────────────────────────────────
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
@@ -295,7 +311,13 @@ class ModelFallbackExecutor:
 
             except Exception as exc:
                 last_exc = exc
-                if _is_model_unavailable_error(exc):
+                if _is_location_blocked_error(exc):
+                    # 地区/帐号限制：所有云端模型都会失败，无需继续尝试，直接跳出循环
+                    logger.warning(
+                        f"[ModelFallback] 🌐 地区限制，跳过剩余云端候选: {exc}"
+                    )
+                    break
+                elif _is_model_unavailable_error(exc):
                     self.mark_unavailable(model_id)
                     logger.warning(
                         f"[ModelFallback] 模型不可用，切换: {model_id} — {exc}"
@@ -304,6 +326,32 @@ class ModelFallbackExecutor:
                 else:
                     # 非"模型不存在"错误（如 prompt 格式错误、鉴权失败等）直接上抛，不降级
                     raise
+
+        # 所有候选均失败 — 尝试 Ollama 本地兜底 ─────────────────────────────────
+        _local_tried = False
+        try:
+            from app.core.routing.local_model_router import LocalModelRouter
+
+            if LocalModelRouter.is_ollama_available():
+                _local_tried = True
+                _msgs = (
+                    prompt
+                    if isinstance(prompt, list)
+                    else [{"role": "user", "content": str(prompt)}]
+                )
+                _content, _err = LocalModelRouter.call_ollama_chat(
+                    messages=_msgs, timeout=60.0
+                )
+                if not _err and _content:
+                    logger.info(
+                        "[ModelFallback] ✅ 云端全部失败，Ollama 本地兜底成功 (task=%s)",
+                        task_type,
+                    )
+                    self._cascade_failures[task_type] = 0
+                    return {"content": _content, "tool_calls": [], "model": "local/ollama"}
+                logger.warning("[ModelFallback] Ollama 兜底失败: %s", _err)
+        except Exception as _le:
+            logger.warning("[ModelFallback] Ollama 兜底异常: %s", _le)
 
         # 所有候选均失败 — record cascade failure for circuit breaker
         self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1

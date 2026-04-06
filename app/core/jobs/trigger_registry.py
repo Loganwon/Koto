@@ -364,6 +364,11 @@ class TriggerRegistry:
         except Exception as exc:
             with self._lock:
                 spec.last_error = str(exc)[:300]
+                # Update last_run even on failure to prevent immediate re-firing
+                # on the next 15-second scheduler cycle (e.g., when DB is locked).
+                # Without this, _should_fire() keeps returning True and the trigger
+                # spams the log on every cycle until the underlying issue is resolved.
+                spec.last_run = datetime.now().isoformat(timespec="milliseconds")
             logger.error("[TriggerRegistry] 触发失败 %s: %s", spec.name, exc)
             try:
                 from app.core.ops.ops_event_bus import get_ops_bus

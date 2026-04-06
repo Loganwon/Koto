@@ -52,6 +52,14 @@ def _doc_path(doc_id: str) -> str:
     return os.path.join(_get_docs_dir(), f"{safe_id}.json")
 
 
+def _source_path(doc_id: str) -> str:
+    """Return the path where the original source file (e.g. .docx) is stored."""
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", doc_id)
+    if not safe_id:
+        raise ValueError("Invalid document ID")
+    return os.path.join(_get_docs_dir(), f"{safe_id}.source.docx")
+
+
 def _read_doc(doc_id: str) -> dict | None:
     path = _doc_path(doc_id)
     if not os.path.exists(path):
@@ -164,8 +172,141 @@ def delete_doc(doc_id: str) -> Response:
     if not os.path.exists(path):
         return jsonify({"error": "Not found"}), 404
     os.remove(path)
+    # Also delete stored source file if present
+    source_path = _source_path(doc_id)
+    if os.path.exists(source_path):
+        os.remove(source_path)
     _logger.info("Deleted doc %s", doc_id)
     return jsonify({"ok": True})
+
+
+# ── Get original source file (e.g. raw .docx binary) ──
+@editor_docs_bp.route("/api/editor/docs/<doc_id>/source", methods=["GET"])
+def get_doc_source(doc_id: str) -> Response:
+    doc = _read_doc(doc_id)
+    if not doc:
+        return jsonify({"error": "Not found"}), 404
+    source_ext = doc.get("sourceExt", "")
+    if not source_ext:
+        return jsonify({"error": "No source file"}), 404
+    spath = _source_path(doc_id)
+    if not os.path.exists(spath):
+        return jsonify({"error": "Source file missing"}), 404
+    with open(spath, "rb") as fh:
+        data = fh.read()
+    mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return Response(data, mimetype=mime, headers={
+        "Content-Disposition": f'attachment; filename="{doc.get("name", "document")}{source_ext}"'
+    })
+
+
+# ── Get document metadata (page size, margins, default font) for docx-preview layout ──
+@editor_docs_bp.route("/api/editor/docs/<doc_id>/meta", methods=["GET"])
+def get_doc_meta(doc_id: str) -> Response:
+    """Return page-layout metadata extracted from the .docx source via python-docx."""
+    doc = _read_doc(doc_id)
+    if not doc:
+        return jsonify({"error": "Not found"}), 404
+    if doc.get("sourceExt") != ".docx":
+        return jsonify({"error": "Not a docx"}), 404
+    spath = _source_path(doc_id)
+    if not os.path.exists(spath):
+        return jsonify({"error": "Source file missing"}), 404
+
+    try:
+        meta = _extract_docx_meta(spath)
+    except Exception as e:
+        _logger.warning("meta extraction failed for %s: %s", doc_id, e)
+        # Return sensible A4 defaults so the viewer still renders well
+        meta = _default_docx_meta()
+
+    return jsonify(meta)
+
+
+def _emu_to_pt(emu: int) -> float:
+    """Convert EMU (English Metric Units) to points. 1 pt = 12700 EMU."""
+    return round(emu / 12700, 2)
+
+
+def _default_docx_meta() -> dict:
+    return {
+        "pageWidth": 595.28,    # A4 pt
+        "pageHeight": 841.89,   # A4 pt
+        "marginTop": 72.0,
+        "marginBottom": 72.0,
+        "marginLeft": 90.0,
+        "marginRight": 90.0,
+        "defaultFont": "Calibri",
+        "defaultFontSize": 11.0,
+        "orientation": "portrait",
+    }
+
+
+def _extract_docx_meta(source_path: str) -> dict:
+    """Extract page layout and default font info from a .docx source file."""
+    try:
+        import docx
+        from docx.oxml.ns import qn
+        doc = docx.Document(source_path)
+        section = doc.sections[0]
+
+        page_width  = _emu_to_pt(section.page_width)
+        page_height = _emu_to_pt(section.page_height)
+        margin_top    = _emu_to_pt(section.top_margin)
+        margin_bottom = _emu_to_pt(section.bottom_margin)
+        margin_left   = _emu_to_pt(section.left_margin)
+        margin_right  = _emu_to_pt(section.right_margin)
+
+        orientation = "landscape" if page_width > page_height else "portrait"
+
+        # Default font — from Normal style or document defaults
+        default_font = "Calibri"
+        default_font_size = 11.0
+        try:
+            normal_style = doc.styles["Normal"]
+            if normal_style.font.name:
+                default_font = normal_style.font.name
+            if normal_style.font.size:
+                default_font_size = round(normal_style.font.size.pt, 1)
+        except Exception:
+            pass
+
+        # Try document-level defaults if Normal style has no explicit values
+        if default_font == "Calibri":
+            try:
+                docDefaults = doc.element.body.getparent().find(
+                    ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}docDefaults"
+                )
+                if docDefaults is not None:
+                    rFonts = docDefaults.find(
+                        ".//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts"
+                    )
+                    if rFonts is not None:
+                        ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                        font_name = (
+                            rFonts.get(f"{{{ns}}}ascii")
+                            or rFonts.get(f"{{{ns}}}hAnsi")
+                            or rFonts.get(f"{{{ns}}}cs")
+                        )
+                        if font_name:
+                            default_font = font_name
+            except Exception:
+                pass
+
+        return {
+            "pageWidth": page_width,
+            "pageHeight": page_height,
+            "marginTop": margin_top,
+            "marginBottom": margin_bottom,
+            "marginLeft": margin_left,
+            "marginRight": margin_right,
+            "defaultFont": default_font,
+            "defaultFontSize": default_font_size,
+            "orientation": orientation,
+        }
+    except ImportError:
+        _logger.warning("python-docx not available; returning default meta")
+        return _default_docx_meta()
 
 
 # ── Import file ──
@@ -200,8 +341,9 @@ def import_doc() -> Response:
 
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     doc_name = os.path.splitext(original_name)[0][:200]
+    new_id = _new_id()
     doc = {
-        "id": _new_id(),
+        "id": new_id,
         "name": doc_name,
         "content": text,
         "snapshot": None,
@@ -209,9 +351,15 @@ def import_doc() -> Response:
         "updatedAt": now,
         "importedFrom": original_name,
     }
+    # For .docx files, persist the raw bytes so the frontend can render with mammoth.js
+    if ext == ".docx":
+        doc["sourceExt"] = ".docx"
+        spath = _source_path(new_id)
+        with open(spath, "wb") as sfh:
+            sfh.write(raw)
     _write_doc(doc)
     _logger.info("Imported %s → doc %s (%d chars)", original_name, doc["id"], len(text))
-    return jsonify({"id": doc["id"], "name": doc_name, "size": len(text)}), 201
+    return jsonify({"id": doc["id"], "name": doc_name, "size": len(text), "sourceExt": doc.get("sourceExt", "")}), 201
 
 
 @editor_docs_bp.route("/api/editor/docs/import_path", methods=["POST"])
@@ -249,8 +397,9 @@ def import_doc_from_path() -> Response:
 
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     doc_name = os.path.splitext(original_name)[0][:200]
+    new_id = _new_id()
     doc = {
-        "id": _new_id(),
+        "id": new_id,
         "name": doc_name,
         "content": text,
         "snapshot": None,
@@ -258,9 +407,15 @@ def import_doc_from_path() -> Response:
         "updatedAt": now,
         "importedFrom": original_name,
     }
+    # For .docx files, persist the raw bytes so the frontend can render with mammoth.js
+    if ext == ".docx":
+        doc["sourceExt"] = ".docx"
+        spath = _source_path(new_id)
+        with open(spath, "wb") as sfh:
+            sfh.write(raw)
     _write_doc(doc)
     _logger.info("Imported path %s → doc %s (%d chars)", file_path, doc["id"], len(text))
-    return jsonify({"id": doc["id"], "name": doc_name, "size": len(text)}), 201
+    return jsonify({"id": doc["id"], "name": doc_name, "size": len(text), "sourceExt": doc.get("sourceExt", "")}), 201
 
 
 # ── Text extraction helpers ──

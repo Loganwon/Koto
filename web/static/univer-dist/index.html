@@ -6,8 +6,8 @@
   <title>Koto 文件助手</title>
   <!-- socket.io CDN 兜底（npm 安装后可删除） -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
-  <script type="module" crossorigin src="./assets/index-ifQ0HjWd.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-9m-WMyzU.css">
+  <script type="module" crossorigin src="/editor/assets/main.js"></script>
+  <link rel="stylesheet" crossorigin href="/editor/assets/main.css">
 </head>
 <body>
   <div id="file-assistant-root">
@@ -32,7 +32,8 @@
     <!-- 右侧：AI 助手面板 -->
     <aside id="right-ai-panel"></aside>
   </div>
-
+
+
   <!-- 运行时扩展补丁：浮动工具栏8项操作 + 键盘快捷键 + 导出功能 -->
   <script src="/editor/assets/koto-patch.js" defer></script>
   <!-- 自动激活文档：等待 FileManager 就绪后，自动加载最近的文档 -->

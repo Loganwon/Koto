@@ -1620,6 +1620,7 @@ if _has_socketio and SocketIO is not None:
         _app_logger.warning("[WebSocket] socket_handler 注册失败: %s", _sio_err)
 
 
+
 # ── Sentry error tracking (no-op if SENTRY_DSN not set) ──────────────────────
 _sentry_dsn = os.environ.get("SENTRY_DSN", "")
 if _sentry_dsn:
@@ -3551,7 +3552,12 @@ def _get_chat_system_instruction(question: str = None):
 - ✗ 自我介绍或重复身份
 - ✗ 生成代码标记 BEGIN_FILE/END_FILE（仅文件生成任务使用）
 - ✗ 输出冗长的前言、风险提示或过度谨慎的警告
-- ✗ 拒绝合理的系统操作请求"""
+- ✗ 拒绝合理的系统操作请求
+
+---
+⚠️ **[时间锚点 · 优先级最高]** 当前系统时间：**{date_str} {weekday} {time_str}**
+对话历史中出现的任何日期（如之前的回复里写过的日期）均为**历史消息生成时的时间**，与现在无关。
+计算"今天/明天/下周/上月"等相对时间时，**严格以此处时间为准**，忽略历史记录中的日期。"""
 
 
 def _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION():
@@ -5869,7 +5875,8 @@ class LocalDispatcher:
         if os.environ.get("KOTO_DEPLOY_MODE") == "cloud":
             return False
         try:
-            requests.get("http://localhost:11434", timeout=0.2)
+            # Bypass system proxy — Ollama is always on localhost
+            requests.get("http://localhost:11434", timeout=0.5, proxies={"http": None, "https": None})
             return True
         except Exception:
             return False
@@ -8824,6 +8831,11 @@ def chat_stream():
         _complexity = (context_info or {}).get("complexity", "normal")
         model_id = SmartDispatcher.get_model_for_task(task_type, complexity=_complexity)
 
+    # 🦙 locked_model='local' → 强制走本地 Ollama 通道，不使用远程模型
+    if locked_model == "local":
+        model_id = SmartDispatcher.get_model_for_task("CHAT")
+        _local_chat_override = True
+
     _app_logger.debug(
         f"[STREAM] Final: task_type='{task_type}', model_id='{model_id}'\n"
     )
@@ -8975,6 +8987,15 @@ def chat_stream():
     except Exception:
             import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
+    # 🕒 为每条发往 LLM 的消息前缀当前时间戳，防止旧历史记录干扰时间判断
+    # （不修改保存到 session 的原始 user_input）
+    _now_ts = datetime.now()
+    _ts_prefix = (
+        f"[🕒 {_now_ts.strftime('%Y-%m-%d %H:%M')} "
+        f"{['周一','周二','周三','周四','周五','周六','周日'][_now_ts.weekday()]}] "
+    )
+    _llm_user_input = _ts_prefix + user_input
+
     def generate():
         start_time = time.time()
 
@@ -9088,7 +9109,8 @@ def chat_stream():
                 yield t
 
         # 如果有上下文，使用增强后的输入
-        effective_input = user_input
+        # _llm_user_input 携带当前时间戳前缀，防止历史记录干扰时间判断
+        effective_input = _llm_user_input
         if (
             context_info
             and context_info.get("is_continuation")
@@ -17295,6 +17317,379 @@ _compare_file_registry: dict = {}
 # 操作历史 API
 
 # 语音转写 API
+
+# ================= 文件助手 AI 端点 =================
+
+
+def _build_editor_prompt(action: str, selection: str, instruction: str, full_text: str = "") -> str:
+    """Build a prompt for the File Assistant AI based on action type.
+    
+    When full_text is provided, it's used as context so AI can match
+    the document's tone and style.
+    """
+    # Helper: build surrounding context (max ~4000 chars around selection)
+    def _context_snippet():
+        if not full_text or not selection:
+            return ""
+        idx = full_text.find(selection)
+        if idx < 0:
+            # Can't locate selection, send truncated full text
+            return full_text[:4000]
+        before = full_text[max(0, idx - 2000):idx]
+        after = full_text[idx + len(selection):idx + len(selection) + 2000]
+        return f"{before}[[[SELECTED]]]{selection}[[[/SELECTED]]]{after}"
+
+    if action == "translate":
+        ctx = ""
+        if full_text:
+            ctx = f"\n\n【文档上下文（仅供参考语气，不要翻译全文）】\n{_context_snippet()}\n"
+        return (
+            "请将以下文本准确翻译为英文，只输出译文，不要添加任何解释或前缀："
+            f"{ctx}\n\n【需要翻译的内容】\n{selection}"
+        )
+    elif action == "polish":
+        ctx = ""
+        if full_text:
+            ctx = f"\n\n【文档全文（仅供参考语气和上下文，不要修改全文）】\n{_context_snippet()}\n"
+        return (
+            "你是一名专业编辑。请对以下【选中部分】进行润色，使其更加流畅、优雅，"
+            "保持原意不变，并与全文语气保持一致。只输出润色后的选中部分，不要添加解释："
+            f"{ctx}\n\n【需要润色的内容】\n{selection}"
+        )
+    elif action == "summarize":
+        return (
+            "请对以下文本进行摘要，提炼核心要点，使用简洁的中文输出，不超过 200 字：\n\n"
+            + selection
+        )
+    elif action == "continue_writing":
+        return (
+            "请根据以下文本内容进行续写，保持风格一致，直接输出续写内容，不加任何前缀：\n\n"
+            + selection
+        )
+    elif action == "check":
+        return (
+            "请仔细检查以下文本中的语法错误、错别字、标点问题和表达不当之处。\n"
+            "用中文逐条列出发现的问题，格式为：\n"
+            "1. 【位置描述】原文 → 建议修改\n"
+            "如果没有发现问题，请直接说\"未发现明显问题\"。\n\n"
+            + selection
+        )
+    elif action in ("python_chart", "chart"):
+        return (
+            "根据以下文本/数据，生成一段 Python 代码，使用 pandas 和 matplotlib 生成合适的图表（折线图、柱状图或饼图等）。\n"
+            "要求：\n"
+            "1. 代码完整可直接运行（包含所有必要 import）\n"
+            "2. 中文显示：在代码开头加入 import matplotlib; matplotlib.rcParams['font.sans-serif']=['SimHei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
+            "3. 最后调用 plt.savefig('chart.png', dpi=150, bbox_inches='tight') 然后 plt.close()\n"
+            "4. 绝对不要调用 plt.show()\n"
+            "5. 只输出代码，不加任何 markdown 代码块标记（不加 ```）\n\n"
+            + selection
+        )
+    elif action == "rewrite":
+        ctx = ""
+        if full_text:
+            ctx = f"\n\n【文档上下文（仅供参考）】\n{_context_snippet()}\n"
+        return (
+            "请对以下文本进行改写，使其用词更准确、逻辑更清晰，保留原意，与全文语气一致，只输出改写后的文本："
+            f"{ctx}\n\n【需要改写的内容】\n{selection}"
+        )
+    elif action == "annotate":
+        return (
+            "请为以下文本添加注解说明，解释关键概念、背景或难点，格式为在原文后附注解：\n\n"
+            + selection
+        )
+    elif action == "find_replace":
+        return (
+            "你是一个文本处理助手。根据用户的替换需求，分析以下全文并输出替换方案。\n"
+            "输出格式（严格 JSON，不要添加任何其他文字）：\n"
+            '{"replacements": [{"from": "原文", "to": "替换为"}], "summary": "共替换 N 处"}\n\n'
+            "注意：\n"
+            "- from 字段必须是全文中实际存在的文本\n"
+            "- 如果用户描述的是模糊替换（如“把所有人的名字隐藏”），请找出所有具体匹配项\n"
+            "- 只输出 JSON，不要加 ```json 标记\n\n"
+            f"全文内容：\n{full_text[:8000]}\n\n"
+            f"用户替换需求：{instruction}"
+        )
+    elif action == "find_reference":
+        ctx = ""
+        if full_text:
+            ctx = f"\n\n文档上下文（仅供参考）：\n{full_text[:3000]}\n"
+        return (
+            "请为以下内容提供可靠的参考文献和支持信息。列出 3-5 个相关来源，格式：\n"
+            "1. 【来源类型】来源名称 — 关键引用内容\n"
+            "   链接（如可获取）\n\n"
+            "注意：只提供真实可靠的来源，不要捏造。如果不确定，请明确标注“待核实”。\n\n"
+            f"选中内容：\n{selection}"
+            f"{ctx}"
+        )
+    elif action == "custom_instruction":
+        ctx = f"\n\n参考文本：\n{selection}" if selection else ""
+        full_ctx = ""
+        if full_text:
+            full_ctx = f"\n\n文档全文（仅供参考）：\n{full_text[:4000]}"
+        return f"{instruction}{ctx}{full_ctx}"
+    else:
+        return selection or instruction
+
+
+@app.route("/api/editor/ai/stream", methods=["POST"])
+def editor_ai_stream():
+    """文件助手 AI — SSE 流式端点，复用主界面 AI 客户端。
+
+    Body JSON: { "action": str, "selection": str, "instruction": str }
+    SSE events: {"type":"token","text":"..."} | {"type":"done"} | {"type":"error","text":"..."}
+    """
+    data = request.get_json(silent=True) or {}
+    action = (data.get("action") or "custom_instruction").strip()
+    selection = (data.get("selection") or "").strip()
+    instruction = (data.get("instruction") or "").strip()
+    full_text = (data.get("full_text") or "").strip()
+    # session_id for server-side persistence — frontend sends 'editor_{docId}'
+    _session_id = re.sub(r"[^A-Za-z0-9_\-]", "_", (data.get("session_id") or "").strip())[:64]
+
+    def _err_gen(msg: str):
+        yield f"data: {json.dumps({'type': 'error', 'text': msg}, ensure_ascii=False)}\n\n"
+
+    if not selection and not instruction:
+        return Response(_err_gen("选中内容或指令不能为空"), mimetype="text/event-stream")
+
+    if not API_KEY:
+        return Response(
+            _err_gen("API 密钥未配置，请检查 config/gemini_config.env"),
+            mimetype="text/event-stream",
+        )
+
+    # Build multi-turn history prefix if the frontend sent prior conversation turns
+    _history_raw = (data.get("history") or [])
+    _history_raw = _history_raw[-20:] if len(_history_raw) > 20 else _history_raw
+    _hist_block = ""
+    if _history_raw:
+        _hist_parts = []
+        for _turn in _history_raw:
+            _role = _turn.get("role", "")
+            _content = (_turn.get("content") or "").strip()
+            if _content:
+                _hist_parts.append(("用户" if _role == "user" else "AI") + "：" + _content)
+        if _hist_parts:
+            _hist_block = "【对话历史（供参考，据此理解上下文）】\n" + "\n".join(_hist_parts) + "\n\n---\n\n"
+
+    prompt = _hist_block + _build_editor_prompt(action, selection, instruction, full_text)
+    model_id = MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
+
+    def generate():
+        _resp_parts = []
+        try:
+            response_stream = client.models.generate_content_stream(
+                model=model_id,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.7,
+                    max_output_tokens=4096,
+                ),
+            )
+            for chunk in response_stream:
+                text = getattr(chunk, "text", None)
+                if text:
+                    _resp_parts.append(text)
+                    yield f"data: {json.dumps({'type': 'token', 'text': text}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            # Persist conversation to server-side session for cross-refresh memory
+            if _session_id and _resp_parts:
+                _user_str = instruction or selection or action
+                _ai_str = "".join(_resp_parts)
+                try:
+                    session_manager.append_and_save(
+                        _session_id + ".json", _user_str, _ai_str,
+                        task=action, model_name=model_id,
+                    )
+                except Exception as _se:
+                    _app_logger.debug(f"[EditorAI] session save skipped: {_se}")
+        except Exception as _e:
+            _app_logger.warning(f"[EditorAI] stream error: {_e}")
+            yield f"data: {json.dumps({'type': 'error', 'text': str(_e)}, ensure_ascii=False)}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream")
+
+
+@app.route("/api/editor/ai/history", methods=["GET"])
+def editor_ai_history():
+    """文件助手 AI — 返回本文件的历史对话记录。
+
+    Query: ?doc_id=<file_id>
+    Response: { "history": [{"role":"user"|"model", "content":str, "timestamp":str}] }
+    """
+    doc_id = (request.args.get("doc_id") or "").strip()
+    if not doc_id:
+        return jsonify({"history": []})
+    _sid = re.sub(r"[^A-Za-z0-9_\-]", "_", doc_id)[:64]
+    if not _sid.startswith("editor_"):
+        _sid = "editor_" + _sid
+    try:
+        records = session_manager.load_full(_sid + ".json")
+        history = []
+        for r in records:
+            role = r.get("role", "")
+            content = (r.get("parts") or [""])[0] if r.get("parts") else ""
+            ts = r.get("timestamp", "")
+            if content:
+                history.append({"role": role, "content": content, "timestamp": ts})
+        return jsonify({"history": history})
+    except Exception:
+        return jsonify({"history": []})
+
+
+@app.route("/api/editor/ai/chart", methods=["POST"])
+def editor_ai_chart():
+    """文件助手 AI — 沙盒图表执行端点。
+
+    Body JSON: { "data_context": str, "instruction": str, "lang": "python"|"r" }
+    SSE events:
+      {"type":"status","text":"..."}              — 进度提示
+      {"type":"code","text":"..."}                — 生成的代码（供展示）
+      {"type":"image","name":"...","data":"..."}  — base64 图片
+      {"type":"stdout","text":"..."}              — 沙盒 stdout（如有）
+      {"type":"stderr","text":"..."}              — 沙盒 stderr（如有）
+      {"type":"done"}                             — 完成
+      {"type":"error","text":"..."}               — 错误
+    """
+    data = request.get_json(silent=True) or {}
+    data_context = (data.get("data_context") or data.get("selection") or "").strip()
+    instruction = (data.get("instruction") or "").strip()
+    lang = (data.get("lang") or "python").strip().lower()
+    if lang not in ("python", "r"):
+        lang = "python"
+
+    def _err_gen(msg: str):
+        yield f"data: {json.dumps({'type': 'error', 'text': msg}, ensure_ascii=False)}\n\n"
+
+    if not data_context and not instruction:
+        return Response(_err_gen("没有可用的数据或描述"), mimetype="text/event-stream")
+
+    if not API_KEY:
+        return Response(
+            _err_gen("API 密钥未配置，请检查 config/gemini_config.env"),
+            mimetype="text/event-stream",
+        )
+
+    lang_label = "Python (matplotlib/pandas)" if lang == "python" else "R (ggplot2)"
+    task_desc = instruction if instruction else "根据以下数据自动选择合适的图表类型并可视化"
+    code_prompt = (
+        f"请根据以下任务，编写一段可以直接运行的 {lang_label} 代码。\n"
+        "要求：\n"
+        "1. 包含所有必要的 import\n"
+    )
+    if lang == "python":
+        code_prompt += (
+            "2. 在代码开头加入: import matplotlib; matplotlib.rcParams['font.sans-serif']=['SimHei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
+            "3. 最后用 plt.savefig('chart.png', dpi=150, bbox_inches='tight') 保存图表，然后 plt.close()\n"
+            "4. 绝对不要调用 plt.show()\n"
+        )
+    else:
+        code_prompt += (
+            "2. 使用 ggplot2 绘图\n"
+            "3. 用 ggsave('chart.png', dpi=150) 保存图表\n"
+        )
+    code_prompt += (
+        "5. 只输出代码，不加任何 markdown 代码块标记（不加 ```）\n\n"
+        f"任务描述：{task_desc}\n"
+    )
+    if data_context:
+        code_prompt += f"\n参考数据/文本：\n{data_context[:3000]}\n"
+
+    model_id = MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
+
+    def generate():
+        import re as _re
+        try:
+            yield f"data: {json.dumps({'type': 'status', 'text': f'🤖 正在生成 {lang.upper()} 图表代码…'}, ensure_ascii=False)}\n\n"
+
+            # ── Step 1: Generate code via LLM ──
+            code_chunks = []
+            response_stream = client.models.generate_content_stream(
+                model=model_id,
+                contents=code_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=2048,
+                ),
+            )
+            for chunk in response_stream:
+                t = getattr(chunk, "text", None)
+                if t:
+                    code_chunks.append(t)
+            raw_code = "".join(code_chunks).strip()
+
+            # Strip markdown code fences if model disobeyed
+            raw_code = _re.sub(r"^```[a-z]*\n?", "", raw_code, flags=_re.MULTILINE)
+            raw_code = raw_code.strip().strip("`").strip()
+
+            if not raw_code:
+                yield f"data: {json.dumps({'type': 'error', 'text': 'AI 代码生成失败，请重试'}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'code', 'text': raw_code}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'status', 'text': '▶ 在沙盒中执行代码…'}, ensure_ascii=False)}\n\n"
+
+            # ── Step 2: Execute in sandbox ──
+            try:
+                from app.core.sandbox import run_python, run_r
+            except ImportError as ie:
+                yield f"data: {json.dumps({'type': 'error', 'text': f'沙盒模块加载失败: {ie}'}, ensure_ascii=False)}\n\n"
+                return
+
+            result = run_python(raw_code) if lang == "python" else run_r(raw_code)
+
+            if result.get("stdout", "").strip():
+                yield f"data: {json.dumps({'type': 'stdout', 'text': result['stdout'][:4096]}, ensure_ascii=False)}\n\n"
+            if result.get("stderr", "").strip():
+                yield f"data: {json.dumps({'type': 'stderr', 'text': result['stderr'][:2048]}, ensure_ascii=False)}\n\n"
+
+            if result.get("error"):
+                yield f"data: {json.dumps({'type': 'error', 'text': result['error']}, ensure_ascii=False)}\n\n"
+                return
+
+            images = result.get("files", {})
+            if not images:
+                yield f"data: {json.dumps({'type': 'error', 'text': '代码执行成功但未生成图片，请检查代码中是否有保存图片的语句'}, ensure_ascii=False)}\n\n"
+                return
+
+            for name, b64 in images.items():
+                yield f"data: {json.dumps({'type': 'image', 'name': name, 'data': b64}, ensure_ascii=False)}\n\n"
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except Exception as _e:
+            _app_logger.warning(f"[EditorAIChart] error: {_e}")
+            yield f"data: {json.dumps({'type': 'error', 'text': str(_e)}, ensure_ascii=False)}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream")
+
+
+@app.route("/api/editor/ai/chart-rerun", methods=["POST"])
+def editor_ai_chart_rerun():
+    """直接运行用户修改后的代码（跳过 LLM），返回 JSON 结果。
+
+    Body JSON: { "code": str, "lang": "python"|"r" }
+    Response JSON: { "stdout": str, "stderr": str, "files": {name: base64}, "error": str|null }
+    """
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip()
+    lang = (data.get("lang") or "python").strip().lower()
+
+    if not code:
+        return jsonify({"error": "代码不能为空", "stdout": "", "stderr": "", "files": {}})
+
+    if lang not in ("python", "r"):
+        lang = "python"
+
+    try:
+        from app.core.sandbox import run_python, run_r
+    except ImportError as ie:
+        return jsonify({"error": f"沙盒模块加载失败: {ie}", "stdout": "", "stderr": "", "files": {}})
+
+    result = run_python(code) if lang == "python" else run_r(code)
+    return jsonify(result)
+
 
 # ================= 主程序入口 =================
 

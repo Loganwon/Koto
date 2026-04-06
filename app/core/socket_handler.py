@@ -225,6 +225,19 @@ def register_socket_events(socketio):
                 )
 
         def _task_body():
+            import time as _time
+
+            # ── Progress helper ───────────────────────────────────────────────
+            def _emit_progress(step, detail=""):
+                socketio.emit(
+                    "agent_progress",
+                    {"step": step, "detail": detail, "ts": _time.time()},
+                    namespace="/doc",
+                    to=sid,
+                )
+
+            _emit_progress("analyzing", "正在分析上下文…")
+
             # ── Build system instruction ──────────────────────────────────────
             file_ctx = f"文件名：{file_name}，" if file_name else ""
 
@@ -323,6 +336,8 @@ def register_socket_events(socketio):
                 len(recent_history) // 2,
                 sid,
             )
+
+            _emit_progress("generating", "正在生成回复…")
 
             def _try_online():
                 provider = _get_provider()
@@ -482,15 +497,52 @@ def register_socket_events(socketio):
 
             # Emit tool calls BEFORE task_complete so the browser has
             # pendingToolCall set when agent_task_complete fires.
+            has_proposals = False
             if output_mode != "chat":
-                for tc in tool_calls:
-                    socketio.emit("doc_tool_call", tc, namespace="/doc", to=sid)
+                # ── Construct proposals when user had a pinned selection ───────
+                if selection and tool_calls:
+                    proposals = []
+                    for idx, tc in enumerate(tool_calls):
+                        proposed = tc.get("value", "")
+                        if proposed:
+                            proposals.append({
+                                "id": f"p_{idx}",
+                                "original_text": selection,
+                                "proposed_text": proposed,
+                                "rationale": clean_text or "",
+                                "tool_call": tc,
+                            })
+                    if proposals:
+                        has_proposals = True
+                        _emit_progress("formatting", "正在准备修改建议…")
+                        socketio.emit(
+                            "agent_proposals",
+                            {"proposals": proposals, "summary": clean_text},
+                            namespace="/doc",
+                            to=sid,
+                        )
+                else:
+                    for tc in tool_calls:
+                        socketio.emit("doc_tool_call", tc, namespace="/doc", to=sid)
 
+            _emit_progress("complete", "")
             socketio.emit(
-                "agent_task_complete", {"result": clean_text}, namespace="/doc", to=sid
+                "agent_task_complete",
+                {"result": clean_text, "has_proposals": has_proposals},
+                namespace="/doc",
+                to=sid,
             )
 
         socketio.start_background_task(_task)
+
+    # ── /files namespace (智能文件库 watchdog real-time updates) ──────────────────
+    @socketio.on("connect", namespace="/files")
+    def on_files_connect():
+        logger.info("[FileLib] /files client connected")
+
+    @socketio.on("disconnect", namespace="/files")
+    def on_files_disconnect():
+        logger.info("[FileLib] /files client disconnected")
 
 
 # ── Core text handler (streaming) ─────────────────────────────

@@ -76,10 +76,13 @@
 
     if (!ft._selectedText) return;
 
+    var _dv = koto.docxViewer;
+    var _inDocx = !!(_dv && _dv.isActive());
     var selData = {
       text:      ft._selectedText,
       range:     ft._selectionRange,
-      fullText:  doc.getFullText(),
+      fullText:  _inDocx ? _dv.getFullText() : doc.getFullText(),
+      _docxMode: _inDocx,
     };
 
     var label = LABEL_MAP[action] || action;
@@ -97,12 +100,10 @@
       var instruction = prompt('输入 AI 指令（将应用于选中文本）：');
       if (!instruction) return;
       panel.addMessage(instruction, 'user');
-      bridge.sendAction('custom_instruction', { instruction: instruction, context: selData });
-      panel.expand();
+      panel._sendViaMainAI('custom_instruction', selData.text || '', selData, instruction);
     } else {
       panel.addMessage(label + '：「' + preview + '」', 'user');
-      bridge.sendAction(action, selData);
-      panel.expand();
+      panel._sendViaMainAI(action, selData.text || '', selData, '');
     }
 
     ft.hide();
@@ -189,27 +190,30 @@
 
     var sel      = window.getSelection();
     var selText  = sel && !sel.isCollapsed ? sel.toString().trim() : '';
-    var fullText = doc.getFullText();
+    var _dv2 = koto.docxViewer;
+    var _inDocx2 = !!(_dv2 && _dv2.isActive());
+    var fullText = _inDocx2 ? _dv2.getFullText() : doc.getFullText();
 
     var payload;
     if (selText) {
       var idx = fullText.indexOf(selText);
       payload = {
-        text:     selText,
-        range:    idx >= 0
+        text:      selText,
+        range:     idx >= 0
           ? { startOffset: idx, endOffset: idx + selText.length }
           : { startOffset: 0, endOffset: fullText.length },
-        fullText: fullText,
+        fullText:  fullText,
+        _docxMode: _inDocx2,
       };
     } else {
       // 无选中 → 操作全文
-      payload = { text: fullText, fullText: fullText };
+      payload = { text: fullText, fullText: fullText, _docxMode: _inDocx2 };
     }
 
     var label   = LABEL_MAP[action] || action;
     var preview = (payload.text || '').substring(0, 30);
     panel.addMessage(label + '（快捷键）：「' + preview + (payload.text.length > 30 ? '…' : '') + '」', 'user');
-    bridge.sendAction(action, payload);
+    panel._sendViaMainAI(action, payload.text || '', payload, '');
     panel.expand();
   }
 

@@ -117,6 +117,80 @@ export class DocxViewer {
     return this._active;
   }
 
+  /**
+   * 将图片追加到文档末尾（供拖戏功能使用）。
+   * 在渲染区域尾部插入一个居中显示的图片块。
+   * @param {string} dataUrl  图片 data URL 或 HTTP URL
+   * @param {string} altText  alt 文本
+   */
+  appendImage(dataUrl, altText) {
+    if (!this._renderArea) return;
+    const wrapper = document.createElement('p');
+    wrapper.style.cssText = 'text-align:center;margin:16px 0;';
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.alt = altText || '图表';
+    img.style.cssText = 'max-width:90%;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,0.15);';
+    wrapper.appendChild(img);
+    this._renderArea.appendChild(wrapper);
+    // Scroll to new image
+    const scrollArea = this._host && this._host.querySelector('.docx-scroll-area');
+    if (scrollArea) scrollArea.scrollTop = scrollArea.scrollHeight;
+  }
+
+  /** 提取渲染区域的纯文本（供 FloatingToolbar 计算选区偏移量） */
+  getFullText() {
+    if (!this._renderArea) return '';
+    return this._renderArea.textContent || '';
+  }
+
+  /**
+   * 在渲染后的 DOCX DOM 中查找并替换第一处匹配文本。
+   * 通过 TreeWalker 遍历文本节点，保留原有样式（加粗/斜体等）。
+   * @param {string} original  要替换的原文
+   * @param {string} newText   替换后的新文本
+   * @returns {boolean} 成功替换返回 true，未找到原文返回 false
+   */
+  replaceText(original, newText) {
+    if (!original || !this._renderArea) return false;
+
+    const walker = document.createTreeWalker(this._renderArea, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    let fullText = '';
+    let n;
+    while ((n = walker.nextNode())) {
+      nodes.push({ node: n, start: fullText.length });
+      fullText += n.nodeValue;
+    }
+
+    const idx = fullText.indexOf(original);
+    if (idx < 0) return false;
+
+    const end = idx + original.length;
+    let replaced = false;
+
+    for (const { node, start } of nodes) {
+      const len = node.nodeValue.length;
+      const nodeEnd = start + len;
+      if (nodeEnd <= idx || start >= end) continue;
+
+      const localStart = Math.max(0, idx - start);
+      const localEnd   = Math.min(len, end - start);
+      const text = node.nodeValue;
+
+      if (!replaced) {
+        // First overlapping node: inject replacement here
+        node.nodeValue = text.slice(0, localStart) + newText + text.slice(localEnd);
+        replaced = true;
+      } else {
+        // Subsequent nodes: erase the overlapping portion
+        node.nodeValue = text.slice(localEnd);
+      }
+    }
+
+    return replaced;
+  }
+
   // ─────────────────────────────────────────────────────────
   // 私有方法
   // ─────────────────────────────────────────────────────────

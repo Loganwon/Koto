@@ -551,6 +551,18 @@ class ContextInjector:
                 "[ContextInjector] PersonalityMatrix 加载跳过: %s", _e
             )
 
+        from datetime import datetime as _dt
+        _now = _dt.now()
+        _now_date = _now.strftime("%Y年%m月%d日")
+        _now_weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][_now.weekday()]
+        _now_time = _now.strftime("%H:%M")
+        _time_lock = (
+            f"\n\n---\n"
+            f"⚠️ **[时间锚点 · 优先级最高]** 当前系统时间：**{_now_date} {_now_weekday} {_now_time}**\n"
+            f"对话历史中出现的任何日期（如之前的回复里写过"3月28日"等）均为**历史消息生成时的时间**，\n"
+            f"与现在无关。计算"今天/明天/下周/上月"等相对时间时，**严格以此处时间为准**，忽略历史记录中的日期。"
+        )
+
         return f"""你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。{_personality_part}{context_part}
 
 ## 👤 角色定位
@@ -574,7 +586,7 @@ class ContextInjector:
 - 协助处理剪贴板、监听快捷键、系统设置
 - 联动本地应用（打开微信、邮件、浏览器等）
 - 进行系统诊断：**仅当**用户反映电脑卡顿或主动查询时，才分析 CPU/内存/磁盘情况
-- 准确理解和计算时间问题"""
+- 准确理解和计算时间问题{_time_lock}"""
 
 
 # 全局实例
