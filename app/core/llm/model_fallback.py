@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import time
 from typing import Dict, List, Optional
 
@@ -45,7 +46,7 @@ _MODEL_NOT_FOUND_PATTERNS = [
     r"model.*not.*exist",
     r"model.*unavailable",
     r"does not exist",
-    r"not supported",
+    r"not supported for",  # 收窄：只匹配 "not supported for xxx" 场景，避免误匹配地区限制
     r"INVALID_ARGUMENT.*model",
     r"unknown model",
     r"model_not_found",
@@ -59,6 +60,22 @@ _MODEL_NOT_FOUND_PATTERNS = [
     r"only.*Interactions",
     r"use.*client\.interactions",
 ]
+
+# ── 地区/帐号限制错误（所有云端模型均受影响，换模型无用）────────────────────────
+# 应直接跳过剩余云端候选，进入本地模型兜底。
+_LOCATION_BLOCKED_PATTERNS = [
+    r"User location is not supported",
+    r"location.*not.*support",
+    r"FAILED_PRECONDITION.*location",
+    r"country.*not.*support",
+    r"region.*not.*support",
+]
+
+
+def _is_location_blocked_error(exc: Exception) -> bool:
+    """判断是否为地区/帐号限制错误（切换 Gemini 模型无用，需直接走本地兜底）。"""
+    msg = str(exc)
+    return any(re.search(p, msg, re.IGNORECASE) for p in _LOCATION_BLOCKED_PATTERNS)
 
 # ── 通用降级链（无任务信息时使用）──────────────────────────────────────────────
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
@@ -177,6 +194,7 @@ class ModelFallbackExecutor:
     _cascade_failure_times: Dict[str, float] = (
         {}
     )  # task_type → timestamp of last cascade failure
+    _cascade_lock: threading.Lock = threading.Lock()  # guards _cascade_failures/_cascade_failure_times
     _CIRCUIT_BREAKER_BASE: float = 5.0  # initial backoff in seconds
     _CIRCUIT_BREAKER_CAP: float = 120.0  # max backoff in seconds
 
@@ -256,13 +274,15 @@ class ModelFallbackExecutor:
         last_exc: Exception = None
 
         # ── Circuit-breaker check ──────────────────────────────────────────
-        n = self._cascade_failures.get(task_type, 0)
+        with self._cascade_lock:
+            n = self._cascade_failures.get(task_type, 0)
+            last_failure_time = self._cascade_failure_times.get(task_type, 0.0)
         if n > 0:
             backoff = min(
                 self._CIRCUIT_BREAKER_BASE * (2.0 ** (n - 1)),
                 self._CIRCUIT_BREAKER_CAP,
             )
-            elapsed = time.time() - self._cascade_failure_times.get(task_type, 0.0)
+            elapsed = time.time() - last_failure_time
             if elapsed < backoff:
                 raise RuntimeError(
                     f"Circuit breaker open. task={task_type}, backing off {backoff:.0f}s"
@@ -290,12 +310,19 @@ class ModelFallbackExecutor:
                         f"(task={task_type})"
                     )
                 # Reset circuit breaker on success
-                self._cascade_failures[task_type] = 0
+                with self._cascade_lock:
+                    self._cascade_failures[task_type] = 0
                 return result
 
             except Exception as exc:
                 last_exc = exc
-                if _is_model_unavailable_error(exc):
+                if _is_location_blocked_error(exc):
+                    # 地区/帐号限制：所有云端模型都会失败，无需继续尝试，直接跳出循环
+                    logger.warning(
+                        f"[ModelFallback] 🌐 地区限制，跳过剩余云端候选: {exc}"
+                    )
+                    break
+                elif _is_model_unavailable_error(exc):
                     self.mark_unavailable(model_id)
                     logger.warning(
                         f"[ModelFallback] 模型不可用，切换: {model_id} — {exc}"
@@ -305,9 +332,37 @@ class ModelFallbackExecutor:
                     # 非"模型不存在"错误（如 prompt 格式错误、鉴权失败等）直接上抛，不降级
                     raise
 
+        # 所有候选均失败 — 尝试 Ollama 本地兜底 ─────────────────────────────────
+        _local_tried = False
+        try:
+            from app.core.routing.local_model_router import LocalModelRouter
+
+            if LocalModelRouter.is_ollama_available():
+                _local_tried = True
+                _msgs = (
+                    prompt
+                    if isinstance(prompt, list)
+                    else [{"role": "user", "content": str(prompt)}]
+                )
+                _content, _err = LocalModelRouter.call_ollama_chat(
+                    messages=_msgs, timeout=60.0
+                )
+                if not _err and _content:
+                    logger.info(
+                        "[ModelFallback] ✅ 云端全部失败，Ollama 本地兜底成功 (task=%s)",
+                        task_type,
+                    )
+                    with self._cascade_lock:
+                        self._cascade_failures[task_type] = 0
+                    return {"content": _content, "tool_calls": [], "model": "local/ollama"}
+                logger.warning("[ModelFallback] Ollama 兜底失败: %s", _err)
+        except Exception as _le:
+            logger.warning("[ModelFallback] Ollama 兜底异常: %s", _le)
+
         # 所有候选均失败 — record cascade failure for circuit breaker
-        self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1
-        self._cascade_failure_times[task_type] = time.time()
+        with self._cascade_lock:
+            self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1
+            self._cascade_failure_times[task_type] = time.time()
         if last_exc:
             raise last_exc
         raise RuntimeError(

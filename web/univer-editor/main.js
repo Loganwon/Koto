@@ -41,6 +41,7 @@ import { SocketBridge } from './src/SocketBridge.js';
 import { AIPanel } from './src/AIPanel.js';
 import { FileManager } from './src/FileManager.js';
 import { FloatingToolbar } from './src/FloatingToolbar.js';
+import { DocxViewer } from './src/DocxViewer.js';
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -125,6 +126,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // 4b. 创建 FloatingToolbar（选区浮动 AI 工具栏）
     const floatingToolbar = new FloatingToolbar(docController, socketBridge, aiPanel);
 
+    // 4c. 创建 DocxViewer（Word 仿真 DOCX 只读查看器）
+    const docxViewer = new DocxViewer('center-doc');
+
     // 5. 创建 FileManager（左侧文件管理面板）
     const fileManager = new FileManager('left-sidebar', docController, (content, docId) => {
       // 文档切换回调：将新文档内容加载到 Univer
@@ -134,7 +138,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // 空白文档：清空编辑器
         docController.loadContent('');
       }
-    });
+      // Reset AI conversation history when switching to a different file
+      aiPanel.resetHistory(docId);
+    }, docxViewer);
 
     // 6. 自动保存（每 30 秒）
     setInterval(() => fileManager.save(), 30000);
@@ -142,8 +148,42 @@ document.addEventListener('DOMContentLoaded', () => {
     // 7. 启动 WebSocket 连接
     socketBridge.init();
 
+    // 8. Drop-zone on #center-doc — accept chart images dragged from the AI panel
+    const centerDoc = document.getElementById('center-doc');
+    if (centerDoc) {
+      centerDoc.addEventListener('dragover', (e) => {
+        if (e.dataTransfer.types.includes('application/koto-chart-image')) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'copy';
+          centerDoc.classList.add('koto-drop-active');
+        }
+      });
+      centerDoc.addEventListener('dragleave', (e) => {
+        // Only remove class when leaving the container itself
+        if (!centerDoc.contains(e.relatedTarget)) {
+          centerDoc.classList.remove('koto-drop-active');
+        }
+      });
+      centerDoc.addEventListener('drop', (e) => {
+        centerDoc.classList.remove('koto-drop-active');
+        const imgSrc  = e.dataTransfer.getData('application/koto-chart-image');
+        const imgName = e.dataTransfer.getData('application/koto-chart-name') || 'chart.png';
+        if (!imgSrc) return;
+        e.preventDefault();
+
+        const dv = docxViewer;
+        if (dv && dv.isActive()) {
+          // DocxViewer mode: append image HTML
+          dv.appendImage(imgSrc, imgName);
+        } else {
+          // Univer canvas mode: append as floating image block at end of text
+          docController.insertImageAtEnd(imgSrc, imgName);
+        }
+      });
+    }
+
     // 暴露到全局供调试
-    window.__koto = { docController, socketBridge, aiPanel, fileManager, floatingToolbar };
+    window.__koto = { docController, socketBridge, aiPanel, fileManager, floatingToolbar, docxViewer };
 
     console.log('[Koto] 文件助手启动完成');
   } catch (err) {

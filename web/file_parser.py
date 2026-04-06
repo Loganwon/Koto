@@ -247,9 +247,9 @@ class FileParser:
             bg_hex = "#FFFFFF"
             try:
                 bg_fill = slide.background.fill
-                if bg_fill.type is not None and str(bg_fill.type) in ("SOLID", "1"):
+                if bg_fill.type is not None and getattr(bg_fill.type, 'name', '') == 'SOLID':
                     try:
-                        bg_hex = "#{:06x}".format(int(bg_fill.fore_color.rgb))
+                        bg_hex = "#" + str(bg_fill.fore_color.rgb).lower()
                     except Exception:
                         pass
             except Exception:
@@ -273,8 +273,8 @@ class FileParser:
                 # Shape fill colour
                 try:
                     fill = shape.fill
-                    if fill.type is not None and str(fill.type) in ("SOLID", "1"):
-                        s["fill"] = "#{:06x}".format(int(fill.fore_color.rgb))
+                    if fill.type is not None and getattr(fill.type, 'name', '') == 'SOLID':
+                        s["fill"] = "#" + str(fill.fore_color.rgb).lower()
                 except Exception:
                     pass
 
@@ -314,7 +314,7 @@ class FileParser:
                                 pass
                             try:
                                 if run.font.color and run.font.color.type is not None:
-                                    r["color"] = "#{:06x}".format(int(run.font.color.rgb))
+                                    r["color"] = "#" + str(run.font.color.rgb).lower()
                             except Exception:
                                 pass
                             p_obj["runs"].append(r)

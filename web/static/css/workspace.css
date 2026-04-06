@@ -122,6 +122,13 @@
     #wa-autosave-status.saving { color: var(--accent); }
     #wa-autosave-status.saved  { color: #4caf50; }
 
+    /* Auto-save toggle — active (on) state */
+    #wa-autosave-toggle.toggle-on {
+      background: rgba(79,126,255,0.12);
+      border-color: rgba(79,126,255,0.45);
+      color: var(--accent);
+    }
+
     /* ── Upload drag zone (shown when no file loaded) ── */
     #wa-drop-zone {
       position: absolute;
@@ -412,6 +419,148 @@
       height: 18px;
     }
 
+    /* Unsupported file types — greyed out */
+    .wa-file-item.wa-unsupported { opacity: 0.55; }
+    .wa-file-item.wa-unsupported:hover { opacity: 0.75; }
+
+    /* Recent files date stamp */
+    .wa-recent-date { margin-left: auto; font-size: 10px; color: var(--text-muted); white-space: nowrap; padding-right: 6px; flex-shrink: 0; opacity: 0; }
+    .wa-file-item:hover .wa-recent-date { opacity: 1; }
+
+    /* FS browser section group headings ("快速访问" / "此电脑") */
+    .wa-browser-group-label {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.8px;
+      color: var(--text-muted); padding: 10px 8px 3px;
+      text-transform: uppercase; user-select: none; cursor: default;
+    }
+
+    /* Recent files subtitle hint */
+    .wa-recent-hint {
+      font-size: 11px; color: var(--text-muted);
+      padding: 3px 10px 5px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+
+    /* ── Type filter chips ── */
+    .wa-filter-chips {
+      display: flex; flex-wrap: wrap; gap: 4px;
+      padding: 5px 8px 4px; border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .wa-filter-chip {
+      padding: 2px 8px; border-radius: 10px; font-size: 11px; cursor: pointer;
+      border: 1px solid var(--border); background: transparent; color: var(--text-muted);
+      transition: all 0.12s; line-height: 1.5;
+    }
+    .wa-filter-chip:hover { color: var(--text); border-color: rgba(255,255,255,0.25); }
+    .wa-filter-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+    /* ── Search results header ── */
+    .wa-search-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 5px 8px; font-size: 11px; color: var(--text-muted);
+      border-bottom: 1px solid rgba(255,255,255,0.06); gap: 8px;
+    }
+    .wa-search-header button {
+      background: none; border: none; color: var(--accent);
+      cursor: pointer; font-size: 11px; padding: 0; flex-shrink: 0;
+    }
+    .wa-search-header button:hover { text-decoration: underline; }
+
+    /* Directory path in search result rows */
+    .wa-search-dir {
+      font-size: 10px; color: var(--text-muted); margin-left: 4px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      max-width: 110px; flex-shrink: 1; opacity: 0.7;
+    }
+
+    /* Loading spinner */
+    .wa-spinner {
+      width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+      border: 2px solid rgba(255,255,255,0.15);
+      border-top-color: var(--accent);
+      animation: wa-spin 0.7s linear infinite; display: inline-block;
+    }
+    @keyframes wa-spin { to { transform: rotate(360deg); } }
+
+    /* ── Archive result cards ── */
+    .wa-archive-success { font-size: 12px; padding: 6px 0; }
+    .wa-archive-group {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 6px; padding: 8px 10px; margin-top: 6px;
+    }
+    .wa-archive-group-title {
+      font-size: 12px; font-weight: 600; display: flex; align-items: center;
+      gap: 5px; margin-bottom: 4px;
+    }
+    .wa-archive-group-files {
+      display: flex; flex-wrap: wrap; gap: 3px; font-size: 11px; color: var(--text-muted);
+    }
+    .wa-archive-group-files span {
+      background: rgba(255,255,255,0.05); padding: 1px 5px;
+      border-radius: 3px; max-width: 130px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* Empty / loading state rows in left panel */
+    .wa-empty-row, .wa-loading-row {
+      font-size: 12px; color: var(--text-muted);
+      padding: 6px 12px; font-style: italic;
+    }
+
+    /* Inline new-item row (VS Code style input for creating file/folder) */
+    .wa-new-item-row { background: rgba(255,255,255,0.04); }
+    .wa-new-item-input { height: 18px; }
+
+    /* ── Open Folder dialog overlay ── */
+    .wa-dlg-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 9999;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .wa-dlg-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 20px 24px;
+      width: 520px; max-width: 92vw;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    }
+    .wa-dlg-title {
+      font-size: 13px; font-weight: 600;
+      margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px;
+      color: var(--text);
+    }
+    .wa-dlg-close {
+      margin-left: auto; background: none; border: none;
+      color: var(--text-muted); font-size: 18px; line-height: 1;
+      cursor: pointer; padding: 0 2px;
+    }
+    .wa-dlg-close:hover { color: var(--text); }
+    .wa-dlg-hint { font-size: 12px; color: var(--text-muted); margin: 0 0 10px; }
+    .wa-dlg-input-row { display: flex; gap: 6px; }
+    .wa-dlg-input {
+      flex: 1; min-width: 0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-size: 13px;
+      padding: 6px 10px;
+      outline: none;
+    }
+    .wa-dlg-input:focus { border-color: var(--accent); }
+    .wa-dlg-footer { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+    .wa-btn {
+      padding: 5px 14px; border-radius: 4px; font-size: 13px; cursor: pointer;
+      border: 1px solid var(--border); background: var(--surface2); color: var(--text);
+    }
+    .wa-btn:hover { background: rgba(255,255,255,0.08); }
+    .wa-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .wa-btn.primary:hover { filter: brightness(1.12); }
+    .wa-btn.secondary { background: var(--surface2); }
+
     /* ── File rows — VS Code explorer 22px height ── */
     .wa-file-item {
       position: relative;
@@ -570,12 +719,27 @@
       top: 0; bottom: 0;
       width: 1px;
       background: var(--border);
-      opacity: 0;
+      opacity: 0.25;   /* always subtly visible, like VS Code */
       pointer-events: none;
       transition: opacity 0.1s;
     }
     .wa-file-item:hover .wa-indent-guide,
-    .wa-folder-group:hover > .wa-folder-children .wa-indent-guide { opacity: 1; }
+    .wa-folder-group:hover > .wa-folder-children .wa-indent-guide { opacity: 0.7; }
+
+    /* VS Code-style continuous vertical connector through a folder's children */
+    .wa-folder-children {
+      position: relative;
+    }
+    .wa-folder-children::before {
+      content: '';
+      position: absolute;
+      left: 15px;   /* aligns with folder twisty centre */
+      top: 0; bottom: 0;
+      width: 1px;
+      background: var(--border);
+      opacity: 0.35;
+      pointer-events: none;
+    }
 
     /* ── Left panel drop zone ── */
     #wa-left-drop {
@@ -781,6 +945,11 @@
       height: 100%;
       padding: 32px 28px;
       box-sizing: border-box;
+      /* Prevent programmatic scroll-anchor jumps and smooth-scroll animations
+         so that Slate's scrollIntoView() on cursor placement doesn't cause
+         visible content jumps when clicking in blank margins. */
+      overflow-anchor: none !important;
+      scroll-behavior: auto !important;
     }
 
     /* The white page — A4 / US Letter with proper margins */
@@ -820,49 +989,460 @@
       margin: 16px 0 8px;
     }
 
-    /* XLSX: Luckysheet container */
+    /* ── Table styles inside WangEditor — Word-like grid appearance ── */
+    #wa-docx-editor [data-slate-editor] table,
+    #wa-docx-editor [contenteditable="true"] table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+    #wa-docx-editor [data-slate-editor] table td,
+    #wa-docx-editor [data-slate-editor] table th,
+    #wa-docx-editor [contenteditable="true"] table td,
+    #wa-docx-editor [contenteditable="true"] table th {
+      border: 1px solid #a0a4b8;
+      padding: 5px 8px;
+      min-width: 40px;
+      vertical-align: top;
+      word-break: break-word;
+    }
+    /* Header row — light blue-gray shading, bold text */
+    #wa-docx-editor [data-slate-editor] table th,
+    #wa-docx-editor [contenteditable="true"] table th {
+      background: #eef1f8;
+      font-weight: 600;
+      text-align: left;
+    }
+    /* Zebra stripes for readability */
+    #wa-docx-editor [data-slate-editor] table tr:nth-child(even) td,
+    #wa-docx-editor [contenteditable="true"] table tr:nth-child(even) td {
+      background: rgba(240,242,250,0.5);
+    }
+    /* Cell focus ring */
+    #wa-docx-editor [data-slate-editor] table td:focus,
+    #wa-docx-editor [contenteditable="true"] table td:focus {
+      outline: 2px solid #4f7eff;
+      outline-offset: -1px;
+    }
+    /* Preserve inline background-color/border styles injected by the import pipeline */
+    #wa-docx-editor [data-slate-editor] table td[style],
+    #wa-docx-editor [contenteditable="true"] table td[style],
+    #wa-docx-editor [data-slate-editor] table th[style],
+    #wa-docx-editor [contenteditable="true"] table th[style] {
+      /* let inline styles win over the zebra rule */
+    }
+
+    /* ── Column resize: fixed layout + right-edge drag handle ── */
+    #wa-docx-editor [data-slate-editor] table,
+    #wa-docx-editor [contenteditable="true"] table {
+      table-layout: fixed;   /* required so explicit td widths are respected */
+    }
+    #wa-docx-editor [data-slate-editor] table td,
+    #wa-docx-editor [data-slate-editor] table th,
+    #wa-docx-editor [contenteditable="true"] table td,
+    #wa-docx-editor [contenteditable="true"] table th {
+      position: relative;
+      overflow: hidden;
+    }
+    /* Right-edge 6-px zone shows a col-resize cursor (matches JS 6-px threshold) */
+    #wa-docx-editor [contenteditable="true"] table td::after,
+    #wa-docx-editor [contenteditable="true"] table th::after {
+      content: '';
+      position: absolute;
+      right: 0; top: 0;
+      width: 6px; height: 100%;
+      cursor: col-resize;
+      z-index: 2;
+    }
+    #wa-docx-editor [contenteditable="true"] table td:hover::after,
+    #wa-docx-editor [contenteditable="true"] table th:hover::after {
+      background: rgba(79, 126, 255, 0.25);
+    }
+
+    /* XLSX: Univer Sheets container */
     #wa-xlsx-editor {
       position: absolute;
       inset: 0;
       display: none;
+      overflow: hidden;   /* prevent Univer scroll regions from bleeding out */
+      background: #fff;
     }
 
     #wa-xlsx-editor.active { display: block; }
 
-    /* XLSX image insertion toolbar */
-    .wa-xlsx-imgbar {
+    /* Univer Sheets fills the whole container; Univer renders toolbar+formula bar internally */
+    #wa-xlsx-sheet {
       position: absolute;
-      top: 4px;
-      right: 8px;
-      z-index: 20;
-    }
-    .wa-xlsx-imgbtn {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      color: var(--text-muted);
-      font-size: 11px;
-      padding: 3px 8px;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .wa-xlsx-imgbtn:hover {
-      border-color: var(--accent);
-      color: var(--accent);
+      inset: 0;
+      width: 100%;
+      height: 100%;
     }
 
-    /* PPTX: geometric canvas editor */
+    /* ═══════════════════════════════════════════════
+       PPTX Editor — PowerPoint-style layout
+       Layout: [thumbstrip | main(ribbon + canvas + statusbar)]
+       ═══════════════════════════════════════════════ */
     #wa-pptx-editor {
       height: 100%;
-      overflow-y: auto;
-      padding: 24px 32px;
-      display: none;
-      flex-direction: column;
-      gap: 20px;
-      background: #3a3d4a;
+      display: none;           /* overridden by .active */
+      flex-direction: row;     /* thumbstrip LEFT + main RIGHT */
+      overflow: hidden;
+      background: #292b35;
     }
 
     #wa-pptx-editor.active { display: flex; }
+
+    /* ── Left: Slide thumbnail strip ────────────── */
+    #wa-pptx-thumbstrip {
+      width: 160px;
+      flex-shrink: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: #1e2029;
+      border-right: 1px solid #363845;
+      padding: 8px 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    #wa-pptx-thumbstrip::-webkit-scrollbar { width: 4px; }
+    #wa-pptx-thumbstrip::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+    .wa-pptx-thumb-wrap {
+      position: relative;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .wa-pptx-thumb {
+      border: 2px solid transparent;
+      border-radius: 3px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,.45);
+      transition: border-color .12s;
+    }
+
+    .wa-pptx-thumb:hover { border-color: #888; }
+    .wa-pptx-thumb.active { border-color: #c43e1c; box-shadow: 0 0 0 1px #c43e1c44; }
+
+    .wa-pptx-thumb canvas { display: block; width: 100%; }
+
+    .wa-pptx-thumb-idx {
+      display: block;
+      text-align: center;
+      font-size: 10px;
+      color: #888;
+      margin-top: 3px;
+      user-select: none;
+    }
+
+    .wa-pptx-thumb.active + .wa-pptx-thumb-idx { color: #c43e1c; }
+
+    /* ── Right: Main editing pane ───────────────── */
+    #wa-pptx-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    /* ── Ribbon tab bar ─────────────────────────── */
+    #wa-pptx-ribbon-tabs {
+      display: flex;
+      align-items: flex-end;
+      background: #2a2d3a;
+      border-bottom: 1px solid #3e4057;
+      padding: 0 8px;
+      flex-shrink: 0;
+      height: 30px;
+    }
+
+    .wa-pptx-rtab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #aab;
+      font-size: 12px;
+      padding: 4px 12px;
+      cursor: pointer;
+      height: 100%;
+      transition: color .12s, border-color .12s;
+      margin-bottom: -1px;
+      white-space: nowrap;
+    }
+
+    .wa-pptx-rtab:hover { color: #dde; }
+    .wa-pptx-rtab.active { color: #fff; border-bottom-color: #c43e1c; }
+
+    /* ── Ribbon toolbar ─────────────────────────── */
+    #wa-pptx-toolbar {
+      display: flex;
+      align-items: stretch;
+      background: #2a2d3a;
+      border-bottom: 1px solid #3e4057;
+      padding: 4px 8px;
+      gap: 0;
+      min-height: 54px;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+
+    #wa-pptx-toolbar::-webkit-scrollbar { height: 3px; }
+    #wa-pptx-toolbar::-webkit-scrollbar-thumb { background: #555; }
+
+    .wa-pptx-tb-grp {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      padding: 0 8px;
+      gap: 2px;
+    }
+
+    .wa-pptx-tb-grp-btns {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex: 1;
+    }
+
+    .wa-pptx-tb-grp-label {
+      font-size: 9.5px;
+      color: #778;
+      text-align: center;
+      white-space: nowrap;
+      padding-bottom: 1px;
+      border-top: 1px solid #3e4057;
+      margin-top: 2px;
+      padding-top: 2px;
+    }
+
+    .wa-pptx-tb-sep {
+      width: 1px;
+      background: #3e4057;
+      margin: 4px 4px;
+      align-self: stretch;
+    }
+
+    .wa-pptx-tb-vsep {
+      width: 1px;
+      height: 22px;
+      background: #3e4057;
+      margin: 0 3px;
+      flex-shrink: 0;
+    }
+
+    .wa-pptx-tb-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 4px 8px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      color: #ccd;
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .1s, border-color .1s;
+      min-width: 28px;
+      min-height: 28px;
+    }
+
+    .wa-pptx-tb-btn:hover { background: rgba(255,255,255,.08); border-color: #555; }
+    .wa-pptx-tb-btn.active { background: rgba(196,62,28,.25); border-color: #c43e1c88; color: #ffaa88; }
+    .wa-pptx-tb-btn.wa-pptx-fmt.on { background: rgba(196,62,28,.22); border-color: #c43e1c88; color: #ffaa88; }
+
+    .wa-pptx-newslide-btn {
+      flex-direction: column;
+      padding: 4px 12px;
+      font-size: 11px;
+      min-height: 40px;
+      gap: 2px;
+    }
+
+    .wa-pptx-tb-input-font {
+      background: #1e2029;
+      border: 1px solid #3e4057;
+      border-radius: 3px;
+      color: #ccd;
+      font-size: 11.5px;
+      padding: 3px 6px;
+      width: 90px;
+      outline: none;
+    }
+
+    .wa-pptx-tb-input-font:focus { border-color: #c43e1c88; }
+
+    .wa-pptx-tb-select {
+      background: #1e2029;
+      border: 1px solid #3e4057;
+      border-radius: 3px;
+      color: #ccd;
+      font-size: 11.5px;
+      padding: 3px 4px;
+      width: 52px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .wa-pptx-color-btn {
+      position: relative;
+      cursor: pointer;
+    }
+
+    .wa-pptx-color-swatch {
+      width: 14px;
+      height: 4px;
+      border-radius: 1px;
+      position: absolute;
+      bottom: 3px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+    /* ── Slide canvas area (gray surround, scrollable) ── */
+    #wa-pptx-slide-area {
+      flex: 1;
+      overflow: auto;
+      background: #525460;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 24px;
+      min-height: 0;
+    }
+
+    #wa-pptx-slide-area::-webkit-scrollbar { width: 6px; height: 6px; }
+    #wa-pptx-slide-area::-webkit-scrollbar-thumb { background: #666; border-radius: 3px; }
+
+    /* The white slide rectangle */
+    #wa-pptx-slide-canvas {
+      position: relative;
+      background: #fff;
+      box-shadow: 0 4px 32px rgba(0,0,0,.55);
+      flex-shrink: 0;
+      outline: none;
+    }
+
+    /* ── Shape elements inside canvas ──────────── */
+    .wa-pptx-shape {
+      position: absolute;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+    .wa-pptx-shape.wa-pptx-selected {
+      outline: 2px solid #0078d4;
+      outline-offset: 1px;
+    }
+
+    .wa-pptx-shape.wa-pptx-editing {
+      outline: 2px solid #0078d4;
+      outline-offset: 1px;
+    }
+
+    .wa-pptx-run {
+      outline: none;
+      caret-color: #0078d4;
+    }
+
+    .wa-pptx-run[contenteditable="true"]:empty::before {
+      content: '\200B'; /* zero-width space keeps caret visible */
+    }
+
+    /* ── Status bar (bottom nav + zoom) ─────────── */
+    #wa-pptx-statusbar {
+      display: flex;
+      align-items: center;
+      height: 28px;
+      flex-shrink: 0;
+      background: #1e2029;
+      border-top: 1px solid #363845;
+      padding: 0 10px;
+      gap: 4px;
+      font-size: 11.5px;
+      color: #aab;
+    }
+
+    .wa-pptx-sb-nav {
+      background: transparent;
+      border: none;
+      color: #aab;
+      cursor: pointer;
+      padding: 3px 6px;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+    }
+
+    .wa-pptx-sb-nav:hover { background: rgba(255,255,255,.08); color: #fff; }
+    .wa-pptx-sb-nav:disabled { opacity: .35; cursor: not-allowed; }
+
+    .wa-pptx-sb-counter { font-size: 11px; min-width: 40px; text-align: center; }
+
+    .wa-pptx-sb-sep { width: 1px; height: 14px; background: #3e4057; margin: 0 4px; }
+
+    .wa-pptx-sb-spacer { flex: 1; }
+
+    .wa-pptx-sb-zoom-label {
+      font-size: 11px;
+      min-width: 34px;
+      text-align: right;
+      color: #aab;
+    }
+
+    .wa-pptx-sb-zoom-slider {
+      -webkit-appearance: none;
+      width: 90px;
+      height: 3px;
+      border-radius: 2px;
+      background: #444;
+      outline: none;
+    }
+
+    .wa-pptx-sb-zoom-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #c43e1c;
+      cursor: pointer;
+    }
+
+    .wa-pptx-sb-view-btn {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 5px;
+      border-radius: 3px;
+      cursor: pointer;
+      color: #778;
+    }
+
+    .wa-pptx-sb-view-btn.active { color: #c43e1c; }
+
+    /* Context menu (already inline-styled but add base) */
+    #wa-pptx-ctx {
+      font-size: 13px;
+      user-select: none;
+    }
+
+    .wa-pptx-ctx-item {
+      padding: 6px 16px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .1s;
+    }
+
+    .wa-pptx-ctx-item:hover { background: rgba(255,255,255,.1); }
+    .wa-pptx-ctx-item.danger { color: #ff7070; }
+    .wa-pptx-ctx-item.danger:hover { background: rgba(255,80,80,.15); }
+    .wa-pptx-ctx-sep { height: 1px; background: #3e4057; margin: 4px 0; }
 
     .wa-slide-card {
       background: #fff;
@@ -1034,42 +1614,55 @@
       max-width: 100%;
     }
 
-    /* ── Floating Selection Toolbar ── */
+    /* ── Floating Selection Toolbar — glassmorphism capsule ── */
     .wa-selection-toolbar {
       position: fixed;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 8px;
+      background: rgba(32, 34, 46, 0.90);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 10px;
       display: none;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-      padding: 4px;
+      box-shadow: 0 8px 28px rgba(0,0,0,0.52), 0 1px 0 rgba(255,255,255,0.07) inset;
+      padding: 4px 5px;
       z-index: 9999;
       pointer-events: all;
       align-items: center;
-      gap: 4px;
+      gap: 2px;
+      animation: wa-toolbar-in 0.13s cubic-bezier(0.2, 0, 0.2, 1);
     }
-    
+
+    @keyframes wa-toolbar-in {
+      from { opacity: 0; transform: translateY(5px) scale(0.96); }
+      to   { opacity: 1; transform: translateY(0)   scale(1); }
+    }
+
     .wa-selection-toolbar button {
       background: transparent;
       border: none;
-      color: var(--text);
-      padding: 6px 10px;
-      border-radius: 4px;
+      color: var(--text-muted);
+      padding: 5px 10px;
+      border-radius: 6px;
       font-size: 12px;
+      font-weight: 500;
       cursor: pointer;
       white-space: nowrap;
-      transition: background 0.15s;
+      letter-spacing: 0.01em;
+      transition: background 0.12s, color 0.12s;
     }
-    
+
     .wa-selection-toolbar button:hover {
-      background: var(--border);
+      background: rgba(255,255,255,0.10);
+      color: var(--text);
     }
-    
-    .wa-selection-toolbar .divider {
+
+    .wa-selection-toolbar .divider,
+    .wa-selection-toolbar .wa-toolbar-divider {
       width: 1px;
-      height: 16px;
-      background: var(--border);
+      height: 14px;
+      background: rgba(255,255,255,0.11);
       margin: 0 2px;
+      flex-shrink: 0;
     }
 
     /* ═══════════════════════════════
@@ -1271,6 +1864,7 @@
     /* ── Messages Area ── */
     #wa-ai-messages {
       flex: 1;
+      min-height: 0;
       overflow-y: auto;
       padding: 16px 12px;
       display: flex;
@@ -1462,20 +2056,22 @@
     .wa-ai-quick-actions::-webkit-scrollbar { display: none; }
 
     .wa-quick-btn {
-      padding: 4px 12px;
-      border: 1px solid var(--ai-border);
+      padding: 4px 11px;
+      border: 1px solid rgba(255,255,255,0.09);
       border-radius: 20px;
-      background: var(--ai-surface);
+      background: rgba(255,255,255,0.04);
       color: var(--text-muted);
       font-size: 11.5px;
+      font-weight: 500;
       cursor: pointer;
-      transition: all 0.15s;
+      transition: background 0.13s, border-color 0.13s, color 0.13s;
       white-space: nowrap;
       flex-shrink: 0;
+      letter-spacing: 0.01em;
     }
 
     .wa-quick-btn:hover {
-      border-color: var(--accent);
+      border-color: rgba(79,126,255,0.45);
       color: var(--accent);
       background: rgba(79,126,255,0.08);
     }
@@ -1488,6 +2084,106 @@
       border-color: var(--success);
       background: rgba(62,200,122,0.08);
       color: var(--success);
+    }
+
+    /* ── Chart image result ── */
+    .wa-chart-img-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-self: stretch;
+      max-width: 100%;
+    }
+    .wa-chart-img {
+      max-width: 100%;
+      border-radius: 6px;
+      border: 1px solid var(--ai-border);
+      display: block;
+    }
+    .wa-chart-img-draggable {
+      cursor: grab;
+      transition: box-shadow 0.15s, opacity 0.15s;
+    }
+    .wa-chart-img-draggable:hover {
+      box-shadow: 0 0 0 2px var(--accent, #4b9eff);
+    }
+    .wa-chart-img-draggable:active {
+      cursor: grabbing;
+      opacity: 0.75;
+    }
+    .wa-chart-drag-hint {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-align: center;
+      letter-spacing: 0.03em;
+    }
+    .wa-chart-img-bar {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    #wa-canvas-body.wa-drop-active {
+      outline: 2px dashed var(--accent, #4b9eff);
+      outline-offset: -4px;
+      background: rgba(75, 158, 255, 0.04);
+    }
+    .wa-chart-code details {
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+    .wa-chart-code details summary {
+      cursor: pointer;
+      padding: 4px 0;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+    .wa-chart-code details pre {
+      background: #1a1a2e;
+      border: 1px solid var(--ai-border);
+      border-radius: 4px;
+      padding: 8px;
+      margin: 4px 0 0;
+      font-size: 11px;
+      color: #9cdcfe;
+      overflow-x: auto;
+      font-family: Consolas, monospace;
+    }
+    .wa-code-block {
+      font-size: 11px;
+      background: #1a1a2e;
+      color: #9cdcfe;
+      padding: 8px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      font-family: Consolas, monospace;
+    }
+    .wa-action-btn {
+      padding: 4px 10px;
+      font-size: 11px;
+      background: rgba(62,200,122,0.15);
+      border: 1px solid rgba(62,200,122,0.3);
+      border-radius: 3px;
+      color: #3ec87a;
+      cursor: pointer;
+      align-self: flex-start;
+    }
+    .wa-action-btn:hover { background: rgba(62,200,122,0.25); }
+    .wa-action-btn.secondary {
+      background: rgba(75,158,255,0.12);
+      border-color: rgba(75,158,255,0.3);
+      color: #4b9eff;
+    }
+    .wa-action-btn.secondary:hover { background: rgba(75,158,255,0.22); }
+
+    /* ── Tooltip character count badge ── */
+    .wa-tooltip-count {
+      font-size: 10px;
+      color: var(--text-muted);
+      padding: 1px 5px;
+      background: rgba(255,255,255,0.05);
+      border-radius: 3px;
+      border: 1px solid var(--ai-border);
+      white-space: nowrap;
     }
 
     /* ── Selection chip ── */
@@ -1678,15 +2374,17 @@
     }
     #wa-chart-dialog.open { display: flex; }
     #wa-chart-dialog .wa-dialog-box {
-      background: var(--surface);
-      border: 1px solid var(--border);
+      background: rgba(32, 34, 46, 0.95);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.09);
       border-radius: 14px;
       padding: 24px;
       width: min(500px, 90vw);
       display: flex;
       flex-direction: column;
       gap: 14px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      box-shadow: 0 24px 64px rgba(0,0,0,0.60);
     }
     #wa-chart-dialog h3 { font-size: 15px; font-weight: 700; }
     #wa-chart-dialog textarea {
@@ -1804,16 +2502,19 @@
       bottom: 20px;
       left: 50%;
       transform: translateX(-50%) translateY(16px);
-      background: var(--surface2);
-      border: 1px solid var(--border);
+      background: rgba(32, 34, 46, 0.92);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.09);
       color: var(--text);
       padding: 8px 20px;
-      border-radius: 8px;
+      border-radius: 10px;
       font-size: 13px;
       z-index: 9999;
       opacity: 0;
-      transition: opacity 0.25s, transform 0.25s;
+      transition: opacity 0.22s, transform 0.22s cubic-bezier(0.2,0,0.2,1);
       pointer-events: none;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.40);
     }
 
     #wa-toast.show {
@@ -1880,17 +2581,27 @@
 }
 .wa-msg.user {
   align-self: flex-end;
-  background: linear-gradient(135deg, var(--accent, #4f7eff), #3b5fe0);
-  color: #fff;
-  border-bottom-right-radius: 3px;
+  background: rgba(79, 126, 255, 0.13);
+  border: 1px solid rgba(79, 126, 255, 0.24);
+  color: var(--text);
+  border-radius: 10px 10px 3px 10px;
   margin-left: auto;
+  max-width: 88%;
 }
 .wa-msg.ai {
   align-self: flex-start;
-  background: var(--surface2, #252834);
-  color: var(--text, #e4e5f0);
-  border-bottom-left-radius: 3px;
-  border: 1px solid var(--border, #2e3140);
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-left: 2px solid rgba(79, 126, 255, 0.42);
+  border-radius: 0 8px 8px 0;
+  padding-left: 14px;
+  max-width: 95%;
+  animation: msgSlideIn 0.18s ease;
+}
+@keyframes msgSlideIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to   { opacity: 1; transform: translateY(0);   }
 }
 .wa-msg.ai.streaming::after {
   content: '▌';
@@ -1987,61 +2698,140 @@
   overflow: hidden;
 }
 
-/* ── Top bar ────────────────────────────────────────────────── */
+/* ── Office QAT Top bar ─────────────────────────────────────── */
 #wa-topbar {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  height: 42px;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  height: 44px;
   flex-shrink: 0;
+  position: relative;
   background: var(--bg-secondary, #2a2a3e);
   border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
   font-size: 13px;
   color: var(--text-primary, #e2e8f0);
 }
-
-.wa-topbar-back {
+/* QAT (Quick Access Toolbar) row */
+.wa-qat {
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border: 1px solid var(--border, rgba(255,255,255,.15));
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-secondary, #94a3b8);
-  font-size: 12px;
-  cursor: pointer;
-  transition: all .15s;
-  white-space: nowrap;
-}
-.wa-topbar-back:hover {
-  background: var(--hover, rgba(255,255,255,.06));
-  color: var(--text-primary, #e2e8f0);
-}
-
-.wa-topbar-sep {
-  width: 1px;
-  height: 16px;
-  background: var(--border, rgba(255,255,255,.12));
+  padding: 0 4px;
+  gap: 1px;
   flex-shrink: 0;
 }
-
-.wa-topbar-filename {
+.wa-qat-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border, rgba(255,255,255,.12));
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+.wa-qat-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #94a3b8);
+  cursor: pointer;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .12s, color .12s;
+  flex-shrink: 0;
+}
+.wa-qat-btn:hover { background: var(--hover, rgba(255,255,255,.08)); color: var(--text-primary, #e2e8f0); }
+.wa-qat-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.wa-qat-btn:disabled:hover { background: transparent; color: var(--text-secondary, #94a3b8); }
+/* "文件" ribbon button */
+.wa-ribbon-file-btn {
+  height: 100%;
+  padding: 0 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary, #e2e8f0);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background .12s;
+  white-space: nowrap;
+}
+.wa-ribbon-file-btn:hover,
+.wa-ribbon-file-btn.open { background: var(--accent, #4f7eff); color: #fff; }
+/* File menu dropdown */
+.wa-file-menu-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+}
+.wa-file-dropdown {
+  position: absolute;
+  top: 44px;
+  left: 0;
+  min-width: 220px;
+  z-index: 200;
+  background: var(--surface2, #272a38);
+  border: 1px solid var(--border, #373a50);
+  border-radius: 4px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.5);
+  padding: 4px 0;
+  font-size: 13px;
+}
+.wa-fileop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  color: var(--text, #e8eaf4);
+  cursor: pointer;
+  transition: background .1s;
+  white-space: nowrap;
+}
+.wa-fileop:hover { background: var(--hover, rgba(255,255,255,.09)); }
+.wa-fileop.disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.wa-fileop svg { flex-shrink: 0; color: var(--text-muted, #a0a3bf); }
+.wa-shortcut { margin-left: auto; padding-left: 24px; font-size: 11px; color: var(--text-muted, #a0a3bf); }
+.wa-file-sep { height: 1px; background: var(--border, #373a50); margin: 4px 0; }
+/* Centered filename title */
+.wa-title-filename {
   flex: 1;
+  text-align: center;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-primary, #e2e8f0);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  align-self: center;
+  padding: 0 8px;
+  pointer-events: none;
 }
-
-.wa-topbar-actions {
+/* Right-side autosave area */
+.wa-topbar-right {
   display: flex;
   align-items: center;
+  padding: 0 12px;
   gap: 6px;
   flex-shrink: 0;
+  min-width: 120px;
+  justify-content: flex-end;
 }
+/* ── Status bar ─────────────────────────────────────────────── */
+#wa-status-bar {
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--text-muted, #a0a3bf);
+  background: var(--bg-secondary, #2a2a3e);
+  border-top: 1px solid var(--border, rgba(255,255,255,.06));
+}
+.wa-status-modified { color: var(--accent, #4f7eff); }
+.wa-status-spacer { flex: 1; }
 
 /* When embedded, #wa-workspace is a flex child filling remaining height.
    Must reset the standalone page's position:absolute so flex:1 applies. */
@@ -2061,4 +2851,268 @@
 /* main-content needs relative positioning for absolute #workspaceView */
 .main-content.chatgpt-main {
   position: relative;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   AI Action Bar (Accept/Reject/View — legacy fallback)
+   ═══════════════════════════════════════════════════════════════ */
+.wa-ai-action-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  background: rgba(79,126,255,0.08);
+  border: 1px solid rgba(79,126,255,0.2);
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+.wa-ai-action-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-right: auto;
+}
+.wa-ai-action-btn {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.wa-ai-action-btn:hover { background: rgba(79,126,255,0.18); border-color: var(--accent); }
+.wa-ai-action-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.wa-ai-action-btn.primary:hover { filter: brightness(1.15); }
+.wa-ai-action-btn.muted { opacity: 0.6; }
+.wa-ai-action-btn.muted:hover { opacity: 1; }
+
+/* ═══════════════════════════════════════════════════════════════
+   AI Progress Step Indicator
+   ═══════════════════════════════════════════════════════════════ */
+.wa-progress-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  margin: 6px 0;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  transition: opacity 0.4s;
+}
+.wa-progress-indicator.done { opacity: 0.4; }
+.wa-progress-step {
+  padding: 3px 8px;
+  border-radius: 5px;
+  transition: all 0.25s;
+  white-space: nowrap;
+}
+.wa-progress-step.active {
+  background: rgba(79,126,255,0.18);
+  color: #8aa8ff;
+  font-weight: 600;
+}
+.wa-progress-step.done {
+  color: rgba(130,230,140,0.8);
+}
+.wa-progress-arrow {
+  color: rgba(255,255,255,0.15);
+  font-size: 10px;
+  margin: 0 1px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Proposal Diff Cards
+   ═══════════════════════════════════════════════════════════════ */
+.wa-proposal-card {
+  margin: 8px 0;
+  padding: 0;
+  border: 1px solid rgba(79,126,255,0.2);
+  border-radius: 12px;
+  background: rgba(13,17,28,0.7);
+  overflow: hidden;
+  transition: opacity 0.3s, border-color 0.3s;
+}
+.wa-proposal-card.accepted {
+  border-color: rgba(80,200,120,0.4);
+  opacity: 0.6;
+}
+.wa-proposal-card.accepted .wa-proposal-actions { display: none; }
+.wa-proposal-card.accepted .wa-proposal-header::after {
+  content: '✅ 已接受';
+  font-size: 11px;
+  color: #50c878;
+  margin-left: auto;
+}
+.wa-proposal-card.rejected {
+  border-color: rgba(255,100,100,0.2);
+  opacity: 0.4;
+}
+.wa-proposal-card.rejected .wa-proposal-actions { display: none; }
+.wa-proposal-card.rejected .wa-proposal-header::after {
+  content: '❌ 已拒绝';
+  font-size: 11px;
+  color: #ff6464;
+  margin-left: auto;
+}
+
+.wa-proposal-header {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  background: rgba(79,126,255,0.06);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-size: 12px;
+}
+.wa-proposal-badge {
+  background: var(--accent);
+  color: #fff;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+}
+
+.wa-proposal-diff {
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.wa-diff-block {
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin: 4px 0;
+  position: relative;
+  font-family: 'Cascadia Code', 'Consolas', 'SF Mono', monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.wa-diff-block.del {
+  background: rgba(255,80,80,0.08);
+  border-left: 3px solid rgba(255,80,80,0.5);
+  color: #ff9b9b;
+  text-decoration: line-through;
+  text-decoration-color: rgba(255,80,80,0.35);
+}
+.wa-diff-block.add {
+  background: rgba(80,200,120,0.08);
+  border-left: 3px solid rgba(80,200,120,0.5);
+  color: #82e68c;
+}
+.wa-diff-label {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-right: 8px;
+  opacity: 0.7;
+  text-decoration: none;
+  vertical-align: top;
+}
+.wa-diff-block.del .wa-diff-label { color: #ff6464; }
+.wa-diff-block.add .wa-diff-label { color: #50c878; }
+.wa-diff-same { color: var(--text-muted); }
+
+.wa-proposal-rationale {
+  padding: 6px 14px 8px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  border-top: 1px solid rgba(255,255,255,0.04);
+  line-height: 1.5;
+}
+
+.wa-proposal-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.wa-proposal-btn {
+  font-size: 12px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.wa-proposal-btn:hover { background: rgba(255,255,255,0.1); }
+.wa-proposal-btn.accept { background: rgba(80,200,120,0.12); border-color: rgba(80,200,120,0.3); color: #82e68c; }
+.wa-proposal-btn.accept:hover { background: rgba(80,200,120,0.25); }
+.wa-proposal-btn.reject { background: rgba(255,80,80,0.08); border-color: rgba(255,80,80,0.2); color: #ff9b9b; }
+.wa-proposal-btn.reject:hover { background: rgba(255,80,80,0.2); }
+.wa-proposal-btn.modify { background: rgba(79,126,255,0.1); border-color: rgba(79,126,255,0.25); color: #8aa8ff; }
+.wa-proposal-btn.modify:hover { background: rgba(79,126,255,0.22); }
+.wa-proposal-btn.small { font-size: 11px; padding: 3px 10px; }
+
+/* Batch bar */
+.wa-proposal-batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  margin: 8px 0 4px;
+  background: rgba(79,126,255,0.06);
+  border: 1px solid rgba(79,126,255,0.15);
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+.wa-proposal-batch-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.wa-proposal-batch-counter {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: auto;
+}
+
+/* Modify input inside proposal card */
+.wa-proposal-modify-input {
+  padding: 8px 14px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.wa-proposal-modify-textarea {
+  width: 100%;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(79,126,255,0.2);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 8px 10px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+.wa-proposal-modify-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.wa-proposal-modify-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  justify-content: flex-end;
+}
+
+/* Tool notification toast */
+.wa-tool-notification {
+  padding: 7px 12px;
+  margin: 5px 0;
+  font-size: 11.5px;
+  background: rgba(80,200,120,0.08);
+  border: 1px solid rgba(80,200,120,0.2);
+  border-radius: 8px;
+  color: #82e68c;
 }

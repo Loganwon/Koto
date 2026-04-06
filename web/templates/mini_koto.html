@@ -122,8 +122,10 @@
                 const history = data.history || [];
                 const recent = history.slice(-10);
                 for (const msg of recent) {
-                    if (msg.role === 'user') add('u', msg.content || '');
-                    else if (msg.role === 'assistant' || msg.role === 'model') add('a', msg.content || '');
+                    // Session format uses {role, parts: [text]} from KotoBrain.append_and_save
+                    const text = (msg.parts && msg.parts[0]) || msg.content || '';
+                    if (msg.role === 'user') add('u', text);
+                    else if (msg.role === 'assistant' || msg.role === 'model') add('a', text);
                 }
                 const c = document.getElementById('c');
                 c.scrollTop = c.scrollHeight;

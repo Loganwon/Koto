@@ -76,11 +76,12 @@ def _lc_messages_to_koto(
         elif isinstance(msg, AIMessage):
             history.append({"role": "model", "content": msg.content})
         elif isinstance(msg, ToolMessage):
-            # 工具返回结果作为 function_response
+            # Gemini uses role="function" (remapped to user+function_response in _format_prompt).
+            # tool_call_id typically equals the function name for Gemini-backed calls.
             history.append(
                 {
-                    "role": "tool",
-                    "tool_call_id": msg.tool_call_id,
+                    "role": "function",
+                    "name": msg.tool_call_id,
                     "content": msg.content,
                 }
             )

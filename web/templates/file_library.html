@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>文件库 — Koto</title>
+  <link rel="icon" href="/static/favicon.ico" />
+  <link rel="stylesheet" href="/static/css/file-library.css" />
+</head>
+<body class="fl-body" data-theme="light">
+
+<!-- ══════════════════════════════════════════════════════════════
+     TOP BAR
+═══════════════════════════════════════════════════════════════ -->
+<header class="fl-topbar" id="flTopbar">
+  <a href="/" class="fl-topbar-logo" title="返回主页">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+    </svg>
+  </a>
+  <span class="fl-topbar-title">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    </svg>
+    Koto 智能文件库
+  </span>
+
+  <!-- Breadcrumb -->
+  <nav class="fl-breadcrumb" id="flBreadcrumb"></nav>
+
+  <div class="fl-topbar-actions">
+    <!-- View toggle -->
+    <div class="fl-view-toggle" id="flViewToggle">
+      <button class="fl-vt-btn active" data-view="tree" title="树形视图" onclick="FL.setViewMode('tree')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+          <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
+          <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+        </svg>
+      </button>
+      <button class="fl-vt-btn" data-view="grid" title="网格视图" onclick="FL.setViewMode('grid')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+        </svg>
+      </button>
+    </div>
+    <button class="fl-topbar-btn" onclick="FL.toggleTheme()" title="切换主题" id="flThemeBtn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/>
+        <line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+        <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+      </svg>
+    </button>
+    <button class="fl-topbar-btn" onclick="FL.toggleRightPanel()" title="AI 笔记本" id="flNotebookToggleBtn">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════════
+     MAIN LAYOUT
+═══════════════════════════════════════════════════════════════ -->
+<div class="fl-layout" id="flLayout">
+
+  <!-- ── LEFT EXPLORER PANEL ─────────────────────────────── -->
+  <aside class="fl-panel fl-panel-left" id="flExplorer">
+    <div class="fl-explorer-inner">
+
+      <!-- Search -->
+      <div class="fl-search-wrap">
+        <svg class="fl-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input class="fl-search-input" id="flSearchInput" placeholder="搜索文件…" oninput="FL.onSearch(this.value)" />
+        <button class="fl-search-clear" id="flSearchClear" onclick="FL.clearSearch()" style="display:none">×</button>
+      </div>
+
+      <!-- ── MOUNTS SECTION ── -->
+      <div class="fl-section">
+        <div class="fl-section-header" onclick="FL.toggleSection('mounts')">
+          <svg class="fl-section-arrow" id="fl-arrow-mounts" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span>文件夹</span>
+          <div class="fl-section-actions">
+            <button class="fl-icon-btn" onclick="FL.showMountDialog();event.stopPropagation()" title="挂载文件夹">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="fl-section-body" id="fl-mounts-list">
+          <!-- dynamically rendered mount items -->
+        </div>
+      </div>
+
+      <!-- ── NOTEBOOKS SECTION ── -->
+      <div class="fl-section">
+        <div class="fl-section-header" onclick="FL.toggleSection('notebooks')">
+          <svg class="fl-section-arrow" id="fl-arrow-notebooks" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span>笔记本</span>
+          <span class="fl-section-badge" id="fl-nb-badge"></span>
+          <div class="fl-section-actions">
+            <button class="fl-icon-btn" onclick="FL.createNotebook();event.stopPropagation()" title="新建笔记本">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="fl-section-body" id="fl-notebooks-list">
+          <!-- dynamically rendered notebook items -->
+        </div>
+      </div>
+
+      <!-- ── TAGS SECTION ── -->
+      <div class="fl-section">
+        <div class="fl-section-header" onclick="FL.toggleSection('tags')">
+          <svg class="fl-section-arrow" id="fl-arrow-tags" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          <span>标签</span>
+        </div>
+        <div class="fl-section-body" id="fl-tags-cloud">
+          <!-- dynamically rendered tags -->
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Explorer resize handle -->
+    <div class="fl-resize-handle fl-resize-left" id="flResizeLeft"></div>
+  </aside>
+
+  <!-- ── CENTER FILE VIEWER ────────────────────────────────── -->
+  <main class="fl-panel fl-panel-center" id="flCenter">
+
+    <!-- Tab bar -->
+    <div class="fl-tabbar" id="flTabbar">
+      <div class="fl-tabs" id="flTabs"></div>
+      <div class="fl-tabbar-actions">
+        <button class="fl-icon-btn" onclick="FL.closeAllTabs()" title="关闭全部">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- File tree / grid view (when no file open) -->
+    <div class="fl-explorer-view" id="flExplorerView">
+      <!-- Welcome splash -->
+      <div class="fl-welcome" id="flWelcome">
+        <div class="fl-welcome-icon">
+          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </div>
+        <h2>Koto 智能文件库</h2>
+        <p>挂载本地文件夹，像 VS Code 一样实时浏览。<br/>将文件加入笔记本，与 AI 一起分析内容。</p>
+        <button class="fl-btn fl-btn-primary" onclick="FL.showMountDialog()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          挂载文件夹
+        </button>
+      </div>
+
+      <!-- Tree/Grid container (inside center panel for folder browsing) -->
+      <div class="fl-tree-container" id="flTreeContainer" style="display:none">
+        <div class="fl-tree-toolbar">
+          <span class="fl-tree-root-label" id="flTreeRootLabel"></span>
+          <div style="display:flex;gap:4px;align-items:center;">
+            <button class="fl-icon-btn" onclick="FL.refreshCurrentTree()" title="刷新">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 1 0 2.13-5.88L9 8"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="fl-tree-body" id="flTreeBody"></div>
+      </div>
+
+      <!-- Notebook file cards grid -->
+      <div class="fl-notebook-grid" id="flNotebookGrid" style="display:none">
+        <div class="fl-notebook-grid-header" id="flNotebookGridHeader"></div>
+        <div class="fl-cards-grid" id="flCardsGrid"></div>
+      </div>
+    </div>
+
+    <!-- Document viewer (when file open) -->
+    <div class="fl-viewer-body" id="flViewerBody" style="display:none">
+      <div class="fl-reader-content" id="flReaderContent"></div>
+      <div class="fl-monaco-wrap" id="flMonacoWrap" style="display:none">
+        <div class="fl-monaco-editor" id="flMonacoEditor"></div>
+      </div>
+      <!-- Related files footer -->
+      <div class="fl-related-bar" id="flRelatedBar" style="display:none">
+        <span class="fl-related-label">相关文件</span>
+        <div class="fl-related-items" id="flRelatedItems"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ── RIGHT AI NOTEBOOK PANEL ──────────────────────────── -->
+  <aside class="fl-panel fl-panel-right" id="flNotebookPanel">
+
+    <div class="fl-np-header">
+      <span class="fl-np-title" id="flNpTitle">AI 助手</span>
+      <button class="fl-icon-btn" onclick="FL.toggleRightPanel()" title="关闭">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+
+    <!-- Quick actions -->
+    <div class="fl-np-actions" id="flNpActions">
+      <button class="fl-qa-btn" onclick="FL.aiQuickAction('summary')">📋 全文摘要</button>
+      <button class="fl-qa-btn" onclick="FL.aiQuickAction('keypoints')">🎯 关键要点</button>
+      <button class="fl-qa-btn" onclick="FL.aiQuickAction('tags')">🏷️ 自动打标</button>
+    </div>
+
+    <!-- Notebook files list (shown when in notebook mode) -->
+    <div class="fl-np-files" id="flNpFiles" style="display:none">
+      <div class="fl-np-files-header">
+        <span>笔记本文件</span>
+        <button class="fl-icon-btn" onclick="FL.openAddFilesDialog()" title="添加文件">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>
+      <div class="fl-np-file-list" id="flNpFileList"></div>
+    </div>
+
+    <!-- Chat area -->
+    <div class="fl-np-chat" id="flNpChat">
+      <div class="fl-chat-messages" id="flChatMessages">
+        <div class="fl-chat-hint">
+          <span id="flChatHint">打开文件或选择笔记本，然后提问</span>
+        </div>
+      </div>
+      <div class="fl-chat-input-wrap">
+        <textarea class="fl-chat-input" id="flChatInput" placeholder="问关于文件的问题…" rows="1"
+          onkeydown="FL.onChatKeydown(event)" oninput="FL.autoResizeInput(this)"></textarea>
+        <button class="fl-chat-send" id="flChatSend" onclick="FL.sendChat()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Right panel resize handle -->
+    <div class="fl-resize-handle fl-resize-right" id="flResizeRight"></div>
+  </aside>
+
+</div><!-- end fl-layout -->
+
+<!-- ══════════════════════════════════════════════════════════════
+     CONTEXT MENU
+═══════════════════════════════════════════════════════════════ -->
+<div class="fl-ctx-menu" id="flCtxMenu" style="display:none">
+  <div class="fl-ctx-item" id="flCtxOpen">打开文件</div>
+  <div class="fl-ctx-item" id="flCtxAddToNb">加入笔记本…</div>
+  <div class="fl-ctx-item" id="flCtxSummarize">生成 AI 摘要</div>
+  <div class="fl-ctx-item" id="flCtxCopyPath">复制路径</div>
+  <div class="fl-ctx-item" id="flCtxOpenNative">用系统程序打开</div>
+  <div class="fl-ctx-sep"></div>
+  <div class="fl-ctx-item fl-ctx-danger" id="flCtxReveal">在资源管理器中显示</div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     MOUNT DIALOG
+═══════════════════════════════════════════════════════════════ -->
+<div class="fl-modal-overlay" id="flMountOverlay" style="display:none" onclick="FL.closeMountDialog()">
+  <div class="fl-modal" onclick="event.stopPropagation()">
+    <div class="fl-modal-header">
+      <span>挂载文件夹</span>
+      <button class="fl-icon-btn" onclick="FL.closeMountDialog()">×</button>
+    </div>
+    <div class="fl-modal-body">
+      <!-- Quick access shortcuts -->
+      <div class="fl-mount-quickaccess" id="flMountQuickAccess"></div>
+      <!-- Drive list -->
+      <div class="fl-mount-drives" id="flMountDrives"></div>
+      <!-- Browse path bar -->
+      <div class="fl-mount-pathbar">
+        <input class="fl-mount-path-input" id="flMountPathInput" placeholder="或直接输入路径…" />
+        <button class="fl-btn fl-btn-sm" onclick="FL.browsePath(document.getElementById('flMountPathInput').value)">浏览</button>
+      </div>
+      <!-- Dir browser -->
+      <div class="fl-mount-browser" id="flMountBrowser"></div>
+    </div>
+    <div class="fl-modal-footer">
+      <span class="fl-mount-selected-path" id="flMountSelectedPath">未选择</span>
+      <div style="display:flex;gap:8px">
+        <button class="fl-btn" onclick="FL.closeMountDialog()">取消</button>
+        <button class="fl-btn fl-btn-primary" onclick="FL.confirmMount()">挂载</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     ADD TO NOTEBOOK DIALOG
+═══════════════════════════════════════════════════════════════ -->
+<div class="fl-modal-overlay" id="flAddNbOverlay" style="display:none" onclick="FL.closeAddNbDialog()">
+  <div class="fl-modal fl-modal-sm" onclick="event.stopPropagation()">
+    <div class="fl-modal-header">
+      <span>加入笔记本</span>
+      <button class="fl-icon-btn" onclick="FL.closeAddNbDialog()">×</button>
+    </div>
+    <div class="fl-modal-body">
+      <div id="flAddNbList"></div>
+      <button class="fl-btn fl-btn-full" onclick="FL.createNotebookAndAdd()" style="margin-top:8px">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        新建笔记本
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     STATUS BAR
+═══════════════════════════════════════════════════════════════ -->
+<div class="fl-statusbar" id="flStatusbar">
+  <span class="fl-status-ws" id="flStatusWs">●</span>
+  <span id="flStatusText">文件库就绪</span>
+  <span class="fl-status-right" id="flStatusRight"></span>
+</div>
+
+<!-- Scripts -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js"></script>
+<script src="/static/js/file-library.js"></script>
+</body>
+</html>

@@ -344,19 +344,20 @@ class GeminiProvider(LLMProvider):
             role = msg.get("role", "user")
             if role == "assistant":
                 role = "model"
-            elif role == "function":
+            elif role in ("function", "tool"):
                 # Gemini only accepts "user" and "model" roles.
-                # Function responses are sent as user-role parts.
+                # Function/tool responses are sent as user-role parts.
                 role = "user"
 
             parts: List[Dict[str, Any]] = []
 
             # For function-response messages, only emit the function_response part
-            if msg.get("role") == "function":
+            if msg.get("role") in ("function", "tool"):
+                fn_name = msg.get("name") or msg.get("tool_call_id") or "unknown_tool"
                 parts.append(
                     {
                         "function_response": {
-                            "name": msg.get("name", "unknown_tool"),
+                            "name": fn_name,
                             "response": {"content": msg.get("content", "")},
                         }
                     }

@@ -26,6 +26,17 @@ window.WA = window.WA || {};
     openTabs: [],          // [{path,name,ext,fileType,fileId,serverData,cache,modified}]
     activeTabPath: null,   // path of the currently active tab
     aiOutputMode: localStorage.getItem('wa_ai_output_mode') || 'inline',  // 'inline'|'chat'
+    lockedModel: localStorage.getItem('wa_locked_model') || 'auto',  // preferred AI model
+    _recentOpen: true,     // recent files section expanded state
+    _workspacePath: '',    // absolute workspace root path for openRecentFile comparison
+    // ── File system browser state (replaces single-workspace tree) ──
+    _browserRoots: null,       // {drives:[...], quick_access:[...]} loaded once
+    _browserExpanded: new Set(), // set of absolute paths currently expanded
+    _browserCache: {},         // absPath → entries[] | 'loading'
+    _fsClipboard: null,        // {path, name, mode:'copy'|'cut'} for copy/cut/paste
+    _searchFilter: 'all',      // active type filter chip: 'all'|'文档'|'表格'|'图片'|'代码'|'其他'
+    _searchActive: false,      // true when showing flat search results
+    _browserSort: localStorage.getItem('wa_browser_sort') || 'name',  // 'name'|'date'|'type'
   };
 
   // Persistent fsHandle map — survives tab entry replacement
@@ -48,6 +59,7 @@ window.WA = window.WA || {};
         <button class="tab-close" onclick="event.stopPropagation();WA._closeTab('${pathEsc}')" title="关闭">×</button>
       </div>`;
     }).join('');
+    _updateStatusBar();
   }
 
   async function _switchToTab(path) {
@@ -59,26 +71,7 @@ window.WA = window.WA || {};
       if (curTab && state.fileType !== 'pdf') {
         curTab.cache = state.activeEditor.serialize();
       }
-      // Background disk save (only if cache has actual content)
-      if (curTab && state.fileType !== 'pdf' && state.fileId && curTab.cache) {
-        clearTimeout(_autoSaveTimer);
-        _autoSaveTimer = null;
-        const savedCache = curTab.cache;
-        const savedType = state.fileType;
-        const savedId = state.fileId;
-        const savedPath = state.wsSourcePath;
-        fetch('/api/v1/workspace/auto_save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            file_type: savedType,
-            file_id: savedId,
-            ws_source_path: savedPath || null,
-            data: savedCache,
-          }),
-        }).then(() => { if (curTab) { curTab.modified = false; _renderTabs(); } })
-          .catch(e => console.warn('[switchToTab diskSave]', e));
-      }
+      // Serialize into cache so we can restore when switching back — no disk write
       try { state.activeEditor.destroy(); } catch(e) {}
       state.activeEditor = null;
     }
@@ -94,23 +87,28 @@ window.WA = window.WA || {};
 
     $('wa-file-name').textContent = tab.name;
     $('wa-save-btn').disabled = (tab.fileType === 'pdf');
+    const _saveAsBtn = $('wa-saveas-btn'); if (_saveAsBtn) _saveAsBtn.disabled = (tab.fileType === 'pdf');
+    _updateSubjectBar(tab.name, tab.fileType);
     toggleWorkspace(true);
 
     const data = tab.cache;
     if (tab.fileType === 'docx') {
+      await _ensureWangEditor();
       state.activeEditor = new KotoDocxEditor();
       // Use cache if it has real content, otherwise fall back to server HTML
       const docxHtml = (data && typeof data === 'string' && data.replace(/<p><br\s*\/?><\/p>/gi,'').trim()) ? data : tab.serverData.html;
       state.activeEditor.render(docxHtml);
     } else if (tab.fileType === 'xlsx') {
+      await _ensureUniverSheets();
       state.activeEditor = new KotoXlsxEditor();
-      // cache is {sheets, _images} — extract sheets array for render
-      const xlsxSheets = data ? (Array.isArray(data) ? data : (data.sheets || data)) : tab.serverData;
-      state.activeEditor.render(xlsxSheets);
+      // cache is {snapshot: IWorkbookData, _images} from serialize(); fall back to serverData
+      const xlsxData = _ensureWorkbookDefaults((data && data.snapshot) ? data.snapshot : tab.serverData);
+      state.activeEditor.render(xlsxData);
     } else if (tab.fileType === 'pptx') {
       state.activeEditor = new KotoPptxEditor();
       state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData);
     } else if (tab.fileType === 'pdf') {
+      await _ensurePdfJS();
       state.activeEditor = new KotoPdfViewer();
       state.activeEditor.render(tab.serverData.raw_url, tab.serverData.pages);
     }
@@ -131,20 +129,9 @@ window.WA = window.WA || {};
     if (idx < 0) return;
     const tab = state.openTabs[idx];
 
-    // Save to disk if modified
-    if (tab.modified && tab.fileType !== 'pdf' && tab.fileId) {
-      const data = (tab.path === state.activeTabPath && state.activeEditor)
-        ? state.activeEditor.serialize()
-        : tab.cache;
-      if (data) {
-        try {
-          await fetch('/api/v1/workspace/auto_save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ file_type: tab.fileType, file_id: tab.fileId, ws_source_path: tab.path, data }),
-          });
-        } catch(e) { console.warn('[closeTab diskSave]', e); }
-      }
+    // Warn before discarding unsaved changes
+    if (tab.modified) {
+      if (!confirm(`"${tab.name}" 有未保存的修改，关闭后将丢失。\n是否继续关闭？`)) return;
     }
 
     const isActive = tab.path === state.activeTabPath;
@@ -161,6 +148,8 @@ window.WA = window.WA || {};
       state.wsSourcePath = null;
       $('wa-file-name').textContent = '全格式 AI 工作区';
       $('wa-save-btn').disabled = true;
+      const _saBtn1 = $('wa-saveas-btn'); if (_saBtn1) _saBtn1.disabled = true;
+      _updateSubjectBar(null, null);
     }
 
     state.openTabs.splice(idx, 1);
@@ -207,6 +196,12 @@ window.WA = window.WA || {};
     }
   }
 
+  // ── Additional file type SVGs (code / image / text) ──────────────────────
+  const _CODE_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#519aba"/><path d="M10 2v3h3" fill="none" stroke="white" stroke-width="0.7" opacity="0.5"/><text x="3" y="12" font-size="5" font-family="monospace" fill="white" opacity="0.9">&lt;/&gt;</text></svg>`;
+  const _MD_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#5c6bc0"/><path d="M10 2v3h3" fill="none" stroke="white" stroke-width="0.7" opacity="0.5"/><path d="M4 10V6l1.5 2L7 6v4" stroke="white" stroke-width="0.9" fill="none"/><path d="M8.5 6v4M11 6l-1.5 2.5L11 10" stroke="white" stroke-width="0.9" fill="none"/></svg>`;
+  const _IMG_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="#4caf50"/><circle cx="5" cy="6" r="1.2" fill="white" opacity="0.9"/><path d="M1.5 10l3.5-3 3 3.5 2.5-2 3 3.5" stroke="white" stroke-width="0.9" fill="none" opacity="0.85"/></svg>`;
+  const _TXT_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#75828d"/><path d="M10 2v3h3" fill="none" stroke="white" stroke-width="0.7" opacity="0.5"/><rect x="4" y="6" width="5" height="0.9" rx="0.3" fill="white" opacity="0.7"/><rect x="4" y="8" width="5" height="0.9" rx="0.3" fill="white" opacity="0.7"/><rect x="4" y="10" width="3.5" height="0.9" rx="0.3" fill="white" opacity="0.5"/></svg>`;
+
   // VS Code-style SVG file type icons
   const _FILE_SVGS = {
     docx: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#2b579a"/><path d="M11 1l3 3v10H11V1z" fill="#1a3f6f"/><path d="M11 1v3h3" fill="none" stroke="white" stroke-width="0.5" opacity="0.4"/><rect x="4" y="5" width="5" height="1" rx="0.4" fill="white" opacity="0.85"/><rect x="4" y="7" width="5" height="1" rx="0.4" fill="white" opacity="0.85"/><rect x="4" y="9" width="3.5" height="1" rx="0.4" fill="white" opacity="0.6"/></svg>`,
@@ -215,9 +210,19 @@ window.WA = window.WA || {};
     pdf: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#e74c3c"/><path d="M11 1l3 3v10H11V1z" fill="#a93226"/><text x="3.2" y="10.5" font-size="4.5" font-family="sans-serif" font-weight="bold" fill="white" opacity="0.9">PDF</text></svg>`,
   };
   const _DEFAULT_FILE_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#75828d"/><path d="M10 2v3h3" fill="none" stroke="white" stroke-width="0.7" opacity="0.5"/></svg>`;
+  // Extend _FILE_SVGS with additional types after definition
+  function _resolveFileIcon(ext, category) {
+    const s = _FILE_SVGS[ext];
+    if (s) return `<span class="wa-file-icon">${s}</span>`;
+    if (category === 'code') return `<span class="wa-file-icon">${_CODE_SVG}</span>`;
+    if (category === 'image') return `<span class="wa-file-icon">${_IMG_SVG}</span>`;
+    if (ext === 'md' || ext === 'markdown') return `<span class="wa-file-icon">${_MD_SVG}</span>`;
+    if (category === 'text') return `<span class="wa-file-icon">${_TXT_SVG}</span>`;
+    return `<span class="wa-file-icon">${_DEFAULT_FILE_SVG}</span>`;
+  }
   const _FOLDER_OPEN_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z" fill="#dcb67a"/><path d="M1.5 6.5h13" stroke="white" stroke-width="0.5" opacity="0.3"/></svg>`;
   const _FOLDER_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z" fill="#c09a5a"/></svg>`;
-  function _fileIcon(ext) { return `<span class="wa-file-icon">${_FILE_SVGS[ext] || _DEFAULT_FILE_SVG}</span>`; }
+  function _fileIcon(ext, category) { return _resolveFileIcon(ext, category); }
 
   const _EXT_ICON = { 'docx': '📘', 'xlsx': '📗', 'pptx': '📙', 'pdf': '📕' };
   const _SORT_LABELS = { name: '名称', date: '日期', type: '类型' };
@@ -254,21 +259,37 @@ window.WA = window.WA || {};
   }
 
   async function loadWorkspaceFiles() {
-    const list = $('wa-files-list');
-    if (!list) return;
+    // Update workspace metadata then soft-refresh the FS browser.
+    // (Kept for backward compatibility — called after file ops like rename/delete/create.)
     try {
-      const res = await fetch('/api/v1/workspace/list_files');
-      const data = await res.json();
+      const res = await fetch('/api/v1/workspace/current_dir');
+      if (res.ok) {
+        const d = await res.json();
+        state._workspaceName = d.name || 'workspace';
+        state._workspacePath = d.path || '';
+        _renderWorkspaceRoot();
+      }
+    } catch (_) {}
+    await _softRefreshBrowser();
+  }
 
-      state._allFiles = data.files || [];
-      _renderWorkspaceTree();
-    } catch (e) {
-      console.error('Failed to load files', e);
+  function _renderWorkspaceRoot() {
+    const el = $('wa-ws-root-label');
+    if (el) {
+      el.textContent = (state._workspaceName || 'workspace').toUpperCase();
+      el.title = state._workspacePath || '';
     }
+    const pt = $('wa-panel-title-ws');
+    if (pt) pt.textContent = state._workspaceName || 'workspace';
   }
 
   function _renderWorkspaceTree() {
-    const list = $('wa-files-list');
+    // No-op: replaced by _renderBrowserTree() in full-FS browser mode.
+    // Kept so existing call sites don't throw.
+  }
+
+  // ── (Old workspace tree helpers kept as stubs) ────────────────────────────
+  function _renderWorkspaceRoot_unused() {
     if (!list) return;
 
     // Apply search filter
@@ -317,6 +338,20 @@ window.WA = window.WA || {};
               <span class="wa-folder-arrow${isOpen ? ' open' : ''}">›</span>
               <span class="wa-file-icon">${folderIconSvg}</span>
               <span class="wa-file-label">${item.name}</span>
+              <div class="wa-file-actions">
+                <button onclick="event.stopPropagation();WA.startNewFile('${folderPathEsc}')" title="新建文件">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                </button>
+                <button onclick="event.stopPropagation();WA.startNewFolder('${folderPathEsc}')" title="新建子文件夹">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+                </button>
+                <button onclick="event.stopPropagation();WA.renameFolderWorkspace('${folderPathEsc}','${folderNameEsc}')" title="重命名">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button class="del" onclick="event.stopPropagation();WA.deleteFolderWorkspace('${folderPathEsc}','${folderNameEsc}')" title="删除文件夹">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                </button>
+              </div>
             </div>
             <div class="wa-folder-children" style="display:${isOpen ? 'block' : 'none'};">${childrenHtml}</div>
           </div>`;
@@ -324,13 +359,14 @@ window.WA = window.WA || {};
           const esc = item.path.replace(/'/g, "\\'");
           const nameEsc = item.name.replace(/'/g, "\\'");
           const isActive = (state.fileName && item.name === state.fileName) ? ' active' : '';
+          const unsupported = (item.supported === false) ? ' wa-unsupported' : '';
           const meta = [item.size, _formatDate(item.mtime)].filter(Boolean).join(' · ');
-          return `<div class="wa-file-item file${isActive}" data-depth="${depth}" data-path="${esc}"
-              onclick="WA._fileRowClick(event,'${esc}')"
+          return `<div class="wa-file-item file${isActive}${unsupported}" data-depth="${depth}" data-path="${esc}"
+              onclick="WA._fileRowClick(event,'${esc}',${item.supported !== false})"
               oncontextmenu="WA._showCtxMenu(event,'${esc}','${nameEsc}')"
               title="${item.name}${meta ? '\n' + meta : ''}">
             <input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleFileCheck(this,'${esc}')">
-            ${_fileIcon(item.ext)}
+            ${_fileIcon(item.ext, item.category)}
             <span class="wa-file-label">${item.name}</span>
             ${meta ? `<span class="wa-file-meta">${meta}</span>` : ''}
             <div class="wa-file-actions">
@@ -370,7 +406,21 @@ window.WA = window.WA || {};
     state.searchQuery = q.trim();
     const clear = $('wa-search-clear');
     if (clear) clear.style.display = state.searchQuery ? '' : 'none';
-    _renderWorkspaceTree();
+    if (!state.searchQuery) {
+      state._searchActive = false;
+      _renderBrowserTree();
+    } else {
+      _doSearch();
+    }
+  };
+
+  window.WA.setSearchFilter = (cat) => {
+    state._searchFilter = cat;
+    document.querySelectorAll('.wa-filter-chip').forEach(el => {
+      el.classList.toggle('active', el.dataset.cat === cat);
+    });
+    if (state.searchQuery) _doSearch();
+    else { state._searchActive = false; _renderBrowserTree(); }
   };
 
   window.WA.clearSearch = () => {
@@ -385,6 +435,114 @@ window.WA = window.WA || {};
     _renderWorkspaceTree();
   };
 
+  // ── Recent files section  ─────────────────────────────────────────────────
+  // Tracks user-opened files in localStorage (not system mtime).
+  const _WA_RECENT_KEY = 'wa_user_recent_v1';
+
+  function _trackUserOpen(path) {
+    if (!path) return;
+    const name = path.split(/[\\/]/).pop() || path;
+    try {
+      const list = JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]');
+      const filtered = list.filter(f => f.path !== path);
+      filtered.unshift({ path, name, ts: Date.now() });
+      localStorage.setItem(_WA_RECENT_KEY, JSON.stringify(filtered.slice(0, 30)));
+    } catch(e) {}
+  }
+
+  async function loadRecentFiles() {
+    const list = document.getElementById('wa-recent-list');
+    if (!list) return;
+    let userRecent = [];
+    // Phase 4: try backend first (richer metadata)
+    try {
+      const res = await fetch('/api/files/recent?days=30&limit=20');
+      if (res.ok) {
+        const d = await res.json();
+        if (d.files && d.files.length) {
+          const backendPaths = new Set(d.files.map(f => f.path));
+          const localExtra = (() => { try { return JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]'); } catch(_) { return []; } })();
+          userRecent = [
+            ...d.files.map(f => ({
+              path: f.path, name: f.name,
+              ts: ((f.mtime || 0) * 1000) || Date.now(),
+              category: f.category, size_bytes: f.size_bytes,
+            })),
+            ...localExtra.filter(f => !backendPaths.has(f.path)).slice(0, 5),
+          ].slice(0, 20);
+        }
+      }
+    } catch (_) {}
+    // Fallback to localStorage
+    if (!userRecent.length) {
+      try { userRecent = JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]'); } catch(_) {}
+    }
+    if (!userRecent.length) {
+      list.innerHTML = '<div class="wa-empty-row">暂无最近文件</div>';
+      return;
+    }
+    list.innerHTML = userRecent.slice(0, 20).map(f => {
+      const name = f.name || (f.path || '').split(/[\\/]/).pop() || '';
+      const ext  = (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
+      const icon = _fileIcon(ext, f.category || null);
+      const date = f.ts ? new Date(f.ts).toLocaleDateString('zh-CN') : '';
+      const size = f.size_bytes ? ' · ' + _formatSize(f.size_bytes) : '';
+      const supported = _isSupportedExt(ext);
+      return `<div class="wa-file-item" title="${_escHtml(f.path || '')}"
+        data-path="${_escHtml(f.path || '')}" data-supported="${supported}"
+        onclick="WA.openRecentFile(${JSON.stringify(f.path || '')})"
+        oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)">
+        <span style="padding-left:8px"></span>
+        ${icon}
+        <span class="wa-file-label">${_escHtml(name)}</span>
+        <span class="wa-recent-date">${date}${size}</span>
+      </div>`;
+    }).join('');
+  }
+
+  window.WA.openRecentFile = async (filePath) => {
+    if (!filePath) return;
+    _trackUserOpen(filePath);  // record user-open event immediately
+    // Check if this path is inside the workspace — if so use normal open
+    const workspacePath = (state._workspacePath || '').replace(/\\/g, '/');
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const isInWorkspace = workspacePath && normalizedPath.startsWith(workspacePath);
+    if (isInWorkspace) {
+      // Derive relative path within workspace
+      const rel = normalizedPath.slice(workspacePath.length).replace(/^\//, '');
+      WA.openWorkspaceFile(rel);
+      return;
+    }
+    // External file — open via open_file_by_path endpoint
+    try {
+      showToast('加载文件…', 'info');
+      const res = await fetch('/api/v1/workspace/open_file_by_path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: filePath }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || '打开失败');
+      if (d.file_id && window.WA._openParsedFile) {
+        WA._openParsedFile(d);
+      } else {
+        showToast('文件已在工作站中加载', 'success');
+      }
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
+
+  window.WA.refreshRecent = () => loadRecentFiles();
+
+  window.WA.toggleRecentSection = () => {
+    state._recentOpen = !state._recentOpen;
+    const list = document.getElementById('wa-recent-list');
+    const arrow = document.getElementById('wa-recent-arrow');
+    if (list) list.style.display = state._recentOpen ? '' : 'none';
+    if (arrow) arrow.classList.toggle('open', state._recentOpen);
+  };
+
   window.WA.cycleSortOrder = () => {
     const order = ['name', 'date', 'type'];
     const idx = order.indexOf(state.sortBy);
@@ -392,6 +550,537 @@ window.WA = window.WA || {};
     localStorage.setItem('wa_sort_by', state.sortBy);
     _renderWorkspaceTree();
   };
+
+  // ── Browser sort ──────────────────────────────────────────────────────────
+  window.WA.cycleBrowserSort = () => {
+    const order = ['name', 'date', 'type'];
+    const labels = { name: '名称', date: '日期', type: '类型' };
+    const idx = order.indexOf(state._browserSort);
+    state._browserSort = order[(idx + 1) % order.length];
+    localStorage.setItem('wa_browser_sort', state._browserSort);
+    const btn = $('wa-browser-sort-btn');
+    if (btn) btn.textContent = '\u21d5 ' + labels[state._browserSort];
+    for (const p in state._browserCache) {
+      if (Array.isArray(state._browserCache[p]))
+        state._browserCache[p] = _applyBrowserSort(state._browserCache[p]);
+    }
+    _renderBrowserTree();
+  };
+
+  function _applyBrowserSort(entries) {
+    if (!entries || !Array.isArray(entries)) return entries;
+    const isF = e => e.type === 'folder' || e.type === 'drive' || e.type === 'quick';
+    const folders = entries.filter(isF);
+    const files   = entries.filter(e => !isF(e));
+    const sortKey = state._browserSort || 'name';
+    const cmp = (a, b) => {
+      if (sortKey === 'date') return (b.mtime || 0) - (a.mtime || 0);
+      if (sortKey === 'type') {
+        const ec = (a.ext || '').localeCompare(b.ext || '');
+        if (ec !== 0) return ec;
+      }
+      return a.name.localeCompare(b.name, 'zh');
+    };
+    return [...folders.sort((a,b)=>a.name.localeCompare(b.name,'zh')), ...files.sort(cmp)];
+  }
+
+  // ── Helper: extension support + size formatting ───────────────────────────
+  function _isSupportedExt(ext) {
+    const s = new Set(['docx','doc','xlsx','xls','pptx','ppt','pdf','txt','md','markdown']);
+    return s.has((ext || '').toLowerCase().replace(/^\./, ''));
+  }
+
+  function _formatSize(bytes) {
+    if (!bytes || bytes < 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  // ── System-wide file search (via /api/files/search) ───────────────────────
+  async function _doSearch() {
+    state._searchActive = true;
+    const q = state.searchQuery;
+    const cat = state._searchFilter !== 'all' ? state._searchFilter : '';
+    const list = $('wa-files-list');
+    if (!list) return;
+    list.innerHTML = '<div class="wa-loading-row" style="padding:12px 8px;display:flex;align-items:center;gap:8px">' +
+      '<span class="wa-spinner"></span>搜索中…</div>';
+    try {
+      const params = new URLSearchParams({ limit: '60' });
+      if (q) params.set('q', q);
+      if (cat) params.set('category', cat);
+      const res = await fetch('/api/files/search?' + params);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const d = await res.json();
+      _renderSearchResults(d.results || [], q);
+    } catch (e) {
+      if (list) list.innerHTML = `<div class="wa-empty-row" style="padding:12px 8px">搜索失败: ${_escHtml(e.message)}</div>`;
+    }
+  }
+
+  function _renderSearchResults(results, query) {
+    const list = $('wa-files-list');
+    if (!list) return;
+    const header = '<div class="wa-search-header">' +
+      `<span>找到 ${results.length} 个文件${query ? ' &middot; "' + _escHtml(query) + '"' : ''}</span>` +
+      '<button onclick="WA.clearSearch()">&#8592; 返回浏览</button>' +
+      '</div>';
+    if (!results.length) {
+      list.innerHTML = header + '<div style="padding:20px 12px;text-align:center;color:var(--text-muted);font-size:12px">' +
+        '未找到匹配的文件<br><span style="font-size:11px;margin-top:4px;display:block">尝试其他关键词或调整类型过滤</span></div>';
+      return;
+    }
+    const rows = results.map(f => {
+      const name = f.name || (f.path || '').split(/[\\/]/).pop();
+      const ext  = (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
+      const path = f.path || '';
+      const dir  = path.replace(/[\\/][^\\/]+$/, '');
+      const cat  = f.category || '';
+      const size = f.size_bytes ? _formatSize(f.size_bytes) : '';
+      const supported = _isSupportedExt(ext);
+      const unsupported = supported ? '' : ' wa-unsupported';
+      const checkHtml = state.selectMode
+        ? '<input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleBrowserCheck(this)">'
+        : '';
+      return `<div class="wa-file-item file${unsupported}" style="padding-left:8px"` +
+        ` data-path="${_escHtml(path)}" data-supported="${supported}"` +
+        ` onclick="WA.openBrowserFile(this.dataset.path,this.dataset.supported!=='false')"` +
+        ` oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)"` +
+        ` title="${_escHtml(path)}">` +
+        `${checkHtml}${_fileIcon(ext, cat)}` +
+        `<span class="wa-file-label">${_escHtml(name)}</span>` +
+        `<span class="wa-search-dir" title="${_escHtml(dir)}">${_escHtml(dir)}</span>` +
+        `${size ? `<span class="wa-recent-date">${size}</span>` : ''}` +
+        `<div class="wa-file-actions"><button onclick="event.stopPropagation();WA._showBrowserCtx(event,this.closest('.wa-file-item'))" title="更多">${_MORE_BTN_SVG}</button></div>` +
+        '</div>';
+    });
+    list.innerHTML = header + rows.join('');
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── Full Local-Filesystem Browser (VS Code Explorer style) ───────────────
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Initial load: fetch drives + quick-access, auto-expand workspace folder.
+   * Replaces the old single-workspace tree on init.
+   */
+  async function loadFileBrowser() {
+    const list = $('wa-files-list');
+    if (list) list.innerHTML = '<div class="wa-loading-row">正在读取文件系统…</div>';
+    try {
+      // 1. Workspace metadata (for section label + recent-file path comparison)
+      const wsMeta = await fetch('/api/v1/workspace/current_dir')
+        .then(r => r.ok ? r.json() : null).catch(() => null);
+      if (wsMeta) {
+        state._workspaceName = wsMeta.name || 'workspace';
+        state._workspacePath = wsMeta.path || '';
+        _renderWorkspaceRoot();
+      }
+      // 2. Roots (drives + quick access)
+      const res = await fetch('/api/v1/workspace/browse_local');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      state._browserRoots = data;
+      // 3. Auto-expand the Koto workspace folder
+      const wsEntry = (data.quick_access || []).find(q => q.name === 'Koto 工作区');
+      if (wsEntry && !state._browserExpanded.has(wsEntry.path)) {
+        state._browserExpanded.add(wsEntry.path);
+        state._browserCache[wsEntry.path] = 'loading';
+      }
+      _renderBrowserTree();
+      // 4. Load workspace children
+      if (wsEntry && state._browserCache[wsEntry.path] === 'loading') {
+        const cr = await fetch('/api/v1/workspace/browse_local?path=' + encodeURIComponent(wsEntry.path));
+        const cd = await cr.json();
+        state._browserCache[wsEntry.path] = cd.entries || [];
+        _renderBrowserTree();
+      }
+    } catch (e) {
+      const l = $('wa-files-list');
+      if (l) l.innerHTML = `<div class="wa-empty-row">加载失败: ${e.message}</div>`;
+    }
+  }
+
+  /**
+   * Soft-refresh: preserve expanded state but re-fetch all open folder contents.
+   * Called after file create/delete/rename operations.
+   */
+  async function _softRefreshBrowser() {
+    const expanded = Array.from(state._browserExpanded);
+    for (const p of expanded) state._browserCache[p] = 'loading';
+    _renderBrowserTree();
+    await Promise.all(expanded.map(async absPath => {
+      try {
+        const r = await fetch('/api/v1/workspace/browse_local?path=' + encodeURIComponent(absPath));
+        state._browserCache[absPath] = r.ok ? (await r.json()).entries || [] : [];
+      } catch (_) { state._browserCache[absPath] = []; }
+    }));
+    _renderBrowserTree();
+  }
+
+  /** Render the full browser tree into #wa-files-list. */
+  function _renderBrowserTree() {
+    const list = $('wa-files-list');
+    if (!list) return;
+    if (!state._browserRoots) {
+      list.innerHTML = '<div class="wa-loading-row">正在读取文件系统…</div>';
+      return;
+    }
+    const r = state._browserRoots;
+    const rows = [];
+    if (r.quick_access?.length) {
+      rows.push(`<div class="wa-browser-group-label">快速访问</div>`);
+      r.quick_access.forEach(qa => _renderBrowserEntry(qa, 0, rows));
+    }
+    if (r.drives?.length) {
+      rows.push(`<div class="wa-browser-group-label">此电脑</div>`);
+      r.drives.forEach(d => _renderBrowserEntry(d, 0, rows));
+    }
+    list.innerHTML = rows.join('');
+    // Restore active file highlight
+    if (state.activeTabPath) {
+      const el = list.querySelector(`[data-path="${CSS.escape(state.activeTabPath)}"]`);
+      if (el) el.classList.add('active');
+    }
+  }
+
+  /** Recursively render one tree entry (folder or file) into the rows array. */
+  const _MORE_BTN_SVG = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="2.5" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13.5" r="1.5"/></svg>`;
+
+  function _renderBrowserEntry(entry, depth, rows) {
+    const pad = depth * 16 + 8;
+    const absPath = entry.path;
+    const isFolder = entry.type === 'folder' || entry.type === 'drive' || entry.type === 'quick';
+
+    if (isFolder) {
+      const isExpanded = state._browserExpanded.has(absPath);
+      const folderSvg = isExpanded ? _FOLDER_OPEN_SVG : _FOLDER_SVG;
+      rows.push(
+        `<div class="wa-file-item folder" style="padding-left:${pad}px" ` +
+        `data-path="${_escHtml(absPath)}" ` +
+        `onclick="WA.toggleBrowserFolder(this.dataset.path)" ` +
+        `oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)">` +
+        `<span class="wa-folder-arrow${isExpanded ? ' open' : ''}">›</span>` +
+        `<span class="wa-file-icon">${folderSvg}</span>` +
+        `<span class="wa-file-label">${_escHtml(entry.name)}</span>` +
+        `<div class="wa-file-actions"><button onclick="event.stopPropagation();WA._showBrowserCtx(event,this.closest('.wa-file-item'))" title="更多操作">${_MORE_BTN_SVG}</button></div>` +
+        `</div>`
+      );
+      if (isExpanded) {
+        const ch = state._browserCache[absPath];
+        if (ch === 'loading') {
+          rows.push(`<div class="wa-loading-row" style="padding-left:${pad + 24}px">加载中…</div>`);
+        } else if (!ch || ch.length === 0) {
+          rows.push(`<div class="wa-empty-row" style="padding-left:${pad + 24}px">（空文件夹）</div>`);
+        } else {
+          ch.forEach(c => _renderBrowserEntry(c, depth + 1, rows));
+        }
+      }
+    } else {
+      const ext = entry.ext || '';
+      const supported = entry.supported !== false;
+      const unsupported = !supported ? ' wa-unsupported' : '';
+      const isActive = state.activeTabPath === absPath ? ' active' : '';
+      const checkHtml = state.selectMode
+        ? '<input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleBrowserCheck(this)">'
+        : '';
+      rows.push(
+        `<div class="wa-file-item file${isActive}${unsupported}" style="padding-left:${pad}px" ` +
+        `data-path="${_escHtml(absPath)}" data-supported="${supported}" ` +
+        `onclick="WA.openBrowserFile(this.dataset.path, this.dataset.supported !== 'false')" ` +
+        `oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)" ` +
+        `title="${_escHtml(entry.name)}">` +
+        `${checkHtml}${_fileIcon(ext, entry.category)}` +
+        `<span class="wa-file-label">${_escHtml(entry.name)}</span>` +
+        `<div class="wa-file-actions"><button onclick="event.stopPropagation();WA._showBrowserCtx(event,this.closest('.wa-file-item'))" title="更多操作">${_MORE_BTN_SVG}</button></div>` +
+        `</div>`
+      );
+    }
+  }
+
+  /** Toggle expand/collapse of a folder in the browser. Lazy-loads on first expand. */
+  window.WA.toggleBrowserFolder = async (absPath) => {
+    if (state._browserExpanded.has(absPath)) {
+      state._browserExpanded.delete(absPath);
+      _renderBrowserTree();
+      return;
+    }
+    state._browserExpanded.add(absPath);
+    if (!state._browserCache[absPath] || state._browserCache[absPath] === 'loading') {
+      state._browserCache[absPath] = 'loading';
+      _renderBrowserTree();
+      try {
+        const res = await fetch('/api/v1/workspace/browse_local?path=' + encodeURIComponent(absPath));
+        const data = await res.json();
+        if (!res.ok) { showToast(data.error || '无法读取文件夹', 'error'); state._browserCache[absPath] = []; }
+        else state._browserCache[absPath] = data.entries || [];
+      } catch (e) { state._browserCache[absPath] = []; showToast(e.message, 'error'); }
+    }
+    _renderBrowserTree();
+  };
+
+  /** Open a file from the browser by absolute path. */
+  window.WA.openBrowserFile = async (absPath, supported = true) => {
+    if (!supported) {
+      showToast('此格式暂不支持在线编辑，已触发本地打开', 'info');
+      fetch('/api/v1/workspace/open-native', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: absPath }),
+      }).catch(() => {});
+      return;
+    }
+    // Switch to existing tab if already open
+    if (state.openTabs.some(t => t.path === absPath)) {
+      await _switchToTab(absPath);
+      return;
+    }
+    const baseName = absPath.replace(/\\/g, '/').split('/').pop() || absPath;
+    _trackUserOpen(absPath);
+    showToast('正在加载 ' + baseName, 'info');
+    try {
+      const res = await fetch('/api/v1/workspace/serve_abs?path=' + encodeURIComponent(absPath));
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const blob = await res.blob();
+      const file = new File([blob], baseName);
+      file._wsPath = absPath;   // use abs path so tabs track by abs path
+      file._absPath = absPath;  // flag: opened from browser (not workspace-relative)
+      await Router.load(file);
+      loadRecentFiles();
+      _renderBrowserTree();     // refresh active highlight
+    } catch (e) { showToast('无法打开文件: ' + e.message, 'error'); }
+  };
+
+  // ── File-browser context menu ─────────────────────────────────────────────
+  let _fsBrowserCtxTarget = { path: null, name: null, isFolder: false, supported: true };
+
+  window.WA._showBrowserCtx = (event, el) => {
+    if (!el) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const absPath = el.dataset.path;
+    if (!absPath) return;
+    const name = el.querySelector('.wa-file-label')?.textContent || absPath.split(/[\\/]/).pop();
+    const isFolder = el.classList.contains('folder');
+    const supported = el.dataset.supported !== 'false';
+    _fsBrowserCtxTarget = { path: absPath, name, isFolder, supported };
+
+    const menu = document.getElementById('wa-ctx-menu');
+    if (!menu) return;
+
+    const clip = state._fsClipboard;
+    const SVG = {
+      open:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+      copy:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+      cut:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="20" r="3"/><circle cx="6" cy="4" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>`,
+      paste:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>`,
+      rename: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
+      newf:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>`,
+      newdir: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>`,
+      ai:     `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`,
+      del:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>`,
+    };
+
+    let html = '';
+    if (isFolder) {
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserNewFile();_closeCtxMenu()">${SVG.newf} 新建文件</div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserNewFolder();_closeCtxMenu()">${SVG.newdir} 新建子文件夹</div>`;
+      html += `<div class="wa-ctx-separator"></div>`;
+      if (clip) {
+        html += `<div class="wa-ctx-item" onclick="WA._fsBrowserPaste();_closeCtxMenu()">${SVG.paste} 粘贴 <span style="font-size:11px;color:var(--text-muted);margin-left:4px">${_escHtml(clip.name)}</span></div>`;
+        html += `<div class="wa-ctx-separator"></div>`;
+      }
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserRename();_closeCtxMenu()">${SVG.rename} 重命名</div>`;
+      html += `<div class="wa-ctx-separator"></div>`;
+      html += `<div class="wa-ctx-item danger" onclick="WA._fsBrowserDelete();_closeCtxMenu()">${SVG.del} 删除文件夹</div>`;
+    } else {
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserOpen();_closeCtxMenu()">${SVG.open} ${supported ? '打开' : '本地打开'}</div>`;
+      html += `<div class="wa-ctx-separator"></div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCopy();_closeCtxMenu()">${SVG.copy} 复制</div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCut();_closeCtxMenu()">${SVG.cut} 剪切</div>`;
+      if (clip && !isFolder) {
+        // paste next to file = paste into same dir
+        html += `<div class="wa-ctx-item" onclick="WA._fsBrowserPaste();_closeCtxMenu()">${SVG.paste} 粘贴到此处</div>`;
+      }
+      html += `<div class="wa-ctx-separator"></div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserRename();_closeCtxMenu()">${SVG.rename} 重命名</div>`;
+      if (supported) {
+        html += `<div class="wa-ctx-separator"></div>`;
+        html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAISummary();_closeCtxMenu()">${SVG.ai} AI 概括</div>`;
+      }
+      html += `<div class="wa-ctx-separator"></div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCopyPath();_closeCtxMenu()">${SVG.copy} 复制路径</div>`;
+      html += `<div class="wa-ctx-separator"></div>`;
+      html += `<div class="wa-ctx-item danger" onclick="WA._fsBrowserDelete();_closeCtxMenu()">${SVG.del} 删除</div>`;
+    }
+    menu.innerHTML = html;
+    menu.classList.add('open');
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = event.clientX, y = event.clientY;
+    if (x + 200 > vw) x = vw - 204;
+    if (y + 280 > vh) y = vh - 284;
+    menu.style.left = x + 'px';
+    menu.style.top  = y + 'px';
+  };
+
+  // ── Browser context menu actions ──────────────────────────────────────────
+
+  window.WA._fsBrowserOpen = () => {
+    const { path, supported } = _fsBrowserCtxTarget;
+    if (!path) return;
+    WA.openBrowserFile(path, supported);
+  };
+
+  window.WA._fsBrowserCopy = () => {
+    const { path, name } = _fsBrowserCtxTarget;
+    if (!path) return;
+    state._fsClipboard = { path, name, mode: 'copy' };
+    showToast('"' + name + '" 已复制', 'success');
+  };
+
+  window.WA._fsBrowserCut = () => {
+    const { path, name } = _fsBrowserCtxTarget;
+    if (!path) return;
+    state._fsClipboard = { path, name, mode: 'cut' };
+    // Dim the item to signal it's being moved
+    const el = document.querySelector(`.wa-file-item[data-path="${CSS.escape(path)}"]`);
+    if (el) el.style.opacity = '0.45';
+    showToast('"' + name + '" 准备移动', 'info');
+  };
+
+  window.WA._fsBrowserPaste = async () => {
+    const clip = state._fsClipboard;
+    if (!clip) return;
+    const { path: target, isFolder } = _fsBrowserCtxTarget;
+    // dst_dir: if target is a folder, paste into it; otherwise paste into its parent
+    const dstDir = isFolder ? target : target.replace(/[\\/][^\\/]+$/, '');
+    try {
+      const res = await fetch('/api/v1/workspace/fs_copy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ src: clip.path, dst_dir: dstDir, move: clip.mode === 'cut' }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || '操作失败');
+      if (clip.mode === 'cut') state._fsClipboard = null;
+      showToast('已粘贴 "' + clip.name + '"', 'success');
+      // Invalidate cache for dst folder and re-expand it
+      delete state._browserCache[dstDir];
+      if (state._browserExpanded.has(dstDir)) state._browserExpanded.delete(dstDir);
+      state._browserExpanded.add(dstDir);
+      await _softRefreshBrowser();
+    } catch (e) { showToast(e.message, 'error'); }
+  };
+
+  window.WA._fsBrowserCopyPath = () => {
+    const { path } = _fsBrowserCtxTarget;
+    if (!path) return;
+    navigator.clipboard.writeText(path)
+      .then(() => showToast('路径已复制', 'success'))
+      .catch(() => showToast(path, 'info'));
+  };
+
+  window.WA._fsBrowserRename = () => {
+    const { path, name, isFolder } = _fsBrowserCtxTarget;
+    if (!path) return;
+    const item = document.querySelector(`.wa-file-item[data-path="${CSS.escape(path)}"]`);
+    if (!item) return;
+    const labelSpan = item.querySelector('.wa-file-label');
+    if (!labelSpan) return;
+    const stem = (!isFolder && name.includes('.')) ? name.slice(0, name.lastIndexOf('.')) : name;
+    const input = document.createElement('input');
+    input.className = 'wa-rename-input';
+    input.value = stem;
+    labelSpan.replaceWith(input);
+    input.focus(); input.select();
+    const commit = async () => {
+      const newName = input.value.trim();
+      if (!newName || newName === stem) { _softRefreshBrowser(); return; }
+      try {
+        const res = await fetch('/api/v1/workspace/fs_rename', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path, name: newName }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || '重命名失败');
+        showToast('已重命名为 ' + json.name, 'success');
+      } catch (e) { showToast(e.message, 'error'); }
+      // Invalidate parent folder cache
+      const parent = path.replace(/[\\/][^\\/]+$/, '');
+      delete state._browserCache[parent];
+      await _softRefreshBrowser();
+    };
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); commit(); }
+      if (e.key === 'Escape') { _softRefreshBrowser(); }
+    });
+    input.addEventListener('blur', commit);
+  };
+
+  window.WA._fsBrowserDelete = async () => {
+    const { path, name, isFolder } = _fsBrowserCtxTarget;
+    if (!path) return;
+    const msg = isFolder
+      ? `确定要删除文件夹 "${name}" 及其所有内容吗？此操作不可撤销。`
+      : `确定要删除 "${name}" 吗？`;
+    if (!confirm(msg)) return;
+    try {
+      const res = await fetch('/api/v1/workspace/fs_delete?path=' + encodeURIComponent(path), { method: 'DELETE' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || '删除失败');
+      showToast('已删除 "' + name + '"', 'success');
+      // Remove from open tabs if it was open
+      const tabIdx = state.openTabs.findIndex(t => t.path === path);
+      if (tabIdx >= 0) {
+        const wasActive = state.openTabs[tabIdx].path === state.activeTabPath;
+        if (wasActive && state.activeEditor) {
+          try { state.activeEditor.destroy(); } catch(_) {}
+          state.activeEditor = null; state.activeTabPath = null;
+          state.fileId = null; state.fileType = null; state.fileName = null;
+          const canvas = document.getElementById('wa-canvas');
+          if (canvas) canvas.innerHTML = '';
+        }
+        state.openTabs.splice(tabIdx, 1);
+        WA._renderTabs();
+      }
+      // Invalidate parent cache
+      const parent = path.replace(/[\\/][^\\/]+$/, '');
+      delete state._browserCache[parent];
+      if (state._browserExpanded.has(path)) state._browserExpanded.delete(path);
+      await _softRefreshBrowser();
+    } catch (e) { showToast(e.message, 'error'); }
+  };
+
+  window.WA._fsBrowserNewFile = () => {
+    const { path } = _fsBrowserCtxTarget;
+    if (!path) return;
+    WA.startNewFile(path);
+  };
+
+  window.WA._fsBrowserNewFolder = () => {
+    const { path } = _fsBrowserCtxTarget;
+    if (!path) return;
+    WA.startNewFolder(path);
+  };
+
+  window.WA._fsBrowserAISummary = async () => {
+    const { path, supported } = _fsBrowserCtxTarget;
+    if (!path || !supported) return;
+    // Open the file first, then send summary request to AI
+    await WA.openBrowserFile(path, true);
+    // Small delay to let the editor finish rendering
+    setTimeout(() => {
+      const input = document.getElementById('wa-user-input');
+      if (input) {
+        input.value = '请帮我概括这份文件的主要内容，列出核心要点。';
+        WA.sendMessage();
+      }
+    }, 600);
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────
 
   window.WA.renameWorkspaceFile = async (path, currentName) => {
     // Find the file item and do inline editing
@@ -470,6 +1159,7 @@ window.WA = window.WA || {};
           toggleWorkspace(false);
           $('wa-file-name').textContent = '全格式 AI 工作区';
           $('wa-save-btn').disabled = true;
+          const _saBtn2 = $('wa-saveas-btn'); if (_saBtn2) _saBtn2.disabled = true;
         }
       }
       showToast('已删除 ' + filepath.split('/').pop(), 'success');
@@ -480,18 +1170,35 @@ window.WA = window.WA || {};
   };
 
   // ── Multi-select helpers ──────────────────────────────────────────────
-  window.WA._fileRowClick = (event, path) => {
+  window.WA._fileRowClick = (event, path, supported = true) => {
     if (state.selectMode) {
       const cb = event.currentTarget.querySelector('.wa-file-check');
       const checked = !cb.checked;
       cb.checked = checked;
       WA._toggleFileCheck(cb, path);
-    } else {
+    } else if (supported) {
       WA.openWorkspaceFile(path);
+    } else {
+      // Not directly editable — offer native open
+      showToast('此格式暂不支持在线编辑，已触发本地打开', 'info');
+      fetch('/api/v1/workspace/open-native', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      }).catch(() => {});
     }
   };
 
   window.WA._toggleFileCheck = (cb, path) => {
+    cb.checked ? state.selectedFiles.add(path) : state.selectedFiles.delete(path);
+    cb.closest('.wa-file-item').classList.toggle('selected', cb.checked);
+    WA._updateSelectBar();
+  };
+
+  // For FS browser: reads path from data-path attribute (avoids quote-escaping)
+  window.WA._toggleBrowserCheck = (cb) => {
+    const path = cb.closest('.wa-file-item')?.dataset.path;
+    if (!path) return;
     cb.checked ? state.selectedFiles.add(path) : state.selectedFiles.delete(path);
     cb.closest('.wa-file-item').classList.toggle('selected', cb.checked);
     WA._updateSelectBar();
@@ -536,13 +1243,113 @@ window.WA = window.WA || {};
     let failed = 0;
     for (const p of paths) {
       try {
-        const res = await fetch('/api/v1/workspace/file?path=' + encodeURIComponent(p), { method: 'DELETE' });
+        // Use fs_delete for absolute paths (browser), workspace delete for relative paths
+        const isAbs = /^[A-Za-z]:[/\\]|\//.test(p);
+        const delUrl = isAbs
+          ? '/api/v1/workspace/fs_delete?path=' + encodeURIComponent(p)
+          : '/api/v1/workspace/file?path='       + encodeURIComponent(p);
+        const res = await fetch(delUrl, { method: 'DELETE' });
         if (!res.ok) failed++;
       } catch { failed++; }
     }
     showToast(failed ? `已删除 ${paths.length - failed} 个，${failed} 个失败` : `已删除 ${paths.length} 个文件`, failed ? 'error' : 'success');
     WA.toggleSelectMode();
     await loadWorkspaceFiles();
+  };
+
+  // ── My Files (我的文件) — bridge to full FileHub panel ───────────────────
+  window.WA.openMyFiles = () => {
+    // When embedded inside index.html, openFileHubModal() is a global function
+    if (typeof window.openFileHubModal === 'function') {
+      window.openFileHubModal();
+    } else {
+      // Standalone page: navigate to main app and auto-open the panel
+      window.location.href = '/?my_files=1';
+    }
+  };
+
+  // ── Archive / organize panel ─────────────────────────────────────────────
+  let _archiveMode = 'auto';
+
+  window.WA.showArchivePanel = () => {
+    const overlay = document.getElementById('wa-archive-overlay');
+    if (!overlay) return;
+    const srcInput = document.getElementById('wa-archive-src');
+    if (srcInput && !srcInput.value && state._workspacePath)
+      srcInput.value = state._workspacePath;
+    const resultEl = document.getElementById('wa-archive-result');
+    if (resultEl) resultEl.innerHTML = '';
+    WA._setArchiveMode(_archiveMode);
+    overlay.style.display = 'flex';
+  };
+
+  window.WA.hideArchivePanel = () => {
+    const el = document.getElementById('wa-archive-overlay');
+    if (el) el.style.display = 'none';
+  };
+
+  window.WA._setArchiveMode = (mode) => {
+    _archiveMode = mode;
+    const btnAuto   = document.getElementById('wa-archive-mode-auto');
+    const btnCustom = document.getElementById('wa-archive-mode-custom');
+    if (btnAuto)   btnAuto.className   = mode === 'auto'   ? 'wa-btn primary' : 'wa-btn';
+    if (btnCustom) btnCustom.className = mode === 'custom' ? 'wa-btn primary' : 'wa-btn';
+  };
+
+  window.WA._archivePickFolder = async (inputId) => {
+    try {
+      const res = await fetch('/api/files/pick-folder');
+      const d = await res.json();
+      if (d.path) { const el = document.getElementById(inputId); if (el) el.value = d.path; }
+    } catch (_) { /* user cancelled or not available */ }
+  };
+
+  window.WA._doArchive = async () => {
+    const srcEl    = document.getElementById('wa-archive-src');
+    const resultEl = document.getElementById('wa-archive-result');
+    const startBtn = document.getElementById('wa-archive-start-btn');
+    if (!srcEl || !resultEl) return;
+    const src = srcEl.value.trim();
+    if (!src) { srcEl.focus(); showToast('请先填写源文件夹路径', 'error'); return; }
+    if (startBtn) startBtn.disabled = true;
+    resultEl.innerHTML = '<div class="wa-loading-row" style="display:flex;align-items:center;gap:8px;padding:12px">' +
+      '<span class="wa-spinner"></span>归档中，请稍候…</div>';
+    try {
+      const res = await fetch('/api/files/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_dir: src, mode: _archiveMode, recursive: true, rules: [] }),
+      });
+      const d = await res.json();
+      if (!res.ok || d.error) throw new Error(d.error || res.statusText);
+      // Group by target folder
+      const byFolder = {};
+      (d.report || []).forEach(item => {
+        if (!byFolder[item.folder]) byFolder[item.folder] = [];
+        byFolder[item.folder].push((item.src || '').split(/[\\/]/).pop());
+      });
+      const cards = Object.entries(byFolder).map(([folder, files]) =>
+        `<div class="wa-archive-group">` +
+        `<div class="wa-archive-group-title">${_FOLDER_SVG} ${_escHtml(folder)} <span class="wa-section-badge">${files.length}</span></div>` +
+        `<div class="wa-archive-group-files">${files.slice(0,6).map(f=>`<span>${_escHtml(f)}</span>`).join('')}` +
+        `${files.length > 6 ? `<span style="color:var(--text-muted)">…另 ${files.length-6} 个</span>` : ''}</div>` +
+        `</div>`
+      ).join('');
+      resultEl.innerHTML =
+        `<div class="wa-archive-success">` +
+        `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">` +
+        `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>` +
+        `<strong>归档完成</strong><span style="color:var(--text-muted);font-size:12px;margin-left:4px">共 ${d.total} 个文件，成功 ${d.copied} 个</span></div>` +
+        `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">目标：${_escHtml(d.dest_dir)}</div>` +
+        cards + `</div>`;
+      delete state._browserCache[d.dest_dir];
+      state._browserExpanded.add(d.dest_dir);
+      _softRefreshBrowser();
+    } catch (e) {
+      resultEl.innerHTML = `<div class="wa-empty-row" style="color:var(--danger)">归档失败：${_escHtml(e.message)}</div>`;
+    } finally {
+      if (startBtn) startBtn.disabled = false;
+    }
   };
 
   // ── Context menu ──────────────────────────────────────────────────────
@@ -587,6 +1394,8 @@ window.WA = window.WA || {};
     const menu = document.getElementById('wa-ctx-menu');
     if (menu) menu.classList.remove('open');
   }
+  // Expose for inline onclick handlers in context menu items
+  window._closeCtxMenu = _closeCtxMenu;
 
   document.addEventListener('click', (e) => {
     // Don't close when clicking on a menu item — let the item's onclick fire first
@@ -618,11 +1427,19 @@ window.WA = window.WA || {};
     _ctxTarget = { path, name };
     const menu = document.getElementById('wa-ctx-menu');
     if (!menu) return;
-    // Build folder-specific menu items inline
     menu.innerHTML = `
+      <div class="wa-ctx-item" onclick="WA.startNewFile('${path.replace(/'/g,"\\'")}');_closeCtxMenu()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+        新建文件
+      </div>
+      <div class="wa-ctx-item" onclick="WA.startNewFolder('${path.replace(/'/g,"\\'")}');_closeCtxMenu()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+        新建子文件夹
+      </div>
+      <div class="wa-ctx-separator"></div>
       <div class="wa-ctx-item" onclick="WA._ctxFolderRename()">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        重命名文件夹
+        重命名
       </div>
       <div class="wa-ctx-separator"></div>
       <div class="wa-ctx-item danger" onclick="WA._ctxFolderDelete()">
@@ -632,8 +1449,8 @@ window.WA = window.WA || {};
     menu.classList.add('open');
     const vw = window.innerWidth, vh = window.innerHeight;
     let x = event.clientX, y = event.clientY;
-    if (x + 180 > vw) x = vw - 184;
-    if (y + 120 > vh) y = vh - 124;
+    if (x + 200 > vw) x = vw - 204;
+    if (y + 180 > vh) y = vh - 184;
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
   };
@@ -702,6 +1519,143 @@ window.WA = window.WA || {};
     input.addEventListener('blur', commit);
   };
 
+  // ── Create new file / folder (VS Code inline input pattern) ──────────────
+
+  window.WA.startNewFile = (folderPath) => {
+    _insertNewItemInput(folderPath, 'file');
+  };
+
+  window.WA.startNewFolder = (parentPath) => {
+    _insertNewItemInput(parentPath, 'folder');
+  };
+
+  function _insertNewItemInput(parentPath, kind) {
+    // Open the folder so the input is visible
+    const fileIcon = kind === 'folder'
+      ? `<span class="wa-file-icon">${_FOLDER_SVG}</span>`
+      : `<span class="wa-file-icon">${_DEFAULT_FILE_SVG}</span>`;
+
+    const row = document.createElement('div');
+    row.className = 'wa-file-item wa-new-item-row';
+
+    // Calculate depth from parent
+    let depth = 0;
+    if (parentPath) {
+      const parentEl = document.querySelector(`.wa-file-item[data-path="${CSS.escape(parentPath)}"]`);
+      if (parentEl) depth = parseInt(parentEl.dataset.depth || '0', 10) + 1;
+    }
+    row.innerHTML = `<span class="wa-tree-indent" style="padding-left:${depth * 16 + 8}px"></span>${fileIcon}`;
+
+    const input = document.createElement('input');
+    input.className = 'wa-rename-input wa-new-item-input';
+    input.placeholder = kind === 'folder' ? '文件夹名称' : '文件名.txt';
+    row.appendChild(input);
+
+    // Find insertion point — inside the folder's children, or at the top of the list
+    let inserted = false;
+    if (parentPath) {
+      const folderGroup = document.querySelector(`.wa-folder-group[data-folder="${CSS.escape(parentPath)}"]`);
+      if (folderGroup) {
+        const childrenEl = folderGroup.querySelector('.wa-folder-children');
+        if (childrenEl) {
+          // Ensure the folder is open
+          childrenEl.style.display = 'block';
+          const arrowEl = folderGroup.querySelector('.wa-folder-arrow');
+          if (arrowEl) arrowEl.classList.add('open');
+          childrenEl.prepend(row);
+          inserted = true;
+        }
+      }
+    }
+    if (!inserted) {
+      const list = document.getElementById('wa-files-list');
+      if (list) list.prepend(row);
+    }
+
+    input.focus();
+
+    const commit = async () => {
+      const name = input.value.trim();
+      if (!name) { row.remove(); return; }
+      try {
+        const endpoint = kind === 'folder' ? '/api/v1/workspace/create_folder' : '/api/v1/workspace/create_file';
+        const body = kind === 'folder'
+          ? { parent: parentPath || '', name }
+          : { folder: parentPath || '', name };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || '创建失败');
+        showToast(`"${name}" 已创建`, 'success');
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+      row.remove();
+      await loadWorkspaceFiles();
+    };
+
+    let committed = false;
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); if (!committed) { committed = true; commit(); } }
+      if (e.key === 'Escape') { row.remove(); }
+    });
+    input.addEventListener('blur', () => { if (!committed) { committed = true; commit(); } });
+  }
+
+  // ── Open Folder as Workspace (VS Code "Open Folder" shortcut) ────────────
+
+  window.WA.openFolderAsWorkspace = () => {
+    const overlay = document.getElementById('wa-open-folder-overlay');
+    if (overlay) overlay.style.display = '';
+  };
+
+  window.WA.closeFolderOverlay = () => {
+    const overlay = document.getElementById('wa-open-folder-overlay');
+    if (overlay) overlay.style.display = 'none';
+  };
+
+  window.WA.confirmOpenFolder = async () => {
+    const input = document.getElementById('wa-open-folder-path');
+    if (!input) return;
+    const path = input.value.trim();
+    if (!path) return;
+    try {
+      const res = await fetch('/api/v1/workspace/set_workspace_dir', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || '切换失败');
+      showToast(`工作区已切换到 "${json.name}"`, 'success');
+      WA.closeFolderOverlay();
+      await loadWorkspaceFiles();
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
+  };
+
+  // Also wire Browse button to pick a folder (File System Access API)
+  window.WA.browseForFolder = async () => {
+    if (window.showDirectoryPicker) {
+      try {
+        const dir = await window.showDirectoryPicker({ mode: 'readwrite' });
+        const input = document.getElementById('wa-open-folder-path');
+        if (input) {
+          // We only get a virtual handle here; show the folder name as hint
+          input.value = dir.name;
+          input.placeholder = dir.name;
+          showToast('已选择文件夹: ' + dir.name + ' （请确认系统路径）', 'info');
+        }
+      } catch (e) { /* user cancelled */ }
+    } else {
+      showToast('浏览器不支持文件夹选择，请直接粘贴路径', 'info');
+    }
+  };
+
   window.WA.toggleFolder = (el) => {
     const arrow = el.querySelector('.wa-folder-arrow');
     const iconEl = el.querySelector('.wa-file-icon');
@@ -732,10 +1686,12 @@ window.WA = window.WA || {};
   window.WA.openWorkspaceFile = async (path) => {
     // If already open in a tab, switch instantly (no server fetch)
     if (state.openTabs.some(t => t.path === path)) {
+      _trackUserOpen(path);  // still track re-opens as user intent
       await _switchToTab(path);
       return;
     }
     const baseName = path.split('/').pop();
+    _trackUserOpen(path);   // record before fetch so it's captured even if load fails
     showToast('正在加载 ' + baseName, 'success');
     try {
       const encodedPath = path.split('/').map(p => encodeURIComponent(p)).join('/');
@@ -745,6 +1701,7 @@ window.WA = window.WA || {};
       const file = new File([blob], baseName);
       file._wsPath = path;
       await Router.load(file);
+      loadRecentFiles();   // refresh recent list after successful open
     } catch (e) {
       console.error('[WA openWorkspaceFile]', e);
       showToast('无法打开文件: ' + e.message, 'error');
@@ -788,6 +1745,74 @@ window.WA = window.WA || {};
     }
   }
 
+  // ── Show/hide the persistent analysis-subject bar ──
+  // Called whenever a file is opened or closed so the user always knows
+  // which file the AI is currently working on.
+  function _updateSubjectBar(fileName, fileType) {
+    const bar = $('wa-subject-bar');
+    if (!bar) return;
+    if (!fileName) { bar.style.display = 'none'; return; }
+    const tag = bar.querySelector('.subject-tag');
+    const txt = bar.querySelector('.subject-text');
+    const labels = { docx: '文档', xlsx: '表格', pptx: '演示', pdf: 'PDF' };
+    if (tag) tag.textContent = labels[fileType] || '文件';
+    if (txt) txt.textContent = fileName;
+    bar.style.display = 'flex';
+  }
+
+  // ── Position #wa-pdf-tooltip below the WangEditor format bar (or below the
+  //    selection when no format bar is present, e.g. PDF/PPTX).
+  //    Uses getBoundingClientRect() so coords are always viewport-relative,
+  //    which is correct for position:fixed elements (fixes pageX/pageY bug).
+  function _positionSelectionToolbar() {
+    const tt = $('wa-pdf-tooltip');
+    if (!tt) return;
+    const winSel = window.getSelection();
+    if (!winSel || winSel.rangeCount === 0) return;
+
+    // Measure the toolbar first (visibility trick avoids layout flash)
+    tt.style.visibility = 'hidden';
+    tt.style.display = 'flex';
+    const ttW = tt.offsetWidth || 220;
+    const ttH = tt.offsetHeight || 36;
+    tt.style.display = 'none';
+    tt.style.visibility = '';
+
+    const GAP = 6;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // ── Preferred: snap to just below the WangEditor format toolbar ──
+    // This groups both toolbars together so the user can act without
+    // moving the mouse far from the selection.
+    const fmtBar = document.getElementById('wa-editor-toolbar');
+    if (fmtBar && fmtBar.offsetParent !== null) {
+      const fb = fmtBar.getBoundingClientRect();
+      if (fb.height > 0) {
+        const left = Math.max(8, Math.min(fb.left, vw - ttW - 8));
+        const top  = fb.bottom + GAP;
+        tt.style.left = left + 'px';
+        tt.style.top  = top  + 'px';
+        tt.style.display = 'flex';
+        return;
+      }
+    }
+
+    // ── Fallback: center below (or above) the selected text ──
+    const rect = winSel.getRangeAt(0).getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) return;
+
+    let left = rect.left + rect.width / 2 - ttW / 2;
+    left = Math.max(8, Math.min(left, vw - ttW - 8));
+    let top = rect.bottom + GAP;
+    if (top + ttH > vh - 8) top = rect.top - ttH - GAP;
+    top = Math.max(8, top);
+
+    tt.style.left = left + 'px';
+    tt.style.top  = top  + 'px';
+    tt.style.display = 'flex';
+  }
+
   document.addEventListener('mouseup', (e) => {
     if (e.target.id === 'wa-pdf-tooltip') return;
     
@@ -799,9 +1824,11 @@ window.WA = window.WA || {};
     
     if (sel && sel.length > 0) {
       lastSelectionText = sel;
-      tt.style.display = 'flex';
-      tt.style.left = e.pageX + 10 + 'px';
-      tt.style.top = e.pageY + 10 + 'px';
+      _positionSelectionToolbar();
+
+      // Update character count badge in tooltip
+      const countEl = $('wa-tooltip-count');
+      if (countEl) countEl.textContent = `${sel.replace(/\s/g, '').length}字`;
 
       // If the chip is already showing (prior pinned context), update it immediately
       // so user sees the new selection reflected without needing to click the chat input again
@@ -828,14 +1855,122 @@ window.WA = window.WA || {};
     let sel = lastSelectionText;
     if (state.fileType === 'xlsx' && state.activeEditor) {
       const rangeText = state.activeEditor.getContent();
-      if (!rangeText.includes('未选中区域')) {
-         sel = "当前选中表格内容已附加";
+      if (rangeText && !rangeText.includes('未选中区域')) sel = rangeText;
+    }
+    if (!sel) { showToast('请先选中文字', 'info'); return; }
+
+    $('wa-pdf-tooltip').style.display = 'none';
+    // Clear the browser text selection so the mouseup handler won't
+    // re-show the tooltip over the document while the result is loading.
+    lastSelectionText = '';
+    try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+
+    const ACTION_LABELS = {
+      '润色': '润色优化', '翻译': '翻译（中英互译）', '总结': '总结要点',
+      '续写': '续写', '改写': '改写', '解释': '解释分析', '可视化': '数据可视化',
+    };
+
+    const msgs = $('wa-ai-messages');
+    const preview = sel.length > 60 ? sel.substring(0, 60) + '…' : sel;
+    const uMsg = document.createElement('div');
+    uMsg.className = 'wa-msg user';
+    uMsg.textContent = `${action}：${preview}`;
+    msgs.appendChild(uMsg);
+
+    const loadingEl = document.createElement('div');
+    loadingEl.className = 'wa-msg ai streaming';
+    loadingEl.innerHTML = '<span class="wa-progress-text">⏳ 处理中…</span>';
+    msgs.appendChild(loadingEl);
+    msgs.scrollTop = msgs.scrollHeight;
+
+    state.lastPinnedSel = sel;
+    // Read-only actions: show result as chat message, not as a proposal card
+    const READ_ONLY_QUICK_ACTIONS = new Set(['总结', '解释']);
+    fetch('/api/v1/workspace/quick-action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action,
+        text: sel,
+        file_type: state.fileType || 'general',
+      }),
+    })
+    .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+    .then(data => {
+      loadingEl.remove();
+      // ── Chart result ──
+      if (data.type === 'chart_result') {
+        if (data.error) {
+          const errEl = document.createElement('div');
+          errEl.className = 'wa-msg ai';
+          errEl.textContent = `❌ 图表生成失败：${data.error}`;
+          msgs.appendChild(errEl);
+          if (data.code) {
+            const pre = document.createElement('pre');
+            pre.className = 'wa-msg ai wa-code-block';
+            pre.textContent = data.code;
+            msgs.appendChild(pre);
+          }
+        } else {
+          if (data.code) {
+            const codeWrap = document.createElement('div');
+            codeWrap.className = 'wa-msg ai wa-chart-code';
+            codeWrap.innerHTML = `<details><summary>🐍 查看生成的代码</summary><pre>${data.code.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></details>`;
+            msgs.appendChild(codeWrap);
+          }
+          (data.images || []).forEach(({ name, data: b64 }) => {
+            const ext = (name || 'chart.png').split('.').pop().toLowerCase();
+            const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext}`;
+            const imgSrc = `data:${mime};base64,${b64}`;
+            msgs.appendChild(_makeWAChartImageWrap(imgSrc, name || 'chart.png'));
+          });
+          if (!data.images || data.images.length === 0) {
+            const noImg = document.createElement('div');
+            noImg.className = 'wa-msg ai';
+            noImg.textContent = '⚠️ 代码已执行，但未生成图片，请查看代码';
+            msgs.appendChild(noImg);
+          }
+        }
+        msgs.scrollTop = msgs.scrollHeight;
+        return;
       }
-    }
-    if (sel) {
-      WA.quickAction(`请${action}以下内容：\n\n"${sel}"`);
-      $('wa-pdf-tooltip').style.display = 'none';
-    }
+      if (data.result) {
+        if (READ_ONLY_QUICK_ACTIONS.has(action)) {
+          // Read-only result: show as AI message only, no proposal card
+          const aiEl = document.createElement('div');
+          aiEl.className = 'wa-msg ai';
+          const renderMd = (t) => {
+            if (window.marked) { try { return window.marked.parse(t || ''); } catch(e) {} }
+            return (t || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+          };
+          aiEl.innerHTML = renderMd(data.result);
+          msgs.appendChild(aiEl);
+        } else {
+          _handleProposals({
+            proposals: [{
+              id: 'qa_' + Date.now(),
+              original_text: sel,
+              proposed_text: data.result,
+              rationale: ACTION_LABELS[action] || action,
+            }],
+          });
+        }
+      } else {
+        const errEl = document.createElement('div');
+        errEl.className = 'wa-msg ai';
+        errEl.textContent = data.error || '❌ 快速处理失败，请稍后重试';
+        msgs.appendChild(errEl);
+      }
+      msgs.scrollTop = msgs.scrollHeight;
+    })
+    .catch(err => {
+      loadingEl.remove();
+      const errEl = document.createElement('div');
+      errEl.className = 'wa-msg ai';
+      errEl.textContent = `❌ 网络错误：${err.message}`;
+      msgs.appendChild(errEl);
+      msgs.scrollTop = msgs.scrollHeight;
+    });
   };
 
   window.WA.sendSelectionToAI = () => {
@@ -850,8 +1985,23 @@ window.WA = window.WA || {};
     // Pin as Copilot-style chip — user types their question separately
     _pinSelectionChip(sel);
     $('wa-pdf-tooltip').style.display = 'none';
+    // Auto-expand AI panel when transferring selection
+    _expandWAPanel();
     $('wa-user-input').focus();
   };
+
+  // Auto-expand the right AI panel if it's collapsed
+  function _expandWAPanel() {
+    const panel = $('wa-ai');
+    if (!panel) return;
+    const gutter = panel.previousElementSibling;
+    if (gutter && gutter.classList.contains('gutter')) {
+      if (panel.offsetWidth < 80) {
+        // panel is near-collapsed: restore to 30% size via Split.js
+        try { window._waSplit && window._waSplit.setSizes([15, 55, 30]); } catch {}
+      }
+    }
+  }
 
   window.WA.clearSelection = () => {
     state.pinnedSelection = '';
@@ -885,7 +2035,7 @@ window.WA = window.WA || {};
   }
 
   // ── Split.js Init ──
-  Split(['#wa-left', '#wa-canvas', '#wa-ai'], {
+  window._waSplit = Split(['#wa-left', '#wa-canvas', '#wa-ai'], {
     sizes: [15, 55, 30],
     minSize: [150, 400, 250],
     gutterSize: 6,
@@ -929,10 +2079,24 @@ window.WA = window.WA || {};
         html: html,
         config: {
           placeholder: '开始编辑文档...',
-          hoverbarKeys: {},
+          // Table hoverbar: show row/col/merge actions when cursor is inside a table cell
+          hoverbarKeys: {
+            'table': {
+              menuKeys: [
+                'tableHeader', 'tableFullWidth',
+                'insertTableRow', 'deleteTableRow',
+                'insertTableCol', 'deleteTableCol',
+                'mergeTableCell', 'splitTableCell',
+                'divider',
+                'deleteTable',
+              ],
+            },
+          },
           MENU_CONF: {
             uploadImage: { base64LimitSize: 5 * 1024 * 1024 },
             insertImage: { checkImage(src) { return true; } },
+            // Allow any table size up to 20×20
+            insertTable: { maxRow: 20, maxCol: 20 },
           },
           onChange: (editor) => {
             // WangEditor v5 passes the editor instance as argument — use it directly.
@@ -948,7 +2112,18 @@ window.WA = window.WA || {};
       this.toolbar = createToolbar({
         editor: this.editor,
         selector: '#wa-editor-toolbar',
-        config: { excludeKeys: ['fullScreen'] }
+        config: {
+          excludeKeys: ['fullScreen'],
+          // Explicitly include all table-related toolbar groups
+          insertKeys: {
+            index: 999,
+            keys: ['insertTable', 'tableHeader', 'tableFullWidth',
+                   'mergeTableCell', 'splitTableCell',
+                   'insertTableRow', 'deleteTableRow',
+                   'insertTableCol', 'deleteTableCol',
+                   'deleteTable'],
+          },
+        }
       });
 
       // MutationObserver as backup — fires even when WangEditor doesn't trigger onChange.
@@ -966,6 +2141,55 @@ window.WA = window.WA || {};
           } catch(e) {}
         });
         this._mutationObs.observe(editable, { childList: true, subtree: true, characterData: true });
+
+        // ── Scroll stabiliser: prevent Slate scrollIntoView() jumps on blank clicks ──
+        // Slate fires scrollIntoView() on every selection change, jumping the viewport
+        // when the user clicks in blank page margins.  Fix: save scrollTop on every
+        // mousedown; restore it if a scroll event fires within 300 ms AND the delta is
+        // large enough to be a programmatic jump (> 80 px), not a deliberate scroll.
+        const scrollEl = ct.querySelector('.w-e-scroll');
+        if (scrollEl) {
+          scrollEl.style.overflowAnchor = 'none';
+          scrollEl.style.scrollBehavior = 'auto';
+          let _savedScroll = 0;
+          let _lockScroll  = false;
+          editable.addEventListener('mousedown', () => {
+            _savedScroll = scrollEl.scrollTop;
+            _lockScroll  = true;
+            setTimeout(() => { _lockScroll = false; }, 300);
+          }, { passive: true });
+          scrollEl.addEventListener('scroll', () => {
+            if (_lockScroll && Math.abs(scrollEl.scrollTop - _savedScroll) > 80) {
+              scrollEl.scrollTop = _savedScroll;
+            }
+          }, { passive: true });
+        }
+
+        // ── Table column drag-resize ──────────────────────────────────────────
+        // CSS sets table-layout:fixed so column widths stick; the right-edge of
+        // every td/th shows a resize cursor (via ::after handle in workspace.css).
+        let _colResize = null;
+        editable.addEventListener('mousedown', (ev) => {
+          const cell = ev.target.closest('td, th');
+          if (!cell) return;
+          const rect = cell.getBoundingClientRect();
+          if (ev.clientX < rect.right - 6) return;   // only the 6 px right-edge zone
+          const table = cell.closest('table');
+          if (!table) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          const ci = cell.cellIndex;
+          const cols = Array.from(table.rows).map(r => r.cells[ci]).filter(Boolean);
+          _colResize = { cols, startX: ev.clientX, startWidths: cols.map(c => c.offsetWidth) };
+        });
+        document.addEventListener('mousemove', (ev) => {
+          if (!_colResize) return;
+          const delta = ev.clientX - _colResize.startX;
+          _colResize.cols.forEach((c, i) => {
+            c.style.width = Math.max(32, _colResize.startWidths[i] + delta) + 'px';
+          });
+        });
+        document.addEventListener('mouseup', () => { _colResize = null; });
       }, 300);
     }
 
@@ -991,6 +2215,24 @@ window.WA = window.WA || {};
 
     applyToolCall(cmd) {
       if (!this.editor) return;
+      if (cmd.type === 'replace_text') {
+        // Replace original_text with proposed_text throughout the document.
+        // Uses HTML-level string replacement which works reliably for Chinese text
+        // that isn't split across inline tags.
+        const original = cmd.original || '';
+        const proposed = cmd.value || '';
+        if (!original) return;
+        const currentHtml = (() => { try { return this.editor.getHtml(); } catch(e) { return this._lastHtml || ''; } })();
+        const newHtml = currentHtml.split(original).join(proposed);
+        if (newHtml === currentHtml) {
+          showToast('未在文档中找到原文', 'info');
+          return;
+        }
+        // Rebuild editor with new HTML (safest way to replace entire content in WangEditor v5)
+        this.render(newHtml);
+        showToast('AI 已更新文档', 'success');
+        return;
+      }
       if (cmd.type === 'set_html' || cmd.type === 'insert_text') {
         const val = cmd.value || '';
         // Restore editor focus so WangEditor re-activates its saved Slate selection/cursor.
@@ -1017,207 +2259,116 @@ window.WA = window.WA || {};
   class KotoXlsxEditor {
     constructor() {
       this.containerId = 'wa-xlsx-editor';
-      this.created = false;
-      this._images = [];   // [{src, x, y, w, h}] for export
+      this._containerId = 'wa-xlsx-sheet';
+      this._api = null;       // FUniver instance
+      this._images = [];      // [{src, x, y, w, h}] overlay images for export
       $(this.containerId).classList.add('active');
     }
 
-    render(sheetsJson) {
-      // Only destroy if we actually created a sheet (prevents double-destroy error)
-      if (this.created) {
-        try { window.luckysheet.destroy(); } catch(e) { console.warn('[Luckysheet destroy]', e); }
-        this.created = false;
+    render(workbookData) {
+      // Destroy previous Univer instance if any
+      if (this._api) {
+        try { window.KotoSheetsAPI.dispose(); } catch (e) {}
+        this._api = null;
       }
-      // Clear stale DOM left by previous Luckysheet instance
+
       const wrapper = $(this.containerId);
       wrapper.innerHTML = '';
 
-      // ── Image insertion toolbar ──
-      const imgBar = document.createElement('div');
-      imgBar.className = 'wa-xlsx-imgbar';
-      imgBar.innerHTML = `<button class="wa-xlsx-imgbtn" title="插入图片到表格">🖼 插入图片</button>`;
-      wrapper.appendChild(imgBar);
-
-      // Sheet container (luckysheet needs a named ID)
+      // Univer Sheets container — fills entire wrapper (Univer renders its own toolbar inside)
       const sheetEl = document.createElement('div');
-      sheetEl.id = 'wa-xlsx-sheet';
-      sheetEl.style.position = 'relative';
-      sheetEl.style.width = '100%';
-      sheetEl.style.height = '100%';
+      sheetEl.id = this._containerId;
+      sheetEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
       wrapper.appendChild(sheetEl);
 
-      // Image overlay layer (sits on top of sheet)
-      const overlayLayer = document.createElement('div');
-      overlayLayer.id = 'wa-xlsx-img-layer';
-      overlayLayer.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:10;';
-      sheetEl.appendChild(overlayLayer);
+      // Mount Univer Sheets after two rAF ticks to ensure container is laid out
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!window.KotoSheetsAPI) {
+            sheetEl.innerHTML = '<div style="padding:24px;color:#e74c3c;font-size:13px;">Univer Sheets 模块未就绪，请刷新页面重试</div>';
+            return;
+          }
+          try {
+            this._api = window.KotoSheetsAPI.create(this._containerId, workbookData);
 
-      window.luckysheet.create({
-        container: 'wa-xlsx-sheet',
-        lang: 'zh',
-        data: sheetsJson,
-        showinfobar: false,
-        showsheetbar: true,
-        showstatisticBar: false,
-        sheetFormulaBar: false,
-        hook: {
-           rangeSelect: (sheet, range) => {
-              const tt = $('wa-pdf-tooltip');
-              tt.style.display = 'flex';
-              tt.style.left = '50%';
-              tt.style.top = '100px';
-              lastSelectionText = '表格数据';
-           }
-        }
+            // Wire selection → AI panel context chip
+            window.KotoSheetsAPI.onSelectionChange(() => {
+              const text = window.KotoSheetsAPI.getSelectionText();
+              if (text) {
+                lastSelectionText = `[当前选中表格数据]:\n${text}\n`;
+              }
+            });
+          } catch (err) {
+            console.error('[KotoXlsxEditor] Univer Sheets 初始化失败', err);
+            sheetEl.innerHTML = `<div style="padding:24px;color:#e74c3c;font-size:13px;">表格引擎加载失败: ${err.message}</div>`;
+          }
+        });
       });
-      this.created = true;
-
-      // Wire up image button
-      imgBar.querySelector('.wa-xlsx-imgbtn').addEventListener('click', () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/png,image/jpeg,image/gif,image/webp';
-        input.onchange = (e) => {
-          const file = e.target.files[0];
-          if (!file) return;
-          if (file.size > 5 * 1024 * 1024) { showToast('图片不能超过 5 MB', 'error'); return; }
-          const reader = new FileReader();
-          reader.onload = (ev) => {
-            const src = ev.target.result;
-            this._addImageOverlay(src, overlayLayer);
-          };
-          reader.readAsDataURL(file);
-        };
-        input.click();
-      });
-    }
-
-    _addImageOverlay(src, layer) {
-      const imgData = { src, x: 20, y: 20, w: 200, h: 150 };
-      this._images.push(imgData);
-      const idx = this._images.length - 1;
-
-      const wrap = document.createElement('div');
-      wrap.style.cssText = `position:absolute;left:${imgData.x}px;top:${imgData.y}px;width:${imgData.w}px;height:${imgData.h}px;pointer-events:all;cursor:move;border:2px dashed #4a9eff;box-sizing:border-box;`;
-      const img = document.createElement('img');
-      img.src = src;
-      img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block;user-select:none;';
-      img.draggable = false;
-
-      // Delete handle
-      const del = document.createElement('div');
-      del.textContent = '×';
-      del.style.cssText = 'position:absolute;top:-10px;right:-10px;width:20px;height:20px;background:#e74c3c;color:#fff;border-radius:50%;text-align:center;line-height:20px;font-size:14px;cursor:pointer;z-index:2;';
-      del.onclick = () => { wrap.remove(); this._images.splice(idx, 1); };
-
-      // Resize handle
-      const rsz = document.createElement('div');
-      rsz.style.cssText = 'position:absolute;bottom:0;right:0;width:12px;height:12px;background:#4a9eff;cursor:se-resize;';
-
-      wrap.appendChild(img);
-      wrap.appendChild(del);
-      wrap.appendChild(rsz);
-      layer.appendChild(wrap);
-
-      // Drag to move
-      let dragging = false, ox = 0, oy = 0;
-      wrap.addEventListener('mousedown', (e) => {
-        if (e.target === rsz || e.target === del) return;
-        dragging = true; ox = e.clientX - imgData.x; oy = e.clientY - imgData.y;
-        e.preventDefault();
-      });
-      document.addEventListener('mousemove', (e) => {
-        if (!dragging) return;
-        imgData.x = e.clientX - ox; imgData.y = e.clientY - oy;
-        wrap.style.left = imgData.x + 'px'; wrap.style.top = imgData.y + 'px';
-      });
-      document.addEventListener('mouseup', () => { dragging = false; });
-
-      // Resize
-      let resizing = false, rx = 0, ry = 0, rw = 0, rh = 0;
-      rsz.addEventListener('mousedown', (e) => {
-        resizing = true; rx = e.clientX; ry = e.clientY; rw = imgData.w; rh = imgData.h;
-        e.stopPropagation(); e.preventDefault();
-      });
-      document.addEventListener('mousemove', (e) => {
-        if (!resizing) return;
-        imgData.w = Math.max(40, rw + e.clientX - rx);
-        imgData.h = Math.max(30, rh + e.clientY - ry);
-        wrap.style.width = imgData.w + 'px'; wrap.style.height = imgData.h + 'px';
-      });
-      document.addEventListener('mouseup', () => { resizing = false; });
-
-      showToast('图片已插入，可拖动调整位置', 'success');
     }
 
     getContent() {
-      if (!window.luckysheet) return "";
-      // 获取当前选区数据
-      const range = window.luckysheet.getRangeValue();
-      if (range && range.length > 0) {
-        const text = range.map(row => row.map(cell => cell ? cell.v : '').join('\t')).join('\n');
-        return `[当前选中表格数据]:\n${text}\n`;
-      }
-      return `[当前表格未选中区域，请提示用户框选数据]`;
+      if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return '';
+      const text = window.KotoSheetsAPI.getSelectionText();
+      if (text) return `[当前选中表格数据]:\n${text}\n`;
+      return '[当前表格未选中区域，请提示用户框选数据]';
     }
 
-    // Export all data from the active sheet as CSV (for chart context)
     getCSV() {
-      if (!window.luckysheet) return '';
-      try {
-        const sheets = window.luckysheet.getluckysheetfile();
-        const active = sheets.find(s => s.status === 1) || sheets[0];
-        if (!active || !active.celldata) return '';
-        // Build a 2D array
-        const cells = {};
-        let maxRow = 0, maxCol = 0;
-        for (const cell of active.celldata) {
-          const r = cell.r, c = cell.c;
-          if (r > maxRow) maxRow = r;
-          if (c > maxCol) maxCol = c;
-          cells[`${r}_${c}`] = cell.v ? (cell.v.m || cell.v.v || '') : '';
-        }
-        const rows = [];
-        for (let r = 0; r <= maxRow; r++) {
-          const row = [];
-          for (let c = 0; c <= maxCol; c++) {
-            const v = String(cells[`${r}_${c}`] ?? '');
-            row.push(v.includes(',') ? `"${v}"` : v);
-          }
-          rows.push(row.join(','));
-        }
-        return rows.join('\n');
-      } catch (e) {
-        return '';
-      }
+      if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return '';
+      return window.KotoSheetsAPI.getActiveSheetCSV();
     }
 
     serialize() {
-      const sheets = window.luckysheet ? window.luckysheet.getluckysheetfile() : [];
-      return { sheets, _images: this._images };
+      const snapshot = (window.KotoSheetsAPI && window.KotoSheetsAPI.isReady())
+        ? window.KotoSheetsAPI.getSnapshot()
+        : null;
+      return { snapshot, _images: this._images };
     }
 
     applyToolCall(cmd) {
-      if (cmd.type === 'set_cell' && window.luckysheet) {
-        window.luckysheet.setCellValue(cmd.r, cmd.c, cmd.value);
+      if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return;
+      if (cmd.type === 'set_cell') {
+        window.KotoSheetsAPI.setCellValue(cmd.r, cmd.c, cmd.value);
         showToast(`AI 已更新单元格 (${cmd.r}, ${cmd.c})`, 'success');
         WA.scheduleAutoSave();
-      } else if (cmd.type === 'set_cells' && window.luckysheet && Array.isArray(cmd.cells)) {
-        cmd.cells.forEach(cell => {
-          window.luckysheet.setCellValue(cell.r, cell.c, cell.value);
-        });
+      } else if (cmd.type === 'set_cells' && Array.isArray(cmd.cells)) {
+        cmd.cells.forEach(cell => window.KotoSheetsAPI.setCellValue(cell.r, cell.c, cell.value));
         showToast(`AI 已批量更新 ${cmd.cells.length} 个单元格`, 'success');
         WA.scheduleAutoSave();
       }
     }
 
     destroy() {
-      if (this.created) {
-        try { window.luckysheet.destroy(); } catch(e) { console.warn('[Luckysheet destroy]', e); }
-        this.created = false;
+      if (window.KotoSheetsAPI) {
+        try { window.KotoSheetsAPI.dispose(); } catch (e) {}
       }
-      $(this.containerId).classList.remove('active');
+      this._api = null;
+      const wrapper = $(this.containerId);
+      if (wrapper) wrapper.classList.remove('active');
     }
+  }
+
+  // ── Colour contrast utility (module-level, used by KotoPptxEditor) ────────
+  // Returns perceived luminance [0..1] from a CSS hex colour like '#3a2b1c'.
+  function _hexLuma(hex) {
+    if (!hex || hex.length < 7) return 1;
+    const r = parseInt(hex.slice(1,3),16)/255;
+    const g = parseInt(hex.slice(3,5),16)/255;
+    const b = parseInt(hex.slice(5,7),16)/255;
+    const toLinear = c => c <= 0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4);
+    return 0.2126*toLinear(r) + 0.7152*toLinear(g) + 0.0722*toLinear(b);
+  }
+  // Return a safe foreground colour: if fgHex is light AND bgHex is also light,
+  // switch to dark text so it remains readable.
+  function _safeTextColor(fgHex, bgHex) {
+    if (!fgHex) return null;
+    const fgL = _hexLuma(fgHex);
+    const bgL = _hexLuma(bgHex || '#ffffff');
+    // Both near-white → force dark text
+    if (fgL > 0.7 && bgL > 0.7) return '#1a1a1a';
+    // Both near-black → force light text
+    if (fgL < 0.15 && bgL < 0.15) return '#e8e8e8';
+    return fgHex;
   }
 
   class KotoPptxEditor {
@@ -1245,6 +2396,8 @@ window.WA = window.WA || {};
           slides: richData.slides || [],
         };
       }
+      // Ensure every slide has .index (backend uses slide_index; AI tool calls match on .index)
+      this.data.slides.forEach((s, i) => { if (s.index === undefined) s.index = s.slide_index ?? i; });
       this._curIdx = 0;
       this._buildThumbs();
       this._initKeyHandler();
@@ -1573,14 +2726,16 @@ window.WA = window.WA || {};
         if (shape.has_text && shape.paragraphs) {
           ctx.save(); ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
           let ty = y + 2;
+          const thumbBg = shape.fill || slide.background || '#ffffff';
           shape.paragraphs.forEach(para => {
             const lineText = (para.runs || []).map(r => r.text).join('');
             if (!lineText.trim()) { ty += 4; return; }
             const fr = para.runs[0] || {};
             // Fixed scale: pt size relative to standard 540pt slide height
-            const px = Math.max(Math.round((fr.size || 12) * sh / 540), 5);
-            ctx.font = (fr.bold ? 'bold ' : '') + px + 'px sans-serif';
-            ctx.fillStyle = fr.color || '#222';
+            const defaultThumbPt = shape.is_title ? 28 : 14;
+            const px = Math.max(Math.round((fr.size || defaultThumbPt) * sh / 540), 5);
+            ctx.font = (fr.bold ? 'bold ' : '') + px + 'px ' + (fr.fontName || 'sans-serif');
+            ctx.fillStyle = _safeTextColor(fr.color, thumbBg) || (_hexLuma(thumbBg) < 0.4 ? '#f0f0f0' : '#222');
             ctx.fillText(lineText, x + 2, ty + px);
             ty += px * 1.35;
           });
@@ -1639,8 +2794,15 @@ window.WA = window.WA || {};
 
         if (shape.has_text && shape.paragraphs) {
           el.style.cursor = 'text';
+          // Pick a default text color that contrasts with the EFFECTIVE background:
+          // shape fill (if present) takes priority over the slide background.
+          // This handles the common case of colored header bars / dark-filled shapes
+          // where the theme text is white but shape.fill is dark.
+          const effectiveBg = shape.fill || slide.background || '#ffffff';
+          const bgLuma = _hexLuma(effectiveBg);
+          const defaultTextColor = bgLuma < 0.4 ? '#f0f0f0' : '#1a1a1a';
           const inner = document.createElement('div');
-          inner.style.cssText = 'width:100%;height:100%;padding:4px 6px;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;color:#1a1a1a;';
+          inner.style.cssText = `width:100%;height:100%;padding:4px 6px;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;color:${defaultTextColor};`;
           shape.paragraphs.forEach((para, pi) => {
             const pEl = document.createElement('div');
             pEl.style.lineHeight = '1.3';
@@ -1659,11 +2821,16 @@ window.WA = window.WA || {};
               span.style.outline = 'none';
               span.style.display = 'inline';
               span.style.whiteSpace = 'pre-wrap';
-              span.style.fontSize = Math.max(Math.round((run.size || 14) * scale * 12700), 6) + 'px';
+              const defaultPt = shape.is_title ? 36 : 18;
+              span.style.fontSize = Math.max(Math.round((run.size || defaultPt) * scale * 12700), 6) + 'px';
               if (run.bold)      span.style.fontWeight = 'bold';
               if (run.italic)    span.style.fontStyle = 'italic';
               if (run.underline) span.style.textDecoration = 'underline';
-              if (run.color)     span.style.color = run.color;
+              if (run.fontName)  span.style.fontFamily = run.fontName;
+              if (run.color) {
+                const safe = _safeTextColor(run.color, effectiveBg);
+                if (safe) span.style.color = safe;
+              }
               span.addEventListener('input', () => {
                 run.text = span.textContent;
                 this._redrawThumb(idx);
@@ -1743,6 +2910,18 @@ window.WA = window.WA || {};
             this._selectShape(el, shape);
             this._startMove(e, el, shape, canvas, scale);
           });
+        } else if (shape._type === 'CHART') {
+          // ── Chart shape — show a visible placeholder (no chart lib available)
+          el.style.background = '#f0f4f8';
+          el.style.border = '1px dashed #a0aec0';
+          el.style.display = 'flex';
+          el.style.alignItems = 'center';
+          el.style.justifyContent = 'center';
+          el.style.color = '#718096';
+          el.style.fontSize = Math.max(Math.round(11 * scale * 12700), 8) + 'px';
+          el.style.userSelect = 'none';
+          el.textContent = `[图表]`;
+          el.style.pointerEvents = 'none';
         } else {
           // ── Unknown / connector / group — render invisibly (no dashed box clutter)
           el.style.opacity = '0';
@@ -2179,10 +3358,15 @@ window.WA = window.WA || {};
          const loadingTask = pdfjsLib.getDocument(pdfUrl);
          const pdf = await loadingTask.promise;
          
+         const dpr = window.devicePixelRatio || 1;
          for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
-            const scale = 1.5;
-            const viewport = page.getViewport({ scale });
+            // Base scale: fit to container width (min 1.5), then multiply by DPR
+            // so the canvas buffer is always crisp on high-DPI displays.
+            const containerW = c.clientWidth || 800;
+            const baseViewport = page.getViewport({ scale: 1 });
+            const baseScale = Math.max(1.5, (containerW - 32) / baseViewport.width);
+            const viewport = page.getViewport({ scale: baseScale });
             
             const wrap = document.createElement('div');
             wrap.className = 'wa-pdf-page-wrap';
@@ -2190,13 +3374,17 @@ window.WA = window.WA || {};
             
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
+            // Physical pixels = CSS pixels × DPR → sharp on retina/high-DPI screens
+            canvas.width  = Math.floor(viewport.width  * dpr);
+            canvas.height = Math.floor(viewport.height * dpr);
+            canvas.style.width  = Math.floor(viewport.width)  + 'px';
+            canvas.style.height = Math.floor(viewport.height) + 'px';
             
             wrap.appendChild(canvas);
             c.appendChild(wrap);
             
-            await page.render({ canvasContext: context, viewport }).promise;
+            const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
+            await page.render({ canvasContext: context, viewport, transform }).promise;
          }
       } catch (e) {
          c.innerHTML = `<div style="color:var(--danger)">PDF 渲染报错: ${e.message}</div>`;
@@ -2206,10 +3394,7 @@ window.WA = window.WA || {};
     handleMouseUp(e) {
       const sel = window.getSelection().toString().trim();
       if (sel) {
-         const tt = $('wa-pdf-tooltip');
-         tt.style.display = 'block';
-         tt.style.left = e.pageX + 10 + 'px';
-         tt.style.top = e.pageY + 10 + 'px';
+         _positionSelectionToolbar();
       }
     }
 
@@ -2233,6 +3418,100 @@ window.WA = window.WA || {};
       $(this.containerId).removeEventListener('mouseup', this.handleMouseUp);
       document.removeEventListener('mousedown', this.hideTooltip);
     }
+  }
+
+  // ── Lazy CDN loader for editing libraries (needed in embedded mode) ──────
+  // In standalone /workspace-assistant the HTML already loads these from CDN.
+  // In embedded mode (inside index.html) they are absent and must be injected.
+  const _libsLoaded = { wang: false, sheets: false, pdfjs: false };
+
+  // Ensure all IWorkbookData required fields are present before passing to Univer.
+  // Univer silently fails to render when `appVersion` or `locale` is missing.
+  function _ensureWorkbookDefaults(wb) {
+    if (!wb || typeof wb !== 'object') return wb;
+    return Object.assign({ appVersion: '0.5.0', locale: 'zh-CN', styles: {}, resources: [] }, wb);
+  }
+
+  function _injectCSS(href) {
+    if (document.querySelector(`link[href="${href}"]`)) return;
+    const l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.href = href;
+    document.head.appendChild(l);
+  }
+
+  function _loadScript(src, timeout) {
+    timeout = timeout || 20000;
+    return new Promise((resolve, reject) => {
+      if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+      const s = document.createElement('script');
+      s.src = src;
+      const timer = setTimeout(() => {
+        s.onload = s.onerror = null;
+        reject(new Error(`CDN 加载超时(${src.split('/').pop()})`));
+      }, timeout);
+      s.onload = () => { clearTimeout(timer); resolve(); };
+      s.onerror = () => { clearTimeout(timer); reject(new Error(`CDN 加载失败(${src.split('/').pop()})`)); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function _ensureWangEditor() {
+    if (window.wangEditor || _libsLoaded.wang) return;
+    _injectCSS('https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/css/style.css');
+    await _loadScript('https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/index.js');
+    _libsLoaded.wang = true;
+  }
+
+  async function _ensureUniverSheets() {
+    if (_libsLoaded.sheets) return;
+    _injectCSS('/editor/assets/sheets-main.css');
+    // sheets-main.js is an ESM module; must load with type="module"
+    await new Promise((resolve, reject) => {
+      const src = '/editor/assets/sheets-main.js';
+      if (document.querySelector(`script[src="${src}"]`)) {
+        // Script tag already exists but module may still be initializing — poll for KotoSheetsAPI
+        const deadline = Date.now() + 5000;
+        const poll = () => {
+          if (window.KotoSheetsAPI) { resolve(); return; }
+          if (Date.now() > deadline) { reject(new Error('Univer Sheets 初始化超时')); return; }
+          setTimeout(poll, 50);
+        };
+        poll();
+        return;
+      }
+      const s = document.createElement('script');
+      s.type = 'module';
+      s.src = src;
+      const timer = setTimeout(() => {
+        s.onload = s.onerror = null;
+        reject(new Error('Univer Sheets 加载超时'));
+      }, 30000);
+      s.onload = () => {
+        clearTimeout(timer);
+        // ESM onload fires when the script executes, but KotoSheetsAPI may not be set yet — poll
+        const deadline = Date.now() + 5000;
+        const poll = () => {
+          if (window.KotoSheetsAPI) { resolve(); return; }
+          if (Date.now() > deadline) { reject(new Error('Univer Sheets 初始化超时')); return; }
+          setTimeout(poll, 50);
+        };
+        poll();
+      };
+      s.onerror = () => { clearTimeout(timer); reject(new Error('Univer Sheets 加载失败')); };
+      document.head.appendChild(s);
+    });
+    _libsLoaded.sheets = true;
+  }
+
+  async function _ensurePdfJS() {
+    if (window.pdfjsLib || _libsLoaded.pdfjs) return;
+    await _loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js');
+    if (window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    }
+    _libsLoaded.pdfjs = true;
   }
 
   // ── Main Router ──
@@ -2269,6 +3548,8 @@ window.WA = window.WA || {};
          state.activeTabPath = wsPath;
          $('wa-file-name').textContent = state.fileName;
          $('wa-save-btn').disabled = (state.fileType === 'pdf');
+         const _saBtn3 = $('wa-saveas-btn'); if (_saBtn3) _saBtn3.disabled = (state.fileType === 'pdf');
+         _updateSubjectBar(state.fileName, state.fileType);
 
          // Destroy old editor if it was a different file (not a tab switch)
          if (state.activeEditor) {
@@ -2300,15 +3581,18 @@ window.WA = window.WA || {};
          toggleWorkspace(true);
 
          if (state.fileType === 'docx') {
+            await _ensureWangEditor();
             state.activeEditor = new KotoDocxEditor();
             state.activeEditor.render(json.data.html);
          } else if (state.fileType === 'xlsx') {
+            await _ensureUniverSheets();
             state.activeEditor = new KotoXlsxEditor();
-            state.activeEditor.render(json.data);
+            state.activeEditor.render(_ensureWorkbookDefaults(json.data));
          } else if (state.fileType === 'pptx') {
             state.activeEditor = new KotoPptxEditor();
             state.activeEditor.render(json.data);
          } else if (state.fileType === 'pdf') {
+            await _ensurePdfJS();
             state.activeEditor = new KotoPdfViewer();
             state.activeEditor.render(json.data.raw_url, json.data.pages);
          }
@@ -2328,198 +3612,362 @@ window.WA = window.WA || {};
     }
   };
 
-  // ── AI Socket Connection (Phase 4) ──
-  function initSocket() {
-     if (typeof io === 'undefined') {
-         // Socket.IO script not loaded yet — retry in 500ms
-         console.warn('Socket.IO not ready, retrying in 500ms...');
-         const badge = $('wa-ai-model-badge');
-         if (badge) badge.textContent = 'Koto AI ⧐';
-         setTimeout(initSocket, 500);
-         return;
-     }
-     const badge = $('wa-ai-model-badge');
-     if (badge) badge.textContent = 'Koto AI ⧐';
-     state.socket = io('/doc', {
-       transports: ['polling', 'websocket'],
-       reconnection: true,
-       reconnectionAttempts: Infinity,
-       reconnectionDelay: 1000,
-       reconnectionDelayMax: 5000,
-     });
-     
-     state.socket.on('connect', () => {
-       const b = $('wa-ai-model-badge');
-       if (b) b.textContent = 'Koto AI ●';
-     });
-     state.socket.on('connect_error', (err) => {
-       console.warn('WA Socket connect_error:', err.message);
-       const b = $('wa-ai-model-badge');
-       if (b) b.textContent = 'Koto AI ○';
-     });
-     state.socket.on('disconnect', (reason) => {
-       console.warn('WA Socket disconnected:', reason);
-       const b = $('wa-ai-model-badge');
-       if (b) b.textContent = 'Koto AI ○';
-     });
-     state.socket.on('reconnect', () => {
-       const b = $('wa-ai-model-badge');
-       if (b) b.textContent = 'Koto AI ●';
-     });
-     
-     state.socket.on('agent_stream_chunk', (data) => {
-        const msgs = $('wa-ai-messages');
-        let last = msgs.lastElementChild;
-        if (!last || !last.classList.contains('streaming')) {
-           last = document.createElement('div');
-           last.className = 'wa-msg ai streaming';
-           last.dataset.raw = '';   // accumulate raw Markdown here
-           msgs.appendChild(last);
-        }
-        last.dataset.raw = (last.dataset.raw || '') + data.chunk;
-        // Live preview: strip TOOL blocks for display
-        const visible = last.dataset.raw.replace(/<TOOL>.*?<\/TOOL>/gs, '').trim();
-        last.textContent = visible;
-        msgs.scrollTop = msgs.scrollHeight;
-     });
+  // ── Unified AI Chat Stream (backed by /api/chat/stream) ─────────────────
 
-     state.socket.on('agent_task_complete', (data) => {
-        const msgs = $('wa-ai-messages');
-        const last = msgs.lastElementChild;
-        const renderMd = (text) => {
-           if (window.marked) {
-              try { return window.marked.parse(text || ''); } catch(e) {}
-           }
-           return (text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-        };
-        let finalMsgEl = null;
-        if (last && last.classList.contains('streaming')) {
-           last.classList.remove('streaming');
-           const finalText = data.result || '';
-           last.innerHTML = renderMd(finalText);
-           delete last.dataset.raw;
-           finalMsgEl = last;
-        } else if (data.result) {
-           const msg = document.createElement('div');
-           msg.className = 'wa-msg ai';
-           msg.innerHTML = renderMd(data.result);
-           msgs.appendChild(msg);
-           finalMsgEl = msg;
-        }
-        if (data.result) {
-           state.conversation.push({ role: 'assistant', content: data.result });
-        }
-        state.isLoading = false;
-        // Show action bar only when user had a pinned selection (needs user decision).
-        // Plain tool-call (no selection) was already auto-applied via doc_tool_call handler.
-        if (finalMsgEl && state.lastPinnedSel) {
-           finalMsgEl.dataset.rawText = data.result || '';
-           msgs.appendChild(_makeAIActionBar());
-        }
-        msgs.scrollTop = msgs.scrollHeight;
-     });
+  function _waSession() {
+    return 'workspace_' + (state.fileId || 'default');
+  }
 
-     state.socket.on('doc_tool_call', (cmd) => {
-        const msgs = $('wa-ai-messages');
-        if (state.aiOutputMode === 'inline') {
-           if (!state.lastPinnedSel && state.activeEditor) {
-              // No user selection — auto-apply directly into the document
-              const note = document.createElement('div');
-              note.className = 'wa-tool-notification';
-              note.innerHTML = `✨ <b>AI 已写入文档</b>: ${cmd.type}`;
-              msgs.appendChild(note);
-              try { state.activeEditor.applyToolCall(cmd); } catch(e) { console.warn('applyToolCall failed:', e); }
-              state.pendingToolCall = null;
-           } else {
-              // User had a pinned selection — store and let the action bar handle it
-              state.pendingToolCall = cmd;
-           }
+  /**
+   * Stream a message through /api/chat/stream (same endpoint as main Koto chat).
+   * Handles token/progress/done/error events and extracts TOOL calls + proposals.
+   * @param {string}  message   Full message body (includes document context prefix)
+   * @param {Element} loadingEl  The streaming bubble element already in the DOM
+   * @param {Object}  opts       { task?, model? }
+   */
+  async function _waSendToChat(message, loadingEl, opts) {
+    opts = opts || {};
+    const msgs = $('wa-ai-messages');
+    let fullText = '';
+    let streamBuffer = '';
+    const renderMd = (text) => {
+      if (window.marked) { try { return window.marked.parse(text || ''); } catch(e) {} }
+      return (text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+    };
+    const payload = {
+      session: _waSession(),
+      message: message,
+      locked_task: opts.task || 'CHAT',
+      locked_model: opts.model || state.lockedModel || 'auto',
+    };
+    try {
+      const resp = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        streamBuffer += decoder.decode(value, { stream: true });
+        const lines = streamBuffer.split('\n');
+        streamBuffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            if (evt.type === 'token') {
+              fullText += evt.content || '';
+              const visible = fullText
+                .replace(/<TOOL>[\s\S]*?<\/TOOL>/g, '')
+                .replace(/\n?\{"proposals"\s*:\s*\[[\s\S]*?\]\s*\}\s*$/m, '')
+                .trim();
+              if (loadingEl) {
+                loadingEl.innerHTML = renderMd(visible) + '<span class="typing-cursor">▊</span>';
+              }
+              msgs.scrollTop = msgs.scrollHeight;
+            } else if (evt.type === 'progress') {
+              if (!fullText && loadingEl && !loadingEl.querySelector('.wa-progress-text')) {
+                loadingEl.innerHTML = `<span class="wa-progress-text">⏳ ${_escHtml(evt.message || '处理中…')}</span>`;
+              }
+            } else if (evt.type === 'done') {
+              if (loadingEl) {
+                loadingEl.classList.remove('streaming');
+                const visible = fullText
+                  .replace(/<TOOL>[\s\S]*?<\/TOOL>/g, '')
+                  .replace(/\n?\{"proposals"\s*:\s*\[[\s\S]*?\]\s*\}\s*$/m, '')
+                  .trim();
+                const finalText = visible || evt.content || '';
+                loadingEl.innerHTML = renderMd(finalText);
+                if (finalText) {
+                  loadingEl.dataset.rawText = finalText;
+                  state.conversation.push({ role: 'assistant', content: finalText });
+                }
+              }
+              msgs.scrollTop = msgs.scrollHeight;
+              // Extract and apply TOOL calls
+              const toolMatches = [...fullText.matchAll(/<TOOL>([\s\S]*?)<\/TOOL>/g)];
+              toolMatches.forEach(m => {
+                try { _handleToolCall(JSON.parse(m[1].trim())); } catch(e) { /* ignore */ }
+              });
+              // Extract proposals JSON block
+              const propMatch = fullText.match(/\{"proposals"\s*:\s*\[[\s\S]*?\]\s*\}/);
+              if (propMatch) {
+                try {
+                  const propData = JSON.parse(propMatch[0]);
+                  if (Array.isArray(propData.proposals) && propData.proposals.length) {
+                    _handleProposals(propData);
+                  }
+                } catch(e) { /* ignore */ }
+              }
+              // Show AI action bar if pinned selection exists and no proposals generated
+              const hasProposals = msgs.querySelector('.wa-proposal-card');
+              if (state.lastPinnedSel && !hasProposals && loadingEl && loadingEl.dataset.rawText) {
+                msgs.appendChild(_makeAIActionBar());
+              }
+              state.isLoading = false;
+              return;
+            } else if (evt.type === 'error') {
+              if (loadingEl) {
+                loadingEl.classList.remove('streaming');
+                loadingEl.innerHTML = `<span style="color:var(--error,#ef4444)">❌ ${_escHtml(evt.message || 'AI 处理失败')}</span>`;
+              }
+              state.isLoading = false;
+              return;
+            }
+            // agent_step, agent_thought etc. — silently ignore in workspace mode
+          } catch(e) { /* ignore malformed SSE line */ }
+        }
+      }
+      // Stream ended without 'done' — finalize gracefully
+      if (loadingEl && loadingEl.classList.contains('streaming')) {
+        loadingEl.classList.remove('streaming');
+        const visible = fullText.replace(/<TOOL>[\s\S]*?<\/TOOL>/g, '').trim();
+        if (visible) {
+          loadingEl.innerHTML = renderMd(visible);
+          state.conversation.push({ role: 'assistant', content: visible });
+        }
+      }
+      state.isLoading = false;
+    } catch (err) {
+      console.error('[WorkspaceAI] Chat stream error:', err);
+      if (loadingEl) {
+        loadingEl.classList.remove('streaming');
+        loadingEl.textContent = `❌ 网络错误：${err.message}`;
+      }
+      state.isLoading = false;
+    }
+  }
+
+  function _handleProposals(data) {
+     const msgs = $('wa-ai-messages');
+     const proposals = data.proposals || [];
+     if (!proposals.length) return;
+     state._activeProposals = proposals;
+     if (proposals.length > 1) msgs.appendChild(_makeProposalBatchBar(proposals));
+     proposals.forEach((p, i) => msgs.appendChild(_makeProposalCard(p, i, proposals.length)));
+     msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function _handleToolCall(cmd) {
+     const msgs = $('wa-ai-messages');
+     if (state.aiOutputMode === 'inline') {
+        if (!state.lastPinnedSel && state.activeEditor) {
+           const note = document.createElement('div');
+           note.className = 'wa-tool-notification';
+           note.innerHTML = `✨ <b>AI 已写入文档</b>: ${cmd.type}`;
+           msgs.appendChild(note);
+           try { state.activeEditor.applyToolCall(cmd); } catch(e) { console.warn('applyToolCall failed:', e); }
+           state.pendingToolCall = null;
         } else {
-           // Chat-only mode: render HTML content as an in-chat preview instead of writing to document
-           if ((cmd.type === 'set_html' || cmd.type === 'insert_text') && cmd.value) {
-              const preview = document.createElement('div');
-              preview.className = 'wa-msg ai wa-tool-preview';
-              preview.innerHTML = cmd.value;
-              msgs.appendChild(preview);
-           } else if (cmd.type === 'insert_image' && (cmd.src || cmd.value)) {
-              const preview = document.createElement('div');
-              preview.className = 'wa-msg ai wa-tool-preview';
-              const img = document.createElement('img');
-              const imgSrc = cmd.src || cmd.value;
-              img.src = imgSrc;
-              img.style.cssText = 'max-width:100%;border-radius:6px;border:1px solid var(--border)';
-              _makeAIImgDraggable(img, imgSrc);
-              const dragHint2 = document.createElement('div');
-              dragHint2.className = 'wa-chart-drag-hint';
-              dragHint2.textContent = '拖动图片即可投放到文档';
-              preview.appendChild(img);
-              preview.appendChild(dragHint2);
-              msgs.appendChild(preview);
-           }
+           state.pendingToolCall = cmd;
         }
-        msgs.scrollTop = msgs.scrollHeight;
+     } else {
+        if ((cmd.type === 'set_html' || cmd.type === 'insert_text') && cmd.value) {
+           const preview = document.createElement('div');
+           preview.className = 'wa-msg ai wa-tool-preview';
+           preview.innerHTML = cmd.value;
+           msgs.appendChild(preview);
+        } else if (cmd.type === 'insert_image' && (cmd.src || cmd.value)) {
+           const preview = document.createElement('div');
+           preview.className = 'wa-msg ai wa-tool-preview';
+           const img = document.createElement('img');
+           const imgSrc = cmd.src || cmd.value;
+           img.src = imgSrc;
+           img.style.cssText = 'max-width:100%;border-radius:6px;border:1px solid var(--border)';
+           _makeAIImgDraggable(img, imgSrc);
+           const dragHint2 = document.createElement('div');
+           dragHint2.className = 'wa-chart-drag-hint';
+           dragHint2.textContent = '拖动图片即可投放到文档';
+           preview.appendChild(img);
+           preview.appendChild(dragHint2);
+           msgs.appendChild(preview);
+        }
+     }
+     msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function _makeWAChartImageWrap(imgSrc, fileName) {
+     const imgWrap = document.createElement('div');
+     imgWrap.className = 'wa-msg ai wa-chart-img-wrap';
+     const img = document.createElement('img');
+     img.className = 'wa-chart-img wa-chart-img-draggable';
+     img.src = imgSrc;
+     img.alt = fileName || 'chart.png';
+     img.draggable = true;
+     img.title = '拖动到左侧文档即可插入';
+     img.addEventListener('dragstart', (e) => {
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('application/wa-chart-image', imgSrc);
+        e.dataTransfer.setData('application/wa-chart-name', fileName || 'chart.png');
      });
-
-     // ── Code / Chart execution result ──
-     state.socket.on('code_result', (result) => {
-        const msgs = $('wa-ai-messages');
-
-        // Remove any streaming placeholder
-        const last = msgs.lastElementChild;
-        if (last && last.classList.contains('streaming')) {
-           last.classList.remove('streaming');
-           if (!last.textContent.trim()) last.remove();
-        }
-
-        if (result.error) {
-           const errDiv = document.createElement('div');
-           errDiv.className = 'wa-msg ai';
-           errDiv.textContent = `❌ 执行错误：${result.error}`;
-           if (result.stderr) errDiv.textContent += `\n\n${result.stderr}`;
-           msgs.appendChild(errDiv);
-        } else if (result.stdout) {
-           const outDiv = document.createElement('div');
-           outDiv.className = 'wa-msg-code';
-           outDiv.textContent = result.stdout;
-           msgs.appendChild(outDiv);
-        }
-
-        // Show generated chart images
-        const files = result.files || {};
-        const fileNames = Object.keys(files);
-        if (fileNames.length > 0) {
-           fileNames.forEach(fname => {
-              const wrapper = document.createElement('div');
-              wrapper.className = 'wa-chart-result';
-              const img = document.createElement('img');
-              img.src = files[fname];
-              img.alt = fname;
-              const caption = document.createElement('div');
-              caption.className = 'wa-chart-caption';
-              caption.textContent = fname;
-              const dl = document.createElement('div');
-              dl.className = 'wa-chart-download';
-              dl.textContent = '⬇ 下载图表';
-              dl.onclick = () => {
-                 const a = document.createElement('a');
-                 a.href = files[fname];
-                 a.download = fname;
-                 a.click();
-              };
-              wrapper.appendChild(img);
-              wrapper.appendChild(caption);
-              wrapper.appendChild(dl);
-              msgs.appendChild(wrapper);
-           });
-        } else if (!result.error) {
-           const okDiv = document.createElement('div');
-           okDiv.className = 'wa-msg ai';
-           okDiv.textContent = '✅ 代码执行完成，但未生成图片文件。请确保代码中有 plt.savefig("chart.png") 或 ggsave("chart.png")。';
-           msgs.appendChild(okDiv);
-        }
-
-        msgs.scrollTop = msgs.scrollHeight;
+     imgWrap.appendChild(img);
+     const hint = document.createElement('div');
+     hint.className = 'wa-chart-drag-hint';
+     hint.textContent = '· 拖入文档 ·';
+     imgWrap.appendChild(hint);
+     const bar = document.createElement('div');
+     bar.className = 'wa-chart-img-bar';
+     const openBtn = document.createElement('button');
+     openBtn.className = 'wa-action-btn secondary';
+     openBtn.textContent = '🖼 查看';
+     openBtn.title = '在新标签页打开（可直接右键复制）';
+     openBtn.addEventListener('click', () => window.open(imgSrc, '_blank'));
+     const dlBtn = document.createElement('button');
+     dlBtn.className = 'wa-action-btn';
+     dlBtn.textContent = '💾 下载';
+     dlBtn.addEventListener('click', () => {
+        const a = document.createElement('a');
+        a.href = imgSrc;
+        a.download = fileName || 'chart.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        dlBtn.textContent = '✅ 下载中';
+        setTimeout(() => { dlBtn.textContent = '💾 下载'; }, 2000);
      });
+     bar.appendChild(openBtn);
+     bar.appendChild(dlBtn);
+     imgWrap.appendChild(bar);
+     return imgWrap;
+  }
+
+  function _makeAIImgDraggable(img, imgSrc) {
+     img.draggable = true;
+     img.style.cursor = 'grab';
+     img.addEventListener('dragstart', (e) => {
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('application/wa-chart-image', imgSrc);
+        e.dataTransfer.setData('application/wa-chart-name', img.alt || 'image.png');
+     });
+  }
+
+  function _handleCodeResult(result) {
+     const msgs = $('wa-ai-messages');
+     const last = msgs.lastElementChild;
+     if (last && last.classList.contains('streaming')) {
+        last.classList.remove('streaming');
+        if (!last.textContent.trim()) last.remove();
+     }
+     if (result.error) {
+        const errDiv = document.createElement('div');
+        errDiv.className = 'wa-msg ai';
+        errDiv.textContent = `❌ 执行错误：${result.error}`;
+        if (result.stderr) errDiv.textContent += `\n\n${result.stderr}`;
+        msgs.appendChild(errDiv);
+     } else if (result.stdout) {
+        const outDiv = document.createElement('div');
+        outDiv.className = 'wa-msg-code';
+        outDiv.textContent = result.stdout;
+        msgs.appendChild(outDiv);
+     }
+     const files = result.files || {};
+     const fileNames = Object.keys(files);
+     if (fileNames.length > 0) {
+        fileNames.forEach(fname => {
+           msgs.appendChild(_makeWAChartImageWrap(files[fname], fname));
+        });
+     } else if (!result.error) {
+        const okDiv = document.createElement('div');
+        okDiv.className = 'wa-msg ai';
+        okDiv.textContent = '✅ 代码执行完成，但未生成图片文件。请确保代码中有 plt.savefig("chart.png") 或 ggsave("chart.png")。';
+        msgs.appendChild(okDiv);
+     }
+     msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  // ── Chart / code execution SSE (backed by /api/v1/workspace/chart-exec) ──
+  async function _sendViaSSEChart(payload) {
+    let buffer = '';
+    try {
+      const resp = await fetch('/api/v1/workspace/chart-exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6));
+            switch (evt.type) {
+              case 'chunk': {
+                const msgs = $('wa-ai-messages');
+                let last = msgs.lastElementChild;
+                if (!last || !last.classList.contains('streaming')) {
+                  last = document.createElement('div');
+                  last.className = 'wa-msg ai streaming';
+                  last.dataset.raw = '';
+                  msgs.appendChild(last);
+                }
+                last.dataset.raw = (last.dataset.raw || '') + evt.text;
+                last.textContent = last.dataset.raw;
+                msgs.scrollTop = msgs.scrollHeight;
+                break;
+              }
+              case 'code_result': _handleCodeResult(evt); break;
+              case 'complete': state.isLoading = false; break;
+              case 'error': {
+                const msgs = $('wa-ai-messages');
+                const last = msgs.lastElementChild;
+                if (last && last.classList.contains('streaming')) last.classList.remove('streaming');
+                const errEl = document.createElement('div');
+                errEl.className = 'wa-msg ai';
+                errEl.textContent = evt.message || '❌ 图表生成失败';
+                msgs.appendChild(errEl);
+                msgs.scrollTop = msgs.scrollHeight;
+                state.isLoading = false;
+                break;
+              }
+            }
+          } catch(e) { /* ignore malformed SSE line */ }
+        }
+      }
+    } catch (err) {
+      console.error('[WorkspaceAI] Chart exec error:', err);
+      const msgs = $('wa-ai-messages');
+      const last = msgs.lastElementChild;
+      if (last && last.classList.contains('streaming')) last.classList.remove('streaming');
+      const errEl = document.createElement('div');
+      errEl.className = 'wa-msg ai';
+      errEl.textContent = `❌ 网络错误：${err.message}`;
+      msgs.appendChild(errEl);
+      msgs.scrollTop = msgs.scrollHeight;
+      state.isLoading = false;
+    }
+  }
+
+  // ── AI init ───────────────────────────────────────────────────────────────
+  function initSocket() {
+    const badge = $('wa-ai-model-badge');
+    if (state.lockedModel === 'local') {
+      if (badge) badge.textContent = 'Ollama ●';
+    } else {
+      if (badge) badge.textContent = 'Koto AI ●';
+      const sel = document.getElementById('wa-model-select');
+      if (sel) sel.value = state.lockedModel || 'auto';
+      if (state.lockedModel && state.lockedModel !== 'auto') WA.setLockedModel(state.lockedModel);
+    }
+    // Restore local model toggle button active state
+    const isLocal = state.lockedModel === 'local';
+    document.querySelectorAll('[data-local-mode]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.localMode === 'on') === isLocal);
+    });
+    // Restore output mode toggle button active state
+    document.querySelectorAll('.wa-output-mode-toggle button[data-mode]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === state.aiOutputMode);
+    });
   }
 
   // ── Exports to Window ──
@@ -2540,6 +3988,8 @@ window.WA = window.WA || {};
       const msgs = $('wa-ai-messages');
       msgs.innerHTML = '<div class="wa-msg ai">对话已清空。你好！我是 Koto AI 助手，随时可以帮你处理文档内容。</div>';
       state.conversation = [];
+      // Clear server-side session so AI won't recall previous turns after user clears chat
+      fetch(`/api/sessions/${encodeURIComponent(_waSession())}`, { method: 'DELETE' }).catch(() => {});
   };
 
   window.WA.pptxSync = (ta) => {
@@ -2733,12 +4183,7 @@ window.WA = window.WA || {};
      msgs.scrollTop = msgs.scrollHeight;
 
      function doChartSend() {
-       if (!state.socket || !state.socket.connected) {
-          loadingMsg.classList.remove('streaming');
-          loadingMsg.textContent = '⚠️ AI 连接未就绪，请确保网络正常并刷新页面重试。';
-          return;
-       }
-       state.socket.emit('doc_ai_request', {
+       _sendViaSSEChart({
           prompt: desc,
           file_type: state.fileType || 'xlsx',
           file_id: state.fileId || '',
@@ -2747,27 +4192,202 @@ window.WA = window.WA || {};
        });
      }
 
-     if (state.socket && state.socket.connected) {
-       doChartSend();
-     } else {
-       let waited = 0;
-       const waitChart = setInterval(() => {
-         waited += 200;
-         if (state.socket && state.socket.connected) {
-           clearInterval(waitChart);
-           doChartSend();
-         } else if (waited >= 5000) {
-           clearInterval(waitChart);
-           doChartSend();
-         }
-       }, 200);
-     }
+     doChartSend();
   };
 
   // Close dialog on backdrop click
   $('wa-chart-dialog').addEventListener('click', (e) => {
      if (e.target === $('wa-chart-dialog')) WA.closeChartDialog();
   });
+
+  // ── Proposal Diff Card System ──────────────────────────────────────────────
+
+  /** Simple word-level diff for inline display */
+  function _computeInlineDiff(original, proposed) {
+    // Strip HTML tags for comparison
+    const stripHtml = (s) => s.replace(/<[^>]+>/g, '').trim();
+    const origText = stripHtml(original);
+    const propText = stripHtml(proposed);
+    if (origText === propText) return '<span class="wa-diff-same">' + _escHtml(propText) + '</span>';
+
+    // Simple sentence-level diff
+    const origSents = origText.split(/([。！？.!?\n]+)/).filter(Boolean);
+    const propSents = propText.split(/([。！？.!?\n]+)/).filter(Boolean);
+
+    // If short enough, show full before/after
+    if (origText.length < 500 && propText.length < 500) {
+      return '<div class="wa-diff-block del"><span class="wa-diff-label">原文</span>' + _escHtml(origText) + '</div>' +
+             '<div class="wa-diff-block add"><span class="wa-diff-label">修改</span>' + _escHtml(propText) + '</div>';
+    }
+
+    // For longer texts, show truncated
+    const truncOrig = origText.length > 300 ? origText.substring(0, 300) + '…' : origText;
+    const truncProp = propText.length > 300 ? propText.substring(0, 300) + '…' : propText;
+    return '<div class="wa-diff-block del"><span class="wa-diff-label">原文</span>' + _escHtml(truncOrig) + '</div>' +
+           '<div class="wa-diff-block add"><span class="wa-diff-label">修改</span>' + _escHtml(truncProp) + '</div>';
+  }
+
+  function _escHtml(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function _makeProposalCard(proposal, index, total) {
+    const card = document.createElement('div');
+    card.className = 'wa-proposal-card';
+    card.dataset.proposalId = proposal.id;
+    card.dataset.index = index;
+
+    const header = document.createElement('div');
+    header.className = 'wa-proposal-header';
+    header.innerHTML = `<span class="wa-proposal-badge">修改建议 ${index + 1}${total > 1 ? '/' + total : ''}</span>`;
+
+    const diffView = document.createElement('div');
+    diffView.className = 'wa-proposal-diff';
+    diffView.innerHTML = _computeInlineDiff(proposal.original_text, proposal.proposed_text);
+
+    // Rationale (AI explanation), truncated
+    const rationale = document.createElement('div');
+    rationale.className = 'wa-proposal-rationale';
+    const rText = (proposal.rationale || '').replace(/<[^>]+>/g, '').trim();
+    if (rText && rText.length > 5) {
+      rationale.innerHTML = '💡 ' + _escHtml(rText.length > 150 ? rText.substring(0, 150) + '…' : rText);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'wa-proposal-actions';
+    actions.innerHTML =
+      `<button class="wa-proposal-btn accept" onclick="WA.acceptProposal('${proposal.id}',this)">✅ 接受</button>` +
+      `<button class="wa-proposal-btn reject" onclick="WA.rejectProposal('${proposal.id}',this)">❌ 拒绝</button>` +
+      `<button class="wa-proposal-btn modify" onclick="WA.modifyProposal('${proposal.id}',this)">✏️ 再修改</button>`;
+
+    card.appendChild(header);
+    card.appendChild(diffView);
+    if (rText && rText.length > 5) card.appendChild(rationale);
+    card.appendChild(actions);
+    return card;
+  }
+
+  function _makeProposalBatchBar(proposals) {
+    const bar = document.createElement('div');
+    bar.className = 'wa-proposal-batch-bar';
+    bar.innerHTML =
+      `<span class="wa-proposal-batch-label">共 ${proposals.length} 条修改建议</span>` +
+      '<span class="wa-proposal-batch-counter" id="wa-proposal-counter">0/' + proposals.length + ' 已处理</span>' +
+      '<button class="wa-proposal-btn accept small" onclick="WA.batchAcceptAll()">全部接受</button>' +
+      '<button class="wa-proposal-btn reject small" onclick="WA.batchRejectAll()">全部拒绝</button>';
+    return bar;
+  }
+
+  function _updateProposalCounter() {
+    const counter = document.getElementById('wa-proposal-counter');
+    if (!counter) return;
+    const all = document.querySelectorAll('.wa-proposal-card');
+    const done = document.querySelectorAll('.wa-proposal-card.accepted, .wa-proposal-card.rejected');
+    counter.textContent = `${done.length}/${all.length} 已处理`;
+  }
+
+  window.WA.acceptProposal = (proposalId, btn) => {
+    const card = btn.closest('.wa-proposal-card');
+    if (!card || card.classList.contains('accepted') || card.classList.contains('rejected')) return;
+    const proposals = state._activeProposals || [];
+    const proposal = proposals.find(p => p.id === proposalId);
+    if (!proposal) return;
+
+    if (state.activeEditor) {
+      try {
+        if (proposal.tool_call) {
+          // Server-provided tool call (e.g. from socket_handler agent_proposals)
+          state.activeEditor.applyToolCall(proposal.tool_call);
+        } else if (proposal.original_text && proposal.proposed_text) {
+          // Proposals built on the frontend (quick actions: translate / rewrite / etc.)
+          // have no tool_call — synthesise a replace_text command.
+          const proposedPlain = (proposal.proposed_text || '').replace(/<[^>]+>/g, '').trim();
+          state.activeEditor.applyToolCall({
+            type: 'replace_text',
+            original: proposal.original_text,
+            value: proposedPlain || proposal.proposed_text,
+          });
+        }
+      } catch(e) {
+        console.warn('acceptProposal applyToolCall failed:', e);
+      }
+    }
+
+    card.classList.add('accepted');
+    showToast('已接受修改', 'success');
+    WA.scheduleAutoSave();
+    _updateProposalCounter();
+  };
+
+  window.WA.rejectProposal = (proposalId, btn) => {
+    const card = btn.closest('.wa-proposal-card');
+    if (!card || card.classList.contains('accepted') || card.classList.contains('rejected')) return;
+    card.classList.add('rejected');
+    showToast('已拒绝修改', 'info');
+    _updateProposalCounter();
+  };
+
+  window.WA.modifyProposal = (proposalId, btn) => {
+    const card = btn.closest('.wa-proposal-card');
+    if (!card) return;
+    // Check if input already open
+    if (card.querySelector('.wa-proposal-modify-input')) return;
+
+    const proposals = state._activeProposals || [];
+    const proposal = proposals.find(p => p.id === proposalId);
+    if (!proposal) return;
+
+    const inputWrap = document.createElement('div');
+    inputWrap.className = 'wa-proposal-modify-input';
+    inputWrap.innerHTML =
+      '<textarea class="wa-proposal-modify-textarea" placeholder="输入修改意见，如：语气再正式一些…" rows="2"></textarea>' +
+      '<div class="wa-proposal-modify-actions">' +
+      `<button class="wa-proposal-btn accept small" onclick="WA._submitModify('${proposalId}',this)">发送</button>` +
+      '<button class="wa-proposal-btn reject small" onclick="this.closest(\'.wa-proposal-modify-input\').remove()">取消</button>' +
+      '</div>';
+    card.appendChild(inputWrap);
+    inputWrap.querySelector('textarea').focus();
+  };
+
+  window.WA._submitModify = (proposalId, btn) => {
+    const card = btn.closest('.wa-proposal-card');
+    const textarea = card.querySelector('.wa-proposal-modify-textarea');
+    const feedback = textarea ? textarea.value.trim() : '';
+    if (!feedback) return;
+
+    const proposals = state._activeProposals || [];
+    const proposal = proposals.find(p => p.id === proposalId);
+    if (!proposal) return;
+
+    // Remove input
+    const inputWrap = card.querySelector('.wa-proposal-modify-input');
+    if (inputWrap) inputWrap.remove();
+    card.classList.add('rejected');
+    _updateProposalCounter();
+
+    // Send a new message with context from this proposal
+    const input = $('wa-user-input');
+    const modifyPrompt = `请重新修改以下内容。\n原文：「${proposal.original_text.substring(0, 200)}」\n上次修改为：「${(proposal.proposed_text || '').replace(/<[^>]+>/g, '').substring(0, 200)}」\n用户反馈：${feedback}`;
+    input.value = modifyPrompt;
+
+    // Re-pin the original selection so the next response also gets proposal cards
+    state.pinnedSelection = proposal.original_text;
+    WA.sendMessage();
+  };
+
+  window.WA.batchAcceptAll = () => {
+    document.querySelectorAll('.wa-proposal-card:not(.accepted):not(.rejected)').forEach(card => {
+      const btn = card.querySelector('.wa-proposal-btn.accept');
+      if (btn) btn.click();
+    });
+  };
+
+  window.WA.batchRejectAll = () => {
+    document.querySelectorAll('.wa-proposal-card:not(.accepted):not(.rejected)').forEach(card => {
+      const btn = card.querySelector('.wa-proposal-btn.reject');
+      if (btn) btn.click();
+    });
+  };
 
   // ── AI Response Action Bar ─────────────────────────────────────────────────
   function _makeAIActionBar() {
@@ -2819,7 +4439,7 @@ window.WA = window.WA || {};
   window.WA.sendMessage = () => {
       const input = $('wa-user-input');
       const text = input.value.trim();
-      if (!text) return;
+      if (!text || state.isLoading) return;
 
       // Capture and clear pinned selection before rendering
       const pinnedSel = state.pinnedSelection;
@@ -2845,80 +4465,73 @@ window.WA = window.WA || {};
       }
       msgs.appendChild(uMsg);
 
-      // Add loading bubble
-      const loadingMsg = document.createElement('div');
-      loadingMsg.className = 'wa-msg ai streaming';
-      loadingMsg.textContent = '';
-      msgs.appendChild(loadingMsg);
+      // Add streaming bubble
+      const loadingEl = document.createElement('div');
+      loadingEl.className = 'wa-msg ai streaming';
+      msgs.appendChild(loadingEl);
       msgs.scrollTop = msgs.scrollHeight;
 
       input.value = '';
       input.style.height = 'auto';
 
-      const MAX_CONTEXT = 6000;  // ~1500 tokens — prevents stream timeout on large docs
+      const MAX_CONTEXT = 6000;
       let contextRaw = state.activeEditor ? state.activeEditor.getContent() : '';
       const context = contextRaw.length > MAX_CONTEXT
           ? contextRaw.substring(0, MAX_CONTEXT) + '\n…[内容过长已截断，请缩小选区]'
           : contextRaw;
       const fileType = state.fileType || 'general';
-      // Detect active selection: use pinnedSel for PPTX (no .editor on that class),
-      // or the WangEditor selection API for DOCX/XLSX
-      const hasSelection = !!(pinnedSel) ||
-          !!(state.activeEditor && state.activeEditor.editor &&
-             typeof state.activeEditor.editor.getSelectionText === 'function' &&
-             state.activeEditor.editor.getSelectionText());
 
       if (context) {
         $('wa-context-indicator').style.display = 'flex';
         setTimeout(() => $('wa-context-indicator').style.display = 'none', 3000);
       }
 
-      // Push user message to conversation history before sending
+      // Build full message with document context + tool/proposal format instructions
+      let fullMessage = text;
+      if (state.fileName && context) {
+        const selHint = pinnedSel
+          ? `\n\n[用户选中的文字]\n"${pinnedSel.length > 500 ? pinnedSel.substring(0, 500) + '…' : pinnedSel}"\n`
+          : '';
+        // Only inject modification proposal hint for queries that intend to edit the document
+        // Skip for read-only intents (summarize, analyze, explain, translate for reference, etc.)
+        const _readOnlyRe = /总结|摘要|分析|解释|讲解|简介|介绍|是什么|描述|概括|审阅/;
+        const _modifyRe   = /修改|改写|润色|删除|替换|更正|修复|优化|重写|调整|纠正|校对|添加|插入/;
+        const _isReadOnly = !pinnedSel && _readOnlyRe.test(text) && !_modifyRe.test(text);
+        let toolHint = '';
+        if (state.aiOutputMode !== 'chat' && !_isReadOnly) {
+          if (fileType === 'docx') {
+            toolHint = '\n\n如需修改文档，在回复末尾另起一行输出 JSON 提案（不要 Markdown 代码块）：\n{"proposals":[{"id":"p1","original_text":"被替换的原文","proposed_text":"修改后内容","rationale":"修改理由"}]}\n如有多处修改，并列多条。不需要修改时不要输出该 JSON。';
+          } else if (fileType === 'xlsx') {
+            toolHint = '\n\n如需修改表格单元格，在回复末尾输出 JSON 提案：\n{"proposals":[{"id":"p1","original_text":"原値","proposed_text":"新値","rationale":"理由","tool":{"type":"set_cell","r":行号,"c":列号,"value":"新値"}}]}';
+          } else if (fileType === 'pptx') {
+            toolHint = '\n\n如需修改幻灯片文字，在回复末尾输出 JSON 提案：\n{"proposals":[{"id":"p1","original_text":"原文","proposed_text":"新内容","rationale":"理由","tool":{"type":"set_pptx_text","slide_index":0,"shape_id":1,"value":"新内容"}}]}';
+          }
+        }
+        fullMessage = `[工作区文档助手模式]\n当前文件: ${state.fileName} (${fileType})\n\n文档内容:\n${context}${selHint}${toolHint}\n\n用户指令: ${text}`;
+      }
+
       state.conversation.push({ role: 'user', content: text });
       state.isLoading = true;
 
-      // If socket not yet connected, wait up to 5s then send
-      function doSend() {
-        if (!state.socket || !state.socket.connected) {
-            loadingMsg.classList.remove('streaming');
-            loadingMsg.textContent = '⚠️ AI 连接未就绪，请确保网络正常并刷新页面重试。';
-            msgs.scrollTop = msgs.scrollHeight;
-            state.isLoading = false;
-            return;
-        }
-        state.socket.emit('doc_ai_request', {
-           prompt: text,
-           context: context,
-           selection: pinnedSel,
-           file_type: fileType,
-           file_id: state.fileId || '',
-           file_name: state.fileName || '',
-           history: state.conversation.slice(-20),
-           has_selection: hasSelection,
-           output_mode: state.aiOutputMode,
-        });
-      }
-
-      if (state.socket && state.socket.connected) {
-        doSend();
-      } else {
-        // Wait up to 5s for socket to connect
-        let waited = 0;
-        const waitInterval = setInterval(() => {
-          waited += 200;
-          if (state.socket && state.socket.connected) {
-            clearInterval(waitInterval);
-            doSend();
-          } else if (waited >= 5000) {
-            clearInterval(waitInterval);
-            doSend(); // will show the error message
-          }
-        }, 200);
-      }
+      _waSendToChat(fullMessage, loadingEl, { model: state.lockedModel || 'auto' });
   };
 
   // ── Auto-save ──────────────────────────────────────────────────────────────
   let _autoSaveTimer = null;
+  let _autoSaveEnabled = localStorage.getItem('wa_autosave') === 'on';
+
+  window.WA.toggleAutoSave = () => {
+    _autoSaveEnabled = !_autoSaveEnabled;
+    localStorage.setItem('wa_autosave', _autoSaveEnabled ? 'on' : 'off');
+    const btn = $('wa-autosave-toggle');
+    if (btn) btn.classList.toggle('toggle-on', _autoSaveEnabled);
+    const status = $('wa-autosave-status');
+    if (status) {
+      status.className = _autoSaveEnabled ? 'saved' : '';
+      status.textContent = _autoSaveEnabled ? '自动保存已开启' : '自动保存已关闭';
+      setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 2000);
+    }
+  };
 
   window.WA.setOutputMode = (mode) => {
     state.aiOutputMode = mode;
@@ -2927,6 +4540,78 @@ window.WA = window.WA || {};
     document.querySelectorAll('.wa-output-mode-btn').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.mode === mode);
     });
+    // Sync the output-mode toggle buttons in settings panel
+    document.querySelectorAll('.wa-output-mode-toggle button[data-mode]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+  };
+
+  window.WA.toggleSettings = () => {
+    const panel = document.getElementById('wa-ai-settings-panel');
+    if (!panel) return;
+    const isOpen = panel.classList.toggle('open');
+    if (isOpen) _checkOllamaStatus();
+  };
+
+  function _checkOllamaStatus() {
+    fetch('/api/v1/workspace/ollama-status')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const row = document.getElementById('wa-ollama-status-row');
+        const txt = document.getElementById('wa-ollama-status-text');
+        const onBtn = document.getElementById('wa-local-on-btn');
+        if (!row || !txt) return;
+        if (data && data.running) {
+          row.style.display = 'block';
+          txt.textContent = `✅ Ollama 运行中 (${data.model || 'qwen3:8b'})`;
+          if (onBtn) { onBtn.disabled = false; onBtn.title = '使用本地 Ollama 模型'; }
+        } else {
+          row.style.display = 'block';
+          txt.textContent = '⚠️ Ollama 未运行，无法切换到本地模型';
+          if (onBtn) { onBtn.disabled = true; onBtn.title = '请先启动 Ollama'; }
+        }
+      })
+      .catch(() => {});
+  }
+
+  window.WA.setUseLocalModel = (useLocal) => {
+    const newModel = useLocal ? 'local' : 'auto';
+    state.lockedModel = newModel;
+    localStorage.setItem('wa_locked_model', newModel);
+    // Update local model toggle buttons
+    document.querySelectorAll('[data-local-mode]').forEach(btn => {
+      btn.classList.toggle('active', (btn.dataset.localMode === 'on') === useLocal);
+    });
+    // Update model badge
+    const badge = document.getElementById('wa-ai-model-badge');
+    if (badge) badge.textContent = useLocal ? 'Ollama ●' : 'Koto AI ●';
+    // Reset cloud model select to auto if switching to local
+    const sel = document.getElementById('wa-model-select');
+    if (sel && useLocal) sel.value = 'auto';
+  };
+
+  window.WA.setLockedModel = (val) => {
+    state.lockedModel = val || 'auto';
+    localStorage.setItem('wa_locked_model', state.lockedModel);
+    // If user picks a cloud model, turn off local-model toggle
+    if (state.lockedModel !== 'local') {
+      document.querySelectorAll('[data-local-mode]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.localMode === 'off');
+      });
+    }
+    const badge = $('wa-ai-model-badge');
+    if (badge) {
+      const MODEL_LABELS = {
+        'auto': 'Koto AI ●',
+        'local': 'Ollama ●',
+        'gemini-3-flash-preview': 'Flash ●',
+        'gemini-3-pro-preview': 'Pro ●',
+        'gemini-3.1-pro-preview': 'Pro 3.1 ●',
+      };
+      badge.textContent = MODEL_LABELS[state.lockedModel] || (state.lockedModel + ' ●');
+    }
+    const sel = document.getElementById('wa-model-select');
+    if (sel && sel.value !== state.lockedModel) sel.value = state.lockedModel;
   };
 
   window.WA.scheduleAutoSave = () => {
@@ -2934,38 +4619,45 @@ window.WA = window.WA || {};
     // Mark active tab as modified (dirty indicator)
     const tab = state.openTabs.find(t => t.path === state.activeTabPath);
     if (tab && !tab.modified) { tab.modified = true; _renderTabs(); }
-    clearTimeout(_autoSaveTimer);
-    const status = $('wa-autosave-status');
-    if (status) { status.className = 'saving'; status.textContent = '保存中…'; }
-    _autoSaveTimer = setTimeout(WA.autoSave, 2000);
+    // If auto-save is enabled, schedule a disk write after 2 s of inactivity
+    if (_autoSaveEnabled) {
+      clearTimeout(_autoSaveTimer);
+      const status = $('wa-autosave-status');
+      if (status) { status.className = 'saving'; status.textContent = '保存中…'; }
+      _autoSaveTimer = setTimeout(WA.autoSave, 2000);
+    }
   };
 
+  // autoSave: called by the timer when auto-save is ON — saves to workspace in-place.
   window.WA.autoSave = async () => {
     if (!state.activeEditor || !state.fileId || !state.fileType || state.fileType === 'pdf') return;
     const status = $('wa-autosave-status');
     try {
       const data = state.activeEditor.serialize();
+      // Always update in-memory cache
+      const tab = state.openTabs.find(t => t.path === state.activeTabPath);
+      if (tab && data) {
+        tab.cache = data;
+        if (state.fileType === 'docx' && tab.serverData) tab.serverData.html = data;
+      }
+      // Write to workspace
       const res = await fetch('/api/v1/workspace/auto_save', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           file_type: state.fileType,
           file_id: state.fileId,
-          ws_source_path: state.wsSourcePath || null,  // write back to original file
+          ws_source_path: state.wsSourcePath || null,
+          explicit: true,
           data,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error || '自动保存失败');
       const json = await res.json();
-      const tab = state.openTabs.find(t => t.path === state.activeTabPath);
-      if (tab) {
-        tab.modified = false;
-        if (state.fileType === 'docx' && tab.serverData && data) tab.serverData.html = data;
-        _renderTabs();
-      }
+      if (tab) { tab.modified = false; _renderTabs(); }
       if (status) {
         status.className = 'saved';
-        status.textContent = `✓ 已保存 ${json.saved_at}`;
+        status.textContent = `✓ 已自动保存 ${json.saved_at}`;
         setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 4000);
       }
     } catch (e) {
@@ -2973,6 +4665,14 @@ window.WA = window.WA || {};
       console.warn('[AutoSave]', e.message);
     }
   };
+
+  // Warn before page unload if any open tab has unsaved changes
+  window.addEventListener('beforeunload', (e) => {
+    if (state.openTabs.some(t => t.modified)) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 
   // MIME types for showSaveFilePicker
   const _MIME = {
@@ -2982,95 +4682,119 @@ window.WA = window.WA || {};
   };
 
   let _isSaving = false;
+
+  // ── Shared: serialize + POST to workspace, then write bytes to a given fsHandle ──
+  async function _doSave(fsHandle) {
+    const _saveTabPath  = state.activeTabPath;
+    const _saveTab      = state.openTabs.find(t => t.path === _saveTabPath);
+    const _saveFileId   = state.fileId;
+    const _saveFileType = state.fileType;
+    const _saveWsPath   = state.wsSourcePath;
+
+    const data = state.activeEditor.serialize();
+    const res = await fetch('/api/v1/workspace/auto_save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_type: _saveFileType,
+        file_id: _saveFileId,
+        ws_source_path: _saveWsPath || null,
+        explicit: true,
+        data,
+      }),
+    });
+    if (!res.ok) {
+      const json = await res.json();
+      throw new Error(json.error || '保存失败');
+    }
+    await res.json();
+    if (_saveTab) {
+      _saveTab.modified = false;
+      if (_saveFileType === 'docx' && _saveTab.serverData) _saveTab.serverData.html = data;
+      _renderTabs();
+    }
+    if (fsHandle) {
+      const rawRes = await fetch(`/api/v1/workspace/raw/${_saveFileId}?_=${Date.now()}`);
+      if (rawRes.ok) {
+        const bytes = await rawRes.arrayBuffer();
+        await _writeToFileHandle(fsHandle, bytes);
+      } else {
+        showToast('已保存到工作区 (无法写回原始位置)', 'success');
+        return;
+      }
+    }
+    showToast('✓ 已保存', 'success');
+  }
+
+  // 保存 — save directly to the original local file (Ctrl+S)
+  // If the file was opened from disk, writes back via its FileSystemFileHandle.
+  // Otherwise saves to Koto workspace only.
   window.WA.saveFile = async () => {
-     if (!state.activeEditor || !state.fileType || state.fileType === 'pdf') return;
-     if (_isSaving) return;
-     _isSaving = true;
-     const btn = $('wa-save-btn');
-     btn.disabled = true;
-     btn.innerHTML = '保存中...';
+    if (!state.activeEditor || !state.fileType || state.fileType === 'pdf') return;
+    if (_isSaving) return;
+    _isSaving = true;
+    const btn     = $('wa-save-btn');
+    const btnAs   = $('wa-saveas-btn');
+    btn.disabled  = true;
+    if (btnAs) btnAs.disabled = true;
+    try {
+      const _saveTab      = state.openTabs.find(t => t.path === state.activeTabPath);
+      const _saveWsPath    = state.wsSourcePath;
+      const _saveFsHandle  = (_saveTab && _saveTab.fsHandle) || _fsHandleMap.get(_saveWsPath) || null;
+      await _doSave(_saveFsHandle);
+    } catch(e) {
+      showToast(e.message, 'error');
+    } finally {
+      _isSaving = false;
+      const isPdf = (state.fileType === 'pdf');
+      btn.disabled    = isPdf;
+      if (btnAs) btnAs.disabled = isPdf;
+    }
+  };
 
-     // Capture all mutable state NOW, before any awaits
-     const _saveTabPath  = state.activeTabPath;
-     const _saveTab      = state.openTabs.find(t => t.path === _saveTabPath);
-     const _saveFileId   = state.fileId;
-     const _saveFileType = state.fileType;
-     const _saveWsPath   = state.wsSourcePath;
-     let   _saveFsHandle = (_saveTab && _saveTab.fsHandle) || _fsHandleMap.get(_saveWsPath) || null;
-
-     try {
-         // ── Acquire a FileSystemFileHandle if we don't have one yet ──
-         // This must happen BEFORE any other await so the browser's user-gesture
-         // activation (from Ctrl+S) is still live when showSaveFilePicker is called.
-         if (!_saveFsHandle && window.showSaveFilePicker && _saveFileType !== 'pdf') {
-           try {
-             const ext  = (_saveWsPath || state.fileName || 'file.docx').split('.').pop().toLowerCase();
-             const mime = _MIME[ext] || 'application/octet-stream';
-             _saveFsHandle = await window.showSaveFilePicker({
-               suggestedName: state.fileName || _saveWsPath || `document.${ext}`,
-               types: [{ description: '文档', accept: { [mime]: ['.' + ext] } }],
-               excludeAcceptAllOption: false,
-             });
-             // Persist so every future Ctrl+S reuses the same location
-             if (_saveTab) _saveTab.fsHandle = _saveFsHandle;
-             _fsHandleMap.set(_saveWsPath, _saveFsHandle);
-           } catch (pickerErr) {
-             if (pickerErr.name === 'AbortError') return; // user cancelled — do nothing
-             console.warn('[saveFile] showSaveFilePicker:', pickerErr);
-             // not fatal — fall through and do workspace-only save
-           }
-         }
-
-         const data = state.activeEditor.serialize();
-         const res = await fetch('/api/v1/workspace/auto_save', {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({
-               file_type: _saveFileType,
-               file_id: _saveFileId,
-               ws_source_path: _saveWsPath || null,
-               explicit: true,
-               data,
-             }),
-         });
-
-         if (!res.ok) {
-             const json = await res.json();
-             throw new Error(json.error || '保存失败');
-         }
-
-         await res.json();
-         if (_saveTab) {
-           _saveTab.modified = false;
-           if (_saveFileType === 'docx' && _saveTab.serverData) _saveTab.serverData.html = data;
-           _renderTabs();
-         }
-
-         // Write the saved bytes to the chosen local file
-         if (_saveFsHandle) {
-           try {
-             const rawRes = await fetch(`/api/v1/workspace/raw/${_saveFileId}?_=${Date.now()}`);
-             if (rawRes.ok) {
-               const bytes = await rawRes.arrayBuffer();
-               await _writeToFileHandle(_saveFsHandle, bytes);
-               showToast('✓ 已保存', 'success');
-             } else {
-               showToast('已保存到工作区 (无法写回原始位置)', 'success');
-             }
-           } catch (fsErr) {
-             console.warn('[saveFile] FileSystem write failed:', fsErr);
-             showToast('已保存到工作区 (原始文件写入失败)', 'success');
-           }
-         } else {
-           showToast(`已保存`, 'success');
-         }
-     } catch(e) {
-         showToast(e.message, 'error');
-     } finally {
-         _isSaving = false;
-         btn.disabled = false;
-         btn.innerHTML = `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg> 保存`;
-     }
+  // 另存为 — always shows the system file picker so the user can choose a new path
+  window.WA.saveAs = async () => {
+    if (!state.activeEditor || !state.fileType || state.fileType === 'pdf') return;
+    if (_isSaving) return;
+    // Must acquire picker BEFORE any await while user-gesture is live
+    if (!window.showSaveFilePicker) {
+      showToast('当前环境不支持文件保存对话框，请使用"保存"', 'error');
+      return;
+    }
+    const ext  = (state.wsSourcePath || state.fileName || 'file.docx').split('.').pop().toLowerCase();
+    const mime = _MIME[ext] || 'application/octet-stream';
+    let _saveFsHandle;
+    try {
+      _saveFsHandle = await window.showSaveFilePicker({
+        suggestedName: state.fileName || state.wsSourcePath || `document.${ext}`,
+        types: [{ description: '文档', accept: { [mime]: ['.' + ext] } }],
+        excludeAcceptAllOption: false,
+      });
+    } catch(pickerErr) {
+      if (pickerErr.name === 'AbortError') return; // user cancelled
+      showToast('无法打开保存对话框: ' + pickerErr.message, 'error');
+      return;
+    }
+    _isSaving = true;
+    const btn     = $('wa-save-btn');
+    const btnAs   = $('wa-saveas-btn');
+    btn.disabled  = true;
+    if (btnAs) btnAs.disabled = true;
+    // Update stored handle so future Ctrl+S goes to this new location
+    const _saveTab    = state.openTabs.find(t => t.path === state.activeTabPath);
+    const _saveWsPath = state.wsSourcePath;
+    if (_saveTab) _saveTab.fsHandle = _saveFsHandle;
+    _fsHandleMap.set(_saveWsPath, _saveFsHandle);
+    try {
+      await _doSave(_saveFsHandle);
+    } catch(e) {
+      showToast(e.message, 'error');
+    } finally {
+      _isSaving = false;
+      const isPdf = (state.fileType === 'pdf');
+      btn.disabled    = isPdf;
+      if (btnAs) btnAs.disabled = isPdf;
+    }
   };
 
   // ── Drag & Drop Events ──
@@ -3149,16 +4873,45 @@ window.WA = window.WA || {};
     if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
   });
 
+  // Drop zone for chart images dragged from the AI panel into the document
+  const _waCanvasBody = $('wa-canvas-body');
+  if (_waCanvasBody) {
+    _waCanvasBody.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('application/wa-chart-image')) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'copy';
+        _waCanvasBody.classList.add('wa-drop-active');
+      }
+    });
+    _waCanvasBody.addEventListener('dragleave', (e) => {
+      if (!_waCanvasBody.contains(e.relatedTarget)) {
+        _waCanvasBody.classList.remove('wa-drop-active');
+      }
+    });
+    _waCanvasBody.addEventListener('drop', (e) => {
+      _waCanvasBody.classList.remove('wa-drop-active');
+      const imgSrc = e.dataTransfer.getData('application/wa-chart-image');
+      if (!imgSrc) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (state.activeEditor) {
+        state.activeEditor.applyToolCall({ type: 'insert_image', src: imgSrc });
+        showToast('图表已插入文档', 'success');
+      }
+    });
+  }
+
   // Init
   initSocket();
-  loadWorkspaceFiles();
+  loadFileBrowser();
+  loadRecentFiles();
+  // Sync auto-save toggle appearance
+  (() => { const btn = $('wa-autosave-toggle'); if (btn && _autoSaveEnabled) btn.classList.add('toggle-on'); })();
 
   // ── Local file / folder pickers ──
   const localFileInput = $('wa-local-file-input');
   const localFolderInput = $('wa-local-folder-input');
-
-  $('wa-pick-local-file-btn').addEventListener('click', () => _openFilePicker());
-  $('wa-pick-local-folder-btn').addEventListener('click', () => localFolderInput.click());
 
   localFileInput.addEventListener('change', (e) => {
     if (e.target.files.length) loadFiles(e.target.files);
@@ -3193,8 +4946,49 @@ window.WA = window.WA || {};
   // contains #workspaceView, or on the standalone /workspace-assistant page.
   const _isEmbedded = !!document.getElementById('workspaceView');
 
+  // ── File menu ──────────────────────────────────────────────────────────────
+  window.WA.toggleFileMenu = function () {
+    const dd  = $('wa-file-dropdown');
+    const btn = $('wa-ribbon-file-btn');
+    if (!dd) return;
+    const isOpen = dd.style.display !== 'none';
+    dd.style.display = isOpen ? 'none' : 'block';
+    if (btn) btn.classList.toggle('open', !isOpen);
+  };
+  window.WA._closeFileMenu = function () {
+    const dd  = $('wa-file-dropdown');
+    const btn = $('wa-ribbon-file-btn');
+    if (dd)  dd.style.display = 'none';
+    if (btn) btn.classList.remove('open');
+  };
+  window.WA._openLocalFile   = function () { _openFilePicker(); };
+  window.WA._openLocalFolder = function () {
+    const input = $('wa-local-folder-input');
+    if (input) input.click();
+  };
+  window.WA._menuCloseFile = function () {
+    if (state.activeTabPath) WA._closeTab(state.activeTabPath);
+  };
+
+  // Close file dropdown when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#wa-file-menu-wrap')) WA._closeFileMenu();
+  });
+
+  // ── Status bar ─────────────────────────────────────────────────────────────
+  function _updateStatusBar() {
+    const ftEl  = $('wa-status-filetype');
+    const modEl = $('wa-status-modified');
+    const sb    = $('wa-status-bar');
+    if (!ftEl) return;
+    const TYPE_LABELS = { docx: 'Word \u6587\u6863', xlsx: 'Excel \u5de5\u4f5c\u7c3f', pptx: 'PowerPoint \u6f14\u793a\u6587\u7a3f', pdf: 'PDF \u6587\u6863' };
+    ftEl.textContent = state.fileType ? (TYPE_LABELS[state.fileType] || state.fileType.toUpperCase()) : '';
+    const tab = state.openTabs.find(t => t.path === state.activeTabPath);
+    if (modEl) modEl.style.display = (tab && tab.modified) ? '' : 'none';
+    if (sb)    sb.style.display    = (state.fileType === 'pptx') ? 'none' : '';
+  }
+
   window.WA.openInMainView = function () {
-    const shell    = document.querySelector('.app-shell');
     const chatView = document.getElementById('chatView');
     const wsView   = document.getElementById('workspaceView');
     if (!wsView) {
@@ -3202,12 +4996,7 @@ window.WA = window.WA || {};
       window.open('/workspace-assistant', '_blank');
       return;
     }
-    // Collapse left sidebar so workspace gets full width
-    if (shell && !shell.classList.contains('sidebar-collapsed')) {
-      if (typeof toggleSidebar === 'function') toggleSidebar();
-      else shell.classList.add('sidebar-collapsed');
-    }
-    // Highlight active nav button
+    // Highlight active nav button (sidebar stays visible)
     document.querySelectorAll('.sb-nav-item').forEach(el => el.classList.remove('active'));
     const navBtn = document.getElementById('navWorkspaceBtn');
     if (navBtn) navBtn.classList.add('active');
@@ -3216,7 +5005,7 @@ window.WA = window.WA || {};
     wsView.style.display = 'flex';
     localStorage.setItem('koto.inWorkspace', '1');
     // Load workspace files on first open
-    if (typeof loadWorkspaceFiles === 'function') loadWorkspaceFiles();
+    if (typeof loadFileBrowser === 'function') loadFileBrowser();
   };
 
   window.WA.closeInMainView = function () {
@@ -3225,13 +5014,28 @@ window.WA = window.WA || {};
     if (wsView)   wsView.style.display   = 'none';
     if (chatView) chatView.style.display = '';
     localStorage.removeItem('koto.inWorkspace');
-    // Restore nav highlight
-    document.querySelectorAll('.sb-nav-item').forEach(el => el.classList.remove('active'));
+    // Remove active state from workspace nav button
+    const navBtn = document.getElementById('navWorkspaceBtn');
+    if (navBtn) navBtn.classList.remove('active');
   };
 
-  // Auto-restore workspace view after page reload while user was in workspace
-  if (_isEmbedded && localStorage.getItem('koto.inWorkspace') === '1') {
-    requestAnimationFrame(() => window.WA.openInMainView());
-  }
+  // Toggle workspace open/close — called by the sidebar nav button
+  window.WA.toggleMainView = function () {
+    const wsView = document.getElementById('workspaceView');
+    if (wsView && wsView.style.display !== 'none') {
+      window.WA.closeInMainView();
+    } else {
+      window.WA.openInMainView();
+    }
+  };
+
+  // Bridge: app.js calls window.switchToChatView() when selecting a session
+  // while the workspace is open — this closes workspace and shows chat
+  window.switchToChatView = function () {
+    const wsView = document.getElementById('workspaceView');
+    if (wsView && wsView.style.display !== 'none') {
+      window.WA.closeInMainView();
+    }
+  };
 
 })();

@@ -15,7 +15,7 @@ import os
 import uuid
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, Response, jsonify, request, send_file, stream_with_context
 
 logger = logging.getLogger(__name__)
 
@@ -42,72 +42,91 @@ def _ext(filename: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@workspace_assistant_bp.route("/api/v1/workspace/current_dir")
+def get_current_workspace_dir():
+    """Return the current workspace root path and display name."""
+    from web.shared import WORKSPACE_DIR
+
+    p = Path(WORKSPACE_DIR).resolve()
+    return jsonify({"path": str(p), "name": p.name})
+
+
 @workspace_assistant_bp.route("/api/v1/workspace/list_files")
 def list_workspace_files():
     """
-    获取工作区的文件树结构，仅包含支持的文件类型（DOCX, XLSX, PPTX, PDF）。
-    过滤掉隐藏文件和无用文件夹，以树状 JSON 返回。
+    获取工作区的文件树结构（全文件类型）。
+    过滤掉隐藏文件和系统文件夹，以树状 JSON 返回。
+    supported=true 表示 Koto 可直接打开和编辑该文件。
     """
     from web.shared import WORKSPACE_DIR
 
     root_path = Path(WORKSPACE_DIR).resolve()
 
+    # Extensions that Koto can open and parse
+    _openable = frozenset(_ALLOWED_EXT)
+
+    def _file_category(ext: str) -> str:
+        _map = {
+            ".docx": "docx", ".doc": "docx",
+            ".xlsx": "xlsx", ".xls": "xlsx",
+            ".pptx": "pptx", ".ppt": "pptx",
+            ".pdf": "pdf",
+            ".txt": "text", ".md": "text", ".markdown": "text",
+            ".py": "code", ".js": "code", ".ts": "code", ".json": "code",
+            ".html": "code", ".css": "code", ".sh": "code", ".yaml": "code",
+            ".png": "image", ".jpg": "image", ".jpeg": "image",
+            ".gif": "image", ".svg": "image", ".webp": "image",
+        }
+        return _map.get(ext, "other")
+
     def _build_tree(dir_path: Path) -> list[dict]:
         items = []
+        _skip = {"tmp", "backups", "editor-docs", "images", "__pycache__",
+                  "node_modules", ".git", ".venv", "venv"}
         try:
-            for p in dir_path.iterdir():
-                if (
-                    p.name.startswith(".")
-                    or p.name.startswith("_")
-                    or p.name in ("tmp", "backups", "editor-docs", "images")
-                ):
+            for p in sorted(dir_path.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+                if p.name.startswith(".") or p.name in _skip:
                     continue
 
                 rel_path = p.relative_to(root_path).as_posix()
 
                 if p.is_dir():
                     children = _build_tree(p)
-                    if children:
-                        items.append(
-                            {
-                                "name": p.name,
-                                "type": "folder",
-                                "path": rel_path,
-                                "children": children,
-                            }
-                        )
-                elif p.is_file() and p.suffix.lower() in _ALLOWED_EXT:
+                    items.append({
+                        "name": p.name,
+                        "type": "folder",
+                        "path": rel_path,
+                        "children": children,
+                    })
+                elif p.is_file():
+                    ext = p.suffix.lower()
                     try:
                         stat = p.stat()
                         size_b = stat.st_size
-                        if size_b < 1024:
-                            size_str = f"{size_b}B"
-                        elif size_b < 1024 * 1024:
-                            size_str = f"{size_b / 1024:.1f}KB"
-                        else:
-                            size_str = f"{size_b / 1024 / 1024:.1f}MB"
+                        size_str = (f"{size_b}B" if size_b < 1024
+                                    else f"{size_b / 1024:.1f}KB" if size_b < 1048576
+                                    else f"{size_b / 1048576:.1f}MB")
                         mtime_ms = int(stat.st_mtime * 1000)
                     except OSError:
                         size_str = ""
                         mtime_ms = 0
-                    items.append(
-                        {
-                            "name": p.name,
-                            "type": "file",
-                            "ext": p.suffix.lower().replace(".", ""),
-                            "path": rel_path,
-                            "size": size_str,
-                            "mtime": mtime_ms,
-                        }
-                    )
+                    items.append({
+                        "name": p.name,
+                        "type": "file",
+                        "ext": ext.lstrip("."),
+                        "path": rel_path,
+                        "size": size_str,
+                        "mtime": mtime_ms,
+                        "supported": ext in _openable,
+                        "category": _file_category(ext),
+                    })
         except PermissionError:
             pass
 
-        items.sort(key=lambda x: (0 if x["type"] == "folder" else 1, x["name"].lower()))
         return items
 
     tree = _build_tree(root_path)
-    return jsonify({"files": tree})
+    return jsonify({"files": tree, "workspace_name": root_path.name, "workspace_path": str(root_path)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -268,21 +287,9 @@ def open_file():
     tmp_path = _ensure_tmp_dir() / f"{file_id}{ext}"
     uploaded.save(str(tmp_path))
 
-    # 持久化保存到 workspace/ 根目录（直接可见，无需子文件夹）
-    # Skip copy if the file already lives in the workspace (opened via workspace panel).
+    # 文件只暂存在 tmp 目录，不立即写入工作区。
+    # 用户显式保存后才会写入 WORKSPACE_DIR（由 auto_save explicit=true 处理）。
     ws_path = request.form.get("ws_path", "").strip()
-    if not ws_path:
-        try:
-            from web.shared import WORKSPACE_DIR
-
-            root_dir = Path(WORKSPACE_DIR)
-            root_dir.mkdir(parents=True, exist_ok=True)
-            persistent_path = root_dir / original_name
-            import shutil
-
-            shutil.copy2(str(tmp_path), str(persistent_path))
-        except Exception as pe:
-            logger.warning(f"[WorkspaceAssistant] 持久化失败 {original_name}: {pe}")
 
     try:
         from app.core.file.file_parser import (
@@ -398,14 +405,16 @@ def save_file():
                 file_name = Path(file_name).stem + ".docx"
 
         elif file_type == "xlsx":
-            # data may be a plain list (legacy) or {sheets, _images} dict (new)
+            # data is {snapshot: IWorkbookData, _images: []} from Univer frontend,
+            # or a plain list (Luckysheet legacy), or a bare IWorkbookData dict.
             if isinstance(data, dict):
-                sheets_data = data.get("sheets", [])
+                # Prefer 'snapshot' key (new Univer format), fall back to whole dict
+                wb_data = data.get("snapshot") or data
                 images_data = data.get("_images", [])
             else:
-                sheets_data = data
+                wb_data = data
                 images_data = []
-            raw_bytes = export_xlsx(sheets_data, images_data)
+            raw_bytes = export_xlsx(wb_data, images_data)
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             if not file_name.endswith(".xlsx"):
                 file_name = Path(file_name).stem + ".xlsx"
@@ -596,9 +605,15 @@ def auto_save():
             raw_bytes = export_docx(data)
             suffix = ".docx"
         elif file_type == "xlsx":
-            sheets_data = data.get("sheets", data) if isinstance(data, dict) else data
-            images_data = data.get("_images", []) if isinstance(data, dict) else []
-            raw_bytes = export_xlsx(sheets_data, images_data)
+            # data is {snapshot: IWorkbookData, _images: []} from Univer frontend.
+            # Fall back to bare dict or list for legacy compatibility.
+            if isinstance(data, dict):
+                wb_data = data.get("snapshot") or data
+                images_data = data.get("_images", [])
+            else:
+                wb_data = data
+                images_data = []
+            raw_bytes = export_xlsx(wb_data, images_data)
             suffix = ".xlsx"
         elif file_type == "pptx":
             tmp_dir = _ensure_tmp_dir()
@@ -623,9 +638,9 @@ def auto_save():
         "[WorkspaceAssistant] auto_save tmp → %s (%d bytes)", tmp_path, len(raw_bytes)
     )
 
-    # 2. Write back to the original workspace file so re-opening loads latest content.
+    # 2. Only write back to the original workspace file on explicit (user-triggered) saves.
     src_written = False
-    if ws_source_path:
+    if explicit and ws_source_path:
         try:
             from web.shared import WORKSPACE_DIR
 
@@ -901,3 +916,647 @@ def delete_workspace_folder():
     shutil.rmtree(target)
     logger.info(f"[WorkspaceAssistant] 删除文件夹: {target}")
     return jsonify({"ok": True})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/create_file
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/create_file", methods=["POST"])
+def create_workspace_file():
+    """
+    在工作区指定目录创建一个新文件（空文件）。
+    Body (JSON): {"folder": "relative/path", "name": "filename.txt"}
+    folder 为 "" 时在工作区根目录创建。
+    """
+    import re
+
+    from web.shared import WORKSPACE_DIR
+
+    body = request.get_json(force=True, silent=True) or {}
+    folder = (body.get("folder") or "").strip().strip("/")
+    name = (body.get("name") or "").strip()
+
+    # Validate name — must not contain path separators or forbidden chars
+    if not name:
+        return jsonify({"error": "文件名不能为空"}), 400
+    if re.search(r'[/\\<>:"|?*\x00-\x1f]', name):
+        return jsonify({"error": "文件名包含非法字符"}), 400
+
+    root = Path(WORKSPACE_DIR).resolve()
+    parent = root.joinpath(folder).resolve() if folder else root
+
+    # Security: prevent path traversal
+    try:
+        parent.relative_to(root)
+    except ValueError:
+        return jsonify({"error": "路径不合法"}), 403
+
+    if not parent.is_dir():
+        return jsonify({"error": "目标目录不存在"}), 404
+
+    target = parent / name
+    if target.exists():
+        return jsonify({"error": f'"{name}" 已存在'}), 409
+
+    try:
+        target.touch()
+        rel = target.relative_to(root).as_posix()
+        logger.info("[WorkspaceAssistant] 创建文件: %s", target)
+        return jsonify({"ok": True, "path": rel, "name": name})
+    except Exception as e:
+        return jsonify({"error": f"创建失败: {e}"}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/create_folder
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/create_folder", methods=["POST"])
+def create_workspace_folder():
+    """
+    在工作区指定目录创建一个新文件夹。
+    Body (JSON): {"parent": "relative/path", "name": "foldername"}
+    parent 为 "" 时在工作区根目录创建。
+    """
+    import re
+
+    from web.shared import WORKSPACE_DIR
+
+    body = request.get_json(force=True, silent=True) or {}
+    parent_rel = (body.get("parent") or "").strip().strip("/")
+    name = (body.get("name") or "").strip()
+
+    if not name:
+        return jsonify({"error": "文件夹名不能为空"}), 400
+    if re.search(r'[/\\<>:"|?*\x00-\x1f]', name):
+        return jsonify({"error": "文件夹名包含非法字符"}), 400
+
+    root = Path(WORKSPACE_DIR).resolve()
+    parent = root.joinpath(parent_rel).resolve() if parent_rel else root
+
+    try:
+        parent.relative_to(root)
+    except ValueError:
+        return jsonify({"error": "路径不合法"}), 403
+
+    if not parent.is_dir():
+        return jsonify({"error": "父目录不存在"}), 404
+
+    target = parent / name
+    if target.exists():
+        return jsonify({"error": f'"{name}" 已存在'}), 409
+
+    try:
+        target.mkdir()
+        rel = target.relative_to(root).as_posix()
+        logger.info("[WorkspaceAssistant] 创建文件夹: %s", target)
+        return jsonify({"ok": True, "path": rel, "name": name})
+    except Exception as e:
+        return jsonify({"error": f"创建失败: {e}"}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/set_workspace_dir
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/set_workspace_dir", methods=["POST"])
+def set_workspace_dir_endpoint():
+    """
+    将工作区根目录切换到指定的本地文件夹。
+    Body (JSON): {"path": "/absolute/path/to/folder"}
+    持久化到 config/user_settings.json 并立即生效（无需重启）。
+    """
+    import json as _json
+
+    body = request.get_json(force=True, silent=True) or {}
+    new_path = (body.get("path") or "").strip()
+    if not new_path:
+        return jsonify({"error": "缺少 path 字段"}), 400
+
+    target = Path(new_path).resolve()
+    if not target.exists():
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            return jsonify({"error": f"无法创建目录: {e}"}), 400
+    if not target.is_dir():
+        return jsonify({"error": "路径不是文件夹"}), 400
+
+    # Persist to user_settings.json
+    from web.shared import PROJECT_ROOT, clear_user_settings_cache
+    settings_path = Path(PROJECT_ROOT) / "config" / "user_settings.json"
+    try:
+        try:
+            with open(settings_path, "r", encoding="utf-8") as f:
+                settings = _json.load(f)
+        except Exception:
+            settings = {}
+        settings.setdefault("storage", {})["workspace_dir"] = str(target)
+        with open(settings_path, "w", encoding="utf-8") as f:
+            _json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        return jsonify({"error": f"设置保存失败: {e}"}), 500
+
+    # Invalidate cache and update live module variable (no restart needed)
+    clear_user_settings_cache()
+    import web.shared as _shared
+    _shared.WORKSPACE_DIR = str(target)
+
+    logger.info("[WorkspaceAssistant] 工作区已切换: %s", target)
+    return jsonify({"ok": True, "path": str(target), "name": target.name})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/chart-exec
+# SSE endpoint for code/chart execution only.
+# AI chat requests now go directly to /api/chat/stream from the frontend.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/chart-exec", methods=["POST"])
+def chart_exec():
+    """
+    Server-Sent Events endpoint for workspace AI requests.
+    Accepts the same payload as the socket.io `doc_ai_request` event and
+    streams events in SSE format so the frontend can consume them without
+    needing socket.io at all.
+
+    Body (JSON):
+      prompt, context, selection, file_type, file_id, file_name,
+      has_selection, history, language, csv_data, output_mode
+
+    SSE Events (one JSON object per `data:` line):
+      {"type":"progress","step":"analyzing"|"generating"|"formatting"|"complete","detail":"..."}
+      {"type":"chunk","text":"..."}
+      {"type":"proposals","proposals":[...],"summary":"..."}
+      {"type":"tool_call","cmd":{...}}
+      {"type":"complete","result":"...","has_proposals":bool}
+      {"type":"error","message":"..."}
+    """
+    import json as _json
+    import re
+    import time
+
+    body = request.get_json(force=True, silent=True) or {}
+    prompt = body.get("prompt", "")
+    context_text = body.get("context", "")
+    selection = body.get("selection", "")
+    file_type = body.get("file_type", "unknown")
+    file_name = body.get("file_name", "")
+    has_selection = bool(body.get("has_selection", False))
+    history = body.get("history", [])
+    language = body.get("language", "")
+    csv_data = body.get("csv_data", "")
+    output_mode = body.get("output_mode", "inline")
+
+    if not prompt:
+        return jsonify({"error": "缺少 prompt 字段"}), 400
+
+    if context_text:
+        prompt = f"{context_text}\n[用户请求]: {prompt}"
+
+    def _sse(obj):
+        return f"data: {_json.dumps(obj, ensure_ascii=False)}\n\n"
+
+    def generate():
+        try:
+            from app.core.socket_handler import (
+                _get_local_provider,
+                _get_provider,
+                _is_ollama_alive,
+                _is_online_failure,
+                _parse_tool_calls,
+                _pick_online_model,
+            )
+        except ImportError as ie:
+            yield _sse({"type": "error", "message": f"AI 模块加载失败: {ie}"})
+            return
+
+        # ── Code / chart execution mode ──────────────────────────────────────
+        if language in ("python", "r"):
+            try:
+                from app.core.socket_handler import _call_llm_sync
+                from app.core.sandbox import run_python, run_r
+            except ImportError as ie2:
+                yield _sse({"type": "error", "message": f"Sandbox 模块加载失败: {ie2}"})
+                return
+
+            lang_label = "Python (matplotlib/pandas)" if language == "python" else "R (ggplot2)"
+            gen_prompt = (
+                f"请根据以下任务，编写一段可以直接运行的 {lang_label} 代码。\n"
+                "要求：\n"
+                "1. 使用 matplotlib 或 pandas 绘图（Python）/ ggplot2（R）\n"
+                "2. 将生成的图表保存为当前目录下的 chart.png 文件\n"
+                "3. 对于 Python：使用 plt.savefig('chart.png', dpi=150, bbox_inches='tight')\n"
+                "4. 对于 R：使用 ggsave('chart.png', dpi=150)\n"
+                "5. 不要用 plt.show() 或任何 GUI 调用\n"
+                "6. 只输出代码，不要任何 markdown 代码块标记（不要 ```）\n\n"
+                f"任务描述：{prompt}\n"
+            )
+            if csv_data:
+                gen_prompt += f"\n表格数据（CSV 格式）：\n{csv_data}\n"
+
+            yield _sse({"type": "chunk", "text": f"🤖 正在为你生成 {language.upper()} 代码…\n"})
+
+            code = _call_llm_sync(gen_prompt)
+            if not code:
+                yield _sse({"type": "code_result", "error": "AI 代码生成失败，请检查 API Key 配置。", "stdout": "", "stderr": "", "files": {}})
+                yield _sse({"type": "complete", "result": "", "has_proposals": False})
+                return
+
+            import re as _re
+            code = _re.sub(r"^```[a-z]*\n?", "", code.strip(), flags=_re.MULTILINE)
+            code = code.strip().strip("`")
+
+            yield _sse({"type": "chunk", "text": f"\n```{language}\n{code}\n```\n\n▶ 正在执行…\n"})
+
+            if language == "python":
+                result = run_python(code)
+            else:
+                result = run_r(code)
+
+            yield _sse({"type": "code_result", **result})
+            yield _sse({"type": "complete", "result": "", "has_proposals": False})
+            return
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/quick-action
+# Non-streaming quick text processing: polish, translate, summarize, etc.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/quick-action", methods=["POST"])
+def quick_action():
+    """
+    One-shot text processing for quick toolbar actions.
+    Body: {action, text, file_type?}
+    Response: {"result": "processed text", "original": "...", "action": "..."}
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    action = body.get("action", "")
+    text = body.get("text", "")
+
+    if not action or not text:
+        return jsonify({"error": "缺少 action 或 text 字段"}), 400
+
+    _PROMPTS = {
+        "润色": (
+            "请对以下文字进行润色优化，保持原意不变，使语言更流畅自然。"
+            "直接输出润色后的文字，不要解释。\n\n"
+        ),
+        "翻译": (
+            "请将以下文字翻译成另一种语言（中文→英文，英文→中文）。"
+            "直接输出翻译结果，不要解释。\n\n"
+        ),
+        "总结": (
+            "请对以下内容进行总结，提炼核心要点，简明扁要（不超过原文 1/3 长度）。"
+            "直接输出总结内容，不要解释。\n\n"
+        ),
+        "续写": (
+            "请根据以下内容的风格和主题进行续写，与原文保持一致的语气和格式。"
+            "直接输出续写内容，不要解释。\n\n"
+        ),
+        "改写": (
+            "请对以下文字进行改写，保持核心意思不变，但使用完全不同的表达方式和句式结构。"
+            "直接输出改写后的文字，不要解释。\n\n"
+        ),
+        "解释": (
+            "请对以下内容进行分析解释，说明其含义、背景或重要性，语言清晰易懂。"
+            "直接输出解释内容，不要重复原文。\n\n"
+        ),
+    }
+
+    # ── Chart visualization (sandboxed Python execution) ──
+    if action in ("可视化", "chart"):
+        lang = body.get("lang", "python").lower()
+        task_desc = body.get("instruction", "") or "根据以下数据自动选择合适的图表类型并可视化"
+        code_prompt = (
+            "请根据以下任务，编写一段可以直接运行的 Python (matplotlib/pandas) 代码。\n"
+            "要求：\n"
+            "1. 包含所有必要的 import\n"
+            "2. 在代码开头加入: import matplotlib; matplotlib.rcParams['font.sans-serif']=['SimHei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
+            "3. 最后用 plt.savefig('chart.png', dpi=150, bbox_inches='tight') 保存，然后 plt.close()\n"
+            "4. 绝对不要调用 plt.show()\n"
+            "5. 只输出代码，不加任何 markdown 代码块标记\n\n"
+            f"任务描述：{task_desc}\n"
+            f"\n参考数据/文本：\n{text[:3000]}\n"
+        )
+        try:
+            import re as _re
+            from app.core.socket_handler import _call_llm_sync
+            from app.core.sandbox import run_python
+
+            raw_code = _call_llm_sync(code_prompt)
+            if not raw_code:
+                return jsonify({"error": "AI 代码生成失败，请检查 API Key 配置"}), 503
+            raw_code = _re.sub(r"^```[a-z]*\n?", "", raw_code.strip(), flags=_re.MULTILINE)
+            raw_code = raw_code.strip().strip("`").strip()
+            result = run_python(raw_code)
+            images = [
+                {"name": name, "data": b64}
+                for name, b64 in (result.get("files") or {}).items()
+            ]
+            return jsonify({
+                "type": "chart_result",
+                "code": raw_code,
+                "images": images,
+                "stdout": result.get("stdout", ""),
+                "stderr": result.get("stderr", ""),
+                "error": result.get("error"),
+            })
+        except Exception as exc:
+            logger.error("[WorkspaceAI] chart failed: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+
+    prompt_template = _PROMPTS.get(action)
+    if not prompt_template:
+        return jsonify({"error": f"不支持的操作: {action}"}), 400
+
+    full_prompt = prompt_template + text
+    try:
+        from app.core.socket_handler import _call_llm_sync
+
+        result = _call_llm_sync(full_prompt)
+        if not result:
+            return jsonify({"error": "AI 处理失败，请检查 API Key 配置"}), 503
+        return jsonify({"result": result.strip(), "original": text, "action": action})
+    except Exception as exc:
+        logger.error("[WorkspaceAI] quick_action failed: %s", exc)
+        return jsonify({"error": str(exc)}), 500
+
+
+# ─── Open file with native system application ─────────────────────────────────
+
+@workspace_assistant_bp.route("/api/v1/workspace/open-native", methods=["POST"])
+def api_open_native():
+    """Open a file using the OS default application."""
+    import subprocess, sys as _sys
+    data = request.get_json(force=True, silent=True) or {}
+    path = data.get("path", "").strip()
+    if not path or not os.path.exists(path):
+        return jsonify({"ok": False, "error": "路径不存在"}), 404
+    try:
+        if _sys.platform == "win32":
+            os.startfile(path)  # type: ignore[attr-defined]
+        elif _sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return jsonify({"ok": True})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# ─── Browse local filesystem (lazy) ──────────────────────────────────────────
+
+@workspace_assistant_bp.route("/api/v1/workspace/browse_local")
+def browse_local():
+    """
+    Lazy filesystem browser — no WORKSPACE_DIR restriction.
+    No path  → drives + quick-access locations (Windows) / home shortcuts (other).
+    With path → all files and folders at that absolute path.
+    """
+    import sys as _sys
+
+    path = request.args.get("path", "").strip()
+
+    _openable = frozenset(_ALLOWED_EXT)
+
+    def _file_category(ext: str) -> str:
+        _MAP = {
+            ".docx": "docx", ".doc": "docx",
+            ".xlsx": "xlsx", ".xls": "xlsx",
+            ".pptx": "pptx", ".ppt": "pptx",
+            ".pdf": "pdf",
+            ".txt": "text", ".md": "text", ".markdown": "text",
+            ".py": "code", ".js": "code", ".ts": "code", ".json": "code",
+            ".html": "code", ".css": "code", ".sh": "code", ".yaml": "code",
+            ".png": "image", ".jpg": "image", ".jpeg": "image",
+            ".gif": "image", ".svg": "image", ".webp": "image",
+        }
+        return _MAP.get(ext, "other")
+
+    if not path:
+        # Root level: drives + quick-access locations
+        try:
+            from web.blueprints.workspace import _list_drives, _quick_access_locations
+            return jsonify({
+                "is_root": True,
+                "drives": _list_drives(),
+                "quick_access": _quick_access_locations(),
+            })
+        except Exception as e:
+            # Fallback: just return home dir
+            home = Path.home()
+            return jsonify({
+                "is_root": True,
+                "quick_access": [{"name": "主目录", "path": str(home), "type": "quick"}],
+                "drives": [],
+            })
+
+    target = Path(path).resolve()
+    if not target.exists():
+        return jsonify({"error": "路径不存在"}), 404
+    if not target.is_dir():
+        return jsonify({"error": "不是文件夹"}), 400
+
+    _SKIP = {
+        "__pycache__", "node_modules", ".git", ".venv", "venv",
+        "$RECYCLE.BIN", "System Volume Information",
+    }
+
+    entries: list[dict] = []
+    try:
+        for p in sorted(target.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
+            if p.name.startswith(".") or p.name in _SKIP:
+                continue
+            if p.is_dir():
+                entries.append({"name": p.name, "path": str(p), "type": "folder"})
+            elif p.is_file():
+                ext = p.suffix.lower()
+                try:
+                    st = p.stat()
+                    sb = st.st_size
+                    size_str = (
+                        f"{sb}B" if sb < 1024
+                        else f"{sb / 1024:.1f}KB" if sb < 1048576
+                        else f"{sb / 1048576:.1f}MB"
+                    )
+                    mtime_ms = int(st.st_mtime * 1000)
+                except OSError:
+                    size_str = ""
+                    mtime_ms = 0
+                entries.append({
+                    "name": p.name,
+                    "path": str(p),
+                    "type": "file",
+                    "ext": ext.lstrip("."),
+                    "size": size_str,
+                    "mtime": mtime_ms,
+                    "supported": ext in _openable,
+                    "category": _file_category(ext),
+                })
+    except PermissionError:
+        return jsonify({"error": "无访问权限", "entries": []}), 403
+
+    parent = str(target.parent)
+    if parent == str(target):
+        parent = None  # Drive root (e.g. C:\)
+
+    return jsonify({
+        "is_root": False,
+        "current": str(target),
+        "parent": parent,
+        "entries": entries,
+    })
+
+
+# ─── Serve any file by absolute path ─────────────────────────────────────────
+
+@workspace_assistant_bp.route("/api/v1/workspace/serve_abs")
+def serve_abs_file():
+    """Return raw bytes of any file by absolute path (for file-system browser)."""
+    path = request.args.get("path", "").strip()
+    if not path:
+        return jsonify({"error": "缺少 path 参数"}), 400
+    target = Path(path).resolve()
+    if not target.is_file():
+        return jsonify({"error": "文件不存在"}), 404
+    return send_file(str(target), as_attachment=False)
+
+
+# ─── FS browser file operations (work on absolute paths) ──────────────────────
+
+_FS_PROTECTED = {
+    "windows", "program files", "program files (x86)", "programdata",
+    "system volume information", "$recycle.bin",
+}
+
+
+def _fs_guard(p: Path) -> bool:
+    """Return True if the path is safe to operate on (not a system root/dir)."""
+    parts = {pp.lower() for pp in p.parts}
+    if parts & _FS_PROTECTED:
+        return False
+    # Reject drive roots on Windows (e.g. C:\)
+    if p == p.parent:
+        return False
+    return True
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/fs_delete", methods=["DELETE"])
+def fs_delete():
+    """
+    Delete any file or folder by absolute path.
+    Query param: path=<abs_path>
+    """
+    import shutil
+    path = request.args.get("path", "").strip()
+    if not path:
+        return jsonify({"error": "缺少 path 参数"}), 400
+    target = Path(path).resolve()
+    if not _fs_guard(target):
+        return jsonify({"error": "不允许删除系统路径"}), 403
+    if not target.exists():
+        return jsonify({"error": "路径不存在"}), 404
+    try:
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+    except PermissionError:
+        return jsonify({"error": "权限不足，无法删除"}), 403
+    logger.info(f"[Browser] 删除: {target}")
+    return jsonify({"ok": True})
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/fs_rename", methods=["PATCH"])
+def fs_rename():
+    """
+    Rename file or folder by absolute path.
+    Body (JSON): {"path": "<abs>", "name": "<new_name>"}
+    """
+    body = request.get_json(silent=True) or {}
+    path = body.get("path", "").strip()
+    new_name = body.get("name", "").strip()
+    if not path or not new_name:
+        return jsonify({"error": "缺少 path 或 name 参数"}), 400
+    if "/" in new_name or "\\" in new_name:
+        return jsonify({"error": "名称不能包含路径分隔符"}), 400
+    target = Path(path).resolve()
+    if not _fs_guard(target):
+        return jsonify({"error": "不允许重命名系统路径"}), 403
+    if not target.exists():
+        return jsonify({"error": "路径不存在"}), 404
+    # Preserve extension for files
+    if target.is_file():
+        stem = Path(new_name).stem or new_name
+        final_name = stem + target.suffix.lower()
+    else:
+        final_name = new_name
+    new_target = target.parent / final_name
+    if new_target.exists():
+        return jsonify({"error": "名称已存在"}), 409
+    try:
+        target.rename(new_target)
+    except PermissionError:
+        return jsonify({"error": "权限不足，无法重命名"}), 403
+    logger.info(f"[Browser] 重命名: {target} -> {new_target}")
+    return jsonify({"ok": True, "name": final_name, "path": str(new_target)})
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/fs_copy", methods=["POST"])
+def fs_copy():
+    """
+    Copy or move a file/folder to a destination directory.
+    Body (JSON): {"src": "<abs>", "dst_dir": "<abs_dir>", "move": false}
+    """
+    import shutil
+    body = request.get_json(silent=True) or {}
+    src = body.get("src", "").strip()
+    dst_dir = body.get("dst_dir", "").strip()
+    do_move = bool(body.get("move", False))
+    if not src or not dst_dir:
+        return jsonify({"error": "缺少 src 或 dst_dir 参数"}), 400
+    src_path = Path(src).resolve()
+    dst_path = Path(dst_dir).resolve()
+    if not _fs_guard(src_path):
+        return jsonify({"error": "不允许操作系统路径"}), 403
+    if not src_path.exists():
+        return jsonify({"error": "源路径不存在"}), 404
+    if not dst_path.is_dir():
+        return jsonify({"error": "目标不是有效文件夹"}), 400
+    final = dst_path / src_path.name
+    # Avoid overwriting
+    if final.exists():
+        base = src_path.stem
+        ext = src_path.suffix
+        n = 1
+        while (dst_path / f"{base} ({n}){ext}").exists():
+            n += 1
+        final = dst_path / f"{base} ({n}){ext}"
+    try:
+        if do_move:
+            shutil.move(str(src_path), str(final))
+            op = "移动"
+        else:
+            if src_path.is_dir():
+                shutil.copytree(str(src_path), str(final))
+            else:
+                shutil.copy2(str(src_path), str(final))
+            op = "复制"
+    except PermissionError:
+        return jsonify({"error": "权限不足"}), 403
+    logger.info(f"[Browser] {op}: {src_path} -> {final}")
+    return jsonify({"ok": True, "name": final.name, "path": str(final)})

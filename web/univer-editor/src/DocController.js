@@ -15,6 +15,8 @@ export class DocController {
   /** @param {import('@univerjs/core').FUniver} univerAPI */
   constructor(univerAPI) {
     this._api = univerAPI;
+    /** Undo stack: stores previous full-text strings (max 30) */
+    this._undoStack = [];
   }
 
   // ──────────────────────────────────────────
@@ -72,7 +74,64 @@ export class DocController {
   insertTextAtCursor(text) {
     if (!text) return false;
     const current = this.getFullText();
-    return this._replaceEntireDoc(current + text);
+    const hlStart = current.length;
+    const hlEnd   = current.length + text.length;
+    const ok = this._replaceEntireDoc(current + text);
+    if (ok) this._flashChangedRegion(hlStart, hlEnd, text.replace(/^\n/, ''));
+    return ok;
+  }
+
+  // ──────────────────────────────────────────
+  // 3b. 在文档区底部追加图片（浮动 overlay）
+  // ──────────────────────────────────────────
+  insertImageAtEnd(dataUrl, altText) {
+    // Univer 0.5.x Facade does not expose image insertion.
+    // Append a positioned image block inside #center-doc as a best-effort overlay.
+    const container = document.getElementById('center-doc');
+    if (!container) return;
+
+    // Remove any previous dropped-image placeholder from the same session
+    // so multiple drops don't stack if user made a mistake.
+    const wrapper = document.createElement('div');
+    wrapper.className = 'koto-dropped-image';
+    wrapper.title = '图表已插入（拖动可重新定位）';
+
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.alt = altText || '图表';
+    img.draggable = false;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'koto-dropped-image-close';
+    closeBtn.textContent = '✕';
+    closeBtn.title = '移除图片';
+    closeBtn.addEventListener('click', () => wrapper.remove());
+
+    wrapper.appendChild(img);
+    wrapper.appendChild(closeBtn);
+    container.appendChild(wrapper);
+
+    // Simple drag-to-reposition within #center-doc
+    let _ox = 0, _oy = 0, _sx = 0, _sy = 0;
+    wrapper.addEventListener('mousedown', (e) => {
+      if (e.target === closeBtn) return;
+      e.preventDefault();
+      _sx = e.clientX; _sy = e.clientY;
+      _ox = wrapper.offsetLeft; _oy = wrapper.offsetTop;
+      const onMove = (ev) => {
+        wrapper.style.left = (_ox + ev.clientX - _sx) + 'px';
+        wrapper.style.top  = (_oy + ev.clientY - _sy) + 'px';
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    // Flash the container to confirm success
+    this._flashChangedRegion(0, 0, altText || '图表');
   }
 
   // ──────────────────────────────────────────
@@ -94,11 +153,15 @@ export class DocController {
       if (start >= 0 && end > start && end <= fullText.length) {
         const before = fullText.substring(0, start);
         const after = fullText.substring(end);
-        return this._replaceEntireDoc(before + newText + after);
+        const ok = this._replaceEntireDoc(before + newText + after);
+        if (ok) this._flashChangedRegion(start, start + newText.length, newText);
+        return ok;
       }
 
       // 范围不合法时直接用新文本替换全文
-      return this._replaceEntireDoc(newText);
+      const ok = this._replaceEntireDoc(newText);
+      if (ok) this._flashChangedRegion(0, newText.length, newText);
+      return ok;
     } catch (e) {
       console.error('[DocController] replaceRange 失败:', e);
       return false;
@@ -145,6 +208,18 @@ export class DocController {
     }
   }
 
+  // ──────────────────────────────────────────
+  // 8. 撤销上一次 AI 注入（自定义撤销栈）
+  // ──────────────────────────────────────────
+  canUndo() { return this._undoStack.length > 0; }
+
+  undo() {
+    if (!this.canUndo()) return false;
+    const prev = this._undoStack.pop();
+    // Call _replaceEntireDoc directly to avoid pushing to stack again
+    return this._replaceEntireDocNoStack(prev);
+  }
+
   // ══════════════════════════════════════════
   // 私有方法
   // ══════════════════════════════════════════
@@ -155,6 +230,13 @@ export class DocController {
    */
   _replaceEntireDoc(text) {
     try {
+      // Save current state to undo stack before overwriting
+      const current = this.getFullText();
+      if (current) {
+        this._undoStack.push(current);
+        if (this._undoStack.length > 30) this._undoStack.shift();
+      }
+
       const univer = window.__univer;
       if (!univer) return false;
 
@@ -181,6 +263,32 @@ export class DocController {
       return true;
     } catch (e) {
       console.error('[DocController] _replaceEntireDoc 失败:', e);
+      return false;
+    }
+  }
+
+  /** Raw replace without touching undo stack — used by undo() itself */
+  _replaceEntireDocNoStack(text) {
+    try {
+      const univer = window.__univer;
+      if (!univer) return false;
+      const currentDoc = this._getDoc();
+      if (currentDoc) {
+        const id = typeof currentDoc.getId === 'function' ? currentDoc.getId() : null;
+        if (id) { try { this._api.disposeUnit(id); } catch (_) { /* ignore */ } }
+      }
+      univer.createUnit(UniverInstanceType.UNIVER_DOC, {
+        id: 'koto-doc-' + Date.now(),
+        body: this._buildDocBody(text),
+        documentStyle: {
+          pageSize: { width: 595.28, height: 841.89 },
+          marginTop: 72, marginBottom: 72,
+          marginLeft: 90, marginRight: 90,
+        },
+      });
+      return true;
+    } catch (e) {
+      console.error('[DocController] _replaceEntireDocNoStack 失败:', e);
       return false;
     }
   }
@@ -225,5 +333,68 @@ export class DocController {
   _getDoc() {
     if (!this._api) return null;
     return this._api.getActiveDocument();
+  }
+
+  // ──────────────────────────────────────────
+  // 修改高亮闪烁：显示横幅 + 尝试设置 Univer 选区
+  // ──────────────────────────────────────────
+  _flashChangedRegion(startOffset, endOffset, newText) {
+    // ① 尝试通过 Univer Facade 设置选区（视觉选中高亮）
+    setTimeout(() => {
+      try {
+        const doc = this._getDoc();
+        if (doc && typeof doc.setSelection === 'function') {
+          doc.setSelection(startOffset, endOffset);
+        }
+      } catch (_) { /* best-effort */ }
+    }, 200);
+
+    // ② 在文档区顶部显示横幅提示
+    const container = document.getElementById('center-doc');
+    if (!container) return;
+
+    let wrap = document.getElementById('koto-change-notice');
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.id = 'koto-change-notice';
+      container.appendChild(wrap);
+    }
+    // 保证绝对定位不被 #center-doc > * { height:100% } 影响
+    wrap.style.cssText = 'position:absolute;top:0;left:0;right:0;height:auto;z-index:1000;'
+                       + 'display:flex;align-items:center;justify-content:center;pointer-events:none;';
+
+    const preview = (newText || '').replace(/\n/g, ' ').trim();
+    const label   = preview.length > 28 ? preview.substring(0, 28) + '…' : preview;
+
+    const banner = document.createElement('div');
+    banner.className = 'koto-change-banner';
+    banner.innerHTML =
+      `<span class="koto-banner-icon">✅</span>`
+      + `<span>已修改第 <strong>${startOffset + 1}–${endOffset}</strong> 字符</span>`
+      + (label ? `<span class="koto-banner-hl">${this._esc(label)}</span>` : '')
+      + `<button class="koto-banner-close" title="关闭">✕</button>`;
+
+    banner.querySelector('.koto-banner-close').addEventListener('click', () => {
+      wrap.innerHTML = '';
+    });
+
+    wrap.innerHTML = '';
+    wrap.appendChild(banner);
+
+    // 5 秒后自动淡出
+    clearTimeout(this._bannerTimer);
+    this._bannerTimer = setTimeout(() => {
+      banner.classList.add('koto-change-banner-fade');
+      setTimeout(() => { wrap.innerHTML = ''; }, 500);
+    }, 5000);
+  }
+
+  /** HTML 转义（用于横幅中显示用户文本） */
+  _esc(str) {
+    return (str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 }

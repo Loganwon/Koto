@@ -170,7 +170,7 @@ class TestOpenFile:
         assert "不支持" in resp.get_json().get("error", "")
 
     def test_pdf_stored_in_tmp_dir(self, wa_client):
-        """Uploading a PDF creates a file in tmp_dir."""
+        """Uploading a PDF always returns 200 (fix: no longer throws on missing pdfplumber)."""
         client, tmp_dir, _ = wa_client
         resp = client.post(
             "/api/v1/workspace/open_file",
@@ -178,11 +178,13 @@ class TestOpenFile:
             content_type="multipart/form-data",
         )
         body = resp.get_json()
-        assert resp.status_code in (200, 500)
-        if resp.status_code == 200:
-            assert "file_id" in body
-            matches = list(tmp_dir.glob(f"{body['file_id']}.*"))
-            assert matches, "uploaded PDF must be saved in tmp_dir"
+        assert resp.status_code == 200, (
+            f"Expected 200 but got {resp.status_code}. "
+            f"parse_pdf should never raise when PDF libs are missing; got: {body}"
+        )
+        assert "file_id" in body
+        matches = list(tmp_dir.glob(f"{body['file_id']}.*"))
+        assert matches, "uploaded PDF must be saved in tmp_dir"
 
     def test_docx_returns_html_data(self, wa_client):
         client, _, _ = wa_client
@@ -213,6 +215,106 @@ class TestOpenFile:
             pytest.skip("parse failed")
         file_id = resp.get_json()["file_id"]
         assert file_id.isalnum() and len(file_id) == 32
+
+
+# ── 2b. PDF-specific loading tests ───────────────────────────────────────────
+
+
+class TestPdfLoading:
+    """Dedicated tests for PDF load pipeline (parse_pdf + raw endpoint)."""
+
+    def _upload_pdf(self, client, name="sample.pdf"):
+        return client.post(
+            "/api/v1/workspace/open_file",
+            data={"file": (io.BytesIO(_fake_pdf_bytes()), name)},
+            content_type="multipart/form-data",
+        )
+
+    def test_pdf_open_always_returns_200(self, wa_client):
+        """PDF open must never return 500 even when text-extraction libs are absent."""
+        client, _, _ = wa_client
+        resp = self._upload_pdf(client)
+        assert resp.status_code == 200, (
+            f"parse_pdf must not raise when PDF libs missing; got {resp.status_code}: "
+            f"{resp.get_json()}"
+        )
+
+    def test_pdf_response_contains_raw_url(self, wa_client):
+        """data.raw_url must point to /api/v1/workspace/raw/<file_id>."""
+        client, _, _ = wa_client
+        resp = self._upload_pdf(client)
+        assert resp.status_code == 200
+        body = resp.get_json()
+        raw_url = body.get("data", {}).get("raw_url", "")
+        file_id = body["file_id"]
+        assert f"/api/v1/workspace/raw/{file_id}" == raw_url, (
+            f"raw_url should be /api/v1/workspace/raw/<file_id>, got {raw_url!r}"
+        )
+
+    def test_pdf_file_type_is_pdf(self, wa_client):
+        client, _, _ = wa_client
+        resp = self._upload_pdf(client)
+        assert resp.status_code == 200
+        assert resp.get_json()["file_type"] == "pdf"
+
+    def test_pdf_page_count_is_non_negative(self, wa_client):
+        """page_count must exist and be >= 0 (0 when lib unavailable is fine)."""
+        client, _, _ = wa_client
+        resp = self._upload_pdf(client)
+        assert resp.status_code == 200
+        page_count = resp.get_json().get("data", {}).get("page_count")
+        assert page_count is not None, "data.page_count must be present"
+        assert isinstance(page_count, int) and page_count >= 0
+
+    def test_pdf_pages_is_list(self, wa_client):
+        """data.pages must be a list (empty list is acceptable when lib unavailable)."""
+        client, _, _ = wa_client
+        resp = self._upload_pdf(client)
+        assert resp.status_code == 200
+        pages = resp.get_json().get("data", {}).get("pages")
+        assert isinstance(pages, list), f"data.pages must be a list, got {type(pages)}"
+
+    def test_pdf_open_succeeds_without_pdfplumber(self, wa_client, monkeypatch):
+        """
+        Critical regression guard: even when pdfplumber, pypdf, AND PyPDF2 are
+        all absent, parse_pdf must NOT raise — it returns a graceful fallback.
+        """
+        import builtins
+
+        real_import = builtins.__import__
+
+        def blocked_import(name, *args, **kwargs):
+            if name in ("pdfplumber", "pypdf", "PyPDF2"):
+                raise ImportError(f"[test] blocked import: {name}")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", blocked_import)
+
+        client, _, _ = wa_client
+        resp = self._upload_pdf(client, "no_lib.pdf")
+        assert resp.status_code == 200, (
+            f"parse_pdf must return 200 even with no PDF text libs; "
+            f"got {resp.status_code}: {resp.get_json()}"
+        )
+        data = resp.get_json().get("data", {})
+        # raw_url must still be present so PDF.js can render
+        assert "/api/v1/workspace/raw/" in data.get("raw_url", ""), (
+            "raw_url must be present even when text extraction is skipped"
+        )
+        # text/pages may be empty — that's fine
+        assert isinstance(data.get("pages", []), list)
+
+    def test_raw_url_is_fetchable_after_upload(self, wa_client):
+        """After upload, GET data.raw_url should return the binary PDF bytes."""
+        client, _, _ = wa_client
+        resp = self._upload_pdf(client, "fetchable.pdf")
+        assert resp.status_code == 200
+        raw_url = resp.get_json()["data"]["raw_url"]
+        raw_resp = client.get(raw_url)
+        assert raw_resp.status_code == 200
+        assert raw_resp.data.startswith(b"%PDF"), (
+            f"{raw_url} did not return PDF bytes; first bytes: {raw_resp.data[:20]!r}"
+        )
 
 
 # ── 3. GET /api/v1/workspace/file/<path> ─────────────────────────────────────

@@ -18,11 +18,13 @@ export class FileManager {
    * @param {string} sidebarId        左侧 sidebar 的 DOM id
    * @param {import('./DocController').DocController} docController
    * @param {function} onDocSwitch    文档切换时的回调（新 snapshot）
+   * @param {import('./DocxViewer').DocxViewer|null} docxViewer  可选 DOCX 查看器
    */
-  constructor(sidebarId, docController, onDocSwitch) {
+  constructor(sidebarId, docController, onDocSwitch, docxViewer = null) {
     this._sidebar = document.getElementById(sidebarId);
     this._doc = docController;
     this._onDocSwitch = onDocSwitch;
+    this._docxViewer = docxViewer;
 
     /** @type {Array<{id:string, name:string, updatedAt:string}>} */
     this._files = [];
@@ -189,12 +191,14 @@ export class FileManager {
   // ══════════════════ 导入文件 ══════════════════
 
   async _importFiles(fileList) {
+    let lastImportedDoc = null;
     for (const file of fileList) {
       try {
         const fd = new FormData();
         fd.append('file', file);
         const data = await this._api('/import', 'POST', fd);
         this._activeId = data.id;
+        lastImportedDoc = data;
         console.log('[FileManager] Imported:', file.name, '→', data.id);
       } catch (e) {
         console.error('[FileManager] Import failed:', file.name, e);
@@ -203,9 +207,14 @@ export class FileManager {
     }
     await this.refresh();
     // Switch to the last imported doc
-    if (this._activeId && this._onDocSwitch) {
-      const doc = await this._api(`/${this._activeId}`);
-      this._onDocSwitch(doc.content || null, this._activeId);
+    if (lastImportedDoc && this._activeId) {
+      if (lastImportedDoc.sourceExt === '.docx' && this._docxViewer) {
+        await this._renderDocx(lastImportedDoc.id, lastImportedDoc.name || lastImportedDoc.id);
+      } else {
+        const doc = await this._api(`/${this._activeId}`);
+        if (this._docxViewer) this._docxViewer.hide();
+        if (this._onDocSwitch) this._onDocSwitch(doc.content || null, this._activeId);
+      }
     }
   }
 
@@ -224,12 +233,48 @@ export class FileManager {
       this._activeId = docId;
       this._renderList();
 
-      if (this._onDocSwitch) this._onDocSwitch(data.content || null, docId);
+      if (data.sourceExt === '.docx' && this._docxViewer) {
+        // ── DOCX: render in Word-sim viewer ──
+        await this._renderDocx(docId, data.name || docId);
+      } else {
+        // ── Plain text / blank doc ──
+        if (this._docxViewer) this._docxViewer.hide();
+        if (this._onDocSwitch) this._onDocSwitch(data.content || null, docId);
+      }
       console.log('[FileManager] Switched to:', docId);
     } catch (e) {
       console.error('[FileManager] Switch failed:', e);
     } finally {
       this._loading = false;
+    }
+  }
+
+  // ── 从后端取原始 DOCX 二进制并交给 DocxViewer 渲染 ──
+  async _renderDocx(docId, name) {
+    try {
+      // Fetch source binary and page metadata in parallel
+      const [sourceResp, metaResp] = await Promise.all([
+        fetch(`/api/editor/docs/${encodeURIComponent(docId)}/source`),
+        fetch(`/api/editor/docs/${encodeURIComponent(docId)}/meta`),
+      ]);
+
+      if (!sourceResp.ok) throw new Error(`HTTP ${sourceResp.status}`);
+      const buffer = await sourceResp.arrayBuffer();
+
+      // Apply meta (page size, margins, default font) before render
+      if (metaResp.ok) {
+        const meta = await metaResp.json();
+        this._docxViewer.setMeta(meta);
+      }
+
+      await this._docxViewer.render(buffer, name);
+    } catch (e) {
+      console.error('[FileManager] DOCX fetch failed:', e);
+      if (this._docxViewer) {
+        this._docxViewer.show();
+        const el = document.getElementById('docx-render-area');
+        if (el) el.innerHTML = `<div class="docx-error">⚠ 无法加载原始文件：${e.message}</div>`;
+      }
     }
   }
 

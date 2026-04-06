@@ -25,10 +25,269 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _extract_table_styles(docx_path: str) -> list[dict]:
+    """
+    Extract table cell formatting metadata from a DOCX file using python-docx.
+
+    Returns a list — one entry per table, positionally indexed:
+        [
+          {  # table 0
+            (row, col): {
+              "bg":      "RRGGBB" | None,   # cell background fill
+              "colspan": int,               # w:gridSpan value
+              "rowspan": int,               # logical rowspan (from w:vMerge analysis)
+              "bold":    bool,              # header-row bold hint
+            },
+            ...
+          },
+          ...  # table 1, table 2, …
+        ]
+
+    Falls back to [] silently if python-docx or lxml is unavailable.
+    """
+    try:
+        from docx import Document
+        from lxml import etree
+    except ImportError:
+        return []
+
+    WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+    def _w(tag: str) -> str:
+        return f"{{{WNS}}}{tag}"
+
+    try:
+        doc = Document(docx_path)
+    except Exception as exc:
+        logger.warning("[_extract_table_styles] 无法打开文件: %s", exc)
+        return []
+
+    result = []
+    for tbl in doc.tables:
+        tbl_data: dict[tuple[int, int], dict] = {}
+
+        for ri, row in enumerate(tbl.rows):
+            for ci, cell in enumerate(row.cells):
+                tc = cell._tc
+
+                # ── Background colour (w:shd w:fill) ────────────────────
+                shd = tc.find(f".//{_w('shd')}")
+                bg = None
+                if shd is not None:
+                    fill = shd.get(_w("fill"))
+                    if fill and fill.upper() not in ("AUTO", "FFFFFF", ""):
+                        bg = fill.upper()
+
+                # ── Colspan (w:gridSpan) ─────────────────────────────────
+                grid_span_el = tc.find(f".//{_w('gridSpan')}")
+                colspan = int(grid_span_el.get(_w("val"), 1)) if grid_span_el is not None else 1
+
+                # ── Rowspan: count how many rows below start with w:vMerge (no val attr) ──
+                # The first cell of a vertical merge has w:vMerge val="restart";
+                # continuation cells have w:vMerge with no val.
+                v_merge_el = tc.find(f".//{_w('vMerge')}")
+                is_merge_start = (
+                    v_merge_el is not None
+                    and v_merge_el.get(_w("val"), "") == "restart"
+                )
+                rowspan = 1
+                if is_merge_start:
+                    # Count how many rows below continue this merge at the same col
+                    for future_ri in range(ri + 1, len(tbl.rows)):
+                        if ci >= len(tbl.rows[future_ri].cells):
+                            break
+                        future_tc = tbl.rows[future_ri].cells[ci]._tc
+                        future_vm = future_tc.find(f".//{_w('vMerge')}")
+                        if future_vm is not None and future_vm.get(_w("val"), "") == "":
+                            rowspan += 1
+                        else:
+                            break
+
+                # ── Skip continuation vMerge cells (they'll be expressed via rowspan) ──
+                is_merge_continuation = (
+                    v_merge_el is not None
+                    and v_merge_el.get(_w("val"), "") == ""
+                )
+                if is_merge_continuation:
+                    continue  # nothing to write; the HTML rowspan covers it
+
+                tbl_data[(ri, ci)] = {
+                    "bg": bg,
+                    "colspan": colspan,
+                    "rowspan": rowspan,
+                }
+
+        result.append(tbl_data)
+
+    return result
+
+
+def _inject_table_styles(html: str, table_styles: list[dict]) -> str:
+    """
+    Post-process mammoth's HTML to inject cell background colours, colspan,
+    and rowspan attributes that mammoth discards.
+
+    Only modifies cells for which _extract_table_styles() found metadata;
+    leaves everything else untouched.
+    """
+    if not table_styles:
+        return html
+
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return html
+
+    soup = BeautifulSoup(html, "html.parser")
+    tables = soup.find_all("table")
+
+    for ti, tbl_tag in enumerate(tables):
+        if ti >= len(table_styles):
+            break
+        style_map = table_styles[ti]
+        if not style_map:
+            continue
+
+        rows = tbl_tag.find_all("tr")
+        for ri, row_tag in enumerate(rows):
+            cells = row_tag.find_all(["td", "th"])
+            for ci, cell_tag in enumerate(cells):
+                meta = style_map.get((ri, ci))
+                if not meta:
+                    continue
+
+                # colspan / rowspan
+                if meta.get("colspan", 1) > 1:
+                    cell_tag["colspan"] = str(meta["colspan"])
+                if meta.get("rowspan", 1) > 1:
+                    cell_tag["rowspan"] = str(meta["rowspan"])
+
+                # background colour
+                bg = meta.get("bg")
+                if bg:
+                    existing = cell_tag.get("style", "")
+                    bg_css = f"background-color:#{bg.lower()};"
+                    cell_tag["style"] = (existing.rstrip(";") + ";" + bg_css).lstrip(";")
+
+    # ── Remove entirely-empty trailing columns ─────────────────────────────
+    # Slate/WangEditor sometimes pads rows with phantom empty cells; stripping
+    # them here (Python side) avoids the Slate reconciler reverting any JS fix.
+    for tbl_tag in soup.find_all("table"):
+        rows = tbl_tag.find_all("tr")
+        if not rows:
+            continue
+        max_cols = max(
+            (len(r.find_all(["td", "th"], recursive=False)) for r in rows),
+            default=0,
+        )
+        if max_cols < 2:
+            continue
+        for ci in range(max_cols - 1, 0, -1):
+            all_empty = all(
+                len(cells) <= ci
+                or (not cells[ci].get_text(strip=True) and not cells[ci].find("img"))
+                for cells in (r.find_all(["td", "th"], recursive=False) for r in rows)
+            )
+            if all_empty:
+                for row in rows:
+                    cells = row.find_all(["td", "th"], recursive=False)
+                    if ci < len(cells):
+                        cells[ci].decompose()
+            else:
+                break
+
+    return str(soup)
+
+
+def _get_floating_image_srcs(docx_path: str) -> list[str]:
+    """
+    Return base64 data URIs for floating (anchor-positioned) images in a DOCX.
+
+    mammoth only converts <wp:inline> images; <wp:anchor> images (floated to a
+    fixed page position, e.g. a resume photo) are silently skipped.
+    Uses namespace-aware ElementTree parsing so attribute order never matters.
+    """
+    import zipfile as _zipfile
+    import xml.etree.ElementTree as _ET
+
+    # Full OOXML namespace URIs — must match exactly (not prefix aliases)
+    IMG_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    WP_NS    = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    A_NS     = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    R_NS     = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+    result: list[str] = []
+    try:
+        with _zipfile.ZipFile(docx_path, "r") as z:
+            file_list = z.namelist()
+
+            # Locate document.xml and its rels (case-insensitive for robustness)
+            doc_name = next(
+                (n for n in file_list if n.lower() == "word/document.xml"), None
+            )
+            rels_name = next(
+                (n for n in file_list if n.lower() == "word/_rels/document.xml.rels"), None
+            )
+            if not doc_name or not rels_name:
+                return result
+
+            # ── rel_id → media path via ElementTree (handles ANY attribute order) ──
+            rels_root = _ET.fromstring(z.read(rels_name))
+            rel_map: dict[str, str] = {}
+            for rel in rels_root:
+                rid   = rel.get("Id", "")
+                rtype = rel.get("Type", "")
+                tgt   = rel.get("Target", "")
+                if rid and IMG_TYPE in rtype and tgt:
+                    rel_map[rid] = tgt if tgt.startswith("word/") else f"word/{tgt}"
+
+            # ── Walk document.xml, separate inline vs anchor image embed IDs ──
+            doc_root = _ET.fromstring(z.read(doc_name))
+
+            inline_ids: set[str] = set()
+            floating_ids: list[str] = []
+
+            for inline in doc_root.iter(f"{{{WP_NS}}}inline"):
+                for blip in inline.iter(f"{{{A_NS}}}blip"):
+                    eid = blip.get(f"{{{R_NS}}}embed")
+                    if eid:
+                        inline_ids.add(eid)
+
+            for anchor in doc_root.iter(f"{{{WP_NS}}}anchor"):
+                for blip in anchor.iter(f"{{{A_NS}}}blip"):
+                    eid = blip.get(f"{{{R_NS}}}embed")
+                    if eid:
+                        floating_ids.append(eid)
+
+            seen: set[str] = set()
+            for rel_id in floating_ids:
+                if rel_id in inline_ids or rel_id in seen:
+                    continue
+                seen.add(rel_id)
+                media_path = rel_map.get(rel_id)
+                if not media_path:
+                    logger.debug(
+                        "[floating_imgs] no media path for rel_id=%s; rel_map keys=%s",
+                        rel_id, list(rel_map)[:8],
+                    )
+                    continue
+                try:
+                    img_bytes = z.read(media_path)
+                    mime = mimetypes.guess_type(media_path)[0] or "image/png"
+                    b64 = base64.b64encode(img_bytes).decode("ascii")
+                    result.append(f"data:{mime};base64,{b64}")
+                except Exception as e:
+                    logger.debug("[floating_imgs] failed to read %s: %s", media_path, e)
+    except Exception as exc:
+        logger.warning("[_get_floating_image_srcs] %s", exc)
+    return result
+
+
 def parse_docx(file_path: str) -> dict[str, Any]:
     """
     使用 mammoth 将 DOCX 转换为语义 HTML。
     图片以 base64 data URI 内联，保证前端渲染自包含。
+    额外通过 python-docx 提取单元格颜色和合并信息，注入 HTML。
 
     Returns:
         {"html": str, "messages": list[str]}
@@ -86,6 +345,48 @@ def parse_docx(file_path: str) -> dict[str, Any]:
         # Remove empty paragraphs left after the above strip
         clean_html = re.sub(r"<p[^>]*>\s*</p>", "", clean_html)
 
+        # ── Pass 3: inject cell colours / colspan / rowspan from python-docx ──
+        # mammoth deliberately strips all tcPr/tblPr XML; we recover it here
+        # by reading the original DOCX with python-docx and matching cells
+        # positionally.
+        try:
+            tbl_styles = _extract_table_styles(file_path)
+            clean_html = _inject_table_styles(clean_html, tbl_styles)
+        except Exception as exc:
+            logger.warning("[DocxParser] 表格样式注入失败 (非致命): %s", exc)
+
+        # ── Pass 4: inject floating images mammoth cannot handle ─────────────
+        # <wp:anchor> images (floating/positioned in the page margin) are
+        # silently discarded by mammoth.  The most common case is a resume
+        # profile photo floated to the top-right of the page.  We recover these
+        # images and inject them right-floated at the very start of the body so
+        # they appear near their original visual position.
+        try:
+            floating_srcs = _get_floating_image_srcs(file_path)
+            if floating_srcs:
+                imgs_html = "".join(
+                    f'<img src="{src}" '
+                    'style="float:right;max-width:28%;max-height:180px;'
+                    'margin:0 0 10px 14px;object-fit:contain;border-radius:2px;" '
+                    'alt="" />'
+                    for src in floating_srcs
+                )
+                # Insert before the first block-level element so the float
+                # wraps naturally around following text content
+                first_block = re.search(
+                    r"<(?:p|h[1-6]|table|ul|ol|blockquote)\b", clean_html
+                )
+                if first_block:
+                    clean_html = (
+                        clean_html[: first_block.start()]
+                        + imgs_html
+                        + clean_html[first_block.start() :]
+                    )
+                else:
+                    clean_html = imgs_html + clean_html
+        except Exception as exc:
+            logger.warning("[DocxParser] 浮动图片注入失败 (非致命): %s", exc)
+
         return {"html": clean_html, "messages": messages_out}
     except Exception as e:
         logger.error(f"[DocxParser] 解析失败: {e}")
@@ -93,31 +394,28 @@ def parse_docx(file_path: str) -> dict[str, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# XLSX → Luckysheet 兼容 JSON
+# XLSX → Univer Sheets IWorkbookData JSON
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Luckysheet 单元格数值类型映射
-_CELL_TYPE_MAP = {
-    "n": 1,  # numeric
-    "s": 0,  # string (general)
-    "b": "bool",
-    "d": "date",
-    "e": "error",
-}
+# Univer CellValueType constants (must match @univerjs/core CellValueType enum)
+_UNIVER_TYPE_STRING = 1
+_UNIVER_TYPE_NUMBER = 2
+_UNIVER_TYPE_BOOLEAN = 3
 
+# Horizontal alignment: Univer HorizontalAlign enum
 _ALIGN_H_MAP = {
     "general": 0,
     "left": 1,
     "center": 2,
     "right": 3,
-    "fill": 4,
-    "justify": 5,
-    "centerContinuous": 6,
+    "justify": 6,
     "distributed": 7,
 }
 
+# Vertical alignment: Univer VerticalAlign enum
 _ALIGN_V_MAP = {
     "top": 1,
+    "middle": 2,
     "center": 2,
     "bottom": 3,
     "justify": 4,
@@ -125,23 +423,26 @@ _ALIGN_V_MAP = {
 }
 
 
-def _openpyxl_cell_to_luckysheet(cell: Any) -> dict[str, Any]:
-    """将单个 openpyxl Cell 转换为 Luckysheet celldata 对象。"""
+def _openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
+    """将单个 openpyxl Cell 转换为 Univer ICellData 对象。"""
     v = cell.value
-    ct: dict[str, Any] = {}
-
     if v is None:
-        return {}
+        return None
 
-    # 基础值
+    cell_data: dict[str, Any] = {}
+
+    # ── Value & type ──────────────────────────────────────────────────────────
     if isinstance(v, bool):
-        ct = {"t": "b", "v": int(v), "m": str(v).upper()}
+        cell_data["v"] = int(v)
+        cell_data["t"] = _UNIVER_TYPE_BOOLEAN
     elif isinstance(v, (int, float)):
-        ct = {"t": "n", "v": v, "m": str(v)}
+        cell_data["v"] = v
+        cell_data["t"] = _UNIVER_TYPE_NUMBER
     else:
-        ct = {"t": "s", "v": str(v), "m": str(v)}
+        cell_data["v"] = str(v)
+        cell_data["t"] = _UNIVER_TYPE_STRING
 
-    # 样式
+    # ── Style ─────────────────────────────────────────────────────────────────
     style: dict[str, Any] = {}
     try:
         font = cell.font
@@ -152,15 +453,18 @@ def _openpyxl_cell_to_luckysheet(cell: Any) -> dict[str, Any]:
                 style["it"] = 1
             if font.size:
                 style["fs"] = int(font.size)
-            if font.color and font.color.type == "rgb" and font.color.rgb != "00000000":
-                style["fc"] = "#" + font.color.rgb[2:]  # strip alpha
+            if font.color and font.color.type == "rgb" and font.color.rgb not in (
+                "00000000", "FF000000"
+            ):
+                # Univer expects { rgb: "#RRGGBB" }
+                style["cl"] = {"rgb": "#" + font.color.rgb[2:]}
         fill = cell.fill
         if fill and fill.fill_type not in (None, "none") and fill.fgColor:
             if fill.fgColor.type == "rgb" and fill.fgColor.rgb not in (
                 "00000000",
                 "FFFFFFFF",
             ):
-                style["bg"] = "#" + fill.fgColor.rgb[2:]
+                style["bg"] = {"rgb": "#" + fill.fgColor.rgb[2:]}
         ali = cell.alignment
         if ali:
             if ali.horizontal and ali.horizontal in _ALIGN_H_MAP:
@@ -171,68 +475,91 @@ def _openpyxl_cell_to_luckysheet(cell: Any) -> dict[str, Any]:
         pass  # 样式提取失败不影响数据
 
     if style:
-        ct["s"] = style
+        cell_data["s"] = style
 
-    return ct
+    return cell_data
 
 
-def parse_xlsx(file_path: str) -> list[dict[str, Any]]:
+def parse_xlsx(file_path: str) -> dict[str, Any]:
     """
-    使用 openpyxl 将 XLSX 转换为 Luckysheet 初始化 JSON 数组。
-    每个元素对应一个 Sheet。
+    使用 openpyxl 将 XLSX 转换为 Univer Sheets IWorkbookData 快照格式。
 
     Returns:
-        [{"name": str, "index": str, "order": int,
-          "celldata": [{"r": int, "c": int, "v": {...}}],
-          "mergeInfo": [...], "config": {"merge": {}}}]
+        {
+          "id": str,
+          "name": str,
+          "sheetOrder": [str, ...],
+          "sheets": {
+            "<sheetId>": {
+              "id": str,
+              "name": str,
+              "rowCount": int,
+              "columnCount": int,
+              "cellData": { row: { col: ICellData } },
+              "mergeData": [{ startRow, startColumn, endRow, endColumn }]
+            }
+          }
+        }
     """
     try:
         import openpyxl
-        from openpyxl.utils import get_column_letter
     except ImportError:
         raise RuntimeError("openpyxl 未安装，请执行: pip install openpyxl")
 
     wb = openpyxl.load_workbook(file_path, data_only=True)
-    sheets_data: list[dict[str, Any]] = []
+
+    workbook_id = str(uuid.uuid4())
+    workbook_name = os.path.splitext(os.path.basename(file_path))[0]
+    sheet_order: list[str] = []
+    sheets: dict[str, Any] = {}
 
     for idx, ws in enumerate(wb.worksheets):
-        celldata: list[dict[str, Any]] = []
+        sheet_id = f"sheet{idx + 1}"
+        sheet_order.append(sheet_id)
 
+        # ── Cell data: nested dict {row: {col: ICellData}} ────────────────────
+        cell_data: dict[int, dict[int, Any]] = {}
         for row in ws.iter_rows():
             for cell in row:
-                ct = _openpyxl_cell_to_luckysheet(cell)
-                if ct:
-                    celldata.append({"r": cell.row - 1, "c": cell.column - 1, "v": ct})
+                cd = _openpyxl_cell_to_univer(cell)
+                if cd is not None:
+                    r = cell.row - 1
+                    c = cell.column - 1
+                    if r not in cell_data:
+                        cell_data[r] = {}
+                    cell_data[r][c] = cd
 
-        # 合并单元格
-        merge_config: dict[str, Any] = {}
+        # ── Merge data ────────────────────────────────────────────────────────
+        merge_data: list[dict[str, int]] = []
         for merge_range in ws.merged_cells.ranges:
-            min_r = merge_range.min_row - 1
-            min_c = merge_range.min_col - 1
-            row_span = merge_range.max_row - merge_range.min_row
-            col_span = merge_range.max_col - merge_range.min_col
-            key = f"{min_r}_{min_c}"
-            merge_config[key] = {
-                "r": min_r,
-                "c": min_c,
-                "rs": row_span,
-                "cs": col_span,
-            }
+            merge_data.append({
+                "startRow": merge_range.min_row - 1,
+                "startColumn": merge_range.min_col - 1,
+                "endRow": merge_range.max_row - 1,
+                "endColumn": merge_range.max_col - 1,
+            })
 
-        sheet_json: dict[str, Any] = {
+        sheets[sheet_id] = {
+            "id": sheet_id,
             "name": ws.title,
-            "index": str(idx),
-            "order": idx,
-            "status": 1 if idx == 0 else 0,
-            "celldata": celldata,
-            "row": ws.max_row or 30,
-            "column": ws.max_column or 10,
-            "config": {"merge": merge_config} if merge_config else {},
+            "rowCount": max(ws.max_row or 30, 30),
+            "columnCount": max(ws.max_column or 10, 10),
+            "cellData": cell_data,
+            "mergeData": merge_data,
         }
-        sheets_data.append(sheet_json)
 
     wb.close()
-    return sheets_data
+
+    return {
+        "id": workbook_id,
+        "name": workbook_name,
+        "appVersion": "0.5.0",   # required by IWorkbookData; Univer fails silently without it
+        "locale": "zh-CN",       # required by IWorkbookData; used for cell formatting
+        "sheetOrder": sheet_order,
+        "sheets": sheets,
+        "styles": {},     # Univer requires styles map even if empty
+        "resources": [],  # Univer plugin resources (e.g. conditional formatting)
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -312,6 +639,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
     """
     使用 python-pptx 提取每个 Slide 的完整几何数据，供前端画布编辑器渲染。
     包含文本框 (含字体样式)、图片 (base64 data URI)、表格 (单元格文本)、备注。
+    支持 GROUP 形状递归、从 layout/master 继承背景色。
 
     Returns:
         {
@@ -348,47 +676,293 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
     slide_h: int = prs.slide_height or 6858000
     slides_data: list[dict[str, Any]] = []
 
-    for slide_idx, slide in enumerate(prs.slides):
-        # Background fill colour
-        bg_hex = "#FFFFFF"
-        try:
-            bg_fill = slide.background.fill
-            if bg_fill.type is not None and str(bg_fill.type) in ("SOLID", "1"):
-                bg_hex = "#{:06x}".format(int(bg_fill.fore_color.rgb))
-        except Exception:
-            pass
+    # ── Inner helpers ────────────────────────────────────────────────────
 
-        # Speaker notes
-        notes_text = ""
-        try:
-            if slide.has_notes_slide:
-                notes_text = slide.notes_slide.notes_text_frame.text.strip()
-        except Exception:
-            pass
-
-        shapes_data: list[dict[str, Any]] = []
-
-        for z_idx, shape in enumerate(slide.shapes):
-            s: dict[str, Any] = {
-                "id": shape.shape_id,
-                "name": shape.name,
-                "left": shape.left or 0,
-                "top": shape.top or 0,
-                "width": shape.width or 0,
-                "height": shape.height or 0,
-                "z_order": z_idx,
-                "fill": None,
-            }
-
-            # Shape fill colour
+    def _extract_bg(slide: Any) -> str:
+        """Walk slide → layout → master for the first extractable solid fill."""
+        for src in (slide, getattr(slide, "slide_layout", None), getattr(slide, "slide_master", None)):
+            if src is None:
+                continue
             try:
-                fill = shape.fill
-                if fill.type is not None and str(fill.type) in ("SOLID", "1"):
-                    s["fill"] = "#{:06x}".format(int(fill.fore_color.rgb))
+                f = src.background.fill
+                # fill.type is an enum; compare by .name (e.g. 'SOLID') or numeric value 1
+                if f.type is not None and getattr(f.type, 'name', '') == 'SOLID':
+                    return "#" + str(f.fore_color.rgb).lower()
+            except Exception:
+                pass
+        return "#FFFFFF"
+
+    def _parse_tf(tf: Any) -> list[dict[str, Any]]:
+        """Convert a python-pptx TextFrame into our [{align, runs:[...]}] format.
+
+        Handles three common cases that cause text to disappear:
+        1. Paragraph-level default run properties (defRPr) for font size/color
+           — most real PPTs store the font size here, not on individual runs.
+        2. Empty para.runs when text lives in <a:fld> field elements
+           — use para.text as a fallback single run.
+        3. Hard line-breaks (<a:br>) within a paragraph
+           — emitted as a run with text='\n'.
+        """
+        # XML namespace used by DrawingML
+        _NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+        def _pt_from_emu_hundredths(val: Any) -> float | None:
+            """python-pptx stores font size as 100ths of a point (e.g. 2400 = 24pt)."""
+            try:
+                v = int(val)
+                return round(v / 100.0, 1) if v > 0 else None
+            except Exception:
+                return None
+
+        def _read_rpr(rpr_el: Any) -> dict[str, Any]:
+            """Extract font attributes from an <a:rPr> or <a:defRPr> XML element."""
+            out: dict[str, Any] = {}
+            if rpr_el is None:
+                return out
+            try:
+                sz = rpr_el.get("sz")
+                if sz:
+                    pt = _pt_from_emu_hundredths(sz)
+                    if pt:
+                        out["size"] = pt
+            except Exception:
+                pass
+            try:
+                b = rpr_el.get("b")
+                if b and b.lower() not in ("0", "false"):
+                    out["bold"] = True
+            except Exception:
+                pass
+            try:
+                i = rpr_el.get("i")
+                if i and i.lower() not in ("0", "false"):
+                    out["italic"] = True
+            except Exception:
+                pass
+            try:
+                u = rpr_el.get("u")
+                if u and u != "none":
+                    out["underline"] = True
+            except Exception:
+                pass
+            # Font name from <a:latin typeface="..."> child
+            try:
+                latin = rpr_el.find(f"{{{_NS}}}latin")
+                if latin is not None:
+                    tf_val = latin.get("typeface", "")
+                    if tf_val and not tf_val.startswith("+"):
+                        out["fontName"] = tf_val
+            except Exception:
+                pass
+            # Solid colour from <a:solidFill><a:srgbClr val="rrggbb">
+            try:
+                solid = rpr_el.find(f"{{{_NS}}}solidFill")
+                if solid is not None:
+                    srgb = solid.find(f"{{{_NS}}}srgbClr")
+                    if srgb is not None:
+                        val = srgb.get("val", "")
+                        if len(val) == 6:
+                            out["color"] = "#" + val.lower()
+            except Exception:
+                pass
+            return out
+
+        paras: list[dict[str, Any]] = []
+        for para in tf.paragraphs:
+            align_name = "LEFT"
+            try:
+                if para.alignment:
+                    align_name = para.alignment.name
             except Exception:
                 pass
 
-            # ── Picture ──
+            # ── Read paragraph-level default run properties (defRPr) ──────
+            # These serve as the fallback when a run has no explicit rPr attrs.
+            para_defaults: dict[str, Any] = {}
+            try:
+                pPr = para._p.find(f"{{{_NS}}}pPr")
+                if pPr is not None:
+                    defRPr = pPr.find(f"{{{_NS}}}defRPr")
+                    para_defaults = _read_rpr(defRPr)
+            except Exception:
+                pass
+
+            p_obj: dict[str, Any] = {"align": align_name, "runs": []}
+
+            # ── Iterate raw XML to capture <a:r> AND <a:br> (hard line-break) ──
+            # python-pptx's para.runs only yields <a:r> elements and silently
+            # skips <a:fld> field elements (e.g. slide numbers, date fields).
+            # We walk _p directly so nothing is lost.
+            try:
+                for child in para._p:
+                    tag = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+
+                    if tag == "br":
+                        # Hard line-break: emit a newline run so rendering looks correct
+                        p_obj["runs"].append({"text": "\n"})
+                        continue
+
+                    if tag not in ("r", "fld"):
+                        continue
+
+                    # Text node: <a:t> child
+                    t_el = child.find(f"{{{_NS}}}t")
+                    text_val = (t_el.text or "") if t_el is not None else ""
+
+                    # Run-level properties (<a:rPr>)
+                    rPr = child.find(f"{{{_NS}}}rPr")
+                    run_attrs = _read_rpr(rPr)
+
+                    # Merge: run attrs override paragraph defaults
+                    r: dict[str, Any] = {"text": text_val}
+                    for key in ("size", "bold", "italic", "underline", "fontName", "color"):
+                        if key in run_attrs:
+                            r[key] = run_attrs[key]
+                        elif key in para_defaults:
+                            r[key] = para_defaults[key]
+
+                    p_obj["runs"].append(r)
+
+            except Exception:
+                # Fallback: use python-pptx's high-level .runs API
+                for run in para.runs:
+                    r_fb: dict[str, Any] = {"text": run.text}
+                    try:
+                        if run.font.size:
+                            r_fb["size"] = round(run.font.size.pt, 1)
+                    except Exception:
+                        pass
+                    try:
+                        if run.font.bold:
+                            r_fb["bold"] = True
+                    except Exception:
+                        pass
+                    try:
+                        if run.font.italic:
+                            r_fb["italic"] = True
+                    except Exception:
+                        pass
+                    try:
+                        if run.font.underline:
+                            r_fb["underline"] = True
+                    except Exception:
+                        pass
+                    try:
+                        if run.font.name:
+                            r_fb["fontName"] = run.font.name
+                    except Exception:
+                        pass
+                    try:
+                        if run.font.color and run.font.color.type is not None:
+                            r_fb["color"] = "#" + str(run.font.color.rgb).lower()
+                    except Exception:
+                        pass
+                    p_obj["runs"].append(r_fb)
+
+            # ── Fallback: if we still have no content, use para.text directly ──
+            # This catches edge cases where XML walk also found nothing.
+            if not any(r.get("text") for r in p_obj["runs"]):
+                raw = ""
+                try:
+                    raw = para.text
+                except Exception:
+                    pass
+                if raw.strip():
+                    fallback_run: dict[str, Any] = {"text": raw}
+                    fallback_run.update(para_defaults)
+                    p_obj["runs"] = [fallback_run]
+
+            paras.append(p_obj)
+        return paras
+
+    def _collect_shapes(
+        shapes_iter: Any,
+        out: list[dict[str, Any]],
+        z_base: int = 0,
+        off_left: int = 0,
+        off_top: int = 0,
+    ) -> None:
+        """
+        Recursively parse shapes into `out`.
+        GROUP shapes are unwrapped and children are appended with their
+        slide-absolute coordinates (group position added as offset).
+        """
+        for z_idx, shape in enumerate(shapes_iter):
+            # ── Resolve effective geometry ───────────────────────────────────
+            # python-pptx returns None for left/top/width/height when a
+            # placeholder shape inherits its position from the slide layout.
+            # (TITLE and BODY placeholders are almost always in this state.)
+            # Falling back to 0 makes every text shape invisible because their
+            # div has zero width/height — TABLE and PICTURE shapes are
+            # always explicitly sized, which is why only they were visible.
+            # Fix: pull the real geometry from the matching layout placeholder.
+            eff_left = shape.left
+            eff_top  = shape.top
+            eff_w    = shape.width
+            eff_h    = shape.height
+
+            if None in (eff_left, eff_top, eff_w, eff_h):
+                try:
+                    ph_fmt = shape.placeholder_format
+                    if ph_fmt is not None:
+                        slide_layout = getattr(
+                            getattr(shape, "part", None), "slide_layout", None
+                        )
+                        if slide_layout is not None:
+                            for lph in slide_layout.placeholders:
+                                try:
+                                    if lph.placeholder_format.idx == ph_fmt.idx:
+                                        if eff_left is None:
+                                            eff_left = lph.left
+                                        if eff_top is None:
+                                            eff_top = lph.top
+                                        if eff_w is None:
+                                            eff_w = lph.width
+                                        if eff_h is None:
+                                            eff_h = lph.height
+                                        break
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+
+            abs_left = (eff_left or 0) + off_left
+            abs_top  = (eff_top  or 0) + off_top
+
+            # ── Group: recurse with absolute-coordinate offset ──────────
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                try:
+                    _collect_shapes(
+                        shape.shapes,
+                        out,
+                        z_base=z_base + z_idx * 100,
+                        off_left=abs_left,
+                        off_top=abs_top,
+                    )
+                except Exception:
+                    pass
+                continue
+
+            s: dict[str, Any] = {
+                "id": shape.shape_id,
+                "name": shape.name,
+                "left": abs_left,
+                "top": abs_top,
+                "width":  eff_w or 0,
+                "height": eff_h or 0,
+                "z_order": z_base + z_idx,
+                "fill": None,
+            }
+
+            # Shape fill colour — use .name attribute since str(fill.type) = 'SOLID (1)'
+            try:
+                fill = shape.fill
+                if fill.type is not None and getattr(fill.type, 'name', '') == 'SOLID':
+                    s["fill"] = "#" + str(fill.fore_color.rgb).lower()
+            except Exception:
+                pass
+
+            # ── Picture ───────────────────────────────────────────────
             try:
                 if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                     img_blob = shape.image.blob
@@ -396,12 +970,12 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                     b64 = base64.b64encode(img_blob).decode("ascii")
                     s["_type"] = "PICTURE"
                     s["image_b64"] = f"data:{img_mime};base64,{b64}"
-                    shapes_data.append(s)
+                    out.append(s)
                     continue
             except Exception:
                 pass
 
-            # ── Table ──
+            # ── Table ─────────────────────────────────────────────────
             try:
                 if shape.has_table:
                     tbl = shape.table
@@ -415,80 +989,54 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                                 )
                             except Exception:
                                 pass
-                            cells.append(
-                                {"row": r_idx, "col": c_idx, "text": cell_text}
-                            )
+                            cells.append({"row": r_idx, "col": c_idx, "text": cell_text})
                     s["_type"] = "TABLE"
                     s["table_rows"] = len(tbl.rows)
                     s["table_cols"] = len(tbl.columns)
                     s["cells"] = cells
-                    shapes_data.append(s)
+                    out.append(s)
                     continue
             except Exception:
                 pass
 
-            # ── Text frame ──
-            if getattr(shape, "has_text_frame", False) and shape.text_frame:
-                s["_type"] = "TEXT"
-                s["has_text"] = True
-                # Detect title placeholder (same logic as in parse_pptx)
-                is_title = False
-                try:
-                    from pptx.enum.shapes import PP_PLACEHOLDER
-
-                    ph = shape.placeholder_format
-                    if ph is not None:
-                        is_title = ph.type in (
-                            PP_PLACEHOLDER.TITLE,
-                            PP_PLACEHOLDER.CENTER_TITLE,
-                        )
-                except Exception:
-                    pass
-                s["is_title"] = is_title
-                paras: list[dict[str, Any]] = []
-                for para in shape.text_frame.paragraphs:
-                    align_name = "LEFT"
+            # ── Text frame ────────────────────────────────────────────
+            try:
+                if getattr(shape, "has_text_frame", False) and shape.text_frame:
+                    s["_type"] = "TEXT"
+                    s["has_text"] = True
+                    is_title = False
                     try:
-                        if para.alignment:
-                            align_name = para.alignment.name
+                        from pptx.enum.shapes import PP_PLACEHOLDER
+                        ph = shape.placeholder_format
+                        if ph is not None:
+                            is_title = ph.type in (
+                                PP_PLACEHOLDER.TITLE,
+                                PP_PLACEHOLDER.CENTER_TITLE,
+                            )
                     except Exception:
                         pass
-                    p_obj: dict[str, Any] = {"align": align_name, "runs": []}
-                    for run in para.runs:
-                        r: dict[str, Any] = {"text": run.text}
-                        try:
-                            if run.font.size:
-                                r["size"] = round(run.font.size.pt, 1)
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.bold:
-                                r["bold"] = True
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.italic:
-                                r["italic"] = True
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.underline:
-                                r["underline"] = True
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.color and run.font.color.type is not None:
-                                r["color"] = "#{:06x}".format(int(run.font.color.rgb))
-                        except Exception:
-                            pass
-                        p_obj["runs"].append(r)
-                    paras.append(p_obj)
-                s["paragraphs"] = paras
-            else:
-                # Connectors, groups, or other unsupported shapes — skip
-                continue
+                    s["is_title"] = is_title
+                    s["paragraphs"] = _parse_tf(shape.text_frame)
+                    out.append(s)
+            except Exception:
+                pass
 
-            shapes_data.append(s)
+            # Connectors / freeforms / other unsupported — silently skip
+
+    # ── Main loop ────────────────────────────────────────────────────────
+
+    for slide_idx, slide in enumerate(prs.slides):
+        bg_hex = _extract_bg(slide)
+
+        notes_text = ""
+        try:
+            if slide.has_notes_slide:
+                notes_text = slide.notes_slide.notes_text_frame.text.strip()
+        except Exception:
+            pass
+
+        shapes_data: list[dict[str, Any]] = []
+        _collect_shapes(slide.shapes, shapes_data)
 
         slides_data.append(
             {
@@ -514,38 +1062,91 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
 
 def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
     """
-    使用 pdfplumber 提取 PDF 全量文本，供 AI RAG 使用。
+    提取 PDF 全量文本，供 AI RAG 使用。
     同时返回原始文件的 raw URL，供前端 PDF.js 渲染。
+
+    文字提取回退链：pdfplumber → pypdf → PyPDF2。
+    若三个库均不可用，仍返回含 raw_url 的结果（PDF.js 视觉渲染不依赖文字提取）。
 
     Returns:
         {"text": str, "page_count": int, "raw_url": str,
          "pages": [{"page": int, "text": str}]}
     """
-    try:
-        import pdfplumber
-    except ImportError:
-        raise RuntimeError("pdfplumber 未安装，请执行: pip install pdfplumber")
-
+    raw_url = f"/api/v1/workspace/raw/{file_id}"
     pages_text: list[dict[str, Any]] = []
     full_text_parts: list[str] = []
+    page_count = 0
 
-    with pdfplumber.open(file_path) as pdf:
-        page_count = len(pdf.pages)
-        for i, page in enumerate(pdf.pages):
-            try:
-                page_text = page.extract_text() or ""
-            except Exception as e:
-                logger.warning(f"[PdfParser] 第 {i+1} 页文本提取失败: {e}")
-                page_text = ""
-            pages_text.append({"page": i + 1, "text": page_text})
-            if page_text:
-                full_text_parts.append(page_text)
+    # ── 1. pdfplumber（首选：支持表格提取） ─────────────────────────────────
+    try:
+        import pdfplumber  # type: ignore
 
+        with pdfplumber.open(file_path) as pdf:
+            page_count = len(pdf.pages)
+            for i, page in enumerate(pdf.pages):
+                try:
+                    page_text = page.extract_text() or ""
+                except Exception as e:
+                    logger.warning(f"[PdfParser/pdfplumber] 第 {i+1} 页文本提取失败: {e}")
+                    page_text = ""
+                pages_text.append({"page": i + 1, "text": page_text})
+                if page_text:
+                    full_text_parts.append(page_text)
+
+        return {
+            "text": "\n\n".join(full_text_parts),
+            "page_count": page_count,
+            "raw_url": raw_url,
+            "pages": pages_text,
+        }
+    except ImportError:
+        logger.info("[PdfParser] pdfplumber 未安装，尝试 pypdf/PyPDF2")
+    except Exception as e:
+        logger.warning(f"[PdfParser] pdfplumber 解析失败: {e}，尝试下一库")
+
+    # ── 2. pypdf / PyPDF2 回退 ───────────────────────────────────────────────
+    for pkg_name, mod_name in [("pypdf", "pypdf"), ("PyPDF2", "PyPDF2")]:
+        try:
+            mod = __import__(mod_name)
+            PdfReader = getattr(mod, "PdfReader")
+            with open(file_path, "rb") as fh:
+                reader = PdfReader(fh)
+                page_count = len(reader.pages)
+                for i, pg in enumerate(reader.pages):
+                    try:
+                        page_text = pg.extract_text() or ""
+                    except Exception as e:
+                        logger.warning(f"[PdfParser/{pkg_name}] 第 {i+1} 页文本提取失败: {e}")
+                        page_text = ""
+                    pages_text.append({"page": i + 1, "text": page_text})
+                    if page_text:
+                        full_text_parts.append(page_text)
+
+            return {
+                "text": "\n\n".join(full_text_parts),
+                "page_count": page_count,
+                "raw_url": raw_url,
+                "pages": pages_text,
+            }
+        except ImportError:
+            logger.info(f"[PdfParser] {pkg_name} 未安装，尝试下一库")
+            continue
+        except Exception as e:
+            logger.warning(f"[PdfParser] {pkg_name} 解析失败: {e}，尝试下一库")
+            pages_text = []
+            full_text_parts = []
+            continue
+
+    # ── 3. 所有文字提取库均不可用——仍返回 raw_url 供 PDF.js 渲染 ────────────
+    logger.warning(
+        "[PdfParser] pdfplumber / pypdf / PyPDF2 均不可用，文字提取跳过。"
+        " 请执行: pip install pdfplumber"
+    )
     return {
-        "text": "\n\n".join(full_text_parts),
-        "page_count": page_count,
-        "raw_url": f"/api/v1/workspace/raw/{file_id}",
-        "pages": pages_text,
+        "text": "",
+        "page_count": 0,
+        "raw_url": raw_url,
+        "pages": [],
     }
 
 
@@ -554,10 +1155,360 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _css_color_to_hex(value: str) -> str | None:
+    """Convert a CSS color string like '#aabbcc' or 'rgb(r,g,b)' to a 6-char hex string."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.startswith("#"):
+        v = value.lstrip("#")
+        if len(v) == 3:
+            v = "".join(c * 2 for c in v)
+        return v.upper() if len(v) == 6 else None
+    if value.startswith("rgb"):
+        nums = re.findall(r"\d+", value)
+        if len(nums) >= 3:
+            return "{:02X}{:02X}{:02X}".format(int(nums[0]), int(nums[1]), int(nums[2]))
+    return None
+
+
+def _parse_css_inline(style_str: str) -> dict[str, str]:
+    """Parse a CSS inline style string into a {property: value} dict."""
+    result: dict[str, str] = {}
+    for part in style_str.split(";"):
+        part = part.strip()
+        if ":" not in part:
+            continue
+        prop, _, val = part.partition(":")
+        result[prop.strip().lower()] = val.strip()
+    return result
+
+
+def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
+    """Apply inline CSS to a python-docx Run (bold, italic, color, font-size)."""
+    from docx.shared import Pt, RGBColor
+
+    if css.get("font-weight") in ("bold", "700", "800", "900"):
+        run.bold = True
+    if css.get("font-style") == "italic":
+        run.italic = True
+    if css.get("text-decoration") == "underline":
+        run.underline = True
+    color_hex = _css_color_to_hex(css.get("color", ""))
+    if color_hex:
+        r, g, b = int(color_hex[0:2], 16), int(color_hex[2:4], 16), int(color_hex[4:6], 16)
+        run.font.color.rgb = RGBColor(r, g, b)
+    fs = css.get("font-size", "")
+    if fs.endswith("pt"):
+        try:
+            run.font.size = Pt(float(fs[:-2]))
+        except ValueError:
+            pass
+    elif fs.endswith("px"):
+        try:
+            run.font.size = Pt(float(fs[:-2]) * 0.75)
+        except ValueError:
+            pass
+
+
+def _add_paragraph_from_tag(doc: Any, tag: Any) -> None:
+    """Convert a single <p>/<h1>-<h6>/<li> BS4 tag into a python-docx paragraph."""
+    from docx.shared import Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    tag_name = tag.name.lower()
+    if tag_name in ("h1", "h2", "h3", "h4", "h5", "h6"):
+        level = int(tag_name[1])
+        para = doc.add_heading("", level=level)
+    else:
+        para = doc.add_paragraph()
+
+    # Text alignment from parent style
+    style_str = tag.get("style", "")
+    if style_str:
+        pcss = _parse_css_inline(style_str)
+        align = pcss.get("text-align", "")
+        if align == "center":
+            para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif align == "right":
+            para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        elif align == "justify":
+            para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+
+    # Walk inline children (text nodes + <strong>, <em>, <span>, <a>, <u>)
+    for child in tag.children:
+        if hasattr(child, "name") and child.name is None:
+            # NavigableString
+            text = str(child)
+            if text:
+                para.add_run(text)
+        elif hasattr(child, "name"):
+            name = child.name.lower() if child.name else ""
+            text = child.get_text()
+            if not text:
+                continue
+            run = para.add_run(text)
+            child_css: dict[str, str] = _parse_css_inline(child.get("style", ""))
+            if name in ("strong", "b"):
+                run.bold = True
+            if name in ("em", "i"):
+                run.italic = True
+            if name == "u":
+                run.underline = True
+            if name == "s":
+                run.font.strike = True
+            _apply_run_inline(run, child_css)
+
+
+def _set_cell_shading(cell: Any, fill_hex: str) -> None:
+    """Set the background shading of a python-docx table cell via direct XML."""
+    from lxml import etree
+
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    # Remove any existing shd element
+    for shd in tcPr.findall(
+        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}shd"
+    ):
+        tcPr.remove(shd)
+    WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    shd = etree.SubElement(tcPr, f"{{{WNS}}}shd")
+    shd.set(f"{{{WNS}}}val", "clear")
+    shd.set(f"{{{WNS}}}color", "auto")
+    shd.set(f"{{{WNS}}}fill", fill_hex.upper())
+
+
+def _set_cell_borders(cell: Any, border_hex: str | None) -> None:
+    """Apply a simple all-sides border to a cell using the given colour hex."""
+    from lxml import etree
+
+    if not border_hex:
+        return
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    tcBorders = tcPr.find(f"{{{WNS}}}tcBorders")
+    if tcBorders is None:
+        tcBorders = etree.SubElement(tcPr, f"{{{WNS}}}tcBorders")
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = tcBorders.find(f"{{{WNS}}}{side}")
+        if el is None:
+            el = etree.SubElement(tcBorders, f"{{{WNS}}}{side}")
+        el.set(f"{{{WNS}}}val", "single")
+        el.set(f"{{{WNS}}}sz", "4")
+        el.set(f"{{{WNS}}}color", border_hex.upper())
+
+
+def _export_docx_python(html_content: str) -> bytes:
+    """
+    Build a .docx from WangEditor HTML using python-docx directly.
+
+    Supports:
+    - Headings (h1–h6), paragraphs, list items
+    - Tables with colspan/rowspan (merged cells), cell background colours,
+      column widths, th header rows, text alignment, vertical alignment
+    - Inline bold/italic/underline/strike/color/font-size on runs
+    """
+    try:
+        from bs4 import BeautifulSoup
+        from docx import Document
+        from docx.shared import Inches, Pt, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.enum.table import WD_ALIGN_VERTICAL
+        from docx.oxml.ns import qn
+    except ImportError as exc:
+        raise RuntimeError(f"python-docx 或 beautifulsoup4 未安装: {exc}") from exc
+
+    doc = Document()
+
+    # Remove default empty paragraph that python-docx adds on creation
+    for para in list(doc.paragraphs):
+        p = para._element
+        p.getparent().remove(p)
+
+    soup = BeautifulSoup(html_content, "html.parser")
+    body = soup.find("body") or soup
+
+    for top in body.children:
+        if not hasattr(top, "name") or top.name is None:
+            # bare text node
+            text = str(top).strip()
+            if text:
+                doc.add_paragraph(text)
+            continue
+
+        tag_name = top.name.lower()
+
+        # ── Block-level text elements ──────────────────────────────────────
+        if tag_name in ("h1", "h2", "h3", "h4", "h5", "h6", "p", "li"):
+            _add_paragraph_from_tag(doc, top)
+            continue
+
+        if tag_name in ("ul", "ol"):
+            for li in top.find_all("li", recursive=False):
+                _add_paragraph_from_tag(doc, li)
+            continue
+
+        # ── Tables ─────────────────────────────────────────────────────────
+        if tag_name == "table":
+            rows_tags = top.find_all("tr")
+            if not rows_tags:
+                continue
+
+            # Determine table dimensions
+            col_count = 0
+            for r in rows_tags:
+                c = 0
+                for cell in r.find_all(["td", "th"], recursive=False):
+                    c += int(cell.get("colspan", 1))
+                col_count = max(col_count, c)
+            if col_count == 0:
+                continue
+
+            tbl = doc.add_table(rows=len(rows_tags), cols=col_count)
+            tbl.style = "Table Grid"
+
+            # Track which (row, col) positions are already consumed by a
+            # rowspan merge so we skip writing to them again.
+            occupied: dict[tuple[int, int], bool] = {}
+
+            for ri, row_tag in enumerate(rows_tags):
+                cell_tags = row_tag.find_all(["td", "th"], recursive=False)
+                ci = 0  # logical col cursor
+                for cell_tag in cell_tags:
+                    # Advance past cells already filled by a previous rowspan
+                    while occupied.get((ri, ci)):
+                        ci += 1
+
+                    colspan = int(cell_tag.get("colspan", 1))
+                    rowspan = int(cell_tag.get("rowspan", 1))
+
+                    # Guard against out-of-range
+                    if ci >= col_count:
+                        break
+
+                    # Mark all cells this span covers as occupied
+                    for dr in range(rowspan):
+                        for dc in range(colspan):
+                            if dr == 0 and dc == 0:
+                                continue
+                            occupied[(ri + dr, ci + dc)] = True
+
+                    tbl_cell = tbl.cell(ri, ci)
+
+                    # ── Merge ────────────────────────────────────────────
+                    end_r = min(ri + rowspan - 1, len(rows_tags) - 1)
+                    end_c = min(ci + colspan - 1, col_count - 1)
+                    if end_r > ri or end_c > ci:
+                        tbl_cell.merge(tbl.cell(end_r, end_c))
+
+                    # ── Cell text ────────────────────────────────────────
+                    # Clear the default empty paragraph python-docx adds
+                    for p_el in list(tbl_cell.paragraphs):
+                        p_el._element.getparent().remove(p_el._element)
+
+                    # Write inline content into the cell
+                    cell_para = tbl_cell.add_paragraph()
+                    cell_css = _parse_css_inline(cell_tag.get("style", ""))
+
+                    # Text alignment
+                    align = cell_css.get("text-align", "")
+                    if align == "center":
+                        cell_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    elif align == "right":
+                        cell_para.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+                    # Vertical alignment
+                    v_align = cell_css.get("vertical-align", "").lower()
+                    if v_align == "middle":
+                        tbl_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+                    elif v_align == "bottom":
+                        tbl_cell.vertical_alignment = WD_ALIGN_VERTICAL.BOTTOM
+
+                    # Bold if <th>
+                    is_header = cell_tag.name.lower() == "th"
+
+                    for child in cell_tag.children:
+                        if not hasattr(child, "name") or child.name is None:
+                            text = str(child).strip()
+                            if text:
+                                run = cell_para.add_run(text)
+                                if is_header:
+                                    run.bold = True
+                        else:
+                            child_name = child.name.lower() if child.name else ""
+                            text = child.get_text()
+                            if not text:
+                                continue
+                            run = cell_para.add_run(text)
+                            if is_header:
+                                run.bold = True
+                            child_css = _parse_css_inline(child.get("style", ""))
+                            if child_name in ("strong", "b"):
+                                run.bold = True
+                            if child_name in ("em", "i"):
+                                run.italic = True
+                            if child_name == "u":
+                                run.underline = True
+                            _apply_run_inline(run, child_css)
+
+                    # ── Cell background colour ───────────────────────────
+                    bg = cell_css.get("background-color", "") or cell_css.get("background", "")
+                    bg_hex = _css_color_to_hex(bg)
+                    if not bg_hex and is_header:
+                        bg_hex = "EEF1F8"  # default header shading
+                    if bg_hex:
+                        _set_cell_shading(tbl_cell, bg_hex)
+
+                    # ── Border colour override ───────────────────────────
+                    border_raw = cell_css.get("border-color", "")
+                    border_hex = _css_color_to_hex(border_raw)
+                    if border_hex:
+                        _set_cell_borders(tbl_cell, border_hex)
+
+                    ci += colspan
+
+            # ── Column widths from <col> or first row <td style="width:..."> ──
+            col_tags = top.find_all("col")
+            if col_tags:
+                for idx, col_tag in enumerate(col_tags[:col_count]):
+                    w_css = _parse_css_inline(col_tag.get("style", ""))
+                    width_str = w_css.get("width", col_tag.get("width", ""))
+                    if width_str:
+                        try:
+                            if width_str.endswith("px"):
+                                emu = int(float(width_str[:-2]) * 9144)  # 1px ≈ 9144 EMU
+                                for r in range(len(rows_tags)):
+                                    tbl.cell(r, idx).width = emu
+                            elif width_str.endswith("%"):
+                                pass  # relative widths handled by Word auto-layout
+                        except (ValueError, IndexError):
+                            pass
+
+            continue  # done with this table
+
+        # ── Any other block: just extract its text ─────────────────────────
+        text = top.get_text(separator=" ").strip()
+        if text:
+            doc.add_paragraph(text)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
 def export_docx(html_content: str) -> bytes:
     """
     将 WangEditor 产出的 HTML 转换为 .docx 字节流。
-    优先使用 html2docx；若不可用则回退到 python-docx + BeautifulSoup 简单提取。
+
+    主路径：_export_docx_python — 基于 python-docx 直接构建，完整支持：
+      - 合并单元格 (colspan/rowspan)
+      - 单元格背景色、边框色
+      - 列宽、对齐方式
+      - 行内格式（加粗、斜体、颜色、字号）
+
+    备用路径：html2docx（当 python-docx/bs4 导入失败时）
 
     Returns:
         bytes — .docx 文件内容
@@ -567,10 +1518,17 @@ def export_docx(html_content: str) -> bytes:
         len(html_content or ""),
         (html_content or "")[:200],
     )
+
+    # ── Primary: rich python-docx builder ──────────────────────────────────
+    try:
+        return _export_docx_python(html_content)
+    except Exception as exc:
+        logger.warning("[export_docx] python-docx builder failed (%s), falling back to html2docx", exc)
+
+    # ── Fallback: html2docx (handles edge cases the builder misses) ─────────
     try:
         from html2docx import html2docx
 
-        # Wrap with a default font style so html2docx preserves a consistent CJK-friendly font
         wrapped_html = (
             '<html><head><meta charset="utf-8">'
             '<style>body{font-family:"Microsoft YaHei","PingFang SC","SimHei",Arial,sans-serif;'
@@ -579,38 +1537,14 @@ def export_docx(html_content: str) -> bytes:
             "</style></head><body>" + html_content + "</body></html>"
         )
         buf = html2docx(wrapped_html, title="Koto 导出文档")
-        buf.seek(0)  # html2docx returns BytesIO at EOF — must rewind before reading
+        buf.seek(0)
         data = buf.read()
         if data:
             return data
-        # Fall through to BeautifulSoup if html2docx produced empty output
     except ImportError:
         pass
 
-    # 回退方案：python-docx 纯文本提取
-    try:
-        from bs4 import BeautifulSoup
-        from docx import Document
-    except ImportError:
-        raise RuntimeError("html2docx 或 (python-docx + beautifulsoup4) 未安装")
-
-    doc = Document()
-    soup = BeautifulSoup(html_content, "html.parser")
-
-    for element in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li"]):
-        tag = element.name
-        text = element.get_text(separator=" ").strip()
-        if not text:
-            continue
-        if tag in ("h1", "h2", "h3"):
-            doc.add_heading(text, level=int(tag[1]))
-        else:
-            doc.add_paragraph(text)
-
-    buf = io.BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf.read()
+    raise RuntimeError("export_docx: 所有路径均失败，请确认 python-docx 和 beautifulsoup4 已安装")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -619,11 +1553,15 @@ def export_docx(html_content: str) -> bytes:
 
 
 def export_xlsx(
-    sheets_json: list[dict[str, Any]], images: list[dict] | None = None
+    sheets_json: Any, images: list[dict] | None = None
 ) -> bytes:
     """
-    将 Luckysheet 序列化 JSON 重建为 .xlsx 字节流。
-    按 celldata 数组写入每个工作表的单元格数据。
+    将编辑器序列化数据重建为 .xlsx 字节流。
+
+    支持两种输入格式:
+    - Univer IWorkbookData (dict): {sheetOrder:[...], sheets:{id:{name, cellData:{row:{col:{v,...}}}}}}
+    - Luckysheet legacy (list):  [{name, celldata:[{r,c,v:{v:...}}]}]
+
     副加 images (前端 overlay) 嵌入到第一个 sheet。
 
     Returns:
@@ -637,14 +1575,35 @@ def export_xlsx(
     wb = openpyxl.Workbook()
     wb.remove(wb.active)  # 删除默认空 sheet
 
-    for sheet_data in sheets_json:
-        ws = wb.create_sheet(title=sheet_data.get("name", "Sheet"))
-        for cell_entry in sheet_data.get("celldata", []):
-            r = cell_entry.get("r", 0) + 1  # Luckysheet 0-indexed → openpyxl 1-indexed
-            c = cell_entry.get("c", 0) + 1
-            v = cell_entry.get("v", {})
-            if v:
-                ws.cell(row=r, column=c, value=v.get("v"))
+    # ── Detect format ────────────────────────────────────────────────────────
+    is_univer = isinstance(sheets_json, dict) and "sheetOrder" in sheets_json
+
+    if is_univer:
+        # Univer IWorkbookData format
+        sheet_order = sheets_json.get("sheetOrder", [])
+        sheets_map = sheets_json.get("sheets", {})
+        for sheet_id in sheet_order:
+            sheet_data = sheets_map.get(sheet_id, {})
+            ws = wb.create_sheet(title=sheet_data.get("name", "Sheet"))
+            cell_data = sheet_data.get("cellData", {})
+            for row_key, row_cells in cell_data.items():
+                r = int(row_key) + 1  # Univer 0-indexed → openpyxl 1-indexed
+                for col_key, cell in row_cells.items():
+                    c = int(col_key) + 1
+                    if cell and "v" in cell:
+                        ws.cell(row=r, column=c, value=cell["v"])
+    else:
+        # Luckysheet legacy format (list of sheets)
+        if not isinstance(sheets_json, list):
+            sheets_json = []
+        for sheet_data in sheets_json:
+            ws = wb.create_sheet(title=sheet_data.get("name", "Sheet"))
+            for cell_entry in sheet_data.get("celldata", []):
+                r = cell_entry.get("r", 0) + 1  # Luckysheet 0-indexed → openpyxl 1-indexed
+                c = cell_entry.get("c", 0) + 1
+                v = cell_entry.get("v", {})
+                if v:
+                    ws.cell(row=r, column=c, value=v.get("v"))
 
     # Embed overlay images into the first sheet (if any)
     if images and wb.worksheets:
