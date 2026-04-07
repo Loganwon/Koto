@@ -1551,18 +1551,26 @@ window.WA = window.WA || {};
     input.placeholder = kind === 'folder' ? '文件夹名称' : '文件名.txt';
     row.appendChild(input);
 
-    // Find insertion point — inside the folder's children, or at the top of the list
+    // Find insertion point — try workspace tree first, then flat browser tree
     let inserted = false;
     if (parentPath) {
+      // Workspace tree: folder wrapped in wa-folder-group with nested children
       const folderGroup = document.querySelector(`.wa-folder-group[data-folder="${CSS.escape(parentPath)}"]`);
       if (folderGroup) {
         const childrenEl = folderGroup.querySelector('.wa-folder-children');
         if (childrenEl) {
-          // Ensure the folder is open
           childrenEl.style.display = 'block';
           const arrowEl = folderGroup.querySelector('.wa-folder-arrow');
           if (arrowEl) arrowEl.classList.add('open');
           childrenEl.prepend(row);
+          inserted = true;
+        }
+      }
+      // Flat browser tree: folder is a wa-file-item.folder[data-path] sibling
+      if (!inserted) {
+        const folderEl = document.querySelector(`.wa-file-item.folder[data-path="${CSS.escape(parentPath)}"]`);
+        if (folderEl) {
+          folderEl.insertAdjacentElement('afterend', row);
           inserted = true;
         }
       }
@@ -1578,10 +1586,18 @@ window.WA = window.WA || {};
       const name = input.value.trim();
       if (!name) { row.remove(); return; }
       try {
-        const endpoint = kind === 'folder' ? '/api/v1/workspace/create_folder' : '/api/v1/workspace/create_file';
-        const body = kind === 'folder'
-          ? { parent: parentPath || '', name }
-          : { folder: parentPath || '', name };
+        // Detect absolute path (Windows drive letter or Unix root) → use fs endpoints
+        const isAbsolute = parentPath && (/^[A-Za-z]:[/\\]/.test(parentPath) || parentPath.startsWith('/'));
+        let endpoint, body;
+        if (isAbsolute) {
+          endpoint = kind === 'folder' ? '/api/v1/fs/create_folder' : '/api/v1/fs/create_file';
+          body = { parent: parentPath, name };
+        } else {
+          endpoint = kind === 'folder' ? '/api/v1/workspace/create_folder' : '/api/v1/workspace/create_file';
+          body = kind === 'folder'
+            ? { parent: parentPath || '', name }
+            : { folder: parentPath || '', name };
+        }
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

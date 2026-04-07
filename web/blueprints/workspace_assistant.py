@@ -1019,6 +1019,82 @@ def create_workspace_folder():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/fs/create_file  — create file at an absolute path (file browser)
+# POST /api/v1/fs/create_folder
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/fs/create_file", methods=["POST"])
+def fs_create_file():
+    """
+    在文件系统任意目录创建新文件（供文件浏览器右键菜单使用）。
+    Body (JSON): {"parent": "<absolute_path>", "name": "filename.txt"}
+    """
+    import re
+
+    body = request.get_json(force=True, silent=True) or {}
+    parent_str = (body.get("parent") or "").strip()
+    name = (body.get("name") or "").strip()
+
+    if not name:
+        return jsonify({"error": "文件名不能为空"}), 400
+    if re.search(r'[/\\<>:"|?*\x00-\x1f]', name):
+        return jsonify({"error": "文件名包含非法字符"}), 400
+    if not parent_str:
+        return jsonify({"error": "父目录不能为空"}), 400
+
+    parent = Path(parent_str).resolve()
+    if not parent.is_dir():
+        return jsonify({"error": "目标目录不存在"}), 404
+
+    target = parent / name
+    if target.exists():
+        return jsonify({"error": f'"{name}" 已存在'}), 409
+
+    try:
+        target.touch()
+        logger.info("[WorkspaceAssistant] fs 创建文件: %s", target)
+        return jsonify({"ok": True, "path": str(target), "name": name})
+    except Exception as e:
+        return jsonify({"error": f"创建失败: {e}"}), 500
+
+
+@workspace_assistant_bp.route("/api/v1/fs/create_folder", methods=["POST"])
+def fs_create_folder():
+    """
+    在文件系统任意目录创建新文件夹（供文件浏览器右键菜单使用）。
+    Body (JSON): {"parent": "<absolute_path>", "name": "foldername"}
+    """
+    import re
+
+    body = request.get_json(force=True, silent=True) or {}
+    parent_str = (body.get("parent") or "").strip()
+    name = (body.get("name") or "").strip()
+
+    if not name:
+        return jsonify({"error": "文件夹名不能为空"}), 400
+    if re.search(r'[/\\<>:"|?*\x00-\x1f]', name):
+        return jsonify({"error": "文件夹名包含非法字符"}), 400
+    if not parent_str:
+        return jsonify({"error": "父目录不能为空"}), 400
+
+    parent = Path(parent_str).resolve()
+    if not parent.is_dir():
+        return jsonify({"error": "父目录不存在"}), 404
+
+    target = parent / name
+    if target.exists():
+        return jsonify({"error": f'"{name}" 已存在'}), 409
+
+    try:
+        target.mkdir()
+        logger.info("[WorkspaceAssistant] fs 创建文件夹: %s", target)
+        return jsonify({"ok": True, "path": str(target), "name": name})
+    except Exception as e:
+        return jsonify({"error": f"创建失败: {e}"}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # POST /api/v1/workspace/set_workspace_dir
 # ─────────────────────────────────────────────────────────────────────────────
 
