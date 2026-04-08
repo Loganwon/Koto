@@ -718,7 +718,7 @@ class TrainingDataBuilder:
         try:
             import requests as _req
 
-            resp = _req.get("http://localhost:11434/api/tags", timeout=2)
+            resp = _req.get("http://127.0.0.1:11434/api/tags", timeout=2)
             if resp.status_code != 200:
                 return
             models = [m["name"] for m in resp.json().get("models", [])]

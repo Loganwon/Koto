@@ -36,12 +36,13 @@ import pytest
 def wa_client(tmp_path_factory):
     """
     Flask test client backed by a temporary workspace/tmp directory.
-    We patch _TMP_DIR and WORKSPACE_DIR so tests never touch the real workspace.
+    We patch _TMP_ROOT and _get_session_id so tests never touch the real workspace
+    and don't need a real Flask session cookie.
     """
     os.environ.setdefault("KOTO_AUTH_ENABLED", "false")
 
     tmp_root = tmp_path_factory.mktemp("wa_root")
-    tmp_dir = tmp_root / "tmp"
+    tmp_dir = tmp_root / "tmp" / "testsession"
     workspace_dir = tmp_root / "workspace"
     tmp_dir.mkdir(parents=True)
     workspace_dir.mkdir(parents=True)
@@ -49,9 +50,13 @@ def wa_client(tmp_path_factory):
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
 
-    original_tmp = _wa._TMP_DIR
+    original_tmp = _wa._TMP_ROOT
+    original_get_sid = _wa._get_session_id
     original_ws = getattr(_shared, "WORKSPACE_DIR", None)
-    _wa._TMP_DIR = tmp_dir
+    # Patch _TMP_ROOT to the parent of our isolated dir and fix session to always
+    # return 'testsession' so _ensure_tmp_dir() resolves to tmp_dir.
+    _wa._TMP_ROOT = tmp_root / "tmp"
+    _wa._get_session_id = lambda: "testsession"
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
@@ -61,11 +66,13 @@ def wa_client(tmp_path_factory):
     app = Flask(__name__)
     app.register_blueprint(workspace_assistant_bp)
     app.config["TESTING"] = True
+    app.config["SECRET_KEY"] = "test-secret"
 
     with app.test_client() as client:
         yield client, tmp_dir, workspace_dir
 
-    _wa._TMP_DIR = original_tmp
+    _wa._TMP_ROOT = original_tmp
+    _wa._get_session_id = original_get_sid
     if original_ws is not None:
         _shared.WORKSPACE_DIR = original_ws
 
@@ -840,3 +847,663 @@ class TestSaveFlowJsFixes:
         assert (
             "_isSaving = false" in self.src[finally_idx:]
         ), "_isSaving must be reset to false in the finally block"
+
+
+# ── XLSX parsing: IWorkbookData format compliance ─────────────────────────────
+
+
+def _make_xlsx_bytes() -> bytes:
+    """Create a minimal real .xlsx file using openpyxl for testing."""
+    try:
+        import openpyxl
+        from io import BytesIO
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws["A1"] = "Hello"
+        ws["B1"] = 123
+        ws["A2"] = "World"
+        ws["B2"] = 45.6
+        buf = BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+    except ImportError:
+        return b""
+
+
+class TestXlsxOpenFile:
+    """Tests for XLSX parsing → IWorkbookData format returned by open_file."""
+
+    def _upload_xlsx(self, client, name="test.xlsx", xlsx_bytes=None):
+        if xlsx_bytes is None:
+            xlsx_bytes = _make_xlsx_bytes()
+        return client.post(
+            "/api/v1/workspace/open_file",
+            data={"file": (io.BytesIO(xlsx_bytes), name)},
+            content_type="multipart/form-data",
+        )
+
+    def test_xlsx_returns_200(self, wa_client):
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.get_json()}"
+
+    def test_xlsx_file_type_is_xlsx(self, wa_client):
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        assert resp.get_json()["file_type"] == "xlsx"
+
+    def test_xlsx_data_is_iworkbookdata(self, wa_client):
+        """data must have all required IWorkbookData top-level keys."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client, "myfile.xlsx")
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        for key in ("id", "name", "appVersion", "locale", "sheetOrder", "sheets", "styles", "resources"):
+            assert key in data, f"IWorkbookData missing required key: {key!r}"
+
+    def test_xlsx_workbook_name_is_original_filename(self, wa_client):
+        """workbook name must be derived from the original uploaded filename, not a UUID."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client, "MyReport.xlsx")
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        wb_name = data.get("name", "")
+        # Must be the stem of the original filename, not a 32-char UUID hex
+        assert wb_name == "MyReport", (
+            f"workbook name should be 'MyReport' (from 'MyReport.xlsx'), got {wb_name!r}"
+        )
+        assert len(wb_name) != 32 or not wb_name.isalnum(), (
+            f"workbook name looks like a UUID hex: {wb_name!r}"
+        )
+
+    def test_xlsx_app_version_is_set(self, wa_client):
+        """appVersion must be '0.5.0' for Univer compatibility."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data.get("appVersion") == "0.5.0"
+
+    def test_xlsx_locale_is_set(self, wa_client):
+        """locale must be present for Univer to apply zh-CN formatting."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data.get("locale") == "zh-CN"
+
+    def test_xlsx_sheet_order_matches_sheets_keys(self, wa_client):
+        """sheetOrder must list the same sheet IDs as the sheets dict keys."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        sheet_order = data.get("sheetOrder", [])
+        sheets = data.get("sheets", {})
+        assert set(sheet_order) == set(sheets.keys()), (
+            f"sheetOrder {sheet_order} != sheets keys {list(sheets.keys())}"
+        )
+
+    def test_xlsx_sheet_has_required_fields(self, wa_client):
+        """Each IWorksheetData must have id, name, rowCount, columnCount, cellData."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        sheets = resp.get_json()["data"].get("sheets", {})
+        assert sheets, "sheets must not be empty"
+        for sheet_id, sheet_data in sheets.items():
+            for key in ("id", "name", "rowCount", "columnCount", "cellData"):
+                assert key in sheet_data, (
+                    f"IWorksheetData[{sheet_id!r}] missing required key: {key!r}"
+                )
+
+    def test_xlsx_sheet_id_matches_key(self, wa_client):
+        """sheet.id must equal the key in the sheets dict."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        sheets = resp.get_json()["data"].get("sheets", {})
+        for sheet_id, sheet_data in sheets.items():
+            assert sheet_data.get("id") == sheet_id, (
+                f"sheet.id {sheet_data.get('id')!r} != dict key {sheet_id!r}"
+            )
+
+    def test_xlsx_cell_data_has_expected_cell(self, wa_client):
+        """
+        The test spreadsheet has 'Hello' in A1 (row=0, col=0).
+        After JSON serialization, keys must be strings '0'.
+        """
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        sheets = resp.get_json()["data"].get("sheets", {})
+        first_sheet = sheets.get("sheet1", next(iter(sheets.values()), {}))
+        cell_data = first_sheet.get("cellData", {})
+        assert cell_data, "cellData should not be empty for a populated sheet"
+        # JSON keys must be strings
+        row_keys = list(cell_data.keys())
+        assert all(isinstance(k, str) for k in row_keys), (
+            f"cellData row keys must be strings after JSON, got: {row_keys[:3]}"
+        )
+        # Row 0 must exist and have cell (0,0) with "Hello"
+        row0 = cell_data.get("0", {})
+        assert row0, "row 0 must be present"
+        col0 = row0.get("0", {})
+        assert col0, "cell (0,0) must be present"
+        assert col0.get("v") == "Hello", f"cell(0,0).v should be 'Hello', got {col0.get('v')!r}"
+        assert col0.get("t") == 1, f"cell(0,0).t should be 1 (string), got {col0.get('t')!r}"
+
+    def test_xlsx_numeric_cell_has_correct_type(self, wa_client):
+        """Numeric cells must have t=2 (number type in Univer)."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        sheets = resp.get_json()["data"].get("sheets", {})
+        first_sheet = sheets.get("sheet1", next(iter(sheets.values()), {}))
+        cell_data = first_sheet.get("cellData", {})
+        row0 = cell_data.get("0", {})
+        col1 = row0.get("1", {})  # B1 = 123
+        assert col1.get("t") == 2, f"numeric cell type should be 2, got {col1.get('t')!r}"
+        assert col1.get("v") == 123, f"numeric cell value should be 123, got {col1.get('v')!r}"
+
+    def test_xlsx_styles_is_dict(self, wa_client):
+        """styles must be present as a dict (even if empty)."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert isinstance(data.get("styles"), dict), "styles must be a dict"
+
+    def test_xlsx_resources_is_list(self, wa_client):
+        """resources must be present as a list (even if empty)."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert isinstance(data.get("resources"), list), "resources must be a list"
+
+    def test_xlsx_row_and_column_counts_positive(self, wa_client):
+        """rowCount and columnCount must each be > 0."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        sheets = resp.get_json()["data"].get("sheets", {})
+        for sid, sheet in sheets.items():
+            assert sheet.get("rowCount", 0) > 0, f"sheet {sid} rowCount should be > 0"
+            assert sheet.get("columnCount", 0) > 0, f"sheet {sid} columnCount should be > 0"
+
+    def test_xlsx_merge_data_is_list(self, wa_client):
+        """mergeData must be a list (empty list if no merged cells)."""
+        client, _, _ = wa_client
+        if not _make_xlsx_bytes():
+            pytest.skip("openpyxl not available")
+        resp = self._upload_xlsx(client)
+        assert resp.status_code == 200
+        sheets = resp.get_json()["data"].get("sheets", {})
+        for sid, sheet in sheets.items():
+            assert isinstance(sheet.get("mergeData"), list), (
+                f"sheet {sid} mergeData must be a list"
+            )
+
+
+# ── PPTX parsing: slide geometry format compliance ───────────────────────────
+
+
+def _make_pptx_bytes() -> bytes:
+    """Create a minimal real .pptx file using python-pptx for testing."""
+    try:
+        from io import BytesIO
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        prs = Presentation()
+        slide_layout = prs.slide_layouts[0]  # Title Slide
+        slide = prs.slides.add_slide(slide_layout)
+        title = slide.shapes.title
+        subtitle = slide.placeholders[1]
+        title.text = "Test Title"
+        subtitle.text = "Test Subtitle"
+
+        # Second slide with a table
+        blank_layout = prs.slide_layouts[6]  # Blank
+        slide2 = prs.slides.add_slide(blank_layout)
+        rows, cols = 2, 3
+        left = top = Inches(1)
+        width = Inches(6)
+        height = Inches(2)
+        table = slide2.shapes.add_table(rows, cols, left, top, width, height).table
+        table.cell(0, 0).text = "Header1"
+        table.cell(0, 1).text = "Header2"
+        table.cell(0, 2).text = "Header3"
+        table.cell(1, 0).text = "Value1"
+        table.cell(1, 1).text = "Value2"
+        table.cell(1, 2).text = "Value3"
+
+        buf = BytesIO()
+        prs.save(buf)
+        return buf.getvalue()
+    except ImportError:
+        return b""
+
+
+class TestPptxOpenFile:
+    """Tests for PPTX parsing → slide geometry format returned by open_file."""
+
+    def _upload_pptx(self, client, name="test.pptx", pptx_bytes=None):
+        if pptx_bytes is None:
+            pptx_bytes = _make_pptx_bytes()
+        return client.post(
+            "/api/v1/workspace/open_file",
+            data={"file": (io.BytesIO(pptx_bytes), name)},
+            content_type="multipart/form-data",
+        )
+
+    def test_pptx_returns_200(self, wa_client):
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.get_json()}"
+
+    def test_pptx_file_type_is_pptx(self, wa_client):
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        assert resp.get_json()["file_type"] == "pptx"
+
+    def test_pptx_data_has_required_keys(self, wa_client):
+        """data must have slide_width_emu, slide_height_emu, and slides."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        for key in ("slide_width_emu", "slide_height_emu", "slides"):
+            assert key in data, f"PPTX data missing required key: {key!r}"
+
+    def test_pptx_slide_dimensions_are_positive(self, wa_client):
+        """Slide dimensions must be positive integers (in EMU)."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        data = resp.get_json()["data"]
+        assert data["slide_width_emu"] > 0, "slide_width_emu must be positive"
+        assert data["slide_height_emu"] > 0, "slide_height_emu must be positive"
+
+    def test_pptx_slides_is_non_empty_list(self, wa_client):
+        """slides must be a non-empty list (we have 2 slides)."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        slides = resp.get_json()["data"].get("slides", [])
+        assert isinstance(slides, list) and len(slides) >= 1, (
+            f"slides must be a non-empty list, got: {slides!r}"
+        )
+
+    def test_pptx_slide_count_matches_presentation(self, wa_client):
+        """Our test PPTX has 2 slides; the response must reflect that."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        slides = resp.get_json()["data"].get("slides", [])
+        assert len(slides) == 2, f"Expected 2 slides, got {len(slides)}"
+
+    def test_pptx_slide_has_required_fields(self, wa_client):
+        """Each slide must have slide_index, background, shapes."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        for i, slide in enumerate(resp.get_json()["data"]["slides"]):
+            for key in ("slide_index", "background", "shapes"):
+                assert key in slide, f"slide[{i}] missing required key: {key!r}"
+
+    def test_pptx_text_shapes_have_paragraphs(self, wa_client):
+        """Slide 0 (title slide) must have at least one TEXT shape with paragraphs."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        slide0 = resp.get_json()["data"]["slides"][0]
+        text_shapes = [s for s in slide0["shapes"] if s.get("_type") == "TEXT"]
+        assert text_shapes, "Slide 0 should have at least one TEXT shape"
+        for shape in text_shapes:
+            assert "paragraphs" in shape, "TEXT shape must have paragraphs"
+            assert isinstance(shape["paragraphs"], list)
+
+    def test_pptx_title_text_is_present(self, wa_client):
+        """Slide 0 title placeholder must contain 'Test Title'."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        slide0 = resp.get_json()["data"]["slides"][0]
+        all_text = []
+        for shape in slide0["shapes"]:
+            for para in shape.get("paragraphs", []):
+                for run in para.get("runs", []):
+                    if run.get("text"):
+                        all_text.append(run["text"])
+        assert "Test Title" in all_text, (
+            f"Expected 'Test Title' in slide 0 text runs, got: {all_text}"
+        )
+
+    def test_pptx_table_shape_on_slide2(self, wa_client):
+        """Slide 1 (index 1) has a table shape with cells."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        slide1 = resp.get_json()["data"]["slides"][1]
+        table_shapes = [s for s in slide1["shapes"] if s.get("_type") == "TABLE"]
+        assert table_shapes, "Slide 1 should have at least one TABLE shape"
+
+    def test_pptx_table_cells_contain_text(self, wa_client):
+        """Table cells in slide 1 must include the test cell text."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        slide1 = resp.get_json()["data"]["slides"][1]
+        table_shapes = [s for s in slide1["shapes"] if s.get("_type") == "TABLE"]
+        assert table_shapes
+        cells = table_shapes[0].get("cells", [])
+        cell_texts = [c["text"] for c in cells]
+        assert "Header1" in cell_texts, f"Expected 'Header1' in table cells, got: {cell_texts}"
+        assert "Value1" in cell_texts, f"Expected 'Value1' in table cells, got: {cell_texts}"
+
+    def test_pptx_table_has_correct_dimensions(self, wa_client):
+        """Table in slide 1 must have the right row/col counts."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        slide1 = resp.get_json()["data"]["slides"][1]
+        table_shapes = [s for s in slide1["shapes"] if s.get("_type") == "TABLE"]
+        assert table_shapes
+        table = table_shapes[0]
+        assert table.get("table_rows") == 2, f"Expected 2 rows, got {table.get('table_rows')}"
+        assert table.get("table_cols") == 3, f"Expected 3 cols, got {table.get('table_cols')}"
+
+    def test_pptx_shapes_have_geometry(self, wa_client):
+        """All shapes must have left, top, width, height (in EMU)."""
+        client, _, _ = wa_client
+        if not _make_pptx_bytes():
+            pytest.skip("python-pptx not available")
+        resp = self._upload_pptx(client)
+        assert resp.status_code == 200
+        for slide in resp.get_json()["data"]["slides"]:
+            for shape in slide["shapes"]:
+                for geo in ("left", "top", "width", "height"):
+                    assert geo in shape, (
+                        f"shape {shape.get('id')} missing geometry key {geo!r}"
+                    )
+
+
+# ── Embedded-mode render reliability: JS source contract ─────────────────────
+
+
+class TestEmbeddedModeRenderGuards:
+    """
+    Validates that workspace-assistant.js contains all guards required for
+    reliable XLSX/PPTX rendering in embedded mode (#workspaceView starts
+    hidden and transitions from display:none → flex before files are opened).
+
+    These checks verify the *presence* of the guard mechanisms without
+    running a full browser — they complement the existing XLSX/PPTX API tests
+    and should catch regressions introduced by future refactors.
+    """
+
+    JS_PATH = (
+        Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
+    )
+
+    @property
+    def src(self) -> str:
+        return self.JS_PATH.read_text(encoding="utf-8")
+
+    # ── Layout guard helper ────────────────────────────────────────────────
+
+    def test_wait_for_editor_layout_function_exists(self):
+        """_waitForEditorLayout must be defined — it is the central visibility guard."""
+        assert "_waitForEditorLayout" in self.src, (
+            "_waitForEditorLayout() is missing from workspace-assistant.js"
+        )
+
+    def test_wait_for_editor_layout_handles_xlsx(self):
+        """Guard must cover xlsx container id."""
+        assert "wa-xlsx-editor" in self.src and "_waitForEditorLayout" in self.src, (
+            "_waitForEditorLayout must reference 'wa-xlsx-editor'"
+        )
+
+    def test_wait_for_editor_layout_handles_pptx(self):
+        """Guard must cover pptx container id."""
+        assert "wa-pptx-editor" in self.src and "_waitForEditorLayout" in self.src, (
+            "_waitForEditorLayout must reference 'wa-pptx-editor'"
+        )
+
+    def test_wait_for_editor_layout_timeout_resolve(self):
+        """Guard must resolve (not reject) on timeout so editors receive a mount attempt."""
+        # The guard should call resolve() on deadline, not reject()
+        src = self.src
+        guard_start = src.find("function _waitForEditorLayout")
+        guard_end   = src.find("\n  }", guard_start) + 4
+        guard_body  = src[guard_start:guard_end]
+        assert "resolve();" in guard_body, (
+            "_waitForEditorLayout must call resolve() on timeout (not reject)"
+        )
+
+    # ── Router.load guard ────────────────────────────────────────────────
+
+    def test_router_load_awaits_layout_guard(self):
+        """Router.load must await _waitForEditorLayout after toggleWorkspace."""
+        src = self.src
+        router_start = src.find("const Router = {")
+        router_end   = src.find("\n  };", router_start) + 4
+        router_body  = src[router_start:router_end]
+        assert "await _waitForEditorLayout" in router_body, (
+            "Router.load must await _waitForEditorLayout before creating editors"
+        )
+
+    def test_router_load_guard_before_xlsx_editor(self):
+        """The guard await must appear before new KotoXlsxEditor() in Router.load."""
+        src = self.src
+        router_start = src.find("const Router = {")
+        router_end   = src.find("\n  };", router_start) + 4
+        body = src[router_start:router_end]
+        guard_pos = body.find("await _waitForEditorLayout")
+        xlsx_pos  = body.find("new KotoXlsxEditor()")
+        assert guard_pos != -1 and xlsx_pos != -1 and guard_pos < xlsx_pos, (
+            "_waitForEditorLayout await must precede new KotoXlsxEditor() in Router.load"
+        )
+
+    def test_router_load_guard_before_pptx_editor(self):
+        """The guard await must appear before new KotoPptxEditor() in Router.load."""
+        src = self.src
+        router_start = src.find("const Router = {")
+        router_end   = src.find("\n  };", router_start) + 4
+        body = src[router_start:router_end]
+        guard_pos = body.find("await _waitForEditorLayout")
+        pptx_pos  = body.find("new KotoPptxEditor()")
+        assert guard_pos != -1 and pptx_pos != -1 and guard_pos < pptx_pos, (
+            "_waitForEditorLayout await must precede new KotoPptxEditor() in Router.load"
+        )
+
+    # ── _switchToTab guard ───────────────────────────────────────────────
+
+    def test_switch_to_tab_awaits_layout_guard(self):
+        """_switchToTab must also await _waitForEditorLayout for tab-switch renders."""
+        src = self.src
+        tab_start = src.find("async function _switchToTab")
+        tab_end   = src.find("\n  }", tab_start) + 4
+        tab_body  = src[tab_start:tab_end]
+        assert "await _waitForEditorLayout" in tab_body, (
+            "_switchToTab must await _waitForEditorLayout before creating editors"
+        )
+
+    # ── KotoXlsxEditor size-polling ──────────────────────────────────────
+
+    def test_xlsx_editor_polls_for_non_zero_size(self):
+        """KotoXlsxEditor.render must poll offsetWidth before calling KotoSheetsAPI.create."""
+        src = self.src
+        xlsx_start = src.find("class KotoXlsxEditor {")
+        xlsx_end   = src.find("\n  class Koto", xlsx_start)
+        xlsx_body  = src[xlsx_start:xlsx_end]
+        assert "offsetWidth" in xlsx_body, (
+            "KotoXlsxEditor must check offsetWidth before mounting Univer"
+        )
+        assert "_tryMount" in xlsx_body or "_doMount" in xlsx_body, (
+            "KotoXlsxEditor must use a polling/deferred mount strategy"
+        )
+
+    def test_xlsx_editor_has_mount_deadline(self):
+        """KotoXlsxEditor must have a bounded deadline to prevent infinite polling."""
+        src = self.src
+        xlsx_start = src.find("class KotoXlsxEditor {")
+        xlsx_end   = src.find("\n  class Koto", xlsx_start)
+        xlsx_body  = src[xlsx_start:xlsx_end]
+        assert "_mountDeadline" in xlsx_body or "Date.now()" in xlsx_body, (
+            "KotoXlsxEditor mount polling must have a bounded deadline"
+        )
+
+    def test_xlsx_editor_resize_nudge_present(self):
+        """ResizeObserver nudge (width+1 / reset) must still be present."""
+        src = self.src
+        xlsx_start = src.find("class KotoXlsxEditor {")
+        xlsx_end   = src.find("\n  class Koto", xlsx_start)
+        xlsx_body  = src[xlsx_start:xlsx_end]
+        assert "style.width" in xlsx_body, (
+            "KotoXlsxEditor must still include the ResizeObserver nudge (width+1/reset)"
+        )
+
+    # ── KotoPptxEditor size-polling ──────────────────────────────────────
+
+    def test_pptx_editor_polls_for_slide_area_width(self):
+        """KotoPptxEditor.render must poll clientWidth before calling _renderSlide(0)."""
+        src = self.src
+        pptx_start = src.find("class KotoPptxEditor {")
+        pptx_end   = src.find("\n  class Koto", pptx_start)
+        pptx_body  = src[pptx_start:pptx_end]
+        assert "_tryPptxRender" in pptx_body or "_pptxMountDeadline" in pptx_body, (
+            "KotoPptxEditor must use a polling strategy for first-slide render"
+        )
+
+    def test_pptx_editor_has_mount_deadline(self):
+        """KotoPptxEditor must have a deadline to prevent infinite polling."""
+        src = self.src
+        pptx_start = src.find("class KotoPptxEditor {")
+        pptx_end   = src.find("\n  class Koto", pptx_start)
+        pptx_body  = src[pptx_start:pptx_end]
+        assert "_pptxMountDeadline" in pptx_body or "Date.now()" in pptx_body, (
+            "KotoPptxEditor mount polling must have a bounded deadline"
+        )
+
+    # ── openInMainView reflow hook ───────────────────────────────────────
+
+    def test_open_in_main_view_reflows_xlsx(self):
+        """openInMainView must trigger a ResizeObserver nudge for active XLSX editors."""
+        src = self.src
+        oim_start = src.find("window.WA.openInMainView = function")
+        oim_end   = src.find("\n  };", oim_start) + 4
+        oim_body  = src[oim_start:oim_end]
+        assert "wa-xlsx-sheet" in oim_body, (
+            "openInMainView must reference 'wa-xlsx-sheet' for the reflow nudge"
+        )
+        assert "style.width" in oim_body, (
+            "openInMainView must perform the width+1/reset nudge for XLSX after showing"
+        )
+
+    def test_open_in_main_view_reflows_pptx(self):
+        """openInMainView must trigger a re-render for active PPTX editors."""
+        src = self.src
+        oim_start = src.find("window.WA.openInMainView = function")
+        oim_end   = src.find("\n  };", oim_start) + 4
+        oim_body  = src[oim_start:oim_end]
+        assert "_renderSlide" in oim_body, (
+            "openInMainView must call _renderSlide for active PPTX editor after showing"
+        )
+
+    # ── XLSX API response still valid ────────────────────────────────────
+
+    def test_xlsx_open_file_returns_workbook_data(self, wa_client):
+        """Backend must still return valid IWorkbookData after frontend changes."""
+        client, _, _ = wa_client
+        xlsx_bytes = _make_xlsx_bytes()
+        if not xlsx_bytes:
+            pytest.skip("openpyxl not available")
+        resp = client.post(
+            "/api/v1/workspace/open_file",
+            data={"file": (io.BytesIO(xlsx_bytes), "embedded_test.xlsx")},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200, f"open_file failed: {resp.data}"
+        body = resp.get_json()
+        assert body["file_type"] == "xlsx"
+        data = body["data"]
+        assert "sheets" in data or "sheetOrder" in data, (
+            "IWorkbookData must contain 'sheets' or 'sheetOrder'"
+        )
+
+    def test_pptx_open_file_returns_slides(self, wa_client):
+        """Backend must still return valid slide data after frontend changes."""
+        client, _, _ = wa_client
+        pptx_bytes = _make_pptx_bytes()
+        if not pptx_bytes:
+            pytest.skip("python-pptx not available")
+        resp = client.post(
+            "/api/v1/workspace/open_file",
+            data={"file": (io.BytesIO(pptx_bytes), "embedded_test.pptx")},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200, f"open_file failed: {resp.data}"
+        body = resp.get_json()
+        assert body["file_type"] == "pptx"
+        assert isinstance(body["data"].get("slides"), list)
+        assert len(body["data"]["slides"]) >= 1
+

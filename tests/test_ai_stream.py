@@ -76,18 +76,22 @@ def app_client():
         # We need to patch the client object in web.app
         try:
             from web.app import app
-            with patch.object(app, "testing", True):
-                app.config["TESTING"] = True
-                # Patch the client
-                import web.app as web_app_module
-                original_client = getattr(web_app_module, "client", None)
-                original_api_key = getattr(web_app_module, "API_KEY", None)
-                web_app_module.client = mock_client
-                web_app_module.API_KEY = "test-key-mock"
-                yield app.test_client()
-                # Restore
-                web_app_module.client = original_client
-                web_app_module.API_KEY = original_api_key
+            app.config["TESTING"] = True
+            # Patch the client and types (to avoid google.genai circular import under test)
+            import web.app as web_app_module
+            original_client = getattr(web_app_module, "client", None)
+            original_api_key = getattr(web_app_module, "API_KEY", None)
+            original_types = getattr(web_app_module, "types", None)
+            mock_types = MagicMock()
+            mock_types.GenerateContentConfig.return_value = MagicMock()
+            web_app_module.client = mock_client
+            web_app_module.API_KEY = "test-key-mock"
+            web_app_module.types = mock_types
+            yield app.test_client()
+            # Restore
+            web_app_module.client = original_client
+            web_app_module.API_KEY = original_api_key
+            web_app_module.types = original_types
         except ImportError as e:
             pytest.skip(f"Cannot import web.app: {e}")
 
@@ -287,3 +291,58 @@ class TestPromptContextTruncation:
         prompt = _build_editor_prompt("polish", "选中内容", "", long_text)
         # Prompt should not contain the entire 20K text
         assert len(prompt) < 15000
+
+
+class TestLocalModelMode:
+    """Tests that model_mode='local' properly routes to Ollama (not cloud) in editor_ai_stream."""
+
+    def test_local_mode_uses_ollama_when_alive(self, app_client):
+        """model_mode=local + Ollama alive → response comes from Ollama, not cloud."""
+        from unittest.mock import patch, MagicMock
+
+        # Mock Ollama provider to return a known response
+        mock_provider = MagicMock()
+        mock_provider.generate_content.return_value = iter([
+            {"content": "本地", "tool_calls": [], "usage": {}},
+            {"content": "Ollama", "tool_calls": [], "usage": {}},
+            {"content": "响应", "tool_calls": [], "usage": {}},
+        ])
+
+        with patch("app.core.socket_handler._is_ollama_alive", return_value=True), \
+             patch("app.core.socket_handler._get_local_provider", return_value=mock_provider):
+            resp = app_client.post("/api/editor/ai/stream", json={
+                "action": "polish",
+                "selection": "需要润色的文字",
+                "model_mode": "local",
+            })
+
+        assert resp.status_code == 200
+        events = parse_sse_events(resp.data)
+        token_texts = "".join(e.get("text", "") for e in events if e.get("type") == "token")
+        assert "Ollama" in token_texts or "本地" in token_texts
+
+    def test_local_mode_ollama_not_running_returns_error(self, app_client):
+        """model_mode=local + Ollama not running → returns error event."""
+        from unittest.mock import patch
+
+        with patch("app.core.socket_handler._is_ollama_alive", return_value=False):
+            resp = app_client.post("/api/editor/ai/stream", json={
+                "action": "polish",
+                "selection": "需要润色的文字",
+                "model_mode": "local",
+            })
+
+        assert resp.status_code == 200
+        events = parse_sse_events(resp.data)
+        error_events = [e for e in events if e.get("type") == "error"]
+        assert len(error_events) > 0, "Expected an error event when Ollama is not running"
+
+    def test_find_replace_sends_model_mode(self):
+        """Verify _sendViaFindReplace in AIPanel.js passes model_mode."""
+        # Read the built source to verify model_mode is included
+        import pathlib
+        src = pathlib.Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
+        # Check that _sendViaFindReplace sends model_mode
+        find_replace_section = src[src.find("_sendViaFindReplace"):]
+        fetch_call = find_replace_section[:find_replace_section.find("}\n  }")]
+        assert "model_mode" in fetch_call, "_sendViaFindReplace should include model_mode"

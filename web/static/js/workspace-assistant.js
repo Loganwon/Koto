@@ -88,8 +88,20 @@ window.WA = window.WA || {};
     $('wa-file-name').textContent = tab.name;
     $('wa-save-btn').disabled = (tab.fileType === 'pdf');
     const _saveAsBtn = $('wa-saveas-btn'); if (_saveAsBtn) _saveAsBtn.disabled = (tab.fileType === 'pdf');
+    const _archBtn1 = $('wa-archive-btn'); if (_archBtn1) _archBtn1.disabled = false;
+    const _histBtn  = $('wa-history-btn'); if (_histBtn) _histBtn.disabled = false;
     _updateSubjectBar(tab.name, tab.fileType);
     toggleWorkspace(true);
+
+    // Show PDF/DOCX zoom control only when the relevant file type is open
+    const _pdfZoomCtrl = $('wa-pdf-zoom-ctrl');
+    if (_pdfZoomCtrl) _pdfZoomCtrl.style.display = (tab.fileType === 'pdf') ? 'flex' : 'none';
+    const _docxZoomCtrl = $('wa-docx-zoom-ctrl');
+    if (_docxZoomCtrl) _docxZoomCtrl.style.display = (tab.fileType === 'docx') ? 'flex' : 'none';
+
+    // Guard: wait for the target editor container to be fully laid out before
+    // mounting dimension-sensitive editors (mirrors the same guard in Router.load).
+    await _waitForEditorLayout(tab.fileType);
 
     const data = tab.cache;
     if (tab.fileType === 'docx') {
@@ -149,6 +161,7 @@ window.WA = window.WA || {};
       $('wa-file-name').textContent = '全格式 AI 工作区';
       $('wa-save-btn').disabled = true;
       const _saBtn1 = $('wa-saveas-btn'); if (_saBtn1) _saBtn1.disabled = true;
+      const _archBtn2 = $('wa-archive-btn'); if (_archBtn2) _archBtn2.disabled = true;
       _updateSubjectBar(null, null);
     }
 
@@ -170,11 +183,50 @@ window.WA = window.WA || {};
   // ── Utility ──
   const $ = id => document.getElementById(id);
 
-  function showToast(msg, type = 'success') {
+  /**
+   * Wait until the editor container for a given fileType has non-zero layout
+   * dimensions and is visible in the DOM.  Returns a Promise that resolves when
+   * the container is ready, or rejects after `timeoutMs`.
+   *
+   * This guards against the embedded-mode race where #workspaceView transitions
+   * from display:none → flex immediately before Router.load or _switchToTab
+   * attempts to mount Univer or the PPTX canvas — both requiring real pixel
+   * dimensions to initialise correctly.
+   *
+   * @param {string} fileType  – 'xlsx' | 'pptx' | any other type (resolves immediately)
+   * @param {number} timeoutMs – max wait (default 800 ms)
+   */
+  function _waitForEditorLayout(fileType, timeoutMs = 800) {
+    const containerId = fileType === 'xlsx' ? 'wa-xlsx-editor'
+                      : fileType === 'pptx' ? 'wa-pptx-editor'
+                      : null;
+    if (!containerId) return Promise.resolve();  // DOCX / PDF don't have layout deps
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + timeoutMs;
+      function check() {
+        const el = document.getElementById(containerId);
+        if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
+          resolve();
+          return;
+        }
+        if (Date.now() >= deadline) {
+          console.warn('[WA] _waitForEditorLayout timeout for', containerId,
+            'offsetW:', el ? el.offsetWidth : 'null',
+            'offsetH:', el ? el.offsetHeight : 'null');
+          resolve();  // proceed anyway — editors have their own fallback retries
+          return;
+        }
+        requestAnimationFrame(check);
+      }
+      requestAnimationFrame(check);
+    });
+  }
+
+  function showToast(msg, type = 'success', duration = 3000) {
     const t = $('wa-toast');
     t.textContent = msg;
     t.className = type + ' show';
-    setTimeout(() => { t.className = t.className.replace('show', ''); }, 3000);
+    setTimeout(() => { t.className = t.className.replace('show', ''); }, duration);
   }
 
   function toggleWorkspace(show) {
@@ -288,114 +340,6 @@ window.WA = window.WA || {};
     // Kept so existing call sites don't throw.
   }
 
-  // ── (Old workspace tree helpers kept as stubs) ────────────────────────────
-  function _renderWorkspaceRoot_unused() {
-    if (!list) return;
-
-    // Apply search filter
-    const q = state.searchQuery;
-    let items = state._allFiles;
-    if (q) {
-      items = items.filter(i => _matchesSearch(i, q));
-    }
-
-    // Update workspace section visibility
-    list.style.display = state.sectionOpen.workspace ? '' : 'none';
-    const arrow = $('wa-ws-arrow');
-    if (arrow) arrow.className = 'wa-section-arrow' + (state.sectionOpen.workspace ? ' open' : '');
-
-    // Update sort button label
-    const sortBtn = $('wa-sort-btn');
-    if (sortBtn) sortBtn.title = '切换排序: ' + _SORT_LABELS[state.sortBy];
-
-    // Count total files in tree
-    const countFiles = (arr) => arr.reduce((n, i) => n + (i.type === 'file' ? 1 : countFiles(i.children || [])), 0);
-    const badge = $('wa-ws-badge');
-    if (badge) badge.textContent = countFiles(state._allFiles) || '';
-
-    if (!items.length) {
-      list.innerHTML = q
-        ? `<div style="padding:16px 12px;color:var(--text-muted);font-size:12px;text-align:center;">未找到 "${q}"</div>`
-        : '<div style="padding:20px 12px;color:var(--text-muted);font-size:12px;text-align:center;">暂无文件<br>点击 + 或拖拽添加</div>';
-      return;
-    }
-
-    function renderTree(rawItems, depth = 0) {
-      const openFolders = JSON.parse(localStorage.getItem('wa_open_folders') || '{}');
-      const sorted = _applySort(rawItems);
-      return sorted.map(item => {
-        if (item.type === 'folder') {
-          const children = q ? (item._filteredChildren || []) : (item.children || []);
-          const childrenHtml = renderTree(children, depth + 1);
-          const isOpen = q ? true : !!openFolders[item.path];
-          const folderIconSvg = isOpen ? _FOLDER_OPEN_SVG : _FOLDER_SVG;
-          const folderPathEsc = item.path.replace(/'/g, "\\'");
-          const folderNameEsc = item.name.replace(/'/g, "\\'");
-          return `<div class="wa-folder-group" data-folder="${item.path}">
-            <div class="wa-file-item folder" data-depth="${depth}" data-path="${folderPathEsc}"
-                onclick="WA.toggleFolder(this)"
-                oncontextmenu="WA._showFolderCtxMenu(event,'${folderPathEsc}','${folderNameEsc}')">
-              <span class="wa-folder-arrow${isOpen ? ' open' : ''}">›</span>
-              <span class="wa-file-icon">${folderIconSvg}</span>
-              <span class="wa-file-label">${item.name}</span>
-              <div class="wa-file-actions">
-                <button onclick="event.stopPropagation();WA.startNewFile('${folderPathEsc}')" title="新建文件">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-                </button>
-                <button onclick="event.stopPropagation();WA.startNewFolder('${folderPathEsc}')" title="新建子文件夹">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
-                </button>
-                <button onclick="event.stopPropagation();WA.renameFolderWorkspace('${folderPathEsc}','${folderNameEsc}')" title="重命名">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                </button>
-                <button class="del" onclick="event.stopPropagation();WA.deleteFolderWorkspace('${folderPathEsc}','${folderNameEsc}')" title="删除文件夹">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/></svg>
-                </button>
-              </div>
-            </div>
-            <div class="wa-folder-children" style="display:${isOpen ? 'block' : 'none'};">${childrenHtml}</div>
-          </div>`;
-        } else {
-          const esc = item.path.replace(/'/g, "\\'");
-          const nameEsc = item.name.replace(/'/g, "\\'");
-          const isActive = (state.fileName && item.name === state.fileName) ? ' active' : '';
-          const unsupported = (item.supported === false) ? ' wa-unsupported' : '';
-          const meta = [item.size, _formatDate(item.mtime)].filter(Boolean).join(' · ');
-          return `<div class="wa-file-item file${isActive}${unsupported}" data-depth="${depth}" data-path="${esc}"
-              onclick="WA._fileRowClick(event,'${esc}',${item.supported !== false})"
-              oncontextmenu="WA._showCtxMenu(event,'${esc}','${nameEsc}')"
-              title="${item.name}${meta ? '\n' + meta : ''}">
-            <input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleFileCheck(this,'${esc}')">
-            ${_fileIcon(item.ext, item.category)}
-            <span class="wa-file-label">${item.name}</span>
-            ${meta ? `<span class="wa-file-meta">${meta}</span>` : ''}
-            <div class="wa-file-actions">
-              <button onclick="event.stopPropagation();WA.renameWorkspaceFile('${esc}','${nameEsc}')" title="重命名">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              </button>
-              <button class="del" onclick="event.stopPropagation();WA.deleteWorkspaceFile('${esc}')" title="删除">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-              </button>
-            </div>
-          </div>`;
-        }
-      }).join('');
-    }
-
-    list.innerHTML = renderTree(items);
-    // restore checkboxes if still in select mode
-    if (state.selectMode) {
-      list.querySelectorAll('.wa-file-item.file').forEach(el => {
-        const p = el.dataset.path;
-        if (p && state.selectedFiles.has(p)) {
-          el.classList.add('selected');
-          const cb = el.querySelector('.wa-file-check');
-          if (cb) cb.checked = true;
-        }
-      });
-    }
-  }
-
   window.WA.refreshFiles = async () => {
     const btn = document.querySelector('.wa-icon-btn');
     if (btn) { btn.classList.add('spinning'); setTimeout(() => btn.classList.remove('spinning'), 700); }
@@ -432,7 +376,11 @@ window.WA = window.WA || {};
   window.WA.toggleSection = (id) => {
     state.sectionOpen[id] = !state.sectionOpen[id];
     localStorage.setItem('wa_sections', JSON.stringify(state.sectionOpen));
-    _renderWorkspaceTree();
+    if (id === 'myworkspace') {
+      _toggleMyWorkspaceSection();
+    } else {
+      _renderWorkspaceTree();
+    }
   };
 
   // ── Recent files section  ─────────────────────────────────────────────────
@@ -542,6 +490,284 @@ window.WA = window.WA || {};
     if (list) list.style.display = state._recentOpen ? '' : 'none';
     if (arrow) arrow.classList.toggle('open', state._recentOpen);
   };
+
+  // ── My Workspace: pinned files ─────────────────────────────────────────────
+  const _MYWS_KEY = 'wa_my_workspace_v1';
+
+  function _loadMyWorkspace() {
+    try { return JSON.parse(localStorage.getItem(_MYWS_KEY) || '[]'); } catch(e) { return []; }
+  }
+  function _saveMyWorkspace(list) {
+    localStorage.setItem(_MYWS_KEY, JSON.stringify(list));
+  }
+
+  function _toggleMyWorkspaceSection() {
+    const open = state.sectionOpen.myworkspace !== false;
+    const list = $('wa-myws-list');
+    const empty = $('wa-myws-empty');
+    const arrow = $('wa-myws-arrow');
+    if (arrow) arrow.classList.toggle('open', open);
+    if (list) list.style.display = open ? '' : 'none';
+    if (empty) empty.style.display = open && !_loadMyWorkspace().length ? '' : 'none';
+  }
+
+  function _renderMyWorkspace() {
+    const list = $('wa-myws-list');
+    const empty = $('wa-myws-empty');
+    const badge = $('wa-myws-badge');
+    if (!list) return;
+    const files = _loadMyWorkspace();
+    if (badge) badge.textContent = files.length || '';
+    const isOpen = state.sectionOpen.myworkspace !== false;
+    if (!isOpen) { list.style.display = 'none'; if (empty) empty.style.display = 'none'; return; }
+    if (!files.length) {
+      list.innerHTML = '';
+      list.style.display = 'none';
+      if (empty) empty.style.display = '';
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+    list.style.display = '';
+    list.innerHTML = files.map(f => {
+      const pathEsc = _escHtml(f.path);
+      const nameEsc = _escHtml(f.name);
+      const icon = _fileIcon(f.ext || f.name.split('.').pop() || '');
+      const active = state.activeTabPath === f.path ? ' active' : '';
+      return `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"
+        onclick="WA.openBrowserFile('${f.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}', true)"
+        draggable="true">
+        ${icon}<span class="wa-file-label">${nameEsc}</span>
+        <button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromMyWorkspace('${f.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')" title="从工作区移除">×</button>
+      </div>`;
+    }).join('');
+    // Add dragstart for files in My Workspace
+    list.querySelectorAll('.wa-myws-item[draggable]').forEach(el => {
+      el.addEventListener('dragstart', (e) => {
+        const p = el.dataset.path;
+        e.dataTransfer.effectAllowed = 'copyMove';
+        e.dataTransfer.setData('application/wa-file-path', p);
+        e.dataTransfer.setData('text/plain', p);
+        el.classList.add('dragging');
+        document.body.classList.add('wa-file-dragging');
+      });
+      el.addEventListener('dragend', () => {
+        el.classList.remove('dragging');
+        document.body.classList.remove('wa-file-dragging');
+      });
+    });
+  }
+
+  window.WA.addToMyWorkspace = (path) => {
+    if (!path) {
+      // No path provided — use current file
+      path = state.activeTabPath || (state.wsSourcePath);
+    }
+    if (!path) { showToast('请先打开一个文件', 'info'); return; }
+    const name = path.split(/[\\/]/).pop() || path;
+    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+    const files = _loadMyWorkspace();
+    if (files.some(f => f.path === path)) { showToast(`"${name}" 已在工作区中`, 'info'); return; }
+    files.push({ path, name, ext, addedAt: Date.now() });
+    _saveMyWorkspace(files);
+    _renderMyWorkspace();
+    showToast(`"${name}" 已加入工作区`, 'success');
+  };
+
+  window.WA.removeFromMyWorkspace = (path) => {
+    const files = _loadMyWorkspace().filter(f => f.path !== path);
+    _saveMyWorkspace(files);
+    _renderMyWorkspace();
+  };
+
+  // ── AI multi-file context ─────────────────────────────────────────────────
+  state._aiFileContext = [];  // [{path, name, content}]
+  state._aiTargetFileIdx = -1; // index into _aiFileContext designated as write-back target (-1 = none)
+
+  function _renderAIFileChips() {
+    const wrap = $('wa-ai-file-chips');
+    const list = $('wa-ai-file-chip-list');
+    const hint = $('wa-ai-attached-hint');
+    const hintLabel = $('wa-ai-attached-label');
+    if (!wrap || !list) return;
+    const n = state._aiFileContext.length;
+    const tIdx = state._aiTargetFileIdx;
+    const targetFile = (tIdx >= 0 && tIdx < n) ? state._aiFileContext[tIdx] : null;
+
+    if (!n) {
+      wrap.style.display = 'none';
+      if (hint) hint.style.display = 'none';
+      // Clear AI-queued markers on file tree items
+      document.querySelectorAll('.wa-file-item.ai-queued').forEach(el => el.classList.remove('ai-queued'));
+      _restoreDefaultQuickActions();
+      // Hide multi-doc extras
+      const ssr = $('wa-source-search-row'); if (ssr) ssr.style.display = 'none';
+      const mda = $('wa-multidoc-actions');  if (mda) mda.style.display = 'none';
+      return;
+    }
+
+    // Dynamic header
+    const headerEl = wrap.querySelector('.wa-ai-file-chips-header');
+    if (headerEl) {
+      const targetHint = targetFile ? `<span class="wa-target-hint"> · 目标: ${_escHtml(targetFile.name)}</span>` : '';
+      headerEl.innerHTML =
+        `<div class="wa-multidoc-title">` +
+        `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>` +
+        `<span>分析文档</span><span class="wa-multi-doc-badge">${n}</span>${targetHint}</div>` +
+        `<button onclick="WA.clearAIFileContext()" title="清除全部附加文件">全部移除</button>`;
+    }
+
+    wrap.style.display = '';
+    list.innerHTML = state._aiFileContext.map((f, i) => {
+      const isTarget = (i === tIdx);
+      const isLoading = !!f.loading;
+      const icon = _fileIcon(f.name.split('.').pop() || '');
+      const chars = (f.content || '').length;
+      const sizeLabel = isLoading ? '读取中…' : (chars < 1000 ? chars + ' 字' : (chars / 1000).toFixed(1) + 'k字');
+      const pinTitle = isTarget ? '取消目标文件' : '设为修改目标文件';
+      return `<div class="wa-ctx-file-row${isTarget ? ' ai-target' : ''}${isLoading ? ' loading' : ''}" title="${_escHtml(f.path)}">` +
+        `<span class="ctx-row-icon">${icon}</span>` +
+        `<span class="ctx-row-name">${_escHtml(f.name)}</span>` +
+        `<span class="ctx-row-size">${sizeLabel}</span>` +
+        (isLoading ? '' : `<button class="ctx-row-pin${isTarget ? ' active' : ''}" onclick="WA.setAITargetFile(${i})" title="${pinTitle}">📌</button>`) +
+        (isLoading ? '' : `<span class="ctx-row-remove" onclick="WA.removeAIFileContext(${i})" title="移除">×</span>`) +
+        `</div>`;
+    }).join('');
+
+    // Input-area hint bar
+    if (hint && hintLabel) {
+      if (targetFile) {
+        hintLabel.textContent = `📂 ${n}个文件 · 修改目标: ${targetFile.name}`;
+      } else {
+        hintLabel.textContent = `📂 ${n}个文件 · 多文档分析模式`;
+      }
+      hint.style.display = 'flex';
+    }
+
+    // Update quick-action bar for multi-doc mode
+    if (n >= 2) {
+      _renderMultiDocQuickActions(n, targetFile);
+    } else {
+      _restoreDefaultQuickActions();
+    }
+
+    // Show source search + multi-doc action buttons whenever files are attached
+    const ssr = $('wa-source-search-row'); if (ssr) ssr.style.display = '';
+    const mda = $('wa-multidoc-actions');  if (mda) mda.style.display = 'flex';
+
+    // Mark queued files in the browser file tree
+    document.querySelectorAll('.wa-file-item.ai-queued').forEach(el => el.classList.remove('ai-queued'));
+    state._aiFileContext.forEach(f => {
+      const el = document.querySelector(`.wa-file-item[data-path="${CSS.escape(f.path)}"]`);
+      if (el) el.classList.add('ai-queued');
+    });
+  }
+
+  // Replace quick-actions bar with multi-doc oriented buttons
+  function _renderMultiDocQuickActions(n, targetFile) {
+    const bar = $('wa-quick-actions');
+    if (!bar) return;
+    const tName = targetFile ? targetFile.name : null;
+    const btns = [
+      { label: '📊 对比差异', prompt: `请对比这${n}份文件的主要内容差异，列出相同点和不同点` },
+      { label: '🔍 查找引用', prompt: `请分析这${n}份文件之间是否存在引用或描述关系，列出具体对应内容` },
+      {
+        label: tName ? `✏️ 同步到 ${tName}` : '✏️ 同步内容',
+        prompt: tName
+          ? `请分析参考文件中有哪些内容需要同步更新到目标文件"${tName}"中，给出具体的逐条修改建议`
+          : `请分析这${n}份文件中有哪些内容需要互相同步更新，给出具体修改建议`
+      },
+      { label: '📋 综合摘要', prompt: `请综合这${n}份文件的核心内容，生成一份结构化摘要` },
+    ];
+    bar.innerHTML = btns.map(b =>
+      `<button class="wa-quick-btn multi-doc" data-prompt="${_escHtml(b.prompt)}">${b.label}</button>`
+    ).join('');
+    bar.querySelectorAll('.wa-quick-btn.multi-doc').forEach(btn => {
+      btn.addEventListener('click', () => WA.quickAction(btn.dataset.prompt));
+    });
+  }
+
+  // Restore the default single-doc quick-action buttons
+  function _restoreDefaultQuickActions() {
+    const bar = $('wa-quick-actions');
+    if (!bar || !bar.querySelector('.wa-quick-btn.multi-doc')) return; // nothing to restore
+    bar.innerHTML =
+      `<button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容')">润色</button>` +
+      `<button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结文档要点')">总结</button>` +
+      `<button class="wa-quick-btn" onclick="WA.quickAction('请检查语法和错别字')">检查</button>` +
+      `<button class="wa-quick-btn" onclick="WA.quickAction('请翻译选中内容为英文')">翻译</button>` +
+      `<button class="wa-quick-btn chart-btn" onclick="WA.sendQuickAction('可视化')" title="将选中数据用 Python 可视化为图表">可视化</button>`;
+  }
+
+  window.WA.removeAIFileContext = (idx) => {
+    state._aiFileContext.splice(idx, 1);
+    // Adjust target index after removal
+    if (state._aiTargetFileIdx === idx) state._aiTargetFileIdx = -1;
+    else if (state._aiTargetFileIdx > idx) state._aiTargetFileIdx--;
+    _renderAIFileChips();
+  };
+
+  window.WA.clearAIFileContext = () => {
+    state._aiFileContext = [];
+    state._aiTargetFileIdx = -1;
+    _renderAIFileChips();
+  };
+
+  // Set or toggle the write-back target file
+  window.WA.setAITargetFile = (idx) => {
+    state._aiTargetFileIdx = (state._aiTargetFileIdx === idx) ? -1 : idx;
+    _renderAIFileChips();
+    const f = state._aiTargetFileIdx >= 0 ? state._aiFileContext[state._aiTargetFileIdx] : null;
+    if (f) showToast(`"${f.name}" 已设为修改目标文件`, 'success');
+    else showToast('已取消目标文件设置', 'info');
+  };
+
+  async function _addFileToAIContext(absPath) {
+    const name = absPath.split(/[\\/]/).pop() || absPath;
+    // Don't add duplicates
+    if (state._aiFileContext.some(f => f.path === absPath)) {
+      showToast(`"${name}" 已在分析列表中`, 'info');
+      return;
+    }
+    // Push a loading placeholder immediately so the user sees the file row at once
+    state._aiFileContext.push({ path: absPath, name, content: null, loading: true });
+    _renderAIFileChips();
+    try {
+      // Download the raw file bytes, then parse via the upload endpoint
+      const rawRes = await fetch('/api/v1/workspace/serve_abs?path=' + encodeURIComponent(absPath));
+      if (!rawRes.ok) throw new Error(`HTTP ${rawRes.status}`);
+      const blob = await rawRes.blob();
+      const formData = new FormData();
+      formData.append('file', blob, name);
+      const parseRes = await fetch('/api/v1/workspace/open_file', { method: 'POST', body: formData });
+      if (!parseRes.ok) throw new Error(`Parse HTTP ${parseRes.status}`);
+      const data = await parseRes.json();
+      // Extract text content from the parsed data
+      let content = '';
+      if (typeof data.data === 'string') {
+        content = data.data;
+      } else if (data.data && data.data.html) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = data.data.html;
+        content = tmp.textContent || tmp.innerText || '';
+      } else if (data.data && typeof data.data === 'object') {
+        content = JSON.stringify(data.data).substring(0, 8000);
+      }
+      const MAX_FILE_CONTEXT = 6000;
+      if (content.length > MAX_FILE_CONTEXT) {
+        content = content.substring(0, MAX_FILE_CONTEXT) + '\n…[内容过长已截断]';
+      }
+      // Replace the loading placeholder with real content
+      const placeholder = state._aiFileContext.find(f => f.path === absPath);
+      if (placeholder) { placeholder.content = content; delete placeholder.loading; }
+      _renderAIFileChips();
+      showToast(`"${name}" 已添加到 AI 分析`, 'success');
+    } catch (e) {
+      // Remove placeholder on failure
+      state._aiFileContext = state._aiFileContext.filter(f => f.path !== absPath);
+      _renderAIFileChips();
+      showToast(`无法读取 "${name}": ${e.message}`, 'error');
+    }
+  }
 
   window.WA.cycleSortOrder = () => {
     const order = ['name', 'date', 'type'];
@@ -789,8 +1015,11 @@ window.WA = window.WA || {};
       rows.push(
         `<div class="wa-file-item file${isActive}${unsupported}" style="padding-left:${pad}px" ` +
         `data-path="${_escHtml(absPath)}" data-supported="${supported}" ` +
+        `draggable="true" ` +
         `onclick="WA.openBrowserFile(this.dataset.path, this.dataset.supported !== 'false')" ` +
         `oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)" ` +
+        `ondragstart="event.dataTransfer.effectAllowed='copyMove';event.dataTransfer.setData('application/wa-file-path',this.dataset.path);event.dataTransfer.setData('text/plain',this.dataset.path);this.classList.add('dragging');document.body.classList.add('wa-file-dragging')" ` +
+        `ondragend="this.classList.remove('dragging');document.body.classList.remove('wa-file-dragging')" ` +
         `title="${_escHtml(entry.name)}">` +
         `${checkHtml}${_fileIcon(ext, entry.category)}` +
         `<span class="wa-file-label">${_escHtml(entry.name)}</span>` +
@@ -897,6 +1126,9 @@ window.WA = window.WA || {};
     } else {
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserOpen();_closeCtxMenu()">${SVG.open} ${supported ? '打开' : '本地打开'}</div>`;
       html += `<div class="wa-ctx-separator"></div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAddToWorkspace();_closeCtxMenu()">${SVG.newf} 加入工作区</div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserSendToAI();_closeCtxMenu()">${SVG.ai} 发送给AI分析</div>`;
+      html += `<div class="wa-ctx-separator"></div>`;
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCopy();_closeCtxMenu()">${SVG.copy} 复制</div>`;
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCut();_closeCtxMenu()">${SVG.cut} 剪切</div>`;
       if (clip && !isFolder) {
@@ -917,8 +1149,25 @@ window.WA = window.WA || {};
     menu.innerHTML = html;
     menu.classList.add('open');
     const vw = window.innerWidth, vh = window.innerHeight;
-    let x = event.clientX, y = event.clientY;
-    if (x + 200 > vw) x = vw - 204;
+    const menuW = 180;
+    // Position at cursor for right-click; right-align below button for three-dot click
+    let x, y;
+    if (event.type === 'click') {
+      const btn = event.target.closest('button');
+      if (btn) {
+        const btnRect = btn.getBoundingClientRect();
+        x = btnRect.right - menuW;
+        y = btnRect.bottom + 2;
+      } else {
+        x = event.clientX;
+        y = event.clientY;
+      }
+    } else {
+      x = event.clientX;
+      y = event.clientY;
+    }
+    if (x + menuW > vw) x = vw - menuW - 4;
+    if (x < 0) x = 0;
     if (y + 280 > vh) y = vh - 284;
     menu.style.left = x + 'px';
     menu.style.top  = y + 'px';
@@ -930,6 +1179,16 @@ window.WA = window.WA || {};
     const { path, supported } = _fsBrowserCtxTarget;
     if (!path) return;
     WA.openBrowserFile(path, supported);
+  };
+
+  window.WA._fsBrowserAddToWorkspace = () => {
+    const { path } = _fsBrowserCtxTarget;
+    if (path) WA.addToMyWorkspace(path);
+  };
+
+  window.WA._fsBrowserSendToAI = () => {
+    const { path } = _fsBrowserCtxTarget;
+    if (path) _addFileToAIContext(path);
   };
 
   window.WA._fsBrowserCopy = () => {
@@ -1209,6 +1468,8 @@ window.WA = window.WA || {};
     document.getElementById('wa-select-count').textContent = n + ' 已选';
     const btn = document.getElementById('wa-delete-selected');
     if (btn) { btn.disabled = n === 0; }
+    const sendBtn = document.getElementById('wa-send-selected-ai');
+    if (sendBtn) { sendBtn.disabled = n === 0; }
   };
 
   window.WA.toggleSelectMode = () => {
@@ -1258,6 +1519,30 @@ window.WA = window.WA || {};
   };
 
   // ── My Files (我的文件) — bridge to full FileHub panel ───────────────────
+  window.WA.sendSelectedToAI = async () => {
+    const paths = [...state.selectedFiles];
+    if (!paths.length) return;
+    let added = 0, skipped = 0;
+    for (const p of paths) {
+      // Only accept files with supported extensions
+      const ext = p.split(/[\\/]/).pop().includes('.')
+        ? p.split('.').pop().toLowerCase() : '';
+      if (!_isSupportedExt(ext)) { skipped++; continue; }
+      if (state._aiFileContext.some(f => f.path === p)) { skipped++; continue; }
+      await _addFileToAIContext(p);
+      added++;
+    }
+    if (added > 0) {
+      showToast(`已将 ${added} 个文件发送给AI助手`, 'success');
+      // Scroll AI panel into focus
+      const aiPanel = document.getElementById('wa-ai');
+      if (aiPanel) aiPanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+      showToast(skipped ? '所选文件均已在分析列表中或格式不支持' : '没有可发送的文件', 'info');
+    }
+    WA.toggleSelectMode();
+  };
+
   window.WA.openMyFiles = () => {
     // When embedded inside index.html, openFileHubModal() is a global function
     if (typeof window.openFileHubModal === 'function') {
@@ -1384,6 +1669,13 @@ window.WA = window.WA || {};
     menu.classList.add('open');
     const vw = window.innerWidth, vh = window.innerHeight;
     let x = event.clientX, y = event.clientY;
+    // Clamp menu within the left panel
+    const leftPanel = document.getElementById('wa-left');
+    if (leftPanel) {
+      const lRect = leftPanel.getBoundingClientRect();
+      if (x + 180 > lRect.right) x = lRect.right - 184;
+      if (x < lRect.left) x = lRect.left + 4;
+    }
     if (x + 180 > vw) x = vw - 184;
     if (y + 180 > vh) y = vh - 184;
     menu.style.left = x + 'px';
@@ -1402,9 +1694,13 @@ window.WA = window.WA || {};
     if (!e.target.closest('#wa-ctx-menu')) _closeCtxMenu();
   }, true);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeCtxMenu(); });
-  // Use capture:true so this fires BEFORE WangEditor can call stopPropagation()
+  // Use capture:true so this fires BEFORE WangEditor can call stopPropagation().
+  // Guard: only intercept Ctrl+S when the workspace panel is actually visible,
+  // so this does not block Ctrl+S in the chat or other views.
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      const wsView = document.getElementById('workspaceView');
+      if (!wsView || wsView.style.display === 'none' || wsView.classList.contains('hidden')) return;
       e.preventDefault();
       e.stopPropagation();
       WA.saveFile();
@@ -1449,6 +1745,13 @@ window.WA = window.WA || {};
     menu.classList.add('open');
     const vw = window.innerWidth, vh = window.innerHeight;
     let x = event.clientX, y = event.clientY;
+    // Clamp menu within the left panel
+    const leftPanel = document.getElementById('wa-left');
+    if (leftPanel) {
+      const lRect = leftPanel.getBoundingClientRect();
+      if (x + 200 > lRect.right) x = lRect.right - 204;
+      if (x < lRect.left) x = lRect.left + 4;
+    }
     if (x + 200 > vw) x = vw - 204;
     if (y + 180 > vh) y = vh - 184;
     menu.style.left = x + 'px';
@@ -1710,6 +2013,8 @@ window.WA = window.WA || {};
 
   // ── Global Selection Tooltip ──
   let lastSelectionText = "";
+  let _draggingChartSrc = null;
+  let _draggingChartName = null;
 
   // CSS Custom Highlights API — non-destructively marks pinned selection in doc
   // Supported: Chrome 105+, Edge 105+, Safari 17.2+
@@ -1752,10 +2057,10 @@ window.WA = window.WA || {};
     const bar = $('wa-subject-bar');
     if (!bar) return;
     if (!fileName) { bar.style.display = 'none'; return; }
-    const tag = bar.querySelector('.subject-tag');
-    const txt = bar.querySelector('.subject-text');
-    const labels = { docx: '文档', xlsx: '表格', pptx: '演示', pdf: 'PDF' };
-    if (tag) tag.textContent = labels[fileType] || '文件';
+    const iconEl = $('wa-subject-icon');
+    const txt = $('wa-subject-text');
+    const icons = { docx: '📝', xlsx: '📊', pptx: '📋', pdf: '📕' };
+    if (iconEl) iconEl.textContent = icons[fileType] || '📄';
     if (txt) txt.textContent = fileName;
     bar.style.display = 'flex';
   }
@@ -1764,13 +2069,18 @@ window.WA = window.WA || {};
   //    selection when no format bar is present, e.g. PDF/PPTX).
   //    Uses getBoundingClientRect() so coords are always viewport-relative,
   //    which is correct for position:fixed elements (fixes pageX/pageY bug).
-  function _positionSelectionToolbar() {
+  function _positionSelectionToolbar(mouseEvent) {
     const tt = $('wa-pdf-tooltip');
     if (!tt) return;
     const winSel = window.getSelection();
     if (!winSel || winSel.rangeCount === 0) return;
 
-    // Measure the toolbar first (visibility trick avoids layout flash)
+    // ── Check selection geometry FIRST before mutating display state ──
+    // (avoids the bug where early-return leaves toolbar stuck at display:none)
+    const rect = winSel.getRangeAt(0).getBoundingClientRect();
+    if (!rect || (rect.width === 0 && rect.height === 0)) return;
+
+    // Measure the toolbar dimensions (visibility trick avoids layout flash)
     tt.style.visibility = 'hidden';
     tt.style.display = 'flex';
     const ttW = tt.offsetWidth || 220;
@@ -1778,34 +2088,21 @@ window.WA = window.WA || {};
     tt.style.display = 'none';
     tt.style.visibility = '';
 
-    const GAP = 6;
+    const GAP = 8;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // ── Preferred: snap to just below the WangEditor format toolbar ──
-    // This groups both toolbars together so the user can act without
-    // moving the mouse far from the selection.
-    const fmtBar = document.getElementById('wa-editor-toolbar');
-    if (fmtBar && fmtBar.offsetParent !== null) {
-      const fb = fmtBar.getBoundingClientRect();
-      if (fb.height > 0) {
-        const left = Math.max(8, Math.min(fb.left, vw - ttW - 8));
-        const top  = fb.bottom + GAP;
-        tt.style.left = left + 'px';
-        tt.style.top  = top  + 'px';
-        tt.style.display = 'flex';
-        return;
-      }
-    }
-
-    // ── Fallback: center below (or above) the selected text ──
-    const rect = winSel.getRangeAt(0).getBoundingClientRect();
-    if (!rect || (rect.width === 0 && rect.height === 0)) return;
-
-    let left = rect.left + rect.width / 2 - ttW / 2;
+    // Center horizontally on the cursor (or selection center if no cursor info)
+    const cx = (mouseEvent && typeof mouseEvent.clientX === 'number') ? mouseEvent.clientX : rect.left + rect.width / 2;
+    let left = cx - ttW / 2;
     left = Math.max(8, Math.min(left, vw - ttW - 8));
-    let top = rect.bottom + GAP;
-    if (top + ttH > vh - 8) top = rect.top - ttH - GAP;
+
+    // Anchor vertically to the cursor release point (not the full selection bottom).
+    // For long multi-paragraph selections, rect.bottom can be hundreds of px below
+    // where the user stopped, making the toolbar feel "too far away".
+    const anchorY = (mouseEvent && typeof mouseEvent.clientY === 'number') ? mouseEvent.clientY : rect.bottom;
+    let top = anchorY + GAP;
+    if (top + ttH > vh - 8) top = anchorY - ttH - GAP;
     top = Math.max(8, top);
 
     tt.style.left = left + 'px';
@@ -1816,7 +2113,6 @@ window.WA = window.WA || {};
   document.addEventListener('mouseup', (e) => {
     if (e.target.id === 'wa-pdf-tooltip') return;
     
-    // For Luckysheet, we handle selection inside the editor class hook
     if (state.fileType === 'xlsx') return;
 
     const sel = window.getSelection().toString().trim();
@@ -1824,7 +2120,7 @@ window.WA = window.WA || {};
     
     if (sel && sel.length > 0) {
       lastSelectionText = sel;
-      _positionSelectionToolbar();
+      _positionSelectionToolbar(e);
 
       // Update character count badge in tooltip
       const countEl = $('wa-tooltip-count');
@@ -1850,6 +2146,33 @@ window.WA = window.WA || {};
        $('wa-pdf-tooltip').style.display = 'none';
     }
   });
+
+  // Hide the selection toolbar on any scroll so it never blocks the AI panel
+  document.addEventListener('scroll', () => {
+    $('wa-pdf-tooltip').style.display = 'none';
+    lastSelectionText = '';
+  }, true);
+  const _waAiMsgs = $('wa-ai-messages');
+  if (_waAiMsgs) {
+    _waAiMsgs.addEventListener('wheel', (e) => {
+      const tt = $('wa-pdf-tooltip');
+      if (tt && tt.style.display !== 'none') {
+        tt.style.display = 'none';
+        lastSelectionText = '';
+      }
+    }, { passive: true });
+  }
+  // Catch-all: if the selection tooltip is visible anywhere on the page and the
+  // user wheels (even if the tooltip is z-index-stacked over the AI panel and
+  // intercepts the event before it reaches #wa-ai-messages), hide it immediately
+  // so the next wheel tick goes straight to the intended scrollable element.
+  document.addEventListener('wheel', () => {
+    const tt = $('wa-pdf-tooltip');
+    if (tt && tt.style.display !== 'none') {
+      tt.style.display = 'none';
+      lastSelectionText = '';
+    }
+  }, { passive: true, capture: true });
 
   window.WA.sendQuickAction = (action) => {
     let sel = lastSelectionText;
@@ -1893,11 +2216,20 @@ window.WA = window.WA || {};
         action,
         text: sel,
         file_type: state.fileType || 'general',
+        locked_model: state.lockedModel || 'auto',
       }),
     })
     .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
     .then(data => {
       loadingEl.remove();
+      // Notify user if cloud AI was unavailable and local model was used
+      if (data.used_local_model) {
+        const noteEl = document.createElement('div');
+        noteEl.className = 'wa-msg system';
+        noteEl.style.cssText = 'background:rgba(255,171,0,0.1);border-left:3px solid #ffab00;padding:5px 8px;font-size:11px;color:#a07800;border-radius:3px;';
+        noteEl.textContent = '⚠️ 云端 AI 暂时不可用，本次由本地模型 (Ollama) 处理，结果质量可能略有差异。';
+        msgs.appendChild(noteEl);
+      }
       // ── Chart result ──
       if (data.type === 'chart_result') {
         if (data.error) {
@@ -2049,12 +2381,23 @@ window.WA = window.WA || {};
       this.containerId = 'wa-docx-editor';
       this.editor = null;
       this.toolbar = null;
+      this._zoom = 100;
       $(this.containerId).classList.add('active');
+
+      // Ctrl+Wheel zoom
+      this._wheelHandler = (e) => {
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -10 : 10;
+        this.setZoom(this._zoom + delta);
+      };
+      $(this.containerId).addEventListener('wheel', this._wheelHandler, { passive: false });
     }
 
     render(html) {
       // Safely destroy previous instances first
       if (this._mutationObs) { this._mutationObs.disconnect(); this._mutationObs = null; }
+      if (this._hoverbarObs) { this._hoverbarObs.disconnect(); this._hoverbarObs = null; }
       if (this.editor) { try { this.editor.destroy(); } catch(e) { console.warn('[WangEditor destroy]', e); } }
       if (this.toolbar) { try { this.toolbar.destroy(); } catch(e) {} }
       this.editor = null;
@@ -2079,8 +2422,21 @@ window.WA = window.WA || {};
         html: html,
         config: {
           placeholder: '开始编辑文档...',
-          // Table hoverbar: show row/col/merge actions when cursor is inside a table cell
+          // Text hoverbar: inline formatting when text is selected
+          // Table hoverbar: row/col/merge actions when cursor is inside a table cell
           hoverbarKeys: {
+            'text': {
+              menuKeys: [
+                // PROTECTED(format-hoverbar): keep font controls for DOCX quick formatting.
+                'fontFamily', 'fontSize',
+                'divider',
+                'bold', 'underline', 'italic', 'through', 'code',
+                'divider',
+                'color', 'bgColor', 'clearStyle',
+                'divider',
+                'insertLink',
+              ],
+            },
             'table': {
               menuKeys: [
                 'tableHeader', 'tableFullWidth',
@@ -2128,6 +2484,11 @@ window.WA = window.WA || {};
 
       // MutationObserver as backup — fires even when WangEditor doesn't trigger onChange.
       // Attach after createEditor() so WangEditor has created its DOM.
+
+      // Apply current zoom immediately after editor DOM is created
+      const scrollElNow = ct.querySelector('.w-e-scroll');
+      if (scrollElNow && this._zoom !== 100) scrollElNow.style.zoom = this._zoom / 100;
+
       setTimeout(() => {
         if (!this.editor) return;
         const editable = ct.querySelector('[contenteditable="true"]');
@@ -2190,7 +2551,50 @@ window.WA = window.WA || {};
           });
         });
         document.addEventListener('mouseup', () => { _colResize = null; });
+
+        // ── Hoverbar 定位修复：保证字体格式工具栏显示在选中文本上方而不遮住文字 ──
+        // WangEditor v5 使用 getClientRects()[0]（仅首行）定位 hoverbar，导致
+        // 多行选区时工具栏出现在选中文字内部。此 MutationObserver 在 hoverbar 显示
+        // 时用完整选区的 getBoundingClientRect() 将其重新定位到选区正上方。
+        const _hoverCtEl = ct.querySelector('.w-e-text-container');
+        if (_hoverCtEl) {
+          const _repositionHoverbar = () => {
+            // WangEditor may show/hide the hoverbar by toggling inline style (display)
+            // OR by adding/removing a CSS class — query the bar regardless of method.
+            const bar = _hoverCtEl.querySelector('.w-e-bar');
+            // offsetHeight === 0 means the element is display:none or has no height → hidden
+            if (!bar || bar.offsetHeight === 0) return;
+            const winSel = window.getSelection();
+            // 只对文字选择生效；表格/图片 hoverbar 保持 WangEditor 原位
+            if (!winSel || winSel.rangeCount === 0 || !winSel.toString().trim()) return;
+            const selRect = winSel.getRangeAt(0).getBoundingClientRect();
+            if (!selRect || selRect.height === 0) return;
+            const ctRect = _hoverCtEl.getBoundingClientRect();
+            const barH = bar.offsetHeight || 36;
+            const GAP = 6;
+            // 将 hoverbar 底边定位在选区顶边上方 GAP px 处
+            const newTop = selRect.top - ctRect.top - barH - GAP;
+            bar.style.setProperty('top', `${Math.max(2, newTop)}px`, 'important');
+            bar.style.removeProperty('bottom');
+          };
+          this._hoverbarObs = new MutationObserver(_repositionHoverbar);
+          this._hoverbarObs.observe(_hoverCtEl, {
+            subtree: true,
+            attributes: true,
+            // No attributeFilter: observe ALL attribute changes (class, style, etc.)
+            // WangEditor v5 shows the bar via inline style (display:block), not a CSS class,
+            // so filtering on 'class' alone would cause the observer to never fire.
+            childList: true,
+          });
+        }
       }, 300);
+    }
+
+    setZoom(pct) {
+      this._zoom = Math.max(50, Math.min(200, pct));
+      const scrollEl = document.querySelector('#wa-docx-editor .w-e-scroll');
+      if (scrollEl) scrollEl.style.zoom = this._zoom / 100;
+      _updateDocxZoomUI(this._zoom);
     }
 
     getContent() {
@@ -2215,6 +2619,13 @@ window.WA = window.WA || {};
 
     applyToolCall(cmd) {
       if (!this.editor) return;
+      if (cmd.type === 'replace_all') {
+        // Full document replacement — rebuild editor with new HTML content
+        this.render(cmd.value || '');
+        showToast('AI 已替换文档内容', 'success');
+        WA.scheduleAutoSave && WA.scheduleAutoSave();
+        return;
+      }
       if (cmd.type === 'replace_text') {
         // Replace original_text with proposed_text throughout the document.
         // Uses HTML-level string replacement which works reliably for Chinese text
@@ -2245,14 +2656,31 @@ window.WA = window.WA || {};
       }
     }
 
+    replaceSelectionWith(mode, pinnedText, newText) {
+      const clean = typeof newText === 'string' ? newText : String(newText || '');
+      if (mode === 'append') {
+        this.applyToolCall({ type: 'insert_text', value: '\n' + clean });
+      } else {
+        if (pinnedText) {
+          this.applyToolCall({ type: 'replace_text', original: pinnedText, value: clean });
+        } else {
+          this.applyToolCall({ type: 'set_html', value: clean });
+        }
+      }
+    }
+
     destroy() {
       if (this._mutationObs) { this._mutationObs.disconnect(); this._mutationObs = null; }
+      if (this._hoverbarObs) { this._hoverbarObs.disconnect(); this._hoverbarObs = null; }
       if (this.editor) { try { this.editor.destroy(); } catch(e) {} }
       if (this.toolbar) { try { this.toolbar.destroy(); } catch(e) {} }
       this.editor = null;
       this.toolbar = null;
       const wrapper = $(this.containerId);
-      if (wrapper) wrapper.classList.remove('active');
+      if (wrapper) {
+        wrapper.removeEventListener('wheel', this._wheelHandler);
+        wrapper.classList.remove('active');
+      }
     }
   }
 
@@ -2281,29 +2709,66 @@ window.WA = window.WA || {};
       sheetEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
       wrapper.appendChild(sheetEl);
 
-      // Mount Univer Sheets after two rAF ticks to ensure container is laid out
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (!window.KotoSheetsAPI) {
-            sheetEl.innerHTML = '<div style="padding:24px;color:#e74c3c;font-size:13px;">Univer Sheets 模块未就绪，请刷新页面重试</div>';
-            return;
-          }
-          try {
-            this._api = window.KotoSheetsAPI.create(this._containerId, workbookData);
+      // Mount Univer Sheets after two rAF ticks to ensure container is laid out.
+      // If the wrapper still has zero dimensions (e.g. embedded-mode layout not
+      // yet flushed) we poll until real dimensions appear before calling create().
+      const _doMount = () => {
+        if (!window.KotoSheetsAPI) {
+          sheetEl.innerHTML = '<div style="padding:24px;color:#e74c3c;font-size:13px;">Univer Sheets 模块未就绪，请刷新页面重试</div>';
+          return;
+        }
+        // Diagnostic: log container dimensions
+        const rect = sheetEl.getBoundingClientRect();
+        console.log('[KotoXlsxEditor] sheetEl rect:', rect.width.toFixed(0) + 'x' + rect.height.toFixed(0),
+          'offsetW:', sheetEl.offsetWidth, 'offsetH:', sheetEl.offsetHeight,
+          'inDOM:', document.body.contains(sheetEl));
+        try {
+          this._api = window.KotoSheetsAPI.create(sheetEl, workbookData);
 
-            // Wire selection → AI panel context chip
-            window.KotoSheetsAPI.onSelectionChange(() => {
-              const text = window.KotoSheetsAPI.getSelectionText();
-              if (text) {
-                lastSelectionText = `[当前选中表格数据]:\n${text}\n`;
-              }
-            });
-          } catch (err) {
-            console.error('[KotoXlsxEditor] Univer Sheets 初始化失败', err);
-            sheetEl.innerHTML = `<div style="padding:24px;color:#e74c3c;font-size:13px;">表格引擎加载失败: ${err.message}</div>`;
-          }
+          // Trigger Univer's internal ResizeObserver to recalculate canvas dimensions.
+          // Univer watches the container element via ResizeObserver (not window.resize).
+          // We briefly nudge the container size to guarantee a ResizeObserver callback
+          // fires after React has fully mounted and the container has real dimensions.
+          setTimeout(() => {
+            const w = sheetEl.offsetWidth;
+            const h = sheetEl.offsetHeight;
+            if (w > 0 && h > 0) {
+              sheetEl.style.width = (w + 1) + 'px';
+              requestAnimationFrame(() => { sheetEl.style.width = ''; });
+            }
+          }, 100);
+
+          // Wire selection → AI panel context chip
+          window.KotoSheetsAPI.onSelectionChange(() => {
+            const text = window.KotoSheetsAPI.getSelectionText();
+            if (text) {
+              lastSelectionText = `[当前选中表格数据]:\n${text}\n`;
+            }
+          });
+        } catch (err) {
+          console.error('[KotoXlsxEditor] Univer Sheets 初始化失败', err);
+          sheetEl.innerHTML = `<div style="padding:24px;color:#e74c3c;font-size:13px;">表格引擎加载失败: ${err.message}</div>`;
+        }
+      };
+
+      // Poll for real container size; fall back to immediate mount if already laid out.
+      const _mountDeadline = Date.now() + 800;
+      const _tryMount = () => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (sheetEl.offsetWidth > 0 && sheetEl.offsetHeight > 0) {
+              _doMount();
+            } else if (Date.now() < _mountDeadline) {
+              console.warn('[KotoXlsxEditor] 容器尺寸为零，等待布局…');
+              setTimeout(_tryMount, 50);
+            } else {
+              console.error('[KotoXlsxEditor] 容器尺寸为零且超时 — 强制挂载');
+              _doMount();  // mount anyway; nudge mechanism will attempt a resize recovery
+            }
+          });
         });
-      });
+      };
+      _tryMount();
     }
 
     getContent() {
@@ -2405,7 +2870,30 @@ window.WA = window.WA || {};
       if (zoomSlider) { zoomSlider.value = 75; this._zoom = 0.75; }
       // Defer first render until after the browser has laid out the flex container
       // so that #wa-pptx-slide-area.clientWidth is non-zero.
-      requestAnimationFrame(() => { this._renderSlide(0); WA.pptxZoom && WA.pptxZoom(75); });
+      // If the area is still zero-width (embedded-mode layout not flushed yet),
+      // poll until real dimensions appear before the first real render.
+      const _pptxMountDeadline = Date.now() + 800;
+      const _tryPptxRender = () => {
+        requestAnimationFrame(() => {
+          const area = $('wa-pptx-slide-area');
+          const rawW = area ? area.clientWidth : 0;
+          if (rawW > 48) {
+            this._renderSlide(0);
+            WA.pptxZoom && WA.pptxZoom(75);
+          } else if (Date.now() < _pptxMountDeadline) {
+            console.warn('[KotoPptxEditor] slide-area 宽度为零，等待布局…', rawW);
+            setTimeout(_tryPptxRender, 50);
+          } else {
+            // Deadline reached — render anyway (will use fallback width logic inside _renderSlide)
+            console.error('[KotoPptxEditor] slide-area 宽度为零且超时 — 强制渲染');
+            this._renderSlide(0);
+            WA.pptxZoom && WA.pptxZoom(75);
+            // Secondary recovery: re-render once layout is available in next frame
+            setTimeout(() => { this._renderSlide(this._curIdx); }, 200);
+          }
+        });
+      };
+      _tryPptxRender();
     }
 
     serialize() { return this.data; }
@@ -2489,6 +2977,8 @@ window.WA = window.WA || {};
       this._closeCtxMenu();
       document.removeEventListener('keydown', this._keyHandler);
       if (this._selChangeHandler) document.removeEventListener('selectionchange', this._selChangeHandler);
+      const slideArea = $('wa-pptx-slide-area');
+      if (slideArea && this._pptxWheelHandler) slideArea.removeEventListener('wheel', this._pptxWheelHandler);
       this.data = null;
     }
 
@@ -2641,6 +3131,22 @@ window.WA = window.WA || {};
       };
       document.addEventListener('keydown', this._keyHandler);
 
+      // Ctrl+Wheel zoom on the slide area
+      const slideArea = $('wa-pptx-slide-area');
+      if (slideArea) {
+        this._pptxWheelHandler = (e) => {
+          if (!e.ctrlKey && !e.metaKey) return;
+          e.preventDefault();
+          const curPct = Math.round((this._zoom || 0.75) * 100);
+          const delta = e.deltaY > 0 ? -5 : 5;
+          const newPct = Math.max(40, Math.min(150, curPct + delta));
+          const slider = $('wa-pptx-zoom');
+          if (slider) slider.value = newPct;
+          WA.pptxZoom(newPct);
+        };
+        slideArea.addEventListener('wheel', this._pptxWheelHandler, { passive: false });
+      }
+
       // Save selection range so toolbar interactions (font-size select, etc.) don't lose it
       this._selChangeHandler = () => {
         if (!this._editMode) return;
@@ -2764,7 +3270,10 @@ window.WA = window.WA || {};
       const slide = this.data.slides[idx];
       const sW = this.data.slideWidthEmu, sH = this.data.slideHeightEmu;
       const area = $('wa-pptx-slide-area');
-      const availW = (area ? area.clientWidth : 700) - 48;
+      // Guard against zero clientWidth (may happen before layout completes).
+      // Fall back to 700px which gives a 16:9 canvas at 75% zoom.
+      const rawW = area ? area.clientWidth : 0;
+      const availW = (rawW > 48 ? rawW : 700) - 48;
       const baseWidth = Math.min(availW, 960);
       const displayWidth = Math.round(baseWidth * (this._zoom || 1));
       const scale = displayWidth / sW;
@@ -3337,14 +3846,34 @@ window.WA = window.WA || {};
   class KotoPdfViewer {
     constructor() {
       this.containerId = 'wa-pdf-viewer';
-      this.pdfUrl = null;
+      this._scale = 1.0;  // user zoom multiplier (1.0 = auto-fit)
+      this._pdfDoc = null;
+      this._pdfUrl = null;
       $(this.containerId).classList.add('active');
       $(this.containerId).addEventListener('mouseup', this.handleMouseUp.bind(this));
       document.addEventListener('mousedown', this.hideTooltip);
+
+      // Ctrl+Wheel zoom
+      this._wheelHandler = (e) => {
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        const newScale = Math.max(0.5, Math.min(3.0, this._scale + delta));
+        this.setZoom(Math.round(newScale * 100));
+      };
+      $(this.containerId).addEventListener('wheel', this._wheelHandler, { passive: false });
     }
 
     async render(pdfUrl, pagesData) {
+      this._pdfUrl = pdfUrl;
       this.pdfUrl = pdfUrl;
+      this._scale = 1.0;
+      await this._doRender();
+      _updatePdfZoomUI(100);
+    }
+
+    async _doRender() {
+      const pdfUrl = this._pdfUrl;
       const c = $(this.containerId);
       c.innerHTML = '';
 
@@ -3355,23 +3884,26 @@ window.WA = window.WA || {};
       }
 
       try {
-         const loadingTask = pdfjsLib.getDocument(pdfUrl);
-         const pdf = await loadingTask.promise;
-         
+         if (!this._pdfDoc || this._pdfDoc._url !== pdfUrl) {
+           const loadingTask = pdfjsLib.getDocument(pdfUrl);
+           this._pdfDoc = await loadingTask.promise;
+           this._pdfDoc._url = pdfUrl;
+         }
+         const pdf = this._pdfDoc;
+
          const dpr = window.devicePixelRatio || 1;
          for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
-            // Base scale: fit to container width (min 1.5), then multiply by DPR
-            // so the canvas buffer is always crisp on high-DPI displays.
+            // Base scale: fit to container width, then multiply by user zoom and DPR
             const containerW = c.clientWidth || 800;
             const baseViewport = page.getViewport({ scale: 1 });
-            const baseScale = Math.max(1.5, (containerW - 32) / baseViewport.width);
-            const viewport = page.getViewport({ scale: baseScale });
-            
+            const fitScale = Math.max(1.0, (containerW - 32) / baseViewport.width);
+            const viewport = page.getViewport({ scale: fitScale * this._scale });
+
             const wrap = document.createElement('div');
             wrap.className = 'wa-pdf-page-wrap';
             wrap.id = `pdf-page-${i}`;
-            
+
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
             // Physical pixels = CSS pixels × DPR → sharp on retina/high-DPI screens
@@ -3379,10 +3911,10 @@ window.WA = window.WA || {};
             canvas.height = Math.floor(viewport.height * dpr);
             canvas.style.width  = Math.floor(viewport.width)  + 'px';
             canvas.style.height = Math.floor(viewport.height) + 'px';
-            
+
             wrap.appendChild(canvas);
             c.appendChild(wrap);
-            
+
             const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
             await page.render({ canvasContext: context, viewport, transform }).promise;
          }
@@ -3391,10 +3923,16 @@ window.WA = window.WA || {};
       }
     }
 
+    setZoom(pct) {
+      this._scale = Math.max(50, Math.min(300, pct)) / 100;
+      _updatePdfZoomUI(Math.round(this._scale * 100));
+      this._doRender();
+    }
+
     handleMouseUp(e) {
       const sel = window.getSelection().toString().trim();
       if (sel) {
-         _positionSelectionToolbar();
+         _positionSelectionToolbar(e);
       }
     }
 
@@ -3416,8 +3954,25 @@ window.WA = window.WA || {};
       $(this.containerId).classList.remove('active');
       $(this.containerId).innerHTML = '';
       $(this.containerId).removeEventListener('mouseup', this.handleMouseUp);
+      $(this.containerId).removeEventListener('wheel', this._wheelHandler);
       document.removeEventListener('mousedown', this.hideTooltip);
     }
+  }
+
+  // Update the PDF zoom label and slider in the status bar
+  function _updatePdfZoomUI(pct) {
+    const label = $('wa-pdf-zoom-label');
+    const slider = $('wa-pdf-zoom');
+    if (label) label.textContent = pct + '%';
+    if (slider) slider.value = pct;
+  }
+
+  // Update the DOCX zoom label and slider in the status bar
+  function _updateDocxZoomUI(pct) {
+    const label = $('wa-docx-zoom-label');
+    const slider = $('wa-docx-zoom');
+    if (label) label.textContent = pct + '%';
+    if (slider) slider.value = pct;
   }
 
   // ── Lazy CDN loader for editing libraries (needed in embedded mode) ──────
@@ -3549,7 +4104,14 @@ window.WA = window.WA || {};
          $('wa-file-name').textContent = state.fileName;
          $('wa-save-btn').disabled = (state.fileType === 'pdf');
          const _saBtn3 = $('wa-saveas-btn'); if (_saBtn3) _saBtn3.disabled = (state.fileType === 'pdf');
+         const _archBtn3 = $('wa-archive-btn'); if (_archBtn3) _archBtn3.disabled = false;
          _updateSubjectBar(state.fileName, state.fileType);
+
+         // Show PDF/DOCX zoom control only when the relevant file type is open
+         const pdfZoomCtrl = $('wa-pdf-zoom-ctrl');
+         if (pdfZoomCtrl) pdfZoomCtrl.style.display = (state.fileType === 'pdf') ? 'flex' : 'none';
+         const docxZoomCtrl = $('wa-docx-zoom-ctrl');
+         if (docxZoomCtrl) docxZoomCtrl.style.display = (state.fileType === 'docx') ? 'flex' : 'none';
 
          // Destroy old editor if it was a different file (not a tab switch)
          if (state.activeEditor) {
@@ -3580,6 +4142,12 @@ window.WA = window.WA || {};
 
          toggleWorkspace(true);
 
+         // Wait for the editor container to have real layout dimensions before
+         // initialising dimension-sensitive editors (Univer Sheets / PPTX canvas).
+         // Critical in embedded mode: #workspaceView just transitioned from
+         // display:none and the browser may not have flushed CSS layout yet.
+         await _waitForEditorLayout(state.fileType);
+
          if (state.fileType === 'docx') {
             await _ensureWangEditor();
             state.activeEditor = new KotoDocxEditor();
@@ -3588,6 +4156,12 @@ window.WA = window.WA || {};
             await _ensureUniverSheets();
             state.activeEditor = new KotoXlsxEditor();
             state.activeEditor.render(_ensureWorkbookDefaults(json.data));
+            // Surface formula loss warning from backend
+            if (json.data && json.data._warnings && json.data._warnings.length) {
+              json.data._warnings.forEach(msg => {
+                showToast('⚠️ ' + msg, 'warning', 8000);
+              });
+            }
          } else if (state.fileType === 'pptx') {
             state.activeEditor = new KotoPptxEditor();
             state.activeEditor.render(json.data);
@@ -3635,10 +4209,14 @@ window.WA = window.WA || {};
       return (text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
     };
     const payload = {
-      session: _waSession(),
-      message: message,
+      session:     _waSession(),
+      message:     message,
       locked_task: opts.task || 'CHAT',
       locked_model: opts.model || state.lockedModel || 'auto',
+      // Document-edit context — instructs backend to use proposals system prompt
+      doc_edit:    opts.doc_edit  || false,
+      doc_file_type: opts.file_type || '',
+      doc_has_sel: opts.has_sel   || false,
     };
     try {
       const resp = await fetch('/api/chat/stream', {
@@ -3666,7 +4244,7 @@ window.WA = window.WA || {};
                 .replace(/\n?\{"proposals"\s*:\s*\[[\s\S]*?\]\s*\}\s*$/m, '')
                 .trim();
               if (loadingEl) {
-                loadingEl.innerHTML = renderMd(visible) + '<span class="typing-cursor">▊</span>';
+                loadingEl.innerHTML = _parseCitations(renderMd(visible)) + '<span class="typing-cursor">▊</span>';
               }
               msgs.scrollTop = msgs.scrollHeight;
             } else if (evt.type === 'progress') {
@@ -3681,7 +4259,7 @@ window.WA = window.WA || {};
                   .replace(/\n?\{"proposals"\s*:\s*\[[\s\S]*?\]\s*\}\s*$/m, '')
                   .trim();
                 const finalText = visible || evt.content || '';
-                loadingEl.innerHTML = renderMd(finalText);
+                loadingEl.innerHTML = _parseCitations(renderMd(finalText));
                 if (finalText) {
                   loadingEl.dataset.rawText = finalText;
                   state.conversation.push({ role: 'assistant', content: finalText });
@@ -3694,19 +4272,31 @@ window.WA = window.WA || {};
                 try { _handleToolCall(JSON.parse(m[1].trim())); } catch(e) { /* ignore */ }
               });
               // Extract proposals JSON block
+              let proposalsRendered = false;
               const propMatch = fullText.match(/\{"proposals"\s*:\s*\[[\s\S]*?\]\s*\}/);
               if (propMatch) {
                 try {
                   const propData = JSON.parse(propMatch[0]);
                   if (Array.isArray(propData.proposals) && propData.proposals.length) {
                     _handleProposals(propData);
+                    proposalsRendered = true;
                   }
                 } catch(e) { /* ignore */ }
               }
-              // Show AI action bar if pinned selection exists and no proposals generated
-              const hasProposals = msgs.querySelector('.wa-proposal-card');
-              if (state.lastPinnedSel && !hasProposals && loadingEl && loadingEl.dataset.rawText) {
-                msgs.appendChild(_makeAIActionBar());
+              // Show AI action bar if file is open + AI gave text + this response had no proposals
+              const _canApply = !proposalsRendered && loadingEl && loadingEl.dataset.rawText && state.activeEditor;
+              if (_canApply) {
+                // Snapshot state at response-complete time so buttons remain
+                // correct even if the user sends another message before clicking.
+                const _barSnap = {
+                  pinnedSel:  state.lastPinnedSel,
+                  toolCall:   state.pendingToolCall,
+                  outputMode: state.aiOutputMode,
+                };
+                msgs.appendChild(_makeAIActionBar(_barSnap));
+                // Scroll to show the action bar — it was appended AFTER the
+                // earlier scrollTop call so without this it renders off-screen.
+                requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
               }
               state.isLoading = false;
               return;
@@ -3749,22 +4339,17 @@ window.WA = window.WA || {};
      state._activeProposals = proposals;
      if (proposals.length > 1) msgs.appendChild(_makeProposalBatchBar(proposals));
      proposals.forEach((p, i) => msgs.appendChild(_makeProposalCard(p, i, proposals.length)));
-     msgs.scrollTop = msgs.scrollHeight;
+     // Use rAF so the browser finishes laying out the (potentially tall) proposal
+     // cards before we measure scrollHeight — otherwise scrollHeight is stale and
+     // the viewport lands in the middle of the content instead of the bottom.
+     requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
   }
 
   function _handleToolCall(cmd) {
      const msgs = $('wa-ai-messages');
      if (state.aiOutputMode === 'inline') {
-        if (!state.lastPinnedSel && state.activeEditor) {
-           const note = document.createElement('div');
-           note.className = 'wa-tool-notification';
-           note.innerHTML = `✨ <b>AI 已写入文档</b>: ${cmd.type}`;
-           msgs.appendChild(note);
-           try { state.activeEditor.applyToolCall(cmd); } catch(e) { console.warn('applyToolCall failed:', e); }
-           state.pendingToolCall = null;
-        } else {
-           state.pendingToolCall = cmd;
-        }
+        // ALWAYS store as pending — never auto-apply. User confirms via action bar.
+        state.pendingToolCall = cmd;
      } else {
         if ((cmd.type === 'set_html' || cmd.type === 'insert_text') && cmd.value) {
            const preview = document.createElement('div');
@@ -3803,6 +4388,16 @@ window.WA = window.WA || {};
         e.dataTransfer.effectAllowed = 'copy';
         e.dataTransfer.setData('application/wa-chart-image', imgSrc);
         e.dataTransfer.setData('application/wa-chart-name', fileName || 'chart.png');
+        _draggingChartSrc = imgSrc;
+        _draggingChartName = fileName || 'chart.png';
+        const overlay = $('wa-ai-img-drop-hint');
+        if (overlay) overlay.classList.add('active');
+     });
+     img.addEventListener('dragend', () => {
+        _draggingChartSrc = null;
+        _draggingChartName = null;
+        const overlay = $('wa-ai-img-drop-hint');
+        if (overlay) overlay.classList.remove('active');
      });
      imgWrap.appendChild(img);
      const hint = document.createElement('div');
@@ -3815,7 +4410,23 @@ window.WA = window.WA || {};
      openBtn.className = 'wa-action-btn secondary';
      openBtn.textContent = '🖼 查看';
      openBtn.title = '在新标签页打开（可直接右键复制）';
-     openBtn.addEventListener('click', () => window.open(imgSrc, '_blank'));
+     openBtn.addEventListener('click', () => {
+        if (imgSrc.startsWith('data:')) {
+           try {
+              const [head, b64] = imgSrc.split(',');
+              const mimeType = head.split(':')[1].split(';')[0];
+              const binary = atob(b64);
+              const arr = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+              const blob = new Blob([arr], { type: mimeType });
+              const blobUrl = URL.createObjectURL(blob);
+              window.open(blobUrl, '_blank');
+              setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+           } catch (_) { window.open(imgSrc, '_blank'); }
+        } else {
+           window.open(imgSrc, '_blank');
+        }
+     });
      const dlBtn = document.createElement('button');
      dlBtn.className = 'wa-action-btn';
      dlBtn.textContent = '💾 下载';
@@ -3842,6 +4453,16 @@ window.WA = window.WA || {};
         e.dataTransfer.effectAllowed = 'copy';
         e.dataTransfer.setData('application/wa-chart-image', imgSrc);
         e.dataTransfer.setData('application/wa-chart-name', img.alt || 'image.png');
+        _draggingChartSrc = imgSrc;
+        _draggingChartName = img.alt || 'image.png';
+        const overlay = $('wa-ai-img-drop-hint');
+        if (overlay) overlay.classList.add('active');
+     });
+     img.addEventListener('dragend', () => {
+        _draggingChartSrc = null;
+        _draggingChartName = null;
+        const overlay = $('wa-ai-img-drop-hint');
+        if (overlay) overlay.classList.remove('active');
      });
   }
 
@@ -3879,14 +4500,20 @@ window.WA = window.WA || {};
      msgs.scrollTop = msgs.scrollHeight;
   }
 
-  // ── Chart / code execution SSE (backed by /api/v1/workspace/chart-exec) ──
+  // ── Chart / code execution SSE (backed by /api/editor/ai/chart) ──
   async function _sendViaSSEChart(payload) {
     let buffer = '';
+    // Map old payload fields to new endpoint schema
+    const body = {
+      data_context: payload.csv_data || payload.prompt || '',
+      instruction: payload.prompt || '',
+      lang: payload.language || 'python',
+    };
     try {
-      const resp = await fetch('/api/v1/workspace/chart-exec', {
+      const resp = await fetch('/api/editor/ai/chart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(body),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
       const reader = resp.body.getReader();
@@ -3901,30 +4528,61 @@ window.WA = window.WA || {};
           if (!line.startsWith('data: ')) continue;
           try {
             const evt = JSON.parse(line.slice(6));
+            const msgs = $('wa-ai-messages');
             switch (evt.type) {
-              case 'chunk': {
-                const msgs = $('wa-ai-messages');
+              case 'status':
+              case 'info': {
                 let last = msgs.lastElementChild;
                 if (!last || !last.classList.contains('streaming')) {
                   last = document.createElement('div');
                   last.className = 'wa-msg ai streaming';
-                  last.dataset.raw = '';
                   msgs.appendChild(last);
                 }
-                last.dataset.raw = (last.dataset.raw || '') + evt.text;
-                last.textContent = last.dataset.raw;
+                last.textContent = evt.text || '';
                 msgs.scrollTop = msgs.scrollHeight;
                 break;
               }
-              case 'code_result': _handleCodeResult(evt); break;
-              case 'complete': state.isLoading = false; break;
+              case 'code': {
+                const last = msgs.lastElementChild;
+                if (last && last.classList.contains('streaming')) last.classList.remove('streaming');
+                const codeEl = document.createElement('div');
+                codeEl.className = 'wa-msg ai';
+                codeEl.innerHTML = `<details><summary>📄 生成的代码</summary><pre style="white-space:pre-wrap;font-size:12px">${evt.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></details>`;
+                msgs.appendChild(codeEl);
+                msgs.scrollTop = msgs.scrollHeight;
+                break;
+              }
+              case 'image': {
+                const imgEl = document.createElement('div');
+                imgEl.className = 'wa-msg ai';
+                imgEl.innerHTML = `<img src="data:image/png;base64,${evt.data}" style="max-width:100%;border-radius:6px" alt="${evt.name||'chart'}">`;
+                msgs.appendChild(imgEl);
+                msgs.scrollTop = msgs.scrollHeight;
+                break;
+              }
+              case 'stdout':
+              case 'stderr': {
+                if (evt.text && evt.text.trim()) {
+                  const outEl = document.createElement('div');
+                  outEl.className = 'wa-msg ai';
+                  outEl.innerHTML = `<pre style="white-space:pre-wrap;font-size:11px;color:${evt.type==='stderr'?'#e57373':'#888'}">${evt.text.replace(/</g,'&lt;')}</pre>`;
+                  msgs.appendChild(outEl);
+                  msgs.scrollTop = msgs.scrollHeight;
+                }
+                break;
+              }
+              case 'done': {
+                const last = msgs.lastElementChild;
+                if (last && last.classList.contains('streaming')) last.classList.remove('streaming');
+                state.isLoading = false;
+                break;
+              }
               case 'error': {
-                const msgs = $('wa-ai-messages');
                 const last = msgs.lastElementChild;
                 if (last && last.classList.contains('streaming')) last.classList.remove('streaming');
                 const errEl = document.createElement('div');
                 errEl.className = 'wa-msg ai';
-                errEl.textContent = evt.message || '❌ 图表生成失败';
+                errEl.textContent = evt.text || evt.message || '❌ 图表生成失败';
                 msgs.appendChild(errEl);
                 msgs.scrollTop = msgs.scrollHeight;
                 state.isLoading = false;
@@ -4037,6 +4695,16 @@ window.WA = window.WA || {};
   window.WA.pptxZoom = (val) => {
      const label = $('wa-pptx-zoom-label');
      if (label) label.textContent = val + '%';
+     if (state.activeEditor && state.activeEditor.setZoom)
+       state.activeEditor.setZoom(parseInt(val));
+  };
+
+  window.WA.pdfZoom = (val) => {
+     if (state.activeEditor && state.activeEditor.setZoom)
+       state.activeEditor.setZoom(parseInt(val));
+  };
+
+  window.WA.docxZoom = (val) => {
      if (state.activeEditor && state.activeEditor.setZoom)
        state.activeEditor.setZoom(parseInt(val));
   };
@@ -4270,11 +4938,18 @@ window.WA = window.WA || {};
   function _makeProposalBatchBar(proposals) {
     const bar = document.createElement('div');
     bar.className = 'wa-proposal-batch-bar';
+    const tIdx = state._aiTargetFileIdx;
+    const targetFile = (tIdx >= 0 && tIdx < state._aiFileContext.length) ? state._aiFileContext[tIdx] : null;
+    const canDownload = targetFile && /\.(docx|txt|md)$/i.test(targetFile.name);
+    const downloadBtn = canDownload
+      ? `<button class="wa-proposal-btn download small" onclick="WA.downloadPatchedFile()" title="将全部修改应用到目标文件并下载">⬇ 应用并下载 ${_escHtml(targetFile.name)}</button>`
+      : '';
     bar.innerHTML =
       `<span class="wa-proposal-batch-label">共 ${proposals.length} 条修改建议</span>` +
       '<span class="wa-proposal-batch-counter" id="wa-proposal-counter">0/' + proposals.length + ' 已处理</span>' +
       '<button class="wa-proposal-btn accept small" onclick="WA.batchAcceptAll()">全部接受</button>' +
-      '<button class="wa-proposal-btn reject small" onclick="WA.batchRejectAll()">全部拒绝</button>';
+      '<button class="wa-proposal-btn reject small" onclick="WA.batchRejectAll()">全部拒绝</button>' +
+      downloadBtn;
     return bar;
   }
 
@@ -4389,51 +5064,518 @@ window.WA = window.WA || {};
     });
   };
 
+  // Download a patched copy of the target file (DOCX / TXT / MD) with all accepted (or provided) proposals applied
+  window.WA.downloadPatchedFile = async (specificProposals) => {
+    const tIdx = state._aiTargetFileIdx;
+    const targetFile = (tIdx >= 0 && tIdx < state._aiFileContext.length) ? state._aiFileContext[tIdx] : null;
+    if (!targetFile) {
+      showToast('请先设置目标文件（点击文件旁的📌）', 'warn');
+      return;
+    }
+    const proposals = (specificProposals || state._activeProposals || []).filter(p => p.original_text && p.proposed_text);
+    if (!proposals.length) {
+      showToast('没有可应用的修改建议', 'warn');
+      return;
+    }
+    showToast(`正在生成修改后的文件…`, 'info');
+    try {
+      const res = await fetch('/api/v1/workspace/patch_file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: targetFile.path,
+          proposals: proposals.map(p => ({
+            original_text: p.original_text,
+            proposed_text: p.proposed_text,
+          })),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const cdHeader = res.headers.get('Content-Disposition') || '';
+      const fnMatch = cdHeader.match(/filename\*?=(?:UTF-8'')?([^;]+)/i);
+      const dlName = fnMatch ? decodeURIComponent(fnMatch[1].replace(/"/g, '')) : `修改后_${targetFile.name}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = dlName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 2000);
+      showToast(`已下载: ${dlName}`, 'success');
+    } catch (e) {
+      showToast(`下载失败: ${e.message}`, 'error');
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // ── NotebookLM-style features ─────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── Cross-source keyword search ───────────────────────────────────────────
+  let _sourceSearchTimer = null;
+  window.WA.doSourceSearch = (query) => {
+    const clearBtn = $('wa-source-clear-btn');
+    if (clearBtn) clearBtn.style.display = query ? '' : 'none';
+    clearTimeout(_sourceSearchTimer);
+    if (!query || query.length < 2) {
+      const r = $('wa-source-search-results');
+      if (r) { r.innerHTML = ''; r.style.display = 'none'; }
+      return;
+    }
+    _sourceSearchTimer = setTimeout(() => _runSourceSearch(query), 280);
+  };
+
+  function _runSourceSearch(query) {
+    const results = $('wa-source-search-results');
+    if (!results) return;
+    const files = state._aiFileContext || [];
+    const qLower = query.toLowerCase();
+    const matches = [];
+
+    files.forEach(f => {
+      const content = f.content || '';
+      let pos = 0;
+      while (matches.length < 20) {
+        const idx = content.toLowerCase().indexOf(qLower, pos);
+        if (idx === -1) break;
+        const start = Math.max(0, idx - 50);
+        const end = Math.min(content.length, idx + query.length + 80);
+        const excerpt = content.slice(start, end);
+        const highlighted = excerpt.replace(
+          new RegExp(_escRegex(query), 'gi'),
+          m => `<mark>${_escHtml(m)}</mark>`
+        );
+        matches.push({ name: f.name, excerpt: highlighted, charOffset: idx, file: f });
+        pos = idx + 1;
+      }
+    });
+
+    if (!matches.length) {
+      results.innerHTML = `<div class="wa-source-no-result">未找到"${_escHtml(query)}"相关内容</div>`;
+      results.style.display = '';
+      return;
+    }
+
+    results.innerHTML = matches.slice(0, 12).map((m, i) =>
+      `<div class="wa-source-result-item" data-idx="${i}" onclick="WA._sourceResultClick(this)">` +
+      `<span class="wa-src-result-file">${_fileIcon(m.name.split('.').pop())} ${_escHtml(m.name)}</span>` +
+      `<span class="wa-src-result-text">…${m.excerpt}…</span>` +
+      `</div>`
+    ).join('');
+    // Store hit data for click handler
+    results._hitData = matches.slice(0, 12);
+    results.style.display = '';
+  }
+
+  window.WA._sourceResultClick = (el) => {
+    const results = $('wa-source-search-results');
+    const idx = parseInt(el.dataset.idx || '0', 10);
+    const hit = results && results._hitData && results._hitData[idx];
+    if (!hit) return;
+    const query = ($('wa-source-search-input') || {}).value || '';
+    // Pre-fill the chat input with a grounded query
+    const input = $('wa-user-input');
+    if (input) {
+      input.value = `关于"${query}"，${hit.name}中提到了什么？请引用原文并分析。`;
+      input.focus();
+    }
+    window.WA.clearSourceSearch();
+  };
+
+  window.WA.clearSourceSearch = () => {
+    const inp = $('wa-source-search-input');
+    if (inp) inp.value = '';
+    const r = $('wa-source-search-results');
+    if (r) { r.innerHTML = ''; r.style.display = 'none'; }
+    const cb = $('wa-source-clear-btn');
+    if (cb) cb.style.display = 'none';
+  };
+
+  function _escRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  // ── Key Topic Extraction ──────────────────────────────────────────────────
+  window.WA.extractTopics = async () => {
+    if (!state._aiFileContext.length) { showToast('请先附加文件', 'warn'); return; }
+    const bar = $('wa-topic-chips-bar');
+    const list = $('wa-topic-chips-list');
+    if (!bar || !list) return;
+    list.innerHTML = '<span class="wa-spinner-sm"></span> 提炼中…';
+    bar.style.display = 'flex';
+
+    const combined = state._aiFileContext.map(f =>
+      `=== ${f.name} ===\n${(f.content || '').slice(0, 8000)}`
+    ).join('\n\n');
+
+    // Use the chat endpoint for topic extraction
+    const prompt = `请从以下资料中提炼6-10个核心主题或关键概念，仅用JSON数组回复，格式:["主题1","主题2",...]\n\n${combined}`;
+    try {
+      const res = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: _waSession(),
+          message: prompt,
+          locked_task: 'CHAT',
+          locked_model: state.lockedModel || 'auto',
+        }),
+      });
+      let fullText = '';
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const ln of lines) {
+          if (!ln.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(ln.slice(6));
+            if (evt.type === 'token') fullText += evt.content || '';
+            if (evt.type === 'done') break;
+          } catch(e) {}
+        }
+      }
+      // Parse JSON array
+      const m = fullText.match(/\[[\s\S]*?\]/);
+      const topics = m ? JSON.parse(m[0]) : [];
+      if (!topics.length) throw new Error('未提取到主题');
+      list.innerHTML = topics.map(t =>
+        `<button class="wa-topic-chip" onclick="WA._topicClick(this)">${_escHtml(t)}</button>`
+      ).join('');
+    } catch(e) {
+      list.innerHTML = `<span style="color:var(--error,red)">提炼失败: ${_escHtml(e.message)}</span>`;
+    }
+  };
+
+  window.WA._topicClick = (btn) => {
+    const topic = btn.textContent;
+    const input = $('wa-user-input');
+    if (input) {
+      input.value = `请详细介绍「${topic}」，并引用附加文件中的具体内容作为依据，标注来源文件名。`;
+      input.focus();
+    }
+  };
+
+  window.WA.closeTopicBar = () => {
+    const bar = $('wa-topic-chips-bar');
+    if (bar) bar.style.display = 'none';
+  };
+
+  // ── Grounded Citation: inject source labeling into multi-doc prompt ────────
+  // Called inside sendMessage() — appends instruction to prompt.
+  function _citationInstruction() {
+    return '\n\n【重要】：在引用各文件中的具体内容时，请在引用后附上来源标注，格式为 `[来源: 文件名]`，以便用户溯源核查。';
+  }
+
+  // Parse AI response text and replace [来源: xxx] with clickable citation chips
+  function _parseCitations(html) {
+    return html.replace(
+      /\[来源[:：]\s*([^\]]{1,60})\]/g,
+      (_, srcName) =>
+        `<span class="wa-citation-chip" onclick="WA._citationClick('${_escHtml(srcName.trim())}')" title="点击查看来源">📌 ${_escHtml(srcName.trim())}</span>`
+    );
+  }
+
+  window.WA._citationClick = (fileName) => {
+    const file = state._aiFileContext.find(
+      f => f.name === fileName || f.name.toLowerCase() === fileName.toLowerCase()
+    );
+    if (!file) { showToast(`未找到文件 "${fileName}"`, 'warn'); return; }
+    // Show the source in the preview drawer
+    const preview = $('wa-source-preview');
+    const label = $('wa-source-preview-label');
+    const body = $('wa-source-preview-body');
+    if (!preview || !body) return;
+    label.textContent = `📌 ${file.name}`;
+    body.innerHTML = `<pre class="wa-source-pre">${_escHtml((file.content || '').slice(0, 3000))}${file.content && file.content.length > 3000 ? '…' : ''}</pre>`;
+    preview.style.display = '';
+    preview.scrollTop = 0;
+  };
+
+  window.WA.closeSourcePreview = () => {
+    const el = $('wa-source-preview');
+    if (el) el.style.display = 'none';
+  };
+
+  // ── Audio Overview ────────────────────────────────────────────────────────
+  window.WA.openAudioOverview = async () => {
+    const files = state._aiFileContext;
+    if (!files.length) { showToast('请先附加文件', 'warn'); return; }
+    const modal = $('wa-audio-modal');
+    const body = $('wa-audio-modal-body');
+    if (!modal || !body) return;
+    body.innerHTML = '<div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成脚本…</div>';
+    modal.style.display = '';
+
+    try {
+      const res = await fetch('/api/v1/workspace/audio_overview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: files.map(f => ({ name: f.name, content: (f.content || '').slice(0, 8000) })),
+          session_id: _waSession(),
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let script = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const ln of lines) {
+          if (!ln.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(ln.slice(6));
+            if (evt.event === 'script') {
+              script = evt.data;
+              body.innerHTML = _renderAudioScript(script, null);
+            } else if (evt.event === 'audio_url') {
+              if (evt.data) {
+                body.innerHTML = _renderAudioScript(script, evt.data);
+              }
+            } else if (evt.event === 'error') {
+              body.innerHTML = `<div style="color:var(--error,red);padding:16px">❌ ${_escHtml(evt.data)}</div>`;
+            }
+          } catch(e) {}
+        }
+      }
+      if (!script) body.innerHTML = '<div class="wa-audio-loading">⚠ 未收到脚本</div>';
+    } catch(e) {
+      if (body) body.innerHTML = `<div style="color:var(--error,red);padding:16px">❌ ${_escHtml(e.message)}</div>`;
+    }
+  };
+
+  function _renderAudioScript(lines, audioUrl) {
+    const scriptHtml = (lines || []).map(l => {
+      const isA = l.speaker === 'Host A';
+      return `<div class="wa-audio-line ${isA ? 'host-a' : 'host-b'}">` +
+        `<span class="wa-audio-name">${isA ? '主播 A' : '主播 B'}</span>` +
+        `<span class="wa-audio-text">${_escHtml(l.text)}</span>` +
+        `</div>`;
+    }).join('');
+
+    const playerHtml = audioUrl
+      ? `<div class="wa-audio-player-wrap"><audio controls src="${_escHtml(audioUrl)}" class="wa-audio-player"></audio></div>`
+      : `<div class="wa-audio-no-tts">💬 脚本已生成，音频合成需要 edge-tts 库（<code>pip install edge-tts</code>）</div>`;
+
+    return `${playerHtml}<div class="wa-audio-script">${scriptHtml}</div>`;
+  }
+
+  window.WA.closeAudioModal = () => {
+    const el = $('wa-audio-modal');
+    if (el) el.style.display = 'none';
+  };
+
+  // ── Notebook Guide ────────────────────────────────────────────────────────
+  window.WA.openNotebookGuide = async () => {
+    const files = state._aiFileContext;
+    if (!files.length) { showToast('请先附加文件', 'warn'); return; }
+    const drawer = $('wa-notebook-guide');
+    const body = $('wa-notebook-body');
+    if (!drawer || !body) return;
+    body.innerHTML = '<div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成学习包…</div>';
+    drawer.style.display = '';
+
+    try {
+      const res = await fetch('/api/v1/workspace/notebook_guide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          files: files.map(f => ({ name: f.name, content: (f.content || '').slice(0, 8000) })),
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Clear loading, prepare cards container
+      body.innerHTML = '';
+
+      const LABELS = {
+        summary: '📋 执行摘要', points: '🎯 关键要点',
+        faq: '❓ 常见问答', glossary: '📖 核心词汇',
+      };
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const ln of lines) {
+          if (!ln.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(ln.slice(6));
+            if (evt.section === 'done') break;
+            if (evt.section === 'error') {
+              body.innerHTML += `<div style="color:var(--error,red);padding:10px">❌ ${_escHtml(evt.content)}</div>`;
+              break;
+            }
+            if (!LABELS[evt.section]) continue;
+            const renderMd = (t) => {
+              if (window.marked) { try { return window.marked.parse(t || ''); } catch(e) {} }
+              return `<pre>${_escHtml(t)}</pre>`;
+            };
+            const card = document.createElement('div');
+            card.className = 'wa-nb-card';
+            card.innerHTML =
+              `<div class="wa-nb-card-header" onclick="this.parentElement.classList.toggle('collapsed')">` +
+              `<span>${LABELS[evt.section]}</span>` +
+              `<div class="wa-nb-card-btns">` +
+              `<button class="wa-nb-copy-btn" onclick="event.stopPropagation();WA._copyNbSection(this)" title="复制">📋</button>` +
+              `<button class="wa-nb-send-btn" onclick="event.stopPropagation();WA._sendNbSection(this)" title="发送到AI">💬</button>` +
+              `<span class="wa-nb-chevron">▾</span></div></div>` +
+              `<div class="wa-nb-card-body" data-raw="${_escHtml(evt.content)}">${renderMd(evt.content)}</div>`;
+            body.appendChild(card);
+          } catch(e) {}
+        }
+      }
+      if (!body.children.length) {
+        body.innerHTML = '<div class="wa-audio-loading">⚠ 未收到内容</div>';
+      }
+    } catch(e) {
+      if (body) body.innerHTML = `<div style="color:var(--error,red);padding:16px">❌ ${_escHtml(e.message)}</div>`;
+    }
+  };
+
+  window.WA._copyNbSection = async (btn) => {
+    const body = btn.closest('.wa-nb-card').querySelector('.wa-nb-card-body');
+    if (!body) return;
+    try {
+      await navigator.clipboard.writeText(body.dataset.raw || body.textContent);
+      showToast('已复制', 'success');
+    } catch(e) { showToast('复制失败', 'warn'); }
+  };
+
+  window.WA._sendNbSection = (btn) => {
+    const body = btn.closest('.wa-nb-card').querySelector('.wa-nb-card-body');
+    if (!body) return;
+    const input = $('wa-user-input');
+    if (input) { input.value = (body.dataset.raw || body.textContent).slice(0, 500); input.focus(); }
+    WA.closeNotebookGuide();
+  };
+
+  window.WA.closeNotebookGuide = () => {
+    const el = $('wa-notebook-guide');
+    if (el) el.style.display = 'none';
+  };
+
   // ── AI Response Action Bar ─────────────────────────────────────────────────
-  function _makeAIActionBar() {
+  // snapshot = { pinnedSel, toolCall, outputMode } — captured at response-complete
+  // time so UI buttons are isolated from subsequent state changes.
+  function _makeAIActionBar(snapshot) {
     const bar = document.createElement('div');
     bar.className = 'wa-ai-action-bar';
-    bar.innerHTML =
-      '<span class="wa-ai-action-label">AI \u56de\u590d\u4e86\uff0c\u5982\u4f55\u5904\u7406\uff1f</span>' +
-      '<button class="wa-ai-action-btn primary" onclick="WA.applyAIResponse(\'replace\',this)">\u2705 \u66ff\u6362\u9009\u533a</button>' +
-      '<button class="wa-ai-action-btn" onclick="WA.applyAIResponse(\'append\',this)">\ud83d\udcce \u63d2\u5165\u5230\u540e\u9762</button>' +
-      '<button class="wa-ai-action-btn muted" onclick="WA.applyAIResponse(\'view\',this)">\ud83d\udc41 \u4ec5\u67e5\u770b</button>';
+
+    const label = document.createElement('span');
+    label.className = 'wa-ai-action-label';
+    label.textContent = 'AI 回复了，如何处理？';
+    bar.appendChild(label);
+
+    const _btn = (text, extraCls, mode) => {
+      const b = document.createElement('button');
+      b.className = 'wa-ai-action-btn' + (extraCls ? ' ' + extraCls : '');
+      b.textContent = text;
+      b.addEventListener('click', () => _execWriteToDoc(mode, snapshot, bar));
+      return b;
+    };
+
+    if (snapshot.pinnedSel) {
+      // Has a pinned text selection — offer targeted replace
+      bar.appendChild(_btn('✅ 替换选区', 'primary', 'replace'));
+      bar.appendChild(_btn('📎 插入到后面', '', 'append'));
+    } else if (snapshot.toolCall) {
+      // No pinned selection but AI produced a structured tool call
+      // (e.g. full-doc polish in 写入文档 mode) — allow applying it
+      bar.appendChild(_btn('✅ 应用到文档', 'primary', 'replace'));
+      bar.appendChild(_btn('📎 插入到末尾', '', 'append'));
+    } else if (snapshot.outputMode && snapshot.outputMode !== 'chat') {
+      // In "写入文档" mode — offer direct write even without explicit selection/tool call
+      bar.appendChild(_btn('✅ 写入文档', 'primary', 'replace'));
+      bar.appendChild(_btn('📎 插入到末尾', '', 'append'));
+    } else {
+      // Pure chat reply with no selection and no tool call
+      bar.appendChild(_btn('📎 插入到文档末尾', 'primary', 'append'));
+    }
+    bar.appendChild(_btn('👁 仅查看', 'muted', 'view'));
     return bar;
   }
 
+  // Isolated apply function — reads exclusively from the closed-over snapshot,
+  // never from global state, so it is safe to call at any time after creation.
+  function _execWriteToDoc(mode, snapshot, bar) {
+    if (mode !== 'view') {
+      // Locate the AI message immediately preceding this action bar
+      let msgEl = bar.previousElementSibling;
+      while (msgEl && !msgEl.classList.contains('wa-msg')) {
+        msgEl = msgEl.previousElementSibling;
+      }
+      const rawText = (msgEl && msgEl.dataset.rawText) ? msgEl.dataset.rawText
+                    : (msgEl ? msgEl.textContent : '');
+
+      const editor = state.activeEditor;
+      const tc     = snapshot.toolCall;
+      const sel    = snapshot.pinnedSel;
+
+      if (tc && editor) {
+        // AI produced a structured tool call — most reliable path
+        if (mode === 'replace') {
+          editor.applyToolCall(tc);
+        } else if (mode === 'append') {
+          if (editor.appendToolCall) {
+            editor.appendToolCall(tc);
+          } else {
+            editor.applyToolCall(tc);
+          }
+        }
+      } else if (sel && editor && typeof editor.replaceSelectionWith === 'function') {
+        // No tool call but original pinned selection is known
+        editor.replaceSelectionWith(mode, sel, rawText);
+      } else if (sel) {
+        showToast('无法定位原始选区，已复制到剪贴板', 'info');
+        navigator.clipboard && navigator.clipboard.writeText(rawText).catch(() => {});
+      } else if (editor) {
+        // No selection and no tool call — full-doc replace or append
+        if (mode === 'replace') {
+          // Convert markdown AI text to HTML and replace entire document content
+          const htmlVal = window.marked ? window.marked.parse(rawText) : ('<p>' + rawText.replace(/\n/g, '</p><p>') + '</p>');
+          editor.applyToolCall({ type: 'replace_all', value: htmlVal });
+        } else {
+          editor.applyToolCall({ type: 'insert_text', value: '\n' + rawText });
+        }
+        WA.scheduleAutoSave && WA.scheduleAutoSave();
+      }
+    }
+    bar.remove();
+  }
+
+  // Legacy entry point kept for backward compatibility (quick-action cards may call this).
   window.WA.applyAIResponse = (mode, btn) => {
     const bar = btn.closest('.wa-ai-action-bar');
     if (!bar) return;
-    // Locate the AI message immediately before the action bar
-    let msgEl = bar.previousElementSibling;
-    while (msgEl && !msgEl.classList.contains('wa-msg')) {
-      msgEl = msgEl.previousElementSibling;
-    }
-    const rawText = (msgEl && msgEl.dataset.rawText) ? msgEl.dataset.rawText
-                  : (msgEl ? msgEl.textContent : '');
-
-    if (mode !== 'view') {
-      if (state.pendingToolCall && state.activeEditor) {
-        if (mode === 'replace') {
-          state.activeEditor.applyToolCall(state.pendingToolCall);
-        } else if (mode === 'append') {
-          if (state.activeEditor.appendToolCall) {
-            state.activeEditor.appendToolCall(state.pendingToolCall);
-          } else {
-            state.activeEditor.applyToolCall(state.pendingToolCall);
-          }
-        }
-      } else if (state.lastPinnedSel && state.activeEditor &&
-                 typeof state.activeEditor.replaceSelectionWith === 'function') {
-        state.activeEditor.replaceSelectionWith(mode, state.lastPinnedSel, rawText);
-      } else if (state.lastPinnedSel) {
-        showToast('\u65e0\u6cd5\u5b9a\u4f4d\u539f\u59cb\u9009\u533a\uff0c\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f', 'info');
-        navigator.clipboard && navigator.clipboard.writeText(rawText).catch(() => {});
-      }
-    }
+    _execWriteToDoc(mode, {
+      pinnedSel:  state.lastPinnedSel,
+      toolCall:   state.pendingToolCall,
+      outputMode: state.aiOutputMode,
+    }, bar);
     state.pendingToolCall = null;
     state.lastPinnedSel = null;
-    bar.remove();
   };
 
   window.WA.sendMessage = () => {
@@ -4452,6 +5594,13 @@ window.WA = window.WA || {};
       // Add user message bubble — with optional Copilot-style quote block
       const uMsg = document.createElement('div');
       uMsg.className = 'wa-msg user';
+      // Show attached files indicator in the message
+      if (state._aiFileContext && state._aiFileContext.length) {
+        const filesNote = document.createElement('div');
+        filesNote.className = 'wa-msg-files-note';
+        filesNote.textContent = `📎 ${state._aiFileContext.map(f => f.name).join(', ')}`;
+        uMsg.appendChild(filesNote);
+      }
       if (pinnedSel) {
         const quote = document.createElement('div');
         quote.className = 'wa-msg-quote';
@@ -4487,6 +5636,12 @@ window.WA = window.WA || {};
       }
 
       // Build full message with document context + tool/proposal format instructions
+      // NOTE: defined at function scope so it's accessible both inside and outside the if block below
+      const _isReadOnlyIntent = (t) => {
+        const roRe = /总结|摘要|分析|解释|讲解|简介|介绍|是什么|描述|概括|审阅/;
+        const modRe = /修改|改写|润色|删除|替换|更正|修复|优化|重写|调整|纠正|校对|添加|插入|精简|压缩|扩充|完善|补充|修订|翻译|转换|改进/;
+        return !pinnedSel && roRe.test(t) && !modRe.test(t);
+      };
       let fullMessage = text;
       if (state.fileName && context) {
         const selHint = pinnedSel
@@ -4494,9 +5649,7 @@ window.WA = window.WA || {};
           : '';
         // Only inject modification proposal hint for queries that intend to edit the document
         // Skip for read-only intents (summarize, analyze, explain, translate for reference, etc.)
-        const _readOnlyRe = /总结|摘要|分析|解释|讲解|简介|介绍|是什么|描述|概括|审阅/;
-        const _modifyRe   = /修改|改写|润色|删除|替换|更正|修复|优化|重写|调整|纠正|校对|添加|插入/;
-        const _isReadOnly = !pinnedSel && _readOnlyRe.test(text) && !_modifyRe.test(text);
+        const _isReadOnly = _isReadOnlyIntent(text);
         let toolHint = '';
         if (state.aiOutputMode !== 'chat' && !_isReadOnly) {
           if (fileType === 'docx') {
@@ -4510,10 +5663,51 @@ window.WA = window.WA || {};
         fullMessage = `[工作区文档助手模式]\n当前文件: ${state.fileName} (${fileType})\n\n文档内容:\n${context}${selHint}${toolHint}\n\n用户指令: ${text}`;
       }
 
+      // Append multi-file context if files have been dragged to the AI panel
+      if (state._aiFileContext && state._aiFileContext.length) {
+        const tIdx = state._aiTargetFileIdx;
+        const targetFile = (tIdx >= 0 && tIdx < state._aiFileContext.length) ? state._aiFileContext[tIdx] : null;
+
+        if (targetFile) {
+          // Target-file mode: label target vs reference files clearly
+          const refFiles = state._aiFileContext
+            .map((f, i) => ({ ...f, i }))
+            .filter(f => f.i !== tIdx);
+          const targetBlock = `\n\n--- 目标文件（待修改）: ${targetFile.name} ---\n${targetFile.content}`;
+          const refBlocks = refFiles.map((f, ri) =>
+            `\n\n--- 参考文件 ${ri + 1}: ${f.name} ---\n${f.content}`
+          ).join('');
+          fullMessage =
+            `[多文档内容同步模式]\n目标文件: ${targetFile.name} | 参考文件: ${refFiles.map(f => f.name).join(', ')}` +
+            (state.fileName ? `\n\n--- 当前编辑文件: ${state.fileName} (${fileType}) ---\n${context || '(无内容)'}` : '') +
+            targetBlock + refBlocks +
+            (pinnedSel ? `\n\n[用户选中的文字]\n"${pinnedSel.length > 500 ? pinnedSel.substring(0, 500) + '…' : pinnedSel}"` : '') +
+            `\n\n请根据参考文件的内容，分析目标文件"${targetFile.name}"需要做哪些更新，并以JSON格式给出proposals修改建议（original_text / proposed_text），以便用户直接应用。${_citationInstruction()}\n\n用户指令: ${text}`;
+        } else {
+          // Pure analysis mode (no write-back target)
+          const fileBlocks = state._aiFileContext.map((f, i) =>
+            `\n\n--- 附加文件 ${i + 1}: ${f.name} ---\n${f.content}`
+          ).join('');
+          fullMessage = `[多文档分析模式]\n共 ${state._aiFileContext.length + (state.fileName ? 1 : 0)} 份文件` +
+            (state.fileName ? `\n\n--- 当前编辑文件: ${state.fileName} (${fileType}) ---\n${context || '(无内容)'}` : '') +
+            fileBlocks +
+            (pinnedSel ? `\n\n[用户选中的文字]\n"${pinnedSel.length > 500 ? pinnedSel.substring(0, 500) + '…' : pinnedSel}"` : '') +
+            _citationInstruction() +
+            `\n\n用户指令: ${text}`;
+        }
+      }
+
       state.conversation.push({ role: 'user', content: text });
       state.isLoading = true;
 
-      _waSendToChat(fullMessage, loadingEl, { model: state.lockedModel || 'auto' });
+      // Pass doc_edit context so backend can inject the right system prompt
+      const _isDocEdit = !!(state.fileName && state.aiOutputMode !== 'chat' && !_isReadOnlyIntent(text));
+      _waSendToChat(fullMessage, loadingEl, {
+        model:    state.lockedModel || 'auto',
+        doc_edit: _isDocEdit,
+        file_type: state.fileType || '',
+        has_sel:  !!pinnedSel,
+      });
   };
 
   // ── Auto-save ──────────────────────────────────────────────────────────────
@@ -4588,6 +5782,12 @@ window.WA = window.WA || {};
     // Reset cloud model select to auto if switching to local
     const sel = document.getElementById('wa-model-select');
     if (sel && useLocal) sel.value = 'auto';
+    // Persist to server so file-editor AI (editor_ai_stream) also respects the choice
+    fetch('/api/local-model/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: newModel === 'local' ? 'local' : 'cloud' }),
+    }).catch(() => {/* silent — localStorage state still works for chat/stream path */});
   };
 
   window.WA.setLockedModel = (val) => {
@@ -4713,6 +5913,8 @@ window.WA = window.WA || {};
       if (_saveFileType === 'docx' && _saveTab.serverData) _saveTab.serverData.html = data;
       _renderTabs();
     }
+    // Refresh the recent-files list so FileHub shows the updated mtime.
+    setTimeout(() => { try { loadRecentFiles(); } catch(e) {} }, 800);
     if (fsHandle) {
       const rawRes = await fetch(`/api/v1/workspace/raw/${_saveFileId}?_=${Date.now()}`);
       if (rawRes.ok) {
@@ -4797,6 +5999,130 @@ window.WA = window.WA || {};
     }
   };
 
+  // ── Phase D: Archive current file ───────────────────────────────────────
+  window.WA.toggleArchivePopover = () => {
+    const pop = document.getElementById('wa-archive-popover');
+    if (!pop) return;
+    const visible = pop.style.display !== 'none';
+    pop.style.display = visible ? 'none' : 'block';
+    if (!visible) {
+      // Close on outside click
+      const handler = (e) => {
+        if (!pop.contains(e.target) && !document.getElementById('wa-archive-btn').contains(e.target)) {
+          pop.style.display = 'none';
+          document.removeEventListener('click', handler, true);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', handler, true), 10);
+    }
+  };
+
+  window.WA.archiveCurrent = async (category) => {
+    const pop = document.getElementById('wa-archive-popover');
+    if (pop) pop.style.display = 'none';
+    if (!state.wsSourcePath) { showToast('当前没有打开文件', 'error'); return; }
+    const ext = (state.wsSourcePath || '').split('.').pop().toLowerCase();
+    try {
+      const res = await fetch('/api/files/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'custom',
+          rules: [{ pattern: `*.${ext}`, target: category }],
+          files: [state.wsSourcePath],
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || '归档失败');
+      const moved = d.report?.find?.(r => r.moved > 0);
+      if (moved) {
+        showToast(`✓ 已归档到「${category}」文件夹`, 'success');
+        // Refresh registry so FileHub shows updated location
+        setTimeout(() => { try { if (window.WA && WA.refreshRecent) WA.refreshRecent(); } catch(e) {} }, 600);
+      } else {
+        showToast(d.message || '归档完成', 'success');
+      }
+    } catch (e) {
+      showToast('归档失败: ' + e.message, 'error');
+    }
+  };
+
+  // ── Version History ──
+  window.WA.toggleHistoryPopover = () => {
+    const pop = document.getElementById('wa-history-popover');
+    if (!pop) return;
+    const visible = pop.style.display !== 'none';
+    pop.style.display = visible ? 'none' : 'block';
+    if (!visible) {
+      _loadVersionHistory();
+      const handler = (e) => {
+        if (!pop.contains(e.target) && !document.getElementById('wa-history-btn').contains(e.target)) {
+          pop.style.display = 'none';
+          document.removeEventListener('click', handler, true);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', handler, true), 10);
+    }
+  };
+
+  async function _loadVersionHistory() {
+    const listEl = document.getElementById('wa-history-list');
+    if (!listEl) return;
+    if (!state.wsSourcePath) { listEl.innerHTML = '<span style="color:var(--text-muted);">当前没有打开的文件</span>'; return; }
+    listEl.innerHTML = '<span style="color:var(--text-muted);">加载中…</span>';
+    try {
+      const r = await fetch('/api/v1/workspace/versions?path=' + encodeURIComponent(state.wsSourcePath));
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      const versions = d.versions || [];
+      if (!versions.length) { listEl.innerHTML = '<span style="color:var(--text-muted);">暂无历史版本，保存文件后会自动创建快照</span>'; return; }
+      const _fmtSize = b => b > 1048576 ? (b/1048576).toFixed(1)+' MB' : Math.round(b/1024)+' KB';
+      listEl.innerHTML = versions.map(v => {
+        const snapArg   = JSON.stringify(v.snap_path).replace(/"/g, '&quot;');
+        const targetArg = JSON.stringify(state.wsSourcePath).replace(/"/g, '&quot;');
+        return `<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 6px;border-radius:7px;transition:background 0.1s;cursor:default;"
+              onmouseover="this.style.background='var(--bg-secondary)'" onmouseout="this.style.background=''">
+            <div>
+              <div style="font-size:13px;font-weight:500;color:var(--text-primary);">${v.saved_at || v.name}</div>
+              <div style="font-size:11px;color:var(--text-muted);">${_fmtSize(v.size_bytes||0)}</div>
+            </div>
+            <button onclick="_waRestoreVersion(${snapArg}, ${targetArg})"
+              style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--border-color);background:var(--bg-primary);color:var(--text-secondary);cursor:pointer;transition:all 0.12s;"
+              onmouseover="this.style.background='var(--accent-primary)';this.style.color='#fff';this.style.borderColor='var(--accent-primary)'"
+              onmouseout="this.style.background='var(--bg-primary)';this.style.color='var(--text-secondary)';this.style.borderColor='var(--border-color)'">
+              恢复
+            </button>
+          </div>`;
+      }).join('');
+    } catch (e) {
+      listEl.innerHTML = `<span style="color:var(--text-muted);">加载失败: ${e.message}</span>`;
+    }
+  }
+
+  window._waRestoreVersion = async (snapPath, targetPath) => {
+    if (!confirm(`将文件恢复到该版本？当前未保存的更改会丢失。`)) return;
+    try {
+      const r = await fetch('/api/v1/workspace/restore-version', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ snap_path: snapPath, target_path: targetPath }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || '恢复失败');
+      document.getElementById('wa-history-popover').style.display = 'none';
+      showToast('✓ 已恢复，正在重新加载…', 'success');
+      // Reload the file in the editor after a short delay
+      setTimeout(async () => {
+        if (state.wsSourcePath) {
+          const currentPath = state.wsSourcePath;
+          await Router.load({ name: currentPath.split(/[\\/]/).pop(), _waPath: currentPath });
+        }
+      }, 800);
+    } catch (e) {
+      showToast('恢复失败: ' + e.message, 'error');
+    }
+  };
+
   // ── Drag & Drop Events ──
   // ── File System Access API helpers ──
   // When a file is opened via the picker we store its FileSystemFileHandle so Ctrl+S
@@ -4873,30 +6199,23 @@ window.WA = window.WA || {};
     if (e.dataTransfer.files.length) loadFiles(e.dataTransfer.files);
   });
 
-  // Drop zone for chart images dragged from the AI panel into the document
-  const _waCanvasBody = $('wa-canvas-body');
-  if (_waCanvasBody) {
-    _waCanvasBody.addEventListener('dragover', (e) => {
-      if (e.dataTransfer.types.includes('application/wa-chart-image')) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.dataTransfer.dropEffect = 'copy';
-        _waCanvasBody.classList.add('wa-drop-active');
-      }
-    });
-    _waCanvasBody.addEventListener('dragleave', (e) => {
-      if (!_waCanvasBody.contains(e.relatedTarget)) {
-        _waCanvasBody.classList.remove('wa-drop-active');
-      }
-    });
-    _waCanvasBody.addEventListener('drop', (e) => {
-      _waCanvasBody.classList.remove('wa-drop-active');
-      const imgSrc = e.dataTransfer.getData('application/wa-chart-image');
-      if (!imgSrc) return;
+  // Drop zone for chart images: wire the pre-existing overlay element
+  // (pointer-events cover the full canvas when a chart drag is active,
+  //  bypassing WangEditor's own drag handlers)
+  const _dropHintOverlay = $('wa-ai-img-drop-hint');
+  if (_dropHintOverlay) {
+    _dropHintOverlay.addEventListener('dragover', (e) => {
       e.preventDefault();
-      e.stopPropagation();
-      if (state.activeEditor) {
-        state.activeEditor.applyToolCall({ type: 'insert_image', src: imgSrc });
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    _dropHintOverlay.addEventListener('drop', (e) => {
+      e.preventDefault();
+      _dropHintOverlay.classList.remove('active');
+      const src = _draggingChartSrc;
+      _draggingChartSrc = null;
+      _draggingChartName = null;
+      if (src && state.activeEditor) {
+        state.activeEditor.applyToolCall({ type: 'insert_image', src });
         showToast('图表已插入文档', 'success');
       }
     });
@@ -4904,10 +6223,138 @@ window.WA = window.WA || {};
 
   // Init
   initSocket();
-  loadFileBrowser();
-  loadRecentFiles();
+  // loadFileBrowser / loadRecentFiles are deferred to first open (openInMainView)
+  // to avoid issuing API requests before the user has ever opened the workspace panel.
+  _renderMyWorkspace();
   // Sync auto-save toggle appearance
   (() => { const btn = $('wa-autosave-toggle'); if (btn && _autoSaveEnabled) btn.classList.add('toggle-on'); })();
+
+  // ── My Workspace: drag-drop to add files ──
+  const mywsList = $('wa-myws-list');
+  const mywsEmpty = $('wa-myws-empty');
+  [mywsList, mywsEmpty].forEach(el => {
+    if (!el) return;
+    el.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('application/wa-file-path') || e.dataTransfer.types.includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (mywsList) mywsList.classList.add('drag-over');
+      }
+    });
+    el.addEventListener('dragleave', (e) => {
+      if (!el.contains(e.relatedTarget)) {
+        if (mywsList) mywsList.classList.remove('drag-over');
+      }
+    });
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (mywsList) mywsList.classList.remove('drag-over');
+      const filePath = e.dataTransfer.getData('application/wa-file-path');
+      if (filePath) {
+        WA.addToMyWorkspace(filePath);
+      }
+    });
+  });
+
+  // ── AI Panel: drag-drop files for multi-doc context ──
+  const aiPanel = $('wa-ai');
+  const aiDropOverlay = $('wa-ai-file-drop');
+  const canvasShield = $('wa-drag-canvas-shield');
+
+  // Track file drags globally so we can show the canvas shield
+  // (prevents rich editors like WangEditor/Univer from swallowing drag events)
+  document.addEventListener('dragstart', (e) => {
+    if (e.dataTransfer.types && e.dataTransfer.types.includes
+        ? e.dataTransfer.types.includes('application/wa-file-path')
+        : false) return; // already handled by ondragstart
+    // ondragstart fires before dragstart, so check if this element is a file item
+    if (e.target && e.target.dataset && e.target.dataset.path) {
+      document.body.classList.add('wa-file-dragging');
+    }
+  });
+  document.addEventListener('dragend', () => {
+    document.body.classList.remove('wa-file-dragging');
+    if (aiDropOverlay) {
+      aiDropOverlay.style.display = 'none';
+      aiDropOverlay.classList.remove('active');
+    }
+  });
+
+  function _isFileDrag(e) {
+    try { return e.dataTransfer.types.includes('application/wa-file-path'); } catch (_) { return false; }
+  }
+
+  function _showAIOverlay() {
+    if (!aiDropOverlay) return;
+    aiDropOverlay.style.display = 'flex';
+    aiDropOverlay.classList.add('active');
+  }
+  function _hideAIOverlay() {
+    if (!aiDropOverlay) return;
+    aiDropOverlay.style.display = 'none';
+    aiDropOverlay.classList.remove('active');
+  }
+
+  if (aiPanel) {
+    let _aiDragCounter = 0;
+
+    aiPanel.addEventListener('dragenter', (e) => {
+      if (!_isFileDrag(e)) return;
+      e.preventDefault();
+      _aiDragCounter++;
+      _showAIOverlay();
+    });
+    aiPanel.addEventListener('dragover', (e) => {
+      if (!_isFileDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    aiPanel.addEventListener('dragleave', (e) => {
+      if (!_isFileDrag(e)) return;
+      _aiDragCounter--;
+      if (_aiDragCounter <= 0) {
+        _aiDragCounter = 0;
+        _hideAIOverlay();
+      }
+    });
+    aiPanel.addEventListener('drop', (e) => {
+      _aiDragCounter = 0;
+      _hideAIOverlay();
+      document.body.classList.remove('wa-file-dragging');
+      const filePath = e.dataTransfer.getData('application/wa-file-path');
+      if (filePath) {
+        e.preventDefault();
+        e.stopPropagation();
+        _addFileToAIContext(filePath);
+      }
+    });
+  }
+
+  // The overlay itself also receives drag events (when pointer-events:all is active)
+  // providing a direct drop target that doesn't depend on bubbling
+  if (aiDropOverlay) {
+    aiDropOverlay.addEventListener('dragover', (e) => {
+      if (!_isFileDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    aiDropOverlay.addEventListener('drop', (e) => {
+      _hideAIOverlay();
+      document.body.classList.remove('wa-file-dragging');
+      const filePath = e.dataTransfer.getData('application/wa-file-path');
+      if (filePath) {
+        e.preventDefault();
+        e.stopPropagation();
+        _addFileToAIContext(filePath);
+      }
+    });
+  }
+
+  // Canvas shield: pass dragover through so the drag stays alive while over the editor,
+  // but the shield itself is not a drop target (drops just fall through after drag ends)
+  if (canvasShield) {
+    canvasShield.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  }
 
   // ── Local file / folder pickers ──
   const localFileInput = $('wa-local-file-input');
@@ -5004,8 +6451,35 @@ window.WA = window.WA || {};
     if (chatView) chatView.style.display = 'none';
     wsView.style.display = 'flex';
     localStorage.setItem('koto.inWorkspace', '1');
-    // Load workspace files on first open
-    if (typeof loadFileBrowser === 'function') loadFileBrowser();
+    // Load workspace files on first open (idempotent: skip if already loaded)
+    if (typeof loadFileBrowser === 'function' && !window._WA_fileBrowserLoaded) {
+      window._WA_fileBrowserLoaded = true;
+      loadFileBrowser();
+      if (typeof loadRecentFiles === 'function') loadRecentFiles();
+    }
+
+    // If an XLSX/PPTX editor is already mounted, trigger a reflow so it can
+    // recover from a prior zero-size render that may have occurred while the
+    // workspace panel was hidden (display:none → flex just happened above).
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!state.activeEditor) return;
+        if (state.fileType === 'xlsx') {
+          const sheetEl = document.getElementById('wa-xlsx-sheet');
+          if (sheetEl && sheetEl.offsetWidth > 0) {
+            // Nudge container to fire Univer's internal ResizeObserver
+            const w = sheetEl.offsetWidth;
+            sheetEl.style.width = (w + 1) + 'px';
+            requestAnimationFrame(() => { sheetEl.style.width = ''; });
+          }
+        } else if (state.fileType === 'pptx') {
+          const area = document.getElementById('wa-pptx-slide-area');
+          if (area && area.clientWidth > 48 && state.activeEditor._renderSlide) {
+            state.activeEditor._renderSlide(state.activeEditor._curIdx || 0);
+          }
+        }
+      });
+    });
   };
 
   window.WA.closeInMainView = function () {
@@ -5037,5 +6511,113 @@ window.WA = window.WA || {};
       window.WA.closeInMainView();
     }
   };
+
+  // ── File-browser keyboard shortcuts (Windows-style) ───────────────────────
+  // Track whether mouse is inside the left file panel
+  let _waLeftActive = false;
+
+  // Update hover target + panel-active flag via event delegation on document
+  document.addEventListener('mouseover', (e) => {
+    const leftPanel = document.getElementById('wa-left');
+    if (!leftPanel || !leftPanel.contains(e.target)) return;
+    _waLeftActive = true;
+    const item = e.target.closest('.wa-file-item');
+    if (item && item.dataset.path) {
+      const path = item.dataset.path;
+      const name = item.querySelector('.wa-file-label')?.textContent?.trim()
+                   || path.split(/[\\/]/).pop();
+      const isFolder = item.classList.contains('folder');
+      const supported = item.dataset.supported !== 'false';
+      _fsBrowserCtxTarget = { path, name, isFolder, supported };
+    }
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    const leftPanel = document.getElementById('wa-left');
+    if (!leftPanel) return;
+    // Only deactivate when mouse truly leaves the panel
+    if (leftPanel.contains(e.target) && !leftPanel.contains(e.relatedTarget)) {
+      _waLeftActive = false;
+    }
+  });
+
+  // Keep _waLeftActive when user clicks inside left panel (so keyboard works
+  // even after moving the mouse slightly outside, VS Code-style)
+  document.addEventListener('click', (e) => {
+    const leftPanel = document.getElementById('wa-left');
+    if (!leftPanel) return;
+    if (leftPanel.contains(e.target)) {
+      _waLeftActive = true;
+    } else if (!e.target.closest('#wa-ctx-menu')) {
+      _waLeftActive = false;
+    }
+  });
+
+  // Keyboard handler — fires when panel is active and no input is focused
+  document.addEventListener('keydown', (e) => {
+    if (!_waLeftActive) return;
+    // Don't intercept when the user is typing in an input / rename field
+    const focused = document.activeElement;
+    if (focused && (
+      focused.tagName === 'INPUT' ||
+      focused.tagName === 'TEXTAREA' ||
+      focused.isContentEditable ||
+      focused.classList.contains('wa-rename-input')
+    )) return;
+
+    const { path, isFolder, supported } = _fsBrowserCtxTarget;
+
+    // Ctrl+C — Copy
+    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && path) {
+      e.preventDefault();
+      WA._fsBrowserCopy();
+      return;
+    }
+    // Ctrl+X — Cut
+    if ((e.ctrlKey || e.metaKey) && e.key === 'x' && path) {
+      e.preventDefault();
+      WA._fsBrowserCut();
+      return;
+    }
+    // Ctrl+V — Paste
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      if (!state._fsClipboard) return;
+      e.preventDefault();
+      WA._fsBrowserPaste();
+      return;
+    }
+    // F2 — Rename
+    if (e.key === 'F2' && path) {
+      e.preventDefault();
+      WA._fsBrowserRename();
+      return;
+    }
+    // Delete — Delete
+    if (e.key === 'Delete' && path) {
+      e.preventDefault();
+      WA._fsBrowserDelete();
+      return;
+    }
+    // Enter — Open file (not folders)
+    if (e.key === 'Enter' && path && !isFolder) {
+      e.preventDefault();
+      WA._fsBrowserOpen();
+      return;
+    }
+    // Ctrl+D — Duplicate (copy then paste into same folder)
+    if ((e.ctrlKey || e.metaKey) && e.key === 'd' && path) {
+      e.preventDefault();
+      WA._fsBrowserCopy();
+      // Paste into the same folder immediately
+      setTimeout(() => WA._fsBrowserPaste(), 50);
+      return;
+    }
+    // Ctrl+Shift+C — Copy path to clipboard
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C' && path) {
+      e.preventDefault();
+      WA._fsBrowserCopyPath();
+      return;
+    }
+  });
 
 })();

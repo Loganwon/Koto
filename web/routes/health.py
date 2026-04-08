@@ -45,7 +45,7 @@ def _check_ollama() -> dict:
     try:
         import requests
 
-        resp = requests.get("http://localhost:11434/api/tags", timeout=2)
+        resp = requests.get("http://127.0.0.1:11434/api/tags", timeout=2)
         ok = resp.status_code == 200
         return {"status": "ok" if ok else "error", "detail": f"HTTP {resp.status_code}"}
     except Exception as exc:

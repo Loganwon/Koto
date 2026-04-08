@@ -17,7 +17,16 @@ export class DocController {
     this._api = univerAPI;
     /** Undo stack: stores previous full-text strings (max 30) */
     this._undoStack = [];
+    /** Current open file extension (e.g. '.docx', '.pptx') — set by FileManager */
+    this._fileType = '';
+    /** Current open file display name — set by FileManager */
+    this._fileName = '';
   }
+
+  setFileType(ext)  { this._fileType = ext  || ''; }
+  getFileType()     { return this._fileType; }
+  setFileName(name) { this._fileName = name || ''; }
+  getFileName()     { return this._fileName; }
 
   // ──────────────────────────────────────────
   // 1. 获取当前选区文本（优先使用浏览器原生选区）
@@ -170,9 +179,11 @@ export class DocController {
 
   // ──────────────────────────────────────────
   // 5. 将文本内容加载到文档中（替换全部内容）
+  // 加载文件时清空撤销栈，不作为可撤销操作记录
   // ──────────────────────────────────────────
   loadContent(text) {
-    return this._replaceEntireDoc(text || '');
+    this._undoStack = [];
+    return this._replaceEntireDocNoStack(text || '');
   }
 
   // ──────────────────────────────────────────
@@ -336,10 +347,10 @@ export class DocController {
   }
 
   // ──────────────────────────────────────────
-  // 修改高亮闪烁：显示横幅 + 尝试设置 Univer 选区
+  // 修改高亮闪烁：显示横幅 + 尝试设置 Univer 选区 + 文字高亮浮层
   // ──────────────────────────────────────────
   _flashChangedRegion(startOffset, endOffset, newText) {
-    // ① 尝试通过 Univer Facade 设置选区（视觉选中高亮）
+    // ① 尝试通过 Univer Facade 设置选区（视觉蓝色选中高亮）
     setTimeout(() => {
       try {
         const doc = this._getDoc();
@@ -347,9 +358,43 @@ export class DocController {
           doc.setSelection(startOffset, endOffset);
         }
       } catch (_) { /* best-effort */ }
-    }, 200);
+    }, 150);
 
-    // ② 在文档区顶部显示横幅提示
+    // ② 在文档 canvas 容器上叠加一个临时高亮 overlay（黄色渐淡）
+    // Univer 0.5.x 没有原生 text-highlight API，我们在 canvas 上层叠一个
+    // position:absolute 的半透明色块，3 秒后淡出消失。
+    const canvasEl = document.querySelector('#center-doc canvas');
+    const centerDoc = document.getElementById('center-doc');
+    if (canvasEl && centerDoc) {
+      let hlOverlay = document.getElementById('koto-text-highlight-overlay');
+      if (!hlOverlay) {
+        hlOverlay = document.createElement('div');
+        hlOverlay.id = 'koto-text-highlight-overlay';
+        hlOverlay.style.cssText =
+          'position:absolute;pointer-events:none;z-index:500;border-radius:3px;'
+          + 'background:rgba(255,220,0,0.35);transition:opacity 0.6s ease;';
+        centerDoc.appendChild(hlOverlay);
+      }
+      // Position the overlay to cover the top third of the canvas as a broad signal
+      // (precise char-to-pixel mapping requires Univer internals we can't access)
+      const rect = canvasEl.getBoundingClientRect();
+      const cRect = centerDoc.getBoundingClientRect();
+      hlOverlay.style.cssText =
+        `position:absolute;pointer-events:none;z-index:500;border-radius:3px;`
+        + `background:rgba(255,220,0,0.30);transition:opacity 0.8s ease;`
+        + `top:${rect.top - cRect.top}px;`
+        + `left:${rect.left - cRect.left + 90}px;`
+        + `width:${Math.max(rect.width - 180, 100)}px;`
+        + `height:${Math.min(48, rect.height)}px;`
+        + `opacity:1;`;
+      clearTimeout(this._hlTimer);
+      this._hlTimer = setTimeout(() => {
+        hlOverlay.style.opacity = '0';
+        setTimeout(() => { if (hlOverlay.parentNode) hlOverlay.style.display = 'none'; }, 800);
+      }, 2500);
+    }
+
+    // ③ 在文档区顶部显示横幅提示（显示修改后的文字预览）
     const container = document.getElementById('center-doc');
     if (!container) return;
 
@@ -364,13 +409,14 @@ export class DocController {
                        + 'display:flex;align-items:center;justify-content:center;pointer-events:none;';
 
     const preview = (newText || '').replace(/\n/g, ' ').trim();
-    const label   = preview.length > 28 ? preview.substring(0, 28) + '…' : preview;
+    const label   = preview.length > 40 ? preview.substring(0, 40) + '…' : preview;
 
     const banner = document.createElement('div');
     banner.className = 'koto-change-banner';
+    banner.style.pointerEvents = 'auto';
     banner.innerHTML =
       `<span class="koto-banner-icon">✅</span>`
-      + `<span>已修改第 <strong>${startOffset + 1}–${endOffset}</strong> 字符</span>`
+      + `<span>已替换选中文字</span>`
       + (label ? `<span class="koto-banner-hl">${this._esc(label)}</span>` : '')
       + `<button class="koto-banner-close" title="关闭">✕</button>`;
 

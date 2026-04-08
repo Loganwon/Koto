@@ -524,7 +524,7 @@ def document_batch_annotate_stream() -> Response:
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
 
         # 导入V2批量标注系统
-        from web.document_batch_annotator_v2 import annotate_large_document
+        from web.document_batch_annotator import annotate_large_document
 
         # 返回SSE流
         return Response(

@@ -33,7 +33,7 @@ from typing import Any, Dict, Generator, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 _STARTUP_TIMEOUT = 30  # 等待 Ollama 启动的最长秒数
 
 
@@ -252,15 +252,23 @@ def _extract_config_params(config: Any) -> Dict[str, Any]:
 # ════════════════════════════════════════════════════════════════════════
 
 
-def _is_ollama_running(base_url: str = _OLLAMA_BASE_URL) -> bool:
-    """检测 Ollama 是否正在运行"""
+def _is_ollama_running(base_url: str = _OLLAMA_BASE_URL, retries: int = 2) -> bool:
+    """检测 Ollama 是否正在运行（带重试，避免启动中的误判）"""
     try:
         host, port_str = base_url.split("://", 1)[1].rsplit(":", 1)
-        sock = socket.create_connection((host, int(port_str)), timeout=2)
-        sock.close()
-        return True
+        port = int(port_str)
     except Exception:
         return False
+
+    for attempt in range(max(1, retries)):
+        try:
+            sock = socket.create_connection((host, port), timeout=2)
+            sock.close()
+            return True
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(1)
+    return False
 
 
 def _start_ollama_if_needed(base_url: str = _OLLAMA_BASE_URL) -> bool:

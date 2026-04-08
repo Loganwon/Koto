@@ -426,48 +426,248 @@
         }
         .csb-dismiss-all:hover { color: #e06c75; border-color: #e06c75; background: rgba(224,108,117,.08); }
 
-        /* ── FileHub panel ──────────────────────────────────────── */
-        #fhFileList { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-right: 4px; }
-        #fhFileList::-webkit-scrollbar { width: 6px; }
+        /* ── FileHub v2 ─────────────────────────────────────────────────── */
+        .fh-overlay { position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center;
+            animation: fhFadeIn 0.18s ease-out; }
+        @keyframes fhFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .fh-app { width: 92vw; max-width: 1160px; height: 88vh; max-height: 840px; margin: auto;
+            background: var(--bg-primary); border: 1px solid var(--border-color);
+            border-radius: 16px; box-shadow: 0 32px 80px rgba(0,0,0,0.32);
+            display: flex; overflow: hidden;
+            animation: fhSlideUp 0.2s cubic-bezier(.4,0,.2,1); }
+        @keyframes fhSlideUp { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+        /* Sidebar */
+        .fh-sidebar { width: 224px; flex-shrink: 0; background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden; }
+        .fh-brand { display: flex; align-items: center; gap: 10px; padding: 16px 14px 13px;
+            border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
+        .fh-brand-icon { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+            background: linear-gradient(135deg, var(--accent-primary) 0%, #6366f1 100%);
+            display: flex; align-items: center; justify-content: center; }
+        .fh-brand-title { font-size: 15px; font-weight: 700; color: var(--text-primary); flex: 1; letter-spacing: -0.2px; }
+        .fh-brand-close { width: 26px; height: 26px; border-radius: 6px; border: none; flex-shrink: 0;
+            background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center;
+            color: var(--text-muted); transition: all 0.15s; }
+        .fh-brand-close:hover { background: var(--bg-elevated); color: var(--text-primary); }
+        .fh-nav-group { padding: 12px 10px 4px; flex-shrink: 0; }
+        .fh-nav-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.8px; color: var(--text-muted); padding: 0 6px; margin-bottom: 4px; }
+        .fh-nav-item { display: flex; align-items: center; gap: 9px; width: 100%;
+            padding: 7px 8px; border-radius: 7px; border: none; background: transparent;
+            cursor: pointer; text-align: left; font-size: 13.5px; font-weight: 500;
+            color: var(--text-secondary); transition: all 0.12s; margin-bottom: 1px; }
+        .fh-nav-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
+        .fh-nav-item.fh-nav-active { background: rgba(59,130,246,0.12); color: var(--accent-primary); font-weight: 600; }
+        .fh-nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .fh-divider { height: 1px; background: var(--border-color); margin: 6px 10px; flex-shrink: 0; }
+        .fh-type-list { padding: 0 10px; overflow-y: auto; flex: 1; }
+        .fh-type-list::-webkit-scrollbar { width: 0; }
+        .fh-type-item { display: flex; align-items: center; gap: 8px; width: 100%;
+            padding: 6px 8px; border: none; border-radius: 6px; background: transparent;
+            cursor: pointer; text-align: left; font-size: 13px; color: var(--text-secondary);
+            transition: background 0.12s; margin-bottom: 1px; }
+        .fh-type-item:hover { background: var(--bg-elevated); color: var(--text-primary); }
+        .fh-type-item.fh-type-active { background: var(--bg-elevated); color: var(--text-primary); font-weight: 600; }
+        .fh-type-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+        .fh-dot-all  { background: var(--text-muted); }
+        .fh-dot-doc  { background: #3b82f6; }
+        .fh-dot-img  { background: #ec4899; }
+        .fh-dot-vid  { background: #8b5cf6; }
+        .fh-dot-aud  { background: #10b981; }
+        .fh-dot-code { background: #f59e0b; }
+        .fh-dot-zip  { background: #f97316; }
+        .fh-sidebar-footer { padding: 10px 14px; border-top: 1px solid var(--border-color);
+            flex-shrink: 0; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+        /* Main */
+        .fh-main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+        .fh-pane-header { padding: 14px 18px 12px; border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+        .fh-search-row { display: flex; gap: 8px; align-items: center; }
+        .fh-search-wrap { flex: 1; position: relative; min-width: 0; }
+        .fh-search-wrap .fh-si { position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+            color: var(--text-muted); pointer-events: none; }
+        .fh-search-input { width: 100%; box-sizing: border-box; height: 40px; padding: 0 36px;
+            border: 1.5px solid var(--border-color); border-radius: 10px;
+            background: var(--bg-elevated); color: var(--text-primary); font-size: 14px;
+            outline: none; font-family: inherit; transition: border-color 0.15s; }
+        .fh-search-input:focus { border-color: var(--accent-primary); }
+        .fh-search-input::placeholder { color: var(--text-muted); }
+        .fh-qbtn { height: 40px; padding: 0 14px; border-radius: 10px;
+            border: 1.5px solid var(--border-color); background: var(--bg-elevated);
+            cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-secondary);
+            display: flex; align-items: center; gap: 6px; white-space: nowrap;
+            transition: all 0.15s; flex-shrink: 0; }
+        .fh-qbtn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+        .fh-qbtn-primary { background: var(--accent-primary) !important;
+            border-color: var(--accent-primary) !important; color: #fff !important; }
+        .fh-qbtn-primary:hover { opacity: 0.88; color: #fff !important; border-color: var(--accent-primary) !important; }
+        .fh-browse-row { display: flex; gap: 8px; align-items: center; }
+        .fh-path-wrap { flex: 1; display: flex; align-items: center; height: 40px; padding: 0 12px; gap: 8px;
+            border: 1.5px solid var(--border-color); border-radius: 10px; background: var(--bg-elevated);
+            min-width: 0; transition: border-color 0.15s; }
+        .fh-path-wrap:focus-within { border-color: var(--accent-primary); }
+        .fh-path-input { flex: 1; border: none; background: transparent; outline: none;
+            font-size: 14px; color: var(--text-primary); font-family: inherit; min-width: 0; }
+        .fh-path-input::placeholder { color: var(--text-muted); }
+
+        /* Result bar */
+        .fh-result-bar { display: flex; align-items: center; justify-content: space-between;
+            padding: 6px 18px; border-bottom: 1px solid var(--border-color);
+            background: var(--bg-elevated); flex-shrink: 0; }
+        .fh-result-bar .fh-count { font-size: 13px; color: var(--text-secondary); font-weight: 500; }
+        .fh-result-actions { display: flex; gap: 5px; }
+        .fh-icon-btn { display: flex; align-items: center; gap: 5px; height: 27px; padding: 0 10px;
+            border-radius: 6px; border: 1px solid var(--border-color); background: transparent;
+            cursor: pointer; font-size: 12px; color: var(--text-secondary); transition: all 0.12s; white-space: nowrap; }
+        .fh-icon-btn:hover { border-color: var(--accent-primary); color: var(--accent-primary); }
+        .fh-icon-btn.fh-active { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; }
+        .fh-icon-btn.fh-active:hover { opacity: 0.88; color: #fff; }
+
+        /* Multi-select bar */
+        .fh-multibar { display: flex; align-items: center; justify-content: space-between;
+            padding: 8px 18px; border-bottom: 2px solid var(--accent-primary);
+            background: rgba(59,130,246,0.06); flex-shrink: 0; gap: 8px; }
+        .fh-multibar-count { font-size: 13px; font-weight: 600; color: var(--accent-primary); }
+        .fh-multibar-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+        /* File list */
+        #fhFileList { flex: 1; overflow-y: auto; padding: 10px 14px; display: flex; flex-direction: column; gap: 3px; }
+        #fhFileList::-webkit-scrollbar { width: 5px; }
         #fhFileList::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
-        
-        .fh-card { 
-            display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 8px;
-            background: var(--bg-card); border: 1px solid var(--border-color); font-size: 13px;
-            transition: all 0.2s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-            cursor: pointer;
-        }
-        .fh-card:hover { 
-            border-color: var(--accent-primary); 
-            box-shadow: 0 3px 8px rgba(0,0,0,0.05);
-            transform: translateY(-1px);
-        }
-        .fh-card .fh-icon { 
-            font-size: 20px; flex: none; display: flex; align-items: center; justify-content: center;
-            width: 32px; height: 32px; background: var(--bg-secondary); border-radius: 6px;
-        }
-        .fh-card .fh-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-        .fh-card .fh-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); font-size: 14px;}
-        .fh-card .fh-sub { color: var(--text-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
-        
-        .fh-action-btn {
-            background: transparent; border: 1px solid transparent; border-radius: 6px;
-            cursor: pointer; padding: 6px; color: var(--text-secondary);
-            display: flex; align-items: center; justify-content: center;
-            transition: all 0.15s ease; flex-shrink: 0;
-        }
-        .fh-action-btn svg { width: 16px; height: 16px; stroke-width: 2; }
-        .fh-action-btn:hover { background: var(--bg-secondary); color: var(--accent-primary); border-color: var(--border-color); }
-        .fh-action-primary { background: var(--accent-primary) !important; color: #fff !important;
-            border-color: var(--accent-primary) !important; font-size: 11px; padding: 3px 8px !important;
-            gap: 3px; white-space: nowrap; }
+
+        /* File card v2 */
+        .fh-card { display: flex; align-items: center; gap: 11px; padding: 9px 12px; border-radius: 9px;
+            background: transparent; border: 1px solid transparent; transition: all 0.14s; cursor: pointer; }
+        .fh-card:hover { background: var(--bg-elevated); border-color: var(--border-color);
+            box-shadow: 0 1px 6px rgba(0,0,0,0.06); }
+        .fh-card-selected { background: rgba(59,130,246,0.06) !important; border-color: var(--accent-primary) !important; }
+        .fh-checkbox { align-items: center; flex-shrink: 0; margin-right: 2px; }
+        .fh-icon { width: 38px; height: 38px; border-radius: 9px; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; font-size: 18px; }
+        .fh-icon-doc  { background: rgba(59,130,246,0.12); }
+        .fh-icon-img  { background: rgba(236,72,153,0.12); }
+        .fh-icon-vid  { background: rgba(139,92,246,0.12); }
+        .fh-icon-aud  { background: rgba(16,185,129,0.12); }
+        .fh-icon-code { background: rgba(245,158,11,0.12); }
+        .fh-icon-zip  { background: rgba(249,115,22,0.12); }
+        .fh-icon-other{ background: rgba(100,116,139,0.10); }
+        .fh-card .fh-meta { flex: 1; min-width: 0; }
+        .fh-card .fh-name { font-weight: 500; font-size: 14px; color: var(--text-primary);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 2px; }
+        .fh-card .fh-sub { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .fh-card-actions { display: flex; gap: 4px; align-items: center; opacity: 0; transition: opacity 0.14s; flex-shrink: 0; }
+        .fh-card:hover .fh-card-actions { opacity: 1; }
+        .fh-action-btn { display: flex; align-items: center; gap: 4px; height: 28px; padding: 0 9px;
+            border-radius: 7px; border: 1px solid transparent; cursor: pointer;
+            font-size: 12px; font-weight: 500; white-space: nowrap; transition: all 0.12s;
+            background: transparent; color: var(--text-secondary); }
+        .fh-action-btn svg { width: 13px; height: 13px; flex-shrink: 0; }
+        .fh-action-btn:hover { background: var(--bg-secondary); border-color: var(--border-color); color: var(--text-primary); }
+        .fh-action-primary { background: var(--accent-primary) !important; border-color: var(--accent-primary) !important; color: #fff !important; }
+
+        /* Star / Favorite button */
+        .fh-star-btn { width:26px;height:26px;border-radius:6px;border:none;background:transparent;cursor:pointer;
+            display:flex;align-items:center;justify-content:center;color:var(--text-muted);transition:all 0.12s;flex-shrink:0;}
+        .fh-star-btn:hover { color:#f59e0b;background:rgba(245,158,11,0.10); }
+        .fh-star-btn.active { color:#f59e0b; }
+        .fh-star-btn svg { width:14px;height:14px; }
+
+        /* Tag chips on file cards */
+        .fh-card-tags { display:flex;flex-wrap:wrap;gap:3px;margin-top:3px; }
+        .fh-tag-chip  { font-size:11px;padding:1px 6px;border-radius:10px;background:rgba(59,130,246,0.10);
+            color:var(--accent-primary);cursor:pointer;transition:background 0.12s; }
+        .fh-tag-chip:hover { background:rgba(59,130,246,0.20); }
+
+        /* Tag cloud in sidebar */
+        .fh-tag-cloud { padding:4px 10px 10px;display:flex;flex-wrap:wrap;gap:4px; }
+        .fh-tag-pill  { font-size:11px;padding:2px 8px;border-radius:10px;background:var(--bg-elevated);
+            border:1px solid var(--border-color);color:var(--text-secondary);cursor:pointer;transition:all 0.12s; }
+        .fh-tag-pill:hover,.fh-tag-pill.active { background:var(--accent-primary);border-color:var(--accent-primary);color:#fff; }
+
+        /* Full-pane sections (health/watcher/graph) */
+        .fh-fullpane { flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column; }
+        .fh-pane-title { display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;
+            color:var(--text-primary);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border-color);}
+        .fh-pane-title svg { flex-shrink:0; }
+
+        /* Health dashboard */
+        .fh-health-cards { display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px; }
+        .fh-health-card  { background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:10px;
+            padding:14px;display:flex;flex-direction:column;gap:4px; }
+        .fh-health-card .fh-hc-label { font-size:12px;color:var(--text-muted); }
+        .fh-health-card .fh-hc-value { font-size:20px;font-weight:700;color:var(--text-primary); }
+        .fh-health-card .fh-hc-sub   { font-size:11px;color:var(--text-muted); }
+        .fh-health-section { margin-top:0; }
+        .fh-health-section-title { font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:8px;display:flex;align-items:center;gap:6px; }
+        .fh-health-row { display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;font-size:13px;
+            background:var(--bg-elevated);margin-bottom:4px;cursor:default; }
+        .fh-health-row:hover { background:var(--bg-secondary); }
+        .fh-health-row .fh-hr-name { flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary); }
+        .fh-health-row .fh-hr-size { font-size:12px;color:var(--text-muted);flex-shrink:0; }
+        .fh-btn-danger { background:#fee2e2;border:1px solid #fca5a5;color:#dc2626;padding:4px 12px;
+            border-radius:7px;font-size:12px;cursor:pointer;transition:all 0.12s; }
+        .fh-btn-danger:hover { background:#fecaca; }
+
+        /* Watcher settings */
+        .fh-watch-dir-row { display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;
+            background:var(--bg-elevated);border:1px solid var(--border-color); }
+        .fh-watch-dir-path { flex:1;min-width:0;font-size:13px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+        .fh-watch-dir-remove { width:24px;height:24px;border:none;background:transparent;cursor:pointer;
+            display:flex;align-items:center;justify-content:center;color:var(--text-muted);border-radius:5px;transition:all 0.12s; }
+        .fh-watch-dir-remove:hover { background:#fee2e2;color:#dc2626; }
+        .fh-toggle-wrap { display:flex;align-items:center;gap:0; }
+        .fh-toggle-wrap input { display:none; }
+        .fh-toggle-track { width:36px;height:20px;background:var(--border-color);border-radius:10px;position:relative;cursor:pointer;transition:background 0.2s; }
+        .fh-toggle-wrap input:checked + .fh-toggle-track { background:var(--accent-primary); }
+        .fh-toggle-thumb { width:16px;height:16px;background:#fff;border-radius:50%;position:absolute;top:2px;left:2px;transition:transform 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2); }
+        .fh-toggle-wrap input:checked + .fh-toggle-track .fh-toggle-thumb { transform:translateX(16px); }
         .fh-action-primary:hover { opacity: 0.85; color: #fff !important; }
-        
-        .fh-dup-group { padding: 12px; border-radius: 8px; border: 1px solid var(--accent-warning);
-            background: rgba(255,165,0,.06); margin-bottom: 8px; font-size: 13px; }
-        .fh-dup-group .fh-dup-title { font-weight: 600; color: var(--accent-warning); margin-bottom: 6px; }
-        .fh-dup-group .fh-dup-path { color: var(--text-secondary); font-size: 12px; padding: 3px 0; display: flex; align-items: center; border-bottom: 1px dashed rgba(255,165,0,.15); }
+
+        /* Duplicate group */
+        .fh-dup-group { padding: 11px 13px; border-radius: 9px; border: 1px solid rgba(245,158,11,0.5);
+            background: rgba(245,158,11,.05); margin-bottom: 5px; }
+        .fh-dup-group .fh-dup-title { font-weight: 600; color: #d97706; margin-bottom: 6px; font-size: 13px; }
+        .fh-dup-group .fh-dup-path { color: var(--text-secondary); font-size: 12px; padding: 3px 0;
+            display: flex; align-items: center; border-bottom: 1px dashed rgba(245,158,11,.2); }
         .fh-dup-group .fh-dup-path:last-child { border-bottom: none; }
+
+        /* Archive pane */
+        .fh-archive-pane { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+        .fh-archive-pane::-webkit-scrollbar { width: 5px; }
+        .fh-archive-pane::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 4px; }
+        .fh-section-card { background: var(--bg-elevated); border: 1px solid var(--border-color);
+            border-radius: 12px; padding: 15px 16px; }
+        .fh-section-title { font-size: 13px; font-weight: 700; color: var(--text-secondary); letter-spacing: 0.3px;
+            text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+        .fh-step-num { width: 20px; height: 20px; border-radius: 50%; background: var(--accent-primary);
+            color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .fh-field-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+        .fh-field-row:last-of-type { margin-bottom: 0; }
+        .fh-field-label { width: 56px; flex-shrink: 0; font-size: 13px; color: var(--text-secondary); }
+        .fh-input-wrap { flex: 1; min-width: 0; display: flex; align-items: center; height: 38px;
+            border: 1.5px solid var(--border-color); border-radius: 8px; background: var(--bg-primary);
+            transition: border-color 0.15s; padding: 0 10px; gap: 8px; }
+        .fh-input-wrap:focus-within { border-color: var(--accent-primary); }
+        .fh-input-wrap input { flex: 1; border: none; background: transparent; outline: none;
+            font-size: 13px; color: var(--text-primary); font-family: inherit; min-width: 0; }
+        .fh-input-wrap input::placeholder { color: var(--text-muted); }
+        .fh-folder-btn { width: 38px; height: 38px; border-radius: 8px; border: 1.5px solid var(--border-color);
+            background: var(--bg-elevated); cursor: pointer; display: flex; align-items: center;
+            justify-content: center; font-size: 16px; flex-shrink: 0; transition: all 0.15s; }
+        .fh-folder-btn:hover { border-color: var(--accent-primary); background: var(--bg-primary); }
+        .fh-mode-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .fh-mode-card { padding: 14px 10px; border-radius: 10px; border: 2px solid var(--border-color);
+            background: transparent; cursor: pointer; transition: all 0.15s;
+            display: flex; flex-direction: column; align-items: center; gap: 5px; text-align: center; }
+        .fh-mode-card:hover { border-color: var(--accent-primary); background: rgba(59,130,246,0.04); }
+        .fh-mode-card.fh-mode-active { border-color: var(--accent-primary) !important; background: rgba(59,130,246,0.1) !important; }
+        .fh-mode-icon { font-size: 24px; line-height: 1; }
+        .fh-mode-title { font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+        .fh-mode-desc { font-size: 11px; color: var(--text-muted); }
 
         #chatView {
             display: flex;
@@ -1211,6 +1411,13 @@
                     <span class="sidebar-text" style="flex:1;">文件助手</span>
                 </div>
 
+                <!-- 我的文件 (FileHub — 文件库管理) -->
+                <div class="sb-nav-item" id="myStuffItem" onclick="toggleMyStuff()" title="我的文件">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                    <span class="sidebar-text" style="flex:1;">我的文件</span>
+                    <svg class="sb-arrow sidebar-text" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+
                 <!-- Skills / Gems -->
                 <div class="sb-nav-item" id="navSkillsBtn" onclick="openSkillsPanel()" title="Skills 库">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
@@ -1729,6 +1936,20 @@
                     <span id="wa-status-filetype"></span>
                     <span id="wa-status-modified" class="wa-status-modified" style="display:none">● 未保存</span>
                     <div class="wa-status-spacer"></div>
+                    <!-- PDF zoom controls (shown only for PDF) -->
+                    <div id="wa-pdf-zoom-ctrl" style="display:none;align-items:center;gap:4px;">
+                      <span class="wa-pptx-sb-zoom-label" id="wa-pdf-zoom-label">100%</span>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      <input type="range" id="wa-pdf-zoom" min="50" max="300" value="100" step="10" class="wa-pptx-sb-zoom-slider" oninput="WA.pdfZoom(this.value)">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    </div>
+                    <!-- DOCX zoom controls (shown only for DOCX) -->
+                    <div id="wa-docx-zoom-ctrl" style="display:none;align-items:center;gap:4px;">
+                      <span class="wa-pptx-sb-zoom-label" id="wa-docx-zoom-label">100%</span>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      <input type="range" id="wa-docx-zoom" min="50" max="200" value="100" step="10" class="wa-pptx-sb-zoom-slider" oninput="WA.docxZoom(this.value)">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                    </div>
                   </div>
                 </div><!-- /wa-canvas -->
                 <div id="wa-ai">
@@ -2746,189 +2967,378 @@
         </div>
     </div>
 
-    <!-- FileHub Modal -->
-    <div class="modal-overlay" id="filehubModal" style="display:none; backdrop-filter: blur(2px);" onclick="if(event.target===this)closeFileHubModal()">
-        <div class="modal" style="width: 800px; max-width: 95vw; background: var(--bg-primary); padding: 28px; text-align: left; display: flex; flex-direction: column; max-height: 85vh; border-radius: 12px; box-shadow: 0 16px 40px rgba(0,0,0,0.12); border: 1px solid var(--border-color);">
-            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px;">
-                <div>
-                    <h3 style="display:flex;align-items:center;gap:10px;margin:0 0 8px 0;font-size:20px; font-weight: 600; color: var(--text-primary);">
-                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-                        </svg>
-                        我的文件
-                    </h3>
-                    <p class="setting-desc" style="margin:0;font-size:13px; color: var(--text-secondary);">全方位管理、搜索、浏览您已注册的库文件或本地任意目录文件。</p>
+    <!-- FileHub v2 Full-Screen Panel -->
+    <div id="filehubModal" class="fh-overlay" style="display:none;">
+      <div class="fh-app">
+
+        <!-- ══ Sidebar ══════════════════════════════════════════ -->
+        <aside class="fh-sidebar">
+
+          <!-- Brand / header -->
+          <div class="fh-brand">
+            <span class="fh-brand-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+            </span>
+            <span class="fh-brand-title">我的文件</span>
+            <button class="fh-brand-close" onclick="closeFileHubModal()" title="关闭">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+
+          <!-- Navigation -->
+          <div class="fh-nav-group">
+            <div class="fh-nav-label">功能</div>
+            <button id="fhNavRecent" class="fh-nav-item fh-nav-active" onclick="fhNavSwitch('recent')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              最近文件
+            </button>
+            <button id="fhNavFavorites" class="fh-nav-item" onclick="fhNavSwitch('favorites')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              我的收藏
+            </button>
+            <button id="fhNavSearch" class="fh-nav-item" onclick="fhNavSwitch('search')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              搜索文件
+            </button>
+            <button id="fhNavBrowse" class="fh-nav-item" onclick="fhNavSwitch('browse')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              浏览目录
+            </button>
+            <button id="fhNavArchive" class="fh-nav-item" onclick="fhNavSwitch('archive')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+              归档整理
+            </button>
+            <button id="fhNavHealth" class="fh-nav-item" onclick="fhNavSwitch('health')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              存储健康
+            </button>
+            <button id="fhNavWatcher" class="fh-nav-item" onclick="fhNavSwitch('watcher')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              监控设置
+            </button>
+            <button id="fhNavGraph" class="fh-nav-item" onclick="fhNavSwitch('graph')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+              关系图
+            </button>
+          </div>
+
+          <div class="fh-divider"></div>
+
+          <!-- File type filters -->
+          <div class="fh-nav-group" style="padding-bottom: 6px; flex-shrink: 0;">
+            <div class="fh-nav-label">按类型筛选</div>
+          </div>
+          <div class="fh-type-list">
+            <button class="fh-type-item fh-type-active" data-cat="" onclick="fhFilterCat('')">
+              <span class="fh-type-dot fh-dot-all"></span> 全部文件
+            </button>
+            <button class="fh-type-item" data-cat="文档" onclick="fhFilterCat('文档')">
+              <span class="fh-type-dot fh-dot-doc"></span> 文档
+            </button>
+            <button class="fh-type-item" data-cat="图片" onclick="fhFilterCat('图片')">
+              <span class="fh-type-dot fh-dot-img"></span> 图片
+            </button>
+            <button class="fh-type-item" data-cat="视频" onclick="fhFilterCat('视频')">
+              <span class="fh-type-dot fh-dot-vid"></span> 视频
+            </button>
+            <button class="fh-type-item" data-cat="音频" onclick="fhFilterCat('音频')">
+              <span class="fh-type-dot fh-dot-aud"></span> 音频
+            </button>
+            <button class="fh-type-item" data-cat="代码" onclick="fhFilterCat('代码')">
+              <span class="fh-type-dot fh-dot-code"></span> 代码
+            </button>
+            <button class="fh-type-item" data-cat="压缩包" onclick="fhFilterCat('压缩包')">
+              <span class="fh-type-dot fh-dot-zip"></span> 压缩包
+            </button>
+          </div>
+
+          <!-- Tag cloud -->
+          <div class="fh-nav-group" style="padding-bottom:4px;flex-shrink:0;margin-top:4px;">
+            <div class="fh-nav-label">按标签</div>
+          </div>
+          <div id="fhTagCloud" class="fh-tag-cloud"></div>
+
+          <!-- Stats footer -->
+          <div class="fh-sidebar-footer" id="fhStatsSummary"></div>
+
+        </aside>
+
+        <!-- ══ Main ══════════════════════════════════════════════ -->
+        <main class="fh-main">
+
+          <!-- Hidden controls JS uses directly -->
+          <select id="fhCatFilter" style="display:none;">
+            <option value="">全部类型</option>
+            <option value="文档">文档</option>
+            <option value="图片">图片</option>
+            <option value="视频">视频</option>
+            <option value="音频">音频</option>
+            <option value="代码">代码</option>
+            <option value="压缩包">压缩包</option>
+            <option value="其他">其他</option>
+          </select>
+
+          <!-- ── Search pane header ── -->
+          <div id="fhPaneSearch" class="fh-pane-header">
+            <div class="fh-search-row">
+              <div class="fh-search-wrap">
+                <svg class="fh-si" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="fhSearchInput" class="fh-search-input"
+                  placeholder="搜索文件名、关键词、扩展名…"
+                  onkeydown="if(event.key==='Enter')fhDoSearch()">
+              </div>
+              <button class="fh-qbtn" onclick="fhLoadRecent()" title="最近 14 天的文件">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                最近
+              </button>
+              <button class="fh-qbtn" onclick="fhCheckDuplicates()" title="检测重复文件">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                查重
+              </button>
+              <button class="fh-qbtn fh-qbtn-primary" onclick="fhDoSearch()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                搜索
+              </button>
+            </div>
+          </div>
+
+          <!-- ── Browse pane header ── -->
+          <div id="fhPaneBrowse" class="fh-pane-header" style="display:none;">
+            <div class="fh-browse-row">
+              <div class="fh-path-wrap">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <input type="text" id="fhBrowsePath" class="fh-path-input"
+                  placeholder="输入本地路径，如 C:\Users\...\Desktop"
+                  onkeydown="if(event.key==='Enter')fhDoBrowse()">
+              </div>
+              <button class="fh-folder-btn" onclick="fhPickFolder()" title="选择文件夹">📂</button>
+              <button class="fh-qbtn fh-qbtn-primary" onclick="fhDoBrowse()">浏览目录</button>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center;padding-top:2px;">
+              <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-secondary);user-select:none;white-space:nowrap;">
+                <input type="checkbox" id="fhRecursive" style="width:15px;height:15px;accent-color:var(--accent-primary);"> 包含子目录
+              </label>
+              <div class="fh-path-wrap" style="flex:1;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="fhBrowseFilter" class="fh-path-input"
+                  placeholder="在结果中过滤文件名…" oninput="fhFilterBrowseResults(this.value)">
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Result bar ── -->
+          <div id="fhResultHeader" class="fh-result-bar" style="display:none;">
+            <span id="fhResultCount" class="fh-count"></span>
+            <div class="fh-result-actions">
+              <button id="fhMultiSelectToggle" class="fh-icon-btn" onclick="fhToggleMultiSelect()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+                多选
+              </button>
+              <button class="fh-icon-btn" onclick="fhCopyAllPaths()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                复制路径
+              </button>
+            </div>
+          </div>
+
+          <!-- ── Multi-select action bar ── -->
+          <div id="fhMultiBar" class="fh-multibar" style="display:none;">
+            <span id="fhMultiCount" class="fh-multibar-count">已选 0 个文件</span>
+            <div class="fh-multibar-actions">
+              <button class="fh-icon-btn" onclick="fhMultiSelectAll()">全选</button>
+              <button class="fh-icon-btn" onclick="fhMultiSelectClear()">取消</button>
+              <button class="fh-icon-btn fh-active" id="fhBatchOpenBtn" disabled onclick="fhBatchOpenInAssistant()" style="opacity:0.5;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                在助手中打开
+              </button>
+              <button class="fh-icon-btn" id="fhBatchAIBtn" disabled onclick="fhBatchAIPrompt()" style="opacity:0.5;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                AI 批量处理
+              </button>
+            </div>
+          </div>
+
+          <!-- ── Archive pane (takes over main when active) ── -->
+          <div id="fhPaneArchive" class="fh-archive-pane" style="display:none;">
+
+            <!-- Step 1: Directory config -->
+            <div class="fh-section-card">
+              <div class="fh-section-title">
+                <span class="fh-step-num">1</span> 选择目录
+              </div>
+              <div class="fh-field-row">
+                <span class="fh-field-label">源目录</span>
+                <div class="fh-input-wrap">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                  <input type="text" id="fhArchiveSrc" placeholder="输入要整理的文件夹路径，如 C:\Users\...\下载">
                 </div>
-                <button class="close-panel" onclick="closeFileHubModal()" style="background: var(--bg-elevated); border: 1px solid var(--border-color); border-radius: 8px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                <button class="fh-folder-btn" onclick="fhPickArchiveFolder('fhArchiveSrc')" title="选择文件夹">📂</button>
+              </div>
+              <div class="fh-field-row">
+                <span class="fh-field-label">目标目录</span>
+                <div class="fh-input-wrap">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="flex-shrink:0;"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>
+                  <input type="text" id="fhArchiveDest" placeholder="留空则自动在源目录同级创建 xxx_归档_日期">
+                </div>
+                <button class="fh-folder-btn" onclick="fhPickArchiveFolder('fhArchiveDest')" title="选择文件夹">📂</button>
+              </div>
             </div>
 
-            <!-- 模式切换标签 -->
-            <div style="display:flex;gap:4px;margin-bottom:16px; background: var(--bg-elevated); padding: 4px; border-radius: 8px; flex-shrink:0; border: 1px solid var(--border-color);">
-                <button id="fhTabSearch" onclick="fhSwitchTab('search')"
-                    style="flex:1;padding:10px 0;font-size:14px; font-weight: 500; border:none;border-radius: 6px; background:var(--accent-primary);color:#ffffff;cursor:pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                    关键词搜索
+            <!-- Step 2: Archive mode -->
+            <div class="fh-section-card">
+              <div class="fh-section-title">
+                <span class="fh-step-num">2</span> 归档方式
+              </div>
+              <div class="fh-mode-cards">
+                <button id="fhArchiveBtnAuto" class="fh-mode-card fh-mode-active" onclick="fhSetArchiveMode('auto')">
+                  <span class="fh-mode-icon">🤖</span>
+                  <span class="fh-mode-title">AI 智能归档</span>
+                  <span class="fh-mode-desc">按文件内容自动分类整理</span>
                 </button>
-                <button id="fhTabBrowse" onclick="fhSwitchTab('browse')"
-                    style="flex:1;padding:10px 0;font-size:14px; font-weight: 500; border:none;border-radius: 6px; background:transparent;color:var(--text-secondary);cursor:pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                    局部目录浏览
+                <button id="fhArchiveBtnCustom" class="fh-mode-card" onclick="fhSetArchiveMode('custom')">
+                  <span class="fh-mode-icon">✏️</span>
+                  <span class="fh-mode-title">自定义规则</span>
+                  <span class="fh-mode-desc">按我设定的匹配规则分类</span>
                 </button>
-                <button id="fhTabArchive" onclick="fhSwitchTab('archive')"
-                    style="flex:1;padding:10px 0;font-size:14px; font-weight: 500; border:none;border-radius: 6px; background:transparent;color:var(--text-secondary);cursor:pointer; transition: all 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
-                    归档整理
+              </div>
+              <!-- Custom rules -->
+              <div id="fhCustomRulesArea" style="display:none; margin-top:14px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                  <span style="font-size:13px;color:var(--text-secondary);font-weight:500;">匹配规则（支持通配符：*.pdf、报告*）</span>
+                  <div style="display:flex;gap:6px;">
+                    <button class="fh-icon-btn" onclick="fhLoadArchivePreset()">📋 按类型预设</button>
+                    <button class="fh-icon-btn fh-active" onclick="fhAddArchiveRule()">+ 添加规则</button>
+                  </div>
+                </div>
+                <div id="fhCustomRules" style="display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;"></div>
+                <div id="fhCustomRulesEmpty" style="text-align:center;padding:16px;color:var(--text-muted);font-size:13px;border:1px dashed var(--border-color);border-radius:8px;">
+                  暂无规则，点击"+ 添加规则"或使用"按类型预设"快速填入
+                </div>
+              </div>
+            </div>
+
+            <!-- Step 3: Options + Start -->
+            <div class="fh-section-card">
+              <div class="fh-section-title">
+                <span class="fh-step-num">3</span> 开始归档
+              </div>
+              <label style="font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--text-primary);user-select:none;margin-bottom:10px;">
+                <input type="checkbox" id="fhArchiveRecursive" checked style="width:15px;height:15px;accent-color:var(--accent-primary);">
+                包含子目录（递归整理所有层级内的文件）
+              </label>
+              <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px;font-size:13px;color:var(--text-secondary);">
+                <span>操作方式：</span>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--text-primary);user-select:none;">
+                  <input type="radio" name="fhArchiveAction" value="copy" checked onchange="window._fhArchiveAction='copy'" style="accent-color:var(--accent-primary);">
+                  复制（保留原文件）
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;color:var(--text-primary);user-select:none;">
+                  <input type="radio" name="fhArchiveAction" value="move" onchange="window._fhArchiveAction='move'" style="accent-color:var(--accent-primary);">
+                  移动（删除原文件）
+                </label>
+              </div>
+              <button class="fh-qbtn fh-qbtn-primary" onclick="fhDoArchive()"
+                style="width:100%;height:44px;justify-content:center;border-radius:10px;font-size:15px;font-weight:600;gap:8px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                开始归档
+              </button>
+            </div>
+
+            <!-- Archive result -->
+            <div id="fhArchiveResult"></div>
+
+          </div><!-- /fhPaneArchive -->
+
+          <!-- ── Storage Health pane ── -->
+          <div id="fhPaneHealth" class="fh-fullpane" style="display:none;">
+            <div class="fh-pane-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              存储健康
+            </div>
+            <div id="fhHealthContent">
+              <div class="fh-health-cards" id="fhHealthCards"></div>
+              <div id="fhLargeFilesWrap" style="margin-top:16px;"></div>
+              <div id="fhOldFilesWrap" style="margin-top:16px;"></div>
+              <div id="fhDupFilesWrap" style="margin-top:16px;"></div>
+            </div>
+          </div>
+
+          <!-- ── File Watcher Settings pane ── -->
+          <div id="fhPaneWatcher" class="fh-fullpane" style="display:none;">
+            <div class="fh-pane-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+              监控目录设置
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+              <span style="font-size:13px;color:var(--text-secondary);">自动监控目录中的新文件并加入「我的文件」</span>
+              <label class="fh-toggle-wrap">
+                <input type="checkbox" id="fhWatcherEnabled" onchange="fhToggleWatcher(this.checked)">
+                <span class="fh-toggle-track"><span class="fh-toggle-thumb"></span></span>
+              </label>
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:10px;">
+              <div class="fh-input-wrap" style="flex:1;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <input type="text" id="fhWatchDirInput" class="fh-path-input" placeholder="输入要监控的目录路径，如 C:\Users\...\Downloads">
+              </div>
+              <button class="fh-folder-btn" onclick="fhPickWatchDir()" title="选择文件夹">📂</button>
+              <button class="fh-qbtn fh-qbtn-primary" onclick="fhAddWatchDir()">添加</button>
+            </div>
+            <div id="fhWatchDirList" style="display:flex;flex-direction:column;gap:6px;"></div>
+          </div>
+
+          <!-- ── File Relation Graph pane ── -->
+          <div id="fhPaneGraph" class="fh-fullpane" style="display:none;flex-direction:column;padding:0;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;flex-shrink:0;border-bottom:1px solid var(--border-color);">
+              <div class="fh-pane-title" style="margin:0;border:none;padding:0;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+                文件关系图
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <span id="fhGraphHint" style="font-size:12px;color:var(--text-muted);">点击节点打开文件</span>
+                <button class="fh-icon-btn" onclick="fhLoadGraph()" title="刷新">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 </button>
+              </div>
             </div>
-
-            <!-- 搜索模式 -->
-            <div id="fhPaneSearch" style="flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:16px; border:1px solid var(--border-color);">
-                <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;">
-                    <div style="flex:1; min-width:0; position: relative;">
-                        <svg style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events:none; color: var(--text-muted);" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                        <input type="text" id="fhSearchInput" class="form-input"
-                            placeholder="输入文件名、关键词、扩展名等..."
-                            style="width:100%;box-sizing:border-box;font-size:14px;padding:0 12px 0 36px;height:40px;border-radius:6px;"
-                            onkeydown="if(event.key==='Enter')fhDoSearch()"
-                        >
-                    </div>
-                    <select id="fhCatFilter" class="form-select" style="width:120px;flex-shrink:0;height:40px;border-radius:6px;font-size:14px;padding:0 8px;">
-                        <option value="">全部类型</option>
-                        <option value="文档">📃 文档</option>
-                        <option value="图片">🖼️ 图片</option>
-                        <option value="代码">💻 代码</option>
-                        <option value="视频">🎬 视频</option>
-                        <option value="音频">🎵 音频</option>
-                        <option value="压缩包">📦 压缩</option>
-                        <option value="其他">📄 其他</option>
-                    </select>
-                    <button class="btn-primary" onclick="fhDoSearch()" style="flex-shrink:0;height:40px;padding:0 20px;border-radius:6px;font-size:14px;font-weight:500;">搜索文件</button>
-                </div>
-                <div style="display:flex;gap:10px;align-items:center;">
-                    <button class="btn-secondary btn-sm" onclick="fhLoadRecent()" style="background: var(--bg-primary); border-color: var(--border-color); color: var(--text-primary); border-radius: 6px; padding: 6px 12px; font-size: 13px;">
-                        <span style="margin-right: 4px;">🕐</span> 最近文件
-                    </button>
-                    <button class="btn-secondary btn-sm" onclick="fhCheckDuplicates()" style="background: var(--bg-primary); border-color: var(--border-color); color: var(--text-primary); border-radius: 6px; padding: 6px 12px; font-size: 13px;">
-                        <span style="margin-right: 4px;">🔁</span> 重复检测
-                    </button>
-                    <span id="fhStatsSummary" style="margin-left:auto;font-size:13px;color:var(--text-muted);"></span>
-                </div>
+            <div id="fhGraphWrap" style="flex:1;position:relative;overflow:hidden;min-height:300px;">
+              <canvas id="fhGraphCanvas" style="width:100%;height:100%;"></canvas>
+              <div id="fhGraphTooltip" style="display:none;position:absolute;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text-primary);pointer-events:none;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 4px 12px rgba(0,0,0,0.15);"></div>
             </div>
+          </div>
 
-            <!-- 浏览目录模式 -->
-            <div id="fhPaneBrowse" style="display:none; flex-shrink:0; background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:16px; border:1px solid var(--border-color);">
-                <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;">
-                    <div style="flex:1; min-width:0; position: relative;">
-                        <svg style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); pointer-events:none; color: var(--text-muted);" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
-                        <input type="text" id="fhBrowsePath" class="form-input"
-                            placeholder="输入本地绝对路径，如 C:\Users\12524\Desktop..."
-                            style="width:100%;box-sizing:border-box;font-size:14px;padding:0 12px 0 36px;height:40px;border-radius:6px;"
-                            onkeydown="if(event.key==='Enter')fhDoBrowse()"
-                        >
-                    </div>
-                    <button class="btn-secondary" onclick="fhPickFolder()" title="打开系统文件夹选择对话框" style="flex-shrink:0;height:40px;width:40px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:6px;">📂</button>
-                    <button class="btn-primary" onclick="fhDoBrowse()" style="flex-shrink:0;height:40px;padding:0 20px;border-radius:6px;font-size:14px;font-weight:500;">浏览目录</button>
-                </div>
-                <div style="display:flex;gap:12px;align-items:center;margin-top:2px;">
-                    <label style="flex-shrink:0;font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-primary);user-select:none;white-space:nowrap;">
-                        <input type="checkbox" id="fhRecursive" style="width:16px;height:16px;accent-color:var(--accent-primary);"> 包含子目录深度浏览
-                    </label>
-                    <input type="text" id="fhBrowseFilter" class="form-input"
-                        placeholder="在结果中过滤文件名..." style="width:auto;flex:1;min-width:0;font-size:13px;height:34px;border-radius:6px;padding:0 10px;"
-                        oninput="fhFilterBrowseResults(this.value)"
-                    >
-                </div>
+          <!-- ── File list ── -->
+          <div id="fhFileList">
+            <div class="memory-empty" style="margin-top:48px;padding:48px 0;display:flex;flex-direction:column;align-items:center;">
+              <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" stroke-width="1.2" style="margin-bottom:16px;">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <span style="color:var(--text-muted);font-size:14px;">点击左侧导航，或在上方搜索文件</span>
             </div>
+          </div>
 
-            <!-- 归档整理模式 -->
-            <div id="fhPaneArchive" style="display:none; flex:1; overflow-y:auto; background:var(--bg-primary); border-radius:10px;">
-                <!-- 路径配置 -->
-                <div style="background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:12px; border:1px solid var(--border-color);">
-                    <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.5px;">路径配置</div>
-                    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;">
-                        <label style="flex-shrink:0;font-size:13px;color:var(--text-secondary);width:56px;">源目录</label>
-                        <div style="flex:1;min-width:0;display:flex;align-items:center;height:38px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-tertiary);">
-                            <span style="display:flex;align-items:center;padding:0 7px 0 10px;flex-shrink:0;color:var(--text-muted);pointer-events:none;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg></span>
-                            <input type="text" id="fhArchiveSrc" placeholder="输入要整理的文件夹路径，如 C:\Users\...\下载" style="flex:1;min-width:0;border:none;background:transparent;outline:none;font-size:13px;color:var(--text-primary);font-family:inherit;padding:0 10px 0 0;height:100%;">
-                        </div>
-                        <button class="btn-secondary" onclick="fhPickArchiveFolder('fhArchiveSrc')" title="选择文件夹" style="flex-shrink:0;height:38px;width:38px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:16px;">📂</button>
-                    </div>
-                    <div style="display:flex;gap:10px;align-items:center;">
-                        <label style="flex-shrink:0;font-size:13px;color:var(--text-secondary);width:56px;">目标目录</label>
-                        <div style="flex:1;min-width:0;display:flex;align-items:center;height:38px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-tertiary);">
-                            <span style="display:flex;align-items:center;padding:0 7px 0 10px;flex-shrink:0;color:var(--text-muted);pointer-events:none;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect></svg></span>
-                            <input type="text" id="fhArchiveDest" placeholder="留空则自动在源目录同级创建 xxx_归档_日期" style="flex:1;min-width:0;border:none;background:transparent;outline:none;font-size:13px;color:var(--text-primary);font-family:inherit;padding:0 10px 0 0;height:100%;">
-                        </div>
-                        <button class="btn-secondary" onclick="fhPickArchiveFolder('fhArchiveDest')" title="选择文件夹" style="flex-shrink:0;height:38px;width:38px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:6px;font-size:16px;">📂</button>
-                    </div>
-                </div>
+        </main><!-- /fh-main -->
 
-                <!-- 归档方式 -->
-                <div style="background:var(--bg-elevated); padding:16px; border-radius:10px; margin-bottom:12px; border:1px solid var(--border-color);">
-                    <div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.5px;">归档方式</div>
-                    <div style="display:flex;gap:10px;margin-bottom:14px;">
-                        <button id="fhArchiveBtnAuto" onclick="fhSetArchiveMode('auto')"
-                            style="flex:1;padding:14px 10px;border-radius:10px;border:2px solid var(--accent-primary);background:var(--accent-primary);color:#fff;cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all 0.2s;">
-                            <span style="font-size:22px;">🤖</span>
-                            <span>AI 智能归档</span>
-                            <span style="font-size:11px;font-weight:400;opacity:0.85;">按文件类型自动分类整理</span>
-                        </button>
-                        <button id="fhArchiveBtnCustom" onclick="fhSetArchiveMode('custom')"
-                            style="flex:1;padding:14px 10px;border-radius:10px;border:2px solid var(--border-color);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:14px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:6px;transition:all 0.2s;">
-                            <span style="font-size:22px;">✏️</span>
-                            <span>自定义规则</span>
-                            <span style="font-size:11px;font-weight:400;opacity:0.7;">按我设定的匹配规则分类</span>
-                        </button>
-                    </div>
+      </div><!-- /fh-app -->
 
-                    <!-- 自定义规则区 -->
-                    <div id="fhCustomRulesArea" style="display:none;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                            <span style="font-size:13px;color:var(--text-secondary);font-weight:500;">匹配规则（支持通配符，如 *.pdf、报告*）</span>
-                            <div style="display:flex;gap:8px;">
-                                <button class="btn-secondary btn-sm" onclick="fhLoadArchivePreset()" style="font-size:12px;border-radius:6px;padding:4px 10px;">📋 按类型预设</button>
-                                <button class="btn-primary btn-sm" onclick="fhAddArchiveRule()" style="font-size:12px;border-radius:6px;padding:4px 10px;">+ 添加规则</button>
-                            </div>
-                        </div>
-                        <div id="fhCustomRules" style="display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto;"></div>
-                        <div id="fhCustomRulesEmpty" style="text-align:center;padding:20px;color:var(--text-muted);font-size:13px;border:1px dashed var(--border-color);border-radius:8px;">暂无规则，点击"+ 添加规则"或使用"按类型预设"快速填入</div>
-                    </div>
-                </div>
+      <!-- AI 批量任务浮层 (fixed, covers overlay) -->
+      <div id="fhBatchAIPanel" style="display:none;position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,0.5);align-items:center;justify-content:center;">
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:14px;padding:22px;max-width:520px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+              <div style="font-size:15px;font-weight:700;color:var(--text-primary);margin-bottom:10px;">AI 批量处理任务</div>
+              <div id="fhBatchAIFileList" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;max-height:100px;overflow-y:auto;line-height:1.7;"></div>
+              <textarea id="fhBatchAITask" rows="3" placeholder="描述任务，例如：提取每个合同的甲乙方和金额"
+                  style="width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1.5px solid var(--border-color);background:var(--bg-primary);color:var(--text-primary);font-size:13px;resize:vertical;outline:none;font-family:inherit;"></textarea>
+              <div id="fhBatchAIOut" style="display:none;margin-top:12px;max-height:240px;overflow-y:auto;font-size:13px;color:var(--text-primary);background:var(--bg-primary);border:1px solid var(--border-color);border-radius:8px;padding:10px;white-space:pre-wrap;word-break:break-all;line-height:1.6;"></div>
+              <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+                  <button class="fh-icon-btn" onclick="document.getElementById('fhBatchAIPanel').style.display='none'">关闭</button>
+                  <button class="fh-icon-btn fh-active" id="fhBatchAIRunBtn" onclick="fhRunBatchAI()">开始处理</button>
+              </div>
+          </div>
+      </div>
 
-                <!-- 选项 + 开始 -->
-                <div style="display:flex;align-items:center;gap:16px;margin-bottom:12px;">
-                    <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-primary);user-select:none;white-space:nowrap;">
-                        <input type="checkbox" id="fhArchiveRecursive" checked style="width:16px;height:16px;accent-color:var(--accent-primary);"> 包含子目录
-                    </label>
-                    <button class="btn-primary" onclick="fhDoArchive()" style="margin-left:auto;height:40px;padding:0 28px;font-size:14px;font-weight:600;border-radius:8px;display:flex;align-items:center;gap:8px;">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"></polyline><rect x="1" y="3" width="22" height="5"></rect><line x1="10" y1="12" x2="14" y2="12"></line></svg>
-                        开始归档
-                    </button>
-                </div>
-
-                <!-- 结果区 -->
-                <div id="fhArchiveResult"></div>
-            </div>
-
-            <!-- 统一文件结果区 -->
-            <div id="fhResultHeader" style="display:none;font-size:13px;color:var(--text-secondary); margin-bottom:10px; align-items:center; justify-content:space-between; flex-shrink:0; padding: 0 4px;">
-                <span id="fhResultCount" style="font-weight: 500;"></span>
-                <button class="btn-secondary btn-sm" style="font-size:12px; display: flex; align-items: center; gap: 6px; border-radius: 6px; padding: 4px 10px;" onclick="fhCopyAllPaths()">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                    复制所有路径
-                </button>
-            </div>
-            <div id="fhFileList" style="flex:1; overflow-y:auto; background:transparent; padding:2px; margin: 0 -2px;">
-                <div class="memory-empty" style="margin-top:40px; padding: 40px 0; background: var(--bg-elevated); border-radius: 12px; border: 1px dashed var(--border-color); display: flex; flex-direction: column; align-items: center;">
-                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" stroke-width="1.5" style="margin-bottom: 16px;">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                    <span style="color: var(--text-muted); font-size: 14px;">在上方选择搜索或浏览模式</span>
-                </div>
-            </div>
-        </div>
-    </div>
+    </div><!-- /filehubModal -->
 
     <!-- New Session Modal -->
     <div class="modal-overlay" id="newSessionModal">
@@ -3507,6 +3917,11 @@
                         尚未启用任何 Skill，也没有自定义技能。<br>
                         <button onclick="spSwitchTab('catalog')" style="margin-top:8px;padding:5px 14px;border-radius:8px;border:1px solid var(--accent-primary);background:transparent;color:var(--accent-primary);cursor:pointer;font-size:12px;">去「全部」启用 Skill</button>
                     </div>`;
+                } else if (tab === 'catalog' && cat === 'custom') {
+                    content.innerHTML = `<div class="sp-loading" style="padding:24px 12px;line-height:1.9">
+                        还没有自定义 Skill。<br>
+                        <button onclick="spSwitchTab('studio')" style="margin-top:10px;padding:5px 16px;border-radius:8px;border:1px solid var(--accent-primary);background:transparent;color:var(--accent-primary);cursor:pointer;font-size:12px;">✨ 前往创意工坊创建</button>
+                    </div>`;
                 } else if (tab === 'catalog' && q) {
                     content.innerHTML = `<div class="sp-loading">本地无匹配结果</div><div id="spLocalSearchCommunity" style="margin-top:10px;"></div>`;
                     spSearchCommunityFallback(q);
@@ -3579,6 +3994,20 @@
                 </div>` : '';
 
             content.innerHTML = `<div class="sp-tile-grid">${skills.map(renderTile).join('')}</div>${activeListHtml}`;
+            // Inject studio promo banner when filtering by custom category
+            if (tab === 'catalog' && cat === 'custom') {
+                const studioBanner = document.createElement('div');
+                studioBanner.className = 'sp-community-promo';
+                studioBanner.setAttribute('title', '在创意工坊创建你的专属 Skill');
+                studioBanner.onclick = () => spSwitchTab('studio');
+                studioBanner.innerHTML = `<span style="font-size:16px;flex-shrink:0">✨</span>
+                    <div class="sp-community-promo-text">
+                        <div class="sp-community-promo-title">在创意工坊创建专属 Skill</div>
+                        <div class="sp-community-promo-sub">AI 智能生成 · 从对话提取 · 手动编写，三种方式随意选</div>
+                    </div>
+                    <span class="sp-community-promo-enter">›</span>`;
+                content.insertBefore(studioBanner, content.firstChild);
+            }
             // Inject community promo banner at top of catalog view
             if (tab === 'catalog' && !q && cat === 'all') {
                 const banner = document.createElement('div');

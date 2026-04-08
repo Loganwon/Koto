@@ -108,14 +108,72 @@ def _parse_slides(raw_bytes: bytes) -> dict:
 
         shapes = []
         for z_idx, shape in enumerate(slide.shapes):
+            # Resolve effective geometry: placeholder shapes often inherit
+            # position from the slide layout or slide master (python-pptx
+            # returns None for inherited values).  Walk: shape → layout → master
+            # → hard-coded EMU defaults so shape divs are never 0×0.
+            _eff_left = shape.left
+            _eff_top  = shape.top
+            _eff_w    = shape.width
+            _eff_h    = shape.height
+            if None in (_eff_left, _eff_top, _eff_w, _eff_h):
+                try:
+                    _ph_fmt = shape.placeholder_format
+                    if _ph_fmt is not None:
+                        _layout = getattr(getattr(shape, "part", None), "slide_layout", None)
+                        if _layout is not None:
+                            for _lph in _layout.placeholders:
+                                try:
+                                    if _lph.placeholder_format.idx == _ph_fmt.idx:
+                                        if _eff_left is None: _eff_left = _lph.left
+                                        if _eff_top  is None: _eff_top  = _lph.top
+                                        if _eff_w    is None: _eff_w    = _lph.width
+                                        if _eff_h    is None: _eff_h    = _lph.height
+                                        break
+                                except Exception:
+                                    pass
+                        # Also walk slide master if layout didn't resolve everything
+                        if None in (_eff_left, _eff_top, _eff_w, _eff_h):
+                            _master = getattr(_layout, "slide_master", None) if _layout else None
+                            if _master is not None:
+                                for _mph in _master.placeholders:
+                                    try:
+                                        if _mph.placeholder_format.idx == _ph_fmt.idx:
+                                            if _eff_left is None: _eff_left = _mph.left
+                                            if _eff_top  is None: _eff_top  = _mph.top
+                                            if _eff_w    is None: _eff_w    = _mph.width
+                                            if _eff_h    is None: _eff_h    = _mph.height
+                                            break
+                                    except Exception:
+                                        pass
+                        # If still None, use standard widescreen EMU defaults by placeholder type
+                        if None in (_eff_left, _eff_top, _eff_w, _eff_h):
+                            _ph_idx = getattr(_ph_fmt, "idx", -1)
+                            if _ph_idx == 0:   # Title
+                                if _eff_left is None: _eff_left = 457200
+                                if _eff_top  is None: _eff_top  = 274638
+                                if _eff_w    is None: _eff_w    = 8229600
+                                if _eff_h    is None: _eff_h    = 1143000
+                            elif _ph_idx == 1:  # Body / Content
+                                if _eff_left is None: _eff_left = 457200
+                                if _eff_top  is None: _eff_top  = 1600200
+                                if _eff_w    is None: _eff_w    = 8229600
+                                if _eff_h    is None: _eff_h    = 4525963
+                            else:
+                                if _eff_left is None: _eff_left = 0
+                                if _eff_top  is None: _eff_top  = 0
+                                if _eff_w    is None: _eff_w    = slide_w
+                                if _eff_h    is None: _eff_h    = slide_h
+                except Exception:
+                    pass
             s: dict = {
                 "id": shape.shape_id,
                 "name": shape.name,
                 "type": str(shape.shape_type),
-                "left": shape.left or 0,
-                "top": shape.top or 0,
-                "width": shape.width or 0,
-                "height": shape.height or 0,
+                "left": _eff_left or 0,
+                "top": _eff_top or 0,
+                "width": _eff_w or 0,
+                "height": _eff_h or 0,
                 "z_order": z_idx,
                 "has_text": False,
                 "fill": None,

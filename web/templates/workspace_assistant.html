@@ -8,9 +8,6 @@
   <!-- ── Split.js ── -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.css">
 
-  <!-- ── WangEditor 5 (DOCX editor) ── -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/css/style.css">
-
   <!-- ── App styles ── -->
   <link rel="stylesheet" href="/static/css/workspace.css?v=20260403a">
 </head>
@@ -43,6 +40,38 @@
         </svg>
         另存为
       </button>
+      <!-- Archive current file -->
+      <div style="position:relative; display:inline-block;">
+        <button class="wa-btn" id="wa-archive-btn" disabled onclick="WA.toggleArchivePopover()" title="将当前文件归档到分类文件夹">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right:4px">
+            <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>
+          </svg>
+          归档
+        </button>
+        <div id="wa-archive-popover" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9000;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:10px;padding:12px;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,0.15);font-size:13px;">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text-primary);">归档到分类文件夹</div>
+          <div id="wa-archive-cats" style="display:flex;flex-direction:column;gap:4px;">
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('文档')">📄 文档</button>
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('表格')">📊 表格</button>
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('演示文稿')">📑 演示文稿</button>
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('报告')">📋 报告</button>
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('合同')">📝 合同</button>
+          </div>
+        </div>
+      </div>
+      <!-- Version History button -->
+      <div style="position:relative; display:inline-block;">
+        <button class="wa-btn" id="wa-history-btn" disabled onclick="WA.toggleHistoryPopover()" title="查看历史版本快照">
+          <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right:4px">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/>
+          </svg>
+          历史版本
+        </button>
+        <div id="wa-history-popover" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9000;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:10px;padding:12px;min-width:260px;max-height:320px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.15);font-size:13px;">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text-primary);">历史版本</div>
+          <div id="wa-history-list"><span style="color:var(--text-muted);">加载中…</span></div>
+        </div>
+      </div>
       <span id="wa-autosave-status"></span>
     </div>
   </div>
@@ -94,6 +123,7 @@
       <div id="wa-select-bar" style="display:none">
         <span id="wa-select-count">0 已选</span>
         <button onclick="WA.selectAll()">全选</button>
+        <button id="wa-send-selected-ai" onclick="WA.sendSelectedToAI()" disabled title="发送选中文件给AI助手同时分析">📂 发送给AI</button>
         <button class="danger" id="wa-delete-selected" onclick="WA.deleteSelected()" disabled>🗑 删除</button>
         <button onclick="WA.toggleSelectMode()">取消</button>
       </div>
@@ -119,6 +149,20 @@
         <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
         <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
       </div>
+      <!-- My Workspace: pinned files the user is actively working on -->
+      <div class="wa-section-label collapsible" id="wa-myws-label">
+        <span class="wa-section-arrow open" id="wa-myws-arrow" onclick="WA.toggleSection('myworkspace')">›</span>
+        <span onclick="WA.toggleSection('myworkspace')" style="flex:1">我的工作区</span>
+        <span class="wa-section-badge" id="wa-myws-badge"></span>
+        <div class="wa-section-actions">
+          <button class="wa-icon-btn" onclick="event.stopPropagation();WA.addToMyWorkspace()" title="添加文件到工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">＋</button>
+        </div>
+      </div>
+      <div id="wa-myws-list" class="wa-myws-list"></div>
+      <div id="wa-myws-empty" class="wa-myws-empty" style="display:none">
+        <span>右键文件选择"加入工作区"<br>或拖拽文件到此处</span>
+      </div>
+
       <!-- File browser (VS Code-style local FS explorer) -->
       <div class="wa-section-label collapsible" id="wa-ws-label">
         <span class="wa-section-arrow open" id="wa-ws-arrow" onclick="WA.toggleSection('workspace')">›</span>
@@ -179,6 +223,8 @@
 
     <!-- Center: polymorphic canvas -->
     <div id="wa-canvas">
+      <!-- Drag shield: covers the editor during file drags so rich editors can't swallow events -->
+      <div id="wa-drag-canvas-shield"></div>
       <!-- VS Code-style tab bar -->
       <div id="wa-tab-bar"></div>
       <!-- Canvas body: all editors positioned relative to this -->
@@ -392,15 +438,36 @@
         </div>
       </div>
 
-      <!-- Current analysis subject indicator -->
-      <div id="wa-subject-bar">
-        <span class="subject-tag" id="wa-subject-tag">文件</span>
+      <!-- Current editor file indicator (neutral; hides when analysis files present) -->
+      <div id="wa-subject-bar" style="display:none">
+        <span class="subject-icon" id="wa-subject-icon">📄</span>
         <span class="subject-text" id="wa-subject-text"></span>
+        <span class="subject-editor-badge">当前编辑</span>
+      </div>
+
+      <!-- Analysis files panel (shown when ≥1 file is dragged for analysis) -->
+      <div id="wa-ai-file-chips" style="display:none">
+        <div class="wa-ai-file-chips-header">
+          <!-- Header and rows are dynamically filled by _renderAIFileChips() -->
+        </div>
+        <div id="wa-ai-file-chip-list" class="wa-ctx-file-list"></div>
+        <div class="wa-ctx-drop-hint">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>继续拖放文件到此处添加分析</span>
+        </div>
       </div>
 
       <!-- Messages -->
       <div id="wa-ai-messages">
-        <div class="wa-msg ai">你好！请从左侧打开一个文件，我可以帮你<strong>分析内容</strong>、<strong>润色文字</strong>、<strong>总结要点</strong>或<strong>翻译段落</strong>。<br><br>选中文档中的文字后，可快速将选区发送给我处理。AI 回复后可选择<b>替换选区</b>、<b>插入到后面</b>或<b>仅查看</b>。</div>
+        <div class="wa-msg ai">你好！请从左侧打开一个文件，我可以帮你<strong>分析内容</strong>、<strong>润色文字</strong>、<strong>总结要点</strong>或<strong>翻译段落</strong>。<br><br>选中文档中的文字后，可快速将选区发送给我处理。AI 回复后可选择<b>替换选区</b>、<b>插入到后面</b>或<b>仅查看</b>。<br><br>💡 <b>多文档分析</b>：从左侧文件树拖拽多个文件到此处，我可以一起分析。</div>
+      </div>
+
+      <!-- AI file drop overlay -->
+      <div id="wa-ai-file-drop" style="display:none">
+        <div class="wa-ai-file-drop-inner">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          <span>拖放文件到此处<br>AI 将一起分析</span>
+        </div>
       </div>
 
       <!-- Input area -->
@@ -414,6 +481,33 @@
         <div id="wa-context-indicator" style="display:none">
           <div class="ctx-dot"></div>
           <span id="wa-ctx-label">已附加上下文</span>
+        </div>
+        <!-- Attached files hint (shown when multi-doc mode active) -->
+        <div id="wa-ai-attached-hint">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <span class="hint-label" id="wa-ai-attached-label">📂 多文档分析模式</span>
+          <button onclick="WA.clearAIFileContext()" title="清除所有附加文件">清除</button>
+        </div>
+        <!-- Cross-source keyword search (visible when ≥1 file attached) -->
+        <div id="wa-source-search-row" style="display:none">
+          <div class="wa-source-search-wrap">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="wa-source-search-input" type="text" placeholder="跨文档搜索关键词…"
+                   oninput="WA.doSourceSearch(this.value)" autocomplete="off">
+            <button class="wa-source-clear" id="wa-source-clear-btn" style="display:none" onclick="WA.clearSourceSearch()">×</button>
+          </div>
+          <div id="wa-source-search-results" style="display:none"></div>
+        </div>
+        <!-- Multi-doc action shortcuts (visible when ≥1 file attached) -->
+        <div id="wa-multidoc-actions" style="display:none">
+          <button class="wa-quick-btn multi-doc" onclick="WA.openAudioOverview()" title="将所有文件生成双主播播客">🎙 有声概览</button>
+          <button class="wa-quick-btn multi-doc" onclick="WA.openNotebookGuide()" title="生成摘要、要点、问答、词汇表">📚 学习包</button>
+          <button class="wa-quick-btn multi-doc" onclick="WA.extractTopics()" title="提炼文件核心主题">🏷 主题</button>
+        </div>
+        <!-- Topic chips bar (populated by extractTopics) -->
+        <div id="wa-topic-chips-bar" style="display:none">
+          <div id="wa-topic-chips-list"></div>
+          <button class="chip-x" onclick="WA.closeTopicBar()" title="关闭">×</button>
         </div>
         <!-- Quick action chips -->
         <div class="wa-ai-quick-actions" id="wa-quick-actions">
@@ -445,13 +539,13 @@
 
   <!-- Floating Selection Toolbar — 3 core actions -->
   <div id="wa-pdf-tooltip" class="wa-selection-toolbar">
-    <button onclick="WA.sendQuickAction('润色')">润色</button>
-    <button onclick="WA.sendQuickAction('解释')">解释</button>
-    <button onclick="WA.sendSelectionToAI()">问 AI</button>
+    <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('润色')">润色</button>
+    <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('解释')">解释</button>
+    <button onmousedown="event.preventDefault()" onclick="WA.sendSelectionToAI()">问 AI</button>
     <div class="wa-toolbar-divider"></div>
-    <button onclick="WA.sendQuickAction('翻译')">翻译</button>
-    <button onclick="WA.sendQuickAction('改写')">改写</button>
-    <button onclick="WA.sendQuickAction('总结')">总结</button>
+    <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('翻译')">翻译</button>
+    <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('改写')">改写</button>
+    <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('总结')">总结</button>
   </div>
 
   <!-- Chart Generation Dialog -->
@@ -469,6 +563,37 @@
     </div>
   </div>
 
+  <!-- Source Preview Drawer →── anchored to bottom of AI panel -->
+  <div id="wa-source-preview" style="display:none">
+    <div class="wa-source-preview-header">
+      <span id="wa-source-preview-label">📌 来源预览</span>
+      <button onclick="WA.closeSourcePreview()" title="关闭">×</button>
+    </div>
+    <div id="wa-source-preview-body"></div>
+  </div>
+
+  <!-- Audio Overview Modal -->
+  <div id="wa-audio-modal" style="display:none" class="wa-dlg-overlay" onclick="if(event.target===this)WA.closeAudioModal()">
+    <div class="wa-audio-modal-box">
+      <div class="wa-audio-modal-header">
+        <span>🎙 有声概览</span>
+        <button class="wa-dlg-close" onclick="WA.closeAudioModal()" title="关闭">×</button>
+      </div>
+      <div id="wa-audio-modal-body">
+        <div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成脚本…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notebook Guide Drawer -->
+  <div id="wa-notebook-guide" style="display:none">
+    <div class="wa-notebook-header">
+      <span>📚 学习包</span>
+      <button class="wa-nb-close" onclick="WA.closeNotebookGuide()" title="关闭">×</button>
+    </div>
+    <div id="wa-notebook-body"><div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成学习包…</div></div>
+  </div>
+
   <!-- Toast -->
   <div id="wa-toast"></div>
 
@@ -476,20 +601,6 @@
   <!-- Split.js served locally so a CDN failure cannot crash the IIFE -->
   <script src="/static/vendor/split.min.js"></script>
 
-  <!-- WangEditor 5 -->
-  <script src="https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/index.js"></script>
-
-  <!-- PDF.js -->
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-  <script>
-    if (typeof pdfjsLib !== 'undefined') {
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-    }
-  </script>
-
-  <!-- Socket.IO: load from CDN (vendor file not bundled) -->
-  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
   <!-- Markdown renderer -->
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
 

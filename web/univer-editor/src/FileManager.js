@@ -19,17 +19,23 @@ export class FileManager {
    * @param {import('./DocController').DocController} docController
    * @param {function} onDocSwitch    文档切换时的回调（新 snapshot）
    * @param {import('./DocxViewer').DocxViewer|null} docxViewer  可选 DOCX 查看器
+   * @param {import('./PptxViewer').PptxViewer|null} pptxViewer  可选 PPTX 查看器
+   * @param {import('./ExcelViewer').ExcelViewer|null} excelViewer 可选 Excel 查看器
    */
-  constructor(sidebarId, docController, onDocSwitch, docxViewer = null) {
+  constructor(sidebarId, docController, onDocSwitch, docxViewer = null, pptxViewer = null, excelViewer = null) {
     this._sidebar = document.getElementById(sidebarId);
     this._doc = docController;
     this._onDocSwitch = onDocSwitch;
     this._docxViewer = docxViewer;
+    this._pptxViewer = pptxViewer;
+    this._excelViewer = excelViewer;
 
     /** @type {Array<{id:string, name:string, updatedAt:string}>} */
     this._files = [];
     /** @type {string|null} */
     this._activeId = null;
+    /** @type {string} */
+    this._activeSourceExt = '';
     /** @type {boolean} */
     this._loading = false;
 
@@ -64,7 +70,7 @@ export class FileManager {
         <span id="fm-save-status" class="save-status"></span>
       </div>
       <input type="file" id="fm-file-input" style="display:none"
-             accept=".txt,.md,.docx,.pdf,.html,.csv,.json,.rtf" multiple />
+             accept=".txt,.md,.docx,.pdf,.html,.csv,.json,.rtf,.pptx,.xlsx" multiple />
     `;
   }
 
@@ -208,13 +214,7 @@ export class FileManager {
     await this.refresh();
     // Switch to the last imported doc
     if (lastImportedDoc && this._activeId) {
-      if (lastImportedDoc.sourceExt === '.docx' && this._docxViewer) {
-        await this._renderDocx(lastImportedDoc.id, lastImportedDoc.name || lastImportedDoc.id);
-      } else {
-        const doc = await this._api(`/${this._activeId}`);
-        if (this._docxViewer) this._docxViewer.hide();
-        if (this._onDocSwitch) this._onDocSwitch(doc.content || null, this._activeId);
-      }
+      await this._openDoc(lastImportedDoc.id, lastImportedDoc);
     }
   }
 
@@ -233,20 +233,65 @@ export class FileManager {
       this._activeId = docId;
       this._renderList();
 
-      if (data.sourceExt === '.docx' && this._docxViewer) {
-        // ── DOCX: render in Word-sim viewer ──
-        await this._renderDocx(docId, data.name || docId);
-      } else {
-        // ── Plain text / blank doc ──
-        if (this._docxViewer) this._docxViewer.hide();
-        if (this._onDocSwitch) this._onDocSwitch(data.content || null, docId);
-      }
+      await this._openDoc(docId, data);
       console.log('[FileManager] Switched to:', docId);
     } catch (e) {
       console.error('[FileManager] Switch failed:', e);
     } finally {
       this._loading = false;
     }
+  }
+
+  // ── 根据 sourceExt 路由到正确的查看器 ──
+  async _openDoc(docId, data) {
+    const sourceExt = data.sourceExt || '';
+    this._activeSourceExt = sourceExt;
+
+    // Keep DocController in sync so SocketBridge can report the correct file type/name
+    this._doc.setFileType(sourceExt);
+    this._doc.setFileName(data.name || docId);
+
+    if (sourceExt === '.docx' && this._docxViewer) {
+      if (this._pptxViewer)  this._pptxViewer.hide();
+      if (this._excelViewer) this._excelViewer.hide();
+      await this._renderDocx(docId, data.name || docId);
+
+    } else if (sourceExt === '.pptx' && this._pptxViewer) {
+      if (this._docxViewer)  this._docxViewer.hide();
+      if (this._excelViewer) this._excelViewer.hide();
+      // pptxData may be in `data` (after import) or need a full fetch
+      const pptxData = data.pptxData || (await this._api(`/${docId}`)).pptxData;
+      if (pptxData) {
+        await this._pptxViewer.render(pptxData, docId, data.name || docId);
+      } else {
+        console.error('[FileManager] No pptxData for', docId);
+        this._fallbackText(data);
+      }
+
+    } else if (sourceExt === '.xlsx' && this._excelViewer) {
+      if (this._docxViewer) this._docxViewer.hide();
+      if (this._pptxViewer) this._pptxViewer.hide();
+      const sheetsData = data.sheetsData || (await this._api(`/${docId}`)).sheetsData;
+      if (sheetsData) {
+        await this._excelViewer.render(sheetsData, docId);
+      } else {
+        console.error('[FileManager] No sheetsData for', docId);
+        this._fallbackText(data);
+      }
+
+    } else {
+      // Plain text / blank doc
+      if (this._docxViewer)  this._docxViewer.hide();
+      if (this._pptxViewer)  this._pptxViewer.hide();
+      if (this._excelViewer) this._excelViewer.hide();
+      this._fallbackText(data);
+    }
+  }
+
+  _fallbackText(data) {
+    const univerContainer = document.getElementById('univer-container');
+    if (univerContainer) univerContainer.style.display = '';
+    if (this._onDocSwitch) this._onDocSwitch(data.content || null, data.id || this._activeId);
   }
 
   // ── 从后端取原始 DOCX 二进制并交给 DocxViewer 渲染 ──
@@ -283,12 +328,20 @@ export class FileManager {
   async _saveCurrentDoc() {
     if (!this._activeId) return;
     try {
-      const text = this._doc.getFullText();
-      const snapshot = this._doc.getSnapshot?.() || null;
-      await this._api(`/${this._activeId}`, 'PUT', {
-        content: text,
-        snapshot: snapshot,
-      });
+      if (this._activeSourceExt === '.pptx' && this._pptxViewer && this._pptxViewer.isActive()) {
+        // 保存 PPTX 文字编辑结果
+        const pptxData = this._pptxViewer.getPptxData();
+        if (pptxData) {
+          await this._api(`/${this._activeId}`, 'PUT', { pptxData });
+        }
+      } else if (this._activeSourceExt === '.docx' || this._activeSourceExt === '.xlsx') {
+        // DocxViewer / ExcelViewer 当前为只读，无需保存
+      } else {
+        // 普通 Univer Docs 文本
+        const text = this._doc.getFullText();
+        const snapshot = this._doc.getSnapshot?.() || null;
+        await this._api(`/${this._activeId}`, 'PUT', { content: text, snapshot });
+      }
     } catch (e) {
       console.warn('[FileManager] Auto-save failed:', e);
     }
@@ -367,6 +420,7 @@ export class FileManager {
     const map = {
       pdf: '📕', docx: '📘', doc: '📘', txt: '📄', md: '📝',
       html: '🌐', csv: '📊', json: '📋', rtf: '📃',
+      pptx: '📊', ppt: '📊', xlsx: '📗', xls: '📗',
     };
     return map[ext] || '📄';
   }

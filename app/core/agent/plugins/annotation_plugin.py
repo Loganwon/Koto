@@ -122,7 +122,7 @@ class AnnotationPlugin(AgentPlugin):
             return f"错误：当前只支持 .docx 格式，收到: {file_path}"
 
         try:
-            from web.document_batch_annotator_v2 import annotate_large_document
+            from web.document_batch_annotator import annotate_large_document
 
             events = []
             output_file = None

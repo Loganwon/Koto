@@ -1,18 +1,24 @@
 {
   "cognitive": {
-    "exploratory": 0.53,
-    "executor": 0.545,
-    "analytical": 0.5,
-    "creative": 0.5
+    "exploratory": 0.5405,
+    "executor": 0.5683,
+    "analytical": 0.515,
+    "creative": 0.485
   },
   "expertise": {},
   "goals": [
     "获取塔罗牌解读",
-    "寻求指引"
+    "寻求指引",
+    "提升简历质量",
+    "优化教育经历描述",
+    "寻求专业润色建议"
   ],
   "recent_themes": [
     "塔罗牌",
     "占卜",
-    "自我探索"
+    "自我探索",
+    "简历撰写",
+    "学术成就",
+    "职业发展"
   ]
 }

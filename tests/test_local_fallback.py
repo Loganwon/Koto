@@ -96,9 +96,9 @@ class TestIsOllamaAlive:
     @skipif_no_import
     def test_returns_false_when_ollama_not_running(self):
         """当 Ollama 端口无响应时应返回 False。"""
-        import urllib.error
-
-        with patch("urllib.request.urlopen", side_effect=ConnectionRefusedError()):
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = ConnectionRefusedError()
+        with patch("urllib.request.build_opener", return_value=mock_opener):
             result = _is_ollama_alive()
         assert result is False
 
@@ -106,11 +106,11 @@ class TestIsOllamaAlive:
     def test_returns_true_when_ollama_running(self):
         """当 Ollama 端口正常响应时应返回 True。"""
         mock_resp = MagicMock()
-        mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = MagicMock(return_value=False)
         mock_resp.close = MagicMock()
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = mock_resp
 
-        with patch("urllib.request.urlopen", return_value=mock_resp):
+        with patch("urllib.request.build_opener", return_value=mock_opener):
             result = _is_ollama_alive()
         assert result is True
 
@@ -325,8 +325,10 @@ class TestGetLocalProvider:
         mock_resp.read.return_value = tags_payload
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = mock_resp
 
-        with patch("urllib.request.urlopen", return_value=mock_resp), \
+        with patch("urllib.request.build_opener", return_value=mock_opener), \
              patch("app.core.llm.ollama_llm_provider.OllamaLLMProvider") as MockOllama:
             MockOllama.return_value = MagicMock()
             provider = _get_local_provider()
@@ -344,7 +346,9 @@ class TestGetLocalProvider:
     @skipif_no_import
     def test_falls_back_to_none_model_when_tags_fail(self):
         """当无法查询 Ollama tags 时，应使用 model=None 的默认选择。"""
-        with patch("urllib.request.urlopen", side_effect=ConnectionRefusedError()), \
+        mock_opener = MagicMock()
+        mock_opener.open.side_effect = ConnectionRefusedError()
+        with patch("urllib.request.build_opener", return_value=mock_opener), \
              patch("app.core.llm.ollama_llm_provider.OllamaLLMProvider") as MockOllama:
             MockOllama.return_value = MagicMock()
             _get_local_provider()

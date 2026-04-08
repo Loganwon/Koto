@@ -206,6 +206,13 @@ def local_model_switch() -> Response:
         with open(settings_path, "w", encoding="utf-8") as f:
             json.dump(settings, f, ensure_ascii=False, indent=2)
 
+        # 同步 SettingsManager 内存状态，防止下次 sm.set() 调用 _save_settings()
+        # 时用旧的内存值覆盖刚写入磁盘的 model_mode/local_model（v1.6.0 蓝图拆分引入的缺陷）
+        sm = _get_settings_manager()
+        sm._settings["model_mode"] = mode
+        if model_tag:
+            sm._settings["local_model"] = model_tag
+
         # 清除缓存，下次 get_client() 调用时重建
         mod._user_settings_cache.clear()
         mod._client = None
@@ -736,20 +743,52 @@ def diagnose_models() -> Response:
 @require_auth
 def local_model_list() -> Response:
     """列出 Ollama 已安装的所有本地模型"""
-    try:
-        import json as _json
-        import urllib.request as _urlreq
+    import socket as _socket
 
-        ollama_url = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-        req = _urlreq.Request(
-            f"{ollama_url}/api/tags", headers={"Accept": "application/json"}
+    ollama_url = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+
+    # 先做快速端口探测，区分"未安装"与"正在启动"
+    def _port_open(host: str, port: int, timeout: float = 1.0) -> bool:
+        try:
+            s = _socket.create_connection((host, port), timeout=timeout)
+            s.close()
+            return True
+        except OSError:
+            return False
+
+    host_part = ollama_url.split("://", 1)[-1].rsplit(":", 1)
+    try:
+        _host, _port = host_part[0], int(host_part[1]) if len(host_part) > 1 else 11434
+    except (ValueError, IndexError):
+        _host, _port = "127.0.0.1", 11434
+
+    # 重试一次：Ollama 可能正在启动
+    port_ok = _port_open(_host, _port, timeout=1.5) or _port_open(_host, _port, timeout=2.0)
+    if not port_ok:
+        import shutil
+        installed = shutil.which("ollama") is not None
+        hint = "Ollama 正在启动，请稍候重试" if installed else "Ollama 未安装，请访问 ollama.com 下载"
+        return jsonify({"success": False, "models": [], "error": hint}), 200
+
+    try:
+        import requests as _requests
+        r = _requests.get(
+            f"{ollama_url}/api/tags",
+            headers={"Accept": "application/json"},
+            timeout=8,
+            proxies={"http": None, "https": None},  # 强制绕过系统代理，避免 VPN/代理导致 502
         )
-        with _urlreq.urlopen(req, timeout=4) as resp:
-            data = _json.loads(resp.read().decode())
+        r.raise_for_status()
+        data = r.json()
         models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
         return jsonify({"success": True, "models": models})
     except Exception as e:
-        return jsonify({"success": False, "models": [], "error": str(e)}), 200
+        err_str = str(e)
+        if "502" in err_str:
+            hint = "Ollama 服务异常 (502)，请在命令行运行 ollama serve 后重试"
+        else:
+            hint = err_str
+        return jsonify({"success": False, "models": [], "error": hint}), 200
 
 
 @settings_bp.route("/api/window/switch-to-full", methods=["POST"])

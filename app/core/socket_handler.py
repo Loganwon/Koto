@@ -15,35 +15,6 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# ── Prompts ────────────────────────────────────────────────────
-PROMPTS = {
-    "polish": (
-        "你是一名专业编辑。请对以下文本进行润色，使其更加流畅、优雅，保持原意不变。"
-        "只输出润色后的文本，不要添加任何解释或额外内容："
-    ),
-    "translate": (
-        "请将以下文本翻译（中文→英文，英文→中文）。"
-        "只输出翻译结果，不要添加原文或任何解释："
-    ),
-    "summarize": (
-        "请对以下文档内容生成一份简洁的中文摘要，包含关键论点和要点，"
-        "摘要控制在 200 字以内："
-    ),
-    "continue_writing": (
-        "你是一名优秀的写作助手。请根据以下已有文本，自然地继续写下去（100-200字），"
-        "保持语气和风格一致，衔接流畅。直接输出续写内容，不要重复原文："
-    ),
-    "rewrite": (
-        "请对以下文本进行改写，保留核心意思，但用不同的措辞和句式重新表达，"
-        "使语言更加多样化。只输出改写后的文本，不要添加任何说明："
-    ),
-    "annotate": (
-        "请为以下文本添加简洁的注释，解释关键概念、术语或难点，"
-        "注释用【】标注，插入相应位置。只输出带注释的文本："
-    ),
-}
-
-
 def register_socket_events(socketio):
     """Register all /doc namespace WebSocket event handlers."""
 
@@ -69,13 +40,19 @@ def register_socket_events(socketio):
         payload = data.get("payload", {})
         logger.info("[DocAssistant] request: %s", action_type)
 
+        # Respect use_local_only: from payload override, or from user settings
+        _req_local = payload.get("model_mode", data.get("model_mode", "")) == "local"
+        if not _req_local:
+            try:
+                _req_local = bool(_SM().get("ai", "use_local_only"))
+            except Exception:
+                pass
+
         try:
-            if action_type in ("polish", "translate", "summarize", "continue_writing"):
-                _handle_text_action(emit, action_type, payload)
-            elif action_type == "custom_instruction":
-                _handle_custom(emit, payload)
+            if action_type == "custom_instruction":
+                _handle_custom(emit, payload, use_local_only=_req_local)
             elif action_type == "code_exec":
-                _handle_code_exec(emit, payload)
+                _handle_code_exec(emit, payload, use_local_only=_req_local)
             else:
                 emit(
                     "agent_execute_command",
@@ -116,6 +93,9 @@ def register_socket_events(socketio):
         language = data.get("language", "")  # "python" | "r" | "" → text mode
         csv_data = data.get("csv_data", "")  # table CSV for chart context
         output_mode = data.get("output_mode", "inline")  # 'inline' | 'chat'
+        model_mode = data.get("model_mode", "auto")  # 'local' | 'auto'
+        # FloatingToolbar actions pass a pre-built system prompt via this field
+        action_system_prompt = data.get("_action_system_prompt", "")  # overrides system_instruction
         if not prompt:
             return
         # Combine document context with prompt
@@ -220,7 +200,7 @@ def register_socket_events(socketio):
                 )
                 socketio.emit(
                     "agent_task_complete",
-                    {"result": f"❌ 内部错误：{_task_exc}"},
+                    {"full_text": "", "error": f"内部错误：{_task_exc}"},
                     namespace="/doc",
                 )
 
@@ -241,7 +221,14 @@ def register_socket_events(socketio):
             # ── Build system instruction ──────────────────────────────────────
             file_ctx = f"文件名：{file_name}，" if file_name else ""
 
-            if output_mode == "chat":
+            # FloatingToolbar actions (polish, translate, rewrite, etc.) send a
+            # pre-built system prompt via _action_system_prompt.  When present,
+            # skip the generic document-editing instruction so the AI focuses on
+            # the text transformation task and does NOT output <TOOL> tags.
+            if action_system_prompt:
+                system_instruction = action_system_prompt
+
+            elif output_mode == "chat":
                 # Chat-only mode: plain conversation, no tool calls
                 system_instruction = (
                     f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n"
@@ -304,6 +291,17 @@ def register_socket_events(socketio):
                     '  PPTX → <TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":1,"value":"新文字"}</TOOL>'
                 )
 
+            # ── Inject user memory context (L0-L3) ────────────────────────
+            try:
+                from app.core.app_context import ctx as _ctx
+                _mem_mgr = _ctx.memory_manager
+                if _mem_mgr is not None:
+                    _mem_ctx = _mem_mgr.get_context_string(prompt, history=history)
+                    if _mem_ctx:
+                        system_instruction = f"{_mem_ctx}\n\n{system_instruction}"
+            except Exception as _mem_exc:
+                logger.debug("[DocAI] Memory injection skipped: %s", _mem_exc)
+
             # ── Build prompt with multi-turn history ──────────────────────
             # Assemble history (最多保留最近 10 轮，防止 token 超限)
             MAX_HISTORY_TURNS = 10
@@ -320,14 +318,18 @@ def register_socket_events(socketio):
                         parts.append(f"Koto AI：{content}")
                 history_text = "\n".join(parts) + "\n\n"
 
-            # Build full prompt: optional selection context first, then history, then user message
+            # Build full prompt: optional table data + selection context + history + user message
+            # csv_data is injected here so text-mode AI (summarize, translate, etc.)
+            # can see structured table content — previously it was ignored (P3 fix).
+            csv_block = f"[表格数据（CSV）]\n{csv_data}\n\n" if csv_data else ""
             if selection:
                 full_prompt = (
                     f'[用户选中的文字]\n"{selection}"\n\n'
+                    f"{csv_block}"
                     f"{history_text}用户：{prompt}"
                 )
             else:
-                full_prompt = f"{history_text}用户：{prompt}"
+                full_prompt = f"{csv_block}{history_text}用户：{prompt}"
             online_model = _pick_online_model()
             logger.warning(
                 "[DocAI] model=%s prompt_len=%d history_turns=%d sid=%s",
@@ -384,13 +386,15 @@ def register_socket_events(socketio):
 
             result_text = None
             # Respect "use local only" setting — skip online entirely
-            use_local_only = False
-            try:
-                from web.settings import SettingsManager as _SM
+            # Either the SettingsManager flag OR the per-request model_mode='local'
+            use_local_only = model_mode == "local"
+            if not use_local_only:
+                try:
+                    from web.settings import SettingsManager as _SM
 
-                use_local_only = bool(_SM().get("ai", "use_local_only"))
-            except Exception:
-                pass
+                    use_local_only = bool(_SM().get("ai", "use_local_only"))
+                except Exception:
+                    pass
 
             if use_local_only:
                 try:
@@ -403,7 +407,7 @@ def register_socket_events(socketio):
                     socketio.emit(
                         "agent_task_complete",
                         {
-                            "result": "❌ 本地模型不可用，请确认 Ollama 已启动并加载了模型。"
+                            "result": "❌ 本地模型未运行。请在终端执行：\n  ollama serve\n若尚未拉取模型，请先执行：\n  ollama pull qwen2.5:7b"
                         },
                         namespace="/doc",
                     )
@@ -425,7 +429,7 @@ def register_socket_events(socketio):
                         )
                         socketio.emit(
                             "agent_task_complete",
-                            {"result": f"❌ AI 处理失败：{exc}"},
+                            {"full_text": "", "error": f"AI 处理失败：{exc}"},
                             namespace="/doc",
                         )
                         return
@@ -434,6 +438,16 @@ def register_socket_events(socketio):
                 if not result_text:
                     logger.warning(
                         "[WorkspaceAssistant] Online AI returned empty, trying local…"
+                    )
+                    socketio.emit(
+                        "agent_execute_command",
+                        {
+                            "action": "show_message",
+                            "text": "⚠️ 云端 AI 暂时不可用，已自动切换到本地模型 (Ollama)，响应速度可能较慢。",
+                            "is_error": False,
+                        },
+                        namespace="/doc",
+                        to=sid,
                     )
                     try:
                         result_text = _try_local()
@@ -446,7 +460,8 @@ def register_socket_events(socketio):
                         socketio.emit(
                             "agent_task_complete",
                             {
-                                "result": "❌ AI 暂时不可用（在线模型不可用，本地模型也未运行）。请启动 Ollama 或配置有效的 API 密钥。"
+                                "full_text": "",
+                                "error": "在线 AI 不可用，本地 Ollama 也未运行。\n请执行: ollama serve，或在 config/gemini_config.env 配置 API 密钥。"
                             },
                             namespace="/doc",
                         )
@@ -464,6 +479,7 @@ def register_socket_events(socketio):
                 "插入到文档",
                 "请插入",
                 "插入内容",
+                "写入文档",
             )
             if (
                 not tool_calls
@@ -545,42 +561,13 @@ def register_socket_events(socketio):
         logger.info("[FileLib] /files client disconnected")
 
 
-# ── Core text handler (streaming) ─────────────────────────────
+# ── Handlers (custom_instruction / code_exec) ─────────────────────
+# Note: polish/translate/rewrite/etc. are now handled by the on_doc_ai_request
+# path (SocketBridge maps them to doc_ai_request for full streaming + history).
+# Only custom_instruction and code_exec still use the client_request fallback.
 
 
-def _handle_text_action(emit, action_type, payload):
-    """Stream a text transformation result back to the client."""
-    text = payload.get("text", "").strip()
-    if not text:
-        emit(
-            "agent_execute_command",
-            {
-                "action": "show_message",
-                "text": "输入文本为空。",
-                "is_error": True,
-            },
-            namespace="/doc",
-        )
-        return
-
-    prompt = PROMPTS[action_type]
-    full_result = _stream_llm(emit, prompt, text)
-
-    if full_result is None:
-        # Error already emitted inside _stream_llm
-        return
-
-    emit(
-        "agent_task_complete",
-        {
-            "full_text": full_result,
-            "message": None,
-        },
-        namespace="/doc",
-    )
-
-
-def _handle_custom(emit, payload):
+def _handle_custom(emit, payload, use_local_only: bool = False):
     """Stream result for an arbitrary user instruction."""
     instruction = payload.get("instruction", "").strip()
     context = payload.get("context") or {}
@@ -603,7 +590,7 @@ def _handle_custom(emit, payload):
         combined += f"\n\n当前选中的上下文内容：\n{context_text}"
 
     prompt = "你是 Koto 文件助手。请根据用户的指令处理，直接输出结果："
-    full_result = _stream_llm(emit, prompt, combined)
+    full_result = _stream_llm(emit, prompt, combined, use_local_only=use_local_only)
     if full_result is None:
         return
 
@@ -620,7 +607,7 @@ def _handle_custom(emit, payload):
 # ── Code execution handler ────────────────────────────────────
 
 
-def _handle_code_exec(emit, payload):
+def _handle_code_exec(emit, payload, use_local_only: bool = False):
     """
     Execute user/AI-supplied Python or R code in the sandbox.
     The AI may also generate code via LLM before executing it.
@@ -655,7 +642,7 @@ def _handle_code_exec(emit, payload):
         if data_context:
             gen_prompt += f"\n\n数据上下文：\n{data_context}"
 
-        code = _call_llm_sync(gen_prompt)
+        code = _call_llm_sync(gen_prompt, use_local_only=use_local_only)
         if code is None:
             emit(
                 "agent_execute_command",
@@ -810,11 +797,17 @@ def _get_provider():
 
 
 def _is_ollama_alive() -> bool:
-    """True if local Ollama is reachable within 2 seconds."""
+    """True if local Ollama is reachable within 2 seconds.
+
+    Uses an explicit no-proxy opener so Windows system proxy settings
+    (e.g. Clash / VPN) do not intercept the localhost connection.
+    """
     try:
         import urllib.request as _ur
 
-        _ur.urlopen("http://localhost:11434/api/tags", timeout=2).close()
+        # Bypass system proxy — Ollama is always on localhost
+        _opener = _ur.build_opener(_ur.ProxyHandler({}))
+        _opener.open("http://127.0.0.1:11434/api/tags", timeout=2).close()
         return True
     except Exception:
         return False
@@ -833,7 +826,9 @@ def _get_local_provider():
         import json as _json
         import urllib.request as _ur
 
-        with _ur.urlopen("http://localhost:11434/api/tags", timeout=3) as r:
+        # Bypass system proxy — Ollama is always on localhost
+        _opener = _ur.build_opener(_ur.ProxyHandler({}))
+        with _opener.open("http://127.0.0.1:11434/api/tags", timeout=3) as r:
             tags = _json.loads(r.read())
         models = [m["name"] for m in tags.get("models", [])]
         if models:
@@ -858,10 +853,20 @@ def _get_local_provider():
 def _is_online_failure(exc: Exception) -> bool:
     """Return True if the exception is a recoverable online-availability failure.
 
-    Includes hard API-key failures (400 INVALID_ARGUMENT / expired) so the
-    handler automatically falls back to local Ollama instead of showing a raw
-    error to the user.
+    Checks both the string representation AND numeric status_code attribute so
+    google.genai SDK errors (which carry exc.status_code) are caught even when
+    their str() doesn't contain the status number.
     """
+    # ── Numeric status code (google.genai / httpx exceptions) ────────────────
+    _status_code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if _status_code is not None:
+        try:
+            _sc = int(_status_code)
+            if _sc in (400, 429, 500, 503):
+                return True
+        except (TypeError, ValueError):
+            pass
+
     s = str(exc).lower()
     return (
         "timed out" in s
@@ -880,10 +885,22 @@ def _is_online_failure(exc: Exception) -> bool:
         or "api_key" in s
         or "expired" in s
         or "400" in s
+        # Region restriction — fall back to local instead of showing bare error
+        or "location is not supported" in s
+        or "failed_precondition" in s
+        or "user_location_invalid" in s
+        # Network-level failures (connection drop, deadline, disconnect)
+        or "deadline_exceeded" in s
+        or "server disconnected" in s
+        or "disconnected without" in s
+        or "connection reset" in s
+        or "connection aborted" in s
+        or "backend error" in s
+        or "service temporarily unavailable" in s
     )
 
 
-def _stream_llm(emit, prompt, text):
+def _stream_llm(emit, prompt, text, use_local_only: bool = False):
     """
     Stream LLM output with dual-mode fallback:
       1. Try the best available online Gemini model.
@@ -892,6 +909,31 @@ def _stream_llm(emit, prompt, text):
     """
     full_prompt = f"{prompt}\n\n{text}"
     online_model = _pick_online_model()
+
+    # ── Local-only mode: skip cloud entirely ─────────────────────────────────
+    if use_local_only:
+        if not _is_ollama_alive():
+            emit(
+                "agent_execute_command",
+                {"action": "show_message", "text": "❌ 本地模式下 Ollama 未运行，请启动 Ollama。", "is_error": True},
+                namespace="/doc",
+            )
+            emit("agent_task_complete", {"full_text": "", "error": "ollama not running"}, namespace="/doc")
+            return None
+        try:
+            local = _get_local_provider()
+            gen = local.generate_content(prompt=full_prompt, stream=True)
+            full = []
+            for chunk in gen:
+                part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
+                if part:
+                    full.append(part)
+                    emit("agent_stream_chunk", {"chunk": part}, namespace="/doc")
+            return "".join(full) if full else ""
+        except Exception as exc_lo:
+            logger.error("[DocAssistant] Local-only stream failed: %s", exc_lo)
+            emit("agent_task_complete", {"full_text": "", "error": str(exc_lo)}, namespace="/doc")
+            return None
 
     # ── Attempt 1: Online ────────────────────────────────────────────────────
     try:
@@ -950,6 +992,16 @@ def _stream_llm(emit, prompt, text):
 
     try:
         local = _get_local_provider()
+        # Notify user the system is falling back to local model
+        emit(
+            "agent_execute_command",
+            {
+                "action": "show_message",
+                "text": "⚠️ 云端 AI 暂时不可用，已自动切换到本地模型 (Ollama)，响应速度可能较慢。",
+                "is_error": False,
+            },
+            namespace="/doc",
+        )
         gen = local.generate_content(prompt=full_prompt, stream=True)
         full = []
         for chunk in gen:
@@ -977,9 +1029,21 @@ def _stream_llm(emit, prompt, text):
         return None
 
 
-def _call_llm_sync(prompt: str) -> str | None:
+def _call_llm_sync(prompt: str, use_local_only: bool = False) -> str | None:
     """Non-streaming LLM call (e.g. code generation). Falls back to Ollama on failure."""
     online_model = _pick_online_model()
+    # ── Local-only mode ───────────────────────────────────────────────────────
+    if use_local_only:
+        if not _is_ollama_alive():
+            logger.error("[DocAssistant] Local-only sync: Ollama not running")
+            return None
+        try:
+            local = _get_local_provider()
+            result = local.generate_content(prompt=prompt, stream=False)
+            return result.get("content", "") if isinstance(result, dict) else str(result)
+        except Exception as exc_lo:
+            logger.error("[DocAssistant] Local-only sync failed: %s", exc_lo)
+            return None
     # ── Attempt 1: Online ────────────────────────────────────────────────────
     try:
         provider = _get_provider()

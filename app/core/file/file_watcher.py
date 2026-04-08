@@ -111,6 +111,15 @@ class FileWatcher:
         user_skip = {e.lower() for e in self._cfg.get("skip_extensions", [])}
         return _DEFAULT_SKIP_EXTS | user_skip
 
+    def reload_and_apply(self):
+        """重读磁盘配置并立即应用：enabled→启动/重启监控；disabled→停止。"""
+        self._reload_config()
+        if self.enabled:
+            self.stop()
+            self.start()
+        else:
+            self.stop()
+
     def add_dir(self, directory: str):
         """动态添加一个监控目录（不持久化到磁盘）。"""
         dirs = self._cfg.get("watch_dirs", [])

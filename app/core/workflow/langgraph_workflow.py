@@ -589,8 +589,11 @@ class WorkflowEngine:
             has_file: 当前请求是否附带了已上传文件。为 True 时直接返回 "legacy"，
                       因为文件分析不应触发 LangGraph 工作流（工作流没有文件字节上下文）。
         """
-        # 有文件附件时，强制走 legacy（文件内容由文件分析流处理，LangGraph 无法访问文件字节）
-        if has_file:
+        # 有文件附件时，默认走 legacy（文件内容由文件分析流处理，LangGraph 无法访问文件字节）。
+        # TODO: 当 LangGraph 文件感知工作流就绪后，将此环境变量设为 "1" 以解除限制。
+        #       export KOTO_LANGGRAPH_FILE_ENABLED=1
+        import os as _os
+        if has_file and not _os.environ.get("KOTO_LANGGRAPH_FILE_ENABLED"):
             return "legacy"
 
         text = user_input.lower()

@@ -42,7 +42,7 @@ from app.core.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
 # ── Koto Skill 元认知前言 ────────────────────────────────────────────────────
 # 注入在 system prompt 最前面，让本地模型理解 Koto Skills 框架。
@@ -162,8 +162,9 @@ def _raw_post(
     if stream:
         return _stream_deltas(req)
 
+    _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with _opener.open(req, timeout=180) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
@@ -174,8 +175,9 @@ def _raw_post(
 
 def _stream_deltas(req: urllib.request.Request) -> Generator[str, None, None]:
     """Yield text delta strings from a streaming Ollama response."""
+    _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with _opener.open(req, timeout=180) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", errors="replace").strip()
                 if not line:

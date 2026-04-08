@@ -31,6 +31,7 @@ $candidateRoots = @(
 
 $KOTO_ROOT = $candidateRoots |
     Where-Object {
+        (Test-Path (Join-Path $_ "web\app.py")) -or
         (Test-Path (Join-Path $_ "koto_setup.py")) -or
         (Test-Path (Join-Path $_ "koto_app.py")) -or
         (Test-Path (Join-Path $_ "server.py")) -or
@@ -57,16 +58,18 @@ function Resolve-EntryScript {
     $candidates = switch ($RunMode) {
         "server" {
             @(
+                (Join-Path $KOTO_ROOT "web\app.py")
                 (Join-Path $KOTO_ROOT "server.py")
                 (Join-Path $KOTO_ROOT "src\server.py")
             )
         }
         default {
             @(
-                (Join-Path $KOTO_ROOT "koto_setup.py")
-                (Join-Path $KOTO_ROOT "src\koto_setup.py")
+                (Join-Path $KOTO_ROOT "src\koto_app.py")   # pywebview 独立窗口（优先）
                 (Join-Path $KOTO_ROOT "koto_app.py")
-                (Join-Path $KOTO_ROOT "src\koto_app.py")
+                (Join-Path $KOTO_ROOT "src\koto_setup.py")
+                (Join-Path $KOTO_ROOT "koto_setup.py")
+                (Join-Path $KOTO_ROOT "web\app.py")        # 纯 Flask 兜底
             )
         }
     }
@@ -116,7 +119,7 @@ function Test-PortFree {
 
 function Get-KotoProcesses {
     return Get-Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match "koto_app\.py" }
+        Where-Object { $_.CommandLine -and ($_.CommandLine -match "koto_app\.py" -or $_.CommandLine -match "web[/\\\\]app\.py") }
 }
 
 # ─────────────────────────────────────────────
@@ -129,8 +132,16 @@ function Invoke-LockCheck {
             $proc = Get-Process -Id ([int]$lockedPid) -ErrorAction SilentlyContinue
             if ($null -ne $proc -and $proc.Name -match "python") {
                 Write-Log "WARN" "已检测到运行中的 Koto 实例 (PID $lockedPid)。"
-                Write-Log "WARN" "若需强制重启，请先运行 Stop_Koto.bat 或删除 .koto.lock"
-                exit 1
+                # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
+                $runningCmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$lockedPid" -ErrorAction SilentlyContinue).CommandLine
+                if ($runningCmd -match "web[/\\\\]app\.py" -or $runningCmd -notmatch "koto_app\.py") {
+                    Write-Log "INFO" "Koto 已在运行（Flask模式），正在打开浏览器..."
+                    $openPort = if ($env:KOTO_PORT) { [int]$env:KOTO_PORT } else { 5000 }
+                    Start-Process "http://127.0.0.1:$openPort"
+                } else {
+                    Write-Log "INFO" "Koto 已在运行（桌面窗口模式），无需打开浏览器"
+                }
+                exit 0
             }
         }
         # 锁文件残留（上次崩溃）→ 清除
@@ -378,6 +389,12 @@ function Start-KotoApp {
                     Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
                     Set-Content -Path $LOCK_FILE -Value "$($proc.Id)" -Encoding ASCII
                     Write-Log "OK" "Koto 正在后台运行 (PID=$($proc.Id))。关闭本窗口不会停止 Koto。"
+                    # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
+                    $entryForCheck = Resolve-EntryScript -RunMode $Mode
+                    if ($entryForCheck -match "web[/\\]app\.py") {
+                        Write-Log "INFO" "正在打开浏览器: http://127.0.0.1:$Port"
+                        Start-Process "http://127.0.0.1:$Port"
+                    }
                     exit 0
                 }
                 $exitCode = $proc.ExitCode

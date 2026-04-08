@@ -1,5 +1,12 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
+
+# Bypass system/VPN proxy for all localhost services (Ollama, etc.)
+# Must be set before any requests/urllib imports.
+import os as _os
+_os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost,::1")
+_os.environ.setdefault("no_proxy", "127.0.0.1,localhost,::1")
+
 import asyncio
 import json
 import logging
@@ -1582,6 +1589,27 @@ try:
     )
 except Exception:
     APP_VERSION = "unknown"
+# Flask session secret key — read from file or env, fall back to auto-generated
+def _load_secret_key() -> str:
+    import secrets as _secrets
+    _key = os.environ.get("KOTO_SECRET_KEY") or os.environ.get("SECRET_KEY")
+    if _key:
+        return _key
+    _key_file = Path(__file__).parent.parent / "config" / "jwt_secret.txt"
+    if _key_file.exists():
+        _k = _key_file.read_text(encoding="utf-8").strip()
+        if _k:
+            return _k
+    # Auto-generate and persist for this installation
+    _k = _secrets.token_urlsafe(32)
+    try:
+        _key_file.write_text(_k, encoding="utf-8")
+    except Exception:
+        pass
+    return _k
+
+app.config["SECRET_KEY"] = _load_secret_key()
+
 # 静态资源缓存，减少重复加载
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
 # Always re-check templates on disk so edits take effect without server restart
@@ -1940,17 +1968,6 @@ def _register_blueprints_deferred():
         _app_logger.warning(f"[PPT_API] ⚠️ 未能导入 PPT 编辑 API: {e}")
     except Exception as e:
         _app_logger.warning(f"[PPT_API] ⚠️ PPT 编辑 API 注册失败: {e}")
-
-    # 注册自适应 Agent API（已迁移到 UnifiedAgent，但保留兼容导入）
-    try:
-        from adaptive_agent_api import init_adaptive_agent_api
-
-        init_adaptive_agent_api(app, gemini_client=None)
-        _app_logger.info("[AdaptiveAgent] ✅ 自适应 Agent API 已注册 (延迟加载客户端)")
-    except ImportError:
-        _app_logger.debug("[AdaptiveAgent] ℹ️ 旧 Agent 模块已退役，使用 UnifiedAgent")
-    except Exception as e:
-        _app_logger.warning(f"[AdaptiveAgent] ⚠️ 旧 Agent 初始化失败 (非致命): {e}")
 
     # 注册长期目标 API（GoalManager: 跨天持续执行的委托任务）
     try:
@@ -5863,7 +5880,7 @@ _threading.Thread(
 
 # === Ollama 后备路由 (可选) ===
 LOCAL_ROUTER_MODEL = "qwen3:8b"  # 升级: Qwen3 中英文能力远超旧模型
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
+OLLAMA_API_URL = "http://127.0.0.1:11434/api/generate"
 
 
 class LocalDispatcher:
@@ -5876,7 +5893,7 @@ class LocalDispatcher:
             return False
         try:
             # Bypass system proxy — Ollama is always on localhost
-            requests.get("http://localhost:11434", timeout=0.5, proxies={"http": None, "https": None})
+            requests.get("http://127.0.0.1:11434", timeout=0.5, proxies={"http": None, "https": None})
             return True
         except Exception:
             return False
@@ -7717,6 +7734,13 @@ def chat_stream():
     locked_model = data.get("locked_model", "auto")
     # 影子对话上下文（影子模型发出的消息原文，用于让 AI 知道这是哪条影子消息的回复）
     shadow_context = data.get("shadow_context", "")
+    # Document-edit mode flag sent by workspace-assistant.js when a file is open
+    # and the user is in 写入文档 mode.  When True we override the generic Koto
+    # system prompt with a document-editing system prompt so the AI reliably
+    # outputs proposals JSON (or TOOL tags) rather than plain text.
+    doc_edit      = bool(data.get("doc_edit", False))
+    doc_file_type = str(data.get("doc_file_type", "")).lower().strip()
+    doc_has_sel   = bool(data.get("doc_has_sel", False))
 
     _app_logger.debug(
         f"\n[STREAM] Incoming request: locked_task='{locked_task}', locked_model='{locked_model}'"
@@ -7730,20 +7754,26 @@ def chat_stream():
 
         return Response(error_gen(), mimetype="text/event-stream")
 
-    # API 密钥缺失时提前返回友好提示
+    # API 密钥缺失时：若 Ollama 可用则直接走本地，否则提示配置
     if not API_KEY:
+        from app.core.socket_handler import _is_ollama_alive
+        from app.core.routing import LocalModelRouter as _LMR_nokey
 
-        def no_key_gen():
-            msg = (
-                "⚠️ **API 密钥未配置**\n\n"
-                "请在 `config/gemini_config.env` 文件中设置：\n"
-                "```\nGEMINI_API_KEY=你的密钥\n```\n\n"
-                "💡 获取密钥：[Google AI Studio](https://aistudio.google.com/apikey)\n\n"
-                "设置完成后重启 Koto 即可使用。"
-            )
-            yield f"data: {json.dumps({'type': 'token', 'content': msg})}\n\n"
+        if _is_ollama_alive():
+            # 无云端Key但本地模型可用 — 直接跳入本地快速通道
+            pass  # 继续执行后续流程，本地通道将在 generate() 内激活
+        else:
+            def no_key_gen():
+                msg = (
+                    "⚠️ **API 密钥未配置**\n\n"
+                    "请在 `config/gemini_config.env` 文件中设置：\n"
+                    "```\nGEMINI_API_KEY=你的密钥\n```\n\n"
+                    "💡 获取密钥：[Google AI Studio](https://aistudio.google.com/apikey)\n\n"
+                    "设置完成后重启 Koto 即可使用。"
+                )
+                yield f"data: {json.dumps({'type': 'token', 'content': msg})}\n\n"
 
-        return Response(no_key_gen(), mimetype="text/event-stream")
+            return Response(no_key_gen(), mimetype="text/event-stream")
 
     user_input = Utils.sanitize_string(user_input)
 
@@ -7857,7 +7887,49 @@ def chat_stream():
             _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION()
         )  # 降级到新鲜生成的指令
 
-    # 👁️ 影子对话：将影子消息原文和对话历史感知能力注入系统指令
+    # � 文档编辑模式：当 workspace-assistant 打开了文件且用户在「写入文档」模式时，
+    # 追加一段强制 proposals 格式指令，确保 AI 输出可被前端解析的修改提案。
+    # 这段指令追加在通用 system prompt 之后，使用 CRITICAL 优先级语气覆盖通用规则。
+    if doc_edit:
+        _sel_hint = "用户有选中的文字，修改时针对选中内容生成提案。" if doc_has_sel else "用户当前无选区，可对全文相关段落生成提案。"
+        if doc_file_type == "docx":
+            _tool_fmt = (
+                '在回复末尾**必须**另起一行输出 JSON 修改提案（纯文本，不要 Markdown 代码块）：\n'
+                '{"proposals":[{"id":"p1","original_text":"被替换的原文（需与文档中完全一致）",'
+                '"proposed_text":"修改后内容","rationale":"修改理由"}]}\n'
+                '如有多处修改并列多条 proposals。确实不需要修改时不输出该 JSON。'
+            )
+        elif doc_file_type == "xlsx":
+            _tool_fmt = (
+                '在回复末尾输出 JSON 修改提案：\n'
+                '{"proposals":[{"id":"p1","original_text":"原值","proposed_text":"新值",'
+                '"rationale":"理由","tool":{"type":"set_cell","r":行号,"c":列号,"value":"新值"}}]}'
+            )
+        elif doc_file_type == "pptx":
+            _tool_fmt = (
+                '在回复末尾输出 JSON 修改提案：\n'
+                '{"proposals":[{"id":"p1","original_text":"原文","proposed_text":"新内容",'
+                '"rationale":"理由","tool":{"type":"set_pptx_text","slide_index":0,"shape_id":1,"value":"新内容"}}]}'
+            )
+        else:
+            _tool_fmt = (
+                '在回复末尾输出 JSON 修改提案：\n'
+                '{"proposals":[{"id":"p1","original_text":"原文","proposed_text":"新内容","rationale":"理由"}]}'
+            )
+        system_instruction += (
+            "\n\n---\n"
+            "## 📄 [CRITICAL] 文档编辑模式\n"
+            f"用户正在编辑一个 {doc_file_type or '文档'} 文件，处于【写入文档】模式。\n"
+            f"{_sel_hint}\n"
+            "你的任务是分析用户指令并直接给出修改建议，输出可应用到文档的提案。\n"
+            "**不要只用文字描述——必须输出 proposals JSON 让程序执行修改。**\n\n"
+            + _tool_fmt
+        )
+        _app_logger.debug(
+            f"[STREAM] 📄 doc_edit 模式激活 file_type={doc_file_type} has_sel={doc_has_sel}"
+        )
+
+    # �👁️ 影子对话：将影子消息原文和对话历史感知能力注入系统指令
     if shadow_context:
         _app_logger.debug(
             f"[STREAM] 影子对话模式激活，shadow_context 长度={len(shadow_context)}"
@@ -8698,6 +8770,32 @@ def chat_stream():
         _agent_skill_id = _router_decision.skill_id if _router_decision else None
 
         def generate_agent():
+            # 🦙 Local-only mode: skip cloud agent entirely, use Ollama directly
+            if locked_model == "local":
+                from app.core.socket_handler import _is_ollama_alive, _get_local_provider
+                if not _is_ollama_alive():
+                    yield f"data: {json.dumps({'type': 'error', 'message': '本地模式已启用，但 Ollama 未运行。请执行 ollama serve。'})}\n\n"
+                    return
+                yield f"data: {json.dumps({'type': 'classification', 'task_type': 'AGENT', 'route_method': 'ollama_local', 'message': '🦙 本地模式，使用 Ollama 回答…'})}\n\n"
+                try:
+                    _lp = _get_local_provider()
+                    _local_answer = ""
+                    for _ck in _lp.generate_content(prompt=user_input, stream=True):
+                        _t = _ck.get("content", "") if isinstance(_ck, dict) else str(_ck)
+                        if _t:
+                            _local_answer += _t
+                            yield f"data: {json.dumps({'type': 'token', 'content': _t}, ensure_ascii=False)}\n\n"
+                    _lp_payload = {"id": f"task_{int(time.time() * 1000)}", "status": "success",
+                                   "result": _local_answer, "steps": [], "engine": "ollama"}
+                    yield f"data: {json.dumps({'type': 'task_final', 'data': _lp_payload}, ensure_ascii=False)}\n\n"
+                    try:
+                        session_manager.append_and_save(f"{session_name}.json", user_input, _local_answer)
+                    except Exception:
+                        pass
+                except Exception as _ole:
+                    yield f"data: {json.dumps({'type': 'error', 'message': f'本地模型失败: {_ole}'})}\n\n"
+                return
+
             yield f"data: {json.dumps({'type': 'classification', 'task_type': 'AGENT', 'route_method': route_method, 'message': '🎯 任务分类: 🤖 智能助手 (LangGraph ReAct)'})}\n\n"
 
             final_answer = ""
@@ -8831,10 +8929,12 @@ def chat_stream():
         _complexity = (context_info or {}).get("complexity", "normal")
         model_id = SmartDispatcher.get_model_for_task(task_type, complexity=_complexity)
 
-    # 🦙 locked_model='local' → 强制走本地 Ollama 通道，不使用远程模型
-    if locked_model == "local":
-        model_id = SmartDispatcher.get_model_for_task("CHAT")
-        _local_chat_override = True
+    # 🦙 locked_model='local' → 强制走本地 Ollama，绝不调用云端
+    # 🌐 其他情况（auto/具体云模型）→ 云端优先，本地仅作兜底（CHAT简单问题优化除外）
+    # _local_chat_override 在此不设 True：
+    #   - locked_model='local' 由各任务分支入口的专用 local 路由块拦截处理
+    #   - CHAT 的 auto-local 快速通道由 RouterDecision.forward_to_cloud=False 触发，
+    #     并在 CHAT 分支内用 locked_model != 'local' 守卫隔离，不影响其他任务类型
 
     _app_logger.debug(
         f"[STREAM] Final: task_type='{task_type}', model_id='{model_id}'\n"
@@ -10539,6 +10639,35 @@ def chat_stream():
 
             # === DOC_ANNOTATE Mode (文档标注/润色 - 流式反馈) ===
             if task_type == "DOC_ANNOTATE":
+                # 🦙 本地模式：文档标注流程依赖云端强模型，改为用本地模型尽力处理
+                if locked_model == "local":
+                    from app.core.routing import LocalModelRouter as _LMR_da
+                    _lmr_da_name = _LMR_da._response_model or "本地模型"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'🏠 本地模型处理文档标注 ({_lmr_da_name})', 'detail': '本地模式下使用通用对话能力处理'})}"
+                    yield "\n\n"
+                    _da_local_stream = _LMR_da.generate_stream(
+                        user_input, history=history, system_instruction=use_instruction
+                    )
+                    if _da_local_stream is None:
+                        _err = "❌ 本地模型 (Ollama) 未响应，无法完成文档标注。"
+                        yield f"data: {json.dumps({'type': 'token', 'content': _err})}"
+                        yield "\n\n"
+                    else:
+                        _da_text = ""
+                        for _c in _da_local_stream:
+                            _da_text += _c
+                            yield f"data: {json.dumps({'type': 'token', 'content': _c})}"
+                            yield "\n\n"
+                        if _da_text.strip():
+                            session_manager.append_and_save(
+                                f"{session_name}.json", user_input, _da_text,
+                                task=task_type, model_name=f"ollama/{_lmr_da_name}"
+                            )
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}"
+                    yield "\n\n"
+                    return
+
                 used_model = model_id if model_id else "gemini-3.1-pro-preview"
                 t = yield_thinking(
                     f"进入文档标注模式，将使用 {model_id or 'gemini-3.1-pro-preview'} 分析文档",
@@ -11683,6 +11812,35 @@ def chat_stream():
 
             # === FILE_GEN Mode (文件生成 - 自动执行) ===
             if task_type == "FILE_GEN":
+                # 🦙 本地模式：文件生成依赖云端多步骤流程，改为用本地模型尽力输出内容
+                if locked_model == "local":
+                    from app.core.routing import LocalModelRouter as _LMR_fg
+                    _lmr_fg_name = _LMR_fg._response_model or "本地模型"
+                    yield f"data: {json.dumps({'type': 'progress', 'message': f'🏠 本地模型处理文件生成 ({_lmr_fg_name})', 'detail': '本地模式下输出文档内容草稿'})}"
+                    yield "\n\n"
+                    _fg_local_stream = _LMR_fg.generate_stream(
+                        user_input, history=history, system_instruction=use_instruction
+                    )
+                    if _fg_local_stream is None:
+                        _err = "❌ 本地模型 (Ollama) 未响应，无法生成文件。"
+                        yield f"data: {json.dumps({'type': 'token', 'content': _err})}"
+                        yield "\n\n"
+                    else:
+                        _fg_text = ""
+                        for _c in _fg_local_stream:
+                            _fg_text += _c
+                            yield f"data: {json.dumps({'type': 'token', 'content': _c})}"
+                            yield "\n\n"
+                        if _fg_text.strip():
+                            session_manager.append_and_save(
+                                f"{session_name}.json", user_input, _fg_text,
+                                task=task_type, model_name=f"ollama/{_lmr_fg_name}"
+                            )
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}"
+                    yield "\n\n"
+                    return
+
                 t = yield_thinking(
                     f"进入文件生成模式，将使用 {model_id} 生成文档", "generating"
                 )
@@ -13753,15 +13911,19 @@ def chat_stream():
                 # ═══ 本地模型快速通道：简单问题直接走 Ollama ═══
                 # _local_chat_override: Phase2 RouterDecision.forward_to_cloud=False → 直接本地
                 # is_simple_query():    字数/复杂度兜底判断 → 两者任一为真即走本地
+                # 注意：locked_model=="local" 时跳过此快速通道，改由通用 locked_model 处理器
+                # 负责（位于本函数下方），确保所有任务类型都能通过 Ollama 处理。
                 from app.core.routing import LocalModelRouter
 
-                if _local_chat_override or LocalModelRouter.is_simple_query(
-                    user_input, task_type, history
+                if locked_model != "local" and (
+                    _local_chat_override or LocalModelRouter.is_simple_query(
+                        user_input, task_type, history
+                    )
                 ):
                     local_stream = LocalModelRouter.generate_stream(
                         user_input,
                         history=history,
-                        system_instruction=_get_DEFAULT_CHAT_SYSTEM_INSTRUCTION(),
+                        system_instruction=system_instruction,  # carries doc_edit proposals format if set
                     )
                     if local_stream is not None:
                         _app_logger.debug(
@@ -13816,7 +13978,7 @@ def chat_stream():
                             yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                             return
                         else:
-                            # 本地模型失败 → 静默降级到云模型
+                            # 路由器自动决策走本地但失败 → 静默降级到云模型
                             _app_logger.debug(f"[CHAT] 本地模型输出为空，降级到云模型")
                             t = yield_thinking(
                                 f"本地模型输出为空，降级到云端模型 {model_id}",
@@ -13903,6 +14065,55 @@ def chat_stream():
                 )
             else:
                 _rag_augmented_input = effective_input
+
+            # 🦙 locked_model='local' → 所有任务类型强制走本地 Ollama，不调用云端
+            if locked_model == "local":
+                from app.core.routing import LocalModelRouter as _LMR_all
+                _lmr_name = _LMR_all._response_model or "本地模型"
+                yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'task_display': task_type, 'model': f'🏠 {_lmr_name} (本地)', 'message': f'🏠 本地模型处理 {task_type} 任务'})}\n\n"
+                _local_all_stream = _LMR_all.generate_stream(
+                    _rag_augmented_input,
+                    history=history,
+                    system_instruction=use_instruction,
+                )
+                if _local_all_stream is None:
+                    _err_msg = "❌ 本地模型 (Ollama) 未响应。\n\n请检查：\n1. Ollama 是否正常运行（`ollama serve`）\n2. 所选模型是否已下载（`ollama list`）\n3. 或在设置中切换到云端模式"
+                    yield f"data: {json.dumps({'type': 'token', 'content': _err_msg})}\n\n"
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+                _local_all_text = ""
+                _local_all_ok = False
+                try:
+                    for _chunk in _local_all_stream:
+                        _local_all_text += _chunk
+                        yield f"data: {json.dumps({'type': 'token', 'content': _chunk})}\n\n"
+                    _local_all_ok = bool(_local_all_text.strip())
+                except Exception as _le:
+                    _app_logger.debug(f"[LOCAL] 本地模型流式失败 ({task_type}): {_le}")
+                if _local_all_ok:
+                    session_manager.append_and_save(
+                        f"{session_name}.json",
+                        user_input,
+                        _local_all_text,
+                        task=task_type,
+                        model_name=f"ollama/{_LMR_all._response_model}",
+                    )
+                    _start_memory_extraction(
+                        user_input,
+                        _local_all_text,
+                        history,
+                        task_type=task_type,
+                        session_name=session_name,
+                    )
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                else:
+                    _err_msg = "❌ 本地模型 (Ollama) 响应失败，输出为空。\n\n请检查：\n1. Ollama 是否正常运行\n2. 所选模型是否已下载\n3. 或切换到云端模式"
+                    yield f"data: {json.dumps({'type': 'token', 'content': _err_msg})}\n\n"
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                return
 
             # 使用流式响应
             response = client.models.generate_content_stream(
@@ -14047,16 +14258,30 @@ def chat_stream():
                 error_str = str(stream_error)
                 _app_logger.debug(f"[CHAT] Stream error: {error_str}")
 
-                # 地区限制错误
-                if (
-                    "location is not supported" in error_str.lower()
-                    or "failed_precondition" in error_str.lower()
-                ):
-                    error_text = "❌ 地区限制\n\n您所在的地区不支持 Gemini API。\n\n💡 解决方案:\n1. 在 `config/gemini_config.env` 配置中转服务 `GEMINI_API_BASE`\n2. 或使用支持的代理服务"
-                    yield f"data: {json.dumps({'type': 'token', 'content': error_text})}\n\n"
-                    total_time = time.time() - start_time
-                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
-                    return
+                from app.core.socket_handler import _is_online_failure as _iof, _is_ollama_alive as _ioav
+                from app.core.routing import LocalModelRouter as _LMR_fb
+                _OLLAMA_TEXT_TASKS = {"CHAT", "CODER", "RESEARCH", "FILE_GEN", "MULTI_STEP", "AGENT"}
+
+                # 云端不可用且无部分输出 → 尝试本地模型兜底
+                if _iof(stream_error) and not full_text and task_type in _OLLAMA_TEXT_TASKS and _ioav():
+                    _app_logger.warning(f"[CHAT] cloud unavailable ({error_str[:60]}), falling back to Ollama")
+                    yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 云端 AI 不可用，已切换到本地模型 (Ollama)...', 'detail': ''}, ensure_ascii=False)}\n\n"
+                    try:
+                        _fb_stream = _LMR_fb.generate_stream(
+                            user_input, history=history,
+                            system_instruction=system_instruction,  # carries doc_edit proposals format if set
+                        )
+                        if _fb_stream:
+                            for _fc in _fb_stream:
+                                if _fc:
+                                    full_text += _fc
+                                    yield f"data: {json.dumps({'type': 'token', 'content': _fc})}\n\n"
+                            # full_text populated — fall through to save + done below
+                        else:
+                            raise RuntimeError("本地模型流不可用")
+                    except Exception as _fb_err:
+                        _app_logger.error(f"[CHAT] Ollama fallback failed: {_fb_err}")
+                        raise stream_error  # re-raise to outer handler
                 # 流式传输中断，但已有部分内容
                 elif full_text:
                     error_msg = error_str[:50]
@@ -14179,12 +14404,56 @@ def chat_stream():
             error_str = str(e)
             _app_logger.debug(f"[CHAT] Exception: {error_str}")
 
-            # 地区限制错误
+            from app.core.socket_handler import _is_online_failure as _iof2, _is_ollama_alive as _ioav2
+            from app.core.routing import LocalModelRouter as _LMR_fb2
+            _OLLAMA_TEXT_TASKS2 = {"CHAT", "CODER", "RESEARCH", "FILE_GEN", "MULTI_STEP", "AGENT"}
+
+            # 云端不可用 → 尝试本地模型兜底（覆盖地区限制/Key无效/503/配额超限等所有在线失败场景）
+            if _iof2(e) and task_type in _OLLAMA_TEXT_TASKS2 and _ioav2():
+                _app_logger.warning(f"[CHAT] outer: cloud failure ({error_str[:60]}), trying Ollama")
+                yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 云端 AI 不可用，已切换到本地模型 (Ollama)...', 'detail': ''}, ensure_ascii=False)}\n\n"
+                _ollama_ok = False
+                try:
+                    _fb2_stream = _LMR_fb2.generate_stream(
+                        user_input, history=history,
+                        system_instruction=system_instruction,  # carries doc_edit proposals format if set
+                    )
+                    if _fb2_stream:
+                        _fb2_full = ""
+                        for _fc2 in _fb2_stream:
+                            if _fc2:
+                                _fb2_full += _fc2
+                                yield f"data: {json.dumps({'type': 'token', 'content': _fc2})}\n\n"
+                        if _fb2_full:
+                            _ollama_ok = True
+                            session_manager.append_and_save(
+                                f"{session_name}.json", user_input, _fb2_full,
+                                task=task_type, model_name=f"ollama/local",
+                            )
+                            total_time = time.time() - start_time
+                            yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                            return
+                except Exception as _fb2_err:
+                    _app_logger.error(f"[CHAT] outer Ollama fallback failed: {_fb2_err}")
+
+                if not _ollama_ok:
+                    # Ollama也失败了，显示原始错误
+                    error_response = f"❌ 云端 AI 不可用，本地模型也响应失败。\n\n原始错误: {error_str[:150]}"
+                    session_manager.append_and_save(
+                        f"{session_name}.json", user_input, error_response,
+                        task=task_type, model_name=model_id,
+                    )
+                    yield f"data: {json.dumps({'type': 'token', 'content': error_response})}\n\n"
+                    total_time = time.time() - start_time
+                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
+                    return
+
+            # 地区限制错误（Ollama不可用时的降级提示）
             if (
                 "location is not supported" in error_str.lower()
                 or "failed_precondition" in error_str.lower()
             ):
-                error_response = "❌ 地区限制\n\n您所在的地区不支持 Gemini API。\n\n💡 解决方案:\n1. 在 `config/gemini_config.env` 配置中转服务 `GEMINI_API_BASE`\n2. 或使用支持的代理服务"
+                error_response = "❌ 地区限制\n\n您所在的地区不支持 Gemini API。\n\n💡 解决方案:\n1. 在 `config/gemini_config.env` 配置中转服务 `GEMINI_API_BASE`\n2. 或使用支持的代理服务\n3. 或启动本地 Ollama 模型作为备用"
             elif "API key not valid" in error_str or (
                 "INVALID_ARGUMENT" in error_str and "api key" in error_str.lower()
             ):
@@ -17321,11 +17590,56 @@ _compare_file_registry: dict = {}
 # ================= 文件助手 AI 端点 =================
 
 
-def _build_editor_prompt(action: str, selection: str, instruction: str, full_text: str = "") -> str:
+def _get_user_writing_style() -> str:
+    """Return a one-line writing-preference hint from user_profile.json.
+
+    Injected into prompts that modify document style (polish, rewrite, etc.)
+    so the AI respects the user's established preferences.
+    """
+    try:
+        _profile_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'user_profile.json')
+        with open(_profile_path, encoding='utf-8') as _f:
+            _profile = json.load(_f)
+        _style = _profile.get('communication_style', {})
+        _prefs = []
+        _formality = _style.get('formality', '')
+        if _formality == 'casual':
+            _prefs.append('语气自然随和')
+        elif _formality == 'formal':
+            _prefs.append('语气正式严谨')
+        _detail = _style.get('preferred_detail_level', '')
+        if _detail == 'concise':
+            _prefs.append('表达简洁')
+        elif _detail == 'detailed':
+            _prefs.append('表达详尽')
+        _likes = _profile.get('preferences', {}).get('likes', [])
+        _habits = _profile.get('preferences', {}).get('habits', [])
+        _notes = [str(x) for x in (_likes + _habits) if x][:2]
+        if _notes:
+            _prefs.append('偏好：' + '、'.join(_notes))
+        return ('【用户写作风格偏好】' + '；'.join(_prefs) + '\n') if _prefs else ''
+    except Exception:
+        return ''
+
+
+def _doc_mode_hint(mode: str) -> str:
+    """Return a writing-tone directive for the given document mode."""
+    hints = {
+        'formal':   '【行文基调：正式、专业、严谨，避免口语化表达】\n',
+        'casual':   '【行文基调：轻松自然、口语化，表达亲切流畅】\n',
+        'academic': '【行文基调：学术严谨，逻辑清晰，术语准确，引用规范】\n',
+        'concise':  '【行文基调：简洁有力，去除冗余，每句话都要有信息量】\n',
+    }
+    return hints.get(mode or 'normal', '')
+
+
+def _build_editor_prompt(action: str, selection: str, instruction: str, full_text: str = "", csv_data: str = "", doc_mode: str = "normal") -> str:
     """Build a prompt for the File Assistant AI based on action type.
-    
+
     When full_text is provided, it's used as context so AI can match
     the document's tone and style.
+    When csv_data is provided, it's appended as structured table context (P8 fix).
+    When doc_mode is provided (formal/casual/academic/concise), a tone directive is prepended.
     """
     # Helper: build surrounding context (max ~4000 chars around selection)
     def _context_snippet():
@@ -17339,11 +17653,15 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
         after = full_text[idx + len(selection):idx + len(selection) + 2000]
         return f"{before}[[[SELECTED]]]{selection}[[[/SELECTED]]]{after}"
 
+    _style_hint = _get_user_writing_style()
+    _mode_hint = _doc_mode_hint(doc_mode)
+
     if action == "translate":
         ctx = ""
         if full_text:
             ctx = f"\n\n【文档上下文（仅供参考语气，不要翻译全文）】\n{_context_snippet()}\n"
         return (
+            f"{_mode_hint}{_style_hint}"
             "请将以下文本准确翻译为英文，只输出译文，不要添加任何解释或前缀："
             f"{ctx}\n\n【需要翻译的内容】\n{selection}"
         )
@@ -17352,6 +17670,7 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
         if full_text:
             ctx = f"\n\n【文档全文（仅供参考语气和上下文，不要修改全文）】\n{_context_snippet()}\n"
         return (
+            f"{_mode_hint}{_style_hint}"
             "你是一名专业编辑。请对以下【选中部分】进行润色，使其更加流畅、优雅，"
             "保持原意不变，并与全文语气保持一致。只输出润色后的选中部分，不要添加解释："
             f"{ctx}\n\n【需要润色的内容】\n{selection}"
@@ -17363,6 +17682,7 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
         )
     elif action == "continue_writing":
         return (
+            f"{_mode_hint}{_style_hint}"
             "请根据以下文本内容进行续写，保持风格一致，直接输出续写内容，不加任何前缀：\n\n"
             + selection
         )
@@ -17374,7 +17694,16 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
             "如果没有发现问题，请直接说\"未发现明显问题\"。\n\n"
             + selection
         )
+    elif action == "explain":
+        ctx = ""
+        if full_text:
+            ctx = f"\n\n文档上下文（仅供参考）：\n{full_text[:3000]}"
+        inst = instruction or "请解释以下内容的含义、背景或重要性，语言简洁易懂："
+        return f"{inst}\n\n{selection}{ctx}"
     elif action in ("python_chart", "chart"):
+        csv_ctx = ""
+        if csv_data:
+            csv_ctx = f"\n\n# 输入数据（CSV 格式）\n{csv_data[:4000]}\n"
         return (
             "根据以下文本/数据，生成一段 Python 代码，使用 pandas 和 matplotlib 生成合适的图表（折线图、柱状图或饼图等）。\n"
             "要求：\n"
@@ -17384,12 +17713,14 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
             "4. 绝对不要调用 plt.show()\n"
             "5. 只输出代码，不加任何 markdown 代码块标记（不加 ```）\n\n"
             + selection
+            + csv_ctx
         )
     elif action == "rewrite":
         ctx = ""
         if full_text:
             ctx = f"\n\n【文档上下文（仅供参考）】\n{_context_snippet()}\n"
         return (
+            f"{_mode_hint}{_style_hint}"
             "请对以下文本进行改写，使其用词更准确、逻辑更清晰，保留原意，与全文语气一致，只输出改写后的文本："
             f"{ctx}\n\n【需要改写的内容】\n{selection}"
         )
@@ -17422,12 +17753,22 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
             f"选中内容：\n{selection}"
             f"{ctx}"
         )
+    elif action == "narrative":
+        # Data→Narrative: generate an analytical paragraph describing the data
+        style = _style_hint or ''
+        return (
+            f"{style}"
+            "你是一名数据分析撰稿人。根据以下数据/表格内容，生成一段简洁有力的分析性文字，"
+            "准确描述数据的关键趋势、最大值/最小值、变化幅度等核心发现。"
+            "直接输出段落，不要加标题也不要重复原始数据：\n\n"
+            + selection
+        )
     elif action == "custom_instruction":
         ctx = f"\n\n参考文本：\n{selection}" if selection else ""
         full_ctx = ""
         if full_text:
             full_ctx = f"\n\n文档全文（仅供参考）：\n{full_text[:4000]}"
-        return f"{instruction}{ctx}{full_ctx}"
+        return f"{_mode_hint}{instruction}{ctx}{full_ctx}"
     else:
         return selection or instruction
 
@@ -17444,6 +17785,9 @@ def editor_ai_stream():
     selection = (data.get("selection") or "").strip()
     instruction = (data.get("instruction") or "").strip()
     full_text = (data.get("full_text") or "").strip()
+    csv_data = (data.get("csv_data") or "").strip()  # structured table context (P8 fix)
+    doc_mode = (data.get("doc_mode") or "normal").strip()  # writing tone preset
+    model_mode = (data.get("model_mode") or "auto").strip()  # 'local' | 'auto'
     # session_id for server-side persistence — frontend sends 'editor_{docId}'
     _session_id = re.sub(r"[^A-Za-z0-9_\-]", "_", (data.get("session_id") or "").strip())[:64]
 
@@ -17452,12 +17796,6 @@ def editor_ai_stream():
 
     if not selection and not instruction:
         return Response(_err_gen("选中内容或指令不能为空"), mimetype="text/event-stream")
-
-    if not API_KEY:
-        return Response(
-            _err_gen("API 密钥未配置，请检查 config/gemini_config.env"),
-            mimetype="text/event-stream",
-        )
 
     # Build multi-turn history prefix if the frontend sent prior conversation turns
     _history_raw = (data.get("history") or [])
@@ -17473,40 +17811,74 @@ def editor_ai_stream():
         if _hist_parts:
             _hist_block = "【对话历史（供参考，据此理解上下文）】\n" + "\n".join(_hist_parts) + "\n\n---\n\n"
 
-    prompt = _hist_block + _build_editor_prompt(action, selection, instruction, full_text)
+    prompt = _hist_block + _build_editor_prompt(action, selection, instruction, full_text, csv_data, doc_mode)
     model_id = MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
 
     def generate():
+        from app.core.socket_handler import _is_ollama_alive, _get_local_provider, _is_online_failure
+
         _resp_parts = []
+        # 'local' mode: skip cloud entirely, go straight to Ollama
+        _online_ok = bool(API_KEY) and model_mode != "local"
+
+        if model_mode == "local" and not _is_ollama_alive():
+            yield f"data: {json.dumps({'type': 'error', 'text': '本地模式已启用，但 Ollama 未运行。请执行 ollama serve。'}, ensure_ascii=False)}\n\n"
+            return
+
+        if _online_ok:
+            try:
+                response_stream = client.models.generate_content_stream(
+                    model=model_id,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.7,
+                        max_output_tokens=4096,
+                    ),
+                )
+                for chunk in response_stream:
+                    text = getattr(chunk, "text", None)
+                    if text:
+                        _resp_parts.append(text)
+                        yield f"data: {json.dumps({'type': 'token', 'text': text}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                # Persist conversation to server-side session for cross-refresh memory
+                if _session_id and _resp_parts:
+                    _user_str = instruction or selection or action
+                    _ai_str = "".join(_resp_parts)
+                    try:
+                        session_manager.append_and_save(
+                            _session_id + ".json", _user_str, _ai_str,
+                            task=action, model_name=model_id,
+                        )
+                    except Exception as _se:
+                        _app_logger.debug(f"[EditorAI] session save skipped: {_se}")
+                return
+            except Exception as _e:
+                if not _is_online_failure(_e):
+                    _app_logger.warning(f"[EditorAI] stream error: {_e}")
+                    yield f"data: {json.dumps({'type': 'error', 'text': str(_e)}, ensure_ascii=False)}\n\n"
+                    return
+                _app_logger.warning(f"[EditorAI] cloud unavailable ({_e}), trying local Ollama…")
+
+        # ── Ollama fallback ───────────────────────────────────────────────────
+        if not _is_ollama_alive():
+            _msg = "在线 AI 不可用，本地 Ollama 也未运行。请启动 Ollama 或配置云端 Key。"
+            yield f"data: {json.dumps({'type': 'error', 'text': _msg}, ensure_ascii=False)}\n\n"
+            return
+        if model_mode != "local":
+            yield f"data: {json.dumps({'type': 'info', 'text': '⚠️ 云端 AI 暂不可用，已切换到本地模型 (Ollama)，速度可能较慢。'}, ensure_ascii=False)}\n\n"
         try:
-            response_stream = client.models.generate_content_stream(
-                model=model_id,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.7,
-                    max_output_tokens=4096,
-                ),
-            )
-            for chunk in response_stream:
-                text = getattr(chunk, "text", None)
-                if text:
-                    _resp_parts.append(text)
-                    yield f"data: {json.dumps({'type': 'token', 'text': text}, ensure_ascii=False)}\n\n"
+            _local = _get_local_provider()
+            _res = _local.generate_content(prompt=prompt, stream=True)
+            for _ck in _res:
+                _t = _ck.get("content", "") if isinstance(_ck, dict) else str(_ck)
+                if _t:
+                    _resp_parts.append(_t)
+                    yield f"data: {json.dumps({'type': 'token', 'text': _t}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
-            # Persist conversation to server-side session for cross-refresh memory
-            if _session_id and _resp_parts:
-                _user_str = instruction or selection or action
-                _ai_str = "".join(_resp_parts)
-                try:
-                    session_manager.append_and_save(
-                        _session_id + ".json", _user_str, _ai_str,
-                        task=action, model_name=model_id,
-                    )
-                except Exception as _se:
-                    _app_logger.debug(f"[EditorAI] session save skipped: {_se}")
-        except Exception as _e:
-            _app_logger.warning(f"[EditorAI] stream error: {_e}")
-            yield f"data: {json.dumps({'type': 'error', 'text': str(_e)}, ensure_ascii=False)}\n\n"
+        except Exception as _le:
+            _app_logger.error(f"[EditorAI] Ollama fallback failed: {_le}")
+            yield f"data: {json.dumps({'type': 'error', 'text': str(_le)}, ensure_ascii=False)}\n\n"
 
     return Response(generate(), mimetype="text/event-stream")
 
@@ -17538,6 +17910,130 @@ def editor_ai_history():
         return jsonify({"history": []})
 
 
+@app.route("/api/editor/ai/analyze", methods=["POST"])
+def editor_ai_analyze():
+    """文件助手 AI — 文档结构静默解析。
+
+    Body JSON: { "full_text": str }
+    Response JSON: { "summary": str, "structure": [str], "doc_type": str, "word_count": int }
+
+    Called automatically when a file is opened to provide contextual awareness
+    for all subsequent AI operations in the session.
+    """
+    data = request.get_json(silent=True) or {}
+    full_text = (data.get("full_text") or "").strip()
+    if not full_text or len(full_text) < 30:
+        return jsonify({"summary": "", "structure": [], "doc_type": "其他", "word_count": 0})
+
+    word_count = len(full_text)
+    text_sample = full_text[:6000]
+    prompt = (
+        "请简洁分析这篇文档的结构，输出严格 JSON（不加 ```json 标记也不加任何其他文字），格式：\n"
+        '{"summary":"一句话概括文档主题（20字以内）","structure":["第一部分主题","第二部分主题"],'
+        f'"doc_type":"报告/合同/文案/论文/邮件/表格/其他","word_count":{word_count}}}\n\n'
+        f"文档内容（前6000字）：\n{text_sample}"
+    )
+    try:
+        _resp = client.models.generate_content(
+            model=MODEL_MAP.get("CHAT", "gemini-2.5-flash"),
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=256),
+        )
+        _text = (_resp.text or "").strip()
+        # Strip possible markdown code fences
+        if _text.startswith("```"):
+            _text = _text.split("```")[-2] if "```" in _text[3:] else _text[3:]
+            _text = _text.lstrip("json").strip()
+        if not _text:
+            raise ValueError("empty LLM response")
+        _result = json.loads(_text)
+        return jsonify(_result)
+    except Exception as _e:
+        _app_logger.warning(f"[EditorAI analyze] cloud failed ({_e}), trying local…")
+        # ── Local Ollama fallback ──────────────────────────────────────────
+        try:
+            from app.core.socket_handler import _is_ollama_alive, _get_local_provider
+            if _is_ollama_alive():
+                _local = _get_local_provider()
+                _res = _local.generate_content(prompt=prompt, stream=False)
+                _text = (_res.get("content", "") if isinstance(_res, dict) else str(_res)).strip()
+                if _text.startswith("```"):
+                    _text = _text.split("```")[-2] if "```" in _text[3:] else _text[3:]
+                    _text = _text.lstrip("json").strip()
+                if not _text:
+                    raise ValueError("empty local LLM response")
+                _result = json.loads(_text)
+                return jsonify(_result)
+        except Exception as _le:
+            _app_logger.warning(f"[EditorAI analyze] local fallback failed: {_le}")
+        return jsonify({"summary": "", "structure": [], "doc_type": "其他", "word_count": word_count})
+
+
+@app.route("/api/editor/ai/agent", methods=["POST"])
+def editor_ai_agent():
+    """文件助手 AI — 综合分析模式 (UnifiedAgent)。
+
+    Routes complex questions and analysis tasks through the full Koto agent
+    (with tool access: web search, memory, calculation, etc.) while injecting
+    the current document as context.
+
+    Body JSON: { "query": str, "doc_context": str, "full_text": str, "session_id": str }
+    SSE events: {"type":"status","text":"..."} | {"type":"token","text":"..."} |
+                {"type":"done"} | {"type":"error","text":"..."}
+    """
+    data = request.get_json(silent=True) or {}
+    query = (data.get("query") or "").strip()
+    doc_context = (data.get("doc_context") or "").strip()
+    full_text = (data.get("full_text") or "")[:6000].strip()
+    _session_id = re.sub(r"[^A-Za-z0-9_\-]", "_", (data.get("session_id") or "").strip())[:64]
+
+    def _err_gen(msg: str):
+        yield f"data: {json.dumps({'type': 'error', 'text': msg}, ensure_ascii=False)}\n\n"
+
+    if not query:
+        return Response(_err_gen("查询内容不能为空"), mimetype="text/event-stream")
+
+    # Build system context block with document awareness
+    _sys_parts = ["你是 Koto 文件助手的 AI 分析模式。你拥有工具调用能力（网页搜索、记忆等）。"]
+    if doc_context:
+        _sys_parts.append(f"【当前文档概况】\n{doc_context}")
+    if full_text:
+        _sys_parts.append(f"【文档内容摘录（前6000字）】\n{full_text}")
+    _system_ctx = "\n\n".join(_sys_parts)
+
+    def generate():
+        try:
+            from app.api.agent_routes import get_agent
+            from app.core.agent.types import AgentStepType
+            _agent = get_agent()
+            for _step in _agent.run(
+                input_text=query,
+                session_id=_session_id or None,
+                system_context=_system_ctx,
+            ):
+                _stype = getattr(_step, 'step_type', None)
+                _content = getattr(_step, 'content', '') or ''
+                if _stype == AgentStepType.THOUGHT:
+                    yield f"data: {json.dumps({'type': 'status', 'text': '🤔 ' + _content[:80]}, ensure_ascii=False)}\n\n"
+                elif _stype == AgentStepType.ACTION:
+                    yield f"data: {json.dumps({'type': 'status', 'text': '🔧 ' + _content[:80]}, ensure_ascii=False)}\n\n"
+                elif _stype == AgentStepType.ANSWER:
+                    # Stream answer char by char for typewriter effect
+                    _chunk_size = 8
+                    for _ci in range(0, len(_content), _chunk_size):
+                        yield f"data: {json.dumps({'type': 'token', 'text': _content[_ci:_ci + _chunk_size]}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    return
+                elif _stype == AgentStepType.ERROR:
+                    yield f"data: {json.dumps({'type': 'error', 'text': _content}, ensure_ascii=False)}\n\n"
+                    return
+        except Exception as _ae:
+            _app_logger.error(f"[EditorAI agent] {_ae}")
+            yield f"data: {json.dumps({'type': 'error', 'text': str(_ae)}, ensure_ascii=False)}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream")
+
+
 @app.route("/api/editor/ai/chart", methods=["POST"])
 def editor_ai_chart():
     """文件助手 AI — 沙盒图表执行端点。
@@ -17556,6 +18052,7 @@ def editor_ai_chart():
     data_context = (data.get("data_context") or data.get("selection") or "").strip()
     instruction = (data.get("instruction") or "").strip()
     lang = (data.get("lang") or "python").strip().lower()
+    model_mode = (data.get("model_mode") or "auto").strip()  # 'local' | 'auto'
     if lang not in ("python", "r"):
         lang = "python"
 
@@ -17564,12 +18061,6 @@ def editor_ai_chart():
 
     if not data_context and not instruction:
         return Response(_err_gen("没有可用的数据或描述"), mimetype="text/event-stream")
-
-    if not API_KEY:
-        return Response(
-            _err_gen("API 密钥未配置，请检查 config/gemini_config.env"),
-            mimetype="text/event-stream",
-        )
 
     lang_label = "Python (matplotlib/pandas)" if lang == "python" else "R (ggplot2)"
     task_desc = instruction if instruction else "根据以下数据自动选择合适的图表类型并可视化"
@@ -17600,32 +18091,50 @@ def editor_ai_chart():
 
     def generate():
         import re as _re
+        from app.core.socket_handler import _is_ollama_alive, _get_local_provider, _is_online_failure
+
+        def _gen_code_via_llm(p: str) -> tuple[str, str] | None:
+            """Try cloud LLM first (unless local-only mode), fall back to local Ollama."""
+            if API_KEY and model_mode != "local":
+                try:
+                    _chunks = []
+                    _stream = client.models.generate_content_stream(
+                        model=model_id,
+                        contents=p,
+                        config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=2048),
+                    )
+                    for _ck in _stream:
+                        _t = getattr(_ck, "text", None)
+                        if _t:
+                            _chunks.append(_t)
+                    if _chunks:
+                        return "joined", "".join(_chunks).strip()
+                except Exception as _ce:
+                    if not _is_online_failure(_ce):
+                        raise
+                    _app_logger.warning(f"[EditorAIChart] cloud failed ({_ce}), trying Ollama…")
+            # Ollama fallback (or primary when model_mode=='local')
+            if not _is_ollama_alive():
+                return "none", None
+            _local = _get_local_provider()
+            _res = _local.generate_content(prompt=p, stream=False)
+            _code = (_res.get("content", "") if isinstance(_res, dict) else str(_res)).strip() or None
+            return "local", _code
+
         try:
             yield f"data: {json.dumps({'type': 'status', 'text': f'🤖 正在生成 {lang.upper()} 图表代码…'}, ensure_ascii=False)}\n\n"
 
             # ── Step 1: Generate code via LLM ──
-            code_chunks = []
-            response_stream = client.models.generate_content_stream(
-                model=model_id,
-                contents=code_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.2,
-                    max_output_tokens=2048,
-                ),
-            )
-            for chunk in response_stream:
-                t = getattr(chunk, "text", None)
-                if t:
-                    code_chunks.append(t)
-            raw_code = "".join(code_chunks).strip()
+            _llm_source, raw_code = _gen_code_via_llm(code_prompt)
+            if not raw_code:
+                yield f"data: {json.dumps({'type': 'error', 'text': 'AI 代码生成失败（云端不可用且 Ollama 未运行）'}, ensure_ascii=False)}\n\n"
+                return
+            if _llm_source == "local":
+                yield f"data: {json.dumps({'type': 'info', 'text': '⚠️ 云端 AI 暂时不可用，已切换到本地模型 (Ollama) 生成代码，速度可能较慢。'}, ensure_ascii=False)}\n\n"
 
-            # Strip markdown code fences if model disobeyed
+            # Strip markdown code fences if model added them
             raw_code = _re.sub(r"^```[a-z]*\n?", "", raw_code, flags=_re.MULTILINE)
             raw_code = raw_code.strip().strip("`").strip()
-
-            if not raw_code:
-                yield f"data: {json.dumps({'type': 'error', 'text': 'AI 代码生成失败，请重试'}, ensure_ascii=False)}\n\n"
-                return
 
             yield f"data: {json.dumps({'type': 'code', 'text': raw_code}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'status', 'text': '▶ 在沙盒中执行代码…'}, ensure_ascii=False)}\n\n"

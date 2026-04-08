@@ -57,6 +57,9 @@ export class SocketBridge {
     this._socket.on('agent_stream_chunk',    (p) => this._handleStreamChunk(p));
     this._socket.on('agent_task_complete',   (p) => this._handleTaskComplete(p));
     this._socket.on('code_result',           (p) => this._handleCodeResult(p));
+    this._socket.on('agent_progress',        (p) => this._handleProgress(p));
+    this._socket.on('agent_proposals',       (p) => this._handleProposals(p));
+    this._socket.on('doc_tool_call',         (p) => this._handleDocToolCall(p));
   }
 
   // ══════════════════ Send ══════════════════
@@ -68,7 +71,44 @@ export class SocketBridge {
     }
     this._pendingAction = { type: actionType, data };
     if (this._panel) this._panel.showTyping();
-    this._socket.emit('client_request', { type: actionType, payload: data, timestamp: Date.now() });
+
+    // Map simple FloatingToolbar actions to the full doc_ai_request format so
+    // they go through the modern handler (streaming history, proposals, model
+    // fallback) instead of the legacy on_client_request handler.
+    const ACTION_PROMPT_MAP = {
+      polish:           '你是一名专业编辑。请对以下文本进行润色，使其更加流畅、优雅，保持原意不变。只输出润色后的文本，不要添加任何解释：',
+      translate:        '请将以下文本翻译（中文→英文，英文→中文）。只输出翻译结果，不要添加原文或任何解释：',
+      summarize:        '请对以下内容生成一份简洁的中文摘要，包含关键论点和要点，摘要控制在200字以内：',
+      continue_writing: '你是一名优秀的写作助手。请根据以下已有文本，自然地继续写下去（100-200字），保持语气和风格一致，衔接流畅。直接输出续写内容，不要重复原文：',
+      rewrite:          '请对以下文本进行改写，保留核心意思，但用不同的措辞和句式重新表达，使语言更加多样化。只输出改写后的文本，不要添加任何说明：',
+      annotate:         '请为以下文本添加简洁的注释，解释关键概念、术语或难点，注释用【】标注，插入相应位置。只输出带注释的文本：',
+    };
+
+    const promptPrefix = ACTION_PROMPT_MAP[actionType];
+    if (promptPrefix) {
+      // Known text-transform action: use doc_ai_request for full streaming pipeline
+      const selText = (data && data.text) || '';
+      const fullText = (data && data.fullText) || '';
+      const docFileType = this._doc?.getFileType?.() || 'unknown';
+      const docFileName = this._doc?.getFileName?.() || '';
+      this._socket.emit('doc_ai_request', {
+        prompt: selText,
+        context: fullText ? `[文档上下文（仅供参考，不要重复输出）]\n${fullText.slice(0, 4000)}` : '',
+        selection: selText,
+        file_type: docFileType,
+        file_name: docFileName,
+        has_selection: !!selText,
+        history: (this._panel?._history || []).slice(-10),
+        language: '',
+        csv_data: '',
+        output_mode: 'inline',
+        model_mode: localStorage.getItem('wa_locked_model') || 'auto',
+        _action_system_prompt: promptPrefix,
+      });
+    } else {
+      // Fallback: legacy path for custom_instruction / code_exec
+      this._socket.emit('client_request', { type: actionType, payload: data, timestamp: Date.now() });
+    }
   }
 
   // ══════════════════ Handlers ══════════════════
@@ -101,6 +141,8 @@ export class SocketBridge {
   /**
    * Task complete: seal the streaming bubble and attach action buttons.
    * Crucially stores the FULL text so user can choose what to do with it.
+   * Falls back to text already rendered in the streaming bubble if the
+   * backend event omits full_text (P5 fix).
    */
   _handleTaskComplete(payload) {
     const ctx = this._pendingAction;
@@ -109,7 +151,11 @@ export class SocketBridge {
 
     this._panel.removeTyping();
 
-    const fullText = payload.full_text || '';
+    // Prefer payload.full_text; fall back to streamed text or payload.result
+    const fullText = payload.full_text
+      || this._panel.getStreamingText?.()
+      || (typeof payload.result === 'string' && !payload.result.startsWith('❌') ? payload.result : '')
+      || '';
     const actionType = ctx?.type || 'custom_instruction';
     const selectionContext = ctx?.data || null;
 
@@ -118,16 +164,61 @@ export class SocketBridge {
       return;
     }
 
-    // Finalise (attach apply buttons) only if there's text to show
-    if (fullText) {
-      this._panel.finalizeStreamMessage(fullText, actionType, selectionContext);
-    } else if (payload.message) {
+    // payload.result starts with ❌ → treat as error (legacy on_doc_ai_request error path)
+    if (typeof payload.result === 'string' && payload.result.startsWith('❌')) {
+      this._panel.addMessage(payload.result, 'error');
+      return;
+    }
+
+    // Always finalise so apply buttons appear (even if fullText is empty)
+    this._panel.finalizeStreamMessage(fullText, actionType, selectionContext);
+    if (!fullText && payload.message) {
       this._panel.addMessage(payload.message, 'system');
     }
   }
 
   _handleCodeResult(payload) {
     if (this._panel) this._panel.showCodeResult(payload);
+  }
+
+  /**
+   * Progress step from server during long-running tasks.
+   * Shown as a transient system message (auto-dismissed on task_complete).
+   */
+  _handleProgress(payload) {
+    if (!this._panel) return;
+    const step = payload.step || '';
+    const detail = payload.detail || '';
+    if (step === 'complete') {
+      // Remove all pending progress indicators
+      this._panel.removeProgressMessages?.();
+      return;
+    }
+    if (detail) this._panel.showProgressMessage?.(detail);
+  }
+
+  /**
+   * Structured proposals emitted when user had a pinned selection.
+   * Each proposal has: id, original_text, proposed_text, rationale, tool_call.
+   */
+  _handleProposals(payload) {
+    if (!this._panel) return;
+    const proposals = payload.proposals || [];
+    const summary = payload.summary || '';
+    if (proposals.length > 0 && this._panel.showProposals) {
+      this._panel.showProposals(proposals, summary, this._pendingAction?.data || null);
+    }
+  }
+
+  /**
+   * Direct tool call emitted (non-proposal mode: no pinned selection).
+   * Passes tool call to the panel which shows apply buttons.
+   */
+  _handleDocToolCall(payload) {
+    if (!this._panel) return;
+    if (this._panel.handleDocToolCall) {
+      this._panel.handleDocToolCall(payload);
+    }
   }
 
   // ══════════════════ Utils ══════════════════

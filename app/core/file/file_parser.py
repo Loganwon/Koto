@@ -480,9 +480,13 @@ def _openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
     return cell_data
 
 
-def parse_xlsx(file_path: str) -> dict[str, Any]:
+def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, Any]:
     """
     使用 openpyxl 将 XLSX 转换为 Univer Sheets IWorkbookData 快照格式。
+
+    Args:
+        file_path: 临时文件路径（可能是 UUID 命名）
+        original_name: 用户上传的原始文件名（用于设置 workbook name）
 
     Returns:
         {
@@ -490,15 +494,9 @@ def parse_xlsx(file_path: str) -> dict[str, Any]:
           "name": str,
           "sheetOrder": [str, ...],
           "sheets": {
-            "<sheetId>": {
-              "id": str,
-              "name": str,
-              "rowCount": int,
-              "columnCount": int,
-              "cellData": { row: { col: ICellData } },
-              "mergeData": [{ startRow, startColumn, endRow, endColumn }]
-            }
-          }
+            "<sheetId>": { ... }
+          },
+          "_warnings": ["..."]   # 非空时应由前端显示提示
         }
     """
     try:
@@ -506,12 +504,58 @@ def parse_xlsx(file_path: str) -> dict[str, Any]:
     except ImportError:
         raise RuntimeError("openpyxl 未安装，请执行: pip install openpyxl")
 
+    # ── 公式检测：先以 data_only=False 快速扫描，判断是否含有公式 ──────────
+    _warnings: list[str] = []
+    try:
+        _wb_check = openpyxl.load_workbook(file_path, data_only=False, read_only=True)
+        _formula_count = 0
+        for _ws in _wb_check.worksheets:
+            for _row in _ws.iter_rows():
+                for _cell in _row:
+                    if isinstance(_cell.value, str) and _cell.value.startswith("="):
+                        _formula_count += 1
+                        if _formula_count >= 1:
+                            break  # 找到任意一个公式即可，不必继续
+                if _formula_count:
+                    break
+            if _formula_count:
+                break
+        _wb_check.close()
+        if _formula_count:
+            _warnings.append(
+                "此表格包含公式（如 =SUM(...)）。Koto 目前以「静态值」模式读取 Excel，"
+                "公式已转换为计算结果，保存导出后公式将永久丢失。如需保留公式，请下载原始文件。"
+            )
+    except Exception:
+        pass  # 检测失败不影响主流程
+
     wb = openpyxl.load_workbook(file_path, data_only=True)
 
     workbook_id = str(uuid.uuid4())
-    workbook_name = os.path.splitext(os.path.basename(file_path))[0]
+    if original_name:
+        workbook_name = os.path.splitext(os.path.basename(original_name))[0]
+    else:
+        workbook_name = os.path.splitext(os.path.basename(file_path))[0]
     sheet_order: list[str] = []
     sheets: dict[str, Any] = {}
+
+    # ── Shared styles registry ────────────────────────────────────────────────
+    # Univer v0.5.x expects cellData["s"] to be a *string* style-ID that keys
+    # into the top-level "styles" map.  Inline IStyleData objects (the old
+    # approach) are silently ignored by Univer's createUnit(), which is why
+    # all cells appeared blank even though the data was correctly parsed.
+    _style_hash_to_id: dict[str, str] = {}
+    _styles_registry: dict[str, Any] = {}
+
+    def _get_style_id(style_obj: dict[str, Any]) -> str:
+        """Return a stable string key for *style_obj*, registering it if new."""
+        import json as _json
+        h = _json.dumps(style_obj, sort_keys=True, ensure_ascii=False)
+        if h not in _style_hash_to_id:
+            sid = str(len(_style_hash_to_id))
+            _style_hash_to_id[h] = sid
+            _styles_registry[sid] = style_obj
+        return _style_hash_to_id[h]
 
     for idx, ws in enumerate(wb.worksheets):
         sheet_id = f"sheet{idx + 1}"
@@ -523,6 +567,9 @@ def parse_xlsx(file_path: str) -> dict[str, Any]:
             for cell in row:
                 cd = _openpyxl_cell_to_univer(cell)
                 if cd is not None:
+                    # Convert inline style object → style ID string
+                    if "s" in cd and isinstance(cd["s"], dict):
+                        cd["s"] = _get_style_id(cd["s"])
                     r = cell.row - 1
                     c = cell.column - 1
                     if r not in cell_data:
@@ -557,8 +604,9 @@ def parse_xlsx(file_path: str) -> dict[str, Any]:
         "locale": "zh-CN",       # required by IWorkbookData; used for cell formatting
         "sheetOrder": sheet_order,
         "sheets": sheets,
-        "styles": {},     # Univer requires styles map even if empty
+        "styles": _styles_registry,  # style-id → IStyleData (populated during cell scan)
         "resources": [],  # Univer plugin resources (e.g. conditional formatting)
+        "_warnings": _warnings,  # 前端应在非空时展示用户提示
     }
 
 
@@ -923,6 +971,45 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                                         break
                                 except Exception:
                                     pass
+                        # Walk slide master if layout didn't resolve everything
+                        if None in (eff_left, eff_top, eff_w, eff_h):
+                            slide_master = getattr(slide_layout, "slide_master", None) if slide_layout else None
+                            if slide_master is not None:
+                                for mph in slide_master.placeholders:
+                                    try:
+                                        if mph.placeholder_format.idx == ph_fmt.idx:
+                                            if eff_left is None:
+                                                eff_left = mph.left
+                                            if eff_top is None:
+                                                eff_top = mph.top
+                                            if eff_w is None:
+                                                eff_w = mph.width
+                                            if eff_h is None:
+                                                eff_h = mph.height
+                                            break
+                                    except Exception:
+                                        pass
+                        # If still None after layout+master, use standard widescreen EMU defaults
+                        if None in (eff_left, eff_top, eff_w, eff_h):
+                            _ph_idx = getattr(ph_fmt, "idx", -1)
+                            _prs_shape = getattr(getattr(shape, "part", None), "presentation", None)
+                            _sw = int(getattr(_prs_shape, "slide_width",  None) or 9144000)
+                            _sh = int(getattr(_prs_shape, "slide_height", None) or 6858000)
+                            if _ph_idx == 0:   # Title
+                                if eff_left is None: eff_left = 457200
+                                if eff_top  is None: eff_top  = 274638
+                                if eff_w    is None: eff_w    = 8229600
+                                if eff_h    is None: eff_h    = 1143000
+                            elif _ph_idx == 1:  # Body / Content
+                                if eff_left is None: eff_left = 457200
+                                if eff_top  is None: eff_top  = 1600200
+                                if eff_w    is None: eff_w    = 8229600
+                                if eff_h    is None: eff_h    = 4525963
+                            else:
+                                if eff_left is None: eff_left = 0
+                                if eff_top  is None: eff_top  = 0
+                                if eff_w    is None: eff_w    = _sw
+                                if eff_h    is None: eff_h    = _sh
                 except Exception:
                     pass
 
