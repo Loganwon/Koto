@@ -28,9 +28,32 @@
       "dismissed_at": null,
       "confirmed_at": null,
       "skill_id": null
+    },
+    {
+      "id": "a61dfd5c",
+      "status": "pending",
+      "fingerprint": "b9656f990080",
+      "task_type": "CHAT",
+      "actions": [
+        "生成"
+      ],
+      "objects": [],
+      "sample_messages": [
+        "生成一份天气预报幻灯片，并在末尾输出 JSON 提案。",
+        "请为我生成一份天气预报。",
+        "生成一份天气预报幻灯片，并输出 JSON 格式提案。"
+      ],
+      "detected_count": 3,
+      "suggested_name": "生成",
+      "suggested_desc": "📽️ 自动录制：一键生成您的内容。源自您最近 60 次对话中的高频操作习惯。",
+      "created_at": "2026-04-10T06:50:10Z",
+      "dismissed_at": null,
+      "confirmed_at": null,
+      "skill_id": null
     }
   ],
   "seen_fingerprints": [
-    "5d843c0c54f3"
+    "5d843c0c54f3",
+    "b9656f990080"
   ]
 }

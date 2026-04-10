@@ -6,6 +6,11 @@
 window.WA = window.WA || {};
 
 (function() {
+  // ── Global error handler — catches silent failures in rAF / setTimeout / async ──
+  window.addEventListener('unhandledrejection', (ev) => {
+    console.error('[WA:unhandledrejection]', ev.reason);
+  });
+
   // ── Global State ──
   const state = {
     fileId: null,
@@ -91,6 +96,11 @@ window.WA = window.WA || {};
     _updateSubjectBar(tab.name, tab.fileType);
     toggleWorkspace(true);
 
+    // Force-hide all editor containers before activating the correct one
+    ['wa-docx-editor', 'wa-xlsx-editor', 'wa-pptx-editor', 'wa-pdf-viewer'].forEach(id => {
+      const el = $(id); if (el) el.classList.remove('active');
+    });
+
     const data = tab.cache;
     if (tab.fileType === 'docx') {
       await _ensureWangEditor();
@@ -99,10 +109,16 @@ window.WA = window.WA || {};
       const docxHtml = (data && typeof data === 'string' && data.replace(/<p><br\s*\/?><\/p>/gi,'').trim()) ? data : tab.serverData.html;
       state.activeEditor.render(docxHtml);
     } else if (tab.fileType === 'xlsx') {
-      await _ensureUniverSheets();
+      console.log('[_switchToTab] xlsx – loading Univer…');
+      try { await _ensureUniverSheets(); } catch(ue) {
+        console.error('[_switchToTab] _ensureUniverSheets failed', ue);
+        showToast('表格引擎加载失败: ' + ue.message, 'error');
+        return;
+      }
       state.activeEditor = new KotoXlsxEditor();
       // cache is {snapshot: IWorkbookData, _images} from serialize(); fall back to serverData
       const xlsxData = _ensureWorkbookDefaults((data && data.snapshot) ? data.snapshot : tab.serverData);
+      console.log('[_switchToTab] xlsxData keys:', Object.keys(xlsxData || {}));
       state.activeEditor.render(xlsxData);
     } else if (tab.fileType === 'pptx') {
       state.activeEditor = new KotoPptxEditor();
@@ -525,6 +541,8 @@ window.WA = window.WA || {};
       if (!res.ok) throw new Error(d.error || '打开失败');
       if (d.file_id && window.WA._openParsedFile) {
         WA._openParsedFile(d);
+      } else if (d.file_id) {
+        await Router.fromParsed(d, filePath);
       } else {
         showToast('文件已在工作站中加载', 'success');
       }
@@ -839,16 +857,47 @@ window.WA = window.WA || {};
     const baseName = absPath.replace(/\\/g, '/').split('/').pop() || absPath;
     _trackUserOpen(absPath);
     showToast('正在加载 ' + baseName, 'info');
+
+    // Always try open_file_by_path first.  The backend accepts both relative
+    // paths and absolute paths that resolve inside the workspace — no
+    // state._workspacePath comparison needed.  This eliminates the
+    // serve_abs → blob → re-upload round-trip that produced 0-byte uploads.
+    // Only fall back to serve_abs when the backend returns 403 (outside workspace).
+    try {
+      console.log('[openBrowserFile] fetching open_file_by_path for:', absPath);
+      const res = await fetch('/api/v1/workspace/open_file_by_path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: absPath }),
+      });
+      console.log('[openBrowserFile] response status:', res.status);
+      if (res.status !== 403) {
+        const d = await res.json();
+        console.log('[openBrowserFile] response data: file_type=%s, file_name=%s, data keys=%s',
+          d.file_type, d.file_name, d.data ? Object.keys(d.data).join(',') : 'null');
+        if (!res.ok) throw new Error(d.error || '打开失败');
+        await Router.fromParsed(d, absPath);
+        loadRecentFiles();
+        _renderBrowserTree();
+        return;
+      }
+      // 403 means outside workspace — fall through to serve_abs
+    } catch (e) {
+      showToast('无法打开文件: ' + e.message, 'error');
+      return;
+    }
+
+    // Fallback: external file outside workspace — use serve_abs round-trip
     try {
       const res = await fetch('/api/v1/workspace/serve_abs?path=' + encodeURIComponent(absPath));
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const blob = await res.blob();
       const file = new File([blob], baseName);
-      file._wsPath = absPath;   // use abs path so tabs track by abs path
-      file._absPath = absPath;  // flag: opened from browser (not workspace-relative)
+      file._wsPath = absPath;
+      file._absPath = absPath;
       await Router.load(file);
       loadRecentFiles();
-      _renderBrowserTree();     // refresh active highlight
+      _renderBrowserTree();
     } catch (e) { showToast('无法打开文件: ' + e.message, 'error'); }
   };
 
@@ -916,12 +965,7 @@ window.WA = window.WA || {};
     }
     menu.innerHTML = html;
     menu.classList.add('open');
-    const vw = window.innerWidth, vh = window.innerHeight;
-    let x = event.clientX, y = event.clientY;
-    if (x + 200 > vw) x = vw - 204;
-    if (y + 280 > vh) y = vh - 284;
-    menu.style.left = x + 'px';
-    menu.style.top  = y + 'px';
+    _posCtxMenu(menu, event, 200, 280);
   };
 
   // ── Browser context menu actions ──────────────────────────────────────────
@@ -1382,13 +1426,27 @@ window.WA = window.WA || {};
         删除
       </div>`;
     menu.classList.add('open');
+    _posCtxMenu(menu, event, 180, 180);
+  };
+
+  /** Position the context menu near the triggering element, clamped inside the left panel. */
+  function _posCtxMenu(menu, event, menuW = 180, menuH = 180) {
+    const leftPanel = document.getElementById('wa-left');
+    const panelRect = leftPanel ? leftPanel.getBoundingClientRect() : null;
     const vw = window.innerWidth, vh = window.innerHeight;
     let x = event.clientX, y = event.clientY;
-    if (x + 180 > vw) x = vw - 184;
-    if (y + 180 > vh) y = vh - 184;
+    // If triggered inside the left panel, clamp X so menu stays within it
+    if (panelRect && x <= panelRect.right + 20) {
+      const maxX = panelRect.right - menuW - 4;
+      if (x + menuW > panelRect.right) x = Math.max(panelRect.left + 4, maxX);
+    } else {
+      if (x + menuW > vw) x = vw - menuW - 4;
+    }
+    if (y + menuH > vh) y = vh - menuH - 4;
+    if (y < 0) y = 4;
     menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
-  };
+    menu.style.top  = y + 'px';
+  }
 
   function _closeCtxMenu() {
     const menu = document.getElementById('wa-ctx-menu');
@@ -1447,12 +1505,7 @@ window.WA = window.WA || {};
         删除文件夹
       </div>`;
     menu.classList.add('open');
-    const vw = window.innerWidth, vh = window.innerHeight;
-    let x = event.clientX, y = event.clientY;
-    if (x + 200 > vw) x = vw - 204;
-    if (y + 180 > vh) y = vh - 184;
-    menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
+    _posCtxMenu(menu, event, 200, 180);
   };
 
   window.WA._ctxFolderRename = () => {
@@ -1606,6 +1659,16 @@ window.WA = window.WA || {};
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || '创建失败');
         showToast(`"${name}" 已创建`, 'success');
+        // Auto-open the newly created file (skip folders)
+        if (kind === 'file' && json.path) {
+          const ext = name.split('.').pop().toLowerCase();
+          const supported = _isSupportedExt(ext);
+          // json.path is absolute for /fs/ endpoint, relative for /workspace/ endpoint
+          const absPath = isAbsolute
+            ? json.path
+            : (state._workspacePath || '').replace(/[\/]$/, '') + '/' + json.path;
+          setTimeout(() => WA.openBrowserFile(absPath, supported), 120);
+        }
       } catch (e) {
         showToast(e.message, 'error');
       }
@@ -1710,13 +1773,22 @@ window.WA = window.WA || {};
     _trackUserOpen(path);   // record before fetch so it's captured even if load fails
     showToast('正在加载 ' + baseName, 'success');
     try {
-      const encodedPath = path.split('/').map(p => encodeURIComponent(p)).join('/');
-      const res = await fetch('/api/v1/workspace/file/' + encodedPath);
-      if (!res.ok) throw new Error('File not found');
-      const blob = await res.blob();
-      const file = new File([blob], baseName);
-      file._wsPath = path;
-      await Router.load(file);
+      // Use open_file_by_path directly — avoids the double round-trip of
+      // fetching file bytes then re-uploading them, which produced a 0-byte
+      // tmp file when the intermediate fetch response was empty or delayed.
+      console.log('[openWorkspaceFile] fetching open_file_by_path for:', path);
+      const res = await fetch('/api/v1/workspace/open_file_by_path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      console.log('[openWorkspaceFile] response status:', res.status);
+      const d = await res.json();
+      console.log('[openWorkspaceFile] file_type=%s, data keys=%s',
+        d.file_type, d.data ? Object.keys(d.data).join(',') : 'null');
+      if (!res.ok) throw new Error(d.error || '打开失败');
+      // Inject wsPath so save/tab tracking works correctly
+      await Router.fromParsed(d, path);
       loadRecentFiles();   // refresh recent list after successful open
     } catch (e) {
       console.error('[WA openWorkspaceFile]', e);
@@ -2297,29 +2369,64 @@ window.WA = window.WA || {};
       sheetEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
       wrapper.appendChild(sheetEl);
 
-      // Mount Univer Sheets after two rAF ticks to ensure container is laid out
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (!window.KotoSheetsAPI) {
-            sheetEl.innerHTML = '<div style="padding:24px;color:#e74c3c;font-size:13px;">Univer Sheets 模块未就绪，请刷新页面重试</div>';
+      // Mount Univer Sheets after container is laid out.
+      // Use setTimeout + retry instead of double requestAnimationFrame to be
+      // more resilient against timing issues (e.g. container not yet visible,
+      // zero dimensions, or rAF callbacks silently failing).
+      const _mountUniver = (attempt = 0) => {
+        const MAX_ATTEMPTS = 10;
+        const RETRY_MS = 100;
+
+        if (!window.KotoSheetsAPI) {
+          console.error('[KotoXlsxEditor] KotoSheetsAPI not available after _ensureUniverSheets');
+          sheetEl.innerHTML = '<div style="padding:24px;color:#e74c3c;font-size:13px;">Univer Sheets 模块未就绪，请刷新页面重试</div>';
+          showToast('Univer Sheets 模块未加载', 'error');
+          return;
+        }
+
+        // Verify the container is in DOM and has non-zero dimensions
+        const containerEl = document.getElementById(this._containerId);
+        if (!containerEl) {
+          if (attempt < MAX_ATTEMPTS) {
+            console.warn(`[KotoXlsxEditor] container not in DOM, retry ${attempt + 1}/${MAX_ATTEMPTS}`);
+            setTimeout(() => _mountUniver(attempt + 1), RETRY_MS);
             return;
           }
-          try {
-            this._api = window.KotoSheetsAPI.create(this._containerId, workbookData);
+          console.error('[KotoXlsxEditor] container element not found after retries:', this._containerId);
+          sheetEl.innerHTML = '<div style="padding:24px;color:#e74c3c;font-size:13px;">表格容器未就绪，请刷新页面重试</div>';
+          showToast('表格容器初始化失败', 'error');
+          return;
+        }
 
-            // Wire selection → AI panel context chip
-            window.KotoSheetsAPI.onSelectionChange(() => {
-              const text = window.KotoSheetsAPI.getSelectionText();
-              if (text) {
-                lastSelectionText = `[当前选中表格数据]:\n${text}\n`;
-              }
-            });
-          } catch (err) {
-            console.error('[KotoXlsxEditor] Univer Sheets 初始化失败', err);
-            sheetEl.innerHTML = `<div style="padding:24px;color:#e74c3c;font-size:13px;">表格引擎加载失败: ${err.message}</div>`;
-          }
-        });
-      });
+        const rect = containerEl.getBoundingClientRect();
+        console.log('[KotoXlsxEditor] container rect:', rect.width, 'x', rect.height, '(attempt', attempt + 1, ')');
+
+        if ((rect.width === 0 || rect.height === 0) && attempt < MAX_ATTEMPTS) {
+          console.warn(`[KotoXlsxEditor] container has zero dimensions, retry ${attempt + 1}/${MAX_ATTEMPTS}`);
+          setTimeout(() => _mountUniver(attempt + 1), RETRY_MS);
+          return;
+        }
+
+        try {
+          console.log('[KotoXlsxEditor] calling KotoSheetsAPI.create, container:', this._containerId);
+          this._api = window.KotoSheetsAPI.create(this._containerId, workbookData);
+          console.log('[KotoXlsxEditor] Univer Sheets 创建成功');
+
+          // Wire selection → AI panel context chip
+          window.KotoSheetsAPI.onSelectionChange(() => {
+            const text = window.KotoSheetsAPI.getSelectionText();
+            if (text) {
+              lastSelectionText = `[当前选中表格数据]:\n${text}\n`;
+            }
+          });
+        } catch (err) {
+          console.error('[KotoXlsxEditor] Univer Sheets 初始化失败', err);
+          sheetEl.innerHTML = `<div style="padding:24px;color:#e74c3c;font-size:13px;">表格引擎加载失败: ${err.message}</div>`;
+          showToast('表格引擎初始化失败: ' + err.message, 'error');
+        }
+      };
+      // Initial delay (50ms) to let the DOM update, then retry if needed
+      setTimeout(() => _mountUniver(0), 50);
     }
 
     getContent() {
@@ -2387,6 +2494,95 @@ window.WA = window.WA || {};
     return fgHex;
   }
 
+  /**
+   * Convert a markdown string into an array of PPTX paragraph objects.
+   * Handles block-level markers (###, >, -, *) and inline bold/italic.
+   * @param {string} md  – raw markdown text from AI
+   * @param {object} ref – reference formatting { bold, italic, underline, size, color, fontName }
+   * @returns {Array<{align:string, runs:Array}>}
+   */
+  function _mdToPptxParagraphs(md, ref) {
+    ref = ref || {};
+    const baseSize = ref.size || 14;
+    const lines = (md || '').split('\n');
+    const paragraphs = [];
+
+    for (const rawLine of lines) {
+      let line = rawLine;
+      let paraSize = baseSize;
+      let paraBold = false;
+      let align = 'LEFT';
+
+      // --- block-level: headings ---
+      const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
+      if (headingMatch) {
+        const level = headingMatch[1].length; // 1-6
+        line = headingMatch[2];
+        paraBold = true;
+        // Scale heading size: h1=+10, h2=+6, h3=+3, h4-6=+1
+        paraSize = baseSize + Math.max(1, Math.round((7 - level) * 1.8));
+      }
+
+      // --- block-level: blockquote ">" ---
+      if (line.match(/^>\s?/)) {
+        line = line.replace(/^>\s?/, '').trim();
+      }
+
+      // --- block-level: unordered list "- " or "* " ---
+      const ulMatch = line.match(/^[-*]\s+(.*)$/);
+      if (ulMatch) {
+        line = '•  ' + ulMatch[1];
+      }
+
+      // --- block-level: ordered list "1. " ---
+      const olMatch = line.match(/^(\d+)\.\s+(.*)$/);
+      if (olMatch) {
+        line = olMatch[1] + '.  ' + olMatch[2];
+      }
+
+      // --- inline: parse **bold**, *italic*, ***bolditalic*** ---
+      const runs = [];
+      // Regex splits on ***text***, **text**, *text*
+      const inlineRe = /(\*{1,3})((?:(?!\1).)+?)\1/g;
+      let lastIdx = 0;
+      let m;
+      while ((m = inlineRe.exec(line)) !== null) {
+        // text before the match
+        if (m.index > lastIdx) {
+          runs.push(_makeRun(line.slice(lastIdx, m.index), ref, paraSize, paraBold, false));
+        }
+        const stars = m[1].length;
+        const isBold   = stars >= 2;
+        const isItalic = stars === 1 || stars === 3;
+        runs.push(_makeRun(m[2], ref, paraSize, paraBold || isBold, isItalic));
+        lastIdx = m.index + m[0].length;
+      }
+      // remaining text after last match
+      if (lastIdx < line.length) {
+        runs.push(_makeRun(line.slice(lastIdx), ref, paraSize, paraBold, false));
+      }
+      // empty line → single empty run
+      if (runs.length === 0) {
+        runs.push(_makeRun('', ref, paraSize, false, false));
+      }
+
+      paragraphs.push({ align, runs });
+    }
+    return paragraphs;
+  }
+
+  function _makeRun(text, ref, size, bold, italic) {
+    return {
+      text,
+      bold:      bold || false,
+      italic:    italic || (ref.italic || false),
+      underline: ref.underline || false,
+      size,
+      color:     ref.color,
+      fontName:  ref.fontName,
+    };
+  }
+
   class KotoPptxEditor {
     constructor() {
       this.data = null;
@@ -2448,16 +2644,10 @@ window.WA = window.WA || {};
       if (!slide) return;
       const shape = slide.shapes.find(s => s.id === cmd.shape_id);
       if (!shape || !shape.paragraphs) return;
-      // Preserve formatting from the first run, then replace ALL content
+      // Preserve formatting from the first run, convert markdown → runs
       const refPara = shape.paragraphs[0] || { align: 'LEFT', runs: [] };
       const refRun = (refPara.runs && refPara.runs[0]) || {};
-      const newLines = cmd.value.split('\n');
-      shape.paragraphs = newLines.map((line, i) => ({
-        align: (shape.paragraphs[i] && shape.paragraphs[i].align) || refPara.align || 'LEFT',
-        runs: [{ text: line, bold: refRun.bold, italic: refRun.italic,
-                 underline: refRun.underline, size: refRun.size,
-                 color: refRun.color, fontName: refRun.fontName }],
-      }));
+      shape.paragraphs = _mdToPptxParagraphs(cmd.value, refRun);
       if (this._curIdx === cmd.slide_index) this._renderSlide(cmd.slide_index);
       this._redrawThumb(cmd.slide_index);
       showToast('AI 已更新 PPT 文本', 'success');
@@ -2472,12 +2662,8 @@ window.WA = window.WA || {};
       if (!shape || !shape.paragraphs) return;
       const lastPara = shape.paragraphs[shape.paragraphs.length - 1];
       const refRun = (lastPara && lastPara.runs && lastPara.runs[0]) || {};
-      shape.paragraphs.push({
-        runs: [{ text: cmd.value, bold: refRun.bold || false, italic: refRun.italic || false,
-                 underline: refRun.underline || false, size: refRun.size || 14,
-                 color: refRun.color, fontName: refRun.fontName }],
-        align: (lastPara && lastPara.align) || 'LEFT',
-      });
+      const newParas = _mdToPptxParagraphs(cmd.value, refRun);
+      shape.paragraphs.push(...newParas);
       if (this._curIdx === cmd.slide_index) this._renderSlide(cmd.slide_index);
       this._redrawThumb(cmd.slide_index);
       showToast('AI 已追加文本', 'success');
@@ -2633,10 +2819,13 @@ window.WA = window.WA || {};
 
     _initKeyHandler() {
       this._keyHandler = (e) => {
-        // Only act when PPTX editor is active and focus is NOT in a text run
+        // Only act when PPTX editor is active
         if (!$('wa-pptx-editor').classList.contains('active')) return;
         const active = document.activeElement;
         const inRun = active && active.classList.contains('wa-pptx-run');
+        const ctrlOrMeta = e.ctrlKey || e.metaKey;
+
+        // ── Escape ───────────────────────────────────────────────────────
         if (e.key === 'Escape') {
           this._closeCtxMenu();
           if (this._editMode) {
@@ -2646,6 +2835,8 @@ window.WA = window.WA || {};
           }
           return;
         }
+
+        // ── Delete / Backspace (not in edit mode) ────────────────────────
         if ((e.key === 'Delete' || e.key === 'Backspace') && !this._editMode) {
           e.preventDefault();
           if (this._selShape) {
@@ -2653,6 +2844,78 @@ window.WA = window.WA || {};
           } else {
             WA.pptxDelSlide();  // Delete key with no shape selected → delete slide
           }
+          return;
+        }
+
+        // ── Ctrl+N → new slide ───────────────────────────────────────────
+        if (ctrlOrMeta && e.key === 'n') {
+          e.preventDefault();
+          e.stopPropagation();
+          WA.pptxAddSlide();
+          return;
+        }
+
+        // ── Ctrl+A → select all text within shape ────────────────────────
+        if (ctrlOrMeta && e.key === 'a') {
+          if (this._editMode && this._selShape) {
+            e.preventDefault();
+            e.stopPropagation();
+            const runs = this._selShape.querySelectorAll('.wa-pptx-run');
+            if (runs.length) {
+              const sel = window.getSelection();
+              sel.removeAllRanges();
+              const range = document.createRange();
+              range.setStartBefore(runs[0].firstChild || runs[0]);
+              const last = runs[runs.length - 1];
+              range.setEndAfter(last.lastChild || last);
+              sel.addRange(range);
+            }
+          } else if (this._selShape) {
+            // Not in edit mode, shape selected — select all shapes on slide
+            e.preventDefault();
+            e.stopPropagation();
+          }
+          return;
+        }
+
+        // ── Ctrl+B → Bold toggle ─────────────────────────────────────────
+        if (ctrlOrMeta && e.key === 'b') {
+          if (this._editMode || this._selShape) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.applyFormat('bold');
+          }
+          return;
+        }
+
+        // ── Ctrl+I → Italic toggle ──────────────────────────────────────
+        if (ctrlOrMeta && e.key === 'i') {
+          if (this._editMode || this._selShape) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.applyFormat('italic');
+          }
+          return;
+        }
+
+        // ── Ctrl+U → Underline toggle ───────────────────────────────────
+        if (ctrlOrMeta && e.key === 'u') {
+          if (this._editMode || this._selShape) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.applyFormat('underline');
+          }
+          return;
+        }
+
+        // ── Ctrl+D → Duplicate shape ────────────────────────────────────
+        if (ctrlOrMeta && e.key === 'd') {
+          if (this._selShape && !this._editMode) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.duplicateShape(parseInt(this._selShape.dataset.shapeId));
+          }
+          return;
         }
       };
       document.addEventListener('keydown', this._keyHandler);
@@ -3444,7 +3707,20 @@ window.WA = window.WA || {};
   // Ensure all IWorkbookData required fields are present before passing to Univer.
   // Univer silently fails to render when `appVersion` or `locale` is missing.
   function _ensureWorkbookDefaults(wb) {
-    if (!wb || typeof wb !== 'object') return wb;
+    if (!wb || typeof wb !== 'object') {
+      // Provide a minimal valid empty workbook so Univer doesn't crash
+      console.warn('[_ensureWorkbookDefaults] received invalid workbookData, using empty template');
+      wb = {
+        id: 'empty_wb',
+        sheetOrder: ['empty_sheet'],
+        sheets: {
+          'empty_sheet': {
+            id: 'empty_sheet', name: 'Sheet1',
+            rowCount: 30, columnCount: 10, cellData: {},
+          }
+        },
+      };
+    }
     return Object.assign({ appVersion: '0.5.0', locale: 'zh-CN', styles: {}, resources: [] }, wb);
   }
 
@@ -3480,7 +3756,8 @@ window.WA = window.WA || {};
   }
 
   async function _ensureUniverSheets() {
-    if (_libsLoaded.sheets) return;
+    if (_libsLoaded.sheets) { console.log('[_ensureUniverSheets] already loaded'); return; }
+    console.log('[_ensureUniverSheets] injecting CSS and loading ESM module…');
     _injectCSS('/editor/assets/sheets-main.css');
     // sheets-main.js is an ESM module; must load with type="module"
     await new Promise((resolve, reject) => {
@@ -3532,6 +3809,82 @@ window.WA = window.WA || {};
 
   // ── Main Router ──
   const Router = {
+    // Apply an already-parsed server response (from open_file or open_file_by_path)
+    // to the editor state.  Avoids duplicating the setup logic in every caller.
+    fromParsed: async (json, wsPath) => {
+      $('upload-progress').style.width = '100%';
+
+      state.fileId   = json.file_id;
+      state.fileType = json.file_type;
+      state.fileName = json.file_name;
+      const ext = json.file_name.split('.').pop().toLowerCase();
+      wsPath = wsPath || json.file_name;
+      state.wsSourcePath = wsPath;
+      state.activeTabPath = wsPath;
+      $('wa-file-name').textContent = state.fileName;
+      $('wa-save-btn').disabled = (state.fileType === 'pdf');
+      const _saBtn3 = $('wa-saveas-btn'); if (_saBtn3) _saBtn3.disabled = (state.fileType === 'pdf');
+      _updateSubjectBar(state.fileName, state.fileType);
+
+      if (state.activeEditor) {
+        try { state.activeEditor.destroy(); } catch(e) { console.warn('[destroy old editor]', e); }
+      }
+      state.activeEditor = null;
+
+      const existingTabIdx = state.openTabs.findIndex(t => t.path === wsPath);
+      const tabEntry = {
+        path: wsPath,
+        name: json.file_name,
+        ext,
+        fileType: json.file_type,
+        fileId: json.file_id,
+        serverData: json.data,
+        cache: null,
+        modified: false,
+        fsHandle: null,
+      };
+      if (existingTabIdx >= 0) {
+        state.openTabs[existingTabIdx] = tabEntry;
+      } else {
+        state.openTabs.push(tabEntry);
+      }
+
+      toggleWorkspace(true);
+
+      // Force-hide all editor containers before activating the correct one
+      ['wa-docx-editor', 'wa-xlsx-editor', 'wa-pptx-editor', 'wa-pdf-viewer'].forEach(id => {
+        const el = $(id); if (el) el.classList.remove('active');
+      });
+
+      if (state.fileType === 'docx') {
+        await _ensureWangEditor();
+        state.activeEditor = new KotoDocxEditor();
+        state.activeEditor.render(json.data.html);
+      } else if (state.fileType === 'xlsx') {
+        console.log('[Router.fromParsed] xlsx path – loading Univer…');
+        try { await _ensureUniverSheets(); } catch(ue) {
+          console.error('[Router.fromParsed] _ensureUniverSheets failed', ue);
+          showToast('表格引擎加载失败: ' + ue.message, 'error');
+          return;
+        }
+        console.log('[Router.fromParsed] Univer ready, creating KotoXlsxEditor');
+        state.activeEditor = new KotoXlsxEditor();
+        const wbData = _ensureWorkbookDefaults(json.data);
+        console.log('[Router.fromParsed] workbookData keys:', Object.keys(wbData || {}));
+        state.activeEditor.render(wbData);
+      } else if (state.fileType === 'pptx') {
+        state.activeEditor = new KotoPptxEditor();
+        state.activeEditor.render(json.data);
+      } else if (state.fileType === 'pdf') {
+        await _ensurePdfJS();
+        state.activeEditor = new KotoPdfViewer();
+        state.activeEditor.render(json.data.raw_url, json.data.pages);
+      }
+
+      _renderTabs();
+      setTimeout(loadWorkspaceFiles, 600);
+    },
+
     load: async (file) => {
       if (state.isLoading) {
         showToast('文件正在加载中，请稍候...', 'error');
@@ -3553,69 +3906,20 @@ window.WA = window.WA || {};
          const json = await res.json();
          if (!res.ok) throw new Error(json.error || '上传失败');
 
-         $('upload-progress').style.width = '100%';
-
-         state.fileId = json.file_id;
-         state.fileType = json.file_type;
-         state.fileName = json.file_name;
-         const ext = json.file_name.split('.').pop().toLowerCase();
-         const wsPath = file._wsPath || json.file_name;   // no uploads/ prefix
-         state.wsSourcePath = wsPath;
-         state.activeTabPath = wsPath;
-         $('wa-file-name').textContent = state.fileName;
-         $('wa-save-btn').disabled = (state.fileType === 'pdf');
-         const _saBtn3 = $('wa-saveas-btn'); if (_saBtn3) _saBtn3.disabled = (state.fileType === 'pdf');
-         _updateSubjectBar(state.fileName, state.fileType);
-
-         // Destroy old editor if it was a different file (not a tab switch)
-         if (state.activeEditor) {
-           try { state.activeEditor.destroy(); } catch(e) { console.warn('[destroy old editor]', e); }
+         // Preserve FileSystemFileHandle so Ctrl+S can write back to original file
+         if (file._fsHandle) {
+           const wsPath = file._wsPath || json.file_name;
+           _fsHandleMap.set(wsPath, file._fsHandle);
          }
-         state.activeEditor = null;
-
-         // Create/update tab entry
-         const existingTabIdx = state.openTabs.findIndex(t => t.path === wsPath);
-         const tabEntry = {
-           path: wsPath,
-           name: json.file_name,
-           ext,
-           fileType: json.file_type,
-           fileId: json.file_id,
-           serverData: json.data,
-           cache: null,
-           modified: false,
-           fsHandle: file._fsHandle || null,  // FileSystemFileHandle for write-back to original path
-         };
-         // Persist fsHandle so it survives tab replacement
-         if (file._fsHandle) _fsHandleMap.set(wsPath, file._fsHandle);
-         if (existingTabIdx >= 0) {
-           state.openTabs[existingTabIdx] = tabEntry;
-         } else {
-           state.openTabs.push(tabEntry);
+         await Router.fromParsed(json, file._wsPath || null);
+         // Restore fsHandle on the tab entry after fromParsed created it
+         if (file._fsHandle) {
+           const wsPath = file._wsPath || json.file_name;
+           const tab = state.openTabs.find(t => t.path === wsPath);
+           if (tab) tab.fsHandle = file._fsHandle;
          }
-
-         toggleWorkspace(true);
-
-         if (state.fileType === 'docx') {
-            await _ensureWangEditor();
-            state.activeEditor = new KotoDocxEditor();
-            state.activeEditor.render(json.data.html);
-         } else if (state.fileType === 'xlsx') {
-            await _ensureUniverSheets();
-            state.activeEditor = new KotoXlsxEditor();
-            state.activeEditor.render(_ensureWorkbookDefaults(json.data));
-         } else if (state.fileType === 'pptx') {
-            state.activeEditor = new KotoPptxEditor();
-            state.activeEditor.render(json.data);
-         } else if (state.fileType === 'pdf') {
-            await _ensurePdfJS();
-            state.activeEditor = new KotoPdfViewer();
-            state.activeEditor.render(json.data.raw_url, json.data.pages);
-         }
-
-         _renderTabs();
-         // Refresh left panel to highlight/show newly-added file
-         setTimeout(loadWorkspaceFiles, 600);
+         // Refresh recent list after successful open
+         loadRecentFiles();
 
       } catch (err) {
          console.error('[WA Router.load]', err);

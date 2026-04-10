@@ -7,6 +7,7 @@ import os
 import re
 
 _app_logger = logging.getLogger("koto.app")
+
 import subprocess
 import sys
 import threading
@@ -26,6 +27,19 @@ _koto_root = os.path.dirname(_web_dir)
 if _koto_root in sys.path:
     sys.path.remove(_koto_root)
 sys.path.insert(0, _koto_root)
+
+# ── Centralized logging: persist all logs to logs/koto.log ──────────────────
+# Must be AFTER sys.path fix above, so 'app.core' resolves to the app/ package
+try:
+    from app.core.logging_setup import setup_logging as _setup_logging
+    _setup_logging(log_dir=os.path.join(_koto_root, "logs"))
+    _app_logger.info("[Logging] ✅ setup_logging OK → logs/koto.log")
+except Exception as _log_err:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    )
+    _app_logger.warning(f"[Logging] setup_logging failed, using basicConfig: {_log_err}")
 
 from dotenv import load_dotenv
 from flask import (
@@ -1703,18 +1717,33 @@ except ImportError:
     _app_logger.debug("flasgger not installed; Swagger UI disabled")
 
 
-# ── Request ID middleware ─────────────────────────────────────────────────────
+# ── Request ID & timing middleware ────────────────────────────────────────────
 @app.before_request
 def _assign_request_id():
-    """Assign a correlation ID to every request (read from header or generate)."""
+    """Assign a correlation ID to every request and record start time."""
     g.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    g.request_start = time.time()
 
 
 @app.after_request
 def _attach_request_id(response):
-    """Attach the correlation ID to every outgoing response."""
+    """Attach the correlation ID and log slow/error requests."""
     if hasattr(g, "request_id"):
         response.headers["X-Request-ID"] = g.request_id
+    # Log request timing — skip noisy polling endpoints
+    _skip_paths = {"/api/token-stats", "/api/shadow/pending", "/api/ping"}
+    if request.path not in _skip_paths and hasattr(g, "request_start"):
+        elapsed_ms = (time.time() - g.request_start) * 1000
+        level = logging.WARNING if (response.status_code >= 400 or elapsed_ms > 3000) else logging.DEBUG
+        _app_logger.log(
+            level,
+            "[%s] %s %s → %s (%.0fms)",
+            getattr(g, "request_id", "-")[:8],
+            request.method,
+            request.path,
+            response.status_code,
+            elapsed_ms,
+        )
     return response
 
 
@@ -15958,7 +15987,7 @@ def chat_with_file():
             file_content = parse_result.get("content", "") if parse_result else ""
 
             # 第 2 步：创建 PPT 会话
-            ppt_session_dir = os.path.join(WORKSPACE_DIR, "workspace", "ppt_sessions")
+            ppt_session_dir = os.path.join(WORKSPACE_DIR, "ppt_sessions")
             os.makedirs(ppt_session_dir, exist_ok=True)
 
             session_manager_ppt = PPTSessionManager(ppt_session_dir)
@@ -16529,7 +16558,7 @@ def download_ppt():
         # 从 PPT 会话中获取文件路径
         from web.ppt_session_manager import PPTSessionManager
 
-        ppt_session_dir = os.path.join(WORKSPACE_DIR, "workspace", "ppt_sessions")
+        ppt_session_dir = os.path.join(WORKSPACE_DIR, "ppt_sessions")
         manager = PPTSessionManager(ppt_session_dir)
 
         session_data = manager.load_session(session_id)
@@ -16568,7 +16597,7 @@ def get_ppt_session(session_id):
     try:
         from web.ppt_session_manager import PPTSessionManager
 
-        ppt_session_dir = os.path.join(WORKSPACE_DIR, "workspace", "ppt_sessions")
+        ppt_session_dir = os.path.join(WORKSPACE_DIR, "ppt_sessions")
         manager = PPTSessionManager(ppt_session_dir)
 
         session_data = manager.load_session(session_id)
@@ -17702,6 +17731,53 @@ if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+    # ── Runtime crash log: tee stderr to a daily log file ──────────────────
+    try:
+        _runtime_log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+        os.makedirs(_runtime_log_dir, exist_ok=True)
+        _runtime_log_path = os.path.join(
+            _runtime_log_dir,
+            f"runtime_{datetime.now().strftime('%Y%m%d')}.log",
+        )
+        _runtime_log_file = open(_runtime_log_path, "a", encoding="utf-8")
+
+        class _TeeWriter:
+            """Write to both the original stream and a log file."""
+            def __init__(self, original, log_file):
+                self._original = original
+                self._log_file = log_file
+            def write(self, text):
+                try:
+                    self._original.write(text)
+                except Exception:
+                    pass
+                try:
+                    self._log_file.write(text)
+                    self._log_file.flush()
+                except Exception:
+                    pass
+            def flush(self):
+                try:
+                    self._original.flush()
+                except Exception:
+                    pass
+                try:
+                    self._log_file.flush()
+                except Exception:
+                    pass
+            # Delegate everything else to the original stream
+            def __getattr__(self, name):
+                return getattr(self._original, name)
+
+        sys.stderr = _TeeWriter(sys.stderr, _runtime_log_file)
+        sys.stdout = _TeeWriter(sys.stdout, _runtime_log_file)
+    except Exception as _tee_err:
+        print(f"⚠️ Could not set up runtime log tee: {_tee_err}")
+
+    _app_logger.info("="*60)
+    _app_logger.info(f"Koto server starting at {datetime.now().isoformat()}")
+    _app_logger.info("="*60)
+
     print("\n🚀 Koto Web Server Starting...")
     print(f"📁 Chat Directory: {os.path.abspath(CHAT_DIR)}")
     print(f"📁 Workspace: {os.path.abspath(WORKSPACE_DIR)}")
@@ -17722,6 +17798,27 @@ if __name__ == "__main__":
     print("⚠️ 本地模型任务路由器已禁用，使用远程 AI")
 
     print("\n🌐 Open http://localhost:5000 in your browser\n")
+
+    # ── Catch uncaught exceptions in main and background threads ──────────
+    _original_excepthook = sys.excepthook
+    def _koto_excepthook(exc_type, exc_value, exc_tb):
+        _app_logger.critical(
+            "Uncaught exception (main thread)", exc_info=(exc_type, exc_value, exc_tb)
+        )
+        _original_excepthook(exc_type, exc_value, exc_tb)
+    sys.excepthook = _koto_excepthook
+
+    if hasattr(threading, "excepthook"):
+        _original_thread_excepthook = threading.excepthook
+        def _koto_thread_excepthook(args):
+            _app_logger.critical(
+                "Uncaught exception in thread '%s'",
+                getattr(args, "thread", "?"),
+                exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+            )
+            if _original_thread_excepthook:
+                _original_thread_excepthook(args)
+        threading.excepthook = _koto_thread_excepthook
 
     # 启动后台服务（异步，不阻塞启动）
     def start_background_services():
@@ -17764,12 +17861,16 @@ if __name__ == "__main__":
                          allow_unsafe_werkzeug=True)
         else:
             app.run(debug=debug_mode, host="0.0.0.0", port=port, threaded=True)
+    except SystemExit as se:
+        _app_logger.info("Server stopped (SystemExit code=%s)", se.code)
+    except BaseException as be:
+        _app_logger.error("Server crashed: %s: %s", type(be).__name__, be, exc_info=True)
     finally:
         # 应用关闭时清理并行执行系统
         if PARALLEL_SYSTEM_ENABLED:
-            print("[PARALLEL] 🛑 Shutting down parallel execution system...")
+            _app_logger.info("Shutting down parallel execution system...")
             stop_dispatcher()
-            print("[PARALLEL] ✅ Parallel execution system shut down")
+            _app_logger.info("Parallel execution system shut down")
 
 
 # ═══ 文件组织系统 API ═══

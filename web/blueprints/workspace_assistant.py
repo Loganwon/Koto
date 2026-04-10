@@ -21,8 +21,13 @@ logger = logging.getLogger(__name__)
 
 workspace_assistant_bp = Blueprint("workspace_assistant", __name__)
 
-# 临时文件存储目录（相对于项目根）
-_TMP_DIR = Path("workspace") / "tmp"
+# 临时文件存储目录（使用绝对路径，避免 python-pptx 等库因 CWD 不同而找不到文件）
+import sys as _sys
+if getattr(_sys, "frozen", False):
+    _PROJECT_ROOT = Path(_sys.executable).parent
+else:
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_TMP_DIR = _PROJECT_ROOT / "workspace" / "tmp"
 
 # 允许上传的文件后缀
 _ALLOWED_EXT = {".docx", ".xlsx", ".pptx", ".pdf"}
@@ -31,6 +36,32 @@ _ALLOWED_EXT = {".docx", ".xlsx", ".pptx", ".pdf"}
 def _ensure_tmp_dir() -> Path:
     _TMP_DIR.mkdir(parents=True, exist_ok=True)
     return _TMP_DIR
+
+
+def cleanup_tmp_dir(max_age_hours: int = 24) -> int:
+    """Delete tmp files older than *max_age_hours* hours (or 0-byte files).
+
+    Returns the number of files deleted.
+    """
+    import time
+
+    deleted = 0
+    cutoff = time.time() - max_age_hours * 3600
+    try:
+        for f in _TMP_DIR.iterdir():
+            if not f.is_file():
+                continue
+            try:
+                if f.stat().st_size == 0 or f.stat().st_mtime < cutoff:
+                    f.unlink(missing_ok=True)
+                    deleted += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    if deleted:
+        logger.info("[WorkspaceAssistant] tmp cleanup: removed %d stale files", deleted)
+    return deleted
 
 
 def _ext(filename: str) -> str:
@@ -58,6 +89,12 @@ def list_workspace_files():
     过滤掉隐藏文件和系统文件夹，以树状 JSON 返回。
     supported=true 表示 Koto 可直接打开和编辑该文件。
     """
+    # Opportunistically clean up stale tmp files (non-blocking: errors silenced)
+    try:
+        cleanup_tmp_dir()
+    except Exception:
+        pass
+
     from web.shared import WORKSPACE_DIR
 
     root_path = Path(WORKSPACE_DIR).resolve()
@@ -82,7 +119,7 @@ def list_workspace_files():
     def _build_tree(dir_path: Path) -> list[dict]:
         items = []
         _skip = {"tmp", "backups", "editor-docs", "images", "__pycache__",
-                  "node_modules", ".git", ".venv", "venv"}
+                  "node_modules", ".git", ".venv", "venv", "ppt_sessions"}
         try:
             for p in sorted(dir_path.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
                 if p.name.startswith(".") or p.name in _skip:
@@ -177,8 +214,10 @@ def serve_workspace_file(filepath: str):
 @workspace_assistant_bp.route("/api/v1/workspace/open_file_by_path", methods=["POST"])
 def open_file_by_path():
     """
-    直接从工作区路径打开并解析文件，无需先下载再上传。
+    直接从路径打开并解析文件，无需先下载再上传。
     比 open_file 更高效，用于工作区文件树点击打开。
+    Accepts both workspace-relative paths AND absolute external paths
+    (e.g. ``C:\\Users\\user\\Downloads\\report.pptx``).
     Body (JSON): {"path": "relative/path/to/file.docx"}
     Response: 同 open_file
     """
@@ -196,7 +235,20 @@ def open_file_by_path():
     try:
         target.relative_to(root)
     except ValueError:
-        return jsonify({"error": "路径不合法"}), 403
+        abs_candidate = Path(rel_path).resolve()
+        if (
+            Path(rel_path).is_absolute()
+            and abs_candidate.parent.is_dir()
+            and abs_candidate.suffix.lower() in _ALLOWED_EXT
+        ):
+            target = abs_candidate
+            logger.info(
+                "[WorkspaceAssistant] open_file_by_path: accepting "
+                "absolute external path '%s'",
+                target,
+            )
+        else:
+            return jsonify({"error": "路径不合法"}), 403
 
     if not target.is_file():
         return jsonify({"error": "文件不存在"}), 404
@@ -204,6 +256,20 @@ def open_file_by_path():
     ext = target.suffix.lower()
     if ext not in _ALLOWED_EXT:
         return jsonify({"error": f"不支持的格式: {ext}"}), 400
+
+    # Auto-repair legacy 0-byte files that were created before _seed_new_file
+    # was introduced.  Silently seed them in-place so the open proceeds normally.
+    if target.stat().st_size == 0:
+        try:
+            _seed_new_file(target)
+        except Exception as _se:
+            logger.warning(
+                f"[WorkspaceAssistant] 无法修复空文件 {target.name}: {_se}"
+            )
+            return jsonify({"error": f"文件内容为空，无法解析: {target.name}"}), 400
+        # Double-check: if the file is still 0 bytes after seeding, bail out
+        if target.stat().st_size == 0:
+            return jsonify({"error": f"文件内容为空，无法解析: {target.name}"}), 400
 
     # Copy to tmp so editor can work with it (same as open_file)
     file_id = uuid.uuid4().hex
@@ -286,6 +352,12 @@ def open_file():
     file_id = uuid.uuid4().hex
     tmp_path = _ensure_tmp_dir() / f"{file_id}{ext}"
     uploaded.save(str(tmp_path))
+
+    # Reject zero-byte uploads — they produce misleading 'Package not found'
+    # errors from python-pptx / openpyxl instead of a clear message.
+    if tmp_path.stat().st_size == 0:
+        tmp_path.unlink(missing_ok=True)
+        return jsonify({"error": f"文件内容为空，无法解析: {original_name}"}), 400
 
     # 文件只暂存在 tmp 目录，不立即写入工作区。
     # 用户显式保存后才会写入 WORKSPACE_DIR（由 auto_save explicit=true 处理）。
@@ -620,7 +692,20 @@ def auto_save():
             matches = list(tmp_dir.glob(f"{file_id}.pptx"))
             if not matches:
                 return jsonify({"error": "原始 PPTX 文件不存在或已过期"}), 404
-            raw_bytes = export_pptx(str(matches[0]), data)
+            original_path = str(matches[0])
+
+            # Rich format (from geometry canvas editor) has a 'slides' key
+            # with full paragraph/run data — use the same _apply_edits used
+            # by the save_file/download endpoint to preserve formatting.
+            if isinstance(data, dict) and "slides" in data:
+                from web.blueprints.pptx_editor import _apply_edits as _pptx_apply
+
+                with open(original_path, "rb") as _f:
+                    orig_bytes = _f.read()
+                raw_bytes = _pptx_apply(orig_bytes, data["slides"])
+            else:
+                # Legacy simple format fallback
+                raw_bytes = export_pptx(original_path, data)
             suffix = ".pptx"
         else:
             return jsonify({"error": f"不支持的格式: {file_type}"}), 400
@@ -646,9 +731,51 @@ def auto_save():
 
             ws_root = Path(WORKSPACE_DIR).resolve()
             src_path = ws_root.joinpath(ws_source_path).resolve()
-            # Path-traversal guard
-            src_path.relative_to(ws_root)
-            if src_path.suffix.lower() in _ALLOWED_EXT:
+            # Path-traversal guard — must raise before any write.
+            # If the resolved path is outside the workspace (e.g. a file
+            # opened from Downloads via openBrowserFile), check whether
+            # ws_source_path is itself a valid absolute path that the user
+            # opened.  If so, write back to it directly — the user pressed
+            # Ctrl+S to save the file they explicitly chose to open.
+            try:
+                src_path.relative_to(ws_root)
+            except ValueError:
+                # ws_source_path is outside the workspace.
+                # Accept it ONLY when it is an absolute path that points to
+                # an existing parent directory (i.e., the user opened a real
+                # file from the file browser, not a traversal attack like
+                # "../../etc/passwd").
+                abs_candidate = Path(ws_source_path).resolve()
+                if not Path(ws_source_path).is_absolute():
+                    # Relative traversal path like "../../evil.docx" —
+                    # this is never a legitimate external file.
+                    logger.warning(
+                        "[WorkspaceAssistant] auto_save: relative path "
+                        "traversal in ws_source_path '%s' — rejecting",
+                        ws_source_path,
+                    )
+                    return jsonify({"error": "路径不合法"}), 403
+                if (
+                    abs_candidate.parent.is_dir()
+                    and abs_candidate.suffix.lower() in _ALLOWED_EXT
+                ):
+                    src_path = abs_candidate
+                    logger.info(
+                        "[WorkspaceAssistant] auto_save: writing back to "
+                        "absolute external path '%s'",
+                        src_path,
+                    )
+                else:
+                    # Absolute path but parent dir doesn't exist or bad
+                    # extension — skip write-back gracefully.
+                    logger.info(
+                        "[WorkspaceAssistant] auto_save: ws_source_path '%s' "
+                        "parent dir does not exist or extension not allowed "
+                        "— skipping write-back",
+                        ws_source_path,
+                    )
+                    src_path = None          # signal: don't write
+            if src_path is not None and src_path.suffix.lower() in _ALLOWED_EXT:
                 src_path.parent.mkdir(parents=True, exist_ok=True)
                 src_path.write_bytes(raw_bytes)
                 src_written = True
@@ -695,10 +822,10 @@ def delete_workspace_file():
     if not target.is_file():
         return jsonify({"error": "文件不存在"}), 404
 
-    if target.suffix.lower() not in _ALLOWED_EXT:
-        return jsonify({"error": "不支持的文件类型"}), 400
-
-    target.unlink()
+    try:
+        target.unlink()
+    except PermissionError:
+        return jsonify({"error": "权限不足，无法删除"}), 403
     logger.info(f"[WorkspaceAssistant] 删除文件: {target}")
     return jsonify({"ok": True})
 
@@ -919,6 +1046,103 @@ def delete_workspace_folder():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers for new-file seeding
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _seed_new_file(target: Path) -> None:
+    """Write a minimal valid template into *target* based on its extension.
+
+    Supported extensions (.docx, .xlsx, .pptx, .pdf) get a real (non-zero-byte)
+    seed so the file can be immediately opened by ``open_file_by_path``.
+    If seeding a supported extension fails, the exception propagates so the
+    caller can handle it — we must NOT silently leave a 0-byte file.
+
+    Unknown extensions fall back to an empty file (``touch()``).
+    """
+    ext = target.suffix.lower()
+
+    if ext == ".docx":
+        import io as _io
+        import docx as _docx
+        doc = _docx.Document()
+        buf = _io.BytesIO()
+        doc.save(buf)
+        target.write_bytes(buf.getvalue())
+        return
+
+    if ext == ".xlsx":
+        import io as _io
+        import openpyxl as _xl
+        wb = _xl.Workbook()
+        buf = _io.BytesIO()
+        wb.save(buf)
+        target.write_bytes(buf.getvalue())
+        return
+
+    if ext == ".pptx":
+        import io as _io
+        from pptx import Presentation as _Prs
+        from pptx.util import Pt, Emu
+        from pptx.enum.text import PP_ALIGN
+
+        prs = _Prs()
+        sW = prs.slide_width or 9144000
+        sH = prs.slide_height or 6858000
+        # Use a blank layout so we control shape positions / formatting
+        # to match the JS pptxAddSlide() defaults exactly.
+        blank_layout = prs.slide_layouts[6]  # "Blank"
+        slide = prs.slides.add_slide(blank_layout)
+
+        # ── Title shape ──
+        title_box = slide.shapes.add_textbox(
+            Emu(int(sW * 0.05)), Emu(int(sH * 0.06)),
+            Emu(int(sW * 0.9)), Emu(int(sH * 0.18)),
+        )
+        tf = title_box.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.CENTER
+        run = p.add_run()
+        run.text = "点击输入标题"
+        run.font.size = Pt(36)
+        run.font.bold = True
+
+        # ── Content shape ──
+        body_box = slide.shapes.add_textbox(
+            Emu(int(sW * 0.05)), Emu(int(sH * 0.30)),
+            Emu(int(sW * 0.9)), Emu(int(sH * 0.60)),
+        )
+        tf2 = body_box.text_frame
+        tf2.word_wrap = True
+        p2 = tf2.paragraphs[0]
+        p2.alignment = PP_ALIGN.LEFT
+        run2 = p2.add_run()
+        run2.text = "点击输入内容"
+        run2.font.size = Pt(24)
+
+        buf = _io.BytesIO()
+        prs.save(buf)
+        target.write_bytes(buf.getvalue())
+        return
+
+    if ext == ".pdf":
+        # Minimal valid PDF so PDF.js can render a blank page
+        target.write_bytes(
+            b"%PDF-1.4\n1 0 obj\n<</Type /Catalog /Pages 2 0 R>>\nendobj\n"
+            b"2 0 obj\n<</Type /Pages /Kids [3 0 R] /Count 1>>\nendobj\n"
+            b"3 0 obj\n<</Type /Page /Parent 2 0 R"
+            b" /MediaBox [0 0 612 792]>>\nendobj\n"
+            b"xref\n0 4\n0000000000 65535 f \n"
+            b"trailer\n<</Size 4 /Root 1 0 R>>\nstartxref\n9\n%%EOF\n"
+        )
+        return
+
+    # All other extensions (txt, py, md, json, …) — create empty
+    target.touch()
+
+
 # POST /api/v1/workspace/create_file
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -961,7 +1185,7 @@ def create_workspace_file():
         return jsonify({"error": f'"{name}" 已存在'}), 409
 
     try:
-        target.touch()
+        _seed_new_file(target)
         rel = target.relative_to(root).as_posix()
         logger.info("[WorkspaceAssistant] 创建文件: %s", target)
         return jsonify({"ok": True, "path": rel, "name": name})
@@ -1052,7 +1276,7 @@ def fs_create_file():
         return jsonify({"error": f'"{name}" 已存在'}), 409
 
     try:
-        target.touch()
+        _seed_new_file(target)
         logger.info("[WorkspaceAssistant] fs 创建文件: %s", target)
         return jsonify({"ok": True, "path": str(target), "name": name})
     except Exception as e:
@@ -1114,6 +1338,16 @@ def set_workspace_dir_endpoint():
         return jsonify({"error": "缺少 path 字段"}), 400
 
     target = Path(new_path).resolve()
+
+    # Security: reject system-protected directories
+    _sys_protected = {
+        "windows", "program files", "program files (x86)", "programdata",
+        "system volume information", "$recycle.bin",
+    }
+    parts_lower = {pp.lower() for pp in target.parts}
+    if parts_lower & _sys_protected or target == target.parent:
+        return jsonify({"error": "不允许将系统目录设为工作区"}), 403
+
     if not target.exists():
         try:
             target.mkdir(parents=True, exist_ok=True)
@@ -1507,6 +1741,14 @@ def serve_abs_file():
     if not path:
         return jsonify({"error": "缺少 path 参数"}), 400
     target = Path(path).resolve()
+    # Security: block system/protected paths (reuse the same guard as fs_delete etc.)
+    _protected = {
+        "windows", "program files", "program files (x86)", "programdata",
+        "system volume information", "$recycle.bin",
+    }
+    parts_lower = {pp.lower() for pp in target.parts}
+    if parts_lower & _protected or target == target.parent:
+        return jsonify({"error": "不允许访问系统路径"}), 403
     if not target.is_file():
         return jsonify({"error": "文件不存在"}), 404
     return send_file(str(target), as_attachment=False)
