@@ -683,7 +683,7 @@ def parse_pptx(file_path: str) -> list[dict[str, Any]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
+def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
     """
     使用 python-pptx 提取每个 Slide 的完整几何数据，供前端画布编辑器渲染。
     包含文本框 (含字体样式)、图片 (base64 data URI)、表格 (单元格文本)、备注。
@@ -1086,6 +1086,24 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
             except Exception:
                 pass
 
+            # ── Generic Shapes / Icons / SVGs / Charts ──────────────────────
+            # Catch shapes that have color fills / borders (like vectors or AutoShapes)
+            try:
+                if getattr(shape, "shape_type", None) in (
+                    MSO_SHAPE_TYPE.AUTO_SHAPE,
+                    MSO_SHAPE_TYPE.FREEFORM,
+                    MSO_SHAPE_TYPE.GRAPHIC_FRAME,
+                ):
+                    s["_type"] = "SHAPE"
+            except Exception:
+                pass
+                
+            try:
+                if getattr(shape, "has_chart", False):
+                    s["_type"] = "CHART"
+            except Exception:
+                pass
+
             # ── Text frame ────────────────────────────────────────────
             try:
                 if getattr(shape, "has_text_frame", False) and shape.text_frame:
@@ -1108,7 +1126,11 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
             except Exception:
                 pass
 
-            # Connectors / freeforms / other unsupported — silently skip
+            # SHAPE/CHART types set their _type above but don't self-append (unlike
+            # TEXT, PICTURE, TABLE which already called out.append+continue).
+            if s.get("_type") in ("SHAPE", "CHART"):
+                out.append(s)
+
 
     # ── Main loop ────────────────────────────────────────────────────────
 
@@ -1142,9 +1164,89 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
     }
 
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PDF → 文本提取 + 原始 URL
 # ─────────────────────────────────────────────────────────────────────────────
+
+# OCR: minimum character count to consider a page as "text-bearing" (not scanned)
+_PDF_OCR_THRESHOLD = 50
+
+# Common Tesseract-OCR install paths on Windows
+_TESSERACT_WIN_PATHS = [
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+]
+
+
+def _configure_tesseract() -> bool:
+    """Set pytesseract.tesseract_cmd to the first existing Windows path. Returns True if found."""
+    try:
+        import pytesseract  # type: ignore
+    except ImportError:
+        return False
+    for path in _TESSERACT_WIN_PATHS:
+        if os.path.isfile(path):
+            pytesseract.pytesseract.tesseract_cmd = path
+            return True
+    # If already on PATH, keep default
+    import shutil
+    return shutil.which("tesseract") is not None
+
+
+def _ocr_pdf_pages(
+    file_path: str, page_indices: list[int]
+) -> dict[int, str]:
+    """
+    Render the given 0-based page indices with PyMuPDF and run Tesseract OCR.
+    Returns {page_index: text}. Silently returns {} if any dependency is missing.
+    """
+    try:
+        import fitz  # PyMuPDF
+        import pytesseract
+        from PIL import Image  # type: ignore
+    except ImportError as exc:
+        logger.info(f"[PdfOCR] 依赖缺失，跳过 OCR: {exc}")
+        return {}
+
+    if not _configure_tesseract():
+        logger.warning(
+            "[PdfOCR] 未找到 Tesseract 可执行文件。"
+            " 请安装: https://github.com/UB-Mannheim/tesseract/wiki"
+        )
+        return {}
+
+    results: dict[int, str] = {}
+    try:
+        doc = fitz.open(file_path)
+        # Determine available language packs; prefer Chinese + English
+        try:
+            langs = pytesseract.get_languages()
+            lang = "+".join(
+                lc for lc in ("chi_sim", "chi_tra", "eng") if lc in langs
+            ) or "eng"
+        except Exception:
+            lang = "eng"
+
+        for idx in page_indices:
+            if idx >= len(doc):
+                continue
+            page = doc[idx]
+            # Render at 2× scale (150 DPI → 300 DPI) for better OCR accuracy
+            mat = fitz.Matrix(2.0, 2.0)
+            pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            try:
+                text = pytesseract.image_to_string(img, lang=lang).strip()
+            except pytesseract.pytesseract.TesseractError as e:
+                # If Chinese pack unavailable, retry with English only
+                logger.warning(f"[PdfOCR] lang={lang} 失败，回退 eng: {e}")
+                text = pytesseract.image_to_string(img, lang="eng").strip()
+            results[idx] = text
+        doc.close()
+    except Exception as e:
+        logger.warning(f"[PdfOCR] OCR 执行失败: {e}")
+    return results
 
 
 def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
@@ -1153,11 +1255,12 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
     同时返回原始文件的 raw URL，供前端 PDF.js 渲染。
 
     文字提取回退链：pdfplumber → pypdf → PyPDF2。
+    若提取文本过少（扫描件），自动对空页运行 OCR（PyMuPDF + Tesseract）。
     若三个库均不可用，仍返回含 raw_url 的结果（PDF.js 视觉渲染不依赖文字提取）。
 
     Returns:
         {"text": str, "page_count": int, "raw_url": str,
-         "pages": [{"page": int, "text": str}]}
+         "pages": [{"page": int, "text": str}], "ocr_applied": bool}
     """
     raw_url = f"/api/v1/workspace/raw/{file_id}"
     pages_text: list[dict[str, Any]] = []
@@ -1180,12 +1283,7 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                 if page_text:
                     full_text_parts.append(page_text)
 
-        return {
-            "text": "\n\n".join(full_text_parts),
-            "page_count": page_count,
-            "raw_url": raw_url,
-            "pages": pages_text,
-        }
+        return _apply_ocr_fallback(file_path, pages_text, full_text_parts, page_count, raw_url)
     except ImportError:
         logger.info("[PdfParser] pdfplumber 未安装，尝试 pypdf/PyPDF2")
     except Exception as e:
@@ -1209,12 +1307,7 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                     if page_text:
                         full_text_parts.append(page_text)
 
-            return {
-                "text": "\n\n".join(full_text_parts),
-                "page_count": page_count,
-                "raw_url": raw_url,
-                "pages": pages_text,
-            }
+            return _apply_ocr_fallback(file_path, pages_text, full_text_parts, page_count, raw_url)
         except ImportError:
             logger.info(f"[PdfParser] {pkg_name} 未安装，尝试下一库")
             continue
@@ -1224,16 +1317,77 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
             full_text_parts = []
             continue
 
-    # ── 3. 所有文字提取库均不可用——仍返回 raw_url 供 PDF.js 渲染 ────────────
+    # ── 3. 所有文字提取库均不可用 — 仍尝试全页 OCR ─────────────────────────
     logger.warning(
-        "[PdfParser] pdfplumber / pypdf / PyPDF2 均不可用，文字提取跳过。"
-        " 请执行: pip install pdfplumber"
+        "[PdfParser] pdfplumber / pypdf / PyPDF2 均不可用，尝试纯 OCR。"
+        " 建议执行: pip install pdfplumber"
     )
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(file_path)
+        page_count = len(doc)
+        doc.close()
+    except Exception:
+        page_count = 0
+
+    if page_count:
+        ocr_results = _ocr_pdf_pages(file_path, list(range(page_count)))
+        for i in range(page_count):
+            t = ocr_results.get(i, "")
+            pages_text.append({"page": i + 1, "text": t})
+            if t:
+                full_text_parts.append(t)
+        return {
+            "text": "\n\n".join(full_text_parts),
+            "page_count": page_count,
+            "raw_url": raw_url,
+            "pages": pages_text,
+            "ocr_applied": bool(ocr_results),
+        }
+
     return {
         "text": "",
         "page_count": 0,
         "raw_url": raw_url,
         "pages": [],
+        "ocr_applied": False,
+    }
+
+
+def _apply_ocr_fallback(
+    file_path: str,
+    pages_text: list[dict[str, Any]],
+    full_text_parts: list[str],
+    page_count: int,
+    raw_url: str,
+) -> dict[str, Any]:
+    """
+    After normal text extraction: find pages with < _PDF_OCR_THRESHOLD chars,
+    run OCR on those pages, and merge the results back.
+    """
+    scanned_indices = [
+        i for i, p in enumerate(pages_text)
+        if len(p["text"].strip()) < _PDF_OCR_THRESHOLD
+    ]
+    ocr_applied = False
+    if scanned_indices:
+        logger.info(
+            f"[PdfParser] 发现 {len(scanned_indices)} 页文本稀少，尝试 OCR: "
+            f"页码 {[i+1 for i in scanned_indices]}"
+        )
+        ocr_results = _ocr_pdf_pages(file_path, scanned_indices)
+        for idx, text in ocr_results.items():
+            if text:
+                pages_text[idx]["text"] = text
+                full_text_parts.append(text)
+                ocr_applied = True
+
+    return {
+        "text": "\n\n".join(full_text_parts),
+        "page_count": page_count,
+        "raw_url": raw_url,
+        "pages": pages_text,
+        "ocr_applied": ocr_applied,
     }
 
 

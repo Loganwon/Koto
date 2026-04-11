@@ -27,6 +27,7 @@ window.WA = window.WA || {};
     activeTabPath: null,   // path of the currently active tab
     aiOutputMode: localStorage.getItem('wa_ai_output_mode') || 'inline',  // 'inline'|'chat'
     lockedModel: localStorage.getItem('wa_locked_model') || 'auto',  // preferred AI model
+    _streamAbortCtrl: null,  // AbortController for the active chat stream
     _recentOpen: true,     // recent files section expanded state
     _workspacePath: '',    // absolute workspace root path for openRecentFile comparison
     // ── File system browser state (replaces single-workspace tree) ──
@@ -72,7 +73,13 @@ window.WA = window.WA || {};
         curTab.cache = state.activeEditor.serialize();
       }
       // Serialize into cache so we can restore when switching back — no disk write
-      try { state.activeEditor.destroy(); } catch(e) {}
+      try {
+            state.activeEditor.destroy();
+          } catch(e) {
+            console.error('Editor destroy failed:', e);
+            const canvas = document.getElementById('wa-canvas');
+            if (canvas) canvas.innerHTML = '';
+          }
       state.activeEditor = null;
     }
 
@@ -123,6 +130,9 @@ window.WA = window.WA || {};
       await _ensurePdfJS();
       state.activeEditor = new KotoPdfViewer();
       state.activeEditor.render(tab.serverData.raw_url, tab.serverData.pages);
+    } else if (tab.fileType === 'text' || tab.fileType === 'code') {
+      state.activeEditor = new KotoTextEditor(tab.fileType);
+      state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData);
     }
 
     _renderTabs();
@@ -150,7 +160,13 @@ window.WA = window.WA || {};
 
     if (isActive) {
       if (state.activeEditor) {
-        try { state.activeEditor.destroy(); } catch(e) {}
+        try {
+            state.activeEditor.destroy();
+          } catch(e) {
+            console.error('Editor destroy failed:', e);
+            const canvas = document.getElementById('wa-canvas');
+            if (canvas) canvas.innerHTML = '';
+          }
         state.activeEditor = null;
       }
       state.activeTabPath = null;
@@ -320,8 +336,11 @@ window.WA = window.WA || {};
         state._workspaceName = d.name || 'workspace';
         state._workspacePath = d.path || '';
         _renderWorkspaceRoot();
-      }
-    } catch (_) {}
+      } else { throw new Error(res.status); }
+    } catch (err) {
+      console.error('Fetch dir error', err);
+      showToast('获取工作区目录网络异常...', 'error');
+    }
     await _softRefreshBrowser();
   }
 
@@ -378,6 +397,8 @@ window.WA = window.WA || {};
     localStorage.setItem('wa_sections', JSON.stringify(state.sectionOpen));
     if (id === 'myworkspace') {
       _toggleMyWorkspaceSection();
+    } else if (id === 'tmpworkspace') {
+      _toggleTempWorkspaceSection();
     } else {
       _renderWorkspaceTree();
     }
@@ -579,6 +600,98 @@ window.WA = window.WA || {};
     _renderMyWorkspace();
   };
 
+  // ── Temp Workspace: session-only in-memory file list ─────────────────────
+  // Files are NOT persisted to localStorage; they live only in state._tempWorkspace
+  // and cleared when Koto closes.
+  state._tempWorkspace = [];  // [{path, name, ext, addedAt}]
+
+  function _toggleTempWorkspaceSection() {
+    const open = state.sectionOpen.tmpworkspace !== false;
+    const list = $('wa-tmpws-list');
+    const empty = $('wa-tmpws-empty');
+    const arrow = $('wa-tmpws-arrow');
+    if (arrow) arrow.classList.toggle('open', open);
+    if (list) list.style.display = open ? '' : 'none';
+    if (empty) empty.style.display = open && !state._tempWorkspace.length ? '' : 'none';
+  }
+
+  function _renderTempWorkspace() {
+    const list = $('wa-tmpws-list');
+    const empty = $('wa-tmpws-empty');
+    const badge = $('wa-tmpws-badge');
+    if (!list) return;
+    const files = state._tempWorkspace;
+    if (badge) badge.textContent = files.length || '';
+    const isOpen = state.sectionOpen.tmpworkspace !== false;
+    if (!isOpen) { list.style.display = 'none'; if (empty) empty.style.display = 'none'; return; }
+    if (!files.length) {
+      list.innerHTML = '';
+      list.style.display = 'none';
+      if (empty) empty.style.display = '';
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+    list.style.display = '';
+    list.innerHTML = files.map(f => {
+      const pathEsc = _escHtml(f.path);
+      const nameEsc = _escHtml(f.name);
+      const icon = _fileIcon(f.ext || f.name.split('.').pop() || '');
+      const active = state.activeTabPath === f.path ? ' active' : '';
+      const pathJs = f.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      return `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"
+        onclick="WA.openBrowserFile('${pathJs}', true)"
+        draggable="true">
+        ${icon}<span class="wa-file-label">${nameEsc}</span>
+        <button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromTempWorkspace('${pathJs}')" title="从临时工作区移除">×</button>
+      </div>`;
+    }).join('');
+    list.querySelectorAll('.wa-myws-item[draggable]').forEach(el => {
+      el.addEventListener('dragstart', (e) => {
+        const p = el.dataset.path;
+        e.dataTransfer.effectAllowed = 'copyMove';
+        e.dataTransfer.setData('application/wa-file-path', p);
+        e.dataTransfer.setData('text/plain', p);
+        el.classList.add('dragging');
+        document.body.classList.add('wa-file-dragging');
+      });
+      el.addEventListener('dragend', () => {
+        el.classList.remove('dragging');
+        document.body.classList.remove('wa-file-dragging');
+      });
+    });
+  }
+
+  window.WA.addToTempWorkspace = (path) => {
+    if (!path) {
+      path = state.activeTabPath || state.wsSourcePath;
+    }
+    if (!path) { showToast('请先打开一个文件', 'info'); return; }
+    const name = path.split(/[\\/]/).pop() || path;
+    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+    if (state._tempWorkspace.some(f => f.path === path)) {
+      showToast(`"${name}" 已在临时工作区中`, 'info');
+      return;
+    }
+    state._tempWorkspace.push({ path, name, ext, addedAt: Date.now() });
+    _renderTempWorkspace();
+    // Open the file in a tab so it's loaded into memory
+    WA.openBrowserFile(path, true);
+    showToast(`"${name}" 已加入临时工作区`, 'success');
+  };
+
+  window.WA.removeFromTempWorkspace = (path) => {
+    state._tempWorkspace = state._tempWorkspace.filter(f => f.path !== path);
+    _renderTempWorkspace();
+  };
+
+  window.WA.clearTempWorkspace = () => {
+    if (!state._tempWorkspace.length) return;
+    if (!confirm('确认清空临时工作区？已打开的标签页不受影响。')) return;
+    state._tempWorkspace = [];
+    _renderTempWorkspace();
+    showToast('临时工作区已清空', 'info');
+  };
+
   // ── AI multi-file context ─────────────────────────────────────────────────
   state._aiFileContext = [];  // [{path, name, content}]
   state._aiTargetFileIdx = -1; // index into _aiFileContext designated as write-back target (-1 = none)
@@ -602,6 +715,8 @@ window.WA = window.WA || {};
       // Hide multi-doc extras
       const ssr = $('wa-source-search-row'); if (ssr) ssr.style.display = 'none';
       const mda = $('wa-multidoc-actions');  if (mda) mda.style.display = 'none';
+      // Restore file context indicator now that no docs are attached
+      _updateSubjectBar(state.fileName, state.fileType);
       return;
     }
 
@@ -633,14 +748,25 @@ window.WA = window.WA || {};
         `</div>`;
     }).join('');
 
-    // Input-area hint bar
+    // Input-area hint bar (Multi-line unified design)
     if (hint && hintLabel) {
-      if (targetFile) {
-        hintLabel.textContent = `📂 ${n}个文件 · 修改目标: ${targetFile.name}`;
+      let fileListHtml = state._aiFileContext.map(f => {
+        if (!f) return '';
+        return `<div style="margin-bottom:2px; opacity:0.85; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden;">📄 ${_escHtml(f.name || '未知文件')}</div>`;
+      }).join('');
+      if (targetFile && targetFile.name) {
+        hintLabel.innerHTML = `<div style="font-weight:600;margin-bottom:4px;color:var(--text);font-size:11px;">分析并修改：</div>${fileListHtml}`;
       } else {
-        hintLabel.textContent = `📂 ${n}个文件 · 多文档分析模式`;
+        hintLabel.innerHTML = `<div style="font-weight:600;margin-bottom:4px;color:var(--text);font-size:11px;">当前分析：</div>${fileListHtml}`;
       }
       hint.style.display = 'flex';
+      // Update context indicator to show file count (don't hide it)
+      const _ctxInd = $('wa-context-indicator');
+      const _ctxLbl = $('wa-ctx-label');
+      if (_ctxInd && _ctxLbl) {
+        _ctxLbl.innerHTML = `已附加 <b style="color:var(--text);font-weight:600">${n} 份文件</b>`;
+        _ctxInd.style.display = 'flex';
+      }
     }
 
     // Update quick-action bar for multi-doc mode
@@ -964,7 +1090,9 @@ window.WA = window.WA || {};
       rows.push(`<div class="wa-browser-group-label">此电脑</div>`);
       r.drives.forEach(d => _renderBrowserEntry(d, 0, rows));
     }
+    const _savedScroll = list.scrollTop;
     list.innerHTML = rows.join('');
+    list.scrollTop = _savedScroll;
     // Restore active file highlight
     if (state.activeTabPath) {
       const el = list.querySelector(`[data-path="${CSS.escape(state.activeTabPath)}"]`);
@@ -1060,10 +1188,20 @@ window.WA = window.WA || {};
       }).catch(() => {});
       return;
     }
-    // Switch to existing tab if already open
-    if (state.openTabs.some(t => t.path === absPath)) {
-      await _switchToTab(absPath);
-      return;
+    // If an existing tab for this path has user-generated edits (cache !== null),
+    // or is already the active tab, just switch to it without re-reading from disk.
+    // Otherwise (no edits / stale serverData), discard the stale tab entry and
+    // re-load fresh from disk — this fixes the case where the workspace file was
+    // updated externally or a previous parse produced corrupt/empty data.
+    const _existingTab = state.openTabs.find(t => t.path === absPath);
+    if (_existingTab) {
+      if (_existingTab.cache !== null || state.activeTabPath === absPath) {
+        await _switchToTab(absPath);
+        return;
+      }
+      // Stale tab with no user edits — drop it and re-load below
+      const _staleIdx = state.openTabs.findIndex(t => t.path === absPath);
+      if (_staleIdx >= 0) state.openTabs.splice(_staleIdx, 1);
     }
     const baseName = absPath.replace(/\\/g, '/').split('/').pop() || absPath;
     _trackUserOpen(absPath);
@@ -1126,7 +1264,8 @@ window.WA = window.WA || {};
     } else {
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserOpen();_closeCtxMenu()">${SVG.open} ${supported ? '打开' : '本地打开'}</div>`;
       html += `<div class="wa-ctx-separator"></div>`;
-      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAddToWorkspace();_closeCtxMenu()">${SVG.newf} 加入工作区</div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAddToTempWorkspace();_closeCtxMenu()">${SVG.newf} 加入临时工作区</div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAddToWorkspace();_closeCtxMenu()">${SVG.newf} 加入我的工作区</div>`;
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserSendToAI();_closeCtxMenu()">${SVG.ai} 发送给AI分析</div>`;
       html += `<div class="wa-ctx-separator"></div>`;
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCopy();_closeCtxMenu()">${SVG.copy} 复制</div>`;
@@ -1147,28 +1286,46 @@ window.WA = window.WA || {};
       html += `<div class="wa-ctx-item danger" onclick="WA._fsBrowserDelete();_closeCtxMenu()">${SVG.del} 删除</div>`;
     }
     menu.innerHTML = html;
+    // Show at (0,0) hidden — browser computes real layout; no flash because paint
+    // is batched until after this synchronous handler returns.
     menu.classList.add('open');
+    menu.style.visibility = 'hidden';
+    menu.style.top  = '0px';
+    menu.style.left = '0px';
+    void menu.getBoundingClientRect(); // force synchronous reflow
+    const menuH = menu.scrollHeight || menu.offsetHeight ||
+      (menu.querySelectorAll('.wa-ctx-item').length * 28 +
+       menu.querySelectorAll('.wa-ctx-separator').length * 7 + 8);
+    const menuW = menu.offsetWidth || 180;
+    menu.style.visibility = '';
     const vw = window.innerWidth, vh = window.innerHeight;
-    const menuW = 180;
-    // Position at cursor for right-click; right-align below button for three-dot click
     let x, y;
     if (event.type === 'click') {
       const btn = event.target.closest('button');
       if (btn) {
         const btnRect = btn.getBoundingClientRect();
         x = btnRect.right - menuW;
-        y = btnRect.bottom + 2;
+        // Enough room below button? show below; otherwise flip above
+        y = (btnRect.bottom + menuH + 4 <= vh)
+          ? btnRect.bottom + 2
+          : Math.max(4, btnRect.top - menuH - 2);
       } else {
         x = event.clientX;
-        y = event.clientY;
+        y = (event.clientY + menuH + 4 <= vh)
+          ? event.clientY
+          : Math.max(4, event.clientY - menuH);
       }
     } else {
       x = event.clientX;
-      y = event.clientY;
+      y = (event.clientY + menuH + 4 <= vh)
+        ? event.clientY
+        : Math.max(4, event.clientY - menuH);
     }
     if (x + menuW > vw) x = vw - menuW - 4;
-    if (x < 0) x = 0;
-    if (y + 280 > vh) y = vh - 284;
+    if (x < 4) x = 4;
+    // Final safety clamp — catches edge cases where menuH was mis-measured
+    if (y + menuH > vh - 2) y = Math.max(4, vh - menuH - 4);
+    if (y < 4) y = 4;
     menu.style.left = x + 'px';
     menu.style.top  = y + 'px';
   };
@@ -1186,9 +1343,20 @@ window.WA = window.WA || {};
     if (path) WA.addToMyWorkspace(path);
   };
 
+  window.WA._fsBrowserAddToTempWorkspace = () => {
+    const { path } = _fsBrowserCtxTarget;
+    if (path) WA.addToTempWorkspace(path);
+  };
+
   window.WA._fsBrowserSendToAI = () => {
     const { path } = _fsBrowserCtxTarget;
-    if (path) _addFileToAIContext(path);
+    if (!path) return;
+    _addFileToAIContext(path);
+    // Expand the AI panel (same experience as dragging a file onto it)
+    _expandWAPanel();
+    // Focus the chat input so the user can immediately type a question
+    const input = $('wa-user-input');
+    if (input) setTimeout(() => input.focus(), 150);
   };
 
   window.WA._fsBrowserCopy = () => {
@@ -1295,7 +1463,13 @@ window.WA = window.WA || {};
       if (tabIdx >= 0) {
         const wasActive = state.openTabs[tabIdx].path === state.activeTabPath;
         if (wasActive && state.activeEditor) {
-          try { state.activeEditor.destroy(); } catch(_) {}
+          try {
+            state.activeEditor.destroy();
+          } catch(e) {
+            console.error('Editor destroy failed:', e);
+            const canvas = document.getElementById('wa-canvas');
+            if (canvas) canvas.innerHTML = '';
+          }
           state.activeEditor = null; state.activeTabPath = null;
           state.fileId = null; state.fileType = null; state.fileName = null;
           const canvas = document.getElementById('wa-canvas');
@@ -1400,7 +1574,13 @@ window.WA = window.WA || {};
       if (tabIdx >= 0) {
         const wasActive = state.openTabs[tabIdx].path === state.activeTabPath;
         if (wasActive && state.activeEditor) {
-          try { state.activeEditor.destroy(); } catch(e) {}
+          try {
+            state.activeEditor.destroy();
+          } catch(e) {
+            console.error('Editor destroy failed:', e);
+            const canvas = document.getElementById('wa-canvas');
+            if (canvas) canvas.innerHTML = '';
+          }
           state.activeEditor = null;
           state.activeTabPath = null;
           state.fileId = null;
@@ -1666,18 +1846,35 @@ window.WA = window.WA || {};
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
         删除
       </div>`;
+    // Show at (0,0) hidden — browser computes real layout; no flash because paint
+    // is batched until after this synchronous handler returns.
     menu.classList.add('open');
+    menu.style.visibility = 'hidden';
+    menu.style.top  = '0px';
+    menu.style.left = '0px';
+    void menu.getBoundingClientRect(); // force synchronous reflow
+    const menuH2 = menu.scrollHeight || menu.offsetHeight ||
+      (menu.querySelectorAll('.wa-ctx-item').length * 28 +
+       menu.querySelectorAll('.wa-ctx-separator').length * 7 + 8);
+    const menuW2 = menu.offsetWidth || 180;
+    menu.style.visibility = '';
     const vw = window.innerWidth, vh = window.innerHeight;
-    let x = event.clientX, y = event.clientY;
-    // Clamp menu within the left panel
+    let x = event.clientX;
+    // Enough room below cursor? show below; otherwise flip above
+    let y = (event.clientY + menuH2 + 4 <= vh)
+      ? event.clientY
+      : Math.max(4, event.clientY - menuH2);
+    // Clamp within left panel
     const leftPanel = document.getElementById('wa-left');
     if (leftPanel) {
       const lRect = leftPanel.getBoundingClientRect();
-      if (x + 180 > lRect.right) x = lRect.right - 184;
+      if (x + menuW2 > lRect.right) x = lRect.right - menuW2 - 4;
       if (x < lRect.left) x = lRect.left + 4;
     }
-    if (x + 180 > vw) x = vw - 184;
-    if (y + 180 > vh) y = vh - 184;
+    if (x + menuW2 > vw) x = vw - menuW2 - 4;
+    if (x < 4) x = 4;
+    if (y + menuH2 > vh - 2) y = Math.max(4, vh - menuH2 - 4);
+    if (y < 4) y = 4;
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
   };
@@ -1742,18 +1939,34 @@ window.WA = window.WA || {};
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
         删除文件夹
       </div>`;
+    // Measure actual height before positioning (same pattern as _showBrowserCtx)
     menu.classList.add('open');
+    menu.style.visibility = 'hidden';
+    menu.style.top  = '0px';
+    menu.style.left = '0px';
+    void menu.getBoundingClientRect();
+    const menuH3 = menu.scrollHeight || menu.offsetHeight ||
+      (menu.querySelectorAll('.wa-ctx-item').length * 28 +
+       menu.querySelectorAll('.wa-ctx-separator').length * 7 + 8);
+    const menuW3 = menu.offsetWidth || 180;
+    menu.style.visibility = '';
     const vw = window.innerWidth, vh = window.innerHeight;
-    let x = event.clientX, y = event.clientY;
+    let x = event.clientX;
+    // Flip above cursor if not enough room below
+    let y = (event.clientY + menuH3 + 4 <= vh)
+      ? event.clientY
+      : Math.max(4, event.clientY - menuH3);
     // Clamp menu within the left panel
     const leftPanel = document.getElementById('wa-left');
     if (leftPanel) {
       const lRect = leftPanel.getBoundingClientRect();
-      if (x + 200 > lRect.right) x = lRect.right - 204;
+      if (x + menuW3 > lRect.right) x = lRect.right - menuW3 - 4;
       if (x < lRect.left) x = lRect.left + 4;
     }
-    if (x + 200 > vw) x = vw - 204;
-    if (y + 180 > vh) y = vh - 184;
+    if (x + menuW3 > vw) x = vw - menuW3 - 4;
+    if (x < 4) x = 4;
+    if (y + menuH3 > vh - 2) y = Math.max(4, vh - menuH3 - 4);
+    if (y < 4) y = 4;
     menu.style.left = x + 'px';
     menu.style.top = y + 'px';
   };
@@ -2032,6 +2245,35 @@ window.WA = window.WA || {};
     if (window.CSS && CSS.highlights) CSS.highlights.delete('wa-pinned');
   }
 
+  // Briefly highlight newly accepted AI text using CSS Custom Highlight API.
+  // Highlights the first matching text node in the editor (3-second green flash).
+  // Non-destructive — does NOT modify any DOM or editor state.
+  function _applyTemporaryHighlight(textToFind) {
+    if (!textToFind || !window.CSS || !CSS.highlights) return;
+    try {
+      const container = document.getElementById('wa-docx-editor') ||
+                        document.getElementById('wa-workspace') || document.body;
+      const ranges = [];
+      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
+      let node;
+      while ((node = walker.nextNode())) {
+        const text = node.nodeValue || '';
+        let idx = 0;
+        while ((idx = text.indexOf(textToFind, idx)) !== -1) {
+          const r = document.createRange();
+          r.setStart(node, idx);
+          r.setEnd(node, idx + textToFind.length);
+          ranges.push(r);
+          idx += textToFind.length;
+        }
+      }
+      if (ranges.length) {
+        CSS.highlights.set('wa-accepted-highlight', new Highlight(...ranges));
+        setTimeout(() => { try { CSS.highlights.delete('wa-accepted-highlight'); } catch(e) {} }, 3000);
+      }
+    } catch(e) { console.warn('[WA highlight]', e); }
+  }
+
   // Update the selection chip UI with new text (used in multiple places)
   function _pinSelectionChip(text) {
     state.pinnedSelection = text;
@@ -2054,15 +2296,80 @@ window.WA = window.WA || {};
   // Called whenever a file is opened or closed so the user always knows
   // which file the AI is currently working on.
   function _updateSubjectBar(fileName, fileType) {
+    // Keep the legacy subject-bar hidden — context is shown in the input-area indicator instead
     const bar = $('wa-subject-bar');
-    if (!bar) return;
-    if (!fileName) { bar.style.display = 'none'; return; }
-    const iconEl = $('wa-subject-icon');
-    const txt = $('wa-subject-text');
-    const icons = { docx: '📝', xlsx: '📊', pptx: '📋', pdf: '📕' };
-    if (iconEl) iconEl.textContent = icons[fileType] || '📄';
-    if (txt) txt.textContent = fileName;
-    bar.style.display = 'flex';
+    if (bar) bar.style.display = 'none';
+
+    const ctx = $('wa-context-indicator');
+    const ctxL = $('wa-ctx-label');
+
+    if (!fileName) {
+      if (ctx) ctx.style.display = 'none';
+      return;
+    }
+
+    if (ctx && ctxL) {
+      if (!state._aiFileContext || state._aiFileContext.length === 0) {
+        ctxL.innerHTML = `当前分析：<b style="color:var(--text);font-weight:600">${_escHtml(fileName)}</b>`;
+        ctx.style.display = 'flex';
+      } else {
+        ctx.style.display = 'none';
+      }
+    }
+  }
+
+  // ── Extract PPTX table shape data as tab-separated text (for AI actions) ──
+  function _extractPptxTableText(shape) {
+    const rows = shape.table_rows || 0;
+    const cols = shape.table_cols || 0;
+    const cellDataMap = {};
+    (shape.cells || []).forEach(c => { cellDataMap[c.row + '_' + c.col] = c; });
+    const lines = [];
+    for (let r = 0; r < rows; r++) {
+      const rowData = [];
+      for (let c = 0; c < cols; c++) {
+        const cell = cellDataMap[r + '_' + c];
+        rowData.push((cell && cell.text) ? cell.text.replace(/[\t\n]/g, ' ').trim() : '');
+      }
+      lines.push(rowData.join('\t'));
+    }
+    return lines.join('\n');
+  }
+
+  // ── Extract an HTML <table> DOM element as tab-separated text ──────────────
+  function _extractHtmlTableText(tblEl) {
+    const lines = [];
+    for (let r = 0; r < tblEl.rows.length; r++) {
+      const row = tblEl.rows[r];
+      const cells = [];
+      for (let c = 0; c < row.cells.length; c++) {
+        cells.push(row.cells[c].textContent.trim().replace(/[\t\n]/g, ' '));
+      }
+      lines.push(cells.join('\t'));
+    }
+    return lines.join('\n');
+  }
+
+  // ── Show #wa-pdf-tooltip positioned near a DOM element (for table shapes) ──
+  function _showTableTooltipNear(el) {
+    const tt = $('wa-pdf-tooltip');
+    if (!tt || !el) return;
+    const rect = el.getBoundingClientRect();
+    const GAP = 6;
+    const vw = window.innerWidth;
+    tt.style.visibility = 'hidden';
+    tt.style.display = 'flex';
+    const ttW = tt.offsetWidth || 260;
+    tt.style.display = 'none';
+    tt.style.visibility = '';
+    const cx = rect.left + rect.width / 2;
+    let left = cx - ttW / 2;
+    left = Math.max(8, Math.min(left, vw - ttW - 8));
+    let top = rect.top - 42 - GAP;
+    if (top < 8) top = rect.bottom + GAP;
+    tt.style.left = left + 'px';
+    tt.style.top = top + 'px';
+    tt.style.display = 'flex';
   }
 
   // ── Position #wa-pdf-tooltip below the WangEditor format bar (or below the
@@ -2092,18 +2399,19 @@ window.WA = window.WA || {};
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    // Center horizontally on the cursor (or selection center if no cursor info)
-    const cx = (mouseEvent && typeof mouseEvent.clientX === 'number') ? mouseEvent.clientX : rect.left + rect.width / 2;
+    // Horizontal: center on the selection bounding box (reliable for any selection shape).
+    // Using mouse clientX caused drift when the user finished dragging at an edge.
+    const cx = rect.left + rect.width / 2;
     let left = cx - ttW / 2;
     left = Math.max(8, Math.min(left, vw - ttW - 8));
 
-    // Anchor vertically to the cursor release point (not the full selection bottom).
-    // For long multi-paragraph selections, rect.bottom can be hundreds of px below
-    // where the user stopped, making the toolbar feel "too far away".
-    const anchorY = (mouseEvent && typeof mouseEvent.clientY === 'number') ? mouseEvent.clientY : rect.bottom;
-    let top = anchorY + GAP;
-    if (top + ttH > vh - 8) top = anchorY - ttH - GAP;
-    top = Math.max(8, top);
+    // Vertical: prefer ABOVE the selection top so the toolbar sits where the user's
+    // eye is (start of the selection), not at the bottom where they released the mouse.
+    // For long multi-paragraph selections, mouseEvent.clientY (mouse-release) can be
+    // hundreds of px below the readable content, giving the appearance of "far away".
+    let top = rect.top - ttH - GAP;
+    if (top < 8) top = rect.bottom + GAP;      // no room above → drop below selection
+    if (top + ttH > vh - 8) top = Math.max(8, rect.top - ttH - GAP); // clamp viewport bottom
 
     tt.style.left = left + 'px';
     tt.style.top  = top  + 'px';
@@ -2134,9 +2442,61 @@ window.WA = window.WA || {};
         _clearPinnedHighlight();
         _applyPinnedHighlight();
       }
+
+      // Live-update the context indicator to show selected text preview (always)
+      const ctx2 = $('wa-context-indicator');
+      const ctxL2 = $('wa-ctx-label');
+      if (ctx2 && ctxL2) {
+        const preview = sel.length > 60 ? sel.substring(0, 60) + '…' : sel;
+        ctxL2.innerHTML = `已选中：<b style="color:var(--primary,#7c6af5);font-weight:600">${_escHtml(preview)}</b>`;
+        ctx2.style.display = 'flex';
+      }
     } else {
+      // ── PPTX table shape selected: expose its data to AI quick-actions ──
+      if (state.fileType === 'pptx' && state.activeEditor && state.activeEditor._lastTableText) {
+        lastSelectionText = state.activeEditor._lastTableText;
+        const countEl = $('wa-tooltip-count');
+        if (countEl) countEl.textContent = `${state.activeEditor._lastTableRows}×${state.activeEditor._lastTableCols} 表格`;
+        _showTableTooltipNear(state.activeEditor._selShape);
+        return;
+      }
+      // ── DOCX table: cursor clicked inside a table cell with no text selection ──
+      if (state.fileType === 'docx' && e.target && e.target.closest) {
+        const tbl = e.target.closest('#wa-editor-content table');
+        if (tbl) {
+          const tableText = _extractHtmlTableText(tbl);
+          if (tableText) {
+            lastSelectionText = tableText;
+            const rows = tbl.rows.length;
+            const cols = rows > 0 ? tbl.rows[0].cells.length : 0;
+            const countEl = $('wa-tooltip-count');
+            if (countEl) countEl.textContent = `${rows}×${cols} 表格`;
+            _showTableTooltipNear(tbl);
+            // Update context indicator
+            const ctx2 = $('wa-context-indicator');
+            const ctxL2 = $('wa-ctx-label');
+            if (ctx2 && ctxL2) {
+              ctxL2.innerHTML = `已选中：<b style="color:var(--primary,#7c6af5);font-weight:600">${rows}×${cols} 表格</b>`;
+              ctx2.style.display = 'flex';
+            }
+            return;
+          }
+        }
+      }
       tt.style.display = 'none';
       lastSelectionText = "";
+      // Revert context indicator: multi-doc count or single file name
+      const ctx3 = $('wa-context-indicator');
+      const ctxL3 = $('wa-ctx-label');
+      if (ctx3 && ctxL3) {
+        const nFiles = state._aiFileContext ? state._aiFileContext.length : 0;
+        if (nFiles > 0) {
+          ctxL3.innerHTML = `已附加 <b style="color:var(--text);font-weight:600">${nFiles} 份文件</b>`;
+          ctx3.style.display = 'flex';
+        } else {
+          _updateSubjectBar(state.fileName, state.fileType);
+        }
+      }
     }
   });
 
@@ -2183,6 +2543,10 @@ window.WA = window.WA || {};
     if (!sel) { showToast('请先选中文字', 'info'); return; }
 
     $('wa-pdf-tooltip').style.display = 'none';
+    // Save WangEditor Slate selection BEFORE clearing browser selection, so
+    // acceptProposal can restore it for an in-place, Undo-safe replacement.
+    _saveEditorRange();
+    state.pinnedSelection = sel;
     // Clear the browser text selection so the mouseup handler won't
     // re-show the tooltip over the document while the result is loading.
     lastSelectionText = '';
@@ -2208,7 +2572,7 @@ window.WA = window.WA || {};
 
     state.lastPinnedSel = sel;
     // Read-only actions: show result as chat message, not as a proposal card
-    const READ_ONLY_QUICK_ACTIONS = new Set(['总结', '解释']);
+    const READ_ONLY_QUICK_ACTIONS = new Set(['总结', '解释', '翻译']);
     fetch('/api/v1/workspace/quick-action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2222,12 +2586,17 @@ window.WA = window.WA || {};
     .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
     .then(data => {
       loadingEl.remove();
-      // Notify user if cloud AI was unavailable and local model was used
+      // Notify user about model used
       if (data.used_local_model) {
         const noteEl = document.createElement('div');
         noteEl.className = 'wa-msg system';
-        noteEl.style.cssText = 'background:rgba(255,171,0,0.1);border-left:3px solid #ffab00;padding:5px 8px;font-size:11px;color:#a07800;border-radius:3px;';
-        noteEl.textContent = '⚠️ 云端 AI 暂时不可用，本次由本地模型 (Ollama) 处理，结果质量可能略有差异。';
+        const _userChoseLocal = (state.lockedModel === 'local');
+        noteEl.style.cssText = _userChoseLocal
+          ? 'background:rgba(80,160,80,0.08);border-left:3px solid #52a052;padding:5px 8px;font-size:11px;color:#3a7a3a;border-radius:3px;'
+          : 'background:rgba(255,171,0,0.1);border-left:3px solid #ffab00;padding:5px 8px;font-size:11px;color:#a07800;border-radius:3px;';
+        noteEl.textContent = _userChoseLocal
+          ? '🦙 本次由本地模型 (Ollama) 生成'
+          : '⚠️ 云端 AI 暂时不可用，本次由本地模型 (Ollama) 处理，结果质量可能略有差异。';
         msgs.appendChild(noteEl);
       }
       // ── Chart result ──
@@ -2564,6 +2933,11 @@ window.WA = window.WA || {};
             const bar = _hoverCtEl.querySelector('.w-e-bar');
             // offsetHeight === 0 means the element is display:none or has no height → hidden
             if (!bar || bar.offsetHeight === 0) return;
+            // When CSS zoom is applied to .w-e-scroll, getBoundingClientRect() may return
+            // pre-zoom layout coordinates (browser-specific), making newTop huge → bar flies off-screen.
+            // Skip repositioning in that case; WangEditor's default positioning takes over.
+            const scrollEl = _hoverCtEl.querySelector('.w-e-scroll');
+            if (scrollEl && Math.abs((parseFloat(scrollEl.style.zoom) || 1) - 1) > 0.01) return;
             const winSel = window.getSelection();
             // 只对文字选择生效；表格/图片 hoverbar 保持 WangEditor 原位
             if (!winSel || winSel.rangeCount === 0 || !winSel.toString().trim()) return;
@@ -2627,21 +3001,104 @@ window.WA = window.WA || {};
         return;
       }
       if (cmd.type === 'replace_text') {
-        // Replace original_text with proposed_text throughout the document.
-        // Uses HTML-level string replacement which works reliably for Chinese text
-        // that isn't split across inline tags.
         const original = cmd.original || '';
         const proposed = cmd.value || '';
         if (!original) return;
-        const currentHtml = (() => { try { return this.editor.getHtml(); } catch(e) { return this._lastHtml || ''; } })();
-        const newHtml = currentHtml.split(original).join(proposed);
-        if (newHtml === currentHtml) {
+
+        // Convert plain-text AI reply to safe HTML for WangEditor insertion.
+        // Handles multi-paragraph replies by wrapping lines in <p> tags.
+        const _toInsertHtml = (text) => {
+          if (!text) return '';
+          if (text.trimStart().startsWith('<')) return text;  // already HTML
+          const paras = text.split(/\n{2,}/).filter(p => p.trim());
+          if (paras.length > 1) {
+            return paras.map(p => '<p>' + p.replace(/\n/g, '<br>') + '</p>').join('');
+          }
+          return text.replace(/\n/g, '<br>');
+        };
+
+        let replaced = false;
+        let usedSlate = false;
+
+        // ── Strategy 1: Restore Slate selection then dangerouslyInsertHtml ────
+        // Preserves Undo history — Ctrl+Z works after this path.
+        if (this._savedRange) {
+          try {
+            this.editor.focus();
+            this.editor.select(this._savedRange);
+            const selText = (this.editor.getSelectionText() || '').replace(/\s+/g, ' ').trim();
+            const origNorm = original.replace(/\s+/g, ' ').trim();
+            // Accept if the restored selection overlaps the original text enough
+            const selOk = selText && (
+              selText === origNorm ||
+              origNorm.startsWith(selText.substring(0, Math.min(15, selText.length))) ||
+              selText.startsWith(origNorm.substring(0, Math.min(15, origNorm.length)))
+            );
+            if (selOk) {
+              this.editor.dangerouslyInsertHtml(_toInsertHtml(proposed));
+              this._savedRange = null;
+              replaced = true;
+              usedSlate = true;
+            }
+          } catch (e) {
+            console.warn('[WA replace_text] slate path failed:', e);
+          }
+        }
+
+        // ── Strategy 2: HTML-level replacement (destroys Undo history) ────────
+        // Handles both single-paragraph and multi-paragraph selections.
+        // Multi-paragraph: browser getSelection gives \n, but HTML has </p><p>.
+        if (!replaced) {
+          try {
+            const currentHtml = (() => { try { return this.editor.getHtml(); } catch(e) { return this._lastHtml || ''; } })();
+
+            // 2a: direct string match (works for single-paragraph selections)
+            let newHtml = currentHtml.includes(original)
+              ? currentHtml.split(original).join(proposed)
+              : currentHtml;
+
+            // 2b: paragraph-boundary aware regex for multi-paragraph selections
+            if (newHtml === currentHtml) {
+              const lines = original.split('\n').filter(l => l.trim());
+              if (lines.length > 1) {
+                const escapedLines = lines.map(l => l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+                const flexRe = new RegExp(
+                  escapedLines.join('(?:\\s*</p>\\s*<p[^>]*>\\s*|\\s*<br\\s*/?>\\s*|[\\s\\u3000])+'),
+                  'g'
+                );
+                const candidate = currentHtml.replace(flexRe, () => proposed);
+                if (candidate !== currentHtml) newHtml = candidate;
+              }
+            }
+
+            if (newHtml !== currentHtml) {
+              this.render(newHtml);
+              replaced = true;
+            }
+          } catch (e) {
+            console.warn('[WA replace_text] html path failed:', e);
+          }
+        }
+
+        if (!replaced) {
           showToast('未在文档中找到原文', 'info');
           return;
         }
-        // Rebuild editor with new HTML (safest way to replace entire content in WangEditor v5)
-        this.render(newHtml);
+
         showToast('AI 已更新文档', 'success');
+        if (typeof WA.scheduleAutoSave === 'function') WA.scheduleAutoSave();
+
+        // Brief green highlight on the newly inserted text (3 s, CSS-only, non-destructive)
+        const plainProposed = proposed.replace(/<[^>]+>/g, '').trim();
+        if (plainProposed) {
+          // Use the first meaningful sentence/clause (≤30 chars) as the search token.
+          const firstToken = plainProposed
+            .split(/[。！？.!?\n]/)
+            .map(s => s.trim())
+            .find(s => s.length >= 4) || plainProposed.substring(0, 30);
+          // Delay: Slate path is synchronous, HTML render needs DOM rebuild time.
+          setTimeout(() => _applyTemporaryHighlight(firstToken), usedSlate ? 60 : 350);
+        }
         return;
       }
       if (cmd.type === 'set_html' || cmd.type === 'insert_text') {
@@ -3147,15 +3604,36 @@ window.WA = window.WA || {};
         slideArea.addEventListener('wheel', this._pptxWheelHandler, { passive: false });
       }
 
-      // Save selection range so toolbar interactions (font-size select, etc.) don't lose it
+      // Save selection range so toolbar interactions (font-size select, etc.) don't lose it.
+      // Also update the format toolbar to reflect the run at the current cursor/selection start.
       this._selChangeHandler = () => {
         if (!this._editMode) return;
         const sel = window.getSelection();
-        if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+        if (sel && sel.rangeCount > 0) {
           const r = sel.getRangeAt(0);
-          const startEl = r.startContainer.nodeType === 3 ? r.startContainer.parentElement : r.startContainer;
-          if (startEl && startEl.classList && startEl.classList.contains('wa-pptx-run')) {
-            this._savedRange = r.cloneRange();
+          const anchorEl = r.startContainer.nodeType === 3 ? r.startContainer.parentElement : r.startContainer;
+          if (anchorEl && anchorEl.classList && anchorEl.classList.contains('wa-pptx-run')) {
+            if (!r.isCollapsed) this._savedRange = r.cloneRange();
+            // Update toolbar to reflect run at cursor/selection start
+            this._activeSpan = anchorEl;
+            const _pi = parseInt(anchorEl.dataset.pi), _ri = parseInt(anchorEl.dataset.ri);
+            const _slide = this.data && this.data.slides[this._curIdx];
+            const _shp = _slide && (_slide.shapes || []).find(s => s.id === parseInt(anchorEl.dataset.shapeId));
+            if (_shp && _shp.paragraphs[_pi]) {
+              const _run = (_shp.paragraphs[_pi].runs || [])[_ri];
+              if (_run) {
+                if ($('wa-pptx-bold'))      $('wa-pptx-bold').classList.toggle('active', !!_run.bold);
+                if ($('wa-pptx-italic'))    $('wa-pptx-italic').classList.toggle('active', !!_run.italic);
+                if ($('wa-pptx-underline')) $('wa-pptx-underline').classList.toggle('active', !!_run.underline);
+                if ($('wa-pptx-fontsize') && _run.size) $('wa-pptx-fontsize').value = Math.round(_run.size);
+                if ($('wa-pptx-fontname') && _run.fontName) $('wa-pptx-fontname').value = _run.fontName;
+                if ($('wa-pptx-fontcolor') && _run.color) {
+                  $('wa-pptx-fontcolor').value = _run.color.startsWith('#') ? _run.color : '#000000';
+                  const _sw = $('wa-pptx-fontcolor-swatch');
+                  if (_sw) _sw.style.background = _run.color;
+                }
+              }
+            }
           }
         } else {
           // Collapsed or no selection — only clear saved range when still in edit mode focus
@@ -3285,6 +3763,7 @@ window.WA = window.WA || {};
       canvas.style.height = pxH + 'px';
       canvas.style.background = slide.background || '#ffffff';
       canvas.innerHTML = '';
+      this._scale = scale;  // store for use by _selectShape/_startResize
 
       // Ascending z_order: low z = back (appended first), high z = front (appended last, on top in DOM)
       (slide.shapes || []).sort((a, b) => a.z_order - b.z_order).forEach(shape => {
@@ -3311,6 +3790,7 @@ window.WA = window.WA || {};
           const bgLuma = _hexLuma(effectiveBg);
           const defaultTextColor = bgLuma < 0.4 ? '#f0f0f0' : '#1a1a1a';
           const inner = document.createElement('div');
+          inner.className = 'wa-pptx-inner';
           inner.style.cssText = `width:100%;height:100%;padding:4px 6px;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column;color:${defaultTextColor};`;
           shape.paragraphs.forEach((para, pi) => {
             const pEl = document.createElement('div');
@@ -3352,20 +3832,57 @@ window.WA = window.WA || {};
             if (!(para.runs || []).length) pEl.appendChild(document.createElement('br'));
             inner.appendChild(pEl);
           });
+          // Sync all run text to data model when inner (the contentEditable container) fires input.
+          inner.addEventListener('input', () => {
+            inner.querySelectorAll('.wa-pptx-run').forEach(span => {
+              const pi = parseInt(span.dataset.pi), ri = parseInt(span.dataset.ri);
+              if (shape.paragraphs[pi] && shape.paragraphs[pi].runs && shape.paragraphs[pi].runs[ri]) {
+                shape.paragraphs[pi].runs[ri].text = span.textContent;
+              }
+            });
+            this._redrawThumb(idx);
+            WA.scheduleAutoSave();
+          });
+          // Prevent Enter from inserting raw DOM nodes; Escape exits edit mode.
+          inner.addEventListener('keydown', ev => {
+            if (ev.key === 'Enter') ev.preventDefault();
+            if (ev.key === 'Escape') { ev.stopPropagation(); this._exitEditMode(); }
+          });
           el.appendChild(inner);
           // Belt-and-suspenders: stop mousedown from reaching shape's move handler
           // when already in edit mode for this shape (prevents move during text drag).
           inner.addEventListener('mousedown', ev => {
             if (this._editMode && this._selShape === el) ev.stopPropagation();
           });
+          // Cursor: border zone → 'move', interior → 'text' (only when selected & not editing)
+          el.addEventListener('mousemove', ev => {
+            if (ev.target.classList && ev.target.classList.contains('wa-pptx-handle')) return;
+            if (this._editMode && this._selShape === el) { el.style.cursor = 'text'; return; }
+            if (this._selShape !== el) { el.style.cursor = 'text'; return; }
+            const _r = el.getBoundingClientRect(), _B = 8;
+            const _onBord = ev.clientX < _r.left + _B || ev.clientX > _r.right - _B ||
+                            ev.clientY < _r.top  + _B || ev.clientY > _r.bottom - _B;
+            el.style.cursor = _onBord ? 'move' : 'text';
+          });
           el.addEventListener('mousedown', e => {
             if (this._insertMode) return;
-            // In edit mode on this shape: let browser handle cursor/text-selection
+            // In edit mode on this shape: let browser (and inner) handle cursor/text-selection
             if (this._editMode && this._selShape === el) return;
-            // Track if shape was already selected — a click without drag will enter edit mode
-            const enterEdit = shape.has_text && (this._selShape === el) && !this._editMode;
+            e.stopPropagation();
+            // Office PPT model: border zone → move shape; interior → enter text editing
+            const rect = el.getBoundingClientRect();
+            const BORDER_T = 8;
+            const onBorder = e.clientX < rect.left + BORDER_T || e.clientX > rect.right - BORDER_T ||
+                             e.clientY < rect.top + BORDER_T  || e.clientY > rect.bottom - BORDER_T;
+            const wasSelected = (this._selShape === el);
             this._selectShape(el, shape);
-            this._startMove(e, el, shape, canvas, scale, enterEdit);
+            if (!onBorder && wasSelected) {
+              // Interior click on already-selected text shape → enter edit mode, no shape-drag
+              this._startMove(e, el, shape, canvas, scale, true, false);
+            } else {
+              // Border click or first click on shape → select + allow drag
+              this._startMove(e, el, shape, canvas, scale, false);
+            }
           });
           el.addEventListener('dblclick', e => {
             if (this._insertMode) return;
@@ -3384,6 +3901,15 @@ window.WA = window.WA || {};
           img.draggable = false;
           el.appendChild(img);
           el.style.cursor = 'default';
+          // Cursor: border zone → 'move', interior → 'default' (only when selected)
+          el.addEventListener('mousemove', ev => {
+            if (ev.target.classList && ev.target.classList.contains('wa-pptx-handle')) return;
+            if (this._selShape !== el) { el.style.cursor = 'default'; return; }
+            const _r = el.getBoundingClientRect(), _B = 8;
+            const _onBord = ev.clientX < _r.left + _B || ev.clientX > _r.right - _B ||
+                            ev.clientY < _r.top  + _B || ev.clientY > _r.bottom - _B;
+            el.style.cursor = _onBord ? 'move' : 'default';
+          });
           el.addEventListener('mousedown', e => {
             if (this._insertMode) return;
             this._selectShape(el, shape);
@@ -3393,31 +3919,89 @@ window.WA = window.WA || {};
           // ── Table shape ──────────────────────────────────────────────────
           const rows = shape.table_rows || 0;
           const cols = shape.table_cols || 0;
-          const cellMap = {};
-          (shape.cells || []).forEach(c => { cellMap[c.row + '_' + c.col] = c.text; });
+          // Keep a mutable map to cell data objects so input handlers update shape.cells in place
+          const cellDataMap = {};
+          (shape.cells || []).forEach(c => { cellDataMap[c.row + '_' + c.col] = c; });
           const tbl = document.createElement('table');
-          tbl.style.cssText = 'width:100%;height:100%;border-collapse:collapse;table-layout:fixed;pointer-events:none;';
-          // scale = px/EMU; 12pt at 96dpi ≈ 16px; use pt * 96/72 * scale * EMU_PER_PT
-          // Simplified: pt * 12700 EMU/pt * scale (px/EMU) = pt * scale * 12700
-          // BUT scale is already ~1.5e-4 so correct formula: 12pt * scale EMU/px = 12*scale*1EMU→
-          // Correct: 1pt = 12700 EMU; fontSize_px = pt * 12700 * scale
+          tbl.style.cssText = 'width:100%;height:100%;border-collapse:collapse;table-layout:fixed;';
           const baseFontPx = Math.max(Math.round(10 * 12700 * scale), 6);
           for (let r = 0; r < rows; r++) {
             const tr = document.createElement('tr');
             for (let c = 0; c < cols; c++) {
               const td = document.createElement('td');
-              td.style.cssText = `border:1px solid #d0d0d0;padding:2px 4px;overflow:hidden;font-size:${baseFontPx}px;vertical-align:top;word-break:break-word;`;
-              td.textContent = cellMap[r + '_' + c] || '';
+              td.className = 'wa-pptx-cell';
+              td.dataset.row = r;
+              td.dataset.col = c;
+              td.contentEditable = 'false';
+              td.style.cssText = `border:1px solid #d0d0d0;padding:2px 4px;overflow:hidden;font-size:${baseFontPx}px;vertical-align:top;word-break:break-word;outline:none;`;
+              const cellData = cellDataMap[r + '_' + c];
+              td.textContent = (cellData && cellData.text) || '';
+              td.addEventListener('input', () => {
+                if (cellData) {
+                  cellData.text = td.textContent;
+                } else {
+                  // Defensive: cell not in original data — create entry
+                  const newCell = { row: r, col: c, text: td.textContent };
+                  shape.cells.push(newCell);
+                  cellDataMap[r + '_' + c] = newCell;
+                }
+                WA.scheduleAutoSave();
+              });
+              td.addEventListener('keydown', e => {
+                if (e.key === 'Escape') {
+                  this._exitEditMode();
+                  e.preventDefault();
+                } else if (e.key === 'Tab') {
+                  e.preventDefault();
+                  const allCells = Array.from(tbl.querySelectorAll('.wa-pptx-cell'));
+                  const tdIdx = allCells.indexOf(td);
+                  const next = allCells[e.shiftKey ? tdIdx - 1 : tdIdx + 1];
+                  if (next) { next.focus(); this._activeSpan = next; }
+                }
+              });
+              td.addEventListener('focus', () => {
+                this._selectShape(el, shape);
+                this._activeSpan = td;
+              });
               tr.appendChild(td);
             }
             tbl.appendChild(tr);
           }
           el.appendChild(tbl);
           el.style.overflow = 'hidden';
+          el.style.cursor = 'default';
+          // Cursor: border zone → 'move' (only when selected)
+          el.addEventListener('mousemove', ev => {
+            if (ev.target.classList && ev.target.classList.contains('wa-pptx-handle')) return;
+            if (this._editMode && this._selShape === el) return;  // let browser handle inside table
+            if (this._selShape !== el) { el.style.cursor = 'default'; return; }
+            const _r = el.getBoundingClientRect(), _B = 8;
+            const _onBord = ev.clientX < _r.left + _B || ev.clientX > _r.right - _B ||
+                            ev.clientY < _r.top  + _B || ev.clientY > _r.bottom - _B;
+            el.style.cursor = _onBord ? 'move' : 'default';
+          });
+          // Stop mousedown from propagating to the move handler when already editing this table
+          tbl.addEventListener('mousedown', ev => {
+            if (this._editMode && this._selShape === el) ev.stopPropagation();
+          });
           el.addEventListener('mousedown', e => {
             if (this._insertMode) return;
+            if (this._editMode && this._selShape === el) return;
             this._selectShape(el, shape);
             this._startMove(e, el, shape, canvas, scale);
+          });
+          el.addEventListener('dblclick', e => {
+            if (this._insertMode) return;
+            e.stopPropagation();
+            // Enter table edit mode: make all cells editable
+            if (this._editMode && this._selShape === el) return;
+            this._editMode = true;
+            el.classList.add('wa-pptx-editing');
+            el.querySelectorAll('.wa-pptx-cell').forEach(td => { td.contentEditable = 'true'; });
+            // Try to focus the cell that was double-clicked
+            const target = e.target.closest('.wa-pptx-cell');
+            const focusCell = target || el.querySelector('.wa-pptx-cell');
+            if (focusCell) { focusCell.focus(); this._activeSpan = focusCell; }
           });
         } else if (shape._type === 'CHART') {
           // ── Chart shape — show a visible placeholder (no chart lib available)
@@ -3541,9 +4125,59 @@ window.WA = window.WA || {};
       document.addEventListener('mouseup', onUp);
     }
 
+    // ── Resize shape ─────────────────────────────────────────────────────────
+
+    _startResize(e, el, shape, canvas, scale, handleType) {
+      const startX = e.clientX, startY = e.clientY;
+      const startLeft = el.offsetLeft, startTop = el.offsetTop;
+      const startW = el.offsetWidth, startH = el.offsetHeight;
+      const pxW = canvas.offsetWidth, pxH = canvas.offsetHeight;
+      const MIN_W = 30, MIN_H = 20;
+
+      const onMove = (ev) => {
+        const dx = ev.clientX - startX, dy = ev.clientY - startY;
+        let newLeft = startLeft, newTop = startTop;
+        let newW = startW, newH = startH;
+
+        if (handleType.includes('e')) newW = Math.max(MIN_W, startW + dx);
+        if (handleType.includes('s')) newH = Math.max(MIN_H, startH + dy);
+        if (handleType.includes('w')) {
+          newW = Math.max(MIN_W, startW - dx);
+          newLeft = startLeft + startW - newW;
+        }
+        if (handleType.includes('n')) {
+          newH = Math.max(MIN_H, startH - dy);
+          newTop = startTop + startH - newH;
+        }
+        // Clamp to canvas bounds
+        newLeft = Math.max(0, Math.min(pxW - MIN_W, newLeft));
+        newTop  = Math.max(0, Math.min(pxH - MIN_H, newTop));
+
+        el.style.left   = newLeft + 'px';
+        el.style.top    = newTop  + 'px';
+        el.style.width  = newW    + 'px';
+        el.style.height = newH    + 'px';
+      };
+
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        // Write back to data model in EMU
+        shape.left   = Math.round(parseInt(el.style.left)   / scale);
+        shape.top    = Math.round(parseInt(el.style.top)    / scale);
+        shape.width  = Math.round(parseInt(el.style.width)  / scale);
+        shape.height = Math.round(parseInt(el.style.height) / scale);
+        this._redrawThumb(this._curIdx);
+        WA.scheduleAutoSave();
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+
     // ── Drag to move ─────────────────────────────────────────────────────────
 
-    _startMove(e, el, shape, canvas, scale, enterEditOnClick = false) {
+    _startMove(e, el, shape, canvas, scale, enterEditOnClick = false, allowDrag = true) {
       // preventDefault/stopPropagation only happen once movement exceeds threshold.
       e.stopPropagation();
 
@@ -3555,6 +4189,7 @@ window.WA = window.WA || {};
       const onMove = (ev) => {
         const dx = ev.clientX - startX, dy = ev.clientY - startY;
         if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+        if (!allowDrag) return;  // interior text click — don't drag shape
         ev.preventDefault();
         if (!moved) { window.getSelection && window.getSelection().removeAllRanges(); }
         moved = true;
@@ -3591,7 +4226,13 @@ window.WA = window.WA || {};
       if (this._editMode && this._selShape === el) return;
       this._editMode = true;
       el.classList.add('wa-pptx-editing');
-      el.querySelectorAll('.wa-pptx-run').forEach(s => { s.contentEditable = 'true'; });
+      const _inner = el.querySelector('.wa-pptx-inner');
+      if (_inner) {
+        _inner.contentEditable = 'true';
+        _inner.querySelectorAll('.wa-pptx-run').forEach(s => s.removeAttribute('contenteditable'));
+      } else {
+        el.querySelectorAll('.wa-pptx-run').forEach(s => { s.contentEditable = 'true'; });
+      }
 
       // Attempt precise caret placement at click point
       let placed = false;
@@ -3628,22 +4269,65 @@ window.WA = window.WA || {};
       this._clearSelection();
       this._selShape = el;
       el.classList.add('wa-pptx-selected');
+      // Add 8 resize handles (CSS positions them at corners + edge midpoints)
+      const _canvas = $('wa-pptx-slide-canvas');
+      ['nw','n','ne','e','se','s','sw','w'].forEach(hType => {
+        const hEl = document.createElement('div');
+        hEl.className = 'wa-pptx-handle';
+        hEl.dataset.h = hType;
+        hEl.addEventListener('mousedown', e => {
+          e.stopPropagation();
+          e.preventDefault();
+          this._startResize(e, el, shape, _canvas, this._scale || 1, hType);
+        });
+        el.appendChild(hEl);
+      });
+      // Store table data so the mouseup handler can expose it to AI quick-actions
+      if (shape && shape._type === 'TABLE' && shape.cells) {
+        this._lastTableText = _extractPptxTableText(shape);
+        this._lastTableRows = shape.table_rows || 0;
+        this._lastTableCols = shape.table_cols || 0;
+      } else {
+        this._lastTableText = null;
+        this._lastTableRows = 0;
+        this._lastTableCols = 0;
+      }
     }
 
     _clearSelection() {
       if (this._selShape) {
         this._selShape.classList.remove('wa-pptx-selected');
-        this._selShape.querySelectorAll('.wa-pptx-run').forEach(s => { s.contentEditable = 'false'; });
+        // Remove resize handles
+        this._selShape.querySelectorAll('.wa-pptx-handle').forEach(h => h.remove());
+        this._selShape.style.overflow = 'hidden';
+        const _inner = this._selShape.querySelector('.wa-pptx-inner');
+        if (_inner) {
+          _inner.contentEditable = 'false';
+          _inner.querySelectorAll('.wa-pptx-run').forEach(s => { s.contentEditable = 'false'; });
+        } else {
+          this._selShape.querySelectorAll('.wa-pptx-run').forEach(s => { s.contentEditable = 'false'; });
+        }
+        this._selShape.querySelectorAll('.wa-pptx-cell').forEach(td => { td.contentEditable = 'false'; td.blur(); });
         this._selShape = null;
       }
       this._editMode = false;
+      this._lastTableText = null;
+      this._lastTableRows = 0;
+      this._lastTableCols = 0;
     }
 
     _enterEditMode(el) {
       if (this._editMode && this._selShape === el) return;  // already editing this shape
       this._editMode = true;
       el.classList.add('wa-pptx-editing');
-      el.querySelectorAll('.wa-pptx-run').forEach(s => { s.contentEditable = 'true'; });
+      // Make inner container the single contentEditable region so cross-run/line selection works
+      const _inner = el.querySelector('.wa-pptx-inner');
+      if (_inner) {
+        _inner.contentEditable = 'true';
+        _inner.querySelectorAll('.wa-pptx-run').forEach(s => s.removeAttribute('contenteditable'));
+      } else {
+        el.querySelectorAll('.wa-pptx-run').forEach(s => { s.contentEditable = 'true'; });
+      }
       const first = el.querySelector('.wa-pptx-run');
       if (first) {
         first.focus();
@@ -3662,9 +4346,16 @@ window.WA = window.WA || {};
     _exitEditMode() {
       if (this._selShape) {
         this._selShape.classList.remove('wa-pptx-editing');
-        this._selShape.querySelectorAll('.wa-pptx-run').forEach(s => {
-          s.contentEditable = 'false';
-          s.blur();
+        const _inner = this._selShape.querySelector('.wa-pptx-inner');
+        if (_inner) {
+          _inner.contentEditable = 'false';
+          _inner.querySelectorAll('.wa-pptx-run').forEach(s => { s.contentEditable = 'false'; s.blur(); });
+        } else {
+          this._selShape.querySelectorAll('.wa-pptx-run').forEach(s => { s.contentEditable = 'false'; s.blur(); });
+        }
+        this._selShape.querySelectorAll('.wa-pptx-cell').forEach(td => {
+          td.contentEditable = 'false';
+          td.blur();
         });
       }
       this._editMode = false;
@@ -3892,13 +4583,16 @@ window.WA = window.WA || {};
          const pdf = this._pdfDoc;
 
          const dpr = window.devicePixelRatio || 1;
+         // Always render at 2× minimum for crisp text on all displays
+         const quality = Math.max(2, dpr);
+         const containerW = (c.clientWidth || 800) - 32;
          for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
-            // Base scale: fit to container width, then multiply by user zoom and DPR
-            const containerW = c.clientWidth || 800;
             const baseViewport = page.getViewport({ scale: 1 });
-            const fitScale = Math.max(1.0, (containerW - 32) / baseViewport.width);
-            const viewport = page.getViewport({ scale: fitScale * this._scale });
+            // fitScale: page → container CSS pixels (no artificial floor; allows shrink-to-fit)
+            const fitScale = (containerW / baseViewport.width) * this._scale;
+            // High-quality off-screen viewport (quality× physical resolution)
+            const renderViewport = page.getViewport({ scale: fitScale * quality });
 
             const wrap = document.createElement('div');
             wrap.className = 'wa-pdf-page-wrap';
@@ -3906,17 +4600,17 @@ window.WA = window.WA || {};
 
             const canvas = document.createElement('canvas');
             const context = canvas.getContext('2d');
-            // Physical pixels = CSS pixels × DPR → sharp on retina/high-DPI screens
-            canvas.width  = Math.floor(viewport.width  * dpr);
-            canvas.height = Math.floor(viewport.height * dpr);
-            canvas.style.width  = Math.floor(viewport.width)  + 'px';
-            canvas.style.height = Math.floor(viewport.height) + 'px';
+            // Physical canvas = full quality resolution
+            canvas.width  = Math.floor(renderViewport.width);
+            canvas.height = Math.floor(renderViewport.height);
+            // CSS display size = exactly fitScale (no CSS max-width distortion)
+            canvas.style.width  = Math.floor(baseViewport.width  * fitScale) + 'px';
+            canvas.style.height = Math.floor(baseViewport.height * fitScale) + 'px';
 
             wrap.appendChild(canvas);
             c.appendChild(wrap);
 
-            const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
-            await page.render({ canvasContext: context, viewport, transform }).promise;
+            await page.render({ canvasContext: context, viewport: renderViewport }).promise;
          }
       } catch (e) {
          c.innerHTML = `<div style="color:var(--danger)">PDF 渲染报错: ${e.message}</div>`;
@@ -3956,6 +4650,44 @@ window.WA = window.WA || {};
       $(this.containerId).removeEventListener('mouseup', this.handleMouseUp);
       $(this.containerId).removeEventListener('wheel', this._wheelHandler);
       document.removeEventListener('mousedown', this.hideTooltip);
+    }
+  }
+
+  // ── Plain Text / Code editor ─────────────────────────────────────────────
+  class KotoTextEditor {
+    constructor(fileType) {
+      this._fileType = fileType; // 'text' | 'code'
+      this._ta = $('wa-text-content');
+      this._badge = $('wa-text-lang-badge');
+      $('wa-text-editor').classList.add('active');
+      this._ta.addEventListener('input', () => WA.scheduleAutoSave());
+    }
+
+    render(data) {
+      const content = (data && typeof data === 'object') ? (data.content || '') : (data || '');
+      const lang    = (data && typeof data === 'object') ? (data.language || '') : '';
+      this._ta.value = content;
+      if (this._badge) {
+        this._badge.textContent = lang ? lang.toUpperCase() : 'TXT';
+        this._badge.style.display = lang ? 'block' : 'none';
+      }
+      this._ta.focus();
+    }
+
+    getContent() { return this._ta.value; }
+
+    serialize() { return this._ta.value; }
+
+    applyToolCall(cmd) {
+      if (cmd.type === 'set_html' || cmd.type === 'set_text') {
+        this._ta.value = cmd.value || '';
+        WA.scheduleAutoSave();
+      }
+    }
+
+    destroy() {
+      $('wa-text-editor').classList.remove('active');
+      if (this._badge) { this._badge.textContent = ''; this._badge.style.display = 'none'; }
     }
   }
 
@@ -4115,7 +4847,13 @@ window.WA = window.WA || {};
 
          // Destroy old editor if it was a different file (not a tab switch)
          if (state.activeEditor) {
-           try { state.activeEditor.destroy(); } catch(e) { console.warn('[destroy old editor]', e); }
+           try {
+            state.activeEditor.destroy();
+          } catch(e) {
+            console.error('Editor destroy failed:', e);
+            const canvas = document.getElementById('wa-canvas');
+            if (canvas) canvas.innerHTML = '';
+          }
          }
          state.activeEditor = null;
 
@@ -4169,6 +4907,9 @@ window.WA = window.WA || {};
             await _ensurePdfJS();
             state.activeEditor = new KotoPdfViewer();
             state.activeEditor.render(json.data.raw_url, json.data.pages);
+         } else if (state.fileType === 'text' || state.fileType === 'code') {
+            state.activeEditor = new KotoTextEditor(state.fileType);
+            state.activeEditor.render(json.data);
          }
 
          _renderTabs();
@@ -4187,6 +4928,19 @@ window.WA = window.WA || {};
   };
 
   // ── Unified AI Chat Stream (backed by /api/chat/stream) ─────────────────
+
+  /** Toggle send / stop button visibility while a stream is active. */
+  function _setStreamBtn(streaming) {
+    const sendBtn = $('wa-send-btn');
+    const stopBtn = $('wa-stop-btn');
+    if (sendBtn) sendBtn.style.display = streaming ? 'none' : '';
+    if (stopBtn) stopBtn.style.display = streaming ? '' : 'none';
+  }
+
+  /** Abort the currently active AI stream (if any). */
+  window.WA.stopStream = () => {
+    if (state._streamAbortCtrl) state._streamAbortCtrl.abort();
+  };
 
   function _waSession() {
     return 'workspace_' + (state.fileId || 'default');
@@ -4219,10 +4973,14 @@ window.WA = window.WA || {};
       doc_has_sel: opts.has_sel   || false,
     };
     try {
+      const ctrl = new AbortController();
+      state._streamAbortCtrl = ctrl;
+      _setStreamBtn(true);
       const resp = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: ctrl.signal,
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
       const reader = resp.body.getReader();
@@ -4283,8 +5041,9 @@ window.WA = window.WA || {};
                   }
                 } catch(e) { /* ignore */ }
               }
-              // Show AI action bar if file is open + AI gave text + this response had no proposals
-              const _canApply = !proposalsRendered && loadingEl && loadingEl.dataset.rawText && state.activeEditor;
+              // Show AI action bar only for write-intent replies. Translation and
+              // other read-only requests should stay in preview mode.
+              const _canApply = !proposalsRendered && opts.allow_apply !== false && loadingEl && loadingEl.dataset.rawText && state.activeEditor;
               if (_canApply) {
                 // Snapshot state at response-complete time so buttons remain
                 // correct even if the user sends another message before clicking.
@@ -4292,6 +5051,7 @@ window.WA = window.WA || {};
                   pinnedSel:  state.lastPinnedSel,
                   toolCall:   state.pendingToolCall,
                   outputMode: state.aiOutputMode,
+                  allowWrite: true,
                 };
                 msgs.appendChild(_makeAIActionBar(_barSnap));
                 // Scroll to show the action bar — it was appended AFTER the
@@ -4323,12 +5083,24 @@ window.WA = window.WA || {};
       }
       state.isLoading = false;
     } catch (err) {
-      console.error('[WorkspaceAI] Chat stream error:', err);
-      if (loadingEl) {
-        loadingEl.classList.remove('streaming');
-        loadingEl.textContent = `❌ 网络错误：${err.message}`;
+      if (err.name === 'AbortError') {
+        // User cancelled — finalize the streaming bubble gracefully
+        if (loadingEl) {
+          loadingEl.classList.remove('streaming');
+          if (!loadingEl.textContent.trim()) loadingEl.textContent = '[已取消]';
+          else loadingEl.innerHTML += '<span style="color:var(--muted,#888);font-size:11px"> [已取消]</span>';
+        }
+      } else {
+        console.error('[WorkspaceAI] Chat stream error:', err);
+        if (loadingEl) {
+          loadingEl.classList.remove('streaming');
+          loadingEl.textContent = `❌ 网络错误：${err.message}`;
+        }
       }
       state.isLoading = false;
+    } finally {
+      state._streamAbortCtrl = null;
+      _setStreamBtn(false);
     }
   }
 
@@ -4899,11 +5671,22 @@ window.WA = window.WA || {};
     return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
 
+  function _proposalCanApply(proposal) {
+    if (!proposal) return false;
+    if (proposal.read_only || proposal.apply_disabled) return false;
+    const rationale = (proposal.rationale || '').replace(/<[^>]+>/g, '').trim();
+    const actionType = String(proposal.action || proposal.action_type || '').trim();
+    if (/翻译/.test(rationale) || /translate/i.test(actionType)) return false;
+    return !!(proposal.tool_call || (proposal.original_text && proposal.proposed_text));
+  }
+
   function _makeProposalCard(proposal, index, total) {
     const card = document.createElement('div');
     card.className = 'wa-proposal-card';
     card.dataset.proposalId = proposal.id;
     card.dataset.index = index;
+    const canApply = _proposalCanApply(proposal);
+    card.dataset.canApply = canApply ? '1' : '0';
 
     const header = document.createElement('div');
     header.className = 'wa-proposal-header';
@@ -4923,10 +5706,11 @@ window.WA = window.WA || {};
 
     const actions = document.createElement('div');
     actions.className = 'wa-proposal-actions';
-    actions.innerHTML =
-      `<button class="wa-proposal-btn accept" onclick="WA.acceptProposal('${proposal.id}',this)">✅ 接受</button>` +
-      `<button class="wa-proposal-btn reject" onclick="WA.rejectProposal('${proposal.id}',this)">❌ 拒绝</button>` +
-      `<button class="wa-proposal-btn modify" onclick="WA.modifyProposal('${proposal.id}',this)">✏️ 再修改</button>`;
+    actions.innerHTML = canApply
+      ? `<button class="wa-proposal-btn accept" onclick="WA.acceptProposal('${proposal.id}',this)">✅ 接受</button>` +
+        `<button class="wa-proposal-btn reject" onclick="WA.rejectProposal('${proposal.id}',this)">❌ 拒绝</button>` +
+        `<button class="wa-proposal-btn modify" onclick="WA.modifyProposal('${proposal.id}',this)">✏️ 再修改</button>`
+      : `<button class="wa-proposal-btn reject" onclick="WA.rejectProposal('${proposal.id}',this)">关闭</button>`;
 
     card.appendChild(header);
     card.appendChild(diffView);
@@ -4938,16 +5722,17 @@ window.WA = window.WA || {};
   function _makeProposalBatchBar(proposals) {
     const bar = document.createElement('div');
     bar.className = 'wa-proposal-batch-bar';
+    const actionableCount = proposals.filter(_proposalCanApply).length;
     const tIdx = state._aiTargetFileIdx;
     const targetFile = (tIdx >= 0 && tIdx < state._aiFileContext.length) ? state._aiFileContext[tIdx] : null;
-    const canDownload = targetFile && /\.(docx|txt|md)$/i.test(targetFile.name);
+    const canDownload = actionableCount > 0 && targetFile && /\.(docx|txt|md)$/i.test(targetFile.name);
     const downloadBtn = canDownload
       ? `<button class="wa-proposal-btn download small" onclick="WA.downloadPatchedFile()" title="将全部修改应用到目标文件并下载">⬇ 应用并下载 ${_escHtml(targetFile.name)}</button>`
       : '';
     bar.innerHTML =
       `<span class="wa-proposal-batch-label">共 ${proposals.length} 条修改建议</span>` +
-      '<span class="wa-proposal-batch-counter" id="wa-proposal-counter">0/' + proposals.length + ' 已处理</span>' +
-      '<button class="wa-proposal-btn accept small" onclick="WA.batchAcceptAll()">全部接受</button>' +
+      '<span class="wa-proposal-batch-counter" id="wa-proposal-counter">0/' + actionableCount + ' 已处理</span>' +
+      (actionableCount > 0 ? '<button class="wa-proposal-btn accept small" onclick="WA.batchAcceptAll()">全部接受</button>' : '') +
       '<button class="wa-proposal-btn reject small" onclick="WA.batchRejectAll()">全部拒绝</button>' +
       downloadBtn;
     return bar;
@@ -4956,8 +5741,8 @@ window.WA = window.WA || {};
   function _updateProposalCounter() {
     const counter = document.getElementById('wa-proposal-counter');
     if (!counter) return;
-    const all = document.querySelectorAll('.wa-proposal-card');
-    const done = document.querySelectorAll('.wa-proposal-card.accepted, .wa-proposal-card.rejected');
+    const all = document.querySelectorAll('.wa-proposal-card[data-can-apply="1"]');
+    const done = document.querySelectorAll('.wa-proposal-card[data-can-apply="1"].accepted, .wa-proposal-card[data-can-apply="1"].rejected');
     counter.textContent = `${done.length}/${all.length} 已处理`;
   }
 
@@ -4967,6 +5752,10 @@ window.WA = window.WA || {};
     const proposals = state._activeProposals || [];
     const proposal = proposals.find(p => p.id === proposalId);
     if (!proposal) return;
+    if (!_proposalCanApply(proposal)) {
+      showToast('该结果仅供查看，不支持直接写入文档', 'info');
+      return;
+    }
 
     if (state.activeEditor) {
       try {
@@ -5011,6 +5800,10 @@ window.WA = window.WA || {};
     const proposals = state._activeProposals || [];
     const proposal = proposals.find(p => p.id === proposalId);
     if (!proposal) return;
+    if (!_proposalCanApply(proposal)) {
+      showToast('该结果仅供查看，不支持继续修改并写回文档', 'info');
+      return;
+    }
 
     const inputWrap = document.createElement('div');
     inputWrap.className = 'wa-proposal-modify-input';
@@ -5072,7 +5865,7 @@ window.WA = window.WA || {};
       showToast('请先设置目标文件（点击文件旁的📌）', 'warn');
       return;
     }
-    const proposals = (specificProposals || state._activeProposals || []).filter(p => p.original_text && p.proposed_text);
+    const proposals = (specificProposals || state._activeProposals || []).filter(_proposalCanApply);
     if (!proposals.length) {
       showToast('没有可应用的修改建议', 'warn');
       return;
@@ -5630,16 +6423,13 @@ window.WA = window.WA || {};
           : contextRaw;
       const fileType = state.fileType || 'general';
 
-      if (context) {
-        $('wa-context-indicator').style.display = 'flex';
-        setTimeout(() => $('wa-context-indicator').style.display = 'none', 3000);
-      }
-
       // Build full message with document context + tool/proposal format instructions
       // NOTE: defined at function scope so it's accessible both inside and outside the if block below
+      const _isTranslateIntent = (t) => /翻译|中译英|英译中|译成|翻成|translate/i.test(t || '');
       const _isReadOnlyIntent = (t) => {
+        if (_isTranslateIntent(t)) return true;
         const roRe = /总结|摘要|分析|解释|讲解|简介|介绍|是什么|描述|概括|审阅/;
-        const modRe = /修改|改写|润色|删除|替换|更正|修复|优化|重写|调整|纠正|校对|添加|插入|精简|压缩|扩充|完善|补充|修订|翻译|转换|改进/;
+        const modRe = /修改|改写|润色|删除|替换|更正|修复|优化|重写|调整|纠正|校对|添加|插入|精简|压缩|扩充|完善|补充|修订|转换|改进/;
         return !pinnedSel && roRe.test(t) && !modRe.test(t);
       };
       let fullMessage = text;
@@ -5707,6 +6497,7 @@ window.WA = window.WA || {};
         doc_edit: _isDocEdit,
         file_type: state.fileType || '',
         has_sel:  !!pinnedSel,
+        allow_apply: !_isReadOnlyIntent(text),
       });
   };
 
@@ -5874,7 +6665,80 @@ window.WA = window.WA || {};
     }
   });
 
-  // MIME types for showSaveFilePicker
+  // ── Close-warning API (called by app.js / pywebview close flow) ────────────
+
+  /**
+   * Returns an array of {path, name} for every open tab that has unsaved changes.
+   * Called by app.js closeWindow() before destroying the pywebview window.
+   */
+  window.WA.getUnsavedTabs = () => {
+    return state.openTabs.filter(t => t.modified).map(t => ({ path: t.path, name: t.name }));
+  };
+
+  /**
+   * Show the close-warning modal.  Resolves to 'save', 'discard', or 'cancel'.
+   * The caller (closeWindow in app.js) awaits this promise before deciding
+   * whether to actually destroy the window.
+   */
+  window.WA.showCloseWarning = (unsavedTabs) => {
+    return new Promise((resolve) => {
+      const overlay = $('wa-close-warn-overlay');
+      const listEl  = $('wa-close-warn-list');
+      if (!overlay || !listEl) { resolve('discard'); return; }
+      listEl.innerHTML = unsavedTabs.map(t => `<li>${_escHtml(t.name)}</li>`).join('');
+      overlay.style.display = 'flex';
+      // Store resolve so buttons can call it
+      overlay._resolve = resolve;
+    });
+  };
+
+  window.WA._closeWarnCancel = () => {
+    const overlay = $('wa-close-warn-overlay');
+    if (overlay) { overlay.style.display = 'none'; if (overlay._resolve) overlay._resolve('cancel'); }
+  };
+
+  window.WA._closeWarnDiscard = () => {
+    const overlay = $('wa-close-warn-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+      if (overlay._resolve) overlay._resolve('discard');
+    }
+  };
+
+  window.WA._closeWarnSaveAll = async () => {
+    const overlay = $('wa-close-warn-overlay');
+    if (overlay) overlay.style.display = 'none';
+    // Try to save the currently active tab (most common case)
+    // For a full save-all, iterate modified tabs
+    const modifiedTabs = state.openTabs.filter(t => t.modified);
+    for (const tab of modifiedTabs) {
+      try {
+        // Switch to the tab and trigger save
+        await _switchToTab(tab.path);
+        if (state.activeEditor) {
+          const data = state.activeEditor.serialize();
+          await fetch('/api/v1/workspace/auto_save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              file_type: tab.fileType,
+              file_id: tab.fileId,
+              ws_source_path: tab.path || null,
+              explicit: true,
+              data,
+            }),
+          });
+          tab.modified = false;
+        }
+      } catch (e) {
+        console.warn('[CloseWarn] Save failed for', tab.name, e);
+      }
+    }
+    _renderTabs();
+    if (overlay && overlay._resolve) overlay._resolve('save');
+  };
+
+
   const _MIME = {
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -6226,6 +7090,7 @@ window.WA = window.WA || {};
   // loadFileBrowser / loadRecentFiles are deferred to first open (openInMainView)
   // to avoid issuing API requests before the user has ever opened the workspace panel.
   _renderMyWorkspace();
+  _renderTempWorkspace();
   // Sync auto-save toggle appearance
   (() => { const btn = $('wa-autosave-toggle'); if (btn && _autoSaveEnabled) btn.classList.add('toggle-on'); })();
 
@@ -6252,6 +7117,33 @@ window.WA = window.WA || {};
       const filePath = e.dataTransfer.getData('application/wa-file-path');
       if (filePath) {
         WA.addToMyWorkspace(filePath);
+      }
+    });
+  });
+
+  // ── Temp Workspace: drag-drop to add files ──
+  const tmpwsList = $('wa-tmpws-list');
+  const tmpwsEmpty = $('wa-tmpws-empty');
+  [tmpwsList, tmpwsEmpty].forEach(el => {
+    if (!el) return;
+    el.addEventListener('dragover', (e) => {
+      if (e.dataTransfer.types.includes('application/wa-file-path') || e.dataTransfer.types.includes('Files')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (tmpwsList) tmpwsList.classList.add('drag-over');
+      }
+    });
+    el.addEventListener('dragleave', (e) => {
+      if (!el.contains(e.relatedTarget)) {
+        if (tmpwsList) tmpwsList.classList.remove('drag-over');
+      }
+    });
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (tmpwsList) tmpwsList.classList.remove('drag-over');
+      const filePath = e.dataTransfer.getData('application/wa-file-path');
+      if (filePath) {
+        WA.addToTempWorkspace(filePath);
       }
     });
   });
@@ -6326,6 +7218,8 @@ window.WA = window.WA || {};
         e.preventDefault();
         e.stopPropagation();
         _addFileToAIContext(filePath);
+        const input = $('wa-user-input');
+        if (input) setTimeout(() => input.focus(), 150);
       }
     });
   }
@@ -6346,6 +7240,8 @@ window.WA = window.WA || {};
         e.preventDefault();
         e.stopPropagation();
         _addFileToAIContext(filePath);
+        const input = $('wa-user-input');
+        if (input) setTimeout(() => input.focus(), 150);
       }
     });
   }

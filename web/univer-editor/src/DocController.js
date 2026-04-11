@@ -99,8 +99,9 @@ export class DocController {
     const container = document.getElementById('center-doc');
     if (!container) return;
 
-    // Remove any previous dropped-image placeholder from the same session
-    // so multiple drops don't stack if user made a mistake.
+    // Remove any previous dropped-image overlays so multiple drops don't stack.
+    container.querySelectorAll('.koto-dropped-image').forEach(el => el.remove());
+
     const wrapper = document.createElement('div');
     wrapper.className = 'koto-dropped-image';
     wrapper.title = '图表已插入（拖动可重新定位）';
@@ -138,9 +139,6 @@ export class DocController {
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
-
-    // Flash the container to confirm success
-    this._flashChangedRegion(0, 0, altText || '图表');
   }
 
   // ──────────────────────────────────────────

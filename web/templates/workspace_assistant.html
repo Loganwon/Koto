@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.css">
 
   <!-- ── App styles ── -->
-  <link rel="stylesheet" href="/static/css/workspace.css?v=20260403a">
+  <link rel="stylesheet" href="/static/css/workspace.css?v={{ range(100000,999999)|random }}">
 </head>
 <body class="wa-standalone">
 
@@ -149,6 +149,20 @@
         <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
         <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
       </div>
+      <!-- Temp Workspace: in-memory session-only files for temporary processing -->
+      <div class="wa-section-label collapsible" id="wa-tmpws-label">
+        <span class="wa-section-arrow open" id="wa-tmpws-arrow" onclick="WA.toggleSection('tmpworkspace')">›</span>
+        <span onclick="WA.toggleSection('tmpworkspace')" style="flex:1">临时工作区</span>
+        <span class="wa-section-badge" id="wa-tmpws-badge"></span>
+        <div class="wa-section-actions">
+          <button class="wa-icon-btn" onclick="event.stopPropagation();WA.addToTempWorkspace()" title="将当前文件加入临时工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">＋</button>
+          <button class="wa-icon-btn" onclick="event.stopPropagation();WA.clearTempWorkspace()" title="清空临时工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px;margin-left:2px">✕</button>
+        </div>
+      </div>
+      <div id="wa-tmpws-list" class="wa-myws-list"></div>
+      <div id="wa-tmpws-empty" class="wa-myws-empty" style="display:none">
+        <span>右键文件选择"加入临时工作区"<br>仅在本次会话中保留</span>
+      </div>
       <!-- My Workspace: pinned files the user is actively working on -->
       <div class="wa-section-label collapsible" id="wa-myws-label">
         <span class="wa-section-arrow open" id="wa-myws-arrow" onclick="WA.toggleSection('myworkspace')">›</span>
@@ -193,6 +207,23 @@
 
     <!-- Right-click context menu -->
     <div id="wa-ctx-menu"></div>
+
+    <!-- Close-warning dialog (shown when Koto closes with unsaved WA files) -->
+    <div id="wa-close-warn-overlay" class="wa-dlg-overlay" style="display:none">
+      <div class="wa-dlg-box" style="width:420px;max-width:95vw">
+        <div class="wa-dlg-title">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8a838" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          有未保存的文件
+        </div>
+        <p class="wa-dlg-hint" style="margin:12px 0">以下文件助手中的文件<b>尚未保存</b>，关闭后修改将会丢失：</p>
+        <ul id="wa-close-warn-list" style="font-size:12px;color:var(--text-muted);margin:0 0 16px 16px;padding:0;list-style:disc"></ul>
+        <div class="wa-dlg-actions" style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="wa-btn" onclick="WA._closeWarnCancel()">取消（继续使用）</button>
+          <button class="wa-btn" onclick="WA._closeWarnDiscard()">不保存，直接关闭</button>
+          <button class="wa-btn primary" onclick="WA._closeWarnSaveAll()">保存全部并关闭</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Archive/Organize panel overlay -->
     <div id="wa-archive-overlay" class="wa-dlg-overlay" style="display:none" onclick="if(event.target===this)WA.hideArchivePanel()">
@@ -380,6 +411,12 @@
 
         <!-- PDF: PDF.js viewer -->
         <div id="wa-pdf-viewer"></div>
+
+        <!-- Text / Code: plain text editor -->
+        <div id="wa-text-editor">
+          <div id="wa-text-lang-badge"></div>
+          <textarea id="wa-text-content" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+        </div>
       </div>
     </div>
 
@@ -531,6 +568,7 @@
                 <polygon points="22 2 15 22 11 13 2 9 22 2"/>
               </svg>
             </button>
+            <button id="wa-stop-btn" onclick="WA.stopStream()" title="停止生成" style="display:none;background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;white-space:nowrap;">⬛ 停止</button>
           </div>
         </div>
       </div>
@@ -539,6 +577,7 @@
 
   <!-- Floating Selection Toolbar — 3 core actions -->
   <div id="wa-pdf-tooltip" class="wa-selection-toolbar">
+    <span id="wa-tooltip-count" class="wa-tooltip-count"></span>
     <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('润色')">润色</button>
     <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('解释')">解释</button>
     <button onmousedown="event.preventDefault()" onclick="WA.sendSelectionToAI()">问 AI</button>
@@ -546,6 +585,8 @@
     <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('翻译')">翻译</button>
     <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('改写')">改写</button>
     <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('总结')">总结</button>
+    <div class="wa-toolbar-divider"></div>
+    <button onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('可视化')" title="将表格数据可视化为图表">📊 图表</button>
   </div>
 
   <!-- Chart Generation Dialog -->

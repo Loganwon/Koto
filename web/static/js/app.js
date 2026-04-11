@@ -228,6 +228,26 @@ async function maximizeWindow() {
 }
 
 async function closeWindow() {
+    // ── Check for unsaved files in the File Assistant ────────────────────────
+    if (window.WA && typeof window.WA.getUnsavedTabs === 'function') {
+        const unsaved = window.WA.getUnsavedTabs();
+        if (unsaved.length > 0) {
+            // Show the custom close-warning dialog inside the WA panel
+            // and wait for user decision ('save' | 'discard' | 'cancel')
+            let decision = 'discard';
+            if (typeof window.WA.showCloseWarning === 'function') {
+                decision = await window.WA.showCloseWarning(unsaved);
+            } else {
+                // Fallback: basic confirm
+                const names = unsaved.map(t => t.name).join('\n  - ');
+                const ok = confirm(`文件助手中有未保存的文件：\n  - ${names}\n\n直接关闭将丢失修改，是否继续？`);
+                decision = ok ? 'discard' : 'cancel';
+            }
+            if (decision === 'cancel') return;  // User chose to stay — do NOT close
+            // 'save' already saved files via _closeWarnSaveAll; 'discard' just proceeds
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
     if (window.pywebview && window.pywebview.api && window.pywebview.api.close) {
         await window.pywebview.api.close();
     } else {

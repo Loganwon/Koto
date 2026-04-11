@@ -1414,7 +1414,18 @@ a { color: var(--accent-primary); }
     flex-direction: column;
     overflow: hidden;
     min-height: 0;
+    position: relative; /* needed: containing block for ::before + position:absolute children */
+    /* backdrop-filter moved to ::before — direct backdrop-filter creates a containing block
+       for position:fixed descendants, breaking toolbar/overlay positioning */
+}
+.main-content::before {
+    content: '';
+    position: absolute;
+    inset: 0;
     backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    z-index: -1;
+    pointer-events: none;
 }
 
 /* API Key 缺失提醒横幅 */
@@ -4577,6 +4588,9 @@ body.desktop-mode .pill-btn {
 /* ── Main content: full-radius glass panel ── */
 .main-content.chatgpt-main {
     border-radius: var(--radius-lg);
+    /* backdrop-filter moved to ::before — see base .main-content rule */
+}
+.main-content.chatgpt-main::before {
     backdrop-filter: blur(20px) saturate(1.4);
     -webkit-backdrop-filter: blur(20px) saturate(1.4);
 }

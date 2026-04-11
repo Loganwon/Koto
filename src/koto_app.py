@@ -342,6 +342,7 @@ class WindowAPI:
         self.full_size = (1200, 800)
         self.full_pos = None
         self.mini_size = (320, 480)  # 适合高分辨率屏幕的迷你尺寸
+        self._force_close_flag = False  # Set by force_close() to skip unsaved-check
 
     def _get_logical_screen_size(self):
         """返回逻辑像素下的屏幕尺寸（pywebview.move/resize 使用逻辑像素坐标）。
@@ -480,7 +481,12 @@ class WindowAPI:
             logger.debug("Failed to toggle fullscreen: %s", e)
 
     def close(self):
-        """关闭窗口"""
+        """关闭窗口（来自JS调用）— 先在JS层检查未保存文件，再销毁"""
+        self.window.destroy()
+
+    def force_close(self):
+        """强制关闭窗口 — 绕过未保存检查，由JS关闭确认对话框调用"""
+        self._force_close_flag = True
         self.window.destroy()
 
     def open_url(self, url: str):
@@ -1241,7 +1247,46 @@ def main():
     window.expose(window_api.minimize)
     window.expose(window_api.maximize)
     window.expose(window_api.close)
+    window.expose(window_api.force_close)
     window.expose(window_api.open_url)
+
+    # ── 原生窗口X按钮关闭拦截 ─────────────────────────────────────
+    # 当用户点击操作系统原生的关闭按钮时，先让JS检查未保存文件；
+    # 若有未保存文件，显示自定义对话框，取消本次关闭。
+    # 对话框确认后调用 pywebview.api.force_close() 直接销毁窗口。
+    import json as _json_mod
+
+    def _on_closing():
+        if window_api._force_close_flag:
+            # force_close() already set flag and is destroying — allow
+            return True
+        try:
+            result = window.evaluate_js(
+                'window.WA && typeof window.WA.getUnsavedTabs === "function" '
+                '? JSON.stringify(window.WA.getUnsavedTabs()) : "[]"'
+            )
+            unsaved = _json_mod.loads(result or '[]')
+        except Exception:
+            unsaved = []
+        if not unsaved:
+            return True  # No unsaved files → allow close
+        # Show the WA close-warning dialog and cancel native close
+        try:
+            js_unsaved = _json_mod.dumps(unsaved)
+            window.evaluate_js(
+                f'window.WA && window.WA.showCloseWarning && '
+                f'window.WA.showCloseWarning({js_unsaved}).then(function(d){{'
+                f'  if(d!=="cancel") window.pywebview.api.force_close();'
+                f'}})'
+            )
+        except Exception as _e:
+            _write_log(f"⚠️ close-warning JS error: {_e}")
+            return True  # fallback: allow close
+        return False  # Cancel native close; JS will call force_close() when ready
+
+    window.events.closing += _on_closing
+    # ──────────────────────────────────────────────────────────────
+
 
     # 将 window_api 注入到 Flask app，供 HTTP 路由降级使用
     try:

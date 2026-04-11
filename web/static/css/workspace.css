@@ -962,8 +962,9 @@
     }
 
     /* Hoverbar (text selection/table popup): high z-index so it's above the ribbon */
-    #wa-docx-editor .w-e-bar {
+    #wa-docx-editor .w-e-text-container .w-e-bar {
       z-index: 10000 !important;
+      /* removed negative margin to prevent WangEditor bar from covering text when flipping downwards */
     }
 
     #wa-docx-editor .w-e-bar-item button,
@@ -1385,12 +1386,34 @@
     .wa-pptx-shape.wa-pptx-selected {
       outline: 2px solid #0078d4;
       outline-offset: 1px;
+      overflow: visible !important;  /* allow resize handles to appear outside bounds */
     }
 
     .wa-pptx-shape.wa-pptx-editing {
       outline: 2px solid #0078d4;
       outline-offset: 1px;
+      overflow: visible !important;
     }
+
+    /* ── Resize handles ─────────────────────────────────────── */
+    .wa-pptx-handle {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: #fff;
+      border: 1.5px solid #0078d4;
+      border-radius: 1px;
+      box-sizing: border-box;
+      z-index: 10000;
+    }
+    .wa-pptx-handle[data-h="nw"] { top: -4px; left: -4px;              cursor: nw-resize; }
+    .wa-pptx-handle[data-h="n"]  { top: -4px; left: calc(50% - 4px);   cursor: n-resize;  }
+    .wa-pptx-handle[data-h="ne"] { top: -4px; right: -4px;             cursor: ne-resize; }
+    .wa-pptx-handle[data-h="e"]  { top: calc(50% - 4px); right: -4px;  cursor: e-resize;  }
+    .wa-pptx-handle[data-h="se"] { bottom: -4px; right: -4px;          cursor: se-resize; }
+    .wa-pptx-handle[data-h="s"]  { bottom: -4px; left: calc(50% - 4px); cursor: s-resize; }
+    .wa-pptx-handle[data-h="sw"] { bottom: -4px; left: -4px;           cursor: sw-resize; }
+    .wa-pptx-handle[data-h="w"]  { top: calc(50% - 4px); left: -4px;   cursor: w-resize;  }
 
     .wa-pptx-run {
       outline: none;
@@ -1650,13 +1673,60 @@
 
     #wa-pdf-viewer.active { display: flex; }
 
+    /* Text / Code editor */
+    #wa-text-editor {
+      position: relative;
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      background: var(--bg, #1e1e1e);
+    }
+
+    #wa-text-editor.active { display: flex; }
+
+    #wa-text-lang-badge {
+      display: none;
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 11px;
+      font-family: monospace;
+      color: var(--text-muted, #888);
+      background: var(--bg2, #2a2a2a);
+      padding: 2px 7px;
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    #wa-text-content {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      padding: 16px;
+      box-sizing: border-box;
+      border: none;
+      outline: none;
+      resize: none;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text, #d4d4d4);
+      background: var(--bg, #1e1e1e);
+      tab-size: 4;
+    }
+
+    #wa-text-content::selection {
+      background: rgba(100, 149, 237, 0.35);
+    }
+
     .wa-pdf-page-wrap {
       box-shadow: 0 4px 24px rgba(0,0,0,0.4);
     }
 
     .wa-pdf-page-wrap canvas {
       display: block;
-      max-width: 100%;
+      /* width/height are set precisely in JS; no CSS scaling to avoid blur */
     }
 
     /* ── Floating Selection Toolbar — glassmorphism capsule ── */
@@ -1923,6 +1993,10 @@
       display: flex;
       flex-direction: column;
       gap: 12px;
+    }
+
+    #wa-ai-messages > * {
+      flex-shrink: 0; /* Prevent messages/cards from shrinking; force them to scroll instead */
     }
 
     /* Scrollbar */
@@ -2550,6 +2624,7 @@
 
     /* CSS Custom Highlight API */
     ::highlight(wa-pinned) { background-color: rgba(79,126,255,0.18); }
+    ::highlight(wa-accepted-highlight) { background-color: rgba(16, 163, 127, 0.3); }
 
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width: 5px; height: 5px; }
@@ -3111,17 +3186,23 @@
 /* ── AI panel: input-area attached-file hint ─────────────────── */
     #wa-ai-attached-hint {
       display: none;
-      align-items: center;
+      align-items: flex-start;
       gap: 6px;
-      padding: 5px 10px;
-      margin: 4px 0 2px;
-      background: rgba(79,126,255,0.08);
-      border: 1px solid rgba(79,126,255,0.25);
-      border-radius: 6px;
-      font-size: 12px;
-      color: var(--text);
+      padding: 8px 10px;
+      margin: 4px 0 8px;
+      background: rgba(79,126,255,0.05); /* Same as selection chip */
+      border: 1px solid rgba(79,126,255,0.2);
+      border-radius: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      animation: chipIn 0.15s ease;
     }
-    #wa-ai-attached-hint .hint-label { flex: 1; min-width: 0; }
+    #wa-ai-attached-hint svg {
+      margin-top: 2px;
+      color: #4f7eff;
+    }
+    #wa-ai-attached-hint .hint-label { flex: 1; min-width: 0; word-break: break-all; white-space: normal; }
     #wa-ai-attached-hint button {
       background: none;
       border: none;

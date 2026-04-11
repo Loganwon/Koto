@@ -157,8 +157,9 @@ document.addEventListener('DOMContentLoaded', () => {
     socketBridge.init();
 
     // 8. Drop-zone on #center-doc — accept chart images (from AI panel) and OS image files.
-    // NOTE: Use capture phase (3rd arg = true) so our handler fires BEFORE Univer's internal
-    // canvas drag listeners — this prevents the Univer "不支持" toast when dragging image files.
+    // NOTE: Register on DOCUMENT level (capture phase) so our handler fires BEFORE Univer's
+    // own document-level capture listeners. stopImmediatePropagation() prevents Univer from
+    // showing the "不支持" toast and corrupting editor state.
     const centerDoc = document.getElementById('center-doc');
     if (centerDoc) {
       // Helper: true if dataTransfer contains at least one image file from the OS
@@ -170,13 +171,15 @@ document.addEventListener('DOMContentLoaded', () => {
         return dt.types.includes('Files');
       };
 
-      // ── dragover: capture phase ──────────────────────────────────────────────
-      centerDoc.addEventListener('dragover', (e) => {
+      // ── dragover: document-level capture (beats Univer's document listeners) ──
+      document.addEventListener('dragover', (e) => {
+        if (!centerDoc.contains(e.target)) return;
         const isChart   = e.dataTransfer.types.includes('application/koto-chart-id');
         const isOsImage = _hasOsImage(e.dataTransfer);
         if (isChart || isOsImage) {
           e.preventDefault();
-          e.stopPropagation();   // prevent Univer canvas from seeing it
+          e.stopPropagation();
+          e.stopImmediatePropagation();  // prevent Univer's document-level capture handlers
           e.dataTransfer.dropEffect = 'copy';
           centerDoc.classList.add('koto-drop-active');
         }
@@ -189,8 +192,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       });
 
-      // ── drop: capture phase ──────────────────────────────────────────────────
-      centerDoc.addEventListener('drop', (e) => {
+      // ── drop: document-level capture ────────────────────────────────────────
+      document.addEventListener('drop', (e) => {
+        if (!centerDoc.contains(e.target)) return;
         centerDoc.classList.remove('koto-drop-active');
 
         // ── A. OS image file drop (jpg/png/gif/webp…) ──
@@ -198,6 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (imageFiles.length > 0) {
           e.preventDefault();
           e.stopPropagation();
+          e.stopImmediatePropagation();
           const file = imageFiles[0];
           const reader = new FileReader();
           reader.onload = (ev) => {
@@ -217,6 +222,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const imgName = e.dataTransfer.getData('application/koto-chart-name') || 'chart.png';
         if (!imgId) return;
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
 
         const entry  = window._kotoChartStore && window._kotoChartStore[imgId];
         const imgSrc = entry?.src;

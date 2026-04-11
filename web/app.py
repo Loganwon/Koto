@@ -2075,7 +2075,6 @@ def _register_blueprints_deferred():
         ("web.blueprints.dev", "dev_bp", None, "Dev"),
         ("web.blueprints.chat", "chat_bp", None, "Chat"),
         ("web.blueprints.workspace_assistant", "workspace_assistant_bp", None, "WorkspaceAssistant"),
-        ("web.blueprints.editor_docs", "editor_docs_bp", None, "EditorDocs"),
         ("web.blueprints.pptx_editor", "pptx_editor_bp", None, "PptxEditor"),
     ]
     import importlib as _il
@@ -17865,7 +17864,9 @@ def editor_ai_stream():
             _msg = "在线 AI 不可用，本地 Ollama 也未运行。请启动 Ollama 或配置云端 Key。"
             yield f"data: {json.dumps({'type': 'error', 'text': _msg}, ensure_ascii=False)}\n\n"
             return
-        if model_mode != "local":
+        if model_mode == "local":
+            yield f"data: {json.dumps({'type': 'info', 'text': '🦙 本次由本地模型 (Ollama) 生成'}, ensure_ascii=False)}\n\n"
+        else:
             yield f"data: {json.dumps({'type': 'info', 'text': '⚠️ 云端 AI 暂不可用，已切换到本地模型 (Ollama)，速度可能较慢。'}, ensure_ascii=False)}\n\n"
         try:
             _local = _get_local_provider()
@@ -18130,7 +18131,10 @@ def editor_ai_chart():
                 yield f"data: {json.dumps({'type': 'error', 'text': 'AI 代码生成失败（云端不可用且 Ollama 未运行）'}, ensure_ascii=False)}\n\n"
                 return
             if _llm_source == "local":
-                yield f"data: {json.dumps({'type': 'info', 'text': '⚠️ 云端 AI 暂时不可用，已切换到本地模型 (Ollama) 生成代码，速度可能较慢。'}, ensure_ascii=False)}\n\n"
+                _local_info_text = ('🦙 本次由本地模型 (Ollama) 生成代码'
+                                    if model_mode == 'local'
+                                    else '⚠️ 云端 AI 暂时不可用，已切换到本地模型 (Ollama) 生成代码，速度可能较慢。')
+                yield f"data: {json.dumps({'type': 'info', 'text': _local_info_text}, ensure_ascii=False)}\n\n"
 
             # Strip markdown code fences if model added them
             raw_code = _re.sub(r"^```[a-z]*\n?", "", raw_code, flags=_re.MULTILINE)

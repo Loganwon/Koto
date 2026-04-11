@@ -24,8 +24,18 @@ workspace_assistant_bp = Blueprint("workspace_assistant", __name__)
 # 临时文件存储目录根（相对于项目根）
 _TMP_ROOT = Path("workspace") / "tmp"
 
+# 纯文本 / 代码文件后缀（直接读取 UTF-8 内容）
+_TEXT_EXTS = {
+    ".txt", ".md", ".markdown",
+    ".py", ".js", ".ts", ".json", ".html", ".css", ".xml",
+    ".sh", ".bash", ".yaml", ".yml",
+    ".c", ".cpp", ".h", ".hpp", ".java", ".rb", ".go",
+    ".rs", ".cs", ".php", ".swift", ".kt", ".r", ".sql",
+    ".toml", ".ini", ".cfg", ".conf",
+}
+
 # 允许上传的文件后缀
-_ALLOWED_EXT = {".docx", ".xlsx", ".pptx", ".pdf"}
+_ALLOWED_EXT = {".docx", ".xlsx", ".pptx", ".pdf"} | _TEXT_EXTS
 
 
 def _get_session_id() -> str:
@@ -255,6 +265,10 @@ def open_file_by_path():
         elif ext == ".pdf":
             data = parse_pdf(str(tmp_path), file_id)
             file_type = "pdf"
+        elif ext in _TEXT_EXTS:
+            content = target.read_text(encoding="utf-8", errors="replace")
+            file_type = "text" if ext in (".txt", ".md", ".markdown") else "code"
+            data = {"content": content, "language": ext.lstrip("."), "extension": ext}
         else:
             return jsonify({"error": "内部格式路由错误"}), 500
 
@@ -333,6 +347,10 @@ def open_file():
         elif ext == ".pdf":
             data = parse_pdf(str(tmp_path), file_id)
             file_type = "pdf"
+        elif ext in _TEXT_EXTS:
+            content = tmp_path.read_text(encoding="utf-8", errors="replace")
+            file_type = "text" if ext in (".txt", ".md", ".markdown") else "code"
+            data = {"content": content, "language": ext.lstrip("."), "extension": ext}
         else:
             return jsonify({"error": "内部格式路由错误"}), 500
 
@@ -467,6 +485,12 @@ def save_file():
             mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
             if not file_name.endswith(".pptx"):
                 file_name = Path(file_name).stem + ".pptx"
+
+        elif file_type in ("text", "code"):
+            content = data if isinstance(data, str) else (data.get("content", "") if isinstance(data, dict) else "")
+            raw_bytes = content.encode("utf-8")
+            ext_guess = Path(file_name).suffix.lower() if file_name else ".txt"
+            mime = "text/markdown; charset=utf-8" if ext_guess == ".md" else "text/plain; charset=utf-8"
 
         else:
             return jsonify({"error": f"不支持的导出格式: {file_type}"}), 400
@@ -644,6 +668,13 @@ def auto_save():
                 return jsonify({"error": "原始 PPTX 文件不存在或已过期"}), 404
             raw_bytes = export_pptx(str(matches[0]), data)
             suffix = ".pptx"
+        elif file_type in ("text", "code"):
+            content = data if isinstance(data, str) else (data.get("content", "") if isinstance(data, dict) else "")
+            raw_bytes = content.encode("utf-8")
+            # Derive the original extension from the tmp file
+            tmp_dir = _ensure_tmp_dir()
+            existing = [f for f in tmp_dir.glob(f"{file_id}.*") if f.suffix.lower() in _TEXT_EXTS]
+            suffix = existing[0].suffix.lower() if existing else ".txt"
         else:
             return jsonify({"error": f"不支持的格式: {file_type}"}), 400
 

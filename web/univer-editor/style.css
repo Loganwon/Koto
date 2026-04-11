@@ -84,6 +84,16 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
 #center-doc > * { height: 100%; }
 #center-doc canvas { display: block; }
 
+/* ── Univer 工具栏修复：dropdown 箭头即使处于 disabled 状态也仍可点击展开菜单，
+       cursor 应显示 pointer 而非 not-allowed ── */
+.univer-toolbar-item-select-arrow-disabled {
+  cursor: pointer !important;
+}
+/* 整个 toolbar-item select 容器也会被标记 disabled，但 dropdown 仍工作 */
+.univer-toolbar-item-select-disabled .univer-toolbar-item-select-arrow {
+  cursor: pointer !important;
+}
+
 /* ═══════════ 右侧 AI 面板（可折叠） ═══════════ */
 #right-ai-panel {
   width: 300px;
@@ -772,6 +782,10 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
   bottom: 24px;
   right: 24px;
   z-index: 500;
+  /* Override the `#center-doc > * { height: 100% }` rule which would otherwise
+     make this overlay span the full container height and block the Univer canvas. */
+  height: auto !important;
+  width: auto;
   background: #1e1e2e;
   border: 1px solid #3c3c3c;
   border-radius: 6px;

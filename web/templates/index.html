@@ -1773,6 +1773,33 @@
                   <!-- Hidden inputs for file/folder pickers (used by file menu) -->
                   <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
                   <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
+                  <!-- Temp Workspace: session-only in-memory list -->
+                  <div class="wa-section-label collapsible" id="wa-tmpws-label">
+                    <span class="wa-section-arrow open" id="wa-tmpws-arrow" onclick="WA.toggleSection('tmpworkspace')">&#8250;</span>
+                    <span onclick="WA.toggleSection('tmpworkspace')" style="flex:1">临时工作区</span>
+                    <span class="wa-section-badge" id="wa-tmpws-badge"></span>
+                    <div class="wa-section-actions">
+                      <button class="wa-icon-btn" onclick="event.stopPropagation();WA.clearTempWorkspace()" title="清空临时工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">✕</button>
+                    </div>
+                  </div>
+                  <div id="wa-tmpws-list" class="wa-myws-list"></div>
+                  <div id="wa-tmpws-empty" class="wa-myws-empty" style="display:none">
+                    <span>右键文件选择"加入临时工作区"<br>仅在本次会话中保留</span>
+                  </div>
+                  <!-- My Workspace: persisted pinned files -->
+                  <div class="wa-section-label collapsible" id="wa-myws-label">
+                    <span class="wa-section-arrow open" id="wa-myws-arrow" onclick="WA.toggleSection('myworkspace')">&#8250;</span>
+                    <span onclick="WA.toggleSection('myworkspace')" style="flex:1">我的工作区</span>
+                    <span class="wa-section-badge" id="wa-myws-badge"></span>
+                    <div class="wa-section-actions">
+                      <button class="wa-icon-btn" onclick="event.stopPropagation();WA.addToMyWorkspace()" title="添加文件到工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">＋</button>
+                    </div>
+                  </div>
+                  <div id="wa-myws-list" class="wa-myws-list"></div>
+                  <div id="wa-myws-empty" class="wa-myws-empty" style="display:none">
+                    <span>右键文件选择"加入我的工作区"<br>或拖拽文件到此处</span>
+                  </div>
+                  <!-- File browser -->
                   <div class="wa-section-label collapsible" id="wa-ws-label">
                     <span class="wa-section-arrow open" id="wa-ws-arrow" onclick="WA.toggleSection('workspace')">&#8250;</span>
                     <span onclick="WA.toggleSection('workspace')" style="flex:1">工作区</span>
@@ -1930,6 +1957,10 @@
                       </div>
                     </div>
                     <div id="wa-pdf-viewer"></div>
+                    <div id="wa-text-editor">
+                      <div id="wa-text-lang-badge"></div>
+                      <textarea id="wa-text-content" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+                    </div>
                   </div><!-- /wa-canvas-body -->
                   <!-- Office-style status bar -->
                   <div id="wa-status-bar">
@@ -1976,10 +2007,30 @@
                       <button data-mode="chat" onclick="WA.setOutputMode('chat')">仅对话框</button>
                     </div>
                   </div>
-                  <div id="wa-subject-bar"><span class="subject-tag" id="wa-subject-tag">文件</span><span class="subject-text" id="wa-subject-text"></span></div>
-                  <div id="wa-ai-messages"><div class="wa-msg ai">你好！请从左侧打开一个文件，我可以帮你分析内容、润色文字、总结要点或翻译段落。</div></div>
+                  <div id="wa-subject-bar" style="display:none"><span class="subject-tag" id="wa-subject-tag">文件</span><span class="subject-text" id="wa-subject-text"></span></div>
+
+                  <!-- Analysis files panel (shown when ≥1 file is dragged for analysis) -->
+                  <div id="wa-ai-file-chips" style="display:none">
+                    <div class="wa-ai-file-chips-header"><!-- filled by _renderAIFileChips() --></div>
+                    <div id="wa-ai-file-chip-list" class="wa-ctx-file-list"></div>
+                    <div class="wa-ctx-drop-hint">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      <span>继续拖放文件到此处添加分析</span>
+                    </div>
+                  </div>
+
+                  <div id="wa-ai-messages"><div class="wa-msg ai">你好！请从左侧打开一个文件，我可以帮你分析内容、润色文字、总结要点或翻译段落。<br><br>💡 <b>多文档分析</b>：从左侧文件树拖拽多个文件到此处，我可以一起分析。</div></div>
+
+                  <!-- AI file drop overlay -->
+                  <div id="wa-ai-file-drop" style="display:none">
+                    <div class="wa-ai-file-drop-inner">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                      <span>拖放文件到此处<br>AI 将一起分析</span>
+                    </div>
+                  </div>
+
                   <div id="wa-ai-input-area">
-                    <div id="wa-selection-chip" style="display:none"><span class="chip-quote-bar"></span><span id="wa-selection-preview"></span><button class="chip-clear" onclick="WA.clearSelection()" title="取消选区">x</button></div>
+                    <div id="wa-selection-chip" style="display:none"><span class="chip-quote-bar"></span><span id="wa-selection-preview"></span><button class="chip-clear" onclick="WA.clearSelection()" title="取消选区">×</button></div>
                     <div id="wa-context-indicator" style="display:none"><div class="ctx-dot"></div><span id="wa-ctx-label">已附加上下文</span></div>
                     <div class="wa-ai-quick-actions" id="wa-quick-actions">
                       <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容')">润色</button>
@@ -1993,11 +2044,30 @@
                       <div class="wa-input-box-footer">
                         <span class="wa-input-hint">Enter 发送 Shift+Enter 换行</span>
                         <button id="wa-send-btn" onclick="WA.sendMessage()" title="发送"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+                        <button id="wa-stop-btn" onclick="WA.stopStream()" title="停止生成" style="display:none;background:rgba(239,68,68,0.12);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;white-space:nowrap;">⬛ 停止</button>
                       </div>
                     </div>
                   </div>
                 </div>
               </div><!-- /wa-workspace -->
+              <!-- Close-warning dialog: shown when closing Koto with unsaved WA files -->
+              <div id="wa-close-warn-overlay" class="wa-dlg-overlay" style="display:none">
+                <div class="wa-dlg-box" style="width:420px">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--warning,#f0a030)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span class="wa-dlg-title" style="margin:0">有未保存的文件</span>
+                  </div>
+                  <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">以下文件有未保存的修改：</p>
+                  <ul id="wa-close-warn-list" style="font-size:12px;color:var(--text-muted);margin:0 0 16px 16px;padding:0;list-style:disc"></ul>
+                  <div class="wa-dlg-footer" style="justify-content:space-between">
+                    <button class="wa-btn" onclick="WA._closeWarnCancel()" style="min-width:120px">取消（继续使用）</button>
+                    <div style="display:flex;gap:8px">
+                      <button class="wa-btn" onclick="WA._closeWarnDiscard()" style="background:var(--danger,#e05555);color:#fff;border-color:var(--danger,#e05555)">不保存，直接关闭</button>
+                      <button class="wa-btn primary" onclick="WA._closeWarnSaveAll()">保存全部并关闭</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
               <div id="wa-pdf-tooltip" class="wa-selection-toolbar">
                 <span id="wa-tooltip-count" class="wa-tooltip-count"></span>
                 <button onclick="WA.sendQuickAction('润色')">润色</button>

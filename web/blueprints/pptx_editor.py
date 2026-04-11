@@ -81,173 +81,14 @@ def _write_meta(meta: dict) -> None:
 
 def _parse_slides(raw_bytes: bytes) -> dict:
     """
-    Parse a .pptx binary blob into structured slide data.
-
-    Returns:
-        {
-          slide_width_emu, slide_height_emu,
-          slides: [ { index, shapes: [{id, name, type, left, top, width,
-                        height, has_text, paragraphs}] } ]
-        }
+    Parse a .pptx binary blob into structured slide data using the geometry parser.
     """
-    from pptx import Presentation
-
-    prs = Presentation(io.BytesIO(raw_bytes))
-    slide_w = int(prs.slide_width or 9144000)
-    slide_h = int(prs.slide_height or 6858000)
-
-    slides = []
-    for idx, slide in enumerate(prs.slides):
-        bg_hex = "#FFFFFF"
-        try:
-            bg_fill = slide.background.fill
-            if bg_fill.type is not None and getattr(bg_fill.type, 'name', '') == 'SOLID':
-                bg_hex = "#" + str(bg_fill.fore_color.rgb).lower()
-        except Exception:
-            pass
-
-        shapes = []
-        for z_idx, shape in enumerate(slide.shapes):
-            # Resolve effective geometry: placeholder shapes often inherit
-            # position from the slide layout or slide master (python-pptx
-            # returns None for inherited values).  Walk: shape → layout → master
-            # → hard-coded EMU defaults so shape divs are never 0×0.
-            _eff_left = shape.left
-            _eff_top  = shape.top
-            _eff_w    = shape.width
-            _eff_h    = shape.height
-            if None in (_eff_left, _eff_top, _eff_w, _eff_h):
-                try:
-                    _ph_fmt = shape.placeholder_format
-                    if _ph_fmt is not None:
-                        _layout = getattr(getattr(shape, "part", None), "slide_layout", None)
-                        if _layout is not None:
-                            for _lph in _layout.placeholders:
-                                try:
-                                    if _lph.placeholder_format.idx == _ph_fmt.idx:
-                                        if _eff_left is None: _eff_left = _lph.left
-                                        if _eff_top  is None: _eff_top  = _lph.top
-                                        if _eff_w    is None: _eff_w    = _lph.width
-                                        if _eff_h    is None: _eff_h    = _lph.height
-                                        break
-                                except Exception:
-                                    pass
-                        # Also walk slide master if layout didn't resolve everything
-                        if None in (_eff_left, _eff_top, _eff_w, _eff_h):
-                            _master = getattr(_layout, "slide_master", None) if _layout else None
-                            if _master is not None:
-                                for _mph in _master.placeholders:
-                                    try:
-                                        if _mph.placeholder_format.idx == _ph_fmt.idx:
-                                            if _eff_left is None: _eff_left = _mph.left
-                                            if _eff_top  is None: _eff_top  = _mph.top
-                                            if _eff_w    is None: _eff_w    = _mph.width
-                                            if _eff_h    is None: _eff_h    = _mph.height
-                                            break
-                                    except Exception:
-                                        pass
-                        # If still None, use standard widescreen EMU defaults by placeholder type
-                        if None in (_eff_left, _eff_top, _eff_w, _eff_h):
-                            _ph_idx = getattr(_ph_fmt, "idx", -1)
-                            if _ph_idx == 0:   # Title
-                                if _eff_left is None: _eff_left = 457200
-                                if _eff_top  is None: _eff_top  = 274638
-                                if _eff_w    is None: _eff_w    = 8229600
-                                if _eff_h    is None: _eff_h    = 1143000
-                            elif _ph_idx == 1:  # Body / Content
-                                if _eff_left is None: _eff_left = 457200
-                                if _eff_top  is None: _eff_top  = 1600200
-                                if _eff_w    is None: _eff_w    = 8229600
-                                if _eff_h    is None: _eff_h    = 4525963
-                            else:
-                                if _eff_left is None: _eff_left = 0
-                                if _eff_top  is None: _eff_top  = 0
-                                if _eff_w    is None: _eff_w    = slide_w
-                                if _eff_h    is None: _eff_h    = slide_h
-                except Exception:
-                    pass
-            s: dict = {
-                "id": shape.shape_id,
-                "name": shape.name,
-                "type": str(shape.shape_type),
-                "left": _eff_left or 0,
-                "top": _eff_top or 0,
-                "width": _eff_w or 0,
-                "height": _eff_h or 0,
-                "z_order": z_idx,
-                "has_text": False,
-                "fill": None,
-                "paragraphs": [],
-            }
-
-            try:
-                fill = shape.fill
-                if fill.type is not None and getattr(fill.type, 'name', '') == 'SOLID':
-                    s["fill"] = "#" + str(fill.fore_color.rgb).lower()
-            except Exception:
-                pass
-
-            if getattr(shape, "has_text_frame", False) and shape.text_frame:
-                s["has_text"] = True
-                paras = []
-                for para in shape.text_frame.paragraphs:
-                    align_name = "LEFT"
-                    try:
-                        if para.alignment:
-                            align_name = para.alignment.name
-                    except Exception:
-                        pass
-                    p_obj: dict = {"align": align_name, "runs": []}
-                    for run in para.runs:
-                        r: dict = {"text": run.text}
-                        try:
-                            if run.font.size:
-                                r["size"] = round(run.font.size.pt, 1)
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.bold:
-                                r["bold"] = True
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.italic:
-                                r["italic"] = True
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.underline:
-                                r["underline"] = True
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.color and run.font.color.type is not None:
-                                r["color"] = "#" + str(run.font.color.rgb).lower()
-                        except Exception:
-                            pass
-                        p_obj["runs"].append(r)
-                    paras.append(p_obj)
-                s["paragraphs"] = paras
-
-            shapes.append(s)
-
-        slides.append(
-            {
-                "index": idx,
-                "background": bg_hex,
-                "shapes": shapes,
-            }
-        )
-
-    return {
-        "slide_width_emu": slide_w,
-        "slide_height_emu": slide_h,
-        "slides": slides,
-    }
+    import io
+    from app.core.file.file_parser import parse_pptx_geometry
+    return parse_pptx_geometry(io.BytesIO(raw_bytes))
 
 
 # ── PPTX export (in-place text update) ───────────────────────────────────────
-
 
 def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
     """
@@ -274,7 +115,7 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
     }
 
     prs = Presentation(io.BytesIO(orig_bytes))
-    slide_map = {edit["index"]: edit for edit in slides_edits}
+    slide_map = {edit.get("index", edit.get("slide_index", i)): edit for i, edit in enumerate(slides_edits)}
 
     for slide_idx, slide in enumerate(prs.slides):
         edit_slide = slide_map.get(slide_idx)
@@ -282,9 +123,33 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
             continue
         shape_map = {s["id"]: s for s in edit_slide.get("shapes", [])}
 
-        for shape in slide.shapes:
-            edit_shape = shape_map.get(shape.shape_id)
-            if not edit_shape or not edit_shape.get("has_text"):
+        # Keep track of existing ids from the file
+        file_shape_ids = [s.shape_id for s in slide.shapes]
+        
+        # Traverse backwards to safely delete
+        for shape_id in reversed(file_shape_ids):
+            shape = next((s for s in slide.shapes if s.shape_id == shape_id), None)
+            if not shape: continue
+            
+            edit_shape = shape_map.get(shape_id)
+            if not edit_shape:
+                # Shape was deleted from the frontend, remove it from slide
+                try:
+                    shape.element.getparent().remove(shape.element)
+                except Exception:
+                    pass
+                continue
+                
+            # Update shape geometry if present
+            try:
+                if "left" in edit_shape: shape.left = int(edit_shape["left"])
+                if "top" in edit_shape: shape.top = int(edit_shape["top"])
+                if "width" in edit_shape: shape.width = int(edit_shape["width"])
+                if "height" in edit_shape: shape.height = int(edit_shape["height"])
+            except Exception:
+                pass
+
+            if not edit_shape.get("has_text"):
                 continue
             if not getattr(shape, "has_text_frame", False):
                 continue
