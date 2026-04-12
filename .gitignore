@@ -118,5 +118,20 @@ config/skill_ratings.json
 *.bak
 web/app.py.bak
 
+# Temporary debug/analysis files (generated during development, not for repo)
+*_log.txt
+git_log_*.txt
+diff_parser.txt
+parser_history.txt
+_test_run.txt
+test_detail.txt
+test_err.txt
+fdadafc.txt
+temp.txt
+slide10.xml
+fix_panel.py
+fix_wa.py
+fix_workspace.py
+
 # License module with embedded key (only compiled .pyd ships)
 app/core/llm/_license.py
