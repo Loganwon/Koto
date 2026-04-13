@@ -34,8 +34,11 @@ _TEXT_EXTS = {
     ".toml", ".ini", ".cfg", ".conf",
 }
 
+# 图片文件后缀
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"}
+
 # 允许上传的文件后缀
-_ALLOWED_EXT = {".docx", ".xlsx", ".pptx", ".pdf"} | _TEXT_EXTS
+_ALLOWED_EXT = {".docx", ".xlsx", ".pptx", ".pdf"} | _TEXT_EXTS | _IMAGE_EXTS
 
 
 def _get_session_id() -> str:
@@ -252,6 +255,8 @@ def open_file_by_path():
 
         if ext == ".docx":
             data = parse_docx(str(tmp_path))
+            html_len = len(data.get("html", ""))
+            logger.info(f"[open_file_by_path] {target.name} 解析成功, HTML={html_len // 1024}KB, messages={data.get('messages', [])}")
             file_type = "docx"
         elif ext == ".xlsx":
             data = parse_xlsx(str(tmp_path), original_name=target.name)
@@ -265,6 +270,9 @@ def open_file_by_path():
         elif ext == ".pdf":
             data = parse_pdf(str(tmp_path), file_id)
             file_type = "pdf"
+        elif ext in _IMAGE_EXTS:
+            file_type = "image"
+            data = {"raw_url": f"/api/v1/workspace/raw/{file_id}"}
         elif ext in _TEXT_EXTS:
             content = target.read_text(encoding="utf-8", errors="replace")
             file_type = "text" if ext in (".txt", ".md", ".markdown") else "code"
@@ -347,6 +355,9 @@ def open_file():
         elif ext == ".pdf":
             data = parse_pdf(str(tmp_path), file_id)
             file_type = "pdf"
+        elif ext in _IMAGE_EXTS:
+            file_type = "image"
+            data = {"raw_url": f"/api/v1/workspace/raw/{file_id}"}
         elif ext in _TEXT_EXTS:
             content = tmp_path.read_text(encoding="utf-8", errors="replace")
             file_type = "text" if ext in (".txt", ".md", ".markdown") else "code"
@@ -402,6 +413,13 @@ def raw_file(file_id: str):
         ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".bmp": "image/bmp",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
     }
     mime = mime_map.get(target.suffix.lower(), "application/octet-stream")
     resp = send_file(str(target), mimetype=mime)
@@ -507,6 +525,196 @@ def save_file():
         as_attachment=True,
         download_name=file_name,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/upload_image
+# GET  /api/v1/workspace/tmp_image/<session_id>/<filename>
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/upload_image", methods=["POST"])
+def upload_image():
+    """
+    Upload a chart/image data URI, save it as a session-scoped temp file, and
+    return a stable server URL.
+
+    Converting the multi-MB base64 string to a short server URL before inserting
+    into WangEditor/Slate prevents the virtual DOM from bloating (which freezes
+    the browser) and keeps the exported DOCX clean (the export pipeline can fetch
+    the bytes from disk instead of embedding a giant base64 inline attribute).
+
+    Body (JSON): {"data": "data:image/png;base64,..."}
+    Returns:     {"ok": true, "url": "/api/v1/workspace/tmp_image/{sid}/{uuid}.png"}
+    """
+    import base64 as _b64
+    import mimetypes as _mime
+
+    body = request.get_json(force=True, silent=True) or {}
+    data_uri = body.get("data", "")
+    if not isinstance(data_uri, str) or not data_uri.startswith("data:image/"):
+        return jsonify({"error": "无效的图片数据 (须为 data:image/... URI)"}), 400
+
+    # Parse: data:image/png;base64,<b64_payload>
+    try:
+        header, _, b64_str = data_uri.partition(",")
+        mime = header.split(":")[1].split(";")[0]   # e.g. "image/png"
+        img_bytes = _b64.b64decode(b64_str)
+    except Exception:
+        return jsonify({"error": "图片数据解码失败"}), 400
+
+    if len(img_bytes) > 10 * 1024 * 1024:
+        return jsonify({"error": "图片大小超过 10 MB 限制"}), 413
+
+    # Map MIME type to a safe file extension
+    ext = _mime.guess_extension(mime) or ".png"
+    if ext in (".jpe", ".jfif"):
+        ext = ".jpg"
+    if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"):
+        ext = ".png"
+
+    # Save to session-scoped tmp/images/ directory
+    img_id = uuid.uuid4().hex
+    sid = _get_session_id()
+    img_dir = _TMP_ROOT / sid / "images"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    img_path = img_dir / f"{img_id}{ext}"
+    img_path.write_bytes(img_bytes)
+
+    url = f"/api/v1/workspace/tmp_image/{sid}/{img_id}{ext}"
+    logger.debug("[upload_image] saved %d bytes → %s", len(img_bytes), url)
+    return jsonify({"ok": True, "url": url})
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/save_to_workspace", methods=["POST"])
+def save_to_workspace():
+    """
+    Save an AI-generated asset (image or file) directly into the workspace
+    directory so it appears in the file tree.
+
+    Body (JSON) — image mode:
+      {"type": "image",
+       "src_url": "/api/v1/workspace/tmp_image/<sid>/<uuid.png>",
+       "filename": "chart.png"}
+
+    Body (JSON) — file mode:
+      {"type": "file",
+       "data": "<base64-encoded bytes>",
+       "filename": "修改后_foo.docx"}
+
+    Returns: {"ok": true, "ws_path": "images/chart.png"}
+    """
+    import base64 as _b64
+    import shutil
+
+    body = request.get_json(force=True, silent=True) or {}
+    asset_type = body.get("type", "")
+    filename = (body.get("filename") or "").strip()
+
+    # Validate filename: no path separators
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        return jsonify({"error": "无效的文件名"}), 400
+
+    from web.shared import WORKSPACE_DIR
+    ws_root = Path(WORKSPACE_DIR).resolve()
+
+    if asset_type == "image":
+        src_url = body.get("src_url", "")
+        # Expected: /api/v1/workspace/tmp_image/<session_id>/<filename>
+        prefix = "/api/v1/workspace/tmp_image/"
+        if not src_url.startswith(prefix):
+            return jsonify({"error": "无效的图片 URL"}), 400
+        parts = src_url[len(prefix):].split("/")
+        if len(parts) != 2:
+            return jsonify({"error": "无效的图片路径"}), 400
+        sid, img_fname = parts
+        # Validate both components
+        if len(sid) != 32 or not all(c in "0123456789abcdef" for c in sid):
+            return jsonify({"error": "无效的 session_id"}), 400
+        if not img_fname or "/" in img_fname or "\\" in img_fname or ".." in img_fname:
+            return jsonify({"error": "无效的图片文件名"}), 400
+        src_path = (_TMP_ROOT / sid / "images" / img_fname).resolve()
+        try:
+            src_path.relative_to(_TMP_ROOT.resolve())
+        except ValueError:
+            return jsonify({"error": "路径非法"}), 403
+        if not src_path.is_file():
+            return jsonify({"error": "临时图片不存在或已过期"}), 404
+        dest_dir = ws_root / "images"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = _unique_path(dest_dir, filename)
+        shutil.copy2(str(src_path), str(dest))
+
+    elif asset_type == "file":
+        data_b64 = body.get("data", "")
+        if not data_b64:
+            return jsonify({"error": "缺少 data 字段"}), 400
+        try:
+            file_bytes = _b64.b64decode(data_b64)
+        except Exception:
+            return jsonify({"error": "数据解码失败"}), 400
+        if len(file_bytes) > 50 * 1024 * 1024:
+            return jsonify({"error": "文件大小超过 50 MB"}), 413
+        ext = Path(filename).suffix.lower()
+        if ext not in _ALLOWED_EXT:
+            return jsonify({"error": f"不支持的格式: {ext}"}), 400
+        dest = _unique_path(ws_root, filename)
+        dest.write_bytes(file_bytes)
+
+    else:
+        return jsonify({"error": "type 须为 image 或 file"}), 400
+
+    ws_rel = str(dest.relative_to(ws_root)).replace("\\", "/")
+    logger.info("[save_to_workspace] saved %s → %s", asset_type, ws_rel)
+    return jsonify({"ok": True, "ws_path": ws_rel})
+
+
+def _unique_path(directory: Path, filename: str) -> Path:
+    """Return a non-colliding path inside directory, appending _1, _2 … as needed."""
+    candidate = directory / filename
+    if not candidate.exists():
+        return candidate
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix
+    i = 1
+    while True:
+        candidate = directory / f"{stem}_{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/tmp_image/<session_id>/<filename>")
+def serve_tmp_image(session_id: str, filename: str):
+    """
+    Serve a previously uploaded temp image file by its session-scoped URL.
+    Both session_id and filename are validated to prevent path traversal.
+    """
+    # Validate session_id: must be exactly 32 lowercase hex characters (uuid4().hex)
+    if len(session_id) != 32 or not all(c in "0123456789abcdef" for c in session_id):
+        return jsonify({"error": "无效的 session_id"}), 400
+    # Validate filename: no path separators or parent-dir references
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        return jsonify({"error": "无效的文件名"}), 400
+
+    img_path = (_TMP_ROOT / session_id / "images" / filename).resolve()
+    # Path-traversal guard (belt-and-suspenders)
+    try:
+        img_path.relative_to(_TMP_ROOT.resolve())
+    except ValueError:
+        return jsonify({"error": "路径非法"}), 403
+
+    if not img_path.is_file():
+        return jsonify({"error": "图片不存在或已过期"}), 404
+
+    _mime_map = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+    }
+    mime = _mime_map.get(img_path.suffix.lower(), "image/png")
+    resp = send_file(str(img_path), mimetype=mime)
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -855,8 +1063,16 @@ def delete_workspace_file():
     if target.suffix.lower() not in _ALLOWED_EXT:
         return jsonify({"error": "不支持的文件类型"}), 400
 
-    target.unlink()
-    logger.info(f"[WorkspaceAssistant] 删除文件: {target}")
+    from send2trash import send2trash
+    try:
+        send2trash(str(target))
+        logger.info(f"[WorkspaceAssistant] 将文件放入回收站: {target}")
+    except Exception as e:
+        logger.error(f"[WorkspaceAssistant] 移动文件到回收站失败: {e}")
+        # 降级处理：直接删除
+        target.unlink()
+        logger.info(f"[WorkspaceAssistant] 直接删除文件: {target}")
+
     return jsonify({"ok": True})
 
 
@@ -1070,8 +1286,16 @@ def delete_workspace_folder():
     if target == root:
         return jsonify({"error": "不能删除根工作区"}), 403
 
-    shutil.rmtree(target)
-    logger.info(f"[WorkspaceAssistant] 删除文件夹: {target}")
+    from send2trash import send2trash
+    try:
+        send2trash(str(target))
+        logger.info(f"[WorkspaceAssistant] 将文件夹放入回收站: {target}")
+    except Exception as e:
+        logger.error(f"[WorkspaceAssistant] 移动文件夹到回收站失败: {e}")
+        # 降级处理：直接删除
+        shutil.rmtree(target)
+        logger.info(f"[WorkspaceAssistant] 直接删除文件夹: {target}")
+
     return jsonify({"ok": True})
 
 
@@ -2075,3 +2299,54 @@ def fs_copy():
         return jsonify({"error": "权限不足"}), 403
     logger.info(f"[Browser] {op}: {src_path} -> {final}")
     return jsonify({"ok": True, "name": final.name, "path": str(final)})
+
+
+# ─── Upload external file(s) straight into a folder ──────────────────────────
+
+@workspace_assistant_bp.route("/api/v1/workspace/upload-to-folder", methods=["POST"])
+def upload_to_folder():
+    """
+    Receive one or more uploaded files and write them into a target folder.
+    Form fields:
+      dest_dir   — absolute path of the destination folder (required)
+      file       — one or more file uploads (required)
+    Returns: {"ok": True, "saved": [{"name": ..., "path": ...}, ...]}
+    """
+    import werkzeug.utils as _wz
+
+    dest_dir = (request.form.get("dest_dir") or "").strip()
+    if not dest_dir:
+        return jsonify({"error": "缺少 dest_dir 参数"}), 400
+
+    dst = Path(dest_dir).resolve()
+    if not _fs_guard(dst):
+        return jsonify({"error": "不允许操作系统路径"}), 403
+    if not dst.is_dir():
+        return jsonify({"error": "目标不是有效文件夹"}), 400
+
+    uploaded_files = request.files.getlist("file")
+    if not uploaded_files:
+        return jsonify({"error": "没有收到文件"}), 400
+
+    saved = []
+    for f in uploaded_files:
+        raw_name = _wz.secure_filename(f.filename or "file")
+        if not raw_name:
+            continue
+        target = dst / raw_name
+        # Avoid overwriting existing file
+        if target.exists():
+            stem = Path(raw_name).stem
+            ext  = Path(raw_name).suffix
+            n = 1
+            while (dst / f"{stem} ({n}){ext}").exists():
+                n += 1
+            target = dst / f"{stem} ({n}){ext}"
+        try:
+            f.save(str(target))
+            saved.append({"name": target.name, "path": str(target)})
+            logger.info("[Browser] upload-to-folder: %s -> %s", f.filename, target)
+        except PermissionError:
+            return jsonify({"error": f"权限不足，无法写入 {target.name}"}), 403
+
+    return jsonify({"ok": True, "saved": saved})
