@@ -172,7 +172,6 @@ class ImageManager:
             # 回退链 4: Gemini 多模态图像生成
             # ========================================
             for gemini_model in [
-                "gemini-2.0-flash-exp-image-generation",
                 "gemini-2.5-flash-image",
             ]:
                 try:

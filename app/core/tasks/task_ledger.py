@@ -248,10 +248,11 @@ class TaskLedger:
     # ── 底层 DB ──────────────────────────────────────────────────────────────
 
     def _open_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn = sqlite3.connect(self._db_path, check_same_thread=False, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
     def _init_schema(self):
@@ -620,26 +621,37 @@ class TaskLedger:
         """删除超过 keep_days 天的已完成/已取消任务及其步骤。"""
         cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff_iso = cutoff.isoformat()
-        with self._lock:
-            self._conn.execute(
-                """
-                DELETE FROM koto_task_steps WHERE task_id IN (
-                    SELECT task_id FROM koto_tasks
+        try:
+            with self._lock:
+                self._conn.execute(
+                    """
+                    DELETE FROM koto_task_steps WHERE task_id IN (
+                        SELECT task_id FROM koto_tasks
+                        WHERE status IN ('completed', 'cancelled', 'failed')
+                          AND created_at < ?
+                    )
+                    """,
+                    (cutoff_iso,),
+                )
+                deleted = self._conn.execute(
+                    """
+                    DELETE FROM koto_tasks
                     WHERE status IN ('completed', 'cancelled', 'failed')
                       AND created_at < ?
-                )
-                """,
-                (cutoff_iso,),
-            )
-            deleted = self._conn.execute(
-                """
-                DELETE FROM koto_tasks
-                WHERE status IN ('completed', 'cancelled', 'failed')
-                  AND created_at < ?
-                """,
-                (cutoff_iso,),
-            ).rowcount
-            self._conn.commit()
+                    """,
+                    (cutoff_iso,),
+                ).rowcount
+                self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                raise
+            logger.warning("[TaskLedger] purge_old skipped due to db lock")
+            try:
+                with self._lock:
+                    self._conn.rollback()
+            except Exception:
+                pass
+            return 0
         logger.info(f"[TaskLedger] 清理 {deleted} 条历史任务（>{keep_days}天）")
         return deleted
 

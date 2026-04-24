@@ -107,6 +107,12 @@ export class ExcelViewer {
 
   isActive() { return this._active; }
 
+  /** Get selected cell range text from Univer Sheets (tab-separated). Returns null if no selection or Sheets not ready. */
+  getSelectionText() {
+    if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return null;
+    return window.KotoSheetsAPI.getSelectionText() || null;
+  }
+
   /** Extract plain text from all sheets (used by AIPanel / FloatingToolbar for context injection). */
   getFullText() {
     if (!this._sheetsData || !this._sheetsData.sheets) return '';
@@ -124,6 +130,21 @@ export class ExcelViewer {
         .filter(l => l.trim());
       return `[${sheet.name || id}]\n` + lines.join('\n');
     }).filter(t => t.trim()).join('\n\n');
+  }
+
+  setCellValue(r, c, value) {
+    if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return false;
+    window.KotoSheetsAPI.setCellValue(Number(r) || 0, Number(c) || 0, value ?? '');
+    return true;
+  }
+
+  setCells(cells = []) {
+    let applied = false;
+    cells.forEach((cell) => {
+      if (!cell || typeof cell !== 'object') return;
+      applied = this.setCellValue(cell.r, cell.c, cell.value) || applied;
+    });
+    return applied;
   }
 
   // ─── 动态加载 sheets-main.js ───────────────────────────────

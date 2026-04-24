@@ -1,6 +1,7 @@
-// ─── CSS imports (order locked: design → ui → sheets-ui → formula-ui → custom)
+// ─── CSS imports (order locked: design → ui → docs-ui → sheets-ui → formula-ui → custom)
 import '@univerjs/design/lib/index.css';
 import '@univerjs/ui/lib/index.css';
+import '@univerjs/docs-ui/lib/index.css';
 import '@univerjs/sheets-ui/lib/index.css';
 import '@univerjs/sheets-formula-ui/lib/index.css';
 
@@ -10,11 +11,14 @@ import { defaultTheme } from '@univerjs/design';
 import { UniverRenderEnginePlugin } from '@univerjs/engine-render';
 import { UniverFormulaEnginePlugin } from '@univerjs/engine-formula';
 import { UniverUIPlugin } from '@univerjs/ui';
+import { UniverDocsPlugin } from '@univerjs/docs';
+import { UniverDocsUIPlugin } from '@univerjs/docs-ui';
 import { UniverSheetsPlugin } from '@univerjs/sheets';
 import { UniverSheetsUIPlugin } from '@univerjs/sheets-ui';
 import { UniverSheetsFormulaPlugin } from '@univerjs/sheets-formula';
 import { UniverSheetsFormulaUIPlugin } from '@univerjs/sheets-formula-ui';
 import '@univerjs/ui/facade';
+import '@univerjs/docs-ui/facade';
 import '@univerjs/sheets/facade';
 import '@univerjs/sheets-ui/facade';
 import '@univerjs/sheets-formula/facade';
@@ -22,6 +26,7 @@ import '@univerjs/sheets-formula/facade';
 // ─── Locales
 import DesignZhCN from '@univerjs/design/locale/zh-CN';
 import UIZhCN from '@univerjs/ui/locale/zh-CN';
+import DocsUIZhCN from '@univerjs/docs-ui/locale/zh-CN';
 import SheetsZhCN from '@univerjs/sheets/locale/zh-CN';
 import SheetsUIZhCN from '@univerjs/sheets-ui/locale/zh-CN';
 import SheetsFormulaZhCN from '@univerjs/sheets-formula/locale/zh-CN';
@@ -41,30 +46,31 @@ class KotoSheetsAPIClass {
 
   /**
    * Create and mount a Univer Sheets instance.
-   * @param {string|HTMLElement} containerOrEl  DOM element id OR the element itself
+   * @param {string|HTMLElement} containerOrId  DOM element id string OR the element itself
    * @param {object} workbookData IWorkbookData snapshot (Univer format)
    */
-  create(containerOrEl, workbookData) {
+  create(containerOrId, workbookData) {
     this.dispose();
 
-    // Resolve to HTMLElement immediately so Univer never falls back to a detached div.
-    // Passing an HTMLElement (instead of a string ID) bypasses Univer's internal
-    // document.getElementById() lookup that can fail during async module init.
-    let container = containerOrEl;
-    if (typeof containerOrEl === 'string') {
-      const el = document.getElementById(containerOrEl);
+    // Resolve to an actual HTMLElement — we MUST pass the element (not a string)
+    // to UniverUIPlugin because its internal getElementById lookup can silently
+    // fail in pywebview/WebView2, causing it to create a *detached* div and
+    // render into that (invisible to the user).
+    let el;
+    if (typeof containerOrId === 'string') {
+      el = document.getElementById(containerOrId);
       if (!el) {
-        console.error('[KotoSheets] 容器元素未找到:', containerOrEl);
-        throw new Error(`Univer 容器元素 #${containerOrEl} 不在 DOM 中`);
+        console.error('[KotoSheets] 容器元素未找到:', containerOrId);
+        throw new Error(`Univer 容器元素 #${containerOrId} 不在 DOM 中`);
       }
-      // Verify container has non-zero dimensions
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) {
-        console.warn('[KotoSheets] 容器尺寸为零, rect=', rect, 'offsetWidth=', el.offsetWidth, 'offsetHeight=', el.offsetHeight);
-      }
-      container = el;
-      console.log('[KotoSheets] 容器元素找到:', containerOrEl, 'rect=', rect.width.toFixed(0) + 'x' + rect.height.toFixed(0));
+    } else if (containerOrId instanceof HTMLElement) {
+      el = containerOrId;
+    } else {
+      throw new Error('create() 需要 string 或 HTMLElement 参数');
     }
+
+    const rect = el.getBoundingClientRect();
+    console.log('[KotoSheets] 容器:', el.id || '(no id)', 'rect=', rect.width.toFixed(0) + 'x' + rect.height.toFixed(0));
 
     const univer = new Univer({
       theme: defaultTheme,
@@ -73,6 +79,7 @@ class KotoSheetsAPIClass {
         [LocaleType.ZH_CN]: {
           ...DesignZhCN,
           ...UIZhCN,
+          ...DocsUIZhCN,
           ...SheetsZhCN,
           ...SheetsUIZhCN,
           ...SheetsFormulaZhCN,
@@ -83,7 +90,11 @@ class KotoSheetsAPIClass {
 
     univer.registerPlugin(UniverRenderEnginePlugin);
     univer.registerPlugin(UniverFormulaEnginePlugin);
-    univer.registerPlugin(UniverUIPlugin, { container });
+    // Pass the *actual element* — not a string — to avoid Univer's fallback to
+    // a detached div when its internal getElementById fails.
+    univer.registerPlugin(UniverUIPlugin, { container: el });
+    univer.registerPlugin(UniverDocsPlugin);
+    univer.registerPlugin(UniverDocsUIPlugin);
     univer.registerPlugin(UniverSheetsPlugin);
     univer.registerPlugin(UniverSheetsUIPlugin);
     univer.registerPlugin(UniverSheetsFormulaPlugin);
@@ -99,6 +110,24 @@ class KotoSheetsAPIClass {
     this._disposed = false;
 
     console.log('[KotoSheets] Univer Sheets 引擎初始化完成');
+
+    // Coordinate debug: log offsetX/Y and resulting cell on click
+    setTimeout(() => {
+      const canvases = el.querySelectorAll('canvas');
+      console.log('[KotoSheets] canvas count:', canvases.length);
+      canvases.forEach((c, idx) => {
+        const r = c.getBoundingClientRect();
+        console.log(`[KotoSheets] canvas[${idx}] rect: ${r.left.toFixed(1)},${r.top.toFixed(1)} size: ${r.width.toFixed(0)}x${r.height.toFixed(0)} cssSize: ${c.style.width}x${c.style.height} bufferSize: ${c.width}x${c.height}`);
+      });
+      const mainCanvas = canvases[canvases.length - 1];
+      if (mainCanvas) {
+        mainCanvas.addEventListener('pointerdown', (e) => {
+          const rect = mainCanvas.getBoundingClientRect();
+          console.log(`[KotoSheets] click: clientX=${e.clientX.toFixed(1)},clientY=${e.clientY.toFixed(1)} offsetX=${e.offsetX.toFixed(1)},offsetY=${e.offsetY.toFixed(1)} canvasRect=${rect.left.toFixed(1)},${rect.top.toFixed(1)} computed=(${(e.clientX-rect.left).toFixed(1)},${(e.clientY-rect.top).toFixed(1)}) dpr=${window.devicePixelRatio}`);
+        }, true);
+      }
+    }, 1000);
+
     return api;
   }
 
@@ -119,24 +148,60 @@ class KotoSheetsAPIClass {
 
   // ── Read operations ────────────────────────────────────────────────────────
 
-  /** Get current selection as tab-separated text. Returns null if no selection. */
+  /**
+   * Convert a raw value from FRange.getValues() to a display string.
+   * FRange.getValues() returns o.v directly (primitive: string|number|boolean|null),
+   * NOT an ICellData object. Accessing .v on a primitive returns undefined.
+   */
+  _cellToStr(cell) {
+    if (cell === null || cell === undefined) return '';
+    if (typeof cell === 'object') return String(cell.v ?? '');  // safety for ICellData
+    return String(cell);  // primitive: number, string, boolean
+  }
+
+  /** Get current selection as tab-separated text. Returns null if nothing is selected or data is empty. */
   getSelectionText() {
     try {
       const wb = this._api.getActiveWorkbook();
       if (!wb) return null;
       const sheet = wb.getActiveSheet();
       if (!sheet) return null;
-      const sel = sheet.getSelection();
-      if (!sel) return null;
-      const range = sel.getCurrentCell
-        ? sel.getCurrentCell()
-        : (sel.getActiveRange ? sel.getActiveRange() : null);
+
+      // Strategy 1: sheet.getActiveRange() — uses primary-flagged selection (standard drag-select)
+      let range = null;
+      if (typeof sheet.getActiveRange === 'function') {
+        try { range = sheet.getActiveRange(); } catch (_) {}
+      }
+
+      // Strategy 2: FSelection.getActiveRangeList() — all selections even without primary flag
+      if (!range && typeof sheet.getSelection === 'function') {
+        try {
+          const sel = sheet.getSelection();
+          if (sel) {
+            if (typeof sel.getActiveRangeList === 'function') {
+              const list = sel.getActiveRangeList();
+              if (list && list.length > 0) range = list[0];
+            } else if (typeof sel.getActiveRange === 'function') {
+              range = sel.getActiveRange();
+            }
+          }
+        } catch (_) {}
+      }
+
       if (!range) return null;
+
       const values = range.getValues();
       if (!values || values.length === 0) return null;
-      return values
-        .map(row => row.map(cell => (cell ? (cell.v ?? '') : '')).join('\t'))
-        .join('\n');
+
+      // getValues() returns raw CellValue primitives (string|number|boolean|null),
+      // NOT ICellData objects. Do NOT use cell.v here.
+      const rows = values
+        .map(row => (Array.isArray(row) ? row : []).map(c => this._cellToStr(c)).join('\t'))
+        .filter(l => l.replace(/\t/g, '').trim() !== '');
+
+      if (rows.length === 0) return null;
+      console.log(`[KotoSheets] getSelectionText: ${rows.length} rows, notation=${typeof range.getA1Notation === 'function' ? range.getA1Notation() : '?'}`);
+      return rows.join('\n');
     } catch (e) {
       console.warn('[KotoSheets] getSelectionText error', e);
       return null;
@@ -154,10 +219,11 @@ class KotoSheetsAPIClass {
       const maxCol = sheet.getMaxColumns();
       if (!maxRow || !maxCol) return '';
       const values = sheet.getRange(0, 0, maxRow, maxCol).getValues();
+      // getValues() returns raw CellValue primitives (NOT ICellData with .v)
       return values
-        .filter(row => row.some(c => c && c.v !== null && c.v !== undefined && c.v !== ''))
+        .filter(row => row.some(c => c !== null && c !== undefined && c !== ''))
         .map(row => row.map(cell => {
-          const v = String(cell ? (cell.v ?? '') : '');
+          const v = this._cellToStr(cell);
           return v.includes(',') ? `"${v}"` : v;
         }).join(','))
         .join('\n');

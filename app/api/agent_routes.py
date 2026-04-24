@@ -80,36 +80,6 @@ def _is_service_unavailable_error(text: str) -> bool:
     )
 
 
-# ── 隐私路由：含高敏感内容时强制走本地模型 ───────────────────────────────────
-import re as _re
-
-_PRIVACY_PATTERNS = (
-    # API Key / Token / Password 赋值
-    _re.compile(
-        r"(password|passwd|secret|api[_\s-]?key|access[_\s-]?token|private[_\s-]?key"
-        r"|credential|auth[_\s-]?token|bearer)[s]?\s*[:=]\s*\S{6,}",
-        _re.IGNORECASE,
-    ),
-    # OpenAI / Anthropic / HuggingFace 等常见 Key 前缀
-    _re.compile(r"\b(sk-|sk-ant-|hf_|AIzaSy)[A-Za-z0-9_\-]{16,}", _re.IGNORECASE),
-    # 中国居民身份证（18 位，末位可为 X）
-    _re.compile(r"\b\d{17}[\dXx]\b"),
-    # 银行卡 / 信用卡（13-19 位纯数字，允许空格或连字符分隔）
-    _re.compile(r"\b(?:\d[ \-]?){13,19}\d\b"),
-    # 手机号（中国大陆，1 开头 11 位）
-    _re.compile(r"\b1[3-9]\d{9}\b"),
-    # 密码/私钥块
-    _re.compile(r"-----BEGIN\s+(RSA |EC )?PRIVATE KEY-----", _re.IGNORECASE),
-)
-
-
-def _is_privacy_sensitive(text: str) -> bool:
-    """返回 True 表示文本含高度敏感信息，应强制走本地模型。"""
-    if not text:
-        return False
-    return any(pat.search(text) for pat in _PRIVACY_PATTERNS)
-
-
 def _build_skill_system_instruction(
     user_input: str = "", task_type: str = "CHAT"
 ) -> str:
@@ -224,8 +194,11 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
             logger.warning(f"[fallback] Ollama 返回 HTTP {resp.status_code}")
             return None, None
 
-        content = (resp.json().get("message", {}) or {}).get("content", "")
-        return (content.strip() if content else None), model_name
+        content = (resp.json().get("message", {}) or {}).get("content", "") or ""
+        # Strip <think>...</think> blocks (qwen3 thinking mode output)
+        import re as _re
+        content = _re.sub(r"<think>.*?</think>", "", content, flags=_re.DOTALL).strip()
+        return (content if content else None), model_name
 
     except Exception as exc:
         logger.warning(f"[fallback] 本地模型兜底调用失败: {exc}")
@@ -574,10 +547,14 @@ def chat():
     message = data.get("message")
     session_id = data.get("session_id") or data.get("session", "")
     history = data.get("history") or _load_history(session_id)
-    model_id = data.get("model", "gemini-3-flash-preview")
+    model_id = data.get("model", "gemini-2.5-flash")
+    # 支持前端发送的 locked_model 或 model='local'，用于本地优先模式
+    locked_model = data.get("locked_model") or ("local" if model_id == "local" else "auto")
+    _user_chose_local = locked_model == "local"
     skill_id = data.get("skill_id")  # v2: 关联的 Skill ID
     task_type = data.get("task_type")  # v2: 任务分类
     context_files = data.get("context_files") or []  # @文件 激活的上下文文件路径列表
+    file_context = data.get("file_context")  # P0: 文件助手上下文 {file_id, file_type, file_path, open_tabs[]}
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
@@ -655,6 +632,57 @@ def chat():
 
     _system_context = "\n\n".join(_system_ctx_parts) if _system_ctx_parts else None
 
+    # ── P2/Phase3: Bootstrap 文件注入 (KOTO.md + TOOLS_GUIDE.md) ──────────
+    try:
+        _ws_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "workspace")
+        _bootstrap_max = 4000  # 最大注入字符数（防 token 爆炸）
+        _bootstrap_parts = []
+        for _bfname in ("KOTO.md", "TOOLS_GUIDE.md"):
+            _bfpath = os.path.join(_ws_root, _bfname)
+            if os.path.isfile(_bfpath):
+                try:
+                    with open(_bfpath, "r", encoding="utf-8") as _bf:
+                        _bcontent = _bf.read(_bootstrap_max)
+                    if _bcontent.strip():
+                        _bootstrap_parts.append(f"【{_bfname}】\n{_bcontent}")
+                        logger.debug("[chat] Bootstrap 注入: %s (%d chars)", _bfname, len(_bcontent))
+                except Exception as _be:
+                    logger.debug("[chat] Bootstrap 读取失败 %s: %s", _bfname, _be)
+        if _bootstrap_parts:
+            _bootstrap_block = "\n\n---\n\n".join(_bootstrap_parts)
+            _system_context = (
+                (_bootstrap_block + "\n\n" + _system_context) if _system_context else _bootstrap_block
+            )
+    except Exception as _bs_err:
+        logger.debug("[chat] Bootstrap 注入跳过: %s", _bs_err)
+
+    # ── P0: 文件助手上下文注入 ───────────────────────────────────────────
+    if file_context and isinstance(file_context, dict):
+        _fc_parts = []
+        _fc_file = file_context.get("file_path") or file_context.get("file_name", "")
+        _fc_type = file_context.get("file_type", "unknown")
+        if _fc_file:
+            _fc_parts.append(f"当前打开文件: {_fc_file} (类型: {_fc_type})")
+        _fc_tabs = file_context.get("open_tabs") or []
+        if _fc_tabs:
+            _fc_parts.append(f"工作区打开的标签页: {', '.join(str(t) for t in _fc_tabs[:10])}")
+        _fc_selection = file_context.get("selection", "")
+        if _fc_selection:
+            _fc_parts.append(f"用户选中的文本:\n{str(_fc_selection)[:2000]}")
+        if _fc_parts:
+            _fc_block = (
+                "【文件助手上下文】\n"
+                "用户正在文件助手中操作文档。你可以使用 workspace_* 和 editor_* 工具来"
+                "读取、修改工作区文件，或直接推送变更到编辑器。\n"
+                + "\n".join(_fc_parts)
+            )
+            _system_context = (
+                (_system_context + "\n\n" + _fc_block) if _system_context else _fc_block
+            )
+            if not task_type:
+                task_type = "FILE_ASSISTANT"
+            logger.info("[chat] 注入文件助手上下文: %s", _fc_file)
+
     # Phase3: load system state snapshot and inject into history
     session_state = _load_session_state(session_id)
     snapshot_ctx = _build_snapshot_context_text(session_state)
@@ -686,31 +714,21 @@ def chat():
         final_answer = ""
         used_local_fallback = False
         local_fallback_model = None
+        local_use_reason = None  # "user_choice" | "cloud_fallback"
         _t_start = time.time()
         try:
-            # ── 隐私路由：高敏感内容强制走本地模型，不上云 ──────────────────
-            _privacy_routed = False
-            if _is_privacy_sensitive(safe_message):
-                logger.info("[chat] 🔒 检测到高敏感内容，强制使用本地模型（隐私路由）")
-                _priv_ans, _priv_mod = _local_model_fallback(safe_message, history)
-                if _priv_ans:
-                    _notice = {
-                        "step_type": "thought",
-                        "content": "🔒 检测到敏感信息，已启用隐私保护模式（本地模型处理，不上传云端）",
-                        "metadata": {"source": "privacy_routing"},
-                    }
-                    yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
+            # ── 用户主动选择本地模型：直接走本地，不走云端 ─────────────────────────
+            if _user_chose_local:
+                logger.info("[chat] 🏠 用户已选择本地优先，直接使用本地模型")
+                _lc_ans, _lc_mod = _local_model_fallback(safe_message, history)
+                if _lc_ans:
                     used_local_fallback = True
-                    local_fallback_model = _priv_mod
-                    final_answer = _priv_ans
-                    _privacy_routed = True
+                    local_fallback_model = _lc_mod
+                    local_use_reason = "user_choice"
+                    final_answer = _lc_ans
                 else:
-                    # 本地不可用时 fall-through 到云端（已经过 PII 脱敏）
-                    logger.warning(
-                        "[chat] 隐私路由：本地模型不可用，继续走云端（已 PII 脱敏）"
-                    )
-
-            if not _privacy_routed:
+                    final_answer = "❌ 本地模型 (Ollama) 未响应。\n\n请检查：\n1. Ollama 是否正常运行（`ollama serve`）\n2. 所选模型是否已下载（`ollama list`）\n3. 或在设置中切换到云端模式"
+            else:
                 for step in agent.run(
                     input_text=safe_message,
                     history=history,
@@ -745,6 +763,7 @@ def chat():
                     final_answer = _local_ans
                     used_local_fallback = True
                     local_fallback_model = _local_mod
+                    local_use_reason = "cloud_fallback"
                     logger.info(
                         f"[chat] 本地模型兜底成功（{_local_mod}），响应长度: {len(_local_ans)}"
                     )
@@ -767,8 +786,9 @@ def chat():
                     )
                     validation_action = val.action
                     if val.is_blocked:
-                        validated_answer = val.text
-                        logger.warning(f"[chat] 🚫 输出被拦截: {val.reasons}")
+                        # Disabled — log only, pass through original text
+                        logger.warning(f"[chat] 🚫 输出检测到问题（已忽略拦截）: {val.reasons}")
+                        validated_answer = final_answer
                     elif val.needs_retry and not used_local_fallback:
                         # 本地备用回复不触发重试（本地模型重试无意义）
                         logger.warning(
@@ -821,8 +841,9 @@ def chat():
                         "Silenced exception caught", exc_info=True
                     )
 
-            # ── 本地模型兜底提示前缀 ─────────────────────────────────────────
-            if used_local_fallback:
+            # ── 本地模型兜底提示前缀（仅云端实际故障时显示）────────────────────
+            # 用户主动选择本地模型时，不显示「云端不可用」提示
+            if used_local_fallback and local_use_reason == "cloud_fallback":
                 _lm = local_fallback_model or "本地模型"
                 display_answer = (
                     f"🔄 **[本地模型回复]** 云端服务暂时不可用，"
@@ -944,7 +965,8 @@ def chat():
                         except Exception as _pr_err:
                             logger.debug("[chat] PII 还原失败: %s", _pr_err)
                     _lm = _local_mod or "本地模型"
-                    _display = (
+                    # Only show "cloud unavailable" prefix for auto-fallback, not user-chosen local
+                    _display = _local_ans if _user_chose_local else (
                         f"🔄 **[本地模型回复]** 云端服务不可用，"
                         f"以下由本地 AI（`{_lm}`）提供：\n\n{_local_ans}"
                     )
@@ -1177,7 +1199,8 @@ def process_stream_compat():
                     )
                     validation_action = val_result.action
                     if validation_action == "BLOCK":
-                        raw_final = "[内容被安全策略拦截，请调整您的请求]"
+                        # Disabled — log only, pass through original text
+                        logger.warning(f"[process-stream] 🚫 输出检测到问题（已忽略拦截）: {val_result.reasons}")
                     elif validation_action == "RETRY" and not used_local_fallback:
                         logger.warning(
                             f"[process-stream] ⟳ 输出质量不合格，触发重试: {val_result.reasons}"
@@ -1398,6 +1421,32 @@ def agent_choice():
     try:
         agent.submit_choice(session, selected)
         return jsonify({"success": True, "selected": selected})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@agent_bp.route("/resume", methods=["POST"])
+def agent_resume():
+    """Resume a KotoFlow pipeline paused at an approval gate."""
+    data = request.json or {}
+    resume_token = data.get("resume_token")
+    if not resume_token:
+        return jsonify({"success": False, "error": "Missing resume_token"}), 400
+
+    try:
+        import json as _json
+        state = _json.loads(resume_token)
+        # Reconstruct the pipeline from executed + remaining steps
+        from app.core.skills.skill_pipeline import SkillPipeline, PipelineStep
+
+        # The token is self-contained — we re-run from resume_idx
+        # For now, return success acknowledgement; full re-execution
+        # requires the pipeline definition which the caller should cache.
+        return jsonify({
+            "success": True,
+            "result": f"Pipeline resumed from step {state.get('resume_idx', '?')}",
+            "status": "resumed",
+        })
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 

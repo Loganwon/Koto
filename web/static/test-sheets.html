@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Koto Sheets 渲染测试</title>
+<link rel="stylesheet" href="/static/univer-dist/assets/sheets-main.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "Microsoft YaHei", sans-serif; background: #f5f5f5; }
+  #status {
+    padding: 12px 20px; font-size: 14px; font-weight: 600;
+    background: #fff3cd; color: #856404; border-bottom: 1px solid #ddd;
+  }
+  #status.ok { background: #d4edda; color: #155724; }
+  #status.err { background: #f8d7da; color: #721c24; }
+  #container {
+    width: 100vw; height: calc(100vh - 44px);
+    position: relative; background: #fff;
+  }
+</style>
+</head>
+<body>
+<div id="status">⏳ 正在加载 sheets-main.js …</div>
+<div id="container"></div>
+<script src="/static/univer-dist/assets/sheets-main.js"></script>
+<script>
+(function() {
+  var status = document.getElementById('status');
+  var step = 1;
+
+  function log(msg, isErr) {
+    status.textContent = '[步骤' + step + '] ' + msg;
+    status.className = isErr ? 'err' : '';
+    step++;
+    console.log('[test-sheets]', msg);
+  }
+
+  // Step 1: Check if KotoSheetsAPI exists
+  if (!window.KotoSheetsAPI) {
+    log('❌ window.KotoSheetsAPI 不存在 — sheets-main.js 未正确执行', true);
+    return;
+  }
+  log('✅ window.KotoSheetsAPI 已就绪');
+
+  // Step 2: Verify container has dimensions
+  var el = document.getElementById('container');
+  var rect = el.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) {
+    log('❌ 容器尺寸为零: ' + rect.width + 'x' + rect.height, true);
+    return;
+  }
+  log('✅ 容器尺寸: ' + Math.round(rect.width) + 'x' + Math.round(rect.height));
+
+  // Step 3: Create test workbook data
+  var testData = {
+    id: 'test-wb-' + Date.now(),
+    appVersion: '0.5.0',
+    name: 'Koto 测试工作簿',
+    locale: 'zh-CN',
+    styles: {},
+    resources: [],
+    sheetOrder: ['sheet1'],
+    sheets: {
+      'sheet1': {
+        id: 'sheet1',
+        name: 'Sheet1',
+        rowCount: 100,
+        columnCount: 26,
+        cellData: {
+          0: { 0: { v: '产品名称' }, 1: { v: '销售额' }, 2: { v: '数量' }, 3: { v: '日期' } },
+          1: { 0: { v: 'Koto AI' }, 1: { v: 99800, t: 2 }, 2: { v: 150, t: 2 }, 3: { v: '2026-04-01' } },
+          2: { 0: { v: '智能助手' }, 1: { v: 56000, t: 2 }, 2: { v: 80, t: 2 }, 3: { v: '2026-04-02' } },
+          3: { 0: { v: '文件解析' }, 1: { v: 34500, t: 2 }, 2: { v: 60, t: 2 }, 3: { v: '2026-04-03' } },
+          4: { 0: { v: '数据分析' }, 1: { v: 78000, t: 2 }, 2: { v: 120, t: 2 }, 3: { v: '2026-04-04' } },
+          5: { 0: { v: '合计' }, 1: { v: 268300, t: 2 }, 2: { v: 410, t: 2 }, 3: { v: '' } }
+        }
+      }
+    }
+  };
+  log('✅ 测试数据已创建 (6行 × 4列)');
+
+  // Step 4: Call KotoSheetsAPI.create — pass the element directly, NOT a string ID
+  try {
+    var api = window.KotoSheetsAPI.create(el, testData);
+    log('✅ KotoSheetsAPI.create() 返回: ' + (api ? 'FUniver 实例' : 'null'));
+  } catch (e) {
+    log('❌ KotoSheetsAPI.create() 抛出异常: ' + e.message, true);
+    console.error(e);
+    return;
+  }
+
+  // Step 5: Check if Univer actually rendered DOM
+  setTimeout(function() {
+    var el = document.getElementById('container');
+    var univerApp = el.querySelector('.univer-app-container') || el.querySelector('[class*="univer"]');
+    var canvas = el.querySelector('canvas');
+    var childCount = el.children.length;
+
+    // Also check document-wide
+    var allUniver = document.querySelectorAll('[class*="univer"]');
+    var bodyDirect = document.body.children.length;
+
+    if (canvas) {
+      status.textContent = '✅ 渲染成功! canvas=' + canvas.width + 'x' + canvas.height + ', 子元素=' + childCount;
+      status.className = 'ok';
+    } else if (univerApp) {
+      status.textContent = '⚠ 有Univer DOM但无canvas, 子元素=' + childCount;
+      status.className = '';
+    } else if (allUniver.length > 0) {
+      // Rendered somewhere else in document!
+      var firstLoc = allUniver[0].closest('[id]');
+      status.textContent = '❌ Univer渲染到错误位置! 文档内共' + allUniver.length + '个元素, 容器内0, 最近父id=' + (firstLoc ? firstLoc.id : 'body');
+      status.className = 'err';
+    } else {
+      status.textContent = '❌ React未渲染任何Univer元素! body子元素=' + bodyDirect + ', innerHTML长=' + el.innerHTML.length;
+      status.className = 'err';
+    }
+    console.log('[test-sheets] allUniver:', allUniver.length, 'inContainer:', childCount);
+  }, 2000);
+})();
+</script>
+</body>
+</html>

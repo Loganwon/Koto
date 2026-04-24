@@ -119,6 +119,8 @@ class SkillSuggester:
                     "tags": tags,
                     "trigger_keywords": trigger_kws,
                     "task_types": s.get("task_types", []),
+                    "has_executor": s.get("has_executor", False),
+                    "params_schema": s.get("params_schema", {}),
                 }
             )
 
@@ -142,6 +144,8 @@ class SkillSuggester:
                     "icon": c["icon"],
                     "description": c["description"],
                     "intent_description": c["intent_description"],
+                    "has_executor": c.get("has_executor", False),
+                    "params_schema": c.get("params_schema", {}),
                 }
             )
         return result

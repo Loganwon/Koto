@@ -3,30 +3,32 @@
 import hashlib
 import threading
 
+from app.core.llm.model_capabilities import is_interactions_only_model
+
 # google.genai.types 延迟到 classify() 内部加载，避免启动时加载 (~4.7s)
 
 
 class AIRouter:
     """
     基于轻量级 AI 模型的智能任务路由器
-    默认使用 gemini-2.5-flash，如不可用则自动降级至 gemini-2.0-flash / gemini-2.0-flash-lite
+    默认使用 gemini-3-flash-preview，如不可用则优先降级到快速的 2.5 系列
     """
 
     # 路由器当前使用的模型（由 ModelManager 初始化后可更新；不可用时自动降级）
     _router_model: str = "gemini-3-flash-preview"
 
+    # Gemini 3 Flash Preview 在极小 token 预算下可能返回空成功响应，
+    # 路由器至少保留一个安全的短文本输出空间。
+    _ROUTER_MAX_OUTPUT_TOKENS: int = 64
+
     # 路由模型降级链（所有模型必须支持 generate_content，不能是 interactions_only）
     _ROUTER_MODEL_CHAIN: list = [
-        "gemini-3-flash-preview",  # 首选：当前最快可用的 Flash 模型
-        "gemini-3-pro-preview",  # 备选1：当前 Pro 模型（路由任务也可用）
-        "gemini-2.5-flash",  # 备选2：旧版 Flash 兜底
-        "gemini-2.0-flash",  # 备选3
-        "gemini-2.0-flash-lite",  # 备选4：极端兜底
+        "gemini-3-flash-preview",  # 首选：当前主力快速模型
+        "gemini-2.5-flash",        # 稳定快速回退
+        "gemini-2.5-flash-lite",   # 轻量回退
+        "gemini-2.5-pro",          # 质量兜底
+        "gemini-3-pro-preview",    # 最后再尝试慢速 preview pro
     ]
-
-    # 已知 Interactions-only 模型前缀（不能用 generate_content，拒绝设为路由模型）
-    # 注意：gemini-3-flash-preview / gemini-3-pro-preview 是普通模型，不在此列
-    _INTERACTIONS_ONLY_PREFIXES: tuple = ("deep-research-",)
 
     # 判定模型不可用的错误信号词
     _MODEL_UNAVAILABLE_KEYWORDS: tuple = (
@@ -48,7 +50,7 @@ class AIRouter:
         会拒绝 Interactions-only 模型（不兼容 generate_content）。"""
         if not model_id:
             return
-        if any(model_id.startswith(p) for p in cls._INTERACTIONS_ONLY_PREFIXES):
+        if is_interactions_only_model(model_id):
             print(f"[AIRouter] ⚠️ 拒绝设置 Interactions-only 模型为路由器: {model_id}")
             return
         if model_id != cls._router_model:
@@ -60,6 +62,36 @@ class AIRouter:
         """Return True if the error indicates the model is not found / unsupported."""
         err_lower = error_str.lower()
         return any(kw in err_lower for kw in cls._MODEL_UNAVAILABLE_KEYWORDS)
+
+    @classmethod
+    def _extract_response_text(cls, response) -> str:
+        """Best-effort text extraction for short routing calls.
+
+        Some Gemini preview models may leave candidates/parts empty while still
+        exposing the final text on response.text.
+        """
+        if response is None:
+            return ""
+
+        text = getattr(response, "text", None)
+        if isinstance(text, str):
+            text = text.strip()
+            if text:
+                return text
+
+        candidates = getattr(response, "candidates", None) or []
+        for candidate in candidates:
+            content = getattr(candidate, "content", None)
+            parts = getattr(content, "parts", None) or []
+            texts = []
+            for part in parts:
+                part_text = getattr(part, "text", None)
+                if isinstance(part_text, str) and part_text:
+                    texts.append(part_text)
+            joined = "".join(texts).strip()
+            if joined:
+                return joined
+        return ""
 
     # 路由器专用系统指令
     ROUTER_INSTRUCTION = """你是任务分类器。根据用户输入判断任务类型。只输出一个类型名称。
@@ -193,17 +225,12 @@ class AIRouter:
                             contents=user_input,
                             config=types.GenerateContentConfig(
                                 system_instruction=_dynamic_instruction,
-                                max_output_tokens=20,  # 只需要一个词
-                                temperature=0.1,  # 低温度，更确定性
+                                max_output_tokens=cls._ROUTER_MAX_OUTPUT_TOKENS,
+                                temperature=0.0,
                             ),
                         )
-                        if response.candidates and response.candidates[0].content.parts:
-                            text = (
-                                response.candidates[0]
-                                .content.parts[0]
-                                .text.strip()
-                                .upper()
-                            )
+                        text = cls._extract_response_text(response).upper()
+                        if text:
                             for task in valid_tasks:
                                 if task in text:
                                     result_holder["task"] = task

@@ -21,6 +21,31 @@ logger = logging.getLogger(__name__)
 
 workspace_assistant_bp = Blueprint("workspace_assistant", __name__)
 
+# ─── Critical static asset check ─────────────────────────────────────────────
+# Prevents silent failures when univer-dist bundle files are missing.
+_CRITICAL_ASSETS = [
+    Path("web") / "static" / "univer-dist" / "assets" / "sheets-main.js",
+    Path("web") / "static" / "univer-dist" / "assets" / "sheets-main.css",
+    Path("web") / "static" / "js" / "workspace-assistant.js",
+]
+
+def _check_critical_assets() -> list[str]:
+    """Return list of missing critical asset paths."""
+    missing = []
+    for p in _CRITICAL_ASSETS:
+        if not p.exists():
+            missing.append(str(p))
+    return missing
+
+_missing_at_startup = _check_critical_assets()
+if _missing_at_startup:
+    logger.error(
+        "⚠️  关键静态资源缺失！Excel 加载将失败。缺失文件: %s\n"
+        "修复方法: 在 web/univer-editor/ 目录下执行 npm run build 重新构建，"
+        "或使用 git checkout <commit> -- web/static/univer-dist/ 恢复。",
+        ", ".join(_missing_at_startup),
+    )
+
 # 临时文件存储目录根（相对于项目根）
 _TMP_ROOT = Path("workspace") / "tmp"
 
@@ -64,8 +89,40 @@ def _ensure_tmp_dir() -> Path:
     return tmp_dir
 
 
+def _tmp_workspace_relpath(file_id: str, ext: str) -> str:
+    """Return the workspace-relative path for the current session temp file."""
+    sid = _get_session_id()
+    return f"tmp/{sid}/{file_id}{ext}"
+
+
 def _ext(filename: str) -> str:
     return Path(filename).suffix.lower()
+
+
+def _tmp_file_path(file_id: str, ext: str) -> Path:
+    return _ensure_tmp_dir() / f"{file_id}{ext}"
+
+
+def _parse_docx_workspace_open(tmp_path: Path, file_id: str) -> dict:
+    from app.core.file.file_parser import parse_docx
+
+    data = parse_docx(str(tmp_path))
+    data["raw_url"] = f"/api/v1/workspace/raw/{file_id}"
+    return data
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /api/v1/workspace/asset_health — verify critical static assets exist
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/asset_health")
+def asset_health():
+    """Quick check that all critical frontend assets are present on disk."""
+    missing = _check_critical_assets()
+    if missing:
+        return jsonify({"ok": False, "missing": missing}), 500
+    return jsonify({"ok": True, "missing": []})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -247,14 +304,10 @@ def open_file_by_path():
         return jsonify({"error": f"文件复制失败: {ce}"}), 500
 
     try:
-        from app.core.file.file_parser import (
-            parse_docx,
-            parse_pdf,
-            parse_xlsx,
-        )
+        from app.core.file.file_parser import parse_pdf, parse_xlsx
 
         if ext == ".docx":
-            data = parse_docx(str(tmp_path))
+            data = _parse_docx_workspace_open(tmp_path, file_id)
             html_len = len(data.get("html", ""))
             logger.info(f"[open_file_by_path] {target.name} 解析成功, HTML={html_len // 1024}KB, messages={data.get('messages', [])}")
             file_type = "docx"
@@ -262,6 +315,12 @@ def open_file_by_path():
             data = parse_xlsx(str(tmp_path), original_name=target.name)
             file_type = "xlsx"
         elif ext == ".pptx":
+            _pptx_size = tmp_path.stat().st_size
+            if _pptx_size > 100 * 1024 * 1024:
+                return jsonify({
+                    "error": f"PPTX 文件过大 ({_pptx_size / 1048576:.0f} MB)，可能包含嵌入视频。"
+                              f"Koto 当前不支持超过 100 MB 的 PPTX 文件，建议先在 PowerPoint 中删除视频后再打开。"
+                }), 413
             from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
             with open(str(tmp_path), "rb") as _f:
                 _raw = _f.read()
@@ -293,9 +352,134 @@ def open_file_by_path():
             "file_id": file_id,
             "file_name": target.name,
             "file_type": file_type,
+            "ws_source_path": rel_path,
+            "temp_path": _tmp_workspace_relpath(file_id, ext),
             "data": data,
         }
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/read_for_ai
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/read_for_ai", methods=["POST"])
+def read_file_for_ai():
+    """
+    返回工作区文件的纯文本内容，供 AI 技能（file_diff_checker、excel_data_filler 等）
+    在不打开编辑器的情况下读取其他文件。
+
+    Body (JSON): {"path": "relative/path/to/file"}
+    Response:
+      {
+        "text":      "<plain text content>",
+        "file_type": "docx" | "xlsx" | "pptx" | "text" | ...,
+        "name":      "filename.ext",
+        "chars":     <int>
+      }
+
+    Security: path is resolved against WORKSPACE_DIR and must be inside it
+    (path-traversal guard same as open_file_by_path).
+    The endpoint returns at most 100 000 characters to prevent accidental
+    memory dumps of huge binary files.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    rel_path = (body.get("path") or "").strip()
+    if not rel_path:
+        return jsonify({"error": "缺少 path 字段"}), 400
+
+    from web.shared import WORKSPACE_DIR
+
+    root = Path(WORKSPACE_DIR).resolve()
+    target = root.joinpath(rel_path).resolve()
+
+    # Security: prevent path traversal
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return jsonify({"error": "路径不合法"}), 403
+
+    if not target.is_file():
+        return jsonify({"error": "文件不存在"}), 404
+
+    ext = target.suffix.lower()
+    _MAX_CHARS = 100_000
+
+    try:
+        if ext in _TEXT_EXTS:
+            text = target.read_text(encoding="utf-8", errors="replace")
+            file_type = "text"
+        elif ext == ".docx":
+            # Write a tmp copy so parser can open it
+            _tmp = _ensure_tmp_dir() / f"{uuid.uuid4().hex}.docx"
+            import shutil
+            shutil.copy2(str(target), str(_tmp))
+            try:
+                from app.core.file.file_parser import parse_docx
+                _d = parse_docx(str(_tmp))
+                # Prefer plain text; fall back to stripping HTML tags
+                raw_html = _d.get("html", "")
+                import re as _re
+                text = _re.sub(r"<[^>]+>", "", raw_html)
+                file_type = "docx"
+            finally:
+                _tmp.unlink(missing_ok=True)
+        elif ext == ".xlsx":
+            _tmp = _ensure_tmp_dir() / f"{uuid.uuid4().hex}.xlsx"
+            import shutil
+            shutil.copy2(str(target), str(_tmp))
+            try:
+                from app.core.file.file_parser import parse_xlsx
+                _d = parse_xlsx(str(_tmp), original_name=target.name)
+                # Return CSV representation of each sheet
+                sheets = _d.get("sheets", [])
+                lines = []
+                for sh in sheets:
+                    lines.append(f"# Sheet: {sh.get('name', '?')}")
+                    lines.append(sh.get("csv", ""))
+                text = "\n".join(lines)
+                file_type = "xlsx"
+            finally:
+                _tmp.unlink(missing_ok=True)
+        elif ext == ".pptx":
+            _tmp = _ensure_tmp_dir() / f"{uuid.uuid4().hex}.pptx"
+            import shutil
+            shutil.copy2(str(target), str(_tmp))
+            try:
+                from web.blueprints.pptx_editor import _parse_slides as _pptx_parse
+                with open(str(_tmp), "rb") as _f:
+                    _raw = _f.read()
+                _d = _pptx_parse(_raw)
+                slides = _d.get("slides", [])
+                lines = []
+                for i, sl in enumerate(slides):
+                    lines.append(f"# Slide {i + 1}")
+                    for shape in sl.get("shapes", []):
+                        t = shape.get("text", "").strip()
+                        if t:
+                            lines.append(t)
+                text = "\n".join(lines)
+                file_type = "pptx"
+            finally:
+                _tmp.unlink(missing_ok=True)
+        else:
+            return jsonify({"error": f"不支持读取该格式作为 AI 文本: {ext}"}), 400
+
+    except Exception as e:
+        logger.error("[read_for_ai] 读取失败 %s: %s", target.name, e, exc_info=True)
+        return jsonify({"error": f"读取失败: {e}"}), 500
+
+    # Truncate to cap
+    if len(text) > _MAX_CHARS:
+        text = text[:_MAX_CHARS] + f"\n…（内容过长，已截断至 {_MAX_CHARS} 字符）"
+
+    return jsonify({
+        "text": text,
+        "file_type": file_type,
+        "name": target.name,
+        "chars": len(text),
+    })
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -334,19 +518,21 @@ def open_file():
     ws_path = request.form.get("ws_path", "").strip()
 
     try:
-        from app.core.file.file_parser import (
-            parse_docx,
-            parse_pdf,
-            parse_xlsx,
-        )
+        from app.core.file.file_parser import parse_pdf, parse_xlsx
 
         if ext == ".docx":
-            data = parse_docx(str(tmp_path))
+            data = _parse_docx_workspace_open(tmp_path, file_id)
             file_type = "docx"
         elif ext == ".xlsx":
             data = parse_xlsx(str(tmp_path), original_name=original_name)
             file_type = "xlsx"
         elif ext == ".pptx":
+            _pptx_size = tmp_path.stat().st_size
+            if _pptx_size > 100 * 1024 * 1024:
+                return jsonify({
+                    "error": f"PPTX 文件过大 ({_pptx_size / 1048576:.0f} MB)，可能包含嵌入视频。"
+                              f"Koto 当前不支持超过 100 MB 的 PPTX 文件，建议先在 PowerPoint 中删除视频后再打开。"
+                }), 413
             from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
             with open(str(tmp_path), "rb") as _f:
                 _raw = _f.read()
@@ -381,6 +567,8 @@ def open_file():
             "file_id": file_id,
             "file_name": original_name,
             "file_type": file_type,
+            "ws_source_path": ws_path or "",
+            "temp_path": _tmp_workspace_relpath(file_id, ext),
             "data": data,
         }
     )
@@ -457,7 +645,10 @@ def save_file():
         from app.core.file.file_parser import export_docx, export_pptx, export_xlsx
 
         if file_type == "docx":
-            raw_bytes = export_docx(data)  # data = HTML string
+            # Use original DOCX as template if available
+            _orig = _ensure_tmp_dir() / f"{file_id}.docx" if file_id else None
+            _orig_path = str(_orig) if _orig and _orig.is_file() else None
+            raw_bytes = export_docx(data, original_path=_orig_path)
             mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             if not file_name.endswith(".docx"):
                 file_name = Path(file_name).stem + ".docx"
@@ -856,7 +1047,9 @@ def auto_save():
         from app.core.file.file_parser import export_docx, export_pptx, export_xlsx
 
         if file_type == "docx":
-            raw_bytes = export_docx(data)
+            _orig = _ensure_tmp_dir() / f"{file_id}.docx" if file_id else None
+            _orig_path = str(_orig) if _orig and _orig.is_file() else None
+            raw_bytes = export_docx(data, original_path=_orig_path)
             suffix = ".docx"
         elif file_type == "xlsx":
             # data is {snapshot: IWorkbookData, _images: []} from Univer frontend.
@@ -1031,6 +1224,45 @@ def restore_version():
         return jsonify({"error": str(e)}), 500
 
     return jsonify({"ok": True, "restored_to": str(target)})
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/checkpoint", methods=["POST"])
+def create_checkpoint():
+    """
+    Create a pre-agent checkpoint for a file (Step 4.3).
+    Body JSON: { "path": "relative/path/to/file.docx", "label": "agent_pre" }
+    Returns: { "ok": true, "snap_path": "..." }
+    """
+    import shutil
+    from web.shared import WORKSPACE_DIR
+
+    body = request.get_json(force=True, silent=True) or {}
+    rel = body.get("path", "").strip()
+    label = body.get("label", "agent_pre")
+    if not rel:
+        return jsonify({"error": "缺少 path 参数"}), 400
+
+    ws_root = Path(WORKSPACE_DIR).resolve()
+    src = ws_root.joinpath(rel).resolve()
+    try:
+        src.relative_to(ws_root)
+    except ValueError:
+        return jsonify({"error": "路径非法"}), 400
+
+    if not src.is_file():
+        return jsonify({"error": "文件不存在"}), 404
+
+    suffix = src.suffix.lower()
+    snap_dir = src.parent / ".koto_versions" / src.stem
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    snap_path = snap_dir / f"{ts_str}_{label}{suffix}"
+    try:
+        shutil.copy2(str(src), str(snap_path))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"ok": True, "snap_path": str(snap_path), "target_path": rel})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1229,7 +1461,7 @@ def summarize_workspace_file():
         from web.app import MODEL_MAP as _MM
         from web.app import get_client
 
-        _DOC_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+        _DOC_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
         _model = _MM.get("CHAT") or _DOC_MODELS[0]
         # Interactions-only models can't do simple generate_content; use flash fallback
         if _model.startswith("deep-research"):
@@ -1501,6 +1733,7 @@ def quick_action():
     body = request.get_json(force=True, silent=True) or {}
     action = body.get("action", "")
     text = body.get("text", "")
+    full_text = body.get("full_text", "")  # full document for RAG context
     locked_model = body.get("locked_model", "auto")
 
     # Respect use_local_only setting if caller didn't explicitly set locked_model
@@ -1511,6 +1744,20 @@ def quick_action():
                 locked_model = "local"
         except Exception:
             pass
+
+    # Accept both Chinese and English action keys from different frontend entry points.
+    _action_aliases = {
+        "polish": "润色",
+        "translate": "翻译",
+        "summarize": "总结",
+        "summary": "总结",
+        "continue": "续写",
+        "rewrite": "改写",
+        "explain": "解释",
+        "visualize": "可视化",
+    }
+    if isinstance(action, str):
+        action = _action_aliases.get(action.strip().lower(), action)
 
     if not action or not text:
         return jsonify({"error": "缺少 action 或 text 字段"}), 400
@@ -1624,7 +1871,51 @@ def quick_action():
     if not prompt_template:
         return jsonify({"error": f"不支持的操作: {action}"}), 400
 
-    full_prompt = prompt_template + text
+    # Build document context via RAG if full_text is provided and long
+    _rag_info = None
+    doc_context_prefix = ""
+    if full_text:
+        try:
+            from app.core.file.doc_chunker import DocChunker as _DC
+            if len(full_text) > _DC.CHUNK_THRESHOLD:
+                _chunks = _DC.chunk(full_text)
+                _retrieved = _DC.retrieve(_chunks, query=text, top_k=4)
+                doc_context_prefix = (
+                    f"[文档上下文（RAG检索，共{len(_chunks)}段，已检索{len(_retrieved)}段）]\n"
+                    + "\n\n---\n\n".join(_retrieved)
+                    + "\n\n"
+                )
+                _rag_info = {"total_chunks": len(_chunks), "retrieved_chunks": len(_retrieved)}
+            else:
+                doc_context_prefix = f"[文档内容]\n{full_text}\n\n"
+        except Exception:
+            pass
+
+    full_prompt = doc_context_prefix + prompt_template + text
+    # ── EditorAIPipeline: PII filter + skill injection ────────────────────────
+    _qa_mask_result = None
+    _qa_skill_ids: list = []
+    _qa_force_local = False
+    try:
+        from app.core.editor_ai_pipeline import EditorAIPipeline
+        _qa_ft = (body.get("file_type") or "").lower().strip()
+        _qa_pipeline = EditorAIPipeline.preprocess(
+            prompt=full_prompt,
+            history=[],
+            file_type=_qa_ft,
+            output_mode="edit",
+            base_system_instruction="",
+            user_input_raw=text,
+        )
+        full_prompt = _qa_pipeline.safe_prompt
+        _qa_mask_result = _qa_pipeline.mask_result
+        _qa_skill_ids = _qa_pipeline.skill_ids
+        _qa_force_local = _qa_pipeline.force_local
+        # Privacy routing disabled — PII masking is sufficient
+        # if _qa_force_local and locked_model == "auto":
+        #     locked_model = "local"
+    except Exception as _qpe:
+        logger.debug("[WorkspaceAI] EditorAIPipeline.preprocess skipped: %s", _qpe)
     try:
         from app.core.socket_handler import (
             _call_llm_sync,
@@ -1669,12 +1960,36 @@ def quick_action():
 
         if not result:
             return jsonify({"error": "AI 处理失败，请检查 API Key 配置或 Ollama 状态"}), 503
-        return jsonify({
+
+        # ── EditorAIPipeline: PII restore + output validation + suggestions ──
+        _qa_suggestions = []
+        try:
+            from app.core.editor_ai_pipeline import EditorAIPipeline
+            _qa_post = EditorAIPipeline.postprocess(
+                response_text=result,
+                mask_result=_qa_mask_result,
+                skill_ids=_qa_skill_ids,
+                user_prompt=text,
+                file_type=(body.get("file_type") or ""),
+            )
+            result = _qa_post.text
+            _qa_suggestions = _qa_post.suggestions
+            if _qa_post.validation_action == "BLOCK":
+                result = _qa_post.text  # already replaced with safe message
+        except Exception as _qpoe:
+            logger.debug("[WorkspaceAI] EditorAIPipeline.postprocess skipped: %s", _qpoe)
+
+        resp = {
             "result": result.strip(),
             "original": text,
             "action": action,
             "used_local_model": used_local,
-        })
+        }
+        if _rag_info:
+            resp["rag_info"] = _rag_info
+        if _qa_suggestions:
+            resp["skill_suggestions"] = _qa_suggestions
+        return jsonify(resp)
     except Exception as exc:
         logger.error("[WorkspaceAI] quick_action failed: %s", exc)
         return jsonify({"error": str(exc)}), 500
@@ -1828,6 +2143,156 @@ def serve_abs_file():
     if not target.is_file():
         return jsonify({"error": "文件不存在"}), 404
     return send_file(str(target), as_attachment=False)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/open_abs_file
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Video extensions stored inside PPTX/DOCX ZIP packages
+_PPTX_VIDEO_EXTS = frozenset({
+    '.mp4', '.mov', '.wmv', '.avi', '.m4v', '.mkv', '.flv', '.webm', '.asf', '.mpg', '.mpeg',
+})
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/open_abs_file", methods=["POST"])
+def open_abs_file():
+    """
+    Parse a file by absolute path — server reads directly from disk, no browser round-trip.
+    This replaces the old serve_abs → blob → Router.load flow for browser-opened files.
+    Includes fast ZIP pre-scan to reject PPTX/DOCX containing embedded video before
+    any heavy parsing begins.
+
+    Body (JSON): {"path": "/absolute/path/to/file.pptx"}
+    Response: same format as open_file
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    abs_path = (body.get("path") or "").strip()
+    if not abs_path:
+        return jsonify({"error": "缺少 path 字段"}), 400
+
+    target = Path(abs_path).resolve()
+
+    # Security: block config dir and system dirs
+    try:
+        target.relative_to(_APP_CONFIG_DIR)
+        return jsonify({"error": "不允许访问应用配置目录"}), 403
+    except ValueError:
+        pass
+    if not _fs_guard(target):
+        return jsonify({"error": "路径不合法"}), 403
+
+    if not target.is_file():
+        return jsonify({"error": "文件不存在"}), 404
+
+    ext = target.suffix.lower()
+    if ext not in _ALLOWED_EXT:
+        return jsonify({"error": f"不支持的格式: {ext}"}), 400
+
+    file_size = target.stat().st_size
+
+    # ── PPTX pre-flight checks (must run BEFORE copying or reading file bytes) ──
+    if ext == ".pptx":
+        # 1. Fast ZIP scan for embedded video — reads only central directory (~milliseconds)
+        import zipfile as _zipfile
+        _found_video = None
+        try:
+            with _zipfile.ZipFile(str(target)) as _zf:
+                for _zname in _zf.namelist():
+                    if Path(_zname).suffix.lower() in _PPTX_VIDEO_EXTS:
+                        _found_video = Path(_zname).name
+                        break
+        except Exception:
+            pass
+        if _found_video:
+            logger.warning("[open_abs_file] PPTX contains video %s, rejecting", _found_video)
+            return jsonify({
+                "error": (
+                    f"该 PPTX 包含嵌入视频（{_found_video}），Koto 当前不支持含视频的 PPTX 文件。\n"
+                    f"请先在 PowerPoint 中选中视频 → 删除 → 另存为，然后重新打开。"
+                )
+            }), 415
+        # 2. Size guard (no video found but still very large → likely huge images)
+        if file_size > 50 * 1024 * 1024:
+            return jsonify({
+                "error": f"PPTX 文件过大（{file_size / 1048576:.0f} MB），Koto 限制 50 MB。"
+                         f"建议压缩图片后重试。"
+            }), 413
+
+    # Copy to session tmp dir (parser works on a sandboxed copy)
+    file_id = uuid.uuid4().hex
+    tmp_path = _ensure_tmp_dir() / f"{file_id}{ext}"
+    try:
+        import shutil
+        shutil.copy2(str(target), str(tmp_path))
+    except Exception as ce:
+        return jsonify({"error": f"文件读取失败: {ce}"}), 500
+
+    try:
+        from app.core.file.file_parser import parse_pdf, parse_xlsx
+
+        if ext == ".docx":
+            data = _parse_docx_workspace_open(tmp_path, file_id)
+            file_type = "docx"
+        elif ext == ".xlsx":
+            data = parse_xlsx(str(tmp_path), original_name=target.name)
+            file_type = "xlsx"
+        elif ext == ".pptx":
+            from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
+            raw = tmp_path.read_bytes()
+            data = _pptx_rich_parse(raw)
+            file_type = "pptx"
+        elif ext == ".pdf":
+            data = parse_pdf(str(tmp_path), file_id)
+            file_type = "pdf"
+        elif ext in _IMAGE_EXTS:
+            file_type = "image"
+            data = {"raw_url": f"/api/v1/workspace/raw/{file_id}"}
+        elif ext in _TEXT_EXTS:
+            content = target.read_text(encoding="utf-8", errors="replace")
+            file_type = "text" if ext in (".txt", ".md", ".markdown") else "code"
+            data = {"content": content, "language": ext.lstrip("."), "extension": ext.lstrip(".")}
+        else:
+            return jsonify({"error": "内部格式路由错误"}), 500
+
+    except Exception as e:
+        logger.error("[open_abs_file] 解析失败 %s: %s", target.name, e, exc_info=True)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return jsonify({"error": f"文件解析失败: {str(e)}"}), 500
+
+    return jsonify({
+        "file_id": file_id,
+        "file_name": target.name,
+        "file_type": file_type,
+        "data": data,
+    })
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/docx_full", methods=["POST"])
+def load_full_docx():
+    """Hydrate a preview-opened DOCX to its full HTML payload."""
+    body = request.get_json(force=True, silent=True) or {}
+    file_id = (body.get("file_id") or "").strip()
+    if not file_id:
+        return jsonify({"error": "缺少 file_id 字段"}), 400
+
+    tmp_path = _tmp_file_path(file_id, ".docx")
+    if not tmp_path.is_file():
+        return jsonify({"error": "DOCX 临时文件不存在或已过期"}), 404
+
+    try:
+        from app.core.file.file_parser import parse_docx
+
+        data = parse_docx(str(tmp_path))
+        data["raw_url"] = f"/api/v1/workspace/raw/{file_id}"
+    except Exception as exc:
+        logger.error("[load_full_docx] 完整解析失败 %s: %s", file_id, exc, exc_info=True)
+        return jsonify({"error": f"DOCX 完整加载失败: {exc}"}), 500
+
+    return jsonify({"file_id": file_id, "file_type": "docx", "data": data})
 
 
 # ─── FS browser file operations (work on absolute paths) ──────────────────────
@@ -2037,9 +2502,9 @@ def audio_overview():
             client = get_client()
 
             # Pick a suitable model
-            _model = _MM.get("CHAT") or "gemini-2.0-flash-lite"
+            _model = _MM.get("CHAT") or "gemini-2.5-flash-lite"
             if _model.startswith("deep-research"):
-                _model = "gemini-2.0-flash-lite"
+                _model = "gemini-2.5-flash-lite"
 
             # Build a simple wrapper that AudioOverviewGenerator expects
             class _ModelAdapter:
@@ -2157,9 +2622,9 @@ def notebook_guide():
             from web.app import get_client
 
             client = get_client()
-            _model = _MM.get("CHAT") or "gemini-2.0-flash-lite"
+            _model = _MM.get("CHAT") or "gemini-2.5-flash-lite"
             if _model.startswith("deep-research"):
-                _model = "gemini-2.0-flash-lite"
+                _model = "gemini-2.5-flash-lite"
 
             for sec_key, sec_label, sec_prompt in SECTIONS:
                 full_prompt = (
@@ -2350,3 +2815,269 @@ def upload_to_folder():
             return jsonify({"error": f"权限不足，无法写入 {target.name}"}), 403
 
     return jsonify({"ok": True, "saved": saved})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/pdf/save_annotations
+# POST /api/v1/workspace/pdf/load_annotations/<file_id>
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/pdf/save_annotations", methods=["POST"])
+def pdf_save_annotations():
+    """
+    Embed client-side annotations into the PDF binary and return the modified file
+    for download.
+
+    Body (JSON):
+      {
+        "file_id": str,          — tmp file identifier (hex)
+        "annotations": [...],    — array of annotation objects from KotoPdfViewer
+        "filename": str          — original filename (used for download name)
+      }
+
+    Returns the annotated PDF as an attachment.
+    """
+    body = request.get_json(silent=True) or {}
+    file_id = str(body.get("file_id", ""))
+    annotations = body.get("annotations", [])
+    filename = body.get("filename", "annotated.pdf")
+
+    # Sanitize file_id: only allow alphanumeric
+    if not file_id.isalnum():
+        return jsonify({"error": "无效的 file_id"}), 400
+
+    tmp_dir = _ensure_tmp_dir()
+    matches = list(tmp_dir.glob(f"{file_id}.pdf"))
+    if not matches:
+        # Also try without extension
+        matches = list(tmp_dir.glob(f"{file_id}.*"))
+        matches = [m for m in matches if m.suffix.lower() == ".pdf"]
+    if not matches:
+        return jsonify({"error": "找不到 PDF 文件"}), 404
+
+    pdf_path = str(matches[0])
+
+    try:
+        from web.pdf_annotator import embed_annotations
+        pdf_bytes = embed_annotations(pdf_path, annotations)
+    except Exception as exc:
+        logger.error("[pdf_save_annotations] 注释嵌入失败: %s", exc, exc_info=True)
+        return jsonify({"error": f"注释嵌入失败: {str(exc)}"}), 500
+
+    import io as _io
+    buf = _io.BytesIO(pdf_bytes)
+    safe_name = filename if filename.lower().endswith(".pdf") else filename + ".pdf"
+    return send_file(
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=safe_name,
+    )
+
+
+@workspace_assistant_bp.route(
+    "/api/v1/workspace/pdf/load_annotations/<file_id>", methods=["GET"]
+)
+def pdf_load_annotations(file_id: str):
+    """
+    Read annotations embedded in a cached PDF and return them as JSON.
+
+    Returns:
+      {"annotations": [...]}
+    """
+    if not file_id.isalnum():
+        return jsonify({"error": "无效的 file_id"}), 400
+
+    tmp_dir = _ensure_tmp_dir()
+    matches = [m for m in tmp_dir.glob(f"{file_id}.*") if m.suffix.lower() == ".pdf"]
+    if not matches:
+        return jsonify({"error": "找不到 PDF 文件"}), 404
+
+    pdf_path = str(matches[0])
+
+    try:
+        from web.pdf_annotator import read_annotations
+        annotations = read_annotations(pdf_path)
+    except Exception as exc:
+        logger.error("[pdf_load_annotations] 批注读取失败: %s", exc, exc_info=True)
+        return jsonify({"error": f"批注读取失败: {str(exc)}"}), 500
+
+    return jsonify({"annotations": annotations})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/pdf/page_ops
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/pdf/page_ops", methods=["POST"])
+def pdf_page_ops():
+    """
+    Reconstruct a PDF with pages in the requested order / rotation.
+    Used by the Page Manager for reorder, rotate, delete, and split (export subset).
+
+    Body (JSON):
+      {
+        "file_id": str,   — tmp file identifier (hex)
+        "pages": [{"orig_page": int, "rotation": int}, ...]
+      }
+
+    Returns the new PDF as an attachment.
+    """
+    body = request.get_json(silent=True) or {}
+    file_id = str(body.get("file_id", ""))
+    pages = body.get("pages", [])
+
+    if not file_id.isalnum():
+        return jsonify({"error": "无效的 file_id"}), 400
+    if not pages:
+        return jsonify({"error": "pages 不能为空"}), 400
+
+    tmp_dir = _ensure_tmp_dir()
+    matches = [m for m in tmp_dir.glob(f"{file_id}.*") if m.suffix.lower() == ".pdf"]
+    if not matches:
+        return jsonify({"error": "找不到 PDF 文件"}), 404
+
+    pdf_path = str(matches[0])
+    orig_name = matches[0].name
+
+    try:
+        from web.pdf_annotator import apply_page_ops
+        pdf_bytes = apply_page_ops(pdf_path, pages)
+    except Exception as exc:
+        logger.error("[pdf_page_ops] 页面操作失败: %s", exc, exc_info=True)
+        return jsonify({"error": f"页面操作失败: {str(exc)}"}), 500
+
+    import io as _io
+    buf = _io.BytesIO(pdf_bytes)
+    return send_file(
+        buf,
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=orig_name,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/pdf/convert
+# ─────────────────────────────────────────────────────────────────────────────
+
+_PDF_CONVERT_MIME = {
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/pdf/convert", methods=["POST"])
+def pdf_convert():
+    """
+    Convert a cached PDF to another format.
+
+    Body (JSON):
+      {
+        "file_id"      : str,   — tmp file identifier (hex)
+        "target_format": str,   — "docx" | "xlsx" | "pptx"
+        "filename"     : str    — original filename (used for download name, optional)
+      }
+
+    Returns the converted file as an attachment.
+    """
+    body = request.get_json(silent=True) or {}
+    file_id = str(body.get("file_id", ""))
+    target_fmt = str(body.get("target_format", "")).lower().lstrip(".")
+    filename = body.get("filename", "converted")
+
+    if not file_id.isalnum():
+        return jsonify({"error": "无效的 file_id"}), 400
+    if target_fmt not in _PDF_CONVERT_MIME:
+        return jsonify({"error": f"不支持的目标格式 '{target_fmt}'，支持：docx / xlsx / pptx"}), 400
+
+    tmp_dir = _ensure_tmp_dir()
+    matches = [m for m in tmp_dir.glob(f"{file_id}.*") if m.suffix.lower() == ".pdf"]
+    if not matches:
+        return jsonify({"error": "找不到 PDF 文件"}), 404
+
+    pdf_path = str(matches[0])
+    stem = Path(filename).stem or "converted"
+    download_name = f"{stem}.{target_fmt}"
+    warning = ""
+
+    try:
+        from web.pdf_annotator import pdf_to_docx, pdf_to_xlsx, pdf_to_pptx
+        if target_fmt == "docx":
+            file_bytes, warning = pdf_to_docx(pdf_path)
+        elif target_fmt == "xlsx":
+            file_bytes = pdf_to_xlsx(pdf_path)
+        elif target_fmt == "pptx":
+            file_bytes = pdf_to_pptx(pdf_path)
+        else:
+            return jsonify({"error": "内部错误"}), 500
+    except Exception as exc:
+        logger.error("[pdf_convert] 格式转换失败: %s", exc, exc_info=True)
+        return jsonify({"error": f"格式转换失败: {str(exc)}"}), 500
+
+    import io as _io
+    resp = send_file(
+        _io.BytesIO(file_bytes),
+        mimetype=_PDF_CONVERT_MIME[target_fmt],
+        as_attachment=True,
+        download_name=download_name,
+    )
+    if warning:
+        resp.headers["X-Koto-Warning"] = warning
+    return resp
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/pdf/remove_watermark
+# ─────────────────────────────────────────────────────────────────────────────
+
+@workspace_assistant_bp.route("/api/v1/workspace/pdf/remove_watermark", methods=["POST"])
+def pdf_remove_watermark():
+    """
+    AI-assisted watermark removal.
+    Body: {"file_id": str, "use_ai": bool}
+    Returns the cleaned PDF as an attachment.
+    """
+    body = request.get_json(silent=True) or {}
+    file_id = str(body.get("file_id", ""))
+    use_ai  = bool(body.get("use_ai", True))
+
+    # Validate file_id: must be alphanumeric/hyphen/underscore only (prevents path traversal)
+    if not file_id or not file_id.replace("-", "").replace("_", "").isalnum():
+        return jsonify({"error": "无效的 file_id"}), 400
+
+    tmp_dir = _ensure_tmp_dir()
+    matches = [m for m in tmp_dir.glob(f"{file_id}.*") if m.suffix.lower() == ".pdf"]
+    if not matches:
+        return jsonify({"error": "找不到对应的 PDF 文件，请重新打开"}), 404
+
+    pdf_path = str(matches[0])
+
+    api_key = None
+    if use_ai:
+        import os
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY")
+
+    try:
+        from web.pdf_annotator import remove_watermark
+        pdf_bytes, removed_count, method_used = remove_watermark(
+            pdf_path, use_ai=use_ai, api_key=api_key
+        )
+    except Exception as exc:
+        logger.error("[pdf_remove_watermark] 失败: %s", exc, exc_info=True)
+        return jsonify({"error": f"去水印失败: {str(exc)}"}), 500
+
+    import io as _io
+    orig_stem = matches[0].stem
+    resp = send_file(
+        _io.BytesIO(pdf_bytes),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=f"{orig_stem}_去水印.pdf",
+    )
+    resp.headers["X-Koto-Removed-Count"] = str(removed_count)
+    resp.headers["X-Koto-Method"] = method_used
+    return resp

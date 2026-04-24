@@ -1,6 +1,5 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
-import concurrent.futures
 import logging
 import os
 import queue
@@ -9,6 +8,11 @@ import time
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from .base import LLMProvider
+from .gemini_config import get_gemini_api_key, load_gemini_config_env
+from .model_capabilities import (
+    get_interactions_only_model_set,
+    is_interactions_only_model,
+)
 
 try:
     from google import genai
@@ -19,15 +23,115 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def _ensure_gemini_env_loaded() -> None:
+    load_gemini_config_env(override=False)
+
+
+def _normalize_proxy_url(proxy_value: str) -> str:
+    value = str(proxy_value or "").strip()
+    if not value:
+        return ""
+    if "://" not in value:
+        value = f"http://{value}"
+    return value
+
+
+def _iter_proxy_candidates() -> List[str]:
+    candidates: List[str] = []
+
+    force_proxy = str(os.getenv("FORCE_PROXY") or "").strip()
+    if force_proxy and force_proxy.lower() not in {"auto", "system"}:
+        candidates.append(_normalize_proxy_url(force_proxy))
+
+    env_proxy = (
+        os.getenv("HTTPS_PROXY")
+        or os.getenv("https_proxy")
+        or os.getenv("HTTP_PROXY")
+        or os.getenv("http_proxy")
+    )
+    if env_proxy:
+        candidates.append(_normalize_proxy_url(env_proxy))
+
+    if os.name == "nt":
+        try:
+            import winreg
+
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+                proxy_enabled = int(winreg.QueryValueEx(key, "ProxyEnable")[0] or 0)
+                if proxy_enabled:
+                    proxy_server = str(
+                        winreg.QueryValueEx(key, "ProxyServer")[0] or ""
+                    ).strip()
+                    if proxy_server:
+                        if "=" in proxy_server and ";" in proxy_server:
+                            parsed_map = {}
+                            for pair in proxy_server.split(";"):
+                                if "=" not in pair:
+                                    continue
+                                key_name, value = pair.split("=", 1)
+                                parsed_map[key_name.strip().lower()] = value.strip()
+                            for proto in ("https", "http", "socks", "socks5"):
+                                value = parsed_map.get(proto)
+                                if value:
+                                    candidates.append(_normalize_proxy_url(value))
+                        else:
+                            candidates.append(_normalize_proxy_url(proxy_server))
+        except Exception:
+            pass
+
+    candidates.extend(
+        [
+            "http://127.0.0.1:7890",
+            "http://127.0.0.1:10809",
+            "http://127.0.0.1:1080",
+        ]
+    )
+
+    deduped: List[str] = []
+    seen = set()
+    for item in candidates:
+        if not item:
+            continue
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _ensure_gemini_proxy_configured() -> Optional[str]:
+    import socket
+    from urllib.parse import urlparse
+
+    for proxy in _iter_proxy_candidates():
+        try:
+            parsed = urlparse(proxy)
+            host = parsed.hostname
+            port = parsed.port
+            if not host or not port:
+                continue
+
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(0.1)
+            result = sock.connect_ex((host, port))
+            sock.close()
+
+            if result == 0:
+                os.environ["HTTPS_PROXY"] = proxy
+                os.environ["HTTP_PROXY"] = proxy
+                return proxy
+        except Exception:
+            continue
+    return None
+
 # Interactions-only models: cannot use client.models.generate_content()
 # Must be routed through rc.interactions.create(agent=...) instead.
-# NOTE: gemini-3-flash-preview and gemini-3-pro-preview are regular models
+# NOTE: gemini-2.5-flash and gemini-2.5-pro are regular models
 # (use generate_content). Only deep-research-* are actual Interactions API agents.
-_INTERACTIONS_ONLY_MODELS: frozenset = frozenset(
-    {
-        "deep-research-pro-preview-12-2025",  # Research agent: Interactions API only
-    }
-)
+_INTERACTIONS_ONLY_MODELS: frozenset = frozenset(get_interactions_only_model_set())
 # No background=True restriction needed for current interactions models
 _NO_BACKGROUND_MODELS: frozenset = frozenset()
 
@@ -39,17 +143,15 @@ class GeminiProvider(LLMProvider):
     RETRY_BASE_DELAY = 2.0  # seconds
     RETRYABLE_STATUS_CODES = {429, 503}
     # 非流式调用整体超时（秒），超时后抛出 TimeoutError 触发本地模型兜底
-    CALL_TIMEOUT: int = int(os.getenv("GEMINI_CALL_TIMEOUT", "30"))
+    CALL_TIMEOUT: int = int(os.getenv("GEMINI_CALL_TIMEOUT", "15"))
     # 流式调用每个 chunk 之间的最长等待（秒）
     STREAM_CHUNK_TIMEOUT: int = int(os.getenv("GEMINI_STREAM_CHUNK_TIMEOUT", "15"))
 
     def __init__(self, api_key: str = None):
-        self.api_key = (
-            api_key
-            or os.getenv("GEMINI_API_KEY")
-            or os.getenv("API_KEY")
-            or os.getenv("GOOGLE_API_KEY")
-        )
+        if not api_key:
+            _ensure_gemini_env_loaded()
+
+        self.api_key = get_gemini_api_key(api_key, ensure_loaded=False)
         self._api_base = os.getenv("GEMINI_API_BASE", "").strip()
         self.client = None
 
@@ -67,24 +169,47 @@ class GeminiProvider(LLMProvider):
             logger.warning("No Google API KEY provided")
 
     def _make_client(self, api_key: str):
-        """Build a genai.Client, honoring GEMINI_API_BASE if configured."""
-        if self._api_base and genai:
+        """Build a genai.Client with bounded HTTP timeouts.
+
+        This avoids indefinite socket/connect hangs in upstream HTTP layers.
+        """
+        if not genai:
+            return None
+
+        opts_kwargs: Dict[str, Any] = {"api_version": "v1beta"}
+        if self._api_base:
+            opts_kwargs["base_url"] = self._api_base
+
+        # Keep connect timeout strict; read timeout should exceed both
+        # non-stream and stream-chunk guard rails.
+        _connect_timeout = float(os.getenv("GEMINI_CONNECT_TIMEOUT", "10"))
+        _read_timeout = float(
+            os.getenv(
+                "GEMINI_READ_TIMEOUT",
+                str(max(self.CALL_TIMEOUT + 5, self.STREAM_CHUNK_TIMEOUT + 5)),
+            )
+        )
+
+        try:
+            import httpx
+            from google.genai._api_client import HttpOptions as _HttpOptions
+
+            _ensure_gemini_proxy_configured()
+            _httpx_client = httpx.Client(
+                timeout=httpx.Timeout(_read_timeout, connect=_connect_timeout),
+                verify=True,
+            )
+            opts_kwargs["httpx_client"] = _httpx_client
+            return genai.Client(api_key=api_key, http_options=_HttpOptions(**opts_kwargs))
+        except Exception as exc:
+            logger.warning("[GeminiProvider] httpx timeout client init failed: %s", exc)
             try:
                 from google.genai._api_client import HttpOptions as _HttpOptions
 
-                return genai.Client(
-                    api_key=api_key,
-                    http_options=_HttpOptions(
-                        api_version="v1beta", base_url=self._api_base
-                    ),
-                )
+                return genai.Client(api_key=api_key, http_options=_HttpOptions(**opts_kwargs))
             except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
-        return genai.Client(api_key=api_key)
+                logger.warning("[GeminiProvider] HttpOptions init failed, using default client")
+                return genai.Client(api_key=api_key)
 
     def _get_client(self):
         """Return a genai.Client for the current request.
@@ -116,7 +241,7 @@ class GeminiProvider(LLMProvider):
     def generate_content(
         self,
         prompt: Union[str, List[Dict[str, Any]]],
-        model: str = "gemini-3-flash-preview",
+        model: str = "gemini-2.5-flash",
         system_instruction: Optional[str] = None,
         tools: Optional[List[Any]] = None,
         stream: bool = False,
@@ -127,7 +252,7 @@ class GeminiProvider(LLMProvider):
             raise ImportError("google.genai client not initialized")
 
         # Route interactions-only models through Interactions API transparently
-        if model in _INTERACTIONS_ONLY_MODELS:
+        if is_interactions_only_model(model, _INTERACTIONS_ONLY_MODELS):
             result = self._call_via_interactions_api(
                 model, prompt, sys_instruction=system_instruction, stream=stream
             )
@@ -189,8 +314,14 @@ class GeminiProvider(LLMProvider):
                         time.sleep(_delay)
                 raise last_stream_exc  # unreachable but satisfies type checker
 
-            # Non-streaming with retry for transient errors
-            result = self._call_with_retry(model, contents, config, client)
+            # File-task style calls can override the hard timeout per request.
+            result = self._call_with_retry(
+                model,
+                contents,
+                config,
+                client,
+                timeout_seconds=kwargs.get("call_timeout"),
+            )
             self._track_usage(
                 model,
                 result.get("usage"),
@@ -203,39 +334,52 @@ class GeminiProvider(LLMProvider):
             logger.error(f"Gemini generation error: {exc}")
             raise
 
-    def _call_with_retry(self, model: str, contents, config, client=None):
+    def _call_with_retry(
+        self,
+        model: str,
+        contents,
+        config,
+        client=None,
+        timeout_seconds: Optional[float] = None,
+    ):
         """Call generate_content with exponential backoff retry on 429/503.
 
-        每次调用在独立线程中执行，若超过 CALL_TIMEOUT 秒无响应则抛出
-        TimeoutError（消息含 "timed out"），触发上层本地模型兜底逻辑。
+        Uses a hard wall-clock timeout wrapper (daemon thread) so Koto never
+        blocks indefinitely even if upstream SDK retries get stuck.
         """
         if client is None:
             client = self._get_client()
-        last_exc = None
+
+        effective_timeout = float(
+            timeout_seconds if timeout_seconds is not None else self.CALL_TIMEOUT
+        )
+
         for attempt in range(self.MAX_RETRIES):
             try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-                    _future = _pool.submit(
-                        client.models.generate_content,
+                response = self._run_call_with_hard_timeout(
+                    lambda: client.models.generate_content(
                         model=model,
                         contents=contents,
                         config=config,
-                    )
-                    try:
-                        response = _future.result(timeout=self.CALL_TIMEOUT)
-                    except concurrent.futures.TimeoutError:
-                        raise TimeoutError(
-                            f"LLM call timed out after {self.CALL_TIMEOUT}s"
-                        )
+                    ),
+                    timeout_seconds=effective_timeout,
+                    timeout_message=(
+                        f"LLM call timed out after {effective_timeout:g}s "
+                        f"(model={model})"
+                    ),
+                )
                 return self._format_response(response)
-            except TimeoutError:
-                # 超时不重试，直接向上抛，由 UnifiedAgent 产生 ERROR step
-                raise
             except Exception as exc:
-                last_exc = exc
-                # Check if retryable
                 status_code = getattr(exc, "status_code", None)
                 exc_str = str(exc)
+                exc_lower = exc_str.lower()
+
+                # Timeout-like failures should fail fast to avoid perceived hangs.
+                if "timeout" in exc_lower or "timed out" in exc_lower:
+                    raise TimeoutError(
+                        f"LLM call timed out (model={model}, timeout={effective_timeout:g}s)"
+                    ) from exc
+
                 is_retryable = (
                     (status_code and status_code in self.RETRYABLE_STATUS_CODES)
                     or "429" in exc_str
@@ -256,6 +400,32 @@ class GeminiProvider(LLMProvider):
                     f"retrying in {delay:.1f}s: {exc}"
                 )
                 time.sleep(delay)
+
+    @staticmethod
+    def _run_call_with_hard_timeout(callable_fn, timeout_seconds: float, timeout_message: str):
+        """Run callable in a daemon thread and fail fast on timeout.
+
+        Daemon thread ensures timed-out SDK calls never block process shutdown.
+        """
+        _q: queue.Queue = queue.Queue(maxsize=1)
+
+        def _runner():
+            try:
+                _q.put(("ok", callable_fn()))
+            except Exception as exc:
+                _q.put(("err", exc))
+
+        _t = threading.Thread(target=_runner, daemon=True, name="gemini-hard-timeout")
+        _t.start()
+
+        try:
+            status, payload = _q.get(timeout=timeout_seconds)
+        except queue.Empty as exc:
+            raise TimeoutError(timeout_message) from exc
+
+        if status == "err":
+            raise payload
+        return payload
 
     def get_token_count(
         self, prompt: Union[str, List[Dict[str, Any]]], model: str
@@ -513,13 +683,19 @@ class GeminiProvider(LLMProvider):
         if sys_instruction:
             full_input = f"[\u7cfb\u7edf\u6307\u4ee4]\n{sys_instruction}\n\n[\u7528\u6237\u8f93\u5165]\n{flat}"
 
-        # Build a client with extended timeout (interactions can take up to 5 min)
+        # Build a client with bounded HTTP timeout; overall polling window is
+        # controlled by the `timeout` argument below.
         try:
             import httpx
             from google.genai._api_client import HttpOptions as _HttpOptions
 
+            _connect_timeout = float(os.getenv("GEMINI_CONNECT_TIMEOUT", "10"))
+            _ia_http_timeout = float(
+                os.getenv("GEMINI_INTERACTIONS_HTTP_TIMEOUT", "45")
+            )
             http_client = httpx.Client(
-                timeout=httpx.Timeout(300.0, connect=30.0), verify=True
+                timeout=httpx.Timeout(_ia_http_timeout, connect=_connect_timeout),
+                verify=True,
             )
             rc = genai.Client(
                 api_key=self.api_key,

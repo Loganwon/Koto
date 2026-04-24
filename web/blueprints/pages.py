@@ -17,6 +17,8 @@ Routes:
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
+  GET /editor                  — editor_page
+  GET /editor/assets/<file>    — editor_assets
 """
 
 import os
@@ -37,19 +39,25 @@ def _get_initial_theme() -> str:
 
 
 @pages_bp.route("/")
-def index() -> str:
+def index() -> Response:
     # 云模式：未认证用户看到落地页
     deploy_mode = os.environ.get("KOTO_DEPLOY_MODE", "local")
     auth_enabled = os.environ.get("KOTO_AUTH_ENABLED", "false").lower() == "true"
     if deploy_mode == "cloud" and auth_enabled:
-        return render_template("landing.html")
-    return render_template("index.html", initial_theme=_get_initial_theme())
+        return make_response(render_template("landing.html"))
+    resp = make_response(render_template("index.html", initial_theme=_get_initial_theme()))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @pages_bp.route("/app")
-def app_main() -> str:
+def app_main() -> Response:
     """主应用页面（SaaS 模式下需认证后访问）"""
-    return render_template("index.html", initial_theme=_get_initial_theme())
+    resp = make_response(render_template("index.html", initial_theme=_get_initial_theme()))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @pages_bp.route("/file-network")
@@ -123,12 +131,34 @@ def notebook_ui() -> str:
 
 
 @pages_bp.route("/workspace-assistant")
-def workspace_assistant_page() -> str:
+def workspace_assistant_page() -> Response:
     """全格式 AI 原生工作区"""
-    return render_template("workspace_assistant.html")
+    resp = make_response(render_template("workspace_assistant.html"))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @pages_bp.route("/doc-compare")
 def doc_compare_ui() -> str:
     """多文档对比界面"""
     return render_template("doc_compare.html")
+
+
+_UNIVER_DIST = os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist")
+
+
+@pages_bp.route("/editor")
+def editor_page() -> Response:
+    """文件助手主页 — 服务 Vite 构建产物 (static/univer-dist/index.html)"""
+    resp = make_response(send_from_directory(_UNIVER_DIST, "index.html"))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
+
+
+@pages_bp.route("/editor/assets/<path:filename>")
+def editor_assets(filename: str) -> Response:
+    """文件助手静态资源 — JS/CSS 束文件"""
+    return send_from_directory(os.path.join(_UNIVER_DIST, "assets"), filename)
+

@@ -9,7 +9,90 @@ Unit tests for:
 import importlib
 import sys
 import types
+from html.parser import HTMLParser
+from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
+
+
+class _HtmlNode:
+    def __init__(self, tag, attrs, parent=None):
+        self.tag = tag
+        self.attrs = dict(attrs)
+        self.parent = parent
+        self.children = []
+        self.text = ""
+
+
+class _TemplateTreeParser(HTMLParser):
+    _VOID_TAGS = {
+        "area",
+        "base",
+        "br",
+        "circle",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "line",
+        "link",
+        "meta",
+        "param",
+        "path",
+        "polyline",
+        "rect",
+        "source",
+        "track",
+        "wbr",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.root = _HtmlNode("root", [])
+        self._stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        node = _HtmlNode(tag, attrs, parent=self._stack[-1])
+        self._stack[-1].children.append(node)
+        if tag not in self._VOID_TAGS:
+            self._stack.append(node)
+
+    def handle_startendtag(self, tag, attrs):
+        node = _HtmlNode(tag, attrs, parent=self._stack[-1])
+        self._stack[-1].children.append(node)
+
+    def handle_endtag(self, tag):
+        for idx in range(len(self._stack) - 1, 0, -1):
+            if self._stack[idx].tag == tag:
+                del self._stack[idx:]
+                break
+
+    def handle_data(self, data):
+        text = data.strip()
+        if text:
+            self._stack[-1].text += text
+
+
+def _iter_nodes(node):
+    yield node
+    for child in node.children:
+        yield from _iter_nodes(child)
+
+
+def _find_node_by_id(root, node_id):
+    for node in _iter_nodes(root):
+        if node.attrs.get("id") == node_id:
+            return node
+    return None
+
+
+def _node_text(node):
+    parts = [node.text] if node.text else []
+    for child in node.children:
+        child_text = _node_text(child)
+        if child_text:
+            parts.append(child_text)
+    return "".join(parts)
 
 # ── 1. _client cache reset on API key save ─────────────────────────────────
 
@@ -121,6 +204,28 @@ class TestApiKeySettingsPanelHtml:
 
     def test_ai_studio_link(self):
         assert "aistudio.google.com/apikey" in self.html
+
+    def test_ui_zoom_controls_stay_inside_appearance_section(self):
+        parser = _TemplateTreeParser()
+        parser.feed(self.html)
+
+        slider = _find_node_by_id(parser.root, "uiZoomSlider")
+        assert slider is not None, "Settings panel must define uiZoomSlider"
+
+        current = slider.parent
+        appearance_section = None
+        while current is not None:
+            classes = current.attrs.get("class", "").split()
+            if "settings-section" in classes and "外观" in _node_text(current):
+                appearance_section = current
+                break
+            current = current.parent
+
+        assert appearance_section is not None, (
+            "UI zoom controls must remain inside the 外观 settings section; "
+            "if they fall outside, malformed closing tags break the settings "
+            "layout and later sections overlay the storage/API controls."
+        )
 
 
 # ── 4. saveSettingsApiKey JS function ──────────────────────────────────────

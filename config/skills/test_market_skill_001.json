@@ -19,8 +19,6 @@
     "description": ""
   },
   "bound_tools": [],
-  "executor_tools": [],
-  "plan_template": [],
   "trigger_keywords": [],
   "task_types": [
     "CHAT"
@@ -45,6 +43,8 @@
   "update_url": "",
   "publisher": "user",
   "default_triggers": [],
+  "plan_template": [],
+  "executor_tools": [],
   "entry_point": null,
   "ui_config": {
     "theme": "",

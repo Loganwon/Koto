@@ -1,0 +1,55 @@
+{
+  "id": "questionnaire_filler",
+  "name": "问卷/RFP 自动填写",
+  "icon": "📝",
+  "category": "workflow",
+  "skill_nature": "domain_skill",
+  "description": "基于参考资料库，自动回答问卷/RFP/尽调表中的问题，标注信心度，支持批量导出",
+  "version": "1.0.0",
+  "author": "koto",
+  "executor": "app.core.workflows.questionnaire_filler.QuestionnaireFiller",
+  "params_schema": [
+    {
+      "key": "question_file",
+      "label": "问卷文件（Excel/Word，含问题列）",
+      "type": "file",
+      "accept": ".xlsx,.xls,.docx,.doc,.txt",
+      "required": true
+    },
+    {
+      "key": "reference_files",
+      "label": "参考资料（可多选）",
+      "type": "file_multi",
+      "accept": ".pdf,.docx,.doc,.xlsx,.xls,.txt",
+      "required": true
+    },
+    {
+      "key": "question_col",
+      "label": "问题所在列名（留空自动识别）",
+      "type": "text",
+      "placeholder": "如：问题、Question",
+      "required": false
+    },
+    {
+      "key": "model_mode",
+      "label": "模型",
+      "type": "select",
+      "options": [
+        {
+          "value": "online",
+          "label": "在线模型"
+        },
+        {
+          "value": "local",
+          "label": "本地模型"
+        }
+      ],
+      "default": "online",
+      "required": false
+    }
+  ],
+  "output_types": [
+    "xlsx_data"
+  ],
+  "enabled": false
+}

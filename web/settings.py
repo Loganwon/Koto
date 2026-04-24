@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import threading
 
 # 默认设置文件位置
@@ -43,6 +44,8 @@ DEFAULT_SETTINGS = {
         "auto_execute_scripts": True,
         "voice_auto_send": False,  # 语音输入后自动发送
         "stream_response": True,
+        "use_agent_loop": True,  # OpenClaw unified loop is the default path
+        "use_doc_agent": False,  # DocAgent remains opt-in for heavy multi-file workflows
         "show_thinking": False,  # 显示思考过程（推理链）
         "show_task_type": False,  # 显示任务分类标签
         "auto_save_files": True,  # 自动保存回复中的文件（代码/文档/总结等）
@@ -82,10 +85,11 @@ class SettingsManager:
 
     def flush(self):
         """Write to disk now (kept for backwards compatibility)."""
-        result = self._save_settings()
-        if result:
-            self._dirty = False
-        return result
+        with self._lock:
+            result = self._save_settings()
+            if result:
+                self._dirty = False
+            return result
 
     def _load_settings(self):
         """加载设置"""
@@ -102,7 +106,7 @@ class SettingsManager:
                 if self._has_missing_defaults(raw):
                     self._save_settings()
             except Exception as e:
-                logger.info(f"加载设置失败: {e}")
+                logger.error(f"加载设置失败: {e}")
                 self._settings = copy.deepcopy(DEFAULT_SETTINGS)
         else:
             self._settings = copy.deepcopy(DEFAULT_SETTINGS)
@@ -154,9 +158,14 @@ class SettingsManager:
     _EXTERNAL_KEYS = frozenset({"skills"})
 
     def _save_settings(self):
-        """保存设置 — read-modify-write，避免覆盖其他子系统写入的数据"""
+        """保存设置 — read-modify-write，避免覆盖其他子系统写入的数据
+
+        MUST be called while holding ``self._lock``.
+        Uses atomic write (temp file + os.replace) to prevent corruption.
+        """
         try:
-            os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+            settings_dir = os.path.dirname(SETTINGS_FILE)
+            os.makedirs(settings_dir, exist_ok=True)
             # 先读取磁盘最新数据，保留其他子系统的写入（如 SkillManager → "skills"）
             on_disk = {}
             if os.path.exists(SETTINGS_FILE):
@@ -169,11 +178,26 @@ class SettingsManager:
             for key, value in self._settings.items():
                 if key not in self._EXTERNAL_KEYS:
                     on_disk[key] = value
-            with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
-                json.dump(on_disk, f, indent=2, ensure_ascii=False)
+            # 原子写入：先写临时文件，再 os.replace 到目标路径
+            fd, tmp_path = tempfile.mkstemp(
+                dir=settings_dir, suffix=".tmp", prefix=".user_settings_"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(on_disk, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, SETTINGS_FILE)
+            except BaseException:
+                # 清理临时文件
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             return True
         except Exception as e:
-            logger.info(f"保存设置失败: {e}")
+            logger.error(f"保存设置失败: {e}")
             return False
 
     def get(self, category, key=None):
@@ -195,37 +219,39 @@ class SettingsManager:
 
     def set(self, category, key, value):
         """设置单个值 — immediately flushes to disk."""
-        if category not in self._settings:
-            self._settings[category] = {}
+        with self._lock:
+            if category not in self._settings:
+                self._settings[category] = {}
 
-        # 如果用户将存储路径置空，则回退默认值，避免后续文件查找失败
-        if (
-            category == "storage"
-            and key in DEFAULT_SETTINGS.get("storage", {})
-            and isinstance(value, str)
-            and not value.strip()
-        ):
-            value = DEFAULT_SETTINGS["storage"].get(key)
+            # 如果用户将存储路径置空，则回退默认值，避免后续文件查找失败
+            if (
+                category == "storage"
+                and key in DEFAULT_SETTINGS.get("storage", {})
+                and isinstance(value, str)
+                and not value.strip()
+            ):
+                value = DEFAULT_SETTINGS["storage"].get(key)
 
-        self._settings[category][key] = value
-        self._normalize_storage()
-        self._dirty = True
-        return self._save_settings()
+            self._settings[category][key] = value
+            self._normalize_storage()
+            self._dirty = True
+            return self._save_settings()
 
     def update(self, category, values):
         """更新一个分类的多个值 — immediately flushes to disk."""
-        if category not in self._settings:
-            self._settings[category] = {}
+        with self._lock:
+            if category not in self._settings:
+                self._settings[category] = {}
 
-        # 处理 storage 目录值为空的情况，回退默认路径
-        if category == "storage":
-            for k, v in values.items():
-                if k in DEFAULT_SETTINGS.get("storage", {}) and isinstance(v, str) and not v.strip():
-                    values[k] = DEFAULT_SETTINGS["storage"].get(k)
+            # 处理 storage 目录值为空的情况，回退默认路径
+            if category == "storage":
+                for k, v in values.items():
+                    if k in DEFAULT_SETTINGS.get("storage", {}) and isinstance(v, str) and not v.strip():
+                        values[k] = DEFAULT_SETTINGS["storage"].get(k)
 
-        self._settings[category].update(values)
-        self._normalize_storage()
-        return self._save_settings()
+            self._settings[category].update(values)
+            self._normalize_storage()
+            return self._save_settings()
 
     def get_all(self):
         """获取所有设置"""
@@ -235,12 +261,13 @@ class SettingsManager:
     def reset(self, category=None):
         """重置设置"""
         import copy
-        if category:
-            if category in DEFAULT_SETTINGS:
-                self._settings[category] = copy.deepcopy(DEFAULT_SETTINGS[category])
-        else:
-            self._settings = copy.deepcopy(DEFAULT_SETTINGS)
-        return self._save_settings()
+        with self._lock:
+            if category:
+                if category in DEFAULT_SETTINGS:
+                    self._settings[category] = copy.deepcopy(DEFAULT_SETTINGS[category])
+            else:
+                self._settings = copy.deepcopy(DEFAULT_SETTINGS)
+            return self._save_settings()
 
     def ensure_directories(self):
         """确保所有存储目录存在"""

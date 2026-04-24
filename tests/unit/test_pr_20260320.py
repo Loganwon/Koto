@@ -222,7 +222,14 @@ class TestMemoryApiRoutes:
     """memory_api_routes CRUD and utility endpoints."""
 
     def setup_method(self):
+        self._sw_patcher = patch(
+            "web.memory_api_routes._get_shadow_watcher", return_value=None
+        )
+        self._sw_patcher.start()
         self.client, self.mgr = _make_memory_app()
+
+    def teardown_method(self):
+        self._sw_patcher.stop()
 
     def test_get_all_memories_returns_list(self):
         r = self.client.get("/api/memories")

@@ -65,6 +65,53 @@ class TestGeminiProviderBasic:
             session_id="sess-a",
         )
 
+    def test_generate_content_passes_per_call_timeout(self):
+        from app.core.llm.gemini import GeminiProvider
+
+        provider = GeminiProvider.__new__(GeminiProvider)
+        provider._get_client = MagicMock(return_value=MagicMock())
+        provider._call_with_retry = MagicMock(
+            return_value={"content": "ok", "tool_calls": [], "usage": None}
+        )
+        provider._format_tools = MagicMock(return_value=None)
+        provider._format_prompt = MagicMock(
+            return_value=[{"role": "user", "parts": []}]
+        )
+        provider._track_usage = MagicMock()
+
+        with patch(
+            "app.core.llm.gemini.types.GenerateContentConfig", return_value=object()
+        ):
+            provider.generate_content(
+                prompt="hello",
+                model="gemini-2.5-flash",
+                stream=False,
+                call_timeout=42,
+            )
+
+        _, kwargs = provider._call_with_retry.call_args
+        assert kwargs["timeout_seconds"] == 42
+
+    def test_call_with_retry_timeout_like_error_no_retry(self):
+        from app.core.llm.gemini import GeminiProvider
+
+        provider = GeminiProvider.__new__(GeminiProvider)
+        mock_client = MagicMock()
+        mock_client.models.generate_content.side_effect = Exception(
+            "ReadTimeout: operation timed out"
+        )
+
+        with pytest.raises(TimeoutError):
+            provider._call_with_retry(
+                model="gemini-2.5-flash",
+                contents="hello",
+                config=object(),
+                client=mock_client,
+            )
+
+        # Timeout-like failures should fail fast to avoid long hangs.
+        assert mock_client.models.generate_content.call_count == 1
+
 
 class TestOpenAIProviderTracking:
     def test_generate_content_tracks_usage(self):

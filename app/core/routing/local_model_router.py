@@ -403,6 +403,32 @@ class LocalModelRouter:
             return False
 
     @classmethod
+    def pick_best_chat_model(cls, installed_models: list = None) -> str:
+        """
+        返回当前已安装的最佳聊天模型名称。
+        如果 Ollama 不可用或无模型，返回空字符串。
+        """
+        if not cls.is_ollama_available():
+            return ""
+        try:
+            import requests as _requests
+            resp = _requests.get(f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY)
+            if resp.status_code != 200:
+                return ""
+            models_data = resp.json().get("models", [])
+            available = [m["name"] for m in models_data]
+            # 按 OLLAMA_MODELS 偏好顺序选最佳
+            for preferred in cls.OLLAMA_MODELS:
+                base = preferred.split(":")[0]
+                for name in available:
+                    if name == preferred or name.split(":")[0] == base:
+                        return name
+            return available[0] if available else ""
+        except Exception as e:
+            logger.debug("[LocalModelRouter] pick_best_chat_model 失败: %s", e)
+            return ""
+
+    @classmethod
     def init_model(cls, model_name: str = None) -> bool:
         """初始化本地模型（静默失败，不影响使用）"""
         if cls._initialized and cls._model_name:

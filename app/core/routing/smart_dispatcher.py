@@ -2024,34 +2024,34 @@ class SmartDispatcher:
         if task_type == "FILE_GEN":
             if complexity == "complex":
                 return MODEL_MAP.get(
-                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-2.5-pro")
                 )
-            return MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
+            return MODEL_MAP.get("FILE_GEN", "gemini-2.5-flash")
 
         if task_type == "DOC_ANNOTATE":
             if complexity == "complex":
                 return MODEL_MAP.get(
-                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-2.5-pro")
                 )
-            return MODEL_MAP.get("DOC_ANNOTATE", "gemini-3-flash-preview")
+            return MODEL_MAP.get("DOC_ANNOTATE", "gemini-2.5-flash")
 
         if task_type == "RESEARCH":
-            return MODEL_MAP.get("RESEARCH", "gemini-3.1-pro-preview")
+            return MODEL_MAP.get("RESEARCH", "gemini-2.5-pro")
 
         if task_type == "CODER":
-            return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+            return MODEL_MAP.get("CODER", "gemini-2.5-pro")
 
         # 多步复杂任务 → Pro 模型确保执行质量
         if task_type == "MULTI_STEP":
             return MODEL_MAP.get(
-                "MULTI_STEP", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                "MULTI_STEP", MODEL_MAP.get("CODER", "gemini-2.5-pro")
             )
 
         # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
         if task_type == "CHAT":
-            _chat_candidate = MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
+            _chat_candidate = MODEL_MAP.get("CHAT", "gemini-2.5-flash")
             # 安全网：如果 ModelManager 将 CHAT 路由到 Pro 模型（tier>7），强制回退到 Flash
-            _FLASH_FALLBACK = "gemini-3-flash-preview"
+            _FLASH_FALLBACK = "gemini-2.5-flash"
             try:
                 from web.model_manager import KNOWN_MODEL_REGISTRY
 
@@ -2078,7 +2078,7 @@ class SmartDispatcher:
 
         # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型
         if complexity == "complex":
-            return MODEL_MAP.get("COMPLEX", "gemini-3.1-pro-preview")
+            return MODEL_MAP.get("COMPLEX", "gemini-2.5-pro")
 
         if has_image and task_type != "PAINTER":
             return _avail(

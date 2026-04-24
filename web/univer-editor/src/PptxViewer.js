@@ -122,6 +122,33 @@ export class PptxViewer {
 
   isActive() { return this._active; }
 
+  /**
+   * 返回当前选中形状的元数据。用于 AIPanel 向特定形状发送 AI 编辑指令。
+   * @returns {{ slideIndex:number, shapeId:number, shapeName:string, text:string }|null}
+   */
+  getSelectedShape() {
+    if (!this._selShape) return null;
+    const shapeId = parseInt(this._selShape.dataset.shapeId, 10);
+    const slideIdx = this._selShape.dataset.slideIdx !== undefined
+      ? parseInt(this._selShape.dataset.slideIdx, 10)
+      : this._curIdx;
+    const slide = this._pptxData?.slides?.[slideIdx];
+    if (!slide) return null;
+    const shapeData = slide.shapes.find(s => s.id === shapeId);
+    const text = shapeData?.paragraphs
+      ? shapeData.paragraphs
+          .map(p => (p.runs || []).map(r => r.text).join(''))
+          .filter(t => t.trim())
+          .join('\n')
+      : (this._selShape.innerText || '');
+    return {
+      slideIndex: slideIdx,
+      shapeId,
+      shapeName: shapeData?.name || '',
+      text,
+    };
+  }
+
   /** Extract plain text from all slides (used by AIPanel / FloatingToolbar for context injection). */
   getFullText() {
     if (!this._pptxData || !this._pptxData.slides) return '';
@@ -134,6 +161,30 @@ export class PptxViewer {
           .filter(t => t.trim()).join('\n'))
         .filter(t => t.trim()).join('\n')
     ).filter(t => t.trim()).join('\n\n');
+  }
+
+  setShapeText(slideIndex, shapeId, text) {
+    const slide = this._pptxData?.slides?.[slideIndex];
+    if (!slide) return false;
+
+    const shape = (slide.shapes || []).find((item) => Number(item.id) === Number(shapeId));
+    if (!shape) return false;
+
+    const baseParagraph = shape.paragraphs?.[0] || {};
+    const baseRun = baseParagraph.runs?.[0] || {};
+    const lines = String(text || '').replace(/\r\n/g, '\n').split('\n');
+
+    shape.has_text = true;
+    shape.paragraphs = lines.map((line) => ({
+      ...baseParagraph,
+      runs: [{ ...baseRun, text: line }],
+    }));
+
+    if (slideIndex === this._curIdx) {
+      this._renderSlide(slideIndex);
+    }
+    this._scheduleThumbUpdate(slideIndex);
+    return true;
   }
 
   // ─── 缩略图 ────────────────────────────────────────────────
@@ -238,28 +289,76 @@ export class PptxViewer {
     const wrapper = this._host.querySelector('#pptx-slide-wrapper');
     wrapper.style.width = pxW + 'px';
     wrapper.style.height = pxH + 'px';
-    wrapper.style.background = slide.background || '#ffffff';
+    if (slide.backgroundImage) {
+      wrapper.style.background = `url('${slide.backgroundImage}') center/cover no-repeat`;
+    } else if (slide.backgroundGradient) {
+      wrapper.style.background = slide.backgroundGradient;
+    } else {
+      wrapper.style.background = slide.background || '#ffffff';
+    }
     wrapper.innerHTML = '';
 
-    slide.shapes.forEach(shape => {
+    // Sort shapes by z_order so background shapes render first
+    const sortedShapes = [...(slide.shapes || [])].sort((a, b) => a.z_order - b.z_order);
+    sortedShapes.forEach(shape => {
       const el = document.createElement('div');
       el.className = 'pptx-shape' + (shape.has_text ? ' pptx-shape-text' : '');
       el.dataset.shapeId = shape.id;
+      el.dataset.slideIdx = String(idx);  // 用于 getSelectedShape() 识别所属幻灯片
       el.style.left   = Math.round(shape.left   * scale) + 'px';
       el.style.top    = Math.round(shape.top    * scale) + 'px';
       el.style.width  = Math.round(shape.width  * scale) + 'px';
       el.style.height = Math.round(shape.height * scale) + 'px';
+      el.style.zIndex = shape.z_order;
 
-      if (shape.fill) el.style.background = shape.fill;
+      if (shape.fillGradient)  el.style.background = shape.fillGradient;
+      else if (shape.fillImage) el.style.backgroundImage = `url('${shape.fillImage}')`;
+      else if (shape.fill)      el.style.background = shape.fill;
+      if (shape.border && shape.border.widthEmu) {
+        const bwPx = Math.max(1, Math.round(shape.border.widthEmu * scale));
+        el.style.border = `${bwPx}px solid ${shape.border.color || '#000'}`;
+      }
+      if (shape.autoShapeType === 'roundRect' && shape.cornerRadiusEmu != null) {
+        el.style.borderRadius = Math.round(shape.cornerRadiusEmu * scale) + 'px';
+      }
+      if (shape.rotation) el.style.transform = 'rotate(' + shape.rotation + 'deg)';
+      // Non-editable background shapes (slide layout/master decorations): no interaction
+      if (shape.editable === false) {
+        el.style.pointerEvents = 'none';
+        el.style.userSelect    = 'none';
+        wrapper.appendChild(el);
+        return;
+      }
 
       if (shape.has_text && shape.paragraphs) {
+        const fontScaleMult = (shape.fontScale != null) ? shape.fontScale / 100 : 1.0;
+        // spAutoFit: text was already fit at save-time — keep fixed dimensions (overflow:hidden)
         const inner = document.createElement('div');
         inner.className = 'pptx-shape-inner';
+
+        // ── Dynamic text insets from PPTX bodyPr (OOXML defaults as fallback) ──
+        const ins = shape.textInsets || { l: 91440, t: 45720, r: 91440, b: 45720 };
+        inner.style.padding = `${Math.round(ins.t * scale)}px ${Math.round(ins.r * scale)}px ${Math.round(ins.b * scale)}px ${Math.round(ins.l * scale)}px`;
+        // ── Vertical alignment from textAnchor ──
+        if (shape.textAnchor === 'ctr') inner.style.justifyContent = 'center';
+        else if (shape.textAnchor === 'b') inner.style.justifyContent = 'flex-end';
 
         shape.paragraphs.forEach((para, pi) => {
           const pEl = document.createElement('div');
           pEl.className = 'pptx-shape-para';
           pEl.style.textAlign = (para.align || 'LEFT').toLowerCase();
+          // ── Word wrap ──
+          if (shape.wordWrap === 'none') {
+            pEl.style.whiteSpace = 'nowrap';
+          }
+          // ── Line spacing ──
+          if (para.lineSpacing) pEl.style.lineHeight = String(para.lineSpacing);
+          else if (para.lineSpacingPt) pEl.style.lineHeight = Math.round(para.lineSpacingPt * scale * 12700) + 'px';
+          // ── Paragraph spacing (pt-based and pct-based) ──
+          if (para.spaceBefore) pEl.style.marginTop = Math.round(para.spaceBefore * scale * 12700) + 'px';
+          else if (para.spaceBeforePct) pEl.style.marginTop = para.spaceBeforePct + 'em';
+          if (para.spaceAfter) pEl.style.marginBottom = Math.round(para.spaceAfter * scale * 12700) + 'px';
+          else if (para.spaceAfterPct) pEl.style.marginBottom = para.spaceAfterPct + 'em';
 
           (para.runs || []).forEach((run, ri) => {
             const span = document.createElement('span');
@@ -269,8 +368,9 @@ export class PptxViewer {
             span.dataset.ri = ri;
             span.textContent = run.text;
 
-            const ptSize = run.size || 14;
-            span.style.fontSize = Math.round(ptSize * scale * 1.33) + 'px';
+            const defaultPt = shape.is_title ? 36 : 14;
+            const ptSize = run.size || defaultPt;
+            span.style.fontSize = Math.max(Math.round(ptSize * fontScaleMult * scale * 12700), 6) + 'px';
             if (run.bold)      span.style.fontWeight = 'bold';
             if (run.italic)    span.style.fontStyle = 'italic';
             if (run.underline) span.style.textDecoration = 'underline';
@@ -278,7 +378,9 @@ export class PptxViewer {
             span.style.whiteSpace = 'pre-wrap';
             span.style.display = 'inline';
             span.style.outline = 'none';
-            span.style.fontFamily = '"Microsoft YaHei", "微软雅黑", Segoe UI, sans-serif';
+            if (run.fontName) span.style.fontFamily = run.fontName;
+            else span.style.fontFamily = '"Microsoft YaHei", "微软雅黑", Segoe UI, sans-serif';
+            if (run.charSpacing) span.style.letterSpacing = Math.round(run.charSpacing * 127 * scale) + 'px';
 
             span.addEventListener('input', () => {
               // 写回内存
@@ -303,6 +405,56 @@ export class PptxViewer {
         el.addEventListener('mousedown', e => {
           if (!e.target.isContentEditable) this._selectShape(el);
         });
+      } else if (shape._type === 'TABLE' && shape.cells) {
+        // ── Table ──
+        const rows = shape.table_rows || 0;
+        const cols = shape.table_cols || 0;
+        const cellMap = {};
+        (shape.cells || []).forEach(c => { cellMap[c.row + '_' + c.col] = c; });
+        const tbl = document.createElement('table');
+        tbl.style.cssText = 'width:100%;height:100%;border-collapse:collapse;table-layout:fixed;';
+        const colWidths = shape.col_widths && shape.col_widths.length === cols ? shape.col_widths : null;
+        if (colWidths) {
+          const totalW = colWidths.reduce((s, w) => s + w, 0) || 1;
+          const cg = document.createElement('colgroup');
+          colWidths.forEach(w => { const col = document.createElement('col'); col.style.width = (w / totalW * 100).toFixed(2) + '%'; cg.appendChild(col); });
+          tbl.appendChild(cg);
+        }
+        const rowHeights = shape.row_heights && shape.row_heights.length === rows ? shape.row_heights : null;
+        const baseFontPx = Math.max(Math.round(10 * 12700 * scale), 6);
+        for (let r = 0; r < rows; r++) {
+          const tr = document.createElement('tr');
+          if (rowHeights) tr.style.height = Math.round(rowHeights[r] * scale) + 'px';
+          for (let c = 0; c < cols; c++) {
+            const td = document.createElement('td');
+            const cd = cellMap[r + '_' + c];
+            const cfPx = cd && cd.fontSize ? Math.max(Math.round(cd.fontSize * 12700 * scale), 6) : baseFontPx;
+            td.style.cssText = `border:1px solid #d0d0d0;padding:2px 4px;overflow:hidden;font-size:${cfPx}px;vertical-align:top;word-break:break-word;text-align:${(cd && cd.align || 'LEFT').toLowerCase()};`;
+            if (cd && cd.fill)  td.style.backgroundColor = cd.fill;
+            if (cd && cd.color) td.style.color = cd.color;
+            if (cd && cd.bold)  td.style.fontWeight = 'bold';
+            td.textContent = (cd && cd.text) || '';
+            tr.appendChild(td);
+          }
+          tbl.appendChild(tr);
+        }
+        el.appendChild(tbl);
+      } else if (shape._type === 'LINE') {
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%');
+        svg.style.overflow = 'visible'; svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0';
+        const lineEl = document.createElementNS(svgNS, 'line');
+        const _w = Math.round(shape.width * scale);
+        const _h = Math.round(shape.height * scale);
+        lineEl.setAttribute('x1', '0'); lineEl.setAttribute('y1', '0');
+        lineEl.setAttribute('x2', String(_w)); lineEl.setAttribute('y2', String(_h));
+        const bwPx = shape.border && shape.border.widthEmu ? Math.max(1, Math.round(shape.border.widthEmu * scale)) : 1;
+        lineEl.setAttribute('stroke', (shape.border && shape.border.color) || '#000');
+        lineEl.setAttribute('stroke-width', String(bwPx));
+        svg.appendChild(lineEl);
+        el.style.overflow = 'visible'; el.style.background = 'none';
+        el.appendChild(svg);
       }
 
       wrapper.appendChild(el);

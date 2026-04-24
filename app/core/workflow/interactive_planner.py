@@ -161,7 +161,7 @@ class InteractivePlanner:
         user_input: str,
         llm_provider: Any,
         task_id: Optional[str] = None,
-        model_id: str = "gemini-3-flash-preview",
+        model_id: str = "gemini-2.5-flash",
     ):
         """
         使用 LLM 动态拆解用户需求为步骤 DAG。
@@ -186,7 +186,7 @@ class InteractivePlanner:
         user_input: str,
         llm_provider: Any,
         task_id: Optional[str] = None,
-        model_id: str = "gemini-3-flash-preview",
+        model_id: str = "gemini-2.5-flash",
         tool_registry: Any = None,
         history: Optional[list] = None,
     ):
@@ -218,7 +218,7 @@ class InteractivePlanner:
         approval_fn=None,
         cancel_check=None,
         llm_provider: Any = None,
-        replan_model_id: str = "gemini-3-flash-preview",
+        replan_model_id: str = "gemini-2.5-flash",
     ) -> Generator[Dict[str, Any], None, None]:
         """
         执行 Plan（新引擎格式）。

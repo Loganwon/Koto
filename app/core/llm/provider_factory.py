@@ -24,6 +24,7 @@ import os
 from typing import Optional
 
 from .base import LLMProvider
+from .gemini_config import get_gemini_api_key, has_gemini_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -130,11 +131,7 @@ def get_llm_provider(
         return _load_gemini(api_key=request_api_key)
 
     # 4. Auto-detect from available env keys
-    if (
-        os.getenv("GEMINI_API_KEY")
-        or os.getenv("API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-    ):
+    if has_gemini_api_key():
         return _load_gemini()
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         return _load_openai()
@@ -149,11 +146,7 @@ def get_llm_provider(
 def list_available_providers() -> list[str]:
     """Return names of providers whose API keys are present in the environment."""
     available = []
-    if (
-        os.getenv("GEMINI_API_KEY")
-        or os.getenv("API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-    ):
+    if get_gemini_api_key():
         available.append("gemini")
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         available.append("openai")

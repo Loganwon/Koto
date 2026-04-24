@@ -1,0 +1,8 @@
+<div class="wa-setting-label">本地模型（Ollama）</div>
+<div class="wa-output-mode-toggle" style="margin-bottom:4px">
+  <button data-local-mode="off" class="active" onclick="WA.setUseLocalModel(false)">{% if wa_local_model_controls_with_icons %}<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a3.5 3.5 0 0 1-.5-7A5 5 0 0 1 13 5.5a3 3 0 0 1-.5 6H4z"/></svg> {% endif %}云端</button>
+  <button id="wa-local-on-btn" data-local-mode="on" onclick="WA.setUseLocalModel(true)">{% if wa_local_model_controls_with_icons %}<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="12" height="7" rx="1.5"/><circle cx="5" cy="8.5" r="1"/><path d="M9 7v4M12 7v4"/></svg> {% endif %}本地优先</button>
+</div>
+<div id="wa-ollama-status-row" style="font-size:10px;color:var(--text-muted);margin-bottom:10px;display:none">
+  <span id="wa-ollama-status-text"></span>
+</div>

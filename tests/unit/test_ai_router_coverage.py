@@ -82,14 +82,14 @@ class TestClassify:
 
         AIRouter._cache.clear()
         AIRouter._router_model = "gemini-2.5-flash"
-        AIRouter._ROUTER_MODEL_CHAIN = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+        AIRouter._ROUTER_MODEL_CHAIN = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
     def teardown_method(self):
         from app.core.routing.ai_router import AIRouter
 
         AIRouter._cache.clear()
         AIRouter._router_model = "gemini-2.5-flash"
-        AIRouter._ROUTER_MODEL_CHAIN = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+        AIRouter._ROUTER_MODEL_CHAIN = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
     @patch("app.core.routing.ai_router.hashlib")
     def test_cache_hit(self, mock_hashlib):
@@ -130,6 +130,26 @@ class TestClassify:
         client = _make_mock_client("UNKNOWN_TASK")
         task, conf, src = AIRouter.classify(client, "hello", timeout=5.0)
         assert task == "CHAT"
+
+    def test_classify_uses_response_text_when_candidates_are_empty(self):
+        from app.core.routing.ai_router import AIRouter
+
+        response = MagicMock()
+        response.text = "CODER"
+        response.candidates = []
+        client = MagicMock()
+        client.models.generate_content.return_value = response
+
+        task, conf, src = AIRouter.classify(client, "write python code", timeout=5.0)
+
+        assert task == "CODER"
+        assert conf == "🤖 AI"
+        assert src == "AI"
+
+    def test_router_token_budget_is_large_enough_for_preview_models(self):
+        from app.core.routing.ai_router import AIRouter
+
+        assert AIRouter._ROUTER_MAX_OUTPUT_TOKENS >= 40
 
     def test_timeout_returns_chat_fallback(self):
         """When the thread exceeds the timeout, classify returns CHAT with Timeout-fallback."""
@@ -218,14 +238,14 @@ class TestClassifyWithHint:
 
         AIRouter._cache.clear()
         AIRouter._router_model = "gemini-2.5-flash"
-        AIRouter._ROUTER_MODEL_CHAIN = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+        AIRouter._ROUTER_MODEL_CHAIN = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
     def teardown_method(self):
         from app.core.routing.ai_router import AIRouter
 
         AIRouter._cache.clear()
         AIRouter._router_model = "gemini-2.5-flash"
-        AIRouter._ROUTER_MODEL_CHAIN = ["gemini-2.5-flash", "gemini-2.0-flash-lite"]
+        AIRouter._ROUTER_MODEL_CHAIN = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
     def test_cache_hit(self):
         from app.core.routing.ai_router import AIRouter

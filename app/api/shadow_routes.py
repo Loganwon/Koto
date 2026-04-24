@@ -278,7 +278,7 @@ def shadow_tick():
 
             def _llm(prompt: str) -> str:
                 resp = client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
+                    model="gemini-2.5-flash-lite",
                     contents=prompt,
                     config=_types.GenerateContentConfig(
                         temperature=0.7, max_output_tokens=80

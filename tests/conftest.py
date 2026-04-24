@@ -19,6 +19,30 @@ from pathlib import Path
 import pytest
 
 
+def _load_project_api_keys() -> None:
+    """Load API keys from project config when env vars are not already set."""
+    env_path = _root() / "config" / "gemini_config.env"
+    if not env_path.exists():
+        return
+
+    wanted = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"}
+    try:
+        for raw in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key = key.strip()
+            if key not in wanted:
+                continue
+            val = val.strip().strip('"').strip("'")
+            if val and not os.environ.get(key):
+                os.environ[key] = val
+    except Exception:
+        # Key loading should never break the test run.
+        pass
+
+
 def _root() -> Path:
     return Path(__file__).resolve().parents[1]
 
@@ -49,12 +73,10 @@ def pytest_configure(config):
         except ImportError:
             pass
 
-    # Prevent Google/Gemini API calls in tests — avoids tenacity retry hangs
-    # when GEMINI_API_KEY is set but invalid (e.g. in CI without secrets).
-    import os as _os
+    # Use project/user-provided API keys in tests by default.
+    _load_project_api_keys()
 
-    for _key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
-        _os.environ.pop(_key, None)
+    import os as _os
 
     # Prevent HuggingFace model downloads in background threads (the fallback
     # embedding path when no Google key is set).  Without these flags the
@@ -75,16 +97,11 @@ def _reset_model_fallback_executor():
     timestamps and circuit-breaker counters across tests.  Left uncleaned,
     tests that mock failing LLM calls poison later tests whose LLM calls are
     expected to succeed (e.g. TestDatetimeInjection).
-
-    Also re-clears Google API keys here to counteract module-level
-    ``os.environ.setdefault("GEMINI_API_KEY", ...)`` calls in test files that
-    run during pytest's collection phase (after pytest_configure already cleared
-    them), permanently re-injecting an invalid key for the whole session.
     """
-    import os as _os
 
-    for _key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
-        _os.environ.pop(_key, None)
+    # Ensure keys remain available even if other modules mutate env during collection.
+    _load_project_api_keys()
+
     try:
         import app.core.llm.model_fallback as _mf  # noqa: PLC0415
 

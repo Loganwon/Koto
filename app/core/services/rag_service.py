@@ -253,16 +253,30 @@ class RAGService:
     def _split_text(self, text: str, source: str = "text") -> List[Any]:
         """将文本分块，返回 LangChain Document 对象列表。"""
         from langchain_core.documents import Document
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        try:
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.CHUNK_SIZE,
-            chunk_overlap=self.CHUNK_OVERLAP,
-            # 中文兼容分隔符（优先段落 → 换行 → 句号 → 逗号 → 字符）
-            separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""],
-            length_function=len,
-        )
-        chunks = splitter.split_text(text)
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.CHUNK_SIZE,
+                chunk_overlap=self.CHUNK_OVERLAP,
+                # 中文兼容分隔符（优先段落 → 换行 → 句号 → 逗号 → 字符）
+                separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""],
+                length_function=len,
+            )
+            chunks = splitter.split_text(text)
+        except Exception as exc:
+            logger.debug("[RAGService] fallback text splitter: %s", exc)
+            chunks = []
+            chunk_size = max(int(self.CHUNK_SIZE), 1)
+            overlap = max(min(int(self.CHUNK_OVERLAP), chunk_size - 1), 0)
+            step = chunk_size - overlap
+            pos = 0
+            while pos < len(text):
+                chunk = text[pos : pos + chunk_size]
+                if chunk:
+                    chunks.append(chunk)
+                pos += step
+
         return [
             Document(
                 page_content=chunk,

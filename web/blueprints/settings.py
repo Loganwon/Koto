@@ -192,26 +192,17 @@ def local_model_switch() -> Response:
         mode = data.get("mode", "cloud")  # "local" 或 "cloud"
         model_tag = data.get("model_tag")  # 本地模式时可指定模型
 
-        settings_path = os.path.join(mod.PROJECT_ROOT, "config", "user_settings.json")
-        try:
-            with open(settings_path, "r", encoding="utf-8") as f:
-                settings = json.load(f)
-        except Exception:
-            settings = {}
-
-        settings["model_mode"] = mode
-        if model_tag:
-            settings["local_model"] = model_tag
-
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(settings, f, ensure_ascii=False, indent=2)
-
-        # 同步 SettingsManager 内存状态，防止下次 sm.set() 调用 _save_settings()
-        # 时用旧的内存值覆盖刚写入磁盘的 model_mode/local_model（v1.6.0 蓝图拆分引入的缺陷）
         sm = _get_settings_manager()
-        sm._settings["model_mode"] = mode
-        if model_tag:
-            sm._settings["local_model"] = model_tag
+
+        # model_mode / local_model are top-level keys, not category.key – use
+        # the lock + _save_settings directly to ensure atomic write.
+        with sm._lock:
+            sm._settings["model_mode"] = mode
+            if model_tag:
+                sm._settings["local_model"] = model_tag
+            save_ok = sm._save_settings()
+        if not save_ok:
+            return jsonify({"success": False, "error": "保存设置到磁盘失败"}), 500
 
         # 清除缓存，下次 get_client() 调用时重建
         mod._user_settings_cache.clear()
@@ -222,7 +213,7 @@ def local_model_switch() -> Response:
             {
                 "success": True,
                 "mode": mode,
-                "model": model_tag or settings.get("local_model"),
+                "model": model_tag or sm.get_all().get("local_model"),
             }
         )
     except Exception as e:
@@ -254,8 +245,20 @@ def local_model_setup() -> Response:
 
 
 # ---------------------------------------------------------------------------
-# /api/skills/<skill_id>/*
+# /api/skills  (list)  and  /api/skills/<skill_id>/*
 # ---------------------------------------------------------------------------
+
+
+@settings_bp.route("/api/skills", methods=["GET"])
+@require_auth
+def list_skills() -> Response:
+    """Return all skills with their metadata and enabled state."""
+    try:
+        from app.core.skills.skill_manager import SkillManager
+
+        return jsonify(SkillManager.list_skills())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @settings_bp.route("/api/skills/<skill_id>/toggle", methods=["POST"])
@@ -402,8 +405,10 @@ def update_settings() -> Response:
     value = data.get("value")
 
     if category and key:
-        success = sm.set(category, key, value)
         sm.ensure_directories()
+        success = sm.set(category, key, value)
+        if not success:
+            return jsonify({"success": False, "error": "保存设置到磁盘失败"}), 500
         # 使 _load_user_settings 缓存失效，确保后续读取获得最新值
         mod._user_settings_cache.clear()
         # 存储路径变更时立即更新模块级全局变量，让运行时路径即时生效
@@ -566,26 +571,20 @@ def get_setup_status() -> Response:
 def setup_api_key() -> Response:
     """设置 API Key"""
     mod = _app()
+    from app.core.llm.gemini_config import (
+        set_runtime_gemini_api_key,
+        write_gemini_config_file,
+    )
+
     data = request.json
     api_key = data.get("api_key", "").strip()
 
     if not api_key or len(api_key) < 10:
         return jsonify({"success": False, "error": "Invalid API key"})
 
-    config_path = os.path.join(mod.PROJECT_ROOT, "config", "gemini_config.env")
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
-
     try:
-        # 写入配置文件（同时写入两个变量名，避免优先级错乱）
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(
-                f"# Koto Configuration\nGEMINI_API_KEY={api_key}\nAPI_KEY={api_key}\n"
-            )
-
-        # 更新环境变量
-        os.environ["GEMINI_API_KEY"] = api_key
-        os.environ["API_KEY"] = api_key
-        mod.API_KEY = api_key
+        write_gemini_config_file(api_key)
+        mod.API_KEY = set_runtime_gemini_api_key(api_key)
         # Reset cached client so get_client() rebuilds with the new key
         mod._client = None
         mod.client = mod.create_client()
@@ -628,7 +627,7 @@ def test_api_connection() -> Response:
         c = _get_client()
         start = time.time()
         response = c.models.generate_content(
-            model="gemini-3-flash-preview",
+            model="gemini-2.5-flash",
             contents="Say 'Koto is ready!' in one short sentence.",
         )
         latency = time.time() - start
@@ -662,9 +661,9 @@ def diagnose_models() -> Response:
 
     # 测试模型列表
     test_models = [
-        ("gemini-2.0-flash-lite", "路由分类"),
-        ("gemini-3-flash-preview", "日常对话"),
-        ("gemini-3-pro-preview", "代码生成"),
+        ("gemini-2.5-flash-lite", "路由分类"),
+        ("gemini-2.5-flash", "日常对话"),
+        ("gemini-2.5-pro", "代码生成"),
         ("gemini-2.5-flash", "联网搜索"),
         ("gemini-3.1-flash-image-preview", "图像生成"),
     ]
@@ -828,16 +827,16 @@ def setup_activate() -> Response:
     if not key:
         return jsonify({"success": False, "error": "激活码无效"})
     from web.app import PROJECT_ROOT
+    from app.core.llm.gemini_config import (
+        set_runtime_gemini_api_key,
+        write_gemini_config_file,
+    )
 
     config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
     try:
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(f"# Koto Configuration\nGEMINI_API_KEY={key}\nAPI_KEY={key}\n")
-        os.environ["GEMINI_API_KEY"] = key
-        os.environ["API_KEY"] = key
+        config_path = str(write_gemini_config_file(key))
         _mod = _app()
-        _mod.API_KEY = key
+        _mod.API_KEY = set_runtime_gemini_api_key(key)
         _mod.client = _mod.create_client()
         _logger.info("[Activate] 激活码验证成功，系统 API Key 已写入配置")
         return jsonify({"success": True})

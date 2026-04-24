@@ -170,7 +170,7 @@ class TestOpenFile:
         client, _, _ = wa_client
         resp = client.post(
             "/api/v1/workspace/open_file",
-            data={"file": (io.BytesIO(b"hello"), "notes.txt")},
+            data={"file": (io.BytesIO(b"hello"), "notes.xyz")},
             content_type="multipart/form-data",
         )
         assert resp.status_code == 400
@@ -356,8 +356,8 @@ class TestServeWorkspaceFile:
 
     def test_returns_400_for_unsupported_extension(self, wa_client):
         client, _, workspace_dir = wa_client
-        (workspace_dir / "readme.txt").write_text("hi")
-        resp = client.get("/api/v1/workspace/file/readme.txt")
+        (workspace_dir / "readme.xyz").write_text("hi")
+        resp = client.get("/api/v1/workspace/file/readme.xyz")
         assert resp.status_code == 400
 
     def test_path_traversal_blocked(self, wa_client):
@@ -691,6 +691,78 @@ class TestAutoSave:
             json={"file_type": "docx", "file_id": fid, "data": "<p>auto</p>"},
         )
         assert resp.status_code == 200
+
+    def test_structured_docx_payload_writes_header_footer(self, wa_client):
+        client, _, _ = wa_client
+        docx_module = pytest.importorskip("docx")
+        import zipfile
+
+        src = io.BytesIO()
+        source_doc = docx_module.Document()
+        source_doc.add_paragraph("original body")
+        source_doc.save(src)
+        src.seek(0)
+
+        upload = client.post(
+            "/api/v1/workspace/open_file",
+            data={"file": (src, "header_footer_save.docx")},
+            content_type="multipart/form-data",
+        )
+        if upload.status_code != 200:
+            pytest.skip("docx parse not available in this environment")
+        fid = upload.get_json()["file_id"]
+
+        header_html = (
+            '<p><span class="koto-hdr-col">项目计划</span>'
+            '<span class="koto-hdr-col"><span class="koto-hdr-page-num">1</span></span>'
+            '<span class="koto-hdr-col">内部使用</span></p>'
+        )
+        footer_html = '<p>页脚说明</p>'
+        payload = {
+            "html": "<p>更新后的正文</p>",
+            "header_html": header_html,
+            "footer_html": footer_html,
+            "sections": [{
+                "header_html": header_html,
+                "footer_html": footer_html,
+                "first_header_html": "",
+                "first_footer_html": "",
+                "even_header_html": "",
+                "even_footer_html": "",
+            }],
+        }
+
+        resp = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "docx",
+                "file_id": fid,
+                "ws_source_path": "header_footer_save.docx",
+                "explicit": True,
+                "data": payload,
+            },
+        )
+        assert resp.status_code == 200
+
+        raw = client.get(f"/api/v1/workspace/raw/{fid}").data
+        saved_doc = docx_module.Document(io.BytesIO(raw))
+        header_text = "\n".join(p.text for p in saved_doc.sections[0].header.paragraphs)
+        footer_text = "\n".join(p.text for p in saved_doc.sections[0].footer.paragraphs)
+        body_text = "\n".join(p.text for p in saved_doc.paragraphs)
+
+        assert "项目计划" in header_text
+        assert "内部使用" in header_text
+        assert "页脚说明" in footer_text
+        assert "更新后的正文" in body_text
+
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            header_parts = [name for name in archive.namelist() if name.startswith("word/header")]
+            assert header_parts, "expected DOCX export to generate at least one header part"
+            header_xml = "".join(
+                archive.read(name).decode("utf-8", errors="ignore")
+                for name in header_parts
+            )
+        assert "PAGE" in header_xml, "header export should preserve Word PAGE field"
 
     def test_src_written_true_when_ws_path_provided(self, wa_client):
         """Response must include src_written=True when ws_source_path is given."""
@@ -1342,37 +1414,45 @@ class TestEmbeddedModeRenderGuards:
     # ── Router.load guard ────────────────────────────────────────────────
 
     def test_router_load_awaits_layout_guard(self):
-        """Router.load must await _waitForEditorLayout after toggleWorkspace."""
+        """The file-open path must await _waitForEditorLayout after toggleWorkspace."""
         src = self.src
-        router_start = src.find("const Router = {")
-        router_end   = src.find("\n  };", router_start) + 4
-        router_body  = src[router_start:router_end]
-        assert "await _waitForEditorLayout" in router_body, (
-            "Router.load must await _waitForEditorLayout before creating editors"
+        # The actual file-open logic lives in _applyFileJson (called by Router.load)
+        fn_start = src.find("async function _applyFileJson")
+        if fn_start == -1:
+            fn_start = src.find("const Router = {")
+        fn_end = src.find("new KotoXlsxEditor()", fn_start)
+        body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
+        assert "await _waitForEditorLayout" in body, (
+            "File-open path must await _waitForEditorLayout before creating editors"
         )
 
     def test_router_load_guard_before_xlsx_editor(self):
-        """The guard await must appear before new KotoXlsxEditor() in Router.load."""
+        """The guard await must appear before new KotoXlsxEditor() in _applyFileJson."""
         src = self.src
-        router_start = src.find("const Router = {")
-        router_end   = src.find("\n  };", router_start) + 4
-        body = src[router_start:router_end]
+        # The actual file-open logic lives in _applyFileJson (called by Router.load)
+        fn_start = src.find("async function _applyFileJson")
+        if fn_start == -1:
+            fn_start = src.find("const Router = {")
+        fn_end = src.find("new KotoXlsxEditor()", fn_start)
+        body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
         guard_pos = body.find("await _waitForEditorLayout")
         xlsx_pos  = body.find("new KotoXlsxEditor()")
         assert guard_pos != -1 and xlsx_pos != -1 and guard_pos < xlsx_pos, (
-            "_waitForEditorLayout await must precede new KotoXlsxEditor() in Router.load"
+            "_waitForEditorLayout await must precede new KotoXlsxEditor()"
         )
 
     def test_router_load_guard_before_pptx_editor(self):
-        """The guard await must appear before new KotoPptxEditor() in Router.load."""
+        """The guard await must appear before new KotoPptxEditor() in _applyFileJson."""
         src = self.src
-        router_start = src.find("const Router = {")
-        router_end   = src.find("\n  };", router_start) + 4
-        body = src[router_start:router_end]
+        fn_start = src.find("async function _applyFileJson")
+        if fn_start == -1:
+            fn_start = src.find("const Router = {")
+        fn_end = src.find("new KotoPptxEditor()", fn_start)
+        body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
         guard_pos = body.find("await _waitForEditorLayout")
         pptx_pos  = body.find("new KotoPptxEditor()")
         assert guard_pos != -1 and pptx_pos != -1 and guard_pos < pptx_pos, (
-            "_waitForEditorLayout await must precede new KotoPptxEditor() in Router.load"
+            "_waitForEditorLayout await must precede new KotoPptxEditor()"
         )
 
     # ── _switchToTab guard ───────────────────────────────────────────────
@@ -1390,36 +1470,36 @@ class TestEmbeddedModeRenderGuards:
     # ── KotoXlsxEditor size-polling ──────────────────────────────────────
 
     def test_xlsx_editor_polls_for_non_zero_size(self):
-        """KotoXlsxEditor.render must poll offsetWidth before calling KotoSheetsAPI.create."""
+        """KotoXlsxEditor.render must use requestAnimationFrame before calling KotoSheetsAPI.create."""
         src = self.src
         xlsx_start = src.find("class KotoXlsxEditor {")
         xlsx_end   = src.find("\n  class Koto", xlsx_start)
         xlsx_body  = src[xlsx_start:xlsx_end]
-        assert "offsetWidth" in xlsx_body, (
-            "KotoXlsxEditor must check offsetWidth before mounting Univer"
+        assert "requestAnimationFrame" in xlsx_body, (
+            "KotoXlsxEditor must use requestAnimationFrame before mounting Univer"
         )
-        assert "_tryMount" in xlsx_body or "_doMount" in xlsx_body, (
-            "KotoXlsxEditor must use a polling/deferred mount strategy"
+        assert "KotoSheetsAPI.create" in xlsx_body, (
+            "KotoXlsxEditor must call KotoSheetsAPI.create"
         )
 
     def test_xlsx_editor_has_mount_deadline(self):
-        """KotoXlsxEditor must have a bounded deadline to prevent infinite polling."""
+        """KotoXlsxEditor.render must have error handling for create failures."""
         src = self.src
         xlsx_start = src.find("class KotoXlsxEditor {")
         xlsx_end   = src.find("\n  class Koto", xlsx_start)
         xlsx_body  = src[xlsx_start:xlsx_end]
-        assert "_mountDeadline" in xlsx_body or "Date.now()" in xlsx_body, (
-            "KotoXlsxEditor mount polling must have a bounded deadline"
+        assert "catch" in xlsx_body and "初始化失败" in xlsx_body, (
+            "KotoXlsxEditor must catch errors from KotoSheetsAPI.create"
         )
 
     def test_xlsx_editor_resize_nudge_present(self):
-        """ResizeObserver nudge (width+1 / reset) must still be present."""
+        """KotoXlsxEditor.render must pass string container ID to KotoSheetsAPI.create."""
         src = self.src
         xlsx_start = src.find("class KotoXlsxEditor {")
         xlsx_end   = src.find("\n  class Koto", xlsx_start)
         xlsx_body  = src[xlsx_start:xlsx_end]
-        assert "style.width" in xlsx_body, (
-            "KotoXlsxEditor must still include the ResizeObserver nudge (width+1/reset)"
+        assert "this._containerId" in xlsx_body, (
+            "KotoXlsxEditor must pass string container ID to KotoSheetsAPI.create"
         )
 
     # ── KotoPptxEditor size-polling ──────────────────────────────────────

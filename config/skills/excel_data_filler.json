@@ -1,0 +1,52 @@
+{
+  "id": "excel_data_filler",
+  "name": "跨文件表格自动填充",
+  "icon": "📝",
+  "category": "domain",
+  "description": "从其他文件或对话中提取数据，自动填入当前表格的指定列/行，输出 set_cell 批量修改指令",
+  "intent_description": "用户需要从另一个文件提取数据填到当前表格，或根据描述批量填充表格时触发",
+  "prompt": "\n\n## 📝 能力增强：跨文件表格自动填充专家\n\n当用户需要从另一文件提取数据填入当前表格时，按以下流程执行：\n\n### 工作流程\n\n**第一步：理解任务**\n- 明确「来源文件」（数据从哪里读）和「目标表格」（当前打开的 xlsx/csv）\n- 确认要填入的列/行范围\n\n**第二步：读取来源数据**\n- 如果来源文件在工作区，调用 `read_workspace_file` 工具读取\n- 如果用户在聊天中提供了数据，直接使用\n\n**第三步：字段映射**\n- 对比来源数据字段名和目标表格列名\n- 自动推断映射关系（如「姓名」→「Name」，「销售额」→「Sales Amount」）\n- 如有歧义，列出候选映射并请用户确认\n\n**第四步：生成填充指令**\n对每个需要填充的单元格输出 set_cell 指令：\n- r = 行号-1（0开始）\n- c = 列号-1（0开始，A列=0, B列=1...）\n\n示例：填充 B2:B5（B列，第2到5行）：\n<TOOL>{\"type\":\"set_cell\",\"r\":1,\"c\":1,\"value\":\"张三\"}</TOOL>\n<TOOL>{\"type\":\"set_cell\",\"r\":2,\"c\":1,\"value\":\"李四\"}</TOOL>\n<TOOL>{\"type\":\"set_cell\",\"r\":3,\"c\":1,\"value\":\"王五\"}</TOOL>\n<TOOL>{\"type\":\"set_cell\",\"r\":4,\"c\":1,\"value\":\"赵六\"}</TOOL>\n\n### 数据提取规则\n- 优先精确匹配字段名（大小写不敏感）\n- 日期格式自动统一为目标表格的格式\n- 数字去除千分位符号、货币符号再填入\n- 空值保持空，不填入 NULL 或 N/A\n\n### 填充前确认\n当填充超过10行时，先汇报映射方案，询问确认后再输出所有 set_cell 指令。\n\n示例对话：\n用户：「我要把 员工花名册.xlsx 里的员工姓名和部门填到当前这个考勤表里」\nAI：我来读取员工花名册...[read_workspace_file]\n  读取成功！找到25名员工。\n  字段映射：员工花名册[姓名] → 考勤表[A列]，员工花名册[部门] → 考勤表[B列]\n  确认后将填充 A2:A26 和 B2:B26，共50个单元格。请确认？\n用户：确认\nAI：开始填充...\n<TOOL>{\"type\":\"set_cell\",\"r\":1,\"c\":0,\"value\":\"张三\"}</TOOL>\n<TOOL>{\"type\":\"set_cell\",\"r\":1,\"c\":1,\"value\":\"人事部\"}</TOOL>...",
+  "examples": [
+    {
+      "input": "把工作区里 采购清单.xlsx 的商品名称和单价填到当前这张表格的A列和C列",
+      "output": "好的，我来读取采购清单.xlsx...\n\n读取成功！找到12行数据。\n字段映射：采购清单[商品名称] → 当前表格[A列]，采购清单[单价] → 当前表格[C列]\n\n开始填充：\n<TOOL>{\"type\":\"set_cell\",\"r\":1,\"c\":0,\"value\":\"螺丝钉M8\"}</TOOL>\n<TOOL>{\"type\":\"set_cell\",\"r\":1,\"c\":2,\"value\":\"0.15\"}</TOOL>",
+      "note": "先确认映射再执行填充，超10行时询问确认"
+    },
+    {
+      "input": "帮我把这些数据填到B列：张三, 李四, 王五, 赵六",
+      "output": "好的，将以下4人填入B列（从第2行开始）：\n<TOOL>{\"type\":\"set_cell\",\"r\":1,\"c\":1,\"value\":\"张三\"}</TOOL>\n<TOOL>{\"type\":\"set_cell\",\"r\":2,\"c\":1,\"value\":\"李四\"}</TOOL>\n<TOOL>{\"type\":\"set_cell\",\"r\":3,\"c\":1,\"value\":\"王五\"}</TOOL>\n<TOOL>{\"type\":\"set_cell\",\"r\":4,\"c\":1,\"value\":\"赵六\"}</TOOL>",
+      "note": "聊天中提供数据时直接填充"
+    }
+  ],
+  "output_spec": {
+    "format": "mixed",
+    "must_contain": ["set_cell"],
+    "must_not_contain": [],
+    "min_chars": 30,
+    "max_chars": null,
+    "description": "生成一系列 set_cell 工具调用指令，每条对应一个单元格的填充值"
+  },
+  "task_types": ["FILE_GEN", "CHAT"],
+  "bound_tools": ["set_cell", "read_workspace_file", "list_workspace_files"],
+  "executor_tools": ["read_workspace_file", "list_workspace_files"],
+  "priority": 78,
+  "conflict_with": [],
+  "enabled": true,
+  "trigger_keywords": [
+    "填表", "填充表格", "填入数据", "从文件填", "从另一个文件",
+    "自动填充", "批量填入", "导入数据到表格", "从花名册", "填到表格",
+    "帮我填", "把数据填", "导入表格", "跨文件填充", "提取数据填"
+  ],
+  "tags": ["excel", "fill", "cross-file", "table", "填表", "表格填充", "跨文件"],
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-04-14T00:00:00Z",
+  "plan_template": [
+    "1. 识别来源文件路径（工作区文件名）和目标位置（列/行范围）",
+    "2. 调用 list_workspace_files 确认来源文件存在",
+    "3. 调用 read_workspace_file 获取来源文件文本内容",
+    "4. 解析来源数据，进行字段名映射",
+    "5. 如填充 >10 行，先列出映射方案请用户确认",
+    "6. 确认后逐行输出 set_cell 工具调用指令"
+  ]
+}

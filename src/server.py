@@ -49,11 +49,9 @@ setup_logging(log_dir=str(APP_ROOT / "logs"))
 
 # 加载 .env 配置
 try:
-    from dotenv import load_dotenv
+    from app.core.llm.gemini_config import load_gemini_config_env
 
-    env_file = APP_ROOT / "config" / "gemini_config.env"
-    if env_file.exists():
-        load_dotenv(str(env_file))
+    load_gemini_config_env(override=False)
 except ImportError:
     pass
 

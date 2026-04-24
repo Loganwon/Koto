@@ -10,6 +10,7 @@
 import json
 import logging
 import os
+import uuid
 from datetime import datetime
 from typing import Dict, List
 
@@ -65,7 +66,9 @@ class QuickNoteManager:
         Returns:
             笔记对象
         """
-        note_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        # Add a random suffix to avoid collisions when multiple notes are created
+        # within the same microsecond.
+        note_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{uuid.uuid4().hex[:8]}"
         timestamp = datetime.now().isoformat()
 
         note = {

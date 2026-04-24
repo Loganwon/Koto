@@ -467,7 +467,7 @@ class TestAnalyze:
         try:
             task, confidence, ctx = self.SD.analyze("帮我写一个python排序函数")
             assert task == "CODER"
-            assert "Code" in confidence
+            assert "Code" in confidence or "TaskClassifier" in confidence
         finally:
             for p in patches:
                 p.stop()

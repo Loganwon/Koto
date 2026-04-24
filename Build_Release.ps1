@@ -77,6 +77,59 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-OK "Cython 编译完成（_license.pyd 及核心模块 .pyd 已生成）"
 
+# ─── 步骤 0.5：前端资产构建（Vite + esbuild） ──────────
+Write-Step "步骤 0.5  前端资产构建（文件助手 + Univer Sheets）"
+$univDir = Join-Path $REPO_ROOT "web\univer-editor"
+$outAssets = Join-Path $REPO_ROOT "web\static\univer-dist\assets"
+
+# 检测 Node.js / npx 是否可用
+$npxCmd = Get-Command npx -ErrorAction SilentlyContinue
+if ($npxCmd) {
+    # ── 1) Vite 构建文件助手主包（index-*.js / index-*.css）──
+    Write-Step "  [Vite] 构建文件助手主包..."
+    Push-Location $univDir
+    try {
+        npx vite build 2>&1 | Tee-Object -Variable viteBuildOutput | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "Vite 构建失败"; Pop-Location; exit 1
+        }
+        Write-OK "Vite 构建完成"
+    } finally { Pop-Location }
+
+    # ── 2) esbuild 构建 Univer Sheets IIFE 包（sheets-main.js / .css）──
+    Write-Step "  [esbuild] 构建 Univer Sheets 包..."
+    Push-Location $univDir
+    try {
+        npx esbuild sheets-main.js --bundle --outdir=../static/univer-dist/assets `
+            "--entry-names=[name]" --format=iife --loader:.css=css --minify --sourcemap `
+            "--define:__VUE_OPTIONS_API__=true" `
+            "--define:__VUE_PROD_DEVTOOLS__=false" `
+            "--define:__VUE_PROD_HYDRATION_MISMATCH_DETAILS__=false" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "esbuild sheets-main 构建失败"; Pop-Location; exit 1
+        }
+        Write-OK "esbuild sheets-main 构建完成"
+
+        # ── 3) 清理未被入口引用的历史残留 assets ──
+        Write-Step "  [cleanup] 清理 stale 前端资产..."
+        node scripts/clean-univer-dist-assets.js 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "stale 资产清理失败"; Pop-Location; exit 1
+        }
+        Write-OK "stale 前端资产清理完成"
+    } finally { Pop-Location }
+} else {
+    # Node.js 不可用 — 检查预构建产物是否存在
+    Write-Host "  [--] 未检测到 npx/Node.js，检查预构建资产..." -ForegroundColor Yellow
+    $sheetsJs = Join-Path $outAssets "sheets-main.js"
+    $indexJs  = Get-ChildItem $outAssets -Filter "index-*.js" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not (Test-Path $sheetsJs) -or -not $indexJs) {
+        Write-Fail "前端预构建资产缺失且无 Node.js 可用！请安装 Node.js 或手动构建前端。"
+        exit 1
+    }
+    Write-Host "  [OK] 预构建资产已存在，跳过前端构建" -ForegroundColor Green
+}
+
 # ─── 步骤 1：PyInstaller 构建 ─────────────────
 if (-not $SkipBuild) {
     $buildLog = Join-Path $LOG_DIR "build_latest.log"

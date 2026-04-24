@@ -30,6 +30,7 @@ export class DocController {
 
   // ──────────────────────────────────────────
   // 1. 获取当前选区文本（优先使用浏览器原生选区）
+  //    无选区时返回 null，由调用方自行决定是否回退到全文。
   // ──────────────────────────────────────────
   getSelection() {
     const fullText = this.getFullText();
@@ -41,8 +42,11 @@ export class DocController {
       if (sel && !sel.isCollapsed && sel.rangeCount > 0) {
         const selectedText = sel.toString().trim();
         if (selectedText && selectedText.length > 0) {
-          // 在文档全文中定位选中文本的偏移量
-          const idx = fullText.indexOf(selectedText);
+          // 精确定位：先用 DOM Range 走读字符数，回退 indexOf（首次匹配）
+          let idx = this._getDomRangeStartOffset(sel);
+          if (idx < 0 || fullText.substring(idx, idx + selectedText.length) !== selectedText) {
+            idx = fullText.indexOf(selectedText);
+          }
           if (idx >= 0) {
             return {
               text: selectedText,
@@ -54,12 +58,7 @@ export class DocController {
       }
     } catch (_) { /* 浏览器选区不可用，回退全文 */ }
 
-    // 回退：返回全文
-    return {
-      text: fullText,
-      range: { startOffset: 0, endOffset: fullText.length },
-      fullText,
-    };
+    return null;
   }
 
   // ──────────────────────────────────────────
@@ -99,9 +98,8 @@ export class DocController {
     const container = document.getElementById('center-doc');
     if (!container) return;
 
-    // Remove any previous dropped-image overlays so multiple drops don't stack.
-    container.querySelectorAll('.koto-dropped-image').forEach(el => el.remove());
-
+    // Remove any previous dropped-image placeholder from the same session
+    // so multiple drops don't stack if user made a mistake.
     const wrapper = document.createElement('div');
     wrapper.className = 'koto-dropped-image';
     wrapper.title = '图表已插入（拖动可重新定位）';
@@ -139,6 +137,9 @@ export class DocController {
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
+
+    // Flash the container to confirm success
+    this._flashChangedRegion(0, 0, altText || '图表');
   }
 
   // ──────────────────────────────────────────
@@ -345,6 +346,25 @@ export class DocController {
   }
 
   // ──────────────────────────────────────────
+  // 用 DOM Range 计算选区起始偏移量（精确定位，避免 indexOf 首次匹配问题）
+  // ──────────────────────────────────────────
+  _getDomRangeStartOffset(sel) {
+    try {
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return -1;
+      const range = sel.getRangeAt(0);
+      // Univer 0.5.x 将文档渲染为 DOM 节点，可走读字符数
+      const docRoot = document.querySelector(
+        '.univer-doc-content, #center-doc > .univer-slide-host, #center-doc .univer-doc-scroll-content'
+      );
+      if (!docRoot || docRoot.tagName === 'CANVAS') return -1;
+      const preRange = document.createRange();
+      preRange.selectNodeContents(docRoot);
+      preRange.setEnd(range.startContainer, range.startOffset);
+      return preRange.toString().length;
+    } catch (_) { return -1; }
+  }
+
+  // ──────────────────────────────────────────
   // 修改高亮闪烁：显示横幅 + 尝试设置 Univer 选区 + 文字高亮浮层
   // ──────────────────────────────────────────
   _flashChangedRegion(startOffset, endOffset, newText) {
@@ -358,38 +378,44 @@ export class DocController {
       } catch (_) { /* best-effort */ }
     }, 150);
 
-    // ② 在文档 canvas 容器上叠加一个临时高亮 overlay（黄色渐淡）
+    // ② 在文档 canvas 容器上叠加一个临时高亮 overlay（黄色脉冲渐淡）
     // Univer 0.5.x 没有原生 text-highlight API，我们在 canvas 上层叠一个
-    // position:absolute 的半透明色块，3 秒后淡出消失。
+    // position:absolute 的半透明色块，带脉冲动画后淡出消失。
     const canvasEl = document.querySelector('#center-doc canvas');
     const centerDoc = document.getElementById('center-doc');
     if (canvasEl && centerDoc) {
-      let hlOverlay = document.getElementById('koto-text-highlight-overlay');
-      if (!hlOverlay) {
-        hlOverlay = document.createElement('div');
-        hlOverlay.id = 'koto-text-highlight-overlay';
-        hlOverlay.style.cssText =
-          'position:absolute;pointer-events:none;z-index:500;border-radius:3px;'
-          + 'background:rgba(255,220,0,0.35);transition:opacity 0.6s ease;';
-        centerDoc.appendChild(hlOverlay);
-      }
-      // Position the overlay to cover the top third of the canvas as a broad signal
-      // (precise char-to-pixel mapping requires Univer internals we can't access)
+      // Remove old overlay first
+      const old = document.getElementById('koto-text-highlight-overlay');
+      if (old) old.remove();
+
+      const hlOverlay = document.createElement('div');
+      hlOverlay.id = 'koto-text-highlight-overlay';
+      centerDoc.appendChild(hlOverlay);
+
+      // Estimate vertical position based on text offset ratio
       const rect = canvasEl.getBoundingClientRect();
       const cRect = centerDoc.getBoundingClientRect();
+      const fullLen = this._getFullTextLength();
+      const ratio = fullLen > 0 ? Math.min(startOffset / fullLen, 0.9) : 0;
+      const estimatedTop = rect.top - cRect.top + ratio * rect.height;
+      // Estimate height based on text length (rough: 20px per 80 chars)
+      const textLen = Math.max(endOffset - startOffset, (newText || '').length);
+      const estimatedH = Math.max(28, Math.min(Math.ceil(textLen / 80) * 22, rect.height * 0.3));
+
       hlOverlay.style.cssText =
-        `position:absolute;pointer-events:none;z-index:500;border-radius:3px;`
-        + `background:rgba(255,220,0,0.30);transition:opacity 0.8s ease;`
-        + `top:${rect.top - cRect.top}px;`
-        + `left:${rect.left - cRect.left + 90}px;`
-        + `width:${Math.max(rect.width - 180, 100)}px;`
-        + `height:${Math.min(48, rect.height)}px;`
-        + `opacity:1;`;
+        `position:absolute;pointer-events:none;z-index:500;border-radius:4px;`
+        + `background:rgba(255,220,0,0.35);`
+        + `top:${Math.max(estimatedTop, rect.top - cRect.top)}px;`
+        + `left:${rect.left - cRect.left + 60}px;`
+        + `width:${Math.max(rect.width - 120, 100)}px;`
+        + `height:${estimatedH}px;`
+        + `opacity:1;`
+        + `animation: koto-hl-pulse 0.4s ease 2, koto-hl-fade 0.8s ease 2.2s forwards;`;
+
       clearTimeout(this._hlTimer);
       this._hlTimer = setTimeout(() => {
-        hlOverlay.style.opacity = '0';
-        setTimeout(() => { if (hlOverlay.parentNode) hlOverlay.style.display = 'none'; }, 800);
-      }, 2500);
+        if (hlOverlay.parentNode) hlOverlay.remove();
+      }, 3500);
     }
 
     // ③ 在文档区顶部显示横幅提示（显示修改后的文字预览）
@@ -425,12 +451,23 @@ export class DocController {
     wrap.innerHTML = '';
     wrap.appendChild(banner);
 
-    // 5 秒后自动淡出
+    // 3 秒后自动淡出（缩短以配合高亮消失节奏）
     clearTimeout(this._bannerTimer);
     this._bannerTimer = setTimeout(() => {
       banner.classList.add('koto-change-banner-fade');
       setTimeout(() => { wrap.innerHTML = ''; }, 500);
-    }, 5000);
+    }, 3000);
+  }
+
+  /** Get full text length for offset ratio estimation */
+  _getFullTextLength() {
+    try {
+      const doc = this._getDoc();
+      if (!doc) return 0;
+      const snapshot = typeof doc.getSnapshot === 'function' ? doc.getSnapshot() : null;
+      const dataStream = snapshot?.body?.dataStream || '';
+      return this._streamToText(dataStream).length;
+    } catch { return 0; }
   }
 
   /** HTML 转义（用于横幅中显示用户文本） */

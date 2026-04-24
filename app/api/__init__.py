@@ -50,4 +50,8 @@ def __getattr__(name):
         from .distill_routes import distill_bp
 
         return distill_bp
+    if name == "bg_agent_bp":
+        from .bg_agent_routes import bg_agent_bp
+
+        return bg_agent_bp
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

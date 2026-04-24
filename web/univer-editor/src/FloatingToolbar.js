@@ -49,6 +49,15 @@ export class FloatingToolbar {
     { action: 'custom',           label: '自定义指令' },
   ];
 
+  static SHORTCUT_ACTIONS = {
+    T: 'translate',
+    R: 'rewrite',
+    P: 'polish',
+    U: 'continue_writing',
+    M: 'summarize',
+    A: 'annotate',
+  };
+
   _createDOM() {
     this._toolbar = document.createElement('div');
     this._toolbar.id = 'floating-ai-toolbar';
@@ -164,7 +173,7 @@ export class FloatingToolbar {
       if (this._selChangeTimer) clearTimeout(this._selChangeTimer);
       this._selChangeTimer = setTimeout(() => {
         const sel = window.getSelection();
-        if (!sel || sel.isCollapsed) return;
+        if (!sel || sel.isCollapsed) { this.hide(); return; }
         this._checkSelection();
       }, 200);
     });
@@ -204,6 +213,29 @@ export class FloatingToolbar {
         this._showCmdInput();
       }
     });
+
+    document.addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey) return;
+      const action = FloatingToolbar.SHORTCUT_ACTIONS[String(e.key || '').toUpperCase()];
+      if (!action) return;
+
+      const liveSelection = document.getSelection();
+      if (liveSelection && !liveSelection.isCollapsed) {
+        this._checkSelection();
+      } else {
+        this._selectedText = '';
+        this._selectionRange = null;
+      }
+
+      const active = document.activeElement;
+      const anchorNode = liveSelection?.anchorNode || null;
+      const inEditor = editorArea.contains(active) || (anchorNode ? editorArea.contains(anchorNode) : false);
+      if (!inEditor && !this._selectedText) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      this._triggerShortcutAction(action);
+    }, true);
   }
 
   // ══════════════════ Ctrl+K 命令面板 ══════════════════
@@ -350,12 +382,20 @@ export class FloatingToolbar {
     if (badge) badge.textContent = `${charCount}字`;
 
     const _dv = window.__koto?.docxViewer;
+    const _pv = window.__koto?.pptxViewer;
+    const _ev = window.__koto?.excelViewer;
     this._docxMode = !!(_dv && _dv.isActive());
     const fullText = this._getViewerFullText();
-    const idx = fullText.indexOf(text);
-    this._selectionRange = idx >= 0
-      ? { startOffset: idx, endOffset: idx + text.length }
-      : { startOffset: 0, endOffset: fullText.length };
+    const hasExternalViewer = this._docxMode || !!(_pv && _pv.isActive()) || !!(_ev && _ev.isActive());
+    const preciseSelection = !hasExternalViewer ? this._doc.getSelection?.() : null;
+    if (preciseSelection?.text === text && preciseSelection?.range) {
+      this._selectionRange = preciseSelection.range;
+    } else {
+      const idx = fullText.indexOf(text);
+      this._selectionRange = idx >= 0
+        ? { startOffset: idx, endOffset: idx + text.length }
+        : null;
+    }
 
     this._positionToolbar(range);
     this._resetAutoHide();
@@ -403,6 +443,34 @@ export class FloatingToolbar {
     if (this._autoHideTimer) { clearTimeout(this._autoHideTimer); this._autoHideTimer = null; }
   }
 
+  _triggerShortcutAction(action) {
+    if (this._selectedText) {
+      this._onAction(action);
+      return;
+    }
+
+    const fullText = this._getViewerFullText();
+    if (!fullText) return;
+
+    const allActions = [...FloatingToolbar.PRIMARY_ACTIONS, ...FloatingToolbar.ALL_ACTIONS];
+    const labelMap = {};
+    allActions.forEach(a => { labelMap[a.action] = a.label; });
+    const label = labelMap[action] || action;
+    const docxViewer = window.__koto?.docxViewer;
+    const selData = {
+      text: fullText,
+      range: { startOffset: 0, endOffset: fullText.length },
+      fullText,
+      _docxMode: !!(docxViewer && docxViewer.isActive()),
+    };
+
+    this._panel.addMessage(`${label}（快捷键）：「${this._truncate(fullText, 40)}」`, 'user');
+    this._panel._sendViaMainAI(action, fullText, selData, '');
+    this._showAIPanel();
+    this.hide();
+    this._clearAutoHide();
+  }
+
   // ══════════════════ 操作处理 ══════════════════
 
   _onAction(action) {
@@ -437,7 +505,7 @@ export class FloatingToolbar {
       const instruction = prompt('输入 AI 指令（将应用于选中文本）：');
       if (!instruction) return;
       this._panel.addMessage(instruction, 'user');
-      this._bridge.sendAction('custom_instruction', { instruction, context: selData });
+      this._panel._sendViaMainAI('custom_instruction', this._selectedText, selData, instruction);
     } else if (action === 'chart') {
       // Chart: use selection as data context
       this._panel.addMessage(`📊 可视化：「${preview}」`, 'user');
@@ -449,7 +517,7 @@ export class FloatingToolbar {
       this._panel._sendViaMainAI('explain', this._selectedText, selData, '请解释以下内容的含义、背景或重要性，语言简洁易懂：');
     } else {
       this._panel.addMessage(`${label}：「${preview}」`, 'user');
-      this._bridge.sendAction(action, selData);
+      this._panel._sendViaMainAI(action, this._selectedText, selData, '');
     }
 
     this._showAIPanel();

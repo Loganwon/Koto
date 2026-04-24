@@ -81,6 +81,12 @@ def _secure_filename(name: str) -> str:
 
 # Import new routing modules
 from app.core.routing import SmartDispatcher
+from app.core.llm.model_capabilities import (
+    DEFAULT_INTERACTIONS_ONLY_MODELS as _DEFAULT_INTERACTIONS_ONLY_MODELS,
+    get_interactions_only_model_set as _get_interactions_only_model_set,
+    is_interactions_only_model as _is_interactions_only_model,
+    normalize_model_id as _normalize_model_id,
+)
 
 # 延迟导入 - 这些路由类仅在运行时首次访问时通过 __getattr__ 加载
 # LocalModelRouter, AIRouter, TaskDecomposer, LocalPlanner 通过 app.core.routing.__getattr__ 延迟加载
@@ -412,29 +418,17 @@ else:
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
-# Try multiple locations for the config file
-config_locations = [
-    os.path.join(PROJECT_ROOT, "config", "gemini_config.env"),
-    os.path.join(PROJECT_ROOT, "gemini_config.env"),
-    (
-        os.path.join(os.path.dirname(_sys.executable), "config", "gemini_config.env")
-        if getattr(_sys, "frozen", False)
-        else ""
-    ),
-    "gemini_config.env",
-    "../gemini_config.env",
-]
+from app.core.llm.gemini_config import (
+    get_gemini_api_key,
+    load_gemini_config_env,
+    set_runtime_gemini_api_key,
+    write_gemini_config_file,
+)
 
-for config_path in config_locations:
-    if os.path.exists(config_path):
-        load_dotenv(config_path)
-        break
+_loaded_gemini_config = load_gemini_config_env(override=False)
 
-# 尝试读取 GEMINI_API_KEY 或 API_KEY
-API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY")
-# 占位符视为无效
-if API_KEY and API_KEY.lower() in {"your_api_key_here", ""}:
-    API_KEY = None
+# 尝试读取 GEMINI_API_KEY 或兼容别名
+API_KEY = get_gemini_api_key(ensure_loaded=False)
 
 # 读取自定义 API 端点（用于中转服务）
 GEMINI_API_BASE = os.getenv("GEMINI_API_BASE", "").strip()
@@ -485,7 +479,7 @@ def get_default_wechat_files_dir() -> str:
 
 if not API_KEY:
     _app_logger.warning(
-        "⚠️ Warning: GEMINI_API_KEY or API_KEY not found in gemini_config.env"
+        "⚠️ Warning: Gemini API key not found in gemini_config.env"
     )
     _app_logger.info("   请在 config/gemini_config.env 中配置 API 密钥")
     _app_logger.info("   应用将继续启动，但 AI 功能不可用")
@@ -679,7 +673,7 @@ def create_client():
     # 构建 http_options
     http_options = {}
 
-    # 注意：最新的 Gemini 模型（如 gemini-1.5-flash）需要 v1beta API
+    # 注意：最新的 Gemini 模型（如 gemini-2.5-flash-lite）需要 v1beta API
     # v1 API 只支持旧的模型。这里使用 v1beta。
     http_options["api_version"] = "v1beta"
 
@@ -842,13 +836,9 @@ def _is_interactions_only(model_id: str) -> bool:
     try:
         iom = _INTERACTIONS_ONLY_MODELS  # noqa: F821 — 模块级全局，运行时已定义
     except NameError:
-        iom = {
-            "gemini-3-flash-preview",
-            "gemini-3-pro-preview",
-            "deep-research-pro-preview-12-2025",
-        }
-    mid = str(model_id or "")
-    return mid in iom or mid.startswith("deep-research-pro-preview")
+        iom = _DEFAULT_INTERACTIONS_ONLY_MODELS
+    mid = _normalize_model_id(model_id)
+    return _is_interactions_only_model(mid, iom)
 
 
 def _is_interactions_agent(model_id: str) -> bool:
@@ -1604,18 +1594,20 @@ def _load_secret_key() -> str:
     _k = _secrets.token_urlsafe(32)
     try:
         _key_file.write_text(_k, encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as _secret_write_err:
+        logging.getLogger("koto.app").debug(
+            "failed to persist generated secret key: %s", _secret_write_err
+        )
     return _k
 
 app.config["SECRET_KEY"] = _load_secret_key()
 
-# 静态资源缓存，减少重复加载
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 3600
+# 静态资源缓存 - 开发期间设为0确保每次加载最新文件
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 # Always re-check templates on disk so edits take effect without server restart
 app.config["TEMPLATES_AUTO_RELOAD"] = True
-# ✅ 允许最大 20MB 请求体（语音 base64 约 1-5MB，留足余量）
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
+# ✅ 允许最大 50MB 请求体（语音 base64 约 1-5MB，保留足够余量）
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 # Session cookie security hardening
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
@@ -1775,6 +1767,22 @@ def _handle_500(exc):
     return _error_response("Internal server error", 500)
 
 
+@app.errorhandler(413)
+def _handle_413(exc):
+    return _error_response("文件过大，请压缩后重试", 413)
+
+
+try:
+    from werkzeug.exceptions import HTTPException as _WerkzeugHTTPException
+
+    @app.errorhandler(_WerkzeugHTTPException)
+    def _handle_http_exception(exc):
+        # Only intercept non-JSON responses; let specific handlers take priority.
+        return _error_response(exc.description or exc.name, exc.code)
+except Exception:  # pragma: no cover
+    pass
+
+
 # ================= 用户认证系统 =================
 try:
     from auth import register_auth_routes
@@ -1854,6 +1862,7 @@ def _register_blueprints_deferred():
         "app.api.ops_routes",
         "app.api.shadow_routes",
         "app.api.macro_routes",
+        "web.blueprints.workflow_api",
     ]
 
     def _safe_preload(mod_name):
@@ -2002,6 +2011,17 @@ def _register_blueprints_deferred():
     except Exception as e:
         _app_logger.error(f"[JobAPI] ❌ 作业 API 注册失败: {e}")
 
+    # 注册 Background Agent API（Cowork 自主任务代理）
+    try:
+        from app.api.bg_agent_routes import bg_agent_bp as _bg_agent_bp
+
+        app.register_blueprint(_bg_agent_bp)
+        _app_logger.info("[BgAgentAPI] ✅ Background Agent API 已注册: /api/bg-agent")
+    except ImportError as e:
+        _app_logger.warning(f"[BgAgentAPI] ⚠️ 未能导入 Background Agent API 蓝图: {e}")
+    except Exception as e:
+        _app_logger.error(f"[BgAgentAPI] ❌ Background Agent API 注册失败: {e}")
+
     # 注册运维健康 API（HealthSnapshot + RemediationPolicy + OpsEventBus）
     try:
         from app.api.ops_routes import ops_bp as _ops_bp
@@ -2056,6 +2076,17 @@ def _register_blueprints_deferred():
         _app_logger.warning(f"[TelegramAPI] ⚠️ 未能导入 Telegram Bot API 蓝图: {e}")
     except Exception as e:
         _app_logger.error(f"[TelegramAPI] ❌ Telegram Bot API 注册失败: {e}")
+
+    # 注册工作流 Skill API（跨格式搬运 / 问卷填写 / 文档比对 / 数据清洗 / 待办提取）
+    try:
+        from web.blueprints.workflow_api import workflow_bp as _workflow_bp
+
+        app.register_blueprint(_workflow_bp)
+        _app_logger.info("[WorkflowAPI] ✅ 工作流 API 已注册: /api/workflow")
+    except ImportError as e:
+        _app_logger.warning(f"[WorkflowAPI] ⚠️ 未能导入工作流 API 蓝图: {e}")
+    except Exception as e:
+        _app_logger.error(f"[WorkflowAPI] ❌ 工作流 API 注册失败: {e}")
 
     # ── web/blueprints/ 路由分层蓝图（页面 / 业务域 API）────────────────────
     _web_bp_configs = [
@@ -2266,48 +2297,57 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 try:
     from web.model_manager import KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
     from web.model_manager import ModelManager
+    from web.model_manager import TASK_REQUIREMENTS as _MODEL_TASK_REQUIREMENTS
+    from web.model_manager import score_model_for_task as _score_model_for_task
 
     _model_manager_available = True
 except ImportError:
     try:
         from model_manager import KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
         from model_manager import ModelManager
+        from model_manager import TASK_REQUIREMENTS as _MODEL_TASK_REQUIREMENTS
+        from model_manager import score_model_for_task as _score_model_for_task
 
         _model_manager_available = True
     except ImportError:
         _model_manager_available = False
         ModelManager = None
         _MODEL_REGISTRY = {}
+        _MODEL_TASK_REQUIREMENTS = {}
+
+        def _score_model_for_task(caps, task):
+            return 0.0
 
 # 静态默认值（API 不可用时的兜底，也是启动时的初始值）
 # 注意：只有 deep-research-pro-preview-* 是 Interactions API agent，其他模型均用 generate_content
 MODEL_MAP = {
     "CHAT": "gemini-3-flash-preview",
     "CODER": "gemini-3.1-pro-preview",
-    "WEB_SEARCH": "gemini-2.5-flash",
-    "VISION": "gemini-2.5-flash",
+    "WEB_SEARCH": "gemini-3-flash-preview",
+    "VISION": "gemini-3-flash-preview",
     "RESEARCH": "gemini-3.1-pro-preview",
-    "FILE_GEN": "gemini-3-flash-preview",
+    "FILE_GEN": "gemini-3.1-pro-preview",
+    "FILE_TASK": "gemini-3.1-pro-preview",
     "PAINTER": "gemini-3.1-flash-image-preview",
     "SYSTEM": "local-executor",
     "FILE_OP": "local-executor",
-    "AGENT": "gemini-3-flash-preview",
+    "AGENT": "gemini-3.1-pro-preview",
     "FILE_SEARCH": "gemini-3-flash-preview",
-    "DOC_ANNOTATE": "gemini-3-flash-preview",
-    "MEETING_EXTRACT": "gemini-2.5-flash",
+    "DOC_ANNOTATE": "gemini-3.1-pro-preview",
+    "MEETING_EXTRACT": "gemini-3.1-pro-preview",
     "COMPLEX": "gemini-3.1-pro-preview",
 }
 
 # ─── Interactions-API-only 模型（动态更新，静态默认兜底）──────────────────────
 # 这些模型不支持 client.models.generate_content()，必须走 Interactions API
-# 注意：gemini-3-flash-preview 和 gemini-3-pro-preview 是普通模型，直接用 generate_content，不在此列表中
+# 注意：gemini-2.5-flash 和 gemini-2.5-pro 是普通模型，直接用 generate_content，不在此列表中
 _INTERACTIONS_ONLY_MODELS = {
-    "deep-research-pro-preview-12-2025",  # 深度研究 Agent，仅支持 Interactions API
+    mid for mid in _DEFAULT_INTERACTIONS_ONLY_MODELS
 }
 # 当前 Interactions API 模型均支持 background=True
 _NO_BACKGROUND_MODELS: set = set()
 # 当 Interactions API 也失败时的最终降级模型
-_INTERACTIONS_FALLBACK_MODEL = "gemini-2.5-flash"
+_INTERACTIONS_FALLBACK_MODEL = "gemini-3-flash-preview"
 
 # ── Interactions API 轮询状态常量 ────────────────────────────────────────────
 _INTERACTION_TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "error"})
@@ -2329,62 +2369,241 @@ _INTERACTION_STATUS_MSGS: dict = {
 # 全局模型管理器实例（后台初始化）
 _model_manager = None
 
+_LEGACY_MODEL_ALIASES = {}
+
+
+def _resolve_legacy_model_alias(model_id: str) -> str:
+    normalized = _normalize_model_id(str(model_id or "").strip())
+    if not normalized:
+        return ""
+    return _LEGACY_MODEL_ALIASES.get(normalized, normalized)
+
+
+def _get_file_task_default_model() -> str:
+    return _resolve_legacy_model_alias(
+        MODEL_MAP.get("FILE_TASK", MODEL_MAP.get("AGENT", MODEL_MAP.get("CHAT", "gemini-3.1-pro-preview")))
+    )
+
+
+_MODEL_LOCK_TASK_ALIASES = {
+    "DOC_ANNOTATE": "FILE_TASK",
+    "FILE_SEARCH": "AGENT",
+    "MEETING_EXTRACT": "FILE_TASK",
+    "MULTI_STEP": "AGENT",
+    "COMPLEX": "AGENT",
+}
+
+
+def _resolve_model_lock_task(task_type: str) -> str:
+    normalized = str(task_type or "").strip().upper()
+    if not normalized:
+        return ""
+    if normalized in _MODEL_TASK_REQUIREMENTS:
+        return normalized
+    return _MODEL_LOCK_TASK_ALIASES.get(normalized, "")
+
+
+def _model_supports_locked_task(model_id: str, task_type: str) -> bool:
+    if _model_manager is None:
+        return True
+
+    resolved_task = _resolve_model_lock_task(task_type)
+    if not resolved_task:
+        return True
+
+    caps = _model_manager._cached_caps.get(model_id)
+    if not caps:
+        return True
+
+    if caps.get("image_gen", False) and resolved_task != "PAINTER":
+        return False
+
+    return _score_model_for_task(caps, resolved_task) >= 0
+
+
+def _pick_available_fallback_model(
+    fallback_model: str,
+    task_type: str,
+    available_model_ids,
+) -> str:
+    fallback = _resolve_legacy_model_alias(fallback_model)
+    ordered_ids = [str(item or "").strip() for item in (available_model_ids or []) if str(item or "").strip()]
+    available_ids = set(ordered_ids)
+
+    if not ordered_ids:
+        return fallback
+
+    if fallback and fallback in available_ids:
+        return fallback
+
+    task_candidates = []
+    resolved_task = _resolve_model_lock_task(task_type)
+    if resolved_task:
+        task_candidates.append(resolved_task)
+
+    normalized_task = str(task_type or "").strip().upper()
+    if normalized_task and normalized_task not in task_candidates:
+        task_candidates.append(normalized_task)
+
+    if _model_manager is not None:
+        for candidate_task in task_candidates:
+            try:
+                routed_model = _model_manager.get_model_for_task(candidate_task)
+            except Exception:
+                routed_model = None
+            routed_model = _resolve_legacy_model_alias(routed_model or "")
+            if routed_model and routed_model in available_ids:
+                return routed_model
+
+    for candidate_task in task_candidates + ["FILE_TASK", "AGENT", "CHAT"]:
+        routed_model = _resolve_legacy_model_alias(MODEL_MAP.get(candidate_task, ""))
+        if routed_model and routed_model in available_ids:
+            return routed_model
+
+    return ordered_ids[0]
+
+
+def _resolve_requested_model_id(
+    requested_model: str,
+    fallback_model: str = "",
+    task_type: str = "",
+) -> str:
+    normalized = _resolve_legacy_model_alias(requested_model)
+    resolved_fallback = _resolve_legacy_model_alias(fallback_model)
+
+    if _model_manager is None:
+        if not normalized or normalized in {"auto", "local"}:
+            return resolved_fallback
+        return normalized
+
+    try:
+        available_ids = [
+            str(item.get("id", "")).strip()
+            for item in _model_manager.get_available_models()
+            if item.get("id")
+        ]
+    except Exception as exc:
+        _app_logger.debug(
+            "[ModelLock] 获取可用模型列表失败，跳过显式模型校验: %s", exc
+        )
+        if not normalized or normalized in {"auto", "local"}:
+            return resolved_fallback
+        return normalized
+
+    if not normalized or normalized in {"auto", "local"}:
+        return _pick_available_fallback_model(resolved_fallback, task_type, available_ids)
+
+    if available_ids and normalized not in set(available_ids):
+        resolved_target = _pick_available_fallback_model(resolved_fallback, task_type, available_ids)
+        _app_logger.warning(
+            "[ModelLock] 请求的模型 %s 当前不可用，回退到 %s",
+            normalized,
+            resolved_target or "auto",
+        )
+        return resolved_target
+
+    if not _model_supports_locked_task(normalized, task_type):
+        resolved_target = _pick_available_fallback_model(resolved_fallback, task_type, available_ids)
+        _app_logger.warning(
+            "[ModelLock] 请求的模型 %s 不满足任务 %s 的能力约束，回退到 %s",
+            normalized,
+            task_type or "unknown",
+            resolved_target or "auto",
+        )
+        return resolved_target
+
+    return normalized
+
+
+def _normalize_file_task_model_id(model_mode: str, requested_model: str) -> str:
+    normalized = str(requested_model or "").strip()
+    if normalized.lower() in {"auto", "local"}:
+        normalized = ""
+
+    if str(model_mode or "auto").strip().lower() == "local":
+        return ""
+
+    return _resolve_requested_model_id(
+        normalized,
+        fallback_model=_get_file_task_default_model(),
+        task_type="FILE_TASK",
+    ) or _get_file_task_default_model()
+
+
+def _sync_model_routes_from_manager(force_refresh: bool = False) -> bool:
+    """将 ModelManager 最新结果同步到全局路由、fallback 和路由器组件。"""
+    global MODEL_MAP, _model_manager, _INTERACTIONS_ONLY_MODELS, _INTERACTIONS_FALLBACK_MODEL
+
+    if _model_manager is None:
+        return False
+
+    dynamic_map = _model_manager.refresh() if force_refresh else _model_manager.get_model_map()
+    if not dynamic_map:
+        return False
+
+    MODEL_MAP.update(dynamic_map)
+    _INTERACTIONS_ONLY_MODELS = _get_interactions_only_model_set(
+        _model_manager.get_interactions_only_models()
+    )
+    _INTERACTIONS_FALLBACK_MODEL = _model_manager.get_fallback_model()
+
+    # 同步更新 SmartDispatcher 的 MODEL_MAP 引用
+    try:
+        SmartDispatcher._dependencies["MODEL_MAP"] = MODEL_MAP
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+
+    # 同步更新 ModelFallbackExecutor 的路由表
+    try:
+        from app.core.llm.model_fallback import get_fallback_executor
+
+        get_fallback_executor().update_model_map(MODEL_MAP)
+    except Exception as _fe:
+        _app_logger.warning(
+            f"[ModelManager] ⚠️ ModelFallbackExecutor 同步失败（非致命）: {_fe}"
+        )
+
+    # 同步更新 AIRouter 的轻量路由模型
+    try:
+        from app.core.routing.ai_router import AIRouter
+
+        _available_caps = _model_manager._cached_caps
+        _fast_candidates = [
+            (mid, caps)
+            for mid, caps in _available_caps.items()
+            if not _is_interactions_only(mid)
+            and not caps.get("image_gen", False)
+            and mid != "local-executor"
+        ]
+        if _fast_candidates:
+            _router_candidate = max(
+                _fast_candidates,
+                key=lambda x: x[1].get("speed", 0) + x[1].get("tier", 0) * 0.1,
+            )[0]
+            AIRouter.set_router_model(_router_candidate)
+    except Exception as _are:
+        _app_logger.warning(
+            f"[ModelManager] ⚠️ AIRouter 路由模型更新失败（非致命）: {_are}"
+        )
+    return True
+
 
 def _init_model_manager():
     """
     在后台线程中初始化动态模型管理器并更新全局路由表。
     不阻塞主线程启动；路由表更新期间仍使用静态默认值。
     """
-    global MODEL_MAP, _model_manager, _INTERACTIONS_ONLY_MODELS, _INTERACTIONS_FALLBACK_MODEL
+    global _model_manager
     if not _model_manager_available or ModelManager is None:
         _app_logger.debug("[ModelManager] 模块不可用，使用静态默认路由")
         return
     try:
         _app_logger.debug("[ModelManager] 🔍 正在发现可用模型...")
         _model_manager = ModelManager(client)
-        dynamic_map = _model_manager.get_model_map()
-        MODEL_MAP.update(dynamic_map)
-        _INTERACTIONS_ONLY_MODELS = _model_manager.get_interactions_only_models()
-        _INTERACTIONS_FALLBACK_MODEL = _model_manager.get_fallback_model()
-        # 同步更新 SmartDispatcher 的 MODEL_MAP 引用
-        try:
-            SmartDispatcher._dependencies["MODEL_MAP"] = MODEL_MAP
-        except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-        _app_logger.info(f"[ModelManager] ✅ 动态路由已加载: {len(dynamic_map)} 个任务")
-        # ── 同步更新 ModelFallbackExecutor 的路由表 ──────────────────────────
-        try:
-            from app.core.llm.model_fallback import get_fallback_executor
-
-            get_fallback_executor().update_model_map(MODEL_MAP)
-            _app_logger.info("[ModelManager] ✅ ModelFallbackExecutor 路由表已同步")
-        except Exception as _fe:
-            _app_logger.warning(
-                f"[ModelManager] ⚠️ ModelFallbackExecutor 同步失败（非致命）: {_fe}"
-            )
-        # ── 同步更新 AIRouter 的轻量路由模型 ────────────────────────────────
-        try:
-            from app.core.routing.ai_router import AIRouter
-
-            # 选取可用的非 interactions-only、速度最快的模型作为路由器
-            _available_caps = _model_manager._cached_caps
-            _fast_candidates = [
-                (mid, caps)
-                for mid, caps in _available_caps.items()
-                if not caps.get("interactions_only", False)
-                and not caps.get("image_gen", False)
-                and mid != "local-executor"
-            ]
-            if _fast_candidates:
-                _router_candidate = max(
-                    _fast_candidates,
-                    key=lambda x: x[1].get("speed", 0) + x[1].get("tier", 0) * 0.1,
-                )[0]
-                AIRouter.set_router_model(_router_candidate)
-        except Exception as _are:
-            _app_logger.warning(
-                f"[ModelManager] ⚠️ AIRouter 路由模型更新失败（非致命）: {_are}"
-            )
+        _sync_model_routes_from_manager(force_refresh=True)
+        _app_logger.info("[ModelManager] ✅ 动态路由已加载并完成组件同步")
     except Exception as _me:
         import traceback as _tb
 
@@ -2394,37 +2613,54 @@ def _init_model_manager():
         _tb.print_exc()
 
 
+def _model_manager_refresh_loop():
+    """周期性刷新模型路由，避免进程长跑时路由映射过期。"""
+    interval = max(60, int(os.getenv("KOTO_MODEL_MANAGER_REFRESH_INTERVAL", "900")))
+    while True:
+        time.sleep(interval)
+        if _model_manager is None:
+            continue
+        try:
+            synced = _sync_model_routes_from_manager(force_refresh=True)
+            if synced:
+                _app_logger.debug("[ModelManager] ✅ 周期刷新完成")
+        except Exception as _refresh_err:
+            _app_logger.warning(
+                f"[ModelManager] ⚠️ 周期刷新失败（非致命）: {_refresh_err}"
+            )
+
+
 # 模型能力矩阵（用于显示，动态模型自动补充）
 MODEL_INFO = {
     "gemini-3-pro-preview": {
-        "name": "Gemini 3.0 Pro",
+        "name": "Gemini 3 Pro Preview",
+        "speed": "🚀",
+        "tier": 8,
+        "strengths": ["推理", "分析", "代码", "复杂任务"],
+    },
+    "gemini-3-flash-preview": {
+        "name": "Gemini 3 Flash Preview",
+        "speed": "⚡",
+        "tier": 7,
+        "strengths": ["快速", "对话", "多模态", "联网搜索"],
+    },
+    "gemini-2.5-pro": {
+        "name": "Gemini 2.5 Pro",
         "speed": "🚀",
         "tier": 7,
         "strengths": ["推理", "分析", "代码", "复杂任务"],
     },
-    "gemini-3-flash-preview": {
-        "name": "Gemini 3.0 Flash",
-        "speed": "⚡",
-        "tier": 6,
-        "strengths": ["快速", "对话", "多模态"],
-    },
     "gemini-2.5-flash": {
         "name": "Gemini 2.5 Flash",
-        "speed": "🌐",
-        "tier": 5,
-        "strengths": ["联网搜索", "grounding"],
-    },
-    "gemini-2.5-flash-preview": {
-        "name": "Gemini 2.5 Flash Preview",
-        "speed": "🌐",
-        "tier": 5,
-        "strengths": ["联网搜索", "grounding"],
-    },
-    "gemini-2.5-pro-preview": {
-        "name": "Gemini 2.5 Pro",
-        "speed": "🎯",
+        "speed": "⚡",
         "tier": 6,
-        "strengths": ["推理", "代码", "分析"],
+        "strengths": ["快速", "对话", "多模态", "联网搜索"],
+    },
+    "gemini-2.5-flash-lite": {
+        "name": "Gemini 2.5 Flash Lite",
+        "speed": "⚡",
+        "tier": 5,
+        "strengths": ["快速", "经济", "轻量"],
     },
     "deep-research-pro-preview-12-2025": {
         "name": "Deep Research Pro",
@@ -2438,29 +2674,11 @@ MODEL_INFO = {
         "tier": 6,
         "strengths": ["图像生成", "创意绘画", "艺术风格"],
     },
-    "gemini-2.0-flash-exp": {
-        "name": "Gemini 2.0 Flash Exp",
-        "speed": "🧪",
+    "gemini-2.5-flash-image": {
+        "name": "Gemini 2.5 Flash Image",
+        "speed": "🎨",
         "tier": 5,
-        "strengths": ["图像生成", "多模态", "实验功能"],
-    },
-    "gemini-2.0-flash": {
-        "name": "Gemini 2.0 Flash",
-        "speed": "⚡",
-        "tier": 5,
-        "strengths": ["快速", "多模态"],
-    },
-    "gemini-1.5-pro": {
-        "name": "Gemini 1.5 Pro",
-        "speed": "📚",
-        "tier": 5,
-        "strengths": ["长上下文", "推理"],
-    },
-    "gemini-1.5-flash": {
-        "name": "Gemini 1.5 Flash",
-        "speed": "⚡",
-        "tier": 4,
-        "strengths": ["快速", "经济"],
+        "strengths": ["图像生成", "多模态"],
     },
     "local-executor": {
         "name": "Local Executor",
@@ -3434,7 +3652,7 @@ class WebSearcher:
         _app_logger.debug(f"[PPT-RESEARCH] 🔄 切换到备用模型进行研究...")
         research_models = [
             MODEL_MAP.get("RESEARCH", "deep-research-pro-preview-12-2025"),
-            "gemini-3-pro-preview",
+            "gemini-2.5-pro",
             "gemini-2.5-flash",
         ]
         # 去重并去空，保持顺序
@@ -3445,11 +3663,8 @@ class WebSearcher:
         ]
         for model in research_models:
             try:
-                # deep-research 和 gemini-3-preview 仅支持 Interactions API，不走 generate_content
-                if (
-                    model.startswith("deep-research-pro-preview")
-                    or model in _INTERACTIONS_ONLY_MODELS
-                ):
+                # Interactions-only 模型必须走 Interactions API，不走 generate_content
+                if _is_interactions_only(model):
                     continue
                 # 备用路径必须启用 Google Search Grounding，避免模型在无实时数据的情况下
                 # 捏造统计数据、引用来源或市场数字（幻觉风险）
@@ -5657,7 +5872,7 @@ class TaskOrchestrator:
                 progress_callback(msg, detail)
 
         try:
-            model_id = MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+            model_id = MODEL_MAP.get("CODER", "gemini-2.5-pro")
             _report("启动代码生成...", f"模型: {model_id}")
 
             # 注入前步搜索/研究结果（如有）
@@ -5795,7 +6010,7 @@ class TaskOrchestrator:
     ) -> int:
         """
         验证输出质量（语义评分版本）。
-        先用快速规则给基准分，再用 gemini-2.0-flash-lite 做语义评估。
+        先用快速规则给基准分，再用 gemini-2.5-flash-lite 做语义评估。
         返回: 质量评分 (0-100)
         """
         # ── 规则基准分 ──────────────────────────────────────────────
@@ -5824,7 +6039,7 @@ class TaskOrchestrator:
         if has_files:
             score += 10
 
-        # ── 语义评分（gemini-2.0-flash-lite，低成本）────────────────
+        # ── 语义评分（gemini-2.5-flash-lite，低成本）────────────────
         try:
             check_prompt = (
                 f"用户需求：{user_input[:300]}\n\n"
@@ -5833,7 +6048,7 @@ class TaskOrchestrator:
             )
             resp = await asyncio.to_thread(
                 lambda: client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
+                    model="gemini-2.5-flash-lite",
                     contents=check_prompt,
                     config=types.GenerateContentConfig(
                         max_output_tokens=8,
@@ -5875,6 +6090,9 @@ import threading as _threading
 
 _threading.Thread(
     target=_init_model_manager, name="ModelManagerInit", daemon=True
+).start()
+_threading.Thread(
+    target=_model_manager_refresh_loop, name="ModelManagerRefresh", daemon=True
 ).start()
 
 # === Ollama 后备路由 (可选) ===
@@ -6029,7 +6247,7 @@ class Utils:
                 f"模型输出:\n{output_text}\n"
             )
             response = client.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash-lite",
                 contents=check_prompt,
                 config=types.GenerateContentConfig(
                     max_output_tokens=300,
@@ -6601,7 +6819,7 @@ def _inject_memory_adapters(mgr):
             prompt: str, temperature: float = 0.2, max_tokens: int = 300
         ) -> str:
             resp = client.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash-lite",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=temperature,
@@ -6663,7 +6881,7 @@ def _start_memory_extraction(
         """Synchronous LLM call for reflection / summarization."""
         try:
             resp = client.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash-lite",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.1,
@@ -6676,13 +6894,12 @@ def _start_memory_extraction(
 
     def _llm_quality_sync(prompt: str) -> str:
         """Higher-quality LLM call for PersonalityMatrix and evaluations.
-        Tries gemini-2.5-flash → gemini-2.0-flash → falls back to _llm_sync."""
+        Tries gemini-2.5-flash → gemini-2.5-flash-lite → falls back to _llm_sync."""
         _quality_models = [
             "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-lite",
+            "gemini-2.5-flash-lite",
         ]
-        _model = "gemini-2.0-flash"  # safe default
+        _model = "gemini-2.5-flash"  # safe default
         try:
             from app.core.llm.model_fallback import get_fallback_executor
 
@@ -6971,9 +7188,9 @@ class KotoBrain:
 
                     # 调用 Gemini 生成代码（带回退）
                     edit_models = [
-                        "gemini-3-flash-preview",
-                        "gemini-3-pro-preview",
                         "gemini-2.5-flash",
+                        "gemini-2.5-pro",
+                        "gemini-2.5-flash-lite",
                     ]
                     code_response = None
                     last_error = None
@@ -7161,7 +7378,7 @@ class KotoBrain:
                             f"用户请求: {user_input}\n\n"
                             f"失败信息/输出: {result['response']}\n"
                         )
-                        retry_models = ["gemini-3-flash-preview", "gemini-2.5-flash"]
+                        retry_models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
                         for retry_model in retry_models:
                             try:
                                 _app_logger.debug(
@@ -7371,7 +7588,7 @@ class KotoBrain:
                         ),
                     )
                     accumulated_text = response.text if response.text else ""
-                elif model_id in _INTERACTIONS_ONLY_MODELS:
+                elif _is_interactions_only(model_id):
                     # 图片文件 + gemini-3-preview 模型：走 Interactions API
                     try:
                         accumulated_text = _call_interactions_api_sync(
@@ -7407,7 +7624,7 @@ class KotoBrain:
                     accumulated_text = response.text if response.text else ""
             else:
                 # gemini-3-preview 只支持 Interactions API，不支持 generate_content
-                if model_id in _INTERACTIONS_ONLY_MODELS:
+                if _is_interactions_only(model_id):
                     try:
                         # 将历史记录折叠进 prompt（Interactions API 不支持多轮历史）
                         history_prefix = ""
@@ -7494,8 +7711,10 @@ class KotoBrain:
         except Exception as e:
             err_str = str(e)
             # 自动降级：如果模型返回"只支持 Interactions API"错误，用 2.0-flash 重试一次
-            if "Interactions API" in err_str and model_id not in (
-                _INTERACTIONS_ONLY_MODELS | {_INTERACTIONS_FALLBACK_MODEL}
+            if (
+                "Interactions API" in err_str
+                and not _is_interactions_only(model_id)
+                and model_id != _INTERACTIONS_FALLBACK_MODEL
             ):
                 _app_logger.info(
                     f"[brain.chat] Interactions API 错误，自动降级 {model_id} → {_INTERACTIONS_FALLBACK_MODEL}"
@@ -7558,7 +7777,7 @@ class KotoBrain:
                         if (
                             _fb_model
                             and _fb_model != model_id
-                            and _fb_model not in _INTERACTIONS_ONLY_MODELS
+                            and not _is_interactions_only(_fb_model)
                         ):
                             _app_logger.info(
                                 f"[brain.chat] 模型不可用 {model_id} → 自动降级 {_fb_model} (task={target_key})"
@@ -7640,9 +7859,24 @@ def chat():
     history = session_manager._trim_history(full_history)
 
     # 确定使用的模型
-    if locked_model and locked_model != "auto":
+    if locked_model == "local":
         model = locked_model
         auto_model = False
+    elif locked_model and locked_model != "auto":
+        requested_model = _resolve_requested_model_id(
+            locked_model,
+            fallback_model="",
+            task_type=locked_task or "CHAT",
+        )
+        if requested_model:
+            model = requested_model
+            auto_model = False
+        elif locked_task:
+            model = MODEL_MAP.get(locked_task, MODEL_MAP["CHAT"])
+            auto_model = False
+        else:
+            model = None
+            auto_model = True
     elif locked_task:
         model = MODEL_MAP.get(locked_task, MODEL_MAP["CHAT"])
         auto_model = False
@@ -8789,8 +9023,8 @@ def chat_stream():
                     yield f"data: {json.dumps({'type': 'task_final', 'data': _lp_payload}, ensure_ascii=False)}\n\n"
                     try:
                         session_manager.append_and_save(f"{session_name}.json", user_input, _local_answer)
-                    except Exception:
-                        pass
+                    except Exception as _save_exc:
+                        _app_logger.debug("[STREAM] 保存本地模式对话失败: %s", _save_exc)
                 except Exception as _ole:
                     yield f"data: {json.dumps({'type': 'error', 'message': f'本地模型失败: {_ole}'})}\n\n"
                 return
@@ -8921,12 +9155,20 @@ def chat_stream():
 
         return Response(generate_agent(), mimetype="text/event-stream")
 
-    if locked_model and locked_model != "auto":
-        model_id = locked_model
+    # 传递 complexity 以便为复杂任务选择更强的模型
+    _complexity = (context_info or {}).get("complexity", "normal")
+    routed_model_id = SmartDispatcher.get_model_for_task(
+        task_type, complexity=_complexity
+    )
+
+    if locked_model and locked_model not in {"auto", "local"}:
+        model_id = _resolve_requested_model_id(
+            locked_model,
+            fallback_model=routed_model_id,
+            task_type=task_type,
+        ) or routed_model_id
     else:
-        # 传递 complexity 以便为复杂任务选择更强的模型
-        _complexity = (context_info or {}).get("complexity", "normal")
-        model_id = SmartDispatcher.get_model_for_task(task_type, complexity=_complexity)
+        model_id = routed_model_id
 
     # 🦙 locked_model='local' → 强制走本地 Ollama，绝不调用云端
     # 🌐 其他情况（auto/具体云模型）→ 云端优先，本地仅作兜底（CHAT简单问题优化除外）
@@ -10488,7 +10730,10 @@ def chat_stream():
 
             # === MEETING_EXTRACT Mode (会议提炼 - 流式输出) ===
             if task_type == "MEETING_EXTRACT":
-                used_model = model_id or "gemini-2.5-flash"
+                used_model = model_id or MODEL_MAP.get(
+                    "MEETING_EXTRACT",
+                    MODEL_MAP.get("FILE_TASK", "gemini-3.1-pro-preview"),
+                )
                 t = yield_thinking(
                     "进入会议提炼模式，分析会议文本并提取行动项", "routing"
                 )
@@ -10667,9 +10912,12 @@ def chat_stream():
                     yield "\n\n"
                     return
 
-                used_model = model_id if model_id else "gemini-3.1-pro-preview"
+                used_model = model_id or MODEL_MAP.get(
+                    "DOC_ANNOTATE",
+                    MODEL_MAP.get("FILE_TASK", "gemini-3.1-pro-preview"),
+                )
                 t = yield_thinking(
-                    f"进入文档标注模式，将使用 {model_id or 'gemini-3.1-pro-preview'} 分析文档",
+                    f"进入文档标注模式，将使用 {used_model} 分析文档",
                     "routing",
                 )
                 if t:
@@ -10763,14 +11011,14 @@ def chat_stream():
 
                 # Step 2: 展示任务信息
                 nl = "\n"
-                task_info_msg = f"📋 【任务信息】{nl}- 模型: {model_id}{nl}- 需求: {user_input[:100]}{nl}- 文档: {doc_filename}"
+                task_info_msg = f"📋 【任务信息】{nl}- 模型: {used_model}{nl}- 需求: {user_input[:100]}{nl}- 文档: {doc_filename}"
                 yield f"data: {json.dumps({'type': 'info', 'message': task_info_msg})}\n\n"
 
                 try:
                     from web.document_feedback import DocumentFeedbackSystem
 
                     feedback_system = DocumentFeedbackSystem(
-                        gemini_client=client, default_model_id="gemini-3.1-pro-preview"
+                        gemini_client=client, default_model_id=used_model
                     )
 
                     # 使用流式分析系统，逐步反馈进度
@@ -10951,7 +11199,7 @@ def chat_stream():
                     or "搜索失败" in response_text
                 ):
                     t = yield_thinking(
-                        "初次搜索结果不佳，使用 gemini-2.0-flash-lite 改写查询词后重试",
+                        "初次搜索结果不佳，使用 gemini-2.5-flash-lite 改写查询词后重试",
                         "searching",
                     )
                     if t:
@@ -10962,7 +11210,7 @@ def chat_stream():
                         f"用户需求: {user_input}"
                     )
                     fix_query_resp = client.models.generate_content(
-                        model="gemini-2.0-flash-lite",
+                        model="gemini-2.5-flash-lite",
                         contents=fix_query_prompt,
                         config=types.GenerateContentConfig(
                             temperature=0.2,
@@ -11190,7 +11438,7 @@ def chat_stream():
             if _tot_enabled:
                 # FILE_GEN 的 ToT 使用 flash 级别模型，避免 pro 模型响应慢导致前端 25s 无心跳触发卡住检测
                 if task_type == "FILE_GEN":
-                    _tot_model = MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
+                    _tot_model = MODEL_MAP.get("FILE_GEN", "gemini-2.5-flash")
                 else:
                     _tot_model = model_id or MODEL_MAP.get(
                         task_type, "gemini-2.5-flash"
@@ -11291,7 +11539,7 @@ def chat_stream():
             # === RESEARCH Mode (深度研究 - 流式响应优先) ===
             if task_type == "RESEARCH":
                 research_model = model_id or MODEL_MAP.get(
-                    "RESEARCH", "gemini-3-pro-preview"
+                    "RESEARCH", "gemini-2.5-pro"
                 )
                 used_model = research_model
                 t = yield_thinking(
@@ -11501,7 +11749,7 @@ def chat_stream():
                                 user_input,
                                 final_text[:4000],
                                 task="RESEARCH",
-                                model_name="gemini-3-flash-preview",
+                                model_name="gemini-2.5-flash",
                             )
 
                         except Exception as fallback_err:
@@ -11512,7 +11760,7 @@ def chat_stream():
                                 user_input,
                                 error_text[:1000],
                                 task="RESEARCH",
-                                model_name="gemini-3-flash-preview",
+                                model_name="gemini-2.5-flash",
                             )
 
                     elif (
@@ -12322,7 +12570,7 @@ def chat_stream():
                         outline_models = [
                             "gemini-2.5-flash",
                             model_id,
-                            "gemini-3-flash-preview",
+                            "gemini-2.5-flash-lite",
                         ]
                         # 根据目标页数调整 token 限额：20页大纲需要更多空间
                         _outline_tokens = (
@@ -13170,9 +13418,9 @@ def chat_stream():
                         dict.fromkeys(
                             [
                                 model_id,
-                                "gemini-3.1-pro-preview",
+                                "gemini-2.5-pro",
                                 "gemini-2.5-flash",
-                                "gemini-3-flash-preview",
+                                "gemini-2.5-flash-lite",
                             ]
                         )
                     )
@@ -13352,9 +13600,9 @@ def chat_stream():
                 # 模型列表（主模型 + 备用模型）
                 file_gen_models = [
                     model_id,  # 主模型
-                    "gemini-3.1-pro-preview",  # 备用1 (最强 generate_content 兼容)
+                    "gemini-2.5-pro",  # 备用1
                     "gemini-2.5-flash",  # 备用2
-                    "gemini-3-flash-preview",  # 备用3
+                    "gemini-2.5-flash-lite",  # 备用3
                 ]
 
                 # 使用线程 + 超时来调用API（带重试）
@@ -15192,21 +15440,29 @@ def chat_with_file():
                             )
                             task_type = task_analysis
 
-                if locked_model != "auto":
-                    model_to_use = locked_model
-                else:
-                    complexity = "complex" if file_data is None else "normal"
-                    if context_info and context_info.get("complexity"):
-                        complexity = context_info["complexity"]
+                complexity = "complex" if file_data is None else "normal"
+                if context_info and context_info.get("complexity"):
+                    complexity = context_info["complexity"]
 
-                    if task_type == "FILE_GEN":
-                        model_to_use = SmartDispatcher.get_model_for_task(
-                            task_type, has_image=bool(file_data), complexity=complexity
-                        )
-                    else:
-                        model_to_use = SmartDispatcher.get_model_for_task(
-                            task_type, has_image=bool(file_data)
-                        )
+                if task_type == "FILE_GEN":
+                    routed_model_to_use = SmartDispatcher.get_model_for_task(
+                        task_type, has_image=bool(file_data), complexity=complexity
+                    )
+                else:
+                    routed_model_to_use = SmartDispatcher.get_model_for_task(
+                        task_type, has_image=bool(file_data)
+                    )
+
+                if locked_model == "local":
+                    model_to_use = locked_model
+                elif locked_model != "auto":
+                    model_to_use = _resolve_requested_model_id(
+                        locked_model,
+                        fallback_model=routed_model_to_use,
+                        task_type=task_type,
+                    ) or routed_model_to_use
+                else:
+                    model_to_use = routed_model_to_use
 
                 _app_logger.info(
                     f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}"
@@ -15271,7 +15527,10 @@ def chat_with_file():
                             _bsh.copy2(_batch_filepath, _batch_target)
                         _bt_feedback = DocumentFeedbackSystem(
                             gemini_client=client,
-                            default_model_id="gemini-3.1-pro-preview",
+                            default_model_id=MODEL_MAP.get(
+                                "DOC_ANNOTATE",
+                                MODEL_MAP.get("FILE_TASK", "gemini-3.1-pro-preview"),
+                            ),
                         )
                         _bt_final = None
                         for _bt_evt in _bt_feedback.full_annotation_loop_streaming(
@@ -15802,30 +16061,38 @@ def chat_with_file():
                 )
 
         # 确定使用的模型
-        if locked_model != "auto":
-            model_to_use = locked_model
-        else:
-            # 获取任务复杂度（上传文件默认按复杂任务处理）
-            complexity = "complex" if file_data is None else "normal"
-            if context_info and context_info.get("complexity"):
-                complexity = context_info["complexity"]
+        complexity = "complex" if file_data is None else "normal"
+        if context_info and context_info.get("complexity"):
+            complexity = context_info["complexity"]
 
-            if task_type == "DOC_ANNOTATE":
-                # 文档标注需要强模型：优先使用 gemini-3.1-pro-preview或 gemini-3-pro-preview
-                model_to_use = "gemini-3.1-pro-preview"
-            elif task_type == "FILE_GEN":
-                model_to_use = SmartDispatcher.get_model_for_task(
-                    task_type, has_image=bool(file_data), complexity=complexity
-                )
-            else:
-                model_to_use = SmartDispatcher.get_model_for_task(
-                    task_type, has_image=bool(file_data)
-                )
+        if task_type == "DOC_ANNOTATE":
+            # 文档标注需要强模型
+            routed_model_to_use = MODEL_MAP.get(
+                "DOC_ANNOTATE",
+                MODEL_MAP.get("FILE_TASK", "gemini-3.1-pro-preview"),
+            )
+        elif task_type == "FILE_GEN":
+            routed_model_to_use = SmartDispatcher.get_model_for_task(
+                task_type, has_image=bool(file_data), complexity=complexity
+            )
+        else:
+            routed_model_to_use = SmartDispatcher.get_model_for_task(
+                task_type, has_image=bool(file_data)
+            )
+
+        if locked_model == "local":
+            model_to_use = locked_model
+        elif locked_model != "auto":
+            model_to_use = _resolve_requested_model_id(
+                locked_model,
+                fallback_model=routed_model_to_use,
+                task_type=task_type,
+            ) or routed_model_to_use
+        else:
+            model_to_use = routed_model_to_use
 
         # 最早拦截：文件分析不能使用 interactions-only 模型（不支持 generate_content 也不支持文件附件）
-        if model_to_use in _INTERACTIONS_ONLY_MODELS or str(
-            model_to_use or ""
-        ).startswith("deep-research-pro-preview"):
+        if _is_interactions_only(model_to_use):
             _orig_model = model_to_use
             model_to_use = _INTERACTIONS_FALLBACK_MODEL
             _app_logger.warning(
@@ -15946,7 +16213,7 @@ def chat_with_file():
 
                     feedback_system = DocumentFeedbackSystem(
                         gemini_client=_ann_client,
-                        default_model_id="gemini-3.1-pro-preview",
+                        default_model_id="gemini-2.5-pro",
                     )
 
                     # 发送分类信息（若上方转换块已发送则跳过重复）
@@ -16489,9 +16756,7 @@ def chat_with_file():
 
                     # 通用拦截：interactions-only 模型不支持 generate_content_stream
                     # 覆盖所有情况（包括文本嵌入模式，不仅是 binary doc）
-                    if _stream_model in _INTERACTIONS_ONLY_MODELS or str(
-                        _stream_model
-                    ).startswith("deep-research-pro-preview"):
+                    if _is_interactions_only(_stream_model):
                         _app_logger.warning(
                             f"[FILE STREAM] ⚠️ {_stream_model} 是 interactions-only，降级到 {_INTERACTIONS_FALLBACK_MODEL}"
                         )
@@ -16505,9 +16770,9 @@ def chat_with_file():
                     # 2. 所选模型是 Interactions-only 模型（如 deep-research），不支持 generate_content_stream
                     _need_fallback = (
                         _has_binary_doc and _captured_task in ("CHAT", "RESEARCH")
-                    ) or _stream_model in _INTERACTIONS_ONLY_MODELS
+                    ) or _is_interactions_only(_stream_model)
                     if _need_fallback:
-                        if _stream_model in _INTERACTIONS_ONLY_MODELS:
+                        if _is_interactions_only(_stream_model):
                             print(
                                 f"[FILE STREAM] interactions-only 模型 {_stream_model} 不支持文件流，降级到 {_INTERACTIONS_FALLBACK_MODEL}"
                             )
@@ -16907,20 +17172,12 @@ def setup_api_key():
         return jsonify({"success": False, "error": "Invalid API key"})
 
     config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
-    os.makedirs(os.path.dirname(config_path), exist_ok=True)
 
     try:
-        # 写入配置文件（同时写入两个变量名，避免优先级错乱）
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(
-                f"# Koto Configuration\nGEMINI_API_KEY={api_key}\nAPI_KEY={api_key}\n"
-            )
-
-        # 更新环境变量
-        os.environ["GEMINI_API_KEY"] = api_key
-        os.environ["API_KEY"] = api_key
+        config_path = str(write_gemini_config_file(api_key))
+        normalized_key = set_runtime_gemini_api_key(api_key)
         global API_KEY, client
-        API_KEY = api_key
+        API_KEY = normalized_key
         client = create_client()
 
         return jsonify({"success": True})
@@ -16956,21 +17213,15 @@ def activate_with_code():
         if not builtin_key or len(builtin_key) < 10:
             return jsonify({"success": False, "error": "激活服务配置异常"})
 
-        # 写入配置文件
-        config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(
-                f"# Koto Configuration (activated)\n"
-                f"GEMINI_API_KEY={builtin_key}\n"
-                f"API_KEY={builtin_key}\n"
+        config_path = str(
+            write_gemini_config_file(
+                builtin_key,
+                header="# Koto Configuration (activated)",
             )
-
-        # 更新运行时状态
-        os.environ["GEMINI_API_KEY"] = builtin_key
-        os.environ["API_KEY"] = builtin_key
+        )
+        normalized_key = set_runtime_gemini_api_key(builtin_key)
         global API_KEY, client
-        API_KEY = builtin_key
+        API_KEY = normalized_key
         client = create_client()
 
         # 确保工作区目录存在
@@ -17012,7 +17263,7 @@ def test_api_connection():
     try:
         start = time.time()
         response = client.models.generate_content(
-            model="gemini-3-flash-preview",
+            model="gemini-2.5-flash",
             contents="Say 'Koto is ready!' in one short sentence.",
         )
         latency = time.time() - start
@@ -17039,9 +17290,9 @@ def diagnose_models():
 
     # 测试模型列表
     test_models = [
-        ("gemini-2.0-flash-lite", "路由分类"),
-        ("gemini-3-flash-preview", "日常对话"),
-        ("gemini-3-pro-preview", "代码生成"),
+        ("gemini-2.5-flash-lite", "路由分类"),
+        ("gemini-2.5-flash", "日常对话"),
+        ("gemini-2.5-pro", "代码生成"),
         ("gemini-2.5-flash", "联网搜索"),
         ("gemini-3.1-flash-image-preview", "图像生成"),
     ]
@@ -17492,13 +17743,13 @@ def _call_document_annotate(file_path: str, requirement: str):
         from web.document_feedback import DocumentFeedbackSystem
 
         feedback_system = DocumentFeedbackSystem(
-            gemini_client=client, default_model_id="gemini-3.1-pro-preview"
+            gemini_client=client, default_model_id="gemini-2.5-pro"
         )
 
         result = feedback_system.full_annotation_loop(
             file_path=file_path,
             user_requirement=requirement,
-            model_id="gemini-3.1-pro-preview",
+            model_id="gemini-2.5-pro",
         )
 
         # 添加处理模式标记
@@ -17632,19 +17883,27 @@ def _doc_mode_hint(mode: str) -> str:
     return hints.get(mode or 'normal', '')
 
 
-def _build_editor_prompt(action: str, selection: str, instruction: str, full_text: str = "", csv_data: str = "", doc_mode: str = "normal") -> str:
+def _build_editor_prompt(action: str, selection: str, instruction: str, full_text: str = "", csv_data: str = "", doc_mode: str = "normal", selection_offset: int = -1) -> str:
     """Build a prompt for the File Assistant AI based on action type.
 
     When full_text is provided, it's used as context so AI can match
     the document's tone and style.
     When csv_data is provided, it's appended as structured table context (P8 fix).
     When doc_mode is provided (formal/casual/academic/concise), a tone directive is prepended.
+    When selection_offset >= 0, it's used as the exact char offset into full_text to avoid
+    first-occurrence indexOf ambiguity.
     """
     # Helper: build surrounding context (max ~4000 chars around selection)
     def _context_snippet():
         if not full_text or not selection:
             return ""
-        idx = full_text.find(selection)
+        # Use provided offset when valid (avoids first-occurrence problem); fall back to find()
+        if (selection_offset >= 0
+                and selection_offset + len(selection) <= len(full_text)
+                and full_text[selection_offset:selection_offset + len(selection)] == selection):
+            idx = selection_offset
+        else:
+            idx = full_text.find(selection)
         if idx < 0:
             # Can't locate selection, send truncated full text
             return full_text[:4000]
@@ -17668,10 +17927,16 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
         ctx = ""
         if full_text:
             ctx = f"\n\n【文档全文（仅供参考语气和上下文，不要修改全文）】\n{_context_snippet()}\n"
+        _extra_inst = ""
+        if instruction:
+            _extra_inst = f"\n用户补充要求：{instruction}"
         return (
             f"{_mode_hint}{_style_hint}"
             "你是一名专业编辑。请对以下【选中部分】进行润色，使其更加流畅、优雅，"
-            "保持原意不变，并与全文语气保持一致。只输出润色后的选中部分，不要添加解释："
+            "保持原意不变，并与全文语气保持一致。\n"
+            "重要规则：只输出润色后的文本，不要添加任何解释、前缀、后缀、标题、分隔符或“以下是…”之类的引导语。"
+            "直接输出纯文本，不要使用 Markdown 格式。"
+            f"{_extra_inst}"
             f"{ctx}\n\n【需要润色的内容】\n{selection}"
         )
     elif action == "summarize":
@@ -17680,18 +17945,29 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
             + selection
         )
     elif action == "continue_writing":
+        ctx = ""
+        if full_text:
+            ctx = f"\n\n[文档上下文（仅供参考语气，不要重复输出）]｜{_context_snippet()}\n"
         return (
             f"{_mode_hint}{_style_hint}"
-            "请根据以下文本内容进行续写，保持风格一致，直接输出续写内容，不加任何前缀：\n\n"
-            + selection
+            "请根据以下文本内容进行续写，保持风格一致，直接输出续写内容，不加任何前缀："
+            f"{ctx}\n\n[要续写的内容]\n{selection}"
         )
     elif action == "check":
+        ctx = ""
+        if full_text:
+            ctx = f"\n\n[文档上下文（仅供参考）]｜{_context_snippet()}\n"
         return (
             "请仔细检查以下文本中的语法错误、错别字、标点问题和表达不当之处。\n"
             "用中文逐条列出发现的问题，格式为：\n"
             "1. 【位置描述】原文 → 建议修改\n"
-            "如果没有发现问题，请直接说\"未发现明显问题\"。\n\n"
-            + selection
+            "重要规则：\n"
+            "- 不要在开头预告“共发现X个问题”或任何总数总结，直接逐条列出\n"
+            "- 每条建议必须有对应的具体原文和修改方案\n"
+            "- 列完后不要添加总结性文字\n"
+            "如果没有发现问题，请直接说\"未发现明显问题\"。\n"
+            f"{ctx}\n"
+            f"[需要检查的内容]\n{selection}"
         )
     elif action == "explain":
         ctx = ""
@@ -17701,17 +17977,21 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
         return f"{inst}\n\n{selection}{ctx}"
     elif action in ("python_chart", "chart"):
         csv_ctx = ""
-        if csv_data:
-            csv_ctx = f"\n\n# 输入数据（CSV 格式）\n{csv_data[:4000]}\n"
+        # Prefer explicit csv_data; fall back to full_text when it looks like spreadsheet data
+        table_src = csv_data or (full_text if ('[' in full_text and '\n' in full_text) else '')
+        if table_src:
+            csv_ctx = f"\n\n# 输入数据（电子表格 CSV 格式，行N=第N行，列字母=Excel列）\n{table_src[:4000]}\n"
+        elif selection:
+            csv_ctx = f"\n\n# 参考数据\n{selection}\n"
         return (
-            "根据以下文本/数据，生成一段 Python 代码，使用 pandas 和 matplotlib 生成合适的图表（折线图、柱状图或饼图等）。\n"
+            "根据以下数据，生成一段 Python 代码，使用 pandas 和 matplotlib 生成合适的图表（折线图、柱状图或饼图等）。\n"
             "要求：\n"
             "1. 代码完整可直接运行（包含所有必要 import）\n"
             "2. 中文显示：在代码开头加入 import matplotlib; matplotlib.rcParams['font.sans-serif']=['SimHei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
             "3. 最后调用 plt.savefig('chart.png', dpi=150, bbox_inches='tight') 然后 plt.close()\n"
             "4. 绝对不要调用 plt.show()\n"
-            "5. 只输出代码，不加任何 markdown 代码块标记（不加 ```）\n\n"
-            + selection
+            "5. 只输出代码，不加任何 markdown 代码块标记（不加 ```）\n"
+            "6. 数据说明：CSV 中第一列'行'为行号，其余列字母（A/B/C...）对应 Excel 列\n\n"
             + csv_ctx
         )
     elif action == "rewrite":
@@ -17724,9 +18004,13 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
             f"{ctx}\n\n【需要改写的内容】\n{selection}"
         )
     elif action == "annotate":
+        ctx = ""
+        if full_text:
+            ctx = f"\n\n[文档上下文（仅供参考）｜{_context_snippet()}\n"
         return (
-            "请为以下文本添加注解说明，解释关键概念、背景或难点，格式为在原文后附注解：\n\n"
-            + selection
+            "请为以下文本添加注解说明，解释关键概念、背景或难点，格式为在原文后附注解：\n"
+            f"{ctx}\n"
+            f"[需要注解的内容]\n{selection}"
         )
     elif action == "find_replace":
         return (
@@ -17762,11 +18046,129 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
             "直接输出段落，不要加标题也不要重复原始数据：\n\n"
             + selection
         )
+    elif action == "format_normalize":
+        return (
+            "你是一名排版专家。请对以下文档全文进行格式统一处理：\n"
+            "1. 统一标题层级（一级用#，二级用##，以此类推）\n"
+            "2. 统一列表样式（有序/无序保持一致）\n"
+            "3. 统一数字与单位格式（如千分位、百分号、货币符号）\n"
+            "4. 统一标点符号（全角/半角保持一致）\n"
+            "5. 统一日期格式\n"
+            "6. 去除多余空行和空格\n\n"
+            "直接输出格式化后的完整文本，不要添加解释：\n\n"
+            f"{full_text[:12000]}"
+        )
+    elif action == "review_checklist":
+        return (
+            "你是一名资深审稿编辑。请对以下文档进行全面审查，输出结构化审查清单：\n\n"
+            "## 审查维度\n"
+            "1. **事实核查**：标记可能不准确的数字、日期、名称\n"
+            "2. **逻辑一致性**：检查前后表述是否矛盾\n"
+            "3. **语法与表达**：发现的语法错误和表述不当\n"
+            "4. **格式与排版**：不一致的格式问题\n"
+            "5. **遗漏检查**：可能缺失的重要内容\n\n"
+            "输出格式：\n"
+            "### [维度名称]\n"
+            "- ⚠️ [问题描述] → 建议：[修改建议]\n"
+            "- ✅ [该维度无问题时的说明]\n\n"
+            "最后给出总体评分（1-10）和总结。\n\n"
+            f"【待审查文档】\n{full_text[:12000]}"
+        )
+    elif action == "glossary_translate":
+        inst_part = ""
+        if instruction:
+            inst_part = f"\n\n用户补充说明：{instruction}"
+        return (
+            "你是一名专业翻译，擅长术语一致性管理。\n"
+            "请扫描以下文档，提取所有专业术语、人名、地名、机构名、专有名词（10-30个）。\n\n"
+            "严格按以下格式输出，不要输出任何其他内容：\n"
+            "TERM_TABLE_BEGIN\n"
+            "[{\"orig\": \"原文术语\", \"trans\": \"建议译文\", \"n\": 出现次数}, ...]\n"
+            "TERM_TABLE_END\n\n"
+            "规则：\n"
+            "- orig: 原文中的术语（与原文完全一致）\n"
+            "- trans: 建议的标准译文\n"
+            "- n: 该术语在全文中大约出现的次数（整数）\n"
+            "- 只输出 JSON 数组，不要加 ```json 标记\n\n"
+            f"【文档全文】\n{full_text[:12000]}"
+            f"{inst_part}"
+        )
+    elif action == "glossary_translate_exec":
+        # instruction contains the user-confirmed term JSON from the approval card
+        terms_hint = ""
+        if instruction:
+            terms_hint = f"\n\n【术语对照表（请严格遵守，不得私自更改）】\n{instruction}"
+        return (
+            "你是一名专业翻译。请使用以下术语对照表，将文档全文翻译为英文"
+            "（如原文已是英文则翻译为中文）。\n"
+            "规则：\n"
+            "1. 术语对照表中的每个术语必须严格按照表中译文翻译\n"
+            "2. 保持原文的段落结构和格式\n"
+            "3. 直接输出完整译文，不要有任何前缀说明\n"
+            f"{terms_hint}\n\n"
+            f"【待翻译全文】\n{full_text[:12000]}"
+        )
+    elif action == "meeting_notes":
+        return (
+            "你是一名高效的会议记录整理助手。请将以下原始会议记录/笔记整理为结构化文档：\n\n"
+            "**输出格式：**\n"
+            "# 会议纪要\n"
+            "- **日期**：（从文本推断或标注【未提及】）\n"
+            "- **参会人**：（从文本推断或标注【未提及】）\n\n"
+            "## 议题摘要\n"
+            "（按讨论主题分段，每段 2-3 句话概括）\n\n"
+            "## 决议事项\n"
+            "（编号列表，标注负责人和截止时间）\n\n"
+            "## 待办跟进\n"
+            "（编号列表，标注优先级：高/中/低）\n\n"
+            f"【原始记录】\n{full_text[:12000]}"
+        )
+    elif action == "data_clean":
+        csv_ctx = csv_data or full_text
+        return (
+            "你是一名数据清洗专家。请对以下表格数据进行清洗并输出修复后的 CSV 数据：\n\n"
+            "**清洗步骤：**\n"
+            "1. 识别并修复空值（合理填充或标记）\n"
+            "2. 统一日期格式为 YYYY-MM-DD\n"
+            "3. 去除重复行\n"
+            "4. 统一文本大小写和空格\n"
+            "5. 修复明显的数据录入错误（如数字中混入字母）\n"
+            "6. 统一数字精度\n\n"
+            "**输出格式：**\n"
+            "先输出清洗报告（发现了哪些问题、做了什么处理），\n"
+            "然后输出清洗后的完整数据。\n\n"
+            f"【原始数据】\n{csv_ctx[:8000]}"
+        )
+    elif action == "slide_expand":
+        return (
+            "你是一名演示文稿设计顾问。请根据以下幻灯片大纲/摘要，为每页扩展详细内容：\n\n"
+            "**对每页幻灯片，请输出：**\n"
+            "### 第 N 页：[标题]\n"
+            "- **要点**：3-5 个关键演讲要点（每点 1-2 句话）\n"
+            "- **演讲备注**：演讲时可以说的详细内容（3-5 句话）\n"
+            "- **视觉建议**：建议的图表/图片/图标类型\n\n"
+            "保持专业、简洁，适合商务演示。\n\n"
+            f"【幻灯片大纲】\n{full_text[:12000]}"
+        )
     elif action == "custom_instruction":
         ctx = f"\n\n参考文本：\n{selection}" if selection else ""
         full_ctx = ""
-        if full_text:
-            full_ctx = f"\n\n文档全文（仅供参考）：\n{full_text[:4000]}"
+        if csv_data:
+            full_ctx = (
+                "\n\n【电子表格数据（CSV 格式）】\n"
+                "格式说明：第一列'行'为行号（1开始），其余列字母（A/B/C...）对应 Excel 列。\n"
+                f"{csv_data[:4000]}"
+            )
+        elif full_text:
+            # Check if full_text looks like spreadsheet output (has [SheetName] sections)
+            if full_text.lstrip().startswith('['):
+                full_ctx = (
+                    "\n\n【电子表格数据（CSV 格式）】\n"
+                    "格式说明：第一列'行'为行号（1开始），其余列字母（A/B/C...）对应 Excel 列。\n"
+                    f"{full_text[:4000]}"
+                )
+            else:
+                full_ctx = f"\n\n文档全文（仅供参考）：\n{full_text[:4000]}"
         return f"{_mode_hint}{instruction}{ctx}{full_ctx}"
     else:
         return selection or instruction
@@ -17774,114 +18176,371 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
 
 @app.route("/api/editor/ai/stream", methods=["POST"])
 def editor_ai_stream():
-    """文件助手 AI — SSE 流式端点，复用主界面 AI 客户端。
+    """文件助手 AI — OpenClaw 统一 SSE 端点。"""
+    from app.core.agent.agent_loop import KotoAgentLoop
+    from app.core.agent.hooks import HookRegistry
+    from app.core.agent.lifecycle import AgentRequest, EventType
+    from app.core.agent.pipeline_hooks import register_pipeline_hooks
 
-    Body JSON: { "action": str, "selection": str, "instruction": str }
-    SSE events: {"type":"token","text":"..."} | {"type":"done"} | {"type":"error","text":"..."}
-    """
     data = request.get_json(silent=True) or {}
     action = (data.get("action") or "custom_instruction").strip()
     selection = (data.get("selection") or "").strip()
     instruction = (data.get("instruction") or "").strip()
     full_text = (data.get("full_text") or "").strip()
-    csv_data = (data.get("csv_data") or "").strip()  # structured table context (P8 fix)
-    doc_mode = (data.get("doc_mode") or "normal").strip()  # writing tone preset
-    model_mode = (data.get("model_mode") or "auto").strip()  # 'local' | 'auto'
-    # session_id for server-side persistence — frontend sends 'editor_{docId}'
-    _session_id = re.sub(r"[^A-Za-z0-9_\-]", "_", (data.get("session_id") or "").strip())[:64]
+    csv_data = (data.get("csv_data") or "").strip()
+    doc_mode = (data.get("doc_mode") or "normal").strip()
+    model_mode = (data.get("model_mode") or "auto").strip().lower()
+    output_mode = (data.get("output_mode") or "inline").strip() or "inline"
+    file_type = (data.get("file_type") or "").lower().strip()
+    file_name = (data.get("file_name") or "").strip()
+    language = (data.get("language") or "").strip().lower()
+    action_system_prompt = (data.get("_action_system_prompt") or "").strip()
+    history = data.get("history") or []
+    if not isinstance(history, list):
+        history = []
+    if len(history) > 20:
+        history = history[-20:]
 
-    def _err_gen(msg: str):
-        yield f"data: {json.dumps({'type': 'error', 'text': msg}, ensure_ascii=False)}\n\n"
+    _sel_offset_raw = data.get("selection_offset", -1)
+    selection_offset: int = int(_sel_offset_raw) if isinstance(_sel_offset_raw, (int, float)) else -1
+    session_id = re.sub(r"[^A-Za-z0-9_\-]", "_", (data.get("session_id") or "").strip())[:64]
+    files = data.get("files") or []
+    if not isinstance(files, list):
+        files = []
+    requested_model_id = str(data.get("model_id") or "").strip()
+
+    try:
+        from app.core.editor_skills import get_phases
+        fallback_phases = get_phases(action)
+    except Exception:
+        fallback_phases = [
+            {"id": "understand", "label": "理解需求"},
+            {"id": "generate", "label": "生成回复"},
+        ]
+
+    if action == "ai_task":
+        task = instruction or selection
+        if not task:
+            def _task_err_gen():
+                yield f"data: {json.dumps({'type': 'error', 'text': '任务描述不能为空'}, ensure_ascii=False)}\n\n"
+
+            return Response(_task_err_gen(), mimetype="text/event-stream")
+
+        def _sample_task_preview(text: str, limit: int = 8000) -> str:
+            content = str(text or "").strip()
+            if len(content) <= limit:
+                return content
+            head = max(int(limit * 0.7), 1)
+            tail = max(limit - head - 48, 0)
+            marker = "\n\n...[中间内容已省略]...\n\n"
+            if tail <= 0:
+                return content[:limit]
+            return content[:head] + marker + content[-tail:]
+
+        normalized_files = []
+        for item in files:
+            if not isinstance(item, dict):
+                continue
+            path = str(item.get("path") or "").strip()
+            name = str(item.get("name") or "").strip() or (os.path.basename(path) if path else "")
+            item_type = str(item.get("type") or "").strip().lower() or file_type
+            content_preview = str(item.get("content_preview") or "").strip()
+            normalized_files.append({
+                "path": path or file_name or session_id or "current_document",
+                "name": name or file_name or "current_document",
+                "type": item_type,
+                "content_preview": _sample_task_preview(content_preview or full_text),
+            })
+
+        if not normalized_files and (file_name or file_type or full_text):
+            inferred_name = file_name or "current_document"
+            inferred_type = file_type or os.path.splitext(inferred_name)[1].lstrip(".").lower()
+            normalized_files.append({
+                "path": file_name or session_id or inferred_name,
+                "name": inferred_name,
+                "type": inferred_type,
+                "content_preview": _sample_task_preview(full_text),
+            })
+
+        normalized_model_id = _normalize_file_task_model_id(model_mode, requested_model_id)
+
+        current_file = ""
+        current_file_name = file_name or ""
+        if normalized_files:
+            current_file = str(normalized_files[0].get("path") or "")
+            current_file_name = (
+                str(normalized_files[0].get("name") or "").strip()
+                or current_file_name
+                or os.path.basename(current_file)
+            )
+
+        task_options = {
+            "model_mode": model_mode,
+            "model_id": normalized_model_id,
+            "session_id": session_id,
+            "current_file": current_file,
+            "current_file_name": current_file_name,
+            "current_file_id": str(data.get("current_file_id") or "").strip(),
+            "current_file_text": full_text,
+        }
+
+        def generate_task():
+            try:
+                from app.core.agent.openclaw_task_runtime import OpenClawTaskRuntime, TaskRuntimeRequest
+
+                runtime = OpenClawTaskRuntime(
+                    socketio=socketio,
+                    model_id=normalized_model_id,
+                    session_store=session_manager,
+                )
+                task_request = TaskRuntimeRequest(
+                    task=task,
+                    files=normalized_files,
+                    options=task_options,
+                    history=history,
+                )
+                event_stream = runtime.execute(task_request)
+
+                for event in event_stream:
+                    if isinstance(event, str):
+                        yield event
+                    else:
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            except Exception as exc:
+                logging.getLogger("koto.web").exception("[editor-ai-stream/task] Error")
+                yield f"data: {json.dumps({'type': 'error', 'text': str(exc)}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'summary': '执行失败'}, ensure_ascii=False)}\n\n"
+
+        return Response(stream_with_context(generate_task()), mimetype="text/event-stream")
 
     if not selection and not instruction:
-        return Response(_err_gen("选中内容或指令不能为空"), mimetype="text/event-stream")
+        def _err_gen():
+            yield f"data: {json.dumps({'type': 'error', 'text': '选中内容或指令不能为空'}, ensure_ascii=False)}\n\n"
+        return Response(_err_gen(), mimetype="text/event-stream")
 
-    # Build multi-turn history prefix if the frontend sent prior conversation turns
-    _history_raw = (data.get("history") or [])
-    _history_raw = _history_raw[-20:] if len(_history_raw) > 20 else _history_raw
-    _hist_block = ""
-    if _history_raw:
-        _hist_parts = []
-        for _turn in _history_raw:
-            _role = _turn.get("role", "")
-            _content = (_turn.get("content") or "").strip()
-            if _content:
-                _hist_parts.append(("用户" if _role == "user" else "AI") + "：" + _content)
-        if _hist_parts:
-            _hist_block = "【对话历史（供参考，据此理解上下文）】\n" + "\n".join(_hist_parts) + "\n\n---\n\n"
+    prompt = _build_editor_prompt(
+        action,
+        selection,
+        instruction,
+        full_text,
+        csv_data,
+        doc_mode,
+        selection_offset,
+    )
 
-    prompt = _hist_block + _build_editor_prompt(action, selection, instruction, full_text, csv_data, doc_mode)
-    model_id = MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
+    req = AgentRequest(
+        prompt=prompt,
+        session_id=session_id,
+        file_type=file_type,
+        file_name=file_name,
+        context=full_text,
+        selection=selection,
+        has_selection=bool(selection),
+        history=history,
+        output_mode=output_mode,
+        model_mode=model_mode,
+        language=language,
+        csv_data=csv_data,
+        action_type=action,
+        action_system_prompt=action_system_prompt,
+    )
 
     def generate():
-        from app.core.socket_handler import _is_ollama_alive, _get_local_provider, _is_online_failure
+        registry = HookRegistry()
+        register_pipeline_hooks(registry)
+        loop = KotoAgentLoop(hook_registry=registry)
 
-        _resp_parts = []
-        # 'local' mode: skip cloud entirely, go straight to Ollama
-        _online_ok = bool(API_KEY) and model_mode != "local"
+        streamed_parts = []
+        final_result = ""
+        final_has_proposals = False
+        emitted_done = False
+        phases = fallback_phases
 
-        if model_mode == "local" and not _is_ollama_alive():
-            yield f"data: {json.dumps({'type': 'error', 'text': '本地模式已启用，但 Ollama 未运行。请执行 ollama serve。'}, ensure_ascii=False)}\n\n"
-            return
+        for event in loop.run(req):
+            etype = event.type
+            d = event.data or {}
 
-        if _online_ok:
-            try:
-                response_stream = client.models.generate_content_stream(
-                    model=model_id,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        temperature=0.7,
-                        max_output_tokens=4096,
-                    ),
-                )
-                for chunk in response_stream:
-                    text = getattr(chunk, "text", None)
-                    if text:
-                        _resp_parts.append(text)
-                        yield f"data: {json.dumps({'type': 'token', 'text': text}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                # Persist conversation to server-side session for cross-refresh memory
-                if _session_id and _resp_parts:
-                    _user_str = instruction or selection or action
-                    _ai_str = "".join(_resp_parts)
-                    try:
-                        session_manager.append_and_save(
-                            _session_id + ".json", _user_str, _ai_str,
-                            task=action, model_name=model_id,
-                        )
-                    except Exception as _se:
-                        _app_logger.debug(f"[EditorAI] session save skipped: {_se}")
+            if etype == EventType.PHASE:
+                phases = d.get("phases", phases) or phases
+                payload = {
+                    "type": "phase",
+                    "phases": phases,
+                    "current": d.get("current", ""),
+                    "status": d.get("status", "running"),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.STREAM_CHUNK:
+                chunk = d.get("chunk", "")
+                if chunk:
+                    streamed_parts.append(chunk)
+                    yield f"data: {json.dumps({'type': 'token', 'text': chunk}, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.THOUGHT:
+                text = d.get("text", "")
+                if text:
+                    yield f"data: {json.dumps({'type': 'thought', 'text': text}, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.PLAN:
+                payload = {
+                    "type": "plan",
+                    "steps": d.get("steps", []),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.STEP_START:
+                payload = {
+                    "type": "step_start",
+                    "step_id": d.get("step_id", ""),
+                    "text": d.get("text", ""),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.STEP_PROGRESS:
+                payload = {
+                    "type": "step_progress",
+                    "step_id": d.get("step_id", ""),
+                    "detail": d.get("detail", ""),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.STEP_DONE:
+                payload = {
+                    "type": "step_done",
+                    "step_id": d.get("step_id", ""),
+                    "text": d.get("text", ""),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.STEP_ERROR:
+                payload = {
+                    "type": "step_error",
+                    "step_id": d.get("step_id", ""),
+                    "error": d.get("error", ""),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.TOOL_CALL:
+                tool_call = d.get("tool_call", {})
+                if tool_call:
+                    payload = {
+                        "type": "tool_call",
+                        "tool_name": tool_call.get("name", ""),
+                        "tool_args": tool_call.get("args", {}),
+                    }
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.TOOL_RESULT:
+                payload = {
+                    "type": "tool_result",
+                    "tool_name": d.get("tool_name", ""),
+                    "result_preview": d.get("result_preview", ""),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.PROPOSAL:
+                payload = {
+                    "type": "proposals",
+                    "proposals": d.get("proposals", []),
+                    "summary": d.get("summary", ""),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.DOC_TOOL_CALL:
+                payload = {"type": "doc_tool_call", **d}
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.RAG_INFO:
+                payload = {
+                    "type": "rag_info",
+                    "total_chunks": d.get("total_chunks", 0),
+                    "retrieved_chunks": d.get("retrieved_chunks", 0),
+                }
+                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.STATUS_MESSAGE:
+                text = d.get("text", "")
+                if text:
+                    evt_type = "error" if d.get("is_error") else "info"
+                    yield f"data: {json.dumps({'type': evt_type, 'text': text}, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.SKILL_SUGGESTIONS:
+                suggestions = d.get("suggestions", [])
+                if suggestions:
+                    yield f"data: {json.dumps({'type': 'skill_suggestions', 'suggestions': suggestions}, ensure_ascii=False)}\n\n"
+                continue
+
+            if etype == EventType.ERROR:
+                yield f"data: {json.dumps({'type': 'error', 'text': d.get('text', '未知错误')}, ensure_ascii=False)}\n\n"
                 return
-            except Exception as _e:
-                if not _is_online_failure(_e):
-                    _app_logger.warning(f"[EditorAI] stream error: {_e}")
-                    yield f"data: {json.dumps({'type': 'error', 'text': str(_e)}, ensure_ascii=False)}\n\n"
+
+            if etype == EventType.TASK_COMPLETE:
+                if d.get("error"):
+                    yield f"data: {json.dumps({'type': 'error', 'text': d.get('error', '执行失败')}, ensure_ascii=False)}\n\n"
                     return
-                _app_logger.warning(f"[EditorAI] cloud unavailable ({_e}), trying local Ollama…")
+                final_result = d.get("result", "")
+                final_has_proposals = bool(d.get("has_proposals"))
+                continue
 
-        # ── Ollama fallback ───────────────────────────────────────────────────
-        if not _is_ollama_alive():
-            _msg = "在线 AI 不可用，本地 Ollama 也未运行。请启动 Ollama 或配置云端 Key。"
-            yield f"data: {json.dumps({'type': 'error', 'text': _msg}, ensure_ascii=False)}\n\n"
-            return
-        if model_mode == "local":
-            yield f"data: {json.dumps({'type': 'info', 'text': '🦙 本次由本地模型 (Ollama) 生成'}, ensure_ascii=False)}\n\n"
-        else:
-            yield f"data: {json.dumps({'type': 'info', 'text': '⚠️ 云端 AI 暂不可用，已切换到本地模型 (Ollama)，速度可能较慢。'}, ensure_ascii=False)}\n\n"
-        try:
-            _local = _get_local_provider()
-            _res = _local.generate_content(prompt=prompt, stream=True)
-            for _ck in _res:
-                _t = _ck.get("content", "") if isinstance(_ck, dict) else str(_ck)
-                if _t:
-                    _resp_parts.append(_t)
-                    yield f"data: {json.dumps({'type': 'token', 'text': _t}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-        except Exception as _le:
-            _app_logger.error(f"[EditorAI] Ollama fallback failed: {_le}")
-            yield f"data: {json.dumps({'type': 'error', 'text': str(_le)}, ensure_ascii=False)}\n\n"
+            if etype == EventType.CODE_RESULT:
+                code_result = d.get("stdout", "") or d.get("stderr", "") or ""
+                if code_result:
+                    streamed_parts.append(code_result)
+                    yield f"data: {json.dumps({'type': 'token', 'text': code_result}, ensure_ascii=False)}\n\n"
+                if d.get("error"):
+                    yield f"data: {json.dumps({'type': 'error', 'text': d.get('error')}, ensure_ascii=False)}\n\n"
+                    return
 
-    return Response(generate(), mimetype="text/event-stream")
+        if final_result and not streamed_parts:
+            streamed_parts.append(final_result)
+            yield f"data: {json.dumps({'type': 'token', 'text': final_result}, ensure_ascii=False)}\n\n"
+
+        for p in phases:
+            done_evt = {
+                "type": "phase",
+                "phases": phases,
+                "current": p.get("id", ""),
+                "status": "done",
+            }
+            yield f"data: {json.dumps(done_evt, ensure_ascii=False)}\n\n"
+
+        if not emitted_done:
+            done_payload = {
+                "type": "done",
+                "result": final_result or "".join(streamed_parts),
+                "has_proposals": final_has_proposals,
+            }
+            yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
+
+        if session_id and streamed_parts:
+            user_str = instruction or selection or action
+            ai_str = "".join(streamed_parts)
+            try:
+                session_manager.append_and_save(
+                    session_id + ".json",
+                    user_str,
+                    ai_str,
+                    task=action,
+                    model_name="openclaw-agent-loop",
+                )
+            except Exception as save_exc:
+                _app_logger.debug("[EditorAI] session save skipped: %s", save_exc)
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
 @app.route("/api/editor/ai/history", methods=["GET"])
@@ -18007,25 +18666,81 @@ def editor_ai_agent():
             from app.api.agent_routes import get_agent
             from app.core.agent.types import AgentStepType
             _agent = get_agent()
+            _analysis_open = False
+            _answer_open = False
+            _pending_tool = None
+            _tool_counter = 0
+
+            def _preview_text(value: object, limit: int = 220) -> str:
+                text = str(value or "").strip()
+                if len(text) <= limit:
+                    return text
+                return text[: limit - 1] + "…"
+
             for _step in _agent.run(
                 input_text=query,
                 session_id=_session_id or None,
                 system_context=_system_ctx,
             ):
                 _stype = getattr(_step, 'step_type', None)
-                _content = getattr(_step, 'content', '') or ''
+                _content = (getattr(_step, 'content', '') or '').strip()
                 if _stype == AgentStepType.THOUGHT:
-                    yield f"data: {json.dumps({'type': 'status', 'text': '🤔 ' + _content[:80]}, ensure_ascii=False)}\n\n"
+                    if _content and not _analysis_open:
+                        _analysis_open = True
+                        yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'analyze', 'text': '分析问题与文档上下文'}, ensure_ascii=False)}\n\n"
+                    if _content:
+                        yield f"data: {json.dumps({'type': 'thought', 'text': _content}, ensure_ascii=False)}\n\n"
                 elif _stype == AgentStepType.ACTION:
-                    yield f"data: {json.dumps({'type': 'status', 'text': '🔧 ' + _content[:80]}, ensure_ascii=False)}\n\n"
+                    if _analysis_open:
+                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'analyze', 'text': '问题分析完成'}, ensure_ascii=False)}\n\n"
+                        _analysis_open = False
+                    if _pending_tool:
+                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': _pending_tool['id'], 'text': _pending_tool['name'] + ' 完成'}, ensure_ascii=False)}\n\n"
+                    _tool_counter += 1
+                    _action = getattr(_step, 'action', None)
+                    _tool_name = (getattr(_action, 'tool_name', '') or _content or f'tool_{_tool_counter}').strip()
+                    _tool_args = getattr(_action, 'tool_args', {}) or {}
+                    _pending_tool = {"id": f"tool_{_tool_counter}", "name": _tool_name}
+                    yield f"data: {json.dumps({'type': 'step_start', 'step_id': _pending_tool['id'], 'text': f'调用 {_tool_name}'}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps({'type': 'tool_call', 'step_id': _pending_tool['id'], 'tool_name': _tool_name, 'tool_args': _tool_args}, ensure_ascii=False)}\n\n"
+                elif _stype == AgentStepType.OBSERVATION:
+                    _obs = getattr(_step, 'observation', None) or _content
+                    _preview = _preview_text(_obs)
+                    if _pending_tool:
+                        yield f"data: {json.dumps({'type': 'tool_result', 'step_id': _pending_tool['id'], 'tool_name': _pending_tool['name'], 'result_preview': _preview}, ensure_ascii=False)}\n\n"
+                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': _pending_tool['id'], 'text': _pending_tool['name'] + ' 完成'}, ensure_ascii=False)}\n\n"
+                        _pending_tool = None
+                    elif _preview:
+                        yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': '观察结果', 'result_preview': _preview}, ensure_ascii=False)}\n\n"
                 elif _stype == AgentStepType.ANSWER:
+                    if _analysis_open:
+                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'analyze', 'text': '问题分析完成'}, ensure_ascii=False)}\n\n"
+                        _analysis_open = False
+                    if _pending_tool:
+                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': _pending_tool['id'], 'text': _pending_tool['name'] + ' 完成'}, ensure_ascii=False)}\n\n"
+                        _pending_tool = None
+                    if not _answer_open:
+                        _answer_open = True
+                        yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'answer', 'text': '生成最终回答'}, ensure_ascii=False)}\n\n"
                     # Stream answer char by char for typewriter effect
                     _chunk_size = 8
                     for _ci in range(0, len(_content), _chunk_size):
                         yield f"data: {json.dumps({'type': 'token', 'text': _content[_ci:_ci + _chunk_size]}, ensure_ascii=False)}\n\n"
+                    if _answer_open:
+                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'answer', 'text': '最终回答已生成'}, ensure_ascii=False)}\n\n"
+                        _answer_open = False
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
                     return
                 elif _stype == AgentStepType.ERROR:
+                    if _pending_tool:
+                        yield f"data: {json.dumps({'type': 'step_error', 'step_id': _pending_tool['id'], 'error': _content or '工具执行失败'}, ensure_ascii=False)}\n\n"
+                        _pending_tool = None
+                    elif _analysis_open:
+                        yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'analyze', 'error': _content or '分析失败'}, ensure_ascii=False)}\n\n"
+                        _analysis_open = False
+                    elif _answer_open:
+                        yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'answer', 'error': _content or '回答生成失败'}, ensure_ascii=False)}\n\n"
+                        _answer_open = False
                     yield f"data: {json.dumps({'type': 'error', 'text': _content}, ensure_ascii=False)}\n\n"
                     return
         except Exception as _ae:
@@ -18088,7 +18803,7 @@ def editor_ai_chart():
     if data_context:
         code_prompt += f"\n参考数据/文本：\n{data_context[:3000]}\n"
 
-    model_id = MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
+    model_id = MODEL_MAP.get("CHAT", "gemini-2.5-flash")
 
     def generate():
         import re as _re
@@ -18124,10 +18839,12 @@ def editor_ai_chart():
 
         try:
             yield f"data: {json.dumps({'type': 'status', 'text': f'🤖 正在生成 {lang.upper()} 图表代码…'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'generate_code', 'text': '生成图表代码'}, ensure_ascii=False)}\n\n"
 
             # ── Step 1: Generate code via LLM ──
             _llm_source, raw_code = _gen_code_via_llm(code_prompt)
             if not raw_code:
+                yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'generate_code', 'error': 'AI 代码生成失败'}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'error', 'text': 'AI 代码生成失败（云端不可用且 Ollama 未运行）'}, ensure_ascii=False)}\n\n"
                 return
             if _llm_source == "local":
@@ -18141,34 +18858,45 @@ def editor_ai_chart():
             raw_code = raw_code.strip().strip("`").strip()
 
             yield f"data: {json.dumps({'type': 'code', 'text': raw_code}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'generate_code', 'text': '图表代码生成完成'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'execute_code', 'text': '在沙盒执行代码'}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'status', 'text': '▶ 在沙盒中执行代码…'}, ensure_ascii=False)}\n\n"
 
             # ── Step 2: Execute in sandbox ──
             try:
                 from app.core.sandbox import run_python, run_r
             except ImportError as ie:
+                yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'execute_code', 'error': f'沙盒模块加载失败: {ie}'}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'error', 'text': f'沙盒模块加载失败: {ie}'}, ensure_ascii=False)}\n\n"
                 return
 
             result = run_python(raw_code) if lang == "python" else run_r(raw_code)
 
             if result.get("stdout", "").strip():
+                yield f"data: {json.dumps({'type': 'step_progress', 'step_id': 'execute_code', 'detail': '代码正在输出日志'}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'stdout', 'text': result['stdout'][:4096]}, ensure_ascii=False)}\n\n"
             if result.get("stderr", "").strip():
+                yield f"data: {json.dumps({'type': 'step_progress', 'step_id': 'execute_code', 'detail': '代码输出了调试信息'}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'stderr', 'text': result['stderr'][:2048]}, ensure_ascii=False)}\n\n"
 
             if result.get("error"):
+                yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'execute_code', 'error': result['error']}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'error', 'text': result['error']}, ensure_ascii=False)}\n\n"
                 return
 
             images = result.get("files", {})
             if not images:
+                yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'execute_code', 'error': '代码执行成功但未生成图片'}, ensure_ascii=False)}\n\n"
                 yield f"data: {json.dumps({'type': 'error', 'text': '代码执行成功但未生成图片，请检查代码中是否有保存图片的语句'}, ensure_ascii=False)}\n\n"
                 return
+
+            yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'execute_code', 'text': f'沙盒执行完成，生成 {len(images)} 张图表'}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'collect_output', 'text': '整理图表结果'}, ensure_ascii=False)}\n\n"
 
             for name, b64 in images.items():
                 yield f"data: {json.dumps({'type': 'image', 'name': name, 'data': b64}, ensure_ascii=False)}\n\n"
 
+            yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'collect_output', 'text': f'已返回 {len(images)} 张图表'}, ensure_ascii=False)}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as _e:
@@ -18202,6 +18930,303 @@ def editor_ai_chart_rerun():
 
     result = run_python(code) if lang == "python" else run_r(code)
     return jsonify(result)
+
+
+# ══════════════════ Skill System API ══════════════════
+
+# OpenClaw mode: expose only canonical merged workflow skill IDs in the editor.
+_OPENCLAW_SKILL_IDS = {
+    "cross_format_extractor",
+    "doc_smart_compare",
+    "questionnaire_filler",
+    "comm_digest",
+    "data_format_cleaner",
+    "contract_clause_matrix",
+    "multi_file_synthesis_report",
+    "pptx_data_refresh",
+    "doc_ai_review",
+    "data_anomaly_report",
+}
+
+
+@app.route("/api/editor/ai/skill-list", methods=["GET"])
+def editor_skill_list():
+    """Return skills that have executor support, optionally filtered by file_type."""
+    try:
+        from app.core.skills.skill_manager import SkillManager
+        sm = SkillManager()
+        all_skills = sm.get_all_skills() if hasattr(sm, "get_all_skills") else []
+        file_type = (request.args.get("file_type") or "").strip().lower().lstrip(".")
+
+        result = []
+        for s in all_skills:
+            sid = s.get("id", "")
+            if sid not in _OPENCLAW_SKILL_IDS:
+                continue
+            if not s.get("enabled", True):
+                # workflow skills may have enabled=False by default — still expose if has_executor
+                pass
+            entry = {
+                "id":           sid,
+                "name":         s.get("name", sid),
+                "icon":         s.get("icon", "🔧"),
+                "description":  s.get("description", ""),
+                "category":     s.get("category", ""),
+                "task_types":   s.get("task_types", []),
+                "has_executor": True,
+                "params_schema": s.get("params_schema", {}),
+            }
+            # If file_type given, filter by task_types (light heuristic)
+            if file_type:
+                task_types = [t.lower() for t in s.get("task_types", [])]
+                type_map = {
+                    "docx": "doc", "doc": "doc", "txt": "doc",
+                    "xlsx": "data", "xls": "data", "csv": "data",
+                    "pdf": "doc",
+                    "pptx": "doc", "ppt": "doc",
+                }
+                mapped = type_map.get(file_type, "")
+                if mapped and task_types and not any(mapped in t for t in task_types):
+                    # Only skip if task_types are set AND none match — otherwise always include
+                    if task_types:
+                        pass  # Include all — let user decide
+            result.append(entry)
+
+        return jsonify({"skills": result})
+    except Exception as exc:
+        app_logger = logging.getLogger("koto.web")
+        app_logger.exception("[skill-list] Error")
+        return jsonify({"skills": [], "error": str(exc)})
+
+
+@app.route("/api/editor/ai/skill-upload", methods=["POST"])
+def editor_skill_upload():
+    """Upload extra files for a skill execution session."""
+    import uuid as _uuid
+    session_id = request.form.get("session_id") or _uuid.uuid4().hex
+    files = request.files.getlist("files[]")
+    if not files:
+        return jsonify({"success": False, "error": "No files provided"})
+    upload_dir = os.path.join(WORKSPACE_DIR, "skill_uploads", session_id)
+    os.makedirs(upload_dir, exist_ok=True)
+    paths = []
+    for f in files:
+        fname = os.path.basename(f.filename or "upload")
+        dest = os.path.join(upload_dir, fname)
+        f.save(dest)
+        paths.append(dest)
+    return jsonify({"success": True, "session_id": session_id, "paths": paths})
+
+
+@app.route("/api/editor/ai/skill-execute", methods=["POST"])
+def editor_skill_execute():
+    """Execute a skill through the unified OpenClaw task runtime."""
+    data = request.get_json(silent=True) or {}
+    skill_id = (data.get("skill_id") or "").strip()
+    params = data.get("params") or {}
+    request_session_id = str(data.get("session_id") or "").strip()
+
+    if skill_id not in _OPENCLAW_SKILL_IDS:
+        return jsonify({"error": f"Unknown skill: {skill_id}"}), 400
+
+    def _resolve_path(raw_path: str) -> str:
+        if not raw_path:
+            return ""
+        p = raw_path
+        if os.path.isabs(p) and os.path.exists(p):
+            return p
+        cands = [
+            os.path.join(WORKSPACE_DIR, p),
+            os.path.join(WORKSPACE_DIR, "uploads", p),
+        ]
+        for cand in cands:
+            if os.path.exists(cand):
+                return cand
+        return p
+
+    def _build_openclaw_task(skill_meta: dict, run_params: dict, files_ctx: list) -> str:
+        name = skill_meta.get("name") or skill_id
+        desc = skill_meta.get("description") or ""
+        lines = [f"执行技能：{name}（{skill_id}）"]
+        if desc:
+            lines.append(f"目标：{desc}")
+        if run_params:
+            lines.append("参数：")
+            for k, v in run_params.items():
+                if not v:
+                    continue
+                if isinstance(v, list):
+                    shown = ", ".join(str(x) for x in v[:5])
+                    lines.append(f"- {k}: {shown}")
+                else:
+                    lines.append(f"- {k}: {v}")
+        if files_ctx:
+            lines.append("请优先读取以上文件，再完成任务并输出结构化结果。")
+        else:
+            lines.append("当前未提供文件，请根据参数内容完成分析任务。")
+        return "\n".join(lines)
+
+    def _iter_sse_payloads(event: str):
+        if not isinstance(event, str):
+            return
+        line = event.strip()
+        if not line.startswith("data: "):
+            return
+        try:
+            payload = json.loads(line[6:])
+        except Exception:
+            return
+        yield payload
+
+    def generate():
+        try:
+            from app.core.agent.openclaw_task_runtime import OpenClawTaskRuntime, TaskRuntimeRequest
+            from app.core.skills.skill_manager import SkillManager
+
+            sm = SkillManager()
+            all_skills = sm.get_all_skills() if hasattr(sm, "get_all_skills") else []
+            skill_meta = next((s for s in all_skills if s.get("id") == skill_id), {})
+
+            run_params = dict(params)
+            files_ctx = []
+            file_keys = ["current_file", "source_files", "compare_file", "reference_files", "files"]
+
+            for key in file_keys:
+                val = run_params.get(key)
+                if not val:
+                    continue
+                if isinstance(val, list):
+                    resolved = [_resolve_path(str(x)) for x in val]
+                    run_params[key] = resolved
+                    for p in resolved:
+                        if p:
+                            files_ctx.append({
+                                "path": p,
+                                "name": os.path.basename(p),
+                                "type": os.path.splitext(p)[1].lstrip(".").lower(),
+                            })
+                elif isinstance(val, str):
+                    p = _resolve_path(val)
+                    run_params[key] = p
+                    if p:
+                        files_ctx.append({
+                            "path": p,
+                            "name": os.path.basename(p),
+                            "type": os.path.splitext(p)[1].lstrip(".").lower(),
+                        })
+
+            task = _build_openclaw_task(skill_meta, run_params, files_ctx)
+            _task_model_mode = str(run_params.get("model_mode", "auto") or "auto").strip().lower()
+            session_id = request_session_id or str(run_params.get("session_id") or "").strip()
+            options = {
+                "model_mode": _task_model_mode,
+                "model_id": _normalize_file_task_model_id(_task_model_mode, run_params.get("model_id") or ""),
+                "session_id": session_id,
+                "skill_id": skill_id,
+                "skill_name": skill_meta.get("name", skill_id),
+                "current_file": run_params.get("current_file", ""),
+                "current_file_name": os.path.basename(run_params.get("current_file", "") or ""),
+                "current_file_id": run_params.get("current_file_id", ""),
+            }
+
+            runtime = OpenClawTaskRuntime(
+                socketio=socketio,
+                model_id=options.get("model_id") or "",
+                session_store=session_manager,
+            )
+            task_request = TaskRuntimeRequest(
+                task=task,
+                files=files_ctx,
+                options=options,
+                history=list(run_params.get("history") or []),
+            )
+
+            for event in runtime.execute(task_request):
+                for payload in _iter_sse_payloads(event):
+                    et = payload.get("type", "")
+
+                    if et == "error":
+                        text = payload.get("error") or payload.get("text") or "执行失败"
+                        yield f"data: {json.dumps({'type': 'error', 'text': text}, ensure_ascii=False)}\n\n"
+                        continue
+
+                    if et == "result":
+                        out_evt = {
+                            "type": "output",
+                            "output_type": payload.get("output_type", "markdown"),
+                            "data": payload.get("data"),
+                            "label": payload.get("summary") or skill_meta.get("name") or skill_id,
+                        }
+                        yield f"data: {json.dumps(out_evt, ensure_ascii=False)}\n\n"
+                        continue
+
+                    if et == "done":
+                        done_evt = {"type": "done", "summary": payload.get("summary", "任务完成")}
+                        yield f"data: {json.dumps(done_evt, ensure_ascii=False)}\n\n"
+                        continue
+
+                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+        except Exception as exc:
+            yield f"data: {json.dumps({'type': 'error', 'text': str(exc)}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'summary': '执行失败'}, ensure_ascii=False)}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream")
+
+
+# ── Dynamic AI Task Engine endpoint ────────────────────────────────────
+
+@app.route("/api/editor/ai/task-execute", methods=["POST"])
+def editor_task_execute():
+    """Execute a dynamic AI task and stream SSE progress events.
+
+    Replaces rigid skill-execute for tasks that benefit from LLM-driven planning.
+    The AI reads files, decides what tools to call, and streams progress.
+
+    Request JSON:
+        task (str):  Natural language task description
+        files (list, optional): [{path, name, type, content_preview}]
+        options (dict, optional): {model_mode, auto_approve, ...}
+    """
+    data = request.get_json(silent=True) or {}
+    task = (data.get("task") or "").strip()
+    if not task:
+        return jsonify({"error": "Missing 'task' parameter"}), 400
+
+    files = data.get("files") or []
+    options = data.get("options") or {}
+
+    _model_mode = str(options.get("model_mode", "auto") or "auto").strip().lower()
+    options["model_mode"] = _model_mode
+    options["model_id"] = _normalize_file_task_model_id(_model_mode, options.get("model_id", "") or "")
+    history = list(data.get("history") or options.get("history") or [])
+
+    def generate():
+        try:
+            from app.core.agent.openclaw_task_runtime import OpenClawTaskRuntime, TaskRuntimeRequest
+
+            runtime = OpenClawTaskRuntime(
+                socketio=socketio,
+                model_id=options.get("model_id") or "",
+                session_store=session_manager,
+            )
+            task_request = TaskRuntimeRequest(
+                task=task,
+                files=files,
+                options=options,
+                history=history,
+            )
+            for event in runtime.execute(task_request):
+                if isinstance(event, str):
+                    yield event
+                else:
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            logging.getLogger("koto.web").exception("[task-execute] Error")
+            yield f"data: {json.dumps({'type': 'error', 'text': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'summary': '执行失败'})}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream")
 
 
 # ================= 主程序入口 =================

@@ -85,7 +85,22 @@ def _parse_slides(raw_bytes: bytes) -> dict:
     """
     import io
     from app.core.file.file_parser import parse_pptx_geometry
-    return parse_pptx_geometry(io.BytesIO(raw_bytes))
+
+    parsed = parse_pptx_geometry(io.BytesIO(raw_bytes))
+
+    # Backward-compatibility for older editor/tests expecting `index` and
+    # shape `type` while the geometry parser now emits `slide_index`/`_type`.
+    slides = parsed.get("slides", []) if isinstance(parsed, dict) else []
+    for i, slide in enumerate(slides):
+        if not isinstance(slide, dict):
+            continue
+        slide.setdefault("index", slide.get("slide_index", i))
+        shapes = slide.get("shapes", [])
+        for shape in shapes:
+            if isinstance(shape, dict) and "type" not in shape and "_type" in shape:
+                shape["type"] = shape["_type"]
+
+    return parsed
 
 
 # ── PPTX export (in-place text update) ───────────────────────────────────────
@@ -121,6 +136,73 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
         edit_slide = slide_map.get(slide_idx)
         if not edit_slide:
             continue
+
+        # ── Apply slide background ──────────────────────────────────────────
+        # Write background color changes back to PPTX XML.
+        # Image backgrounds are stored as data URIs in the JSON; for the PPTX
+        # export we convert them back to an embedded image relationship.
+        try:
+            bg_color = edit_slide.get("background")
+            bg_image = edit_slide.get("backgroundImage")
+            if bg_image and bg_image.startswith("data:"):
+                # Decode data URI and embed as blipFill in slide background
+                import base64 as _b64
+                from pptx.oxml.ns import qn as _qn
+                from lxml import etree as _et
+                header, data = bg_image.split(",", 1)
+                img_bytes = _b64.b64decode(data)
+                mime = header.split(":")[1].split(";")[0]
+                ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif",
+                           "image/webp": "webp", "image/bmp": "bmp"}
+                img_ext = ext_map.get(mime, "png")
+                # Add image as a media part inside the PPTX package
+                # Use python-pptx's internal Part API (wrapped in try/except for safety)
+                from pptx.opc.part import Part as _Part
+                from pptx.opc.constants import RELATIONSHIP_TYPE as _RT
+                part_name = f"/ppt/media/koto_bg_{slide_idx}.{img_ext}"
+                img_part = _Part(part_name, mime, img_bytes)
+                rId = slide.part.relate_to(img_part, _RT.IMAGE)
+                # Build <p:bg><p:bgPr><a:blipFill>...</a:blipFill>...</p:bgPr></p:bg>
+                bg_xml = (
+                    f'<p:bg xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+                    f' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+                    f' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+                    f'<p:bgPr><a:blipFill dpi="0" rotWithShape="1">'
+                    f'<a:blip r:embed="{rId}"/>'
+                    f'<a:stretch><a:fillRect/></a:stretch>'
+                    f'</a:blipFill>'
+                    f'<a:effectLst/></p:bgPr></p:bg>'
+                )
+                new_bg = _et.fromstring(bg_xml)
+                sp_tree = slide.shapes._spTree
+                cSld = sp_tree.getparent()
+                old_bg = cSld.find(_qn('p:bg'))
+                if old_bg is not None:
+                    cSld.remove(old_bg)
+                cSld.insert(0, new_bg)
+            elif bg_color and bg_color.startswith("#") and len(bg_color) == 7:
+                # Solid color background
+                from pptx.oxml.ns import qn as _qn
+                from lxml import etree as _et
+                hex_val = bg_color.lstrip("#")
+                bg_xml = (
+                    f'<p:bg xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+                    f' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+                    f'<p:bgPr><a:solidFill>'
+                    f'<a:srgbClr val="{hex_val}"/>'
+                    f'</a:solidFill>'
+                    f'<a:effectLst/></p:bgPr></p:bg>'
+                )
+                new_bg = _et.fromstring(bg_xml)
+                sp_tree = slide.shapes._spTree
+                cSld = sp_tree.getparent()
+                old_bg = cSld.find(_qn('p:bg'))
+                if old_bg is not None:
+                    cSld.remove(old_bg)
+                cSld.insert(0, new_bg)
+        except Exception as _bg_exc:
+            _logger.debug("Could not write background for slide %d: %s", slide_idx, _bg_exc)
+
         shape_map = {s["id"]: s for s in edit_slide.get("shapes", [])}
 
         # Keep track of existing ids from the file

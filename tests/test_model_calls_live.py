@@ -111,7 +111,7 @@ check_cases = [
     ("gemini-3.1-pro-preview", False, "应走 generate_content"),
     ("gemini-2.5-pro-preview", False, "应走 generate_content"),
     ("gemini-2.5-flash", False, "应走 generate_content"),
-    ("gemini-2.0-flash", False, "应走 generate_content"),
+    ("gemini-2.5-flash-lite", False, "应走 generate_content"),
     ("deep-research-pro-preview-12-2025", True, "应走 interactions.create(agent=)"),
 ]
 for model_id, should_be_interactions, note in check_cases:

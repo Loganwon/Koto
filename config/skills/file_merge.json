@@ -1,0 +1,16 @@
+{
+  "id": "file_merge",
+  "name": "多文件合并",
+  "icon": "📎",
+  "category": "workflow",
+  "description": "将多个文件的内容合并为一个文件",
+  "intent_description": "用户想合并多个文件、汇总多个文件内容",
+  "task_types": ["CHAT", "FILE_ASSISTANT"],
+  "priority": 50,
+  "enabled": true,
+  "trigger_keywords": ["合并", "汇总", "merge", "combine", "拼接", "合在一起"],
+  "prompt": "\n\n## 📎 任务：多文件合并\n\n将多个文件的内容合并为一个文件。\n\n### 执行步骤\n\n1. **确认文件列表**：使用 `workspace_list_files` 查看可用文件，确认用户要合并哪些\n2. **逐个读取**：使用 `workspace_read_file` 读取每个文件\n3. **合并内容**：根据文件类型选择合适的合并策略\n4. **创建输出文件**：使用 `workspace_create_file` 创建合并后的文件\n5. **打开结果**：使用 `editor_open_file` 让用户查看\n\n### 合并策略\n- 文本文件：按顺序拼接，每个文件之间加分隔符\n- CSV/表格：使用 `run_python_code` + pandas 合并（concat/merge）\n- 相同格式：保持原格式\n- 不同格式：转为 Markdown 统一\n\n### 输出要求\n- 说明合并了哪些文件\n- 标注每个文件在合并结果中的位置\n- 如有冲突或重复内容，提示用户",
+  "version": "1.0.0",
+  "author": "koto",
+  "tags": ["file-ops", "merge", "combine"]
+}

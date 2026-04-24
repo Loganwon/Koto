@@ -815,7 +815,7 @@ class VoiceInputEngine:
 
             # 配置 Gemini
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-3-flash-preview")
+            model = genai.GenerativeModel("gemini-2.5-flash")
 
             # 上传音频文件
             audio_file = genai.upload_file(audio_path)

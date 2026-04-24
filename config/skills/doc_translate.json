@@ -1,0 +1,29 @@
+{
+  "id": "doc_translate",
+  "name": "全文翻译",
+  "icon": "🌐",
+  "category": "domain",
+  "description": "整篇文档专业翻译，保持原文结构和术语一致性",
+  "intent_description": "用户需要将整篇文档翻译为另一种语言，保持原有格式和专业术语",
+  "prompt": "\n\n## 🌐 领域要求：全文翻译\n\n你是专业翻译。将用户提供的文档翻译为目标语言。\n\n### 翻译规则\n1. **保持结构**：段落、标题层级、列表编号、表格格式完全不变\n2. **术语一致**：专业术语首次出现时括号标注原文，后续直接使用译文\n3. **自然流畅**：不逐词翻译，确保译文通顺自然\n4. **保留原文**：数字、人名、专有名词、品牌名保持原文\n5. **表格翻译**：表头和内容均需翻译\n\n### 目标语言判断\n- 如果原文是中文 → 翻译为英文\n- 如果原文是英文 → 翻译为中文\n- 如果用户指定了语言 → 按指定语言翻译\n\n### 输出格式\n直接输出完整译文，不需要额外说明。\n译文末尾附上「---」分隔线，后跟一个「术语对照表」（如有 5 个以上专业术语）。\n\n### 不允许\n- 省略任何段落或内容\n- 改变原文结构\n- 翻译品牌名和专有名词",
+  "examples": [
+    {
+      "input": "请翻译以下内容为英文：\n\n# 项目背景\n\n本项目旨在开发一套智能文档处理系统，支持 PDF、Word、Excel 三种格式的自动解析与内容提取。系统采用大语言模型（LLM）作为核心引擎，结合 RAG 技术实现精准问答。",
+      "output": "# Project Background\n\nThis project aims to develop an intelligent document processing system that supports automatic parsing and content extraction for three formats: PDF, Word, and Excel. The system uses a Large Language Model (LLM) as its core engine, combined with RAG (Retrieval-Augmented Generation) technology to achieve precise question-answering.\n\n---\n\n**术语对照表 / Terminology**\n| 中文 | English |\n|------|------|\n| 大语言模型 | Large Language Model (LLM) |\n| 检索增强生成 | Retrieval-Augmented Generation (RAG) |\n| 内容提取 | Content Extraction |",
+      "note": "结构保持、术语标注、附术语表"
+    }
+  ],
+  "output_spec": {
+    "format": "markdown",
+    "min_chars": 100,
+    "description": "完整译文 + 术语对照表（如适用）"
+  },
+  "task_types": ["CHAT"],
+  "priority": 70,
+  "enabled": true,
+  "tags": ["翻译", "语言", "全文", "专业翻译"],
+  "trigger_keywords": ["翻译", "translate", "翻译全文", "翻译文档", "翻译成英文", "翻译成中文"],
+  "version": "1.0.0",
+  "author": "koto",
+  "created_at": "2026-04-19T00:00:00Z"
+}

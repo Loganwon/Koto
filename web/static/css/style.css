@@ -2296,7 +2296,8 @@ a { color: var(--accent-primary); }
     position: fixed;
     right: 0;
     top: 0;
-    width: var(--settings-panel-width, 420px);
+    width: min(var(--settings-panel-width, 420px), calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
     height: var(--viewport-h, 100vh);
     background: var(--bg-secondary);
     border-left: 1px solid var(--border-color);
@@ -2309,12 +2310,21 @@ a { color: var(--accent-primary); }
 }
 .settings-panel.active { transform: translateX(0); }
 
-/* 设置面板打开时，主内容区向左缩进，避免被遮挡 */
+/* 设置/技能面板打开时，主内容区向左缩进，避免被遮挡 */
 .main-content {
     transition: margin-right 0.25s ease;
 }
 body.settings-panel-open .main-content {
     margin-right: var(--settings-panel-width, 420px);
+}
+body.skills-panel-open .main-content {
+    margin-right: var(--skills-panel-width, 420px);
+}
+
+@media (max-width: 1024px) {
+    body.settings-panel-open .main-content {
+        margin-right: 0;
+    }
 }
 
 .panel-header {
@@ -2332,7 +2342,8 @@ body.settings-panel-open .main-content {
 .workspace-file { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: var(--radius-md); border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); text-decoration: none; }
 .workspace-file:hover { border-color: var(--accent-primary); }
 
-.settings-content { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 18px; }
+.settings-content { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; }
+.settings-content > * + * { margin-top: 18px; }
 .settings-section { padding: 14px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-tertiary); }
 .settings-section h4 { display: flex; align-items: center; gap: 8px; font-size: 13px; letter-spacing: 0.4px; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; }
 .setting-item { margin-bottom: 14px; }
@@ -4956,6 +4967,12 @@ body.desktop-mode .pill-btn {
 .sb-nav-item.active { background: var(--bg-hover); color: var(--accent-primary); }
 .sb-nav-item > svg:first-child { flex-shrink: 0; color: var(--text-secondary); }
 .sb-nav-item.active > svg:first-child { color: var(--accent-primary); }
+.sb-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 16px; height: 16px; padding: 0 4px;
+    background: var(--accent-primary); color: #fff;
+    border-radius: 10px; font-size: 10px; font-weight: 700; line-height: 1;
+}
 .sb-chevron, .sb-arrow {
     flex-shrink: 0;
     color: var(--text-muted);

@@ -276,7 +276,7 @@ class LoRAPipeline:
         for pkg, label in required.items():
             try:
                 __import__(pkg)
-            except ImportError:
+            except Exception:
                 missing.append(label)
 
         all_ok = len(missing) == 0

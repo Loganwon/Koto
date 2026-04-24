@@ -126,7 +126,7 @@ def _call_document_annotate(file_path: str, requirement: str):
         result = feedback_system.full_annotation_loop(
             file_path=file_path,
             user_requirement=requirement,
-            model_id="gemini-3.1-pro-preview",
+            model_id="gemini-2.5-pro",
         )
 
         # 添加处理模式标记
@@ -413,7 +413,7 @@ def document_annotate() -> Response:
         data = request.json
         file_path = data.get("file_path")
         user_requirement = data.get("requirement", "")
-        model_id = data.get("model_id", "gemini-3.1-pro-preview")
+        model_id = data.get("model_id", "gemini-2.5-pro")
 
         if not file_path:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400

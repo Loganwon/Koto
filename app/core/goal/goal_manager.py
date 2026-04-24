@@ -225,6 +225,7 @@ class GoalManager:
     def __init__(self, db_path: Optional[str] = None):
         self._db_path = db_path or _DEFAULT_DB_PATH
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._db_lock = threading.RLock()
         self._conn = self._open_conn()
         self._init_schema()
         self._bg_thread: Optional[threading.Thread] = None
@@ -235,15 +236,17 @@ class GoalManager:
     # ── DB helpers ──────────────────────────────────────────────────────────
 
     def _open_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn = sqlite3.connect(self._db_path, check_same_thread=False, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
     def _init_schema(self):
-        self._conn.executescript(self._DDL)
-        self._conn.commit()
+        with self._db_lock:
+            self._conn.executescript(self._DDL)
+            self._conn.commit()
 
     # ── Goal CRUD ────────────────────────────────────────────────────────────
 
@@ -280,9 +283,10 @@ class GoalManager:
         return goal
 
     def get(self, goal_id: str) -> Optional[GoalTask]:
-        row = self._conn.execute(
-            "SELECT * FROM koto_goals WHERE goal_id = ?", (goal_id,)
-        ).fetchone()
+        with self._db_lock:
+            row = self._conn.execute(
+                "SELECT * FROM koto_goals WHERE goal_id = ?", (goal_id,)
+            ).fetchone()
         return self._row_to_goal(row) if row else None
 
     def list_goals(
@@ -304,26 +308,29 @@ class GoalManager:
             clauses.append("session_id = ?")
             params.append(session_id)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        rows = self._conn.execute(
-            f"SELECT * FROM koto_goals {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-            params + [limit, offset],
-        ).fetchall()
+        with self._db_lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM koto_goals {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
         return [self._row_to_goal(r) for r in rows]
 
     def count(self, status: Optional[GoalStatus] = None) -> int:
-        if status:
-            row = self._conn.execute(
-                "SELECT COUNT(*) FROM koto_goals WHERE status = ?", (status.value,)
-            ).fetchone()
-        else:
-            row = self._conn.execute("SELECT COUNT(*) FROM koto_goals").fetchone()
+        with self._db_lock:
+            if status:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) FROM koto_goals WHERE status = ?", (status.value,)
+                ).fetchone()
+            else:
+                row = self._conn.execute("SELECT COUNT(*) FROM koto_goals").fetchone()
         return row[0] if row else 0
 
     def runs_for_goal(self, goal_id: str, limit: int = 20) -> List[GoalRun]:
-        rows = self._conn.execute(
-            "SELECT * FROM koto_goal_runs WHERE goal_id = ? ORDER BY started_at DESC LIMIT ?",
-            (goal_id, limit),
-        ).fetchall()
+        with self._db_lock:
+            rows = self._conn.execute(
+                "SELECT * FROM koto_goal_runs WHERE goal_id = ? ORDER BY started_at DESC LIMIT ?",
+                (goal_id, limit),
+            ).fetchall()
         return [self._row_to_run(r) for r in rows]
 
     # ── Lifecycle transitions ────────────────────────────────────────────────
@@ -396,12 +403,35 @@ class GoalManager:
         return True
 
     def delete(self, goal_id: str) -> bool:
-        rows_deleted = self._conn.execute(
-            "DELETE FROM koto_goals WHERE goal_id = ?", (goal_id,)
-        ).rowcount
-        self._conn.execute("DELETE FROM koto_goal_runs WHERE goal_id = ?", (goal_id,))
-        self._conn.commit()
-        return rows_deleted > 0
+        # SQLite can transiently report "database is locked" under concurrent
+        # writers (background loop + API requests). Retry briefly before failing.
+        for attempt in range(5):
+            try:
+                with self._db_lock:
+                    rows_deleted = self._conn.execute(
+                        "DELETE FROM koto_goals WHERE goal_id = ?", (goal_id,)
+                    ).rowcount
+                    self._conn.execute(
+                        "DELETE FROM koto_goal_runs WHERE goal_id = ?", (goal_id,)
+                    )
+                    self._conn.commit()
+                return rows_deleted > 0
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower():
+                    raise
+                if attempt == 4:
+                    logger.warning(
+                        "[GoalManager] delete skipped due to persistent db lock: goal_id=%s",
+                        goal_id,
+                    )
+                    return False
+                try:
+                    with self._db_lock:
+                        self._conn.rollback()
+                except Exception:
+                    pass
+                time.sleep(0.1 * (attempt + 1))
+        return False
 
     def update_from_run(
         self,
@@ -449,21 +479,22 @@ class GoalManager:
 
     def start_run(self, goal_id: str, linked_task_id: Optional[str] = None) -> GoalRun:
         run = GoalRun(goal_id=goal_id, linked_task_id=linked_task_id)
-        self._conn.execute(
-            """INSERT INTO koto_goal_runs
-               (run_id, goal_id, started_at, outcome, summary, tool_calls_json, linked_task_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                run.run_id,
-                run.goal_id,
-                run.started_at,
-                run.outcome,
-                run.summary,
-                run.tool_calls_json,
-                run.linked_task_id,
-            ),
-        )
-        self._conn.commit()
+        with self._db_lock:
+            self._conn.execute(
+                """INSERT INTO koto_goal_runs
+                   (run_id, goal_id, started_at, outcome, summary, tool_calls_json, linked_task_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    run.run_id,
+                    run.goal_id,
+                    run.started_at,
+                    run.outcome,
+                    run.summary,
+                    run.tool_calls_json,
+                    run.linked_task_id,
+                ),
+            )
+            self._conn.commit()
         return run
 
     def finish_run(
@@ -473,19 +504,20 @@ class GoalManager:
         summary: str,
         tool_calls: Optional[List[str]] = None,
     ) -> bool:
-        self._conn.execute(
-            """UPDATE koto_goal_runs
-               SET finished_at=?, outcome=?, summary=?, tool_calls_json=?
-               WHERE run_id=?""",
-            (
-                _now_iso(),
-                outcome,
-                summary[:2000],
-                json.dumps(tool_calls or [], ensure_ascii=False),
-                run_id,
-            ),
-        )
-        self._conn.commit()
+        with self._db_lock:
+            self._conn.execute(
+                """UPDATE koto_goal_runs
+                   SET finished_at=?, outcome=?, summary=?, tool_calls_json=?
+                   WHERE run_id=?""",
+                (
+                    _now_iso(),
+                    outcome,
+                    summary[:2000],
+                    json.dumps(tool_calls or [], ensure_ascii=False),
+                    run_id,
+                ),
+            )
+            self._conn.commit()
         return True
 
     # ── 对外：获取待检查目标 ─────────────────────────────────────────────────
@@ -493,12 +525,13 @@ class GoalManager:
     def get_due_goals(self) -> List[GoalTask]:
         """返回所有 status=active 且 next_check_at <= now 的目标。"""
         now = _now_iso()
-        rows = self._conn.execute(
-            """SELECT * FROM koto_goals
-               WHERE status = 'active' AND next_check_at IS NOT NULL AND next_check_at <= ?
-               ORDER BY next_check_at ASC""",
-            (now,),
-        ).fetchall()
+        with self._db_lock:
+            rows = self._conn.execute(
+                """SELECT * FROM koto_goals
+                   WHERE status = 'active' AND next_check_at IS NOT NULL AND next_check_at <= ?
+                   ORDER BY next_check_at ASC""",
+                (now,),
+            ).fetchall()
         return [self._row_to_goal(r) for r in rows]
 
     # ── 后台执行循环 ─────────────────────────────────────────────────────────
@@ -645,36 +678,37 @@ class GoalManager:
     # ── DB helpers ────────────────────────────────────────────────────────────
 
     def _insert_goal(self, g: GoalTask):
-        self._conn.execute(
-            """INSERT INTO koto_goals
-               (goal_id, title, user_goal, category, status, priority,
-                created_at, updated_at, due_at, next_check_at, check_interval_minutes,
-                requires_confirmation, context_snapshot, last_result, progress_summary,
-                total_runs, session_id, run_on_activate)
-               VALUES
-               (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                g.goal_id,
-                g.title,
-                g.user_goal,
-                g.category,
-                g.status.value,
-                g.priority,
-                g.created_at,
-                g.updated_at,
-                g.due_at,
-                g.next_check_at,
-                g.check_interval_minutes,
-                int(g.requires_confirmation),
-                g.context_snapshot,
-                g.last_result,
-                g.progress_summary,
-                g.total_runs,
-                g.session_id,
-                int(g.run_on_activate),
-            ),
-        )
-        self._conn.commit()
+        with self._db_lock:
+            self._conn.execute(
+                """INSERT INTO koto_goals
+                   (goal_id, title, user_goal, category, status, priority,
+                    created_at, updated_at, due_at, next_check_at, check_interval_minutes,
+                    requires_confirmation, context_snapshot, last_result, progress_summary,
+                    total_runs, session_id, run_on_activate)
+                   VALUES
+                   (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    g.goal_id,
+                    g.title,
+                    g.user_goal,
+                    g.category,
+                    g.status.value,
+                    g.priority,
+                    g.created_at,
+                    g.updated_at,
+                    g.due_at,
+                    g.next_check_at,
+                    g.check_interval_minutes,
+                    int(g.requires_confirmation),
+                    g.context_snapshot,
+                    g.last_result,
+                    g.progress_summary,
+                    g.total_runs,
+                    g.session_id,
+                    int(g.run_on_activate),
+                ),
+            )
+            self._conn.commit()
 
     def _update(self, goal_id: str, **kwargs):
         if not kwargs:
@@ -687,8 +721,9 @@ class GoalManager:
 
         cols = ", ".join(f"{k} = ?" for k in kwargs)
         vals = list(kwargs.values()) + [goal_id]
-        self._conn.execute(f"UPDATE koto_goals SET {cols} WHERE goal_id = ?", vals)
-        self._conn.commit()
+        with self._db_lock:
+            self._conn.execute(f"UPDATE koto_goals SET {cols} WHERE goal_id = ?", vals)
+            self._conn.commit()
 
     def _row_to_goal(self, row: sqlite3.Row) -> GoalTask:
         d = dict(row)

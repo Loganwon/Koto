@@ -308,7 +308,7 @@ class FileAnalyzer:
 
                 _client = _genai.Client(api_key=api_key)
                 resp = _client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
+                    model="gemini-2.5-flash-lite",
                     contents=f"{self.AI_CLASSIFY_PROMPT}\n\n{user_msg}",
                     config=_types.GenerateContentConfig(
                         temperature=0.0,

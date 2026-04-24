@@ -561,10 +561,24 @@ function renderSlide(idx){
     if(shape.has_text && shape.paragraphs){
       const inner=document.createElement('div');
       inner.className='shape-inner';
+      // Dynamic text insets from PPTX bodyPr
+      const ins=shape.textInsets;
+      if(ins){
+        inner.style.padding=`${Math.round(ins.t*scale)}px ${Math.round(ins.r*scale)}px ${Math.round(ins.b*scale)}px ${Math.round(ins.l*scale)}px`;
+      }
+      // Vertical alignment from textAnchor
+      if(shape.textAnchor==='ctr') inner.style.justifyContent='center';
+      else if(shape.textAnchor==='b') inner.style.justifyContent='flex-end';
       shape.paragraphs.forEach((para,pi)=>{
         const pEl=document.createElement('div');
         pEl.className='shape-para';
         pEl.style.textAlign=(para.align||'LEFT').toLowerCase();
+        // Line spacing
+        if(para.lineSpacing) pEl.style.lineHeight=String(para.lineSpacing);
+        else if(para.lineSpacingPt) pEl.style.lineHeight=Math.round(para.lineSpacingPt*scale*12700)+'px';
+        // Paragraph spacing
+        if(para.spaceBefore) pEl.style.marginTop=Math.round(para.spaceBefore*scale*12700)+'px';
+        if(para.spaceAfter)  pEl.style.marginBottom=Math.round(para.spaceAfter*scale*12700)+'px';
         (para.runs||[]).forEach((run,ri)=>{
           const span=document.createElement('span');
           span.className='run-span';
@@ -572,12 +586,14 @@ function renderSlide(idx){
           span.dataset.pi=pi; span.dataset.ri=ri;
           span.textContent=run.text;
           // Sizing: clamp rendered font to reasonable bounds
-          const ptSize=run.size||14;
-          span.style.fontSize=Math.round(ptSize*scale*1.33)+'px';
+          const defaultPt=shape.is_title?36:14;
+          const ptSize=run.size||defaultPt;
+          span.style.fontSize=Math.max(Math.round(ptSize*scale*12700),6)+'px';
           if(run.bold)      span.style.fontWeight='bold';
           if(run.italic)    span.style.fontStyle='italic';
           if(run.underline) span.style.textDecoration='underline';
           if(run.color)     span.style.color=run.color;
+          if(run.fontName)  span.style.fontFamily=run.fontName;
           span.style.whiteSpace='pre-wrap';
           span.style.display='inline';
           // Events

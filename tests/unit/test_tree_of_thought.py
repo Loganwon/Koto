@@ -67,7 +67,7 @@ class TestTreeOfThoughtInit:
 
         tot = TreeOfThought()
         assert tot.n_branches == 3
-        assert tot.model_id == "gemini-3-flash-preview"
+        assert tot.model_id == TreeOfThought.DEFAULT_MODEL
         assert tot.max_tokens == 6000
         assert tot.max_workers == 3
         assert tot.timeout_sec == 90

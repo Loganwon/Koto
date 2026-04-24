@@ -74,7 +74,7 @@ class ContextStore:
         return self._compress_if_needed(str(val), max_chars)
 
     def _compress_if_needed(self, text: str, max_chars: int) -> str:
-        """超过阈值时尝试用 gemini-2.0-flash-lite 生成摘要，否则硬截断。"""
+        """超过阈值时尝试用 gemini-2.5-flash-lite 生成摘要，否则硬截断。"""
         if len(text) <= max_chars:
             return text
         try:
@@ -85,7 +85,7 @@ class ContextStore:
             _types_mod = sys.modules.get("google.genai.types")
             if _client and _types_mod:
                 resp = _client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
+                    model="gemini-2.5-flash-lite",
                     contents=(
                         f"请将以下内容压缩为{max_chars // 2}字以内的要点摘要，"
                         f"保留所有关键数据、数字和结论：\n\n{text[:20000]}"
