@@ -21,23 +21,10 @@ import pytest
 
 def _load_project_api_keys() -> None:
     """Load API keys from project config when env vars are not already set."""
-    env_path = _root() / "config" / "gemini_config.env"
-    if not env_path.exists():
-        return
-
-    wanted = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"}
     try:
-        for raw in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, val = line.split("=", 1)
-            key = key.strip()
-            if key not in wanted:
-                continue
-            val = val.strip().strip('"').strip("'")
-            if val and not os.environ.get(key):
-                os.environ[key] = val
+        from app.core.llm.gemini_config import load_gemini_config_env
+
+        load_gemini_config_env(override=False)
     except Exception:
         # Key loading should never break the test run.
         pass
