@@ -18,6 +18,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Generator, Optional
 
+from app.core.llm.model_mode import normalize_model_mode
+
 logger = logging.getLogger(__name__)
 
 # ── SSE 事件构建器 ─────────────────────────────────────────────────────────────
@@ -60,10 +62,13 @@ def sse_done(summary: str = "") -> str:
 
 def _resolve_provider_arg(model_mode: str) -> dict:
     """将 model_mode 映射为 get_llm_provider 接受的参数。"""
-    if model_mode == "local":
+    normalized_mode = normalize_model_mode(model_mode, default="auto")
+    if normalized_mode == "local":
         return {"provider": "ollama"}
-    if model_mode in ("gemini", "openai", "anthropic", "ollama"):
-        return {"provider": model_mode}
+    if normalized_mode == "cloud":
+        return {"provider": "gemini"}
+    if normalized_mode in ("gemini", "openai", "anthropic", "ollama"):
+        return {"provider": normalized_mode}
     # "auto" 或其他 → 不指定，由 provider_factory 自动检测
     return {}
 
@@ -86,7 +91,10 @@ def call_llm(prompt: str, system: str = "", model_mode: str = "auto",
     """
     from app.core.llm.provider_factory import get_llm_provider
 
-    provider = get_llm_provider(**_resolve_provider_arg(model_mode))
+    provider = get_llm_provider(
+        **_resolve_provider_arg(model_mode),
+        allow_local_fallback=False,
+    )
 
     try:
         result = provider.generate_content(

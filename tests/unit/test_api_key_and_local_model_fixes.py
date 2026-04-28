@@ -13,6 +13,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
+import pytest
+
 
 class _HtmlNode:
     def __init__(self, tag, attrs, parent=None):
@@ -147,6 +149,47 @@ class TestClientCacheReset:
         os.environ["API_KEY"] = new_key
         assert os.environ["GEMINI_API_KEY"] == new_key
         assert os.environ["API_KEY"] == new_key
+
+
+class TestGetClientLocalIsolation:
+    """Local-mode get_client must stay on the local system and never reverse-fallback to cloud."""
+
+    def _load_app_module(self):
+        import web.app as app_mod
+
+        app_mod._client = None
+        app_mod._client_mode_key = (None, None)
+        return app_mod
+
+    def test_local_mode_without_explicit_model_uses_ollama(self):
+        app_mod = self._load_app_module()
+
+        with patch.object(app_mod, "_get_local_model_config", return_value=("local", None)), patch(
+            "app.core.llm.ollama_provider.OllamaClientProxy",
+            return_value=MagicMock(name="ollama_client"),
+        ) as mock_ollama, patch.object(
+            app_mod,
+            "create_client",
+            side_effect=AssertionError("create_client should not be called in local mode"),
+        ):
+            client = app_mod.get_client()
+
+        assert client is mock_ollama.return_value
+        mock_ollama.assert_called_once_with(model_tag=None)
+
+    def test_local_mode_failure_does_not_reverse_fallback_to_cloud(self):
+        app_mod = self._load_app_module()
+
+        with patch.object(app_mod, "_get_local_model_config", return_value=("local", None)), patch(
+            "app.core.llm.ollama_provider.OllamaClientProxy",
+            side_effect=RuntimeError("boom"),
+        ), patch.object(
+            app_mod,
+            "create_client",
+            side_effect=AssertionError("create_client should not be called on local failure"),
+        ):
+            with pytest.raises(RuntimeError, match="本地模式已启用，但 Ollama 初始化失败"):
+                app_mod.get_client()
 
 
 # ── 2. Windows stdout encoding fix ─────────────────────────────────────────

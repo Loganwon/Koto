@@ -1704,11 +1704,25 @@ def ollama_status():
         models = [m["name"] for m in data.get("models", [])]
         if not models:
             return jsonify({"running": True, "model": None, "models": []})
-        # Prefer larger/known-good chat models
+
+        # 1. Prefer the model configured in user_settings.json
+        try:
+            from web.shared import PROJECT_ROOT as _PR
+            import json as _js, os as _os
+            _cfg_path = _os.path.join(_PR, "config", "user_settings.json")
+            with open(_cfg_path, "r", encoding="utf-8") as _f:
+                _cfg = _js.load(_f)
+            _configured = (_cfg.get("local_model") or _cfg.get("ai", {}).get("local_model") or "").strip()
+            if _configured and _configured in models:
+                return jsonify({"running": True, "model": _configured, "models": models})
+        except Exception:
+            pass
+
+        # 2. Fall back to size-based preference (include 9b)
         preferred = next(
             (
                 m for m in models
-                if any(k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b"))
+                if any(k in m.lower() for k in ("9b", "7b", "8b", "13b", "14b", "32b", "70b"))
             ),
             models[0],
         )

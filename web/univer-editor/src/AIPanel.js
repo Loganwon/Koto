@@ -669,7 +669,7 @@ export class AIPanel {
       const resp = await fetch('/api/editor/ai/chart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data_context: dataContext, instruction, lang: 'python', model_mode: localStorage.getItem('editor_model_mode') || 'auto' }),
+        body: JSON.stringify({ data_context: dataContext, instruction, lang: 'python', model_mode: localStorage.getItem('editor_model_mode') || 'cloud' }),
         signal: this._abortController.signal,
       });
 
@@ -908,7 +908,7 @@ export class AIPanel {
           selection: '',
           instruction: instruction,
           full_text: fullText,
-          model_mode: localStorage.getItem('editor_model_mode') || 'auto',
+          model_mode: localStorage.getItem('editor_model_mode') || 'cloud',
         }),
         signal: this._abortController.signal,
       });
@@ -1420,7 +1420,7 @@ export class AIPanel {
     try {
       const _fileType = this._doc?.getFileType?.() || this._currentFileType || '';
       const _fileName = this._doc?.getFileName?.() || '';
-      const _modelMode = localStorage.getItem('editor_model_mode') || 'auto';
+      const _modelMode = localStorage.getItem('editor_model_mode') || 'cloud';
       const resp = await fetch('/api/editor/ai/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1544,7 +1544,7 @@ export class AIPanel {
           selection_offset: selectionCtx?.range?.startOffset ?? -1,
           doc_context: this._docContext || '',
           doc_mode: this._docMode || 'normal',
-          model_mode: localStorage.getItem('editor_model_mode') || 'auto',
+          model_mode: localStorage.getItem('editor_model_mode') || 'cloud',
           file_type: _fileType,
           file_name: _fileName,
           history: _histCtx,
@@ -1746,7 +1746,7 @@ export class AIPanel {
   _syncModelBadge() {
     const badge = document.getElementById('ai-model-badge');
     if (!badge) return;
-    const isLocal = (localStorage.getItem('editor_model_mode') || 'auto') === 'local';
+    const isLocal = (localStorage.getItem('editor_model_mode') || 'cloud') === 'local';
     badge.textContent = isLocal ? 'Ollama ●' : '';
     badge.className = isLocal ? 'ai-model-badge local' : 'ai-model-badge';
   }

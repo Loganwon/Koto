@@ -42,8 +42,13 @@ def _get_workspace_root() -> str:
 def _safe_resolve(relative_path: str) -> Optional[str]:
     """Resolve a user path inside workspace root. Returns None on traversal."""
     root = _get_workspace_root()
+    # Strip leading "workspace/" prefix — the model sometimes includes it even
+    # though paths are already relative to the workspace root.
+    stripped = relative_path.replace("\\", "/")
+    if stripped.startswith("workspace/"):
+        stripped = stripped[len("workspace/"):]
     try:
-        resolved = os.path.normpath(os.path.join(root, relative_path))
+        resolved = os.path.normpath(os.path.join(root, stripped))
         if not resolved.startswith(os.path.normpath(root)):
             return None
         return resolved
@@ -67,8 +72,23 @@ def _resolve_path(path: str) -> Optional[str]:
 
 
 def _result_path(raw_path: str, resolved_path: str) -> str:
-    """Prefer the caller-visible path while falling back to the resolved path."""
-    return raw_path or resolved_path
+    """Return a workspace-relative path so the frontend can match it to wsSourcePath.
+
+    Falls back to absolute path when the file is outside the workspace root.
+    Frontend refresh (_refreshChangedFile) compares this to state.wsSourcePath which
+    is always workspace-relative, so returning absolute paths breaks the match.
+    """
+    target = resolved_path or raw_path
+    if not target:
+        return raw_path
+    ws_root = _get_workspace_root()
+    try:
+        rel = os.path.relpath(target, ws_root).replace("\\", "/")
+        if not rel.startswith(".."):
+            return rel
+    except (ValueError, TypeError):
+        pass
+    return target
 
 
 def _normalize_text_limit(max_chars: Any, default: int) -> int:
@@ -260,7 +280,12 @@ def write_sheet_data(path: str, sheet_name: str = "", updates: str = "[]") -> st
             value = u.get("value", "")
             if row < 1 or col < 1:
                 continue
-            ws.cell(row=row, column=col, value=value)
+            cell = ws.cell(row=row, column=col)
+            # Detect Excel formulas — write as formula, not literal string
+            if isinstance(value, str) and value.startswith("="):
+                cell.value = value
+            else:
+                cell.value = value
             count += 1
 
         wb.save(resolved)
@@ -346,9 +371,7 @@ def parse_file_to_text(
     """Parse any supported file to plain text (DOCX/XLSX/PPTX/PDF/TXT/CSV)."""
     resolved = _resolve_path(path)
     if not resolved:
-        return f"Error: file not found — {path}"
-
-    max_chars = _normalize_text_limit(max_chars, _TEXT_LIMIT_DEFAULT)
+        return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
 
     try:
         from app.core.workflow_engine import parse_source_file
@@ -443,13 +466,29 @@ def _prepend_task_file_context(code: str, staged_entries: List[Dict[str, str]]) 
     }
     staged_names = [entry["staged_name"] for entry in staged_entries]
 
+    workspace_root = _get_workspace_root()
     preamble = (
         "# Attached task files are mirrored into the sandbox working directory.\n"
+        f"TASK_WORKSPACE_ROOT = {json.dumps(workspace_root, ensure_ascii=False)}\n"
         f"TASK_FILE_PATHS = {json.dumps(absolute_paths, ensure_ascii=False)}\n"
         f"TASK_SANDBOX_FILE_PATHS = {json.dumps(staged_paths, ensure_ascii=False)}\n"
-        f"TASK_SANDBOX_FILES = {json.dumps(staged_names, ensure_ascii=False)}\n\n"
+        f"TASK_SANDBOX_FILES = {json.dumps(staged_names, ensure_ascii=False)}\n"
+        "# After creating a file in the workspace, print: KOTO_CREATED:<absolute_path>\n"
+        "# e.g. print('KOTO_CREATED:' + output_path)\n\n"
     )
     return preamble + code
+
+
+def _parse_koto_created_paths(stdout: str) -> List[str]:
+    """Extract KOTO_CREATED:<path> markers printed by sandbox code."""
+    paths: List[str] = []
+    for line in (stdout or "").splitlines():
+        line = line.strip()
+        if line.startswith("KOTO_CREATED:"):
+            candidate = line[len("KOTO_CREATED:"):].strip()
+            if candidate and os.path.isabs(candidate) and os.path.isfile(candidate):
+                paths.append(candidate)
+    return paths
 
 
 def _format_sandbox_result(result: Dict[str, Any]) -> str:
@@ -468,7 +507,11 @@ def _format_sandbox_result(result: Dict[str, Any]) -> str:
 
 
 def run_python_in_sandbox(code: str, timeout: int = 30, task_files: Optional[List[Dict[str, str]]] = None) -> str:
-    """Execute Python code in the sandbox. Returns stdout + stderr + images."""
+    """Execute Python code in the sandbox. Returns stdout + stderr + images.
+
+    If the code prints ``KOTO_CREATED:<absolute_path>`` lines, those paths are
+    returned as a JSON suffix so the task agent can emit file_change events.
+    """
     try:
         from app.core.sandbox import run_python
 
@@ -478,12 +521,21 @@ def run_python_in_sandbox(code: str, timeout: int = 30, task_files: Optional[Lis
                 staged_entries = _stage_task_files_for_sandbox(resolved_task_files, tmpdir)
                 prepared_code = _prepend_task_file_context(code, staged_entries)
                 result = run_python(prepared_code, timeout=timeout, work_dir=tmpdir)
-                return _format_sandbox_result(result)
+                return _wrap_sandbox_result(result)
 
         result = run_python(code, timeout=timeout)
-        return _format_sandbox_result(result)
+        return _wrap_sandbox_result(result)
     except Exception as e:
         return f"Sandbox error: {e}"
+
+
+def _wrap_sandbox_result(result: Dict[str, Any]) -> str:
+    """Format sandbox result; append __koto_created__ JSON if files were created."""
+    text = _format_sandbox_result(result)
+    created = _parse_koto_created_paths(result.get("stdout", ""))
+    if created:
+        text += "\n__koto_created__:" + json.dumps(created, ensure_ascii=False)
+    return text
 
 
 def list_workspace_files(path: str = "", recursive: bool = False) -> str:
@@ -643,7 +695,7 @@ def llm_transform(text: str, instruction: str) -> str:
     try:
         return call_llm(prompt, call_timeout=_TASK_TOOL_LLM_CALL_TIMEOUT)
     except Exception as e:
-        return f"Error: {e}"
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -839,7 +891,20 @@ def insert_excel_as_docx_table(
         target_exists = os.path.exists(target_resolved)
         if target_exists:
             shutil.copy2(target_resolved, target_resolved + ".bak")
-            document = Document(target_resolved)
+            try:
+                document = Document(target_resolved)
+            except Exception as open_err:
+                return json.dumps(
+                    {
+                        "error": (
+                            f"无法用 python-docx 打开 {os.path.basename(target_resolved)}"
+                            f"（{open_err}）。"
+                            "请改用 run_python_code + python-docx 手动追加表格，"
+                            "或用 openpyxl 读取数据后用脚本写入 docx。"
+                        )
+                    },
+                    ensure_ascii=False,
+                )
         else:
             document = Document()
 
@@ -893,7 +958,14 @@ def insert_excel_as_docx_table(
 
 
 def verify_task_completion(task_description: str, file_states: str = "[]", model_mode: str = "auto") -> str:
-    """Ask the model to verify if a task was completed successfully.
+    """Verify whether a task was completed successfully.
+
+    Uses a heuristic: if all tracked files are marked as modified, the task is
+    considered complete.  A separate LLM call was previously used here but it
+    proved unreliable — local Ollama models frequently hallucinated failure
+    messages (e.g. "未检测到文件变更记录") even when file_states clearly showed
+    modified=true, causing the loop to continue unnecessarily and the final
+    result text to be wrong.
 
     Args:
         task_description: The original task description.
@@ -902,46 +974,42 @@ def verify_task_completion(task_description: str, file_states: str = "[]", model
 
     Returns: JSON with verification result.
     """
-    from app.core.workflow_engine import call_llm_json
-
     try:
         states = json.loads(file_states) if isinstance(file_states, str) else file_states
     except json.JSONDecodeError:
         states = []
 
-    # Build state summary
-    state_text = ""
-    if states:
-        state_parts = []
-        for s in states:
-            status = "已修改" if s.get("modified") else ("存在" if s.get("exists") else "不存在")
-            state_parts.append(f"- {s.get('path', '?')}: {status}")
-            if s.get("preview"):
-                state_parts.append(f"  预览: {s['preview'][:200]}")
-        state_text = "\n".join(state_parts)
+    if not states:
+        return json.dumps({"completed": False, "summary": "无文件状态信息"}, ensure_ascii=False)
 
-    prompt = f"""请验证以下任务是否已成功完成：
+    all_modified = all(s.get("modified") for s in states if isinstance(s, dict))
+    if not all_modified:
+        # Some files not yet written; let the loop continue
+        unmodified = [
+            os.path.basename(str(s.get("path") or ""))
+            for s in states
+            if isinstance(s, dict) and not s.get("modified")
+        ]
+        return json.dumps(
+            {
+                "completed": False,
+                "confidence": 0.5,
+                "summary": f"以下文件尚未修改：{', '.join(unmodified)}",
+                "remaining_steps": [f"写入 {n}" for n in unmodified],
+            },
+            ensure_ascii=False,
+        )
 
-## 任务描述
-{task_description}
-
-## 文件状态
-{state_text or "无文件状态信息"}
-
-## 请判断
-1. 任务是否完成？
-2. 如果未完成，还需要做什么？
-
-以 JSON 格式输出：
-{{"completed": true/false, "confidence": 0.0-1.0, "summary": "说明", "remaining_steps": ["如有"]}}"""
-
-    try:
-        result = call_llm_json(prompt, model_mode=str(model_mode or "auto"))
-        if isinstance(result, dict):
-            return json.dumps(result, ensure_ascii=False)
-        return json.dumps({"completed": False, "summary": str(result)}, ensure_ascii=False)
-    except Exception as e:
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
+    modified_names = [
+        os.path.basename(str(s.get("path") or ""))
+        for s in states
+        if isinstance(s, dict) and s.get("modified")
+    ]
+    summary = "文件已成功修改：" + "、".join(n for n in modified_names if n)
+    return json.dumps(
+        {"completed": True, "confidence": 1.0, "summary": summary, "remaining_steps": []},
+        ensure_ascii=False,
+    )
 
 
 def read_file_range(path: str, start_line: int = 1, end_line: int = 100) -> str:
@@ -956,7 +1024,7 @@ def read_file_range(path: str, start_line: int = 1, end_line: int = 100) -> str:
     """
     resolved = _resolve_path(path)
     if not resolved:
-        return f"Error: file not found — {path}"
+        return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
 
     try:
         with open(resolved, "r", encoding="utf-8", errors="replace") as f:
@@ -1027,6 +1095,152 @@ def write_docx_content(path: str, paragraphs: str = "[]") -> str:
         )
     except ImportError:
         return json.dumps({"error": "python-docx not installed"}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+def write_pptx_slides(path: str, updates: str = "[]") -> str:
+    """Update text in existing PPTX slides.
+
+    updates: JSON array of:
+      [{"slide_index": 0, "shape_name": "标题 1", "text": "新内容"}, ...]
+    or
+      [{"slide_index": 0, "shape_index": 0, "text": "新内容"}, ...]
+    slide_index is 0-based.
+    """
+    resolved = _resolve_path(path)
+    if not resolved:
+        return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
+
+    try:
+        upd_list = json.loads(updates) if isinstance(updates, str) else updates
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid updates JSON: {e}"}, ensure_ascii=False)
+
+    try:
+        from pptx import Presentation
+        from pptx.util import Pt
+        import shutil as _sh
+
+        _sh.copy2(resolved, resolved + ".bak")
+        prs = Presentation(resolved)
+        slides_updated = 0
+
+        for upd in upd_list:
+            slide_idx = int(upd.get("slide_index", 0))
+            if slide_idx < 0 or slide_idx >= len(prs.slides):
+                continue
+            slide = prs.slides[slide_idx]
+            new_text = str(upd.get("text", ""))
+
+            shape_name = upd.get("shape_name")
+            shape_index = upd.get("shape_index")
+            target_shape = None
+
+            for i, shape in enumerate(slide.shapes):
+                if shape_name and shape.name == shape_name:
+                    target_shape = shape
+                    break
+                if shape_index is not None and i == int(shape_index):
+                    target_shape = shape
+                    break
+
+            if target_shape and target_shape.has_text_frame:
+                # Preserve first run's font settings; replace paragraph text
+                tf = target_shape.text_frame
+                if tf.paragraphs:
+                    para = tf.paragraphs[0]
+                    # Keep existing run formatting, just replace text
+                    if para.runs:
+                        para.runs[0].text = new_text
+                        for run in para.runs[1:]:
+                            run.text = ""
+                    else:
+                        para.text = new_text
+                slides_updated += 1
+
+        prs.save(resolved)
+        return _success_result(
+            _result_path(path, resolved),
+            operation="write_pptx_slides",
+            summary=f"已更新 {slides_updated} 个形状的文字内容",
+            file_type="pptx",
+            change_type="modify",
+            slides_updated=slides_updated,
+        )
+    except ImportError:
+        return json.dumps({"error": "python-pptx not installed. Use run_python_code with python-pptx instead."}, ensure_ascii=False)
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+def add_pptx_slides(path: str, slides: str = "[]") -> str:
+    """Append new slides to an existing PPTX file.
+
+    slides: JSON array of:
+      [{"title": "幻灯片标题", "content": "第一行\\n第二行\\n第三行", "layout_index": 1}, ...]
+    layout_index: 0=空白, 1=标题+内容(默认), 2=章节标题, etc.
+    """
+    resolved = _resolve_path(path)
+    if not resolved:
+        return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
+
+    try:
+        slides_list = json.loads(slides) if isinstance(slides, str) else slides
+    except json.JSONDecodeError as e:
+        return json.dumps({"error": f"Invalid slides JSON: {e}"}, ensure_ascii=False)
+
+    try:
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+        import shutil as _sh
+
+        _sh.copy2(resolved, resolved + ".bak")
+        prs = Presentation(resolved)
+        slides_added = 0
+
+        for slide_data in slides_list:
+            layout_idx = int(slide_data.get("layout_index", 1))
+            layout_idx = min(layout_idx, len(prs.slide_layouts) - 1)
+            layout = prs.slide_layouts[layout_idx]
+            slide = prs.slides.add_slide(layout)
+
+            title_text = slide_data.get("title", "")
+            content_text = slide_data.get("content", "")
+
+            # Set title placeholder if available
+            if slide.shapes.title and title_text:
+                slide.shapes.title.text = title_text
+
+            # Set body/content placeholder if available
+            for ph in slide.placeholders:
+                if ph.placeholder_format.idx == 1 and content_text:
+                    tf = ph.text_frame
+                    tf.clear()
+                    lines = content_text.split("\n")
+                    for i, line in enumerate(lines):
+                        if i == 0:
+                            tf.paragraphs[0].text = line
+                        else:
+                            p = tf.add_paragraph()
+                            p.text = line
+                    break
+
+            slides_added += 1
+
+        total_slides = len(prs.slides)
+        prs.save(resolved)
+        return _success_result(
+            _result_path(path, resolved),
+            operation="add_pptx_slides",
+            summary=f"已新增 {slides_added} 张幻灯片，当前共 {total_slides} 张",
+            file_type="pptx",
+            change_type="modify",
+            slides_added=slides_added,
+            total_slides=total_slides,
+        )
+    except ImportError:
+        return json.dumps({"error": "python-pptx not installed. Use run_python_code instead."}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -1390,6 +1604,43 @@ class TaskToolsPlugin(AgentPlugin):
                     "required": ["source_path", "target_path"],
                 },
             },
+            {
+                "name": "write_pptx_slides",
+                "func": write_pptx_slides,
+                "description": (
+                    "Modify text content in an existing PPTX file. "
+                    "Use to update slide text, titles, or bullet points in-place. "
+                    "Args: path (str — PPTX file path), "
+                    "updates (JSON array of [{slide_index (0-based), shape_name or shape_index, text}]). "
+                    "Returns: JSON with slides_updated count."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "path": {"type": "STRING"},
+                        "updates": {"type": "STRING"},
+                    },
+                    "required": ["path", "updates"],
+                },
+            },
+            {
+                "name": "add_pptx_slides",
+                "func": add_pptx_slides,
+                "description": (
+                    "Add new slides to an existing PPTX file. "
+                    "Args: path (str — PPTX file path), "
+                    "slides (JSON array of [{title, content (bullet lines, one per \\n), layout_index (optional, default 1)}]). "
+                    "Returns: JSON with slides_added count and new total."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "path": {"type": "STRING"},
+                        "slides": {"type": "STRING"},
+                    },
+                    "required": ["path", "slides"],
+                },
+            },
         ]
 
         # editor_live_update requires socketio — only register if available
@@ -1426,4 +1677,4 @@ class TaskToolsPlugin(AgentPlugin):
             )
             return f"Applied: {type}"
         except Exception as e:
-            return f"Error: {e}"
+            return json.dumps({"error": str(e)}, ensure_ascii=False)

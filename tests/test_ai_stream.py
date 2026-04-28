@@ -184,48 +184,24 @@ class TestEditorAIStream:
         events = parse_sse_events(resp.data)
         assert len(events) >= 1
 
-    def test_ai_task_action_prefers_doc_agent_main_path(self, app_client):
-        """ai_task 默认应走 OpenClaw 的 DocAgent 主通路。"""
+    def test_ai_task_action_uses_task_agent(self, app_client):
+        """ai_task 应始终走 TaskAgent 的 ReAct 主通路。"""
         captured = {}
 
-        from app.core.agent.doc_agent import DocEvent, DocEventType
-
-        class FakeDocAgent:
-            def __init__(self, emitter=None, model_id="", api_key=None):
+        class FakeTaskAgent:
+            def __init__(self, socketio=None, model_id="", api_key=None):
                 captured["init_model_id"] = model_id
 
-            def run(self, task):
-                captured["task"] = task.prompt
-                captured["files"] = [f.to_dict() for f in task.files]
-                captured["options"] = task.options or {}
-                yield DocEvent(
-                    DocEventType.PLAN_CREATED,
-                    task_id=task.id,
-                    data={"plan": {"steps": [{"id": "read", "description": "读取当前文件"}]}},
-                )
-                yield DocEvent(
-                    DocEventType.STEP_START,
-                    task_id=task.id,
-                    step_id="read",
-                    data={"description": "读取当前文件"},
-                )
-                yield DocEvent(
-                    DocEventType.VERIFICATION,
-                    task_id=task.id,
-                    data={"status": "completed", "summary": "已验证完成"},
-                )
-                yield DocEvent(
-                    DocEventType.TASK_COMPLETE,
-                    task_id=task.id,
-                    data={"summary": "doc agent done"},
-                )
+            def execute(self, task, files=None, options=None):
+                captured["task"] = task
+                captured["files"] = list(files or [])
+                captured["options"] = options or {}
+                yield 'data: {"type":"plan_summary","text":"正在分析任务..."}\n\n'
+                yield 'data: {"type":"step_start","step_id":"s1","text":"读取文件"}\n\n'
+                yield 'data: {"type":"verification","status":"completed","summary":"已完成"}\n\n'
+                yield 'data: {"type":"done","summary":"task agent done"}\n\n'
 
-        class FailingTaskAgent:
-            def __init__(self, *args, **kwargs):
-                raise AssertionError("TaskAgent should not be used for the default ai_task path")
-
-        with patch("app.core.agent.doc_agent.DocAgent", FakeDocAgent), \
-             patch("app.core.agent.task_agent.TaskAgent", FailingTaskAgent), \
+        with patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent), \
              patch.dict("web.app.MODEL_MAP", {"CHAT": "gemini-chat-default", "FILE_TASK": "gemini-file-task-default"}, clear=False):
             resp = app_client.post(
                 "/api/editor/ai/stream",
@@ -243,7 +219,6 @@ class TestEditorAIStream:
 
         assert resp.status_code == 200
         assert "text/event-stream" in resp.content_type
-        assert captured["init_model_id"] == ""
         assert captured["task"] == "整理当前文件"
         assert captured["options"]["model_mode"] == "local"
         assert captured["options"]["model_id"] == ""
@@ -251,21 +226,14 @@ class TestEditorAIStream:
         assert captured["options"]["current_file_name"] == "demo.docx"
         assert captured["files"] and captured["files"][0]["type"] == "docx"
         events = parse_sse_events(payload)
-        assert any(e.get("type") == "phase" and e.get("current") == "decision" for e in events)
-        assert any(e.get("type") == "plan" for e in events)
+        assert any(e.get("type") == "phase" and e.get("current") == "analysis" for e in events)
         assert any(e.get("type") == "step_start" for e in events)
         assert any(e.get("type") == "verification" for e in events)
         assert any(e.get("type") == "done" for e in events)
 
-    def test_ai_task_runtime_falls_back_to_task_agent_when_doc_agent_boot_fails(self, app_client):
+    def test_ai_task_runtime_always_uses_task_agent(self, app_client):
+        """ai_task 无论文件类型，均走 TaskAgent，不再有 DocAgent 回退。"""
         captured = {}
-
-        class FailingDocAgent:
-            def __init__(self, emitter=None, model_id="", api_key=None):
-                captured["doc_agent_model_id"] = model_id
-
-            def run(self, task):
-                raise RuntimeError("doc agent boot failed")
 
         class FakeTaskAgent:
             def __init__(self, socketio=None, model_id="", api_key=None):
@@ -274,10 +242,9 @@ class TestEditorAIStream:
             def execute(self, task, files=None, options=None):
                 captured["task"] = task
                 captured["options"] = options or {}
-                yield 'data: {"type":"done","summary":"fallback done"}\n\n'
+                yield 'data: {"type":"done","summary":"task agent done"}\n\n'
 
-        with patch("app.core.agent.doc_agent.DocAgent", FailingDocAgent), \
-             patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent):
+        with patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -292,40 +259,25 @@ class TestEditorAIStream:
         assert resp.status_code == 200
         assert captured["task"] == "整理当前文件"
         events = parse_sse_events(payload)
-        assert any(
-            e.get("type") == "plan_summary"
-            and "回退" in str(e.get("text") or "")
-            for e in events
-        )
-        assert any(e.get("type") == "done" and e.get("summary") == "fallback done" for e in events)
+        assert any(e.get("type") == "done" and e.get("summary") == "task agent done" for e in events)
 
-    def test_ai_task_long_docx_transform_uses_chunked_runtime(self, app_client):
+    def test_ai_task_any_file_type_uses_task_agent(self, app_client):
+        """无论是 docx、xlsx 还是长文本，ai_task 均使用 TaskAgent。"""
         captured = {}
 
-        class FakeChunkedRuntime:
+        class FakeTaskAgent:
             def __init__(self, socketio=None, model_id="", api_key=None):
                 captured["init_model_id"] = model_id
 
-            def should_handle(self, task, files=None, options=None):
-                captured["task"] = task
-                captured["files"] = files or []
-                captured["options"] = options or {}
-                return True
-
             def execute(self, task, files=None, options=None):
-                yield 'data: {"type":"phase","phases":[{"id":"chunk","label":"切分文档"}],"current":"chunk","status":"running"}\n\n'
-                yield 'data: {"type":"plan","steps":[{"id":"chunk_1","description":"第 1/2 块"},{"id":"chunk_2","description":"第 2/2 块"}]}\n\n'
-                yield 'data: {"type":"progress","current":1,"total":2,"detail":"已完成第 1/2 块"}\n\n'
-                yield 'data: {"type":"done","summary":"chunked"}\n\n'
-
-        class FailingTaskAgent:
-            def __init__(self, *args, **kwargs):
-                raise AssertionError("TaskAgent should not be used for long chunked tasks")
+                captured["task"] = task
+                captured["files"] = list(files or [])
+                captured["options"] = options or {}
+                yield 'data: {"type":"done","summary":"done"}\n\n'
 
         long_text = ("第一段需要润色。\n\n" * 500).strip()
 
-        with patch("app.core.agent.chunked_task_runtime.ChunkedTaskRuntime", FakeChunkedRuntime), \
-             patch("app.core.agent.task_agent.TaskAgent", FailingTaskAgent):
+        with patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -340,40 +292,31 @@ class TestEditorAIStream:
             payload = resp.get_data()
 
         assert resp.status_code == 200
-        assert captured["init_model_id"]
         assert captured["task"] == "润色当前文件"
         assert captured["options"]["current_file_text"] == long_text
         events = parse_sse_events(payload)
         assert any(e.get("type") == "phase" for e in events)
-        assert any(e.get("type") == "plan" for e in events)
-        assert any(e.get("type") == "progress" for e in events)
         assert any(e.get("type") == "done" for e in events)
 
     def test_ai_task_passes_incoming_history_into_runtime_options(self, app_client):
         captured = {}
 
-        from app.core.agent.doc_agent import DocEvent, DocEventType
-
-        class FakeDocAgent:
-            def __init__(self, emitter=None, model_id="", api_key=None):
+        class FakeTaskAgent:
+            def __init__(self, socketio=None, model_id="", api_key=None):
                 captured["init_model_id"] = model_id
 
-            def run(self, task):
-                captured["task"] = task.prompt
-                captured["history"] = task.history
-                captured["options"] = task.options or {}
-                yield DocEvent(
-                    DocEventType.TASK_COMPLETE,
-                    task_id=task.id,
-                    data={"summary": "ok"},
-                )
+            def execute(self, task, files=None, options=None):
+                captured["task"] = task
+                captured["history"] = list(options.get("history") or [])
+                captured["options"] = options or {}
+                yield 'data: {"type":"done","summary":"ok"}\n\n'
 
         history = [
             {"role": "user", "content": "先看一下这个文件"},
             {"role": "assistant", "content": "我已经初步看过了"},
         ]
 
-        with patch("app.core.agent.doc_agent.DocAgent", FakeDocAgent):
+        with patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -396,27 +339,21 @@ class TestEditorAIStream:
     def test_ai_task_loads_persisted_history_when_frontend_omits_history(self, app_client):
         captured = {}
 
-        from app.core.agent.doc_agent import DocEvent, DocEventType
-
-        class FakeDocAgent:
-            def __init__(self, emitter=None, model_id="", api_key=None):
+        class FakeTaskAgent:
+            def __init__(self, socketio=None, model_id="", api_key=None):
                 captured["model_id"] = model_id
 
-            def run(self, task):
-                captured["history"] = task.history
-                captured["options"] = task.options or {}
-                yield DocEvent(
-                    DocEventType.TASK_COMPLETE,
-                    task_id=task.id,
-                    data={"summary": "ok"},
-                )
+            def execute(self, task, files=None, options=None):
+                captured["history"] = list(options.get("history") or [])
+                captured["options"] = options or {}
+                yield 'data: {"type":"done","summary":"ok"}\n\n'
 
         stored_history = [
             {"role": "user", "parts": ["第一轮任务"]},
             {"role": "model", "parts": ["第一轮结果"]},
         ]
 
-        with patch("app.core.agent.doc_agent.DocAgent", FakeDocAgent), \
+        with patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent), \
              patch("web.app.session_manager.load", return_value=stored_history):
             resp = app_client.post(
                 "/api/editor/ai/stream",
@@ -437,25 +374,16 @@ class TestEditorAIStream:
         ]
 
     def test_ai_task_persists_runtime_turns_via_session_manager(self, app_client):
-        from app.core.agent.doc_agent import DocEvent, DocEventType
 
-        class FakeDocAgent:
-            def __init__(self, emitter=None, model_id="", api_key=None):
+        class FakeTaskAgent:
+            def __init__(self, socketio=None, model_id="", api_key=None):
                 pass
 
-            def run(self, task):
-                yield DocEvent(
-                    DocEventType.VERIFICATION,
-                    task_id=task.id,
-                    data={"status": "completed", "summary": "已验证完成"},
-                )
-                yield DocEvent(
-                    DocEventType.TASK_COMPLETE,
-                    task_id=task.id,
-                    data={"summary": "已整理内容"},
-                )
+            def execute(self, task, files=None, options=None):
+                yield 'data: {"type":"result","output_type":"markdown","data":"已整理内容","summary":"已整理内容"}\n\n'
+                yield 'data: {"type":"done","summary":"已整理内容"}\n\n'
 
-        with patch("app.core.agent.doc_agent.DocAgent", FakeDocAgent), \
+        with patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent), \
              patch("web.app.session_manager.append_user_early") as append_user_early, \
              patch("web.app.session_manager.update_last_model_response") as update_last_model_response:
             resp = app_client.post(
@@ -477,7 +405,7 @@ class TestEditorAIStream:
         assert call_args.args[0] == "editor_demo.json"
         assert call_args.args[1] == "已整理内容"
         assert call_args.kwargs["task"] == "FILE_TASK"
-        assert call_args.kwargs["model_name"] == "openclaw-task-runtime"
+        assert call_args.kwargs["model_name"] == "koto-task-agent"
 
     def test_workspace_open_file_returns_temp_path(self, app_client):
         resp = app_client.post(
@@ -750,6 +678,42 @@ class TestLocalModelMode:
         error_events = [e for e in events if e.get("type") == "error"]
         assert len(error_events) > 0, "Expected an error event when Ollama is not running"
 
+    def test_explicit_cloud_mode_is_not_overridden_by_legacy_local_only_setting(self, app_client):
+        """model_mode=cloud must keep using cloud first even if legacy local-only is enabled."""
+        class FakeCloudProvider:
+            def generate_content(self, prompt=None, model=None, system_instruction=None, stream=False, **kwargs):
+                assert stream is True
+                return iter([
+                    {"content": "云端", "tool_calls": [], "usage": {}},
+                    {"content": "Gemini", "tool_calls": [], "usage": {}},
+                ])
+
+        class FakeLocalProvider:
+            def generate_content(self, prompt=None, model=None, system_instruction=None, stream=False, **kwargs):
+                assert stream is True
+                return iter([
+                    {"content": "本地", "tool_calls": [], "usage": {}},
+                    {"content": "Ollama", "tool_calls": [], "usage": {}},
+                ])
+
+        with patch("web.settings.SettingsManager.get", return_value=True), \
+             patch("app.core.agent.agent_loop._get_provider", return_value=FakeCloudProvider()), \
+             patch("app.core.agent.agent_loop._get_local_provider", return_value=FakeLocalProvider()), \
+             patch("app.core.agent.agent_loop._is_ollama_alive", return_value=True):
+            resp = app_client.post("/api/editor/ai/stream", json={
+                "action": "polish",
+                "selection": "需要润色的文字",
+                "model_mode": "cloud",
+            })
+            resp_data = resp.get_data()
+
+        assert resp.status_code == 200
+        events = parse_sse_events(resp_data)
+        token_texts = "".join(e.get("text", "") for e in events if e.get("type") == "token")
+        assert "云端" in token_texts
+        assert "Gemini" in token_texts
+        assert "Ollama" not in token_texts
+
     def test_workspace_quick_actions_use_editor_ai_stream_with_model_mode(self):
         """Workspace quick actions should use the canonical editor SSE endpoint."""
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
@@ -770,6 +734,7 @@ class TestLocalModelMode:
         toggle_end = src.find("window.WA.setLockedModel = (val) => {", toggle_start)
         assert toggle_start != -1 and toggle_end != -1
         toggle_section = src[toggle_start:toggle_end]
+        assert "const editorMode = mode === 'local' ? 'local' : 'cloud';" in toggle_section
         assert "localStorage.setItem('editor_model_mode', editorMode);" in toggle_section
         assert "localStorage.setItem('editor_locked_model', editorLockedModel);" in toggle_section
         assert "localStorage.removeItem('editor_locked_model');" in toggle_section
@@ -781,7 +746,7 @@ class TestLocalModelMode:
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
         assert "function _refreshModelCatalog(force = false)" in src
         assert "fetch('/api/v1/models', { cache: 'no-store' })" in src
-        assert "_renderModelSelectOptions();" in src
+        assert "_syncModelStatusUi();" in src
 
     def test_workspace_stream_handlers_consume_classification_events(self):
         """Workspace assistant streams should surface backend classification/model routing events."""
@@ -840,10 +805,12 @@ class TestLocalModelMode:
         assert 'Gemini Flash' not in partial_html
         assert 'Gemini Pro 3.1（代码）' not in partial_html
 
-    def test_workspace_hidden_cloud_model_lock_is_normalized_to_auto(self):
+    def test_workspace_cloud_selection_maps_request_model_mode_to_cloud(self):
         js = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
         assert "lockedModel: localStorage.getItem('wa_locked_model') === 'local' ? 'local' : 'auto'" in js
         assert "const storedLockedModel = localStorage.getItem('wa_locked_model');" in js
+        assert "return state.lockedModel === 'local' ? 'local' : 'cloud';" in js
+        assert "model_mode: lockedModel === 'local' ? 'local' : 'cloud'," in js
         assert "window.WA.setLockedModel = (val) => {\n    window.WA.setUseLocalModel(val === 'local');\n  };" in js
 
 
@@ -1084,14 +1051,14 @@ class TestTaskExecuteRoute:
                 "/api/editor/ai/task-execute",
                 json={
                     "task": "处理任务",
-                    "options": {"model_mode": "auto", "model_id": "gemini-2.5-pro"},
+                    "options": {"model_mode": "cloud", "model_id": "gemini-2.5-pro"},
                 },
             )
             _ = resp.get_data()
 
         assert resp.status_code == 200
         assert captured["init_model_id"] == "gemini-2.5-pro"
-        assert captured["options"]["model_mode"] == "auto"
+        assert captured["options"]["model_mode"] == "cloud"
         assert captured["options"]["model_id"] == "gemini-2.5-pro"
 
 

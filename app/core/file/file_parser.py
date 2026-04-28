@@ -544,9 +544,18 @@ def _docx_to_rich_html(
         "标题4": "h4", "标题5": "h5", "标题6": "h6",
         # Common alternative Chinese heading names
         "一级标题": "h1", "二级标题": "h2", "三级标题": "h3",
-        "title": "h1", "subtitle": "h2", "标题": "h1",
+        "标题": "h1",
         # subheading
         "subheading 1": "h2", "subheading 2": "h3",
+    }
+
+    _HEADING_TYPOGRAPHY_FALLBACKS: dict[str, dict[str, str]] = {
+        "h1": {"font-size": "16.0pt", "font-weight": "bold"},
+        "h2": {"font-size": "14.0pt", "font-weight": "bold"},
+        "h3": {"font-size": "12.0pt", "font-weight": "bold"},
+        "h4": {"font-size": "11.0pt", "font-weight": "bold"},
+        "h5": {"font-size": "10.5pt", "font-weight": "bold"},
+        "h6": {"font-size": "10.5pt", "font-weight": "bold"},
     }
 
     _ALIGN_MAP = {
@@ -637,6 +646,18 @@ def _docx_to_rich_html(
             if _ch.isdigit():
                 return _ch
         return "1"
+
+    def _apply_heading_typography_fallback(tag: str, css: dict[str, str], inner_html: str) -> None:
+        """Keep semantic headings readable when DOCX outline metadata has no font props."""
+        _fallback = _HEADING_TYPOGRAPHY_FALLBACKS.get((tag or "").lower())
+        if not _fallback:
+            return
+
+        _inner_lower = inner_html.lower()
+        if "font-size" not in css and "font-size:" not in _inner_lower:
+            css["font-size"] = _fallback["font-size"]
+        if "font-weight" not in css and "font-weight:" not in _inner_lower:
+            css["font-weight"] = _fallback["font-weight"]
 
     def _p_elem_has_toc_anchor(p_el) -> bool:
         """True when paragraph has internal TOC hyperlink targets like #_Toc*."""
@@ -1433,7 +1454,18 @@ def _docx_to_rich_html(
         if _para_rpr_props.get("font_weight_set"):
             _fw = _para_rpr_props.get("font_weight")
         else:
-            _fw = _style_defaults.get("font_weight")
+            # Only apply bold from the paragraph's *direct* named style, not from
+            # ancestor styles.  Walking the full inheritance chain causes all body
+            # paragraphs to appear bold when a base style (Normal / 正文) has
+            # w:b set — a common mishap in WPS / Word document templates.
+            _fw = None
+            _direct_sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+            if _direct_sr is not None:
+                try:
+                    if _direct_sr.font.bold is True:
+                        _fw = "bold"
+                except Exception:
+                    pass
         if _fw:
             css["font-weight"] = _fw
 
@@ -1537,6 +1569,8 @@ def _docx_to_rich_html(
         inner = "".join(inner_parts)
         if not inner.strip():
             inner = "<br/>"
+
+        _apply_heading_typography_fallback(tag, css, inner)
 
         style_str = ";".join(f"{k}:{v}" for k, v in css.items())
         # For TOC entries: strip per-paragraph font-size, font-weight, and
@@ -2097,10 +2131,20 @@ def _docx_to_rich_html(
                     val = olvl.get(qn("w:val"))
                     if val is not None:
                         lvl = int(val)
-                        if 0 <= lvl <= 5:
-                            return f"h{lvl + 1}"
                         if lvl == 9:
                             return None  # 9 means "body text" (no heading)
+                        if 0 <= lvl <= 5:
+                            # Guard against WPS/Word documents that write
+                            # outlineLvl on long body-text paragraphs for
+                            # navigation-pane purposes.  Real headings are
+                            # always concise; skip very long paragraphs.
+                            try:
+                                para_text = para.text.strip() if para is not None else ""
+                                if len(para_text) > 30:
+                                    return None
+                            except Exception:
+                                pass
+                            return f"h{lvl + 1}"
         except Exception:
             pass
 
@@ -2112,7 +2156,7 @@ def _docx_to_rich_html(
         #    - skip if paragraph is a list item (numPr present)
         try:
             para_text = para.text.strip() if para is not None else ""
-            if len(para_text) > 60:
+            if len(para_text) > 30:
                 return None
         except Exception:
             pass
@@ -2360,6 +2404,19 @@ def _docx_to_rich_html(
 
             if _h_tag and not _p_elem_text_content(child_elem):
                 _h_tag = None
+
+            # Guard: h2–h6 paragraphs whose text is longer than 60 chars are
+            # almost certainly body text that was *styled* as a heading for
+            # visual emphasis (e.g. a company-name paragraph styled as "标题2").
+            # Real subheadings are concise; suppress the heading tag so they
+            # don't appear as false entries in the navigation.
+            # h1 (document-level title) is exempt — it can be longer.
+            if _h_tag and _h_tag != "h1":
+                try:
+                    if len((para.text or "").strip()) > 60:
+                        _h_tag = None
+                except Exception:
+                    pass
 
             if _h_tag:
                 block_tag = _h_tag

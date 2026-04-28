@@ -1343,19 +1343,16 @@
     #wa-docx-editor [contenteditable="true"] h1 {
       margin: 0;
       font-size: inherit;
-      font-weight: inherit;
     }
     #wa-docx-editor [data-slate-editor] h2,
     #wa-docx-editor [contenteditable="true"] h2 {
       margin: 0;
       font-size: inherit;
-      font-weight: inherit;
     }
     #wa-docx-editor [data-slate-editor] h3,
     #wa-docx-editor [contenteditable="true"] h3 {
       margin: 0;
       font-size: inherit;
-      font-weight: inherit;
     }
     #wa-docx-editor [data-slate-editor] h4,
     #wa-docx-editor [contenteditable="true"] h4,
@@ -1365,7 +1362,6 @@
     #wa-docx-editor [contenteditable="true"] h6 {
       margin: 0;
       font-size: inherit;
-      font-weight: inherit;
     }
 
     /* ── Hyperlinks — Word default blue ─────────────────────────────────── */
@@ -4719,6 +4715,31 @@
       margin-bottom: 8px;
       font-weight: 600;
     }
+    .wa-settings-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: center;
+      gap: 7px 10px;
+    }
+    .wa-settings-grid-label {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+      white-space: nowrap;
+      line-height: 1;
+    }
+    .wa-settings-grid .wa-output-mode-toggle { margin-bottom: 0; }
+    .wa-model-badge {
+      font-size: 9px;
+      font-weight: 400;
+      opacity: 0.85;
+      margin-left: 4px;
+      max-width: 72px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
 
     /* ── Skill Library Button (header) ── */
     #wa-skill-lib-btn {
@@ -7167,6 +7188,53 @@
   border-radius: 4px;
   font-size: 10.5px;
 }
+
+/* ── Phase bar ──────────────────────────────────────────────── */
+.wa-phase-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 4px 0 8px;
+  font-size: 11px;
+  color: var(--text-muted, #888);
+}
+.wa-phase-dot {
+  padding: 2px 8px;
+  border-radius: 10px;
+  transition: background 0.2s, color 0.2s;
+}
+.wa-phase-dot.active {
+  background: rgba(100,140,255,0.18);
+  color: #8ab4f8;
+  font-weight: 500;
+}
+.wa-phase-dot.done {
+  color: #6bcf8f;
+}
+.wa-phase-sep {
+  color: var(--text-muted, #666);
+  font-size: 10px;
+  padding: 0 2px;
+}
+
+/* ── File change preview snippet ───────────────────────────── */
+.wa-file-preview {
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.04);
+  border-left: 2px solid rgba(100,140,255,0.3);
+  border-radius: 0 4px 4px 0;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-muted, #888);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 60px;
+  overflow: hidden;
+}
+
+/* ── Verification step variants ─────────────────────────────── */
+.wa-agent-step.step-warn::before { background: #f59e0b; }
 
 /* ── Approval Card ──────────────────────────────────────────── */
 .wa-approval-card {

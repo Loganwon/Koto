@@ -22,6 +22,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
+from app.core.llm.model_mode import normalize_model_mode
+from app.core.shared.tool_parser import stringify_tool_result
+
 logger = logging.getLogger(__name__)
 
 _FILE_CONTEXT_PREVIEW_LIMIT = 8_000
@@ -29,6 +32,18 @@ _HISTORY_MESSAGE_CONTEXT_LIMIT = 2_000
 _TOOL_RESULT_CONTEXT_LIMIT = 24_000
 _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"))
 _REPEATED_TOOL_BATCH_MESSAGE = "检测到模型重复请求同一组工具，已自动停止以避免重复处理。"
+_KOTO_CREATED_MARKER = "__koto_created__:"
+
+
+def _extract_koto_created_paths(result_str: str) -> List[str]:
+    """Parse __koto_created__:[...] marker appended by run_python_in_sandbox."""
+    idx = result_str.rfind(_KOTO_CREATED_MARKER)
+    if idx == -1:
+        return []
+    try:
+        return json.loads(result_str[idx + len(_KOTO_CREATED_MARKER):])
+    except Exception:
+        return []
 
 
 def _sample_context_text(text: Any, limit: int) -> str:
@@ -203,7 +218,8 @@ _SYSTEM_PROMPT = """你是 Koto 文件任务助手。用户会描述一个涉及
 6. 如果任务不明确，先用已有工具探索文件内容，然后再决定具体做法
 7. 当任务要求把 Excel 数据写入 Word 新表格时，优先使用 `insert_excel_as_docx_table`
 8. 对结果文件负责：完成写入后，必须确认目标文件已经更新，并在最终答复中明确说明修改的是哪个文件
-9. 同一轮里不要对完全相同的工具参数重复调用同一个工具；如果某个写入工具已经成功完成，下一步应校验结果或结束，而不是再次重复写入"""
+9. 同一轮里不要对完全相同的工具参数重复调用同一个工具；如果某个写入工具已经成功完成，下一步应校验结果或结束，而不是再次重复写入
+10. 所有写入文件的内容必须是基于实际任务数据生成的真实内容；严禁使用任何占位符、示例文本或模板内容（如"内容示例""请替换为实际内容""XX此处填写YY"等）——没有数据时先调用读取工具获取，再写入"""
 
 
 _LIVE_UPDATE_PROMPT = """
@@ -227,10 +243,26 @@ _LIVE_UPDATE_PROMPT = """
 """
 
 
+_LOCAL_SYSTEM_PROMPT = """你是 Koto 文件助手（本地模式）。
+
+用户会描述一个文件操作任务，你必须通过调用工具来完成，而不是只给出文字描述。
+
+## 工具使用规则
+
+1. 优先调用 `parse_file_to_text` 或 `read_docx_content` 读取文件，再决定如何修改
+2. 对文件的所有修改必须通过工具完成并落盘；如需操作 PPTX/PDF 等，使用 `run_python_code` 编写 python-pptx 代码执行
+3. **严禁新建文件**：所有修改必须写回原始文件路径，不能另存为新文件（如 _优化版、_updated 等）
+4. 每步给用户简洁的进度说明
+5. 写入工具执行成功后确认结果，不要重复写入同一文件
+6. 如果文件内容不足以完成任务，先调用读取工具获取，再写入；严禁使用占位符或示例内容"""
+
+
 # ── TaskAgent ──────────────────────────────────────────────────────────────
 
 # Maximum tool call rounds per task execution
 MAX_ROUNDS = 20
+# Maximum rounds when running on a local (Ollama) model — saves time
+MAX_ROUNDS_LOCAL = 10
 # Maximum consecutive errors before aborting
 MAX_CONSECUTIVE_ERRORS = 3
 _MODIFIER_TOOLS = {
@@ -244,7 +276,9 @@ _MODIFIER_TOOLS = {
 
 # 一次任务中，写入工具对同一个目标文件的最大成功执行次数
 # 超过此数字认为是重复写入，跳过并注入警告
-_MAX_WRITE_OPS_PER_FILE = 2
+# NOTE: insert_excel_as_docx_table 不按 sheet 单独计数（见 _canonical_write_target），
+#       最多允许对同一 DOCX 写入 3 次（首次 + 2 次格式修正）。
+_MAX_WRITE_OPS_PER_FILE = 3
 
 
 class TaskAgent:
@@ -286,6 +320,7 @@ class TaskAgent:
         files = files or []
         options = options or {}
         task_id = uuid.uuid4().hex[:8]
+        _is_local = normalize_model_mode(options.get("model_mode")) == "local"
 
         yield sse_plan_summary("正在分析任务...")
 
@@ -296,13 +331,16 @@ class TaskAgent:
         registry = self._build_registry(files)
         tool_defs = registry.get_definitions()
 
-        # ── Build system prompt with skill injection ───────────────────
-        system = _SYSTEM_PROMPT
-        if self._socketio:
-            system += _LIVE_UPDATE_PROMPT
-        skill_prompt = _load_skill_prompts(task)
-        if skill_prompt:
-            system += f"\n\n## 参考知识\n\n{skill_prompt}"
+        # ── Build system prompt ────────────────────────────────────────
+        if _is_local:
+            system = _LOCAL_SYSTEM_PROMPT
+        else:
+            system = _SYSTEM_PROMPT
+            if self._socketio:
+                system += _LIVE_UPDATE_PROMPT
+            skill_prompt = _load_skill_prompts(task)
+            if skill_prompt:
+                system += f"\n\n## 参考知识\n\n{skill_prompt}"
 
         # ── Build initial messages ─────────────────────────────────────
         user_message = self._build_user_message(task, file_context)
@@ -319,6 +357,7 @@ class TaskAgent:
         # ── Main execution loop ────────────────────────────────────────
         rounds = 0
         consecutive_errors = 0
+        _max_rounds = MAX_ROUNDS_LOCAL if normalize_model_mode((options or {}).get("model_mode")) == "local" else MAX_ROUNDS
         current_step_id = "init"
         has_live_update_tool = any(d.get("name") == "editor_live_update" for d in tool_defs)
         has_stage_verification_tool = any(d.get("name") == "verify_task_completion" for d in tool_defs)
@@ -328,8 +367,12 @@ class TaskAgent:
         file_states: list[dict[str, Any]] = []
         # Cross-round write dedup: tracks (tool_name, canonical_target_path) → success count
         completed_write_ops: dict[str, int] = {}
+        # Track whether any tool call ever produced a hard error across all rounds
+        had_any_error = False
+        # Local model: whether we've already injected a "write your answer" directive
+        _local_final_answer_injected = False
 
-        while rounds < MAX_ROUNDS:
+        while rounds < _max_rounds:
             rounds += 1
 
             try:
@@ -371,6 +414,10 @@ class TaskAgent:
             # Append model turn (include tool_calls + raw_parts for Gemini multi-turn)
             model_msg: Dict[str, Any] = {"role": "model", "content": content_text or ""}
             if tool_calls:
+                # Ensure every tool call has an id for proper multi-turn tracking
+                for _tc in tool_calls:
+                    if not _tc.get("id"):
+                        _tc["id"] = uuid.uuid4().hex[:8]
                 model_msg["tool_calls"] = tool_calls
             raw_parts = response.get("_raw_parts")
             if raw_parts:
@@ -379,18 +426,36 @@ class TaskAgent:
 
             tool_batch_signature = self._tool_batch_signature(tool_calls)
             if tool_batch_signature and tool_batch_signature == last_successful_tool_batch_signature:
-                repeat_notice = "检测到模型重复请求同一组工具，已自动停止后续执行"
-                if last_successful_tool_batch_summary:
-                    repeat_notice = f"{repeat_notice}：{last_successful_tool_batch_summary}"
-                yield sse_thought(repeat_notice)
-                final_summary = "检测到重复步骤，已自动停止"
-                break
+                # Local models sometimes loop on read-only tool calls after getting file content.
+                # Inject a final-answer directive once before giving up.
+                _is_local = normalize_model_mode((options or {}).get("model_mode")) == "local"
+                if _is_local and not _local_final_answer_injected:
+                    _local_final_answer_injected = True
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "你已经读取了文件内容，请不要再调用任何工具。"
+                            "直接用文字写出你的分析、总结或回答。"
+                        ),
+                    })
+                    # Don't break — allow one more round to generate a text answer
+                else:
+                    repeat_notice = "检测到模型重复请求同一组工具，已自动停止后续执行"
+                    if last_successful_tool_batch_summary:
+                        repeat_notice = f"{repeat_notice}：{last_successful_tool_batch_summary}"
+                    yield sse_thought(repeat_notice)
+                    final_summary = "检测到重复步骤，已自动停止"
+                    break
 
             # ── No tool calls → final answer, we're done ───────────────
             if not tool_calls:
+                # Detect tasks that should have written files but didn't.
+                # has_stage_verification_tool is True only for file-modification tasks.
+                no_writes = has_stage_verification_tool and not completed_write_ops
+                status_label = "请检查结果" if no_writes else "任务完成"
                 if content_text:
-                    yield sse_result("markdown", content_text, "任务完成")
-                final_summary = "任务完成"
+                    yield sse_result("markdown", content_text, status_label)
+                final_summary = status_label
                 break
 
             # ── Execute tool calls ─────────────────────────────────────
@@ -414,6 +479,7 @@ class TaskAgent:
                     messages.append({
                         "role": "function",
                         "name": tool_name,
+                        "tool_call_id": tool_call_id,
                         "content": "已跳过重复工具调用",
                     })
                     continue
@@ -428,13 +494,15 @@ class TaskAgent:
                     prior_count = completed_write_ops.get(write_key, 0)
                     if prior_count >= _MAX_WRITE_OPS_PER_FILE:
                         skip_msg = (
-                            f"⚠️ 写入工具 `{tool_name}` 已对目标文件成功执行 {prior_count} 次，"
-                            "本次调用被跳过以防止重复写入。如需修复格式问题，请使用 run_python_code。"
+                            f"[系统提示] `{tool_name}` 已成功对该文件执行 {prior_count} 次写入，"
+                            "文件数据已是最新状态，本次调用已自动跳过（保护数据完整性）。"
+                            "请直接汇报已完成的结果，无需再次写入。"
                         )
                         # Silently skip with feedback to model, no user-facing noise
                         messages.append({
                             "role": "function",
                             "name": tool_name,
+                            "tool_call_id": tool_call_id,
                             "content": skip_msg,
                         })
                         continue
@@ -444,11 +512,12 @@ class TaskAgent:
 
                 # Execute the tool
                 try:
-                    result = registry.execute(tool_name, tool_args)
-                    result_str = str(result) if result is not None else "(no output)"
+                    result = registry.execute(tool_name, tool_args) if registry else None
+                    result_str = stringify_tool_result(result)
                 except Exception as e:
                     result_str = f"Error: {e}"
                     batch_had_error = True
+                    had_any_error = True
                     logger.warning("[TaskAgent] Tool %s failed: %s", tool_name, e)
                     yield sse_step_error(current_step_id, str(e))
 
@@ -456,6 +525,7 @@ class TaskAgent:
                 preview_text = self._tool_result_preview(tool_name, result_str)
                 if result_str.startswith("Error:"):
                     batch_had_error = True
+                    had_any_error = True
                 elif preview_text:
                     batch_summaries.append(preview_text)
                 yield sse_tool_result(current_step_id, tool_name, preview_text)
@@ -466,8 +536,35 @@ class TaskAgent:
                     batch_file_changes.append(file_change)
                     yield sse_file_change(**file_change)
 
+                # run_python_code may create workspace files — detect KOTO_CREATED markers
+                if tool_name == "run_python_code" and not result_str.startswith("Error:"):
+                    for created_path in _extract_koto_created_paths(result_str):
+                        py_change = {
+                            "path": created_path,
+                            "file_type": Path(created_path).suffix.lstrip(".").lower(),
+                            "operation": "run_python_code",
+                            "summary": f"Python 代码创建了 {os.path.basename(created_path)}",
+                            "preview": "",
+                            "change_type": "create",
+                            "focus": True,
+                        }
+                        batch_file_changes.append(py_change)
+                        yield sse_file_change(**py_change)
+                        # Track as a write op to prevent the model from writing the same file again
+                        write_key = f"run_python_code::{os.path.normcase(created_path)}"
+                        completed_write_ops[write_key] = completed_write_ops.get(write_key, 0) + 1
+
                 # Track successful write operations for cross-round dedup
-                if tool_name in _MODIFIER_TOOLS and not result_str.startswith("Error:"):
+                # Treat both "Error: ..." strings and {"error": ...} JSON as failures.
+                _is_success = not result_str.startswith("Error:")
+                if _is_success:
+                    try:
+                        _p = json.loads(result_str)
+                        if isinstance(_p, dict) and _p.get("error"):
+                            _is_success = False
+                    except Exception:
+                        pass
+                if tool_name in _MODIFIER_TOOLS and _is_success:
                     canonical_target = self._canonical_write_target(tool_name, tool_args)
                     write_key = f"{tool_name}::{canonical_target}"
                     completed_write_ops[write_key] = completed_write_ops.get(write_key, 0) + 1
@@ -478,6 +575,7 @@ class TaskAgent:
                 messages.append({
                     "role": "function",
                     "name": tool_name,
+                    "tool_call_id": tool_call_id,
                     "content": _sample_context_text(result_str, _TOOL_RESULT_CONTEXT_LIMIT),
                 })
 
@@ -488,7 +586,10 @@ class TaskAgent:
                 last_successful_tool_batch_signature = None
                 last_successful_tool_batch_summary = ""
 
-            if has_stage_verification_tool and batch_file_changes and not batch_had_error:
+            if has_stage_verification_tool and batch_file_changes:
+                # Run verification whenever any files were written in this batch,
+                # even if other tools in the same batch errored — partial progress
+                # is still worth verifying so the model knows what's done.
                 file_states = self._merge_file_states(file_states, batch_file_changes)
                 verify_step_id = f"verify_{rounds}"
                 yield sse_step_start(verify_step_id, "阶段检测")
@@ -531,6 +632,8 @@ class TaskAgent:
         elapsed = round(time.time() - start_time, 1)
         if final_summary:
             yield sse_done(f"{final_summary}，耗时 {elapsed}s（共 {rounds} 轮）")
+        elif had_any_error:
+            yield sse_done(f"执行遇到错误，耗时 {elapsed}s（共 {rounds} 轮）")
         else:
             yield sse_done(f"任务完成，耗时 {elapsed}s（共 {rounds} 轮）")
 
@@ -806,6 +909,8 @@ class TaskAgent:
         """Return a canonical string key for the write target of a modifier tool.
 
         Used to detect cross-round duplicate writes to the same file.
+        For insert_excel_as_docx_table we intentionally do NOT include sheet_name
+        so that all sheet insertions to the same DOCX count against the same cap.
         """
         path = (
             tool_args.get("path")
@@ -814,10 +919,6 @@ class TaskAgent:
             or ""
         )
         path = os.path.normcase(os.path.abspath(str(path))) if path else "__unknown__"
-        # For insert_excel_as_docx_table also include sheet_name to allow different sheets
-        if tool_name == "insert_excel_as_docx_table":
-            sheet = str(tool_args.get("sheet_name") or "").strip()
-            return f"{path}::{sheet}" if sheet else path
         return path
 
     @staticmethod
@@ -968,13 +1069,16 @@ class TaskAgent:
 
     def _get_provider(self, options: Optional[Dict[str, Any]] = None):
         """Get LLM provider instance."""
-        model_mode = str((options or {}).get("model_mode") or "auto").strip().lower()
+        model_mode = normalize_model_mode((options or {}).get("model_mode"))
         if model_mode == "local":
             try:
                 from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
-                local_model = str((options or {}).get("local_model") or "").strip() or None
-                return OllamaLLMProvider(model=local_model)
+                local_model = str((options or {}).get("local_model") or "").strip()
+                # Discard cloud-only model IDs that Ollama cannot serve
+                if local_model.lower().startswith("gemini") or local_model.lower() in {"auto", "cloud"}:
+                    local_model = ""
+                return OllamaLLMProvider(model=local_model or None)
             except Exception as e:
                 logger.error("[TaskAgent] Failed to init local LLM provider: %s", e)
                 return None
@@ -1006,11 +1110,16 @@ class TaskAgent:
         options: Optional[Dict[str, Any]] = None,
     ) -> dict:
         """Call the LLM with messages and tools. Returns response dict."""
-        model_mode = str((options or {}).get("model_mode") or "auto").strip().lower()
+        model_mode = normalize_model_mode((options or {}).get("model_mode"))
         if model_mode == "local":
+            # Pass tools through — OllamaLLMProvider supports native tool calling
+            # for compatible models (qwen3, llama3.1, mistral-nemo, etc.)
+            _local_m = str((options or {}).get("local_model") or "").strip()
+            if _local_m.lower().startswith("gemini") or _local_m.lower() in {"auto", "cloud"}:
+                _local_m = ""
             return provider.generate_content(
                 prompt=messages,
-                model=str((options or {}).get("local_model") or "").strip() or None,
+                model=_local_m or None,
                 system_instruction=system,
                 tools=tool_defs if tool_defs else None,
                 stream=False,

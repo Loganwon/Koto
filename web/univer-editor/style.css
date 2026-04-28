@@ -3200,3 +3200,51 @@ html, body {
   cursor: pointer;
 }
 .skill-rec-dismiss-btn:hover { color: var(--fa-text-primary); background: var(--fa-bg-hover); }
+
+/* ── Doc Live Commit Bar ── */
+.doc-live-commit-bar {
+  position: fixed;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  background: #fff;
+  border: 1.5px solid var(--accent, #4a7ce8);
+  border-radius: 12px;
+  padding: 9px 16px;
+  box-shadow: 0 4px 20px rgba(74, 124, 232, 0.22);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  color: #24458a;
+  animation: liveBarIn 0.2s cubic-bezier(0.2, 0, 0.2, 1);
+  white-space: nowrap;
+}
+@keyframes liveBarIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.doc-live-commit-label {
+  font-weight: 600;
+  margin-right: 2px;
+}
+.doc-live-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: background 0.15s;
+}
+.doc-live-btn--accept {
+  background: var(--accent, #4a7ce8);
+  color: #fff;
+}
+.doc-live-btn--accept:hover { background: #3566d0; }
+.doc-live-btn--dismiss {
+  background: var(--fa-bg-hover, #f0f0f0);
+  color: var(--fa-text-secondary, #888);
+}
+.doc-live-btn--dismiss:hover { background: #e0e0e0; }

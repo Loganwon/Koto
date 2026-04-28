@@ -95,12 +95,44 @@ def _write_typography_fixture_docx(path) -> None:
     doc.save(path)
 
 
+def _write_outline_only_heading_fixture_docx(path) -> None:
+    from docx import Document  # noqa: PLC0415
+    from docx.oxml import OxmlElement  # noqa: PLC0415
+    from docx.oxml.ns import qn  # noqa: PLC0415
+
+    doc = Document()
+    para = doc.add_paragraph("执行概要")
+    p_pr = para._p.get_or_add_pPr()
+    outline_lvl = p_pr.find(qn("w:outlineLvl"))
+    if outline_lvl is None:
+        outline_lvl = OxmlElement("w:outlineLvl")
+        p_pr.append(outline_lvl)
+    outline_lvl.set(qn("w:val"), "1")
+    doc.save(path)
+
+
 @pytest.fixture()
 def typography_html(tmp_path) -> str:
     pytest.importorskip("docx", reason="python-docx 未安装")
 
     docx_path = tmp_path / "typography-fixture.docx"
     _write_typography_fixture_docx(docx_path)
+
+    from app.core.file.file_parser import parse_docx  # noqa: PLC0415
+
+    result = parse_docx(str(docx_path))
+    assert isinstance(result, dict), "parse_docx() must return a dict"
+    html = result.get("html", "")
+    assert isinstance(html, str) and html, "parse_docx() must produce HTML"
+    return html
+
+
+@pytest.fixture()
+def outline_heading_fallback_html(tmp_path) -> str:
+    pytest.importorskip("docx", reason="python-docx 未安装")
+
+    docx_path = tmp_path / "outline-only-heading.docx"
+    _write_outline_only_heading_fixture_docx(docx_path)
 
     from app.core.file.file_parser import parse_docx  # noqa: PLC0415
 
@@ -219,6 +251,29 @@ class TestTypography:
         assert style_match, "Target heading missing inline style"
         style = style_match.group(1)
         assert "font-size:16.0pt" in style
+
+    def test_outline_level_heading_without_font_props_gets_fallback_typography(
+        self, outline_heading_fallback_html: str
+    ) -> None:
+        """Outline-only headings should still render with a readable heading size/weight."""
+        blocks = re.findall(r'<(h[1-6])\b([^>]*)>(.*?)</\1>', outline_heading_fallback_html, re.IGNORECASE | re.DOTALL)
+        target_tag = None
+        target_attrs = None
+        for tag, attrs, inner in blocks:
+            text = re.sub(r'<[^>]+>', '', inner).replace("\xa0", " ")
+            text = re.sub(r'\s+', ' ', text).strip()
+            if text == "执行概要":
+                target_tag = tag.lower()
+                target_attrs = attrs
+                break
+
+        assert target_tag == "h2", "Outline level 1 paragraph should render as <h2>"
+        assert target_attrs is not None, "Outline-only heading not found in parsed HTML"
+        style_match = re.search(r'style="([^"]*)"', target_attrs)
+        assert style_match, "Outline-only heading missing inline style"
+        style = style_match.group(1)
+        assert "font-size:14.0pt" in style
+        assert "font-weight:bold" in style
 
 
 @pytest.mark.integration

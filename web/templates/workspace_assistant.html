@@ -907,17 +907,20 @@
 
       <!-- Settings panel (collapsible) -->
       <div id="wa-ai-settings-panel">
-        {% set wa_local_model_controls_with_icons = true %}
-        {% include '_workspace_model_controls.html' %}
-        <div class="wa-setting-label">AI 输出模式</div>
-        <div class="wa-output-mode-toggle">
-          <button data-mode="inline" class="active" onclick="WA.setOutputMode('inline')"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/></svg> 写入文档</button>
-          <button data-mode="chat" onclick="WA.setOutputMode('chat')"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H5l-3 3V4a1 1 0 0 1 1-1z"/></svg> 仅对话框</button>
-        </div>
-        <div class="wa-setting-label" style="margin-top:10px">面板位置</div>
-        <div class="wa-output-mode-toggle">
-          <button id="wa-panel-autoreset-on" class="active" onclick="WA.setPanelAutoReset(true)" title="每次发送消息时自动展开右侧面板"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.9-3.2M13.5 8a5.5 5.5 0 0 1-9.9 3.2"/><path d="M12.4 1.5v3.3h-3.3M3.6 14.5v-3.3h3.3"/></svg> 自动重置</button>
-          <button id="wa-panel-autoreset-off" onclick="WA.setPanelAutoReset(false)" title="保持当前面板宽度，不自动重置"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5l6 0 0 4.5-1.5 1.5V11H6.5V8.5L5 7z"/><path d="M8 11v3.5"/></svg> 保持位置</button>
+        <div class="wa-settings-grid">
+          <span class="wa-settings-grid-label">模型</span>
+          {% set wa_local_model_controls_with_icons = true %}
+          {% include '_workspace_model_controls.html' %}
+          <span class="wa-settings-grid-label">输出</span>
+          <div class="wa-output-mode-toggle">
+            <button data-mode="inline" class="active" onclick="WA.setOutputMode('inline')"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/></svg> 写入文档</button>
+            <button data-mode="chat" onclick="WA.setOutputMode('chat')"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H5l-3 3V4a1 1 0 0 1 1-1z"/></svg> 仅对话框</button>
+          </div>
+          <span class="wa-settings-grid-label">面板</span>
+          <div class="wa-output-mode-toggle">
+            <button id="wa-panel-autoreset-on" class="active" onclick="WA.setPanelAutoReset(true)" title="每次发送消息时自动展开右侧面板"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.9-3.2M13.5 8a5.5 5.5 0 0 1-9.9 3.2"/><path d="M12.4 1.5v3.3h-3.3M3.6 14.5v-3.3h3.3"/></svg> 自动重置</button>
+            <button id="wa-panel-autoreset-off" onclick="WA.setPanelAutoReset(false)" title="保持当前面板宽度，不自动重置"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5l6 0 0 4.5-1.5 1.5V11H6.5V8.5L5 7z"/><path d="M8 11v3.5"/></svg> 保持位置</button>
+          </div>
         </div>
       </div>
 
