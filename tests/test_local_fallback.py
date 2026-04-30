@@ -36,6 +36,7 @@ try:
         _is_online_failure,
         _stream_llm,
     )
+
     _IMPORT_OK = True
 except Exception as _exc:
     _IMPORT_OK = False
@@ -51,36 +52,43 @@ skipif_no_import = pytest.mark.skipif(
 # 1. _is_online_failure() — 错误分类
 # ===========================================================================
 
+
 class TestIsOnlineFailure:
     """_is_online_failure 必须正确识别所有可恢复的云端错误。"""
 
-    @pytest.mark.parametrize("msg", [
-        "Request timed out after 30 s",
-        "stream stalled — no data for 15 s",
-        "503 Service Unavailable",
-        "service unavailable",
-        "timeout exceeded",
-        "ResourceExhausted: quota exceeded",
-        "resource_exhausted",
-        "429 Too Many Requests",
-        "model overloaded",
-        "quota limit reached",
-        "INVALID_ARGUMENT: API key not valid",
-        "api key invalid",
-        "api_key expired",
-        "400 Bad Request: expired",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "Request timed out after 30 s",
+            "stream stalled — no data for 15 s",
+            "503 Service Unavailable",
+            "service unavailable",
+            "timeout exceeded",
+            "ResourceExhausted: quota exceeded",
+            "resource_exhausted",
+            "429 Too Many Requests",
+            "model overloaded",
+            "quota limit reached",
+            "INVALID_ARGUMENT: API key not valid",
+            "api key invalid",
+            "api_key expired",
+            "400 Bad Request: expired",
+        ],
+    )
     @skipif_no_import
     def test_recoverable_errors_trigger_fallback(self, msg):
         exc = RuntimeError(msg)
         assert _is_online_failure(exc), f"Expected True for: {msg!r}"
 
-    @pytest.mark.parametrize("msg", [
-        "ValueError: unexpected token",
-        "KeyError: missing field 'content'",
-        "AttributeError: 'NoneType' has no attribute",
-        "ZeroDivisionError",
-    ])
+    @pytest.mark.parametrize(
+        "msg",
+        [
+            "ValueError: unexpected token",
+            "KeyError: missing field 'content'",
+            "AttributeError: 'NoneType' has no attribute",
+            "ZeroDivisionError",
+        ],
+    )
     @skipif_no_import
     def test_non_recoverable_errors_do_not_trigger_fallback(self, msg):
         exc = RuntimeError(msg)
@@ -90,6 +98,7 @@ class TestIsOnlineFailure:
 # ===========================================================================
 # 2. _is_ollama_alive() — 端口探测
 # ===========================================================================
+
 
 class TestIsOllamaAlive:
 
@@ -119,6 +128,7 @@ class TestIsOllamaAlive:
 # 3. _call_llm_sync() — 代码生成降级
 # ===========================================================================
 
+
 def _make_provider(content="local model response"):
     """构造一个返回固定内容的 mock LLMProvider。"""
     provider = MagicMock()
@@ -132,19 +142,23 @@ class TestCallLlmSync:
     def test_online_success_returns_directly(self):
         """云端成功时直接返回，不调用本地。"""
         online_prov = _make_provider("online answer")
-        with patch("app.core.socket_handler._get_provider", return_value=online_prov), \
-             patch("app.core.socket_handler._get_local_provider") as mock_local:
+        with patch(
+            "app.core.socket_handler._get_provider", return_value=online_prov
+        ), patch("app.core.socket_handler._get_local_provider") as mock_local:
             result = _call_llm_sync("test prompt")
         assert result == "online answer"
         mock_local.assert_not_called()
 
-    @pytest.mark.parametrize("error_msg", [
-        "Request timed out",
-        "503 Service Unavailable",
-        "429 Too Many Requests",
-        "api key invalid",
-        "ResourceExhausted",
-    ])
+    @pytest.mark.parametrize(
+        "error_msg",
+        [
+            "Request timed out",
+            "503 Service Unavailable",
+            "429 Too Many Requests",
+            "api key invalid",
+            "ResourceExhausted",
+        ],
+    )
     @skipif_no_import
     def test_online_failure_falls_back_to_local(self, error_msg):
         """云端抛出可恢复错误时，应降级到本地 Ollama。"""
@@ -153,13 +167,16 @@ class TestCallLlmSync:
 
         local_prov = _make_provider("local answer")
 
-        with patch("app.core.socket_handler._get_provider", return_value=online_prov), \
-             patch("app.core.socket_handler._is_ollama_alive", return_value=True), \
-             patch("app.core.socket_handler._get_local_provider", return_value=local_prov):
+        with patch(
+            "app.core.socket_handler._get_provider", return_value=online_prov
+        ), patch("app.core.socket_handler._is_ollama_alive", return_value=True), patch(
+            "app.core.socket_handler._get_local_provider", return_value=local_prov
+        ):
             result = _call_llm_sync("test prompt")
 
-        assert result == "local answer", \
-            f"Fallback should succeed for error: {error_msg!r}"
+        assert (
+            result == "local answer"
+        ), f"Fallback should succeed for error: {error_msg!r}"
 
     @skipif_no_import
     def test_online_failure_ollama_down_returns_none(self):
@@ -167,8 +184,9 @@ class TestCallLlmSync:
         online_prov = MagicMock()
         online_prov.generate_content.side_effect = RuntimeError("503 unavailable")
 
-        with patch("app.core.socket_handler._get_provider", return_value=online_prov), \
-             patch("app.core.socket_handler._is_ollama_alive", return_value=False):
+        with patch(
+            "app.core.socket_handler._get_provider", return_value=online_prov
+        ), patch("app.core.socket_handler._is_ollama_alive", return_value=False):
             result = _call_llm_sync("test prompt")
 
         assert result is None
@@ -179,8 +197,9 @@ class TestCallLlmSync:
         online_prov = MagicMock()
         online_prov.generate_content.side_effect = ValueError("unexpected token")
 
-        with patch("app.core.socket_handler._get_provider", return_value=online_prov), \
-             patch("app.core.socket_handler._get_local_provider") as mock_local:
+        with patch(
+            "app.core.socket_handler._get_provider", return_value=online_prov
+        ), patch("app.core.socket_handler._get_local_provider") as mock_local:
             result = _call_llm_sync("test prompt")
 
         assert result is None
@@ -195,9 +214,11 @@ class TestCallLlmSync:
         local_prov = MagicMock()
         local_prov.generate_content.side_effect = Exception("Ollama crashed")
 
-        with patch("app.core.socket_handler._get_provider", return_value=online_prov), \
-             patch("app.core.socket_handler._is_ollama_alive", return_value=True), \
-             patch("app.core.socket_handler._get_local_provider", return_value=local_prov):
+        with patch(
+            "app.core.socket_handler._get_provider", return_value=online_prov
+        ), patch("app.core.socket_handler._is_ollama_alive", return_value=True), patch(
+            "app.core.socket_handler._get_local_provider", return_value=local_prov
+        ):
             result = _call_llm_sync("test prompt")
 
         assert result is None
@@ -207,12 +228,11 @@ class TestCallLlmSync:
 # 4. _stream_llm() — 用于 client_request 快捷操作的流式降级
 # ===========================================================================
 
+
 def _make_streaming_provider(chunks):
     """构造返回分块流的 mock provider。"""
     provider = MagicMock()
-    provider.generate_content.return_value = iter(
-        [{"content": c} for c in chunks]
-    )
+    provider.generate_content.return_value = iter([{"content": c} for c in chunks])
     return provider
 
 
@@ -222,13 +242,15 @@ class TestStreamLlm:
     def test_online_stream_success(self):
         """云端流式正常时返回完整文本，不调用本地。"""
         emitted = []
+
         def fake_emit(event, data, namespace=None):
             emitted.append((event, data))
 
         online_prov = _make_streaming_provider(["hello ", "world"])
 
-        with patch("app.core.socket_handler._get_provider", return_value=online_prov), \
-             patch("app.core.socket_handler._get_local_provider") as mock_local:
+        with patch(
+            "app.core.socket_handler._get_provider", return_value=online_prov
+        ), patch("app.core.socket_handler._get_local_provider") as mock_local:
             result = _stream_llm(fake_emit, "Polish:", "some text")
 
         assert result == "hello world"
@@ -237,17 +259,21 @@ class TestStreamLlm:
         chunk_events = [d for ev, d in emitted if ev == "agent_stream_chunk"]
         assert len(chunk_events) == 2
 
-    @pytest.mark.parametrize("error_msg", [
-        "timed out",
-        "503 unavailable",
-        "429 rate limited",
-        "api key invalid",
-        "quota exceeded",
-    ])
+    @pytest.mark.parametrize(
+        "error_msg",
+        [
+            "timed out",
+            "503 unavailable",
+            "429 rate limited",
+            "api key invalid",
+            "quota exceeded",
+        ],
+    )
     @skipif_no_import
     def test_online_stream_failure_falls_back_to_local(self, error_msg):
         """云端流式失败时应降级到本地并返回本地内容。"""
         emitted = []
+
         def fake_emit(event, data, namespace=None):
             emitted.append((event, data))
 
@@ -256,45 +282,56 @@ class TestStreamLlm:
 
         local_prov = _make_streaming_provider(["local ", "result"])
 
-        with patch("app.core.socket_handler._get_provider", return_value=online_prov), \
-             patch("app.core.socket_handler._is_ollama_alive", return_value=True), \
-             patch("app.core.socket_handler._get_local_provider", return_value=local_prov):
+        with patch(
+            "app.core.socket_handler._get_provider", return_value=online_prov
+        ), patch("app.core.socket_handler._is_ollama_alive", return_value=True), patch(
+            "app.core.socket_handler._get_local_provider", return_value=local_prov
+        ):
             result = _stream_llm(fake_emit, "Polish:", "text")
 
-        assert result == "local result", \
-            f"Local fallback should produce result for error: {error_msg!r}"
+        assert (
+            result == "local result"
+        ), f"Local fallback should produce result for error: {error_msg!r}"
 
     @skipif_no_import
     def test_online_failure_ollama_down_emits_error(self):
         """云端失败且 Ollama 未运行时，应 emit 错误事件并返回 None。"""
         emitted = []
+
         def fake_emit(event, data, namespace=None):
             emitted.append((event, data))
 
         online_prov = MagicMock()
         online_prov.generate_content.side_effect = RuntimeError("503 unavailable")
 
-        with patch("app.core.socket_handler._get_provider", return_value=online_prov), \
-             patch("app.core.socket_handler._is_ollama_alive", return_value=False):
+        with patch(
+            "app.core.socket_handler._get_provider", return_value=online_prov
+        ), patch("app.core.socket_handler._is_ollama_alive", return_value=False):
             result = _stream_llm(fake_emit, "Polish:", "text")
 
         assert result is None
         # 应该发出错误通知
-        error_events = [d for ev, d in emitted if ev in ("agent_execute_command", "agent_task_complete")]
+        error_events = [
+            d
+            for ev, d in emitted
+            if ev in ("agent_execute_command", "agent_task_complete")
+        ]
         assert len(error_events) > 0
 
     @skipif_no_import
     def test_non_recoverable_online_error_emits_error_event(self):
         """逻辑/断言错误不触发降级，直接 emit 错误事件并返回 None。"""
         emitted = []
+
         def fake_emit(event, data, namespace=None):
             emitted.append((event, data))
 
         online_prov = MagicMock()
         online_prov.generate_content.side_effect = ValueError("bad response format")
 
-        with patch("app.core.socket_handler._get_provider", return_value=online_prov), \
-             patch("app.core.socket_handler._get_local_provider") as mock_local:
+        with patch(
+            "app.core.socket_handler._get_provider", return_value=online_prov
+        ), patch("app.core.socket_handler._get_local_provider") as mock_local:
             result = _stream_llm(fake_emit, "Polish:", "text")
 
         assert result is None
@@ -307,6 +344,7 @@ class TestStreamLlm:
 # 5. _get_local_provider() — 本地 provider 选取逻辑
 # ===========================================================================
 
+
 class TestGetLocalProvider:
 
     @skipif_no_import
@@ -314,20 +352,23 @@ class TestGetLocalProvider:
         """应从 /api/tags 列表中选取模型（优先大参数）。"""
         import json
 
-        tags_payload = json.dumps({
-            "models": [
-                {"name": "phi3:3b"},
-                {"name": "llama3:8b"},   # 应被选中
-                {"name": "tinyllama"},
-            ]
-        }).encode()
+        tags_payload = json.dumps(
+            {
+                "models": [
+                    {"name": "phi3:3b"},
+                    {"name": "llama3:8b"},  # 应被选中
+                    {"name": "tinyllama"},
+                ]
+            }
+        ).encode()
         mock_resp = MagicMock()
         mock_resp.read.return_value = tags_payload
         mock_resp.__enter__ = lambda s: s
         mock_resp.__exit__ = MagicMock(return_value=False)
 
-        with patch("urllib.request.urlopen", return_value=mock_resp), \
-             patch("app.core.llm.ollama_llm_provider.OllamaLLMProvider") as MockOllama:
+        with patch("urllib.request.urlopen", return_value=mock_resp), patch(
+            "app.core.llm.ollama_llm_provider.OllamaLLMProvider"
+        ) as MockOllama:
             MockOllama.return_value = MagicMock()
             provider = _get_local_provider()
 
@@ -338,14 +379,16 @@ class TestGetLocalProvider:
                 call_kwargs.args[0] if call_kwargs.args else None
             )
             if model_arg:
-                assert "8b" in model_arg or "llama3" in model_arg.lower(), \
-                    f"Expected 8b model, got: {model_arg}"
+                assert (
+                    "8b" in model_arg or "llama3" in model_arg.lower()
+                ), f"Expected 8b model, got: {model_arg}"
 
     @skipif_no_import
     def test_falls_back_to_none_model_when_tags_fail(self):
         """当无法查询 Ollama tags 时，应使用 model=None 的默认选择。"""
-        with patch("urllib.request.urlopen", side_effect=ConnectionRefusedError()), \
-             patch("app.core.llm.ollama_llm_provider.OllamaLLMProvider") as MockOllama:
+        with patch(
+            "urllib.request.urlopen", side_effect=ConnectionRefusedError()
+        ), patch("app.core.llm.ollama_llm_provider.OllamaLLMProvider") as MockOllama:
             MockOllama.return_value = MagicMock()
             _get_local_provider()
 

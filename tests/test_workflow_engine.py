@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 # ── Stub optional heavy imports ───────────────────────────────────────────────
 
+
 def _stub(name):
     if name not in sys.modules:
         sys.modules[name] = MagicMock()
@@ -56,9 +57,13 @@ class TestSseBuilders(unittest.TestCase):
 
     def _parse(self, sse_str: str) -> dict:
         """Extract the JSON payload from a single SSE data line."""
-        self.assertTrue(sse_str.startswith("data: "), f"Missing 'data: ' prefix: {sse_str!r}")
-        self.assertTrue(sse_str.endswith("\n\n"), f"Missing trailing '\\n\\n': {sse_str!r}")
-        return json.loads(sse_str[len("data: "):].strip())
+        self.assertTrue(
+            sse_str.startswith("data: "), f"Missing 'data: ' prefix: {sse_str!r}"
+        )
+        self.assertTrue(
+            sse_str.endswith("\n\n"), f"Missing trailing '\\n\\n': {sse_str!r}"
+        )
+        return json.loads(sse_str[len("data: ") :].strip())
 
     def setUp(self):
         from app.core.workflow_engine import (
@@ -70,6 +75,7 @@ class TestSseBuilders(unittest.TestCase):
             sse_error,
             sse_done,
         )
+
         self.sse_status = sse_status
         self.sse_progress = sse_progress
         self.sse_step_start = sse_step_start
@@ -180,6 +186,7 @@ class TestResolveProviderArg(unittest.TestCase):
 
     def setUp(self):
         from app.core.workflow_engine import _resolve_provider_arg
+
         self.resolve = _resolve_provider_arg
 
     def test_local_maps_to_ollama(self):
@@ -220,6 +227,7 @@ class TestExtractText(unittest.TestCase):
 
     def setUp(self):
         from app.core.workflow_engine import _extract_text
+
         self.extract = _extract_text
 
     def test_string_passthrough(self):
@@ -261,26 +269,32 @@ class TestCallLlmJson(unittest.TestCase):
         """Return call_llm_json with call_llm patched to return fake_response."""
         from app.core.workflow_engine import call_llm_json
 
-        def _fake_call_llm(prompt, system="", model_mode="auto",
-                           max_tokens=8192, call_timeout=None):
+        def _fake_call_llm(
+            prompt, system="", model_mode="auto", max_tokens=8192, call_timeout=None
+        ):
             return fake_response
 
         return call_llm_json, _fake_call_llm
 
     def test_plain_json_object_parsed(self):
         from app.core.workflow_engine import call_llm_json
-        with patch("app.core.workflow_engine.call_llm", return_value='{"key": "value"}'):
+
+        with patch(
+            "app.core.workflow_engine.call_llm", return_value='{"key": "value"}'
+        ):
             result = call_llm_json("prompt")
         self.assertEqual(result, {"key": "value"})
 
     def test_plain_json_array_parsed(self):
         from app.core.workflow_engine import call_llm_json
-        with patch("app.core.workflow_engine.call_llm", return_value='[1, 2, 3]'):
+
+        with patch("app.core.workflow_engine.call_llm", return_value="[1, 2, 3]"):
             result = call_llm_json("prompt")
         self.assertEqual(result, [1, 2, 3])
 
     def test_json_fence_stripped(self):
         from app.core.workflow_engine import call_llm_json
+
         fenced = '```json\n{"a": 1}\n```'
         with patch("app.core.workflow_engine.call_llm", return_value=fenced):
             result = call_llm_json("prompt")
@@ -288,6 +302,7 @@ class TestCallLlmJson(unittest.TestCase):
 
     def test_plain_fence_stripped(self):
         from app.core.workflow_engine import call_llm_json
+
         fenced = '```\n{"b": 2}\n```'
         with patch("app.core.workflow_engine.call_llm", return_value=fenced):
             result = call_llm_json("prompt")
@@ -295,6 +310,7 @@ class TestCallLlmJson(unittest.TestCase):
 
     def test_json_embedded_in_prose_extracted(self):
         from app.core.workflow_engine import call_llm_json
+
         prose = 'Here is the result: {"score": 5} end'
         with patch("app.core.workflow_engine.call_llm", return_value=prose):
             result = call_llm_json("prompt")
@@ -303,16 +319,20 @@ class TestCallLlmJson(unittest.TestCase):
 
     def test_invalid_json_returns_raw_string(self):
         from app.core.workflow_engine import call_llm_json
+
         with patch("app.core.workflow_engine.call_llm", return_value="not json at all"):
             result = call_llm_json("prompt")
         self.assertIsInstance(result, str)
 
     def test_system_prompt_json_reminder_appended(self):
         from app.core.workflow_engine import call_llm_json
+
         captured = {}
+
         def _capture_call_llm(prompt, system="", **kwargs):
             captured["system"] = system
             return '{"ok": true}'
+
         with patch("app.core.workflow_engine.call_llm", side_effect=_capture_call_llm):
             call_llm_json("prompt", system="Be concise.")
         # The JSON reminder should be appended when "json" is not already in system
@@ -320,10 +340,13 @@ class TestCallLlmJson(unittest.TestCase):
 
     def test_system_prompt_with_json_not_double_appended(self):
         from app.core.workflow_engine import call_llm_json
+
         captured = {}
+
         def _capture_call_llm(prompt, system="", **kwargs):
             captured["system"] = system
             return '{"ok": true}'
+
         with patch("app.core.workflow_engine.call_llm", side_effect=_capture_call_llm):
             call_llm_json("prompt", system="Output as json only.")
         # "json" is already in system prompt → no duplication
@@ -348,12 +371,13 @@ class TestWorkflowExecutorBase(unittest.TestCase):
         class NopExecutor(WorkflowExecutor):
             WORKFLOW_ID = "nop"
             WORKFLOW_NAME = "Nop"
+
             def execute(self, params, yield_event):
                 return
                 yield  # make it a generator
 
         events = self._collect(NopExecutor(), {})
-        first = json.loads(events[0][len("data: "):].strip())
+        first = json.loads(events[0][len("data: ") :].strip())
         self.assertEqual(first["type"], "status")
 
     def test_run_yields_done_last(self):
@@ -362,12 +386,13 @@ class TestWorkflowExecutorBase(unittest.TestCase):
         class NopExecutor(WorkflowExecutor):
             WORKFLOW_ID = "nop"
             WORKFLOW_NAME = "Nop"
+
             def execute(self, params, yield_event):
                 return
                 yield
 
         events = self._collect(NopExecutor(), {})
-        last = json.loads(events[-1][len("data: "):].strip())
+        last = json.loads(events[-1][len("data: ") :].strip())
         self.assertEqual(last["type"], "done")
 
     def test_run_yields_error_on_exception(self):
@@ -376,12 +401,13 @@ class TestWorkflowExecutorBase(unittest.TestCase):
         class BrokenExecutor(WorkflowExecutor):
             WORKFLOW_ID = "broken"
             WORKFLOW_NAME = "Broken"
+
             def execute(self, params, yield_event):
                 raise RuntimeError("intentional failure")
                 yield
 
         events = self._collect(BrokenExecutor(), {})
-        types = [json.loads(e[len("data: "):].strip())["type"] for e in events]
+        types = [json.loads(e[len("data: ") :].strip())["type"] for e in events]
         self.assertIn("error", types)
         self.assertIn("done", types)
 
@@ -393,22 +419,28 @@ class TestWorkflowExecutorBase(unittest.TestCase):
             list(ex.execute({}, lambda x: None))
 
     def test_run_passes_through_yielded_events(self):
-        from app.core.workflow_engine import WorkflowExecutor, sse_step_start, sse_step_done
+        from app.core.workflow_engine import (
+            WorkflowExecutor,
+            sse_step_start,
+            sse_step_done,
+        )
 
         class SimpleExecutor(WorkflowExecutor):
             WORKFLOW_ID = "simple"
             WORKFLOW_NAME = "Simple"
+
             def execute(self, params, yield_event):
                 yield sse_step_start("s1", "Step 1")
                 yield sse_step_done("s1", "Step 1 done")
 
         events = self._collect(SimpleExecutor(), {})
-        types = [json.loads(e[len("data: "):].strip())["type"] for e in events]
+        types = [json.loads(e[len("data: ") :].strip())["type"] for e in events]
         self.assertIn("step_start", types)
         self.assertIn("step_done", types)
 
     def test_workflow_id_and_name_defaults(self):
         from app.core.workflow_engine import WorkflowExecutor
+
         ex = WorkflowExecutor()
         self.assertEqual(ex.WORKFLOW_ID, "base")
         self.assertEqual(ex.WORKFLOW_NAME, "基础工作流")
@@ -419,22 +451,26 @@ class TestWorkflowExecutorSaveOutputFile(unittest.TestCase):
 
     def test_docx_suffix(self):
         from app.core.workflow_engine import WorkflowExecutor
+
         path = WorkflowExecutor.save_output_file(".docx")
         self.assertTrue(str(path).endswith(".docx"))
 
     def test_xlsx_suffix(self):
         from app.core.workflow_engine import WorkflowExecutor
+
         path = WorkflowExecutor.save_output_file(".xlsx")
         self.assertTrue(str(path).endswith(".xlsx"))
 
     def test_unique_filenames(self):
         from app.core.workflow_engine import WorkflowExecutor
+
         p1 = WorkflowExecutor.save_output_file(".docx")
         p2 = WorkflowExecutor.save_output_file(".docx")
         self.assertNotEqual(p1, p2)
 
     def test_parent_directory_exists(self):
         from app.core.workflow_engine import WorkflowExecutor
+
         path = WorkflowExecutor.save_output_file(".txt")
         self.assertTrue(path.parent.exists())
 

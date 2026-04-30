@@ -43,7 +43,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -127,7 +126,7 @@ def env(tmp_path_factory):
     root = tmp_path_factory.mktemp("wf")
     tmp_dir = root / "tmp"
     ws_dir = root / "workspace"
-    ext_dir = root / "external"      # stands for C:\Users\…\Downloads
+    ext_dir = root / "external"  # stands for C:\Users\…\Downloads
     for d in (tmp_dir, ws_dir, ext_dir):
         d.mkdir()
 
@@ -159,6 +158,7 @@ def env(tmp_path_factory):
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1.  BUG-1 — open_file_by_path must accept absolute external paths
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestBug1_OpenExternalPath:
     """
@@ -209,9 +209,10 @@ class TestBug1_OpenExternalPath:
             "/api/v1/workspace/open_file_by_path",
             json={"path": "../../etc/passwd"},
         )
-        assert resp.status_code in (403, 404), (
-            f"Traversal not blocked — got {resp.status_code}"
-        )
+        assert resp.status_code in (
+            403,
+            404,
+        ), f"Traversal not blocked — got {resp.status_code}"
 
     def test_bad_extension_blocked_even_if_path_exists(self, env):
         """Absolute path with disallowed extension must be rejected."""
@@ -236,6 +237,7 @@ class TestBug1_OpenExternalPath:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2.  BUG-2 — auto_save must write back to external files on Ctrl+S
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestBug2_ExternalSaveWriteBack:
     """
@@ -319,17 +321,17 @@ class TestBug2_ExternalSaveWriteBack:
         # Step 3: Close tab (nothing to do server-side)
 
         # Verify file on disk actually changed
-        assert f.read_bytes() != original_bytes, (
-            "BUG-2: file on disk unchanged after Ctrl+S"
-        )
+        assert (
+            f.read_bytes() != original_bytes
+        ), "BUG-2: file on disk unchanged after Ctrl+S"
 
         # Step 4: Reopen (new file_id, reads from disk)
         fid2, data2 = self._open_external(client, f)
         assert fid2 != fid1, "Reopen should produce a new file_id"
         text2 = _runs_text(data2)
-        assert "Edited By User" in text2, (
-            f"BUG-2: content lost after close → reopen.  Got: {text2!r}"
-        )
+        assert (
+            "Edited By User" in text2
+        ), f"BUG-2: content lost after close → reopen.  Got: {text2!r}"
 
     def test_nonexistent_parent_dir_skips_writeback_gracefully(self, env):
         """Path with non-existent parent → skip write, but don't crash."""
@@ -363,14 +365,15 @@ class TestBug2_ExternalSaveWriteBack:
             },
         )
         assert resp.status_code == 200
-        assert resp.get_json()["src_written"] is False, (
-            "Write-back should be skipped for non-existent parent dir"
-        )
+        assert (
+            resp.get_json()["src_written"] is False
+        ), "Write-back should be skipped for non-existent parent dir"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 3.  BUG-3 — auto_save must use _apply_edits for rich PPTX format
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestBug3_RichFormatAutoSave:
     """
@@ -405,8 +408,7 @@ class TestBug3_RichFormatAutoSave:
             json={"file_type": "pptx", "file_id": fid, "data": data},
         )
         assert resp.status_code == 200, (
-            f"BUG-3 regression: auto_save crashed on rich format: "
-            f"{resp.get_json()}"
+            f"BUG-3 regression: auto_save crashed on rich format: " f"{resp.get_json()}"
         )
 
     def test_rich_format_preserves_text(self, env):
@@ -442,17 +444,18 @@ class TestBug3_RichFormatAutoSave:
         )
 
         texts = _pptx_all_texts(client.get(f"/api/v1/workspace/raw/{fid}").data)
-        assert "Changed Text" in " ".join(texts), (
-            f"BUG-3: edited text not written to PPTX.  Got: {texts}"
-        )
-        assert "Original" not in " ".join(texts), (
-            f"BUG-3: old text still present after edit.  Got: {texts}"
-        )
+        assert "Changed Text" in " ".join(
+            texts
+        ), f"BUG-3: edited text not written to PPTX.  Got: {texts}"
+        assert "Original" not in " ".join(
+            texts
+        ), f"BUG-3: old text still present after edit.  Got: {texts}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 4.  BUG-4 — _seed_new_file must create a non-empty, openable PPTX
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestBug4_SeedNewFile:
     """
@@ -471,9 +474,9 @@ class TestBug4_SeedNewFile:
         f = ws_dir / "seed_slide_count.pptx"
         _seed_new_file(f)
         count = _pptx_slide_count(f.read_bytes())
-        assert count >= 1, (
-            f"BUG-4 regression: seeded PPTX has {count} slides (need ≥ 1)"
-        )
+        assert (
+            count >= 1
+        ), f"BUG-4 regression: seeded PPTX has {count} slides (need ≥ 1)"
 
     def test_seeded_pptx_has_text_shapes(self, env):
         """Blank Presentation() has 0 shapes — we need at least title+body."""
@@ -501,14 +504,12 @@ class TestBug4_SeedNewFile:
         )
         assert resp.status_code == 200
         slides = resp.get_json()["data"]["slides"]
-        assert len(slides) >= 1, (
-            "BUG-4: created PPTX opens with zero slides"
-        )
+        assert len(slides) >= 1, "BUG-4: created PPTX opens with zero slides"
         # Must have shapes with text (not blank placeholders)
         shapes = slides[0].get("shapes", [])
-        assert any(s.get("has_text") for s in shapes), (
-            "BUG-4: first slide has no text shapes"
-        )
+        assert any(
+            s.get("has_text") for s in shapes
+        ), "BUG-4: first slide has no text shapes"
 
     def test_zero_byte_pptx_auto_repaired_on_open(self, env):
         """Legacy 0-byte files should be auto-seeded when opened."""
@@ -530,6 +531,7 @@ class TestBug4_SeedNewFile:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 5.  BUG-6 — timer auto_save must NOT write to workspace / source
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestBug6_TimerVsExplicitSave:
     """
@@ -568,7 +570,9 @@ class TestBug6_TimerVsExplicitSave:
         assert resp.status_code == 200
         assert resp.get_json()["src_written"] is False
 
-        assert (ws_dir / name).read_bytes() == original_bytes, (
+        assert (
+            ws_dir / name
+        ).read_bytes() == original_bytes, (
             "BUG-6: timer auto_save modified the workspace file!"
         )
 
@@ -604,15 +608,16 @@ class TestBug6_TimerVsExplicitSave:
         assert resp.get_json()["src_written"] is True
 
         new_bytes = (ws_dir / name).read_bytes()
-        assert new_bytes != original_bytes, (
-            "BUG-6: explicit save did NOT update the workspace file!"
-        )
+        assert (
+            new_bytes != original_bytes
+        ), "BUG-6: explicit save did NOT update the workspace file!"
         assert "Explicit Save Edit" in " ".join(_pptx_all_texts(new_bytes))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6.  BUG-7 — concurrent files must not cross-contaminate
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestBug7_CrossContamination:
 
@@ -655,17 +660,18 @@ class TestBug7_CrossContamination:
         textsA = " ".join(_pptx_all_texts((ws_dir / "iso_a.pptx").read_bytes()))
         textsB = " ".join(_pptx_all_texts((ws_dir / "iso_b.pptx").read_bytes()))
 
-        assert "ONLY IN A" in textsA and "ONLY IN B" not in textsA, (
-            f"Cross-contamination in file A: {textsA!r}"
-        )
-        assert "ONLY IN B" in textsB and "ONLY IN A" not in textsB, (
-            f"Cross-contamination in file B: {textsB!r}"
-        )
+        assert (
+            "ONLY IN A" in textsA and "ONLY IN B" not in textsA
+        ), f"Cross-contamination in file A: {textsA!r}"
+        assert (
+            "ONLY IN B" in textsB and "ONLY IN A" not in textsB
+        ), f"Cross-contamination in file B: {textsB!r}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 7.  Full workflows — DOCX and XLSX (same patterns apply)
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestDocxWorkflow:
     """DOCX: create → open → edit → Ctrl+S → close → reopen → verify."""
@@ -702,9 +708,7 @@ class TestDocxWorkflow:
             json={"path": "notes.docx"},
         )
         html = resp2.get_json()["data"].get("html", "")
-        assert "meeting notes" in html.lower(), (
-            f"DOCX content lost: {html[:200]}"
-        )
+        assert "meeting notes" in html.lower(), f"DOCX content lost: {html[:200]}"
 
     def test_external_docx_survives_round_trip(self, env):
         client, _, _, ext_dir = env
@@ -734,9 +738,9 @@ class TestDocxWorkflow:
             json={"path": str(f)},
         )
         html = resp2.get_json()["data"].get("html", "")
-        assert "updated letter" in html.lower(), (
-            f"External DOCX content lost: {html[:200]}"
-        )
+        assert (
+            "updated letter" in html.lower()
+        ), f"External DOCX content lost: {html[:200]}"
 
 
 class TestXlsxWorkflow:
@@ -781,6 +785,7 @@ class TestXlsxWorkflow:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 8.  FS-browser create in external dir → full round-trip
 # ═══════════════════════════════════════════════════════════════════════════════
+
 
 class TestFsBrowserWorkflow:
 
@@ -832,6 +837,7 @@ class TestFsBrowserWorkflow:
 # 9.  Data-format contract: parse → serialize → save → re-parse must be stable
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 class TestDataFormatContract:
     """
     The geometry format flowing between backend and frontend must be
@@ -859,9 +865,7 @@ class TestDataFormatContract:
 
         raw = client.get(f"/api/v1/workspace/raw/{fid}").data
         n_after = _pptx_slide_count(raw)
-        assert n_after == n_before, (
-            f"Slide count changed: {n_before} → {n_after}"
-        )
+        assert n_after == n_before, f"Slide count changed: {n_before} → {n_after}"
 
     def test_shape_text_survives_parse_save_reparse(self, env):
         """Parse → save unmodified → re-parse must have identical text."""
@@ -920,10 +924,8 @@ class TestDataFormatContract:
             assert "shapes" in slide, "Each slide must have 'shapes'"
             for shape in slide["shapes"]:
                 if shape.get("has_text"):
-                    assert "paragraphs" in shape, (
-                        "Text shape must have 'paragraphs' key"
-                    )
+                    assert (
+                        "paragraphs" in shape
+                    ), "Text shape must have 'paragraphs' key"
                     for para in shape["paragraphs"]:
-                        assert "runs" in para, (
-                            "Paragraph must have 'runs' key"
-                        )
+                        assert "runs" in para, "Paragraph must have 'runs' key"

@@ -15,8 +15,8 @@ DEFAULT_INTERACTIONS_ONLY_MODELS: frozenset[str] = frozenset(
 
 INTERACTIONS_ONLY_PREFIXES: tuple[str, ...] = (
     "deep-research-",
-    "gemini-3-",   # gemini-3-flash-preview, gemini-3-pro-preview
-    "gemini-3.",   # gemini-3.1-pro-preview, gemini-3.1-flash-image-preview
+    "gemini-3-",  # gemini-3-flash-preview, gemini-3-pro-preview
+    "gemini-3.",  # gemini-3.1-pro-preview, gemini-3.1-flash-image-preview
 )
 
 
@@ -24,7 +24,7 @@ def normalize_model_id(model_id: str | None) -> str:
     """Normalize model identifiers from API and call sites."""
     mid = str(model_id or "").strip()
     if mid.startswith("models/"):
-        mid = mid[len("models/"):]
+        mid = mid[len("models/") :]
     return mid
 
 
@@ -70,7 +70,9 @@ def is_interactions_only_model(
     if normalized_lower in model_set:
         return True
 
-    return any(normalized_lower.startswith(prefix) for prefix in INTERACTIONS_ONLY_PREFIXES)
+    return any(
+        normalized_lower.startswith(prefix) for prefix in INTERACTIONS_ONLY_PREFIXES
+    )
 
 
 def get_model_blocklist_from_env() -> Set[str]:

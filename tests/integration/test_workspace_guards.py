@@ -15,6 +15,7 @@ Integration tests for the three guards introduced alongside the PPTX fix:
 These guards prevent the "Package not found" error family from leaking
 through to the user as an opaque traceback.
 """
+
 from __future__ import annotations
 
 import io
@@ -106,16 +107,16 @@ class TestOpenFileZeroByteGuard:
     def test_zero_byte_pdf_returns_400(self, wa_client):
         client, _, _ = wa_client
         resp = self._upload(client, "empty.pdf", b"")
-        assert resp.status_code == 400, (
-            f"0-byte PDF must return 400, got {resp.status_code}"
-        )
+        assert (
+            resp.status_code == 400
+        ), f"0-byte PDF must return 400, got {resp.status_code}"
 
     def test_zero_byte_pptx_returns_400(self, wa_client):
         client, _, _ = wa_client
         resp = self._upload(client, "empty.pptx", b"")
-        assert resp.status_code == 400, (
-            f"0-byte PPTX must return 400, got {resp.status_code}"
-        )
+        assert (
+            resp.status_code == 400
+        ), f"0-byte PPTX must return 400, got {resp.status_code}"
 
     def test_zero_byte_docx_returns_400(self, wa_client):
         client, _, _ = wa_client
@@ -133,9 +134,9 @@ class TestOpenFileZeroByteGuard:
         resp = self._upload(client, "my_slides.pptx", b"")
         body = resp.get_json() or {}
         error = body.get("error", "")
-        assert "my_slides.pptx" in error, (
-            f"Error message should mention the filename; got: {error!r}"
-        )
+        assert (
+            "my_slides.pptx" in error
+        ), f"Error message should mention the filename; got: {error!r}"
 
     def test_zero_byte_error_message_in_chinese(self, wa_client):
         """Error message must be a Chinese user-facing string, not a raw traceback."""
@@ -144,9 +145,9 @@ class TestOpenFileZeroByteGuard:
         body = resp.get_json() or {}
         error = body.get("error", "")
         # The guard message contains Chinese characters (文件内容为空)
-        assert any(ord(c) > 127 for c in error), (
-            f"Error message should be in Chinese; got: {error!r}"
-        )
+        assert any(
+            ord(c) > 127 for c in error
+        ), f"Error message should be in Chinese; got: {error!r}"
 
     def test_zero_byte_pptx_no_package_not_found_in_error(self, wa_client):
         """
@@ -157,9 +158,9 @@ class TestOpenFileZeroByteGuard:
         resp = self._upload(client, "tricky.pptx", b"")
         body = resp.get_json() or {}
         error = body.get("error", "")
-        assert "Package not found" not in error, (
-            "0-byte guard must prevent 'Package not found' from reaching client"
-        )
+        assert (
+            "Package not found" not in error
+        ), "0-byte guard must prevent 'Package not found' from reaching client"
 
     def test_zero_byte_no_tmp_file_left_behind(self, wa_client):
         """The guard must clean up the 0-byte tmp file it created."""
@@ -169,9 +170,9 @@ class TestOpenFileZeroByteGuard:
         assert resp.status_code == 400
         after = {p.name for p in tmp_dir.iterdir()}
         new_files = after - before
-        assert new_files == set(), (
-            f"0-byte guard should not leave files in tmp: {new_files}"
-        )
+        assert (
+            new_files == set()
+        ), f"0-byte guard should not leave files in tmp: {new_files}"
 
     # ── non-zero content still works ─────────────────────────────────────────
 
@@ -180,9 +181,9 @@ class TestOpenFileZeroByteGuard:
         client, _, _ = wa_client
         resp = self._upload(client, "real.pdf", _real_pdf())
         # Guard returns 400; everything else is a different status code
-        assert resp.status_code != 400, (
-            "Non-empty PDF must not be rejected by the 0-byte guard"
-        )
+        assert (
+            resp.status_code != 400
+        ), "Non-empty PDF must not be rejected by the 0-byte guard"
 
     def test_non_zero_docx_not_rejected_by_guard(self, wa_client):
         client, _, _ = wa_client
@@ -242,9 +243,9 @@ class TestOpenFileByPathZeroByteGuard:
         ws_file = ws / "auto_seed_check.pptx"
         ws_file.write_bytes(b"")
         self._open_by_path(client, "auto_seed_check.pptx")
-        assert ws_file.stat().st_size > 0, (
-            "open_file_by_path must seed the 0-byte workspace file before parsing"
-        )
+        assert (
+            ws_file.stat().st_size > 0
+        ), "open_file_by_path must seed the 0-byte workspace file before parsing"
 
     def test_zero_byte_pptx_response_has_file_id_and_data(self, wa_client):
         """Auto-repaired PPTX response must contain file_id, file_name, data."""
@@ -292,9 +293,9 @@ class TestOpenFileByPathZeroByteGuard:
         self._plant(ws, "no_pkg_err.pptx", b"")
         resp = self._open_by_path(client, "no_pkg_err.pptx")
         body = resp.get_json() or {}
-        assert "Package not found" not in str(body), (
-            "Auto-repair must prevent 'Package not found' from reaching client"
-        )
+        assert "Package not found" not in str(
+            body
+        ), "Auto-repair must prevent 'Package not found' from reaching client"
 
     def test_zero_byte_pptx_file_type_in_response(self, wa_client):
         """Auto-repaired PPTX must have file_type='pptx' in the response."""
@@ -303,9 +304,9 @@ class TestOpenFileByPathZeroByteGuard:
         resp = self._open_by_path(client, "type_check.pptx")
         if resp.status_code == 200:
             body = resp.get_json() or {}
-            assert body.get("file_type") == "pptx", (
-                f"file_type must be 'pptx', got: {body.get('file_type')!r}"
-            )
+            assert (
+                body.get("file_type") == "pptx"
+            ), f"file_type must be 'pptx', got: {body.get('file_type')!r}"
 
     # ── missing / traversal still handled correctly ──────────────────────────
 
@@ -340,9 +341,9 @@ class TestOpenFileByPathZeroByteGuard:
         self._plant(ws, "real_report.pdf", _real_pdf())
         resp = self._open_by_path(client, "real_report.pdf")
         # Guard yields 400; a different code means the guard passed
-        assert resp.status_code != 400, (
-            "Non-empty PDF must not be rejected by the 0-byte guard"
-        )
+        assert (
+            resp.status_code != 400
+        ), "Non-empty PDF must not be rejected by the 0-byte guard"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -384,9 +385,9 @@ class TestListFilesSkipPptSessions:
         assert resp.status_code == 200
         data = resp.get_json()
         top_names = self._tree_names(data)
-        assert "ppt_sessions" not in top_names, (
-            f"ppt_sessions must be excluded from the file tree; found in: {top_names}"
-        )
+        assert (
+            "ppt_sessions" not in top_names
+        ), f"ppt_sessions must be excluded from the file tree; found in: {top_names}"
 
     def test_ppt_sessions_zero_byte_file_not_in_tree(self, wa_client):
         """The 0-byte 1.pptx inside ppt_sessions must also not appear anywhere."""
@@ -398,9 +399,9 @@ class TestListFilesSkipPptSessions:
         resp = client.get("/api/v1/workspace/list_files")
         assert resp.status_code == 200
         files = resp.get_json().get("files", [])
-        assert not self._find_in_tree(files, "1.pptx"), (
-            "1.pptx inside ppt_sessions must not appear anywhere in the file tree"
-        )
+        assert not self._find_in_tree(
+            files, "1.pptx"
+        ), "1.pptx inside ppt_sessions must not appear anywhere in the file tree"
 
     def test_ppt_sessions_not_in_tree_even_with_real_file(self, wa_client):
         """Even if ppt_sessions contains a valid PPTX, the folder stays hidden."""
@@ -410,6 +411,7 @@ class TestListFilesSkipPptSessions:
         # Write something non-empty to rule out any size-based filtering
         try:
             from pptx import Presentation as _Prs
+
             buf = __import__("io").BytesIO()
             _Prs().save(buf)
             (ppt_sessions / "session_real.pptx").write_bytes(buf.getvalue())
@@ -419,9 +421,9 @@ class TestListFilesSkipPptSessions:
         resp = client.get("/api/v1/workspace/list_files")
         assert resp.status_code == 200
         files = resp.get_json().get("files", [])
-        assert not self._find_in_tree(files, "ppt_sessions"), (
-            "ppt_sessions must always be excluded regardless of its contents"
-        )
+        assert not self._find_in_tree(
+            files, "ppt_sessions"
+        ), "ppt_sessions must always be excluded regardless of its contents"
 
     # ── other skip-set entries are also hidden ────────────────────────────────
 
@@ -430,18 +432,18 @@ class TestListFilesSkipPptSessions:
         (ws / "tmp").mkdir(exist_ok=True)
         resp = client.get("/api/v1/workspace/list_files")
         files = resp.get_json().get("files", [])
-        assert not self._find_in_tree(files, "tmp"), (
-            "'tmp' folder must be excluded from the file tree"
-        )
+        assert not self._find_in_tree(
+            files, "tmp"
+        ), "'tmp' folder must be excluded from the file tree"
 
     def test_hidden_dot_dirs_not_in_tree(self, wa_client):
         client, _, ws = wa_client
         (ws / ".hidden_dir").mkdir(exist_ok=True)
         resp = client.get("/api/v1/workspace/list_files")
         files = resp.get_json().get("files", [])
-        assert not self._find_in_tree(files, ".hidden_dir"), (
-            "Dot-prefixed directories must be excluded"
-        )
+        assert not self._find_in_tree(
+            files, ".hidden_dir"
+        ), "Dot-prefixed directories must be excluded"
 
     # ── legitimate folders still appear ──────────────────────────────────────
 
@@ -455,9 +457,9 @@ class TestListFilesSkipPptSessions:
         resp = client.get("/api/v1/workspace/list_files")
         assert resp.status_code == 200
         files = resp.get_json().get("files", [])
-        assert self._find_in_tree(files, "my_documents"), (
-            "User-created folder 'my_documents' should appear in the file tree"
-        )
+        assert self._find_in_tree(
+            files, "my_documents"
+        ), "User-created folder 'my_documents' should appear in the file tree"
 
     def test_workspace_name_and_path_present_in_response(self, wa_client):
         """Response must include workspace_name and workspace_path fields."""
@@ -486,9 +488,9 @@ class TestListFilesSkipPptSessions:
             (c for c in folder.get("children", []) if c["name"] == "deck.pptx"), None
         )
         assert child is not None, "deck.pptx should appear in the tree"
-        assert child.get("supported") is True, (
-            "PPTX files must have supported=True in the file tree"
-        )
+        assert (
+            child.get("supported") is True
+        ), "PPTX files must have supported=True in the file tree"
 
     def test_category_field_present_for_pdf(self, wa_client):
         """Each file entry must include a 'category' field."""

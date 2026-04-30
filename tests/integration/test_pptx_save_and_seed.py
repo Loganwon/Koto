@@ -23,7 +23,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -144,9 +143,9 @@ class TestSeedNewFilePptx:
         slide = prs.slides[0]
         # Must have at least 2 text shapes (title + content)
         text_shapes = [s for s in slide.shapes if s.has_text_frame]
-        assert len(text_shapes) >= 2, (
-            "Seeded slide must have at least title + content shapes"
-        )
+        assert (
+            len(text_shapes) >= 2
+        ), "Seeded slide must have at least title + content shapes"
         # Verify shapes contain visible text runs (not empty placeholders)
         texts = []
         for s in text_shapes:
@@ -154,9 +153,9 @@ class TestSeedNewFilePptx:
                 for r in p.runs:
                     if r.text.strip():
                         texts.append(r.text)
-        assert len(texts) >= 2, (
-            f"Seeded slide must have visible text in both shapes, got: {texts}"
-        )
+        assert (
+            len(texts) >= 2
+        ), f"Seeded slide must have visible text in both shapes, got: {texts}"
 
     def test_seeded_pptx_parseable_by_geometry_parser(self, wa_client):
         """parse_pptx_geometry must succeed on a seeded PPTX."""
@@ -255,9 +254,7 @@ class TestPptxAutoSaveRichFormat:
                 "data": data,
             },
         )
-        assert resp.status_code == 200, (
-            f"auto_save crashed: {resp.get_json()}"
-        )
+        assert resp.status_code == 200, f"auto_save crashed: {resp.get_json()}"
         assert resp.get_json()["ok"] is True
 
     def test_auto_save_preserves_text_content(self, wa_client):
@@ -295,9 +292,9 @@ class TestPptxAutoSaveRichFormat:
         assert raw_resp.status_code == 200
         saved_texts = _read_pptx_texts(raw_resp.data)
         all_text = " ".join(saved_texts)
-        assert "Original Title" in all_text, (
-            f"Text lost after auto_save! Got: {saved_texts}"
-        )
+        assert (
+            "Original Title" in all_text
+        ), f"Text lost after auto_save! Got: {saved_texts}"
 
     def test_auto_save_explicit_writes_workspace_file(self, wa_client):
         """explicit=True with ws_source_path must write to workspace dir."""
@@ -360,9 +357,9 @@ class TestPptxAutoSaveRichFormat:
         raw_resp = client.get(f"/api/v1/workspace/raw/{file_id}")
         saved_texts = _read_pptx_texts(raw_resp.data)
         all_text = " ".join(saved_texts)
-        assert "Modified Title Text" in all_text, (
-            f"Edited text not persisted! Got: {saved_texts}"
-        )
+        assert (
+            "Modified Title Text" in all_text
+        ), f"Edited text not persisted! Got: {saved_texts}"
 
     def test_auto_save_with_empty_slides(self, wa_client):
         """auto_save must handle an empty slides array gracefully."""
@@ -411,7 +408,9 @@ class TestPptxAutoSaveRichFormat:
         )
         raw2 = client.get(f"/api/v1/workspace/raw/{file_id}").data
 
-        assert raw1 != raw2, "Consecutive saves with different text must produce different bytes"
+        assert (
+            raw1 != raw2
+        ), "Consecutive saves with different text must produce different bytes"
 
     def test_auto_save_outside_workspace_returns_200_not_403(self, wa_client):
         """
@@ -510,9 +509,9 @@ class TestPptxAutoSaveRichFormat:
                 "data": data,
             },
         )
-        assert resp.status_code == 403, (
-            f"Relative traversal must be blocked with 403, got {resp.status_code}"
-        )
+        assert (
+            resp.status_code == 403
+        ), f"Relative traversal must be blocked with 403, got {resp.status_code}"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -567,8 +566,7 @@ class TestExportPptxLegacyFormat:
             {
                 "slide_index": 0,
                 "texts": [
-                    {"shape_id": sid, "text": "Legacy Text"}
-                    for sid in shape_ids
+                    {"shape_id": sid, "text": "Legacy Text"} for sid in shape_ids
                 ],
             }
         ]
@@ -610,6 +608,6 @@ class TestExportPptxLegacyFormat:
 
         saved_texts = _read_pptx_texts(result)
         all_text = " ".join(saved_texts)
-        assert "Rich Export Updated" in all_text, (
-            f"Rich paragraph data not handled by export_pptx: {saved_texts}"
-        )
+        assert (
+            "Rich Export Updated" in all_text
+        ), f"Rich paragraph data not handled by export_pptx: {saved_texts}"

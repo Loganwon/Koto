@@ -247,9 +247,9 @@ class TestPdfLoading:
         body = resp.get_json()
         raw_url = body.get("data", {}).get("raw_url", "")
         file_id = body["file_id"]
-        assert f"/api/v1/workspace/raw/{file_id}" == raw_url, (
-            f"raw_url should be /api/v1/workspace/raw/<file_id>, got {raw_url!r}"
-        )
+        assert (
+            f"/api/v1/workspace/raw/{file_id}" == raw_url
+        ), f"raw_url should be /api/v1/workspace/raw/<file_id>, got {raw_url!r}"
 
     def test_pdf_file_type_is_pdf(self, wa_client):
         client, _, _ = wa_client
@@ -298,9 +298,9 @@ class TestPdfLoading:
         )
         data = resp.get_json().get("data", {})
         # raw_url must still be present so PDF.js can render
-        assert "/api/v1/workspace/raw/" in data.get("raw_url", ""), (
-            "raw_url must be present even when text extraction is skipped"
-        )
+        assert "/api/v1/workspace/raw/" in data.get(
+            "raw_url", ""
+        ), "raw_url must be present even when text extraction is skipped"
         # text/pages may be empty — that's fine
         assert isinstance(data.get("pages", []), list)
 
@@ -312,9 +312,9 @@ class TestPdfLoading:
         raw_url = resp.get_json()["data"]["raw_url"]
         raw_resp = client.get(raw_url)
         assert raw_resp.status_code == 200
-        assert raw_resp.data.startswith(b"%PDF"), (
-            f"{raw_url} did not return PDF bytes; first bytes: {raw_resp.data[:20]!r}"
-        )
+        assert raw_resp.data.startswith(
+            b"%PDF"
+        ), f"{raw_url} did not return PDF bytes; first bytes: {raw_resp.data[:20]!r}"
 
 
 # ── 3. GET /api/v1/workspace/file/<path> ─────────────────────────────────────

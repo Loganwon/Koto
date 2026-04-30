@@ -325,7 +325,10 @@ class TestRenameFileBranch:
         src.write_bytes(b"fake docx")
         resp = client.patch(
             "/api/v1/workspace/rename",
-            json={"path": src.relative_to(workspace_dir).as_posix(), "name": "renamed_no_ext"},
+            json={
+                "path": src.relative_to(workspace_dir).as_posix(),
+                "name": "renamed_no_ext",
+            },
         )
         assert resp.status_code == 200
         data = resp.get_json()
@@ -376,7 +379,10 @@ class TestRenameFileBranch:
         src.write_text("x")
         resp = client.patch(
             "/api/v1/workspace/rename",
-            json={"path": src.relative_to(workspace_dir).as_posix(), "name": "sub/evil"},
+            json={
+                "path": src.relative_to(workspace_dir).as_posix(),
+                "name": "sub/evil",
+            },
         )
         assert resp.status_code == 400
 

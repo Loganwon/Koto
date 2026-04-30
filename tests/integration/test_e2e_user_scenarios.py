@@ -261,8 +261,12 @@ class TestAutoSave:
     def test_auto_save_writes_tmp(self, client, workspace_dir: Path):
         """auto_save with explicit=true writes to both tmp AND workspace src."""
         # Setup: create & open a docx
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "draft.docx"})
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "draft.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "draft.docx"}
+        )
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "draft.docx"}
+        )
         fid = _json_body(r)["file_id"]
 
         r2 = client.post(
@@ -283,8 +287,13 @@ class TestAutoSave:
 
     def test_auto_save_no_ws_path_skips_src_write(self, client, workspace_dir: Path):
         """When ws_source_path is null/empty, only tmp is updated."""
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "tmp_only.docx"})
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "tmp_only.docx"})
+        client.post(
+            "/api/v1/workspace/create_file",
+            json={"folder": "", "name": "tmp_only.docx"},
+        )
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "tmp_only.docx"}
+        )
         fid = _json_body(r)["file_id"]
 
         r2 = client.post(
@@ -300,9 +309,13 @@ class TestAutoSave:
         assert r2.status_code == 200
         assert _json_body(r2)["src_written"] is False
 
-    def test_auto_save_non_explicit_still_writes_src_when_path_given(self, client, workspace_dir: Path):
+    def test_auto_save_non_explicit_still_writes_src_when_path_given(
+        self, client, workspace_dir: Path
+    ):
         """Current behavior: explicit flag determines src write when ws_source_path present."""
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "x.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "x.docx"}
+        )
         r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "x.docx"})
         fid = _json_body(r)["file_id"]
 
@@ -323,15 +336,21 @@ class TestAutoSave:
     def test_auto_save_validation_errors(self, client):
         """Missing fields should return 400."""
         # Missing file_type
-        r = client.post("/api/v1/workspace/auto_save", json={"file_id": "abc", "data": "x"})
+        r = client.post(
+            "/api/v1/workspace/auto_save", json={"file_id": "abc", "data": "x"}
+        )
         assert r.status_code == 400
 
         # Missing file_id
-        r = client.post("/api/v1/workspace/auto_save", json={"file_type": "docx", "data": "x"})
+        r = client.post(
+            "/api/v1/workspace/auto_save", json={"file_type": "docx", "data": "x"}
+        )
         assert r.status_code == 400
 
         # Missing data
-        r = client.post("/api/v1/workspace/auto_save", json={"file_type": "docx", "file_id": "abc"})
+        r = client.post(
+            "/api/v1/workspace/auto_save", json={"file_type": "docx", "file_id": "abc"}
+        )
         assert r.status_code == 400
 
     def test_auto_save_invalid_file_id(self, client):
@@ -353,7 +372,9 @@ class TestSaveThenDownload:
     """After saving, the /raw/<file_id> endpoint should return updated bytes."""
 
     def test_raw_returns_saved_bytes(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "dl.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "dl.docx"}
+        )
         r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "dl.docx"})
         fid = _json_body(r)["file_id"]
 
@@ -377,7 +398,9 @@ class TestSaveThenDownload:
         assert r2.data[:2] == b"PK"
 
     def test_raw_pptx_returns_saved_bytes(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "dl.pptx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "dl.pptx"}
+        )
         r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "dl.pptx"})
         d = _json_body(r)
         fid = d["file_id"]
@@ -436,10 +459,15 @@ class TestSubfolderOperations:
     def test_open_and_save_subfolder_file(self, client, workspace_dir: Path):
         (workspace_dir / "docs").mkdir()
         # Create
-        client.post("/api/v1/workspace/create_file", json={"folder": "docs", "name": "memo.docx"})
+        client.post(
+            "/api/v1/workspace/create_file",
+            json={"folder": "docs", "name": "memo.docx"},
+        )
 
         # Open
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "docs/memo.docx"})
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "docs/memo.docx"}
+        )
         assert r.status_code == 200
         fid = _json_body(r)["file_id"]
 
@@ -462,8 +490,13 @@ class TestSubfolderOperations:
 
     def test_nested_subfolder_create_and_open(self, client, workspace_dir: Path):
         # Create nested folders
-        client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": "projects"})
-        client.post("/api/v1/workspace/create_folder", json={"parent": "projects", "name": "alpha"})
+        client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": "projects"}
+        )
+        client.post(
+            "/api/v1/workspace/create_folder",
+            json={"parent": "projects", "name": "alpha"},
+        )
         client.post(
             "/api/v1/workspace/create_file",
             json={"folder": "projects/alpha", "name": "plan.xlsx"},
@@ -478,8 +511,12 @@ class TestSubfolderOperations:
 
     def test_list_shows_subfolder_files(self, client, workspace_dir: Path):
         (workspace_dir / "sub").mkdir()
-        client.post("/api/v1/workspace/create_file", json={"folder": "sub", "name": "a.docx"})
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "b.pptx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "sub", "name": "a.docx"}
+        )
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "b.pptx"}
+        )
 
         r = client.get("/api/v1/workspace/list_files")
         assert r.status_code == 200
@@ -514,8 +551,12 @@ class TestRenameThenSave:
 
     def test_rename_docx_then_save(self, client, workspace_dir: Path):
         # Create & open
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "old.docx"})
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "old.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "old.docx"}
+        )
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "old.docx"}
+        )
         fid = _json_body(r)["file_id"]
 
         # Rename
@@ -543,7 +584,9 @@ class TestRenameThenSave:
         assert _json_body(r3)["src_written"] is True
 
     def test_rename_preserves_extension(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "test.pptx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "test.pptx"}
+        )
         r = client.patch(
             "/api/v1/workspace/rename",
             json={"path": "test.pptx", "name": "presentation"},
@@ -554,8 +597,12 @@ class TestRenameThenSave:
 
     def test_rename_folder_then_open_file_inside(self, client, workspace_dir: Path):
         # Create folder with file
-        client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": "olddir"})
-        client.post("/api/v1/workspace/create_file", json={"folder": "olddir", "name": "f.docx"})
+        client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": "olddir"}
+        )
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "olddir", "name": "f.docx"}
+        )
 
         # Rename folder
         r = client.patch(
@@ -572,8 +619,12 @@ class TestRenameThenSave:
         assert r2.status_code == 200
 
     def test_rename_to_existing_returns_409(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "a.docx"})
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "b.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "a.docx"}
+        )
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "b.docx"}
+        )
         r = client.patch(
             "/api/v1/workspace/rename",
             json={"path": "a.docx", "name": "b.docx"},
@@ -590,7 +641,9 @@ class TestDeleteScenarios:
     """Various delete operations and edge cases."""
 
     def test_delete_file(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "bye.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "bye.docx"}
+        )
         assert (workspace_dir / "bye.docx").exists()
 
         r = client.delete("/api/v1/workspace/file?path=bye.docx")
@@ -602,8 +655,12 @@ class TestDeleteScenarios:
         assert r.status_code == 404
 
     def test_delete_folder_recursive(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": "rmdir"})
-        client.post("/api/v1/workspace/create_file", json={"folder": "rmdir", "name": "f.docx"})
+        client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": "rmdir"}
+        )
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "rmdir", "name": "f.docx"}
+        )
         assert (workspace_dir / "rmdir" / "f.docx").exists()
 
         r = client.delete("/api/v1/workspace/folder?path=rmdir")
@@ -739,8 +796,12 @@ class TestSaveFileExport:
 
     def test_export_pptx_with_valid_file_id(self, client, workspace_dir: Path):
         # Create & open to get a file_id with a tmp file
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "exp.pptx"})
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "exp.pptx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "exp.pptx"}
+        )
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "exp.pptx"}
+        )
         d = _json_body(r)
         fid = d["file_id"]
 
@@ -849,7 +910,10 @@ class TestMoveCopy:
         dst_dir.mkdir()
 
         # Create a valid docx
-        client.post("/api/v1/workspace/create_file", json={"folder": "old_loc", "name": "move_me.docx"})
+        client.post(
+            "/api/v1/workspace/create_file",
+            json={"folder": "old_loc", "name": "move_me.docx"},
+        )
 
         # Move it
         r = client.post(
@@ -927,13 +991,34 @@ class TestFsBrowserOperations:
         assert not d.exists()
 
     def test_fs_operations_reject_missing_params(self, client):
-        assert client.post("/api/v1/fs/create_file", json={"parent": "", "name": "x.txt"}).status_code == 400
-        assert client.post("/api/v1/fs/create_file", json={"parent": "/tmp", "name": ""}).status_code == 400
-        assert client.post("/api/v1/fs/create_folder", json={"parent": "", "name": "x"}).status_code == 400
+        assert (
+            client.post(
+                "/api/v1/fs/create_file", json={"parent": "", "name": "x.txt"}
+            ).status_code
+            == 400
+        )
+        assert (
+            client.post(
+                "/api/v1/fs/create_file", json={"parent": "/tmp", "name": ""}
+            ).status_code
+            == 400
+        )
+        assert (
+            client.post(
+                "/api/v1/fs/create_folder", json={"parent": "", "name": "x"}
+            ).status_code
+            == 400
+        )
 
     def test_fs_duplicate_returns_409(self, client, workspace_dir: Path):
-        client.post("/api/v1/fs/create_file", json={"parent": str(workspace_dir), "name": "dup.docx"})
-        r = client.post("/api/v1/fs/create_file", json={"parent": str(workspace_dir), "name": "dup.docx"})
+        client.post(
+            "/api/v1/fs/create_file",
+            json={"parent": str(workspace_dir), "name": "dup.docx"},
+        )
+        r = client.post(
+            "/api/v1/fs/create_file",
+            json={"parent": str(workspace_dir), "name": "dup.docx"},
+        )
         assert r.status_code == 409
 
 
@@ -950,7 +1035,9 @@ class TestListFiles:
         assert r.status_code == 200
 
     def test_list_shows_supported_flag(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "s.pptx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "s.pptx"}
+        )
         (workspace_dir / "readme.txt").write_text("hi")
 
         r = client.get("/api/v1/workspace/list_files")
@@ -966,7 +1053,9 @@ class TestListFiles:
     def test_list_hides_tmp_dir(self, client, workspace_dir: Path):
         (workspace_dir / "tmp").mkdir(exist_ok=True)
         (workspace_dir / "tmp" / "junk.bin").write_bytes(b"x")
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "visible.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "visible.docx"}
+        )
 
         r = client.get("/api/v1/workspace/list_files")
         names = _collect_names(_json_body(r))
@@ -1078,30 +1167,41 @@ class TestServeAbs:
 class TestPathTraversalGuards:
     """Ensure all endpoints reject path traversal attempts."""
 
-    @pytest.mark.parametrize("path", [
-        "../../../etc/passwd",
-        "..\\..\\..\\Windows\\System32",
-        "foo/../../bar",
-        "/etc/shadow",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "../../../etc/passwd",
+            "..\\..\\..\\Windows\\System32",
+            "foo/../../bar",
+            "/etc/shadow",
+        ],
+    )
     def test_open_file_by_path_traversal(self, client, path):
         r = client.post("/api/v1/workspace/open_file_by_path", json={"path": path})
         assert r.status_code in (403, 404)
 
-    @pytest.mark.parametrize("path", [
-        "../../../etc/passwd",
-        "..\\..\\..\\secret",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "../../../etc/passwd",
+            "..\\..\\..\\secret",
+        ],
+    )
     def test_delete_traversal(self, client, path):
         r = client.delete(f"/api/v1/workspace/file?path={path}")
         assert r.status_code == 403
 
-    @pytest.mark.parametrize("path", [
-        "../../../etc/passwd",
-    ])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "../../../etc/passwd",
+        ],
+    )
     def test_auto_save_traversal(self, client, path, workspace_dir: Path):
         # Create a valid file to get a file_id
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "t.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "t.docx"}
+        )
         r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "t.docx"})
         fid = _json_body(r)["file_id"]
 
@@ -1132,7 +1232,9 @@ class TestPathTraversalGuards:
         assert r.status_code in (403, 404)
 
     def test_rename_separator_in_name(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "a.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "a.docx"}
+        )
         r = client.patch(
             "/api/v1/workspace/rename",
             json={"path": "a.docx", "name": "../../evil.docx"},
@@ -1149,8 +1251,12 @@ class TestMultipleSaves:
     """Saving the same file multiple times should work without errors."""
 
     def test_three_consecutive_saves(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "multi.docx"})
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "multi.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "multi.docx"}
+        )
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "multi.docx"}
+        )
         fid = _json_body(r)["file_id"]
 
         for i in range(3):
@@ -1168,13 +1274,19 @@ class TestMultipleSaves:
             assert _json_body(r2)["src_written"] is True
 
         # Final content should reflect last save
-        r3 = client.post("/api/v1/workspace/open_file_by_path", json={"path": "multi.docx"})
+        r3 = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "multi.docx"}
+        )
         assert r3.status_code == 200
         assert "Save #3" in _json_body(r3)["data"].get("html", "")
 
     def test_pptx_multiple_saves(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "multi.pptx"})
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "multi.pptx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "multi.pptx"}
+        )
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "multi.pptx"}
+        )
         d = _json_body(r)
         fid = d["file_id"]
 
@@ -1230,21 +1342,32 @@ class TestCreateFileValidation:
     """Validate all edge cases for file/folder creation."""
 
     def test_empty_name_rejected(self, client):
-        r = client.post("/api/v1/workspace/create_file", json={"folder": "", "name": ""})
+        r = client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": ""}
+        )
         assert r.status_code == 400
 
     def test_name_with_illegal_chars_rejected(self, client):
-        for ch in ['<', '>', ':', '"', '|', '?', '*']:
-            r = client.post("/api/v1/workspace/create_file", json={"folder": "", "name": f"bad{ch}.txt"})
+        for ch in ["<", ">", ":", '"', "|", "?", "*"]:
+            r = client.post(
+                "/api/v1/workspace/create_file",
+                json={"folder": "", "name": f"bad{ch}.txt"},
+            )
             assert r.status_code == 400, f"char {ch!r} should be rejected"
 
     def test_name_with_path_separator_rejected(self, client):
-        r = client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "a/b.txt"})
+        r = client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "a/b.txt"}
+        )
         assert r.status_code == 400
 
     def test_duplicate_name_returns_409(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "dup.docx"})
-        r = client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "dup.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "dup.docx"}
+        )
+        r = client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "dup.docx"}
+        )
         assert r.status_code == 409
 
     def test_create_in_nonexistent_folder_returns_404(self, client):
@@ -1256,18 +1379,26 @@ class TestCreateFileValidation:
 
     def test_create_txt_file(self, client, workspace_dir: Path):
         """Non-office extensions should create empty files."""
-        r = client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "notes.txt"})
+        r = client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "notes.txt"}
+        )
         assert r.status_code == 200
         assert (workspace_dir / "notes.txt").exists()
         assert (workspace_dir / "notes.txt").stat().st_size == 0  # touch()
 
     def test_create_folder_empty_name_rejected(self, client):
-        r = client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": ""})
+        r = client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": ""}
+        )
         assert r.status_code == 400
 
     def test_create_folder_duplicate_returns_409(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": "mydir"})
-        r = client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": "mydir"})
+        client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": "mydir"}
+        )
+        r = client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": "mydir"}
+        )
         assert r.status_code == 409
 
 
@@ -1280,12 +1411,16 @@ class TestOpenEdgeCases:
     """Edge cases for open_file_by_path."""
 
     def test_open_nonexistent_returns_404(self, client):
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "ghost.docx"})
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "ghost.docx"}
+        )
         assert r.status_code == 404
 
     def test_open_unsupported_ext_returns_400(self, client, workspace_dir: Path):
         (workspace_dir / "script.py").write_text("print('hi')")
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "script.py"})
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "script.py"}
+        )
         assert r.status_code == 400
 
     def test_open_empty_path_returns_400(self, client):
@@ -1305,13 +1440,18 @@ class TestOpenEdgeCases:
 class TestZeroByteAutoRepair:
     """Legacy 0-byte files should be auto-repaired on open."""
 
-    @pytest.mark.parametrize("name,expected_type", [
-        ("legacy.docx", "docx"),
-        ("legacy.xlsx", "xlsx"),
-        ("legacy.pptx", "pptx"),
-        ("legacy.pdf", "pdf"),
-    ])
-    def test_zero_byte_auto_repair(self, client, workspace_dir: Path, name, expected_type):
+    @pytest.mark.parametrize(
+        "name,expected_type",
+        [
+            ("legacy.docx", "docx"),
+            ("legacy.xlsx", "xlsx"),
+            ("legacy.pptx", "pptx"),
+            ("legacy.pdf", "pdf"),
+        ],
+    )
+    def test_zero_byte_auto_repair(
+        self, client, workspace_dir: Path, name, expected_type
+    ):
         # Create a 0-byte file (simulating legacy behavior)
         (workspace_dir / name).touch()
         assert (workspace_dir / name).stat().st_size == 0
@@ -1348,10 +1488,14 @@ class TestRapidOperations:
 
     def test_open_save_open_save_rapid(self, client, workspace_dir: Path):
         """Open → save → reopen → save cycle without errors."""
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "rapid.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "rapid.docx"}
+        )
 
         for cycle in range(5):
-            r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "rapid.docx"})
+            r = client.post(
+                "/api/v1/workspace/open_file_by_path", json={"path": "rapid.docx"}
+            )
             assert r.status_code == 200
             fid = _json_body(r)["file_id"]
 
@@ -1380,7 +1524,9 @@ class TestOpenByAbsolutePath:
     """
 
     def test_absolute_path_inside_workspace(self, client, workspace_dir: Path):
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "abs.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "abs.docx"}
+        )
         abs_path = str(workspace_dir / "abs.docx")
 
         r = client.post("/api/v1/workspace/open_file_by_path", json={"path": abs_path})
@@ -1390,13 +1536,19 @@ class TestOpenByAbsolutePath:
     def test_absolute_path_outside_workspace_returns_403(self, client, tmp_path: Path):
         outside = tmp_path / "outside.docx"
         outside.touch()
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": str(outside)})
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": str(outside)}
+        )
         assert r.status_code == 403
 
     def test_save_with_absolute_ws_source_path(self, client, workspace_dir: Path):
         """Save should work even if ws_source_path is absolute (inside workspace)."""
-        client.post("/api/v1/workspace/create_file", json={"folder": "", "name": "abssave.docx"})
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "abssave.docx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "abssave.docx"}
+        )
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "abssave.docx"}
+        )
         fid = _json_body(r)["file_id"]
 
         abs_ws_path = str(workspace_dir / "abssave.docx")
@@ -1426,7 +1578,9 @@ class TestCompleteWorkflow:
 
     def test_full_user_journey(self, client, workspace_dir: Path):
         # 1. Create a project folder
-        r = client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": "project"})
+        r = client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": "project"}
+        )
         assert r.status_code == 200
 
         # 2. Create a document in it
@@ -1443,7 +1597,9 @@ class TestCompleteWorkflow:
         assert "spec.docx" in names
 
         # 4. Open the file
-        r = client.post("/api/v1/workspace/open_file_by_path", json={"path": "project/spec.docx"})
+        r = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "project/spec.docx"}
+        )
         assert r.status_code == 200
         fid = _json_body(r)["file_id"]
 
@@ -1526,7 +1682,13 @@ class TestJavaScriptSourceChecks:
 
     @pytest.fixture(autouse=True)
     def _load_js(self):
-        js_path = Path(__file__).resolve().parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
+        js_path = (
+            Path(__file__).resolve().parents[2]
+            / "web"
+            / "static"
+            / "js"
+            / "workspace-assistant.js"
+        )
         self.js = js_path.read_text(encoding="utf-8")
 
     def test_ctrl_s_handler_exists(self):
@@ -1538,8 +1700,11 @@ class TestJavaScriptSourceChecks:
         """The keydown handler must use capture:true to beat WangEditor."""
         # Find the keydown listener that contains the Ctrl+S handler
         import re
+
         pattern = r"addEventListener\('keydown'.*?e\.key\s*===\s*'s'.*?\},\s*true\)"
-        assert re.search(pattern, self.js, re.DOTALL), "Ctrl+S handler should use capture: true"
+        assert re.search(
+            pattern, self.js, re.DOTALL
+        ), "Ctrl+S handler should use capture: true"
 
     def test_save_file_calls_do_save(self):
         assert "_doSave(" in self.js
