@@ -70,10 +70,10 @@ class TestNormalizeModelMode(unittest.TestCase):
     def test_cloud_passthrough(self):
         self.assertEqual(self.normalize("cloud"), "cloud")
 
-    def test_uppercase_local_normalised(self):
+    def test_uppercase_local_normalized(self):
         self.assertEqual(self.normalize("LOCAL"), "local")
 
-    def test_uppercase_cloud_normalised(self):
+    def test_uppercase_cloud_normalized(self):
         self.assertEqual(self.normalize("CLOUD"), "cloud")
 
     def test_auto_maps_to_default(self):
