@@ -77,6 +77,7 @@ def _is_location_blocked_error(exc: Exception) -> bool:
     msg = str(exc)
     return any(re.search(p, msg, re.IGNORECASE) for p in _LOCATION_BLOCKED_PATTERNS)
 
+
 # ── 通用降级链（无任务信息时使用）──────────────────────────────────────────────
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
     "gemini-3-flash-preview",  # 首选：最新 Gemini 3 Flash（generate_content）
@@ -194,7 +195,9 @@ class ModelFallbackExecutor:
     _cascade_failure_times: Dict[str, float] = (
         {}
     )  # task_type → timestamp of last cascade failure
-    _cascade_lock: threading.Lock = threading.Lock()  # guards _cascade_failures/_cascade_failure_times
+    _cascade_lock: threading.Lock = (
+        threading.Lock()
+    )  # guards _cascade_failures/_cascade_failure_times
     _CIRCUIT_BREAKER_BASE: float = 5.0  # initial backoff in seconds
     _CIRCUIT_BREAKER_CAP: float = 120.0  # max backoff in seconds
 
@@ -354,14 +357,20 @@ class ModelFallbackExecutor:
                     )
                     with self._cascade_lock:
                         self._cascade_failures[task_type] = 0
-                    return {"content": _content, "tool_calls": [], "model": "local/ollama"}
+                    return {
+                        "content": _content,
+                        "tool_calls": [],
+                        "model": "local/ollama",
+                    }
                 logger.warning("[ModelFallback] Ollama 兜底失败: %s", _err)
         except Exception as _le:
             logger.warning("[ModelFallback] Ollama 兜底异常: %s", _le)
 
         # 所有候选均失败 — record cascade failure for circuit breaker
         with self._cascade_lock:
-            self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1
+            self._cascade_failures[task_type] = (
+                self._cascade_failures.get(task_type, 0) + 1
+            )
             self._cascade_failure_times[task_type] = time.time()
         if last_exc:
             raise last_exc

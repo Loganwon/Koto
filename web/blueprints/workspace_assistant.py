@@ -1339,12 +1339,20 @@ def set_workspace_dir_endpoint():
 
     target = Path(new_path).resolve()
 
-    # Security: reject system-protected directories
+    # Security: reject system-protected directories.
+    # Also split the raw input on backslashes so that Windows-style paths like
+    # C:\Windows are caught even when running on Linux (where Path.parts won't
+    # split on backslashes).
     _sys_protected = {
-        "windows", "program files", "program files (x86)", "programdata",
-        "system volume information", "$recycle.bin",
+        "windows",
+        "program files",
+        "program files (x86)",
+        "programdata",
+        "system volume information",
+        "$recycle.bin",
     }
-    parts_lower = {pp.lower() for pp in target.parts}
+    raw_parts = {p.lower() for p in new_path.replace("/", "\\").split("\\") if p}
+    parts_lower = {pp.lower() for pp in target.parts} | raw_parts
     if parts_lower & _sys_protected or target == target.parent:
         return jsonify({"error": "不允许将系统目录设为工作区"}), 403
 
@@ -1742,11 +1750,18 @@ def serve_abs_file():
         return jsonify({"error": "缺少 path 参数"}), 400
     target = Path(path).resolve()
     # Security: block system/protected paths (reuse the same guard as fs_delete etc.)
+    # Also split the raw input on backslashes so that Windows-style paths like
+    # C:\windows\system.ini are caught even when running on Linux.
     _protected = {
-        "windows", "program files", "program files (x86)", "programdata",
-        "system volume information", "$recycle.bin",
+        "windows",
+        "program files",
+        "program files (x86)",
+        "programdata",
+        "system volume information",
+        "$recycle.bin",
     }
-    parts_lower = {pp.lower() for pp in target.parts}
+    raw_parts = {p.lower() for p in path.replace("/", "\\").split("\\") if p}
+    parts_lower = {pp.lower() for pp in target.parts} | raw_parts
     if parts_lower & _protected or target == target.parent:
         return jsonify({"error": "不允许访问系统路径"}), 403
     if not target.is_file():

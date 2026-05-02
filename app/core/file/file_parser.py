@@ -80,7 +80,11 @@ def _extract_table_styles(docx_path: str) -> list[dict]:
 
                 # ── Colspan (w:gridSpan) ─────────────────────────────────
                 grid_span_el = tc.find(f".//{_w('gridSpan')}")
-                colspan = int(grid_span_el.get(_w("val"), 1)) if grid_span_el is not None else 1
+                colspan = (
+                    int(grid_span_el.get(_w("val"), 1))
+                    if grid_span_el is not None
+                    else 1
+                )
 
                 # ── Rowspan: count how many rows below start with w:vMerge (no val attr) ──
                 # The first cell of a vertical merge has w:vMerge val="restart";
@@ -105,8 +109,7 @@ def _extract_table_styles(docx_path: str) -> list[dict]:
 
                 # ── Skip continuation vMerge cells (they'll be expressed via rowspan) ──
                 is_merge_continuation = (
-                    v_merge_el is not None
-                    and v_merge_el.get(_w("val"), "") == ""
+                    v_merge_el is not None and v_merge_el.get(_w("val"), "") == ""
                 )
                 if is_merge_continuation:
                     continue  # nothing to write; the HTML rowspan covers it
@@ -167,7 +170,9 @@ def _inject_table_styles(html: str, table_styles: list[dict]) -> str:
                 if bg:
                     existing = cell_tag.get("style", "")
                     bg_css = f"background-color:#{bg.lower()};"
-                    cell_tag["style"] = (existing.rstrip(";") + ";" + bg_css).lstrip(";")
+                    cell_tag["style"] = (existing.rstrip(";") + ";" + bg_css).lstrip(
+                        ";"
+                    )
 
     # ── Remove entirely-empty trailing columns ─────────────────────────────
     # Slate/WangEditor sometimes pads rows with phantom empty cells; stripping
@@ -211,10 +216,12 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
     import xml.etree.ElementTree as _ET
 
     # Full OOXML namespace URIs — must match exactly (not prefix aliases)
-    IMG_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-    WP_NS    = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-    A_NS     = "http://schemas.openxmlformats.org/drawingml/2006/main"
-    R_NS     = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    IMG_TYPE = (
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    )
+    WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
     result: list[str] = []
     try:
@@ -226,7 +233,8 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
                 (n for n in file_list if n.lower() == "word/document.xml"), None
             )
             rels_name = next(
-                (n for n in file_list if n.lower() == "word/_rels/document.xml.rels"), None
+                (n for n in file_list if n.lower() == "word/_rels/document.xml.rels"),
+                None,
             )
             if not doc_name or not rels_name:
                 return result
@@ -235,9 +243,9 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
             rels_root = _ET.fromstring(z.read(rels_name))
             rel_map: dict[str, str] = {}
             for rel in rels_root:
-                rid   = rel.get("Id", "")
+                rid = rel.get("Id", "")
                 rtype = rel.get("Type", "")
-                tgt   = rel.get("Target", "")
+                tgt = rel.get("Target", "")
                 if rid and IMG_TYPE in rtype and tgt:
                     rel_map[rid] = tgt if tgt.startswith("word/") else f"word/{tgt}"
 
@@ -268,7 +276,8 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
                 if not media_path:
                     logger.debug(
                         "[floating_imgs] no media path for rel_id=%s; rel_map keys=%s",
-                        rel_id, list(rel_map)[:8],
+                        rel_id,
+                        list(rel_map)[:8],
                     )
                     continue
                 try:
@@ -453,8 +462,10 @@ def _openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
                 style["it"] = 1
             if font.size:
                 style["fs"] = int(font.size)
-            if font.color and font.color.type == "rgb" and font.color.rgb not in (
-                "00000000", "FF000000"
+            if (
+                font.color
+                and font.color.type == "rgb"
+                and font.color.rgb not in ("00000000", "FF000000")
             ):
                 # Univer expects { rgb: "#RRGGBB" }
                 style["cl"] = {"rgb": "#" + font.color.rgb[2:]}
@@ -532,12 +543,14 @@ def parse_xlsx(file_path: str) -> dict[str, Any]:
         # ── Merge data ────────────────────────────────────────────────────────
         merge_data: list[dict[str, int]] = []
         for merge_range in ws.merged_cells.ranges:
-            merge_data.append({
-                "startRow": merge_range.min_row - 1,
-                "startColumn": merge_range.min_col - 1,
-                "endRow": merge_range.max_row - 1,
-                "endColumn": merge_range.max_col - 1,
-            })
+            merge_data.append(
+                {
+                    "startRow": merge_range.min_row - 1,
+                    "startColumn": merge_range.min_col - 1,
+                    "endRow": merge_range.max_row - 1,
+                    "endColumn": merge_range.max_col - 1,
+                }
+            )
 
         sheets[sheet_id] = {
             "id": sheet_id,
@@ -553,11 +566,11 @@ def parse_xlsx(file_path: str) -> dict[str, Any]:
     return {
         "id": workbook_id,
         "name": workbook_name,
-        "appVersion": "0.5.0",   # required by IWorkbookData; Univer fails silently without it
-        "locale": "zh-CN",       # required by IWorkbookData; used for cell formatting
+        "appVersion": "0.5.0",  # required by IWorkbookData; Univer fails silently without it
+        "locale": "zh-CN",  # required by IWorkbookData; used for cell formatting
         "sheetOrder": sheet_order,
         "sheets": sheets,
-        "styles": {},     # Univer requires styles map even if empty
+        "styles": {},  # Univer requires styles map even if empty
         "resources": [],  # Univer plugin resources (e.g. conditional formatting)
     }
 
@@ -672,6 +685,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
         raise RuntimeError("python-pptx 未安装，请执行: pip install python-pptx")
 
     import os as _os
+
     _abs_path = _os.path.abspath(file_path)
     if not _os.path.isfile(_abs_path):
         raise FileNotFoundError(f"PPTX 文件不存在: {_abs_path}")
@@ -685,13 +699,17 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
 
     def _extract_bg(slide: Any) -> str:
         """Walk slide → layout → master for the first extractable solid fill."""
-        for src in (slide, getattr(slide, "slide_layout", None), getattr(slide, "slide_master", None)):
+        for src in (
+            slide,
+            getattr(slide, "slide_layout", None),
+            getattr(slide, "slide_master", None),
+        ):
             if src is None:
                 continue
             try:
                 f = src.background.fill
                 # fill.type is an enum; compare by .name (e.g. 'SOLID') or numeric value 1
-                if f.type is not None and getattr(f.type, 'name', '') == 'SOLID':
+                if f.type is not None and getattr(f.type, "name", "") == "SOLID":
                     return "#" + str(f.fore_color.rgb).lower()
             except Exception:
                 pass
@@ -820,7 +838,14 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
 
                     # Merge: run attrs override paragraph defaults
                     r: dict[str, Any] = {"text": text_val}
-                    for key in ("size", "bold", "italic", "underline", "fontName", "color"):
+                    for key in (
+                        "size",
+                        "bold",
+                        "italic",
+                        "underline",
+                        "fontName",
+                        "color",
+                    ):
                         if key in run_attrs:
                             r[key] = run_attrs[key]
                         elif key in para_defaults:
@@ -902,9 +927,9 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
             # always explicitly sized, which is why only they were visible.
             # Fix: pull the real geometry from the matching layout placeholder.
             eff_left = shape.left
-            eff_top  = shape.top
-            eff_w    = shape.width
-            eff_h    = shape.height
+            eff_top = shape.top
+            eff_w = shape.width
+            eff_h = shape.height
 
             if None in (eff_left, eff_top, eff_w, eff_h):
                 try:
@@ -932,7 +957,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                     pass
 
             abs_left = (eff_left or 0) + off_left
-            abs_top  = (eff_top  or 0) + off_top
+            abs_top = (eff_top or 0) + off_top
 
             # ── Group: recurse with absolute-coordinate offset ──────────
             if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
@@ -953,7 +978,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                 "name": shape.name,
                 "left": abs_left,
                 "top": abs_top,
-                "width":  eff_w or 0,
+                "width": eff_w or 0,
                 "height": eff_h or 0,
                 "z_order": z_base + z_idx,
                 "fill": None,
@@ -962,7 +987,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
             # Shape fill colour — use .name attribute since str(fill.type) = 'SOLID (1)'
             try:
                 fill = shape.fill
-                if fill.type is not None and getattr(fill.type, 'name', '') == 'SOLID':
+                if fill.type is not None and getattr(fill.type, "name", "") == "SOLID":
                     s["fill"] = "#" + str(fill.fore_color.rgb).lower()
             except Exception:
                 pass
@@ -994,7 +1019,9 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                                 )
                             except Exception:
                                 pass
-                            cells.append({"row": r_idx, "col": c_idx, "text": cell_text})
+                            cells.append(
+                                {"row": r_idx, "col": c_idx, "text": cell_text}
+                            )
                     s["_type"] = "TABLE"
                     s["table_rows"] = len(tbl.rows)
                     s["table_cols"] = len(tbl.columns)
@@ -1012,6 +1039,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                     is_title = False
                     try:
                         from pptx.enum.shapes import PP_PLACEHOLDER
+
                         ph = shape.placeholder_format
                         if ph is not None:
                             is_title = ph.type in (
@@ -1092,7 +1120,9 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                 try:
                     page_text = page.extract_text() or ""
                 except Exception as e:
-                    logger.warning(f"[PdfParser/pdfplumber] 第 {i+1} 页文本提取失败: {e}")
+                    logger.warning(
+                        f"[PdfParser/pdfplumber] 第 {i+1} 页文本提取失败: {e}"
+                    )
                     page_text = ""
                 pages_text.append({"page": i + 1, "text": page_text})
                 if page_text:
@@ -1121,7 +1151,9 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                     try:
                         page_text = pg.extract_text() or ""
                     except Exception as e:
-                        logger.warning(f"[PdfParser/{pkg_name}] 第 {i+1} 页文本提取失败: {e}")
+                        logger.warning(
+                            f"[PdfParser/{pkg_name}] 第 {i+1} 页文本提取失败: {e}"
+                        )
                         page_text = ""
                     pages_text.append({"page": i + 1, "text": page_text})
                     if page_text:
@@ -1201,7 +1233,11 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
         run.underline = True
     color_hex = _css_color_to_hex(css.get("color", ""))
     if color_hex:
-        r, g, b = int(color_hex[0:2], 16), int(color_hex[2:4], 16), int(color_hex[4:6], 16)
+        r, g, b = (
+            int(color_hex[0:2], 16),
+            int(color_hex[2:4], 16),
+            int(color_hex[4:6], 16),
+        )
         run.font.color.rgb = RGBColor(r, g, b)
     fs = css.get("font-size", "")
     if fs.endswith("pt"):
@@ -1458,7 +1494,9 @@ def _export_docx_python(html_content: str) -> bytes:
                             _apply_run_inline(run, child_css)
 
                     # ── Cell background colour ───────────────────────────
-                    bg = cell_css.get("background-color", "") or cell_css.get("background", "")
+                    bg = cell_css.get("background-color", "") or cell_css.get(
+                        "background", ""
+                    )
                     bg_hex = _css_color_to_hex(bg)
                     if not bg_hex and is_header:
                         bg_hex = "EEF1F8"  # default header shading
@@ -1482,7 +1520,9 @@ def _export_docx_python(html_content: str) -> bytes:
                     if width_str:
                         try:
                             if width_str.endswith("px"):
-                                emu = int(float(width_str[:-2]) * 9144)  # 1px ≈ 9144 EMU
+                                emu = int(
+                                    float(width_str[:-2]) * 9144
+                                )  # 1px ≈ 9144 EMU
                                 for r in range(len(rows_tags)):
                                     tbl.cell(r, idx).width = emu
                             elif width_str.endswith("%"):
@@ -1528,7 +1568,10 @@ def export_docx(html_content: str) -> bytes:
     try:
         return _export_docx_python(html_content)
     except Exception as exc:
-        logger.warning("[export_docx] python-docx builder failed (%s), falling back to html2docx", exc)
+        logger.warning(
+            "[export_docx] python-docx builder failed (%s), falling back to html2docx",
+            exc,
+        )
 
     # ── Fallback: html2docx (handles edge cases the builder misses) ─────────
     try:
@@ -1549,7 +1592,9 @@ def export_docx(html_content: str) -> bytes:
     except ImportError:
         pass
 
-    raise RuntimeError("export_docx: 所有路径均失败，请确认 python-docx 和 beautifulsoup4 已安装")
+    raise RuntimeError(
+        "export_docx: 所有路径均失败，请确认 python-docx 和 beautifulsoup4 已安装"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1557,9 +1602,7 @@ def export_docx(html_content: str) -> bytes:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def export_xlsx(
-    sheets_json: Any, images: list[dict] | None = None
-) -> bytes:
+def export_xlsx(sheets_json: Any, images: list[dict] | None = None) -> bytes:
     """
     将编辑器序列化数据重建为 .xlsx 字节流。
 
@@ -1618,6 +1661,7 @@ def export_xlsx(
                             rgb_hex = cl["rgb"].lstrip("#")
                             try:
                                 from openpyxl.styles.colors import Color
+
                                 font_kw["color"] = Color(rgb="FF" + rgb_hex)
                             except Exception:
                                 pass
@@ -1638,8 +1682,20 @@ def export_xlsx(
 
                         # Alignment
                         align_kw: dict[str, Any] = {}
-                        _h_rev = {1: "left", 2: "center", 3: "right", 6: "justify", 7: "distributed"}
-                        _v_rev = {1: "top", 2: "center", 3: "bottom", 4: "justify", 5: "distributed"}
+                        _h_rev = {
+                            1: "left",
+                            2: "center",
+                            3: "right",
+                            6: "justify",
+                            7: "distributed",
+                        }
+                        _v_rev = {
+                            1: "top",
+                            2: "center",
+                            3: "bottom",
+                            4: "justify",
+                            5: "distributed",
+                        }
                         if "ht" in s and s["ht"] in _h_rev:
                             align_kw["horizontal"] = _h_rev[s["ht"]]
                         if "vt" in s and s["vt"] in _v_rev:
@@ -1651,13 +1707,16 @@ def export_xlsx(
             for merge in sheet_data.get("mergeData", []):
                 try:
                     from openpyxl.utils import get_column_letter
+
                     r1 = merge["startRow"] + 1
                     c1 = merge["startColumn"] + 1
                     r2 = merge["endRow"] + 1
                     c2 = merge["endColumn"] + 1
                     ws.merge_cells(
-                        start_row=r1, start_column=c1,
-                        end_row=r2, end_column=c2,
+                        start_row=r1,
+                        start_column=c1,
+                        end_row=r2,
+                        end_column=c2,
                     )
                 except Exception:
                     pass  # skip invalid merge ranges
@@ -1668,7 +1727,9 @@ def export_xlsx(
         for sheet_data in sheets_json:
             ws = wb.create_sheet(title=sheet_data.get("name", "Sheet"))
             for cell_entry in sheet_data.get("celldata", []):
-                r = cell_entry.get("r", 0) + 1  # Luckysheet 0-indexed → openpyxl 1-indexed
+                r = (
+                    cell_entry.get("r", 0) + 1
+                )  # Luckysheet 0-indexed → openpyxl 1-indexed
                 c = cell_entry.get("c", 0) + 1
                 v = cell_entry.get("v", {})
                 if v:
@@ -1809,7 +1870,11 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
             p_el = etree.SubElement(txBody, f"{{{nsmap['a']}}}p")
 
             # Set paragraph alignment
-            align = para_data.get("align", "LEFT") if isinstance(para_data, dict) else "LEFT"
+            align = (
+                para_data.get("align", "LEFT")
+                if isinstance(para_data, dict)
+                else "LEFT"
+            )
             align_map = {"LEFT": "l", "CENTER": "ctr", "RIGHT": "r", "JUSTIFY": "just"}
             algn_val = align_map.get(str(align).upper(), "l")
             pPr = etree.SubElement(p_el, f"{{{nsmap['a']}}}pPr")
@@ -1844,7 +1909,9 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
                     color_str = str(run_data["color"]).lstrip("#")
                     if len(color_str) == 6:
                         solidFill = etree.SubElement(rPr, f"{{{nsmap['a']}}}solidFill")
-                        srgbClr = etree.SubElement(solidFill, f"{{{nsmap['a']}}}srgbClr")
+                        srgbClr = etree.SubElement(
+                            solidFill, f"{{{nsmap['a']}}}srgbClr"
+                        )
                         srgbClr.set("val", color_str.upper())
 
                 # Font name
@@ -1910,6 +1977,7 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
             else:
                 # ── New slide (index beyond original) — add blank slide with textboxes ──
                 from pptx.util import Emu
+
                 try:
                     layout = prs.slide_layouts[6]
                 except (IndexError, KeyError):

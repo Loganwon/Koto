@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koto (言) — 本地 + 云端 AI 工作台</title>
-    <meta name="description" content="Koto 是一款本地 + 云端混合运行的 AI 工作台，内置 Skill Marketplace，支持文档处理、PPT 生成、知识图谱、语音交互等 51+ 技能。数据默认本地存储，云端能力按需开启。">
+    <title>Koto (言) — 本地优先 AI 文件工作台</title>
+    <meta name="description" content="Koto 是一款本地优先的 AI 文件工作台，支持 Word、PPT、Excel 文件内联 AI 编辑，内置写作润色、翻译、摘要等 8 种技能，同时提供多模型对话、知识库、语音交互和工作流自动化。数据默认本地存储，按需开启 Gemini 或 Ollama 模型。">
     <style>
             :root {
             --bg-primary: #05080f;
@@ -297,7 +297,7 @@
         }
         .stat:last-child { border-right: none; }
         .stat-value {
-            font-size: 56px; font-weight: 900; letter-spacing: -2px; line-height: 1;
+            font-size: clamp(32px, 4vw, 56px); font-weight: 900; letter-spacing: -2px; line-height: 1.15;
             color: var(--accent-primary); margin-bottom: 10px;
         }
         .stat-label { color: var(--text-secondary); font-size: 15px; font-weight: 500; }
@@ -463,9 +463,9 @@
             Koto
         </a>
         <div class="nav-links">
-            <a href="#marketplace">技能市场</a>
-            <a href="#features">功能特性</a>
-            <a href="#activation">使用指南</a>
+            <a href="#marketplace">技能系统</a>
+            <a href="#features">核心能力</a>
+            <a href="#activation">快速上手</a>
             <a href="#download">下载</a>
             <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
         </div>
@@ -476,13 +476,13 @@
         <div class="hero-inner">
             <div class="hero-badge fade-up" id="hero-version-badge">
                 <span class="dot"></span>
-                \1v1.7.0</span> · 开源 · Python · 本地 + 云端
+                <span id="version-text">v1.7.1</span> · 开源 · Python · 本地优先
             </div>
             <h1 class="hero-title fade-up fade-up-1">
-                属于你的<br><span class="accent">AI 工作台</span>
+                属于你的<br><span class="accent">AI 文件工作台</span>
             </h1>
             <p class="hero-desc fade-up fade-up-2">
-                本地部署，云端增强。51+ Skill 按需启用——写作、代码、分析、翻译、PPT 生成，数据默认存储在你的电脑上，云端能力一键开启。
+                在你的电脑上直接打开 Word、PPT、Excel，AI 悬浮工具栏一键润色、翻译、摘要。本地文件管理 + 知识库 + 多模型对话，数据始终留在你的设备上。
             </p>
             <div class="hero-actions fade-up fade-up-3">
                 <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-hero" class="btn btn-primary btn-lg" target="_blank" rel="noopener">
@@ -494,9 +494,9 @@
             </div>
             <div class="hero-meta fade-up fade-up-4">
                 <span>🔒 数据本地存储</span>
-                <span>☁️ 云端按需开启</span>
-                <span>🧩 51+ 技能</span>
+                <span>📄 Word / PPT / Excel</span>
                 <span>🤖 Gemini + Ollama</span>
+                <span>🎙️ 语音交互</span>
             </div>
         </div>
     </section>
@@ -506,18 +506,18 @@
         <div class="section-wrap">
             <div class="marketplace-header">
                 <div>
-                    <div class="section-label">🧩 Skill Marketplace</div>
-                    <h2 class="section-title">像应用商店一样<br>扩展 AI 能力</h2>
-                    <p class="section-desc">内置 51+ 精选技能，覆盖写作、代码、分析、翻译等场景。本地离线可用，联网解锁更多。一键启用，即插即用，也支持自定义创建专属技能。</p>
+                    <div class="section-label">🧩 技能系统</div>
+                    <h2 class="section-title">文件内联 AI 技能<br>悬浮工具栏一键调用</h2>
+                    <p class="section-desc">在 Word、PPT、Excel 中选中文字，悬浮工具栏即时弹出。8 种内置技能覆盖日常文档场景，也支持自定义提示词创建专属技能。</p>
                     <div class="marketplace-cats">
                         <span class="cat-pill active">全部</span>
                         <span class="cat-pill">✍️ 写作润色</span>
-                        <span class="cat-pill">💻 代码开发</span>
-                        <span class="cat-pill">📊 数据分析</span>
                         <span class="cat-pill">🌐 翻译</span>
-                        <span class="cat-pill">📄 文档处理</span>
-                        <span class="cat-pill">🎨 创意生成</span>
-                        <span class="cat-pill">🔍 深度研究</span>
+                        <span class="cat-pill">📝 摘要</span>
+                        <span class="cat-pill">✨ 续写</span>
+                        <span class="cat-pill">🔄 改写</span>
+                        <span class="cat-pill">💡 注释</span>
+                        <span class="cat-pill">💻 代码执行</span>
                     </div>
                 </div>
             </div>
@@ -526,61 +526,85 @@
                 <div class="skill-card">
                     <div class="skill-card-head">
                         <div class="skill-icon">✍️</div>
-                        <span class="skill-badge">热门</span>
+                        <span class="skill-badge">常用</span>
                     </div>
-                    <h3>写作润色助手</h3>
-                    <p>一键优化文章表达，支持正式/轻松/专业等多种语气，保留原意的同时让文字更流畅自然。</p>
+                    <h3>写作润色</h3>
+                    <p>一键优化文章表达，让文字更流畅自然，保留原意的同时提升文档品质。支持正式 / 轻松 / 专业多种语气。</p>
                     <div class="skill-card-footer">
-                        <span>✅ 已启用</span>
-                        <span>🌐 写作</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">🔍</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>深度研究模式</h3>
-                    <p>多轮网络搜索 + 结构化分析，自动汇总权威信息，生成带引用的研究报告，适合复杂调研任务。</p>
-                    <div class="skill-card-footer">
-                        <span>🔓 点击启用</span>
-                        <span>🔍 研究</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">💻</div>
-                        <span class="skill-badge">热门</span>
-                    </div>
-                    <h3>代码审查专家</h3>
-                    <p>自动发现代码中的 Bug、安全隐患和性能问题，提供具体修复建议，支持 Python、JS、Go 等主流语言。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 已启用</span>
-                        <span>💻 代码</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">📊</div>
-                        <span class="skill-badge">精选</span>
-                    </div>
-                    <h3>数据分析师</h3>
-                    <p>上传 Excel / CSV，AI 自动生成分析报告、图表解读和业务洞察，无需编写任何代码。</p>
-                    <div class="skill-card-footer">
-                        <span>🔓 点击启用</span>
-                        <span>📊 分析</span>
+                        <span>✅ 内置</span>
+                        <span>✍️ 写作</span>
                     </div>
                 </div>
                 <div class="skill-card">
                     <div class="skill-card-head">
                         <div class="skill-icon">🌐</div>
+                        <span class="skill-badge">常用</span>
+                    </div>
+                    <h3>智能翻译</h3>
+                    <p>基于语境的高质量翻译，中英双向互译，保留专业术语和文档格式，远超机翻质量。</p>
+                    <div class="skill-card-footer">
+                        <span>✅ 内置</span>
+                        <span>🌐 翻译</span>
+                    </div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-head">
+                        <div class="skill-icon">📝</div>
+                        <span class="skill-badge">常用</span>
+                    </div>
+                    <h3>内容摘要</h3>
+                    <p>自动提炼文档关键论点和要点，生成简洁中文摘要（200 字以内），快速掌握长文精华。</p>
+                    <div class="skill-card-footer">
+                        <span>✅ 内置</span>
+                        <span>📝 摘要</span>
+                    </div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-head">
+                        <div class="skill-icon">✨</div>
+                        <span class="skill-badge new">New</span>
+                    </div>
+                    <h3>续写助手</h3>
+                    <p>根据已有文本自然延续写作（100–200 字），保持语气和风格一致，衔接流畅，告别写作卡顿。</p>
+                    <div class="skill-card-footer">
+                        <span>✅ 内置</span>
+                        <span>✨ 创作</span>
+                    </div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-head">
+                        <div class="skill-icon">🔄</div>
                         <span class="skill-badge">精选</span>
                     </div>
-                    <h3>专业翻译引擎</h3>
-                    <p>基于语境的高质量翻译，支持中英日韩等 20+ 语言，保留格式与专业术语，远超机翻质量。</p>
+                    <h3>文本改写</h3>
+                    <p>保留核心意思，用不同措辞和句式重新表达，让语言更多样化，避免重复用词。</p>
                     <div class="skill-card-footer">
-                        <span>✅ 已启用</span>
-                        <span>🌐 翻译</span>
+                        <span>✅ 内置</span>
+                        <span>🔄 改写</span>
+                    </div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-head">
+                        <div class="skill-icon">💡</div>
+                        <span class="skill-badge">精选</span>
+                    </div>
+                    <h3>智能注释</h3>
+                    <p>自动为文本添加简洁注释，解释关键概念、术语或难点，注释插入相应位置，不破坏原文结构。</p>
+                    <div class="skill-card-footer">
+                        <span>✅ 内置</span>
+                        <span>💡 注释</span>
+                    </div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-head">
+                        <div class="skill-icon">💻</div>
+                        <span class="skill-badge new">New</span>
+                    </div>
+                    <h3>代码沙箱执行</h3>
+                    <p>在安全沙箱中执行 AI 生成或用户编写的 Python 代码，支持图表输出，结果直接展示在对话界面。</p>
+                    <div class="skill-card-footer">
+                        <span>✅ 内置</span>
+                        <span>💻 代码</span>
                     </div>
                 </div>
                 <div class="skill-card">
@@ -588,8 +612,8 @@
                         <div class="skill-icon">🎯</div>
                         <span class="skill-badge new">New</span>
                     </div>
-                    <h3>自定义技能创建</h3>
-                    <p>用自然语言描述你的需求，AI 自动生成专属技能配置。打造属于你的私人 AI 工作流，无需编程。</p>
+                    <h3>自定义技能</h3>
+                    <p>用自然语言描述你的需求，AI 自动生成专属技能配置。打造私人 AI 工作流，无需编程，即插即用。</p>
                     <div class="skill-card-footer">
                         <span>🛠 DIY</span>
                         <span>🧩 自定义</span>
@@ -598,8 +622,8 @@
             </div>
 
             <div class="marketplace-cta">
-                <h3>探索更多技能</h3>
-                <p>51+ 精选技能持续更新，涵盖职场、学术、创意、生活各场景。本地运行，联网增强，找到最适合你的 AI 工作方式。</p>
+                <h3>探索更多用法</h3>
+                <p>8 种内置技能覆盖日常文档场景，自定义技能随时扩展。本地运行保护隐私，Gemini 云端与 Ollama 本地模型自由切换。</p>
                 <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
                     <a href="#download" class="btn btn-primary">下载体验</a>
                     <a href="https://github.com/Loganwon/Koto" class="btn btn-ghost" target="_blank" rel="noopener">查看源码</a>
@@ -611,10 +635,10 @@
     <!-- ===== STATS ===== -->
     <div class="stats-band">
         <div class="stats-inner">
-            <div class="stat"><div class="stat-value">51+</div><div class="stat-label">内置技能</div></div>
-            <div class="stat"><div class="stat-value">160+</div><div class="stat-label">API 接口</div></div>
-            <div class="stat"><div class="stat-value">8</div><div class="stat-label">主题风格</div></div>
-            <div class="stat"><div class="stat-value">本地+云端</div><div class="stat-label">运行模式</div></div>
+            <div class="stat"><div class="stat-value">8+</div><div class="stat-label">内置 AI 技能</div></div>
+            <div class="stat"><div class="stat-value">DOCX<br>PPT<br>XLSX</div><div class="stat-label">全格式文档编辑</div></div>
+            <div class="stat"><div class="stat-value">本地<br>+云端</div><div class="stat-label">双模式运行</div></div>
+            <div class="stat"><div class="stat-value">Gemini<br>+Ollama</div><div class="stat-label">多模型支持</div></div>
         </div>
     </div>
 
@@ -624,38 +648,38 @@
             <div style="text-align:center;margin-bottom:64px;">
                 <div class="section-label" style="display:inline-flex;">⚡ 核心能力</div>
                 <h2 class="section-title" style="text-align:center;">不止于对话</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;">从文档到 PPT，从知识图谱到语音交互——本地处理确保隐私，云端加速提升效率</p>
+                <p class="section-desc" style="margin:0 auto;text-align:center;">文件内联编辑、知识库 RAG、语音交互、代码沙箱——本地处理确保隐私，Gemini 或 Ollama 按需调用</p>
             </div>
             <div class="features-grid">
                 <div class="feature-card">
-                    <div class="feature-icon">💬</div>
-                    <h3>多模型智能对话</h3>
-                    <p>Gemini 云端多模态 + Ollama 本地模型自由切换，多轮记忆，8 种界面主题，流式实时响应。</p>
-                </div>
-                <div class="feature-card">
                     <div class="feature-icon">📄</div>
-                    <h3>全格式文档处理</h3>
-                    <p>Word、PDF、Excel、PPT 一站式处理，智能批注、格式转换、内容摘要，全自动文档工作流。</p>
+                    <h3>文件内联 AI 编辑</h3>
+                    <p>打开 Word、PPT、Excel 文件，选中文字即弹出 AI 悬浮工具栏，一键润色、翻译、摘要，修改结果直接应用到文档，无需复制粘贴。</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🎨</div>
-                    <h3>一键 PPT 生成</h3>
-                    <p>输入主题即可生成专业演示文稿，支持多种商务模板与布局，内容与排版双重优化。</p>
+                    <div class="feature-icon">🗂️</div>
+                    <h3>本地工作区管理</h3>
+                    <p>内置文件浏览器，直接管理本地文件夹。创建、重命名、删除、移动，支持右键菜单，所有操作都在本地完成，文件不上传任何服务器。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">💬</div>
+                    <h3>多模型 AI 对话</h3>
+                    <p>Gemini 云端多模态 + Ollama 本地模型自由切换，多轮记忆，流式实时响应。支持上传图片、附件，结合知识库进行 RAG 问答。</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">🧠</div>
-                    <h3>知识图谱</h3>
-                    <p>从文档中自动抽取概念与关系，构建可视化知识网络，让碎片化信息结构化呈现。</p>
+                    <h3>知识库 RAG</h3>
+                    <p>上传 TXT、Markdown、PDF、DOCX 文件构建本地知识库，AI 对话时自动语义检索关联内容，让 AI 了解你的私有文档。</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🤖</div>
-                    <h3>智能 Agent</h3>
-                    <p>复杂任务自动拆解与执行，浏览器自动化、定时任务、批量文件处理，全程无需人工干预。</p>
+                    <div class="feature-icon">🎙️</div>
+                    <h3>语音交互</h3>
+                    <p>语音输入提问，AI 回复支持 TTS 朗读，打造更自然的人机交互体验。完全本地语音处理，无需上传音频数据。</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">🔒</div>
-                    <h3>安全 · 私有 · 灵活</h3>
-                    <p>数据默认本地存储，支持完全离线运行；也可开启云端功能加速处理。用户认证 + 请求限流，企业级安全保障。</p>
+                    <div class="feature-icon">⚙️</div>
+                    <h3>工作流 · 代码沙箱</h3>
+                    <p>可视化工作流编排复杂任务，代码沙箱安全执行 Python 脚本，支持图表输出。定时任务、批量文件处理，全程自动化。</p>
                 </div>
             </div>
         </div>
@@ -664,44 +688,48 @@
     <!-- ===== ACTIVATION CODE ===== -->
     <section id="activation" class="activation-section">
         <div class="activation-inner">
-            <div class="section-label">� 开始使用</div>
-            <h2 class="section-title">三步开始使用 Koto</h2>
-            <p class="section-desc">用自己的 Gemini API Key 免费使用，或申请激活码解锁云端高级能力——两种模式自由切换。</p>
+            <div class="section-label">🚀 开始使用</div>
+            <h2 class="section-title">三步上手 Koto</h2>
+            <p class="section-desc">下载便携包，填入 Gemini API Key 即可开始。数据留在本地，按需开启云端能力。</p>
 
             <div class="steps-row">
                 <div class="step-card">
                     <div class="step-num">1</div>
-                    <h3>下载并安装</h3>
-                    <p>前往 GitHub Releases 页面下载最新版 Windows 便携包，解压即用，无需安装任何运行环境。</p>
+                    <h3>下载并启动</h3>
+                    <p>前往 GitHub Releases 下载最新 Windows 便携包，解压后运行 <code>koto.exe</code>，或从源码用 <code>python server.py</code> 启动，浏览器访问 <code>localhost:5000</code>。</p>
                     <div class="step-note">
-                        📦 便携版 .exe，解压即运行<br>
-                        <strong>无需 Python 环境</strong>
+                        📦 Windows 便携版，解压即运行<br>
+                        <strong>也可从源码运行（Python 3.11+）</strong>
                     </div>
                 </div>
                 <div class="step-card">
                     <div class="step-num">2</div>
-                    <h3>填入 API Key 或申请激活码</h3>
-                    <p>在设置中填入你自己的 <strong>Google Gemini API Key</strong> 即可开始使用全部本地功能；如需云端高级功能，也可联系管理员获取激活码。</p>
+                    <h3>填入 Gemini API Key</h3>
+                    <p>在设置页面填入你的 <strong>Google Gemini API Key</strong>，所有 AI 功能立即解锁。也可配置本地 Ollama 模型实现完全离线运行。</p>
                     <div class="step-note">
-                        🔑 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">免费获取 Gemini API Key</a><br>
-                        💬 或加微信 <strong>18913921188</strong> 申请激活码
+                        🔑 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent-primary);text-decoration:underline">免费获取 Gemini API Key</a><br>
+                        🤖 或安装 <a href="https://ollama.ai" target="_blank" rel="noopener" style="color:var(--accent-primary);text-decoration:underline">Ollama</a> 本地运行
                     </div>
                 </div>
                 <div class="step-card">
                     <div class="step-num">3</div>
-                    <h3>开始使用</h3>
-                    <p>打开 Koto，首次启动会引导你完成配置。填入 API Key 后即可使用全部功能，包括 Skill Marketplace。</p>
+                    <h3>打开文件开始编辑</h3>
+                    <p>在工作区浏览器中打开 Word、PPT 或 Excel 文件，选中文字后 AI 悬浮工具栏自动出现。选择技能，AI 即时处理，一键应用到文档。</p>
                     <div class="step-note">
-                        🚀 解锁 <strong>51+ 技能</strong><br>
-                        及全部高级功能
+                        📄 支持 DOCX · PPTX · XLSX<br>
+                        <strong>数据始终留在你的设备上</strong>
                     </div>
                 </div>
             </div>
 
             <div class="activation-contact">
                 <div class="left">
-                    <h3>两种方式，自由选择</h3>
-                    <p>方式一：在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:underline">Google AI Studio</a> 免费申请 Gemini API Key，填入 Koto 设置即可使用。<br>方式二：加微信发送「Koto 激活码」获取内测激活码，通常 24 小时内回复。</p>
+                    <h3>两种运行模式，自由切换</h3>
+                    <p>
+                        <strong>云端模式</strong>：在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent-primary);text-decoration:underline">Google AI Studio</a> 免费申请 Gemini API Key，填入设置即可使用全部功能。<br>
+                        <strong>本地模式</strong>：安装 Ollama 并下载模型（如 llama3、qwen），Koto 自动检测并切换，完全离线运行。<br>
+                        有问题？加微信咨询或发送「Koto 使用帮助」。
+                    </p>
                 </div>
                 <div class="wechat-chip">
                     <div class="wc-icon">💬</div>
@@ -720,7 +748,7 @@
             <div class="download-left">
                 <div class="section-label">⬇ 下载</div>
                 <h2>立即下载<br>开始体验</h2>
-                <p>下载最新 Release，解压即可运行。本地开箱即用，联网即享云端增强，无需配置 Python 环境。</p>
+                <p>下载最新 Release，解压即可运行。本地文件管理开箱即用，Gemini / Ollama 按需配置，无需额外安装运行环境。</p>
                 <div class="download-actions">
                     <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-main" class="download-btn" target="_blank" rel="noopener">
                         <div class="dl-icon">🪟</div>
@@ -742,20 +770,21 @@
             </div>
             <div class="download-right">
                 <div class="req-card">
-                    <h4>系统要求</h4>
+                    <h4>系统要求（便携版）</h4>
                     <div class="req-item"><span class="check">✓</span> Windows 10 / 11 (64-bit)</div>
                     <div class="req-item"><span class="check">✓</span> 内存 4GB+（推荐 8GB+）</div>
                     <div class="req-item"><span class="check">✓</span> 磁盘空间 2GB+</div>
                     <div class="req-item"><span class="check">✓</span> 网络连接（Gemini API 需要）</div>
                 </div>
                 <div class="req-card">
-                    <h4>也可从源码运行</h4>
+                    <h4>从源码运行（跨平台）</h4>
                     <div class="req-item"><span class="check">✓</span> Python 3.11+</div>
                     <div class="req-item"><span class="check">✓</span> pip install -r config/requirements.txt</div>
+                    <div class="req-item"><span class="check">✓</span> python server.py → localhost:5000</div>
                     <div class="req-item" style="margin-top:8px;">
                         <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener"
                            style="color:var(--accent-primary);text-decoration:none;font-size:14px;">
-                            → GitHub 仓库源码
+                            → GitHub 仓库 · Docker 支持
                         </a>
                     </div>
                 </div>
@@ -776,7 +805,7 @@
                 <a href="#marketplace">技能市场</a>
                 <a href="#activation">使用指南</a>
             </div>
-            <div class="footer-copy" id="footer-version">\1v1.7.0</div>
+            <div class="footer-copy" id="footer-version">© 2026 Koto · v1.7.1</div>
         </div>
     </footer>
 

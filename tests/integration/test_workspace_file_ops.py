@@ -170,7 +170,9 @@ class TestCreateFolder:
     def test_create_folder_in_root(self, _app_bundle):
         client, _, ws = _app_bundle
         name = f"folder_{uuid.uuid4().hex[:8]}"
-        resp = client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": name})
+        resp = client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": name}
+        )
         assert resp.status_code == 200
         data = resp.get_json()
         assert data.get("ok") is True
@@ -180,7 +182,9 @@ class TestCreateFolder:
     def test_create_folder_returns_path(self, _app_bundle):
         client, _, ws = _app_bundle
         name = f"fp_{uuid.uuid4().hex[:8]}"
-        resp = client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": name})
+        resp = client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": name}
+        )
         assert resp.status_code == 200
         assert "path" in resp.get_json()
 
@@ -200,12 +204,16 @@ class TestCreateFolder:
         client, _, ws = _app_bundle
         name = f"dup_{uuid.uuid4().hex[:8]}"
         (ws / name).mkdir(exist_ok=True)
-        resp = client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": name})
+        resp = client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": name}
+        )
         assert resp.status_code == 409
 
     def test_create_folder_empty_name_returns_400(self, _app_bundle):
         client, _, _ = _app_bundle
-        resp = client.post("/api/v1/workspace/create_folder", json={"parent": "", "name": ""})
+        resp = client.post(
+            "/api/v1/workspace/create_folder", json={"parent": "", "name": ""}
+        )
         assert resp.status_code == 400
 
     def test_create_folder_slash_in_name_returns_400(self, _app_bundle):
@@ -258,7 +266,9 @@ class TestRenameFolderPath:
         old_name = f"rf_src_{uuid.uuid4().hex[:6]}"
         (ws / old_name).mkdir(exist_ok=True)
         new_name = f"rf_dst_{uuid.uuid4().hex[:6]}"
-        resp = client.patch("/api/v1/workspace/rename", json={"path": old_name, "name": new_name})
+        resp = client.patch(
+            "/api/v1/workspace/rename", json={"path": old_name, "name": new_name}
+        )
         assert resp.status_code == 200
         data = resp.get_json()
         assert "path" in data
@@ -350,6 +360,7 @@ class TestAutoSaveTraversalGuard:
         """Return a valid file_id from a real upload."""
         try:
             import docx as _docx
+
             buf = __import__("io").BytesIO()
             _docx.Document().save(buf)
             docx_bytes = buf.getvalue()
@@ -401,9 +412,9 @@ class TestAutoSaveTraversalGuard:
         # Error must not contain a filesystem path
         body = resp.get_json() or {}
         err = body.get("error", "")
-        assert "\\" not in err and "/" not in err, (
-            f"Error message must not leak filesystem paths, got: {err!r}"
-        )
+        assert (
+            "\\" not in err and "/" not in err
+        ), f"Error message must not leak filesystem paths, got: {err!r}"
 
     def test_valid_ws_source_path_still_works(self, _app_bundle):
         """Normal (non-traversal) explicit save must still return 200."""
@@ -454,7 +465,9 @@ class TestFsDelete:
 
     def test_fs_delete_nonexistent_returns_404(self, _app_bundle, tmp_path):
         client, _, _ = _app_bundle
-        resp = client.delete(f"/api/v1/workspace/fs_delete?path={tmp_path / 'nope.txt'}")
+        resp = client.delete(
+            f"/api/v1/workspace/fs_delete?path={tmp_path / 'nope.txt'}"
+        )
         assert resp.status_code == 404
 
     def test_fs_delete_system_path_returns_403(self, _app_bundle):
@@ -746,7 +759,9 @@ class TestCurrentDir:
         resp = client.get("/api/v1/workspace/current_dir")
         assert resp.status_code == 200
         path = resp.get_json()["path"]
-        assert Path(path).is_absolute(), f"current_dir path must be absolute, got {path!r}"
+        assert Path(
+            path
+        ).is_absolute(), f"current_dir path must be absolute, got {path!r}"
 
     def test_name_matches_workspace_dir_name(self, _app_bundle):
         client, _, ws = _app_bundle
@@ -799,9 +814,7 @@ class TestListFilesAdditional:
         (ws / fname).write_bytes(b"content")
         resp = client.get("/api/v1/workspace/list_files")
         data = resp.get_json()
-        all_file_nodes = [
-            n for n in data.get("files", []) if n.get("type") == "file"
-        ]
+        all_file_nodes = [n for n in data.get("files", []) if n.get("type") == "file"]
         names = [n["name"] for n in all_file_nodes]
         assert fname in names
         # txt should have supported=False

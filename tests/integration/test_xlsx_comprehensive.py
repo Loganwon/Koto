@@ -54,6 +54,7 @@ import pytest
 # Helpers
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
 def _make_xlsx(sheets: dict[str, list[list]]) -> bytes:
     """Build a real .xlsx in memory.  sheets = {"SheetName": [[row1], [row2], ...]}"""
     import openpyxl
@@ -139,7 +140,16 @@ class TestParseXlsx:
 
     def test_envelope_has_required_keys(self, tmp_path):
         data = self._parse(_make_xlsx({"S1": [["a"]]}), tmp_path)
-        for key in ("id", "name", "appVersion", "locale", "sheetOrder", "sheets", "styles", "resources"):
+        for key in (
+            "id",
+            "name",
+            "appVersion",
+            "locale",
+            "sheetOrder",
+            "sheets",
+            "styles",
+            "resources",
+        ):
             assert key in data, f"Missing required envelope key: {key}"
 
     def test_app_version_and_locale_present(self, tmp_path):
@@ -276,8 +286,10 @@ class TestParseXlsx:
         m = merges[0]
         # B3:C4 → (row=2, col=1) to (row=3, col=2) (0-indexed)
         assert m == {
-            "startRow": 2, "startColumn": 1,
-            "endRow": 3, "endColumn": 2,
+            "startRow": 2,
+            "startColumn": 1,
+            "endRow": 3,
+            "endColumn": 2,
         }
 
     def test_no_merges_yields_empty_list(self, tmp_path):
@@ -341,8 +353,10 @@ class TestExportXlsx:
     def _simple_univer(self, cells=None, name="Sheet1", merges=None):
         """Build a minimal Univer IWorkbookData dict."""
         sheet = {
-            "id": "s1", "name": name,
-            "rowCount": 30, "columnCount": 10,
+            "id": "s1",
+            "name": name,
+            "rowCount": 30,
+            "columnCount": 10,
             "cellData": cells or {},
         }
         if merges:
@@ -355,21 +369,21 @@ class TestExportXlsx:
     # ── Basic cell values ────────────────────────────────────────────────
 
     def test_string_value_exported(self):
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": "Hello", "t": 1}}}
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer({"0": {"0": {"v": "Hello", "t": 1}}})
+        )
         assert wb.active.cell(1, 1).value == "Hello"
 
     def test_number_value_exported(self):
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": 99.5, "t": 2}}}
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer({"0": {"0": {"v": 99.5, "t": 2}}})
+        )
         assert wb.active.cell(1, 1).value == 99.5
 
     def test_boolean_value_exported(self):
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": 1, "t": 3}}}
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer({"0": {"0": {"v": 1, "t": 3}}})
+        )
         assert wb.active.cell(1, 1).value == 1
 
     # ── Multi-sheet export ───────────────────────────────────────────────
@@ -378,8 +392,20 @@ class TestExportXlsx:
         data = {
             "sheetOrder": ["s1", "s2"],
             "sheets": {
-                "s1": {"id": "s1", "name": "First", "cellData": {}, "rowCount": 30, "columnCount": 10},
-                "s2": {"id": "s2", "name": "Second", "cellData": {"0": {"0": {"v": "B"}}}, "rowCount": 30, "columnCount": 10},
+                "s1": {
+                    "id": "s1",
+                    "name": "First",
+                    "cellData": {},
+                    "rowCount": 30,
+                    "columnCount": 10,
+                },
+                "s2": {
+                    "id": "s2",
+                    "name": "Second",
+                    "cellData": {"0": {"0": {"v": "B"}}},
+                    "rowCount": 30,
+                    "columnCount": 10,
+                },
             },
         }
         wb = self._export_and_reload(data)
@@ -389,43 +415,49 @@ class TestExportXlsx:
     # ── Style export ─────────────────────────────────────────────────────
 
     def test_bold_style_exported(self):
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": "B", "s": {"bl": 1}}}}
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer({"0": {"0": {"v": "B", "s": {"bl": 1}}}})
+        )
         assert wb.active.cell(1, 1).font.bold is True
 
     def test_italic_style_exported(self):
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": "I", "s": {"it": 1}}}}
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer({"0": {"0": {"v": "I", "s": {"it": 1}}}})
+        )
         assert wb.active.cell(1, 1).font.italic is True
 
     def test_font_size_exported(self):
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": "Big", "s": {"fs": 20}}}}
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer({"0": {"0": {"v": "Big", "s": {"fs": 20}}}})
+        )
         assert wb.active.cell(1, 1).font.size == 20
 
     def test_font_color_exported(self):
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": "Red", "s": {"cl": {"rgb": "#FF0000"}}}}}
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer(
+                {"0": {"0": {"v": "Red", "s": {"cl": {"rgb": "#FF0000"}}}}}
+            )
+        )
         color = wb.active.cell(1, 1).font.color
         assert color is not None
         assert "FF0000" in (color.rgb or "").upper()
 
     def test_background_fill_exported(self):
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": "Y", "s": {"bg": {"rgb": "#FFFF00"}}}}}
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer(
+                {"0": {"0": {"v": "Y", "s": {"bg": {"rgb": "#FFFF00"}}}}}
+            )
+        )
         fill = wb.active.cell(1, 1).fill
         assert fill.fgColor is not None
         assert "FFFF00" in (fill.fgColor.rgb or "").upper()
 
     def test_alignment_exported(self):
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": "C", "s": {"ht": 2, "vt": 1}}}}  # center, top
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer(
+                {"0": {"0": {"v": "C", "s": {"ht": 2, "vt": 1}}}}  # center, top
+            )
+        )
         ali = wb.active.cell(1, 1).alignment
         assert ali.horizontal == "center"
         assert ali.vertical == "top"
@@ -434,9 +466,12 @@ class TestExportXlsx:
 
     def test_merge_data_exported(self):
         merges = [{"startRow": 0, "startColumn": 0, "endRow": 1, "endColumn": 1}]
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"v": "Merged"}}}, merges=merges,
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer(
+                {"0": {"0": {"v": "Merged"}}},
+                merges=merges,
+            )
+        )
         merged = list(wb.active.merged_cells.ranges)
         assert len(merged) == 1
         mr = merged[0]
@@ -464,21 +499,23 @@ class TestExportXlsx:
     def test_empty_univer_data(self):
         """Empty sheetOrder produces a workbook with a fallback sheet."""
         from app.core.file.file_parser import export_xlsx
+
         raw = export_xlsx({"sheetOrder": [], "sheets": {}})
         assert len(raw) > 0
         assert raw[:2] == b"PK"  # valid xlsx/zip
 
     def test_non_list_non_dict_produces_empty(self):
         from app.core.file.file_parser import export_xlsx
+
         raw = export_xlsx("not a dict or list")
         assert len(raw) > 0  # should not crash
         assert raw[:2] == b"PK"
 
     def test_cell_without_v_key_skipped(self):
         """A cell dict with no 'v' key should still be written (for style-only cells)."""
-        wb = self._export_and_reload(self._simple_univer(
-            {"0": {"0": {"s": {"bl": 1}}}}
-        ))
+        wb = self._export_and_reload(
+            self._simple_univer({"0": {"0": {"s": {"bl": 1}}}})
+        )
         cell = wb.active.cell(1, 1)
         # Value is None but bold style should still be set
         assert cell.font.bold is True
@@ -489,6 +526,7 @@ class TestExportXlsx:
         """Base64 image embedding should not crash (even if we can't verify image in test)."""
         # 1x1 red PNG
         import base64
+
         png_1x1 = (
             b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
             b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
@@ -506,6 +544,7 @@ class TestExportXlsx:
     def test_bad_image_src_silently_skipped(self):
         images = [{"src": "not-a-data-uri"}, {"src": ""}, {}]
         from app.core.file.file_parser import export_xlsx
+
         raw = export_xlsx(
             self._simple_univer({"0": {"0": {"v": "ok"}}}),
             images,
@@ -521,8 +560,17 @@ class TestExportXlsx:
 class TestCellToUniver:
     """Test the low-level cell conversion helper."""
 
-    def _make_cell(self, value, bold=False, italic=False, font_size=None,
-                   font_color_rgb=None, fill_rgb=None, h_align=None, v_align=None):
+    def _make_cell(
+        self,
+        value,
+        bold=False,
+        italic=False,
+        font_size=None,
+        font_color_rgb=None,
+        fill_rgb=None,
+        h_align=None,
+        v_align=None,
+    ):
         """Create a mock openpyxl cell with the given properties."""
         from unittest.mock import MagicMock
 
@@ -619,7 +667,9 @@ class TestCellToUniver:
     def test_font_color_style(self):
         from app.core.file.file_parser import _openpyxl_cell_to_univer
 
-        result = _openpyxl_cell_to_univer(self._make_cell("x", font_color_rgb="FFFF0000"))
+        result = _openpyxl_cell_to_univer(
+            self._make_cell("x", font_color_rgb="FFFF0000")
+        )
         assert result["s"]["cl"]["rgb"] == "#FF0000"
 
     def test_fill_color_style(self):
@@ -650,7 +700,9 @@ class TestCellToUniver:
         """Standard black (00000000 or FF000000) should not create a cl entry."""
         from app.core.file.file_parser import _openpyxl_cell_to_univer
 
-        result = _openpyxl_cell_to_univer(self._make_cell("x", font_color_rgb="FF000000"))
+        result = _openpyxl_cell_to_univer(
+            self._make_cell("x", font_color_rgb="FF000000")
+        )
         assert "cl" not in result.get("s", {})
 
     def test_white_fill_ignored(self):
@@ -697,9 +749,9 @@ class TestRoundTrip:
 
         for rk, row in cd1.items():
             for ck, cell in row.items():
-                assert cd2[rk][ck]["v"] == cell["v"], (
-                    f"Cell ({rk},{ck}) value mismatch: {cell['v']} → {cd2[rk][ck]['v']}"
-                )
+                assert (
+                    cd2[rk][ck]["v"] == cell["v"]
+                ), f"Cell ({rk},{ck}) value mismatch: {cell['v']} → {cd2[rk][ck]['v']}"
 
     def test_multi_sheet_round_trip(self, tmp_path):
         d1, d2 = self._round_trip(
@@ -745,7 +797,9 @@ class TestRoundTrip:
         d1, d2 = self._round_trip(_make_styled_xlsx(), tmp_path)
         cell = d2["sheets"][d2["sheetOrder"][0]]["cellData"][0][0]
         bg = cell.get("s", {}).get("bg", {})
-        assert "FFFF00" in bg.get("rgb", "").upper(), "Background fill lost in round-trip"
+        assert (
+            "FFFF00" in bg.get("rgb", "").upper()
+        ), "Background fill lost in round-trip"
 
     def test_alignment_survives_round_trip(self, tmp_path):
         d1, d2 = self._round_trip(_make_styled_xlsx(), tmp_path)
@@ -861,12 +915,14 @@ class TestXlsxAutoSaveEndpoint:
         client, _, ws = xlsx_client
 
         # Create
-        client.post("/api/v1/workspace/create_file",
-                     json={"folder": "", "name": "persist.xlsx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "persist.xlsx"}
+        )
 
         # Open
-        resp = client.post("/api/v1/workspace/open_file_by_path",
-                           json={"path": "persist.xlsx"})
+        resp = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "persist.xlsx"}
+        )
         assert resp.status_code == 200
         fid = resp.get_json()["file_id"]
 
@@ -876,8 +932,10 @@ class TestXlsxAutoSaveEndpoint:
                 "sheetOrder": ["s1"],
                 "sheets": {
                     "s1": {
-                        "id": "s1", "name": "Saved",
-                        "rowCount": 30, "columnCount": 10,
+                        "id": "s1",
+                        "name": "Saved",
+                        "rowCount": 30,
+                        "columnCount": 10,
                         "cellData": {
                             "0": {"0": {"v": "Saved!", "t": 1}},
                             "1": {"0": {"v": 42, "t": 2}},
@@ -888,17 +946,23 @@ class TestXlsxAutoSaveEndpoint:
             },
             "_images": [],
         }
-        resp2 = client.post("/api/v1/workspace/auto_save", json={
-            "file_type": "xlsx", "file_id": fid,
-            "ws_source_path": "persist.xlsx",
-            "explicit": True, "data": save_data,
-        })
+        resp2 = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "xlsx",
+                "file_id": fid,
+                "ws_source_path": "persist.xlsx",
+                "explicit": True,
+                "data": save_data,
+            },
+        )
         assert resp2.status_code == 200
         assert resp2.get_json()["src_written"] is True
 
         # Reopen and verify
-        resp3 = client.post("/api/v1/workspace/open_file_by_path",
-                            json={"path": "persist.xlsx"})
+        resp3 = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "persist.xlsx"}
+        )
         assert resp3.status_code == 200
         cd = resp3.get_json()["data"]["sheets"][
             resp3.get_json()["data"]["sheetOrder"][0]
@@ -911,10 +975,13 @@ class TestXlsxAutoSaveEndpoint:
         """Styles and merges in the save payload should survive round-trip."""
         client, _, ws = xlsx_client
 
-        client.post("/api/v1/workspace/create_file",
-                     json={"folder": "", "name": "styled_save.xlsx"})
-        resp = client.post("/api/v1/workspace/open_file_by_path",
-                           json={"path": "styled_save.xlsx"})
+        client.post(
+            "/api/v1/workspace/create_file",
+            json={"folder": "", "name": "styled_save.xlsx"},
+        )
+        resp = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "styled_save.xlsx"}
+        )
         fid = resp.get_json()["file_id"]
 
         save_data = {
@@ -922,30 +989,45 @@ class TestXlsxAutoSaveEndpoint:
                 "sheetOrder": ["s1"],
                 "sheets": {
                     "s1": {
-                        "id": "s1", "name": "Styled",
-                        "rowCount": 30, "columnCount": 10,
+                        "id": "s1",
+                        "name": "Styled",
+                        "rowCount": 30,
+                        "columnCount": 10,
                         "cellData": {
-                            "0": {"0": {"v": "Header", "t": 1, "s": {"bl": 1, "fs": 14}}},
+                            "0": {
+                                "0": {"v": "Header", "t": 1, "s": {"bl": 1, "fs": 14}}
+                            },
                             "1": {"0": {"v": 100, "t": 2}},
                         },
                         "mergeData": [
-                            {"startRow": 2, "startColumn": 0, "endRow": 3, "endColumn": 1}
+                            {
+                                "startRow": 2,
+                                "startColumn": 0,
+                                "endRow": 3,
+                                "endColumn": 1,
+                            }
                         ],
                     }
                 },
             },
             "_images": [],
         }
-        resp2 = client.post("/api/v1/workspace/auto_save", json={
-            "file_type": "xlsx", "file_id": fid,
-            "ws_source_path": "styled_save.xlsx",
-            "explicit": True, "data": save_data,
-        })
+        resp2 = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "xlsx",
+                "file_id": fid,
+                "ws_source_path": "styled_save.xlsx",
+                "explicit": True,
+                "data": save_data,
+            },
+        )
         assert resp2.status_code == 200
 
         # Reopen
-        resp3 = client.post("/api/v1/workspace/open_file_by_path",
-                            json={"path": "styled_save.xlsx"})
+        resp3 = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "styled_save.xlsx"}
+        )
         assert resp3.status_code == 200
         sheet = resp3.get_json()["data"]["sheets"][
             resp3.get_json()["data"]["sheetOrder"][0]
@@ -959,10 +1041,12 @@ class TestXlsxAutoSaveEndpoint:
         """Non-explicit (timer) auto_save must NOT write to workspace source."""
         client, _, ws = xlsx_client
 
-        client.post("/api/v1/workspace/create_file",
-                     json={"folder": "", "name": "timer.xlsx"})
-        resp = client.post("/api/v1/workspace/open_file_by_path",
-                           json={"path": "timer.xlsx"})
+        client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "timer.xlsx"}
+        )
+        resp = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": "timer.xlsx"}
+        )
         fid = resp.get_json()["file_id"]
         original_size = (ws / "timer.xlsx").stat().st_size
 
@@ -970,18 +1054,27 @@ class TestXlsxAutoSaveEndpoint:
         save_data = {
             "snapshot": {
                 "sheetOrder": ["s1"],
-                "sheets": {"s1": {
-                    "id": "s1", "name": "Timer",
-                    "cellData": {"0": {"0": {"v": "CHANGED"}}},
-                    "rowCount": 30, "columnCount": 10,
-                }},
+                "sheets": {
+                    "s1": {
+                        "id": "s1",
+                        "name": "Timer",
+                        "cellData": {"0": {"0": {"v": "CHANGED"}}},
+                        "rowCount": 30,
+                        "columnCount": 10,
+                    }
+                },
             },
         }
-        resp2 = client.post("/api/v1/workspace/auto_save", json={
-            "file_type": "xlsx", "file_id": fid,
-            "ws_source_path": "timer.xlsx",
-            "explicit": False, "data": save_data,
-        })
+        resp2 = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "xlsx",
+                "file_id": fid,
+                "ws_source_path": "timer.xlsx",
+                "explicit": False,
+                "data": save_data,
+            },
+        )
         assert resp2.status_code == 200
         assert resp2.get_json()["src_written"] is False
 
@@ -994,17 +1087,26 @@ class TestXlsxSaveFileEndpoint:
         wb_data = {
             "snapshot": {
                 "sheetOrder": ["s1"],
-                "sheets": {"s1": {
-                    "id": "s1", "name": "DL",
-                    "cellData": {"0": {"0": {"v": "Download"}}},
-                    "rowCount": 30, "columnCount": 10,
-                }},
+                "sheets": {
+                    "s1": {
+                        "id": "s1",
+                        "name": "DL",
+                        "cellData": {"0": {"0": {"v": "Download"}}},
+                        "rowCount": 30,
+                        "columnCount": 10,
+                    }
+                },
             },
             "_images": [],
         }
-        resp = client.post("/api/v1/workspace/save_file", json={
-            "file_type": "xlsx", "data": wb_data, "file_name": "dl.xlsx",
-        })
+        resp = client.post(
+            "/api/v1/workspace/save_file",
+            json={
+                "file_type": "xlsx",
+                "data": wb_data,
+                "file_name": "dl.xlsx",
+            },
+        )
         assert resp.status_code == 200
         assert resp.data[:2] == b"PK"
 
@@ -1016,17 +1118,26 @@ class TestXlsxSaveFileEndpoint:
         wb_data = {
             "snapshot": {
                 "sheetOrder": ["s1"],
-                "sheets": {"s1": {
-                    "id": "s1", "name": "Verify",
-                    "cellData": {"0": {"0": {"v": "Check", "t": 1}}},
-                    "rowCount": 30, "columnCount": 10,
-                }},
+                "sheets": {
+                    "s1": {
+                        "id": "s1",
+                        "name": "Verify",
+                        "cellData": {"0": {"0": {"v": "Check", "t": 1}}},
+                        "rowCount": 30,
+                        "columnCount": 10,
+                    }
+                },
             },
             "_images": [],
         }
-        resp = client.post("/api/v1/workspace/save_file", json={
-            "file_type": "xlsx", "data": wb_data, "file_name": "verify.xlsx",
-        })
+        resp = client.post(
+            "/api/v1/workspace/save_file",
+            json={
+                "file_type": "xlsx",
+                "data": wb_data,
+                "file_name": "verify.xlsx",
+            },
+        )
         wb = openpyxl.load_workbook(io.BytesIO(resp.data))
         assert wb.active.cell(1, 1).value == "Check"
 
@@ -1035,15 +1146,24 @@ class TestXlsxSaveFileEndpoint:
         client, _, _ = xlsx_client
         bare_data = {
             "sheetOrder": ["s1"],
-            "sheets": {"s1": {
-                "id": "s1", "name": "Bare",
-                "cellData": {"0": {"0": {"v": "BareOK"}}},
-                "rowCount": 30, "columnCount": 10,
-            }},
+            "sheets": {
+                "s1": {
+                    "id": "s1",
+                    "name": "Bare",
+                    "cellData": {"0": {"0": {"v": "BareOK"}}},
+                    "rowCount": 30,
+                    "columnCount": 10,
+                }
+            },
         }
-        resp = client.post("/api/v1/workspace/save_file", json={
-            "file_type": "xlsx", "data": bare_data, "file_name": "bare.xlsx",
-        })
+        resp = client.post(
+            "/api/v1/workspace/save_file",
+            json={
+                "file_type": "xlsx",
+                "data": bare_data,
+                "file_name": "bare.xlsx",
+            },
+        )
         assert resp.status_code == 200
         assert resp.data[:2] == b"PK"
 
@@ -1056,8 +1176,9 @@ class TestXlsxOpenByPathExternal:
         ext_file = tmp_path / "external_data.xlsx"
         ext_file.write_bytes(_make_xlsx({"Ext": [["External", 999]]}))
 
-        resp = client.post("/api/v1/workspace/open_file_by_path",
-                           json={"path": str(ext_file)})
+        resp = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": str(ext_file)}
+        )
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["file_type"] == "xlsx"
@@ -1070,8 +1191,9 @@ class TestXlsxOpenByPathExternal:
         ext_file = tmp_path / "styled_ext.xlsx"
         ext_file.write_bytes(_make_styled_xlsx())
 
-        resp = client.post("/api/v1/workspace/open_file_by_path",
-                           json={"path": str(ext_file)})
+        resp = client.post(
+            "/api/v1/workspace/open_file_by_path", json={"path": str(ext_file)}
+        )
         assert resp.status_code == 200
         cd = resp.get_json()["data"]["sheets"][
             resp.get_json()["data"]["sheetOrder"][0]

@@ -35,6 +35,7 @@ Coverage matrix:
   │ cleanup_tmp_dir()                │ unit-level: removes old/0-byte   │
   └──────────────────────────────────────────────────────────────────────┘
 """
+
 from __future__ import annotations
 
 import json
@@ -43,7 +44,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 
 # ── shared fixture ─────────────────────────────────────────────────────────
 

@@ -20,6 +20,7 @@ Two code changes were made:
 The tests in this module verify both fixes end-to-end via the Flask test
 client as well as at the unit level.
 """
+
 from __future__ import annotations
 
 import io
@@ -150,18 +151,18 @@ class TestTmpDirIsAbsolute:
         monkeypatch.chdir(tmp_path)
         # Re-evaluate the stored path; it must already be absolute and correct
         assert Path(_wa._TMP_DIR).is_absolute()
-        assert str(tmp_path) not in str(_wa._TMP_DIR), (
-            "_TMP_DIR must not be affected by changing the working directory"
-        )
+        assert str(tmp_path) not in str(
+            _wa._TMP_DIR
+        ), "_TMP_DIR must not be affected by changing the working directory"
 
     def test_ensure_tmp_dir_returns_absolute(self, wa_client):
         """_ensure_tmp_dir() must always return an absolute path."""
         import web.blueprints.workspace_assistant as _wa
 
         result = _wa._ensure_tmp_dir()
-        assert result.is_absolute(), (
-            f"_ensure_tmp_dir() returned a relative path: {result!r}"
-        )
+        assert (
+            result.is_absolute()
+        ), f"_ensure_tmp_dir() returned a relative path: {result!r}"
 
     def test_tmp_path_passed_to_parse_is_absolute(self, wa_client, monkeypatch):
         """
@@ -174,6 +175,7 @@ class TestTmpDirIsAbsolute:
         captured_paths: list[str] = []
 
         import app.core.file.file_parser as _fp
+
         real_fn = _fp.parse_pptx_geometry
 
         def spy(path, *a, **kw):
@@ -182,7 +184,8 @@ class TestTmpDirIsAbsolute:
 
         monkeypatch.setattr(_fp, "parse_pptx_geometry", spy)
         monkeypatch.setattr(
-            "web.blueprints.workspace_assistant.parse_pptx_geometry", spy,
+            "web.blueprints.workspace_assistant.parse_pptx_geometry",
+            spy,
             raising=False,
         )
 
@@ -237,7 +240,9 @@ class TestOpenFilePptx:
         resp = self._upload(client)
         assert resp.status_code == 200
         data = resp.get_json().get("data", {})
-        assert "slides" in data, f"Response data missing 'slides' key; got: {list(data)}"
+        assert (
+            "slides" in data
+        ), f"Response data missing 'slides' key; got: {list(data)}"
         assert isinstance(data["slides"], list)
 
     def test_pptx_response_contains_slide_dimensions(self, wa_client):
@@ -256,18 +261,18 @@ class TestOpenFilePptx:
         assert resp.status_code == 200
         file_id = resp.get_json()["file_id"]
         matches = list(tmp_dir.glob(f"{file_id}.pptx"))
-        assert matches, (
-            f"Expected {file_id}.pptx in {tmp_dir}; found: {list(tmp_dir.iterdir())}"
-        )
+        assert (
+            matches
+        ), f"Expected {file_id}.pptx in {tmp_dir}; found: {list(tmp_dir.iterdir())}"
 
     def test_pptx_file_id_is_hex_uuid(self, wa_client):
         client, _, _ = wa_client
         resp = self._upload(client)
         assert resp.status_code == 200
         fid = resp.get_json()["file_id"]
-        assert fid.isalnum() and len(fid) == 32, (
-            f"file_id must be a 32-char hex UUID; got {fid!r}"
-        )
+        assert (
+            fid.isalnum() and len(fid) == 32
+        ), f"file_id must be a 32-char hex UUID; got {fid!r}"
 
     def test_pptx_file_name_preserved(self, wa_client):
         client, _, _ = wa_client
@@ -387,9 +392,9 @@ class TestOpenFileByPathPptx:
             json={"path": "no_err_deck.pptx"},
         )
         error = (resp.get_json() or {}).get("error", "")
-        assert "Package not found" not in error, (
-            f"open_file_by_path returned: {error!r}"
-        )
+        assert (
+            "Package not found" not in error
+        ), f"open_file_by_path returned: {error!r}"
 
     def test_open_by_path_missing_file_returns_404(self, wa_client):
         client, _, _ = wa_client
@@ -451,9 +456,9 @@ class TestParsePptxGeometryPathHandling:
             parse_pptx_geometry("/nonexistent/path/deck.pptx")
         # Must clearly report the file is missing, not "Package not found"
         # with a confusing relative path
-        assert "nonexistent" in str(exc_info.value) or "不存在" in str(exc_info.value), (
-            f"Expected a clear FileNotFoundError; got: {exc_info.value!r}"
-        )
+        assert "nonexistent" in str(exc_info.value) or "不存在" in str(
+            exc_info.value
+        ), f"Expected a clear FileNotFoundError; got: {exc_info.value!r}"
 
     def test_accepts_absolute_path(self, tmp_path):
         """parse_pptx_geometry must succeed when given an absolute path."""
@@ -542,7 +547,9 @@ class TestCwdIndependence:
     with 'Package not found at workspace\\tmp\\<id>.pptx'.
     """
 
-    def test_pptx_upload_succeeds_from_unrelated_cwd(self, wa_client, tmp_path, monkeypatch):
+    def test_pptx_upload_succeeds_from_unrelated_cwd(
+        self, wa_client, tmp_path, monkeypatch
+    ):
         """
         Change the process CWD to an unrelated directory, then upload a PPTX.
         Must return 200, not 500 with 'Package not found'.
@@ -562,7 +569,9 @@ class TestCwdIndependence:
             "This is the exact regression — _TMP_DIR must be absolute."
         )
 
-    def test_open_by_path_succeeds_from_unrelated_cwd(self, wa_client, tmp_path, monkeypatch):
+    def test_open_by_path_succeeds_from_unrelated_cwd(
+        self, wa_client, tmp_path, monkeypatch
+    ):
         """Same CWD-independence test for the open_file_by_path endpoint."""
         client, _, workspace_dir = wa_client
 
