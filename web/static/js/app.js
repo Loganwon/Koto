@@ -4458,6 +4458,13 @@ function handleGlobalKeyDown(e) {
     // 有模态框开着时不拦截
     if (document.querySelector('.modal-overlay.active')) return;
 
+    // PPTX editor is active — let its own key handler take over (avoid stealing Ctrl+B etc.)
+    const pptxEditor = document.getElementById('wa-pptx-editor');
+    if (pptxEditor && pptxEditor.classList.contains('active')) {
+        // Only keep Escape (for stopping generation) here; everything else goes to PPTX handler
+        if (e.key !== 'Escape') return;
+    }
+
     if (e.key === 'Escape' && currentSession && isSessionGenerating(currentSession)) {
         e.preventDefault();
         document.getElementById('sendBtn')?.click();

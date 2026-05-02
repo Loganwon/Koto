@@ -273,13 +273,53 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
         "THAI_DISTRIBUTE": PP_ALIGN.THAI_DISTRIBUTE,
     }
 
-    prs = Presentation(io.BytesIO(orig_bytes))
-    slide_map = {edit["index"]: edit for edit in slides_edits}
+    from pptx.util import Emu
 
+    prs = Presentation(io.BytesIO(orig_bytes))
+    orig_slide_count = len(prs.slides)
+
+    # Build ordered edit list — each entry keeps its target index.
+    # The edit index is the *logical* position in the final deck.
+    edit_list: list[tuple[int, dict]] = []
+    for i, edit in enumerate(slides_edits):
+        idx = edit.get("index", edit.get("slide_index", i))
+        edit_list.append((idx, edit))
+    edit_list.sort(key=lambda t: t[0])
+
+    # ── Phase 0: Delete slides that are in the original but NOT in the
+    #    edit list.  The frontend re-indexes after deletion, so the edit
+    #    list describes the *desired* final deck.  We detect surplus
+    #    original slides by comparing counts: if there are fewer edits
+    #    than original slides AND no edit index exceeds the original count
+    #    (i.e. no new slides were added), we must trim the originals.
+    #    We delete from the back so that earlier indexes stay valid.
+    edit_indexes = {idx for idx, _ in edit_list}
+    slides_to_delete = []
+    if len(edit_list) < orig_slide_count:
+        # The frontend re-indexes 0..N-1 after deletion, so edits map
+        # 1-to-1 onto the first len(edit_list) original slides only when
+        # all edit indexes < orig_slide_count.  When the user also *added*
+        # new slides, we cannot safely determine which originals were
+        # deleted — so we skip deletion in that case.
+        has_new_slides = any(idx >= orig_slide_count for idx, _ in edit_list)
+        if not has_new_slides:
+            # Keep the first len(edit_list) original slides, remove the rest.
+            for si in range(orig_slide_count - 1, len(edit_list) - 1, -1):
+                slides_to_delete.append(si)
+
+    # Delete surplus original slides (reverse order to preserve indexes)
+    for si in slides_to_delete:
+        rId = prs.slides._sldIdLst[si].get(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+        )
+        prs.part.drop_rel(rId)
+        del prs.slides._sldIdLst[si]
+
+    # ── Phase 1: Apply edits to existing slides ──────────────────────────
     for slide_idx, slide in enumerate(prs.slides):
-        edit_slide = slide_map.get(slide_idx)
-        if not edit_slide:
-            continue
+        if slide_idx >= len(edit_list):
+            break
+        _, edit_slide = edit_list[slide_idx]
         shape_map = {s["id"]: s for s in edit_slide.get("shapes", [])}
 
         for shape in slide.shapes:
@@ -359,7 +399,47 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
                         except Exception:
                             pass
 
-        # ── New shapes (negative IDs = inserted on frontend) ─────────────────
+                # ── Extra runs beyond original count (e.g. AI markdown → multiple runs)
+                for er in edit_runs[len(orig_runs):]:
+                    try:
+                        run = para.add_run()
+                        run.text = er.get("text", "")
+                        if er.get("bold"):      run.font.bold = True
+                        if er.get("italic"):    run.font.italic = True
+                        if er.get("underline"): run.font.underline = True
+                        if er.get("size"):      run.font.size = Pt(float(er["size"]))
+                        if er.get("color"):
+                            h = er["color"].lstrip("#")
+                            run.font.color.rgb = RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+                        if er.get("fontName"):
+                            run.font.name = er["fontName"]
+                    except Exception:
+                        pass
+
+            # ── Extra paragraphs beyond original count ─────────────
+            orig_para_count = len(shape.text_frame.paragraphs)
+            for ep in edit_paras[orig_para_count:]:
+                try:
+                    para = shape.text_frame.add_paragraph()
+                    align_str = ep.get("align", "").upper()
+                    if align_str in _ALIGN_MAP:
+                        para.alignment = _ALIGN_MAP[align_str]
+                    for er in ep.get("runs", []):
+                        run = para.add_run()
+                        run.text = er.get("text", "")
+                        if er.get("bold"):      run.font.bold = True
+                        if er.get("italic"):    run.font.italic = True
+                        if er.get("underline"): run.font.underline = True
+                        if er.get("size"):      run.font.size = Pt(float(er["size"]))
+                        if er.get("color"):
+                            h = er["color"].lstrip("#")
+                            run.font.color.rgb = RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+                        if er.get("fontName"):
+                            run.font.name = er["fontName"]
+                except Exception:
+                    pass
+
+        # ── New shapes (negative IDs = inserted on frontend) ─────────────
         existing_ids = {s.shape_id for s in slide.shapes}
         for edit_shape in edit_slide.get("shapes", []):
             try:
@@ -370,8 +450,67 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
                 continue  # already handled above
             if not edit_shape.get("has_text"):
                 continue
-            from pptx.util import Emu
             txBox = slide.shapes.add_textbox(
+                Emu(edit_shape.get("left", 0)),
+                Emu(edit_shape.get("top", 0)),
+                Emu(edit_shape.get("width", 2743200)),
+                Emu(edit_shape.get("height", 914400)),
+            )
+            tf = txBox.text_frame
+            tf.word_wrap = True
+            for p_idx, ep in enumerate(edit_shape.get("paragraphs", [])):
+                para = tf.paragraphs[0] if p_idx == 0 else tf.add_paragraph()
+                align_str = ep.get("align", "LEFT").upper()
+                if align_str in _ALIGN_MAP:
+                    try:
+                        para.alignment = _ALIGN_MAP[align_str]
+                    except Exception:
+                        pass
+                for er in ep.get("runs", []):
+                    run = para.add_run()
+                    run.text = er.get("text", "")
+                    try:
+                        if er.get("bold"):      run.font.bold = True
+                        if er.get("italic"):    run.font.italic = True
+                        if er.get("underline"): run.font.underline = True
+                        if er.get("size"):      run.font.size = Pt(float(er["size"]))
+                        if er.get("color"):
+                            h = er["color"].lstrip("#")
+                            run.font.color.rgb = RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+                    except Exception:
+                        pass
+
+    # ── Phase 2: Append brand-new slides ─────────────────────────────────
+    # Edits beyond the (post-deletion) original count are new slides the
+    # user created in the frontend.  Add them as blank slides with textboxes.
+    current_count = len(prs.slides)
+    for list_pos in range(current_count, len(edit_list)):
+        _, edit_slide = edit_list[list_pos]
+
+        # Pick a blank layout (index 6 by convention, fallback to last)
+        try:
+            layout = prs.slide_layouts[6]
+        except (IndexError, KeyError):
+            layout = prs.slide_layouts[-1]
+        new_slide = prs.slides.add_slide(layout)
+
+        # Set background colour
+        bg_hex = edit_slide.get("background", "")
+        if bg_hex and bg_hex != "#ffffff" and bg_hex != "#FFFFFF":
+            try:
+                from pptx.dml.color import RGBColor as _RGB
+                fill = new_slide.background.fill
+                fill.solid()
+                h = bg_hex.lstrip("#")
+                fill.fore_color.rgb = _RGB(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
+            except Exception:
+                pass
+
+        # Populate shapes (all are new — add as textboxes)
+        for edit_shape in edit_slide.get("shapes", []):
+            if not edit_shape.get("has_text"):
+                continue
+            txBox = new_slide.shapes.add_textbox(
                 Emu(edit_shape.get("left", 0)),
                 Emu(edit_shape.get("top", 0)),
                 Emu(edit_shape.get("width", 2743200)),

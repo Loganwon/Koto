@@ -521,13 +521,15 @@ def register_socket_events(socketio):
                     for idx, tc in enumerate(tool_calls):
                         proposed = tc.get("value", "")
                         if proposed:
-                            proposals.append({
-                                "id": f"p_{idx}",
-                                "original_text": selection,
-                                "proposed_text": proposed,
-                                "rationale": clean_text or "",
-                                "tool_call": tc,
-                            })
+                            proposals.append(
+                                {
+                                    "id": f"p_{idx}",
+                                    "original_text": selection,
+                                    "proposed_text": proposed,
+                                    "rationale": clean_text or "",
+                                    "tool_call": tc,
+                                }
+                            )
                     if proposals:
                         has_proposals = True
                         _emit_progress("formatting", "正在准备修改建议…")

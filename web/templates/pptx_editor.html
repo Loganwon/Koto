@@ -107,43 +107,44 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:#f3f3f3;
 }
 /* Each shape div */
 .shape{
-  position:absolute;overflow:hidden;cursor:default;
+  position:absolute;overflow:hidden;cursor:move;
 }
-.shape.has-text{cursor:text;}
-.shape-inner{
-  width:100%;height:100%;padding:4px 6px;
-  display:flex;flex-direction:column;justify-content:flex-start;
-}
-/* Paragraph inside shape */
-.shape-para{line-height:1.3;white-space:pre-wrap;word-break:break-word;}
-/* Inline run spans (preserve bold/italic/underline) */
-.run-span{outline:none;}
-.run-span[contenteditable="true"]:focus{
-  outline:none;
-}
+.shape.has-text{cursor:move;}
 /* Selection glow on shape */
 .shape.selected{
+  overflow:visible!important;
   outline:2px solid #0078d4;
   outline-offset:0px;
+  z-index:10;
 }
 .shape.selected::after{
   content:'';position:absolute;inset:-1px;pointer-events:none;
-  border:1px solid #0078d4;
+  border:1px solid #0078d4;z-index:10;
 }
-/* Resize handles (decorative only for now) */
+.shape-inner{
+  width:100%;height:100%;overflow:hidden;padding:4px 6px;
+  display:flex;flex-direction:column;justify-content:flex-start;
+  cursor:text;user-select:text;
+}
+/* Paragraph inside shape */
+.shape-para{line-height:1.3;white-space:pre-wrap;word-break:break-word;}
+/* Inline run spans */
+.run-span{outline:none;}
+.run-span[contenteditable="true"]:focus{outline:none;}
+/* Resize handles */
 .handle{
-  position:absolute;width:8px;height:8px;background:#0078d4;border:1px solid #fff;
-  border-radius:1px;display:none;
+  position:absolute;width:10px;height:10px;background:#0078d4;border:2px solid #fff;
+  border-radius:2px;display:none;z-index:11;box-sizing:border-box;
 }
 .shape.selected .handle{display:block;}
-.handle.tl{top:-4px;left:-4px;cursor:nw-resize;}
-.handle.tr{top:-4px;right:-4px;cursor:ne-resize;}
-.handle.bl{bottom:-4px;left:-4px;cursor:sw-resize;}
-.handle.br{bottom:-4px;right:-4px;cursor:se-resize;}
-.handle.tm{top:-4px;left:50%;transform:translateX(-50%);cursor:n-resize;}
-.handle.bm{bottom:-4px;left:50%;transform:translateX(-50%);cursor:s-resize;}
-.handle.ml{left:-4px;top:50%;transform:translateY(-50%);cursor:w-resize;}
-.handle.mr{right:-4px;top:50%;transform:translateY(-50%);cursor:e-resize;}
+.handle.tl{top:-5px;left:-5px;cursor:nw-resize;}
+.handle.tr{top:-5px;right:-5px;cursor:ne-resize;}
+.handle.bl{bottom:-5px;left:-5px;cursor:sw-resize;}
+.handle.br{bottom:-5px;right:-5px;cursor:se-resize;}
+.handle.tm{top:-5px;left:50%;transform:translateX(-50%);cursor:n-resize;}
+.handle.bm{bottom:-5px;left:50%;transform:translateX(-50%);cursor:s-resize;}
+.handle.ml{left:-5px;top:50%;transform:translateY(-50%);cursor:w-resize;}
+.handle.mr{right:-5px;top:50%;transform:translateY(-50%);cursor:e-resize;}
 
 /* ── Status bar ── */
 #statusbar{
@@ -239,9 +240,33 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:#f3f3f3;
     <button class="rib-btn" onclick="nextSlide()" title="下一张"><span class="ri">▶</span>下一张</button>
   </div>
   <div class="rib-group">
-    <button class="rib-btn" id="btn-bold" onclick="execFmt('bold')"><span class="ri">𝐁</span>加粗</button>
-    <button class="rib-btn" id="btn-italic" onclick="execFmt('italic')"><span class="ri">𝐼</span>斜体</button>
-    <button class="rib-btn" id="btn-underline" onclick="execFmt('underline')"><span class="ri">U̲</span>下划线</button>
+    <button class="rib-btn" id="btn-bold" onmousedown="event.preventDefault()" onclick="execFmt('bold')"><span class="ri">𝐁</span>加粗</button>
+    <button class="rib-btn" id="btn-italic" onmousedown="event.preventDefault()" onclick="execFmt('italic')"><span class="ri">𝐼</span>斜体</button>
+    <button class="rib-btn" id="btn-underline" onmousedown="event.preventDefault()" onclick="execFmt('underline')"><span class="ri">U̲</span>下划线</button>
+  </div>
+  <div class="rib-group" style="align-items:center;gap:4px;">
+    <label style="font-size:11px;color:#555;" for="font-size-input">pt</label>
+    <input type="number" id="font-size-input" min="6" max="400" placeholder="–"
+           style="width:50px;border:1px solid #d0d0d0;border-radius:3px;padding:2px 4px;font-size:12px;text-align:center;"
+           title="Font size in points"
+           onmousedown="event.stopPropagation()"
+           onkeydown="if(event.key==='Enter'){applyFontSize(this.value);this.blur();}"
+           onchange="applyFontSize(this.value)"/>
+  </div>
+  <div class="rib-group" id="size-group" style="align-items:center;gap:4px;display:none;">
+    <label style="font-size:11px;color:#555;">W</label>
+    <input type="number" id="shape-w" min="0.1" max="100" step="0.1" placeholder="–"
+           style="width:52px;border:1px solid #d0d0d0;border-radius:3px;padding:2px 4px;font-size:12px;text-align:center;"
+           title="Box width in cm" onmousedown="event.stopPropagation()"
+           onkeydown="if(event.key==='Enter'){applyShapeSize('w',this.value);this.blur();}"
+           onchange="applyShapeSize('w',this.value)"/>
+    <label style="font-size:11px;color:#555;">H</label>
+    <input type="number" id="shape-h" min="0.1" max="100" step="0.1" placeholder="–"
+           style="width:52px;border:1px solid #d0d0d0;border-radius:3px;padding:2px 4px;font-size:12px;text-align:center;"
+           title="Box height in cm" onmousedown="event.stopPropagation()"
+           onkeydown="if(event.key==='Enter'){applyShapeSize('h',this.value);this.blur();}"
+           onchange="applyShapeSize('h',this.value)"/>
+    <label style="font-size:9px;color:#aaa;">cm</label>
   </div>
   <div class="rib-zoom">
     <span id="zoom-label">100%</span>
@@ -252,7 +277,7 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:#f3f3f3;
 <!-- ═══════════════════════════════ WORKSPACE ════════════════════════════════ -->
 <div id="workspace">
   <!-- Left: slide thumbnails -->
-  <div id="slide-panel" id="slide-panel"></div>
+  <div id="slide-panel"></div>
 
   <!-- Center: editable canvas -->
   <div id="canvas-area" onclick="onCanvasAreaClick(event)">
@@ -293,7 +318,12 @@ let _meta    = null;   // full JSON from API
 let _curIdx  = 0;      // current slide index
 let _zoom    = 1.0;    // current zoom factor
 let _selShape = null;  // currently selected shape div
+let _lastFocusedRun = null; // {span, shape, pi, ri}
+let _selectionSpans = [];   // run-spans in active selection (saved before focus change)
+let _resizing = null;  // resize drag state
+let _dragging = null;  // shape move drag state
 const EMU_PER_PX = 9525; // 1 px = 9525 EMU at 96 dpi
+const EMU_PER_CM = 360000; // 1 cm = 360000 EMU
 
 /* ──────────────────────── Boot ─────────────────────── */
 (function boot(){
@@ -421,6 +451,8 @@ function drawThumb(canvas,slide,slideW,slideH){
 function renderSlide(idx){
   _curIdx=idx;
   _selShape=null;
+  _lastFocusedRun=null;
+  _selectionSpans=[];
 
   // update thumbnail highlight
   document.querySelectorAll('.slide-thumb').forEach((el,i)=>{
@@ -480,7 +512,14 @@ function renderSlide(idx){
           // Events
           span.addEventListener('focus',()=>onRunFocus(el,shape,pi,ri));
           span.addEventListener('input',()=>onRunInput(span,shape,pi,ri));
-          span.addEventListener('keydown', e=>{ if(e.key==='Escape') span.blur(); });
+          span.addEventListener('keydown', e=>{
+            if(e.key==='Escape'){ span.blur(); return; }
+            if((e.ctrlKey||e.metaKey)&&e.key==='a'){
+              e.preventDefault();
+              // Mark every run in this shape as "selected" for formatting
+              _selectionSpans=Array.from(el.querySelectorAll('.run-span'));
+            }
+          });
           pEl.appendChild(span);
         });
         if((para.runs||[]).length===0){
@@ -491,12 +530,25 @@ function renderSlide(idx){
         inner.appendChild(pEl);
       });
       el.appendChild(inner);
-      // Handles
-      ['tl','tr','bl','br','tm','bm','ml','mr'].forEach(c=>{
-        const h=document.createElement('div'); h.className='handle '+c; el.appendChild(h);
-      });
-      el.addEventListener('mousedown', e=>{ if(!e.target.classList.contains('run-span')) selectShape(el); });
     }
+
+    // Handles (ALL shapes get resize handles)
+    ['tl','tr','bl','br','tm','bm','ml','mr'].forEach(c=>{
+      const h=document.createElement('div'); h.className='handle '+c;
+      h.addEventListener('mousedown', ev=>{
+        ev.stopPropagation(); ev.preventDefault();
+        selectShape(el);
+        startResize(ev, c, el, shape);
+      });
+      el.appendChild(h);
+    });
+    // Drag: only body clicks (not handles or text spans) start a move
+    el.addEventListener('mousedown', e=>{
+      if(e.target.classList.contains('handle')) return;
+      if(e.target.classList.contains('run-span')) return;
+      selectShape(el);
+      startDrag(e, el, shape);
+    });
 
     wrapper.appendChild(el);
   });
@@ -510,28 +562,39 @@ function renderSlide(idx){
 function selectShape(el){
   if(_selShape) _selShape.classList.remove('selected');
   _selShape=el;
+  _selectionSpans=[];  // clear stale selection from any previous shape
   el.classList.add('selected');
   const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(el.dataset.shapeId));
-  if(shape) document.getElementById('sb-shape').textContent=shape.name||'';
+  if(shape){ document.getElementById('sb-shape').textContent=shape.name||''; updateSizeInputs(shape); }
 }
 
 function onCanvasAreaClick(e){
-  if(e.target===document.getElementById('canvas-area')){
+  const ca=document.getElementById('canvas-area');
+  const sw=document.getElementById('slide-wrapper');
+  if(e.target===ca||e.target===sw){
     if(_selShape){ _selShape.classList.remove('selected'); _selShape=null; }
+    _lastFocusedRun=null;
+    _selectionSpans=[];
+    const inp=document.getElementById('font-size-input'); if(inp) inp.value='';
+    updateSizeInputs(null);
   }
 }
 
 /* ──────────────────────── Editing ──────────────────── */
 function onRunFocus(shapeEl, shape, pi, ri){
   selectShape(shapeEl);
+  _lastFocusedRun = { span: shapeEl.querySelector(`[data-pi="${pi}"][data-ri="${ri}"]`), shape, pi, ri };
+  const run = shape.paragraphs[pi] && shape.paragraphs[pi].runs[ri];
+  const inp = document.getElementById('font-size-input');
+  if(inp && run) inp.value = run.size || 14;
 }
 
 function onRunInput(span, shape, pi, ri){
-  // Write back immediately to _meta
   if(shape.paragraphs[pi] && shape.paragraphs[pi].runs[ri] !== undefined){
     shape.paragraphs[pi].runs[ri].text = span.textContent;
   }
-  // Redraw thumb for current slide (debounced)
+  const shapeEl=span.closest('.shape');
+  if(shapeEl) requestAnimationFrame(()=>autoFitShape(shapeEl,shape));
   scheduleThumbUpdate(_curIdx);
 }
 
@@ -561,7 +624,227 @@ function setZoom(v){
 
 /* ──────────────────────── Formatting ───────────────── */
 function execFmt(cmd){
-  document.execCommand(cmd);
+  const sel = window.getSelection();
+  let targetSpans = [];
+
+  // Prefer live selection, then saved selection, then last focused run
+  if(sel && sel.rangeCount > 0 && !sel.isCollapsed){
+    const range = sel.getRangeAt(0);
+    document.querySelectorAll('.run-span').forEach(s=>{
+      if(isSpanInSelection(s, range)) targetSpans.push(s);
+    });
+  }
+  if(targetSpans.length === 0) targetSpans = _selectionSpans.slice();
+  // If still nothing, apply to ALL runs in the selected shape
+  if(targetSpans.length === 0 && _selShape)
+    targetSpans = Array.from(_selShape.querySelectorAll('.run-span'));
+  if(targetSpans.length === 0 && _lastFocusedRun && _lastFocusedRun.span)
+    targetSpans = [_lastFocusedRun.span];
+  if(targetSpans.length === 0) return;
+
+  // Determine current state (toggle if all already have it)
+  const allHave = targetSpans.every(s=>{
+    const cs = window.getComputedStyle(s);
+    if(cmd==='bold')      return cs.fontWeight==='700'||cs.fontWeight==='bold';
+    if(cmd==='italic')    return cs.fontStyle==='italic';
+    if(cmd==='underline') return cs.textDecoration.includes('underline');
+    return false;
+  });
+
+  targetSpans.forEach(span=>{
+    const pi=parseInt(span.dataset.pi), ri=parseInt(span.dataset.ri);
+    const shapeEl=span.closest('.shape'); if(!shapeEl) return;
+    const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(shapeEl.dataset.shapeId));
+    if(!shape||!shape.paragraphs[pi]||shape.paragraphs[pi].runs[ri]===undefined) return;
+    const run=shape.paragraphs[pi].runs[ri];
+    if(cmd==='bold'){      run.bold=!allHave;      span.style.fontWeight=run.bold?'bold':''; }
+    if(cmd==='italic'){   run.italic=!allHave;    span.style.fontStyle=run.italic?'italic':''; }
+    if(cmd==='underline'){run.underline=!allHave; span.style.textDecoration=run.underline?'underline':''; }
+  });
+  // Auto-fit shapes whose text layout may have changed
+  const affectedEls=new Set(targetSpans.map(s=>s.closest('.shape')).filter(Boolean));
+  requestAnimationFrame(()=>affectedEls.forEach(el=>{
+    const sh=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(el.dataset.shapeId));
+    if(sh) autoFitShape(el,sh);
+  }));
+  scheduleThumbUpdate(_curIdx);
+}
+function applyFontSize(val){
+  const pt=parseFloat(val);
+  if(isNaN(pt)||pt<1) return;
+  const scale=getScale();
+  let applied=false;
+
+  // Use saved selection spans (survives focus change to input)
+  if(_selectionSpans.length > 0){
+    _selectionSpans.forEach(s=>{ updateRunSize(s,pt,scale); });
+    applied=true;
+  } else {
+    const sel=window.getSelection();
+    if(sel&&sel.rangeCount>0&&!sel.isCollapsed){
+      const range=sel.getRangeAt(0);
+      document.querySelectorAll('.run-span').forEach(s=>{
+        if(isSpanInSelection(s,range)){ updateRunSize(s,pt,scale); applied=true; }
+      });
+    }
+  }
+  if(!applied&&_selShape){
+    // No text specifically selected — apply to every run in the selected shape
+    _selShape.querySelectorAll('.run-span').forEach(s=>{ updateRunSize(s,pt,scale); applied=true; });
+  }
+  if(!applied&&_lastFocusedRun&&_lastFocusedRun.span){
+    updateRunSize(_lastFocusedRun.span,pt,scale);
+  }
+  if(applied) requestAnimationFrame(()=>{ if(_selShape){
+    const sh=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(_selShape.dataset.shapeId));
+    if(sh) autoFitShape(_selShape,sh);
+  }});
+  scheduleThumbUpdate(_curIdx);
+}
+
+function updateRunSize(span,pt,scale){
+  const pi=parseInt(span.dataset.pi),ri=parseInt(span.dataset.ri);
+  const shapeEl=span.closest('.shape'); if(!shapeEl) return;
+  const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(shapeEl.dataset.shapeId));
+  if(!shape||!shape.paragraphs[pi]||shape.paragraphs[pi].runs[ri]===undefined) return;
+  shape.paragraphs[pi].runs[ri].size=pt;
+  span.style.fontSize=Math.round(pt*scale*1.33)+'px';
+  requestAnimationFrame(()=>autoFitShape(shapeEl,shape));
+}
+
+function isSpanInSelection(span,range){
+  try{
+    const sr=document.createRange(); sr.selectNode(span);
+    // Overlap: range.end > sr.start  AND  range.start < sr.end
+    return range.compareBoundaryPoints(Range.END_TO_START,sr)>0 &&
+           range.compareBoundaryPoints(Range.START_TO_END,sr)<0;
+  }catch(e){ return false; }
+}
+
+/* ──────────────────────── Auto-fit & size UI ────────── */
+function autoFitShape(shapeEl, shape){
+  const inner=shapeEl.querySelector('.shape-inner');
+  if(!inner) return;
+  if(inner.scrollHeight > inner.clientHeight + 2){
+    const newPx=inner.scrollHeight + 4;
+    shapeEl.style.height=newPx+'px';
+    const sc=getScale();
+    shape.height=Math.round(newPx/sc);
+    if(_selShape===shapeEl) updateSizeInputs(shape);
+  }
+}
+
+function updateSizeInputs(shape){
+  const grp=document.getElementById('size-group');
+  const wIn=document.getElementById('shape-w');
+  const hIn=document.getElementById('shape-h');
+  if(!grp||!wIn||!hIn) return;
+  if(shape){
+    grp.style.display='flex';
+    wIn.value=(shape.width /EMU_PER_CM).toFixed(1);
+    hIn.value=(shape.height/EMU_PER_CM).toFixed(1);
+  } else {
+    grp.style.display='none';
+    wIn.value=''; hIn.value='';
+  }
+}
+
+function applyShapeSize(dim, val){
+  const cm=parseFloat(val);
+  if(isNaN(cm)||cm<0.1||!_selShape||!_meta) return;
+  const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(_selShape.dataset.shapeId));
+  if(!shape) return;
+  const emu=Math.round(cm*EMU_PER_CM);
+  const sc=getScale();
+  if(dim==='w'){ shape.width =emu; _selShape.style.width =Math.round(emu*sc)+'px'; }
+  else          { shape.height=emu; _selShape.style.height=Math.round(emu*sc)+'px'; }
+  scheduleThumbUpdate(_curIdx);
+}
+
+/* ──────────────────────── Resize ────────────────────── */
+function getScale(){
+  const W=_meta.slideWidthEmu;
+  const area=document.getElementById('canvas-area');
+  const maxW=area.clientWidth-40;
+  const baseW=Math.min(maxW,960);
+  return (_zoom*baseW)/W;
+}
+
+function startResize(e, handle, shapeEl, shape){
+  _resizing={
+    handle, shapeEl, shape,
+    startX:e.clientX, startY:e.clientY,
+    startLeft:parseInt(shapeEl.style.left),
+    startTop:parseInt(shapeEl.style.top),
+    startW:parseInt(shapeEl.style.width),
+    startH:parseInt(shapeEl.style.height),
+  };
+  document.addEventListener('mousemove',onResizeMove);
+  document.addEventListener('mouseup',stopResize);
+}
+
+function onResizeMove(e){
+  if(!_resizing) return;
+  const {handle,shapeEl,startX,startY,startLeft,startTop,startW,startH}=_resizing;
+  const dx=e.clientX-startX, dy=e.clientY-startY;
+  let l=startLeft,t=startTop,w=startW,h=startH;
+  if(handle==='tl'||handle==='ml'||handle==='bl'){ w=Math.max(20,startW-dx); l=startLeft+startW-w; }
+  if(handle==='tr'||handle==='mr'||handle==='br'){ w=Math.max(20,startW+dx); }
+  if(handle==='tl'||handle==='tm'||handle==='tr'){ h=Math.max(10,startH-dy); t=startTop+startH-h; }
+  if(handle==='bl'||handle==='bm'||handle==='br'){ h=Math.max(10,startH+dy); }
+  shapeEl.style.left=l+'px'; shapeEl.style.top=t+'px';
+  shapeEl.style.width=w+'px'; shapeEl.style.height=h+'px';
+}
+
+function stopResize(){
+  if(!_resizing) return;
+  const {shape,shapeEl}=_resizing;
+  const sc=getScale();
+  shape.left  =Math.round(parseInt(shapeEl.style.left)  /sc);
+  shape.top   =Math.round(parseInt(shapeEl.style.top)   /sc);
+  shape.width =Math.round(parseInt(shapeEl.style.width) /sc);
+  shape.height=Math.round(parseInt(shapeEl.style.height)/sc);
+  updateSizeInputs(shape);
+  scheduleThumbUpdate(_curIdx);
+  document.removeEventListener('mousemove',onResizeMove);
+  document.removeEventListener('mouseup',stopResize);
+  _resizing=null;
+}
+
+/* ──────────────────────── Drag / move ────────────────── */
+function startDrag(e, shapeEl, shape){
+  _dragging={
+    shapeEl, shape, moved:false,
+    startX:e.clientX, startY:e.clientY,
+    startLeft:parseInt(shapeEl.style.left),
+    startTop:parseInt(shapeEl.style.top),
+  };
+  document.addEventListener('mousemove',onDragMove);
+  document.addEventListener('mouseup',stopDrag);
+}
+
+function onDragMove(e){
+  if(!_dragging) return;
+  const {shapeEl,startX,startY,startLeft,startTop}=_dragging;
+  const dx=e.clientX-startX, dy=e.clientY-startY;
+  if(!_dragging.moved && Math.abs(dx)<3 && Math.abs(dy)<3) return;
+  _dragging.moved=true;
+  shapeEl.style.left=(startLeft+dx)+'px';
+  shapeEl.style.top =(startTop +dy)+'px';
+}
+
+function stopDrag(){
+  if(!_dragging) return;
+  if(_dragging.moved){
+    const {shape,shapeEl}=_dragging;
+    const sc=getScale();
+    shape.left=Math.round(parseInt(shapeEl.style.left)/sc);
+    shape.top =Math.round(parseInt(shapeEl.style.top) /sc);
+    scheduleThumbUpdate(_curIdx);
+  }
+  document.removeEventListener('mousemove',onDragMove);
+  document.removeEventListener('mouseup',stopDrag);
+  _dragging=null;
 }
 
 /* ──────────────────────── Save ─────────────────────── */
@@ -649,6 +932,23 @@ document.addEventListener('keydown',e=>{
   if(e.key==='ArrowLeft'||e.key==='PageUp')  prevSlide();
   if(e.key==='ArrowRight'||e.key==='PageDown') nextSlide();
   if((e.ctrlKey||e.metaKey)&&e.key==='s'){ e.preventDefault(); doSave(); }
+});
+
+/* ──────────────────────── Selection tracking ────────── */
+// Save selected spans before focus moves away (e.g. to font-size input)
+document.addEventListener('selectionchange',()=>{
+  const sel=window.getSelection();
+  if(!sel||sel.rangeCount===0||sel.isCollapsed) return;
+  const range=sel.getRangeAt(0);
+  const wrapper=document.getElementById('slide-wrapper');
+  if(!wrapper) return;
+  // Only track selections inside the slide
+  try{ if(!wrapper.contains(range.commonAncestorContainer)) return; }catch(e){ return; }
+  const found=[];
+  document.querySelectorAll('.run-span').forEach(s=>{
+    if(isSpanInSelection(s,range)) found.push(s);
+  });
+  if(found.length>0) _selectionSpans=found;
 });
 
 /* ──────────────────────── Resize ────────────────────── */

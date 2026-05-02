@@ -443,8 +443,16 @@ class TriggerRegistry:
         time.sleep(8)  # 等应用完全初始化
         for spec in list(self._triggers.values()):
             if spec.trigger_type == "startup" and spec.enabled:
-                logger.info("[TriggerRegistry] 🚀 startup 触发: %s", spec.name)
-                self._dispatch(spec)
+                try:
+                    logger.info("[TriggerRegistry] 🚀 startup 触发: %s", spec.name)
+                    self._dispatch(spec)
+                except BaseException as exc:
+                    logger.error(
+                        "[TriggerRegistry] startup 触发异常 %s: %s",
+                        spec.name,
+                        exc,
+                        exc_info=True,
+                    )
 
     # ── 持久化 ────────────────────────────────────────────────────────────────
 

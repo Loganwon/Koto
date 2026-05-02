@@ -80,7 +80,11 @@ def _extract_table_styles(docx_path: str) -> list[dict]:
 
                 # ── Colspan (w:gridSpan) ─────────────────────────────────
                 grid_span_el = tc.find(f".//{_w('gridSpan')}")
-                colspan = int(grid_span_el.get(_w("val"), 1)) if grid_span_el is not None else 1
+                colspan = (
+                    int(grid_span_el.get(_w("val"), 1))
+                    if grid_span_el is not None
+                    else 1
+                )
 
                 # ── Rowspan: count how many rows below start with w:vMerge (no val attr) ──
                 # The first cell of a vertical merge has w:vMerge val="restart";
@@ -105,8 +109,7 @@ def _extract_table_styles(docx_path: str) -> list[dict]:
 
                 # ── Skip continuation vMerge cells (they'll be expressed via rowspan) ──
                 is_merge_continuation = (
-                    v_merge_el is not None
-                    and v_merge_el.get(_w("val"), "") == ""
+                    v_merge_el is not None and v_merge_el.get(_w("val"), "") == ""
                 )
                 if is_merge_continuation:
                     continue  # nothing to write; the HTML rowspan covers it
@@ -167,7 +170,9 @@ def _inject_table_styles(html: str, table_styles: list[dict]) -> str:
                 if bg:
                     existing = cell_tag.get("style", "")
                     bg_css = f"background-color:#{bg.lower()};"
-                    cell_tag["style"] = (existing.rstrip(";") + ";" + bg_css).lstrip(";")
+                    cell_tag["style"] = (existing.rstrip(";") + ";" + bg_css).lstrip(
+                        ";"
+                    )
 
     # ── Remove entirely-empty trailing columns ─────────────────────────────
     # Slate/WangEditor sometimes pads rows with phantom empty cells; stripping
@@ -211,10 +216,12 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
     import xml.etree.ElementTree as _ET
 
     # Full OOXML namespace URIs — must match exactly (not prefix aliases)
-    IMG_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-    WP_NS    = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-    A_NS     = "http://schemas.openxmlformats.org/drawingml/2006/main"
-    R_NS     = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    IMG_TYPE = (
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    )
+    WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
     result: list[str] = []
     try:
@@ -226,7 +233,8 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
                 (n for n in file_list if n.lower() == "word/document.xml"), None
             )
             rels_name = next(
-                (n for n in file_list if n.lower() == "word/_rels/document.xml.rels"), None
+                (n for n in file_list if n.lower() == "word/_rels/document.xml.rels"),
+                None,
             )
             if not doc_name or not rels_name:
                 return result
@@ -235,9 +243,9 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
             rels_root = _ET.fromstring(z.read(rels_name))
             rel_map: dict[str, str] = {}
             for rel in rels_root:
-                rid   = rel.get("Id", "")
+                rid = rel.get("Id", "")
                 rtype = rel.get("Type", "")
-                tgt   = rel.get("Target", "")
+                tgt = rel.get("Target", "")
                 if rid and IMG_TYPE in rtype and tgt:
                     rel_map[rid] = tgt if tgt.startswith("word/") else f"word/{tgt}"
 
@@ -268,7 +276,8 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
                 if not media_path:
                     logger.debug(
                         "[floating_imgs] no media path for rel_id=%s; rel_map keys=%s",
-                        rel_id, list(rel_map)[:8],
+                        rel_id,
+                        list(rel_map)[:8],
                     )
                     continue
                 try:
@@ -453,8 +462,10 @@ def _openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
                 style["it"] = 1
             if font.size:
                 style["fs"] = int(font.size)
-            if font.color and font.color.type == "rgb" and font.color.rgb not in (
-                "00000000", "FF000000"
+            if (
+                font.color
+                and font.color.type == "rgb"
+                and font.color.rgb not in ("00000000", "FF000000")
             ):
                 # Univer expects { rgb: "#RRGGBB" }
                 style["cl"] = {"rgb": "#" + font.color.rgb[2:]}
@@ -579,12 +590,14 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
         # ── Merge data ────────────────────────────────────────────────────────
         merge_data: list[dict[str, int]] = []
         for merge_range in ws.merged_cells.ranges:
-            merge_data.append({
-                "startRow": merge_range.min_row - 1,
-                "startColumn": merge_range.min_col - 1,
-                "endRow": merge_range.max_row - 1,
-                "endColumn": merge_range.max_col - 1,
-            })
+            merge_data.append(
+                {
+                    "startRow": merge_range.min_row - 1,
+                    "startColumn": merge_range.min_col - 1,
+                    "endRow": merge_range.max_row - 1,
+                    "endColumn": merge_range.max_col - 1,
+                }
+            )
 
         sheets[sheet_id] = {
             "id": sheet_id,
@@ -600,8 +613,8 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
     return {
         "id": workbook_id,
         "name": workbook_name,
-        "appVersion": "0.5.0",   # required by IWorkbookData; Univer fails silently without it
-        "locale": "zh-CN",       # required by IWorkbookData; used for cell formatting
+        "appVersion": "0.5.0",  # required by IWorkbookData; Univer fails silently without it
+        "locale": "zh-CN",  # required by IWorkbookData; used for cell formatting
         "sheetOrder": sheet_order,
         "sheets": sheets,
         "styles": _styles_registry,  # style-id → IStyleData (populated during cell scan)
@@ -719,7 +732,13 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
     except ImportError:
         raise RuntimeError("python-pptx 未安装，请执行: pip install python-pptx")
 
-    prs = Presentation(file_path)
+    import os as _os
+
+    _abs_path = _os.path.abspath(file_path)
+    if not _os.path.isfile(_abs_path):
+        raise FileNotFoundError(f"PPTX 文件不存在: {_abs_path}")
+
+    prs = Presentation(_abs_path)
     slide_w: int = prs.slide_width or 9144000
     slide_h: int = prs.slide_height or 6858000
     slides_data: list[dict[str, Any]] = []
@@ -728,13 +747,17 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
 
     def _extract_bg(slide: Any) -> str:
         """Walk slide → layout → master for the first extractable solid fill."""
-        for src in (slide, getattr(slide, "slide_layout", None), getattr(slide, "slide_master", None)):
+        for src in (
+            slide,
+            getattr(slide, "slide_layout", None),
+            getattr(slide, "slide_master", None),
+        ):
             if src is None:
                 continue
             try:
                 f = src.background.fill
                 # fill.type is an enum; compare by .name (e.g. 'SOLID') or numeric value 1
-                if f.type is not None and getattr(f.type, 'name', '') == 'SOLID':
+                if f.type is not None and getattr(f.type, "name", "") == "SOLID":
                     return "#" + str(f.fore_color.rgb).lower()
             except Exception:
                 pass
@@ -863,7 +886,14 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
 
                     # Merge: run attrs override paragraph defaults
                     r: dict[str, Any] = {"text": text_val}
-                    for key in ("size", "bold", "italic", "underline", "fontName", "color"):
+                    for key in (
+                        "size",
+                        "bold",
+                        "italic",
+                        "underline",
+                        "fontName",
+                        "color",
+                    ):
                         if key in run_attrs:
                             r[key] = run_attrs[key]
                         elif key in para_defaults:
@@ -945,9 +975,9 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
             # always explicitly sized, which is why only they were visible.
             # Fix: pull the real geometry from the matching layout placeholder.
             eff_left = shape.left
-            eff_top  = shape.top
-            eff_w    = shape.width
-            eff_h    = shape.height
+            eff_top = shape.top
+            eff_w = shape.width
+            eff_h = shape.height
 
             if None in (eff_left, eff_top, eff_w, eff_h):
                 try:
@@ -1014,7 +1044,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                     pass
 
             abs_left = (eff_left or 0) + off_left
-            abs_top  = (eff_top  or 0) + off_top
+            abs_top = (eff_top or 0) + off_top
 
             # ── Group: recurse with absolute-coordinate offset ──────────
             if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
@@ -1035,7 +1065,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                 "name": shape.name,
                 "left": abs_left,
                 "top": abs_top,
-                "width":  eff_w or 0,
+                "width": eff_w or 0,
                 "height": eff_h or 0,
                 "z_order": z_base + z_idx,
                 "fill": None,
@@ -1044,7 +1074,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
             # Shape fill colour — use .name attribute since str(fill.type) = 'SOLID (1)'
             try:
                 fill = shape.fill
-                if fill.type is not None and getattr(fill.type, 'name', '') == 'SOLID':
+                if fill.type is not None and getattr(fill.type, "name", "") == "SOLID":
                     s["fill"] = "#" + str(fill.fore_color.rgb).lower()
             except Exception:
                 pass
@@ -1076,7 +1106,9 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                                 )
                             except Exception:
                                 pass
-                            cells.append({"row": r_idx, "col": c_idx, "text": cell_text})
+                            cells.append(
+                                {"row": r_idx, "col": c_idx, "text": cell_text}
+                            )
                     s["_type"] = "TABLE"
                     s["table_rows"] = len(tbl.rows)
                     s["table_cols"] = len(tbl.columns)
@@ -1094,6 +1126,7 @@ def parse_pptx_geometry(file_path: str) -> dict[str, Any]:
                     is_title = False
                     try:
                         from pptx.enum.shapes import PP_PLACEHOLDER
+
                         ph = shape.placeholder_format
                         if ph is not None:
                             is_title = ph.type in (
@@ -1174,7 +1207,9 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                 try:
                     page_text = page.extract_text() or ""
                 except Exception as e:
-                    logger.warning(f"[PdfParser/pdfplumber] 第 {i+1} 页文本提取失败: {e}")
+                    logger.warning(
+                        f"[PdfParser/pdfplumber] 第 {i+1} 页文本提取失败: {e}"
+                    )
                     page_text = ""
                 pages_text.append({"page": i + 1, "text": page_text})
                 if page_text:
@@ -1203,7 +1238,9 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                     try:
                         page_text = pg.extract_text() or ""
                     except Exception as e:
-                        logger.warning(f"[PdfParser/{pkg_name}] 第 {i+1} 页文本提取失败: {e}")
+                        logger.warning(
+                            f"[PdfParser/{pkg_name}] 第 {i+1} 页文本提取失败: {e}"
+                        )
                         page_text = ""
                     pages_text.append({"page": i + 1, "text": page_text})
                     if page_text:
@@ -1283,7 +1320,11 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
         run.underline = True
     color_hex = _css_color_to_hex(css.get("color", ""))
     if color_hex:
-        r, g, b = int(color_hex[0:2], 16), int(color_hex[2:4], 16), int(color_hex[4:6], 16)
+        r, g, b = (
+            int(color_hex[0:2], 16),
+            int(color_hex[2:4], 16),
+            int(color_hex[4:6], 16),
+        )
         run.font.color.rgb = RGBColor(r, g, b)
     fs = css.get("font-size", "")
     if fs.endswith("pt"):
@@ -1540,7 +1581,9 @@ def _export_docx_python(html_content: str) -> bytes:
                             _apply_run_inline(run, child_css)
 
                     # ── Cell background colour ───────────────────────────
-                    bg = cell_css.get("background-color", "") or cell_css.get("background", "")
+                    bg = cell_css.get("background-color", "") or cell_css.get(
+                        "background", ""
+                    )
                     bg_hex = _css_color_to_hex(bg)
                     if not bg_hex and is_header:
                         bg_hex = "EEF1F8"  # default header shading
@@ -1564,7 +1607,9 @@ def _export_docx_python(html_content: str) -> bytes:
                     if width_str:
                         try:
                             if width_str.endswith("px"):
-                                emu = int(float(width_str[:-2]) * 9144)  # 1px ≈ 9144 EMU
+                                emu = int(
+                                    float(width_str[:-2]) * 9144
+                                )  # 1px ≈ 9144 EMU
                                 for r in range(len(rows_tags)):
                                     tbl.cell(r, idx).width = emu
                             elif width_str.endswith("%"):
@@ -1610,7 +1655,10 @@ def export_docx(html_content: str) -> bytes:
     try:
         return _export_docx_python(html_content)
     except Exception as exc:
-        logger.warning("[export_docx] python-docx builder failed (%s), falling back to html2docx", exc)
+        logger.warning(
+            "[export_docx] python-docx builder failed (%s), falling back to html2docx",
+            exc,
+        )
 
     # ── Fallback: html2docx (handles edge cases the builder misses) ─────────
     try:
@@ -1631,7 +1679,9 @@ def export_docx(html_content: str) -> bytes:
     except ImportError:
         pass
 
-    raise RuntimeError("export_docx: 所有路径均失败，请确认 python-docx 和 beautifulsoup4 已安装")
+    raise RuntimeError(
+        "export_docx: 所有路径均失败，请确认 python-docx 和 beautifulsoup4 已安装"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1639,9 +1689,7 @@ def export_docx(html_content: str) -> bytes:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def export_xlsx(
-    sheets_json: Any, images: list[dict] | None = None
-) -> bytes:
+def export_xlsx(sheets_json: Any, images: list[dict] | None = None) -> bytes:
     """
     将编辑器序列化数据重建为 .xlsx 字节流。
 
@@ -1667,6 +1715,8 @@ def export_xlsx(
 
     if is_univer:
         # Univer IWorkbookData format
+        from openpyxl.styles import Alignment, Font, PatternFill
+
         sheet_order = sheets_json.get("sheetOrder", [])
         sheets_map = sheets_json.get("sheets", {})
         for sheet_id in sheet_order:
@@ -1677,8 +1727,86 @@ def export_xlsx(
                 r = int(row_key) + 1  # Univer 0-indexed → openpyxl 1-indexed
                 for col_key, cell in row_cells.items():
                     c = int(col_key) + 1
-                    if cell and "v" in cell:
-                        ws.cell(row=r, column=c, value=cell["v"])
+                    if not cell:
+                        continue
+                    xl_cell = ws.cell(row=r, column=c)
+                    if "v" in cell:
+                        xl_cell.value = cell["v"]
+
+                    # ── Restore styles from Univer ICellData.s ────────
+                    s = cell.get("s")
+                    if isinstance(s, dict):
+                        font_kw: dict[str, Any] = {}
+                        if s.get("bl"):
+                            font_kw["bold"] = True
+                        if s.get("it"):
+                            font_kw["italic"] = True
+                        if s.get("fs"):
+                            font_kw["size"] = s["fs"]
+                        cl = s.get("cl")
+                        if isinstance(cl, dict) and cl.get("rgb"):
+                            rgb_hex = cl["rgb"].lstrip("#")
+                            try:
+                                from openpyxl.styles.colors import Color
+
+                                font_kw["color"] = Color(rgb="FF" + rgb_hex)
+                            except Exception:
+                                pass
+                        if font_kw:
+                            xl_cell.font = Font(**font_kw)
+
+                        bg = s.get("bg")
+                        if isinstance(bg, dict) and bg.get("rgb"):
+                            bg_hex = bg["rgb"].lstrip("#")
+                            try:
+                                xl_cell.fill = PatternFill(
+                                    start_color=bg_hex,
+                                    end_color=bg_hex,
+                                    fill_type="solid",
+                                )
+                            except Exception:
+                                pass
+
+                        # Alignment
+                        align_kw: dict[str, Any] = {}
+                        _h_rev = {
+                            1: "left",
+                            2: "center",
+                            3: "right",
+                            6: "justify",
+                            7: "distributed",
+                        }
+                        _v_rev = {
+                            1: "top",
+                            2: "center",
+                            3: "bottom",
+                            4: "justify",
+                            5: "distributed",
+                        }
+                        if "ht" in s and s["ht"] in _h_rev:
+                            align_kw["horizontal"] = _h_rev[s["ht"]]
+                        if "vt" in s and s["vt"] in _v_rev:
+                            align_kw["vertical"] = _v_rev[s["vt"]]
+                        if align_kw:
+                            xl_cell.alignment = Alignment(**align_kw)
+
+            # ── Restore merged cells ──────────────────────────────────
+            for merge in sheet_data.get("mergeData", []):
+                try:
+                    from openpyxl.utils import get_column_letter
+
+                    r1 = merge["startRow"] + 1
+                    c1 = merge["startColumn"] + 1
+                    r2 = merge["endRow"] + 1
+                    c2 = merge["endColumn"] + 1
+                    ws.merge_cells(
+                        start_row=r1,
+                        start_column=c1,
+                        end_row=r2,
+                        end_column=c2,
+                    )
+                except Exception:
+                    pass  # skip invalid merge ranges
     else:
         # Luckysheet legacy format (list of sheets)
         if not isinstance(sheets_json, list):
@@ -1686,7 +1814,9 @@ def export_xlsx(
         for sheet_data in sheets_json:
             ws = wb.create_sheet(title=sheet_data.get("name", "Sheet"))
             for cell_entry in sheet_data.get("celldata", []):
-                r = cell_entry.get("r", 0) + 1  # Luckysheet 0-indexed → openpyxl 1-indexed
+                r = (
+                    cell_entry.get("r", 0) + 1
+                )  # Luckysheet 0-indexed → openpyxl 1-indexed
                 c = cell_entry.get("c", 0) + 1
                 v = cell_entry.get("v", {})
                 if v:
@@ -1717,6 +1847,9 @@ def export_xlsx(
                     pass  # skip unreadable images
 
     buf = io.BytesIO()
+    # openpyxl requires at least one visible sheet; add a fallback if needed.
+    if not wb.worksheets:
+        wb.create_sheet(title="Sheet")
     wb.save(buf)
     buf.seek(0)
     return buf.read()
@@ -1736,6 +1869,7 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
         original_path: 暂存的原始 .pptx 文件路径
         slides_json: 画布编辑器序列化数据（两种格式）:
           - 新格式 (几何画布): {"slides": [{"slide_index": int, "shapes": [
+              {"_type": "TEXT", "id": int, "paragraphs": [...]} |
               {"_type": "TEXT", "id": int, "text": str} |
               {"_type": "TABLE", "id": int, "cells": [{"row", "col", "text"}]}
             ]}]}
@@ -1746,6 +1880,8 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
     """
     try:
         from pptx import Presentation
+        from pptx.util import Pt
+        from pptx.dml.color import RGBColor
     except ImportError:
         raise RuntimeError("python-pptx 未安装")
 
@@ -1757,8 +1893,8 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
         shape_map: dict[int, Any] = {shape.shape_id: shape for shape in slide.shapes}
         slides_map[slide_idx] = shape_map
 
-    def _replace_text_frame(tf: Any, new_text: str) -> None:
-        """Replace all text in a text frame preserving the first run's style."""
+    def _replace_text_frame_flat(tf: Any, new_text: str) -> None:
+        """Replace all text in a text frame with a single string, preserving first run's style."""
         if not tf.paragraphs:
             return
         first_para = tf.paragraphs[0]
@@ -1767,43 +1903,187 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
             for run in first_para.runs[1:]:
                 run.text = ""
         else:
-            # No existing runs — add one rather than using para.text= (which destroys XML)
             run = first_para.add_run()
             run.text = new_text
         for para in tf.paragraphs[1:]:
             for run in para.runs:
                 run.text = ""
 
+    def _apply_run_style(run: Any, run_data: dict) -> None:
+        """Apply font styling from the editor's run data to a python-pptx Run."""
+        try:
+            if run_data.get("bold") is not None:
+                run.font.bold = bool(run_data["bold"])
+            if run_data.get("italic") is not None:
+                run.font.italic = bool(run_data["italic"])
+            if run_data.get("underline") is not None:
+                run.font.underline = bool(run_data["underline"])
+            if run_data.get("size"):
+                sz = run_data["size"]
+                if isinstance(sz, (int, float)) and sz > 0:
+                    run.font.size = Pt(sz)
+            if run_data.get("color"):
+                color_str = str(run_data["color"]).lstrip("#")
+                if len(color_str) == 6:
+                    run.font.color.rgb = RGBColor.from_string(color_str)
+            if run_data.get("fontName"):
+                run.font.name = run_data["fontName"]
+        except Exception:
+            pass  # styling is best-effort
+
+    def _replace_text_frame_rich(tf: Any, paragraphs_data: list) -> None:
+        """Replace a text frame's content using rich paragraph/run data from the editor.
+
+        Rebuilds paragraphs and runs to match the editor's state, preserving
+        formatting from the editor data (bold, italic, size, color, font).
+        """
+        from lxml import etree
+        from copy import deepcopy
+
+        if not paragraphs_data:
+            return
+
+        # python-pptx TextFrame XML element
+        txBody = tf._txBody
+        nsmap = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+
+        # Remove all existing <a:p> elements
+        for old_p in txBody.findall("a:p", nsmap):
+            txBody.remove(old_p)
+
+        # Build new <a:p> elements from the editor data
+        for para_data in paragraphs_data:
+            # Create a new paragraph element
+            p_el = etree.SubElement(txBody, f"{{{nsmap['a']}}}p")
+
+            # Set paragraph alignment
+            align = (
+                para_data.get("align", "LEFT")
+                if isinstance(para_data, dict)
+                else "LEFT"
+            )
+            align_map = {"LEFT": "l", "CENTER": "ctr", "RIGHT": "r", "JUSTIFY": "just"}
+            algn_val = align_map.get(str(align).upper(), "l")
+            pPr = etree.SubElement(p_el, f"{{{nsmap['a']}}}pPr")
+            pPr.set("algn", algn_val)
+
+            runs = para_data.get("runs", []) if isinstance(para_data, dict) else []
+            if not runs:
+                # Empty paragraph — add an end-paragraph run so it's not collapsed
+                etree.SubElement(p_el, f"{{{nsmap['a']}}}endParaRPr")
+                continue
+
+            for run_data in runs:
+                r_el = etree.SubElement(p_el, f"{{{nsmap['a']}}}r")
+                rPr = etree.SubElement(r_el, f"{{{nsmap['a']}}}rPr")
+                rPr.set("lang", "zh-CN")
+                rPr.set("dirty", "0")
+
+                # Apply styling attributes
+                if run_data.get("bold"):
+                    rPr.set("b", "1")
+                if run_data.get("italic"):
+                    rPr.set("i", "1")
+                if run_data.get("underline"):
+                    rPr.set("u", "sng")
+                if run_data.get("size"):
+                    sz = run_data["size"]
+                    if isinstance(sz, (int, float)) and sz > 0:
+                        rPr.set("sz", str(int(sz * 100)))  # hundredths of a point
+
+                # Font color
+                if run_data.get("color"):
+                    color_str = str(run_data["color"]).lstrip("#")
+                    if len(color_str) == 6:
+                        solidFill = etree.SubElement(rPr, f"{{{nsmap['a']}}}solidFill")
+                        srgbClr = etree.SubElement(
+                            solidFill, f"{{{nsmap['a']}}}srgbClr"
+                        )
+                        srgbClr.set("val", color_str.upper())
+
+                # Font name
+                if run_data.get("fontName"):
+                    latin = etree.SubElement(rPr, f"{{{nsmap['a']}}}latin")
+                    latin.set("typeface", run_data["fontName"])
+                    ea = etree.SubElement(rPr, f"{{{nsmap['a']}}}ea")
+                    ea.set("typeface", run_data["fontName"])
+
+                # Text content
+                t_el = etree.SubElement(r_el, f"{{{nsmap['a']}}}t")
+                t_el.text = run_data.get("text", "")
+
+    def _get_shape_text(shape_entry: dict) -> str | None:
+        """Extract flat text from a shape entry, or None if rich paragraphs are present."""
+        if "text" in shape_entry:
+            return shape_entry["text"]
+        # Build flat text from paragraphs/runs as fallback
+        paras = shape_entry.get("paragraphs")
+        if paras:
+            return None  # Caller should use _replace_text_frame_rich instead
+        return ""
+
     # Detect format: new geometry canvas dict vs legacy text-card list
     if isinstance(slides_json, dict) and "slides" in slides_json:
         # ── New geometry canvas format ──
+        orig_slide_count = len(prs.slides)
         for slide_data in slides_json["slides"]:
-            slide_idx = slide_data.get("slide_index", 0)
+            slide_idx = slide_data.get("slide_index") or slide_data.get("index", 0)
             shape_map = slides_map.get(slide_idx, {})
-            for shape_entry in slide_data.get("shapes", []):
-                shape_id = shape_entry.get("id") or shape_entry.get("shape_id")
-                shape = shape_map.get(shape_id)
-                if shape is None:
-                    continue
-                stype = shape_entry.get("_type", "TEXT")
-                if stype == "TEXT":
-                    if shape.has_text_frame:
-                        _replace_text_frame(
-                            shape.text_frame, shape_entry.get("text", "")
-                        )
-                elif stype == "TABLE":
-                    if shape.has_table:
-                        tbl = shape.table
-                        for cell_data in shape_entry.get("cells", []):
-                            r, c = cell_data.get("row", 0), cell_data.get("col", 0)
-                            try:
-                                cell = tbl.cell(r, c)
-                                if cell.text_frame:
-                                    _replace_text_frame(
-                                        cell.text_frame, cell_data.get("text", "")
-                                    )
-                            except Exception:
-                                pass
+
+            if shape_map:
+                # ── Edit existing slide ──
+                for shape_entry in slide_data.get("shapes", []):
+                    shape_id = shape_entry.get("id") or shape_entry.get("shape_id")
+                    shape = shape_map.get(shape_id)
+                    if shape is None:
+                        continue
+                    stype = shape_entry.get("_type", "TEXT")
+                    if stype == "TEXT":
+                        if not shape.has_text_frame:
+                            continue
+                        paras = shape_entry.get("paragraphs")
+                        if paras and isinstance(paras, list):
+                            _replace_text_frame_rich(shape.text_frame, paras)
+                        else:
+                            _replace_text_frame_flat(
+                                shape.text_frame, shape_entry.get("text", "")
+                            )
+                    elif stype == "TABLE":
+                        if shape.has_table:
+                            tbl = shape.table
+                            for cell_data in shape_entry.get("cells", []):
+                                r, c = cell_data.get("row", 0), cell_data.get("col", 0)
+                                try:
+                                    cell = tbl.cell(r, c)
+                                    if cell.text_frame:
+                                        _replace_text_frame_flat(
+                                            cell.text_frame, cell_data.get("text", "")
+                                        )
+                                except Exception:
+                                    pass
+            else:
+                # ── New slide (index beyond original) — add blank slide with textboxes ──
+                from pptx.util import Emu
+
+                try:
+                    layout = prs.slide_layouts[6]
+                except (IndexError, KeyError):
+                    layout = prs.slide_layouts[-1]
+                new_slide = prs.slides.add_slide(layout)
+                for shape_entry in slide_data.get("shapes", []):
+                    stype = shape_entry.get("_type", "TEXT")
+                    if stype != "TEXT":
+                        continue
+                    paras = shape_entry.get("paragraphs")
+                    if not paras:
+                        continue
+                    txBox = new_slide.shapes.add_textbox(
+                        Emu(shape_entry.get("left", 0)),
+                        Emu(shape_entry.get("top", 0)),
+                        Emu(shape_entry.get("width", 2743200)),
+                        Emu(shape_entry.get("height", 914400)),
+                    )
+                    _replace_text_frame_rich(txBox.text_frame, paras)
     else:
         # ── Legacy text-card format ──
         for slide_data in slides_json or []:
@@ -1814,7 +2094,7 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
                 shape = shape_map.get(shape_id)
                 if shape is None or not shape.has_text_frame:
                     continue
-                _replace_text_frame(shape.text_frame, text_entry.get("text", ""))
+                _replace_text_frame_flat(shape.text_frame, text_entry.get("text", ""))
 
     buf = io.BytesIO()
     prs.save(buf)

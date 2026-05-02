@@ -262,7 +262,7 @@ class TaskScheduler:
 
             self.running = True
             self.scheduler_thread = threading.Thread(
-                target=self._scheduler_loop, name="TaskScheduler", daemon=False
+                target=self._scheduler_loop, name="TaskScheduler", daemon=True
             )
             self.scheduler_thread.start()
             logger.info("[SCHEDULER] Started")
