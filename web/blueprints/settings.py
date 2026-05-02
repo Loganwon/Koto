@@ -204,6 +204,13 @@ def local_model_switch() -> Response:
         if not save_ok:
             return jsonify({"success": False, "error": "保存设置到磁盘失败"}), 500
 
+        # 同步 SettingsManager 内存状态，防止下次 sm.set() 调用 _save_settings()
+        # 时用旧的内存值覆盖刚写入磁盘的 model_mode/local_model（v1.6.0 蓝图拆分引入的缺陷）
+        sm = _get_settings_manager()
+        sm._settings["model_mode"] = mode
+        if model_tag:
+            sm._settings["local_model"] = model_tag
+
         # 清除缓存，下次 get_client() 调用时重建
         mod._user_settings_cache.clear()
         mod._client = None
