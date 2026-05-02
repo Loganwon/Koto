@@ -6,8 +6,17 @@
   <title>Koto 文件助手</title>
   <!-- socket.io CDN 兜底（npm 安装后可删除） -->
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
-  <script type="module" crossorigin src="/editor/assets/main.js"></script>
-  <link rel="stylesheet" crossorigin href="/editor/assets/main.css">
+  <!-- JSZip: docx-preview 的必需依赖，必须在 docx-preview 之前加载 -->
+  <script src="/static/jszip.min.js"
+          onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);console.warn('[jszip] 本地加载失败，已切换至 CDN');"
+          crossorigin="anonymous"></script>
+  <!-- docx-preview: 高保真 DOCX 渲染库，直接解析 OOXML 保留字号/颜色/表格/页眉页脚 -->
+  <!-- 本地版本优先（离线可用）；加载失败时自动回退到 CDN -->
+  <script src="/static/docx-preview.min.js"
+          onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/docx-preview@latest/dist/docx-preview.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);console.warn('[docx-preview] 本地加载失败，已切换至 CDN');"
+          crossorigin="anonymous"></script>
+  <script type="module" crossorigin src="./assets/index-D8JYWG22.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BPzI-evX.css">
 </head>
 <body>
   <div id="file-assistant-root">
@@ -32,8 +41,7 @@
     <!-- 右侧：AI 助手面板 -->
     <aside id="right-ai-panel"></aside>
   </div>
-
-
+
   <!-- 运行时扩展补丁：浮动工具栏8项操作 + 键盘快捷键 + 导出功能 -->
   <script src="/editor/assets/koto-patch.js" defer></script>
   <!-- 自动激活文档：等待 FileManager 就绪后，自动加载最近的文档 -->

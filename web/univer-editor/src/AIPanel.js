@@ -13,10 +13,34 @@ const SLASH_COMMANDS = [
   { cmd: '/检查',   action: 'check',             icon: '🔍', hint: '检查语法错别字' },
   { cmd: '/续写',   action: 'continue_writing',  icon: '✍️', hint: '继续写作' },
   { cmd: '/改写',   action: 'rewrite',           icon: '✏️', hint: '改写表达方式' },
+  { cmd: '/叙述',   action: 'narrative',         icon: '📝', hint: '数据转文字+图表' },
   { cmd: '/可视化', action: 'chart',             icon: '📊', hint: '用Python画图' },
+  { cmd: '/解析',   action: 'analyze_doc',       icon: '🧠', hint: '深度分析文档（AI工具调用）' },
   { cmd: '/替换',   action: 'find_replace',      icon: '🔄', hint: '智能查找替换' },
   { cmd: '/引用',   action: 'find_reference',    icon: '📚', hint: '查找参考引用' },
 ];
+
+// ── 图表图片全局缓存（避免拖拽时序列化巨大 base64 卡死 UI 线程）
+// key: 短 ID  value: { src: dataUrl, name: fileName }
+const _CHART_IMG_STORE = new Map();
+let _chartImgCounter = 0;
+
+export function getChartImgSrc(id) {
+  return _CHART_IMG_STORE.get(id);
+}
+
+// ── 下一步建议映射（按动作类型） ──────────────────────────────────
+const NEXT_STEPS = {
+  polish:           [{ action: 'check',    label: '🔍 检查语法' }, { action: 'translate', label: '🌐 翻译' }, { action: 'rewrite', label: '✏️ 改写风格' }],
+  translate:        [{ action: 'polish',   label: '✨ 润色译文' }, { action: 'summarize', label: '📋 总结' }],
+  rewrite:          [{ action: 'check',    label: '🔍 检查语法' }, { action: 'translate', label: '🌐 翻译' }],
+  check:            [{ action: 'polish',   label: '✨ 润色建议' }, { action: 'rewrite',   label: '✏️ 改写' }],
+  summarize:        [{ action: 'polish',   label: '✨ 润色总结' }, { action: 'continue_writing', label: '✍️ 继续扩写' }],
+  continue_writing: [{ action: 'check',    label: '🔍 检查全文' }, { action: 'summarize', label: '📋 重新总结' }],
+  narrative:        [{ action: 'chart',    label: '📊 同时可视化' }, { action: 'polish',   label: '✨ 润色段落' }],
+  analyze_doc:      [{ action: 'chart',    label: '📊 数据可视化' }, { action: 'narrative', label: '📝 叙述分析' }],
+  explain:          [{ action: 'find_reference', label: '📚 查找引用' }, { action: 'summarize', label: '📋 全文总结' }],
+};
 
 export class AIPanel {
   constructor(containerId, docController, socketBridge) {
@@ -31,6 +55,8 @@ export class AIPanel {
     this._slashFiltered = [];
     this._history = [];   // [{role:'user'|'assistant', content:str}] multi-turn memory
     this._fileId  = null; // current doc ID (for server-side session persistence)
+    this._docContext = ''; // brief document summary injected into all AI requests
+    this._docMode = 'normal'; // Document mode: normal | formal | casual | academic | concise
 
     this._render();
     this._bind();
@@ -45,6 +71,7 @@ export class AIPanel {
       <div class="ai-panel-header">
         <button id="ai-panel-toggle" class="ai-panel-toggle-btn" title="展开/折叠 AI 面板">◀</button>
         <span class="ai-panel-title">AI 助手</span>
+        <span id="ai-model-badge" class="ai-model-badge"></span>
         <span id="conn-status" class="conn-status connected"><span class="conn-dot"></span>Koto AI</span>
       </div>
       <div id="ai-chat-flow" class="ai-chat-flow">
@@ -55,7 +82,17 @@ export class AIPanel {
         <button class="quick-btn" data-action="summarize"      title="生成全文摘要">📋 总结</button>
         <button class="quick-btn" data-action="check"          title="检查语法与错别字">🔍 检查</button>
         <button class="quick-btn" data-action="translate"      title="翻译选中文本为英文">🌐 翻译</button>
+        <button class="quick-btn" data-action="narrative"      title="将选中数据生成分析段落+图表">📝 叙述</button>
+        <button class="quick-btn" data-action="analyze_doc"    title="深度分析文档（AI工具调用）">🧠 分析</button>
         <button class="quick-btn chart-quick-btn" data-action="chart" title="用 Python 将数据可视化为图表">📊 可视化</button>
+      </div>
+      <div class="ai-mode-bar" title="选择写作基调，影响润色/改写/续写风格">
+        <span class="ai-mode-label">基调</span>
+        <button class="ai-mode-btn active" data-mode="normal"   title="默认基调">📝 默认</button>
+        <button class="ai-mode-btn"        data-mode="formal"   title="正式、专业">🎩 正式</button>
+        <button class="ai-mode-btn"        data-mode="casual"   title="轻松、口语化">😊 轻松</button>
+        <button class="ai-mode-btn"        data-mode="academic" title="学术严谨">🎓 学术</button>
+        <button class="ai-mode-btn"        data-mode="concise"  title="简洁有力">⚡ 简洁</button>
       </div>
       <div class="ai-input-wrap">
         <div id="ai-slash-menu" class="ai-slash-menu hidden"></div>
@@ -118,6 +155,15 @@ export class AIPanel {
       btn.addEventListener('click', () => this._onAction(btn.dataset.action));
     });
 
+    // Document mode buttons
+    this._container.querySelectorAll('.ai-mode-btn[data-mode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._docMode = btn.dataset.mode;
+        this._container.querySelectorAll('.ai-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
+    });
+
     // Input textarea — auto-resize + slash command detection
     const input = document.getElementById('ai-input');
     input.addEventListener('input', () => {
@@ -162,6 +208,12 @@ export class AIPanel {
       if (this._abortController) this._abortController.abort();
     });
 
+    // Model badge — read wa_locked_model from localStorage, update on storage events
+    this._syncModelBadge();
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'wa_locked_model') this._syncModelBadge();
+    });
+
     // Close slash menu when clicking outside
     document.addEventListener('mousedown', (e) => {
       if (!this._slashMenu.contains(e.target) && e.target !== input) {
@@ -169,10 +221,13 @@ export class AIPanel {
       }
     });
 
-    // Global Ctrl+Z: intercept at document level so Univer canvas doesn't
-    // capture it — only when our custom undo stack has entries.
+    // Global Ctrl+Z: intercept at document level for AI undo — but only
+    // when focus is NOT inside the Univer document canvas (#center-doc),
+    // so manual edits in the canvas can still be undone by Univer natively.
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        const centerDoc = document.getElementById('center-doc');
+        if (centerDoc && centerDoc.contains(e.target)) return; // let Univer handle
         if (this._doc && this._doc.canUndo()) {
           e.preventDefault();
           e.stopPropagation();
@@ -236,14 +291,54 @@ export class AIPanel {
     this._slashIdx = 0;
   }
 
+  /** Returns full document text from whichever viewer is currently active, falling back to Univer canvas. */
+  _getDocFullText() {
+    const dv = window.__koto?.docxViewer;
+    if (dv && dv.isActive()) return dv.getFullText();
+    const pv = window.__koto?.pptxViewer;
+    if (pv && pv.isActive()) return pv.getFullText();
+    const ev = window.__koto?.excelViewer;
+    if (ev && ev.isActive()) return ev.getFullText();
+    return this._doc.getFullText();
+  }
+
   // ══════════════════ Action Dispatch ══════════════════
 
   _onAction(actionType) {
+    // Deep document analysis — routes to UnifiedAgent with tool access
+    if (actionType === 'analyze_doc') {
+      const fullText = this._getDocFullText();
+      if (!fullText.trim()) { this.addMessage('文档为空，无内容可分析。', 'error'); return; }
+      const input = document.getElementById('ai-input');
+      const userQuery = (input && input.value.trim()) || '请对这篇文档进行全面分析，包括主要论点、逻辑结构、数据质量和改进建议。';
+      if (input) { input.value = ''; input.style.height = 'auto'; }
+      this.addMessage(`🧠 深度分析：${this._truncate(userQuery, 60)}`, 'user');
+      this._sendViaAgent(userQuery, fullText);
+      return;
+    }
+
+    // Data → Narrative: generate analysis paragraph AND chart
+    if (actionType === 'narrative') {
+      const selection = this._doc.getSelection();
+      const hasSelection = selection && selection.text && selection.text.trim();
+      const text = hasSelection ? selection.text : this._getDocFullText();
+      if (!text.trim()) { this.addMessage('请先选中数据或确保文档有内容。', 'error'); return; }
+      this.addMessage(
+        hasSelection ? `📝 数据叙述：「${this._truncate(text, 60)}」` : '📝 文档数据叙述',
+        'user'
+      );
+      // Step 1: generate narrative paragraph
+      this._sendViaMainAI('narrative', text, hasSelection ? selection : null, '');
+      // Step 2: also generate chart (independent, shown below)
+      this._sendViaChart(text, '根据以上数据生成最合适的图表');
+      return;
+    }
+
     // Chart visualization — uses sandbox endpoint
     if (actionType === 'chart') {
       const selection = this._doc.getSelection();
       const hasSelection = selection && selection.text && selection.text.trim();
-      const text = hasSelection ? selection.text : this._doc.getFullText();
+      const text = hasSelection ? selection.text : this._getDocFullText();
       const instruction = '';
       this.addMessage(hasSelection
         ? `📊 可视化选中数据：「${this._truncate(text, 60)}」`
@@ -254,7 +349,7 @@ export class AIPanel {
 
     // Find & Replace — works on full document
     if (actionType === 'find_replace') {
-      const fullText = this._doc.getFullText();
+      const fullText = this._getDocFullText();
       if (!fullText.trim()) { this.addMessage('文档为空。', 'error'); return; }
       this.addMessage('🔄 智能查找替换', 'user');
       this._sendViaFindReplace(fullText);
@@ -274,7 +369,7 @@ export class AIPanel {
 
     // Actions that work on full document (no selection needed)
     if (actionType === 'summarize' || actionType === 'continue_writing') {
-      const fullText = this._doc.getFullText();
+      const fullText = this._getDocFullText();
       if (!fullText.trim()) { this.addMessage('文档为空，请先输入内容。', 'error'); return; }
       const label = actionType === 'summarize' ? '📋 全文总结' : '✍️ AI 续写';
       this.addMessage(label, 'user');
@@ -286,7 +381,7 @@ export class AIPanel {
     if (actionType === 'check') {
       const selection = this._doc.getSelection();
       const hasSelection = selection && selection.text && selection.text.trim();
-      const text = hasSelection ? selection.text : this._doc.getFullText();
+      const text = hasSelection ? selection.text : this._getDocFullText();
       if (!text.trim()) { this.addMessage('文档为空，无内容可检查。', 'error'); return; }
       this.addMessage(hasSelection ? `🔍 检查选中：「${this._truncate(text, 60)}」` : '🔍 检查全文', 'user');
       this._sendViaMainAI('check', text, hasSelection ? selection : null, '');
@@ -319,6 +414,15 @@ export class AIPanel {
 
     const selection = this._doc.getSelection();
     this.addMessage(text, 'user');
+
+    // Route complex analytical queries (questions with no selection) to UnifiedAgent
+    const hasSelection = selection && selection.text && selection.text.trim();
+    const isQuestion = /[？?]$/.test(text) || /^(分析|帮我分析|评估|判断|是否|有没有|这份|这个文档|准不准|正确吗|合理吗|检验|验证)/.test(text);
+    if (!hasSelection && isQuestion) {
+      this._sendViaAgent(text, this._getDocFullText());
+      return;
+    }
+
     this._sendViaMainAI('custom_instruction', selection?.text || '', selection, text);
   }
 
@@ -337,7 +441,7 @@ export class AIPanel {
       const resp = await fetch('/api/editor/ai/chart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data_context: dataContext, instruction, lang: 'python' }),
+        body: JSON.stringify({ data_context: dataContext, instruction, lang: 'python', model_mode: localStorage.getItem('wa_locked_model') || 'auto' }),
         signal: this._abortController.signal,
       });
 
@@ -363,6 +467,8 @@ export class AIPanel {
 
         if (parsed.type === 'status') {
           statusEl.textContent = parsed.text;
+        } else if (parsed.type === 'info') {
+          this._showInfoBanner(parsed.text || '');
         } else if (parsed.type === 'code') {
           codeText = parsed.text;
           statusEl.style.display = 'none'; // hide status row
@@ -419,7 +525,6 @@ export class AIPanel {
           codeWrap.appendChild(codeHeader);
           codeWrap.appendChild(pre);
           codeWrap.appendChild(textarea);
-          codeWrap.appendChild(pre);
           codeEl = codeWrap;
           chartWrap.appendChild(codeWrap);
           this._chatFlow.appendChild(chartWrap);
@@ -566,6 +671,7 @@ export class AIPanel {
           selection: '',
           instruction: instruction,
           full_text: fullText,
+          model_mode: localStorage.getItem('wa_locked_model') || 'auto',
         }),
         signal: this._abortController.signal,
       });
@@ -683,7 +789,17 @@ export class AIPanel {
         const r = replacements[parseInt(cb.dataset.idx)];
         if (r) text = text.split(r.from).join(r.to);
       });
-      this._doc.loadContent(this._cleanAIText(text));
+      // Route to the appropriate viewer rather than unconditionally writing to Univer canvas
+      const _dv = window.__koto?.docxViewer;
+      if (_dv && _dv.isActive()) {
+        // DOCX mode: apply each replacement to the live DOM via DocxViewer
+        checked.forEach(cb => {
+          const r = replacements[parseInt(cb.dataset.idx)];
+          if (r) _dv.replaceText(r.from, r.to);
+        });
+      } else {
+        this._doc.loadContent(this._cleanAIText(text));
+      }
       applyBtn.disabled = true;
       applyBtn.textContent = '✅ 已应用';
     });
@@ -723,6 +839,18 @@ export class AIPanel {
     }
   }
 
+  _showInfoBanner(text) {
+    // Remove any previous info banner to avoid stacking
+    this._chatFlow.querySelectorAll('.ai-info-banner').forEach(el => el.remove());
+    const banner = document.createElement('div');
+    banner.className = 'chat-msg system ai-info-banner';
+    banner.style.cssText = 'background:rgba(255,171,0,0.12);border-left:3px solid #ffab00;padding:6px 10px;font-size:11px;color:#b88000;border-radius:4px;margin:4px 0;';
+    banner.textContent = text;
+    this._chatFlow.appendChild(banner);
+    this._scrollBottom();
+    setTimeout(() => { if (banner.isConnected) banner.remove(); }, 8000);
+  }
+
   /**
    * Strip markdown-style format artifacts left by LLM or file conversion.
    * Removes **bold**, *italic*, __underline__, heading # markers, and
@@ -740,6 +868,13 @@ export class AIPanel {
     const imgWrap = document.createElement('div');
     imgWrap.className = 'chart-img-wrap';
 
+    // Register in the global store so drag only transfers a short ID (not the full base64)
+    const imgId = 'ci_' + (++_chartImgCounter);
+    _CHART_IMG_STORE.set(imgId, { src: imgSrc, name: fileName });
+    // Expose on window so main.js drop handler can resolve without a module import
+    if (!window._kotoChartStore) window._kotoChartStore = {};
+    window._kotoChartStore[imgId] = { src: imgSrc, name: fileName };
+
     const img = document.createElement('img');
     img.className = 'chart-img chart-img-draggable';
     img.src = imgSrc;
@@ -748,8 +883,8 @@ export class AIPanel {
     img.title = '拖动到左侧文档即可插入图片';
     img.addEventListener('dragstart', (e) => {
       e.dataTransfer.effectAllowed = 'copy';
-      e.dataTransfer.setData('text/plain', imgSrc);
-      e.dataTransfer.setData('application/koto-chart-image', imgSrc);
+      // Only transfer the short ID — drop handler resolves full data URL from window._kotoChartStore
+      e.dataTransfer.setData('application/koto-chart-id', imgId);
       e.dataTransfer.setData('application/koto-chart-name', fileName);
     });
     imgWrap.appendChild(img);
@@ -765,8 +900,33 @@ export class AIPanel {
     const openBtn = document.createElement('button');
     openBtn.className = 'msg-action-btn secondary';
     openBtn.textContent = '🖼 查看';
-    openBtn.title = '在新标签页打开图片（可直接复制）';
-    openBtn.addEventListener('click', () => { window.open(imgSrc, '_blank'); });
+    openBtn.title = '在新标签页打开图片';
+    openBtn.addEventListener('click', () => {
+      // Convert data URL → Blob → Object URL to reliably open in new tab
+      // (modern browsers block window.open with data: URLs)
+      try {
+        const [header, b64] = imgSrc.split(',');
+        const mime = header.match(/:(.*?);/)?.[1] || 'image/png';
+        const bytes = atob(b64);
+        const arr = new Uint8Array(bytes.length);
+        for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+        const blob = new Blob([arr], { type: mime });
+        const blobUrl = URL.createObjectURL(blob);
+        const win = window.open(blobUrl, '_blank');
+        // Revoke after a short delay so the tab has time to load it
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+        if (!win) {
+          // Popup blocked — fall back to direct download
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.target = '_blank';
+          a.click();
+        }
+      } catch (_) {
+        // Last resort: try original data URL
+        window.open(imgSrc, '_blank');
+      }
+    });
 
     const dlBtn = document.createElement('button');
     dlBtn.className = 'msg-action-btn secondary';
@@ -798,9 +958,150 @@ export class AIPanel {
       .replace(/_([^_\n]+?)_/g, '$1')            // _italic_
       .replace(/^#{1,6}\s+/gm, '')               // ## Heading
       .replace(/^[\-\*=]{3,}\s*$/gm, '')         // --- / *** dividers
+      .replace(/^\s*[\*\-\+]\s+/gm, '')          // * bullet / - bullet / + bullet list items
+      .replace(/^\s*\d+\.\s+/gm, '')             // 1. numbered list items
+      .replace(/`{1,3}([^`]*)`{1,3}/g, '$1')     // `inline code` / ```code```
       .replace(/^\s*[\*_]+\s*$/gm, '')           // lone * or _ lines
+      .replace(/\*{1,3}/g, '')                   // any remaining stray asterisks
       .replace(/\n{3,}/g, '\n\n')               // collapse excess blank lines
       .trim();
+  }
+
+  // ══════════════════ Document Auto-Analyze ══════════════════
+
+  /**
+   * Called when a file is opened. Silently fetches a structural summary
+   * and stores it as _docContext for injection into all subsequent AI calls.
+   */
+  async analyzeDoc(fullText) {
+    this._docContext = '';
+    if (!fullText || fullText.trim().length < 30) return;
+    try {
+      const resp = await fetch('/api/editor/ai/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_text: fullText }),
+      });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      if (!data.summary) return;
+      this._docContext = `文档类型：${data.doc_type || ''}；主题：${data.summary}；` +
+        (data.structure && data.structure.length
+          ? `结构：${data.structure.slice(0, 4).join(' / ')}`
+          : '');
+      // Show a subtle doc-awareness chip
+      const chip = document.createElement('div');
+      chip.className = 'chat-msg system doc-context-chip';
+      chip.innerHTML = `📄 <strong>${data.doc_type || '文档'}</strong>：${data.summary}` +
+        (data.word_count ? ` <span class="chip-wc">（约${data.word_count}字）</span>` : '');
+      // Insert right after initial greeting
+      const anchor = this._chatFlow.children[1] || null;
+      this._chatFlow.insertBefore(chip, anchor);
+      this._scrollBottom();
+    } catch {}
+  }
+
+  // ══════════════════ Agent (UnifiedAgent) SSE ══════════════════
+
+  /**
+   * Routes analytical questions to the full Koto UnifiedAgent with tool access.
+   * The current document is injected as context automatically.
+   */
+  async _sendViaAgent(query, fullText) {
+    if (this._abortController) this._abortController.abort();
+    this._abortController = new AbortController();
+
+    // Record user turn (mirrors the pattern in _sendViaMainAI)
+    this._history.push({ role: 'user', content: query || '' });
+    if (this._history.length > 20) this._history = this._history.slice(-20);
+
+    this.showTyping();
+    this.expand();
+    this._setAbortBtnVisible(true);
+
+    let resultText = '';
+    try {
+      const resp = await fetch('/api/editor/ai/agent', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query,
+          doc_context: this._docContext || '',
+          full_text: fullText || this._getDocFullText() || '',
+          session_id: this._fileId ? 'editor_' + this._fileId : '',
+        }),
+        signal: this._abortController.signal,
+      });
+
+      if (!resp.ok) {
+        this.removeTyping();
+        this.addMessage(`❌ 请求失败 (${resp.status})`, 'error');
+        return;
+      }
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      const processLine = (line) => {
+        if (!line.startsWith('data: ')) return;
+        let parsed;
+        try { parsed = JSON.parse(line.slice(6)); } catch { return; }
+        if (parsed.type === 'status') {
+          // Show thinking/tool-call status inline as a dimmed system message
+          const existing = this._chatFlow.querySelector('.agent-status-msg');
+          if (existing) { existing.textContent = parsed.text; }
+          else {
+            const el = document.createElement('div');
+            el.className = 'chat-msg system agent-status-msg';
+            el.textContent = parsed.text;
+            this._chatFlow.appendChild(el);
+            this._scrollBottom();
+          }
+        } else if (parsed.type === 'token') {
+          this.removeTyping();
+          // Remove status chip once answer starts
+          this._chatFlow.querySelectorAll('.agent-status-msg').forEach(el => el.remove());
+          this.appendStreamChunk(parsed.text || '');
+          resultText += parsed.text || '';
+        } else if (parsed.type === 'done') {
+          if (resultText) this._history.push({ role: 'assistant', content: resultText });
+          if (this._streamingEl) this.finalizeStreamMessage(resultText, 'analyze_doc', null);
+        } else if (parsed.type === 'error') {
+          this.removeTyping();
+          this._chatFlow.querySelectorAll('.agent-status-msg').forEach(el => el.remove());
+          if (this._streamingEl) { this._streamingEl.classList.remove('streaming'); this._streamingEl = null; }
+          this.addMessage(`❌ ${parsed.text || '未知错误'}`, 'error');
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop();
+        for (const part of parts) processLine(part);
+      }
+      if (buffer) processLine(buffer);
+      if (this._streamingEl) {
+        if (resultText) this._history.push({ role: 'assistant', content: resultText });
+        this.finalizeStreamMessage(resultText, 'analyze_doc', null);
+      }
+
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        this.removeTyping();
+        if (this._streamingEl) { this._streamingEl.classList.remove('streaming'); this._streamingEl = null; }
+        return;
+      }
+      this.removeTyping();
+      if (this._streamingEl) { this._streamingEl.classList.remove('streaming'); this._streamingEl = null; }
+      this.addMessage(`❌ ${err.message}`, 'error');
+    } finally {
+      this._abortController = null;
+      this._setAbortBtnVisible(false);
+    }
   }
 
   // ══════════════════ Main AI (HTTP SSE) ══════════════════
@@ -831,7 +1132,10 @@ export class AIPanel {
           action: actionType,
           selection: selectionText || '',
           instruction: instruction || '',
-          full_text: this._doc.getFullText() || '',
+          full_text: this._getDocFullText() || '',
+          doc_context: this._docContext || '',
+          doc_mode: this._docMode || 'normal',
+          model_mode: localStorage.getItem('wa_locked_model') || 'auto',
           history: _histCtx,
           session_id: this._fileId ? 'editor_' + this._fileId : '',
         }),
@@ -856,6 +1160,9 @@ export class AIPanel {
           this.removeTyping();
           this.appendStreamChunk(parsed.text || '');
           fullText += parsed.text || '';
+        } else if (parsed.type === 'info') {
+          // Non-streaming notification: fallback to local model, etc.
+          this._showInfoBanner(parsed.text || '');
         } else if (parsed.type === 'done') {
           if (fullText) this._history.push({ role: 'assistant', content: fullText });
           if (this._streamingEl) this.finalizeStreamMessage(fullText, actionType, selectionCtx);
@@ -911,6 +1218,19 @@ export class AIPanel {
     if (el) { el.textContent = text; el.className = 'conn-status ' + type; }
   }
 
+  _syncModelBadge() {
+    const badge = document.getElementById('ai-model-badge');
+    if (!badge) return;
+    const isLocal = (localStorage.getItem('wa_locked_model') || 'auto') === 'local';
+    badge.textContent = isLocal ? 'Ollama ●' : '';
+    badge.className = isLocal ? 'ai-model-badge local' : 'ai-model-badge';
+  }
+
+  /** Called by workspace-assistant when the user switches models globally. */
+  notifyModelChange(newModel) {
+    this._syncModelBadge();
+  }
+
   addMessage(text, role = 'system') {
     if (!this._chatFlow) return null;
     const div = document.createElement('div');
@@ -919,6 +1239,11 @@ export class AIPanel {
     this._chatFlow.appendChild(div);
     this._scrollBottom();
     return div;
+  }
+
+  /** Returns accumulated text from the active streaming bubble (fallback for SocketBridge). */
+  getStreamingText() {
+    return this._streamingEl?.textContent || '';
   }
 
   startStreamMessage() {
@@ -944,6 +1269,11 @@ export class AIPanel {
     if (!el) return;
     el.classList.remove('streaming');
 
+    // Clean markdown symbols from the displayed bubble text
+    if (el.childNodes.length === 1 && el.firstChild.nodeType === Node.TEXT_NODE) {
+      el.textContent = this._cleanAIText(el.textContent);
+    }
+
     const bar = document.createElement('div');
     bar.className = 'msg-action-bar';
     this._buildApplyButtons(fullText, actionType, selectionContext, el).forEach(b => bar.appendChild(b));
@@ -960,6 +1290,29 @@ export class AIPanel {
     });
     bar.appendChild(copyBtn);
     el.appendChild(bar);
+
+    // Next-steps hint row
+    const steps = NEXT_STEPS[actionType];
+    if (steps && steps.length) {
+      const nextRow = document.createElement('div');
+      nextRow.className = 'ai-next-steps';
+      const label = document.createElement('span');
+      label.className = 'ai-next-label';
+      label.textContent = '继续 →';
+      nextRow.appendChild(label);
+      steps.forEach(step => {
+        const btn = document.createElement('button');
+        btn.className = 'ai-next-btn';
+        btn.textContent = step.label;
+        btn.addEventListener('click', () => {
+          nextRow.remove();
+          this._onAction(step.action);
+        });
+        nextRow.appendChild(btn);
+      });
+      el.appendChild(nextRow);
+    }
+
     this._scrollBottom();
   }
 
@@ -994,7 +1347,7 @@ export class AIPanel {
     };
     const canReplace = !!(ctx?.range || ctx?._docxMode);
 
-    const DIFF_ACTIONS = new Set(['polish', 'translate', 'rewrite']);
+    const DIFF_ACTIONS = new Set(['polish', 'translate', 'rewrite', 'check']);
     if (DIFF_ACTIONS.has(actionType) && ctx?.text) {
       // Show inline diff view (word-level)
       const diffEl = this._buildDiffView(ctx.text, clean);
@@ -1002,8 +1355,60 @@ export class AIPanel {
         msgEl.textContent = '';
         msgEl.appendChild(diffEl);
       }
-      if (canReplace) btns.push(make('✅ 接受修改', () => applyReplace(ctx?.range)));
+
+      // Helper: disable all buttons in the bar after an action is taken
+      const lockBar = (activeBtn, label) => {
+        const bar = activeBtn.closest('.msg-action-bar');
+        if (bar) bar.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        activeBtn.textContent = label;
+      };
+
+      if (canReplace) {
+        const acceptBtn = document.createElement('button');
+        acceptBtn.className = 'msg-action-btn';
+        acceptBtn.textContent = '✅ 接受修改';
+        acceptBtn.addEventListener('click', () => {
+          const ok = applyReplace(ctx?.range);
+          if (ok === false) {
+            this.addMessage('⚠ 当前文档为只读模式（如 DOCX）或编辑器未加载，无法直接修改。AI 内容已显示在上方，请复制后手动粘贴。', 'system');
+          } else {
+            lockBar(acceptBtn, '✅ 已接受');
+          }
+        });
+        btns.push(acceptBtn);
+      }
+
+      // Reject button — removes the AI bubble entirely
+      const rejectBtn = document.createElement('button');
+      rejectBtn.className = 'msg-action-btn secondary diff-reject-btn';
+      rejectBtn.textContent = '❌ 拒绝';
+      rejectBtn.addEventListener('click', () => {
+        if (msgEl) msgEl.remove();
+      });
+      btns.push(rejectBtn);
+
+      // Regenerate button — removes bubble and re-sends the same action
+      const regenBtn = document.createElement('button');
+      regenBtn.className = 'msg-action-btn secondary';
+      regenBtn.textContent = '🔄 重新生成';
+      regenBtn.addEventListener('click', () => {
+        if (msgEl) msgEl.remove();
+        if (ctx?.text) {
+          const labels = { polish: '✨ 润色', translate: '🌐 翻译', rewrite: '✏️ 改写', check: '🔍 检查' };
+          this.addMessage(`${labels[actionType] || actionType}：「${this._truncate(ctx.text, 80)}」`, 'user');
+          this._sendViaMainAI(actionType, ctx.text, ctx, '');
+        }
+      });
+      btns.push(regenBtn);
+
       btns.push(make('📝 插入到末尾', () => this._doc.insertTextAtCursor('\n' + clean)));
+    } else if (actionType === 'narrative') {
+      // Narrative paragraph: offer to insert after the data or at cursor
+      btns.push(make('📝 插入分析段落', () => this._doc.insertTextAtCursor('\n\n' + clean)));
+      if (canReplace) btns.push(make('✅ 替换选中内容', () => applyReplace(ctx?.range)));
+    } else if (actionType === 'analyze_doc') {
+      // Analysis result: informational, offer insert or just copy
+      btns.push(make('📝 插入分析报告', () => this._doc.insertTextAtCursor('\n\n【AI 分析报告】\n' + clean)));
     } else if (actionType === 'annotate') {
       if (canReplace) btns.push(make('✏️ 替换选中内容', () => applyReplace(ctx?.range)));
       btns.push(make('📝 插入到末尾', () => this._doc.insertTextAtCursor('\n' + clean)));
@@ -1015,6 +1420,9 @@ export class AIPanel {
       btns.push(make('📝 插入修改建议', () => this._doc.insertTextAtCursor('\n\n【检查建议】\n' + clean)));
     } else if (actionType === 'find_reference') {
       btns.push(make('📝 插入引用', () => this._doc.insertTextAtCursor('\n\n【参考引用】\n' + clean)));
+    } else if (actionType === 'explain') {
+      // Explanation is informational — insert only, no "replace selected" option
+      btns.push(make('📝 插入解释', () => this._doc.insertTextAtCursor('\n\n【解释】\n' + clean)));
     } else {
       if (canReplace) btns.push(make('✏️ 替换选中内容', () => applyReplace(ctx?.range)));
       btns.push(make('📝 插入到末尾', () => this._doc.insertTextAtCursor('\n' + clean)));
@@ -1112,6 +1520,128 @@ export class AIPanel {
     this._scrollBottom();
   }
 
+  /**
+   * Show a transient progress message (e.g. "正在分析上下文…").
+   * Previous progress message is replaced in-place.
+   */
+  showProgressMessage(text) {
+    if (!this._chatFlow) return;
+    let el = this._chatFlow.querySelector('.ai-progress-msg');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'chat-msg system ai-progress-msg';
+      el.style.cssText = 'opacity:0.7;font-size:11px;padding:3px 8px;';
+      this._chatFlow.appendChild(el);
+    }
+    el.textContent = text;
+    this._scrollBottom();
+  }
+
+  /** Remove all progress indicator messages. */
+  removeProgressMessages() {
+    if (!this._chatFlow) return;
+    this._chatFlow.querySelectorAll('.ai-progress-msg').forEach(el => el.remove());
+  }
+
+  /**
+   * Show structured proposals from socket_handler agent_proposals event.
+   * Each proposal: { id, original_text, proposed_text, rationale, tool_call }
+   */
+  showProposals(proposals, summary, selectionCtx) {
+    if (!this._chatFlow) return;
+    this.removeProgressMessages();
+
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-msg ai proposals-wrap';
+
+    if (summary) {
+      const sumEl = document.createElement('div');
+      sumEl.className = 'proposals-summary';
+      sumEl.textContent = summary;
+      wrap.appendChild(sumEl);
+    }
+
+    proposals.forEach((p) => {
+      const card = document.createElement('div');
+      card.className = 'proposal-card';
+
+      // Clean markdown symbols from proposed text before display and application
+      const cleanProposed = this._cleanAIText(p.proposed_text);
+
+      const diffEl = this._buildDiffView(p.original_text, cleanProposed);
+      if (diffEl) card.appendChild(diffEl);
+
+      const bar = document.createElement('div');
+      bar.className = 'msg-action-bar';
+
+      const applyBtn = document.createElement('button');
+      applyBtn.className = 'msg-action-btn';
+      applyBtn.textContent = '✅ 应用';
+      applyBtn.addEventListener('click', () => {
+        // Prefer DOCX viewer replace if in docx mode
+        if (selectionCtx?._docxMode) {
+          const dv = window.__koto?.docxViewer;
+          if (dv && dv.isActive()) {
+            dv.replaceText(p.original_text, cleanProposed);
+          }
+        } else if (selectionCtx?.range) {
+          this._doc.replaceRange(selectionCtx.range, cleanProposed);
+        } else {
+          // No range — insert at cursor
+          this._doc.insertTextAtCursor('\n' + cleanProposed);
+        }
+        applyBtn.disabled = true;
+        applyBtn.textContent = '✅ 已应用';
+      });
+      bar.appendChild(applyBtn);
+
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'msg-action-btn secondary';
+      copyBtn.textContent = '📋 复制';
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(cleanProposed).then(() => {
+          copyBtn.textContent = '✅ 已复制';
+          setTimeout(() => { copyBtn.textContent = '📋 复制'; }, 2000);
+        });
+      });
+      bar.appendChild(copyBtn);
+
+      card.appendChild(bar);
+      wrap.appendChild(card);
+    });
+
+    this._chatFlow.appendChild(wrap);
+    this._scrollBottom();
+  }
+
+  /**
+   * Handle direct doc_tool_call events (non-proposal mode).
+   * Shows a confirmation message with apply button.
+   */
+  handleDocToolCall(toolCall) {
+    if (!this._chatFlow) return;
+    const type = toolCall.type || 'unknown';
+    const value = toolCall.value || '';
+    const preview = value.length > 60 ? value.substring(0, 60) + '…' : value;
+
+    const el = this.addMessage(`🔧 文档操作 (${type})：${preview}`, 'ai');
+    const bar = document.createElement('div');
+    bar.className = 'msg-action-bar';
+
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'msg-action-btn';
+    applyBtn.textContent = '✅ 应用到文档';
+    applyBtn.addEventListener('click', () => {
+      // Strip HTML tags for plain text insertion
+      const clean = value.replace(/<[^>]+>/g, '').trim() || value;
+      this._doc.insertTextAtCursor('\n' + clean);
+      applyBtn.disabled = true;
+      applyBtn.textContent = '✅ 已应用';
+    });
+    bar.appendChild(applyBtn);
+    el.appendChild(bar);
+  }
+
   // ══════════════════ State helpers ══════════════════
 
   showTyping() {
@@ -1166,10 +1696,18 @@ export class AIPanel {
   resetHistory(fileId = null) {
     this._fileId = fileId;
     this._history = [];
+    this._docContext = '';
     if (this._chatFlow) {
-      this._chatFlow.querySelectorAll('.chat-hist-sep, .chat-hist-item').forEach(el => el.remove());
+      this._chatFlow.querySelectorAll('.chat-hist-sep, .chat-hist-item, .doc-context-chip').forEach(el => el.remove());
     }
-    if (fileId) this._loadServerHistory(fileId);
+    if (fileId) {
+      this._loadServerHistory(fileId);
+      // Silently analyze document structure for contextual awareness
+      setTimeout(() => {
+        const fullText = this._getDocFullText();
+        if (fullText && fullText.trim().length >= 30) this.analyzeDoc(fullText);
+      }, 800);  // slight delay to let the document finish loading
+    }
   }
 
   /** Fetch saved conversation from server and display it as dimmed history above new messages. */

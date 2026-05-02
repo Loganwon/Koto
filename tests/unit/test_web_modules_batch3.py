@@ -875,7 +875,7 @@ class TestFileAnalyzer:
     def test_class_constants(self):
         from web.file_analyzer import FileAnalyzer
 
-        assert FileAnalyzer.OLLAMA_URL == "http://localhost:11434"
+        assert FileAnalyzer.OLLAMA_URL == "http://127.0.0.1:11434"
         assert FileAnalyzer.AI_MODEL == "qwen3:8b"
 
     # -- _load_classification_rules -----------------------------------------

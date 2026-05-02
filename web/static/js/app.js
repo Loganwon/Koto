@@ -1229,24 +1229,6 @@ function renderWelcomeScreen() {
     if (greetEl) greetEl.textContent = greeting;
 }
 
-function _renderWelcomeScreen_unused() {
-    // \u6700\u8fd1\u5bf9\u8bdd — removed per user request
-    const sessions = window._projectSessions || [];
-    const recentSec = document.getElementById('welcomeRecent');
-    const recentList = document.getElementById('welcomeRecentList');
-    if (recentSec && recentList && sessions.length > 0) {
-        const recent = sessions.slice(0, 5);
-        recentList.innerHTML = recent.map(s => `
-            <button class="welcome-recent-item" onclick="selectSession('${s.replace(/'/g, "\\'")}')">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
-                <span>${s.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</span>
-            </button>
-        `).join('');
-        recentSec.style.display = 'block';
-    } else if (recentSec) {
-        recentSec.style.display = 'none';
-    }
-}
 
 async function selectSession(sessionName) {
     // Switch back to chat view if we're in editor view
@@ -5205,7 +5187,6 @@ function openSettings() {
     loadSkills();   // Load skills when opening settings
     loadSkillBindings();    // Load intent bindings
     loadTriggers();         // Load scheduled triggers
-    fileHubLoadStats();     // Load file registry stats
     loadShadowStatus();     // Load shadow watcher status (includes shadow memories)
     detectLocalModels();    // 自动扫描本地 Ollama 模型
     document.getElementById('settingsPanel').classList.add('active');
@@ -6048,6 +6029,10 @@ async function updateSetting(category, key, value) {
             body: JSON.stringify({ category, key, value })
         });
         
+        if (!response.ok) {
+            console.error('Failed to update setting: HTTP', response.status);
+            return;
+        }
         const data = await response.json();
         if (data.success) {
             if (!currentSettings[category]) currentSettings[category] = {};
@@ -6429,7 +6414,13 @@ async function onLocalOnlyChange(enabled) {
             ollamaOk = data.success && data.models && data.models.length > 0;
             if (!ollamaOk) {
                 document.getElementById('settingLocalOnly').checked = false;
-                showNotification('⚠️ Ollama 未运行。请先安装并启动 Ollama（ollama.com），再开启本地模式。', 'warning', 6000);
+                const errMsg = data.error || '';
+                const msg = errMsg.includes('正在启动')
+                    ? '⚠️ Ollama 正在启动，请稍候再试。'
+                    : errMsg.includes('未安装')
+                        ? '⚠️ Ollama 未安装。请访问 ollama.com 下载安装后再开启本地模式。'
+                        : '⚠️ Ollama 未运行。请先启动 Ollama，再开启本地模式。';
+                showNotification(msg, 'warning', 6000);
                 return;
             }
             const selectEl = document.getElementById('settingLocalModel');
@@ -6448,6 +6439,14 @@ async function onLocalOnlyChange(enabled) {
     }
     applyLocalOnlyMode(enabled);
     updateSetting('ai', 'use_local_only', enabled);
+    // 同步通知后端切换 model_mode，否则服务端路由不会跟随 use_local_only 改变
+    const selectEl = document.getElementById('settingLocalModel');
+    const modelTag = selectEl ? selectEl.value : '';
+    fetch('/api/local-model/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(enabled ? {mode: 'local', model_tag: modelTag} : {mode: 'cloud'})
+    }).catch(err => console.warn('[LocalOnly] mode switch failed:', err));
 }
 
 function applyLocalOnlyMode(enabled) {
@@ -6471,8 +6470,20 @@ async function detectLocalModels() {
         const data = await resp.json();
         if (!data.success || !data.models || !data.models.length) {
             _allLocalModels = [];
-            if (badgeEl) { badgeEl.textContent = 'Ollama 未运行'; badgeEl.style.color = '#e87979'; }
-            if (hintEl) hintEl.textContent = data.error ? `检测失败: ${data.error}` : '未检测到已安装的 Ollama 模型';
+            const errMsg = data.error || '';
+            const isStarting = errMsg.includes('正在启动');
+            const notInstalled = errMsg.includes('未安装');
+            const isServiceError = errMsg.includes('502') || errMsg.includes('服务异常') || errMsg.includes('HTTP');
+            if (badgeEl) {
+                badgeEl.textContent = isStarting ? 'Ollama 启动中…'
+                    : notInstalled ? 'Ollama 未安装'
+                    : isServiceError ? 'Ollama 服务异常'
+                    : 'Ollama 未运行';
+                badgeEl.style.color = isStarting ? '#f0a500' : isServiceError ? '#e07b00' : '#e87979';
+            }
+            if (hintEl) hintEl.textContent = isServiceError
+                ? (errMsg || '请在命令行运行 ollama serve 后重试')
+                : (errMsg || '未检测到已安装的 Ollama 模型');
             return;
         }
         _allLocalModels = data.models;
@@ -8505,16 +8516,479 @@ function openFileHubModal() {
     const modal = document.getElementById('filehubModal');
     if (modal) {
         modal.style.display = 'flex';
-        // 默认显示搜索并加载最近文件（作为"我的内容"的综合入口）
-        fhSwitchTab('search');
-        fhLoadRecent();
+        fhNavSwitch('recent');
+        fileHubLoadStats();
+        _fhLoadFavoriteSet();
+        _fhLoadTagCloud();
         const navItem = document.getElementById('myStuffItem');
         if (navItem) navItem.classList.add('active');
-        setTimeout(() => {
-            const input = document.getElementById('fhSearchInput');
-            if (input) input.focus();
-        }, 50);
     }
+}
+
+// ─── Favorites cache ────────────────────────────────────────────────────────
+let _fhFavorites = new Set();
+
+async function _fhLoadFavoriteSet() {
+    try {
+        const r = await fetch('/api/files/favorites');
+        if (!r.ok) return;
+        const d = await r.json();
+        _fhFavorites = new Set((d.favorites || []));
+    } catch (e) { /* silent */ }
+}
+
+async function fhLoadFavorites() {
+    const list = document.getElementById('fhFileList');
+    if (!list) return;
+    list.innerHTML = fhShowLoading('正在加载收藏…');
+    document.getElementById('fhResultHeader').style.display = 'none';
+    try {
+        const r = await fetch('/api/files/favorites');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        const files = d.files || [];
+        _fhRenderFiles(files, list, false);
+        _fhShowCount(files.length, '收藏文件');
+    } catch (e) {
+        list.innerHTML = fhShowEmpty(`加载失败：${_esc(e.message)}`);
+    }
+}
+
+async function fhToggleFavorite(path, btn) {
+    const isFav = _fhFavorites.has(path);
+    try {
+        const resp = await fetch('/api/files/favorites', {
+            method: isFav ? 'DELETE' : 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        if (isFav) {
+            _fhFavorites.delete(path);
+            if (btn) { btn.classList.remove('active'); btn.title = '加入收藏'; btn.innerHTML = _fhStarSvg(false); }
+        } else {
+            _fhFavorites.add(path);
+            if (btn) { btn.classList.add('active'); btn.title = '取消收藏'; btn.innerHTML = _fhStarSvg(true); }
+        }
+    } catch (e) { _showToast('收藏操作失败：' + e.message); }
+}
+
+function _fhStarSvg(filled) {
+    return filled
+        ? `<svg viewBox="0 0 24 24" fill="#f59e0b" stroke="#f59e0b" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`
+        : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+}
+
+// ─── Tag cloud ────────────────────────────────────────────────────────────────
+async function _fhLoadTagCloud() {
+    try {
+        const r = await fetch('/api/files/tags');
+        if (!r.ok) return;
+        const d = await r.json();
+        const tags = (d.tags || []).slice(0, 20);
+        const cloud = document.getElementById('fhTagCloud');
+        if (!cloud) return;
+        if (!tags.length) { cloud.innerHTML = '<span style="font-size:12px;color:var(--text-muted);padding:2px 10px;">暂无标签</span>'; return; }
+        cloud.innerHTML = tags.map(t =>
+            `<button class="fh-tag-pill" onclick="fhFilterByTag(${JSON.stringify(t.tag).replace(/"/g,'&quot;')})" title="${_esc(t.tag)} (${t.count})">${_esc(t.tag)}</button>`
+        ).join('');
+    } catch (e) { /* silent */ }
+}
+
+async function fhFilterByTag(tag) {
+    document.querySelectorAll('.fh-tag-pill').forEach(el => el.classList.toggle('active', el.textContent === tag));
+    const list = document.getElementById('fhFileList');
+    if (!list) return;
+    list.innerHTML = fhShowLoading('正在按标签筛选…');
+    document.getElementById('fhResultHeader').style.display = 'none';
+    fhNavSwitch('search');
+    try {
+        const r = await fetch('/api/files/by-tag?tag=' + encodeURIComponent(tag) + '&limit=100');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        // by-tag returns paths only, enrich via search
+        const paths = d.paths || [];
+        const files = paths.map(p => ({ path: p, name: p.replace(/\\/g,'/').split('/').pop(), category: '其他', tags: [tag] }));
+        _fhRenderFiles(files, list, false);
+        _fhShowCount(files.length, `标签「${tag}」`);
+    } catch (e) {
+        list.innerHTML = fhShowEmpty(`标签筛选失败：${_esc(e.message)}`);
+    }
+}
+
+// ─── Storage Health Dashboard ─────────────────────────────────────────────────
+async function fhLoadHealth() {
+    const cardsEl = document.getElementById('fhHealthCards');
+    const largeEl = document.getElementById('fhLargeFilesWrap');
+    const oldEl   = document.getElementById('fhOldFilesWrap');
+    const dupEl   = document.getElementById('fhDupFilesWrap');
+    if (!cardsEl) return;
+    cardsEl.innerHTML = fhShowLoading('正在分析…');
+
+    try {
+        // Top-level stats from registry
+        const statsR = await fetch('/api/files/stats');
+        const stats  = await statsR.json();
+        const total  = stats.total || 0;
+        const bycat  = (stats.by_category || {});
+
+        // Summary cards
+        cardsEl.innerHTML = `
+            <div class="fh-health-card">
+                <div class="fh-hc-label">已收录文件</div>
+                <div class="fh-hc-value">${total}</div>
+                <div class="fh-hc-sub">在 Koto 文件库中</div>
+            </div>
+            ${Object.entries(bycat).slice(0,4).map(([cat,cnt]) => `
+            <div class="fh-health-card">
+                <div class="fh-hc-label">${_esc(cat)}</div>
+                <div class="fh-hc-value">${cnt}</div>
+                <div class="fh-hc-sub">个文件</div>
+            </div>`).join('')}`;
+
+        // Large files
+        const largeR = await fetch('/api/files/large-files?min_size_mb=5&limit=10');
+        const largeD = await largeR.json();
+        const largeFiles = largeD.result || [];
+        if (largeFiles.length) {
+            const _fmt = b => b > 1048576 ? (b/1048576).toFixed(1)+' MB' : Math.round(b/1024)+' KB';
+            largeEl.innerHTML = `<div class="fh-health-section">
+                <div class="fh-health-section-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+                    大文件 (≥5 MB)
+                </div>
+                ${largeFiles.map(f => `<div class="fh-health-row">
+                    <span class="fh-hr-name" title="${_esc(f.path||f.name||'')}">📄 ${_esc(f.name||'')}</span>
+                    <span class="fh-hr-size">${_fmt(f.size_bytes||0)}</span>
+                </div>`).join('')}
+            </div>`;
+        }
+
+        // Old files
+        const oldR = await fetch('/api/files/old-files?days_old=180&limit=10');
+        const oldD = await oldR.json();
+        const oldFiles = oldD.result || [];
+        if (oldFiles.length) {
+            const _fmtDate = ts => ts ? new Date(ts*1000).toLocaleDateString('zh-CN') : '';
+            oldEl.innerHTML = `<div class="fh-health-section">
+                <div class="fh-health-section-title">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                    长期未访问文件 (≥180天)
+                </div>
+                ${oldFiles.slice(0,8).map(f => `<div class="fh-health-row">
+                    <span class="fh-hr-name" title="${_esc(f.path||f.name||'')}">📄 ${_esc(f.name||'')}</span>
+                    <span class="fh-hr-size">${_fmtDate(f.mtime)}</span>
+                </div>`).join('')}
+            </div>`;
+        }
+
+        // Duplicate files with cleanup button
+        const dupR = await fetch('/api/files/duplicates');
+        const dupD = await dupR.json();
+        const groups = dupD.groups || dupD.duplicates || [];
+        if (groups.length) {
+            dupEl.innerHTML = `<div class="fh-health-section">
+                <div class="fh-health-section-title" style="justify-content:space-between;">
+                    <span style="display:flex;align-items:center;gap:6px;">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#dc2626" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+                        发现 ${groups.length} 组重复文件
+                    </span>
+                    <button class="fh-btn-danger" onclick="fhCleanupDups()">一键清理</button>
+                </div>
+                ${groups.slice(0,5).map((g,i) => {
+                    const files = g.files || g;
+                    return `<div class="fh-health-row" style="flex-direction:column;align-items:flex-start;gap:2px;">
+                        <span style="font-size:12px;font-weight:600;color:var(--text-primary);">重复组 ${i+1}（${files.length} 个）</span>
+                        ${files.slice(0,2).map(ff => `<span style="font-size:12px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">• ${_esc((ff.name||ff.path||ff).split(/[\\/]/).pop()||'')}</span>`).join('')}
+                        ${files.length > 2 ? `<span style="font-size:11px;color:var(--text-muted);">…另 ${files.length-2} 个</span>` : ''}
+                    </div>`;
+                }).join('')}
+            </div>`;
+        }
+
+        if (!largeFiles.length && !oldFiles.length && !groups.length) {
+            largeEl.innerHTML = `<div style="margin-top:20px;text-align:center;color:var(--text-muted);font-size:13px;">✅ 存储状态良好，未发现大文件、旧文件或重复文件</div>`;
+        }
+    } catch (e) {
+        cardsEl.innerHTML = fhShowEmpty('加载失败：' + _esc(e.message));
+    }
+}
+
+async function fhCleanupDups() {
+    if (!confirm('将删除每组重复文件中的副本（保留最新版本）。此操作不可撤销，继续？')) return;
+    try {
+        const r = await fetch('/api/files/cleanup-dups', {
+            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ dry_run: false })
+        });
+        const d = await r.json();
+        _showToast(d.result?.message || '清理完成');
+        fhLoadHealth();
+    } catch (e) { _showToast('清理失败：' + e.message); }
+}
+
+// ─── File Watcher Settings ────────────────────────────────────────────────────
+let _fhWatchDirs = [];
+
+async function fhLoadWatcherSettings() {
+    try {
+        const r = await fetch('/api/files/watch-settings');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const d = await r.json();
+        _fhWatchDirs = d.watch_dirs || [];
+        const enabledEl = document.getElementById('fhWatcherEnabled');
+        if (enabledEl) enabledEl.checked = !!d.enabled;
+        _fhRenderWatchDirs();
+    } catch (e) {
+        _showToast('加载监控设置失败：' + e.message);
+    }
+}
+
+function _fhRenderWatchDirs() {
+    const el = document.getElementById('fhWatchDirList');
+    if (!el) return;
+    if (!_fhWatchDirs.length) {
+        el.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:12px 0;text-align:center;">暂无监控目录，添加后 Koto 会自动收录新文件</div>';
+        return;
+    }
+    el.innerHTML = _fhWatchDirs.map((dir, i) => `
+        <div class="fh-watch-dir-row">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent-primary)" stroke-width="2" style="flex-shrink:0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <span class="fh-watch-dir-path" title="${_esc(dir)}">${_esc(dir)}</span>
+            <button class="fh-watch-dir-remove" onclick="fhRemoveWatchDir(${i})" title="移除">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>`).join('');
+}
+
+async function fhAddWatchDir() {
+    const inp = document.getElementById('fhWatchDirInput');
+    const dir = (inp?.value || '').trim();
+    if (!dir) { inp?.focus(); return; }
+    if (_fhWatchDirs.includes(dir)) { _showToast('该目录已在监控列表中'); return; }
+    _fhWatchDirs.push(dir);
+    if (inp) inp.value = '';
+    await _fhSaveWatchSettings();
+    _fhRenderWatchDirs();
+}
+
+async function fhRemoveWatchDir(idx) {
+    _fhWatchDirs.splice(idx, 1);
+    await _fhSaveWatchSettings();
+    _fhRenderWatchDirs();
+}
+
+async function fhToggleWatcher(enabled) {
+    await _fhSaveWatchSettings(enabled);
+}
+
+async function _fhSaveWatchSettings(enabledOverride) {
+    try {
+        const enabledEl = document.getElementById('fhWatcherEnabled');
+        const enabled = enabledOverride !== undefined ? enabledOverride : !!(enabledEl?.checked);
+        const r = await fetch('/api/files/watch-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled, watch_dirs: _fhWatchDirs }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        _showToast('监控设置已保存');
+    } catch (e) { _showToast('保存失败：' + e.message); }
+}
+
+async function fhPickWatchDir() {
+    try {
+        const r = await fetch('/api/files/pick-folder');
+        const d = await r.json();
+        if (d.ok && d.path) {
+            const inp = document.getElementById('fhWatchDirInput');
+            if (inp) inp.value = d.path;
+        }
+    } catch (e) { /* silent */ }
+}
+
+// ─── File Relation Graph ──────────────────────────────────────────────────────
+let _fhGraphData = null;
+
+async function fhLoadGraph() {
+    const wrap = document.getElementById('fhGraphWrap');
+    const canvas = document.getElementById('fhGraphCanvas');
+    if (!canvas || !wrap) return;
+    document.getElementById('fhGraphHint').textContent = '加载中…';
+    try {
+        const r = await fetch('/api/files/graph-data?limit=60');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        _fhGraphData = await r.json();
+        _fhDrawGraph(canvas, wrap, _fhGraphData);
+        document.getElementById('fhGraphHint').textContent = '点击节点打开文件';
+    } catch (e) {
+        document.getElementById('fhGraphHint').textContent = '加载失败：' + e.message;
+    }
+}
+
+function _fhDrawGraph(canvas, wrap, data) {
+    const nodes = data.nodes || [];
+    const edges = data.edges || [];
+    if (!nodes.length) { document.getElementById('fhGraphHint').textContent = '暂无文件关系数据'; return; }
+
+    const W = wrap.clientWidth || 600;
+    const H = wrap.clientHeight || 400;
+    canvas.width  = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+
+    // Assign initial random positions
+    const pos = nodes.map(() => ({
+        x: 60 + Math.random() * (W - 120),
+        y: 60 + Math.random() * (H - 120),
+        vx: 0, vy: 0,
+    }));
+    const idxOf = {};
+    nodes.forEach((n, i) => { idxOf[n.id || n.path || i] = i; });
+
+    // Force simulation (Fruchterman-Reingold, ~120 iterations)
+    const k = Math.sqrt((W * H) / Math.max(nodes.length, 1));
+    for (let iter = 0; iter < 120; iter++) {
+        const cooling = 1 - iter / 120;
+        // Repulsion
+        for (let i = 0; i < pos.length; i++) {
+            let fx = 0, fy = 0;
+            for (let j = 0; j < pos.length; j++) {
+                if (i === j) continue;
+                const dx = pos[i].x - pos[j].x;
+                const dy = pos[i].y - pos[j].y;
+                const d  = Math.sqrt(dx*dx + dy*dy) || 1;
+                const fr = (k * k) / d;
+                fx += (dx / d) * fr;
+                fy += (dy / d) * fr;
+            }
+            pos[i].vx = (pos[i].vx + fx) * 0.5;
+            pos[i].vy = (pos[i].vy + fy) * 0.5;
+        }
+        // Attraction
+        for (const e of edges) {
+            const si = idxOf[e.source]; const ti = idxOf[e.target];
+            if (si == null || ti == null) continue;
+            const dx = pos[ti].x - pos[si].x;
+            const dy = pos[ti].y - pos[si].y;
+            const d  = Math.sqrt(dx*dx + dy*dy) || 1;
+            const fa = (d * d) / k;
+            const fx = (dx / d) * fa * 0.3;
+            const fy = (dy / d) * fa * 0.3;
+            pos[si].vx += fx; pos[si].vy += fy;
+            pos[ti].vx -= fx; pos[ti].vy -= fy;
+        }
+        // Apply + clamp
+        const temp = k * cooling;
+        for (const p of pos) {
+            const spd = Math.sqrt(p.vx*p.vx + p.vy*p.vy) || 1;
+            const mv  = Math.min(spd, temp);
+            p.x = Math.max(30, Math.min(W-30, p.x + (p.vx/spd)*mv));
+            p.y = Math.max(30, Math.min(H-30, p.y + (p.vy/spd)*mv));
+        }
+    }
+
+    // Draw
+    const isDark = document.documentElement.classList.contains('dark') || document.body.classList.contains('theme-dark');
+    const edgeColor  = isDark ? 'rgba(148,163,184,0.25)' : 'rgba(100,116,139,0.20)';
+    const nodeColor  = '#3b82f6';
+    const nodeRadius = 10;
+
+    ctx.clearRect(0, 0, W, H);
+    // Edges
+    ctx.strokeStyle = edgeColor;
+    ctx.lineWidth   = 1.2;
+    for (const e of edges) {
+        const si = idxOf[e.source]; const ti = idxOf[e.target];
+        if (si == null || ti == null) continue;
+        ctx.beginPath();
+        ctx.moveTo(pos[si].x, pos[si].y);
+        ctx.lineTo(pos[ti].x, pos[ti].y);
+        ctx.stroke();
+    }
+    // Nodes
+    nodes.forEach((n, i) => {
+        const p = pos[i];
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, nodeRadius, 0, Math.PI * 2);
+        ctx.fillStyle = nodeColor;
+        ctx.fill();
+        // Label below node
+        const rawName = (n.name || n.path || n.id || '').split(/[\\/]/).pop();
+        const label = rawName.length > 9 ? rawName.slice(0, 8) + '…' : rawName;
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = isDark ? 'rgba(203,213,225,0.85)' : '#4b5563';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, p.x, p.y + nodeRadius + 12);
+    });
+
+    // Click → open file
+    canvas.onclick = (ev) => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = ev.clientX - rect.left;
+        const my = ev.clientY - rect.top;
+        for (let i = 0; i < pos.length; i++) {
+            const dx = mx - pos[i].x; const dy = my - pos[i].y;
+            if (dx*dx + dy*dy < nodeRadius*nodeRadius*2.5) {
+                const n = nodes[i];
+                const fp = n.path || n.id || '';
+                if (fp) _fhOpenInAssistant(fp);
+                break;
+            }
+        }
+    };
+
+    // Hover tooltip
+    const tooltip = document.getElementById('fhGraphTooltip');
+    canvas.onmousemove = (ev) => {
+        if (!tooltip) return;
+        const rect = canvas.getBoundingClientRect();
+        const mx = ev.clientX - rect.left;
+        const my = ev.clientY - rect.top;
+        let hit = null;
+        for (let i = 0; i < pos.length; i++) {
+            const dx = mx - pos[i].x; const dy = my - pos[i].y;
+            if (dx*dx + dy*dy < nodeRadius*nodeRadius*2.5) { hit = nodes[i]; break; }
+        }
+        if (hit) {
+            const name = (hit.name || hit.path || hit.id || '').split(/[\\/]/).pop();
+            tooltip.textContent = name;
+            tooltip.style.display  = 'block';
+            tooltip.style.left     = (mx + 14) + 'px';
+            tooltip.style.top      = (my - 10) + 'px';
+        } else {
+            tooltip.style.display = 'none';
+        }
+    };
+    canvas.onmouseleave = () => { if (tooltip) tooltip.style.display = 'none'; };
+}
+
+// ─── end of new feature functions ────────────────────────────────────────────
+
+// ---- Sidebar navigation (v2) ----
+function fhNavSwitch(mode) {
+    ['recent','favorites','search','browse','archive','health','watcher','graph'].forEach(m => {
+        const key = m.charAt(0).toUpperCase() + m.slice(1);
+        const el = document.getElementById('fhNav' + key);
+        if (el) el.classList.toggle('fh-nav-active', m === mode);
+    });
+    if (mode === 'recent')    { fhSwitchTab('search');  fhLoadRecent(); }
+    else if (mode === 'favorites') { fhSwitchTab('search'); fhLoadFavorites(); }
+    else if (mode === 'search')   { fhSwitchTab('search'); setTimeout(() => document.getElementById('fhSearchInput')?.focus(), 60); }
+    else if (mode === 'browse')   { fhSwitchTab('browse'); }
+    else if (mode === 'archive')  { fhSwitchTab('archive'); }
+    else if (mode === 'health')   { fhSwitchTab('health');  fhLoadHealth(); }
+    else if (mode === 'watcher')  { fhSwitchTab('watcher'); fhLoadWatcherSettings(); }
+    else if (mode === 'graph')    { fhSwitchTab('graph');   setTimeout(fhLoadGraph, 60); }
+}
+
+// ---- Category filter from sidebar ----
+function fhFilterCat(cat) {
+    document.querySelectorAll('.fh-type-item').forEach(el => {
+        el.classList.toggle('fh-type-active', el.dataset.cat === cat);
+    });
+    const sel = document.getElementById('fhCatFilter');
+    if (sel) sel.value = cat;
+    fhDoSearch();
 }
 
 function closeFileHubModal() {
@@ -8522,6 +8996,9 @@ function closeFileHubModal() {
     if (modal) modal.style.display = 'none';
     const navItem = document.getElementById('myStuffItem');
     if (navItem) navItem.classList.remove('active');
+    // Reset multi-select state on close
+    if (_fhMultiMode) fhToggleMultiSelect();
+    _fhHidePreview();
 }
 
 const _FILE_CAT_ICONS = {
@@ -8541,25 +9018,32 @@ function fhSwitchTab(tab) {
         btn.style.boxShadow   = active ? '0 2px 4px rgba(0,0,0,0.1)' : 'none';
     });
 
+    const fullPanes = ['health', 'watcher', 'graph'];
+    const isFullPane = fullPanes.includes(tab);
+
     document.getElementById('fhPaneSearch').style.display  = tab === 'search'  ? '' : 'none';
     document.getElementById('fhPaneBrowse').style.display  = tab === 'browse'  ? '' : 'none';
     document.getElementById('fhPaneArchive').style.display = tab === 'archive' ? '' : 'none';
+    const ph = document.getElementById('fhPaneHealth');  if (ph) ph.style.display  = tab === 'health'  ? 'flex' : 'none';
+    const pw = document.getElementById('fhPaneWatcher'); if (pw) pw.style.display  = tab === 'watcher' ? 'flex' : 'none';
+    const pg = document.getElementById('fhPaneGraph');   if (pg) pg.style.display  = tab === 'graph'   ? 'flex' : 'none';
 
-    // hide the unified file list area when on archive tab
+    // hide the unified file list area when on archive / full-pane tabs
     const fileListWrap = document.getElementById('fhFileList');
     const resultHeader = document.getElementById('fhResultHeader');
-    if (tab === 'archive') {
+    const multiBar     = document.getElementById('fhMultiBar');
+    if (tab === 'archive' || isFullPane) {
         if (fileListWrap) fileListWrap.style.display = 'none';
         if (resultHeader) resultHeader.style.display = 'none';
+        if (multiBar) multiBar.style.display = 'none';
     } else {
         if (fileListWrap) fileListWrap.style.display = '';
         document.getElementById('fhFileList').innerHTML = `
-        <div class="memory-empty" style="margin-top:40px; padding: 40px 0; background: var(--bg-elevated); border-radius: 12px; border: 1px dashed var(--border-color); display: flex; flex-direction: column; align-items: center;">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" stroke-width="1.5" style="margin-bottom: 16px;">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        <div class="memory-empty" style="margin-top:48px;padding:48px 0;display:flex;flex-direction:column;align-items:center;">
+            <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" stroke-width="1.2" style="margin-bottom:16px;">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <span style="color: var(--text-muted); font-size: 14px;">在上方选择搜索或浏览模式</span>
+            <span style="color:var(--text-muted);font-size:14px;">点击左侧导航，或在上方搜索文件</span>
         </div>`;
         if (resultHeader) resultHeader.style.display = 'none';
     }
@@ -8567,6 +9051,7 @@ function fhSwitchTab(tab) {
 
 // ---- Archive mode ----
 let _fhArchiveMode = 'auto';
+let _fhArchiveAction = 'copy';  // 'copy' | 'move'
 let _fhArchiveRules = [];
 
 function fhSetArchiveMode(mode) {
@@ -8575,24 +9060,10 @@ function fhSetArchiveMode(mode) {
     const btnCustom = document.getElementById('fhArchiveBtnCustom');
     const rulesArea = document.getElementById('fhCustomRulesArea');
     if (!btnAuto || !btnCustom) return;
-    if (mode === 'auto') {
-        btnAuto.style.background  = 'var(--accent-primary)';
-        btnAuto.style.color       = '#fff';
-        btnAuto.style.borderColor = 'var(--accent-primary)';
-        btnCustom.style.background  = 'transparent';
-        btnCustom.style.color       = 'var(--text-secondary)';
-        btnCustom.style.borderColor = 'var(--border-color)';
-        if (rulesArea) rulesArea.style.display = 'none';
-    } else {
-        btnCustom.style.background  = 'var(--accent-primary)';
-        btnCustom.style.color       = '#fff';
-        btnCustom.style.borderColor = 'var(--accent-primary)';
-        btnAuto.style.background  = 'transparent';
-        btnAuto.style.color       = 'var(--text-secondary)';
-        btnAuto.style.borderColor = 'var(--border-color)';
-        if (rulesArea) rulesArea.style.display = '';
-        fhRenderArchiveRules();
-    }
+    btnAuto.classList.toggle('fh-mode-active', mode === 'auto');
+    btnCustom.classList.toggle('fh-mode-active', mode === 'custom');
+    if (rulesArea) rulesArea.style.display = mode === 'custom' ? '' : 'none';
+    if (mode === 'custom') fhRenderArchiveRules();
 }
 
 function fhRenderArchiveRules() {
@@ -8694,6 +9165,7 @@ async function fhDoArchive() {
             mode:       _fhArchiveMode,
             recursive:  recEl?.checked !== false,
             rules:      _fhArchiveMode === 'custom' ? _fhArchiveRules.filter(r => r.match.trim()) : [],
+            action:     _fhArchiveAction,
         };
         const resp = await fetch('/api/files/archive', {
             method: 'POST',
@@ -8737,7 +9209,7 @@ async function fhDoArchive() {
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                     <div>
                         <div style="font-size:15px;font-weight:600;color:var(--text-primary);">归档完成</div>
-                        <div style="font-size:12px;color:var(--text-muted);">共 ${d.total} 个文件 · 成功 ${d.copied} 个 · 跳过 ${d.skipped} 个</div>
+                        <div style="font-size:12px;color:var(--text-muted);">共 ${d.total} 个文件 · ${d.action === 'move' ? '移动' : '复制'}成功 ${d.copied} 个 · 跳过 ${d.skipped} 个</div>
                     </div>
                 </div>
                 <div style="font-size:12px;color:var(--text-muted);padding:8px 12px;background:var(--bg-primary);border-radius:6px;display:flex;align-items:center;gap:8px;cursor:pointer;" onclick="navigator.clipboard.writeText('${d.dest_dir.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')">
@@ -8838,12 +9310,13 @@ async function fhCheckDuplicates() {
             return;
         }
         list.innerHTML = groups.map((g, i) => {
-            const pairs = (g.files || g).map(f =>
-                `<div class="fh-dup-path" title="${_esc(f.path||f)}">
+            const pairs = (g.files || g).map(f => {
+                const dupArg = JSON.stringify(f.path || f).replace(/"/g, '&quot;');
+                return `<div class="fh-dup-path" title="${_esc(f.path||f)}">
                     <span>• ${_esc((f.name||(f.path||f).split(/[\\/]/).pop()||''))}</span>
-                    <button onclick="_fhCopyPath(${JSON.stringify(f.path||f)})" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:var(--text-muted);">📋</button>
-                </div>`
-            ).join('');
+                    <button onclick="_fhCopyPath(${dupArg})" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:11px;color:var(--text-muted);">📋</button>
+                </div>`;
+            }).join('');
             return `<div class="fh-dup-group">
                 <div class="fh-dup-title">重复组 ${i+1}（${(g.files||g).length} 个文件）</div>
                 ${pairs}
@@ -8943,10 +9416,12 @@ async function fhRegisterBrowsed() {
 }
 
 // ---- Shared render helpers ----
+const _FH_ICON_CLASS = { '文档':'fh-icon-doc', '图片':'fh-icon-img', '视频':'fh-icon-vid', '音频':'fh-icon-aud', '代码':'fh-icon-code', '压缩包':'fh-icon-zip' };
 function _fhRenderFiles(files, container, showPath) {
     if (!files.length) { container.innerHTML = fhShowEmpty('未能找到符合条件的文件', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'); return; }
     container.innerHTML = files.map(f => {
         const icon = _FILE_CAT_ICONS[f.category] || '📎';
+        const iconCls = _FH_ICON_CLASS[f.category] || 'fh-icon-other';
         const size = f.size_bytes
             ? (f.size_bytes > 1048576 ? (f.size_bytes / 1048576).toFixed(1) + ' MB' : Math.round(f.size_bytes / 1024) + ' KB')
             : '';
@@ -8956,25 +9431,39 @@ function _fhRenderFiles(files, container, showPath) {
             ? (f.path || '')
             : [f.category, size, date, isFs ? '(文件系统)' : ''].filter(Boolean).join(' · ');
         const path = _esc(f.path || '');
-        const asst_exts = /\.(docx?|pdf|xlsx?|pptx?|csv|txt|md|html?|json|rtf)$/i;
+        const asst_exts = /\.(docx|xlsx|pptx|pdf)$/i;
         const canInAsst = asst_exts.test(f.name || f.path || '');
         const openLabel = canInAsst ? '在助手中打开' : '系统打开';
         const openFn    = canInAsst ? `_fhOpenInAssistant` : `_fhOpenFile`;
-        return `<div class="fh-card" title="${path}" onclick="${openFn}(${JSON.stringify(f.path||'')})">
-            <span class="fh-icon">${icon}</span>
-            <div class="fh-meta" style="min-width:0;">
-                <div class="fh-name" style="margin-bottom: 2px;">${_esc(f.name || f.path || '')}</div>
-                <div class="fh-sub" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size: 11px; opacity: 0.85;">${_esc(sub)}</div>
+        const pathArg   = JSON.stringify(f.path || '').replace(/"/g, '&quot;');
+        const copyArg   = JSON.stringify(f.path || '').replace(/"/g, '&quot;');
+        const preview   = _esc(f.content_preview || '');
+        const nameEsc   = _esc(f.name || f.path || '');
+        const isSelected = _fhSelected.has(f.path || '');
+        const isFav      = _fhFavorites.has(f.path || '') || f.favorited;
+        const tags       = Array.isArray(f.tags) ? f.tags : [];
+        const tagsHtml   = tags.length
+            ? `<div class="fh-card-tags">${tags.map(t => `<span class="fh-tag-chip" onclick="event.stopPropagation();fhFilterByTag(${JSON.stringify(t).replace(/"/g,'&quot;')})">${_esc(t)}</span>`).join('')}</div>`
+            : '';
+        return `<div class="fh-card${isSelected ? ' fh-card-selected' : ''}" title="${path}" data-path="${path}"
+            onclick="_fhMultiMode ? _fhToggleCard(${pathArg}, this) : ${openFn}(${pathArg})"
+            onmouseenter="_fhShowPreview(this, ${pathArg}, '${nameEsc}', '${preview}')"
+            onmouseleave="_fhHidePreview()">
+            <span class="fh-checkbox" style="display:${_fhMultiMode ? 'flex' : 'none'};align-items:center;flex-shrink:0;margin-right:2px;">${_fhCheckboxSvg(isSelected)}</span>
+            <span class="fh-icon ${iconCls}">${icon}</span>
+            <div class="fh-meta">
+                <div class="fh-name">${_esc(f.name || f.path || '')}</div>
+                <div class="fh-sub">${_esc(sub)}</div>
+                ${tagsHtml}
             </div>
-            <div style="display: flex; gap: 4px; align-items: center;" onclick="event.stopPropagation()">
-                <button class="fh-action-btn fh-action-primary" onclick="${openFn}(${JSON.stringify(f.path||'')})"
-                    title="${openLabel}">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:13px;height:13px;flex-shrink:0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+            <div class="fh-card-actions" onclick="event.stopPropagation()">
+                <button class="fh-star-btn${isFav ? ' active' : ''}" onclick="fhToggleFavorite(${pathArg},this)" title="${isFav ? '取消收藏' : '加入收藏'}">${_fhStarSvg(isFav)}</button>
+                <button class="fh-action-btn fh-action-primary" onclick="${openFn}(${pathArg})" title="${openLabel}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                     ${openLabel}
                 </button>
-                <button class="fh-action-btn" onclick="_fhCopyPath(${JSON.stringify(f.path||'')})"
-                    title="复制路径">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                <button class="fh-action-btn" onclick="_fhCopyPath(${copyArg})" title="复制路径">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
                 </button>
             </div>
         </div>`;
@@ -9002,30 +9491,24 @@ function _fhOpenFile(path) {
 
 async function _fhOpenInAssistant(path) {
     if (!path) return;
-    const asst_exts = /\.(docx?|pdf|xlsx?|pptx?|csv|txt|md|html?|json|rtf)$/i;
+    const asst_exts = /\.(docx|xlsx|pptx|pdf)$/i;
     if (!asst_exts.test(path)) {
         // 不支持的格式，直接用系统打开
         _fhOpenFile(path);
         return;
     }
-    _showToast('正在导入文件…');
-    try {
-        const r = await fetch('/api/editor/docs/import_path', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path })
-        });
-        const d = await r.json();
-        if (!r.ok || !d.id) {
-            _showToast('导入失败：' + (d.error || '未知错误'));
-            return;
-        }
-        // 关闭文件管理弹窗（如存在）
-        const modal = document.getElementById('fileHubModal');
-        if (modal) modal.style.display = 'none';
-        _showToast('文件已导入：' + d.name);
-    } catch(e) {
-        _showToast('请求失败：' + e.message);
+    // 关闭文件管理弹窗
+    const modal = document.getElementById('filehubModal');
+    if (modal) modal.style.display = 'none';
+    // 打开文件助手并加载文件
+    if (window.WA && typeof window.WA.openInMainView === 'function') {
+        window.WA.openInMainView();
+    }
+    if (window.WA && typeof window.WA.openRecentFile === 'function') {
+        window.WA.openRecentFile(path);
+    } else {
+        _showToast('文件助手不可用，改用系统打开');
+        _fhOpenFile(path);
     }
 }
 
@@ -9035,6 +9518,205 @@ function _fhCopyPath(path) {
     }).catch(() => {
         prompt('复制路径：', path);
     });
+}
+
+// ---- Phase A: Quick preview pane ----
+let _fhPreviewTimer = null;
+let _fhActivePreviewCard = null;
+
+function _fhShowPreview(el, path, name, previewText) {
+    clearTimeout(_fhPreviewTimer);
+    _fhPreviewTimer = setTimeout(() => {
+        let pane = document.getElementById('fhQuickPreview');
+        if (!pane) {
+            pane = document.createElement('div');
+            pane.id = 'fhQuickPreview';
+            pane.style.cssText = 'position:fixed;z-index:9999;max-width:340px;min-width:220px;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:10px;padding:12px 14px;box-shadow:0 8px 24px rgba(0,0,0,0.18);font-size:12px;pointer-events:none;line-height:1.55;';
+            document.body.appendChild(pane);
+        }
+        const rect = el.getBoundingClientRect();
+        const left = Math.min(rect.right + 8, window.innerWidth - 360);
+        const top  = Math.max(rect.top, 10);
+        pane.style.left = left + 'px';
+        pane.style.top  = top + 'px';
+        pane.style.display = 'block';
+        const displayText = previewText
+            ? `<div style="color:var(--text-primary);white-space:pre-wrap;word-break:break-all;">${_esc(previewText.slice(0, 300))}</div>`
+            : `<div style="color:var(--text-muted);font-style:italic;">（暂无预览内容）</div>`;
+        pane.innerHTML = `<div style="font-weight:600;color:var(--text-primary);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${_esc(name)}">${_esc(name)}</div>${displayText}`;
+        _fhActivePreviewCard = el;
+    }, 320);
+}
+
+function _fhHidePreview() {
+    clearTimeout(_fhPreviewTimer);
+    const pane = document.getElementById('fhQuickPreview');
+    if (pane) pane.style.display = 'none';
+    _fhActivePreviewCard = null;
+}
+
+// ---- Phase B: Multi-select mode ----
+let _fhMultiMode = false;
+const _fhSelected = new Set();
+
+function fhToggleMultiSelect() {
+    _fhMultiMode = !_fhMultiMode;
+    _fhSelected.clear();
+    const btn = document.getElementById('fhMultiSelectToggle');
+    if (btn) btn.classList.toggle('fh-active', _fhMultiMode);
+    const bar = document.getElementById('fhMultiBar');
+    if (bar) bar.style.display = _fhMultiMode ? 'flex' : 'none';
+    _fhUpdateMultiCount();
+    // Re-render current cards to show/hide checkboxes
+    const cards = document.querySelectorAll('#fhFileList .fh-card');
+    cards.forEach(c => {
+        const cb = c.querySelector('.fh-checkbox');
+        if (cb) cb.style.display = _fhMultiMode ? 'flex' : 'none';
+    });
+}
+
+function _fhUpdateMultiCount() {
+    const n = _fhSelected.size;
+    const el = document.getElementById('fhMultiCount');
+    if (el) el.textContent = `已选 ${n} 个文件`;
+    const btn = document.getElementById('fhBatchOpenBtn');
+    if (btn) {
+        const canOpen = n > 0 && Array.from(_fhSelected).some(p => /\.(docx|xlsx|pptx|pdf)$/i.test(p));
+        btn.disabled = !canOpen;
+        btn.style.opacity = canOpen ? '1' : '0.4';
+    }
+    const aiBtn = document.getElementById('fhBatchAIBtn');
+    if (aiBtn) { aiBtn.disabled = (n === 0); aiBtn.style.opacity = n > 0 ? '1' : '0.4'; }
+}
+
+function _fhToggleCard(path, el) {
+    if (!_fhMultiMode) return;
+    if (_fhSelected.has(path)) {
+        _fhSelected.delete(path);
+        el.classList.remove('fh-card-selected');
+        const cb = el.querySelector('.fh-checkbox');
+        if (cb) cb.innerHTML = _fhCheckboxSvg(false);
+    } else {
+        _fhSelected.add(path);
+        el.classList.add('fh-card-selected');
+        const cb = el.querySelector('.fh-checkbox');
+        if (cb) cb.innerHTML = _fhCheckboxSvg(true);
+    }
+    _fhUpdateMultiCount();
+}
+
+function _fhCheckboxSvg(checked) {
+    return checked
+        ? `<svg width="16" height="16" viewBox="0 0 24 24" fill="var(--accent-primary)" stroke="none"><rect width="24" height="24" rx="4"/><path d="M5 12l5 5 9-9" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+        : `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--border-color)" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="4"/></svg>`;
+}
+
+function fhMultiSelectAll() {
+    document.querySelectorAll('#fhFileList .fh-card').forEach(c => {
+        const p = c.getAttribute('data-path');
+        if (p) {
+            _fhSelected.add(p);
+            c.classList.add('fh-card-selected');
+            const cb = c.querySelector('.fh-checkbox');
+            if (cb) cb.innerHTML = _fhCheckboxSvg(true);
+        }
+    });
+    _fhUpdateMultiCount();
+}
+
+function fhMultiSelectClear() {
+    _fhSelected.clear();
+    document.querySelectorAll('#fhFileList .fh-card').forEach(c => {
+        c.classList.remove('fh-card-selected');
+        const cb = c.querySelector('.fh-checkbox');
+        if (cb) cb.innerHTML = _fhCheckboxSvg(false);
+    });
+    _fhUpdateMultiCount();
+}
+
+async function fhBatchOpenInAssistant() {
+    const asstPaths = Array.from(_fhSelected).filter(p => /\.(docx|xlsx|pptx|pdf)$/i.test(p));
+    if (!asstPaths.length) { _showToast('没有可在助手中打开的文件'); return; }
+    // Close modal and switch to assistant view
+    const modal = document.getElementById('filehubModal');
+    if (modal) modal.style.display = 'none';
+    if (window.WA && typeof window.WA.openInMainView === 'function') window.WA.openInMainView();
+    if (!window.WA || typeof window.WA.openRecentFile !== 'function') {
+        _showToast('文件助手不可用'); return;
+    }
+    // Reset multi-select state
+    _fhMultiMode = false;
+    _fhSelected.clear();
+    const bar = document.getElementById('fhMultiBar');
+    if (bar) bar.style.display = 'none';
+    // Assistant is single-document mode — open only the first selected file
+    const filename = asstPaths[0].split(/[\\/]/).pop();
+    await window.WA.openRecentFile(asstPaths[0]);
+    _showToast(`已打开 ${filename}（助手为单文档模式${asstPaths.length > 1 ? '，共选中 ' + asstPaths.length + ' 个文件' : ''}）`, 'info');
+}
+
+function fhBatchAIPrompt() {
+    const paths = Array.from(_fhSelected);
+    if (!paths.length) { _showToast('请先选择文件'); return; }
+    const panel = document.getElementById('fhBatchAIPanel');
+    const fileList = document.getElementById('fhBatchAIFileList');
+    const out = document.getElementById('fhBatchAIOut');
+    const task = document.getElementById('fhBatchAITask');
+    const runBtn = document.getElementById('fhBatchAIRunBtn');
+    if (fileList) fileList.textContent = paths.map(p => '• ' + p.split('/').pop().split('\\').pop()).join('\n');
+    if (out) { out.style.display = 'none'; out.textContent = ''; }
+    if (task) task.value = '';
+    if (runBtn) runBtn.disabled = false;
+    if (panel) panel.style.display = 'flex';
+}
+
+async function fhRunBatchAI() {
+    const paths = Array.from(_fhSelected);
+    const taskEl = document.getElementById('fhBatchAITask');
+    const outEl = document.getElementById('fhBatchAIOut');
+    const runBtn = document.getElementById('fhBatchAIRunBtn');
+    const task = (taskEl?.value || '').trim() || '请对以下文件内容进行摘要，提炼关键信息。';
+    if (!paths.length) return;
+    if (runBtn) runBtn.disabled = true;
+    if (outEl) { outEl.style.display = 'block'; outEl.textContent = '正在处理…\n'; }
+    try {
+        const res = await fetch('/api/files/batch-ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paths, task }),
+        });
+        if (!res.ok || !res.body) throw new Error('请求失败');
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                    const ev = JSON.parse(line.slice(6));
+                    if (ev.type === 'file') {
+                        if (outEl) outEl.textContent += `\n⏳ 正在处理：${ev.name}\n`;
+                    } else if (ev.type === 'token') {
+                        if (outEl) { outEl.textContent += ev.content; outEl.scrollTop = outEl.scrollHeight; }
+                    } else if (ev.type === 'done') {
+                        if (outEl) outEl.textContent += '\n✅ 全部处理完成';
+                        if (runBtn) runBtn.disabled = false;
+                    } else if (ev.type === 'error') {
+                        if (outEl) outEl.textContent += '\n❌ 错误: ' + ev.message;
+                        if (runBtn) runBtn.disabled = false;
+                    }
+                } catch(e) { /* skip malformed line */ }
+            }
+        }
+    } catch (e) {
+        if (outEl) outEl.textContent += '\n❌ ' + e.message;
+        if (runBtn) runBtn.disabled = false;
+    }
 }
 
 function fhCopyAllPaths() {
@@ -9056,7 +9738,7 @@ async function fileHubLoadStats() {
         const stats = d.stats || d;
         const total = stats.total || 0;
         const el = document.getElementById('fhStatsSummary');
-        if (el) el.textContent = `我的文件：${total} 个文件`;
+        if (el) el.innerHTML = `<div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-muted);margin-bottom:4px;">库文件</div><div style="font-size:22px;font-weight:700;color:var(--text-primary);line-height:1.2;">${total}</div><div style="font-size:12px;color:var(--text-muted);margin-top:2px;">已索引文件</div>`;
     } catch(e) { /* silent */ }
 }
 

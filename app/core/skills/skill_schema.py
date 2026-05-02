@@ -383,11 +383,8 @@ class SkillDefinition:
     bound_tools: List[str] = field(default_factory=list)
 
     # ── 执行层增强（自定义 Skill 由 SkillRecorder LLM 分析自动填充）──────────
-    # 执行时建议调用的内部工具名列表，供 UnifiedAgent 执行层参考
-    executor_tools: List[str] = field(default_factory=list)
-    # 有序执行步骤描述，供 inject_into_prompt 注入给模型
-    plan_template: List[str] = field(default_factory=list)
     # AutoMatcher 触发关键词，用于 SkillAutoMatcher._PATTERN_MAP 注册
+    # executor_tools / plan_template 定义见下方「两层能力架构 v2」区块
     trigger_keywords: List[str] = field(default_factory=list)
 
     # ── 原有字段（保留向后兼容）─────────────────────────────────────────────
@@ -653,8 +650,6 @@ class SkillDefinition:
                 "description": self.output_spec.description,
             },
             "bound_tools": self.bound_tools,
-            "executor_tools": self.executor_tools,
-            "plan_template": self.plan_template,
             "trigger_keywords": self.trigger_keywords,
             "task_types": self.task_types,
             "enabled": self.enabled,

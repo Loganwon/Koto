@@ -119,6 +119,17 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
 }
 .ai-panel-title { font-size: 13px; font-weight: 600; color: #e0e0e0; }
 
+/* ── 本地模型标识徽章 ── */
+.ai-model-badge {
+  font-size: 11px;
+  color: #888;
+  margin-left: 4px;
+}
+.ai-model-badge.local {
+  color: #66bb6a;
+  font-weight: 500;
+}
+
 /* ── 连接状态指示器 — only shown on disconnect/connecting ── */
 .conn-status {
   display: none; /* hidden when connected (default state) */
@@ -195,6 +206,11 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
 .chat-msg.ai      { background: transparent; color: #e0e0e0; align-self: flex-start; border-left: 2px solid rgba(79,126,255,0.42); border-radius: 0 8px 8px 0; padding-left: 12px; animation: msgIn 0.17s ease; }
 @keyframes msgIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
 .chat-msg.error   { background: #4a1010; color: #f48771; align-self: stretch; font-size: 12px; border-radius: 6px; max-width: 100%; border: 1px solid #7a2020; }
+.doc-context-chip { background: rgba(79,126,255,0.08) !important; border-color: rgba(79,126,255,0.2) !important; color: #7a9eee !important; font-size: 11px !important; }
+.doc-context-chip strong { color: #9ab3f5 !important; }
+.chip-wc  { color: #555; }
+.agent-status-msg { font-style: italic; opacity: 0.6; font-size: 11px; animation: pulse 1.2s ease infinite; }
+@keyframes pulse { 0%,100%{opacity:.6} 50%{opacity:.35} }
 .chat-hist-sep    { align-self: stretch; text-align: center; color: #555; font-size: 11px; margin: 6px 0; letter-spacing: 1px; user-select: none; }
 .chat-hist-item   { opacity: 0.5; }
 .chat-hist-ts     { display: block; font-size: 10px; color: #888; margin-bottom: 2px; }
@@ -218,6 +234,20 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
 }
 .msg-action-btn:hover { background: rgba(79,126,255,0.28); color: #c8d4ff; }
 .msg-action-btn:disabled { opacity: 0.5; cursor: default; background: #444; color: #aaa; }
+.msg-action-btn.secondary {
+  background: rgba(80,80,80,0.25);
+  color: #999;
+  border-color: rgba(120,120,120,0.30);
+}
+.msg-action-btn.secondary:hover { background: rgba(100,100,100,0.40); color: #ccc; }
+/* Reject button gets a subtle red tint */
+.msg-action-btn.secondary:first-of-type { }
+.diff-reject-btn {
+  background: rgba(239,83,80,0.12) !important;
+  color: #f48771 !important;
+  border-color: rgba(239,83,80,0.25) !important;
+}
+.diff-reject-btn:hover { background: rgba(239,83,80,0.25) !important; }
 
 /* ── 底部输入框 ── */
 .ai-input-wrap {
@@ -318,13 +348,16 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
 
 /* ── 文件列表项内操作按钮 ── */
 .file-tree-item {
-  position: relative;
+  position: relative;  /* 不覆盖 flex 属性（已在上方定义） */
 }
 .fm-name {
+  /* flex:1 会把按钮推到最远处 — 改用 min-width+truncate 尙1 */
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: calc(100% - 52px);  /* 为两个按钮预留空间 */
 }
 .fm-actions {
   display: none;
@@ -475,6 +508,141 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
   background: rgba(79, 126, 255, 0.18);
   border-color: rgba(79, 126, 255, 0.35);
   color: #c8d4ff;
+}
+
+/* ── Ctrl+K 命令输入面板 ── */
+#ft-cmd-input {
+  position: fixed;
+  z-index: 2000000;
+  background: #1e1e2e;
+  border: 1px solid rgba(79,126,255,0.45);
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6), 0 0 0 1px rgba(79,126,255,0.15);
+  padding: 8px 10px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  animation: ft-fade-in 0.12s ease;
+  min-width: 300px;
+}
+#ft-cmd-input.hidden { display: none !important; }
+.ft-cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ft-cmd-icon {
+  font-size: 10px;
+  font-weight: 700;
+  color: #4f7eff;
+  opacity: 0.8;
+  flex-shrink: 0;
+  letter-spacing: -0.5px;
+}
+.ft-cmd-text {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e0e0e0;
+  font-size: 13px;
+  caret-color: #4f7eff;
+  min-width: 0;
+}
+.ft-cmd-text::placeholder { color: #555; }
+.ft-cmd-close {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.ft-cmd-close:hover { color: #aaa; }
+.ft-cmd-chips {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.ft-chip {
+  padding: 2px 8px;
+  font-size: 11px;
+  background: rgba(79,126,255,0.10);
+  color: #8aabf7;
+  border: 1px solid rgba(79,126,255,0.22);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+.ft-chip:hover { background: rgba(79,126,255,0.22); color: #c0d4ff; }
+
+/* ── 文档基调（Document Mode）选择栏 ── */
+.ai-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px 4px;
+  border-bottom: 1px solid #2a2a2a;
+  flex-wrap: wrap;
+  background: rgba(0,0,0,0.10);
+}
+.ai-mode-label {
+  font-size: 10px;
+  color: #555;
+  margin-right: 2px;
+  flex-shrink: 0;
+  letter-spacing: 0.5px;
+}
+.ai-mode-btn {
+  padding: 2px 7px;
+  font-size: 10px;
+  background: rgba(60,60,60,0.40);
+  color: #777;
+  border: 1px solid rgba(80,80,80,0.30);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.ai-mode-btn:hover { background: rgba(79,126,255,0.18); color: #aabcff; border-color: rgba(79,126,255,0.30); }
+.ai-mode-btn.active {
+  background: rgba(79,126,255,0.20);
+  color: #a0baff;
+  border-color: rgba(79,126,255,0.40);
+  font-weight: 600;
+}
+
+/* ── AI 下一步建议行 ── */
+.ai-next-steps {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+  opacity: 0.85;
+  animation: msgIn 0.2s ease;
+}
+.ai-next-label {
+  font-size: 10px;
+  color: #555;
+  flex-shrink: 0;
+}
+.ai-next-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  background: rgba(60,60,80,0.35);
+  color: #8895b8;
+  border: 1px solid rgba(80,90,120,0.28);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.ai-next-btn:hover {
+  background: rgba(79,126,255,0.20);
+  color: #c0d4ff;
+  border-color: rgba(79,126,255,0.35);
 }
 
 @keyframes ft-fade-in {
@@ -829,6 +997,10 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
   /* 尺寸/内边距由 docx-preview 通过 inline style 设置，勿覆盖 */
   box-sizing: border-box;
   flex-shrink: 0;
+  /* Fix D: docx-preview 总会注入 section.docx { overflow: hidden }（0-1-1）。
+     锚定图片（wrapNone）在表格单元格内的 left/top 是页面坐标，会超出 section 边框；
+     overflow:hidden 会完全裁掉这些图片。用更高特异度规则（0-2-1）覆盖。 */
+  overflow: visible;
 }
 
 /* 页眉/页脚区域美化（docx-preview 输出 .docx-header / .docx-footer） */
@@ -848,6 +1020,13 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
 /* 表格：保留 docx-preview 的精确列宽，补充 hover 效果 */
 .docx-render-area table {
   border-collapse: collapse;
+}
+/* Fix E: 表格单元格不能裁剪 — 嵌入图片和锚定图片都可见；
+   position:relative 使 td/th 成为 position:absolute 子元素的包含块。 */
+.docx-render-area td,
+.docx-render-area th {
+  overflow: visible;
+  position: relative;
 }
 .docx-render-area tr:hover td,
 .docx-render-area tr:hover th {
@@ -918,6 +1097,43 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
   .docx-render-area .docx-wrapper > section {
     min-width: unset !important;
     padding: 24px !important;
+  }
+}
+
+/* ── 触控设备 (手机/平板) 增大点击目标 ── */
+@media (pointer: coarse) {
+  .ft-btn {
+    min-height: 40px;
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+  .ft-more-btn {
+    min-height: 40px;
+    padding: 8px 12px;
+    font-size: 15px;
+  }
+  .ft-palette-item {
+    min-height: 36px;
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+  .floating-toolbar {
+    padding: 6px 8px;
+    border-radius: 12px;
+  }
+  .ft-cmd-text {
+    font-size: 16px; /* prevents iOS auto-zoom on focus */
+    min-height: 40px;
+  }
+  .msg-action-btn {
+    min-height: 36px;
+    padding: 7px 14px;
+    font-size: 13px;
+  }
+  .quick-btn {
+    min-height: 36px;
+    padding: 6px 10px;
+    font-size: 12px;
   }
 }
 
@@ -1172,4 +1388,162 @@ html, body { height: 100%; overflow: hidden; font-family: -apple-system, "Segoe 
   flex-shrink: 0;
 }
 .koto-banner-close:hover { color: #e8f4fc; }
+
+/* ═══════════════════════════════════════════════════════════
+   PPTX Viewer (PptxViewer.js)
+   ═══════════════════════════════════════════════════════════ */
+#pptx-view-host {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+  background: #1e1e1e;
+  overflow: hidden;
+}
+.pptx-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  background: #2d2d2d;
+  border-bottom: 1px solid #3c3c3c;
+  padding: 0 12px;
+  flex-shrink: 0;
+  gap: 8px;
+}
+.pptx-topbar-name {
+  font-size: 13px;
+  color: #e0e0e0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  flex-shrink: 0;
+}
+.pptx-topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #ccc;
+}
+.pptx-nav-btn {
+  background: #3c3c3c;
+  border: none;
+  color: #e0e0e0;
+  border-radius: 3px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.pptx-nav-btn:hover { background: #4f4f4f; }
+.pptx-dl-btn {
+  background: #4f7eff;
+  border: none;
+  color: #fff;
+  border-radius: 3px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pptx-dl-btn:hover { background: #6b8fff; }
+.pptx-workspace {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.pptx-thumb-panel {
+  width: 130px;
+  flex-shrink: 0;
+  background: #252526;
+  border-right: 1px solid #3c3c3c;
+  overflow-y: auto;
+  padding: 8px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pptx-thumb {
+  position: relative;
+  cursor: pointer;
+  border: 2px solid transparent;
+  border-radius: 2px;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.4);
+  transition: border-color .12s;
+}
+.pptx-thumb:hover { border-color: #666; }
+.pptx-thumb-active { border-color: #4f7eff !important; }
+.pptx-thumb canvas { width: 100%; display: block; }
+.pptx-thumb-num {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  font-size: 9px;
+  color: #888;
+  text-shadow: 0 0 3px #fff;
+  pointer-events: none;
+}
+.pptx-canvas-area {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px;
+  background: #737373;
+}
+.pptx-slide-wrapper {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 4px 24px rgba(0,0,0,.5);
+  flex-shrink: 0;
+}
+.pptx-shape {
+  position: absolute;
+  overflow: hidden;
+}
+.pptx-shape-text { cursor: text; }
+.pptx-shape-selected {
+  outline: 2px solid #4f7eff;
+  outline-offset: 0;
+}
+.pptx-shape-inner {
+  width: 100%;
+  height: 100%;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+.pptx-shape-para {
+  line-height: 1.3;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Excel Viewer (ExcelViewer.js)
+   ═══════════════════════════════════════════════════════════ */
+#excel-view-host {
+  display: none;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+#excel-warning-bar {
+  background: #fff3cd;
+  color: #856404;
+  font-size: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #ffc107;
+  flex-shrink: 0;
+}
+#koto-sheets-container {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 

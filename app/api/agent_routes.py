@@ -207,7 +207,7 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
         messages.append({"role": "user", "content": user_message})
 
         resp = _req.post(
-            "http://localhost:11434/api/chat",
+            "http://127.0.0.1:11434/api/chat",
             json={
                 "model": model_name,
                 "messages": messages,

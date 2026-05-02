@@ -15,7 +15,7 @@ import os
 import uuid
 from pathlib import Path
 
-from flask import Blueprint, Response, jsonify, request, send_file, stream_with_context
+from flask import Blueprint, Response, jsonify, request, send_file, session, stream_with_context
 
 logger = logging.getLogger(__name__)
 
@@ -28,14 +28,33 @@ if getattr(_sys, "frozen", False):
 else:
     _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _TMP_DIR = _PROJECT_ROOT / "workspace" / "tmp"
+_TMP_ROOT = _TMP_DIR  # backward-compat alias
 
 # 允许上传的文件后缀
 _ALLOWED_EXT = {".docx", ".xlsx", ".pptx", ".pdf"}
 
 
+def _get_session_id() -> str:
+    """Return a per-browser session ID, creating one if absent.
+
+    This is the only isolation guarantor between users on a shared instance.
+    The ID is stored in a signed Flask session cookie so it survives page reloads
+    without a database.
+    """
+    sid = session.get("ws_session_id")
+    if not sid:
+        sid = uuid.uuid4().hex
+        session["ws_session_id"] = sid
+        session.permanent = True
+    return sid
+
+
 def _ensure_tmp_dir() -> Path:
-    _TMP_DIR.mkdir(parents=True, exist_ok=True)
-    return _TMP_DIR
+    """Return an isolated tmp directory for the current browser session."""
+    sid = _get_session_id()
+    tmp_dir = _TMP_ROOT / sid
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    return tmp_dir
 
 
 def cleanup_tmp_dir(max_age_hours: int = 24) -> int:
@@ -285,7 +304,6 @@ def open_file_by_path():
         from app.core.file.file_parser import (
             parse_docx,
             parse_pdf,
-            parse_pptx_geometry,
             parse_xlsx,
         )
 
@@ -293,10 +311,13 @@ def open_file_by_path():
             data = parse_docx(str(tmp_path))
             file_type = "docx"
         elif ext == ".xlsx":
-            data = parse_xlsx(str(tmp_path))
+            data = parse_xlsx(str(tmp_path), original_name=target.name)
             file_type = "xlsx"
         elif ext == ".pptx":
-            data = parse_pptx_geometry(str(tmp_path))
+            from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
+            with open(str(tmp_path), "rb") as _f:
+                _raw = _f.read()
+            data = _pptx_rich_parse(_raw)
             file_type = "pptx"
         elif ext == ".pdf":
             data = parse_pdf(str(tmp_path), file_id)
@@ -367,7 +388,6 @@ def open_file():
         from app.core.file.file_parser import (
             parse_docx,
             parse_pdf,
-            parse_pptx_geometry,
             parse_xlsx,
         )
 
@@ -375,10 +395,13 @@ def open_file():
             data = parse_docx(str(tmp_path))
             file_type = "docx"
         elif ext == ".xlsx":
-            data = parse_xlsx(str(tmp_path))
+            data = parse_xlsx(str(tmp_path), original_name=original_name)
             file_type = "xlsx"
         elif ext == ".pptx":
-            data = parse_pptx_geometry(str(tmp_path))
+            from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
+            with open(str(tmp_path), "rb") as _f:
+                _raw = _f.read()
+            data = _pptx_rich_parse(_raw)
             file_type = "pptx"
         elif ext == ".pdf":
             data = parse_pdf(str(tmp_path), file_id)
@@ -478,7 +501,7 @@ def save_file():
 
         elif file_type == "xlsx":
             # data is {snapshot: IWorkbookData, _images: []} from Univer frontend,
-            # or a plain list (Luckysheet legacy), or a bare IWorkbookData dict.
+            # or a bare IWorkbookData dict.
             if isinstance(data, dict):
                 # Prefer 'snapshot' key (new Univer format), fall back to whole dict
                 wb_data = data.get("snapshot") or data
@@ -784,6 +807,27 @@ def auto_save():
                     src_path,
                     len(raw_bytes),
                 )
+                # 3. Sync file registry so FileHub shows updated mtime & preview.
+                try:
+                    from app.core.file.file_registry import get_file_registry
+                    _reg = get_file_registry()
+                    _reg.batch_register([str(src_path)], source="editor", extract_content=False)
+                    logger.debug("[WorkspaceAssistant] auto_save registry synced: %s", src_path.name)
+                except Exception as _re:
+                    logger.debug("[WorkspaceAssistant] auto_save registry sync skipped: %s", _re)
+                # 4. Version snapshot — keep last 10 versions per file.
+                try:
+                    snap_dir = src_path.parent / ".koto_versions" / src_path.stem
+                    snap_dir.mkdir(parents=True, exist_ok=True)
+                    ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    snap_path = snap_dir / f"{ts_str}{suffix}"
+                    snap_path.write_bytes(raw_bytes)
+                    snaps = sorted(snap_dir.glob(f"*{suffix}"))
+                    for old_snap in snaps[:-10]:
+                        old_snap.unlink(missing_ok=True)
+                    logger.debug("[WorkspaceAssistant] version snapshot: %s", snap_path.name)
+                except Exception as _ve:
+                    logger.debug("[WorkspaceAssistant] version snapshot failed: %s", _ve)
         except Exception as e:
             logger.warning(
                 "[WorkspaceAssistant] auto_save: could not write source file: %s", e
@@ -793,6 +837,89 @@ def auto_save():
 
     saved_at = datetime.datetime.now().strftime("%H:%M")
     return jsonify({"ok": True, "saved_at": saved_at, "src_written": src_written})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /api/v1/workspace/versions   — list version snapshots for a file
+# POST /api/v1/workspace/restore-version — restore a snapshot
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/versions", methods=["GET"])
+def list_versions():
+    """
+    列出文件的历史版本快照。
+    Query: path=relative/path/to/file.docx
+    Returns: {"versions": [{name, snap_path, saved_at, size_bytes}]}
+    """
+    from web.shared import WORKSPACE_DIR
+
+    rel = request.args.get("path", "").strip()
+    if not rel:
+        return jsonify({"error": "缺少 path 参数"}), 400
+
+    ws_root = Path(WORKSPACE_DIR).resolve()
+    src = ws_root.joinpath(rel).resolve()
+    try:
+        src.relative_to(ws_root)
+    except ValueError:
+        return jsonify({"error": "路径非法"}), 400
+
+    snap_dir = src.parent / ".koto_versions" / src.stem
+    if not snap_dir.is_dir():
+        return jsonify({"versions": []})
+
+    suffix = src.suffix.lower()
+    snaps = sorted(snap_dir.glob(f"*{suffix}"), reverse=True)
+    result = []
+    for s in snaps[:20]:
+        try:
+            stat = s.stat()
+            result.append({
+                "name": s.name,
+                "snap_path": str(s),
+                "saved_at": s.stem.replace("_", " "),
+                "size_bytes": stat.st_size,
+            })
+        except Exception:
+            pass
+    return jsonify({"versions": result})
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/restore-version", methods=["POST"])
+def restore_version():
+    """
+    将版本快照恢复为当前文件。
+    Body JSON: { "snap_path": "abs/path/to/snapshot.docx", "target_path": "relative/target.docx" }
+    """
+    import shutil
+    from web.shared import WORKSPACE_DIR
+
+    body = request.get_json(force=True, silent=True) or {}
+    snap_path_str = body.get("snap_path", "").strip()
+    target_rel = body.get("target_path", "").strip()
+    if not snap_path_str or not target_rel:
+        return jsonify({"error": "缺少 snap_path 或 target_path"}), 400
+
+    snap = Path(snap_path_str)
+    if not snap.is_file():
+        return jsonify({"error": "快照文件不存在"}), 404
+
+    ws_root = Path(WORKSPACE_DIR).resolve()
+    target = ws_root.joinpath(target_rel).resolve()
+    try:
+        target.relative_to(ws_root)
+    except ValueError:
+        return jsonify({"error": "target_path 非法"}), 400
+    if target.suffix.lower() not in _ALLOWED_EXT:
+        return jsonify({"error": "不支持的格式"}), 400
+
+    try:
+        shutil.copy2(str(snap), str(target))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({"ok": True, "restored_to": str(target)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1389,123 +1516,37 @@ def set_workspace_dir_endpoint():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# POST /api/v1/workspace/chart-exec
-# SSE endpoint for code/chart execution only.
-# AI chat requests now go directly to /api/chat/stream from the frontend.
+# GET /api/v1/workspace/ollama-status
+# Check if local Ollama is running and which models are available.
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@workspace_assistant_bp.route("/api/v1/workspace/chart-exec", methods=["POST"])
-def chart_exec():
-    """
-    Server-Sent Events endpoint for workspace AI requests.
-    Accepts the same payload as the socket.io `doc_ai_request` event and
-    streams events in SSE format so the frontend can consume them without
-    needing socket.io at all.
+@workspace_assistant_bp.route("/api/v1/workspace/ollama-status")
+def ollama_status():
+    """Return {running: bool, model: str|null, models: [str]}."""
+    try:
+        import requests as _req
 
-    Body (JSON):
-      prompt, context, selection, file_type, file_id, file_name,
-      has_selection, history, language, csv_data, output_mode
-
-    SSE Events (one JSON object per `data:` line):
-      {"type":"progress","step":"analyzing"|"generating"|"formatting"|"complete","detail":"..."}
-      {"type":"chunk","text":"..."}
-      {"type":"proposals","proposals":[...],"summary":"..."}
-      {"type":"tool_call","cmd":{...}}
-      {"type":"complete","result":"...","has_proposals":bool}
-      {"type":"error","message":"..."}
-    """
-    import json as _json
-    import re
-    import time
-
-    body = request.get_json(force=True, silent=True) or {}
-    prompt = body.get("prompt", "")
-    context_text = body.get("context", "")
-    selection = body.get("selection", "")
-    file_type = body.get("file_type", "unknown")
-    file_name = body.get("file_name", "")
-    has_selection = bool(body.get("has_selection", False))
-    history = body.get("history", [])
-    language = body.get("language", "")
-    csv_data = body.get("csv_data", "")
-    output_mode = body.get("output_mode", "inline")
-
-    if not prompt:
-        return jsonify({"error": "缺少 prompt 字段"}), 400
-
-    if context_text:
-        prompt = f"{context_text}\n[用户请求]: {prompt}"
-
-    def _sse(obj):
-        return f"data: {_json.dumps(obj, ensure_ascii=False)}\n\n"
-
-    def generate():
-        try:
-            from app.core.socket_handler import (
-                _get_local_provider,
-                _get_provider,
-                _is_ollama_alive,
-                _is_online_failure,
-                _parse_tool_calls,
-                _pick_online_model,
-            )
-        except ImportError as ie:
-            yield _sse({"type": "error", "message": f"AI 模块加载失败: {ie}"})
-            return
-
-        # ── Code / chart execution mode ──────────────────────────────────────
-        if language in ("python", "r"):
-            try:
-                from app.core.socket_handler import _call_llm_sync
-                from app.core.sandbox import run_python, run_r
-            except ImportError as ie2:
-                yield _sse({"type": "error", "message": f"Sandbox 模块加载失败: {ie2}"})
-                return
-
-            lang_label = "Python (matplotlib/pandas)" if language == "python" else "R (ggplot2)"
-            gen_prompt = (
-                f"请根据以下任务，编写一段可以直接运行的 {lang_label} 代码。\n"
-                "要求：\n"
-                "1. 使用 matplotlib 或 pandas 绘图（Python）/ ggplot2（R）\n"
-                "2. 将生成的图表保存为当前目录下的 chart.png 文件\n"
-                "3. 对于 Python：使用 plt.savefig('chart.png', dpi=150, bbox_inches='tight')\n"
-                "4. 对于 R：使用 ggsave('chart.png', dpi=150)\n"
-                "5. 不要用 plt.show() 或任何 GUI 调用\n"
-                "6. 只输出代码，不要任何 markdown 代码块标记（不要 ```）\n\n"
-                f"任务描述：{prompt}\n"
-            )
-            if csv_data:
-                gen_prompt += f"\n表格数据（CSV 格式）：\n{csv_data}\n"
-
-            yield _sse({"type": "chunk", "text": f"🤖 正在为你生成 {language.upper()} 代码…\n"})
-
-            code = _call_llm_sync(gen_prompt)
-            if not code:
-                yield _sse({"type": "code_result", "error": "AI 代码生成失败，请检查 API Key 配置。", "stdout": "", "stderr": "", "files": {}})
-                yield _sse({"type": "complete", "result": "", "has_proposals": False})
-                return
-
-            import re as _re
-            code = _re.sub(r"^```[a-z]*\n?", "", code.strip(), flags=_re.MULTILINE)
-            code = code.strip().strip("`")
-
-            yield _sse({"type": "chunk", "text": f"\n```{language}\n{code}\n```\n\n▶ 正在执行…\n"})
-
-            if language == "python":
-                result = run_python(code)
-            else:
-                result = run_r(code)
-
-            yield _sse({"type": "code_result", **result})
-            yield _sse({"type": "complete", "result": "", "has_proposals": False})
-            return
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+        r = _req.get(
+            "http://127.0.0.1:11434/api/tags",
+            timeout=3,
+            proxies={"http": None, "https": None},  # bypass system proxy for localhost
+        )
+        data = r.json()
+        models = [m["name"] for m in data.get("models", [])]
+        if not models:
+            return jsonify({"running": True, "model": None, "models": []})
+        # Prefer larger/known-good chat models
+        preferred = next(
+            (
+                m for m in models
+                if any(k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b"))
+            ),
+            models[0],
+        )
+        return jsonify({"running": True, "model": preferred, "models": models})
+    except Exception:
+        return jsonify({"running": False, "model": None, "models": []})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1518,12 +1559,22 @@ def chart_exec():
 def quick_action():
     """
     One-shot text processing for quick toolbar actions.
-    Body: {action, text, file_type?}
+    Body: {action, text, file_type?, locked_model?}
     Response: {"result": "processed text", "original": "...", "action": "..."}
     """
     body = request.get_json(force=True, silent=True) or {}
     action = body.get("action", "")
     text = body.get("text", "")
+    locked_model = body.get("locked_model", "auto")
+
+    # Respect use_local_only setting if caller didn't explicitly set locked_model
+    if locked_model == "auto":
+        try:
+            from web.settings import SettingsManager as _WSM
+            if _WSM().get("ai", "use_local_only"):
+                locked_model = "local"
+        except Exception:
+            pass
 
     if not action or not text:
         return jsonify({"error": "缺少 action 或 text 字段"}), 400
@@ -1572,10 +1623,45 @@ def quick_action():
         )
         try:
             import re as _re
-            from app.core.socket_handler import _call_llm_sync
+            from app.core.socket_handler import (
+                _get_local_provider,
+                _get_provider,
+                _is_ollama_alive,
+                _is_online_failure,
+                _pick_online_model,
+            )
             from app.core.sandbox import run_python
 
-            raw_code = _call_llm_sync(code_prompt)
+            chart_used_local = False
+            if locked_model == "local":
+                if not _is_ollama_alive():
+                    return jsonify({"error": "本地 Ollama 未运行，请先启动 Ollama 服务"}), 503
+                local = _get_local_provider()
+                raw = local.generate_content(prompt=code_prompt, stream=False)
+                raw_code = raw.get("content", "") if isinstance(raw, dict) else str(raw)
+                chart_used_local = True
+            else:
+                raw_code = None
+                try:
+                    provider = _get_provider()
+                    raw = provider.generate_content(
+                        prompt=code_prompt,
+                        model=_pick_online_model(),
+                        stream=False,
+                    )
+                    raw_code = raw.get("content", "") if isinstance(raw, dict) else str(raw)
+                except Exception as _ce:
+                    if _is_online_failure(_ce):
+                        logger.warning("[WorkspaceAI] chart cloud unavailable, trying local…")
+                    else:
+                        raise
+                if not raw_code:
+                    if not _is_ollama_alive():
+                        return jsonify({"error": "AI 代码生成失败，请检查 API Key 配置"}), 503
+                    local = _get_local_provider()
+                    raw = local.generate_content(prompt=code_prompt, stream=False)
+                    raw_code = raw.get("content", "") if isinstance(raw, dict) else str(raw)
+                    chart_used_local = True
             if not raw_code:
                 return jsonify({"error": "AI 代码生成失败，请检查 API Key 配置"}), 503
             raw_code = _re.sub(r"^```[a-z]*\n?", "", raw_code.strip(), flags=_re.MULTILINE)
@@ -1592,6 +1678,7 @@ def quick_action():
                 "stdout": result.get("stdout", ""),
                 "stderr": result.get("stderr", ""),
                 "error": result.get("error"),
+                "used_local_model": chart_used_local,
             })
         except Exception as exc:
             logger.error("[WorkspaceAI] chart failed: %s", exc)
@@ -1603,12 +1690,55 @@ def quick_action():
 
     full_prompt = prompt_template + text
     try:
-        from app.core.socket_handler import _call_llm_sync
+        from app.core.socket_handler import (
+            _call_llm_sync,
+            _get_local_provider,
+            _get_provider,
+            _is_ollama_alive,
+            _is_online_failure,
+            _pick_online_model,
+        )
 
-        result = _call_llm_sync(full_prompt)
+        if locked_model == "local":
+            if not _is_ollama_alive():
+                return jsonify({"error": "本地 Ollama 未运行，请先启动 Ollama 服务"}), 503
+            local = _get_local_provider()
+            raw = local.generate_content(prompt=full_prompt, stream=False)
+            result = raw.get("content", "") if isinstance(raw, dict) else str(raw)
+            used_local = True
+        else:
+            # Try cloud first, fall back to local
+            result = None
+            used_local = False
+            try:
+                provider = _get_provider()
+                raw = provider.generate_content(
+                    prompt=full_prompt,
+                    model=_pick_online_model(),
+                    stream=False,
+                )
+                result = raw.get("content", "") if isinstance(raw, dict) else str(raw)
+            except Exception as _ce:
+                if _is_online_failure(_ce):
+                    logger.warning("[WorkspaceAI] cloud unavailable (%s), trying local…", _ce)
+                else:
+                    raise
+            if not result:
+                if not _is_ollama_alive():
+                    return jsonify({"error": "AI 处理失败，请检查 API Key 配置或 Ollama 状态"}), 503
+                local = _get_local_provider()
+                raw = local.generate_content(prompt=full_prompt, stream=False)
+                result = raw.get("content", "") if isinstance(raw, dict) else str(raw)
+                used_local = True
+
         if not result:
-            return jsonify({"error": "AI 处理失败，请检查 API Key 配置"}), 503
-        return jsonify({"result": result.strip(), "original": text, "action": action})
+            return jsonify({"error": "AI 处理失败，请检查 API Key 配置或 Ollama 状态"}), 503
+        return jsonify({
+            "result": result.strip(),
+            "original": text,
+            "action": action,
+            "used_local_model": used_local,
+        })
     except Exception as exc:
         logger.error("[WorkspaceAI] quick_action failed: %s", exc)
         return jsonify({"error": str(exc)}), 500
@@ -1742,6 +1872,10 @@ def browse_local():
 
 # ─── Serve any file by absolute path ─────────────────────────────────────────
 
+# Application config directory — must never be served over the API
+_APP_CONFIG_DIR = (Path(__file__).resolve().parents[2] / "config").resolve()
+
+
 @workspace_assistant_bp.route("/api/v1/workspace/serve_abs")
 def serve_abs_file():
     """Return raw bytes of any file by absolute path (for file-system browser)."""
@@ -1749,9 +1883,13 @@ def serve_abs_file():
     if not path:
         return jsonify({"error": "缺少 path 参数"}), 400
     target = Path(path).resolve()
+    # Block access to the application config directory (contains secrets/tokens)
+    try:
+        target.relative_to(_APP_CONFIG_DIR)
+        return jsonify({"error": "不允许访问应用配置目录"}), 403
+    except ValueError:
+        pass
     # Security: block system/protected paths (reuse the same guard as fs_delete etc.)
-    # Also split the raw input on backslashes so that Windows-style paths like
-    # C:\windows\system.ini are caught even when running on Linux.
     _protected = {
         "windows",
         "program files",
@@ -1785,7 +1923,352 @@ def _fs_guard(p: Path) -> bool:
     # Reject drive roots on Windows (e.g. C:\)
     if p == p.parent:
         return False
+    # Protect application config directory (contains JWT secrets, token data, etc.)
+    try:
+        p.relative_to(_APP_CONFIG_DIR)
+        return False
+    except ValueError:
+        pass
     return True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/patch_file
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/patch_file", methods=["POST"])
+def patch_file():
+    """
+    Apply text-replacement proposals to an existing file and return the patched
+    file for browser download.  Used by the multi-document content-sync feature
+    so AI-generated proposals can be exported without modifying disk.
+
+    Body (JSON):
+      {
+        "path":      "/absolute/or/workspace-relative/path/to/file.docx",
+        "proposals": [
+          {"original_text": "...", "proposed_text": "..."},
+          ...
+        ]
+      }
+
+    Supported formats: .docx, .txt, .md
+    Returns: patched file binary (Content-Disposition: attachment)
+    """
+    import io as _io
+
+    body = request.get_json(force=True, silent=True) or {}
+    raw_path = (body.get("path") or "").strip()
+    proposals = body.get("proposals") or []
+
+    if not raw_path:
+        return jsonify({"error": "缺少 path 字段"}), 400
+    if not proposals:
+        return jsonify({"error": "缺少 proposals 字段"}), 400
+
+    # Resolve to an absolute path; try workspace-relative first, then absolute
+    target: "Path | None" = None
+    candidate = Path(raw_path)
+    if candidate.is_absolute() and candidate.is_file():
+        target = candidate.resolve()
+    else:
+        try:
+            from web.shared import WORKSPACE_DIR
+            ws_root = Path(WORKSPACE_DIR).resolve()
+            rel_try = ws_root.joinpath(raw_path).resolve()
+            if rel_try.is_file():
+                target = rel_try
+        except Exception:
+            pass
+
+    if target is None:
+        return jsonify({"error": "文件不存在或路径无效"}), 404
+
+    ext = target.suffix.lower()
+    file_name = target.name
+
+    if ext not in (".docx", ".txt", ".md"):
+        return jsonify({"error": f"暂不支持对 {ext} 格式进行文本修补，请使用 .docx / .txt / .md"}), 400
+
+    # Only include well-formed proposals
+    clean = [
+        p for p in proposals
+        if isinstance(p, dict)
+        and (p.get("original_text") or "").strip()
+        and (p.get("proposed_text") or "").strip()
+    ]
+    if not clean:
+        return jsonify({"error": "proposals 中没有有效的修改条目"}), 400
+
+    # ── DOCX: python-docx paragraph / table cell replacement ─────────────────
+    if ext == ".docx":
+        try:
+            from docx import Document
+
+            doc = Document(str(target))
+
+            def _replace_in_para(para, orig: str, new: str) -> bool:
+                """Replace *orig* with *new* inside *para*, preserving run structure."""
+                full = para.text
+                if orig not in full:
+                    return False
+                # Fast path: orig lives entirely inside a single run
+                for run in para.runs:
+                    if orig in run.text:
+                        run.text = run.text.replace(orig, new)
+                        return True
+                # Slow path: orig spans multiple runs — rebuild first run, clear rest
+                new_full = full.replace(orig, new, 1)
+                if para.runs:
+                    para.runs[0].text = new_full
+                    for run in para.runs[1:]:
+                        run.text = ""
+                return True
+
+            def _replace_all(orig: str, new: str):
+                for para in doc.paragraphs:
+                    _replace_in_para(para, orig, new)
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for para in cell.paragraphs:
+                                _replace_in_para(para, orig, new)
+
+            for p in clean:
+                orig = p["original_text"].strip()
+                new  = p["proposed_text"].strip()
+                _replace_all(orig, new)
+
+            buf = _io.BytesIO()
+            doc.save(buf)
+            buf.seek(0)
+            return send_file(
+                buf,
+                mimetype="application/"
+                         "vnd.openxmlformats-officedocument.wordprocessingml.document",
+                as_attachment=True,
+                download_name=f"修改后_{file_name}",
+            )
+        except ImportError:
+            return jsonify({"error": "python-docx 未安装，请执行: pip install python-docx"}), 500
+        except Exception as exc:
+            logger.error("[patch_file] DOCX 修补失败: %s", exc, exc_info=True)
+            return jsonify({"error": f"DOCX 修补失败: {str(exc)}"}), 500
+
+    # ── TXT / MD: plain string replacement ───────────────────────────────────
+    try:
+        content = target.read_text(encoding="utf-8", errors="replace")
+        for p in clean:
+            content = content.replace(p["original_text"].strip(), p["proposed_text"].strip(), 1)
+        buf = _io.BytesIO(content.encode("utf-8"))
+        mime = "text/markdown; charset=utf-8" if ext == ".md" else "text/plain; charset=utf-8"
+        return send_file(buf, mimetype=mime, as_attachment=True, download_name=f"修改后_{file_name}")
+    except Exception as exc:
+        logger.error("[patch_file] TXT/MD 修补失败: %s", exc, exc_info=True)
+        return jsonify({"error": f"文本修补失败: {str(exc)}"}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/audio_overview
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/audio_overview", methods=["POST"])
+def audio_overview():
+    """
+    Generate a two-host podcast audio overview from a set of files.
+
+    Body JSON:
+      { "files": [{"name": "...", "content": "..."}], "session_id": "..." }
+
+    SSE stream:
+      {"event": "script",    "data": [{speaker, text}, ...]}
+      {"event": "progress",  "data": "合成音频…"}
+      {"event": "audio_url", "data": "/static/audio_cache/podcast_xxx.mp3"}
+      {"event": "error",     "data": "…"}
+    """
+    import asyncio
+    import uuid as _uuid
+
+    body = request.get_json(force=True, silent=True) or {}
+    files = body.get("files") or []
+    if not files:
+        return jsonify({"error": "缺少 files 字段"}), 400
+
+    combined_text = "\n\n".join(
+        f"=== {f.get('name', '文件')} ===\n{f.get('content', '')}"
+        for f in files
+    )[:20000]
+
+    session_id = body.get("session_id") or _uuid.uuid4().hex[:12]
+
+    def _generate():
+        import json as _json
+
+        try:
+            from web.app import MODEL_MAP as _MM
+            from web.app import get_client
+            from web.audio_overview import AudioOverviewGenerator
+
+            client = get_client()
+
+            # Pick a suitable model
+            _model = _MM.get("CHAT") or "gemini-2.0-flash-lite"
+            if _model.startswith("deep-research"):
+                _model = "gemini-2.0-flash-lite"
+
+            # Build a simple wrapper that AudioOverviewGenerator expects
+            class _ModelAdapter:
+                def generate_content(self, prompt):
+                    resp = client.models.generate_content(
+                        model=_model, contents=prompt
+                    )
+                    return resp
+
+            gen = AudioOverviewGenerator(
+                output_dir=os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)), "static", "audio_cache"
+                )
+            )
+
+            loop = asyncio.new_event_loop()
+            script = loop.run_until_complete(
+                gen.generate_script(combined_text, _ModelAdapter())
+            )
+            if not script:
+                yield f"data: {_json.dumps({'event': 'error', 'data': '脚本生成失败，请重试'}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {_json.dumps({'event': 'script', 'data': script}, ensure_ascii=False)}\n\n"
+
+            # Attempt TTS synthesis
+            try:
+                audio_path = loop.run_until_complete(
+                    gen.synthesize_audio(script, session_id)
+                )
+                loop.close()
+                if audio_path and os.path.exists(audio_path):
+                    audio_url = "/static/audio_cache/" + os.path.basename(audio_path)
+                    yield f"data: {_json.dumps({'event': 'audio_url', 'data': audio_url}, ensure_ascii=False)}\n\n"
+                else:
+                    yield f"data: {_json.dumps({'event': 'audio_url', 'data': None}, ensure_ascii=False)}\n\n"
+            except Exception as tts_err:
+                loop.close()
+                logger.warning("[audio_overview] TTS 失败: %s", tts_err)
+                yield f"data: {_json.dumps({'event': 'audio_url', 'data': None}, ensure_ascii=False)}\n\n"
+
+        except Exception as exc:
+            logger.error("[audio_overview] 失败: %s", exc, exc_info=True)
+            yield f"data: {_json.dumps({'event': 'error', 'data': str(exc)}, ensure_ascii=False)}\n\n"
+
+    return Response(
+        stream_with_context(_generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/notebook_guide
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/notebook_guide", methods=["POST"])
+def notebook_guide():
+    """
+    Generate a 4-section study guide (学习包) from attached files.
+
+    Body JSON:
+      { "files": [{"name": "...", "content": "..."}] }
+
+    SSE stream (one event per section):
+      {"section": "summary",  "content": "..."}
+      {"section": "points",   "content": "..."}
+      {"section": "faq",      "content": "..."}
+      {"section": "glossary", "content": "..."}
+      {"section": "done"}
+      {"section": "error",    "content": "..."}
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    files = body.get("files") or []
+    if not files:
+        return jsonify({"error": "缺少 files 字段"}), 400
+
+    combined_text = "\n\n".join(
+        f"=== {f.get('name', '文件')} ===\n{f.get('content', '')}"
+        for f in files
+    )[:24000]
+
+    SECTIONS = [
+        (
+            "summary",
+            "执行摘要",
+            "请用200-300字对以下资料进行执行摘要，抓住核心结论和关键数据，不要逐条列点。",
+        ),
+        (
+            "points",
+            "关键要点",
+            "请从以下资料中提炼5-8条关键要点，每条以「·」开头，包含具体数据或结论，不要泛泛而谈。",
+        ),
+        (
+            "faq",
+            "常见问答",
+            "请根据以下资料生成5个读者最可能提出的问题及详细解答，格式：Q: 问题\nA: 解答",
+        ),
+        (
+            "glossary",
+            "核心词汇",
+            "请从以下资料中提取8-12个专业术语或核心概念，每个词汇后附一句简洁定义，格式：**词汇** — 定义",
+        ),
+    ]
+
+    def _generate():
+        import json as _json
+
+        try:
+            from web.app import MODEL_MAP as _MM
+            from web.app import get_client
+
+            client = get_client()
+            _model = _MM.get("CHAT") or "gemini-2.0-flash-lite"
+            if _model.startswith("deep-research"):
+                _model = "gemini-2.0-flash-lite"
+
+            for sec_key, sec_label, sec_prompt in SECTIONS:
+                full_prompt = (
+                    f"{sec_prompt}\n\n"
+                    f"资料内容（共 {len(files)} 个文件）:\n{combined_text}"
+                )
+                try:
+                    resp = client.models.generate_content(
+                        model=_model, contents=full_prompt
+                    )
+                    content = (getattr(resp, "text", None) or "").strip()
+                    if not content:
+                        content = "（AI 暂无回复）"
+                except Exception as sec_err:
+                    content = f"（生成失败: {sec_err}）"
+
+                yield f"data: {_json.dumps({'section': sec_key, 'label': sec_label, 'content': content}, ensure_ascii=False)}\n\n"
+
+            yield f"data: {_json.dumps({'section': 'done'}, ensure_ascii=False)}\n\n"
+
+        except Exception as exc:
+            logger.error("[notebook_guide] 失败: %s", exc, exc_info=True)
+            yield f"data: {_json.dumps({'section': 'error', 'content': str(exc)}, ensure_ascii=False)}\n\n"
+
+    return Response(
+        stream_with_context(_generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @workspace_assistant_bp.route("/api/v1/workspace/fs_delete", methods=["DELETE"])

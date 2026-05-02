@@ -11,6 +11,11 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# Use explicit IPv4 to avoid IPv6 DNS resolution issues on Windows
+_OLLAMA_API_BASE = "http://127.0.0.1:11434"
+# Bypass system proxy (Clash/VPN) for all localhost Ollama requests
+_NO_PROXY = {"http": None, "https": None}
+
 # ══════════════════════════════════════════════════════════════════
 # RouterDecision — 结构化路由决策（v2）
 # ══════════════════════════════════════════════════════════════════
@@ -71,14 +76,14 @@ class LocalModelRouter:
 
     # 推荐的快速模型（按优先级排序）
     OLLAMA_MODELS = [
-        "koto-router",  # ★★ Koto 专用路由器（基于 qwen3:8b 微调，针对 Koto 任务分类）
-        "qwen3:8b",  # ★ 最佳中英文能力，RTX 4090 流畅运行
-        "qwen3:4b",  # 快速备选
-        "qwen3:1.7b",  # 轻量备选
-        "qwen2.5:7b",  # 旧版但质量好
-        "qwen2.5:3b",  # 旧版快速
+        "qwen3:8b",      # ★ 最佳中英文能力，RTX 4090 流畅运行
+        "qwen3:4b",      # 快速备选
+        "qwen3:1.7b",    # 轻量备选
+        "qwen2.5:7b",    # 旧版但质量好
+        "qwen2.5:3b",    # 旧版快速
         "qwen2.5:1.5b",  # 旧版轻量
-        "llama3.2:3b",  # 英文为主
+        "llama3.2:3b",   # 英文为主
+        "koto-router",   # 自定义路由器（如未充分训练则不稳定，保留作备选）
     ]
 
     # 分类 Prompt（固定 JSON 格式，确保输出一致）
@@ -409,7 +414,7 @@ class LocalModelRouter:
 
         # 获取已安装的模型
         try:
-            resp = requests.get("http://localhost:11434/api/tags", timeout=2)
+            resp = requests.get(f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY)
             if resp.status_code != 200:
                 return False
             installed = [
@@ -505,9 +510,10 @@ class LocalModelRouter:
 
         try:
             resp = requests.post(
-                "http://localhost:11434/api/chat",
+                f"{_OLLAMA_API_BASE}/api/chat",
                 json=payload,
                 timeout=timeout,
+                proxies=_NO_PROXY,
             )
             if resp.status_code != 200:
                 return "", f"❌ HTTP {resp.status_code}: {resp.text[:120]}"
@@ -533,9 +539,11 @@ class LocalModelRouter:
     @classmethod
     def classify(cls, user_input: str, timeout: float = 4.0) -> tuple:
         """
-        使用本地 Ollama 模型分类任务
-
+        基础任务分类器（内部工具方法）。
         返回: (task_type, confidence_str, source) 或 (None, reason, source)
+
+        注意: 该方法为模块内部使用（classify_with_hint / classify_v2 内部调用）。
+        外部接口请使用 classify_v2()，它返回结构化的 RouterDecision 对象。
         """
         start = time.time()
 
@@ -548,7 +556,7 @@ class LocalModelRouter:
 
         try:
             resp = requests.post(
-                "http://localhost:11434/api/chat",
+                f"{_OLLAMA_API_BASE}/api/chat",
                 json={
                     "model": cls._model_name,
                     "messages": [
@@ -564,6 +572,7 @@ class LocalModelRouter:
                     },
                 },
                 timeout=timeout,
+                proxies=_NO_PROXY,
             )
 
             latency = (time.time() - start) * 1000
@@ -727,7 +736,7 @@ class LocalModelRouter:
 
         try:
             resp = requests.post(
-                "http://localhost:11434/api/chat",
+                f"{_OLLAMA_API_BASE}/api/chat",
                 json={
                     "model": cls._model_name,
                     "messages": [
@@ -743,6 +752,7 @@ class LocalModelRouter:
                     },
                 },
                 timeout=timeout,
+                proxies=_NO_PROXY,
             )
 
             latency = (time.time() - start) * 1000
@@ -874,7 +884,7 @@ class LocalModelRouter:
             return False
 
         try:
-            resp = requests.get("http://localhost:11434/api/tags", timeout=2)
+            resp = requests.get(f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY)
             if resp.status_code != 200:
                 return False
             installed = [m["name"] for m in resp.json().get("models", [])]
@@ -1127,7 +1137,7 @@ class LocalModelRouter:
 """
         try:
             resp = requests.post(
-                "http://localhost:11434/api/chat",
+                f"{_OLLAMA_API_BASE}/api/chat",
                 json={
                     "model": cls._model_name,
                     "messages": [
@@ -1146,6 +1156,7 @@ class LocalModelRouter:
                     },
                 },
                 timeout=timeout,
+                proxies=_NO_PROXY,
             )
             if resp.status_code != 200:
                 return []
@@ -1255,7 +1266,7 @@ class LocalModelRouter:
         def _stream():
             try:
                 resp = requests.post(
-                    "http://localhost:11434/api/chat",
+                    f"{_OLLAMA_API_BASE}/api/chat",
                     json={
                         "model": cls._response_model,
                         "messages": messages,
@@ -1267,6 +1278,7 @@ class LocalModelRouter:
                     },
                     stream=True,
                     timeout=timeout,
+                    proxies=_NO_PROXY,
                 )
                 if resp.status_code != 200:
                     return
@@ -1310,6 +1322,10 @@ class LocalModelRouter:
                             # 输出剩余缓冲
                             if _think_buf and not _in_think:
                                 yield _think_buf
+                            elif _think_buf and _in_think:
+                                # <think> 未正常关闭（网络截断等），紧急输出缓冲内容
+                                logger.warning("[LocalModelRouter] <think> unclosed at stream end, flushing buffer")
+                                yield _think_buf
                             break
                     except Exception:
                         continue
@@ -1326,9 +1342,10 @@ class LocalModelRouter:
         include_skill_routing: bool = True,
     ) -> RouterDecision:
         """
-        结构化路由决策 v2 — 返回 RouterDecision 对象。
+        外部路由接口（由 web/app.py 调用）。返回结构化的 RouterDecision 对象。
+        命名里的 _v2 是历史遗留；该方法就是并且将一直是正式外部路由入口。
 
-        在旧版 classify() / classify_with_hint() 基础上增加：
+        在内部 classify() / classify_with_hint() 基础上增加：
         - skill_id    : 尝试将任务类型映射到已注册的 Skill ID
         - forward_to_cloud: 基于 is_simple_query() 决策是否本地处理
         - params      : 预填充的 Skill 变量（如 task_type 对应的系统参数）

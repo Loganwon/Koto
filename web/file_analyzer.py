@@ -43,7 +43,7 @@ class FileAnalyzer:
 {"industry": "类别", "category": "子类型(如contract/paper/bp/resume/report/presentation/software)", "entity": "核心实体名(简短)", "confidence": 0.0-1.0}"""
 
     # Ollama 连接配置
-    OLLAMA_URL = "http://localhost:11434"
+    OLLAMA_URL = "http://127.0.0.1:11434"
     AI_MODEL = "qwen3:8b"
     _ai_available = None
     _ai_check_time = 0

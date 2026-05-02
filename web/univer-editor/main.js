@@ -42,6 +42,8 @@ import { AIPanel } from './src/AIPanel.js';
 import { FileManager } from './src/FileManager.js';
 import { FloatingToolbar } from './src/FloatingToolbar.js';
 import { DocxViewer } from './src/DocxViewer.js';
+import { PptxViewer } from './src/PptxViewer.js';
+import { ExcelViewer } from './src/ExcelViewer.js';
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -129,6 +131,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // 4c. 创建 DocxViewer（Word 仿真 DOCX 只读查看器）
     const docxViewer = new DocxViewer('center-doc');
 
+    // 4d. 创建 PptxViewer（可编辑 PowerPoint 查看器）
+    const pptxViewer = new PptxViewer('center-doc');
+
+    // 4e. 创建 ExcelViewer（Univer Sheets Excel 查看器）
+    const excelViewer = new ExcelViewer('center-doc');
+
     // 5. 创建 FileManager（左侧文件管理面板）
     const fileManager = new FileManager('left-sidebar', docController, (content, docId) => {
       // 文档切换回调：将新文档内容加载到 Univer
@@ -140,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       // Reset AI conversation history when switching to a different file
       aiPanel.resetHistory(docId);
-    }, docxViewer);
+    }, docxViewer, pptxViewer, excelViewer);
 
     // 6. 自动保存（每 30 秒）
     setInterval(() => fileManager.save(), 30000);
@@ -148,42 +156,82 @@ document.addEventListener('DOMContentLoaded', () => {
     // 7. 启动 WebSocket 连接
     socketBridge.init();
 
-    // 8. Drop-zone on #center-doc — accept chart images dragged from the AI panel
+    // 8. Drop-zone on #center-doc — accept chart images (from AI panel) and OS image files.
+    // NOTE: Use capture phase (3rd arg = true) so our handler fires BEFORE Univer's internal
+    // canvas drag listeners — this prevents the Univer "不支持" toast when dragging image files.
     const centerDoc = document.getElementById('center-doc');
     if (centerDoc) {
+      // Helper: true if dataTransfer contains at least one image file from the OS
+      const _hasOsImage = (dt) => {
+        if (dt.items) {
+          return Array.from(dt.items).some(item => item.kind === 'file' && item.type.startsWith('image/'));
+        }
+        // Fallback (Firefox): types includes 'Files', check after drop via dt.files
+        return dt.types.includes('Files');
+      };
+
+      // ── dragover: capture phase ──────────────────────────────────────────────
       centerDoc.addEventListener('dragover', (e) => {
-        if (e.dataTransfer.types.includes('application/koto-chart-image')) {
+        const isChart   = e.dataTransfer.types.includes('application/koto-chart-id');
+        const isOsImage = _hasOsImage(e.dataTransfer);
+        if (isChart || isOsImage) {
           e.preventDefault();
+          e.stopPropagation();   // prevent Univer canvas from seeing it
           e.dataTransfer.dropEffect = 'copy';
           centerDoc.classList.add('koto-drop-active');
         }
-      });
+      }, true);  // capture
+
+      // ── dragleave ────────────────────────────────────────────────────────────
       centerDoc.addEventListener('dragleave', (e) => {
-        // Only remove class when leaving the container itself
         if (!centerDoc.contains(e.relatedTarget)) {
           centerDoc.classList.remove('koto-drop-active');
         }
       });
+
+      // ── drop: capture phase ──────────────────────────────────────────────────
       centerDoc.addEventListener('drop', (e) => {
         centerDoc.classList.remove('koto-drop-active');
-        const imgSrc  = e.dataTransfer.getData('application/koto-chart-image');
+
+        // ── A. OS image file drop (jpg/png/gif/webp…) ──
+        const imageFiles = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith('image/'));
+        if (imageFiles.length > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          const file = imageFiles[0];
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            const imgSrc = ev.target.result;
+            if (docxViewer && docxViewer.isActive()) {
+              docxViewer.appendImage(imgSrc, file.name);
+            } else {
+              docController.insertImageAtEnd(imgSrc, file.name);
+            }
+          };
+          reader.readAsDataURL(file);
+          return;
+        }
+
+        // ── B. Chart image dragged from AI panel (ID-based) ──
+        const imgId   = e.dataTransfer.getData('application/koto-chart-id');
         const imgName = e.dataTransfer.getData('application/koto-chart-name') || 'chart.png';
-        if (!imgSrc) return;
+        if (!imgId) return;
         e.preventDefault();
 
-        const dv = docxViewer;
-        if (dv && dv.isActive()) {
-          // DocxViewer mode: append image HTML
-          dv.appendImage(imgSrc, imgName);
+        const entry  = window._kotoChartStore && window._kotoChartStore[imgId];
+        const imgSrc = entry?.src;
+        if (!imgSrc) return;
+
+        if (docxViewer && docxViewer.isActive()) {
+          docxViewer.appendImage(imgSrc, imgName);
         } else {
-          // Univer canvas mode: append as floating image block at end of text
           docController.insertImageAtEnd(imgSrc, imgName);
         }
-      });
+      }, true);  // capture
     }
 
     // 暴露到全局供调试
-    window.__koto = { docController, socketBridge, aiPanel, fileManager, floatingToolbar, docxViewer };
+    window.__koto = { docController, socketBridge, aiPanel, fileManager, floatingToolbar, docxViewer, pptxViewer, excelViewer };
 
     console.log('[Koto] 文件助手启动完成');
   } catch (err) {

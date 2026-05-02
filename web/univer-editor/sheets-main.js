@@ -41,11 +41,30 @@ class KotoSheetsAPIClass {
 
   /**
    * Create and mount a Univer Sheets instance.
-   * @param {string} containerId  DOM element id to mount into
+   * @param {string|HTMLElement} containerOrEl  DOM element id OR the element itself
    * @param {object} workbookData IWorkbookData snapshot (Univer format)
    */
-  create(containerId, workbookData) {
+  create(containerOrEl, workbookData) {
     this.dispose();
+
+    // Resolve to HTMLElement immediately so Univer never falls back to a detached div.
+    // Passing an HTMLElement (instead of a string ID) bypasses Univer's internal
+    // document.getElementById() lookup that can fail during async module init.
+    let container = containerOrEl;
+    if (typeof containerOrEl === 'string') {
+      const el = document.getElementById(containerOrEl);
+      if (!el) {
+        console.error('[KotoSheets] 容器元素未找到:', containerOrEl);
+        throw new Error(`Univer 容器元素 #${containerOrEl} 不在 DOM 中`);
+      }
+      // Verify container has non-zero dimensions
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) {
+        console.warn('[KotoSheets] 容器尺寸为零, rect=', rect, 'offsetWidth=', el.offsetWidth, 'offsetHeight=', el.offsetHeight);
+      }
+      container = el;
+      console.log('[KotoSheets] 容器元素找到:', containerOrEl, 'rect=', rect.width.toFixed(0) + 'x' + rect.height.toFixed(0));
+    }
 
     const univer = new Univer({
       theme: defaultTheme,
@@ -64,7 +83,7 @@ class KotoSheetsAPIClass {
 
     univer.registerPlugin(UniverRenderEnginePlugin);
     univer.registerPlugin(UniverFormulaEnginePlugin);
-    univer.registerPlugin(UniverUIPlugin, { container: containerId });
+    univer.registerPlugin(UniverUIPlugin, { container });
     univer.registerPlugin(UniverSheetsPlugin);
     univer.registerPlugin(UniverSheetsUIPlugin);
     univer.registerPlugin(UniverSheetsFormulaPlugin);

@@ -28,6 +28,42 @@ OUTPUT_SIZE_LIMIT = 512 * 1024  # 512 KB
 # Image extensions we capture automatically
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"}
 
+# Environment variable name fragments that indicate sensitive credentials.
+# Any env var whose uppercase name contains one of these substrings is
+# stripped before being passed to sandbox subprocesses (S3 fix).
+_SENSITIVE_ENV_PATTERNS = frozenset(
+    {"KEY", "SECRET", "TOKEN", "PASSWORD", "PASS", "CREDENTIAL", "AUTH", "CERT", "APIKEY"}
+)
+
+
+def _build_sandbox_env(tmpdir: str) -> dict:
+    """Return a sanitised environment for sandbox subprocesses.
+
+    Keeps OS-essential variables (PATH, system locale, etc.) and strips
+    anything that looks like an API key, secret, token, or credential —
+    preventing sandbox code from exfiltrating parent-process secrets via
+    os.environ.
+    """
+    sanitised = {}
+    for k, v in os.environ.items():
+        k_upper = k.upper()
+        if any(pat in k_upper for pat in _SENSITIVE_ENV_PATTERNS):
+            continue  # strip sensitive vars
+        sanitised[k] = v
+
+    # Override temp/home dirs to point exclusively at the sandbox tmpdir
+    sanitised.update(
+        {
+            "HOME": tmpdir,
+            "TMPDIR": tmpdir,
+            "TEMP": tmpdir,
+            "TMP": tmpdir,
+            "R_USER": tmpdir,
+            "USERPROFILE": tmpdir,  # Windows
+        }
+    )
+    return sanitised
+
 
 # ── Python ────────────────────────────────────────────────────
 
@@ -122,43 +158,55 @@ def _run_in_tempdir(lang: str, cmd: list, timeout: int) -> dict:
     """
     Create a temp directory, run `cmd` inside it, collect results.
     The temp directory is always cleaned up.
-    """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        env = {**os.environ, "HOME": tmpdir, "TMPDIR": tmpdir}
-        # For R: set R_HOME_USER so it doesn't try to write to user dirs
-        env["R_USER"] = tmpdir
 
+    Uses Popen + communicate so the process is explicitly terminated/killed
+    on timeout — preventing zombie process accumulation (P7 fix).
+    Sensitive env vars are stripped via _build_sandbox_env (S3 fix).
+    Output truncation is reported via the 'truncated' flag (D14 fix).
+    """
+    stdout = stderr = ""
+    error = None
+    truncated = False
+    files = {}
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        env = _build_sandbox_env(tmpdir)
         try:
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
+                encoding="utf-8",
+                errors="replace",
                 cwd=tmpdir,
                 env=env,
             )
-            stdout = proc.stdout[:OUTPUT_SIZE_LIMIT]
-            stderr = proc.stderr[:OUTPUT_SIZE_LIMIT]
-            error = None
-        except subprocess.TimeoutExpired:
-            stdout = ""
-            stderr = ""
-            error = f"执行超时（超过 {timeout} 秒）"
+            try:
+                out, err = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                error = f"执行超时（超过 {timeout} 秒）"
+            else:
+                truncated = len(out) > OUTPUT_SIZE_LIMIT or len(err) > OUTPUT_SIZE_LIMIT
+                stdout = out[:OUTPUT_SIZE_LIMIT]
+                stderr = err[:OUTPUT_SIZE_LIMIT]
+
         except FileNotFoundError:
-            stdout = ""
-            stderr = ""
             error = f"未找到 {lang} 解析器。" + (
                 " 请确保已安装 Python 并在 PATH 中。"
                 if lang == "python"
                 else " 请安装 R 并将 Rscript 加入 PATH。"
             )
         except Exception as exc:
-            stdout = ""
-            stderr = ""
             error = f"执行失败：{exc}"
 
         # Collect image output files
-        files = {}
         if error is None:
             for fname in os.listdir(tmpdir):
                 fpath = Path(tmpdir) / fname
@@ -168,4 +216,10 @@ def _run_in_tempdir(lang: str, cmd: list, timeout: int) -> dict:
                     except OSError:
                         pass
 
-    return {"stdout": stdout, "stderr": stderr, "files": files, "error": error}
+    return {
+        "stdout": stdout,
+        "stderr": stderr,
+        "files": files,
+        "error": error,
+        "truncated": truncated,
+    }

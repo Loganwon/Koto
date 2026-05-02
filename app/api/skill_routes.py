@@ -678,57 +678,19 @@ def delete_skill(skill_id: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# POST /api/skills/<id>/enable  —  启用 / 禁用 Skill
+# POST /api/skills/<id>/enable  —  [已废弃] 委托给 /toggle
 # ══════════════════════════════════════════════════════════════════════════════
 
 
 @skill_bp.route("/<skill_id>/enable", methods=["POST"])
 def toggle_skill(skill_id: str):
     """
+    [已废弃] 请改用 POST /api/skills/<id>/toggle。
+    此路由保留向后兼容，内部直接委托给 toggle_skill_v2，
+    以确保 SkillManager.set_enabled() 和 affinity 记录正确执行。
     请求体: { "enabled": true | false }
     """
-    data = request.json or {}
-    enabled = data.get("enabled", True)
-    skill_file = os.path.join(_SKILLS_DIR, f"{skill_id}.json")
-
-    if not os.path.exists(skill_file):
-        return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
-
-    try:
-        with open(skill_file, "r", encoding="utf-8") as f:
-            existing = json.load(f)
-        existing["enabled"] = bool(enabled)
-        with open(skill_file, "w", encoding="utf-8") as f:
-            json.dump(existing, f, ensure_ascii=False, indent=2)
-        # 记录亲和度
-        if bool(enabled):
-            try:
-                from app.core.skills.skill_affinity import SkillAffinityTracker
-
-                SkillAffinityTracker.get_instance().record_activation(skill_id)
-            except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
-        try:
-            from app.core.hooks.hook_manager import HookContext, get_hook_manager
-
-            get_hook_manager().fire_on_skill_change(
-                skill_id,
-                bool(enabled),
-                HookContext(task_type="skill_toggle", skill_id=skill_id),
-            )
-        except Exception:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Silenced exception caught", exc_info=True
-            )
-        return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+    return toggle_skill_v2(skill_id)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

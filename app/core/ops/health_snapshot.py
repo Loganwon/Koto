@@ -200,7 +200,7 @@ class HealthSnapshot:
             import urllib.request
 
             req = urllib.request.Request(
-                "http://localhost:11434/api/tags",
+                "http://127.0.0.1:11434/api/tags",
                 headers={"User-Agent": "koto-healthcheck"},
             )
             with urllib.request.urlopen(req, timeout=2) as resp:
