@@ -281,8 +281,21 @@ class DocAgent:
 
             planner = TaskPlanner()
 
-            # Extract tool names for planning
-            tool_names = [t.get("name", "") for t in tool_defs if t.get("name")]
+            # Extract tool names + one-line descriptions for planning
+            # Format: "tool_name: description" so planner can suggest correct tools
+            tool_names = []
+            for t in tool_defs:
+                name = t.get("name", "")
+                if not name:
+                    continue
+                desc = ""
+                # OpenAI-style: function.description
+                if "function" in t:
+                    desc = t["function"].get("description", "")
+                # Flat style: description directly on tool def
+                if not desc:
+                    desc = t.get("description", "")
+                tool_names.append(f"{name}: {desc}" if desc else name)
 
             # Build file context for planning
             file_context = self._build_file_context(task.files)
@@ -422,6 +435,10 @@ class DocAgent:
 
         # Construct messages
         user_message = f"## 当前任务\n\n{exec_prompt}"
+        # Inject suggested tools hint if the planner specified any
+        suggested = list(getattr(step, "suggested_tools", None) or [])
+        if suggested:
+            user_message += f"\n\n## 建议使用的工具\n" + "\n".join(f"- `{t}`" for t in suggested)
         if file_context:
             user_message += f"\n\n{file_context}"
 
@@ -432,13 +449,29 @@ class DocAgent:
 
         # LLM loop for this step
         tool_calls_count = 0
+        no_tool_nudges = 0  # Count of times we've nudged the model to call tools
+        _MAX_NO_TOOL_NUDGES = 1
 
         while tool_calls_count < MAX_TOOL_CALLS_PER_STEP:
             if self._cancelled:
                 return
 
-            # Call LLM
-            response = self._call_llm(provider, messages, system, tool_defs)
+            # Call LLM — retry once on transient generation errors (e.g. malformed_tool_call)
+            _llm_exc = None
+            for _llm_attempt in range(3):
+                try:
+                    response = self._call_llm(provider, messages, system, tool_defs)
+                    _llm_exc = None
+                    break
+                except Exception as _exc:
+                    _llm_exc = _exc
+                    err_msg = str(_exc).lower()
+                    if any(p in err_msg for p in ("malformed_tool_call", "invalid json", "output could not be parsed")):
+                        logger.warning("[DocAgent] LLM tool call error, retrying (%d/3): %s", _llm_attempt + 1, _exc)
+                        continue
+                    raise  # Non-retryable error — propagate
+            if _llm_exc is not None:
+                raise _llm_exc  # Exhausted retries
 
             content_text = response.get("content", "")
             tool_calls = response.get("tool_calls", [])
@@ -461,8 +494,20 @@ class DocAgent:
                 model_msg["parts"] = raw_parts
             messages.append(model_msg)
 
-            # No tool calls means step is complete
+            # No tool calls: if this is the first LLM turn and no tools were called yet,
+            # nudge the model to actually invoke tools rather than just describe the action.
             if not tool_calls:
+                if tool_calls_count == 0 and no_tool_nudges < _MAX_NO_TOOL_NUDGES:
+                    no_tool_nudges += 1
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "你必须通过调用工具来完成任务，不能只用文字描述。"
+                            "请立即调用相应的文件操作工具（例如 insert_excel_as_docx_table、"
+                            "write_docx_content、run_python_code 等）来执行写入操作。"
+                        ),
+                    })
+                    continue
                 break
 
             # Execute tool calls
@@ -526,39 +571,78 @@ class DocAgent:
                 data={"progress": progress},
             )
 
+    # Tools that only read data and never write files — everything else is
+    # assumed to be a potential file-writer and will be tracked if it has a
+    # path argument and returns without an error.
+    _READ_ONLY_TOOLS = frozenset({
+        "read_sheet_data", "read_docx_content", "parse_file_to_text",
+        "read_file_range", "list_workspace_files", "compare_files",
+        "llm_extract", "verify_task_completion", "open_file_in_editor",
+        "annotate_file",
+    })
+
     def _detect_file_change(
         self,
         tool_name: str,
         tool_args: Dict[str, Any],
         result: str,
     ) -> Optional[FileChange]:
-        """Detect if a tool call resulted in a file change."""
-        write_tools = {
-            "write_sheet_data",
-            "create_file",
-            "copy_file",
-            "editor_live_update",
-        }
+        """Detect if a tool call resulted in a file change.
 
-        if tool_name not in write_tools:
+        Uses a blacklist of known read-only tools instead of a whitelist,
+        so newly added write tools are automatically tracked without needing
+        to update this method.
+        """
+        if tool_name in self._READ_ONLY_TOOLS:
             return None
 
+        # Check for error result
+        if result.startswith("Error:"):
+            return None
         try:
-            result_data = json.loads(result)
-            if not result_data.get("success", False) and "error" in result_data:
+            rd = json.loads(result)
+            if isinstance(rd, dict) and rd.get("error"):
                 return None
         except (json.JSONDecodeError, TypeError):
             pass
 
-        file_path = tool_args.get("path", tool_args.get("destination", ""))
+        # run_python_code: detect files via __koto_created__ markers
+        if tool_name == "run_python_code":
+            _marker = "__koto_created__:"
+            idx = result.rfind(_marker)
+            if idx != -1:
+                try:
+                    import os as _os
+                    created = json.loads(result[idx + len(_marker):])
+                    if created:
+                        return FileChange(
+                            file_path=str(created[0]),
+                            change_type="modify",
+                            range_start=0, range_end=0,
+                            original="",
+                            modified=f"Python 代码修改了 {_os.path.basename(str(created[0]))}",
+                        )
+                except Exception:
+                    pass
+            return None
+
+        # For all other tools: look for a file path in args
+        file_path = (
+            tool_args.get("path")
+            or tool_args.get("target_path")
+            or tool_args.get("destination")
+            or tool_args.get("file_path")
+            or ""
+        )
         if not file_path:
             return None
 
+        _modify_hints = {"write", "insert", "update", "docx", "sheet"}
+        change_type = "modify" if any(h in tool_name for h in _modify_hints) else "add"
         return FileChange(
-            file_path=file_path,
-            change_type="modify" if tool_name == "write_sheet_data" else "add",
-            range_start=0,
-            range_end=0,
+            file_path=str(file_path),
+            change_type=change_type,
+            range_start=0, range_end=0,
             original="",
             modified=str(tool_args.get("updates", tool_args.get("content", "")))[:500],
         )
@@ -571,14 +655,36 @@ class DocAgent:
         provider: Any,
     ) -> Dict[str, Any]:
         """Ask the model to verify if the task was completed successfully."""
+        # Build change log summary
+        change_summary = (
+            json.dumps([c.to_dict() for c in self._change_log], ensure_ascii=False, indent=2)
+            if self._change_log
+            else "无文件变更记录"
+        )
+
+        # Re-read modified files to give the verifier real content (up to 3 files, 800 chars each)
+        file_snapshots = ""
+        seen: set = set()
+        for change in self._change_log[:3]:
+            fp = getattr(change, "file_path", "") or ""
+            if not fp or fp in seen:
+                continue
+            seen.add(fp)
+            try:
+                from pathlib import Path as _P
+                content = _P(fp).read_text(encoding="utf-8", errors="replace")[:800]
+                file_snapshots += f"\n### 文件快照: {_P(fp).name}\n```\n{content}\n```\n"
+            except Exception:
+                pass
+
         prompt = f"""请验证以下任务是否已成功完成：
 
 ## 原始任务
 {task.prompt}
 
-## 执行的变更
-{json.dumps([c.to_dict() for c in self._change_log], ensure_ascii=False, indent=2) if self._change_log else "无文件变更记录"}
-
+## 执行的变更记录
+{change_summary}
+{file_snapshots}
 ## 请回答
 1. 任务是否完成？(completed/partial/failed)
 2. 简要说明完成情况
@@ -615,7 +721,8 @@ class DocAgent:
     def _get_provider(self, options: Optional[Dict[str, Any]] = None):
         """Get LLM provider instance."""
         try:
-            model_mode = str((options or {}).get("model_mode") or "").strip().lower()
+            from app.core.llm.model_mode import normalize_model_mode
+            model_mode = normalize_model_mode((options or {}).get("model_mode"))
             if model_mode == "local":
                 from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
@@ -692,14 +799,33 @@ class DocAgent:
         """Build the system prompt for execution."""
         return """你是 Koto 文件任务助手。你正在执行一个分步任务。
 
-## 规则
-1. 在执行文件写入前，先读取目标文件确认当前状态
+## 核心约束（必须严格遵守）
+- **直接修改原文件**：任务要求修改某个文件时，必须直接对该文件进行写入操作，不得创建任何副本、备份或新版本文件（禁止创建名称含"_优化版""_新版""_updated""_modified""_v2"等后缀的文件）
+- **不创建多余文件**：未经用户明确要求，不得创建任何新文件；输出必须写入用户指定的原始文件路径
+- **工具必须真实调用**：必须通过工具调用完成写入，不得仅在回复文字中描述"已完成"而不调用工具
+
+## 执行规则
+1. 执行写入前，先读取目标文件确认当前状态
 2. 工具调用失败时，分析错误原因，尝试修复后重试
 3. 每一步给用户清晰的进展说明
 4. 完成后简要汇报结果
+5. 写入内容必须是根据任务数据生成的真实内容；严禁输出占位符或示例文本
+6. 每个写入工具对同一目标文件只调用一次；第一次成功后不重复写入
 
 ## 可用工具
-你可以使用各种文件读写工具来完成任务。"""
+
+**文件读取:**
+- `read_sheet_data(path, sheet_name?, max_rows?)` — 读取 Excel/CSV 表格数据
+- `read_docx_content(path, max_chars?)` — 读取 Word 文档段落和表格
+- `parse_file_to_text(path, max_chars?)` — 将任意文件解析为纯文本
+- `list_workspace_files(path?, recursive?)` — 列出工作区文件
+
+**文件写入:**
+- `insert_excel_as_docx_table(source_path, target_path, sheet_name?, table_title?)` — 把 Excel 表格数据作为 Word 表格插入到 DOCX 文件末尾
+- `write_docx_content(path, content, mode?)` — 写入 Word 文档内容
+- `write_sheet_data(path, data, sheet_name?)` — 写入/更新 Excel 表格数据
+- `create_file(path, content)` — 创建新文件
+- `run_python_code(code)` — 执行 Python 代码（处理复杂格式转换、openpyxl/python-docx 操作等）"""
 
     def _build_file_context(self, files: List[FileHandle]) -> str:
         """Build file context string for LLM."""

@@ -3452,7 +3452,7 @@ window.WA = window.WA || {};
   }
 
   function _waQuickActionModelMode() {
-    return state.lockedModel === 'local' ? 'local' : 'auto';
+    return state.lockedModel === 'local' ? 'local' : 'cloud';
   }
 
   async function _sendViaEditorActionSSE(payload) {
@@ -3542,7 +3542,7 @@ window.WA = window.WA || {};
     _setStreamBtn(true);
 
     try {
-      const modelId = (state.lockedModel && !['auto', 'local'].includes(state.lockedModel))
+      const modelId = (state.lockedModel && !['auto', 'cloud', 'local'].includes(state.lockedModel))
         ? state.lockedModel
         : '';
       const resp = await fetch('/api/editor/ai/stream', {
@@ -8630,6 +8630,7 @@ window.WA = window.WA || {};
 
     let finalAnswer = '';
     let stepCount = 0;
+    let phaseBarEl = null;
     const startTime = Date.now();
     const taskFiles = _waBuildTaskFiles(opts.currentContent || '');
     const stepEls = new Map();
@@ -8728,9 +8729,15 @@ window.WA = window.WA || {};
       refreshedPaths.add(normalizedPath);
       const supported = _isSupportedExt(fileType || _waInferFileType(normalizedPath));
       setTimeout(() => {
-        Promise.resolve(WA.reloadFileByPath(normalizedPath, supported))
-          .catch((error) => console.warn('[TaskAgent] File refresh failed:', error))
-          .finally(() => setTimeout(() => refreshedPaths.delete(normalizedPath), 800));
+        if (focus && !alreadyOpen && normalizedPath !== currentPath) {
+          Promise.resolve(WA.openWorkspaceFile(normalizedPath))
+            .catch((e) => console.warn('[TaskAgent] Auto-open failed:', e))
+            .finally(() => setTimeout(() => refreshedPaths.delete(normalizedPath), 800));
+        } else {
+          Promise.resolve(WA.reloadFileByPath(normalizedPath, supported))
+            .catch((error) => console.warn('[TaskAgent] File refresh failed:', error))
+            .finally(() => setTimeout(() => refreshedPaths.delete(normalizedPath), 800));
+        }
       }, 250);
     }
 
@@ -8771,8 +8778,8 @@ window.WA = window.WA || {};
         action: 'ai_task',
         instruction: taskText,
         session_id: _waSession(),
-        model_mode: lockedModel === 'local' ? 'local' : 'auto',
-        model_id: (lockedModel && !['auto', 'local'].includes(lockedModel)) ? lockedModel : '',
+        model_mode: lockedModel === 'local' ? 'local' : 'cloud',
+        model_id: (lockedModel && !['auto', 'cloud', 'local'].includes(lockedModel)) ? lockedModel : '',
         file_type: state.fileType || '',
         file_name: state.fileName || '',
         files: taskFiles,
@@ -8833,7 +8840,6 @@ window.WA = window.WA || {};
 
             if (evt.type === 'step_start') {
               _clearThinking();
-              stepCount++;
               currentStepId = evt.step_id || `step_${stepCount}`;
               const stepEl = _ensureStep(currentStepId, evt.text || '执行步骤', 'step-action', '⚙️');
               if (!stepEl.querySelector('.wa-step-spinner')) {
@@ -8858,7 +8864,8 @@ window.WA = window.WA || {};
 
             if (evt.type === 'tool_call') {
               _clearThinking();
-              const stepId = evt.step_id || currentStepId || `tool_${stepCount || 1}`;
+              stepCount++;
+              const stepId = evt.step_id || currentStepId || `tool_${stepCount}`;
               const toolName = evt.tool_name || 'tool';
               const toolArgs = evt.tool_args || {};
               const toolLabel = _toolDisplayName(toolName, toolArgs);
@@ -8894,13 +8901,20 @@ window.WA = window.WA || {};
               const changeType = evt.change_type || 'modify';
               const changeSummary = evt.summary || `${changedName} 已更新`;
               if (changeType === 'open') {
-                // Open-only: don't count as modification, just show as navigation
                 _clearThinking();
                 _addStep('📂', changeSummary, 'step-done');
               } else {
                 if (changeType === 'create') filesCreated++;
                 else filesModified++;
-                _addStep('📝', changeSummary, 'step-done');
+                const stepEl = _addStep('📝', changeSummary, 'step-done');
+                if (stepEl && evt.preview && evt.preview.trim()) {
+                  const previewEl = document.createElement('div');
+                  previewEl.className = 'wa-file-preview';
+                  previewEl.textContent = evt.preview.length > 200
+                    ? evt.preview.slice(0, 200) + '…'
+                    : evt.preview;
+                  stepEl.appendChild(previewEl);
+                }
               }
               _refreshChangedFile(changedPath, evt.file_type || '', !!evt.focus);
               continue;
@@ -8936,6 +8950,44 @@ window.WA = window.WA || {};
               } else {
                 _addStep('❌', errorText, 'step-error');
               }
+              continue;
+            }
+
+            if (evt.type === 'phase') {
+              const phases = evt.phases || [
+                {id: 'decision', label: '决策'},
+                {id: 'execution', label: '执行'},
+                {id: 'check', label: '验证'},
+              ];
+              const current = evt.current || '';
+              const status = evt.status || '';
+              if (!phaseBarEl && loadingEl) {
+                phaseBarEl = document.createElement('div');
+                phaseBarEl.className = 'wa-phase-bar';
+                loadingEl.insertBefore(phaseBarEl, loadingEl.firstChild);
+              }
+              if (phaseBarEl) {
+                phaseBarEl.innerHTML = phases.map(p => {
+                  let cls = 'wa-phase-dot';
+                  if (p.id === current) cls += status === 'done' ? ' done' : ' active';
+                  else if (phases.findIndex(x => x.id === p.id) < phases.findIndex(x => x.id === current)) cls += ' done';
+                  return `<span class="${cls}" title="${_escHtml(p.label || p.id)}">${_escHtml(p.label || p.id)}</span>`;
+                }).join('<span class="wa-phase-sep">›</span>');
+              }
+              continue;
+            }
+
+            if (evt.type === 'verification') {
+              const vStatus = evt.status || 'unknown';
+              const vSummary = evt.summary || '';
+              const iconMap = {completed: '✅', partial: '⚠️', failed: '❌', unknown: '❓'};
+              const clsMap  = {completed: 'step-done', partial: 'step-warn', failed: 'step-error', unknown: 'step-action'};
+              const icon = iconMap[vStatus] || '❓';
+              const cls  = clsMap[vStatus]  || 'step-action';
+              const label = vSummary
+                ? (vSummary.length > 120 ? vSummary.slice(0, 120) + '…' : vSummary)
+                : {completed: '任务验证通过', partial: '任务部分完成', failed: '任务未完成', unknown: '验证结果未知'}[vStatus];
+              _addStep(icon, label, cls);
               continue;
             }
 
@@ -13278,8 +13330,8 @@ window.WA = window.WA || {};
   })();
 
   const _MODEL_LABELS = {
-    auto: 'Koto AI',
-    local: 'Ollama',
+    auto: '云端',
+    local: '本地',
     'gemini-3-flash-preview': 'Gemini 3 Flash Preview',
     'gemini-3-pro-preview': 'Gemini 3 Pro Preview',
     'gemini-3.1-pro-preview': 'Gemini 3.1 Pro Preview',
@@ -13289,12 +13341,12 @@ window.WA = window.WA || {};
   };
 
   function _normalizeEditorLockedModel(modelId) {
-    if (!modelId || ['auto', 'local'].includes(modelId)) return '';
+    if (!modelId || ['auto', 'cloud', 'local'].includes(modelId)) return '';
     return modelId;
   }
 
   function _selectedCloudModelId() {
-    return (state.lockedModel && !['auto', 'local'].includes(state.lockedModel))
+    return (state.lockedModel && !['auto', 'cloud', 'local'].includes(state.lockedModel))
       ? state.lockedModel
       : '';
   }
@@ -13309,8 +13361,8 @@ window.WA = window.WA || {};
   }
 
   function _modelDisplayName(modelId, fallback) {
-    if (!modelId) return fallback || 'Koto AI';
-    if (modelId === 'local') return 'Ollama';
+    if (!modelId) return fallback || '云端';
+    if (modelId === 'local') return '本地';
     const meta = _lookupModelMeta(modelId);
     if (meta && meta.display) return meta.display;
     return _MODEL_LABELS[modelId] || fallback || modelId;
@@ -13325,8 +13377,8 @@ window.WA = window.WA || {};
 
     const modelLabel = activeRoute?.modelDisplay
       || (state.lockedModel === 'local'
-        ? 'Ollama'
-        : (explicitCloudModel ? _modelDisplayName(explicitCloudModel, explicitCloudModel) : 'Koto AI'));
+        ? '本地'
+        : (explicitCloudModel ? _modelDisplayName(explicitCloudModel, explicitCloudModel) : '云端'));
 
     if (badge) {
       badge.textContent = modelLabel;
@@ -13340,7 +13392,7 @@ window.WA = window.WA || {};
     if (!routeInfo) return;
 
     const routeBits = [];
-    if (state.lockedModel === 'local') routeBits.push('本地优先');
+    if (state.lockedModel === 'local') { /* mode already shown in header badge */ }
     else if (explicitCloudModel) routeBits.push('已锁定模型');
     else if (activeRoute) routeBits.push('自动路由');
 
@@ -13417,17 +13469,13 @@ window.WA = window.WA || {};
     fetch('/api/v1/workspace/ollama-status')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        const row = document.getElementById('wa-ollama-status-row');
-        const txt = document.getElementById('wa-ollama-status-text');
+        const badge = document.getElementById('wa-ollama-model-badge');
         const onBtn = document.getElementById('wa-local-on-btn');
-        if (!row || !txt) return;
         if (data && data.running) {
-          row.style.display = 'block';
-          txt.textContent = `Ollama 运行中 (${data.model || 'qwen3:8b'})`;
-          if (onBtn) { onBtn.disabled = false; onBtn.title = '使用本地 Ollama 模型'; }
+          if (badge) { badge.textContent = data.model || 'qwen3.5:9b'; badge.style.display = 'inline'; }
+          if (onBtn) { onBtn.disabled = false; onBtn.title = `使用本地 Ollama 模型 (${data.model || 'qwen3.5:9b'})`; }
         } else {
-          row.style.display = 'block';
-          txt.textContent = 'Ollama 未运行，无法切换到本地模型';
+          if (badge) { badge.style.display = 'none'; }
           if (onBtn) { onBtn.disabled = true; onBtn.title = '请先启动 Ollama'; }
         }
       })
@@ -13435,7 +13483,7 @@ window.WA = window.WA || {};
   }
 
   function _syncEditorModelPreference(mode, lockedModel) {
-    const editorMode = mode === 'local' ? 'local' : 'auto';
+    const editorMode = mode === 'local' ? 'local' : 'cloud';
     const editorLockedModel = editorMode === 'local'
       ? ''
       : _normalizeEditorLockedModel(lockedModel);
@@ -13448,7 +13496,7 @@ window.WA = window.WA || {};
     }
 
     try {
-      window.__koto?.aiPanel?.notifyModelChange?.(editorMode === 'local' ? 'local' : (editorLockedModel || 'auto'));
+      window.__koto?.aiPanel?.notifyModelChange?.(editorMode === 'local' ? 'local' : (editorLockedModel || 'cloud'));
     } catch (_) { /* best-effort UI sync only */ }
   }
 

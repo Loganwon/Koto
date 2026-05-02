@@ -22,6 +22,9 @@ from app.core.agent.task_agent import (
 logger = logging.getLogger(__name__)
 
 _SUPPORTED_TEXT_TYPES = {"doc", "docx", "md", "markdown", "txt"}
+# Non-text formats that must never go through the chunked rewrite path regardless
+# of content length (presentations, spreadsheets, PDFs have specialist tools).
+_UNSUPPORTED_FILE_TYPES = {"pptx", "ppt", "xlsx", "xls", "csv", "pdf"}
 _TRANSFORM_HINTS = (
     "polish",
     "refine",
@@ -107,6 +110,10 @@ class ChunkedTaskRuntime:
             return False
 
         file_type = self._resolve_file_type(files, options)
+        # Explicit exclusion takes priority — presentation/spreadsheet/PDF files
+        # are handled by specialist tools, never by the text-chunking path.
+        if file_type in _UNSUPPORTED_FILE_TYPES:
+            return False
         if file_type not in _SUPPORTED_TEXT_TYPES:
             return False
 
@@ -126,14 +133,20 @@ class ChunkedTaskRuntime:
         file_path = str(options.get("current_file") or (files[0].get("path") if files else "") or "current_document")
 
         if not source_text.strip():
-            yield sse_error("当前文件内容为空，无法执行分块处理")
-            yield sse_done("执行失败")
+            logger.debug("[ChunkedTaskRuntime] Empty source text — delegating to TaskAgent")
+            yield from self._get_task_agent().execute(task=task, files=files, options=options)
             return
 
         chunks = self._build_chunks(source_text, options)
         if len(chunks) <= 1:
-            yield sse_error("当前文件无需分块处理，请回退到普通任务执行")
-            yield sse_done("执行失败")
+            # Document is too short or has no paragraph breaks for chunking; fall
+            # back to the regular TaskAgent so the user gets a useful response
+            # instead of a red error.
+            logger.debug(
+                "[ChunkedTaskRuntime] Only %d chunk(s) — delegating to TaskAgent",
+                len(chunks),
+            )
+            yield from self._get_task_agent().execute(task=task, files=files, options=options)
             return
 
         yield sse_phase("detect", "running")
@@ -254,7 +267,8 @@ class ChunkedTaskRuntime:
         return ""
 
     def _build_chunks(self, source_text: str, options: Dict[str, Any]) -> List[ChunkUnit]:
-        target_size = _TARGET_LOCAL_CHUNK_CHARS if str(options.get("model_mode") or "").lower() == "local" else _TARGET_CHUNK_CHARS
+        from app.core.llm.model_mode import normalize_model_mode
+        target_size = _TARGET_LOCAL_CHUNK_CHARS if normalize_model_mode(options.get("model_mode")) == "local" else _TARGET_CHUNK_CHARS
         paragraphs = self._split_paragraphs(source_text)
         chunks: List[ChunkUnit] = []
         buffer: List[str] = []

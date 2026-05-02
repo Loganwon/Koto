@@ -7,7 +7,6 @@ importable routing helper.
 SmartDispatcher.analyze() contains the primary call-sites; these methods are
 provided as reusable, testable extraction points.
 """
-
 from __future__ import annotations
 
 import logging
@@ -71,7 +70,9 @@ class MLRouter:
     # LocalModelRouter / Ollama integration
     # ─────────────────────────────────────────────────────────────────────────
     @classmethod
-    def classify_with_local_model(cls, user_input: str) -> "tuple[str, float] | None":
+    def classify_with_local_model(
+        cls, user_input: str
+    ) -> "tuple[str, float] | None":
         """
         Attempt classification via the local Ollama model router.
 

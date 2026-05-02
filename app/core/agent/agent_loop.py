@@ -33,6 +33,12 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
 from app.core.agent.hooks import HookContext, HookPoint, HookRegistry, get_default_registry
+from app.core.llm.model_mode import normalize_model_mode
+from app.core.shared.tool_parser import parse_tool_calls, stringify_tool_result
+from app.core.shared.llm_helpers import is_online_failure, is_ollama_alive, get_local_provider
+from app.core.agent.request_validator import RequestValidator
+from app.core.agent.tool_executor import ToolExecutor
+from app.core.agent.response_formatter import ResponseFormatter
 from app.core.agent.lifecycle import (
     AgentEvent,
     AgentRequest,
@@ -58,6 +64,7 @@ from app.core.agent.lifecycle import (
     evt_stream_block,
     evt_stream_chunk,
     evt_task_complete,
+    evt_live_doc_commit,
     evt_thought,
     evt_tool_call,
     evt_tool_result,
@@ -72,12 +79,18 @@ MAX_TASK_ROUNDS = 20
 MAX_TASK_CONSECUTIVE_ERRORS = 3
 _TASK_FILE_CONTEXT_PREVIEW_LIMIT = 8_000
 _TASK_TOOL_RESULT_CONTEXT_LIMIT = 24_000
-_KNOWN_TOOL_TYPES = {"set_html", "set_cell", "set_cells", "set_pptx_text"}
-_TASK_SKILL_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "config" / "task_skills"
-_PROPOSAL_NOTE_PREAMBLE_RE = re.compile(
-    r"^(?:以下|下面|这是|如下)(?:是|为)?.{0,20}(?:润色|翻译|改写|修改|修正|优化|版本|结果|文本|内容).{0,10}[：:]\s*",
-    re.IGNORECASE,
-)
+_KOTO_CREATED_MARKER = "__koto_created__:"
+
+
+def _extract_koto_created_paths(result_str: str) -> List[str]:
+    """Parse __koto_created__:[...] marker appended by run_python_in_sandbox."""
+    idx = result_str.rfind(_KOTO_CREATED_MARKER)
+    if idx == -1:
+        return []
+    try:
+        return json.loads(result_str[idx + len(_KOTO_CREATED_MARKER):])
+    except Exception:
+        return []
 
 
 def _sample_task_context_text(text: Any, limit: int) -> str:
@@ -91,22 +104,6 @@ def _sample_task_context_text(text: Any, limit: int) -> str:
         return content[:limit]
     return content[:head] + marker + content[-tail:]
 
-
-def _normalize_proposal_note_text(text: Any) -> str:
-    plain = re.sub(r"<[^>]+>", " ", str(text or ""))
-    plain = _PROPOSAL_NOTE_PREAMBLE_RE.sub("", plain).strip()
-    return re.sub(r"\s+", "", plain).lower()
-
-
-def _proposal_note_or_empty(note: str, selection: str, proposed_values: List[str]) -> str:
-    note = str(note or "").strip()
-    note_key = _normalize_proposal_note_text(note)
-    if not note_key:
-        return ""
-    for candidate in [selection, *proposed_values]:
-        if _normalize_proposal_note_text(candidate) == note_key:
-            return ""
-    return note
 
 _TASK_SYSTEM_PROMPT = """你是 Koto 文件任务助手。用户会描述一个涉及文件操作的任务，你需要理解任务、制定计划、使用工具执行。
 
@@ -173,6 +170,10 @@ class KotoAgentLoop:
     ) -> None:
         self._hooks = hook_registry or get_default_registry()
         self._socketio = socketio
+        # Live-doc streaming state (reset per run)
+        self._live_doc: bool = False
+        self._live_mode: str = "replace"
+        self._live_request_id: str = ""
 
     # ══════════════════════════════════════════════════════════════
     # Public entry point
@@ -185,6 +186,10 @@ class KotoAgentLoop:
         """
         meta = RunMetadata(session_id=request.session_id)
         meta.start()
+        # Capture live-doc flags for this run
+        self._live_doc = getattr(request, 'live_doc', False)
+        self._live_mode = getattr(request, 'live_mode', 'replace')
+        self._live_request_id = meta.run_id
         yield evt_lifecycle_start(meta.run_id, meta.session_id)
 
         try:
@@ -386,6 +391,14 @@ class KotoAgentLoop:
         yield evt_status_message("")
 
         # ── Final result ──────────────────────────────────────────────
+        # If streaming directly to document, emit commit event before task_complete
+        if self._live_doc and clean_text and not has_proposals:
+            yield evt_live_doc_commit(
+                full_text=clean_text,
+                live_mode=self._live_mode,
+                original_selection=request.selection,
+                request_id=self._live_request_id,
+            )
         yield evt_task_complete(result=clean_text, has_proposals=has_proposals)
         meta.finish(RunState.SUCCEEDED)
 
@@ -416,6 +429,8 @@ class KotoAgentLoop:
         task_files = self._get_task_files(request)
         file_context = self._build_task_file_context(task_files)
         messages = self._build_task_messages(request, prompt, file_context)
+        # Always build registry and tool_defs — OllamaLLMProvider supports native
+        # tool calling for compatible models (qwen3, llama3.1+, mistral-nemo…)
         registry = self._build_task_registry(task_files)
         tool_defs = registry.get_definitions()
 
@@ -431,7 +446,7 @@ class KotoAgentLoop:
             "write_sheet_data", "write_docx_content", "create_file",
             "copy_file", "extract_to_file", "insert_excel_as_docx_table",
         }
-        _MAX_WRITE_OPS_PER_FILE = 2
+        _MAX_WRITE_OPS_PER_FILE = 3
 
         while rounds < MAX_TASK_ROUNDS:
             rounds += 1
@@ -485,6 +500,10 @@ class KotoAgentLoop:
 
             model_msg: Dict[str, Any] = {"role": "model", "content": content_text}
             if tool_calls:
+                # Ensure every tool call has an id for proper multi-turn tracking
+                for _tc in tool_calls:
+                    if not _tc.get("id"):
+                        _tc["id"] = uuid.uuid4().hex[:8]
                 model_msg["tool_calls"] = tool_calls
             raw_parts = (response or {}).get("_raw_parts")
             if raw_parts:
@@ -501,6 +520,7 @@ class KotoAgentLoop:
                 tool_args = tool_call.get("args") or {}
                 if not isinstance(tool_args, dict):
                     tool_args = {}
+                tool_call_id = tool_call.get("id") or uuid.uuid4().hex[:8]
                 step_id = f"{tool_name or 'tool'}_{rounds}_{index}"
 
                 hook_ctx = HookContext(
@@ -548,9 +568,8 @@ class KotoAgentLoop:
                         os.path.normcase(os.path.abspath(str(_target_path)))
                         if _target_path else "__unknown__"
                     )
-                    if tool_name == "insert_excel_as_docx_table":
-                        _sheet = str(tool_args.get("sheet_name") or "").strip()
-                        _canonical = f"{_canonical}::{_sheet}" if _sheet else _canonical
+                    # Do NOT include sheet_name for insert_excel_as_docx_table —
+                    # all sheet insertions to the same DOCX share a single write cap.
                     _write_key = f"{tool_name}::{_canonical}"
                     _prior_count = completed_write_ops.get(_write_key, 0)
                     if _prior_count >= _MAX_WRITE_OPS_PER_FILE:
@@ -575,7 +594,7 @@ class KotoAgentLoop:
                 })
 
                 try:
-                    result = registry.execute(tool_name, tool_args)
+                    result = registry.execute(tool_name, tool_args) if registry else None
                     result_str = _stringify_tool_result(result)
                 except Exception as exc:
                     logger.warning("[AgentLoop] Tool %s failed: %s", tool_name, exc, exc_info=True)
@@ -624,9 +643,24 @@ class KotoAgentLoop:
                     except Exception:
                         pass
 
+                # run_python_code may modify/create workspace files — detect KOTO_CREATED markers
+                if tool_name == "run_python_code" and not result_str.startswith("Error:"):
+                    for _created_path in _extract_koto_created_paths(result_str):
+                        _ext = Path(_created_path).suffix.lstrip(".").lower()
+                        file_states = _merge_file_states_loop(file_states, [{
+                            "path": _created_path,
+                            "file_type": _ext,
+                            "summary": f"Python 代码修改了 {os.path.basename(_created_path)}",
+                            "preview": "",
+                            "change_type": "modify",
+                        }])
+                        _py_write_key = f"run_python_code::{os.path.normcase(_created_path)}"
+                        completed_write_ops[_py_write_key] = completed_write_ops.get(_py_write_key, 0) + 1
+
                 messages.append({
                     "role": "function",
                     "name": tool_name,
+                    "tool_call_id": tool_call_id,
                     "content": _sample_task_context_text(result_str, _TASK_TOOL_RESULT_CONTEXT_LIMIT),
                 })
 
@@ -701,6 +735,43 @@ class KotoAgentLoop:
         for p in phases:
             yield evt_phase(phases, p["id"], "done")
         yield evt_status_message("")
+
+        # Stream final answer to chat bubble (fake streaming)
+        # CJK text has no spaces → split at sentence punctuation; Latin → word chunks.
+        if final_text:
+            import re as _re
+            _CJK = bool(_re.search(r'[\u4e00-\u9fff\u3040-\u30ff]', final_text[:80]))
+            if _CJK:
+                # Split at sentence-ending punctuation, keeping the delimiter attached
+                _parts = _re.split(r'(?<=[。！？\n；])', final_text)
+                _parts = [p for p in _parts if p]
+                # If no sentence breaks, fall back to 30-char chunks
+                if len(_parts) <= 1:
+                    _parts = [final_text[i:i + 30] for i in range(0, len(final_text), 30)]
+            else:
+                _words = final_text.split()
+                _parts = [" ".join(_words[i:i + 8]) for i in range(0, len(_words), 8)]
+                # Re-add trailing spaces for interior chunks
+                _parts = [
+                    p + " " if idx < len(_parts) - 1 else p
+                    for idx, p in enumerate(_parts)
+                ]
+            for _c in _parts:
+                yield evt_stream_chunk(
+                    _c,
+                    live_doc=self._live_doc,
+                    live_mode=self._live_mode,
+                    request_id=self._live_request_id,
+                )
+            # Emit live-doc commit when docx is active
+            if self._live_doc:
+                yield evt_live_doc_commit(
+                    full_text=final_text,
+                    live_mode=self._live_mode,
+                    original_selection=getattr(request, "selection", ""),
+                    request_id=self._live_request_id,
+                )
+
         yield evt_task_complete(result=final_text)
         meta.finish(RunState.SUCCEEDED)
 
@@ -827,7 +898,9 @@ class KotoAgentLoop:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part)
+                yield evt_stream_chunk(part, live_doc=self._live_doc,
+                                       live_mode=self._live_mode,
+                                       request_id=self._live_request_id)
         return "".join(parts) or None
 
     def _try_local(
@@ -844,7 +917,9 @@ class KotoAgentLoop:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part)
+                yield evt_stream_chunk(part, live_doc=self._live_doc,
+                                       live_mode=self._live_mode,
+                                       request_id=self._live_request_id)
         return "".join(parts) or None
 
     # ══════════════════════════════════════════════════════════════
@@ -890,131 +965,11 @@ class KotoAgentLoop:
 
     def _build_system_instruction(self, request: AgentRequest) -> str:
         """Build the system instruction based on file type and mode."""
-        file_ctx = f"文件名：{request.file_name}，" if request.file_name else ""
-
-        # FloatingToolbar actions pass a pre-built system prompt
-        if request.action_system_prompt:
-            return request.action_system_prompt
-
-        if request.action_type == "ai_task":
-            system_instruction = _TASK_SYSTEM_PROMPT
-            skill_prompt = _load_task_skill_prompts(request.prompt)
-            if skill_prompt:
-                system_instruction += f"\n\n## 参考知识\n\n{skill_prompt}"
-            return system_instruction
-
-        if request.output_mode == "chat":
-            return (
-                f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {request.file_type}。\n"
-                "用户当前处于【仅对话模式】，你的回复只会显示在聊天栏，不会修改文档。\n"
-                "请直接用自然语言回答用户的问题或提供建议，支持 Markdown 格式。\n"
-                "不要输出任何 <TOOL> 标签或 JSON 指令。"
-            )
-
-        if request.file_type == "pptx":
-            if request.has_selection:
-                action_hint = (
-                    "用户选中了某个文本框的文字（见[用户选中的文字]）。"
-                    "修改时必须使用 set_pptx_text 指令，"
-                    "slide_index 和 shape_id 从[PPT幻灯片内容]中读取，禁止使用 set_html。"
-                )
-            else:
-                action_hint = (
-                    "修改幻灯片文字必须使用 set_pptx_text 指令，"
-                    "slide_index 和 shape_id 从[PPT幻灯片内容]中读取，禁止使用 set_html。"
-                )
-            return (
-                f"你是 Koto PPT AI 助手。当前文件：{file_ctx}类型 pptx。\n\n"
-                "【重要规则】\n"
-                "当用户要求修改、翻译、润色幻灯片文字时，必须在回复末尾输出修改指令。\n"
-                "不要只描述——直接输出指令让程序执行。\n\n"
-                "指令格式（必须一行完整输出）：\n"
-                '<TOOL>{"type":"set_pptx_text","slide_index":N,"shape_id":M,"value":"新内容"}</TOOL>\n\n'
-                "示例 — 修改标题：\n"
-                "上下文：[PPT幻灯片1内容, slide_index=0]\n"
-                '[shape_id=2 name="标题"]: 原标题\n'
-                "用户：把标题改成「季度总结」\n"
-                'AI：好的。<TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":2,"value":"季度总结"}</TOOL>\n\n'
-                f"{action_hint}\n"
-            )
-
-        if request.file_type in ("xlsx", "csv"):
-            return (
-                f"你是 Koto 表格 AI 助手。当前文件：{file_ctx}类型 {request.file_type}。\n\n"
-                "【数据格式说明】\n"
-                "表格数据以 CSV 格式提供：第一列'行'为行号（1起），其余列标题为列字母（A/B/C...对应 Excel 列）。\n"
-                "示例：\n"
-                "  行,A,B,C\n"
-                "  1,姓名,销售额,日期\n"
-                "  2,张三,12000,2024-01\n\n"
-                "【重要规则】\n"
-                "- 分析/问答：直接用中文自然语言回答，不需要输出 <TOOL> 指令。\n"
-                "- 修改单元格：在回复末尾输出 set_cell 指令（r/c 从 0 开始）：\n"
-                '  <TOOL>{"type":"set_cell","r":1,"c":1,"value":"新值"}</TOOL>\n'
-                "  （r=0 对应第1行，c=0 对应 A 列，c=1 对应 B 列，以此类推）\n"
-                '  value 可以是文本、数字或 Excel 公式（如 "=SUM(B2:B10)"、"=AVERAGE(C2:C20)"）。\n'
-                "- 批量修改：连续输出多个 set_cell 指令，每条占一行。\n\n"
-                "示例 1 — 修改 B2 单元格：\n"
-                "用户：把 B2 改为 15000\n"
-                'AI：已更新。<TOOL>{"type":"set_cell","r":1,"c":1,"value":"15000"}</TOOL>\n\n'
-                "示例 2 — 在 B11 插入 SUM 公式（B2:B10 求和，r=10 对应第11行）：\n"
-                "用户：帮我在 B11 对 B2:B10 求和\n"
-                'AI：已插入求和公式。<TOOL>{"type":"set_cell","r":10,"c":1,"value":"=SUM(B2:B10)"}</TOOL>\n\n'
-                "示例 3 — 批量翻译表头（A1、B1、C1）：\n"
-                "用户：把第一行翻译成英文\n"
-                'AI：已更新。<TOOL>{"type":"set_cell","r":0,"c":0,"value":"Name"}</TOOL>\n'
-                '<TOOL>{"type":"set_cell","r":0,"c":1,"value":"Sales"}</TOOL>\n'
-                '<TOOL>{"type":"set_cell","r":0,"c":2,"value":"Date"}</TOOL>\n'
-            )
-
-        # Default: docx / txt / md / etc.
-        if request.has_selection:
-            action_hint = "用户当前有选中文字。修改时用 set_html 替换选区内容。"
-        else:
-            action_hint = "用户当前无选区。修改时用 set_html 在光标处插入内容。"
-
-        return (
-            f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {request.file_type}。\n\n"
-            "【重要规则】\n"
-            "当用户要求插入、修改、翻译、润色等文档操作时，你必须在回复末尾输出修改指令。\n"
-            "不要只描述你会做什么——直接输出指令，让程序执行。\n\n"
-            "修改指令格式（必须完整、一行输出）：\n"
-            '<TOOL>{"type": "set_html", "value": "<p>内容</p>"}</TOOL>\n\n'
-            "示例 1 — 用户让你插入内容：\n"
-            "用户：写一行「你好世界」插入文档\n"
-            'AI：已插入。<TOOL>{"type": "set_html", "value": "<p>你好世界</p>"}</TOOL>\n\n'
-            "示例 2 — 用户让你翻译并插入：\n"
-            "用户：翻译成英文插入文档\n"
-            'AI：<TOOL>{"type": "set_html", "value": "<p>Hello world</p>"}</TOOL>\n\n'
-            f"{action_hint}\n"
-            "其他文件类型指令：\n"
-            '  XLSX → <TOOL>{"type":"set_cell","r":0,"c":0,"value":"值"}</TOOL>\n'
-            '  PPTX → <TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":1,"value":"新文字"}</TOOL>'
-        )
+        return RequestValidator.build_system_instruction(request, self._hooks)
 
     def _assemble_prompt(self, request: AgentRequest, prompt: str) -> str:
         """Assemble the full prompt with history, selection, CSV data."""
-        history = request.history or []
-        recent = history[-MAX_HISTORY_TURNS * 2:] if history else []
-        history_text = ""
-        if recent:
-            parts = []
-            for turn in recent:
-                role = turn.get("role", "")
-                content = turn.get("content", "")
-                if role == "user":
-                    parts.append(f"用户：{content}")
-                elif role == "assistant":
-                    parts.append(f"Koto AI：{content}")
-            history_text = "\n".join(parts) + "\n\n"
-
-        csv_block = f"[表格数据（CSV）]\n{request.csv_data}\n\n" if request.csv_data else ""
-        if request.selection:
-            return (
-                f'[用户选中的文字]\n"{request.selection}"\n\n'
-                f"{csv_block}{history_text}用户：{prompt}"
-            )
-        return f"{csv_block}{history_text}用户：{prompt}"
+        return RequestValidator.assemble_prompt(request, prompt)
 
     def _get_task_files(self, request: AgentRequest) -> List[Dict[str, str]]:
         """Normalise task file metadata carried in AgentRequest.extra."""
@@ -1106,12 +1061,7 @@ class KotoAgentLoop:
 
     def _build_task_registry(self, task_files: Optional[List[Dict[str, str]]] = None):
         """Build a ToolRegistry backed by task tools."""
-        from app.core.agent.task_tools import TaskToolsPlugin
-        from app.core.agent.tool_registry import ToolRegistry
-
-        registry = ToolRegistry()
-        registry.register_plugin(TaskToolsPlugin(socketio=self._socketio, task_files=task_files))
-        return registry
+        return ToolExecutor.build_registry(task_files, socketio=self._socketio)
 
     def _call_task_llm(
         self,
@@ -1126,6 +1076,8 @@ class KotoAgentLoop:
             if not _is_ollama_alive():
                 raise RuntimeError("本地 Ollama 未运行")
             local_provider = _get_local_provider()
+            # Pass tools through — OllamaLLMProvider supports native tool calling
+            # for compatible models (qwen3, llama3.1+, mistral-nemo, etc.)
             response = local_provider.generate_content(
                 prompt=messages,
                 system_instruction=system_instruction,
@@ -1163,7 +1115,12 @@ class KotoAgentLoop:
 
     def _should_use_local(self, request: AgentRequest, force_local: bool = False) -> bool:
         """Determine whether to use local model."""
-        if request.model_mode == "local":
+        normalized_mode = normalize_model_mode(request.model_mode, default="auto")
+        if normalized_mode == "local":
+            return True
+        if normalized_mode == "cloud":
+            return False
+        if force_local:
             return True
         try:
             from web.settings import SettingsManager as _SM
@@ -1225,107 +1182,19 @@ class KotoAgentLoop:
         clean_text: str,
     ) -> List[Dict[str, Any]]:
         """Build proposal dicts from tool calls + selection."""
-        proposals = []
-        proposed_values = [tc.get("value", "") for tc in tool_calls if tc.get("value", "")]
-        proposal_note = _proposal_note_or_empty(clean_text, selection, proposed_values)
-        for idx, tc in enumerate(tool_calls):
-            proposed = tc.get("value", "")
-            if proposed:
-                proposals.append({
-                    "id": f"p_{idx}",
-                    "original_text": selection,
-                    "proposed_text": proposed,
-                    "rationale": proposal_note,
-                    "tool_call": tc,
-                })
-        return proposals
+        return ResponseFormatter.build_proposals(selection, tool_calls, clean_text)
 
 
 # ══════════════════════════════════════════════════════════════
-# Module-level helpers (extracted from socket_handler.py)
+# Module-level helpers (delegated to app.core.shared)
 # ══════════════════════════════════════════════════════════════
 
-def _parse_tool_calls(text: str):
-    """
-    Parse embedded <TOOL>JSON</TOOL> blocks from AI response text.
-    Returns (clean_text, list_of_tool_call_dicts).
-    """
-    tool_calls: List[Dict[str, Any]] = []
-
-    def _try_parse(raw: str) -> bool:
-        raw = raw.strip()
-        try:
-            tc = json.loads(raw)
-            if isinstance(tc, dict) and tc.get("type") in _KNOWN_TOOL_TYPES:
-                tool_calls.append(tc)
-                return True
-        except Exception:
-            pass
-        return False
-
-    # Pass 1: explicit <TOOL>…</TOOL>
-    pattern = re.compile(r"<TOOL>(.*?)<\s*/\s*TOOL>", re.DOTALL | re.IGNORECASE)
-
-    def _replace(m):
-        _try_parse(m.group(1))
-        return ""
-
-    text = pattern.sub(_replace, text).strip()
-    text = re.sub(r"<\s*/?\s*TOOL\s*>", "", text, flags=re.IGNORECASE).strip()
-
-    # Pass 2: code-fenced JSON
-    fence_pat = re.compile(r"```(?:json)?\s*(\{[^`]+\})\s*```", re.DOTALL)
-
-    def _replace_fence(m):
-        if _try_parse(m.group(1)):
-            return ""
-        return m.group(0)
-
-    text = fence_pat.sub(_replace_fence, text).strip()
-
-    # Pass 3: bare JSON lines
-    bare_pat = re.compile(r'^(\{[^\n]+\})$', re.MULTILINE)
-
-    def _replace_bare(m):
-        if _try_parse(m.group(1)):
-            return ""
-        return m.group(0)
-
-    text = bare_pat.sub(_replace_bare, text).strip()
-
-    return text, tool_calls
-
-
-def _load_task_skill_prompts(task_description: str) -> str:
-    """Load matching task skill prompt files from config/task_skills/."""
-    if not _TASK_SKILL_PROMPTS_DIR.is_dir():
-        return ""
-
-    task_lower = (task_description or "").lower()
-    parts: List[str] = []
-    try:
-        for md_file in _TASK_SKILL_PROMPTS_DIR.glob("*.md"):
-            content = md_file.read_text(encoding="utf-8", errors="replace")
-            first_line = content.split("\n", 1)[0].lower()
-            keywords = [k.strip() for k in first_line.replace("#", "").split(",") if k.strip()]
-            if keywords and any(keyword in task_lower for keyword in keywords):
-                parts.append(content)
-    except Exception as exc:
-        logger.debug("[AgentLoop] Task skill prompt loading error: %s", exc)
-
-    return "\n\n---\n\n".join(parts)
-
-
-def _stringify_tool_result(result: Any) -> str:
-    """Render arbitrary tool output into a compact conversation-safe string."""
-    if result is None:
-        return "(no output)"
-    if isinstance(result, str):
-        return result
-    try:
-        return json.dumps(result, ensure_ascii=False)
-    except Exception:
-        return str(result)
+# Aliases so any in-file references continue to work unchanged
+_parse_tool_calls = parse_tool_calls
+_stringify_tool_result = stringify_tool_result
+_is_online_failure = is_online_failure
+_is_ollama_alive = is_ollama_alive
+_get_local_provider = get_local_provider
 
 
 # ── LLM helpers (delegate to existing provider infrastructure) ─────────
@@ -1343,77 +1212,7 @@ def _pick_online_model() -> str:
 
 def _get_provider():
     from app.core.llm.provider_factory import get_llm_provider
-    return get_llm_provider()
-
-
-def _is_ollama_alive() -> bool:
-    # Reuse socket_handler helper first so existing monkeypatch-based tests
-    # and runtime behavior stay consistent across WS/SSE paths.
-    try:
-        from app.core.socket_handler import _is_ollama_alive as _legacy_alive
-        return bool(_legacy_alive())
-    except Exception:
-        pass
-
-    try:
-        import urllib.request as _ur
-        opener = _ur.build_opener(_ur.ProxyHandler({}))
-        opener.open("http://127.0.0.1:11434/api/tags", timeout=2).close()
-        return True
-    except Exception:
-        return False
-
-
-def _get_local_provider():
-    try:
-        from app.core.socket_handler import _get_local_provider as _legacy_provider
-        return _legacy_provider()
-    except Exception:
-        pass
-
-    from app.core.llm.ollama_llm_provider import OllamaLLMProvider
-    try:
-        import urllib.request as _ur
-        opener = _ur.build_opener(_ur.ProxyHandler({}))
-        with opener.open("http://127.0.0.1:11434/api/tags", timeout=3) as r:
-            tags = json.loads(r.read())
-        models = [m["name"] for m in tags.get("models", [])]
-        if models:
-            preferred = next(
-                (m for m in models if any(
-                    k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b")
-                )),
-                models[0],
-            )
-            return OllamaLLMProvider(model=preferred)
-    except Exception as e:
-        logger.warning("[AgentLoop] Could not query Ollama model list: %s", e)
-    return OllamaLLMProvider(model=None)
-
-
-def _is_online_failure(exc: Exception) -> bool:
-    """Check if the exception indicates a transient online failure (should try local)."""
-    name = type(exc).__name__
-    msg = str(exc).lower()
-    if name in ("ConnectionError", "Timeout", "ReadTimeout", "ConnectTimeout"):
-        return True
-    if "timeout" in msg or "connection" in msg or "502" in msg or "503" in msg:
-        return True
-    model_failure_markers = (
-        "not found",
-        "does not exist",
-        "model_not_found",
-        "invalid_argument",
-        "not supported",
-        "permission denied",
-        "does not have access",
-        "interactions api",
-        "requires interactions",
-        "client.interactions",
-    )
-    if any(m in msg for m in model_failure_markers):
-        return True
-    return False
+    return get_llm_provider(provider="gemini", allow_local_fallback=False)
 
 
 def _call_llm_sync(prompt: str, use_local_only: bool = False) -> Optional[str]:
@@ -1486,6 +1285,13 @@ def _run_task_stage_verify(
     """Run stage verification for agent_loop task mode.
 
     Returns verification dict or None if verification is not applicable/failed.
+
+    Uses a heuristic approach instead of a separate LLM call: if all tracked
+    files are marked as modified and at least one write op succeeded, we treat
+    the task as complete.  An extra LLM round-trip cannot reliably verify DOCX
+    content (it never reads the file), and when it falsely returns
+    completed=false it injects a dedup warning that causes the main LLM to
+    produce confusing "没有执行" final messages.
     """
     # Only run verification when there are actual file changes to evaluate
     if not file_states:
@@ -1494,33 +1300,13 @@ def _run_task_stage_verify(
     if not any(v >= 1 for v in completed_write_ops.values()):
         return None
 
-    try:
-        from app.core.workflow_engine import call_llm_json
+    # Heuristic: all tracked files modified → task is done.
+    all_modified = all(s.get("modified") for s in file_states)
+    if not all_modified:
+        return None  # Some files not yet modified; let the loop continue
 
-        state_parts = []
-        for s in file_states:
-            status = "已修改" if s.get("modified") else ("存在" if s.get("exists") else "不存在")
-            state_parts.append(f"- {s.get('path', '?')}: {status}")
-            if s.get("preview"):
-                state_parts.append(f"  预览: {str(s['preview'])[:200]}")
-        state_text = "\n".join(state_parts)
-
-        prompt_text = (
-            f"请验证以下任务是否已成功完成：\n\n"
-            f"## 任务描述\n{task}\n\n"
-            f"## 文件状态\n{state_text or '无文件状态信息'}\n\n"
-            "以 JSON 格式输出：\n"
-            '{"completed": true/false, "confidence": 0.0-1.0, "summary": "说明", "remaining_steps": ["如有"]}'
-        )
-
-        model_mode = "auto"
-        if hasattr(request, "extra") and isinstance(request.extra, dict):
-            model_mode = str(request.extra.get("model_mode") or "auto").lower() or "auto"
-
-        result = call_llm_json(prompt_text, model_mode=model_mode)
-        if isinstance(result, dict):
-            return result
-        return None
-    except Exception as exc:
-        logger.debug("[AgentLoop] Stage verify failed: %s", exc)
-        return None
+    modified_names = [
+        os.path.basename(str(s.get("path") or "")) for s in file_states
+    ]
+    summary = "文件已成功修改：" + "、".join(n for n in modified_names if n)
+    return {"completed": True, "confidence": 1.0, "summary": summary, "remaining_steps": []}

@@ -57,6 +57,8 @@ class AgentRequest:
     csv_data: str = ""                  # CSV table data
     action_type: str = ""               # "polish" | "translate" | etc.
     action_system_prompt: str = ""      # pre-built prompt from FloatingToolbar
+    live_doc: bool = False               # stream tokens to document in parallel
+    live_mode: str = "replace"           # "replace" (overwrite selection) | "append" (insert at cursor)
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -111,6 +113,9 @@ class EventType(Enum):
     # Code execution result
     CODE_RESULT = "code_result"
 
+    # Live document streaming
+    LIVE_DOC_COMMIT = "live_doc_commit"
+
 
 @dataclass
 class AgentEvent:
@@ -155,12 +160,36 @@ def evt_phase(phases: List[Dict], current: str, status: str = "running") -> Agen
     })
 
 
-def evt_stream_chunk(chunk: str) -> AgentEvent:
-    return AgentEvent(EventType.STREAM_CHUNK, {"chunk": chunk})
+def evt_stream_chunk(
+    chunk: str,
+    live_doc: bool = False,
+    live_mode: str = "replace",
+    request_id: str = "",
+) -> AgentEvent:
+    return AgentEvent(EventType.STREAM_CHUNK, {
+        "chunk": chunk,
+        "live_doc": live_doc,
+        "live_mode": live_mode,
+        "request_id": request_id,
+    })
 
 
 def evt_stream_block(text: str) -> AgentEvent:
     return AgentEvent(EventType.STREAM_BLOCK, {"text": text})
+
+
+def evt_live_doc_commit(
+    full_text: str,
+    live_mode: str = "replace",
+    original_selection: str = "",
+    request_id: str = "",
+) -> AgentEvent:
+    return AgentEvent(EventType.LIVE_DOC_COMMIT, {
+        "full_text": full_text,
+        "live_mode": live_mode,
+        "original_selection": original_selection,
+        "request_id": request_id,
+    })
 
 
 def evt_tool_call(tool_call: Dict[str, Any]) -> AgentEvent:

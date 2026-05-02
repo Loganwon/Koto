@@ -19,9 +19,14 @@ export class SocketBridge {
     this._panel = null;
     /** Track current request context for task_complete finalisation */
     this._pendingAction = null;
+    /** @type {import('./DocLiveRenderer').DocLiveRenderer|null} */
+    this._liveRenderer = null;
   }
 
   setAIPanel(panel) { this._panel = panel; }
+
+  /** Wire up the DocLiveRenderer for live document streaming. */
+  setLiveRenderer(renderer) { this._liveRenderer = renderer; }
 
   // ══════════════════ Init ══════════════════
 
@@ -63,6 +68,9 @@ export class SocketBridge {
     this._socket.on('agent_proposals',       (p) => this._handleProposals(p));
     this._socket.on('doc_tool_call',         (p) => this._handleDocToolCall(p));
     this._socket.on('skill_suggestions',      (p) => this._handleSkillSuggestions(p));
+    // Live document streaming events
+    this._socket.on('doc_live_chunk',        (p) => this._handleLiveChunk(p));
+    this._socket.on('doc_live_commit',       (p) => this._handleLiveCommit(p));
   }
 
   // ══════════════════ Send ══════════════════
@@ -109,9 +117,11 @@ export class SocketBridge {
         language: '',
         csv_data: '',
         output_mode: 'inline',
-        model_mode: localStorage.getItem('wa_locked_model') || 'auto',
+        model_mode: localStorage.getItem('wa_locked_model') === 'local' ? 'local' : 'cloud',
         _action_system_prompt: promptPrefix,
         _action_type: actionType,
+        live_doc: !!(window.__koto?.docxViewer?.isActive()),
+        live_mode: selText ? 'replace' : 'append',
       });
     } else {
       // Fallback: legacy path for custom_instruction / code_exec
@@ -206,6 +216,28 @@ export class SocketBridge {
     if (suggestions.length && this._panel) {
       this._panel.showSkillSuggestions(suggestions);
     }
+  }
+
+  // ── Live document streaming handlers ──────────────────────────
+
+  _handleLiveChunk(payload) {
+    const dv = window.__koto?.docxViewer;
+    if (!dv?.isActive() || !this._liveRenderer) return;
+    // Start a new live session when the request_id changes
+    if (payload.request_id && payload.request_id !== this._liveRenderer._requestId) {
+      this._liveRenderer.start(payload.mode || 'replace', null, payload.request_id);
+    }
+    this._liveRenderer.push(payload.chunk || '');
+  }
+
+  _handleLiveCommit(payload) {
+    const dv = window.__koto?.docxViewer;
+    if (!dv?.isActive() || !this._liveRenderer) return;
+    this._liveRenderer.showCommitBar(
+      payload.full_text || '',
+      payload.mode || 'replace',
+      payload.original_selection || '',
+    );
   }
 
   /**
@@ -458,7 +490,7 @@ export class SocketBridge {
       language: '',
       csv_data: '',
       output_mode: 'inline',
-      model_mode: localStorage.getItem('wa_locked_model') || 'auto',
+      model_mode: localStorage.getItem('wa_locked_model') === 'local' ? 'local' : 'cloud',
     });
   }
 }

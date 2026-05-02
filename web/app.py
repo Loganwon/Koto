@@ -8,6 +8,7 @@ _os.environ.setdefault("NO_PROXY", "127.0.0.1,localhost,::1")
 _os.environ.setdefault("no_proxy", "127.0.0.1,localhost,::1")
 
 import asyncio
+import importlib
 import json
 import logging
 import os
@@ -81,6 +82,7 @@ def _secure_filename(name: str) -> str:
 
 # Import new routing modules
 from app.core.routing import SmartDispatcher
+from app.core.llm.model_mode import normalize_model_mode
 from app.core.llm.model_capabilities import (
     DEFAULT_INTERACTIONS_ONLY_MODELS as _DEFAULT_INTERACTIONS_ONLY_MODELS,
     get_interactions_only_model_set as _get_interactions_only_model_set,
@@ -737,7 +739,7 @@ _client_mode_key: tuple = (None, None)  # (model_mode, local_model_tag)
 def get_client():
     """
     获取 AI 客户端（懒加载）。
-    - 若 user_settings.json 中 model_mode == "local"，返回 OllamaClientProxy
+    - 若 user_settings.json 中 model_mode == "local"，仅返回 OllamaClientProxy
     - 否则返回 Gemini genai.Client（原有行为）
     """
     global _client, _client_mode_key
@@ -749,15 +751,17 @@ def get_client():
         _client = None
 
     if _client is None:
-        if model_mode == "local" and local_model:
+        if model_mode == "local":
             try:
                 from app.core.llm.ollama_provider import OllamaClientProxy
 
-                _client = OllamaClientProxy(model_tag=local_model)
-                _app_logger.debug(f"[Koto] 🦙 使用本地模型: {local_model}")
+                _client = OllamaClientProxy(model_tag=local_model or None)
+                _app_logger.debug(
+                    f"[Koto] 🦙 使用本地模型: {local_model or 'auto-select'}"
+                )
             except Exception as _e:
-                _app_logger.warning(f"[Koto] ⚠️ Ollama 初始化失败，回退到 Gemini: {_e}")
-                _client = create_client()
+                _app_logger.error(f"[Koto] ❌ 本地模式下 Ollama 初始化失败: {_e}")
+                raise RuntimeError("本地模式已启用，但 Ollama 初始化失败") from _e
         else:
             _client = create_client()
         _client_mode_key = current_key
@@ -6096,7 +6100,7 @@ _threading.Thread(
 ).start()
 
 # === Ollama 后备路由 (可选) ===
-LOCAL_ROUTER_MODEL = "qwen3:8b"  # 升级: Qwen3 中英文能力远超旧模型
+LOCAL_ROUTER_MODEL = "qwen3.5:9b"  # 升级: Qwen3.5 中英文能力更强
 OLLAMA_API_URL = "http://127.0.0.1:11434/api/generate"
 
 
@@ -8702,6 +8706,7 @@ def chat_stream():
 
         def generate_multi_step():
             _ms_task_id = f"multi_step_{session_name}_{int(time.time() * 1000)}"
+            _total_steps = len(subtasks)
             # === 立即发送任务分类信息 ===
             pattern = multi_step_info.get("pattern", "unknown")
             classification_msg = f"🎯 任务分类: 🔄 多步任务\n"
@@ -8711,7 +8716,7 @@ def chat_stream():
             _planned_steps = []
             for i, subtask in enumerate(subtasks):
                 _planned_steps.append({"index": i + 1, "title": subtask.get("description", f"步骤 {i + 1}")})
-            yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'status': 'init', 'steps': _planned_steps, 'step_total': len(subtasks)})}\n\n"
+            yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'status': 'init', 'steps': _planned_steps, 'step_total': _total_steps})}\n\n"
             
             # 执行所有子任务（逐步流式反馈）
             try:
@@ -8779,7 +8784,7 @@ def chat_stream():
 
                     if etype == "progress":
                         _step_no = int(evt.get("step_number") or 0)
-                        _step_total = int(total_steps or 0)
+                        _step_total = int(evt.get("step_total") or _total_steps or 0)
                         _pct = evt.get("progress")
                         if _pct is None:
                             if _step_total > 0 and _step_no > 0:
@@ -8795,7 +8800,7 @@ def chat_stream():
                         task_type_done = evt.get("task_type", "")
                         success = evt.get("success", False)
                         preview = evt.get("output_preview", "")
-                        _step_total = int(total_steps or 0)
+                        _step_total = int(evt.get("step_total") or _total_steps or 0)
                         _pct = min(95, int((step_idx / _step_total) * 100)) if _step_total > 0 else 0
                         if success:
                             yield f"data: {json.dumps({'type': 'progress', 'task_id': _ms_task_id, 'stage': 'step_complete', 'step_number': step_idx, 'step_total': _step_total, 'progress': _pct, 'message': f'步骤 {step_idx} 完成', 'detail': preview[:80]})}\n\n"
@@ -8826,8 +8831,8 @@ def chat_stream():
 
                     elif etype == "plan_done":
                         _plan_done_event = evt
-                        yield f"data: {json.dumps({'type': 'progress', 'task_id': _ms_task_id, 'stage': 'complete', 'step_number': total_steps, 'step_total': total_steps, 'progress': 100, 'message': '✅ 多步任务执行完成', 'detail': f'共 {total_steps} 个步骤'})}\n\n"
-                        yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'step_index': total_steps, 'step_total': total_steps, 'status': 'all_done', 'title': '多步任务执行完成', 'detail': f'共 {total_steps} 个步骤', 'progress': 100})}\n\n"
+                        yield f"data: {json.dumps({'type': 'progress', 'task_id': _ms_task_id, 'stage': 'complete', 'step_number': _total_steps, 'step_total': _total_steps, 'progress': 100, 'message': '✅ 多步任务执行完成', 'detail': f'共 {_total_steps} 个步骤'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'step_index': _total_steps, 'step_total': _total_steps, 'status': 'all_done', 'title': '多步任务执行完成', 'detail': f'共 {_total_steps} 个步骤', 'progress': 100})}\n\n"
                         # 收集保存文件
                         saved_files.extend(evt.get("saved_files") or [])
                         # 同步 context 快照
@@ -18189,7 +18194,7 @@ def editor_ai_stream():
     full_text = (data.get("full_text") or "").strip()
     csv_data = (data.get("csv_data") or "").strip()
     doc_mode = (data.get("doc_mode") or "normal").strip()
-    model_mode = (data.get("model_mode") or "auto").strip().lower()
+    model_mode = normalize_model_mode(data.get("model_mode"), default="cloud")
     output_mode = (data.get("output_mode") or "inline").strip() or "inline"
     file_type = (data.get("file_type") or "").lower().strip()
     file_name = (data.get("file_name") or "").strip()
@@ -18291,6 +18296,7 @@ def editor_ai_stream():
                 runtime = OpenClawTaskRuntime(
                     socketio=socketio,
                     model_id=normalized_model_id,
+                    api_key=API_KEY or None,
                     session_store=session_manager,
                 )
                 task_request = TaskRuntimeRequest(
@@ -18768,7 +18774,7 @@ def editor_ai_chart():
     data_context = (data.get("data_context") or data.get("selection") or "").strip()
     instruction = (data.get("instruction") or "").strip()
     lang = (data.get("lang") or "python").strip().lower()
-    model_mode = (data.get("model_mode") or "auto").strip()  # 'local' | 'auto'
+    model_mode = normalize_model_mode(data.get("model_mode"), default="cloud")  # 'local' | 'cloud'
     if lang not in ("python", "r"):
         lang = "python"
 
@@ -19116,7 +19122,7 @@ def editor_skill_execute():
                         })
 
             task = _build_openclaw_task(skill_meta, run_params, files_ctx)
-            _task_model_mode = str(run_params.get("model_mode", "auto") or "auto").strip().lower()
+            _task_model_mode = normalize_model_mode(run_params.get("model_mode"), default="cloud")
             session_id = request_session_id or str(run_params.get("session_id") or "").strip()
             options = {
                 "model_mode": _task_model_mode,
@@ -19132,6 +19138,7 @@ def editor_skill_execute():
             runtime = OpenClawTaskRuntime(
                 socketio=socketio,
                 model_id=options.get("model_id") or "",
+                api_key=API_KEY or None,
                 session_store=session_manager,
             )
             task_request = TaskRuntimeRequest(
@@ -19196,7 +19203,7 @@ def editor_task_execute():
     files = data.get("files") or []
     options = data.get("options") or {}
 
-    _model_mode = str(options.get("model_mode", "auto") or "auto").strip().lower()
+    _model_mode = normalize_model_mode(options.get("model_mode"), default="cloud")
     options["model_mode"] = _model_mode
     options["model_id"] = _normalize_file_task_model_id(_model_mode, options.get("model_id", "") or "")
     history = list(data.get("history") or options.get("history") or [])
@@ -19208,6 +19215,7 @@ def editor_task_execute():
             runtime = OpenClawTaskRuntime(
                 socketio=socketio,
                 model_id=options.get("model_id") or "",
+                api_key=API_KEY or None,
                 session_store=session_manager,
             )
             task_request = TaskRuntimeRequest(

@@ -7,7 +7,6 @@ These helpers encapsulate the compound-task detection (TaskDecomposer) and
 RAG history-continuation analysis (ContextAnalyzer) that SmartDispatcher uses
 as a safety net after all fast-track channels have been exhausted.
 """
-
 from __future__ import annotations
 
 import logging
@@ -28,7 +27,9 @@ class FallbackRouter:
     # Compound task detection
     # ─────────────────────────────────────────────────────────────────────────
     @classmethod
-    def check_compound_task(cls, user_input: str, LocalExecutor=None) -> "str | None":
+    def check_compound_task(
+        cls, user_input: str, LocalExecutor=None
+    ) -> "str | None":
         """
         Check whether *user_input* describes a compound multi-step task.
 

@@ -326,6 +326,7 @@ export class FileManager {
         this._docxViewer.setMeta(meta);
       }
 
+      window.__koto.lastDocxBuffer = buffer;   // DocLiveRenderer dismiss path
       await this._docxViewer.render(buffer, name);
     } catch (e) {
       console.error('[FileManager] DOCX fetch failed:', e);

@@ -96,7 +96,7 @@ class TestCallLlm:
         result = call_llm("你好", model_mode="auto")
         assert result == "AI 回复"
         # auto → 不传参数，由 provider_factory 自动检测
-        mock_factory.assert_called_once_with()
+        mock_factory.assert_called_once_with(allow_local_fallback=False)
 
     @patch("app.core.llm.provider_factory.get_llm_provider")
     def test_call_llm_json_parses_raw_json(self, mock_factory):

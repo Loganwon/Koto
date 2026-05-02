@@ -44,6 +44,7 @@ import { FloatingToolbar } from './src/FloatingToolbar.js';
 import { DocxViewer } from './src/DocxViewer.js';
 import { PptxViewer } from './src/PptxViewer.js';
 import { ExcelViewer } from './src/ExcelViewer.js';
+import { DocLiveRenderer } from './src/DocLiveRenderer.js';
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -155,6 +156,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 7. 启动 WebSocket 连接
     socketBridge.init();
+
+    // 7b. 接线 DocLiveRenderer（AI 实时文档流式写入）
+    const liveRenderer = new DocLiveRenderer(docxViewer);
+    socketBridge.setLiveRenderer(liveRenderer);
+    window.__koto.liveRenderer = liveRenderer;
 
     // 8. Drop-zone on #center-doc — accept chart images (from AI panel) and OS image files.
     // NOTE: Register on DOCUMENT level (capture phase) so our handler fires BEFORE Univer's

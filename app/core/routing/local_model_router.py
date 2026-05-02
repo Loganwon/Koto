@@ -76,7 +76,8 @@ class LocalModelRouter:
 
     # 推荐的快速模型（按优先级排序）
     OLLAMA_MODELS = [
-        "qwen3:8b",      # ★ 最佳中英文能力，RTX 4090 流畅运行
+        "qwen3.5:9b",    # ★ 最佳中英文能力
+        "qwen3:8b",      # 次选
         "qwen3:4b",      # 快速备选
         "qwen3:1.7b",    # 轻量备选
         "qwen2.5:7b",    # 旧版但质量好
@@ -891,8 +892,9 @@ class LocalModelRouter:
 
     # 用于响应生成的模型（按偏好排序，比分类模型可以更大）
     OLLAMA_RESPONSE_MODELS = [
-        "qwen3:8b",  # ★ 最佳，中英文流畅
-        "qwen3:4b",  # 快速备选
+        "qwen3.5:9b",  # ★ 最佳，中英文流畅
+        "qwen3:8b",    # 次选
+        "qwen3:4b",    # 快速备选
         "qwen2.5:7b",  # 旧版质量好
         "qwen2.5:3b",  # 旧版快速
         "llama3.2:3b",

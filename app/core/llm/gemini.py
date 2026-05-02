@@ -9,10 +9,7 @@ from typing import Any, Dict, Generator, List, Optional, Union
 
 from .base import LLMProvider
 from .gemini_config import get_gemini_api_key, load_gemini_config_env
-from .model_capabilities import (
-    get_interactions_only_model_set,
-    is_interactions_only_model,
-)
+from .model_capabilities import is_interactions_only_model
 
 try:
     from google import genai
@@ -127,13 +124,8 @@ def _ensure_gemini_proxy_configured() -> Optional[str]:
             continue
     return None
 
-# Interactions-only models: cannot use client.models.generate_content()
-# Must be routed through rc.interactions.create(agent=...) instead.
-# NOTE: gemini-2.5-flash and gemini-2.5-pro are regular models
-# (use generate_content). Only deep-research-* are actual Interactions API agents.
-_INTERACTIONS_ONLY_MODELS: frozenset = frozenset(get_interactions_only_model_set())
-# No background=True restriction needed for current interactions models
-_NO_BACKGROUND_MODELS: frozenset = frozenset()
+# model_capabilities.is_interactions_only_model() is evaluated per-call (not baked
+# at import time), so env overrides (KOTO_INTERACTIONS_ONLY_MODELS) are always live.
 
 
 class GeminiProvider(LLMProvider):
@@ -252,7 +244,7 @@ class GeminiProvider(LLMProvider):
             raise ImportError("google.genai client not initialized")
 
         # Route interactions-only models through Interactions API transparently
-        if is_interactions_only_model(model, _INTERACTIONS_ONLY_MODELS):
+        if is_interactions_only_model(model):
             result = self._call_via_interactions_api(
                 model, prompt, sys_instruction=system_instruction, stream=stream
             )
@@ -533,22 +525,28 @@ class GeminiProvider(LLMProvider):
                     }
                 )
             else:
-                text = msg.get("content")
-                if text:
-                    parts.append({"text": str(text)})
+                # For model messages that carry raw parts (e.g. thinking models with
+                # thought_signature), use those directly — they already contain text,
+                # function_call, and thought_signature fields.
+                if role == "model" and msg.get("parts"):
+                    parts = list(msg["parts"])
+                else:
+                    text = msg.get("content")
+                    if text:
+                        parts.append({"text": str(text)})
 
-            for tool_call in msg.get("tool_calls", []) or []:
-                parts.append(
-                    {
-                        "function_call": {
-                            "name": tool_call.get("name"),
-                            "args": tool_call.get("args", {}),
-                        }
-                    }
-                )
+                    for tool_call in msg.get("tool_calls", []) or []:
+                        parts.append(
+                            {
+                                "function_call": {
+                                    "name": tool_call.get("name"),
+                                    "args": tool_call.get("args", {}),
+                                }
+                            }
+                        )
 
-            if not parts and msg.get("parts"):
-                parts = msg["parts"]
+                    if not parts and msg.get("parts"):
+                        parts = list(msg["parts"])
 
             if parts:
                 contents.append({"role": role, "parts": parts})
@@ -585,7 +583,13 @@ class GeminiProvider(LLMProvider):
                         "args": dict(function_call.args or {}),
                     }
                     function_calls.append(fc_dict)
-                    raw_parts.append({"function_call": fc_dict})
+                    # Preserve thought_signature at the Part level — required for
+                    # thinking models in multi-turn tool-calling conversations.
+                    part_dict: Dict[str, Any] = {"function_call": fc_dict}
+                    part_thought_sig = getattr(part, "thought_signature", None) or ""
+                    if part_thought_sig:
+                        part_dict["thought_signature"] = part_thought_sig
+                    raw_parts.append(part_dict)
                 elif getattr(part, "text", None):
                     raw_parts.append({"text": part.text})
 
@@ -670,109 +674,120 @@ class GeminiProvider(LLMProvider):
         prompt,
         sys_instruction: str = None,
         stream: bool = False,
-        timeout: float = 90.0,
+        timeout: float = 45.0,
     ):
-        """Route interactions-only models (e.g. deep-research-pro-preview) via rc.interactions.create().
+        """Route gemini-3.x / deep-research models via rc.interactions.create().
 
-        Returns the same dict format as generate_content() so all callers work unchanged.
-        For stream=True, yields the full response as a single chunk (Interactions API has
-        no token-level streaming).
+        - gemini-3.x  → background=False (sync, hard daemon-thread timeout)
+        - deep-research-* → background=True (async create + status polling)
+
+        Returns the same dict format as generate_content() for transparent routing.
+        For stream=True, yields the full response as a single chunk (Interactions API
+        has no token-level streaming).
         """
-        flat = self._flatten_prompt_to_text(prompt)
-        full_input = flat
-        if sys_instruction:
-            full_input = f"[\u7cfb\u7edf\u6307\u4ee4]\n{sys_instruction}\n\n[\u7528\u6237\u8f93\u5165]\n{flat}"
+        normalized = model_id.lstrip("models/")
+        is_deep_research = normalized.startswith("deep-research-")
+        background = is_deep_research
 
-        # Build a client with bounded HTTP timeout; overall polling window is
-        # controlled by the `timeout` argument below.
+        # Build plain-text input (Interactions API accepts text only)
+        flat = self._flatten_prompt_to_text(prompt)
+        if sys_instruction:
+            flat = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{flat}"
+        flat = flat[:80000]
+
+        rc = self._make_interactions_client(timeout=timeout, is_sync=not is_deep_research)
+
+        if background:
+            # Async: create() returns immediately, poll until done
+            interaction = rc.interactions.create(
+                agent=model_id, input=flat, background=True, stream=False,
+            )
+            start = time.time()
+            iid = getattr(interaction, "id", None)
+            status = getattr(interaction, "status", "")
+            while (
+                iid
+                and status not in ("completed", "failed", "cancelled")
+                and (time.time() - start) < timeout
+            ):
+                time.sleep(2)
+                interaction = rc.interactions.get(iid)
+                status = getattr(interaction, "status", "")
+            if status not in ("completed", "failed", "cancelled"):
+                try:
+                    rc.interactions.cancel(iid)
+                except Exception:
+                    pass
+                raise TimeoutError(
+                    f"Interactions API polling timeout ({timeout}s) model={model_id}"
+                )
+        else:
+            # Sync: create() blocks until model finishes. Wrap in daemon thread so the
+            # hard timeout fires even when httpx chunked-transfer keeps the socket open.
+            interaction = self._run_call_with_hard_timeout(
+                lambda: rc.interactions.create(
+                    model=model_id, input=flat, background=False, stream=False,
+                ),
+                timeout_seconds=timeout,
+                timeout_message=f"Interactions API sync timeout ({timeout}s) model={model_id}",
+            )
+
+        text = self._extract_interactions_text(interaction).strip()
+
+        if stream:
+            def _single_chunk():
+                yield {"content": text, "finish_reason": "stop"}
+            return _single_chunk()
+
+        return {"content": text, "tool_calls": [], "usage": self._normalize_usage(interaction)}
+
+    def _make_interactions_client(self, timeout: float, is_sync: bool):
+        """Build a genai.Client tuned for Interactions API calls.
+
+        For sync calls (is_sync=True) the HTTP read timeout equals `timeout` so the
+        connection is not kept alive longer than necessary.  For async poll calls the
+        per-request timeout can be much shorter.
+        """
         try:
             import httpx
             from google.genai._api_client import HttpOptions as _HttpOptions
 
-            _connect_timeout = float(os.getenv("GEMINI_CONNECT_TIMEOUT", "10"))
-            _ia_http_timeout = float(
+            connect_t = float(os.getenv("GEMINI_CONNECT_TIMEOUT", "10"))
+            # Sync: daemon-thread enforces wall-clock timeout; httpx is a secondary
+            # guard.  Async: poll requests are tiny, 45 s is plenty.
+            read_t = timeout if is_sync else float(
                 os.getenv("GEMINI_INTERACTIONS_HTTP_TIMEOUT", "45")
             )
-            http_client = httpx.Client(
-                timeout=httpx.Timeout(_ia_http_timeout, connect=_connect_timeout),
-                verify=True,
+            hc = httpx.Client(
+                timeout=httpx.Timeout(read_t, connect=connect_t), verify=True
             )
-            rc = genai.Client(
+            return genai.Client(
                 api_key=self.api_key,
-                http_options=_HttpOptions(
-                    api_version="v1beta", httpx_client=http_client
-                ),
+                http_options=_HttpOptions(api_version="v1beta", httpx_client=hc),
             )
         except Exception:
-            rc = self.client
-
-        background = model_id not in _NO_BACKGROUND_MODELS
-        interaction = rc.interactions.create(
-            agent=model_id,
-            input=full_input[:80000],
-            background=background,
-            stream=False,
-        )
-
-        interaction_id = getattr(interaction, "id", None)
-        status = getattr(interaction, "status", "")
-        start_wait = time.time()
-
-        while (
-            interaction_id
-            and status not in ("completed", "failed", "cancelled")
-            and (time.time() - start_wait) < timeout
-        ):
-            time.sleep(2)
-            interaction = rc.interactions.get(interaction_id)
-            status = getattr(interaction, "status", "")
-
-        if status not in ("completed", "failed", "cancelled"):
-            try:
-                rc.interactions.cancel(interaction_id)
-            except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
-            raise TimeoutError(
-                f"Interactions API timeout ({timeout}s) model={model_id}"
-            )
-
-        text = (
-            self._get_interactions_text(getattr(interaction, "outputs", None))
-            or self._get_interactions_text(interaction)
-        ).strip()
-
-        if stream:
-            # Interactions API has no token-level streaming; emit as a single chunk
-            def _single_chunk():
-                yield {"content": text, "finish_reason": "stop"}
-
-            return _single_chunk()
-
-        usage = self._normalize_usage(interaction)
-        return {"content": text, "tool_calls": [], "usage": usage}
+            return self.client
 
     @staticmethod
-    def _get_interactions_text(obj) -> str:
-        """Recursively extract text from an Interactions API response object."""
+    def _extract_interactions_text(obj) -> str:
+        """Extract plain text from an Interactions API response object."""
         if obj is None:
             return ""
         if isinstance(obj, str):
             return obj
-        if hasattr(obj, "text") and obj.text:
-            return str(obj.text)
-        if hasattr(obj, "parts"):
-            return " ".join(
-                str(p.text) for p in (obj.parts or []) if hasattr(p, "text") and p.text
-            )
-        if hasattr(obj, "outputs"):
-            texts = [
-                GeminiProvider._get_interactions_text(o) for o in (obj.outputs or [])
-            ]
-            return "\n".join(t for t in texts if t)
+        # Direct .text attribute — most common path for sync responses
+        text = getattr(obj, "text", None)
+        if text:
+            return str(text)
+        # Parts list (content / message object)
+        parts = getattr(obj, "parts", None)
+        if parts:
+            return " ".join(str(p.text) for p in parts if getattr(p, "text", None))
+        # Outputs list — background=True responses
+        outputs = getattr(obj, "outputs", None)
+        if outputs:
+            chunks = [GeminiProvider._extract_interactions_text(o) for o in outputs]
+            return "\n".join(c for c in chunks if c)
         return ""
 
     @staticmethod

@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 _OLLAMA_HOST = "127.0.0.1"
 _OLLAMA_PORT = 11434
 _OLLAMA_URL = f"http://{_OLLAMA_HOST}:{_OLLAMA_PORT}"
-_AI_MODEL = "qwen3:8b"
+_AI_MODEL = "qwen3.5:9b"
 
 _QA_SYSTEM = """\
 你是文件管家助手，已获得若干文件的摘要内容。

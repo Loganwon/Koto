@@ -81,10 +81,31 @@ _TRANSIENT_MODEL_ERROR_PATTERNS = [
     r"ssl.*error",
     r"connection.*aborted",
     r"broken.*pipe",
+    # google-genai SDK 内部兼容性错误（特定预览模型可能触发，换模型可解决）
+    r"has no attribute.*headers",
+    r"HttpResponse.*headers",
+    r"response_stream.*httpx",
+    r"Expected.*response_stream.*httpx",
+    r"has no attribute.*body_segments",
 ]
 
 # 超时导致的模型不可用缓存 TTL（比模型本身 404 的 5 分钟更短）
 _TIMEOUT_UNAVAILABLE_TTL = 30  # 30 秒后重试
+
+# ── 可原地重试的生成错误（不换模型，只重试当前模型）────────────────────────────
+# 这类错误是模型偶发性生成失败，重试同一模型通常可以解决。
+_RETRYABLE_GENERATION_PATTERNS = [
+    r"malformed_tool_call",
+    r"invalid json syntax",
+    r"output could not be parsed",
+]
+_RETRYABLE_GENERATION_MAX = 2  # 最多重试 2 次
+
+
+def _is_retryable_generation_error(exc: Exception) -> bool:
+    """判断是否为可原地重试的生成错误（如模型输出了无效的 tool call JSON）。"""
+    msg = str(exc).lower()
+    return any(re.search(p, msg, re.IGNORECASE) for p in _RETRYABLE_GENERATION_PATTERNS)
 
 
 def _is_location_blocked_error(exc: Exception) -> bool:
@@ -104,40 +125,33 @@ def _is_transient_error(exc: Exception) -> bool:
     return any(re.search(p, msg, re.IGNORECASE) for p in _TRANSIENT_MODEL_ERROR_PATTERNS)
 
 # ── 通用降级链（无任务信息时使用）──────────────────────────────────────────────
-# gemini-3-flash-preview 仍是轻量交互主力。
-# gemini-3.1-pro-preview 已实测可用于高质量重任务与工具调用。
+# 3.x 模型优先；2.5 系列作为稳定兜底。
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
-    "gemini-3-flash-preview",   # 首选：当前主力稳定模型
-    "gemini-3.1-pro-preview",   # 重任务优先 Pro 3.1
-    "gemini-2.5-flash",         # 稳定快速备选
-    "gemini-2.5-flash-lite",    # 轻量兜底
-    "gemini-2.5-pro",           # 高质量备选
-    "gemini-3-pro-preview",     # 最后再尝试慢速 preview pro
+    "gemini-3-flash-preview",   # 首选：当前轻量主力
+    "gemini-3.1-pro-preview",   # 重任务 Pro 备选
+    "gemini-2.5-flash",         # 稳定快速兜底
+    "gemini-2.5-flash-lite",    # 轻量最终兜底
 ]
 
 # ── 按任务类型的专属降级链 ──────────────────────────────────────────────────────
-# 只有 deep-research-pro-preview-* 才是 Interactions API agent（使用 agent= 字段）。
+# 原则：3.x 模型始终先于 2.x 模型；链长控制在 3-4 个（越短越快降级判断）。
 _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
     "CHAT": [
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.5-pro",
+        "gemini-3-flash-preview",   # 快速对话主力
+        "gemini-2.5-flash",         # 稳定备选
+        "gemini-2.5-flash-lite",    # 轻量兜底
     ],
     "CODER": [
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-3-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash-lite",
+        "gemini-3.1-pro-preview",   # 代码首选：最强推理
+        "gemini-3-pro-preview",     # Pro 3 备选
+        "gemini-3-flash-preview",   # 快速备选
+        "gemini-2.5-flash",         # 稳定兜底
     ],
     "RESEARCH": [
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
+        "gemini-3.1-pro-preview",   # 长上下文推理
+        "gemini-3-pro-preview",     # Pro 3 备选
+        "gemini-3-flash-preview",   # 快速备选
+        "gemini-2.5-flash",         # 稳定兜底
     ],
     "PAINTER": [
         "gemini-3.1-flash-image-preview",
@@ -147,65 +161,51 @@ _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
         "gemini-3-flash-preview",
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
-        "gemini-2.5-pro",
     ],
     "FILE_GEN": [
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-3-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash-lite",
+        "gemini-3.1-pro-preview",   # 文档生成需要高质量
+        "gemini-3-pro-preview",     # Pro 3 备选
+        "gemini-3-flash-preview",   # 快速备选
+        "gemini-2.5-flash",         # 稳定兜底
     ],
     "FILE_TASK": [
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash-lite",
-        "gemini-3-pro-preview",
+        "gemini-3.1-pro-preview",   # 文件任务首选：工具调用能力强
+        "gemini-3-flash-preview",   # 快速备选（工具调用支持良好）
+        "gemini-2.5-flash",         # 稳定兜底
+        "gemini-2.5-flash-lite",    # 轻量最终兜底
     ],
     "AGENT": [
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash-lite",
-        "gemini-3-pro-preview",
+        "gemini-3.1-pro-preview",   # Agent 首选：多步推理最强
+        "gemini-3-flash-preview",   # 快速备选
+        "gemini-2.5-flash",         # 稳定兜底
+        "gemini-2.5-flash-lite",    # 轻量最终兜底
     ],
     "DOC_ANNOTATE": [
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-3-flash-preview",
-        "gemini-3-pro-preview",
+        "gemini-3.1-pro-preview",   # 文档注释需要理解能力
+        "gemini-3-flash-preview",   # 快速备选
+        "gemini-2.5-flash",         # 稳定兜底
     ],
     "FILE_SEARCH": [
         "gemini-3-flash-preview",
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
-        "gemini-2.5-pro",
     ],
     "VISION": [
         "gemini-3-flash-preview",
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
-        "gemini-2.5-pro",
     ],
     "MULTI_STEP": [
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3-pro-preview",
-        "gemini-2.5-flash-lite",
+        "gemini-3.1-pro-preview",   # 多步任务首选
+        "gemini-3-pro-preview",     # Pro 3 备选
+        "gemini-3-flash-preview",   # 快速备选
+        "gemini-2.5-flash",         # 稳定兜底
     ],
     "COMPLEX": [
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3-pro-preview",
+        "gemini-3.1-pro-preview",   # 复杂任务首选
+        "gemini-3-pro-preview",     # Pro 3 备选
+        "gemini-3-flash-preview",   # 快速备选
+        "gemini-2.5-flash",         # 稳定兜底
     ],
 }
 
@@ -216,6 +216,9 @@ def _is_model_unavailable_error(exc: Exception) -> bool:
     只有模型不可用错误才需要切换模型重试。
     """
     msg = str(exc)
+    # thought_signature 错误是请求格式问题，不是模型不可用；换模型无法解决
+    if "thought_signature" in msg:
+        return False
     for pattern in _MODEL_NOT_FOUND_PATTERNS:
         if re.search(pattern, msg, re.IGNORECASE):
             return True
@@ -342,49 +345,66 @@ class ModelFallbackExecutor:
             if model_id in tried or not self.is_available(model_id):
                 continue
             tried.add(model_id)
-            try:
-                result = provider.generate_content(
-                    prompt=prompt,
-                    model=model_id,
-                    system_instruction=system_instruction,
-                    tools=tools,
-                    stream=stream,
-                    **kwargs,
-                )
-                if model_id != preferred_model:
-                    logger.info(
-                        f"[ModelFallback] ✅ 降级成功: {preferred_model} → {model_id} "
-                        f"(task={task_type})"
+            _gen_exc: Exception = None
+            for _gen_attempt in range(_RETRYABLE_GENERATION_MAX + 1):
+                try:
+                    result = provider.generate_content(
+                        prompt=prompt,
+                        model=model_id,
+                        system_instruction=system_instruction,
+                        tools=tools,
+                        stream=stream,
+                        **kwargs,
                     )
-                # Reset circuit breaker on success
-                with self._cascade_lock:
-                    self._cascade_failures[task_type] = 0
-                return result
-
-            except Exception as exc:
-                last_exc = exc
-                if _is_location_blocked_error(exc):
-                    # 地区/帐号限制：所有云端模型都会失败，无需继续尝试，直接跳出循环
-                    logger.warning(
-                        f"[ModelFallback] 🌐 地区限制，跳过剩余云端候选: {exc}"
-                    )
+                    if model_id != preferred_model:
+                        logger.info(
+                            f"[ModelFallback] ✅ 降级成功: {preferred_model} → {model_id} "
+                            f"(task={task_type})"
+                        )
+                    # Reset circuit breaker on success
+                    with self._cascade_lock:
+                        self._cascade_failures[task_type] = 0
+                    return result
+                except Exception as _exc:
+                    if _gen_attempt < _RETRYABLE_GENERATION_MAX and _is_retryable_generation_error(_exc):
+                        logger.warning(
+                            f"[ModelFallback] ⟳ 生成错误可重试，原地重试 {_gen_attempt + 1}/{_RETRYABLE_GENERATION_MAX}: "
+                            f"{model_id} — {_exc}"
+                        )
+                        _gen_exc = _exc
+                        continue
+                    _gen_exc = _exc
                     break
-                elif _is_model_unavailable_error(exc):
-                    self.mark_unavailable(model_id)
-                    logger.warning(
-                        f"[ModelFallback] 模型不可用，切换: {model_id} — {exc}"
-                    )
-                    # 继续尝试下一个候选
-                elif _is_transient_error(exc):
-                    # 超时/瞬时网络错误：短暂标记当前模型不可用，尝试下一个
-                    self.mark_unavailable(model_id, ttl=_TIMEOUT_UNAVAILABLE_TTL)
-                    logger.warning(
-                        f"[ModelFallback] ⏱ 超时/网络错误，切换到下一个模型: {model_id} — {exc}"
-                    )
-                    # 继续尝试下一个候选
-                else:
-                    # 非"模型不存在"错误（如 prompt 格式错误、鉴权失败等）直接上抛，不降级
-                    raise
+            exc = _gen_exc
+            last_exc = exc
+            if _is_location_blocked_error(exc):
+                # 地区/帐号限制：所有云端模型都会失败，无需继续尝试，直接跳出循环
+                logger.warning(
+                    f"[ModelFallback] 🌐 地区限制，跳过剩余云端候选: {exc}"
+                )
+                break
+            elif _is_model_unavailable_error(exc):
+                self.mark_unavailable(model_id)
+                logger.warning(
+                    f"[ModelFallback] 模型不可用，切换: {model_id} — {exc}"
+                )
+                # 继续尝试下一个候选
+            elif _is_transient_error(exc):
+                # 超时/瞬时网络错误：短暂标记当前模型不可用，尝试下一个
+                self.mark_unavailable(model_id, ttl=_TIMEOUT_UNAVAILABLE_TTL)
+                logger.warning(
+                    f"[ModelFallback] ⏱ 超时/网络错误，切换到下一个模型: {model_id} — {exc}"
+                )
+                # 继续尝试下一个候选
+            elif _is_retryable_generation_error(exc):
+                # 已在内层重试过 _RETRYABLE_GENERATION_MAX 次仍失败，继续尝试下一个候选
+                logger.warning(
+                    f"[ModelFallback] ⟳ 生成错误重试耗尽，切换到下一个候选: {model_id} — {exc}"
+                )
+                # 继续尝试下一个候选
+            else:
+                # 非"模型不存在"错误（如 prompt 格式错误、鉴权失败等）直接上抛，不降级
+                raise exc
 
         # 所有候选均失败 — 尝试 Ollama 本地兜底 ─────────────────────────────────
         _local_tried = False
@@ -398,6 +418,29 @@ class ModelFallbackExecutor:
                     if isinstance(prompt, list)
                     else [{"role": "user", "content": str(prompt)}]
                 )
+                # 若调用方传入了 tools，通过 OllamaLLMProvider 保留工具调用能力
+                if tools:
+                    try:
+                        from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+                        _ollama = OllamaLLMProvider()
+                        _result = _ollama.generate_content(
+                            prompt=_msgs,
+                            system_instruction=system_instruction or "",
+                            tools=tools,
+                            stream=False,
+                        )
+                        if _result and (_result.get("content") or _result.get("tool_calls")):
+                            logger.info(
+                                "[ModelFallback] ✅ 云端全部失败，Ollama 本地兜底（含工具）成功 (task=%s)",
+                                task_type,
+                            )
+                            with self._cascade_lock:
+                                self._cascade_failures[task_type] = 0
+                            return _result
+                    except Exception as _oe:
+                        logger.warning("[ModelFallback] Ollama 工具模式兜底失败，降级为纯文本: %s", _oe)
+
+                # 无工具或工具模式失败时，退回简单文本调用
                 _content, _err = LocalModelRouter.call_ollama_chat(
                     messages=_msgs, timeout=60.0
                 )

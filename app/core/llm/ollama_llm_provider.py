@@ -81,15 +81,66 @@ def _to_ollama_messages(
         role = msg.get("role", "user")
         if role == "model":
             role = "assistant"
-        # Skip roles Ollama doesn't understand (system already added above)
-        if role not in ("user", "assistant"):
-            continue
-        content = msg.get("content", "")
-        # Handle Gemini-style parts
-        if not content and isinstance(msg.get("parts"), list):
-            content = " ".join(str(p) for p in msg["parts"] if p)
-        if content:
-            messages.append({"role": role, "content": str(content)})
+
+        if role == "assistant":
+            content = msg.get("content", "")
+            if not content and isinstance(msg.get("parts"), list):
+                content = " ".join(str(p) for p in msg["parts"] if p)
+            tool_calls = msg.get("tool_calls", [])
+            if tool_calls:
+                # Convert to Ollama OpenAI-compatible tool_calls format
+                ollama_tcs = []
+                for tc in tool_calls:
+                    ollama_tcs.append({
+                        "id": tc.get("id") or "",
+                        "type": "function",
+                        "function": {
+                            "name": tc.get("name", ""),
+                            "arguments": tc.get("args") or {},
+                        },
+                    })
+                messages.append({
+                    "role": "assistant",
+                    "content": content or "",
+                    "tool_calls": ollama_tcs,
+                })
+            elif content:
+                messages.append({"role": "assistant", "content": str(content)})
+
+        elif role == "function":
+            # Tool result — convert to Ollama "tool" role
+            fn_name = msg.get("name", "tool")
+            content = msg.get("content", "")
+            tool_call_id = msg.get("tool_call_id") or ""
+            if not tool_call_id:
+                # Fallback: search backward for matching tool_call id
+                for prev in reversed(messages):
+                    if prev.get("role") == "assistant":
+                        for tc in prev.get("tool_calls") or []:
+                            if (tc.get("function") or {}).get("name") == fn_name:
+                                tool_call_id = tc.get("id", "")
+                                break
+                    if tool_call_id:
+                        break
+            if tool_call_id:
+                messages.append({
+                    "role": "tool",
+                    "content": str(content),
+                    "tool_call_id": tool_call_id,
+                })
+            else:
+                # No id available — inject as user message so context isn't lost
+                messages.append({
+                    "role": "user",
+                    "content": f"[Tool result from {fn_name}]: {str(content)}",
+                })
+
+        elif role == "user":
+            content = msg.get("content", "")
+            if not content and isinstance(msg.get("parts"), list):
+                content = " ".join(str(p) for p in msg["parts"] if p)
+            if content:
+                messages.append({"role": "user", "content": str(content)})
 
     return messages
 
@@ -123,6 +174,7 @@ def _to_ollama_tools(tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
 def _parse_ollama_response(resp_json: Dict) -> Dict[str, Any]:
     """Convert Ollama /api/chat response → UnifiedAgent {content, tool_calls, usage}."""
     import re as _re
+    import uuid as _uuid
     msg = resp_json.get("message") or {}
     content = msg.get("content") or ""
     # Strip <think>...</think> blocks (qwen3 thinking mode)
@@ -139,7 +191,10 @@ def _parse_ollama_response(resp_json: Dict) -> Dict[str, Any]:
             except Exception:
                 args = {}
         if name:
-            tool_calls.append({"name": name, "args": args})
+            # Preserve id from Ollama if present; generate one otherwise so
+            # multi-turn tool result messages can reference it.
+            tc_id = tc.get("id") or _uuid.uuid4().hex[:8]
+            tool_calls.append({"id": tc_id, "name": name, "args": args})
 
     usage = {
         "prompt_tokens": resp_json.get("prompt_eval_count", 0),
@@ -297,7 +352,7 @@ class OllamaLLMProvider(LLMProvider):
             logging.getLogger(__name__).warning(
                 "Silenced exception caught", exc_info=True
             )
-        return "qwen3:8b"  # 绝对保底，实际运行时 Ollama 应已安装
+        return "qwen3.5:9b"  # 绝对保底，实际运行时 Ollama 应已安装
 
     def generate_content(
         self,

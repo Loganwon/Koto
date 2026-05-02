@@ -21,7 +21,7 @@ from typing import Any, Dict, Optional
 _OLLAMA_HOST = "127.0.0.1"
 _OLLAMA_PORT = 11434
 _OLLAMA_URL = f"http://{_OLLAMA_HOST}:{_OLLAMA_PORT}"
-_AI_MODEL = "qwen3:8b"
+_AI_MODEL = "qwen3.5:9b"
 
 _EXTRACT_PROMPT = """\
 你是文档信息提取助手。根据下方文档内容，提取所有关键字段。
