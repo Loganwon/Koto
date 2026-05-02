@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.8.0] - 2026-05-02
+
+### Added
+- **Live DOCX AI streaming preview**: Added streamed document-edit previews with commit/dismiss controls in the Univer editor.
+- **File assistant overhaul**: Expanded assistant support across Excel, PPTX, and DOCX workflows, including viewer/editor improvements and sandbox fixes.
+- **Workspace assistant and PPTX editor UX**: Refreshed workspace assistant interactions, templates, static assets, and PPTX editor integration.
+
+### Changed
+- **Routing and model-mode refactor**: Split agent loop, task runtime, validators, executors, and smart routing into clearer helpers while normalizing cloud/local model selection.
+- **Univer editor rebuild**: Updated editor controller logic and rebuilt production assets for the latest file-assistant changes.
+- **File parsing updates**: Improved backend file parsing paths used by workspace assistant flows.
+- **Dependency maintenance**: Updated `openpyxl`, `mutmut`, `python-json-logger`, `prometheus-flask-exporter`, and `schedule` requirements.
+- **Release tooling maintenance**: Updated `softprops/action-gh-release` and `github/codeql-action`.
+
+### Fixed
+- **Windows path security handling on Linux**: Fixed path-security behavior for Windows-style paths on Linux and refreshed related tests.
+- **Formatting and website cleanup**: Applied black formatting and updated the project website for the release.
+
+---
+
 ## [1.7.0] - 2026-04-01
 
 ### Fixed
