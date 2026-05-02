@@ -6,6 +6,8 @@ import logging
 import os
 from pathlib import Path
 
+from app.core.llm.gemini_config import get_gemini_api_key
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,7 +34,7 @@ def validate_startup_config():
         errors.append(f"KOTO_PORT must be an integer, got '{port_str}'")
 
     # 2. Check API keys (warn, don't fail — local-only mode is valid)
-    gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY")
+    gemini_key = get_gemini_api_key()
     if not gemini_key:
         warnings.append("GEMINI_API_KEY not set — Gemini features will be unavailable")
 

@@ -7,7 +7,7 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/koto_icon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260323a">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/skill-ui-extensions.css') }}?v=20260526">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20260331b">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20260416b">
     <!-- Restore UI zoom before first paint to avoid flash -->
     <script>(function(){
         var z=parseFloat(localStorage.getItem('koto.uiZoom')||'1');
@@ -692,6 +692,140 @@
             transition: transform 0.22s cubic-bezier(.4,0,.2,1); z-index: 45;
         }
         .skills-panel.active { transform: translateX(0); }
+
+        /* ── Cowork Panel (自动化任务) ───────────────────────────────────── */
+        .cowork-panel {
+            position: fixed; right: 0; top: 0;
+            width: 480px; height: var(--viewport-h, 100vh);
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            box-shadow: -24px 0 48px rgba(0,0,0,0.32);
+            display: flex; flex-direction: column;
+            transform: translateX(100%);
+            transition: transform 0.22s cubic-bezier(.4,0,.2,1); z-index: 46;
+            overflow: hidden;
+        }
+        .cowork-panel.active { transform: translateX(0); }
+        .cw-header {
+            padding: 14px 18px; display: flex; align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border-color); flex-shrink: 0;
+        }
+        .cw-title { font-size: 14px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 7px; }
+        .cw-tabs {
+            display: flex; border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0; padding: 0 14px;
+        }
+        .cw-tab {
+            padding: 8px 14px; font-size: 12px; font-weight: 500;
+            color: var(--text-secondary); background: transparent;
+            border: none; border-bottom: 2px solid transparent;
+            cursor: pointer; transition: all .15s; margin-bottom: -1px;
+        }
+        .cw-tab.active { color: var(--accent-primary); border-bottom-color: var(--accent-primary); }
+        .cw-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+        .cw-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+        .cw-textarea {
+            width: 100%; box-sizing: border-box; padding: 10px 12px;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+            border-radius: 8px; color: var(--text-primary); font-size: 13px;
+            font-family: inherit; resize: vertical; outline: none; min-height: 100px;
+        }
+        .cw-textarea:focus { border-color: var(--accent-primary); }
+        .cw-input {
+            width: 100%; box-sizing: border-box; padding: 8px 12px;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+            border-radius: 8px; color: var(--text-primary); font-size: 12px;
+            font-family: inherit; outline: none;
+        }
+        .cw-input:focus { border-color: var(--accent-primary); }
+        .cw-toggle-row { display: flex; align-items: center; gap: 10px; }
+        .cw-toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+        .cw-toggle input { opacity: 0; width: 0; height: 0; }
+        .cw-toggle-slider {
+            position: absolute; inset: 0; background: var(--border-color);
+            border-radius: 20px; cursor: pointer; transition: .2s;
+        }
+        .cw-toggle-slider:before {
+            content: ""; position: absolute; width: 14px; height: 14px;
+            left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s;
+        }
+        .cw-toggle input:checked + .cw-toggle-slider { background: var(--accent-primary); }
+        .cw-toggle input:checked + .cw-toggle-slider:before { transform: translateX(16px); }
+        .cw-submit-btn {
+            width: 100%; padding: 10px; border-radius: 8px;
+            background: var(--accent-primary); color: #fff;
+            border: none; font-size: 13px; font-weight: 600; cursor: pointer;
+            transition: opacity .15s;
+        }
+        .cw-submit-btn:hover { opacity: .88; }
+        .cw-submit-btn:disabled { opacity: .45; cursor: not-allowed; }
+        /* Phase badge */
+        .cw-phase-badge {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+        }
+        .cw-phase-badge.planning { background: rgba(59,130,246,.15); color: #60a5fa; }
+        .cw-phase-badge.review   { background: rgba(245,158,11,.15); color: #fbbf24; }
+        .cw-phase-badge.executing{ background: rgba(16,185,129,.15); color: var(--accent-primary); }
+        .cw-phase-badge.done     { background: rgba(16,185,129,.15); color: var(--accent-primary); }
+        .cw-phase-badge.failed   { background: rgba(239,68,68,.15);  color: #f87171; }
+        /* Plan steps list */
+        .cw-plan-steps { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+        .cw-step {
+            padding: 9px 12px; border-radius: 8px;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+        }
+        .cw-step-header { display: flex; align-items: center; gap: 8px; }
+        .cw-step-icon { font-size: 14px; flex-shrink: 0; }
+        .cw-step-title { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+        .cw-step-desc { font-size: 11px; color: var(--text-secondary); margin-top: 3px; line-height: 1.5; }
+        .cw-step.running  { border-color: var(--accent-primary); background: rgba(16,185,129,.06); }
+        .cw-step.done     { opacity: .7; }
+        .cw-step.failed   { border-color: #ef4444; background: rgba(239,68,68,.06); }
+        /* Approve/reject block */
+        .cw-review-actions { display: flex; gap: 8px; }
+        .cw-approve-btn {
+            flex: 1; padding: 8px; border-radius: 8px;
+            background: var(--accent-primary); color: #fff;
+            border: none; font-size: 12px; font-weight: 600; cursor: pointer;
+        }
+        .cw-reject-btn {
+            flex: 1; padding: 8px; border-radius: 8px;
+            background: transparent; color: var(--text-secondary);
+            border: 1px solid var(--border-color); font-size: 12px; cursor: pointer;
+        }
+        /* History list */
+        .cw-history-item {
+            padding: 10px 12px; border-radius: 8px;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+            cursor: pointer; transition: border-color .15s;
+        }
+        .cw-history-item:hover { border-color: var(--accent-primary); }
+        .cw-history-goal { font-size: 12px; color: var(--text-primary); font-weight: 500;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cw-history-meta { font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
+        .cw-report {
+            padding: 12px; border-radius: 8px;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+            font-size: 12px; color: var(--text-primary); line-height: 1.7;
+        }
+        .cw-report h1,.cw-report h2,.cw-report h3 { font-size: 13px; font-weight: 700; margin: 8px 0 4px; }
+        .cw-report p { margin: 4px 0; }
+        .cw-report ul,.cw-report ol { padding-left: 18px; margin: 4px 0; }
+        .cw-empty { padding: 32px 16px; text-align: center; color: var(--text-secondary); font-size: 12px; }
+        .cw-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border-color); border-top-color: var(--accent-primary); border-radius: 50%; animation: cw-spin .7s linear infinite; }
+        @keyframes cw-spin { to { transform: rotate(360deg); } }
+        .cw-feedback-row { display: flex; gap: 6px; margin-top: 6px; }
+        .cw-feedback-input {
+            flex: 1; padding: 7px 10px;
+            background: var(--bg-tertiary); border: 1px solid var(--border-color);
+            border-radius: 8px; color: var(--text-primary); font-size: 12px;
+            font-family: inherit; outline: none;
+        }
+        .cw-progress-bar-wrap { height: 4px; background: var(--border-color); border-radius: 4px; overflow: hidden; }
+        .cw-progress-bar { height: 100%; background: var(--accent-primary); border-radius: 4px; transition: width .4s; }
+
         .sp-header {
             padding: 15px 18px; display: flex; align-items: center;
             justify-content: space-between;
@@ -1366,6 +1500,12 @@
         @keyframes tp-spin { to { transform: rotate(360deg); } }
     </style>
     <script defer src="{{ url_for('static', filename='vendor/katex/0.16.9/contrib/auto-render.min.js') }}"></script>
+    <!-- JSZip: docx-preview 的必需依赖 -->
+    <script defer src="{{ url_for('static', filename='jszip.min.js') }}"
+            onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
+    <!-- docx-preview: 高保真 DOCX 渲染（分页/页眉/页脚/目录） -->
+    <script defer src="{{ url_for('static', filename='docx-preview.min.js') }}"
+            onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/docx-preview@latest/dist/docx-preview.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);"></script>
     <!-- Mermaid 图表渲染：按需懒加载（3.2MB，不在启动时阻塞 DOMContentLoaded） -->
 </head>
 <body class="loading">
@@ -1416,6 +1556,13 @@
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                     <span class="sidebar-text" style="flex:1;">我的文件</span>
                     <svg class="sb-arrow sidebar-text" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+
+                <!-- 自动化任务 (Cowork) — 已集成到文件助手技能系统，隐藏入口 -->
+                <div class="sb-nav-item" id="navCoworkBtn" onclick="CoworkPanel.open()" title="自动化任务" style="display:none">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9l6 6M15 9l-6 6"/></svg>
+                    <span class="sidebar-text" style="flex:1;">自动化任务</span>
+                    <span class="sb-badge" id="coworkRunningBadge" style="display:none;">0</span>
                 </div>
 
                 <!-- Skills / Gems -->
@@ -1688,82 +1835,36 @@
 
             <!-- ═══ 文件工作站视图 ═══ -->
             <div id="workspaceView" class="wa-embedded" style="display:none">
-              <!-- Office-style title bar: [QAT] [File▼] [💾] [📤] | filename | [status] -->
-              <div id="wa-topbar">
-                <!-- Hidden file inputs (triggered by file menu) -->
-                <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf" style="display:none">
-                <!-- QAT zone: back icon + file menu + save icons -->
-                <div class="wa-qat">
-                  <button class="wa-qat-btn wa-back-btn" onclick="WA.closeInMainView()" title="返回主界面">
-                    <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-                  </button>
-                  <div class="wa-qat-sep"></div>
-                  <!-- 文件 dropdown -->
-                  <div class="wa-file-menu-wrap" id="wa-file-menu-wrap">
-                    <button class="wa-ribbon-file-btn" id="wa-ribbon-file-btn" onclick="WA.toggleFileMenu()">文件</button>
-                    <div class="wa-file-dropdown" id="wa-file-dropdown" style="display:none">
-                      <div class="wa-fileop" onclick="WA._openLocalFile();WA._closeFileMenu()">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                        <span>打开本地文件...</span>
-                      </div>
-                      <div class="wa-fileop" onclick="WA._openLocalFolder();WA._closeFileMenu()">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 7h4l2-3h8l2 3h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/></svg>
-                        <span>打开本地文件夹...</span>
-                      </div>
-                      <div class="wa-file-sep"></div>
-                      <div class="wa-fileop" id="wa-menu-save" onclick="WA.saveFile();WA._closeFileMenu()">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                        <span>保存</span><span class="wa-shortcut">Ctrl+S</span>
-                      </div>
-                      <div class="wa-fileop" id="wa-menu-saveas" onclick="WA.saveAs();WA._closeFileMenu()">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/><line x1="12" y1="9" x2="12" y2="4"/><polyline points="9 6 12 3 15 6"/></svg>
-                        <span>另存为...</span>
-                      </div>
-                      <div class="wa-file-sep"></div>
-                      <div class="wa-fileop" id="wa-menu-close-file" onclick="WA._menuCloseFile();WA._closeFileMenu()">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                        <span>关闭</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="wa-qat-sep"></div>
-                  <!-- QAT save icons -->
-                  <button class="wa-qat-btn" id="wa-save-btn" disabled onclick="WA.saveFile()" title="保存 (Ctrl+S)">
-                    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-                  </button>
-                  <button class="wa-qat-btn" id="wa-saveas-btn" disabled onclick="WA.saveAs()" title="另存为...">
-                    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/><line x1="12" y1="9" x2="12" y2="4"/><polyline points="9 6 12 3 15 6"/></svg>
-                  </button>
-                </div>
-                <!-- Centered filename -->
-                <span class="wa-title-filename" id="wa-file-name">文件工作站</span>
-                <!-- Right: autosave status -->
-                <div class="wa-topbar-right">
-                  <span id="wa-autosave-status"></span>
-                </div>
-              </div><!-- /wa-topbar -->
-              <div id="wa-workspace">
+                            <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" style="display:none">
+                            <div id="wa-workspace">
                 <div id="wa-left">
                   <div id="wa-left-header">
-                    <span class="wa-panel-title">文件管理</span>
+                                        <div class="wa-left-title-group">
+                                            <button class="wa-icon-btn wa-left-back-btn" onclick="WA.closeInMainView()" title="返回主界面">
+                                                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+                                            </button>
+                                            <span class="wa-panel-title">文件管理</span>
+                                        </div>
                     <div class="wa-header-actions">
-                      <label class="wa-icon-btn" for="wa-file-input-left" title="上传文件到工作区">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-                      </label>
-                      <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
-                      <button class="wa-icon-btn" onclick="WA.refreshFiles()" title="刷新">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                      </button>
-                      <button class="wa-icon-btn" id="wa-select-toggle" onclick="WA.toggleSelectMode()" title="多选模式">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-                      </button>
+                                            <button class="wa-left-action-btn" type="button" onclick="WA.openSystemFileList()" title="打开 Windows 文件列表并添加文件">
+                                                添加文件
+                                            </button>
+                      <div class="wa-save-split" id="wa-save-split">
+                        <button class="wa-left-action-btn primary wa-save-main" type="button" id="wa-save-btn" disabled onclick="WA.saveFile()" title="保存 (Ctrl+S)">保存</button>
+                        <button class="wa-left-action-btn primary wa-save-caret" type="button" id="wa-save-caret" disabled onclick="WA.toggleSaveMenu(event)" title="更多保存选项">
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M4 6l4 4 4-4z"/></svg>
+                        </button>
+                        <div class="wa-save-dropdown" id="wa-save-dropdown" style="display:none">
+                          <div class="wa-save-opt" onclick="WA.saveFile();WA._closeSaveMenu()">保存<span class="wa-save-shortcut">Ctrl+S</span></div>
+                          <div class="wa-save-opt" onclick="WA.saveAs();WA._closeSaveMenu()">另存为...</div>
+                        </div>
+                      </div>
+                      <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" multiple style="display:none">
                     </div>
                   </div>
                   <div id="wa-select-bar" style="display:none">
                     <span id="wa-select-count">0 已选</span>
                     <button onclick="WA.selectAll()">全选</button>
-                    <button class="danger" id="wa-delete-selected" onclick="WA.deleteSelected()" disabled>删除</button>
-                    <button onclick="WA.toggleSelectMode()">取消</button>
                   </div>
                   <div id="wa-search-wrap">
                     <svg class="wa-search-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -1773,6 +1874,33 @@
                   <!-- Hidden inputs for file/folder pickers (used by file menu) -->
                   <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
                   <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
+                  <!-- Temp Workspace: session-only in-memory list -->
+                  <div class="wa-section-label collapsible" id="wa-tmpws-label">
+                    <span class="wa-section-arrow open" id="wa-tmpws-arrow" onclick="WA.toggleSection('tmpworkspace')">&#8250;</span>
+                    <span onclick="WA.toggleSection('tmpworkspace')" style="flex:1">临时工作区</span>
+                    <span class="wa-section-badge" id="wa-tmpws-badge"></span>
+                    <div class="wa-section-actions">
+                      <button class="wa-icon-btn" onclick="event.stopPropagation();WA.clearTempWorkspace()" title="清空临时工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">✕</button>
+                    </div>
+                  </div>
+                  <div id="wa-tmpws-list" class="wa-myws-list"></div>
+                  <div id="wa-tmpws-empty" class="wa-myws-empty" style="display:none">
+                    <span>右键文件选择"加入临时工作区"<br>仅在本次会话中保留</span>
+                  </div>
+                  <!-- My Workspace: persisted pinned files -->
+                  <div class="wa-section-label collapsible" id="wa-myws-label">
+                    <span class="wa-section-arrow open" id="wa-myws-arrow" onclick="WA.toggleSection('myworkspace')">&#8250;</span>
+                    <span onclick="WA.toggleSection('myworkspace')" style="flex:1">我的工作区</span>
+                    <span class="wa-section-badge" id="wa-myws-badge"></span>
+                    <div class="wa-section-actions">
+                      <button class="wa-icon-btn" onclick="event.stopPropagation();WA.addToMyWorkspace()" title="添加文件到工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">＋</button>
+                    </div>
+                  </div>
+                  <div id="wa-myws-list" class="wa-myws-list"></div>
+                  <div id="wa-myws-empty" class="wa-myws-empty" style="display:none">
+                    <span>右键文件选择"加入我的工作区"<br>或拖拽文件到此处</span>
+                  </div>
+                  <!-- File browser -->
                   <div class="wa-section-label collapsible" id="wa-ws-label">
                     <span class="wa-section-arrow open" id="wa-ws-arrow" onclick="WA.toggleSection('workspace')">&#8250;</span>
                     <span onclick="WA.toggleSection('workspace')" style="flex:1">工作区</span>
@@ -1812,6 +1940,7 @@
                       </div>
                     </div>
                     <div id="wa-docx-editor"><div id="wa-editor-toolbar"></div><div id="wa-editor-content"></div></div>
+                    <div id="wa-docx-read-view"></div>
                     <div id="wa-xlsx-editor"></div>
                     <div id="wa-pptx-editor">
                       <!-- Left: Slide thumbnail panel -->
@@ -1930,7 +2059,35 @@
                       </div>
                     </div>
                     <div id="wa-pdf-viewer"></div>
+                    <div id="wa-image-viewer"></div>
+                    <div id="wa-text-editor">
+                      <div id="wa-text-lang-badge"></div>
+                      <textarea id="wa-text-content" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+                    </div>
                   </div><!-- /wa-canvas-body -->
+
+                  <!-- Inline AI dialog (shown when display mode = 'inline') -->
+                  <div id="wa-inline-ai" style="display:none">
+                    <div class="wa-iai-header">
+                      <div class="wa-iai-brand"><svg width="12" height="12" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3-3.8-2.8-3.8 2.8 1.4-4.3-3.6-2.7h4.5Z" fill="var(--accent)" opacity="0.8"/></svg> Koto AI</div>
+                      <button class="wa-iai-close" onclick="WA.setAIDisplayMode('panel')" title="切换到面板模式"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg></button>
+                    </div>
+                    <div class="wa-iai-messages" id="wa-iai-messages"></div>
+                    <div class="wa-iai-input-row">
+                      <div id="wa-iai-selection-chip" style="display:none"><span class="chip-quote-bar"></span><span id="wa-iai-selection-preview"></span><button class="chip-clear" onclick="WA.clearSelection()" title="取消选区">&times;</button></div>
+                      <div class="wa-iai-input-wrap">
+                        <textarea id="wa-iai-input" placeholder="在此输入 AI 指令…" rows="1" onkeydown="WA.handleInlineInputKeydown(event)"></textarea>
+                        <button class="wa-iai-send" id="wa-iai-send-btn" onclick="WA.sendInlineMessage()" title="发送"><svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+                      </div>
+                      <div class="wa-iai-quick-row">
+                        <button class="wa-iai-qbtn" onclick="WA.inlineQuickAction('请帮我润色当前内容')">润色</button>
+                        <button class="wa-iai-qbtn" onclick="WA.inlineQuickAction('请帮我总结文档要点')">总结</button>
+                        <button class="wa-iai-qbtn" onclick="WA.inlineQuickAction('请检查语法和错别字')">检查</button>
+                        <button class="wa-iai-qbtn" onclick="WA.inlineQuickAction('请翻译选中内容为英文')">翻译</button>
+                      </div>
+                    </div>
+                  </div>
+
                   <!-- Office-style status bar -->
                   <div id="wa-status-bar">
                     <span id="wa-status-filetype"></span>
@@ -1953,59 +2110,239 @@
                   </div>
                 </div><!-- /wa-canvas -->
                 <div id="wa-ai">
+                  <!-- AI Header (mirrors standalone workspace_assistant.html) -->
                   <div id="wa-ai-header">
-                    <div class="wa-ai-logo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3-3.8-2.8-3.8 2.8 1.4-4.3-3.6-2.7h4.5Z" fill="#fff" opacity="0.9"/></svg></div>
-                    <div class="wa-ai-header-main"><span class="wa-ai-title">AI 助手</span><span id="wa-ai-model-badge">Koto AI</span></div>
-                    <div class="wa-ai-header-btns">
-                      <button id="wa-settings-btn" title="AI 输出设置" onclick="WA.toggleSettings()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
-                      <button id="wa-clear-chat-btn" title="清空对话" onclick="WA.clearChat()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
+                    <div class="wa-ai-logo">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3-3.8-2.8-3.8 2.8 1.4-4.3-3.6-2.7h4.5Z" fill="#fff" opacity="0.9"/>
+                      </svg>
+                    </div>
+                    <div class="wa-ai-header-main">
+                      <span class="wa-ai-title">AI 助手</span>
+                      <span id="wa-ai-model-badge">Koto AI</span>
                     </div>
                   </div>
+                                    <div id="wa-ai-route-info" style="display:none;padding:0 12px 8px;font-size:11px;color:var(--text-muted);"></div>
+                  <!-- Skill Library overlay panel -->
+                  <div id="wa-skill-library"></div>
+                  <!-- Workflow panel -->
+                  <div id="wa-workflow-panel" class="wa-workflow-panel" style="display:none"></div>
                   <div id="wa-ai-settings-panel">
-                    <div class="wa-setting-label">本地模型（Ollama）</div>
-                    <div class="wa-output-mode-toggle" style="margin-bottom:4px">
-                      <button data-local-mode="off" class="active" onclick="WA.setUseLocalModel(false)">☁️ 云端</button>
-                      <button id="wa-local-on-btn" data-local-mode="on" onclick="WA.setUseLocalModel(true)">🦙 本地优先</button>
-                    </div>
-                    <div id="wa-ollama-status-row" style="font-size:10px;color:var(--text-muted);margin-bottom:8px;display:none">
-                      <span id="wa-ollama-status-text"></span>
-                    </div>
+                                        {% set wa_local_model_controls_with_icons = false %}
+                                        {% include '_workspace_model_controls.html' %}
                     <div class="wa-setting-label">AI 输出模式</div>
                     <div class="wa-output-mode-toggle">
                       <button data-mode="inline" class="active" onclick="WA.setOutputMode('inline')">写入文档</button>
                       <button data-mode="chat" onclick="WA.setOutputMode('chat')">仅对话框</button>
                     </div>
                   </div>
-                  <div id="wa-subject-bar"><span class="subject-tag" id="wa-subject-tag">文件</span><span class="subject-text" id="wa-subject-text"></span></div>
-                  <div id="wa-ai-messages"><div class="wa-msg ai">你好！请从左侧打开一个文件，我可以帮你分析内容、润色文字、总结要点或翻译段落。</div></div>
+                  <div id="wa-subject-bar" style="display:none"><span class="subject-tag" id="wa-subject-tag">文件</span><span class="subject-text" id="wa-subject-text"></span></div>
+
+                  <!-- Analysis files panel (shown when ≥1 file is dragged for analysis) -->
+                  <div id="wa-ai-file-chips" style="display:none">
+                    <div class="wa-ai-file-chips-header"><!-- filled by _renderAIFileChips() --></div>
+                    <div id="wa-ai-file-chip-list" class="wa-ctx-file-list"></div>
+                    <div class="wa-ctx-drop-hint">
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                      <span>继续拖放文件到此处添加分析</span>
+                    </div>
+                  </div>
+
+                  <!-- 技能快捷栏 — populated by WaSkills.load() -->
+                  <div id="wa-skill-bar" style="display:none;flex-shrink:0;padding:5px 10px 4px;border-bottom:1px solid var(--border);background:var(--bg-secondary);flex-wrap:wrap;gap:4px;min-height:34px;align-items:center;"></div>
+
+                  <div id="wa-ai-messages">
+                    <!-- PEMO-style welcome card — hidden once any message is sent -->
+                    <div class="wa-welcome" id="wa-ai-welcome">
+                      <div class="wa-welcome-hero">
+                        <div class="wa-welcome-avatar">
+                          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3-3.8-2.8-3.8 2.8 1.4-4.3-3.6-2.7h4.5Z" fill="#fff" opacity="0.95"/>
+                          </svg>
+                        </div>
+                        <h2 class="wa-welcome-title">欢迎使用 Koto AI</h2>
+                                                <p class="wa-welcome-sub">从一个目标开始输入，当前文件、选区和附件会自动并入上下文。</p>
+                      </div>
+                      <div class="wa-scenario-grid">
+                                                <button class="wa-scenario-card" onclick="WA.useScenario('请先快速读懂当前文件，如果我已经选中了部分内容就优先结合选区，给我一个结构化概览，说明主题、重点和结论')">
+                          <div class="scenario-icon" style="color:#f59e0b"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></div>
+                                                    <span class="scenario-title">快速读懂当前文件</span>
+                                                    <span class="scenario-desc">先快速建立结构、重点和结论。</span>
+                        </button>
+                                                <button class="wa-scenario-card" onclick="WA.useScenario('请提炼当前文件中的关键信息，整理成结构化要点，并明确结论、风险和待办事项')">
+                          <div class="scenario-icon" style="color:#3b82f6"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></div>
+                                                    <span class="scenario-title">提炼重点与待办</span>
+                                                    <span class="scenario-desc">直接得到结论、风险和下一步。</span>
+                        </button>
+                                                <button class="wa-scenario-card" onclick="WA.useScenario('请基于当前文件或已选中的内容进行翻译或改写，保留专业术语，并保持表达自然、结构清晰')">
+                          <div class="scenario-icon" style="color:#10b981"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg></div>
+                                                    <span class="scenario-title">翻译或改写内容</span>
+                                                    <span class="scenario-desc">保留术语，同时重写语言表达。</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- AI file drop overlay -->
+                  <div id="wa-ai-file-drop" style="display:none">
+                    <div class="wa-ai-file-drop-inner">
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+                      <span>拖放文件到此处<br>AI 将一起分析</span>
+                    </div>
+                  </div>
+
                   <div id="wa-ai-input-area">
-                    <div id="wa-selection-chip" style="display:none"><span class="chip-quote-bar"></span><span id="wa-selection-preview"></span><button class="chip-clear" onclick="WA.clearSelection()" title="取消选区">x</button></div>
-                    <div id="wa-context-indicator" style="display:none"><div class="ctx-dot"></div><span id="wa-ctx-label">已附加上下文</span></div>
-                    <div class="wa-ai-quick-actions" id="wa-quick-actions">
-                      <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容')">润色</button>
-                      <button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结文档要点')">总结</button>
-                      <button class="wa-quick-btn" onclick="WA.quickAction('请检查语法和错别字')">检查</button>
-                      <button class="wa-quick-btn" onclick="WA.quickAction('请翻译选中内容为英文')">翻译</button>
-                      <button class="wa-quick-btn chart-btn" onclick="WA.sendQuickAction('可视化')" title="将选中数据用 Python 可视化为图表">📊 可视化</button>
+                    <div id="wa-context-bar" style="display:none"></div>
+                    <div id="wa-actions-bar">
+                                            <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容，保留原意但让表达更顺滑')">润色表达</button>
+                                            <button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结当前内容，提炼重点和待办事项')">提炼要点</button>
+                                            <button class="wa-quick-btn" onclick="WA.quickAction('请检查当前内容中的语病、歧义和逻辑风险')">检查问题</button>
+                                            <button class="wa-quick-btn chart-btn" onclick="WA.sendQuickAction('可视化')" title="将选中数据用 Python 可视化为图表"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="5" rx="0.5"/><rect x="6.5" y="5" width="3" height="9" rx="0.5"/><rect x="11" y="2" width="3" height="12" rx="0.5"/></svg> 可视化</button>
                     </div>
                     <div class="wa-input-box">
-                      <div id="wa-input-row"><textarea id="wa-user-input" placeholder="有什么需要帮忙的？" onkeydown="WA.handleInputKeydown(event)" rows="1"></textarea></div>
+                                            <div id="wa-input-row"><textarea id="wa-user-input" placeholder="可以直接告诉我你想要的结果。比如：先读完当前文件，列出 3 个结论，再告诉我下一步该怎么改。" onkeydown="WA.handleInputKeydown(event)" rows="6"></textarea></div>
                       <div class="wa-input-box-footer">
-                        <span class="wa-input-hint">Enter 发送 Shift+Enter 换行</span>
-                        <button id="wa-send-btn" onclick="WA.sendMessage()" title="发送"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+                        <div class="wa-footer-meta">
+                          <div id="wa-footer-file-chip" style="display:none" class="wa-footer-file-chip-wrap">
+                            <span id="wa-footer-file-icon" class="footer-file-icon"></span>
+                            <span id="wa-footer-file-label">文件</span>
+                          </div>
+                          <button class="wa-footer-model-btn" id="wa-footer-model-btn" onclick="WA.toggleSettings()" title="AI 模型设置">
+                            <span class="model-status-dot"></span>
+                            <span id="wa-footer-model-name">Koto AI</span>
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                          </button>
+                          <div class="wa-display-mode-toggle" id="wa-display-mode-toggle">
+                            <button data-dm="panel" class="active" onclick="WA.setAIDisplayMode('panel')" title="右侧面板">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
+                            </button>
+                            <button data-dm="inline" onclick="WA.setAIDisplayMode('inline')" title="文档内嵌对话">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div class="wa-footer-actions">
+                          <span class="wa-input-hint">Enter 发送 Shift+Enter 换行</span>
+                                                    <button id="wa-send-btn" type="button" onclick="WA.sendMessage()" title="发送" aria-label="发送"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
               </div><!-- /wa-workspace -->
-              <div id="wa-pdf-tooltip" class="wa-selection-toolbar">
-                <span id="wa-tooltip-count" class="wa-tooltip-count"></span>
-                <button onclick="WA.sendQuickAction('润色')">润色</button>
-                <button onclick="WA.sendQuickAction('翻译')">翻译</button>
-                <button onclick="WA.sendQuickAction('总结')">总结</button>
-                <button onclick="WA.sendQuickAction('可视化')" title="可视化数据">📊</button>
-                <div class="divider"></div>
-                <button onclick="WA.sendSelectionToAI()">转交 AI</button>
+
+              <!-- 技能执行面板 (底部滑出，定位在 #workspaceView 内) -->
+              <div id="wa-skill-exec-panel" style="position:absolute;bottom:0;left:0;right:0;max-height:55%;min-height:260px;background:var(--bg-primary);border-top:2px solid var(--accent,#4a90e2);border-radius:8px 8px 0 0;display:flex;flex-direction:column;box-shadow:0 -4px 24px rgba(0,0,0,0.18);z-index:200;transform:translateY(100%);opacity:0;pointer-events:none;transition:transform 0.22s ease,opacity 0.22s ease;">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--border);background:var(--bg-secondary);border-radius:8px 8px 0 0;flex-shrink:0;">
+                  <span id="wa-skill-exec-title" style="font-size:13px;font-weight:600;color:var(--text-primary)">🔧 技能执行</span>
+                  <div style="display:flex;gap:4px;">
+                    <button onclick="WaSkills.minimizePanel()" style="background:transparent;border:none;color:var(--text-muted);font-size:13px;width:22px;height:22px;cursor:pointer;border-radius:4px;" title="最小化">▼</button>
+                    <button onclick="WaSkills.hidePanel()" style="background:transparent;border:none;color:var(--text-muted);font-size:13px;width:22px;height:22px;cursor:pointer;border-radius:4px;" title="关闭">✕</button>
+                  </div>
+                </div>
+                <div id="wa-skill-exec-body" style="flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-height:0;"></div>
+              </div>
+
+              <!-- Close-warning dialog: shown when closing Koto with unsaved WA files -->
+              <div id="wa-close-warn-overlay" class="wa-dlg-overlay" style="display:none">
+                <div class="wa-dlg-box" style="width:420px">
+                  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--warning,#f0a030)" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                    <span class="wa-dlg-title" style="margin:0">有未保存的文件</span>
+                  </div>
+                  <p style="font-size:12px;color:var(--text-muted);margin:0 0 8px">以下文件有未保存的修改：</p>
+                  <ul id="wa-close-warn-list" style="font-size:12px;color:var(--text-muted);margin:0 0 16px 16px;padding:0;list-style:disc"></ul>
+                  <div class="wa-dlg-footer" style="justify-content:space-between">
+                    <button class="wa-btn" onclick="WA._closeWarnCancel()" style="min-width:120px">取消（继续使用）</button>
+                    <div style="display:flex;gap:8px">
+                      <button class="wa-btn" onclick="WA._closeWarnDiscard()" style="background:var(--danger,#e05555);color:#fff;border-color:var(--danger,#e05555)">不保存，直接关闭</button>
+                      <button class="wa-btn primary" onclick="WA._closeWarnSaveAll()">保存全部并关闭</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Floating Selection Toolbar — AI quick actions on selected text -->
+              <div id="wa-pdf-tooltip" class="wa-sel-toolbar" onmousedown="event.preventDefault()">
+                <button class="wa-sel-close" onmousedown="event.preventDefault(); WA.closeSelectionToolbar(); return false;" title="关闭">
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>
+                </button>
+                <span id="wa-tooltip-count" class="wa-sel-count"></span>
+                <div class="wa-sel-divider"></div>
+                <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('润色')">润色</button>
+                <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('翻译')">翻译</button>
+                <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('总结')">总结</button>
+                <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('检查')">检查</button>
+                <div class="wa-sel-divider"></div>
+                <button class="wa-sel-action wa-sel-ai-action" onmousedown="event.preventDefault()" onclick="WA.sendSelectionToAI()">
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2 L10 6 L14 7 L10 8 L8 12 L6 8 L2 7 L6 6 Z"/></svg>
+                  转交 AI
+                </button>
+                <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('可视化')" title="将表格数据可视化为图表">
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="5" rx="0.5"/><rect x="6.5" y="5" width="3" height="9" rx="0.5"/><rect x="11" y="2" width="3" height="12" rx="0.5"/></svg>
+                  可视化
+                </button>
+              </div>
+
+              <!-- DOCX floating format hover bar -->
+              <div id="wa-docx-hoverbar" onmousedown="event.preventDefault()">
+                <div class="wa-dhb-row">
+                  <select id="wa-dh-fontname" class="wa-dhb-font-select" title="字体" onmousedown="event.stopPropagation()" onchange="WA.docxHoverFontFamily(this.value)">
+                    <option value="">默认字体</option>
+                                        <option value="SimSun">宋体</option>
+                                        <option value="SimHei">黑体</option>
+                                        <option value="KaiTi">楷体</option>
+                                        <option value="FangSong">仿宋</option>
+                                        <option value="Microsoft YaHei">微软雅黑</option>
+                                        <option value="DengXian">等线</option>
+                                        <option value="STZhongsong">华文中宋</option>
+                                        <option value="STKaiti">华文楷体</option>
+                    <option value="Calibri">Calibri</option>
+                    <option value="Arial">Arial</option>
+                    <option value="Times New Roman">Times New Roman</option>
+                    <option value="Georgia">Georgia</option>
+                    <option value="Verdana">Verdana</option>
+                    <option value="Consolas">Consolas</option>
+                  </select>
+                  <select id="wa-dh-fontsize" class="wa-dhb-font-select" title="字号" onmousedown="event.stopPropagation()" onchange="WA.docxHoverFontSize(this.value)">
+                    <option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>32</option><option>36</option><option>48</option><option>72</option>
+                  </select>
+                  <div class="wa-dhb-sep"></div>
+                  <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-bold" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('bold')" title="加粗 (Ctrl+B)"><b>B</b></button>
+                  <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-italic" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('italic')" title="斜体 (Ctrl+I)"><i>I</i></button>
+                  <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-underline" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('underline')" title="下划线 (Ctrl+U)"><span style="text-decoration:underline">U</span></button>
+                  <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-strike" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('strike')" title="删除线"><s>S</s></button>
+                  <div class="wa-dhb-sep"></div>
+                  <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-align-left" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('justifyLeft')" title="左对齐">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="2" y1="6.5" x2="10" y2="6.5"/><line x1="2" y1="10" x2="14" y2="10"/><line x1="2" y1="13.5" x2="10" y2="13.5"/></svg>
+                  </button>
+                  <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-align-center" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('justifyCenter')" title="居中">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="4" y1="6.5" x2="12" y2="6.5"/><line x1="2" y1="10" x2="14" y2="10"/><line x1="4" y1="13.5" x2="12" y2="13.5"/></svg>
+                  </button>
+                  <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-align-right" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('justifyRight')" title="右对齐">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="6" y1="6.5" x2="14" y2="6.5"/><line x1="2" y1="10" x2="14" y2="10"/><line x1="6" y1="13.5" x2="14" y2="13.5"/></svg>
+                  </button>
+                  <div class="wa-dhb-sep"></div>
+                  <div class="wa-dhb-btn wa-dhb-color-wrap" id="wa-dh-color-trigger" title="字体颜色" onmousedown="event.preventDefault()" onclick="WA.docxColorPicker('font',this)">
+                    <span class="wa-dhb-color-letter">A</span>
+                    <div id="wa-dh-color-swatch" class="wa-dhb-color-swatch" style="background:#000"></div>
+                  </div>
+                  <div class="wa-dhb-btn wa-dhb-color-wrap" id="wa-dh-bg-trigger" title="文字背景色" onmousedown="event.preventDefault()" onclick="WA.docxColorPicker('bg',this)">
+                    <span class="wa-dhb-color-letter wa-dhb-color-bg-icon">A</span>
+                    <div id="wa-dh-bg-swatch" class="wa-dhb-color-swatch wa-dhb-color-swatch-bg"></div>
+                  </div>
+                  <button class="wa-dhb-btn" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('clearMarks')" title="清除格式">
+                    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3 L13 13 M7 3 L13 3 L13 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  </button>
+                </div>
+              </div>
+              <!-- DOCX in-page colour picker -->
+              <div id="wa-docx-cp" onmousedown="event.preventDefault()">
+                <div id="wa-docx-cp-grid" class="wa-dcp-grid"></div>
+                <div class="wa-dcp-custom-row">
+                  <span class="wa-dcp-custom-label">自定义:</span>
+                  <input type="color" id="wa-docx-cp-custom" value="#000000" class="wa-dcp-custom-input" onmousedown="event.stopPropagation()" onchange="WA._docxPickColor(this.value,true)">
+                  <span id="wa-docx-cp-hex" class="wa-dcp-hex">#000000</span>
+                </div>
               </div>
               <div id="wa-chart-dialog"><div class="wa-dialog-box"><h3 id="wa-chart-dialog-title">Python 画图</h3><textarea id="wa-chart-prompt" placeholder="描述你想要的图表"></textarea><div style="font-size:12px;color:var(--text-muted)"><span id="wa-chart-data-hint">将使用当前表格的全量数据</span></div><div class="wa-dialog-actions"><button class="wa-btn" onclick="WA.closeChartDialog()">取消</button><button class="wa-btn primary" onclick="WA.submitChartRequest()">生成图表</button></div></div></div>
               <div id="wa-toast"></div>
@@ -2094,8 +2431,6 @@
                         </svg>
                         外观
                     </h4>
-                    <div class="setting-item">
-                        <label>主题</label>
                         <div class="theme-selector" id="themeSelector">
                             <div class="theme-option" data-theme="light" onclick="selectTheme('light')">
                                 <div class="theme-preview light-preview">
@@ -2154,7 +2489,6 @@
                                 <span>跟随系统</span>
                             </div>
                         </div>
-                    </div>
 
                     <!-- UI Zoom / Font Scale -->
                     <div class="setting-item" style="margin-top:12px;">
@@ -2702,6 +3036,112 @@
             </div>
         </div>
 
+        <!-- ==================== Cowork 自动化任务面板 ==================== -->
+        <aside class="cowork-panel" id="coworkPanel">
+            <div class="cw-header">
+                <div class="cw-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
+                    自动化任务
+                    <span class="cw-phase-badge" id="cwPhaseBadge" style="display:none;"></span>
+                </div>
+                <button class="close-panel" onclick="CoworkPanel.close()" title="关闭">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="cw-tabs">
+                <button class="cw-tab active" id="cwTabNew"    onclick="CoworkPanel.switchTab('new')">✦ 新任务</button>
+                <button class="cw-tab"        id="cwTabStatus" onclick="CoworkPanel.switchTab('status')" style="display:none;">⚡ 执行中</button>
+                <button class="cw-tab"        id="cwTabHistory" onclick="CoworkPanel.switchTab('history')">📋 历史</button>
+            </div>
+
+            <!-- 新任务 Tab -->
+            <div class="cw-body" id="cwTabNewBody">
+                <div>
+                    <div class="cw-label">任务目标</div>
+                    <textarea class="cw-textarea" id="cwGoalInput" placeholder="描述你想让 AI 完成的任务，例如：&#10;• 分析 workspace 目录下所有 CSV 文件，生成数据质量报告&#10;• 整理我的文件夹，删除重复内容&#10;• 每周五汇总本周工作进展"></textarea>
+                </div>
+                <div>
+                    <div class="cw-label">背景信息（可选）</div>
+                    <input class="cw-input" id="cwContextInput" type="text" placeholder="例如：/workspace/data/ 目录，或相关文件名">
+                </div>
+                <div class="cw-toggle-row">
+                    <label class="cw-toggle">
+                        <input type="checkbox" id="cwHumanReviewToggle" checked>
+                        <span class="cw-toggle-slider"></span>
+                    </label>
+                    <span style="font-size:12px;color:var(--text-secondary);">执行前展示计划，待我确认</span>
+                </div>
+                <button class="cw-submit-btn" id="cwSubmitBtn" onclick="CoworkPanel.submit()">
+                    ▶ 开始执行任务
+                </button>
+            </div>
+
+            <!-- 执行状态 Tab -->
+            <div class="cw-body" id="cwTabStatusBody" style="display:none;">
+                <!-- 进度条 -->
+                <div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span class="cw-label" style="margin:0;">进度</span>
+                        <span style="font-size:11px;color:var(--text-secondary);" id="cwProgressText">0 / 0</span>
+                    </div>
+                    <div class="cw-progress-bar-wrap">
+                        <div class="cw-progress-bar" id="cwProgressBar" style="width:0%"></div>
+                    </div>
+                </div>
+                <!-- 当前目标 -->
+                <div style="font-size:12px;color:var(--text-secondary);" id="cwCurrentGoal"></div>
+
+                <!-- 计划审批区块（phase=review 时显示） -->
+                <div id="cwReviewBlock" style="display:none;">
+                    <div class="cw-label">📋 AI 生成的计划</div>
+                    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;" id="cwPlanReasoning"></div>
+                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;" id="cwPlanMeta"></div>
+                    <div class="cw-plan-steps" id="cwPlanSteps"></div>
+                    <div style="margin-top:10px;">
+                        <div class="cw-review-actions">
+                            <button class="cw-approve-btn" onclick="CoworkPanel.approve()">✓ 批准计划</button>
+                            <button class="cw-reject-btn" onclick="CoworkPanel.showRejectInput()">✕ 拒绝</button>
+                        </div>
+                        <div class="cw-feedback-row" id="cwRejectRow" style="display:none;">
+                            <input class="cw-feedback-input" id="cwRejectFeedback" placeholder="可选：告诉 AI 哪里需要调整…">
+                            <button class="cw-reject-btn" style="flex-shrink:0;padding:7px 14px;" onclick="CoworkPanel.reject()">确认拒绝</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 执行步骤列表（phase=executing 时显示） -->
+                <div id="cwStepsBlock" style="display:none;">
+                    <div class="cw-label">执行步骤</div>
+                    <div class="cw-plan-steps" id="cwExecSteps"></div>
+                </div>
+
+                <!-- 最终报告（phase=done 时显示） -->
+                <div id="cwReportBlock" style="display:none;">
+                    <div class="cw-label">✅ 任务完成 — 最终报告</div>
+                    <div class="cw-report" id="cwReportContent"></div>
+                    <div style="display:flex;gap:8px;margin-top:10px;">
+                        <button class="cw-submit-btn" style="background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color);" onclick="CoworkPanel.newTask()">+ 新任务</button>
+                    </div>
+                </div>
+
+                <!-- 错误块（phase=failed） -->
+                <div id="cwErrorBlock" style="display:none;">
+                    <div class="cw-label" style="color:#f87171;">⚠ 任务失败</div>
+                    <div style="font-size:12px;color:#f87171;padding:10px;background:rgba(239,68,68,.08);border-radius:8px;" id="cwErrorMsg"></div>
+                    <button class="cw-submit-btn" style="margin-top:10px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color);" onclick="CoworkPanel.newTask()">↩ 返回新任务</button>
+                </div>
+
+                <div style="text-align:right;margin-top:4px;">
+                    <button class="cw-reject-btn" style="font-size:11px;padding:5px 12px;" onclick="CoworkPanel.cancel()">取消任务</button>
+                </div>
+            </div>
+
+            <!-- 历史 Tab -->
+            <div class="cw-body" id="cwTabHistoryBody" style="display:none;">
+                <div id="cwHistoryList"><div class="cw-empty">暂无历史任务</div></div>
+            </div>
+        </aside>
+
         <!-- ==================== Skills Panel (VS Code Extension 风格) ==================== -->        <aside class="skills-panel" id="skillsPanel">
             <div class="resize-handle resize-handle-skills" id="skillsResizeHandle"></div>
             <div class="sp-header">
@@ -2728,6 +3168,7 @@
             <!-- Category filter chips + sort trigger -->
             <div class="sp-filter-row" id="spFilterRow">
                 <button class="sp-chip active" data-cat="all" onclick="spSetCat('all')">全部</button>
+                <button class="sp-chip" data-cat="file" onclick="spSetCat('file')">📁 文件管理</button>
                 <button class="sp-chip" data-cat="behavior" onclick="spSetCat('behavior')">⚙️ 行为</button>
                 <button class="sp-chip" data-cat="style" onclick="spSetCat('style')">🎨 风格</button>
                 <button class="sp-chip" data-cat="domain" onclick="spSetCat('domain')">🔬 领域</button>
@@ -3674,7 +4115,7 @@
                 }
                 if (dismissAllBtn) dismissAllBtn.style.display = '';
                 bar.style.display = 'flex';
-                const CAT_ZH = {behavior:'⚙️ 行为', style:'🎨 风格', domain:'🔬 领域', custom:'🔧 自定义', workflow:'🔄 工作流'};
+                const CAT_ZH = {behavior:'⚙️ 行为', style:'🎨 风格', domain:'🔬 领域', custom:'🔧 自定义', workflow:'🔄 工作流', file:'📁 文件管理'};
 
                 // Build conflict lookup: loser_id → winner_name
                 const conflictWinner = {};
@@ -3782,6 +4223,19 @@
         let _spConflictWinner = {}; // loser_id → winner_name
         let _spCurrentTab = 'catalog';
         let _spCurrentCat = 'all';
+        // 📁 文件管理专区: curated file-related skill IDs (跨 domain/workflow 类别)
+        const _SP_FILE_SKILL_IDS = new Set([
+            'pdf_reader','multi_format_reader','long_doc_parser','spreadsheet_analyst',
+            'table_extractor','cross_format_extractor','multi_doc_synthesis',
+            'doc_format_fixer','doc_structure_optimizer','table_enhancer',
+            'doc_tone_adjuster','doc_fact_checker','doc_readability','doc_dedup',
+            'legal_doc_review','financial_doc_review','academic_paper_polish',
+            'marketing_copy','excel_formula_expert','excel_data_cleaner','pivot_advisor',
+            'slide_storyteller','slide_data_viz','doc_smart_compare',
+            'questionnaire_filler','comm_digest','data_format_cleaner',
+            'ppt_generator_pro','excel_generator_pro','docx_generator_pro',
+            'pdf_generator_pro','docx_translator'
+        ]);
         let _spCurrentSearch = '';
         let _spCurrentSort = 'default';  // 'default' | 'recent' | 'popular'
         let _spSelectedSessionId = null;
@@ -3821,7 +4275,10 @@
         window.openSkillsPanel = function() {
             const panel = document.getElementById('skillsPanel');
             if (!panel) return;
+            // 关闭设置面板（互斥）
+            if (typeof closeSettings === 'function') closeSettings();
             panel.classList.add('active');
+            document.body.classList.add('skills-panel-open');
             const navBtn = document.getElementById('navSkillsBtn');
             if (navBtn) navBtn.classList.add('active');
             _syncCsbToggleBtn(true);
@@ -3833,6 +4290,7 @@
             const panel = document.getElementById('skillsPanel');
             if (!panel) return;
             panel.classList.remove('active');
+            document.body.classList.remove('skills-panel-open');
             const navBtn = document.getElementById('navSkillsBtn');
             if (navBtn) navBtn.classList.remove('active');
             _syncCsbToggleBtn(false);
@@ -3848,9 +4306,325 @@
             }
         };
 
-        document.addEventListener('DOMContentLoaded', () => {
-            window.closeSkillsPanel();
-        });
+        // ══════════════════════════════════════════════════════════════════
+        // CoworkPanel — 自动化任务面板控制器
+        // ══════════════════════════════════════════════════════════════════
+        window.CoworkPanel = (() => {
+            let _taskId   = null;
+            let _sse      = null;
+            let _pollTimer= null;
+            let _sessionId= 'default';
+
+            // ── 工具函数 ─────────────────────────────────────
+            function _el(id) { return document.getElementById(id); }
+
+            function _phaseLabel(phase) {
+                const map = { planning:'规划中', review:'待审批', executing:'执行中', done:'已完成', failed:'失败' };
+                return map[phase] || phase;
+            }
+
+            function _stepIcon(status) {
+                if (status === 'done')    return '✅';
+                if (status === 'running') return '<span class="cw-spinner"></span>';
+                if (status === 'failed')  return '❌';
+                if (status === 'skipped') return '⏭';
+                return '⬜';
+            }
+
+            function _toolIcon(hint) {
+                const m={web_search:'🌐',read_file:'📄',write_file:'💾',code_exec:'⚙️',memory_search:'🧠'};
+                return m[hint] || '🔧';
+            }
+
+            function _md(text) {
+                if (typeof marked !== 'undefined') {
+                    try { return marked.parse(text || ''); } catch(e) {}
+                }
+                return (text||'').replace(/\n/g,'<br>');
+            }
+
+            function _updateBadge(count) {
+                const b = _el('coworkRunningBadge');
+                if (!b) return;
+                if (count > 0) { b.textContent = count; b.style.display = ''; }
+                else { b.style.display = 'none'; }
+            }
+
+            // ── 面板开关 ─────────────────────────────────────
+            function open() {
+                const panel = _el('coworkPanel');
+                if (!panel) return;
+                if (typeof closeSkillsPanel === 'function') closeSkillsPanel();
+                panel.classList.add('active');
+                const btn = _el('navCoworkBtn');
+                if (btn) btn.classList.add('active');
+            }
+
+            function close() {
+                const panel = _el('coworkPanel');
+                if (!panel) return;
+                panel.classList.remove('active');
+                const btn = _el('navCoworkBtn');
+                if (btn) btn.classList.remove('active');
+            }
+
+            // ── Tab 切换 ──────────────────────────────────────
+            function switchTab(tab) {
+                ['new','status','history'].forEach(t => {
+                    const tabEl  = _el('cwTab' + t.charAt(0).toUpperCase() + t.slice(1));
+                    const bodyEl = _el('cwTab' + t.charAt(0).toUpperCase() + t.slice(1) + 'Body');
+                    if (tabEl)  tabEl.classList.toggle('active', t === tab);
+                    if (bodyEl) bodyEl.style.display = t === tab ? 'flex' : 'none';
+                });
+                if (tab === 'history') _loadHistory();
+            }
+
+            // ── 提交任务 ──────────────────────────────────────
+            async function submit() {
+                const goal = (_el('cwGoalInput').value || '').trim();
+                if (!goal) { _el('cwGoalInput').focus(); return; }
+                const context = (_el('cwContextInput').value || '').trim();
+                const human_review = _el('cwHumanReviewToggle').checked;
+
+                _el('cwSubmitBtn').disabled = true;
+                _el('cwSubmitBtn').textContent = '提交中…';
+
+                try {
+                    const resp = await fetch('/api/bg-agent/submit', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            goal,
+                            context: context ? { info: context } : {},
+                            human_review,
+                            session_id: _sessionId
+                        })
+                    });
+                    const json = await resp.json();
+                    if (!resp.ok || !json.ok) throw new Error(json.error || '提交失败');
+                    _taskId = json.data.task_id;
+                    _startMonitor(_taskId);
+                    switchTab('status');
+                    _el('cwTabStatus').style.display = '';
+                    _el('cwCurrentGoal').textContent = '目标: ' + goal;
+                } catch(e) {
+                    alert('提交失败: ' + e.message);
+                } finally {
+                    _el('cwSubmitBtn').disabled = false;
+                    _el('cwSubmitBtn').textContent = '▶ 开始执行任务';
+                }
+            }
+
+            // ── 监控任务（SSE + 轮询回退）────────────────────
+            function _startMonitor(taskId) {
+                _stopMonitor();
+                // 尝试 SSE
+                try {
+                    _sse = new EventSource('/api/bg-agent/' + taskId + '/stream');
+                    _sse.onmessage = (ev) => {
+                        try { _handleUpdate(JSON.parse(ev.data)); } catch(e) {}
+                    };
+                    _sse.onerror = () => {
+                        _sse.close(); _sse = null;
+                        _startPoll(taskId);  // 降级轮询
+                    };
+                } catch(e) {
+                    _startPoll(taskId);
+                }
+                _updateBadge(1);
+            }
+
+            function _startPoll(taskId) {
+                _pollTimer = setInterval(() => _fetchStatus(taskId), 2500);
+            }
+
+            function _stopMonitor() {
+                if (_sse) { try { _sse.close(); } catch(e) {} _sse = null; }
+                if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+            }
+
+            async function _fetchStatus(taskId) {
+                try {
+                    const resp = await fetch('/api/bg-agent/' + taskId);
+                    if (!resp.ok) return;
+                    const json = await resp.json();
+                    if (json.ok) _handleUpdate(json.data);
+                } catch(e) {}
+            }
+
+            // ── 渲染状态更新 ──────────────────────────────────
+            function _handleUpdate(status) {
+                if (!status) return;
+                const phase = status.phase;
+
+                // Phase badge
+                const badge = _el('cwPhaseBadge');
+                if (badge) {
+                    badge.textContent = _phaseLabel(phase);
+                    badge.className = 'cw-phase-badge ' + phase;
+                    badge.style.display = '';
+                }
+
+                // Progress bar
+                if (status.steps_total > 0) {
+                    const pct = Math.round(status.steps_done / status.steps_total * 100);
+                    if (_el('cwProgressBar')) _el('cwProgressBar').style.width = pct + '%';
+                    if (_el('cwProgressText')) _el('cwProgressText').textContent = status.steps_done + ' / ' + status.steps_total;
+                }
+
+                // Show/hide sub-blocks per phase
+                _el('cwReviewBlock').style.display  = phase === 'review'    ? '' : 'none';
+                _el('cwStepsBlock').style.display   = phase === 'executing' ? '' : 'none';
+                _el('cwReportBlock').style.display  = phase === 'done'      ? '' : 'none';
+                _el('cwErrorBlock').style.display   = phase === 'failed'    ? '' : 'none';
+
+                if (phase === 'review' && status.plan) _renderPlan(status.plan);
+                if (phase === 'executing' && status.plan) _renderExecSteps(status.plan.steps, status.current_step);
+                if (phase === 'done') {
+                    _el('cwReportContent').innerHTML = _md(status.final_report || '任务完成。');
+                    _stopMonitor();
+                    _updateBadge(0);
+                }
+                if (phase === 'failed') {
+                    _el('cwErrorMsg').textContent = status.error || '未知错误';
+                    _stopMonitor();
+                    _updateBadge(0);
+                }
+                // planning phase — just show spinner (steps not rendered yet)
+            }
+
+            function _renderPlan(plan) {
+                if (_el('cwPlanReasoning')) _el('cwPlanReasoning').textContent = plan.reasoning || '';
+                if (_el('cwPlanMeta')) _el('cwPlanMeta').textContent =
+                    '预计耗时: ' + (plan.estimated_minutes || '?') + ' 分钟 · ' + (plan.steps||[]).length + ' 个步骤';
+                const container = _el('cwPlanSteps');
+                if (!container) return;
+                container.innerHTML = (plan.steps||[]).map((s,i) =>
+                    `<div class="cw-step">
+                        <div class="cw-step-header">
+                            <span class="cw-step-icon">${_toolIcon(s.tool_hint)}</span>
+                            <span class="cw-step-title">${i+1}. ${_esc(s.title)}</span>
+                        </div>
+                        <div class="cw-step-desc">${_esc(s.description)}</div>
+                    </div>`
+                ).join('');
+            }
+
+            function _renderExecSteps(steps, currentStepId) {
+                const container = _el('cwExecSteps');
+                if (!container) return;
+                container.innerHTML = (steps||[]).map(s => {
+                    const isCurrent = s.step_id === currentStepId;
+                    return `<div class="cw-step ${s.status}">
+                        <div class="cw-step-header">
+                            <span class="cw-step-icon">${_stepIcon(s.status)}</span>
+                            <span class="cw-step-title">${_esc(s.title)}</span>
+                            ${isCurrent ? '<span class="cw-spinner" style="margin-left:auto"></span>' : ''}
+                        </div>
+                        ${s.result ? '<div class="cw-step-desc">' + _esc(s.result.slice(0,120)) + '</div>' : ''}
+                    </div>`;
+                }).join('');
+            }
+
+            function _esc(str) {
+                return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            }
+
+            // ── 审批 / 拒绝 ───────────────────────────────────
+            async function approve() {
+                if (!_taskId) return;
+                try {
+                    const resp = await fetch('/api/bg-agent/' + _taskId + '/approve', { method: 'POST' });
+                    const json = await resp.json();
+                    if (!json.ok) throw new Error(json.error || '操作失败');
+                    _el('cwReviewBlock').style.display = 'none';
+                } catch(e) { alert('批准失败: ' + e.message); }
+            }
+
+            function showRejectInput() {
+                const row = _el('cwRejectRow');
+                if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+            }
+
+            async function reject() {
+                if (!_taskId) return;
+                const feedback = (_el('cwRejectFeedback') && _el('cwRejectFeedback').value) || '';
+                try {
+                    const resp = await fetch('/api/bg-agent/' + _taskId + '/reject', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ feedback })
+                    });
+                    const json = await resp.json();
+                    if (!json.ok) throw new Error(json.error || '操作失败');
+                    _stopMonitor();
+                    _updateBadge(0);
+                    newTask();
+                } catch(e) { alert('拒绝失败: ' + e.message); }
+            }
+
+            async function cancel() {
+                if (!_taskId) return;
+                if (!confirm('确认取消当前任务？')) return;
+                try {
+                    await fetch('/api/bg-agent/' + _taskId + '/cancel', { method: 'POST' });
+                } catch(e) {}
+                _stopMonitor();
+                _updateBadge(0);
+                newTask();
+            }
+
+            function newTask() {
+                _taskId = null;
+                _stopMonitor();
+                _el('cwGoalInput').value = '';
+                _el('cwContextInput').value = '';
+                _el('cwPhaseBadge').style.display = 'none';
+                _el('cwProgressBar').style.width = '0%';
+                _el('cwProgressText').textContent = '0 / 0';
+                _el('cwTabStatus').style.display = 'none';
+                switchTab('new');
+                _updateBadge(0);
+            }
+
+            // ── 历史列表 ──────────────────────────────────────
+            async function _loadHistory() {
+                const container = _el('cwHistoryList');
+                if (!container) return;
+                container.innerHTML = '<div class="cw-empty"><span class="cw-spinner"></span></div>';
+                try {
+                    const resp = await fetch('/api/bg-agent/list?session_id=' + _sessionId);
+                    const json = await resp.json();
+                    if (!json.ok) throw new Error(json.error || '加载失败');
+                    const tasks = json.data || [];
+                    if (!tasks.length) { container.innerHTML = '<div class="cw-empty">暂无历史任务</div>'; return; }
+                    container.innerHTML = tasks.map(t => {
+                        const dt = t.submitted_at ? new Date(t.submitted_at * 1000).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '';
+                        return `<div class="cw-history-item" onclick="CoworkPanel.loadTask('${t.task_id}')">
+                            <div class="cw-history-goal">${_esc(t.goal)}</div>
+                            <div class="cw-history-meta">
+                                <span class="cw-phase-badge ${t.phase}" style="padding:1px 7px;font-size:10px;">${_phaseLabel(t.phase)}</span>
+                                <span style="margin-left:6px;">${dt}</span>
+                            </div>
+                        </div>`;
+                    }).join('');
+                } catch(e) {
+                    container.innerHTML = '<div class="cw-empty" style="color:#f87171;">' + _esc(e.message) + '</div>';
+                }
+            }
+
+            async function loadTask(taskId) {
+                _taskId = taskId;
+                switchTab('status');
+                _el('cwTabStatus').style.display = '';
+                _fetchStatus(taskId);
+                _startMonitor(taskId);
+            }
+
+            return { open, close, switchTab, submit, approve, showRejectInput, reject, cancel, newTask, loadTask };
+        })();
+
+
 
         async function spLoadSkills() {
             const content = document.getElementById('spContent');
@@ -3903,7 +4677,9 @@
                 // 我的库: enabled skills + user-created (non-builtin) skills
                 skills = skills.filter(s => s.enabled || !s.is_builtin);
             }
-            if (cat !== 'all') {
+            if (cat === 'file') {
+                skills = skills.filter(s => _SP_FILE_SKILL_IDS.has(s.id));
+            } else if (cat !== 'all') {
                 skills = skills.filter(s => s.category === cat);
             }
             if (q) {
@@ -4532,6 +5308,14 @@
                 skills: ['deep_thinking','strict_logic','step_by_step'],
                 is_builtin: true,
                 desc: '深度思考 + 严谨逻辑 + 步骤化'
+            },
+            {
+                id: '__builtin_file_mgmt',
+                name: '文件管理模式',
+                icon: '📁',
+                skills: ['multi_format_reader','doc_structure_optimizer','doc_readability','table_enhancer','spreadsheet_analyst','excel_formula_expert'],
+                is_builtin: true,
+                desc: '多格式读取 + 结构优化 + 可读性 + 表格增强 + 数据分析 + 公式专家'
             }
         ];
 
@@ -5431,6 +6215,224 @@
     <!-- ── 文件工作站 CDN deps (lazy-loaded by WA.openInMainView) ── -->
     <script src="/static/vendor/split.min.js"></script>
     <script src="{{ url_for('static', filename='js/workspace-assistant.js') }}?v={{ range(100000,999999)|random }}"></script>
+
+    <!-- ===== WaSkills: 工作流技能芯片系统 ===== -->
+    <script>
+    window.WaSkills = (() => {
+      const _bar   = () => document.getElementById('wa-skill-bar');
+      const _panel = () => document.getElementById('wa-skill-exec-panel');
+      const _body  = () => document.getElementById('wa-skill-exec-body');
+      const _titleEl = () => document.getElementById('wa-skill-exec-title');
+
+      async function load() {
+        const bar = _bar();
+        if (!bar) return;
+        try {
+          const resp = await fetch('/api/editor/ai/skill-list');
+          const data = await resp.json();
+          const skills = (data.skills || []).filter(s => s.has_executor);
+          bar.innerHTML = '';
+          if (!skills.length) { bar.style.display = 'none'; return; }
+          bar.style.display = 'flex';
+          const lbl = document.createElement('span');
+          lbl.style.cssText = 'font-size:11px;color:var(--text-muted);white-space:nowrap;margin-right:2px;flex-shrink:0;';
+          lbl.textContent = '技能：';
+          bar.appendChild(lbl);
+          skills.forEach(s => {
+            const chip = document.createElement('button');
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 10px;font-size:11.5px;font-weight:500;color:var(--accent,#4a90e2);background:rgba(74,144,226,0.08);border:1px solid rgba(74,144,226,0.3);border-radius:20px;cursor:pointer;transition:background 0.15s;white-space:nowrap;';
+            chip.title = s.description || '';
+            chip.textContent = (s.icon || '🔧') + '\u00a0' + s.name;
+            chip.onmouseover = () => chip.style.background = 'rgba(74,144,226,0.18)';
+            chip.onmouseout  = () => chip.style.background = 'rgba(74,144,226,0.08)';
+            chip.addEventListener('click', () => activate(s));
+            bar.appendChild(chip);
+          });
+        } catch(e) {
+          const b = _bar(); if (b) b.style.display = 'none';
+        }
+      }
+
+      function showPanel() {
+        const p = _panel(); if (!p) return;
+        p.style.transform = 'translateY(0)';
+        p.style.opacity   = '1';
+        p.style.pointerEvents = '';
+      }
+
+      function hidePanel() {
+        const p = _panel(); if (!p) return;
+        p.style.transform = 'translateY(100%)';
+        p.style.opacity   = '0';
+        p.style.pointerEvents = 'none';
+      }
+
+      function minimizePanel() {
+        const p = _panel(); if (!p) return;
+        if (p.dataset.minimized === '1') {
+          p.style.maxHeight = '55%'; p.dataset.minimized = '0';
+        } else {
+          p.style.maxHeight = '40px'; p.dataset.minimized = '1';
+        }
+      }
+
+      function activate(skill) {
+        const body = _body(); const titleEl = _titleEl();
+        if (!body || !titleEl) return;
+        titleEl.textContent = (skill.icon || '🔧') + '\u00a0' + skill.name;
+        body.innerHTML = '';
+        if (skill.description) {
+          const d = document.createElement('p');
+          d.style.cssText = 'font-size:12px;color:var(--text-muted);margin:0;line-height:1.5';
+          d.textContent = skill.description; body.appendChild(d);
+        }
+        const form = document.createElement('form');
+        form.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+        const schema = skill.params_schema || {};
+        Object.entries(schema).forEach(([key, field]) => {
+          if (key === 'current_file') return;
+          const lbl = document.createElement('label');
+          lbl.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
+          const span = document.createElement('span');
+          span.style.cssText = 'font-size:11.5px;font-weight:500;color:var(--text-muted);';
+          span.textContent = (field.label || key) + (field.required ? ' *' : '');
+          lbl.appendChild(span);
+          let input;
+          if (field.type === 'file' || field.type === 'file_list') {
+            input = document.createElement('input'); input.type = 'file';
+            if (field.type === 'file_list') input.multiple = true;
+            if (field.accept) input.accept = field.accept;
+            input.style.cssText = 'font-size:11px;color:var(--text-primary);padding:4px 0;';
+          } else if (field.type === 'textarea') {
+            input = document.createElement('textarea'); input.rows = 3;
+            input.placeholder = field.placeholder || '';
+            input.style.cssText = 'padding:6px 8px;font-size:12px;border:1px solid var(--border);border-radius:5px;background:var(--bg-secondary);color:var(--text-primary);resize:vertical;min-height:30px;width:100%;box-sizing:border-box;';
+          } else {
+            input = document.createElement('input'); input.type = 'text';
+            input.placeholder = field.placeholder || '';
+            input.style.cssText = 'padding:6px 8px;font-size:12px;border:1px solid var(--border);border-radius:5px;background:var(--bg-secondary);color:var(--text-primary);width:100%;box-sizing:border-box;';
+          }
+          input.name = key; if (field.required) input.required = true;
+          lbl.appendChild(input); form.appendChild(lbl);
+        });
+        const runBtn = document.createElement('button');
+        runBtn.type = 'submit'; runBtn.textContent = '▶ 开始执行';
+        runBtn.style.cssText = 'margin-top:4px;padding:7px 18px;font-size:12.5px;font-weight:600;color:#fff;background:var(--accent,#4a90e2);border:none;border-radius:6px;cursor:pointer;align-self:flex-start;';
+        form.appendChild(runBtn);
+        form.addEventListener('submit', async (e) => { e.preventDefault(); await execute(skill, form); });
+        body.appendChild(form);
+        showPanel();
+      }
+
+      async function execute(skill, form) {
+        const body = _body();
+        const runBtn = form.querySelector('button[type="submit"]');
+        if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ 执行中…'; }
+        const progressWrap = document.createElement('div');
+        progressWrap.style.cssText = 'display:flex;flex-direction:column;gap:3px;max-height:140px;overflow-y:auto;padding:6px 10px;background:var(--bg-secondary);border-radius:5px;font-size:11.5px;';
+        body.appendChild(progressWrap);
+        const resultWrap = document.createElement('div'); resultWrap.style.display = 'none';
+        body.appendChild(resultWrap);
+        const addStep = (text, color='var(--text-muted)') => {
+          const s = document.createElement('div'); s.style.color = color; s.textContent = text;
+          progressWrap.appendChild(s); progressWrap.scrollTop = progressWrap.scrollHeight; return s;
+        };
+        try {
+          const params = {};
+          const sessionId = Math.random().toString(36).slice(2, 10);
+          for (const el of Array.from(form.elements)) {
+            if (!el.name) continue;
+            if (el.type === 'file') {
+              if (el.files && el.files.length > 0) {
+                const fd = new FormData();
+                fd.append('session_id', sessionId);
+                for (const f of el.files) fd.append('files[]', f);
+                addStep('📤 上传文件…');
+                const up = await fetch('/api/editor/ai/skill-upload', { method:'POST', body:fd });
+                const uj = await up.json();
+                if (!uj.success) throw new Error('上传失败: ' + uj.error);
+                params[el.name] = el.multiple ? uj.paths : uj.paths[0];
+              }
+            } else if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || (el.tagName === 'INPUT' && el.type !== 'submit')) {
+              params[el.name] = el.value;
+            }
+          }
+          addStep('📡 连接技能服务…');
+          const resp = await fetch('/api/editor/ai/skill-execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ skill_id: skill.id, params })
+          });
+          if (!resp.ok) throw new Error('服务器错误 (' + resp.status + ')');
+          const reader = resp.body.getReader();
+          const dec = new TextDecoder();
+          let buf = '', activeStep = null;
+          const handleEvent = (raw) => {
+            if (!raw.startsWith('data: ')) return;
+            let ev; try { ev = JSON.parse(raw.slice(6)); } catch { return; }
+            if (ev.type === 'status')     addStep(ev.text || '');
+            else if (ev.type === 'step_start') activeStep = addStep('⚙️ ' + ev.label + '…');
+            else if (ev.type === 'step_done') {
+              if (activeStep) { activeStep.textContent = '✅ ' + ev.label; activeStep.style.color = '#27ae60'; activeStep = null; }
+              else addStep('✅ ' + ev.label, '#27ae60');
+            }
+            else if (ev.type === 'progress') addStep((ev.detail || '处理中') + ' (' + ev.current + '/' + ev.total + ')');
+            else if (ev.type === 'output')   { resultWrap.style.display = ''; _renderOutput(ev, resultWrap); }
+            else if (ev.type === 'error')    addStep('❌ ' + ev.text, '#e74c3c');
+            else if (ev.type === 'done') {
+              addStep('🎉 完成' + (ev.summary ? '：' + ev.summary : ''), '#27ae60');
+              if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ 重新执行'; }
+            }
+          };
+          while (true) {
+            const { done, value } = await reader.read(); if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const parts = buf.split('\n\n'); buf = parts.pop();
+            for (const p of parts) handleEvent(p);
+          }
+          if (buf) handleEvent(buf);
+        } catch(err) {
+          addStep('❌ ' + err.message, '#e74c3c');
+          if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ 重新执行'; }
+        }
+      }
+
+      function _renderOutput(ev, resultWrap) {
+        const { output_type, data } = ev;
+        if (output_type === 'html') {
+          const d = document.createElement('div');
+          d.style.cssText = 'font-size:12px;line-height:1.6;overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:8px;';
+          d.innerHTML = (typeof data === 'string') ? data : '';
+          resultWrap.appendChild(d);
+        } else {
+          const pre = document.createElement('pre');
+          pre.style.cssText = 'font-size:12px;white-space:pre-wrap;line-height:1.6;max-height:280px;overflow-y:auto;background:var(--bg-secondary);border-radius:4px;padding:6px 8px;';
+          pre.textContent = (typeof data === 'string') ? data : JSON.stringify(data, null, 2);
+          resultWrap.appendChild(pre);
+        }
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;';
+        const insertBtn = document.createElement('button');
+        insertBtn.textContent = '✍️ 发送到AI对话';
+        insertBtn.style.cssText = 'padding:5px 12px;font-size:12px;color:var(--accent,#4a90e2);background:transparent;border:1px solid var(--accent,#4a90e2);border-radius:5px;cursor:pointer;';
+        insertBtn.addEventListener('click', () => {
+          const text = (typeof data === 'string') ? data : JSON.stringify(data, null, 2);
+          const inp = document.getElementById('wa-ai-input');
+          if (inp) { inp.value = text.slice(0, 500); if (window.WA) WA.sendMessage(); }
+          insertBtn.textContent = '✅ 已发送'; insertBtn.disabled = true;
+        });
+        btnRow.appendChild(insertBtn);
+        resultWrap.appendChild(btnRow);
+      }
+
+      // 初始化：DOMContentLoaded + 延迟加载确保 WA 就绪
+      document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(() => { const b = document.getElementById('wa-skill-bar'); if (b) load(); }, 900);
+      });
+
+      return { load, activate, showPanel, hidePanel, minimizePanel };
+    })();
+    </script>
 
 </body>
 </html>

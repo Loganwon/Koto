@@ -234,6 +234,16 @@ hiddenimports = [
     'app.core.agent.plugins.auto_remediation_plugin',
     'app.core.agent.plugins.system_event_monitoring_plugin',
     'app.core.agent.plugins.system_info_plugin',
+    'app.core.agent.plugins.annotation_plugin',
+    'app.core.agent.plugins.chart_vision_plugin',
+    'app.core.agent.plugins.doc_gen_plugin',
+    'app.core.agent.plugins.file_converter_plugin',
+    'app.core.agent.plugins.memory_tools_plugin',
+    'app.core.agent.plugins.ppt_plugin',
+    'app.core.agent.plugins.productivity_plugin',
+    'app.core.agent.plugins.skill_tools_plugin',
+    'app.core.agent.plugins.template_fill_plugin',
+    'app.core.agent.plugins.web_tools_bridge_plugin',
     'app.core.analytics', 'app.core.analytics.trend_analyzer',
     'app.core.config', 'app.core.config.configuration_manager',
     'app.core.learning', 'app.core.learning.distill_manager',
@@ -264,6 +274,12 @@ hiddenimports = [
     'app.core.workflow',
     'app.core.workflow.interactive_planner',
     'app.core.workflow.langgraph_workflow',
+    'app.core.workflows',
+    'app.core.workflows.action_item_extractor',
+    'app.core.workflows.cross_format_extractor',
+    'app.core.workflows.data_format_cleaner',
+    'app.core.workflows.doc_deep_compare',
+    'app.core.workflows.questionnaire_filler',
     'app.api.agent_routes',
     'app.api.skill_routes',
     'app.api.skill_marketplace_routes',
@@ -276,6 +292,7 @@ hiddenimports = [
     'app.api.macro_routes',
     'app.api.telegram_bot_routes',
     'app.api.distill_routes',
+    'app.api.bg_agent_routes',
 
     # ── web/blueprints/ 分层蓝图（动态 import_module，PyInstaller 不自动发现）──
     'web.blueprints',
@@ -294,6 +311,9 @@ hiddenimports = [
     'web.blueprints.file_editor',
     'web.blueprints.file_organize',
     'web.blueprints.dev',
+    'web.blueprints.pptx_editor',
+    'web.blueprints.workflow_api',
+    'web.blueprints.workspace_assistant',
 
     # ── web/routes/ ──
     'web.routes',
@@ -310,7 +330,7 @@ hiddenimports = [
     'web.clipboard_manager', 'web.clipboard_ocr_assistant', 'web.code_generator',
     'web.concept_extractor', 'web.consistency_checker', 'web.context_awareness',
     'web.context_injector', 'web.data_pipeline', 'web.doc_converter',
-    'web.doc_planner', 'web.document_annotator', 'web.document_batch_annotator_v2',
+    'web.doc_planner', 'web.document_annotator', 'web.document_batch_annotator',
     'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
     'web.document_feedback', 'web.document_generator', 'web.document_reader',
     'web.document_validator', 'web.document_workflow_executor',
@@ -339,6 +359,7 @@ hiddenimports = [
     'web.voice_input', 'web.voice_interaction', 'web.voice_recognition_enhanced',
     'web.web_searcher', 'web.windows_notifier', 'web.work_file_library',
     'web.workflow_manager',
+    'web.pdf_annotator', 'web.settings_backup',
 ]
 
 # ═══════════════════════════════════════════════

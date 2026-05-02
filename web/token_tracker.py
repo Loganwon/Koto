@@ -40,17 +40,14 @@ _PRICING: Dict[str, Dict[str, float]] = {
     "gemini-3": {"input": 0.075, "output": 0.30},  # 其他 3.x fallback
     # ── Gemini 2.5 ────────────────────────────────────────────────
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
-    "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
-    # ── Gemini 2.0 ────────────────────────────────────────────────
-    "gemini-2.0-flash-lite": {
+    "gemini-2.5-flash-lite": {
         "input": 0.075,
         "output": 0.30,
-    },  # Lite 版更便宜（须在 flash 前）
-    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},  # 标准 Flash / Exp / Preview
+    },  # Lite 版（保持在 flash 之前）
+    "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
+    # ── Gemini 2.0 ────────────────────────────────────────────────
     "gemini-2.0-pro": {"input": 1.25, "output": 5.00},
     # ── Gemini 1.5 ────────────────────────────────────────────────
-    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
-    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     # ── 深度研究 ────────────────────────────────────────────
     "deep-research": {"input": 2.00, "output": 8.00},  # 按 Pro 估算（官方未公布）
     # ── Embedding ────────────────────────────────────────────

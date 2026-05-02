@@ -15,8 +15,8 @@
   <script src="/static/docx-preview.min.js"
           onerror="var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/docx-preview@latest/dist/docx-preview.min.js';s.crossOrigin='anonymous';document.head.appendChild(s);console.warn('[docx-preview] 本地加载失败，已切换至 CDN');"
           crossorigin="anonymous"></script>
-  <script type="module" crossorigin src="./assets/index-D8JYWG22.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-BPzI-evX.css">
+  <script type="module" crossorigin src="./assets/index-iaK-HjBG.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DMe3sD7Z.css">
 </head>
 <body>
   <div id="file-assistant-root">
@@ -40,10 +40,34 @@
 
     <!-- 右侧：AI 助手面板 -->
     <aside id="right-ai-panel"></aside>
+
+    <!-- 技能执行面板（底部弹出，由 AIPanel._activateSkill 控制） -->
+    <div id="skill-exec-panel" class="skill-exec-panel collapsed">
+      <div class="skill-exec-header">
+        <span class="skill-exec-title">🔧 技能执行</span>
+        <div class="skill-exec-header-btns">
+          <button class="skill-exec-minimize" title="最小化/展开">▼</button>
+          <button class="skill-exec-close" title="关闭">✕</button>
+        </div>
+      </div>
+      <div class="skill-exec-body"></div>
+    </div>
   </div>
+
+  <!-- 技能执行面板：绑定最小化/关闭按钮 -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      var panel = document.getElementById('skill-exec-panel');
+      if (!panel) return;
+      panel.querySelector('.skill-exec-minimize').addEventListener('click', function () {
+        panel.classList.toggle('minimized');
+      });
+      panel.querySelector('.skill-exec-close').addEventListener('click', function () {
+        panel.classList.add('collapsed');
+      });
+    });
+  </script>
 
-  <!-- 运行时扩展补丁：浮动工具栏8项操作 + 键盘快捷键 + 导出功能 -->
-  <script src="/editor/assets/koto-patch.js" defer></script>
   <!-- 自动激活文档：等待 FileManager 就绪后，自动加载最近的文档 -->
   <script>
     (function autoActivateDoc() {

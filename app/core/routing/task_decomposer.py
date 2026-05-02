@@ -345,7 +345,7 @@ class TaskDecomposer:
 
             resp = provider.generate_content(
                 prompt=_PROMPT,
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 stream=False,
                 max_tokens=400,
             )

@@ -1555,7 +1555,7 @@ class EnhancedPPTGenerator:
         if ai_client:
             try:
                 response = ai_client.models.generate_content(
-                    model="gemini-3-flash-preview",
+                    model="gemini-2.5-flash",
                     contents=outline_prompt,
                     config=types.GenerateContentConfig(
                         system_instruction="你是专业的PPT内容策划师，擅长结构化内容组织。",

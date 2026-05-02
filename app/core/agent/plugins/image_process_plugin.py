@@ -11,6 +11,7 @@ import os
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
+from app.core.agent.path_utils import resolve_existing_path
 
 
 class ImageProcessPlugin(AgentPlugin):
@@ -97,13 +98,32 @@ class ImageProcessPlugin(AgentPlugin):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def image_info(filepath: str) -> str:
+    def _resolve_image_path(filepath: str) -> tuple[str | None, str | None, bool]:
+        resolved, err = resolve_existing_path(filepath)
+        if resolved:
+            return resolved, None, True
+        # Compatibility fallback: allow downstream image loader to attempt raw path
+        # (useful for unit tests with mocked PIL open).
+        return filepath, err, False
+
+    @classmethod
+    def image_info(cls, filepath: str) -> str:
         """Return metadata about an image."""
         try:
             from PIL import Image
 
-            img = Image.open(filepath)
+            resolved, err, from_resolver = cls._resolve_image_path(filepath)
+            if not resolved:
+                return f"Error reading image info: {err or 'empty path'}"
+
+            try:
+                img = Image.open(resolved)
+            except Exception as exc:
+                if not from_resolver and err:
+                    return f"Error reading image info: {err}"
+                return f"Error reading image info: {exc}"
             return (
+                f"File: {resolved}\n"
                 f"Format: {img.format}\n"
                 f"Size: {img.size[0]}x{img.size[1]} px\n"
                 f"Mode: {img.mode}"
@@ -111,35 +131,55 @@ class ImageProcessPlugin(AgentPlugin):
         except Exception as exc:
             return f"Error reading image info: {exc}"
 
-    @staticmethod
+    @classmethod
     def image_resize(
-        filepath: str, width: int, height: int, output_path: str = ""
+        cls, filepath: str, width: int, height: int, output_path: str = ""
     ) -> str:
         """Resize an image."""
         try:
             from PIL import Image
 
-            img = Image.open(filepath)
+            resolved, err, from_resolver = cls._resolve_image_path(filepath)
+            if not resolved:
+                return f"Error resizing image: {err or 'empty path'}"
+
+            try:
+                img = Image.open(resolved)
+            except Exception as exc:
+                if not from_resolver and err:
+                    return f"Error resizing image: {err}"
+                return f"Error resizing image: {exc}"
             resized = img.resize((int(width), int(height)))
             if not output_path:
-                base, ext = os.path.splitext(filepath)
+                base, ext = os.path.splitext(resolved)
                 output_path = f"{base}_resized{ext}"
+            elif not os.path.isabs(output_path):
+                output_path = os.path.abspath(output_path)
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
             resized.save(output_path)
             return f"Image resized to {width}x{height} and saved to {output_path}"
         except Exception as exc:
             return f"Error resizing image: {exc}"
 
-    @staticmethod
-    def image_convert(filepath: str, target_format: str, output_path: str = "") -> str:
+    @classmethod
+    def image_convert(cls, filepath: str, target_format: str, output_path: str = "") -> str:
         """Convert an image to another format."""
         try:
             from PIL import Image
 
-            img = Image.open(filepath)
+            resolved, err, from_resolver = cls._resolve_image_path(filepath)
+            if not resolved:
+                return f"Error converting image: {err or 'empty path'}"
+
+            try:
+                img = Image.open(resolved)
+            except Exception as exc:
+                if not from_resolver and err:
+                    return f"Error converting image: {err}"
+                return f"Error converting image: {exc}"
             fmt = target_format.upper()
             if not output_path:
-                base, _ = os.path.splitext(filepath)
+                base, _ = os.path.splitext(resolved)
                 ext_map = {
                     "JPEG": ".jpg",
                     "PNG": ".png",
@@ -149,6 +189,8 @@ class ImageProcessPlugin(AgentPlugin):
                 }
                 ext = ext_map.get(fmt, f".{fmt.lower()}")
                 output_path = f"{base}_converted{ext}"
+            elif not os.path.isabs(output_path):
+                output_path = os.path.abspath(output_path)
             os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
             # Handle RGBA → RGB for JPEG
             if fmt == "JPEG" and img.mode in ("RGBA", "P"):

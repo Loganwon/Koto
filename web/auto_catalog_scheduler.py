@@ -42,14 +42,36 @@ class AutoCatalogScheduler:
         self.catalog_task_id = None
 
     def _load_config(self) -> Dict:
-        """加载用户设置"""
+        """加载用户设置（通过 SettingsManager 保证线程安全）"""
+        try:
+            from web.settings import SETTINGS_FILE, SettingsManager
+
+            # For test/custom instances, honor the explicit settings file path
+            # instead of always reading the global singleton settings.
+            if os.path.abspath(self.settings_file) == os.path.abspath(SETTINGS_FILE):
+                return SettingsManager().get_all()
+        except Exception:
+            pass
+
         if os.path.exists(self.settings_file):
-            with open(self.settings_file, "r", encoding="utf-8") as f:
+            with open(self.settings_file, "r", encoding="utf-8-sig") as f:
                 return json.load(f)
         return {}
 
     def _save_config(self):
-        """保存用户设置"""
+        """保存用户设置（通过 SettingsManager 原子写入，避免覆盖其他设置）"""
+        try:
+            from web.settings import SETTINGS_FILE, SettingsManager
+
+            if os.path.abspath(self.settings_file) == os.path.abspath(SETTINGS_FILE):
+                sm = SettingsManager()
+                ac = self.config.get("auto_catalog", {})
+                sm.update("auto_catalog", ac)
+                return
+        except Exception:
+            pass
+
+        # fallback for custom settings files or settings manager failures
         with open(self.settings_file, "w", encoding="utf-8") as f:
             json.dump(self.config, f, ensure_ascii=False, indent=2)
 

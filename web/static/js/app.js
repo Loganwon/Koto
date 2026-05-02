@@ -228,6 +228,26 @@ async function maximizeWindow() {
 }
 
 async function closeWindow() {
+    // ── Check for unsaved files in the File Assistant ────────────────────────
+    if (window.WA && typeof window.WA.getUnsavedTabs === 'function') {
+        const unsaved = window.WA.getUnsavedTabs();
+        if (unsaved.length > 0) {
+            // Show the custom close-warning dialog inside the WA panel
+            // and wait for user decision ('save' | 'discard' | 'cancel')
+            let decision = 'discard';
+            if (typeof window.WA.showCloseWarning === 'function') {
+                decision = await window.WA.showCloseWarning(unsaved);
+            } else {
+                // Fallback: basic confirm
+                const names = unsaved.map(t => t.name).join('\n  - ');
+                const ok = confirm(`文件助手中有未保存的文件：\n  - ${names}\n\n直接关闭将丢失修改，是否继续？`);
+                decision = ok ? 'discard' : 'cancel';
+            }
+            if (decision === 'cancel') return;  // User chose to stay — do NOT close
+            // 'save' already saved files via _closeWarnSaveAll; 'discard' just proceeds
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
     if (window.pywebview && window.pywebview.api && window.pywebview.api.close) {
         await window.pywebview.api.close();
     } else {
@@ -2778,6 +2798,9 @@ async function sendMessage(event) {
             let hasReceivedData = false; // 追踪是否收到过数据
             let agentStepCounter = 0;
             let agentStepTimer = null;  // 当前步骤计时器
+            let canonicalStepTotal = 0;
+            let canonicalCurrentStepIndex = 0;
+            const canonicalStepOrder = new Map();
 
             // ── 实时进度面板状态（新方案）──
             let progressCompletedSteps = [];   // {message, detail}[]
@@ -3008,11 +3031,183 @@ async function sendMessage(event) {
                 return `<div class="agent-observation-card"><pre>${escapeHtml(JSON.stringify(obj, null, 2))}</pre></div>`;
             };
 
+            const ensureCanonicalStepIndex = (rawStepId, fallbackTitle = '') => {
+                const key = String(rawStepId || '').trim() || fallbackTitle || `step_${canonicalStepOrder.size + 1}`;
+                if (canonicalStepOrder.has(key)) return canonicalStepOrder.get(key);
+                const nextIdx = canonicalStepOrder.size + 1;
+                canonicalStepOrder.set(key, nextIdx);
+                canonicalStepTotal = Math.max(canonicalStepTotal, nextIdx);
+                return nextIdx;
+            };
+
+            const canonicalProgressFraction = (milestone = 'step_progress') => {
+                const fractions = {
+                    phase_running: 0.5,
+                    phase_done: 1,
+                    step_start: 0.35,
+                    tool_call: 0.5,
+                    step_progress: 0.7,
+                    tool_result: 0.85,
+                    step_done: 1,
+                    step_error: 1,
+                };
+                return Object.prototype.hasOwnProperty.call(fractions, milestone) ? fractions[milestone] : 0;
+            };
+
+            const canonicalProgressPercent = (index, total, milestone = 'step_progress') => {
+                const safeTotal = Math.max(Number(total) || 0, Number(index) || 0, 1);
+                const safeIndex = Math.min(Math.max(Number(index) || 1, 1), safeTotal);
+                const fraction = canonicalProgressFraction(milestone);
+                return Math.max(0, Math.min(100, Math.round((((safeIndex - 1) + fraction) / safeTotal) * 100)));
+            };
+
             const normalizeEvent = (evt) => {
                 if (!evt || typeof evt !== 'object') return evt;
 
                 if (evt.type === 'error' && evt.data && !evt.message) {
                     return { type: 'error', message: evt.data.error || '未知错误' };
+                }
+
+                if (evt.type === 'plan' && Array.isArray(evt.steps)) {
+                    canonicalStepOrder.clear();
+                    canonicalCurrentStepIndex = 0;
+                    canonicalStepTotal = evt.steps.length;
+                    const steps = evt.steps.map((step, idx) => {
+                        const title = step.description || step.label || step.text || step.id || `步骤 ${idx + 1}`;
+                        const key = String(step.id || step.step_id || step.step || title || idx + 1);
+                        canonicalStepOrder.set(key, idx + 1);
+                        return { index: idx + 1, title };
+                    });
+                    return { type: 'task_step', status: 'init', steps, step_total: steps.length };
+                }
+
+                if (evt.type === 'plan_summary') {
+                    return { type: 'planning_status', message: evt.text || evt.summary || '' };
+                }
+
+                if (evt.type === 'thought') {
+                    return { type: 'agent_thought', thought: evt.text || evt.message || '' };
+                }
+
+                if (evt.type === 'phase' && Array.isArray(evt.phases) && evt.phases.length) {
+                    const currentKey = String(evt.current || '').trim();
+                    const currentIdx = evt.phases.findIndex(phase => String(phase.id || phase.label || '').trim() === currentKey);
+                    const phaseIndex = currentIdx >= 0 ? currentIdx + 1 : 1;
+                    const phase = evt.phases[currentIdx] || evt.phases[0];
+                    const title = phase?.label || phase?.id || evt.text || currentKey || '执行阶段';
+                    return {
+                        type: 'task_step',
+                        step_index: phaseIndex,
+                        step_total: evt.phases.length,
+                        status: evt.status === 'done' && phaseIndex >= evt.phases.length ? 'done' : 'running',
+                        title,
+                        detail: '',
+                        progress: canonicalProgressPercent(phaseIndex, evt.phases.length, evt.status === 'done' ? 'phase_done' : 'phase_running'),
+                    };
+                }
+
+                if (evt.type === 'step_start') {
+                    const title = evt.text || evt.label || evt.step_id || evt.step || '执行步骤';
+                    const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, title);
+                    canonicalCurrentStepIndex = idx;
+                    return {
+                        type: 'task_step',
+                        step_index: idx,
+                        step_total: canonicalStepTotal || idx,
+                        status: 'running',
+                        title,
+                        detail: evt.detail || '',
+                        progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_start'),
+                    };
+                }
+
+                if (evt.type === 'step_progress') {
+                    const detail = evt.detail || evt.text || '处理中';
+                    const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, detail);
+                    canonicalCurrentStepIndex = idx;
+                    const currentTitle = taskStepStates.get(idx)?.title || `步骤 ${idx}`;
+                    return {
+                        type: 'task_step',
+                        step_index: idx,
+                        step_total: canonicalStepTotal || idx,
+                        status: 'running',
+                        title: currentTitle,
+                        detail,
+                        progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_progress'),
+                    };
+                }
+
+                if (evt.type === 'step_done') {
+                    const title = evt.text || evt.label || evt.step_id || evt.step || '步骤完成';
+                    const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, title);
+                    canonicalCurrentStepIndex = idx;
+                    return {
+                        type: 'task_step',
+                        step_index: idx,
+                        step_total: canonicalStepTotal || idx,
+                        status: 'done',
+                        title,
+                        detail: evt.detail || '',
+                        progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_done'),
+                    };
+                }
+
+                if (evt.type === 'step_error') {
+                    const errText = evt.error || evt.text || '步骤失败';
+                    const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, errText);
+                    canonicalCurrentStepIndex = idx;
+                    const currentTitle = taskStepStates.get(idx)?.title || evt.step_id || `步骤 ${idx}`;
+                    return {
+                        type: 'task_step',
+                        step_index: idx,
+                        step_total: canonicalStepTotal || idx,
+                        status: 'failed',
+                        title: currentTitle,
+                        detail: errText,
+                        progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_error'),
+                    };
+                }
+
+                if (evt.type === 'tool_call') {
+                    if (canonicalCurrentStepIndex > 0 || canonicalStepTotal > 0) {
+                        const idx = canonicalCurrentStepIndex || 1;
+                        const currentTitle = taskStepStates.get(idx)?.title || `步骤 ${idx}`;
+                        return {
+                            type: 'task_step',
+                            step_index: idx,
+                            step_total: canonicalStepTotal || idx,
+                            status: 'running',
+                            title: currentTitle,
+                            detail: describeAction(evt.tool_name, evt.tool_args),
+                            progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'tool_call'),
+                        };
+                    }
+                    agentStepCounter += 1;
+                    return {
+                        type: 'agent_step',
+                        step_number: agentStepCounter,
+                        total_steps: '?',
+                        tool_name: evt.tool_name || 'tool',
+                        tool_args: evt.tool_args || {},
+                    };
+                }
+
+                if (evt.type === 'tool_result') {
+                    const preview = evt.result_preview || '';
+                    if (canonicalCurrentStepIndex > 0 || canonicalStepTotal > 0) {
+                        const idx = canonicalCurrentStepIndex || 1;
+                        const currentTitle = taskStepStates.get(idx)?.title || `步骤 ${idx}`;
+                        return {
+                            type: 'task_step',
+                            step_index: idx,
+                            step_total: canonicalStepTotal || idx,
+                            status: 'running',
+                            title: currentTitle,
+                            detail: briefObsText(preview),
+                            progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'tool_result'),
+                        };
+                    }
+                    return { type: 'observation', message: preview, observation: preview };
                 }
 
                 if (evt.type === 'task_final' && evt.data) {
@@ -4458,13 +4653,6 @@ function handleGlobalKeyDown(e) {
     // 有模态框开着时不拦截
     if (document.querySelector('.modal-overlay.active')) return;
 
-    // PPTX editor is active — let its own key handler take over (avoid stealing Ctrl+B etc.)
-    const pptxEditor = document.getElementById('wa-pptx-editor');
-    if (pptxEditor && pptxEditor.classList.contains('active')) {
-        // Only keep Escape (for stopping generation) here; everything else goes to PPTX handler
-        if (e.key !== 'Escape') return;
-    }
-
     if (e.key === 'Escape' && currentSession && isSessionGenerating(currentSession)) {
         e.preventDefault();
         document.getElementById('sendBtn')?.click();
@@ -5183,6 +5371,8 @@ function selectTheme(theme) {
 }
 
 function openSettings() {
+    // 关闭 Skills 面板（互斥）
+    if (typeof closeSkillsPanel === 'function') closeSkillsPanel();
     loadSettings();
     loadSkills();   // Load skills when opening settings
     loadSkillBindings();    // Load intent bindings
@@ -6031,6 +6221,7 @@ async function updateSetting(category, key, value) {
         
         if (!response.ok) {
             console.error('Failed to update setting: HTTP', response.status);
+            showNotification('设置保存失败，请重试', 'error', 3000);
             return;
         }
         const data = await response.json();
@@ -6055,9 +6246,12 @@ async function updateSetting(category, key, value) {
                 console.log('[设置] 等待小游戏:', enableMiniGame ? '启用' : '禁用');
                 if (!enableMiniGame) hideMiniGame();
             }
+        } else {
+            showNotification('设置保存失败：' + (data.error || '未知错误'), 'error', 3000);
         }
     } catch (error) {
         console.error('Failed to update setting:', error);
+        showNotification('设置保存失败，请检查网络连接', 'error', 3000);
     }
 }
 

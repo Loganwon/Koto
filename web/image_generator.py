@@ -32,7 +32,7 @@ class ImageGenerator:
                 api_key=api_key, http_options={"api_version": "v1beta"}
             )
 
-        # Model preference: try specific image models first, then fallback to gemini-2.0-flash which might have image capability
+        # Model preference: try specific image models first, then fallback to gemini-2.5-flash-image
         self.image_model = "imagen-4.0-generate-001"
 
     def generate_image(

@@ -92,7 +92,10 @@ ACTIVATION_CODES_FILE = os.environ.get(
     "KOTO_ACTIVATION_CODES_FILE", "config/activation_codes.json"
 )
 # 系统 API key（后台 Gemini key，供持有激活码的用户使用）
-SYSTEM_GEMINI_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY", "")
+def _get_system_gemini_key() -> str:
+    from app.core.llm.gemini_config import get_gemini_api_key
+
+    return get_gemini_api_key() or ""
 
 
 def _hash_password(password: str, salt: str = None) -> tuple:
@@ -145,7 +148,7 @@ def get_user_api_key(user_record: dict) -> str | None:
     if own_key:
         return own_key
     if user_record.get("activation_code"):
-        return SYSTEM_GEMINI_KEY or None
+        return _get_system_gemini_key() or None
     return None
 
 
@@ -276,7 +279,7 @@ def require_auth(f):
         if not AUTH_ENABLED:
             g.user_id = "local"
             g.user_email = "local@koto.ai"
-            g.api_key = SYSTEM_GEMINI_KEY
+            g.api_key = _get_system_gemini_key()
             return f(*args, **kwargs)
 
         # 从 header 或 cookie 获取 token

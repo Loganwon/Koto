@@ -322,6 +322,157 @@ _RECOMMENDED_INTENT_BINDINGS = [
         ],
         "auto_disable_after_turns": 2,
     },
+    # ── 文档专用技能（Document-specific skills）──
+    {
+        "skill_id": "doc_format_fixer",
+        "patterns": [
+            "格式修复", "格式问题", "标题层级", "列表缩进", "段落间距", "格式整理", "排版问题",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "doc_structure_optimizer",
+        "patterns": [
+            "结构优化", "章节重组", "逻辑结构", "文档结构", "文章结构", "内容安排", "章节顺序",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "table_enhancer",
+        "patterns": [
+            "表格优化", "表格格式", "补充表头", "表格整理", "表格美化", "数据对齐",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "doc_tone_adjuster",
+        "patterns": [
+            "语气调整", "语气正式", "语气轻松", "学术语气", "营销语气", "改变语气", "调整风格",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "doc_fact_checker",
+        "patterns": [
+            "事实核查", "数据准确", "验证数据", "检查引用", "核实信息", "数据核实",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "doc_readability",
+        "patterns": [
+            "可读性", "句子太长", "被动语态", "表达简洁", "语言简化", "提升可读性",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "doc_dedup",
+        "patterns": [
+            "内容去重", "重复内容", "冗余段落", "段落重复", "内容精简", "去除重复",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "legal_doc_review",
+        "patterns": [
+            "法律审阅", "合同审阅", "法律文书", "条款审查", "风险条款", "合规检查", "免责条款",
+        ],
+        "auto_disable_after_turns": 2,
+    },
+    {
+        "skill_id": "financial_doc_review",
+        "patterns": [
+            "财务审阅", "财务报告", "数据一致性", "公式验证", "财务核查", "账目核对", "报表审查",
+        ],
+        "auto_disable_after_turns": 2,
+    },
+    {
+        "skill_id": "academic_paper_polish",
+        "patterns": [
+            "论文精修", "期刊投稿", "论文润色", "学术规范", "论文结构", "摘要优化", "研究论文",
+        ],
+        "auto_disable_after_turns": 2,
+    },
+    {
+        "skill_id": "marketing_copy",
+        "patterns": [
+            "营销文案", "广告文案", "产品文案", "销售文案", "推广文案", "文案优化", "落地页",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "excel_formula_expert",
+        "patterns": [
+            "公式报错", "excel公式", "vlookup", "index match", "公式错误", "公式优化", "excel函数",
+        ],
+        "auto_disable_after_turns": 2,
+    },
+    {
+        "skill_id": "excel_data_cleaner",
+        "patterns": [
+            "数据清洗", "空值处理", "格式统一", "异常值", "重复行", "数据预处理", "脏数据",
+        ],
+        "auto_disable_after_turns": 2,
+    },
+    {
+        "skill_id": "pivot_advisor",
+        "patterns": [
+            "透视表", "数据透视", "groupby", "数据汇总", "多维分析", "pivot table", "数据聚合",
+        ],
+        "auto_disable_after_turns": 2,
+    },
+    {
+        "skill_id": "slide_storyteller",
+        "patterns": [
+            "ppt优化", "演示叙事", "幻灯片逻辑", "演讲稿", "ppt逻辑", "幻灯片故事", "ppt结构",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "slide_data_viz",
+        "patterns": [
+            "图表推荐", "可视化建议", "数据图表", "选图表", "ppt图表", "数据展示", "什么图表",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    # ── 工作流技能绑定 ────────────────────────────────────────────────────────
+    {
+        "skill_id": "cross_format_extractor",
+        "patterns": [
+            "提取填报", "信息搬运", "批量提取", "字段提取", "填入模板", "抽取字段",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "doc_smart_compare",
+        "patterns": [
+            "合同比对", "防暗改", "扫描件对比", "条款比对", "文档对比", "差异检测",
+            "合同差异", "标红批注", "track changes",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "questionnaire_filler",
+        "patterns": [
+            "问卷填写", "rfp填写", "填问卷", "自动填答", "尽调问卷", "自动答题",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "comm_digest",
+        "patterns": [
+            "待办提取", "行动项", "action item", "任务提取", "会议待办", "整理待办",
+            "邮件摘要", "消息摘要", "沟通纪要", "会议纪要", "邮件线程",
+        ],
+        "auto_disable_after_turns": 1,
+    },
+    {
+        "skill_id": "data_format_cleaner",
+        "patterns": [
+            "数据清洗", "格式清洗", "脏数据", "日期格式统一", "数据标准化", "清洗数据",
+        ],
+        "auto_disable_after_turns": 1,
+    },
 ]
 
 

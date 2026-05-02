@@ -72,11 +72,16 @@ In AIPanel.js `_buildApplyButtons()`, add handling for the new action type.
 
 ## Build Process
 
-After editing frontend files, rebuild with esbuild:
+After editing frontend files, rebuild with the unified pipeline:
 ```powershell
 cd web/univer-editor
-.\node_modules\@esbuild\win32-x64\esbuild.exe main.js --bundle --outdir=../static/univer-dist/assets --format=esm --splitting --loader:.css=css --minify --sourcemap "--define:__VUE_OPTIONS_API__=true" "--define:__VUE_PROD_DEVTOOLS__=false" "--define:__VUE_PROD_HYDRATION_MISMATCH_DETAILS__=false"
+npm run build
 ```
+
+This command builds:
+- Vite main entry (`index-*.js`, `index-*.css`)
+- Sheets bundle (`sheets-main.js`, `sheets-main.css`)
+- stale asset cleanup (removes old unreferenced bundles)
 
 ## Data Flow
 
@@ -97,4 +102,4 @@ User selects text → FloatingToolbar._checkSelection()
 - **Univer 0.5.x limitation**: No `replaceText()` API. All edits go through `_replaceEntireDoc()` (dispose + recreate).
 - **Selection tracking**: `fullText.indexOf(selectedText)` may match wrong position if text appears multiple times.
 - **Token limits**: Truncate `full_text` to ~8000 chars in prompts to avoid Gemini token limits.
-- **esbuild Vue flags**: MUST include `--define` flags or Vue runtime crashes with ReferenceError.
+- **Wrong build command risk**: Building only legacy bundles can make source edits appear "not applied" because `/editor` loads `index-*.js` from `web/static/univer-dist/index.html`.

@@ -408,7 +408,7 @@ class OllamaModelsProxy:
         """非流式生成（返回 OllamaResponse，接口兼容 Gemini 响应）"""
         self._ensure_running()
 
-        # 始终使用本地安装的模型 tag，忽略 Gemini 模型名称（如 gemini-3-flash-preview）
+        # 始终使用本地安装的模型 tag，忽略 Gemini 模型名称（如 gemini-2.5-flash）
         target_model = self._model_tag
         config_params = _extract_config_params(config)
         system_instruction = config_params.pop("system_instruction", None)

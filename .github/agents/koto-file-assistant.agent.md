@@ -2,13 +2,11 @@
 name: koto-file-assistant
 description: |
   Custom agent for working on the Koto "文件助手" editor. Use when making UI/UX
-  changes, selection/AI integration fixes, or build+deploy adjustments in
-  `web/univer-editor` and related backend handlers.
+  changes, selection/AI integration fixes, or build+deploy adjustments.
   Use this agent instead of the default when you want strict pre-return checks
   (compile + smoke test + selection/LLM sanity checks) and conservative tool
   usage for editing the repository.
 applyTo:
-  - "web/univer-editor/**"
   - "app/core/**"
   - "*.py"
   - "*.js"
@@ -48,9 +46,9 @@ examples:
       instead show an error and suggest the user retry or use offline mode.
   - description: "Create floating toolbar improvements"
     prompt: |
-      Update `web/univer-editor/src/*` to improve selection detection and
+      Update `web/static/js/workspace-assistant.js` to improve selection detection and
       ensure floating toolbar maps selection -> doc offsets robustly. Run the
-      esbuild bundle after edits and report build success.
+      tests after edits and report success.
 notes: |
   - This agent prefers working incrementally with the user: always present a
     concise checklist of what was changed, what build/test was run, and the

@@ -81,173 +81,29 @@ def _write_meta(meta: dict) -> None:
 
 def _parse_slides(raw_bytes: bytes) -> dict:
     """
-    Parse a .pptx binary blob into structured slide data.
-
-    Returns:
-        {
-          slide_width_emu, slide_height_emu,
-          slides: [ { index, shapes: [{id, name, type, left, top, width,
-                        height, has_text, paragraphs}] } ]
-        }
+    Parse a .pptx binary blob into structured slide data using the geometry parser.
     """
-    from pptx import Presentation
+    import io
+    from app.core.file.file_parser import parse_pptx_geometry
 
-    prs = Presentation(io.BytesIO(raw_bytes))
-    slide_w = int(prs.slide_width or 9144000)
-    slide_h = int(prs.slide_height or 6858000)
+    parsed = parse_pptx_geometry(io.BytesIO(raw_bytes))
 
-    slides = []
-    for idx, slide in enumerate(prs.slides):
-        bg_hex = "#FFFFFF"
-        try:
-            bg_fill = slide.background.fill
-            if bg_fill.type is not None and getattr(bg_fill.type, 'name', '') == 'SOLID':
-                bg_hex = "#" + str(bg_fill.fore_color.rgb).lower()
-        except Exception:
-            pass
+    # Backward-compatibility for older editor/tests expecting `index` and
+    # shape `type` while the geometry parser now emits `slide_index`/`_type`.
+    slides = parsed.get("slides", []) if isinstance(parsed, dict) else []
+    for i, slide in enumerate(slides):
+        if not isinstance(slide, dict):
+            continue
+        slide.setdefault("index", slide.get("slide_index", i))
+        shapes = slide.get("shapes", [])
+        for shape in shapes:
+            if isinstance(shape, dict) and "type" not in shape and "_type" in shape:
+                shape["type"] = shape["_type"]
 
-        shapes = []
-        for z_idx, shape in enumerate(slide.shapes):
-            # Resolve effective geometry: placeholder shapes often inherit
-            # position from the slide layout or slide master (python-pptx
-            # returns None for inherited values).  Walk: shape → layout → master
-            # → hard-coded EMU defaults so shape divs are never 0×0.
-            _eff_left = shape.left
-            _eff_top  = shape.top
-            _eff_w    = shape.width
-            _eff_h    = shape.height
-            if None in (_eff_left, _eff_top, _eff_w, _eff_h):
-                try:
-                    _ph_fmt = shape.placeholder_format
-                    if _ph_fmt is not None:
-                        _layout = getattr(getattr(shape, "part", None), "slide_layout", None)
-                        if _layout is not None:
-                            for _lph in _layout.placeholders:
-                                try:
-                                    if _lph.placeholder_format.idx == _ph_fmt.idx:
-                                        if _eff_left is None: _eff_left = _lph.left
-                                        if _eff_top  is None: _eff_top  = _lph.top
-                                        if _eff_w    is None: _eff_w    = _lph.width
-                                        if _eff_h    is None: _eff_h    = _lph.height
-                                        break
-                                except Exception:
-                                    pass
-                        # Also walk slide master if layout didn't resolve everything
-                        if None in (_eff_left, _eff_top, _eff_w, _eff_h):
-                            _master = getattr(_layout, "slide_master", None) if _layout else None
-                            if _master is not None:
-                                for _mph in _master.placeholders:
-                                    try:
-                                        if _mph.placeholder_format.idx == _ph_fmt.idx:
-                                            if _eff_left is None: _eff_left = _mph.left
-                                            if _eff_top  is None: _eff_top  = _mph.top
-                                            if _eff_w    is None: _eff_w    = _mph.width
-                                            if _eff_h    is None: _eff_h    = _mph.height
-                                            break
-                                    except Exception:
-                                        pass
-                        # If still None, use standard widescreen EMU defaults by placeholder type
-                        if None in (_eff_left, _eff_top, _eff_w, _eff_h):
-                            _ph_idx = getattr(_ph_fmt, "idx", -1)
-                            if _ph_idx == 0:   # Title
-                                if _eff_left is None: _eff_left = 457200
-                                if _eff_top  is None: _eff_top  = 274638
-                                if _eff_w    is None: _eff_w    = 8229600
-                                if _eff_h    is None: _eff_h    = 1143000
-                            elif _ph_idx == 1:  # Body / Content
-                                if _eff_left is None: _eff_left = 457200
-                                if _eff_top  is None: _eff_top  = 1600200
-                                if _eff_w    is None: _eff_w    = 8229600
-                                if _eff_h    is None: _eff_h    = 4525963
-                            else:
-                                if _eff_left is None: _eff_left = 0
-                                if _eff_top  is None: _eff_top  = 0
-                                if _eff_w    is None: _eff_w    = slide_w
-                                if _eff_h    is None: _eff_h    = slide_h
-                except Exception:
-                    pass
-            s: dict = {
-                "id": shape.shape_id,
-                "name": shape.name,
-                "type": str(shape.shape_type),
-                "left": _eff_left or 0,
-                "top": _eff_top or 0,
-                "width": _eff_w or 0,
-                "height": _eff_h or 0,
-                "z_order": z_idx,
-                "has_text": False,
-                "fill": None,
-                "paragraphs": [],
-            }
-
-            try:
-                fill = shape.fill
-                if fill.type is not None and getattr(fill.type, 'name', '') == 'SOLID':
-                    s["fill"] = "#" + str(fill.fore_color.rgb).lower()
-            except Exception:
-                pass
-
-            if getattr(shape, "has_text_frame", False) and shape.text_frame:
-                s["has_text"] = True
-                paras = []
-                for para in shape.text_frame.paragraphs:
-                    align_name = "LEFT"
-                    try:
-                        if para.alignment:
-                            align_name = para.alignment.name
-                    except Exception:
-                        pass
-                    p_obj: dict = {"align": align_name, "runs": []}
-                    for run in para.runs:
-                        r: dict = {"text": run.text}
-                        try:
-                            if run.font.size:
-                                r["size"] = round(run.font.size.pt, 1)
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.bold:
-                                r["bold"] = True
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.italic:
-                                r["italic"] = True
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.underline:
-                                r["underline"] = True
-                        except Exception:
-                            pass
-                        try:
-                            if run.font.color and run.font.color.type is not None:
-                                r["color"] = "#" + str(run.font.color.rgb).lower()
-                        except Exception:
-                            pass
-                        p_obj["runs"].append(r)
-                    paras.append(p_obj)
-                s["paragraphs"] = paras
-
-            shapes.append(s)
-
-        slides.append(
-            {
-                "index": idx,
-                "background": bg_hex,
-                "shapes": shapes,
-            }
-        )
-
-    return {
-        "slide_width_emu": slide_w,
-        "slide_height_emu": slide_h,
-        "slides": slides,
-    }
+    return parsed
 
 
 # ── PPTX export (in-place text update) ───────────────────────────────────────
-
 
 def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
     """
@@ -273,58 +129,109 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
         "THAI_DISTRIBUTE": PP_ALIGN.THAI_DISTRIBUTE,
     }
 
-    from pptx.util import Emu
-
     prs = Presentation(io.BytesIO(orig_bytes))
-    orig_slide_count = len(prs.slides)
+    slide_map = {edit.get("index", edit.get("slide_index", i)): edit for i, edit in enumerate(slides_edits)}
 
-    # Build ordered edit list — each entry keeps its target index.
-    # The edit index is the *logical* position in the final deck.
-    edit_list: list[tuple[int, dict]] = []
-    for i, edit in enumerate(slides_edits):
-        idx = edit.get("index", edit.get("slide_index", i))
-        edit_list.append((idx, edit))
-    edit_list.sort(key=lambda t: t[0])
-
-    # ── Phase 0: Delete slides that are in the original but NOT in the
-    #    edit list.  The frontend re-indexes after deletion, so the edit
-    #    list describes the *desired* final deck.  We detect surplus
-    #    original slides by comparing counts: if there are fewer edits
-    #    than original slides AND no edit index exceeds the original count
-    #    (i.e. no new slides were added), we must trim the originals.
-    #    We delete from the back so that earlier indexes stay valid.
-    edit_indexes = {idx for idx, _ in edit_list}
-    slides_to_delete = []
-    if len(edit_list) < orig_slide_count:
-        # The frontend re-indexes 0..N-1 after deletion, so edits map
-        # 1-to-1 onto the first len(edit_list) original slides only when
-        # all edit indexes < orig_slide_count.  When the user also *added*
-        # new slides, we cannot safely determine which originals were
-        # deleted — so we skip deletion in that case.
-        has_new_slides = any(idx >= orig_slide_count for idx, _ in edit_list)
-        if not has_new_slides:
-            # Keep the first len(edit_list) original slides, remove the rest.
-            for si in range(orig_slide_count - 1, len(edit_list) - 1, -1):
-                slides_to_delete.append(si)
-
-    # Delete surplus original slides (reverse order to preserve indexes)
-    for si in slides_to_delete:
-        rId = prs.slides._sldIdLst[si].get(
-            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
-        )
-        prs.part.drop_rel(rId)
-        del prs.slides._sldIdLst[si]
-
-    # ── Phase 1: Apply edits to existing slides ──────────────────────────
     for slide_idx, slide in enumerate(prs.slides):
-        if slide_idx >= len(edit_list):
-            break
-        _, edit_slide = edit_list[slide_idx]
+        edit_slide = slide_map.get(slide_idx)
+        if not edit_slide:
+            continue
+
+        # ── Apply slide background ──────────────────────────────────────────
+        # Write background color changes back to PPTX XML.
+        # Image backgrounds are stored as data URIs in the JSON; for the PPTX
+        # export we convert them back to an embedded image relationship.
+        try:
+            bg_color = edit_slide.get("background")
+            bg_image = edit_slide.get("backgroundImage")
+            if bg_image and bg_image.startswith("data:"):
+                # Decode data URI and embed as blipFill in slide background
+                import base64 as _b64
+                from pptx.oxml.ns import qn as _qn
+                from lxml import etree as _et
+                header, data = bg_image.split(",", 1)
+                img_bytes = _b64.b64decode(data)
+                mime = header.split(":")[1].split(";")[0]
+                ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif",
+                           "image/webp": "webp", "image/bmp": "bmp"}
+                img_ext = ext_map.get(mime, "png")
+                # Add image as a media part inside the PPTX package
+                # Use python-pptx's internal Part API (wrapped in try/except for safety)
+                from pptx.opc.part import Part as _Part
+                from pptx.opc.constants import RELATIONSHIP_TYPE as _RT
+                part_name = f"/ppt/media/koto_bg_{slide_idx}.{img_ext}"
+                img_part = _Part(part_name, mime, img_bytes)
+                rId = slide.part.relate_to(img_part, _RT.IMAGE)
+                # Build <p:bg><p:bgPr><a:blipFill>...</a:blipFill>...</p:bgPr></p:bg>
+                bg_xml = (
+                    f'<p:bg xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+                    f' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+                    f' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+                    f'<p:bgPr><a:blipFill dpi="0" rotWithShape="1">'
+                    f'<a:blip r:embed="{rId}"/>'
+                    f'<a:stretch><a:fillRect/></a:stretch>'
+                    f'</a:blipFill>'
+                    f'<a:effectLst/></p:bgPr></p:bg>'
+                )
+                new_bg = _et.fromstring(bg_xml)
+                sp_tree = slide.shapes._spTree
+                cSld = sp_tree.getparent()
+                old_bg = cSld.find(_qn('p:bg'))
+                if old_bg is not None:
+                    cSld.remove(old_bg)
+                cSld.insert(0, new_bg)
+            elif bg_color and bg_color.startswith("#") and len(bg_color) == 7:
+                # Solid color background
+                from pptx.oxml.ns import qn as _qn
+                from lxml import etree as _et
+                hex_val = bg_color.lstrip("#")
+                bg_xml = (
+                    f'<p:bg xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"'
+                    f' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+                    f'<p:bgPr><a:solidFill>'
+                    f'<a:srgbClr val="{hex_val}"/>'
+                    f'</a:solidFill>'
+                    f'<a:effectLst/></p:bgPr></p:bg>'
+                )
+                new_bg = _et.fromstring(bg_xml)
+                sp_tree = slide.shapes._spTree
+                cSld = sp_tree.getparent()
+                old_bg = cSld.find(_qn('p:bg'))
+                if old_bg is not None:
+                    cSld.remove(old_bg)
+                cSld.insert(0, new_bg)
+        except Exception as _bg_exc:
+            _logger.debug("Could not write background for slide %d: %s", slide_idx, _bg_exc)
+
         shape_map = {s["id"]: s for s in edit_slide.get("shapes", [])}
 
-        for shape in slide.shapes:
-            edit_shape = shape_map.get(shape.shape_id)
-            if not edit_shape or not edit_shape.get("has_text"):
+        # Keep track of existing ids from the file
+        file_shape_ids = [s.shape_id for s in slide.shapes]
+        
+        # Traverse backwards to safely delete
+        for shape_id in reversed(file_shape_ids):
+            shape = next((s for s in slide.shapes if s.shape_id == shape_id), None)
+            if not shape: continue
+            
+            edit_shape = shape_map.get(shape_id)
+            if not edit_shape:
+                # Shape was deleted from the frontend, remove it from slide
+                try:
+                    shape.element.getparent().remove(shape.element)
+                except Exception:
+                    pass
+                continue
+                
+            # Update shape geometry if present
+            try:
+                if "left" in edit_shape: shape.left = int(edit_shape["left"])
+                if "top" in edit_shape: shape.top = int(edit_shape["top"])
+                if "width" in edit_shape: shape.width = int(edit_shape["width"])
+                if "height" in edit_shape: shape.height = int(edit_shape["height"])
+            except Exception:
+                pass
+
+            if not edit_shape.get("has_text"):
                 continue
             if not getattr(shape, "has_text_frame", False):
                 continue
@@ -399,47 +306,7 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
                         except Exception:
                             pass
 
-                # ── Extra runs beyond original count (e.g. AI markdown → multiple runs)
-                for er in edit_runs[len(orig_runs):]:
-                    try:
-                        run = para.add_run()
-                        run.text = er.get("text", "")
-                        if er.get("bold"):      run.font.bold = True
-                        if er.get("italic"):    run.font.italic = True
-                        if er.get("underline"): run.font.underline = True
-                        if er.get("size"):      run.font.size = Pt(float(er["size"]))
-                        if er.get("color"):
-                            h = er["color"].lstrip("#")
-                            run.font.color.rgb = RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
-                        if er.get("fontName"):
-                            run.font.name = er["fontName"]
-                    except Exception:
-                        pass
-
-            # ── Extra paragraphs beyond original count ─────────────
-            orig_para_count = len(shape.text_frame.paragraphs)
-            for ep in edit_paras[orig_para_count:]:
-                try:
-                    para = shape.text_frame.add_paragraph()
-                    align_str = ep.get("align", "").upper()
-                    if align_str in _ALIGN_MAP:
-                        para.alignment = _ALIGN_MAP[align_str]
-                    for er in ep.get("runs", []):
-                        run = para.add_run()
-                        run.text = er.get("text", "")
-                        if er.get("bold"):      run.font.bold = True
-                        if er.get("italic"):    run.font.italic = True
-                        if er.get("underline"): run.font.underline = True
-                        if er.get("size"):      run.font.size = Pt(float(er["size"]))
-                        if er.get("color"):
-                            h = er["color"].lstrip("#")
-                            run.font.color.rgb = RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
-                        if er.get("fontName"):
-                            run.font.name = er["fontName"]
-                except Exception:
-                    pass
-
-        # ── New shapes (negative IDs = inserted on frontend) ─────────────
+        # ── New shapes (negative IDs = inserted on frontend) ─────────────────
         existing_ids = {s.shape_id for s in slide.shapes}
         for edit_shape in edit_slide.get("shapes", []):
             try:
@@ -450,67 +317,8 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
                 continue  # already handled above
             if not edit_shape.get("has_text"):
                 continue
+            from pptx.util import Emu
             txBox = slide.shapes.add_textbox(
-                Emu(edit_shape.get("left", 0)),
-                Emu(edit_shape.get("top", 0)),
-                Emu(edit_shape.get("width", 2743200)),
-                Emu(edit_shape.get("height", 914400)),
-            )
-            tf = txBox.text_frame
-            tf.word_wrap = True
-            for p_idx, ep in enumerate(edit_shape.get("paragraphs", [])):
-                para = tf.paragraphs[0] if p_idx == 0 else tf.add_paragraph()
-                align_str = ep.get("align", "LEFT").upper()
-                if align_str in _ALIGN_MAP:
-                    try:
-                        para.alignment = _ALIGN_MAP[align_str]
-                    except Exception:
-                        pass
-                for er in ep.get("runs", []):
-                    run = para.add_run()
-                    run.text = er.get("text", "")
-                    try:
-                        if er.get("bold"):      run.font.bold = True
-                        if er.get("italic"):    run.font.italic = True
-                        if er.get("underline"): run.font.underline = True
-                        if er.get("size"):      run.font.size = Pt(float(er["size"]))
-                        if er.get("color"):
-                            h = er["color"].lstrip("#")
-                            run.font.color.rgb = RGBColor(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
-                    except Exception:
-                        pass
-
-    # ── Phase 2: Append brand-new slides ─────────────────────────────────
-    # Edits beyond the (post-deletion) original count are new slides the
-    # user created in the frontend.  Add them as blank slides with textboxes.
-    current_count = len(prs.slides)
-    for list_pos in range(current_count, len(edit_list)):
-        _, edit_slide = edit_list[list_pos]
-
-        # Pick a blank layout (index 6 by convention, fallback to last)
-        try:
-            layout = prs.slide_layouts[6]
-        except (IndexError, KeyError):
-            layout = prs.slide_layouts[-1]
-        new_slide = prs.slides.add_slide(layout)
-
-        # Set background colour
-        bg_hex = edit_slide.get("background", "")
-        if bg_hex and bg_hex != "#ffffff" and bg_hex != "#FFFFFF":
-            try:
-                from pptx.dml.color import RGBColor as _RGB
-                fill = new_slide.background.fill
-                fill.solid()
-                h = bg_hex.lstrip("#")
-                fill.fore_color.rgb = _RGB(int(h[0:2],16), int(h[2:4],16), int(h[4:6],16))
-            except Exception:
-                pass
-
-        # Populate shapes (all are new — add as textboxes)
-        for edit_shape in edit_slide.get("shapes", []):
-            if not edit_shape.get("has_text"):
-                continue
-            txBox = new_slide.shapes.add_textbox(
                 Emu(edit_shape.get("left", 0)),
                 Emu(edit_shape.get("top", 0)),
                 Emu(edit_shape.get("width", 2743200)),

@@ -1301,6 +1301,7 @@ class TestAnnotationPlugin:
     def test_annotate_document_relative_path(self):
         p = self._make()
         result = p.annotate_document(file_path="relative/path.docx")
+        assert "错误" in result
         assert "绝对路径" in result
 
     def test_annotate_document_file_not_found(self):

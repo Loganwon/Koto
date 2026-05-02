@@ -345,7 +345,7 @@ class TestUnifiedAgentCompression:
         from app.core.agent.unified_agent import UnifiedAgent
 
         src = inspect.getsource(UnifiedAgent._compress_observation)
-        assert "gemini-2.0-flash-lite" in src
+        assert "gemini-2.5-flash-lite" in src
 
     def test_compress_integrated_in_exec_one(self):
         from app.core.agent.unified_agent import UnifiedAgent

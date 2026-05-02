@@ -145,6 +145,25 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     except Exception as _e:
         logger.debug(f"[_build_registry] PPTPlugin 跳过: {_e}")
 
+    # ── P0: 沙盒代码执行工具（Python/R/Shell）──────────────────────────
+    try:
+        from app.core.agent.plugins.sandbox_plugin import SandboxPlugin
+
+        registry.register_plugin(SandboxPlugin())
+        logger.debug("[_build_registry] SandboxPlugin 已注册")
+    except Exception as _e:
+        logger.debug(f"[_build_registry] SandboxPlugin 跳过: {_e}")
+
+    # ── P0: 工作区编辑器桥梁（Agent ↔ 前端编辑器）───────────────────────
+    try:
+        from app.core.agent.plugins.workspace_editor_plugin import WorkspaceEditorPlugin
+
+        # socketio instance will be injected later via set_workspace_socketio()
+        registry.register_plugin(WorkspaceEditorPlugin())
+        logger.debug("[_build_registry] WorkspaceEditorPlugin 已注册")
+    except Exception as _e:
+        logger.debug(f"[_build_registry] WorkspaceEditorPlugin 跳过: {_e}")
+
     # ── P0: Skills → 原生函数调用（SkillToolAdapter）────────────────────
     # 将所有 Skill 注册为 ToolRegistry 工具，让 LLM 通过原生 function calling
     # 自行决定何时激活哪个技能，取代 SkillAutoMatcher 的猜测式激活。
@@ -174,7 +193,7 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
 
 def create_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-2.5-flash",
+    model_id: str = "gemini-3.1-pro-preview",
     use_langgraph: Optional[bool] = None,
 ):
     """
@@ -295,7 +314,7 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
 
 def create_langgraph_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-3-flash-preview",
+    model_id: str = "gemini-3.1-pro-preview",
     enable_pii_filter: bool = True,
     enable_output_validation: bool = True,
 ) -> "LangGraphAgent":
@@ -333,7 +352,7 @@ def create_langgraph_agent(
 
 def create_multi_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-3-flash-preview",
+    model_id: str = "gemini-3.1-pro-preview",
     max_revisions: int = 1,
 ) -> "MultiAgentOrchestrator":
     """

@@ -178,6 +178,64 @@ export class DocxViewer {
   }
 
   /**
+   * Show a lightweight live text preview while the agent is still processing.
+   * This favors immediacy over full DOCX fidelity.
+   */
+  setLiveText(text, options = {}) {
+    if (!this._renderArea) return false;
+
+    const append = !!options.append;
+    const label = options.label || 'AI 实时预览';
+    const normalized = String(text || '').replace(/\r\n/g, '\n').trim();
+
+    this.show();
+
+    if (!append) {
+      this._renderArea.innerHTML = '';
+
+      const banner = document.createElement('div');
+      banner.textContent = label;
+      banner.style.cssText = [
+        'margin:0 0 12px 0',
+        'padding:8px 12px',
+        'border-radius:10px',
+        'background:#eef4ff',
+        'color:#24458a',
+        'font-size:12px',
+        'font-weight:600',
+      ].join(';');
+      this._renderArea.appendChild(banner);
+    }
+
+    if (!normalized) {
+      this._updateStats();
+      return true;
+    }
+
+    const block = document.createElement('div');
+    block.className = 'docx-live-preview';
+
+    normalized.split(/\n{2,}/).forEach((paragraph) => {
+      const p = document.createElement('p');
+      p.textContent = paragraph;
+      p.style.whiteSpace = 'pre-wrap';
+      block.appendChild(p);
+    });
+
+    this._renderArea.appendChild(block);
+
+    const pageEl = this._host.querySelector('#docx-status-page');
+    if (pageEl) pageEl.textContent = label;
+
+    this._updateStats();
+
+    const scrollArea = this._host.querySelector('.docx-scroll-area');
+    if (scrollArea) scrollArea.scrollTop = append ? scrollArea.scrollHeight : 0;
+
+    return true;
+  }
+
+  /**
    * 在渲染后的 DOCX DOM 中查找并替换第一处匹配文本。
    * 通过 TreeWalker 遍历文本节点，保留原有样式（加粗/斜体等）。
    * @param {string} original  要替换的原文
@@ -259,7 +317,7 @@ export class DocxViewer {
             && s.width    === '0px'
             && s.height   === '0px'
             && s.display  === 'block'
-            && parseFloat(s.left) > 50   // skip tiny offsets (inline wraps use small values)
+
             && div.querySelector('img');
       });
 

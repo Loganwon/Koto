@@ -88,11 +88,25 @@ export class FileManager {
     });
     this._sidebar.querySelector('#fm-btn-save').addEventListener('click', () => this.saveWithFeedback());
 
-    // Ctrl+S → 保存
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      const ctrl = e.ctrlKey || e.metaKey;
+      const key = String(e.key || '').toLowerCase();
+
+      if (ctrl && !e.shiftKey && key === 's') {
         e.preventDefault();
         this.saveWithFeedback();
+        return;
+      }
+
+      if (ctrl && !e.shiftKey && key === 'n') {
+        e.preventDefault();
+        this._createDoc();
+        return;
+      }
+
+      if (ctrl && e.shiftKey && key === 'e') {
+        e.preventDefault();
+        this.exportCurrentAsText();
       }
     });
 
@@ -367,6 +381,20 @@ export class FileManager {
     } catch (e) {
       if (statusEl) { statusEl.textContent = '保存失败'; statusEl.className = 'save-status'; }
     }
+  }
+
+  exportCurrentAsText() {
+    const text = this._doc.getFullText();
+    const activeFile = this._files.find(f => f.id === this._activeId) || null;
+    const name = (activeFile && activeFile.name) ? activeFile.name : '文档';
+    const blob = new Blob([text || ''], { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = name.replace(/\.[^.]+$/, '') + '.txt';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
   }
 
   /** 设置当前激活文档 ID（首次加载时用） */

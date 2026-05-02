@@ -342,6 +342,11 @@ class WindowAPI:
         self.full_size = (1200, 800)
         self.full_pos = None
         self.mini_size = (320, 480)  # 适合高分辨率屏幕的迷你尺寸
+        self._force_close_flag = False  # Set by force_close() to skip unsaved-check
+        # Python-side mirror of unsaved files: {path_or_key: display_name}
+        # JS updates this via mark_file_modified() so _on_closing never needs evaluate_js
+        # for the common "nothing dirty" path.
+        self._unsaved_files: dict = {}
 
     def _get_logical_screen_size(self):
         """返回逻辑像素下的屏幕尺寸（pywebview.move/resize 使用逻辑像素坐标）。
@@ -480,8 +485,24 @@ class WindowAPI:
             logger.debug("Failed to toggle fullscreen: %s", e)
 
     def close(self):
-        """关闭窗口"""
+        """关闭窗口（来自JS调用）— 先在JS层检查未保存文件，再销毁"""
         self.window.destroy()
+
+    def force_close(self):
+        """强制关闭窗口 — 绕过未保存检查，由JS关闭确认对话框调用"""
+        self._force_close_flag = True
+        self.window.destroy()
+
+    def mark_file_modified(self, path: str, name: str, modified: bool):
+        """JS 每次改变 tab.modified 时调用此方法，保持 Python 侧状态同步。
+        这样 _on_closing 在无未保存文件的普通关闭路径上无需调用 evaluate_js，
+        避免 EdgeChromium COM 线程与后台线程之间的死锁（"未响应"根本原因）。"""
+        key = path or name
+        if modified:
+            self._unsaved_files[key] = name
+        else:
+            self._unsaved_files.pop(key, None)
+        return True
 
     def open_url(self, url: str):
         """在系统默认浏览器中打开外部链接，防止 webview 导航离开 Koto"""
@@ -1241,7 +1262,57 @@ def main():
     window.expose(window_api.minimize)
     window.expose(window_api.maximize)
     window.expose(window_api.close)
+    window.expose(window_api.force_close)
+    window.expose(window_api.mark_file_modified)
     window.expose(window_api.open_url)
+
+    # ── 原生窗口X按钮关闭拦截 ─────────────────────────────────────
+    # 当用户点击操作系统原生的关闭按钮时，先让JS检查未保存文件；
+    # 若有未保存文件，显示自定义对话框，取消本次关闭。
+    # 对话框确认后调用 pywebview.api.force_close() 直接销毁窗口。
+    import json as _json_mod
+    import threading as _threading
+
+    def _on_closing():
+        if window_api._force_close_flag:
+            # force_close() already set flag — allow
+            return True
+
+        # Fast path: Python-side mirror says no unsaved files → close immediately.
+        # This avoids calling evaluate_js() from any thread (source of "未响应"):
+        #   * Old approach: background thread → evaluate_js() → COM deadlock potential
+        #   * New approach: JS keeps _unsaved_files dict in sync via mark_file_modified()
+        if not window_api._unsaved_files:
+            return True  # Allow close; no JS evaluation needed
+
+        # There are unsaved files — show the WA dialog via background thread.
+        # evaluate_js() is ONLY called when we actually need user confirmation.
+        def _show_warn():
+            try:
+                unsaved = [
+                    {"path": k, "name": v}
+                    for k, v in list(window_api._unsaved_files.items())
+                ]
+                js_unsaved = _json_mod.dumps(unsaved)
+                window.evaluate_js(
+                    f'window.WA && window.WA.showCloseWarning && '
+                    f'window.WA.showCloseWarning({js_unsaved}).then(function(d){{'
+                    f'  if(d!=="cancel") window.pywebview.api.force_close();'
+                    f'}})'
+                )
+            except Exception as _e:
+                _write_log(f"⚠️ close-warning JS error: {_e}")
+                # Fallback: force-close without saving
+                window_api._force_close_flag = True
+                window.destroy()
+
+        _threading.Thread(target=_show_warn, daemon=True).start()
+        return False  # Cancel native close; thread handles the rest
+
+    window.events.closing += _on_closing
+    # ──────────────────────────────────────────────────────────────
+
+
 
     # 将 window_api 注入到 Flask app，供 HTTP 路由降级使用
     try:

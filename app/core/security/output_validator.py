@@ -140,12 +140,16 @@ _TRUNCATION_ENDINGS = [
 
 # 内部 Prompt 泄露检测词（如果 LLM 把 system prompt 回显了）
 _INTERNAL_LEAK_PATTERNS = [
-    r"<<[^>]{2,30}>>",  # PII 占位符未被还原
-    r"\[SYSTEM\]",
-    r"system_instruction",
-    r"System Prompt:",
-    r"\[INST\]",  # llama 格式
-    r"<\|im_start\|>",  # chatml 格式
+    # PII 占位符未被还原 — 仅匹配 PIIFilter 实际使用的 <<标签-数字>> 格式
+    # 旧模式 <<[^>]{2,30}>> 过宽：会误匹配中文文档中的 <<合同名>> 等正常内容
+    r"<<[^>]+-\d+>>",
+    # 注意: 本地模型 (qwen3, llama 等) 的格式标记 [SYSTEM] / [INST] / <|im_start|>
+    # 已在 validate() 入口处清理，此处不再检测这些标记，避免误报。
+    # 仅检测疑似将内部 system_instruction 原文大段泄露的场景
+    # 单独出现 "system instruction" 可能只是 AI 讨论概念，不应 BLOCK
+    r"\bsystem[_ ]?instruction\s*:",
+    r"(?:你的|你是|我的|当前)\s*system[_ ]?instruction",
+    r"System Prompt:\s*\n",  # 紧跟换行 = 可能在输出完整 prompt
 ]
 _LEAK_RE = [re.compile(p, re.IGNORECASE) for p in _INTERNAL_LEAK_PATTERNS]
 
@@ -391,27 +395,70 @@ class OutputValidator:
             skill_id,
         )
 
-        if not text or not text.strip():
+        raw_text = text or ""
+
+        if not raw_text.strip():
             logger.debug("[OutputValidator] action=RETRY reason=empty_input")
             return ValidationResult(
                 action="RETRY",
-                text=text or "",
-                original_text=text or "",
+                text=raw_text,
+                original_text=raw_text,
                 reasons=["LLM 返回空响应"],
                 skill_id=skill_id,
             )
 
         reasons: List[str] = []
-        current_text = text
+        current_text = raw_text
 
-        # ── 1. 安全检测：内部信息泄露 ──────────────────────────────
-        leak_reasons = cls._check_leaks(text, original_prompt)
-        if leak_reasons:
-            logger.warning(f"[OutputValidator] ⚠️ 检测到潜在泄露: {leak_reasons}")
+        # ── 0.5 快速拦截：显式系统标记泄露 ───────────────────────
+        _SYSTEM_TAG_LEAK_RE = re.compile(
+            r"\[SYSTEM\]|\[/SYSTEM\]|\[INST\]|\[/INST\]|<<SYS>>|<</SYS>>",
+            re.IGNORECASE,
+        )
+        if _SYSTEM_TAG_LEAK_RE.search(raw_text):
+            leak_reasons = ["响应包含内部系统标记"]
+            logger.warning(f"[OutputValidator] 🚨 BLOCK 泄露检测: {leak_reasons}")
             return ValidationResult(
                 action="BLOCK",
-                text="⚠️ 响应包含异常内容，已被安全护栏拦截。",
-                original_text=text,
+                text="⚠️ 响应包含内部系统标记，已拦截。",
+                original_text=raw_text,
+                reasons=leak_reasons,
+                skill_id=skill_id,
+            )
+
+        # ── 0. 清理本地模型格式标记 ──────────────────────────────
+        # Ollama 本地模型 (qwen, llama 等) 可能在输出中包含 ChatML / Llama
+        # 格式标记，这些是正常的模型输出而非安全泄露，先清理再检测。
+        _LOCAL_MODEL_TAGS_RE = re.compile(
+            r"<\|im_start\|>.*?(?:<\|im_end\|>|\n)|<\|im_end\|>"
+            r"|\[INST\]|\[/INST\]"
+            r"|\[SYSTEM\]|\[/SYSTEM\]"
+            r"|<<SYS>>|<</SYS>>"
+            r"|<\|(?:user|assistant|system|end_of_turn|eot_id|begin_of_text|end_of_text)\|>"
+            r"|<s>|</s>"
+            r"|<think>.*?</think>",
+            re.DOTALL,
+        )
+        text = _LOCAL_MODEL_TAGS_RE.sub("", raw_text).strip()
+        current_text = text
+
+        if not text:
+            return ValidationResult(
+                action="PASS",
+                text=current_text,
+                original_text=raw_text,
+                reasons=[],
+                skill_id=skill_id,
+            )
+
+        # ── 1. 安全检测：内部信息泄露（BLOCK）───────────────────
+        leak_reasons = cls._check_leaks(text, original_prompt)
+        if leak_reasons:
+            logger.warning(f"[OutputValidator] 🚨 BLOCK 泄露检测: {leak_reasons}")
+            return ValidationResult(
+                action="BLOCK",
+                text="⚠️ 响应包含内部信息泄露，已拦截。",
+                original_text=raw_text,
                 reasons=leak_reasons,
                 skill_id=skill_id,
             )
@@ -422,7 +469,7 @@ class OutputValidator:
             return ValidationResult(
                 action="BLOCK",
                 text="⚠️ 回复包含有害内容指引，已被安全策略拦截。",
-                original_text=text,
+                original_text=raw_text,
                 reasons=harmful_reasons,
                 skill_id=skill_id,
             )
@@ -436,7 +483,7 @@ class OutputValidator:
             return ValidationResult(
                 action="RETRY",
                 text=text,
-                original_text=text,
+                original_text=raw_text,
                 reasons=reasons,
                 skill_id=skill_id,
             )
@@ -455,7 +502,7 @@ class OutputValidator:
             return ValidationResult(
                 action="RETRY",
                 text=fix_prompt,
-                original_text=text,
+                original_text=raw_text,
                 reasons=reasons,
                 skill_id=skill_id,
             )
@@ -472,7 +519,7 @@ class OutputValidator:
             return ValidationResult(
                 action="RETRY",
                 text=fix_prompt,
-                original_text=text,
+                original_text=raw_text,
                 reasons=reasons,
                 skill_id=skill_id,
             )
@@ -485,7 +532,7 @@ class OutputValidator:
             return ValidationResult(
                 action="WARN",
                 text=text,
-                original_text=text,
+                original_text=raw_text,
                 reasons=reasons,
                 skill_id=skill_id,
             )
@@ -501,7 +548,7 @@ class OutputValidator:
             return ValidationResult(
                 action="RETRY",
                 text=text,
-                original_text=text,
+                original_text=raw_text,
                 reasons=reasons,
                 skill_id=skill_id,
             )
@@ -519,7 +566,7 @@ class OutputValidator:
                 return ValidationResult(
                     action=action,
                     text=formatted_text,
-                    original_text=text,
+                    original_text=raw_text,
                     reasons=reasons,
                     skill_id=skill_id,
                 )
@@ -533,7 +580,7 @@ class OutputValidator:
                 return ValidationResult(
                     action=action,
                     text=current_text,
-                    original_text=text,
+                    original_text=raw_text,
                     reasons=[reason],
                     skill_id=skill_id,
                 )
@@ -543,7 +590,7 @@ class OutputValidator:
         return ValidationResult(
             action="PASS",
             text=current_text,
-            original_text=text,
+            original_text=raw_text,
             reasons=[],
             skill_id=skill_id,
         )
@@ -555,7 +602,16 @@ class OutputValidator:
         """检测内部信息泄露"""
         reasons = []
         for pattern in _LEAK_RE:
-            if pattern.search(text):
+            m = pattern.search(text)
+            if m:
+                # 打印匹配的上下文以便调试
+                ctx_start = max(0, m.start() - 60)
+                ctx_end = min(len(text), m.end() + 60)
+                logger.warning(
+                    "[OutputValidator] leak match pattern=%s context=...%s...",
+                    pattern.pattern,
+                    repr(text[ctx_start:ctx_end]),
+                )
                 reasons.append(f"响应包含内部标记: {pattern.pattern}")
         return reasons
 

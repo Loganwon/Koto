@@ -217,7 +217,7 @@ def voice_gemini_stt() -> Response:
     统一语音转文字 (STT) 入口：本地 Whisper 优先 → Gemini STT 备用。
 
     - 若安装了 faster-whisper 或 openai-whisper：完全本地转写，无 API 消耗
-    - 否则：发送至 Gemini gemini-2.0-flash-lite 转写
+    - 否则：发送至 Gemini gemini-2.5-flash-lite 转写
     - 始终返回 JSON，绝不返回 HTML 错误页面。
     """
     try:
@@ -294,7 +294,7 @@ def voice_gemini_stt() -> Response:
                 503,
             )
 
-        stt_model = "gemini-2.0-flash-lite"
+        stt_model = "gemini-2.5-flash-lite"
         prompt_parts = [
             types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
             types.Part.from_text(

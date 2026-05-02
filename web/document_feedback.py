@@ -14,6 +14,12 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
+from app.core.llm.model_capabilities import (
+    get_interactions_only_model_set,
+    is_interactions_only_model,
+    normalize_model_id,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,7 +27,7 @@ class DocumentFeedbackSystem:
     """文档智能反馈系统"""
 
     def __init__(
-        self, gemini_client=None, default_model_id: str = "gemini-3.1-pro-preview"
+        self, gemini_client=None, default_model_id: str = "gemini-2.5-pro"
     ):
         """
         Args:
@@ -46,7 +52,7 @@ class DocumentFeedbackSystem:
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-3-flash-preview",
+        model_id: str = "gemini-2.5-flash",
     ) -> Dict[str, Any]:
         """
         分析文档并给出AI修改建议
@@ -399,7 +405,7 @@ class DocumentFeedbackSystem:
 
     # 仅支持 Interactions API 的模型：所有 generate_content 调用必须排除这些模型
     # 注意：gemini-3-flash/pro-preview 是普通 generate_content 模型，不应列在此
-    _INTERACTIONS_ONLY_MODELS = {"deep-research-pro-preview-12-2025"}
+    _INTERACTIONS_ONLY_MODELS = frozenset(get_interactions_only_model_set())
 
     def _list_available_models(self) -> List[Dict[str, str]]:
         """列出当前 API 可用模型（仅包含支持 generateContent 的模型，排除 Interactions-only）"""
@@ -419,7 +425,7 @@ class DocumentFeedbackSystem:
                     for m in self.client.models.list():
                         name = getattr(m, "name", "")
                         display_name = getattr(m, "display_name", "")
-                        base_name = name.split("/")[-1] if name else ""
+                        base_name = normalize_model_id(name)
                         if not base_name:
                             continue
                         # 新版 google-genai SDK 中 supported_generation_methods 不再作为属性暴露
@@ -430,7 +436,9 @@ class DocumentFeedbackSystem:
                             if "generateContent" not in supported:
                                 continue
                         # 跳过 Interactions-only 模型（仅支持 Interactions API，不能用于 generate_content）
-                        if base_name not in self._INTERACTIONS_ONLY_MODELS:
+                        if not is_interactions_only_model(
+                            base_name, self._INTERACTIONS_ONLY_MODELS
+                        ):
                             models.append(
                                 {
                                     "name": base_name,
@@ -464,7 +472,7 @@ class DocumentFeedbackSystem:
         # 若 preferred 本身是 Interactions-only，直接替换为稳定备选
         safe_preferred = (
             preferred
-            if preferred not in self._INTERACTIONS_ONLY_MODELS
+            if not is_interactions_only_model(preferred, self._INTERACTIONS_ONLY_MODELS)
             else "gemini-2.5-flash"
         )
 
@@ -473,12 +481,12 @@ class DocumentFeedbackSystem:
 
         priority = [
             safe_preferred,
-            # gemini-3-flash-preview / gemini-3-pro-preview 是 generate_content 模型，可正常使用
-            "gemini-3-flash-preview",
-            "gemini-3-pro-preview",
-            # gemini-3.1-pro-preview 是目前最强的可用模型
-            "gemini-3.1-pro-preview",
-            "gemini-3.1-pro-preview-customtools",
+            # gemini-2.5-flash / gemini-2.5-pro 是 generate_content 模型，可正常使用
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            # gemini-2.5-pro 是目前最强的可用模型
+            "gemini-2.5-pro",
+            "gemini-2.5-pro-customtools",
             "gemini-3-flash",
             "gemini-3-pro",
             "gemini-2.5-pro",
@@ -524,15 +532,17 @@ class DocumentFeedbackSystem:
             dict.fromkeys(
                 [
                     preferred,
-                    "gemini-3.1-pro-preview",
+                    "gemini-2.5-pro",
                     "gemini-2.5-pro",
                     "gemini-2.5-flash",
-                    "gemini-3-flash-preview",
+                    "gemini-2.5-flash",
                 ]
             )
         )
         probe_order = [
-            m for m in probe_order if m not in self._INTERACTIONS_ONLY_MODELS
+            m
+            for m in probe_order
+            if not is_interactions_only_model(m, self._INTERACTIONS_ONLY_MODELS)
         ]
 
         for candidate in probe_order:
@@ -1753,7 +1763,7 @@ class DocumentFeedbackSystem:
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-3.1-pro-preview",
+        model_id: str = "gemini-2.5-pro",
     ) -> Dict[str, Any]:
         """
         分析文档，生成标注格式的建议

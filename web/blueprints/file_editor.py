@@ -35,6 +35,8 @@ import time
 
 from flask import Blueprint, Response, jsonify, request
 
+from app.core.llm.gemini_config import get_gemini_api_key
+
 _logger = logging.getLogger("koto.routes.file_editor")
 
 file_editor_bp = Blueprint("file_editor", __name__)
@@ -91,7 +93,7 @@ def notebook_overview() -> Response:
         import google.genai as genai
         import requests as _requests
 
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+        client = genai.Client(api_key=get_gemini_api_key())
         model = client.models
 
         script = asyncio.run(generator.generate_script(content, model))
@@ -143,7 +145,7 @@ def notebook_qa() -> Response:
     try:
         import google.genai as genai
 
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+        client = genai.Client(api_key=get_gemini_api_key())
         response = client.models.generate_content(
             model="gemini-2.5-flash", contents=prompt
         )
@@ -172,7 +174,7 @@ def notebook_study_guide() -> Response:
     try:
         import google.genai as genai
 
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+        client = genai.Client(api_key=get_gemini_api_key())
         response = client.models.generate_content(
             model="gemini-2.5-flash", contents=full_prompt
         )

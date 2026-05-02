@@ -56,7 +56,7 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:#f3f3f3;
 #ribbon{
   display:none;flex-shrink:0;
   background:#fff;border-bottom:1px solid #d0d0d0;height:46px;
-  align-items:center;padding:0 10px;gap:2px;
+  align-items:center;padding:0 10px;gap:2px;overflow-x:auto;
 }
 .rib-group{display:flex;align-items:center;gap:2px;padding:0 6px;
            border-right:1px solid #e0e0e0;}
@@ -68,7 +68,10 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:#f3f3f3;
   transition:background .12s;
 }
 .rib-btn:hover{background:#e8e8e8;}
+.rib-btn:disabled{opacity:.38;cursor:default;pointer-events:none;}
 .rib-btn .ri{font-size:18px;line-height:1;}
+.shape.selected{cursor:grab;}
+.shape.dragging{opacity:.85;cursor:grabbing !important;}
 .rib-sep{width:1px;height:28px;background:#e0e0e0;margin:0 2px;}
 .rib-zoom{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:12px;color:#555;}
 .rib-zoom input[type=range]{width:80px;accent-color:#d04f20;}
@@ -107,44 +110,43 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:#f3f3f3;
 }
 /* Each shape div */
 .shape{
-  position:absolute;overflow:hidden;cursor:move;
+  position:absolute;overflow:hidden;cursor:default;
 }
-.shape.has-text{cursor:move;}
-/* Selection glow on shape */
-.shape.selected{
-  overflow:visible!important;
-  outline:2px solid #0078d4;
-  outline-offset:0px;
-  z-index:10;
-}
-.shape.selected::after{
-  content:'';position:absolute;inset:-1px;pointer-events:none;
-  border:1px solid #0078d4;z-index:10;
-}
+.shape.has-text{cursor:text;}
 .shape-inner{
-  width:100%;height:100%;overflow:hidden;padding:4px 6px;
+  width:100%;height:100%;padding:4px 6px;
   display:flex;flex-direction:column;justify-content:flex-start;
-  cursor:text;user-select:text;
 }
 /* Paragraph inside shape */
 .shape-para{line-height:1.3;white-space:pre-wrap;word-break:break-word;}
-/* Inline run spans */
+/* Inline run spans (preserve bold/italic/underline) */
 .run-span{outline:none;}
-.run-span[contenteditable="true"]:focus{outline:none;}
-/* Resize handles */
+.run-span[contenteditable="true"]:focus{
+  outline:none;
+}
+/* Selection glow on shape */
+.shape.selected{
+  outline:2px solid #0078d4;
+  outline-offset:0px;
+}
+.shape.selected::after{
+  content:'';position:absolute;inset:-1px;pointer-events:none;
+  border:1px solid #0078d4;
+}
+/* Resize handles (decorative only for now) */
 .handle{
-  position:absolute;width:10px;height:10px;background:#0078d4;border:2px solid #fff;
-  border-radius:2px;display:none;z-index:11;box-sizing:border-box;
+  position:absolute;width:8px;height:8px;background:#0078d4;border:1px solid #fff;
+  border-radius:1px;display:none;
 }
 .shape.selected .handle{display:block;}
-.handle.tl{top:-5px;left:-5px;cursor:nw-resize;}
-.handle.tr{top:-5px;right:-5px;cursor:ne-resize;}
-.handle.bl{bottom:-5px;left:-5px;cursor:sw-resize;}
-.handle.br{bottom:-5px;right:-5px;cursor:se-resize;}
-.handle.tm{top:-5px;left:50%;transform:translateX(-50%);cursor:n-resize;}
-.handle.bm{bottom:-5px;left:50%;transform:translateX(-50%);cursor:s-resize;}
-.handle.ml{left:-5px;top:50%;transform:translateY(-50%);cursor:w-resize;}
-.handle.mr{right:-5px;top:50%;transform:translateY(-50%);cursor:e-resize;}
+.handle.tl{top:-4px;left:-4px;cursor:nw-resize;}
+.handle.tr{top:-4px;right:-4px;cursor:ne-resize;}
+.handle.bl{bottom:-4px;left:-4px;cursor:sw-resize;}
+.handle.br{bottom:-4px;right:-4px;cursor:se-resize;}
+.handle.tm{top:-4px;left:50%;transform:translateX(-50%);cursor:n-resize;}
+.handle.bm{bottom:-4px;left:50%;transform:translateX(-50%);cursor:s-resize;}
+.handle.ml{left:-4px;top:50%;transform:translateY(-50%);cursor:w-resize;}
+.handle.mr{right:-4px;top:50%;transform:translateY(-50%);cursor:e-resize;}
 
 /* ── Status bar ── */
 #statusbar{
@@ -231,42 +233,34 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:#f3f3f3;
 <!-- ═══════════════════════════════ RIBBON ════════════════════════════════════ -->
 <div id="ribbon">
   <div class="rib-group">
-    <button class="rib-btn" onclick="document.getElementById('up-input').click()"><span class="ri">📂</span>打开</button>
-    <button class="rib-btn" onclick="doSave()"><span class="ri">💾</span>保存</button>
-    <button class="rib-btn" onclick="doDownload()"><span class="ri">⬇️</span>下载</button>
+    <button class="rib-btn" onclick="document.getElementById('up-input').click()" title="打开文件"><span class="ri">📂</span>打开</button>
+    <button class="rib-btn" onclick="doSave()" title="保存 (Ctrl+S)"><span class="ri">💾</span>保存</button>
+    <button class="rib-btn" onclick="doDownload()" title="下载 PPTX"><span class="ri">⬇️</span>下载</button>
   </div>
   <div class="rib-group">
-    <button class="rib-btn" onclick="prevSlide()" title="上一张"><span class="ri">◀</span>上一张</button>
-    <button class="rib-btn" onclick="nextSlide()" title="下一张"><span class="ri">▶</span>下一张</button>
+    <button class="rib-btn" id="btn-undo" onclick="doUndo()" title="撤销 (Ctrl+Z)" disabled><span class="ri">↩</span>撤销</button>
+    <button class="rib-btn" id="btn-redo" onclick="doRedo()" title="重做 (Ctrl+Y)" disabled><span class="ri">↪</span>重做</button>
   </div>
   <div class="rib-group">
-    <button class="rib-btn" id="btn-bold" onmousedown="event.preventDefault()" onclick="execFmt('bold')"><span class="ri">𝐁</span>加粗</button>
-    <button class="rib-btn" id="btn-italic" onmousedown="event.preventDefault()" onclick="execFmt('italic')"><span class="ri">𝐼</span>斜体</button>
-    <button class="rib-btn" id="btn-underline" onmousedown="event.preventDefault()" onclick="execFmt('underline')"><span class="ri">U̲</span>下划线</button>
+    <button class="rib-btn" onclick="copyShape()" title="复制形状 (Ctrl+C)"><span class="ri">❏</span>复制</button>
+    <button class="rib-btn" onclick="pasteShape()" title="粘贴形状 (Ctrl+V)"><span class="ri">📋</span>粘贴</button>
+    <button class="rib-btn" onclick="duplicateShape()" title="就地复制 (Ctrl+D)"><span class="ri">⧉</span>另复</button>
+    <button class="rib-btn" onclick="deleteShape()" title="删除形状 (Delete)"><span class="ri">🗑</span>删除</button>
   </div>
-  <div class="rib-group" style="align-items:center;gap:4px;">
-    <label style="font-size:11px;color:#555;" for="font-size-input">pt</label>
-    <input type="number" id="font-size-input" min="6" max="400" placeholder="–"
-           style="width:50px;border:1px solid #d0d0d0;border-radius:3px;padding:2px 4px;font-size:12px;text-align:center;"
-           title="Font size in points"
-           onmousedown="event.stopPropagation()"
-           onkeydown="if(event.key==='Enter'){applyFontSize(this.value);this.blur();}"
-           onchange="applyFontSize(this.value)"/>
+  <div class="rib-group">
+    <button class="rib-btn" onclick="prevSlide()" title="上一张 (← / PageUp)"><span class="ri">◀</span>上一张</button>
+    <button class="rib-btn" onclick="nextSlide()" title="下一张 (→ / PageDown)"><span class="ri">▶</span>下一张</button>
   </div>
-  <div class="rib-group" id="size-group" style="align-items:center;gap:4px;display:none;">
-    <label style="font-size:11px;color:#555;">W</label>
-    <input type="number" id="shape-w" min="0.1" max="100" step="0.1" placeholder="–"
-           style="width:52px;border:1px solid #d0d0d0;border-radius:3px;padding:2px 4px;font-size:12px;text-align:center;"
-           title="Box width in cm" onmousedown="event.stopPropagation()"
-           onkeydown="if(event.key==='Enter'){applyShapeSize('w',this.value);this.blur();}"
-           onchange="applyShapeSize('w',this.value)"/>
-    <label style="font-size:11px;color:#555;">H</label>
-    <input type="number" id="shape-h" min="0.1" max="100" step="0.1" placeholder="–"
-           style="width:52px;border:1px solid #d0d0d0;border-radius:3px;padding:2px 4px;font-size:12px;text-align:center;"
-           title="Box height in cm" onmousedown="event.stopPropagation()"
-           onkeydown="if(event.key==='Enter'){applyShapeSize('h',this.value);this.blur();}"
-           onchange="applyShapeSize('h',this.value)"/>
-    <label style="font-size:9px;color:#aaa;">cm</label>
+  <div class="rib-group">
+    <button class="rib-btn" id="btn-bold" onclick="execFmt('bold')" title="加粗 (Ctrl+B)"><span class="ri">𝐁</span>加粗</button>
+    <button class="rib-btn" id="btn-italic" onclick="execFmt('italic')" title="斜体 (Ctrl+I)"><span class="ri">𝐼</span>斜体</button>
+    <button class="rib-btn" id="btn-underline" onclick="execFmt('underline')" title="下划线 (Ctrl+U)"><span class="ri">U̲</span>下划线</button>
+    <button class="rib-btn" onclick="execFmt('strikeThrough')" title="删除线"><span class="ri">S̶</span>删除线</button>
+  </div>
+  <div class="rib-group">
+    <button class="rib-btn" onclick="execFmt('justifyLeft')" title="左对齐"><span class="ri">⬅</span>左对齐</button>
+    <button class="rib-btn" onclick="execFmt('justifyCenter')" title="居中"><span class="ri">↔</span>居中</button>
+    <button class="rib-btn" onclick="execFmt('justifyRight')" title="右对齐"><span class="ri">➡</span>右对齐</button>
   </div>
   <div class="rib-zoom">
     <span id="zoom-label">100%</span>
@@ -277,7 +271,7 @@ body{font-family:"Segoe UI",system-ui,sans-serif;background:#f3f3f3;
 <!-- ═══════════════════════════════ WORKSPACE ════════════════════════════════ -->
 <div id="workspace">
   <!-- Left: slide thumbnails -->
-  <div id="slide-panel"></div>
+  <div id="slide-panel" id="slide-panel"></div>
 
   <!-- Center: editable canvas -->
   <div id="canvas-area" onclick="onCanvasAreaClick(event)">
@@ -318,12 +312,91 @@ let _meta    = null;   // full JSON from API
 let _curIdx  = 0;      // current slide index
 let _zoom    = 1.0;    // current zoom factor
 let _selShape = null;  // currently selected shape div
-let _lastFocusedRun = null; // {span, shape, pi, ri}
-let _selectionSpans = [];   // run-spans in active selection (saved before focus change)
-let _resizing = null;  // resize drag state
-let _dragging = null;  // shape move drag state
 const EMU_PER_PX = 9525; // 1 px = 9525 EMU at 96 dpi
-const EMU_PER_CM = 360000; // 1 cm = 360000 EMU
+let _copyBuf     = null;  // copied shape (deep clone)
+const _undoStack = [];    // {undo(), redo()} command entries
+let _undoPtr     = -1;    // index of latest undoable action
+const MAX_UNDO   = 40;
+let _dragState   = null;  // active drag operation
+
+/* ──────────────────────── Undo / Redo ─────────────── */
+function pushUndo(entry){
+  _undoStack.splice(_undoPtr+1);          // discard redo branch
+  _undoStack.push(entry);
+  if(_undoStack.length>MAX_UNDO) _undoStack.shift(); else _undoPtr++;
+  _syncHistoryBtns();
+}
+function doUndo(){
+  if(_undoPtr<0) return;
+  _undoStack[_undoPtr].undo();
+  _undoPtr--;
+  _syncHistoryBtns();
+}
+function doRedo(){
+  if(_undoPtr>=_undoStack.length-1) return;
+  _undoPtr++;
+  _undoStack[_undoPtr].redo();
+  _syncHistoryBtns();
+}
+function _syncHistoryBtns(){
+  const u=document.getElementById('btn-undo');
+  const r=document.getElementById('btn-redo');
+  if(u) u.disabled=(_undoPtr<0);
+  if(r) r.disabled=(_undoStack.length===0||_undoPtr>=_undoStack.length-1);
+}
+
+/* ──────────────────────── Copy / Paste / Delete ──── */
+function copyShape(){
+  if(!_selShape) return;
+  const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(_selShape.dataset.shapeId));
+  if(!shape) return;
+  _copyBuf=JSON.parse(JSON.stringify(shape));
+  toast('已复制形状');
+}
+function pasteShape(){
+  if(!_copyBuf||!_meta) return;
+  const slide=_meta.slides[_curIdx];
+  const maxId=Math.max(0,...slide.shapes.map(s=>s.id));
+  const clone=JSON.parse(JSON.stringify(_copyBuf));
+  clone.id=maxId+1;
+  clone.left+=9525*20;
+  clone.top +=9525*20;
+  slide.shapes.push(clone);
+  const snapClone=JSON.parse(JSON.stringify(clone));
+  const snapSlide=_curIdx;
+  pushUndo({
+    undo(){ _meta.slides[snapSlide].shapes=_meta.slides[snapSlide].shapes.filter(s=>s.id!==snapClone.id); renderSlide(snapSlide); },
+    redo(){ _meta.slides[snapSlide].shapes.push(JSON.parse(JSON.stringify(snapClone))); renderSlide(snapSlide); }
+  });
+  renderSlide(_curIdx);
+  const newEl=document.querySelector(`[data-shape-id="${clone.id}"]`);
+  if(newEl) selectShape(newEl);
+  scheduleThumbUpdate(_curIdx);
+}
+function deleteShape(){
+  if(!_selShape||!_meta) return;
+  const slide=_meta.slides[_curIdx];
+  const shapeId=parseInt(_selShape.dataset.shapeId);
+  const idx=slide.shapes.findIndex(s=>s.id===shapeId);
+  if(idx<0) return;
+  const snapShape=JSON.parse(JSON.stringify(slide.shapes[idx]));
+  const snapIdx=idx, snapSlide=_curIdx;
+  slide.shapes.splice(idx,1);
+  pushUndo({
+    undo(){ _meta.slides[snapSlide].shapes.splice(snapIdx,0,JSON.parse(JSON.stringify(snapShape))); renderSlide(snapSlide); },
+    redo(){ _meta.slides[snapSlide].shapes=_meta.slides[snapSlide].shapes.filter(s=>s.id!==snapShape.id); renderSlide(snapSlide); }
+  });
+  _selShape=null;
+  renderSlide(_curIdx);
+  scheduleThumbUpdate(_curIdx);
+}
+function duplicateShape(){
+  if(!_selShape) return;
+  const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(_selShape.dataset.shapeId));
+  if(!shape) return;
+  _copyBuf=JSON.parse(JSON.stringify(shape));
+  pasteShape();
+}
 
 /* ──────────────────────── Boot ─────────────────────── */
 (function boot(){
@@ -451,8 +524,6 @@ function drawThumb(canvas,slide,slideW,slideH){
 function renderSlide(idx){
   _curIdx=idx;
   _selShape=null;
-  _lastFocusedRun=null;
-  _selectionSpans=[];
 
   // update thumbnail highlight
   document.querySelectorAll('.slide-thumb').forEach((el,i)=>{
@@ -490,10 +561,24 @@ function renderSlide(idx){
     if(shape.has_text && shape.paragraphs){
       const inner=document.createElement('div');
       inner.className='shape-inner';
+      // Dynamic text insets from PPTX bodyPr
+      const ins=shape.textInsets;
+      if(ins){
+        inner.style.padding=`${Math.round(ins.t*scale)}px ${Math.round(ins.r*scale)}px ${Math.round(ins.b*scale)}px ${Math.round(ins.l*scale)}px`;
+      }
+      // Vertical alignment from textAnchor
+      if(shape.textAnchor==='ctr') inner.style.justifyContent='center';
+      else if(shape.textAnchor==='b') inner.style.justifyContent='flex-end';
       shape.paragraphs.forEach((para,pi)=>{
         const pEl=document.createElement('div');
         pEl.className='shape-para';
         pEl.style.textAlign=(para.align||'LEFT').toLowerCase();
+        // Line spacing
+        if(para.lineSpacing) pEl.style.lineHeight=String(para.lineSpacing);
+        else if(para.lineSpacingPt) pEl.style.lineHeight=Math.round(para.lineSpacingPt*scale*12700)+'px';
+        // Paragraph spacing
+        if(para.spaceBefore) pEl.style.marginTop=Math.round(para.spaceBefore*scale*12700)+'px';
+        if(para.spaceAfter)  pEl.style.marginBottom=Math.round(para.spaceAfter*scale*12700)+'px';
         (para.runs||[]).forEach((run,ri)=>{
           const span=document.createElement('span');
           span.className='run-span';
@@ -501,25 +586,20 @@ function renderSlide(idx){
           span.dataset.pi=pi; span.dataset.ri=ri;
           span.textContent=run.text;
           // Sizing: clamp rendered font to reasonable bounds
-          const ptSize=run.size||14;
-          span.style.fontSize=Math.round(ptSize*scale*1.33)+'px';
+          const defaultPt=shape.is_title?36:14;
+          const ptSize=run.size||defaultPt;
+          span.style.fontSize=Math.max(Math.round(ptSize*scale*12700),6)+'px';
           if(run.bold)      span.style.fontWeight='bold';
           if(run.italic)    span.style.fontStyle='italic';
           if(run.underline) span.style.textDecoration='underline';
           if(run.color)     span.style.color=run.color;
+          if(run.fontName)  span.style.fontFamily=run.fontName;
           span.style.whiteSpace='pre-wrap';
           span.style.display='inline';
           // Events
           span.addEventListener('focus',()=>onRunFocus(el,shape,pi,ri));
           span.addEventListener('input',()=>onRunInput(span,shape,pi,ri));
-          span.addEventListener('keydown', e=>{
-            if(e.key==='Escape'){ span.blur(); return; }
-            if((e.ctrlKey||e.metaKey)&&e.key==='a'){
-              e.preventDefault();
-              // Mark every run in this shape as "selected" for formatting
-              _selectionSpans=Array.from(el.querySelectorAll('.run-span'));
-            }
-          });
+          span.addEventListener('keydown', e=>{ if(e.key==='Escape') span.blur(); });
           pEl.appendChild(span);
         });
         if((para.runs||[]).length===0){
@@ -530,25 +610,12 @@ function renderSlide(idx){
         inner.appendChild(pEl);
       });
       el.appendChild(inner);
-    }
-
-    // Handles (ALL shapes get resize handles)
-    ['tl','tr','bl','br','tm','bm','ml','mr'].forEach(c=>{
-      const h=document.createElement('div'); h.className='handle '+c;
-      h.addEventListener('mousedown', ev=>{
-        ev.stopPropagation(); ev.preventDefault();
-        selectShape(el);
-        startResize(ev, c, el, shape);
+      // Handles
+      ['tl','tr','bl','br','tm','bm','ml','mr'].forEach(c=>{
+        const h=document.createElement('div'); h.className='handle '+c; el.appendChild(h);
       });
-      el.appendChild(h);
-    });
-    // Drag: only body clicks (not handles or text spans) start a move
-    el.addEventListener('mousedown', e=>{
-      if(e.target.classList.contains('handle')) return;
-      if(e.target.classList.contains('run-span')) return;
-      selectShape(el);
-      startDrag(e, el, shape);
-    });
+      _attachShapeDrag(el, shape);
+    }
 
     wrapper.appendChild(el);
   });
@@ -562,39 +629,28 @@ function renderSlide(idx){
 function selectShape(el){
   if(_selShape) _selShape.classList.remove('selected');
   _selShape=el;
-  _selectionSpans=[];  // clear stale selection from any previous shape
   el.classList.add('selected');
   const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(el.dataset.shapeId));
-  if(shape){ document.getElementById('sb-shape').textContent=shape.name||''; updateSizeInputs(shape); }
+  if(shape) document.getElementById('sb-shape').textContent=shape.name||'';
 }
 
 function onCanvasAreaClick(e){
-  const ca=document.getElementById('canvas-area');
-  const sw=document.getElementById('slide-wrapper');
-  if(e.target===ca||e.target===sw){
+  if(e.target===document.getElementById('canvas-area')){
     if(_selShape){ _selShape.classList.remove('selected'); _selShape=null; }
-    _lastFocusedRun=null;
-    _selectionSpans=[];
-    const inp=document.getElementById('font-size-input'); if(inp) inp.value='';
-    updateSizeInputs(null);
   }
 }
 
 /* ──────────────────────── Editing ──────────────────── */
 function onRunFocus(shapeEl, shape, pi, ri){
   selectShape(shapeEl);
-  _lastFocusedRun = { span: shapeEl.querySelector(`[data-pi="${pi}"][data-ri="${ri}"]`), shape, pi, ri };
-  const run = shape.paragraphs[pi] && shape.paragraphs[pi].runs[ri];
-  const inp = document.getElementById('font-size-input');
-  if(inp && run) inp.value = run.size || 14;
 }
 
 function onRunInput(span, shape, pi, ri){
+  // Write back immediately to _meta
   if(shape.paragraphs[pi] && shape.paragraphs[pi].runs[ri] !== undefined){
     shape.paragraphs[pi].runs[ri].text = span.textContent;
   }
-  const shapeEl=span.closest('.shape');
-  if(shapeEl) requestAnimationFrame(()=>autoFitShape(shapeEl,shape));
+  // Redraw thumb for current slide (debounced)
   scheduleThumbUpdate(_curIdx);
 }
 
@@ -608,6 +664,52 @@ function scheduleThumbUpdate(idx){
       drawThumb(thumbs[idx],slide,_meta.slideWidthEmu,_meta.slideHeightEmu);
     }
   },300);
+}
+
+/* ──────────────────────── Shape drag ───────────────── */
+function _attachShapeDrag(el, shape){
+  el.addEventListener('mousedown', e=>{
+    if(e.target.classList.contains('handle')) return;
+    if(e.target.classList.contains('run-span')){ selectShape(el); return; }
+    e.preventDefault();
+    selectShape(el);
+    const area=document.getElementById('canvas-area');
+    const scale=(_zoom*Math.min(area.clientWidth-40,960))/_meta.slideWidthEmu;
+    _dragState={
+      el, shape,
+      startX:e.clientX, startY:e.clientY,
+      origLeft:shape.left, origTop:shape.top,
+      moved:false
+    };
+    const onMove=ev=>{
+      if(!_dragState) return;
+      const dx=ev.clientX-_dragState.startX, dy=ev.clientY-_dragState.startY;
+      if(!_dragState.moved && Math.hypot(dx,dy)<4) return;
+      _dragState.moved=true;
+      el.classList.add('dragging');
+      shape.left=Math.max(0,_dragState.origLeft+dx/scale);
+      shape.top =Math.max(0,_dragState.origTop +dy/scale);
+      el.style.left=Math.round(shape.left*scale)+'px';
+      el.style.top =Math.round(shape.top *scale)+'px';
+    };
+    const onUp=()=>{
+      document.removeEventListener('mousemove',onMove);
+      if(_dragState&&_dragState.moved){
+        el.classList.remove('dragging');
+        const fLeft=shape.left, fTop=shape.top;
+        const oLeft=_dragState.origLeft, oTop=_dragState.origTop;
+        const sId=shape.id, sIdx=_curIdx;
+        pushUndo({
+          undo(){ const s=_meta.slides[sIdx].shapes.find(x=>x.id===sId); if(s){s.left=oLeft;s.top=oTop;} renderSlide(sIdx); },
+          redo(){ const s=_meta.slides[sIdx].shapes.find(x=>x.id===sId); if(s){s.left=fLeft;s.top=fTop;} renderSlide(sIdx); }
+        });
+        scheduleThumbUpdate(_curIdx);
+      }
+      _dragState=null;
+    };
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp,{once:true});
+  });
 }
 
 /* ──────────────────────── Navigation ────────────────── */
@@ -624,227 +726,7 @@ function setZoom(v){
 
 /* ──────────────────────── Formatting ───────────────── */
 function execFmt(cmd){
-  const sel = window.getSelection();
-  let targetSpans = [];
-
-  // Prefer live selection, then saved selection, then last focused run
-  if(sel && sel.rangeCount > 0 && !sel.isCollapsed){
-    const range = sel.getRangeAt(0);
-    document.querySelectorAll('.run-span').forEach(s=>{
-      if(isSpanInSelection(s, range)) targetSpans.push(s);
-    });
-  }
-  if(targetSpans.length === 0) targetSpans = _selectionSpans.slice();
-  // If still nothing, apply to ALL runs in the selected shape
-  if(targetSpans.length === 0 && _selShape)
-    targetSpans = Array.from(_selShape.querySelectorAll('.run-span'));
-  if(targetSpans.length === 0 && _lastFocusedRun && _lastFocusedRun.span)
-    targetSpans = [_lastFocusedRun.span];
-  if(targetSpans.length === 0) return;
-
-  // Determine current state (toggle if all already have it)
-  const allHave = targetSpans.every(s=>{
-    const cs = window.getComputedStyle(s);
-    if(cmd==='bold')      return cs.fontWeight==='700'||cs.fontWeight==='bold';
-    if(cmd==='italic')    return cs.fontStyle==='italic';
-    if(cmd==='underline') return cs.textDecoration.includes('underline');
-    return false;
-  });
-
-  targetSpans.forEach(span=>{
-    const pi=parseInt(span.dataset.pi), ri=parseInt(span.dataset.ri);
-    const shapeEl=span.closest('.shape'); if(!shapeEl) return;
-    const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(shapeEl.dataset.shapeId));
-    if(!shape||!shape.paragraphs[pi]||shape.paragraphs[pi].runs[ri]===undefined) return;
-    const run=shape.paragraphs[pi].runs[ri];
-    if(cmd==='bold'){      run.bold=!allHave;      span.style.fontWeight=run.bold?'bold':''; }
-    if(cmd==='italic'){   run.italic=!allHave;    span.style.fontStyle=run.italic?'italic':''; }
-    if(cmd==='underline'){run.underline=!allHave; span.style.textDecoration=run.underline?'underline':''; }
-  });
-  // Auto-fit shapes whose text layout may have changed
-  const affectedEls=new Set(targetSpans.map(s=>s.closest('.shape')).filter(Boolean));
-  requestAnimationFrame(()=>affectedEls.forEach(el=>{
-    const sh=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(el.dataset.shapeId));
-    if(sh) autoFitShape(el,sh);
-  }));
-  scheduleThumbUpdate(_curIdx);
-}
-function applyFontSize(val){
-  const pt=parseFloat(val);
-  if(isNaN(pt)||pt<1) return;
-  const scale=getScale();
-  let applied=false;
-
-  // Use saved selection spans (survives focus change to input)
-  if(_selectionSpans.length > 0){
-    _selectionSpans.forEach(s=>{ updateRunSize(s,pt,scale); });
-    applied=true;
-  } else {
-    const sel=window.getSelection();
-    if(sel&&sel.rangeCount>0&&!sel.isCollapsed){
-      const range=sel.getRangeAt(0);
-      document.querySelectorAll('.run-span').forEach(s=>{
-        if(isSpanInSelection(s,range)){ updateRunSize(s,pt,scale); applied=true; }
-      });
-    }
-  }
-  if(!applied&&_selShape){
-    // No text specifically selected — apply to every run in the selected shape
-    _selShape.querySelectorAll('.run-span').forEach(s=>{ updateRunSize(s,pt,scale); applied=true; });
-  }
-  if(!applied&&_lastFocusedRun&&_lastFocusedRun.span){
-    updateRunSize(_lastFocusedRun.span,pt,scale);
-  }
-  if(applied) requestAnimationFrame(()=>{ if(_selShape){
-    const sh=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(_selShape.dataset.shapeId));
-    if(sh) autoFitShape(_selShape,sh);
-  }});
-  scheduleThumbUpdate(_curIdx);
-}
-
-function updateRunSize(span,pt,scale){
-  const pi=parseInt(span.dataset.pi),ri=parseInt(span.dataset.ri);
-  const shapeEl=span.closest('.shape'); if(!shapeEl) return;
-  const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(shapeEl.dataset.shapeId));
-  if(!shape||!shape.paragraphs[pi]||shape.paragraphs[pi].runs[ri]===undefined) return;
-  shape.paragraphs[pi].runs[ri].size=pt;
-  span.style.fontSize=Math.round(pt*scale*1.33)+'px';
-  requestAnimationFrame(()=>autoFitShape(shapeEl,shape));
-}
-
-function isSpanInSelection(span,range){
-  try{
-    const sr=document.createRange(); sr.selectNode(span);
-    // Overlap: range.end > sr.start  AND  range.start < sr.end
-    return range.compareBoundaryPoints(Range.END_TO_START,sr)>0 &&
-           range.compareBoundaryPoints(Range.START_TO_END,sr)<0;
-  }catch(e){ return false; }
-}
-
-/* ──────────────────────── Auto-fit & size UI ────────── */
-function autoFitShape(shapeEl, shape){
-  const inner=shapeEl.querySelector('.shape-inner');
-  if(!inner) return;
-  if(inner.scrollHeight > inner.clientHeight + 2){
-    const newPx=inner.scrollHeight + 4;
-    shapeEl.style.height=newPx+'px';
-    const sc=getScale();
-    shape.height=Math.round(newPx/sc);
-    if(_selShape===shapeEl) updateSizeInputs(shape);
-  }
-}
-
-function updateSizeInputs(shape){
-  const grp=document.getElementById('size-group');
-  const wIn=document.getElementById('shape-w');
-  const hIn=document.getElementById('shape-h');
-  if(!grp||!wIn||!hIn) return;
-  if(shape){
-    grp.style.display='flex';
-    wIn.value=(shape.width /EMU_PER_CM).toFixed(1);
-    hIn.value=(shape.height/EMU_PER_CM).toFixed(1);
-  } else {
-    grp.style.display='none';
-    wIn.value=''; hIn.value='';
-  }
-}
-
-function applyShapeSize(dim, val){
-  const cm=parseFloat(val);
-  if(isNaN(cm)||cm<0.1||!_selShape||!_meta) return;
-  const shape=_meta.slides[_curIdx].shapes.find(s=>s.id===parseInt(_selShape.dataset.shapeId));
-  if(!shape) return;
-  const emu=Math.round(cm*EMU_PER_CM);
-  const sc=getScale();
-  if(dim==='w'){ shape.width =emu; _selShape.style.width =Math.round(emu*sc)+'px'; }
-  else          { shape.height=emu; _selShape.style.height=Math.round(emu*sc)+'px'; }
-  scheduleThumbUpdate(_curIdx);
-}
-
-/* ──────────────────────── Resize ────────────────────── */
-function getScale(){
-  const W=_meta.slideWidthEmu;
-  const area=document.getElementById('canvas-area');
-  const maxW=area.clientWidth-40;
-  const baseW=Math.min(maxW,960);
-  return (_zoom*baseW)/W;
-}
-
-function startResize(e, handle, shapeEl, shape){
-  _resizing={
-    handle, shapeEl, shape,
-    startX:e.clientX, startY:e.clientY,
-    startLeft:parseInt(shapeEl.style.left),
-    startTop:parseInt(shapeEl.style.top),
-    startW:parseInt(shapeEl.style.width),
-    startH:parseInt(shapeEl.style.height),
-  };
-  document.addEventListener('mousemove',onResizeMove);
-  document.addEventListener('mouseup',stopResize);
-}
-
-function onResizeMove(e){
-  if(!_resizing) return;
-  const {handle,shapeEl,startX,startY,startLeft,startTop,startW,startH}=_resizing;
-  const dx=e.clientX-startX, dy=e.clientY-startY;
-  let l=startLeft,t=startTop,w=startW,h=startH;
-  if(handle==='tl'||handle==='ml'||handle==='bl'){ w=Math.max(20,startW-dx); l=startLeft+startW-w; }
-  if(handle==='tr'||handle==='mr'||handle==='br'){ w=Math.max(20,startW+dx); }
-  if(handle==='tl'||handle==='tm'||handle==='tr'){ h=Math.max(10,startH-dy); t=startTop+startH-h; }
-  if(handle==='bl'||handle==='bm'||handle==='br'){ h=Math.max(10,startH+dy); }
-  shapeEl.style.left=l+'px'; shapeEl.style.top=t+'px';
-  shapeEl.style.width=w+'px'; shapeEl.style.height=h+'px';
-}
-
-function stopResize(){
-  if(!_resizing) return;
-  const {shape,shapeEl}=_resizing;
-  const sc=getScale();
-  shape.left  =Math.round(parseInt(shapeEl.style.left)  /sc);
-  shape.top   =Math.round(parseInt(shapeEl.style.top)   /sc);
-  shape.width =Math.round(parseInt(shapeEl.style.width) /sc);
-  shape.height=Math.round(parseInt(shapeEl.style.height)/sc);
-  updateSizeInputs(shape);
-  scheduleThumbUpdate(_curIdx);
-  document.removeEventListener('mousemove',onResizeMove);
-  document.removeEventListener('mouseup',stopResize);
-  _resizing=null;
-}
-
-/* ──────────────────────── Drag / move ────────────────── */
-function startDrag(e, shapeEl, shape){
-  _dragging={
-    shapeEl, shape, moved:false,
-    startX:e.clientX, startY:e.clientY,
-    startLeft:parseInt(shapeEl.style.left),
-    startTop:parseInt(shapeEl.style.top),
-  };
-  document.addEventListener('mousemove',onDragMove);
-  document.addEventListener('mouseup',stopDrag);
-}
-
-function onDragMove(e){
-  if(!_dragging) return;
-  const {shapeEl,startX,startY,startLeft,startTop}=_dragging;
-  const dx=e.clientX-startX, dy=e.clientY-startY;
-  if(!_dragging.moved && Math.abs(dx)<3 && Math.abs(dy)<3) return;
-  _dragging.moved=true;
-  shapeEl.style.left=(startLeft+dx)+'px';
-  shapeEl.style.top =(startTop +dy)+'px';
-}
-
-function stopDrag(){
-  if(!_dragging) return;
-  if(_dragging.moved){
-    const {shape,shapeEl}=_dragging;
-    const sc=getScale();
-    shape.left=Math.round(parseInt(shapeEl.style.left)/sc);
-    shape.top =Math.round(parseInt(shapeEl.style.top) /sc);
-    scheduleThumbUpdate(_curIdx);
-  }
-  document.removeEventListener('mousemove',onDragMove);
-  document.removeEventListener('mouseup',stopDrag);
-  _dragging=null;
+  document.execCommand(cmd);
 }
 
 /* ──────────────────────── Save ─────────────────────── */
@@ -928,27 +810,18 @@ function esc(s){
 
 /* ──────────────────────── Keyboard ─────────────────── */
 document.addEventListener('keydown',e=>{
-  if(e.target.classList.contains('run-span')) return; // don't steal from editing
+  const inText=e.target.classList.contains('run-span');
+  // Ctrl/Meta combos work even in text editing mode for some
+  if((e.ctrlKey||e.metaKey)&&e.key==='s'){ e.preventDefault(); doSave(); return; }
+  if((e.ctrlKey||e.metaKey)&&e.key==='z'){ e.preventDefault(); if(!inText) doUndo(); return; }
+  if((e.ctrlKey||e.metaKey)&&(e.key==='y'||(e.shiftKey&&e.key==='Z'))){ e.preventDefault(); doRedo(); return; }
+  if(inText) return; // don't steal nav/edit shortcuts while typing
   if(e.key==='ArrowLeft'||e.key==='PageUp')  prevSlide();
   if(e.key==='ArrowRight'||e.key==='PageDown') nextSlide();
-  if((e.ctrlKey||e.metaKey)&&e.key==='s'){ e.preventDefault(); doSave(); }
-});
-
-/* ──────────────────────── Selection tracking ────────── */
-// Save selected spans before focus moves away (e.g. to font-size input)
-document.addEventListener('selectionchange',()=>{
-  const sel=window.getSelection();
-  if(!sel||sel.rangeCount===0||sel.isCollapsed) return;
-  const range=sel.getRangeAt(0);
-  const wrapper=document.getElementById('slide-wrapper');
-  if(!wrapper) return;
-  // Only track selections inside the slide
-  try{ if(!wrapper.contains(range.commonAncestorContainer)) return; }catch(e){ return; }
-  const found=[];
-  document.querySelectorAll('.run-span').forEach(s=>{
-    if(isSpanInSelection(s,range)) found.push(s);
-  });
-  if(found.length>0) _selectionSpans=found;
+  if((e.ctrlKey||e.metaKey)&&e.key==='c'){ copyShape(); }
+  if((e.ctrlKey||e.metaKey)&&e.key==='v'){ e.preventDefault(); pasteShape(); }
+  if((e.ctrlKey||e.metaKey)&&e.key==='d'){ e.preventDefault(); duplicateShape(); }
+  if(e.key==='Delete'||e.key==='Backspace'){ if(_selShape) deleteShape(); }
 });
 
 /* ──────────────────────── Resize ────────────────────── */

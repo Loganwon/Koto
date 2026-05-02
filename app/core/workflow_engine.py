@@ -18,12 +18,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Generator, Optional
 
-from app.core.llm.model_mode import normalize_model_mode
-
 logger = logging.getLogger(__name__)
 
 # ── SSE 事件构建器 ─────────────────────────────────────────────────────────────
-
 
 def _sse(payload: dict) -> str:
     """构建单条 Server-Sent-Events 数据行。"""
@@ -35,9 +32,7 @@ def sse_status(text: str) -> str:
 
 
 def sse_progress(current: int, total: int, detail: str = "") -> str:
-    return _sse(
-        {"type": "progress", "current": current, "total": total, "detail": detail}
-    )
+    return _sse({"type": "progress", "current": current, "total": total, "detail": detail})
 
 
 def sse_step_start(step: str, label: str) -> str:
@@ -50,9 +45,7 @@ def sse_step_done(step: str, label: str) -> str:
 
 def sse_output(output_type: str, data: Any, label: str = "") -> str:
     """输出结果事件。output_type: 'xlsx_data' | 'markdown' | 'html' | 'text' | 'docx_file' | 'pptx_file' | 'xlsx_file'"""
-    return _sse(
-        {"type": "output", "output_type": output_type, "data": data, "label": label}
-    )
+    return _sse({"type": "output", "output_type": output_type, "data": data, "label": label})
 
 
 def sse_error(msg: str) -> str:
@@ -65,16 +58,12 @@ def sse_done(summary: str = "") -> str:
 
 # ── LLM 调用辅助 ───────────────────────────────────────────────────────────────
 
-
 def _resolve_provider_arg(model_mode: str) -> dict:
     """将 model_mode 映射为 get_llm_provider 接受的参数。"""
-    normalized_mode = normalize_model_mode(model_mode, default="auto")
-    if normalized_mode == "local":
+    if model_mode == "local":
         return {"provider": "ollama"}
-    if normalized_mode == "cloud":
-        return {"provider": "gemini"}
-    if normalized_mode in ("gemini", "openai", "anthropic", "ollama"):
-        return {"provider": normalized_mode}
+    if model_mode in ("gemini", "openai", "anthropic", "ollama"):
+        return {"provider": model_mode}
     # "auto" 或其他 → 不指定，由 provider_factory 自动检测
     return {}
 
@@ -89,23 +78,15 @@ def _extract_text(result: Any) -> str:
     return str(result)
 
 
-def call_llm(
-    prompt: str,
-    system: str = "",
-    model_mode: str = "auto",
-    max_tokens: int = 4096,
-    call_timeout: Optional[float] = None,
-) -> str:
+def call_llm(prompt: str, system: str = "", model_mode: str = "auto",
+             max_tokens: int = 4096, call_timeout: Optional[float] = None) -> str:
     """
     单次 LLM 调用，返回完整回复文本。
     回退链：online → local Ollama。
     """
     from app.core.llm.provider_factory import get_llm_provider
 
-    provider = get_llm_provider(
-        **_resolve_provider_arg(model_mode),
-        allow_local_fallback=False,
-    )
+    provider = get_llm_provider(**_resolve_provider_arg(model_mode))
 
     try:
         result = provider.generate_content(
@@ -131,13 +112,8 @@ def call_llm(
             raise RuntimeError(f"LLM 调用失败: {e2}") from e2
 
 
-def call_llm_json(
-    prompt: str,
-    system: str = "",
-    model_mode: str = "auto",
-    max_tokens: int = 8192,
-    call_timeout: Optional[float] = None,
-) -> Any:
+def call_llm_json(prompt: str, system: str = "", model_mode: str = "auto",
+                  max_tokens: int = 8192, call_timeout: Optional[float] = None) -> Any:
     """
     调用 LLM 并解析 JSON 输出。自动去除 markdown 代码块标记。
     如果解析失败, 尝试提取最外层 JSON 片段再次解析。
@@ -147,10 +123,7 @@ def call_llm_json(
     # 在 system prompt 末尾强化 JSON-only 指令
     json_system = system
     if system and "json" not in system.lower():
-        json_system = (
-            system.rstrip()
-            + "\n\n请严格以 JSON 格式输出，不要包含任何 markdown 代码块标记或额外说明。"
-        )
+        json_system = system.rstrip() + "\n\n请严格以 JSON 格式输出，不要包含任何 markdown 代码块标记或额外说明。"
 
     raw = call_llm(
         prompt,
@@ -185,37 +158,31 @@ def call_llm_json(
 
 # ── 文件解析辅助 ───────────────────────────────────────────────────────────────
 
-
 def parse_source_file(file_path: str) -> str:
     """
     将任意支持格式的文件解析为纯文本，供 LLM 使用。
     支持: DOCX, XLSX, PPTX, PDF, TXT, CSV, MD
     """
     from pathlib import Path as _Path
-
     p = _Path(file_path)
     ext = p.suffix.lower()
 
     try:
         if ext == ".pdf":
             from app.core.file.file_parser import parse_pdf
-
             result = parse_pdf(str(p), str(uuid.uuid4()))
             return result.get("text", "")
 
         if ext in (".docx", ".doc"):
             from app.core.file.file_parser import parse_docx
-
             result = parse_docx(str(p))
             # 提取纯文本（去除 HTML 标签）
             import re
-
             html = result.get("html", "") or result.get("content", "")
             return re.sub(r"<[^>]+>", " ", html).strip()
 
         if ext in (".xlsx", ".xls"):
             from app.core.file.file_parser import parse_xlsx
-
             result = parse_xlsx(str(p), p.name)
             # 组装为 CSV-like 文本
             lines = []
@@ -235,7 +202,6 @@ def parse_source_file(file_path: str) -> str:
 
         if ext in (".pptx", ".ppt"):
             from app.core.file.file_parser import parse_pptx
-
             slides = parse_pptx(str(p))
             lines = []
             for slide in slides:
@@ -255,7 +221,6 @@ def parse_source_file(file_path: str) -> str:
 
 
 # ── 基类 ───────────────────────────────────────────────────────────────────────
-
 
 class WorkflowExecutor:
     """
@@ -321,21 +286,18 @@ class WorkflowExecutor:
     @staticmethod
     def save_output_file(suffix: str = ".docx") -> Path:
         """创建输出目录并返回输出文件 Path，供工作流保存产出文件。
-
+        
         输出目录优先使用项目 workspace/tmp，回退到系统临时目录。
         """
         # 定位项目根目录（workflow_engine.py 在 app/core/ 下）
         _engine_file = Path(__file__).resolve()
-        _project_root = (
-            _engine_file.parent.parent.parent
-        )  # app/core/workflow_engine.py -> root
+        _project_root = _engine_file.parent.parent.parent  # app/core/workflow_engine.py -> root
         _workspace_tmp = _project_root / "workspace" / "tmp"
         try:
             _workspace_tmp.mkdir(parents=True, exist_ok=True)
             out_dir = _workspace_tmp
         except OSError:
             import tempfile as _tf
-
             out_dir = Path(_tf.gettempdir()) / f"koto_wf_{uuid.uuid4().hex[:8]}"
             out_dir.mkdir(parents=True, exist_ok=True)
         return out_dir / f"output_{uuid.uuid4().hex[:8]}{suffix}"

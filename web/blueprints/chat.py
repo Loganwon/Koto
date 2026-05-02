@@ -131,7 +131,7 @@ def mini_chat() -> Response:
                 )
                 try:
                     fix_resp = _a.client.models.generate_content(
-                        model="gemini-2.0-flash-lite",
+                        model="gemini-2.5-flash-lite",
                         contents=fix_query_prompt,
                         config=_a.types.GenerateContentConfig(
                             temperature=0.2, max_output_tokens=64
@@ -192,7 +192,7 @@ def mini_chat() -> Response:
                 code in response_text for code in ("404", "503", "UNAVAILABLE", "INVALID")
             )
             if _needs_fallback:
-                for fallback_model in ["gemini-2.5-flash", "gemini-3-flash-preview"]:
+                for fallback_model in ["gemini-2.5-flash", "gemini-2.5-flash-lite"]:
                     try:
                         result = _a.brain.chat(
                             history, user_input, model=fallback_model, auto_model=False

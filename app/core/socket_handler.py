@@ -15,6 +15,28 @@ import re
 
 logger = logging.getLogger(__name__)
 
+_PROPOSAL_NOTE_PREAMBLE_RE = re.compile(
+    r"^(?:以下|下面|这是|如下)(?:是|为)?.{0,20}(?:润色|翻译|改写|修改|修正|优化|版本|结果|文本|内容).{0,10}[：:]\s*",
+    re.IGNORECASE,
+)
+
+
+def _normalize_proposal_note_text(text) -> str:
+    plain = re.sub(r"<[^>]+>", " ", str(text or ""))
+    plain = _PROPOSAL_NOTE_PREAMBLE_RE.sub("", plain).strip()
+    return re.sub(r"\s+", "", plain).lower()
+
+
+def _proposal_note_or_empty(note, selection, proposed_values) -> str:
+    note = str(note or "").strip()
+    note_key = _normalize_proposal_note_text(note)
+    if not note_key:
+        return ""
+    for candidate in [selection, *(proposed_values or [])]:
+        if _normalize_proposal_note_text(candidate) == note_key:
+            return ""
+    return note
+
 def register_socket_events(socketio):
     """Register all /doc namespace WebSocket event handlers."""
 
@@ -98,9 +120,97 @@ def register_socket_events(socketio):
         action_system_prompt = data.get("_action_system_prompt", "")  # overrides system_instruction
         if not prompt:
             return
-        # Combine document context with prompt
+
+        # ── Agent Loop path (OpenClaw-inspired unified agent) ─────────
+        _use_agent_loop = data.get("_use_agent_loop", True)
+        if not _use_agent_loop:
+            try:
+                from web.settings import SettingsManager as _SM
+                _use_agent_loop = bool(_SM().get("ai", "use_agent_loop"))
+            except Exception:
+                pass
+
+        # ── DocAgent path (new multi-file document processor) ─────────
+        _use_doc_agent = data.get("_use_doc_agent", False)
+        if not _use_doc_agent:
+            try:
+                from web.settings import SettingsManager as _SM
+                _use_doc_agent = bool(_SM().get("ai", "use_doc_agent"))
+            except Exception:
+                pass
+
+        # DocAgent takes priority if enabled
+        if _use_doc_agent:
+            def _doc_agent_task():
+                try:
+                    _run_doc_agent(socketio, sid, data)
+                except Exception as _da_exc:
+                    logger.exception("[DocAI] DocAgent error: %s", _da_exc)
+                    socketio.emit(
+                        "agent_task_complete",
+                        {"full_text": "", "error": f"DocAgent 错误：{_da_exc}"},
+                        namespace="/doc", to=sid,
+                    )
+            socketio.start_background_task(_doc_agent_task)
+            return
+
+        if not _use_agent_loop:
+            logger.info("[DocAI] Legacy path disabled; force-enabling OpenClaw agent_loop")
+            _use_agent_loop = True
+
+        if _use_agent_loop:
+            def _agent_loop_task():
+                try:
+                    _run_agent_loop(socketio, sid, data)
+                except Exception as _al_exc:
+                    logger.exception("[DocAI] Agent loop error: %s", _al_exc)
+                    socketio.emit(
+                        "agent_task_complete",
+                        {"full_text": "", "error": f"Agent loop 错误：{_al_exc}"},
+                        namespace="/doc", to=sid,
+                    )
+            socketio.start_background_task(_agent_loop_task)
+            return
+
+        # ── Legacy path retired: OpenClaw-only runtime ────────────────
+        socketio.emit(
+            "agent_task_complete",
+            {
+                "full_text": "",
+                "error": "Legacy workflow 已停用，当前仅支持 OpenClaw 流程。",
+            },
+            namespace="/doc",
+            to=sid,
+        )
+        return
+
+        # ── Legacy path (kept as dead code for rollback safety) ───────
+        # Combine document context with prompt.
+        # For long documents, RAG chunking replaces the raw context with
+        # only the most-relevant retrieved passages to avoid token overflow.
         if context:
-            prompt = f"{context}\n[用户请求]: {prompt}"
+            try:
+                from app.core.file.doc_chunker import DocChunker as _DC
+
+                if len(context) > _DC.CHUNK_THRESHOLD:
+                    _dc_chunks = _DC.chunk(context)
+                    # Use selection text as the retrieval query when present
+                    _dc_query = selection if selection else prompt
+                    _dc_retrieved = _DC.retrieve(_dc_chunks, query=_dc_query, top_k=4)
+                    _dc_context = "\n\n---\n\n".join(_dc_retrieved)
+                    prompt = (
+                        f"[文档内容（RAG检索片段，共{len(_dc_chunks)}段，"
+                        f"已检索最相关{len(_dc_retrieved)}段）]\n"
+                        f"{_dc_context}\n[用户请求]: {prompt}"
+                    )
+                    socketio.emit("rag_info", {
+                        "total_chunks": len(_dc_chunks),
+                        "retrieved_chunks": len(_dc_retrieved),
+                    }, namespace="/doc", to=sid)
+                else:
+                    prompt = f"{context}\n[用户请求]: {prompt}"
+            except Exception:
+                prompt = f"{context}\n[用户请求]: {prompt}"
 
         # ── Chart / code-exec mode ─────────────────────────────────────────
         if language in ("python", "r"):
@@ -207,6 +317,14 @@ def register_socket_events(socketio):
         def _task_body():
             import time as _time
 
+            # ── Resolve skill phases for this action ──────────────────────────
+            try:
+                from app.core.editor_skills import get_phases
+                _action_hint = data.get("_action_type", "")
+                _phases = get_phases(_action_hint) if _action_hint else get_phases("")
+            except Exception:
+                _phases = [{"id": "understand", "label": "理解需求"}, {"id": "generate", "label": "生成回复"}]
+
             # ── Progress helper ───────────────────────────────────────────────
             def _emit_progress(step, detail=""):
                 socketio.emit(
@@ -216,6 +334,16 @@ def register_socket_events(socketio):
                     to=sid,
                 )
 
+            def _emit_phase(phase_id, status="running"):
+                """Emit a phase event for frontend PhaseTracker."""
+                socketio.emit(
+                    "agent_phase",
+                    {"phases": _phases, "current": phase_id, "status": status},
+                    namespace="/doc",
+                    to=sid,
+                )
+
+            _emit_phase(_phases[0]["id"], "running")
             _emit_progress("analyzing", "正在分析上下文…")
 
             # ── Build system instruction ──────────────────────────────────────
@@ -263,6 +391,36 @@ def register_socket_events(socketio):
                     'AI：好的。<TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":2,"value":"季度总结"}</TOOL>\n\n'
                     f"{action_hint}\n"
                 )
+            elif file_type in ("xlsx", "csv"):
+                # Spreadsheet-specific: data arrives as CSV with column-letter headers.
+                # Prefer set_cell tool for modifications; allow plain analysis/chat.
+                system_instruction = (
+                    f"你是 Koto 表格 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n\n"
+                    "【数据格式说明】\n"
+                    "表格数据以 CSV 格式提供：第一列'行'为行号（1起），其余列标题为列字母（A/B/C...对应 Excel 列）。\n"
+                    "示例：\n"
+                    "  行,A,B,C\n"
+                    "  1,姓名,销售额,日期\n"
+                    "  2,张三,12000,2024-01\n\n"
+                    "【重要规则】\n"
+                    "- 分析/问答：直接用中文自然语言回答，不需要输出 <TOOL> 指令。\n"
+                    "- 修改单元格：在回复末尾输出 set_cell 指令（r/c 从 0 开始）：\n"
+                    '  <TOOL>{"type":"set_cell","r":1,"c":1,"value":"新值"}</TOOL>\n'
+                    "  （r=0 对应第1行，c=0 对应 A 列，c=1 对应 B 列，以此类推）\n"
+                    '  value 可以是文本、数字或 Excel 公式（如 "=SUM(B2:B10)"、"=AVERAGE(C2:C20)"）。\n'
+                    "- 批量修改：连续输出多个 set_cell 指令，每条占一行。\n\n"
+                    "示例 1 — 修改 B2 单元格：\n"
+                    "用户：把 B2 改为 15000\n"
+                    'AI：已更新。<TOOL>{"type":"set_cell","r":1,"c":1,"value":"15000"}</TOOL>\n\n'
+                    "示例 2 — 在 B11 插入 SUM 公式（B2:B10 求和，r=10 对应第11行）：\n"
+                    "用户：帮我在 B11 对 B2:B10 求和\n"
+                    'AI：已插入求和公式。<TOOL>{"type":"set_cell","r":10,"c":1,"value":"=SUM(B2:B10)"}</TOOL>\n\n'
+                    "示例 3 — 批量翻译表头（A1、B1、C1）：\n"
+                    "用户：把第一行翻译成英文\n"
+                    'AI：已更新。<TOOL>{"type":"set_cell","r":0,"c":0,"value":"Name"}</TOOL>\n'
+                    '<TOOL>{"type":"set_cell","r":0,"c":1,"value":"Sales"}</TOOL>\n'
+                    '<TOOL>{"type":"set_cell","r":0,"c":2,"value":"Date"}</TOOL>\n'
+                )
             else:
                 if has_selection:
                     action_hint = "用户当前有选中文字。修改时用 set_html 替换选区内容。"
@@ -291,16 +449,52 @@ def register_socket_events(socketio):
                     '  PPTX → <TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":1,"value":"新文字"}</TOOL>'
                 )
 
-            # ── Inject user memory context (L0-L3) ────────────────────────
+            # ── EditorAIPipeline: PII filtering + memory + skill injection ──
+            _raw_prompt = data.get("prompt", prompt)
+            _pipeline_result = None
+            _pipeline_skill_ids: list = []
+            _pipeline_mask_result = None
+            _pipeline_force_local = False
             try:
-                from app.core.app_context import ctx as _ctx
-                _mem_mgr = _ctx.memory_manager
-                if _mem_mgr is not None:
-                    _mem_ctx = _mem_mgr.get_context_string(prompt, history=history)
-                    if _mem_ctx:
-                        system_instruction = f"{_mem_ctx}\n\n{system_instruction}"
-            except Exception as _mem_exc:
-                logger.debug("[DocAI] Memory injection skipped: %s", _mem_exc)
+                from app.core.editor_ai_pipeline import EditorAIPipeline
+                _pipeline_result = EditorAIPipeline.preprocess(
+                    prompt=prompt,
+                    history=history,
+                    file_type=file_type,
+                    output_mode=output_mode,
+                    base_system_instruction=system_instruction,
+                    user_input_raw=_raw_prompt,
+                )
+                system_instruction = _pipeline_result.system_instruction
+                # Use PII-masked prompt for the LLM call
+                prompt = _pipeline_result.safe_prompt
+                _pipeline_skill_ids = _pipeline_result.skill_ids
+                _pipeline_mask_result = _pipeline_result.mask_result
+                _pipeline_force_local = _pipeline_result.force_local
+            except Exception as _pe:
+                logger.debug("[DocAI] EditorAIPipeline.preprocess skipped: %s", _pe)
+                # Fallback: legacy inline memory + skill injection
+                try:
+                    from app.core.app_context import ctx as _ctx
+                    _mem_mgr = _ctx.memory_manager
+                    if _mem_mgr is not None:
+                        _mem_ctx = _mem_mgr.get_context_string(prompt, history=history)
+                        if _mem_ctx:
+                            system_instruction = f"{_mem_ctx}\n\n{system_instruction}"
+                except Exception as _mem_exc:
+                    logger.debug("[DocAI] Memory injection skipped: %s", _mem_exc)
+                try:
+                    from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+                    from app.core.skills.skill_manager import SkillManager as _SKM
+                    _task_type = "CHAT" if output_mode == "chat" else "FILE_GEN"
+                    _temp_ids = SkillAutoMatcher.match(_raw_prompt, task_type=_task_type)
+                    system_instruction = _SKM.inject_into_prompt(
+                        system_instruction, task_type=_task_type,
+                        user_input=_raw_prompt, temp_skill_ids=_temp_ids,
+                    )
+                    _pipeline_skill_ids = _temp_ids
+                except Exception as _sk_exc:
+                    logger.debug("[DocAI] Skill injection skipped: %s", _sk_exc)
 
             # ── Build prompt with multi-turn history ──────────────────────
             # Assemble history (最多保留最近 10 轮，防止 token 超限)
@@ -339,6 +533,9 @@ def register_socket_events(socketio):
                 sid,
             )
 
+            _emit_phase(_phases[0]["id"], "done")
+            _gen_phase = _phases[-1]["id"] if len(_phases) <= 2 else _phases[1]["id"]
+            _emit_phase(_gen_phase, "running")
             _emit_progress("generating", "正在生成回复…")
 
             def _try_online():
@@ -395,6 +592,10 @@ def register_socket_events(socketio):
                     use_local_only = bool(_SM().get("ai", "use_local_only"))
                 except Exception:
                     pass
+            # Privacy routing disabled — PII masking already protects sensitive data
+            # if not use_local_only and _pipeline_force_local:
+            #     use_local_only = True
+            #     logger.info("[DocAI] Privacy routing: using local model due to detected PII")
 
             if use_local_only:
                 try:
@@ -467,6 +668,38 @@ def register_socket_events(socketio):
                         )
                         return
 
+            # ── EditorAIPipeline: post-process result (PII restore + validation) ──
+            if result_text:
+                try:
+                    from app.core.editor_ai_pipeline import EditorAIPipeline
+                    _post = EditorAIPipeline.postprocess(
+                        response_text=result_text,
+                        mask_result=_pipeline_mask_result,
+                        skill_ids=_pipeline_skill_ids,
+                        user_prompt=_raw_prompt,
+                        file_type=file_type,
+                    )
+                    result_text = _post.text
+                    # Emit skill suggestions if any (non-blocking)
+                    if _post.suggestions:
+                        socketio.emit(
+                            "skill_suggestions",
+                            {"suggestions": _post.suggestions},
+                            namespace="/doc",
+                            to=sid,
+                        )
+                    # If output was BLOCKED, replace with safe message
+                    if _post.validation_action == "BLOCK":
+                        socketio.emit(
+                            "agent_task_complete",
+                            {"result": result_text, "has_proposals": False},
+                            namespace="/doc",
+                            to=sid,
+                        )
+                        return
+                except Exception as _post_exc:
+                    logger.debug("[DocAI] EditorAIPipeline.postprocess skipped: %s", _post_exc)
+
             # ── Parse and emit any embedded tool calls ────────────────────
             clean_text, tool_calls = _parse_tool_calls(result_text or "")
 
@@ -518,24 +751,27 @@ def register_socket_events(socketio):
                 # ── Construct proposals when user had a pinned selection ───────
                 if selection and tool_calls:
                     proposals = []
+                    proposal_note = _proposal_note_or_empty(
+                        clean_text,
+                        selection,
+                        [tc.get("value", "") for tc in tool_calls if tc.get("value", "")],
+                    )
                     for idx, tc in enumerate(tool_calls):
                         proposed = tc.get("value", "")
                         if proposed:
-                            proposals.append(
-                                {
-                                    "id": f"p_{idx}",
-                                    "original_text": selection,
-                                    "proposed_text": proposed,
-                                    "rationale": clean_text or "",
-                                    "tool_call": tc,
-                                }
-                            )
+                            proposals.append({
+                                "id": f"p_{idx}",
+                                "original_text": selection,
+                                "proposed_text": proposed,
+                                "rationale": proposal_note,
+                                "tool_call": tc,
+                            })
                     if proposals:
                         has_proposals = True
                         _emit_progress("formatting", "正在准备修改建议…")
                         socketio.emit(
                             "agent_proposals",
-                            {"proposals": proposals, "summary": clean_text},
+                            {"proposals": proposals, "summary": proposal_note},
                             namespace="/doc",
                             to=sid,
                         )
@@ -543,6 +779,9 @@ def register_socket_events(socketio):
                     for tc in tool_calls:
                         socketio.emit("doc_tool_call", tc, namespace="/doc", to=sid)
 
+            # Mark all phases done
+            for _p in _phases:
+                _emit_phase(_p["id"], "done")
             _emit_progress("complete", "")
             socketio.emit(
                 "agent_task_complete",
@@ -772,9 +1011,9 @@ def _parse_tool_calls(text: str):
 
 
 _ONLINE_DOC_MODELS = [
-    "gemini-3-flash-preview",  # 首选：最新快速模型
-    "gemini-2.5-flash",  # 备用稳定模型
-    "gemini-2.0-flash-lite",  # 轻量兜底
+    "gemini-3-flash-preview",  # 首选：当前主聊天模型
+    "gemini-2.5-flash",        # 稳定快速回退
+    "gemini-2.5-flash-lite",   # 轻量兜底
 ]
 
 
@@ -828,9 +1067,7 @@ def _get_local_provider():
         import json as _json
         import urllib.request as _ur
 
-        # Bypass system proxy — Ollama is always on localhost
-        _opener = _ur.build_opener(_ur.ProxyHandler({}))
-        with _opener.open("http://127.0.0.1:11434/api/tags", timeout=3) as r:
+        with _ur.urlopen("http://127.0.0.1:11434/api/tags", timeout=3) as r:
             tags = _json.loads(r.read())
         models = [m["name"] for m in tags.get("models", [])]
         if models:
@@ -1072,3 +1309,390 @@ def _call_llm_sync(prompt: str, use_local_only: bool = False) -> str | None:
     except Exception as exc2:
         logger.error("[DocAssistant] Local sync fallback failed: %s", exc2)
         return None
+
+
+# ══════════════════════════════════════════════════════════════
+# Agent Loop Bridge — maps AgentEvent → WebSocket emit()
+# ══════════════════════════════════════════════════════════════
+
+def _run_agent_loop(socketio, sid, data: dict) -> None:
+    """
+    Run a doc_ai_request through the unified KotoAgentLoop.
+    Maps AgentEvent objects to existing WebSocket events for
+    backward-compatible frontend consumption.
+    """
+    from app.core.agent.agent_loop import KotoAgentLoop
+    from app.core.agent.hooks import HookRegistry
+    from app.core.agent.lifecycle import AgentRequest, EventType
+    from app.core.agent.pipeline_hooks import register_pipeline_hooks
+    from app.core.agent.session_queue import SessionQueue
+
+    # Build AgentRequest from raw WS data
+    request = AgentRequest(
+        prompt=data.get("prompt", ""),
+        session_id=sid or "",
+        file_type=data.get("file_type", "unknown"),
+        file_name=data.get("file_name", ""),
+        context=data.get("context", ""),
+        selection=data.get("selection", ""),
+        has_selection=data.get("has_selection", False),
+        history=data.get("history", []),
+        output_mode=data.get("output_mode", "inline"),
+        model_mode=data.get("model_mode", "auto"),
+        language=data.get("language", ""),
+        csv_data=data.get("csv_data", ""),
+        action_type=data.get("_action_type", ""),
+        action_system_prompt=data.get("_action_system_prompt", ""),
+    )
+
+    # Set up hooks
+    registry = HookRegistry()
+    register_pipeline_hooks(registry)
+
+    # Create loop
+    loop = KotoAgentLoop(hook_registry=registry)
+
+    # Per-session serialization
+    _sq = _get_session_queue()
+    with _sq.acquire(request.session_id):
+        for event in loop.run(request):
+            _emit_agent_event(socketio, sid, event)
+
+
+def _emit_agent_event(socketio, sid, event) -> None:
+    """Map a single AgentEvent to one or more WebSocket emit calls."""
+    from app.core.agent.lifecycle import EventType
+
+    etype = event.type
+    d = event.data
+    ns = "/doc"
+
+    if etype == EventType.STREAM_CHUNK:
+        socketio.emit("agent_stream_chunk", {"chunk": d.get("chunk", "")},
+                       namespace=ns, to=sid)
+
+    elif etype == EventType.TASK_COMPLETE:
+        socketio.emit("agent_task_complete", {
+            "result": d.get("result", ""),
+            "has_proposals": d.get("has_proposals", False),
+            "error": d.get("error", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.PHASE:
+        socketio.emit("agent_phase", {
+            "phases": d.get("phases", []),
+            "current": d.get("current", ""),
+            "status": d.get("status", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.THOUGHT:
+        socketio.emit("agent_event", {
+            "type": "thought",
+            "text": d.get("text", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.PLAN:
+        socketio.emit("agent_event", {
+            "type": "plan",
+            "steps": d.get("steps", []),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STEP_START:
+        socketio.emit("agent_event", {
+            "type": "step_start",
+            "step_id": d.get("step_id", ""),
+            "text": d.get("text", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STEP_PROGRESS:
+        socketio.emit("agent_event", {
+            "type": "step_progress",
+            "step_id": d.get("step_id", ""),
+            "detail": d.get("detail", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STEP_DONE:
+        socketio.emit("agent_event", {
+            "type": "step_done",
+            "step_id": d.get("step_id", ""),
+            "text": d.get("text", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STEP_ERROR:
+        socketio.emit("agent_event", {
+            "type": "step_error",
+            "step_id": d.get("step_id", ""),
+            "error": d.get("error", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.TOOL_CALL:
+        tool_call = d.get("tool_call", {}) or {}
+        socketio.emit("agent_event", {
+            "type": "tool_call",
+            "tool_name": tool_call.get("name", ""),
+            "tool_args": tool_call.get("args", {}),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.TOOL_RESULT:
+        socketio.emit("agent_event", {
+            "type": "tool_result",
+            "tool_name": d.get("tool_name", ""),
+            "result_preview": d.get("result_preview", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STATUS_MESSAGE:
+        text = d.get("text", "")
+        is_error = d.get("is_error", False)
+        if is_error:
+            socketio.emit("agent_execute_command", {
+                "action": "show_message", "text": text, "is_error": True,
+            }, namespace=ns, to=sid)
+        else:
+            socketio.emit("agent_progress", {
+                "step": "status", "detail": text,
+            }, namespace=ns, to=sid)
+
+    elif etype == EventType.PROPOSAL:
+        socketio.emit("agent_proposals", {
+            "proposals": d.get("proposals", []),
+            "summary": d.get("summary", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.DOC_TOOL_CALL:
+        socketio.emit("doc_tool_call", d, namespace=ns, to=sid)
+
+    elif etype == EventType.SKILL_SUGGESTIONS:
+        socketio.emit("skill_suggestions", {
+            "suggestions": d.get("suggestions", []),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.RAG_INFO:
+        socketio.emit("rag_info", d, namespace=ns, to=sid)
+        socketio.emit("agent_event", {
+            "type": "rag_info",
+            **d,
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.CODE_RESULT:
+        socketio.emit("code_result", d, namespace=ns, to=sid)
+
+    elif etype == EventType.ERROR:
+        socketio.emit("agent_task_complete", {
+            "full_text": "", "error": d.get("text", "未知错误"),
+        }, namespace=ns, to=sid)
+
+    elif etype in (EventType.LIFECYCLE_START, EventType.LIFECYCLE_END):
+        # New lifecycle events — emit for frontend observability
+        socketio.emit("agent_lifecycle", {
+            "type": etype.value, **d,
+        }, namespace=ns, to=sid)
+
+    # Other event types (THOUGHT, PLAN, etc.) are logged but not emitted yet
+    # to maintain backward compatibility with the existing frontend.
+
+
+# Singleton session queue
+_session_queue = None
+
+def _get_session_queue():
+    global _session_queue
+    if _session_queue is None:
+        from app.core.agent.session_queue import SessionQueue
+        _session_queue = SessionQueue(global_concurrency=4)
+    return _session_queue
+
+
+# ══════════════════════════════════════════════════════════════
+# DocAgent Integration — OpenClaw-style document processing
+# ══════════════════════════════════════════════════════════════
+
+def _run_doc_agent(socketio, sid, data: dict) -> None:
+    """
+    Run a doc_ai_request through the new DocAgent.
+
+    DocAgent provides:
+    - LLM-driven task planning with multi-file context
+    - Step-by-step execution with progress streaming
+    - File change tracking for frontend highlighting
+    - Task completion verification
+    """
+    from app.core.agent.doc_agent import DocAgent, DocTask, FileHandle, DocEventType
+    from app.core.agent.doc_event_emitter import DocEventEmitter
+
+    # Build FileHandle objects from data
+    files = []
+
+    # Add main file context
+    file_path = data.get("file_path", "")
+    file_type = data.get("file_type", "unknown")
+    file_name = data.get("file_name", "")
+    context = data.get("context", "")
+    selection = data.get("selection", "")
+
+    if file_path or context:
+        files.append(FileHandle(
+            path=file_path or file_name or "document",
+            file_type=file_type,
+            content_snapshot=context[:5000] if context else "",
+            selection=selection if selection else None,
+        ))
+
+    # Add additional files from open_tabs
+    open_tabs = data.get("open_tabs", [])
+    for tab in open_tabs[:5]:  # Limit to 5 files
+        tab_path = tab.get("path", tab.get("name", ""))
+        if tab_path and tab_path != file_path:
+            files.append(FileHandle(
+                path=tab_path,
+                file_type=tab.get("type", ""),
+                content_snapshot=tab.get("content", "")[:2000] if tab.get("content") else "",
+            ))
+
+    # Build DocTask
+    task = DocTask(
+        id=data.get("task_id", ""),
+        prompt=data.get("prompt", ""),
+        files=files,
+        permissions={"read", "write", "annotate"},
+        session_id=sid,
+        history=data.get("history", []),
+        options={
+            "model_mode": data.get("model_mode", "auto"),
+            "output_mode": data.get("output_mode", "inline"),
+        },
+    )
+
+    # Create emitter and agent
+    emitter = DocEventEmitter(socketio, sid, namespace="/doc")
+    emitter.set_task_id(task.id)
+
+    agent = DocAgent(emitter=emitter)
+
+    # Run and emit events
+    for event in agent.run(task):
+        _emit_doc_agent_event(socketio, sid, event, emitter)
+
+
+def _emit_doc_agent_event(socketio, sid, event, emitter) -> None:
+    """Map DocAgent events to WebSocket emit calls."""
+    from app.core.agent.doc_agent import DocEventType
+
+    etype = event.event_type
+    data = event.data
+    ns = "/doc"
+
+    if etype == DocEventType.PLAN_START:
+        socketio.emit("doc_plan_start", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.PLAN_CREATED:
+        socketio.emit("doc_plan_created", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STEP_START:
+        socketio.emit("doc_step_start", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STEP_PROGRESS:
+        socketio.emit("doc_step_progress", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STEP_DONE:
+        socketio.emit("doc_step_done", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STEP_ERROR:
+        socketio.emit("doc_step_error", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.TOOL_CALL:
+        socketio.emit("doc_tool_call", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.TOOL_RESULT:
+        socketio.emit("doc_tool_result", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.FILE_CHANGE:
+        socketio.emit("doc_file_change", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.HIGHLIGHT:
+        socketio.emit("doc_highlight", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.USER_CONFIRM:
+        socketio.emit("doc_user_confirm", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.REPLAN:
+        socketio.emit("doc_replan", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.THOUGHT:
+        # Stream to chat area
+        text = data.get("text", "")
+        if text:
+            socketio.emit("agent_stream_chunk", {
+                "chunk": text,
+            }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STREAM_CHUNK:
+        socketio.emit("agent_stream_chunk", {
+            "chunk": data.get("chunk", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.VERIFICATION:
+        socketio.emit("doc_verification", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.TASK_COMPLETE:
+        socketio.emit("agent_task_complete", {
+            "task_id": event.task_id,
+            "full_text": data.get("summary", ""),
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.ERROR:
+        socketio.emit("doc_error", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+        # Also emit task_complete with error for frontend compatibility
+        socketio.emit("agent_task_complete", {
+            "full_text": "",
+            "error": data.get("message", "未知错误"),
+        }, namespace=ns, to=sid)

@@ -122,8 +122,11 @@ def _to_ollama_tools(tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
 
 def _parse_ollama_response(resp_json: Dict) -> Dict[str, Any]:
     """Convert Ollama /api/chat response → UnifiedAgent {content, tool_calls, usage}."""
+    import re as _re
     msg = resp_json.get("message") or {}
     content = msg.get("content") or ""
+    # Strip <think>...</think> blocks (qwen3 thinking mode)
+    content = _re.sub(r"<think>.*?</think>", "", content, flags=_re.DOTALL).strip()
 
     tool_calls: List[Dict] = []
     for tc in msg.get("tool_calls") or []:
@@ -174,8 +177,10 @@ def _raw_post(
 
 
 def _stream_deltas(req: urllib.request.Request) -> Generator[str, None, None]:
-    """Yield text delta strings from a streaming Ollama response."""
+    """Yield text delta strings from a streaming Ollama response, stripping <think> blocks."""
     _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    _in_think = False
+    _think_buf = ""
     try:
         with _opener.open(req, timeout=180) as resp:
             for raw in resp:
@@ -186,7 +191,31 @@ def _stream_deltas(req: urllib.request.Request) -> Generator[str, None, None]:
                     chunk = json.loads(line)
                     delta = (chunk.get("message") or {}).get("content", "")
                     if delta:
-                        yield delta
+                        if _in_think:
+                            # Accumulate until we find </think>
+                            _think_buf += delta
+                            if "</think>" in _think_buf:
+                                _in_think = False
+                                remainder = _think_buf.split("</think>", 1)[1]
+                                _think_buf = ""
+                                if remainder:
+                                    yield remainder
+                        else:
+                            if "<think>" in delta:
+                                parts = delta.split("<think>", 1)
+                                if parts[0]:
+                                    yield parts[0]
+                                _in_think = True
+                                _think_buf = parts[1] if len(parts) > 1 else ""
+                                # Check if </think> is already in this chunk
+                                if "</think>" in _think_buf:
+                                    _in_think = False
+                                    remainder = _think_buf.split("</think>", 1)[1]
+                                    _think_buf = ""
+                                    if remainder:
+                                        yield remainder
+                            else:
+                                yield delta
                     if chunk.get("done", False):
                         break
                 except json.JSONDecodeError:

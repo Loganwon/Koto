@@ -715,7 +715,7 @@ class SkillAutoBuilder:
         author: str = "user",
         tags: Optional[List[str]] = None,
         enabled: bool = False,
-        model: str = "gemini-3-flash-preview",
+        model: str = "gemini-2.5-flash",
         personalize: bool = False,
         personalization_context: Optional[Dict[str, Any]] = None,
     ):

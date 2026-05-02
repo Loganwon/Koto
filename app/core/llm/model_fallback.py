@@ -18,7 +18,7 @@
     result = executor.generate_with_fallback(
         provider=gemini_provider,
         prompt="你好",
-        preferred_model="gemini-3-flash-preview",
+        preferred_model="gemini-2.5-flash",
         task_type="CHAT",
     )
 
@@ -26,7 +26,7 @@
     model_id = executor.get_best_available(task_type="CODER")
 
     # 手动标记某模型短暂不可用
-    executor.mark_unavailable("gemini-3-pro-preview")
+    executor.mark_unavailable("gemini-2.5-pro")
 """
 
 from __future__ import annotations
@@ -71,6 +71,21 @@ _LOCATION_BLOCKED_PATTERNS = [
     r"region.*not.*support",
 ]
 
+# ── 超时/瞬时网络错误（当前模型可能过载，换模型重试）────────────────────────────
+_TRANSIENT_MODEL_ERROR_PATTERNS = [
+    r"timed out",
+    r"timeout",
+    r"connection.*reset",
+    r"remote.*disconnected",
+    r"unexpected.*eof",
+    r"ssl.*error",
+    r"connection.*aborted",
+    r"broken.*pipe",
+]
+
+# 超时导致的模型不可用缓存 TTL（比模型本身 404 的 5 分钟更短）
+_TIMEOUT_UNAVAILABLE_TTL = 30  # 30 秒后重试
+
 
 def _is_location_blocked_error(exc: Exception) -> bool:
     """判断是否为地区/帐号限制错误（切换 Gemini 模型无用，需直接走本地兜底）。"""
@@ -78,88 +93,119 @@ def _is_location_blocked_error(exc: Exception) -> bool:
     return any(re.search(p, msg, re.IGNORECASE) for p in _LOCATION_BLOCKED_PATTERNS)
 
 
+def _is_transient_error(exc: Exception) -> bool:
+    """判断是否为瞬时网络/超时错误（换下一个模型重试，短暂标记当前模型不可用）。"""
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    exc_type = type(exc).__name__
+    if exc_type in ("ReadTimeout", "ConnectTimeout", "ConnectionError", "Timeout"):
+        return True
+    msg = str(exc).lower()
+    return any(re.search(p, msg, re.IGNORECASE) for p in _TRANSIENT_MODEL_ERROR_PATTERNS)
+
 # ── 通用降级链（无任务信息时使用）──────────────────────────────────────────────
+# gemini-3-flash-preview 仍是轻量交互主力。
+# gemini-3.1-pro-preview 已实测可用于高质量重任务与工具调用。
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
-    "gemini-3-flash-preview",  # 首选：最新 Gemini 3 Flash（generate_content）
-    "gemini-2.5-flash",  # 次选：快速路径
-    "gemini-3.1-pro-preview",  # 高质量
-    "gemini-3-pro-preview",  # Gemini 3 Pro（generate_content）
-    "gemini-2.5-pro-preview",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
+    "gemini-3-flash-preview",   # 首选：当前主力稳定模型
+    "gemini-3.1-pro-preview",   # 重任务优先 Pro 3.1
+    "gemini-2.5-flash",         # 稳定快速备选
+    "gemini-2.5-flash-lite",    # 轻量兜底
+    "gemini-2.5-pro",           # 高质量备选
+    "gemini-3-pro-preview",     # 最后再尝试慢速 preview pro
 ]
 
 # ── 按任务类型的专属降级链 ──────────────────────────────────────────────────────
-# 注意：gemini-3-flash-preview / gemini-3-pro-preview 是普通 generate_content 模型。
 # 只有 deep-research-pro-preview-* 才是 Interactions API agent（使用 agent= 字段）。
 _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
     "CHAT": [
-        "gemini-3-flash-preview",  # 首选：最新 Gemini 3 Flash
-        "gemini-2.5-flash",  # 次选
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
     ],
     "CODER": [
-        "gemini-3.1-pro-preview",  # 最强代码能力
-        "gemini-3-pro-preview",  # Gemini 3 Pro
-        "gemini-2.5-pro-preview",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+        "gemini-3-pro-preview",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash-lite",
     ],
     "RESEARCH": [
-        "gemini-3.1-pro-preview",  # 高质量 generate_content
-        "gemini-3-pro-preview",  # Gemini 3 Pro
-        "gemini-2.5-pro-preview",
-        "deep-research-pro-preview-12-2025",  # Interactions API agent（专用深研，慢）
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
         "gemini-2.5-flash",
     ],
     "PAINTER": [
         "gemini-3.1-flash-image-preview",
-        "gemini-2.0-flash-exp",
+        "gemini-2.5-flash-image",
     ],
     "WEB_SEARCH": [
-        "gemini-2.5-flash",  # grounding 需要 generate_content
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
     ],
     "FILE_GEN": [
-        "gemini-3-flash-preview",  # 首选
-        "gemini-2.5-flash",  # 次选
-        "gemini-2.0-flash",
-        "gemini-1.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
+        "gemini-3-pro-preview",
+        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash-lite",
+    ],
+    "FILE_TASK": [
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash-lite",
+        "gemini-3-pro-preview",
     ],
     "AGENT": [
-        "gemini-3-flash-preview",  # 首选
+        "gemini-3.1-pro-preview",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
+        "gemini-2.5-pro",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash-lite",
+        "gemini-3-pro-preview",
     ],
     "DOC_ANNOTATE": [
-        "gemini-3-flash-preview",  # 首选
+        "gemini-3.1-pro-preview",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
+        "gemini-2.5-pro",
+        "gemini-3-flash-preview",
+        "gemini-3-pro-preview",
     ],
     "FILE_SEARCH": [
-        "gemini-3-flash-preview",  # 首选
+        "gemini-3-flash-preview",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
     ],
     "VISION": [
-        "gemini-2.5-flash",  # 需要 generate_content 处理图像字节
-        "gemini-2.0-flash",
-        "gemini-1.5-pro",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+        "gemini-2.5-pro",
     ],
     "MULTI_STEP": [
-        "gemini-3.1-pro-preview",  # 最强
-        "gemini-3-pro-preview",  # Gemini 3 Pro
-        "gemini-2.5-pro-preview",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
         "gemini-2.5-flash",
-        "gemini-2.0-flash",
+        "gemini-3-flash-preview",
+        "gemini-3-pro-preview",
+        "gemini-2.5-flash-lite",
     ],
     "COMPLEX": [
-        "gemini-3.1-pro-preview",  # 最强
-        "gemini-3-pro-preview",  # Gemini 3 Pro
-        "gemini-2.5-pro-preview",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-pro",
         "gemini-2.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-3-pro-preview",
     ],
 }
 
@@ -195,9 +241,7 @@ class ModelFallbackExecutor:
     _cascade_failure_times: Dict[str, float] = (
         {}
     )  # task_type → timestamp of last cascade failure
-    _cascade_lock: threading.Lock = (
-        threading.Lock()
-    )  # guards _cascade_failures/_cascade_failure_times
+    _cascade_lock: threading.Lock = threading.Lock()  # guards _cascade_failures/_cascade_failure_times
     _CIRCUIT_BREAKER_BASE: float = 5.0  # initial backoff in seconds
     _CIRCUIT_BREAKER_CAP: float = 120.0  # max backoff in seconds
 
@@ -331,6 +375,13 @@ class ModelFallbackExecutor:
                         f"[ModelFallback] 模型不可用，切换: {model_id} — {exc}"
                     )
                     # 继续尝试下一个候选
+                elif _is_transient_error(exc):
+                    # 超时/瞬时网络错误：短暂标记当前模型不可用，尝试下一个
+                    self.mark_unavailable(model_id, ttl=_TIMEOUT_UNAVAILABLE_TTL)
+                    logger.warning(
+                        f"[ModelFallback] ⏱ 超时/网络错误，切换到下一个模型: {model_id} — {exc}"
+                    )
+                    # 继续尝试下一个候选
                 else:
                     # 非"模型不存在"错误（如 prompt 格式错误、鉴权失败等）直接上抛，不降级
                     raise
@@ -357,20 +408,14 @@ class ModelFallbackExecutor:
                     )
                     with self._cascade_lock:
                         self._cascade_failures[task_type] = 0
-                    return {
-                        "content": _content,
-                        "tool_calls": [],
-                        "model": "local/ollama",
-                    }
+                    return {"content": _content, "tool_calls": [], "model": "local/ollama"}
                 logger.warning("[ModelFallback] Ollama 兜底失败: %s", _err)
         except Exception as _le:
             logger.warning("[ModelFallback] Ollama 兜底异常: %s", _le)
 
         # 所有候选均失败 — record cascade failure for circuit breaker
         with self._cascade_lock:
-            self._cascade_failures[task_type] = (
-                self._cascade_failures.get(task_type, 0) + 1
-            )
+            self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1
             self._cascade_failure_times[task_type] = time.time()
         if last_exc:
             raise last_exc

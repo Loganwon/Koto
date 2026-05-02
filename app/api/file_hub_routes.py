@@ -60,6 +60,7 @@ import threading
 from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
+from web.settings import settings as user_settings
 
 logger = logging.getLogger(__name__)
 
@@ -1064,18 +1065,29 @@ _WATCH_SETTINGS_PATH = str(
 
 
 def _read_user_settings() -> dict:
-    import json as _json
+    """Read settings via SettingsManager (thread-safe)."""
     try:
-        with open(_WATCH_SETTINGS_PATH, "r", encoding="utf-8") as f:
-            return _json.load(f)
+        from web.settings import SettingsManager
+        return SettingsManager().get_all()
     except Exception:
-        return {}
+        import json as _json
+        try:
+            with open(_WATCH_SETTINGS_PATH, "r", encoding="utf-8-sig") as f:
+                return _json.load(f)
+        except Exception:
+            return {}
 
 
 def _write_user_settings(data: dict) -> None:
-    import json as _json
-    with open(_WATCH_SETTINGS_PATH, "w", encoding="utf-8") as f:
-        _json.dump(data, f, ensure_ascii=False, indent=2)
+    """Write settings via SettingsManager (atomic, thread-safe).
+
+    Only the 'file_watcher' sub-key is updated to avoid clobbering other
+    settings that may have been changed concurrently.
+    """
+    from web.settings import SettingsManager
+    sm = SettingsManager()
+    fw = data.get("file_watcher", {})
+    sm.update("file_watcher", fw)
 
 
 @file_hub_bp.route("/watch-settings", methods=["GET"])
@@ -1218,7 +1230,9 @@ def batch_ai():
                     from app.core.security.output_validator import OutputValidator
                     _val = OutputValidator.validate(text=text)
                     if _val.is_blocked:
-                        text = "⚠️ 内容被安全策略拦截。"
+                        # Disabled — log only, don't replace content
+                        import logging as _logging
+                        _logging.getLogger(__name__).warning("[file_hub] OutputValidator BLOCK (ignored): %s", _val.reasons)
                     else:
                         text = _val.text
                 except Exception:

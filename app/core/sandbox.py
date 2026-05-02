@@ -68,7 +68,7 @@ def _build_sandbox_env(tmpdir: str) -> dict:
 # ── Python ────────────────────────────────────────────────────
 
 
-def run_python(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
+def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None) -> dict:
     """
     Execute Python code in an isolated temp directory.
 
@@ -109,13 +109,13 @@ def run_python(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
     """)
 
     full_code = preamble + "\n" + code
-    return _run_in_tempdir("python", [sys.executable, "-c", full_code], timeout)
+    return _run_in_tempdir("python", [sys.executable, "-c", full_code], timeout, work_dir=work_dir)
 
 
 # ── R ─────────────────────────────────────────────────────────
 
 
-def run_r(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
+def run_r(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None) -> dict:
     """
     Execute R code in an isolated temp directory.
     ggplot2 / base graphics are captured as PNG via a preamble.
@@ -143,7 +143,7 @@ def run_r(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
         script_path = f.name
 
     try:
-        return _run_in_tempdir("Rscript", ["Rscript", script_path], timeout)
+        return _run_in_tempdir("Rscript", ["Rscript", script_path], timeout, work_dir=work_dir)
     finally:
         try:
             os.unlink(script_path)
@@ -154,7 +154,69 @@ def run_r(code: str, timeout: int = DEFAULT_TIMEOUT) -> dict:
 # ── Shared runner ─────────────────────────────────────────────
 
 
-def _run_in_tempdir(lang: str, cmd: list, timeout: int) -> dict:
+def _run_in_dir(lang: str, cmd: list, timeout: int, cwd: str) -> dict:
+    """Run cmd in a specific directory (for session persistence). Does NOT delete the dir."""
+    stdout = stderr = ""
+    error = None
+    truncated = False
+    files = {}
+
+    env = _build_sandbox_env(cwd)
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            cwd=cwd,
+            env=env,
+        )
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            error = f"执行超时（超过 {timeout} 秒）"
+        else:
+            truncated = len(out) > OUTPUT_SIZE_LIMIT or len(err) > OUTPUT_SIZE_LIMIT
+            stdout = out[:OUTPUT_SIZE_LIMIT]
+            stderr = err[:OUTPUT_SIZE_LIMIT]
+
+    except FileNotFoundError:
+        error = f"未找到 {lang} 解析器。" + (
+            " 请确保已安装 Python 并在 PATH 中。"
+            if lang == "python"
+            else " 请安装 R 并将 Rscript 加入 PATH。"
+        )
+    except Exception as exc:
+        error = f"执行失败：{exc}"
+
+    # Collect image output files
+    if error is None:
+        for fname in os.listdir(cwd):
+            fpath = Path(cwd) / fname
+            if fpath.suffix.lower() in IMAGE_EXTS and fpath.stat().st_size > 0:
+                try:
+                    files[fname] = base64.b64encode(fpath.read_bytes()).decode()
+                except OSError:
+                    pass
+
+    return {
+        "stdout": stdout,
+        "stderr": stderr,
+        "files": files,
+        "error": error,
+        "truncated": truncated,
+    }
+
+
+def _run_in_tempdir(lang: str, cmd: list, timeout: int, *, work_dir: str | None = None) -> dict:
     """
     Create a temp directory, run `cmd` inside it, collect results.
     The temp directory is always cleaned up.
@@ -168,6 +230,11 @@ def _run_in_tempdir(lang: str, cmd: list, timeout: int) -> dict:
     error = None
     truncated = False
     files = {}
+
+    # If a persistent work_dir is provided (session mode), use it directly
+    # instead of creating a throwaway TemporaryDirectory.
+    if work_dir and os.path.isdir(work_dir):
+        return _run_in_dir(lang, cmd, timeout, work_dir)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         env = _build_sandbox_env(tmpdir)

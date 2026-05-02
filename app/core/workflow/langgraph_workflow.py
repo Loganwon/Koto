@@ -107,7 +107,7 @@ if _LG_AVAILABLE:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _get_llm(model_id: str = "gemini-3-flash-preview"):
+def _get_llm(model_id: str = "gemini-2.5-flash"):
     from app.core.llm.langchain_adapter import KotoLangChainLLM
 
     return KotoLangChainLLM(model_id=model_id)
@@ -426,7 +426,7 @@ class WorkflowEngine:
         "multi_agent_ppt": _build_multi_agent_ppt_graph,
     }
 
-    def __init__(self, model_id: str = "gemini-3-flash-preview", checkpointer=None):
+    def __init__(self, model_id: str = "gemini-2.5-flash", checkpointer=None):
         _assert_langgraph()
         self.model_id = model_id
         if checkpointer is None:

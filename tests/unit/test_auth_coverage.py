@@ -283,6 +283,27 @@ class TestFlaskDecorators:
             assert resp.status_code == 200
             assert resp.get_json()["user"] == "local"
 
+    def test_require_auth_local_mode_uses_runtime_system_key(self, monkeypatch):
+        """Local mode should read the latest system Gemini key instead of an import-time snapshot."""
+        from flask import Flask, g, jsonify
+
+        auth_mod = _get_auth_module()
+        monkeypatch.setattr(auth_mod, "AUTH_ENABLED", False)
+        monkeypatch.setenv("GEMINI_API_KEY", "runtime-key-123")
+
+        app = Flask(__name__)
+        app.config["TESTING"] = True
+
+        @app.route("/protected-runtime")
+        @auth_mod.require_auth
+        def protected_runtime():
+            return jsonify({"api_key": g.api_key})
+
+        with app.test_client() as c:
+            resp = c.get("/protected-runtime")
+            assert resp.status_code == 200
+            assert resp.get_json()["api_key"] == "runtime-key-123"
+
     def test_optional_auth_requires_token_when_enabled(self, monkeypatch):
         """With AUTH_ENABLED=True and no token, optional_auth returns 401."""
         auth_mod = _get_auth_module()

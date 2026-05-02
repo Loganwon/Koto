@@ -95,6 +95,18 @@ class TestAllModelsFail:
                     task_type="CHAT",
                 )
 
+
+def test_file_task_candidate_list_prefers_file_task_route_first():
+    exe = _fresh_executor()
+    exe.update_model_map({"FILE_TASK": "gemini-3-flash-preview"})
+
+    candidates = exe._build_candidate_list("", "FILE_TASK")
+
+    assert candidates[0] == "gemini-3-flash-preview"
+    assert "gemini-3-pro-preview" in candidates
+    assert "gemini-3-flash-preview" in candidates
+    assert "gemini-2.5-pro" in candidates
+
     def test_raises_runtime_if_no_candidate_tried(self):
         """All models pre-marked unavailable → RuntimeError (no last_exc)."""
         exe = _fresh_executor()

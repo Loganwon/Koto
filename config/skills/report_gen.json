@@ -1,0 +1,16 @@
+{
+  "id": "report_gen",
+  "name": "报告生成",
+  "icon": "📝",
+  "category": "workflow",
+  "description": "从数据或文档内容自动生成结构化报告",
+  "intent_description": "用户想从数据或文件生成分析报告、汇报文档",
+  "task_types": ["CHAT", "FILE_ASSISTANT"],
+  "priority": 55,
+  "enabled": true,
+  "trigger_keywords": ["报告", "汇报", "分析报告", "生成报告", "report", "generate report", "周报", "月报"],
+  "prompt": "\n\n## 📝 任务：报告生成\n\n根据用户提供的数据或文件，生成一份结构化的分析报告。\n\n### 执行步骤\n\n1. **读取数据**：使用 `workspace_read_file` 读取相关文件\n2. **数据处理**：如需计算统计数据，使用 `run_python_code` 执行 pandas 分析\n3. **生成报告**：使用 `workspace_create_file` 创建报告文件（Markdown 格式）\n4. **打开报告**：使用 `editor_open_file` 在编辑器中打开生成的报告\n\n### 报告结构\n- 标题和日期\n- 摘要/概述\n- 关键发现\n- 详细分析\n- 建议/结论\n\n### 输出要求\n- 报告语言正式、简洁\n- 包含数据支撑\n- 如果有图表需求，先用 run_python_code 生成图表再引用",
+  "version": "1.0.0",
+  "author": "koto",
+  "tags": ["file-ops", "report", "analysis"]
+}

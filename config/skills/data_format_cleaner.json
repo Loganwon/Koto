@@ -1,0 +1,37 @@
+{
+  "id": "data_format_cleaner",
+  "name": "脏数据格式清洗",
+  "icon": "🧹",
+  "category": "workflow",
+  "skill_nature": "domain_skill",
+  "description": "用自然语言描述清洗规则，AI 自动生成 pandas 代码在沙箱中执行，输出清洗后数据及变更对比",
+  "version": "1.0.0",
+  "author": "koto",
+  "executor": "app.core.workflows.data_format_cleaner.DataFormatCleaner",
+  "params_schema": [
+    {
+      "key": "data_file",
+      "label": "数据文件（Excel/CSV）",
+      "type": "file",
+      "accept": ".xlsx,.xls,.csv",
+      "required": true
+    },
+    {
+      "key": "instruction",
+      "label": "清洗说明（自然语言）",
+      "type": "textarea",
+      "placeholder": "如：统一日期格式为 YYYY-MM-DD，删除空行，电话号码去除所有非数字字符",
+      "required": true
+    },
+    {
+      "key": "model_mode",
+      "label": "模型",
+      "type": "select",
+      "options": [{"value": "online", "label": "在线模型"}, {"value": "local", "label": "本地模型"}],
+      "default": "online",
+      "required": false
+    }
+  ],
+  "output_types": ["xlsx_data"],
+  "enabled": false
+}

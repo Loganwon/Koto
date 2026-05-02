@@ -21,6 +21,6 @@ export default defineConfig({
 
   build: {
     outDir: '../static/univer-dist',
-    emptyOutDir: true,
+    emptyOutDir: false,   // ← false: 保留 esbuild 单独构建的 sheets-main.js/css
   },
 });

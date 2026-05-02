@@ -38,7 +38,7 @@ class RealLLMClient:
 
             if self.api_key:
                 genai.configure(api_key=self.api_key)
-                self.client = genai.GenerativeModel("gemini-1.5-flash-preview")
+                self.client = genai.GenerativeModel("gemini-2.5-flash")
                 print(f"✅ Gemini API已连接")
                 self.use_mock = False
             else:

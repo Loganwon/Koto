@@ -1,0 +1,16 @@
+{
+  "id": "doc_compare_agent",
+  "name": "文档对比分析",
+  "icon": "🔄",
+  "category": "workflow",
+  "description": "对比两份文档的差异，标出新增、删除和修改内容",
+  "intent_description": "用户想对比两个文件的区别、差异、版本差异",
+  "task_types": ["CHAT", "FILE_ASSISTANT"],
+  "priority": 60,
+  "enabled": true,
+  "trigger_keywords": ["对比", "比较", "diff", "区别", "差异", "版本", "compare", "changes"],
+  "prompt": "\n\n## 📋 任务：文档对比分析\n\n你需要对比用户指定的两份文档，找出它们之间的差异。\n\n### 执行步骤\n\n1. **读取文件**：使用 `workspace_read_file` 读取两份文档的内容\n2. **分析差异**：使用 `run_python_code` 执行 Python difflib 对比代码，生成结构化差异报告\n3. **呈现结果**：将对比报告用清晰的 Markdown 格式展示，标注新增（+）、删除（-）和修改部分\n\n### 对比代码模板\n```python\nimport difflib\n\ntext1 = '''<文档1内容>'''\ntext2 = '''<文档2内容>'''\n\ndiff = difflib.unified_diff(\n    text1.splitlines(keepends=True),\n    text2.splitlines(keepends=True),\n    fromfile='文档1', tofile='文档2'\n)\nprint(''.join(diff))\n```\n\n### 输出要求\n- 先给出整体概览（几处新增、几处删除、几处修改）\n- 再详细列出每处差异\n- 对重要变化给出评价或风险提示",
+  "version": "1.0.0",
+  "author": "koto",
+  "tags": ["file-ops", "compare", "diff"]
+}
