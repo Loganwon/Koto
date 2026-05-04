@@ -202,6 +202,7 @@ class TestEditorAIStream:
                 yield 'data: {"type":"done","summary":"task agent done"}\n\n'
 
         with patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent), \
+             patch("web.app._get_configured_local_model_id", return_value="qwen3.5:9b"), \
              patch.dict("web.app.MODEL_MAP", {"CHAT": "gemini-chat-default", "FILE_TASK": "gemini-file-task-default"}, clear=False):
             resp = app_client.post(
                 "/api/editor/ai/stream",
@@ -222,6 +223,7 @@ class TestEditorAIStream:
         assert captured["task"] == "整理当前文件"
         assert captured["options"]["model_mode"] == "local"
         assert captured["options"]["model_id"] == ""
+        assert captured["options"]["local_model"] == "qwen3.5:9b"
         assert captured["options"]["current_file"] == "demo.docx"
         assert captured["options"]["current_file_name"] == "demo.docx"
         assert captured["files"] and captured["files"][0]["type"] == "docx"
@@ -297,6 +299,102 @@ class TestEditorAIStream:
         events = parse_sse_events(payload)
         assert any(e.get("type") == "phase" for e in events)
         assert any(e.get("type") == "done" for e in events)
+
+    def test_ai_task_explicit_context_prefers_explicit_target_file(self, app_client):
+        captured = {}
+
+        class FakeTaskAgent:
+            def __init__(self, socketio=None, model_id="", api_key=None):
+                captured["init_model_id"] = model_id
+
+            def execute(self, task, files=None, options=None):
+                captured["task"] = task
+                captured["files"] = list(files or [])
+                captured["options"] = options or {}
+                yield 'data: {"type":"done","summary":"done"}\n\n'
+
+        with patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent):
+            resp = app_client.post(
+                "/api/editor/ai/stream",
+                json={
+                    "action": "ai_task",
+                    "instruction": "请把参考文本整理进目标文件",
+                    "context_mode": "explicit",
+                    "file_name": "open-editor.docx",
+                    "file_type": "docx",
+                    "full_text": "这段当前打开文件内容不应自动变成任务文件。",
+                    "files": [
+                        {"path": "ref.docx", "name": "ref.docx", "type": "docx", "content_preview": "参考文件内容"},
+                        {"path": "target.docx", "name": "target.docx", "type": "docx", "content_preview": "目标文件正文"},
+                    ],
+                    "target_file": {"path": "target.docx", "name": "target.docx", "type": "docx"},
+                    "reference_files": [
+                        {"path": "ref.docx", "name": "ref.docx", "type": "docx"},
+                    ],
+                    "selection_context": {
+                        "text": "这是一段明确附加的参考文本。",
+                        "source_path": "open-editor.docx",
+                        "source_name": "open-editor.docx",
+                        "source_type": "docx",
+                    },
+                },
+            )
+            _ = resp.get_data()
+
+        assert resp.status_code == 200
+        assert captured["options"]["context_mode"] == "explicit"
+        assert captured["options"]["current_file"] == "target.docx"
+        assert captured["options"]["current_file_name"] == "target.docx"
+        assert captured["options"]["current_file_text"] == "目标文件正文"
+        assert captured["options"]["selection_context"]["text"] == "这是一段明确附加的参考文本。"
+        assert captured["options"]["target_file"]["path"] == "target.docx"
+        assert captured["options"]["reference_files"][0]["path"] == "ref.docx"
+        assert captured["files"][0]["path"] == "target.docx"
+
+    def test_ai_task_explicit_multifile_context_does_not_infer_current_file(self, app_client):
+        captured = {}
+
+        class FakeTaskAgent:
+            def __init__(self, socketio=None, model_id="", api_key=None):
+                captured["init_model_id"] = model_id
+
+            def execute(self, task, files=None, options=None):
+                captured["task"] = task
+                captured["files"] = list(files or [])
+                captured["options"] = options or {}
+                yield 'data: {"type":"done","summary":"done"}\n\n'
+
+        with patch("app.core.agent.task_agent.TaskAgent", FakeTaskAgent):
+            resp = app_client.post(
+                "/api/editor/ai/stream",
+                json={
+                    "action": "ai_task",
+                    "instruction": "请比较这两份文档的差异",
+                    "context_mode": "explicit",
+                    "file_name": "open-editor.docx",
+                    "file_type": "docx",
+                    "full_text": "当前打开文件不应在多文件分析里被默认为 current_file。",
+                    "files": [
+                        {"path": "left.docx", "name": "left.docx", "type": "docx", "content_preview": "左侧文档"},
+                        {"path": "right.docx", "name": "right.docx", "type": "docx", "content_preview": "右侧文档"},
+                    ],
+                    "selection_context": {
+                        "text": "比较时重点关注结论段落。",
+                        "source_path": "open-editor.docx",
+                        "source_name": "open-editor.docx",
+                        "source_type": "docx",
+                    },
+                },
+            )
+            _ = resp.get_data()
+
+        assert resp.status_code == 200
+        assert captured["options"]["context_mode"] == "explicit"
+        assert captured["options"]["current_file"] == ""
+        assert captured["options"]["current_file_name"] == ""
+        assert captured["options"]["current_file_text"] == ""
+        assert len(captured["files"]) == 2
+        assert captured["options"]["selection_context"]["source_name"] == "open-editor.docx"
 
     def test_ai_task_passes_incoming_history_into_runtime_options(self, app_client):
         captured = {}
@@ -448,6 +546,34 @@ class TestEditorAIStream:
         assert any(e.get("type") == "step_done" for e in events)
         done_events = [e for e in events if e.get("type") == "done"]
         assert done_events and done_events[0].get("result") == "处理完成"
+
+    def test_non_task_stream_passes_preferred_and_local_model_into_agent_request(self, app_client):
+        """普通 editor SSE 请求应把显式云端模型和配置的本地模型一起传入 AgentLoop。"""
+        captured = {}
+        from app.core.agent.lifecycle import evt_task_complete
+
+        def fake_run(self, request):
+            captured["request"] = request
+            yield evt_task_complete(result="ok")
+
+        with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run), \
+             patch("web.app._get_configured_local_model_id", return_value="qwen3.5:9b"):
+            resp = app_client.post(
+                "/api/editor/ai/stream",
+                json={
+                    "action": "polish",
+                    "selection": "这段文字需要润色。",
+                    "model_mode": "cloud",
+                    "model_id": "gemini-2.5-pro",
+                },
+            )
+            _ = resp.get_data()
+
+        assert resp.status_code == 200
+        req = captured["request"]
+        assert req.model_mode == "cloud"
+        assert req.extra["preferred_model"] == "gemini-2.5-pro"
+        assert req.extra["local_model"] == "qwen3.5:9b"
 
 
 class TestEditorAIAgent:
@@ -727,19 +853,30 @@ class TestLocalModelMode:
         assert "model_id" in stream_fetch
         assert "output_mode" in stream_fetch
 
-    def test_workspace_local_toggle_syncs_editor_ai_task_model_keys(self):
-        """Workspace local/cloud toggle must also update the editor ai_task model keys."""
+    def test_workspace_model_state_uses_wa_keys_only(self):
+        """Workspace assistant should use wa_* model state only and not write legacy editor_* keys."""
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        toggle_start = src.find("function _syncEditorModelPreference(")
+        toggle_start = src.find("window.WA.setUseLocalModel = (useLocal) => {")
         toggle_end = src.find("window.WA.setLockedModel = (val) => {", toggle_start)
         assert toggle_start != -1 and toggle_end != -1
         toggle_section = src[toggle_start:toggle_end]
-        assert "const editorMode = mode === 'local' ? 'local' : 'cloud';" in toggle_section
-        assert "localStorage.setItem('editor_model_mode', editorMode);" in toggle_section
-        assert "localStorage.setItem('editor_locked_model', editorLockedModel);" in toggle_section
-        assert "localStorage.removeItem('editor_locked_model');" in toggle_section
-        assert "window.__koto?.aiPanel?.notifyModelChange?.(" in toggle_section
-        assert "_syncEditorModelPreference(newModel, newModel);" in toggle_section
+        assert "function _syncEditorModelPreference(" not in src
+        assert "editor_model_mode" not in src
+        assert "editor_locked_model" not in src
+        assert "localStorage.setItem('wa_locked_model', newModel);" in toggle_section
+        assert "localStorage.setItem('wa_model_choice_explicit', '1');" in toggle_section
+
+    def test_workspace_chart_stream_includes_model_routing_fields(self):
+        """Chart SSE helper should send the same model_mode/model_id routing fields as text SSE."""
+        src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
+        helper_start = src.find("async function _sendViaSSEChart(payload) {")
+        helper_end = src.find("function initSocket() {", helper_start)
+        assert helper_start != -1 and helper_end != -1
+        helper_section = src[helper_start:helper_end]
+        assert "const modelMode = payload.model_mode || _waQuickActionModelMode();" in helper_section
+        assert "const modelId = payload.model_id || _selectedCloudModelId();" in helper_section
+        assert "model_mode: modelMode," in helper_section
+        assert "model_id: modelId," in helper_section
 
     def test_workspace_model_selector_fetches_dynamic_catalog(self):
         """Workspace assistant should fetch the dynamic model catalog instead of relying on hardcoded options."""
@@ -812,98 +949,6 @@ class TestLocalModelMode:
         assert "return state.lockedModel === 'local' ? 'local' : 'cloud';" in js
         assert "model_mode: lockedModel === 'local' ? 'local' : 'cloud'," in js
         assert "window.WA.setLockedModel = (val) => {\n    window.WA.setUseLocalModel(val === 'local');\n  };" in js
-
-
-class TestAIPanelRegression:
-    """Regression checks for recent AIPanel request-plumbing fixes."""
-
-    def test_check_action_defines_selection_before_use(self):
-        """check action should compute selection/hasSelection before branch logic."""
-        src = Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
-        pattern = re.compile(
-            r"const\s+selection\s*=\s*this\._doc\.getSelection\(\);[\s\S]*?"
-            r"const\s+hasSelection\s*=\s*!!\(selection\s*&&\s*selection\.text\s*&&\s*selection\.text\.trim\(\)\);[\s\S]*?"
-            r"if\s*\(actionType\s*===\s*'check'\)",
-            re.MULTILINE,
-        )
-        assert pattern.search(src), "check branch must derive selection/hasSelection before use"
-
-    def test_main_ai_stream_payload_includes_file_metadata(self):
-        """Main AI stream body should include file_type and file_name."""
-        src = Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
-        send_via_main = src[src.find("async _sendViaMainAI("):]
-        stream_fetch = send_via_main[: send_via_main.find("/api/editor/ai/stream") + 1000]
-        assert "file_type" in stream_fetch
-        assert "file_name" in stream_fetch
-
-    def test_task_stream_payload_uses_unified_stream_endpoint_and_model_fields(self):
-        """Task flow should go through editor_ai_stream and send model settings explicitly."""
-        src = Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
-        send_via_task = src[src.find("async _sendViaTask("):]
-        task_fetch = send_via_task[: send_via_task.find("/api/editor/ai/stream") + 1200]
-        assert "/api/editor/ai/stream" in task_fetch
-        assert "/api/editor/ai/task-execute" not in task_fetch
-        assert "action: 'ai_task'" in task_fetch
-        assert "model_mode" in task_fetch
-        assert "editor_model_mode" in task_fetch
-        assert "model_id" in task_fetch
-        assert "editor_locked_model" in task_fetch
-
-    def test_floating_toolbar_routes_standard_actions_via_main_ai(self):
-        """FloatingToolbar 普通文本动作应通过面板 SSE，而不是 sendAction。"""
-        src = Path("web/univer-editor/src/FloatingToolbar.js").read_text(encoding="utf-8")
-        assert "_sendViaMainAI('custom_instruction', this._selectedText, selData, instruction)" in src
-        assert "_sendViaMainAI(action, this._selectedText, selData, '')" in src
-
-    def test_main_ai_uses_shared_progress_consumer_for_phase_and_steps(self):
-        """Main SSE handler should route phase/plan/step progress through the shared consumer."""
-        src = Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
-        send_via_main = src[src.find("async _sendViaMainAI("):]
-        assert "_consumeTaskProgressEvent(progressState, this._chatFlow, parsed)" in send_via_main
-
-    def test_task_progress_consumer_handles_phase_events(self):
-        """Shared task progress consumer should understand canonical phase events."""
-        src = Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
-        consume_section = src[src.find("_consumeTaskProgressEvent("): src.find("handleAgentEvent(")]
-        assert "case 'phase':" in consume_section
-        assert "_computeTaskProgressPercent(phaseIndex, meta.totalPhases" in consume_section
-
-    def test_agent_mode_uses_structured_progress_consumer(self):
-        """Agent analysis mode should feed canonical step events into the shared progress consumer."""
-        src = Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
-        send_via_agent = src[src.find("async _sendViaAgent("): src.find("async _sendViaTask(")]
-        assert "_consumeTaskProgressEvent(progressState, this._chatFlow, parsed)" in send_via_agent
-
-    def test_task_mode_uses_structured_progress_consumer(self):
-        """Task mode should share the same canonical progress renderer."""
-        src = Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
-        send_via_task = src[src.find("async _sendViaTask("): src.find("async _sendViaMainAI(")]
-        assert "_consumeTaskProgressEvent(progressState, this._chatFlow, ev)" in send_via_task
-
-    def test_task_mode_applies_file_change_preview_updates(self):
-        """Task mode should apply file_change previews into the active document view."""
-        src = Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
-        send_via_task = src[src.find("async _sendViaTask("): src.find("async _sendViaMainAI(")]
-        assert "case 'file_change':" in send_via_task
-        assert "this._applyTaskFilePreview(ev);" in send_via_task
-        assert "_applyTaskFilePreview(ev)" in src
-        assert "docxViewer.setLiveText(preview" in src
-
-    def test_skill_exec_handles_plan_tool_and_step_progress(self):
-        """Skill execution panel should preserve plan/tool/step progress via the shared consumer."""
-        src = Path("web/univer-editor/src/AIPanel.js").read_text(encoding="utf-8")
-        execute_skill = src[src.find("async _executeSkill("): src.find("_renderSkillOutput(")]
-        assert "_consumeTaskProgressEvent(progressState, body, ev" in execute_skill
-        assert "wrapperClass: 'skill-exec-progress task-progress'" in execute_skill
-
-
-class TestSocketBridgeRegression:
-    """Regression checks for structured WebSocket progress plumbing."""
-
-    def test_socket_bridge_listens_for_agent_event(self):
-        src = Path("web/univer-editor/src/SocketBridge.js").read_text(encoding="utf-8")
-        assert "this._socket.on('agent_event'" in src
-        assert "this._panel.handleAgentEvent?.(payload);" in src
 
 
 class TestMainChatProgressRegression:
@@ -1062,30 +1107,39 @@ class TestTaskExecuteRoute:
         assert captured["options"]["model_id"] == "gemini-2.5-pro"
 
 
-class TestEditorEntrypointRegression:
-    """Regression checks for the file assistant runtime entrypoint."""
+class TestLegacyEditorRemovalRegression:
+    """Regression checks for removing the old Univer editor stack."""
 
-    def test_editor_entrypoint_no_longer_loads_runtime_patch(self):
-        src_index = Path("web/univer-editor/index.html").read_text(encoding="utf-8")
-        dist_index = Path("web/static/univer-dist/index.html").read_text(encoding="utf-8")
-        assert "/editor/assets/koto-patch.js" not in src_index
-        assert "/editor/assets/koto-patch.js" not in dist_index
+    def test_legacy_univer_entrypoints_are_removed(self):
+        assert not Path("web/univer-editor/index.html").exists()
+        assert not Path("web/static/univer-dist/index.html").exists()
 
-    def test_file_manager_owns_new_and_export_shortcuts(self):
-        src = Path("web/univer-editor/src/FileManager.js").read_text(encoding="utf-8")
-        assert "key === 'n'" in src
-        assert "key === 'e'" in src
-        assert "exportCurrentAsText()" in src
+    def test_legacy_univer_source_tree_is_removed(self):
+        assert not Path("web/univer-editor/main.js").exists()
+        assert not Path("web/univer-editor/src").exists()
 
-    def test_floating_toolbar_owns_ai_shortcuts(self):
-        src = Path("web/univer-editor/src/FloatingToolbar.js").read_text(encoding="utf-8")
-        assert "static SHORTCUT_ACTIONS" in src
-        assert "this._triggerShortcutAction(action);" in src
-        assert "this._panel._sendViaMainAI(action, fullText, selData, '');" in src
+    def test_workspace_assistant_still_loads_sheets_runtime(self):
+        src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
+        assert "/static/univer-dist/assets/sheets-main.css" in src
+        assert "/static/univer-dist/assets/sheets-main.js" in src
+        assert Path("web/static/univer-dist/assets/sheets-main.css").exists()
+        assert Path("web/static/univer-dist/assets/sheets-main.js").exists()
+
+    def test_univer_editor_build_only_targets_sheets_runtime(self):
+        pkg = Path("web/univer-editor/package.json").read_text(encoding="utf-8")
+        assert '"build": "npm run build:sheets && npm run clean:assets"' in pkg
+        assert '"build:editor"' not in pkg
 
 
 class TestTaskAgentDocumentEdits:
     """Regression checks for real file-edit tool execution in TaskAgent."""
+
+    def test_task_agent_local_prompt_prefers_real_excel_to_word_table(self):
+        prompt = (ROOT / "app/core/agent/task_agent.py").read_text(encoding="utf-8")
+
+        assert "insert_excel_as_docx_table" in prompt
+        assert "不要先把整张表压缩成一段摘要" in prompt
+        assert "write_docx_content" in prompt
 
     def test_task_agent_runs_stage_verification_after_file_change(self, monkeypatch):
         from app.core.agent.task_agent import TaskAgent
@@ -1824,7 +1878,13 @@ class TestWorkspaceAssistantOpenClawRegression:
 
     def test_workspace_assistant_prefers_ws_source_path_for_ai_file_context(self):
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        assert "path: state.wsSourcePath || state.filePath || state.fileName || 'current_document'" in src
+        assert "function _currentAIContextPath() {" in src
+        assert "return String(state.wsSourcePath || state.filePath || '').trim();" in src
+        assert "window.WA.addCurrentFileToAIContext = async () => {" in src
+        assert "const currentPath = _currentAIContextPath();" in src
+        assert "await _addFileToAIContext(currentPath);" in src
+        assert "window.WA.toggleCurrentFileAIContext = async () => {" in src
+        assert "if (state.fileName && currentContent) {" not in src
         assert "file_path: state.wsSourcePath || state.filePath || state.fileName || ''" in src
         assert "state.filePath = json.temp_path || wsPath || null;" in src
 
@@ -1840,17 +1900,16 @@ class TestWorkspaceAssistantOpenClawRegression:
         send_end = src.index("// ── Auto-save", send_start)
         send_block = src[send_start:send_end]
         pattern = re.compile(
-            r"const\s+_hasCurrentTaskFile\s*=\s*!!\(state\.fileName\s*&&\s*context\);[\s\S]*?"
             r"const\s+_hasOpenFileIntent\s*=\s*_isOpenFileIntent\(text\);[\s\S]*?"
             r"const\s+_hasTaskIntent\s*=\s*_isAgentIntent\(text\);[\s\S]*?"
-            r"const\s+_useOpenClawTaskForCurrentFile\s*=\s*_hasCurrentTaskFile\s*&&\s*"
-            r"\(pinnedSel\s*\|\|\s*_isDocEdit\s*\|\|\s*_hasTaskIntent\);[\s\S]*?"
-            r"const\s+_useOpenClawTask\s*=\s*_hasAttachedTaskFiles\s*\|\|\s*_useOpenClawTaskForCurrentFile\s*\|\|\s*_hasTaskIntent\s*\|\|\s*_hasOpenFileIntent;",
+            r"const\s+_useOpenClawTask\s*=\s*_hasAttachedTaskFiles\s*\|\|\s*_hasOpenFileIntent;",
             re.MULTILINE,
         )
         assert pattern.search(send_block), (
-            "task-capable requests should prefer the OpenClaw ai_task path before the generic agent route"
+            "workspace assistant should only enter the OpenClaw ai_task path for explicit attached files or open-file intents"
         )
+        assert "const _hasCurrentTaskFile = !!(state.fileName && context);" not in send_block
+        assert "const _useOpenClawTaskForCurrentFile = _hasCurrentTaskFile" not in send_block
 
     def test_workspace_task_intents_do_not_fall_back_to_generic_agent_route(self):
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")

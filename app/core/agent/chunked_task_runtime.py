@@ -259,6 +259,8 @@ class ChunkedTaskRuntime:
     ) -> str:
         files = files or []
         options = options or {}
+        if str(options.get("context_mode") or "").strip().lower() == "explicit" and not str(options.get("current_file") or "").strip():
+            return ""
         source_text = str(options.get("current_file_text") or "")
         if source_text.strip():
             return source_text

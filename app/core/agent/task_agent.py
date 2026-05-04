@@ -259,12 +259,16 @@ _LOCAL_SYSTEM_PROMPT = """你是 Koto 文件助手（本地模式）。
 
 ## 工具使用规则
 
-1. 优先调用 `parse_file_to_text` 或 `read_docx_content` 读取文件，再决定如何修改
+1. 优先调用 `parse_file_to_text`、`read_docx_content` 或 `read_sheet_data` 读取文件，再决定如何修改
 2. 对文件的所有修改必须通过工具完成并落盘；如需操作 PPTX/PDF 等，使用 `run_python_code` 编写 python-pptx 代码执行
 3. **严禁新建文件**：所有修改必须写回原始文件路径，不能另存为新文件（如 _优化版、_updated 等）
 4. 每步给用户简洁的进度说明
 5. 写入工具执行成功后确认结果，不要重复写入同一文件
-6. 如果文件内容不足以完成任务，先调用读取工具获取，再写入；严禁使用占位符或示例内容"""
+6. 如果文件内容不足以完成任务，先调用读取工具获取，再写入；严禁使用占位符或示例内容
+7. 当任务是把 Excel/XLSX 数据加入 Word/DOCX 时，默认目标是生成真实 Word 表格；优先调用 `insert_excel_as_docx_table`，不要先把整张表压缩成一段摘要后再用 `write_docx_content`
+8. `write_docx_content` 只适合写自由文本段落、结论、说明；只有用户明确要求“摘要、分析、结论、说明”时，才把表格数据改写成文字段落
+9. 完成 Excel 到 Word 的写入后，优先再次调用 `read_docx_content` 检查目标文档已经新增了表格或对应内容
+10. 同一轮里不要对完全相同的工具参数重复调用同一个工具；如果某个写入工具已经成功完成，下一步应校验结果或结束，而不是再次重复写入"""
 
 
 # ── TaskAgent ──────────────────────────────────────────────────────────────
@@ -353,7 +357,7 @@ class TaskAgent:
                 system += f"\n\n## 参考知识\n\n{skill_prompt}"
 
         # ── Build initial messages ─────────────────────────────────────
-        user_message = self._build_user_message(task, file_context)
+        user_message = self._build_user_message(task, file_context, options)
         history = self._normalize_history_messages(options.get("history") if options else [])
         messages = self._build_conversation_messages(user_message, history)
 
@@ -686,9 +690,36 @@ class TaskAgent:
 
         return "\n".join(parts)
 
-    def _build_user_message(self, task: str, file_context: str) -> str:
+    def _build_selection_context_block(self, options: Dict[str, Any]) -> str:
+        selection_context = options.get("selection_context") if isinstance(options, dict) else {}
+        if not isinstance(selection_context, dict):
+            return ""
+
+        text = str(selection_context.get("text") or "").strip()
+        if not text:
+            return ""
+
+        source_path = str(selection_context.get("source_path") or "").strip()
+        source_name = str(selection_context.get("source_name") or "").strip() or (os.path.basename(source_path) if source_path else "")
+        source_type = str(selection_context.get("source_type") or "").strip().lower()
+
+        parts = ["## 参考文本上下文"]
+        if source_name:
+            parts.append(f"- 来源文件: {source_name}")
+        if source_path:
+            parts.append(f"- 来源路径: {source_path}")
+        if source_type:
+            parts.append(f"- 来源类型: {source_type}")
+        parts.append(f"- 文本内容:\n```\n{_sample_context_text(text, _FILE_CONTEXT_PREVIEW_LIMIT)}\n```")
+        parts.append("- 说明: 这段文本是显式提供的参考上下文，不应默认视为待修改文件。")
+        return "\n".join(parts)
+
+    def _build_user_message(self, task: str, file_context: str, options: Dict[str, Any]) -> str:
         """Compose the user message with task + file context."""
         parts = [f"## 任务\n\n{task}"]
+        selection_context = self._build_selection_context_block(options or {})
+        if selection_context:
+            parts.append(selection_context)
         if file_context:
             parts.append(file_context)
         return "\n\n".join(parts)

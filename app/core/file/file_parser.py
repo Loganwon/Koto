@@ -583,9 +583,6 @@ def _docx_to_rich_html(
         "line_height": None,
         "font_size": None,
         "font_family": None,
-        "font_weight": None,
-        "font_style": None,
-        "outline_tag": None,
     }
     _para_style_ref_cache: dict[int, Any] = {}
     _style_defaults_cache: dict[int, dict[str, Any]] = {}
@@ -837,25 +834,7 @@ def _docx_to_rich_html(
         except Exception:
             pass
 
-        if _resolved["outline_tag"] is None:
-            try:
-                _st_pPr = style_ref._element.find(qn("w:pPr"))
-                if _st_pPr is not None:
-                    _olvl = _st_pPr.find(qn("w:outlineLvl"))
-                    if _olvl is not None:
-                        _val = _olvl.get(qn("w:val"))
-                        if _val is not None:
-                            _lvl = int(_val)
-                            if 0 <= _lvl <= 5:
-                                _resolved["outline_tag"] = f"h{_lvl + 1}"
-                            elif _lvl == 9:
-                                _resolved["outline_tag"] = None
-            except Exception:
-                pass
-
         _style = style_ref
-        _font_weight_locked = False
-        _font_style_locked = False
         while _style:
             try:
                 _spf = _style.paragraph_format
@@ -911,36 +890,6 @@ def _docx_to_rich_html(
                 if _resolved["font_size"] is None and _rpr_props["font_size"] is not None:
                     _resolved["font_size"] = _rpr_props["font_size"]
 
-            if not _font_weight_locked:
-                _bold_state = None
-                try:
-                    if _style.font.bold is True:
-                        _bold_state = True
-                    elif _style.font.bold is False:
-                        _bold_state = False
-                except Exception:
-                    pass
-                if _bold_state is None and _rpr_props["font_weight_set"]:
-                    _bold_state = _rpr_props["font_weight"] == "bold"
-                if _bold_state is not None:
-                    _font_weight_locked = True
-                    _resolved["font_weight"] = "bold" if _bold_state else None
-
-            if not _font_style_locked:
-                _italic_state = None
-                try:
-                    if _style.font.italic is True:
-                        _italic_state = True
-                    elif _style.font.italic is False:
-                        _italic_state = False
-                except Exception:
-                    pass
-                if _italic_state is None and _rpr_props["font_style_set"]:
-                    _italic_state = _rpr_props["font_style"] == "italic"
-                if _italic_state is not None:
-                    _font_style_locked = True
-                    _resolved["font_style"] = "italic" if _italic_state else None
-
             if _resolved["font_family"] is None:
                 try:
                     if _rpr_props["font_family"]:
@@ -972,7 +921,6 @@ def _docx_to_rich_html(
                 and _resolved["line_height"] is not None
                 and _resolved["font_size"] is not None
                 and _resolved["font_family"] is not None
-                and _resolved["outline_tag"] is not None
             ):
                 break
 
@@ -1307,17 +1255,26 @@ def _docx_to_rich_html(
                 pass
 
         # Bold — implement OOXML toggle property semantics to prevent phantom bold.
-        # When a paragraph's pPr/rPr has <w:b/> set AND a run also has <w:b/>,
-        # the run's bold TOGGLES the paragraph-level bold OFF (net result: not bold).
-        # python-docx's run.font.bold misses this toggle and always returns True.
+        # Rules:
+        #  1) Check both w:b AND w:bCs (required for CJK text in Chinese documents).
+        #  2) When pPr/rPr sets bold, paragraph CSS inherits it.  Any run with an
+        #     explicit <w:b> or <w:bCs> MUST emit font-weight:bold OR font-weight:normal
+        #     to avoid inheriting phantom bold from the paragraph block CSS.
+        #  3) Toggle semantics: run_bold XOR para_ppr_bold gives the net result.
         # Skip bold entirely for TOC runs — CSS normalizes per-level.
         decorations: list[str] = []
         _run_rpr = run._element.find(qn("w:rPr"))
-        _b_el = _run_rpr.find(qn("w:b")) if _run_rpr is not None else None
+        if _run_rpr is not None:
+            _b_el = _run_rpr.find(qn("w:b"))
+            if _b_el is None:
+                _b_el = _run_rpr.find(qn("w:bCs"))  # CJK / complex-script bold
+        else:
+            _b_el = None
         if _b_el is not None and not _is_toc_run:
             _b_val = (_b_el.get(qn("w:val")) or "1").lower()
             _run_bold_on = _b_val not in ("0", "false", "off")
-            # Check paragraph pPr/rPr/w:b as the toggle base
+            # Determine paragraph pPr/rPr bold for toggle-base detection.
+            # Check both w:b and w:bCs to mirror the paragraph-level logic.
             _para_ppr_bold = False
             if _p_el is not None:
                 _p_pPr = _p_el.find(qn("w:pPr"))
@@ -1325,12 +1282,21 @@ def _docx_to_rich_html(
                     _p_rpr2 = _p_pPr.find(qn("w:rPr"))
                     if _p_rpr2 is not None:
                         _p_b = _p_rpr2.find(qn("w:b"))
+                        if _p_b is None:
+                            _p_b = _p_rpr2.find(qn("w:bCs"))
                         if _p_b is not None:
                             _p_b_val = (_p_b.get(qn("w:val")) or "1").lower()
                             _para_ppr_bold = _p_b_val not in ("0", "false", "off")
-            # Toggle: run bold XOR paragraph pPr bold
-            if _run_bold_on and not _para_ppr_bold:
-                styles.append("font-weight:bold")
+            # Net bold = OOXML toggle semantics:
+            #   run=on  + pPr=off → bold ON   (run explicitly sets bold)
+            #   run=on  + pPr=on  → bold OFF  (both on = toggle/cancel)
+            #   run=off + pPr=off → bold OFF  (run explicitly clears bold)
+            #   run=off + pPr=on  → bold OFF  (explicit val="0" beats pPr)
+            # NOTE: XOR would wrongly give True for (run=off, pPr=on).
+            # ALWAYS emit an explicit font-weight so the run overrides any
+            # paragraph-level font-weight:bold inherited from the block's CSS.
+            _net_bold = _run_bold_on and not _para_ppr_bold
+            styles.append("font-weight:bold" if _net_bold else "font-weight:normal")
         if f.italic:
             styles.append("font-style:italic")
         if f.underline and not _is_toc_run:
@@ -1492,7 +1458,18 @@ def _docx_to_rich_html(
         if _para_rpr_props.get("font_style_set"):
             _fi = _para_rpr_props.get("font_style")
         else:
-            _fi = _style_defaults.get("font_style")
+            # Only apply italic from the paragraph's *direct* named style, not from
+            # ancestor styles.  Walking the full inheritance chain causes phantom
+            # italic when a base style (Normal / 正文) has w:i set — same issue
+            # that was already fixed for bold above.
+            _fi = None
+            _direct_sr_fi = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+            if _direct_sr_fi is not None:
+                try:
+                    if _direct_sr_fi.font.italic is True:
+                        _fi = "italic"
+                except Exception:
+                    pass
         if _fi:
             css["font-style"] = _fi
 
@@ -2038,7 +2015,8 @@ def _docx_to_rich_html(
         Handles:
         - Multi-paragraph headers/footers
         - Tab-based left/center/right alignment converted to flex layout
-        - Page-number (PAGE) fields rendered as placeholder spans
+        - PAGE/NUMPAGES field codes replaced by dynamic placeholder spans
+          (the TipTap NodeView updates .koto-hdr-page-num per page)
         - Paragraphs that contain only field chars but no literal text
         """
         try:
@@ -2052,22 +2030,6 @@ def _docx_to_rich_html(
                     return True
                 xml = p._element.xml if hasattr(p._element, "xml") else ""
                 return ("fldChar" in xml or "instrText" in xml)
-
-            def _inject_page_field(p_html: str, p) -> str:
-                """Replace runs that are PAGE fields with a styled placeholder."""
-                try:
-                    instr = " ".join(
-                        e.text or ""
-                        for e in p._element.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}instrText")
-                    ).strip()
-                    if "PAGE" in instr.upper():
-                        # Insert page number span before closing </p>
-                        if p_html.endswith("</p>"):
-                            inner = p_html[:-4]
-                            p_html = inner + '<span class="koto-hdr-page-num" style="font-size:inherit;color:inherit">1</span></p>'
-                except Exception:
-                    pass
-                return p_html
 
             def _tabs_to_flex(p_html: str) -> str:
                 """Convert tab-based header/footer to a flex row.
@@ -2108,22 +2070,129 @@ def _docx_to_rich_html(
                     spans.append(f'<span class="koto-hdr-col" style="text-align:{align};flex-shrink:0">{part}</span>')
                 return open_tag + ''.join(spans) + close_tag
 
+            def _build_field_aware_inner(p) -> str:
+                """Build the inner HTML for a header/footer paragraph.
+
+                Unlike _para_html (which renders all w:t text), this function
+                handles complex field sequences (PAGE, NUMPAGES) by:
+                  - Skipping the cached result runs between fldChar/separate
+                    and fldChar/end
+                  - Injecting a koto-hdr-page-num / koto-hdr-num-pages span
+                    in their place so the TipTap NodeView can update them
+
+                Non-field runs are delegated to _run_html.
+                """
+                from docx.text.run import Run as _Run
+                from docx.text.paragraph import Paragraph as _Para
+
+                parts: list[str] = []
+                # Complex-field tracking state
+                _in_field = False
+                _after_sep = False
+                _cur_instr: list[str] = []
+
+                for child in p._element:
+                    tag_name = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+
+                    if tag_name == "hyperlink":
+                        # Hyperlinks are rare in headers/footers; render normally.
+                        rId = child.get(qn("r:id"))
+                        url = ""
+                        if rId:
+                            try:
+                                url = p.part.relationships[rId].target_ref
+                            except Exception:
+                                pass
+                        if not url:
+                            anchor_val = child.get(qn("w:anchor"), "")
+                            if anchor_val:
+                                url = "#" + anchor_val
+                        link_inner = ""
+                        for r_elem in child.findall(qn("w:r")):
+                            run_obj = _Run(r_elem, p)
+                            link_inner += _run_html(run_obj, doc)
+                        if link_inner:
+                            esc_url = url.replace('"', "&quot;")
+                            target_attr = '' if url.startswith('#') else ' target="_blank"'
+                            parts.append(
+                                f'<a href="{esc_url}"{target_attr} '
+                                f'style="color:#1155CC;text-decoration:underline;">'
+                                f'{link_inner}</a>'
+                            )
+                        continue
+
+                    if tag_name != "r":
+                        continue
+
+                    # --- Handle w:r run ---
+                    fldChar_el = child.find(qn("w:fldChar"))
+                    instrText_el = child.find(qn("w:instrText"))
+
+                    if fldChar_el is not None:
+                        ftype = fldChar_el.get(qn("w:fldCharType"), "")
+                        if ftype == "begin":
+                            _in_field = True
+                            _after_sep = False
+                            _cur_instr = []
+                        elif ftype == "separate" and _in_field:
+                            _after_sep = True
+                        elif ftype == "end" and _in_field:
+                            # Emit the appropriate dynamic span
+                            instr = " ".join(_cur_instr).strip().upper()
+                            instr_words = set(instr.split())
+                            if "PAGE" in instr_words and "NUMPAGES" not in instr_words:
+                                parts.append(
+                                    '<span class="koto-hdr-page-num" '
+                                    'style="font-size:inherit;color:inherit" '
+                                    'contenteditable="false">1</span>'
+                                )
+                            elif "NUMPAGES" in instr_words or "SECTIONPAGES" in instr_words:
+                                parts.append(
+                                    '<span class="koto-hdr-num-pages" '
+                                    'style="font-size:inherit;color:inherit" '
+                                    'contenteditable="false">1</span>'
+                                )
+                            _in_field = False
+                            _after_sep = False
+                        # fldChar runs never contain visible text — skip rendering
+                        continue
+
+                    if instrText_el is not None:
+                        # instrText runs: collect instruction, no visible output
+                        if _in_field and not _after_sep:
+                            _cur_instr.append(instrText_el.text or "")
+                        continue
+
+                    if _in_field and _after_sep:
+                        # Cached field result — suppress: dynamic span was injected above
+                        continue
+
+                    # Regular run — delegate to normal renderer
+                    run_obj = _Run(child, p)
+                    parts.append(_run_html(run_obj, doc))
+
+                return "".join(parts)
+
             texts = []
             for p in paras:
                 if not _has_content(p):
                     continue
-                p_html = _para_html(p, doc, "p")
-                p_html = _inject_page_field(p_html, p)
+                # Build inner HTML with field-aware rendering
+                inner = _build_field_aware_inner(p)
+                if not inner.strip():
+                    inner = "<br/>"
+
+                # Build block-level CSS (alignment, spacing, font) via _para_style
+                css = _para_style(p)
+                style_str = ";".join(f"{k}:{v}" for k, v in css.items())
+                style_attr = f' style="{style_str}"' if style_str else ""
+
+                p_html = f'<p class="{cls}"{style_attr}>{inner}</p>'
+
                 # _run_html replaces w:tab with 6 × &nbsp; for non-TOC runs,
                 # but we need actual \t characters for _tabs_to_flex detection.
-                # Restore tab markers from the raw XML w:tab elements.
                 _nbsp6 = '\u00a0' * 6
                 p_html = p_html.replace(_nbsp6, '\t')
-                # Inject class
-                if p_html.startswith("<p>"):
-                    p_html = f'<p class="{cls}">' + p_html[3:]
-                elif p_html.startswith("<p "):
-                    p_html = f'<p class="{cls}" ' + p_html[3:]
                 # Convert tab-based alignment to flex layout
                 p_html = _tabs_to_flex(p_html)
                 texts.append(p_html)
@@ -2133,16 +2202,21 @@ def _docx_to_rich_html(
         except Exception:
             return ""
 
-    def _detect_outline_level(para, p_el, style_ref=None) -> str | None:
-        """Detect heading level from w:outlineLvl in paragraph or its style.
+    def _detect_outline_level(para, p_el, style_ref=None) -> tuple[str | None, bool]:
+        """Detect heading level from w:outlineLvl in paragraph or its style chain.
 
         Word uses outlineLvl (0-based) as the authoritative heading level.
         Many Chinese documents (especially WPS) set outlineLvl on custom
         styles rather than using the standard "Heading 1" style names.
 
-        Returns "h1"-"h6" if a valid outline level is found, else None.
+        Returns (tag, via_outlinelvl) where tag is "h1"-"h6" or None, and
+        via_outlinelvl is True when detected via paragraph-level outlineLvl
+        (caller applies a length guard for h2-h6) vs False for style-chain
+        detection (no additional length guard needed).
         """
-        # 1) Check paragraph-level pPr/outlineLvl (most authoritative)
+        # 1) Check paragraph-level pPr/outlineLvl (most authoritative).
+        #    Word writes this on each heading paragraph.  We trust it directly;
+        #    the caller applies a length guard for h2–h6.
         try:
             pPr = p_el.find(qn("w:pPr"))
             if pPr is not None:
@@ -2152,28 +2226,18 @@ def _docx_to_rich_html(
                     if val is not None:
                         lvl = int(val)
                         if lvl == 9:
-                            return None  # 9 means "body text" (no heading)
+                            return None, False  # 9 = body text
                         if 0 <= lvl <= 5:
-                            # Guard against WPS/Word documents that write
-                            # outlineLvl on long body-text paragraphs for
-                            # navigation-pane purposes.  Real headings are
-                            # always concise; skip very long paragraphs.
-                            try:
-                                para_text = para.text.strip() if para is not None else ""
-                                if len(para_text) > 20:
-                                    return None
-                            except Exception:
-                                pass
-                            return f"h{lvl + 1}"
+                            return f"h{lvl + 1}", True  # True = caller applies length guard
         except Exception:
             pass
 
         # 2) Style-based fallback: walk the basedOn chain to find a recognised
         #    heading style ancestor.  This is the Word-native approach:
         #    a paragraph is a structural heading only if its style (or one of its
-        #    base styles) is a named heading style ("Heading N" / "\u6807\u9898N",
-        #    etc.).  We do NOT trust outlineLvl written on arbitrary body-text
-        #    styles, which WPS inserts for its own navigation-pane purposes.
+        #    base styles) is a named heading style ("Heading N" / "标题N", etc.).
+        #    We do NOT trust outlineLvl written on arbitrary body-text styles,
+        #    which WPS inserts for its own navigation-pane purposes.
         _sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
         _visited_ids: set[int] = set()
         _style_iter = _sr
@@ -2187,14 +2251,14 @@ def _docx_to_rich_html(
                 _sid2  = getattr(_style_iter, "style_id", "") or ""
                 _h = _is_heading_style_key(_sname) or _is_heading_style_key(_sid2)
                 if _h:
-                    return _h
+                    return _h, False  # Style-chain match — no additional length guard
             except Exception:
                 pass
             try:
                 _style_iter = _style_iter.base_style
             except Exception:
                 break
-        return None
+        return None, False
 
     # ── List tracking ────────────────────────────────────────────────────────
     # We process the document body as a flat list of block elements.
@@ -2419,25 +2483,23 @@ def _docx_to_rich_html(
             )
 
             # Fallback: check w:outlineLvl in paragraph properties (and
-            # inherited style pPr).  Word uses outlineLvl as the
+            # inherited style chain).  Word uses outlineLvl as the
             # authoritative heading level for the navigation pane, even
             # when the style name is non-standard (e.g. WPS documents).
+            _via_outlinelvl = False
             if not _is_toc_para and not _h_tag:
-                _h_tag = _detect_outline_level(para, child_elem, style_ref=style_ref)
+                _h_tag, _via_outlinelvl = _detect_outline_level(para, child_elem, style_ref=style_ref)
 
             if _h_tag and not _p_elem_text_content(child_elem):
                 _h_tag = None
 
-            # Guard: h2–h6 paragraphs whose text is longer than 25 chars are
-            # almost certainly body text that was *styled* as a heading for
-            # visual emphasis (e.g. a company-name paragraph styled as "标题2").
-            # Real subheadings in Chinese documents are concise (typically
-            # under 15 chars); 25 chars gives a safe margin without picking
-            # up body sentences (which are 30-100+ chars).
-            # h1 (document-level title) is exempt — it can be longer.
-            if _h_tag and _h_tag != "h1":
+            # Guard: h2–h6 detected via paragraph-level outlineLvl whose text
+            # exceeds 60 chars are likely body text that WPS/Word tagged for
+            # nav-pane purposes, not structural headings.  h1 is exempt.
+            # Style-name matches and basedOn-chain matches are always trusted.
+            if _via_outlinelvl and _h_tag and _h_tag != "h1":
                 try:
-                    if len((para.text or "").strip()) > 25:
+                    if len((para.text or "").strip()) > 60:
                         _h_tag = None
                 except Exception:
                     pass
@@ -2536,10 +2598,17 @@ def _docx_to_rich_html(
                         _h_tag = None if _is_toc_para else (
                             _is_heading_style_key(_style_name) or _is_heading_style_key(_style_id)
                         )
+                        _via_outlinelvl_sdt = False
                         if not _is_toc_para and not _h_tag:
-                            _h_tag = _detect_outline_level(para, sdt_child, style_ref=style_ref)
+                            _h_tag, _via_outlinelvl_sdt = _detect_outline_level(para, sdt_child, style_ref=style_ref)
                         if _h_tag and not _p_elem_text_content(sdt_child):
                             _h_tag = None
+                        if _via_outlinelvl_sdt and _h_tag and _h_tag != "h1":
+                            try:
+                                if len((para.text or "").strip()) > 60:
+                                    _h_tag = None
+                            except Exception:
+                                pass
                         if _h_tag:
                             _btag = _h_tag
                         _para_units = _estimate_paragraph_units(para)

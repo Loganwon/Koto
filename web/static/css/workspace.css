@@ -5298,6 +5298,7 @@
     #wa-context-bar b { color: var(--text, #1D1D1F); font-weight: 600; }
     .ctx-bar-sel { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ctx-bar-quote { width: 3px; height: 14px; background: var(--accent, #5b8def); border-radius: 2px; flex-shrink: 0; }
+    .ctx-bar-source { color: var(--text-muted, #6E6E73); white-space: nowrap; }
     .ctx-bar-files { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
     .ctx-bar-sep { color: var(--text-muted, #666); font-size: 10px; }
     .ctx-bar-clear {
@@ -5555,6 +5556,40 @@
       max-width: 80px;
     }
 
+    .wa-footer-attach-current-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+      background: color-mix(in srgb, var(--accent) 6%, transparent);
+      color: var(--text-muted);
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 11px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s, color 0.12s, border-color 0.12s;
+      flex-shrink: 0;
+    }
+
+    .wa-footer-attach-current-btn:hover {
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      color: var(--text);
+      border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+    }
+
+    .wa-footer-attach-current-btn.active {
+      background: color-mix(in srgb, #16a34a 12%, transparent);
+      border-color: color-mix(in srgb, #16a34a 30%, transparent);
+      color: #166534;
+    }
+
+    .wa-msg-quote-meta {
+      font-size: 11px;
+      color: var(--text-muted, #6E6E73);
+      margin-bottom: 6px;
+    }
+
     .wa-footer-model-btn {
       display: flex;
       align-items: center;
@@ -5586,143 +5621,79 @@
       background: color-mix(in srgb, var(--accent) 14%, transparent);
     }
 
-    .wa-model-mode-menu {
+    .wa-model-mode-toggle {
       display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      position: relative;
-      padding: 0 8px 0 10px;
-      height: 32px;
+      align-items: stretch;
+      padding: 3px;
       border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border) 84%);
-      border-radius: 11px;
-      background: color-mix(in srgb, var(--surface, #fff) 94%, var(--accent) 6%);
-      color: var(--text);
-      flex-shrink: 0;
+      border-radius: 14px;
+      background: color-mix(in srgb, var(--surface, #fff) 96%, var(--accent) 4%);
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
-    }
-    .wa-model-mode-menu:hover {
-      border-color: color-mix(in srgb, var(--accent) 28%, var(--border) 72%);
-      background: color-mix(in srgb, var(--surface, #fff) 90%, var(--accent) 10%);
-    }
-    .wa-model-mode-menu:focus-within,
-    .wa-model-mode-menu.open {
-      border-color: color-mix(in srgb, var(--accent) 40%, var(--border) 60%);
-      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
-    }
-    .wa-model-mode-select-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--success, #16a34a);
       flex-shrink: 0;
-      box-shadow: 0 0 0 2px color-mix(in srgb, var(--success, #16a34a) 14%, transparent);
+      gap: 3px;
     }
-    .wa-model-mode-trigger {
+    .wa-model-mode-toggle-btn {
+      min-width: 68px;
+      max-width: 168px;
       display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      border: none;
-      background: transparent;
-      color: var(--text);
-      font-size: 11.5px;
-      font-weight: 600;
-      line-height: 30px;
-      height: 30px;
-      padding: 0;
-      outline: none;
-      cursor: pointer;
-      white-space: nowrap;
-    }
-    #wa-model-mode-label {
-      min-width: 24px;
-      text-align: left;
-    }
-    .wa-model-mode-trigger:disabled {
-      color: var(--text-muted);
-      cursor: not-allowed;
-    }
-    .wa-model-mode-trigger .wa-model-mode-select-caret {
-      transition: transform 0.16s ease, color 0.16s ease;
-    }
-    .wa-model-mode-menu.open .wa-model-mode-select-caret {
-      transform: rotate(180deg);
-      color: var(--accent);
-    }
-    .wa-model-mode-dropdown {
-      position: absolute;
-      right: -1px;
-      bottom: calc(100% + 8px);
-      min-width: 116px;
-      padding: 6px;
-      border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border) 82%);
-      border-radius: 12px;
-      background: color-mix(in srgb, var(--surface, #fff) 98%, var(--bg-secondary, #f7f8fb) 2%);
-      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
-      z-index: 30;
-    }
-    .wa-model-mode-option {
-      width: 100%;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 10px;
-      border: none;
-      border-radius: 9px;
-      background: transparent;
-      color: var(--text);
-      text-align: left;
-      font-size: 12px;
-      cursor: pointer;
-      transition: background 0.14s, color 0.14s;
-    }
-    .wa-model-mode-option:hover:not(:disabled) {
-      background: color-mix(in srgb, var(--accent) 10%, transparent);
-      color: var(--text);
-    }
-    .wa-model-mode-option.active {
-      background: color-mix(in srgb, var(--accent) 12%, transparent);
-      color: var(--accent);
-    }
-    .wa-model-mode-option:disabled {
-      color: var(--text-muted);
-      cursor: not-allowed;
-      opacity: 0.72;
-    }
-    .wa-model-mode-option-icon {
-      width: 18px;
-      height: 18px;
-      border-radius: 999px;
-      display: inline-flex;
+      flex-direction: row;
       align-items: center;
       justify-content: center;
-      background: color-mix(in srgb, var(--accent) 12%, transparent);
-      color: inherit;
-      font-size: 10px;
-      font-weight: 700;
-      flex-shrink: 0;
-    }
-    .wa-model-mode-option[data-model-mode="local"] .wa-model-mode-option-icon {
-      background: color-mix(in srgb, var(--success, #16a34a) 14%, transparent);
-    }
-    .wa-model-mode-option-text {
+      gap: 0;
+      padding: 5px 10px;
+      border: none;
+      border-radius: 11px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: background 0.14s, color 0.14s, box-shadow 0.14s;
+      text-align: left;
+      line-height: 1;
       white-space: nowrap;
     }
-    .wa-model-mode-select-caret {
-      color: var(--text-muted);
-      pointer-events: none;
-      flex-shrink: 0;
+    .wa-model-mode-toggle-btn:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
+      color: var(--text);
+    }
+    .wa-model-mode-toggle-btn.active {
+      background: color-mix(in srgb, var(--surface, #fff) 72%, var(--accent) 28%);
+      color: var(--accent);
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    }
+    .wa-model-mode-toggle-btn:disabled {
+      opacity: 0.58;
+      cursor: not-allowed;
+    }
+    .wa-model-mode-main {
+      font-size: 10.5px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .wa-model-mode-sub {
+      display: inline;
+      max-width: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 9px;
+      font-weight: 500;
+      line-height: 1;
+      opacity: 0.78;
+      margin-left: 4px;
+    }
+    .wa-model-mode-sub::before {
+      content: '\00B7';
+      margin-right: 4px;
+      opacity: 0.55;
+    }
+    .wa-model-mode-sub[hidden] {
+      display: none;
+    }
+    .wa-model-mode-sub[hidden]::before {
+      content: none;
     }
     .wa-footer-model-mode-select {
-      margin-right: 2px;
-    }
-
-    .model-status-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--success);
-      flex-shrink: 0;
+      margin-right: 0;
     }
 
     /* Workflow active indicator chip */
@@ -5755,6 +5726,7 @@
       align-items: center;
       gap: 8px;
       flex-shrink: 0;
+      margin-left: auto;
     }
 
     #wa-send-btn {

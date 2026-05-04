@@ -1000,10 +1000,20 @@
           </div>
           <div class="wa-input-box-footer">
             <div class="wa-footer-meta">
-              <!-- Current file chip -->
               <div id="wa-footer-file-chip" style="display:none" class="wa-footer-file-chip-wrap">
                 <span id="wa-footer-file-icon" class="footer-file-icon"></span>
                 <span id="wa-footer-file-label">文件</span>
+              </div>
+              <button id="wa-footer-attach-current-btn" type="button" style="display:none" class="wa-footer-attach-current-btn" onclick="WA.toggleCurrentFileAIContext()">附加到任务</button>
+              <div id="wa-model-mode-toggle" class="wa-model-mode-toggle wa-footer-model-mode-select" role="group" aria-label="AI 模型选择">
+                <button id="wa-model-mode-cloud-btn" type="button" class="wa-model-mode-toggle-btn active" data-model-mode="cloud" onclick="WA.setLockedModel('cloud')" title="云端模型">
+                  <span class="wa-model-mode-main">Gemini</span>
+                  <span id="wa-model-mode-cloud-model" class="wa-model-mode-sub">Gemini 2.5 Flash</span>
+                </button>
+                <button id="wa-model-mode-local-btn" type="button" class="wa-model-mode-toggle-btn" data-model-mode="local" onclick="WA.setLockedModel('local')" title="本地模型">
+                  <span class="wa-model-mode-main">本地</span>
+                  <span id="wa-model-mode-local-model" class="wa-model-mode-sub">未启动</span>
+                </button>
               </div>
               <!-- Workflow active indicator -->
               <div id="wa-wf-active-indicator" style="display:none" class="wa-wf-active-chip">
@@ -1012,23 +1022,6 @@
               </div>
             </div>
             <div class="wa-footer-actions">
-              <div id="wa-model-mode-menu" class="wa-model-mode-menu wa-footer-model-mode-select">
-                <span class="wa-model-mode-select-dot"></span>
-                <button id="wa-model-mode-trigger" class="wa-model-mode-trigger" type="button" onclick="WA.toggleModelModeMenu()" aria-haspopup="menu" aria-expanded="false" title="AI 模型选择">
-                  <span id="wa-model-mode-label">云端</span>
-                  <svg class="wa-model-mode-select-caret" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 6 8 10 12 6"/></svg>
-                </button>
-                <div id="wa-model-mode-dropdown" class="wa-model-mode-dropdown" role="menu" aria-label="AI 模型选择" style="display:none">
-                  <button type="button" class="wa-model-mode-option" data-model-mode="cloud" onclick="WA.setLockedModel('cloud')" role="menuitemradio" aria-checked="true">
-                    <span class="wa-model-mode-option-icon">云</span>
-                    <span class="wa-model-mode-option-text">云端</span>
-                  </button>
-                  <button type="button" class="wa-model-mode-option" data-model-mode="local" onclick="WA.setLockedModel('local')" role="menuitemradio" aria-checked="false">
-                    <span class="wa-model-mode-option-icon">本</span>
-                    <span id="wa-model-mode-option-local-label" class="wa-model-mode-option-text">本地</span>
-                  </button>
-                </div>
-              </div>
               <button id="wa-send-btn" type="button" onclick="WA.sendMessage()" title="发送" aria-label="发送">
                 <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
                   <line x1="22" y1="2" x2="11" y2="13"/>

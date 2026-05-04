@@ -18,12 +18,11 @@ Routes:
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
     GET /workspace-assistant     — workspace_assistant_page
-    GET /editor                  — editor_page
 """
 
 import os
 
-from flask import Blueprint, Response, make_response, redirect, render_template, send_from_directory, url_for
+from flask import Blueprint, Response, make_response, render_template, send_from_directory
 
 pages_bp = Blueprint("pages", __name__)
 
@@ -143,12 +142,4 @@ def workspace_assistant_page() -> Response:
 def doc_compare_ui() -> str:
     """多文档对比界面"""
     return render_template("doc_compare.html")
-
-@pages_bp.route("/editor")
-def editor_page() -> Response:
-    """兼容旧入口：统一跳转到当前 workspace assistant。"""
-    resp = make_response(redirect(url_for("pages.workspace_assistant_page")))
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-    resp.headers["Pragma"] = "no-cache"
-    return resp
 

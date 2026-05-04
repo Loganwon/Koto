@@ -310,7 +310,7 @@ class KotoAgentLoop:
 
         # ── Stream LLM response ───────────────────────────────────────
         result_text = yield from self._stream_llm(
-            full_prompt, system_instruction, use_local, meta,
+            full_prompt, system_instruction, use_local, meta, request,
         )
 
         if result_text is None:
@@ -843,6 +843,7 @@ class KotoAgentLoop:
         system_instruction: str,
         use_local: bool,
         meta: RunMetadata,
+        request: AgentRequest,
     ) -> Generator[AgentEvent, None, Optional[str]]:
         """
         Stream LLM response. Yields stream_chunk events.
@@ -854,7 +855,7 @@ class KotoAgentLoop:
         result_text: Optional[str] = None
 
         if use_local:
-            result_text = yield from self._try_local(full_prompt, system_instruction)
+            result_text = yield from self._try_local(full_prompt, system_instruction, request)
             if not result_text:
                 return None
         else:
@@ -874,7 +875,7 @@ class KotoAgentLoop:
                     "⚠️ 云端 AI 暂时不可用，已自动切换到本地模型 (Ollama)，响应速度可能较慢。"
                 )
                 try:
-                    result_text = yield from self._try_local(full_prompt, system_instruction)
+                    result_text = yield from self._try_local(full_prompt, system_instruction, request)
                 except Exception as exc2:
                     logger.error("[AgentLoop] Local fallback failed: %s", exc2)
                     result_text = None
@@ -904,12 +905,12 @@ class KotoAgentLoop:
         return "".join(parts) or None
 
     def _try_local(
-        self, full_prompt: str, system_instruction: str
+        self, full_prompt: str, system_instruction: str, request: Optional[AgentRequest] = None
     ) -> Generator[AgentEvent, None, Optional[str]]:
         """Stream from local Ollama. Yields stream_chunk events."""
         if not _is_ollama_alive():
             return None
-        local = _get_local_provider()
+        local = _get_local_provider(self._pick_local_model(request))
         local_prompt = f"[系统指令]\n{system_instruction}\n\n{full_prompt}"
         gen = local.generate_content(prompt=local_prompt, stream=True)
         parts: List[str] = []
@@ -1075,7 +1076,7 @@ class KotoAgentLoop:
         if use_local:
             if not _is_ollama_alive():
                 raise RuntimeError("本地 Ollama 未运行")
-            local_provider = _get_local_provider()
+            local_provider = _get_local_provider(self._pick_local_model(request))
             # Pass tools through — OllamaLLMProvider supports native tool calling
             # for compatible models (qwen3, llama3.1+, mistral-nemo, etc.)
             response = local_provider.generate_content(
@@ -1141,6 +1142,14 @@ class KotoAgentLoop:
         if preferred_model:
             return preferred_model
         return _pick_online_model()
+
+    def _pick_local_model(self, request: Optional[AgentRequest] = None) -> str:
+        if request and isinstance(request.extra, dict):
+            preferred_model = str(request.extra.get("local_model") or "").strip()
+            if preferred_model.lower() in {"auto", "cloud", "local"} or preferred_model.lower().startswith("gemini"):
+                return ""
+            return preferred_model
+        return ""
 
     def _insert_fallback(
         self,

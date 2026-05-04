@@ -21,7 +21,8 @@ window.WA = window.WA || {};
     sectionOpen:JSON.parse(localStorage.getItem('wa_sections') || '{"workspace":true}'),
     searchQuery: '',
     _allFiles: [],  // full file tree cached for client-side filter
-    pinnedSelection: '',  // text pinned as Copilot-style context chip
+    pinnedSelection: null,  // { text, sourcePath, sourceName, sourceType } pinned as explicit task text context
+    lastPinnedSel: null,
     selectMode: false,  // multi-select mode
     selectedFiles: new Set(),  // paths of selected files
     openTabs: [],          // [{path,name,ext,fileType,fileId,serverData,cache,modified}]
@@ -46,6 +47,8 @@ window.WA = window.WA || {};
     _modelsReady: false,
     _modelCatalogPromise: null,
     _activeRoute: null,
+    _localRuntimeModel: '',
+    _hasExplicitModelChoice: localStorage.getItem('wa_model_choice_explicit') === '1' || localStorage.getItem('wa_locked_model') === 'local',
     useAgentMode: localStorage.getItem('wa_use_agent') !== 'off',  // P0: enable agent ReAct loop
   };
 
@@ -753,6 +756,20 @@ window.WA = window.WA || {};
   state._aiFileContext = [];  // [{path, name, content}]
   state._aiTargetFileIdx = -1; // index into _aiFileContext designated as write-back target (-1 = none)
 
+  function _normalizeAIContextPath(value) {
+    return String(value || '').trim().replace(/\\/g, '/').toLowerCase();
+  }
+
+  function _currentAIContextPath() {
+    return String(state.wsSourcePath || state.filePath || '').trim();
+  }
+
+  function _findAIContextFileIndex(path) {
+    const normalizedPath = _normalizeAIContextPath(path);
+    if (!normalizedPath) return -1;
+    return (state._aiFileContext || []).findIndex((file) => _normalizeAIContextPath(file.path || file.name) === normalizedPath);
+  }
+
   function _renderAIFileChips() {
     const wrap = $('wa-ai-file-chips');
     const list = $('wa-ai-file-chip-list');
@@ -818,6 +835,8 @@ window.WA = window.WA || {};
       if (el) el.classList.add('ai-queued');
     });
 
+    _updateSubjectBar(state.fileName, state.fileType);
+
   }
   function _renderMultiDocQuickActions(n, targetFile) {
     const bar = ($('wa-actions-bar') || $('wa-quick-actions'));
@@ -863,6 +882,29 @@ window.WA = window.WA || {};
     _renderAIFileChips();
   };
 
+
+  window.WA.addCurrentFileToAIContext = async () => {
+    const currentPath = _currentAIContextPath();
+    if (!currentPath) {
+      showToast('当前打开的文件暂时不能附加为任务输入', 'warn');
+      return;
+    }
+    await _addFileToAIContext(currentPath);
+  };
+
+  window.WA.toggleCurrentFileAIContext = async () => {
+    const currentPath = _currentAIContextPath();
+    if (!currentPath) {
+      showToast('当前打开的文件暂时不能附加为任务输入', 'warn');
+      return;
+    }
+    const existingIdx = _findAIContextFileIndex(currentPath);
+    if (existingIdx >= 0) {
+      window.WA.removeAIFileContext(existingIdx);
+      return;
+    }
+    await window.WA.addCurrentFileToAIContext();
+  };
   window.WA.clearAIFileContext = () => {
     state._aiFileContext = [];
     state._aiTargetFileIdx = -1;
@@ -2887,12 +2929,72 @@ window.WA = window.WA || {};
   // ── Unified context bar — replaces wa-selection-chip + wa-context-indicator + wa-ai-attached-hint ──
   // opts: { selection?: string, files?: number, table?: string }
   // Call with no args to auto-detect from state; or pass overrides.
+  function _getPinnedSelectionSourceMeta() {
+    const sourcePath = String(state.wsSourcePath || state.filePath || '').trim();
+    const sourceName = String(state.fileName || (sourcePath ? sourcePath.split(/[\\/]/).pop() : '') || '').trim();
+    return {
+      sourcePath,
+      sourceName,
+      sourceType: String(state.fileType || '').trim(),
+    };
+  }
+
+  function _selectionContextText(selectionContext) {
+    if (!selectionContext) return '';
+    if (typeof selectionContext === 'string') return selectionContext.trim();
+    return String(selectionContext.text || '').trim();
+  }
+
+  function _selectionContextSourceLabel(selectionContext) {
+    if (!selectionContext || typeof selectionContext === 'string') return '';
+    const sourceName = String(selectionContext.sourceName || '').trim();
+    if (sourceName) return sourceName;
+    const sourcePath = String(selectionContext.sourcePath || '').trim();
+    return sourcePath ? sourcePath.split(/[\\/]/).pop() || sourcePath : '';
+  }
+
+  function _selectionContextPreview(selectionContext, limit = 60) {
+    const text = _selectionContextText(selectionContext);
+    if (!text) return '';
+    return text.length > limit ? text.substring(0, limit) + '…' : text;
+  }
+
+  function _createPinnedSelectionContext(text, sourceMeta) {
+    if (text && typeof text === 'object') {
+      const normalizedText = _selectionContextText(text);
+      if (!normalizedText) return null;
+      const sourcePath = String(text.sourcePath || text.source_path || '').trim();
+      const sourceName = String(text.sourceName || text.source_name || '').trim();
+      const sourceType = String(text.sourceType || text.source_type || '').trim();
+      return {
+        text: normalizedText,
+        sourcePath,
+        sourceName: sourceName || (sourcePath ? sourcePath.split(/[\\/]/).pop() || sourcePath : ''),
+        sourceType,
+      };
+    }
+
+    const normalizedText = String(text || '').trim();
+    if (!normalizedText) return null;
+    const meta = sourceMeta || _getPinnedSelectionSourceMeta();
+    const sourcePath = String(meta.sourcePath || meta.source_path || '').trim();
+    const sourceName = String(meta.sourceName || meta.source_name || '').trim();
+    return {
+      text: normalizedText,
+      sourcePath,
+      sourceName: sourceName || (sourcePath ? sourcePath.split(/[\\/]/).pop() || sourcePath : ''),
+      sourceType: String(meta.sourceType || meta.source_type || '').trim(),
+    };
+  }
+
   function _updateContextBar(opts) {
     const bar = $('wa-context-bar');
     if (!bar) return;
     const nFiles = (opts && opts.files != null) ? opts.files : (state._aiFileContext ? state._aiFileContext.length : 0);
     const selText = (opts && opts.selection) || '';
     const tableInfo = (opts && opts.table) || '';
+    const pinnedSelectionText = _selectionContextText(state.pinnedSelection);
+    const pinnedSelectionSource = _selectionContextSourceLabel(state.pinnedSelection);
 
     const parts = [];
 
@@ -2902,9 +3004,12 @@ window.WA = window.WA || {};
       parts.push(`<span class="ctx-bar-sel">已选中：<b>${_escHtml(preview)}</b></span>`);
     } else if (tableInfo) {
       parts.push(`<span class="ctx-bar-sel">已选中：<b>${_escHtml(tableInfo)}</b></span>`);
-    } else if (state.pinnedSelection) {
-      const preview = state.pinnedSelection.length > 60 ? state.pinnedSelection.substring(0, 60) + '…' : state.pinnedSelection;
-      parts.push(`<span class="ctx-bar-sel"><span class="ctx-bar-quote"></span>${_escHtml(preview)}<button class="ctx-bar-clear" onclick="WA.clearSelection()" title="取消选区">&times;</button></span>`);
+    } else if (pinnedSelectionText) {
+      const preview = _selectionContextPreview(state.pinnedSelection, 60);
+      const sourceHint = pinnedSelectionSource
+        ? `<span class="ctx-bar-source">来自 <b>${_escHtml(pinnedSelectionSource)}</b></span>`
+        : '';
+      parts.push(`<span class="ctx-bar-sel"><span class="ctx-bar-quote"></span>${_escHtml(preview)}${sourceHint}<button class="ctx-bar-clear" onclick="WA.clearSelection()" title="取消选区">&times;</button></span>`);
     }
 
     // File context
@@ -2922,9 +3027,14 @@ window.WA = window.WA || {};
   }
 
   // Update the selection chip UI with new text (used in multiple places)
-  function _pinSelectionChip(text) {
-    state.pinnedSelection = text;
-    const preview = text.length > 200 ? text.substring(0, 200) + '…' : text;
+  function _pinSelectionChip(text, sourceMeta) {
+    const selectionContext = _createPinnedSelectionContext(text, sourceMeta);
+    if (!selectionContext) {
+      WA.clearSelection();
+      return;
+    }
+    state.pinnedSelection = selectionContext;
+    const preview = _selectionContextPreview(selectionContext, 200);
 
     // Update the unified context bar
     _updateContextBar();
@@ -2993,6 +3103,12 @@ window.WA = window.WA || {};
     const iconEl = $('wa-subject-icon');
     const txt = $('wa-subject-text');
     const hasAttachedFiles = Array.isArray(state._aiFileContext) && state._aiFileContext.length > 0;
+    const footerChip = $('wa-footer-file-chip');
+    const footerLabel = $('wa-footer-file-label');
+    const footerIcon = $('wa-footer-file-icon');
+    const footerAttachBtn = $('wa-footer-attach-current-btn');
+    const currentPath = _currentAIContextPath();
+    const currentFileAttached = _findAIContextFileIndex(currentPath) >= 0;
 
     if (bar) {
       if (!fileName || hasAttachedFiles) {
@@ -3005,14 +3121,14 @@ window.WA = window.WA || {};
       }
     }
 
-    // ── Footer file chip sync (PEMO-style) ──
-    const footerChip = $('wa-footer-file-chip');
-    const footerLabel = $('wa-footer-file-label');
-    const footerIcon = $('wa-footer-file-icon');
     if (!fileName) {
       if (footerChip) footerChip.style.display = 'none';
-    } else if (footerChip && footerLabel) {
-      if (footerLabel) footerLabel.textContent = fileName;
+      if (footerAttachBtn) footerAttachBtn.style.display = 'none';
+      return;
+    }
+
+    if (footerChip && footerLabel) {
+      footerLabel.textContent = fileName;
       if (footerIcon) {
         const ext = (fileName.split('.').pop() || '').toLowerCase();
         const EXT_COLORS = { docx: '#2563eb', doc: '#2563eb', xlsx: '#16a34a', xls: '#16a34a', pptx: '#dc2626', ppt: '#dc2626', pdf: '#7c3aed', txt: '#6b7280', md: '#6b7280' };
@@ -3020,9 +3136,21 @@ window.WA = window.WA || {};
         footerIcon.style.background = EXT_COLORS[ext] || '#6b7280';
       }
       footerChip.style.display = 'flex';
-        const subjectBar = $('wa-subject-bar');
-        if (subjectBar) subjectBar.style.display = 'none';
     }
+
+    if (footerAttachBtn) {
+      if (!currentPath) {
+        footerAttachBtn.style.display = 'none';
+      } else {
+        footerAttachBtn.style.display = 'inline-flex';
+        footerAttachBtn.classList.toggle('active', currentFileAttached);
+        footerAttachBtn.textContent = currentFileAttached ? '已附加' : '附加到任务';
+        footerAttachBtn.title = currentFileAttached
+          ? '从当前任务上下文移除当前文件'
+          : '将当前打开文件附加到当前任务上下文';
+      }
+    }
+
   }
 
   // ── Extract PPTX table shape data as tab-separated text (for AI actions) ──
@@ -3783,7 +3911,7 @@ window.WA = window.WA || {};
       // Save editor selection BEFORE clearing browser selection, so
       // acceptProposal can restore it for an in-place, Undo-safe replacement.
       _saveEditorRange();
-      state.pinnedSelection = sel;
+      state.pinnedSelection = _createPinnedSelectionContext(sel);
     } else {
       state.pinnedSelection = null;
     }
@@ -3807,7 +3935,7 @@ window.WA = window.WA || {};
     msgs.appendChild(loadingEl);
     msgs.scrollTop = msgs.scrollHeight;
 
-    state.lastPinnedSel = hasSelection ? sel : null;
+    state.lastPinnedSel = hasSelection ? state.pinnedSelection : null;
     state.pendingToolCall = null;
 
     if (action === '可视化') {
@@ -3867,7 +3995,7 @@ window.WA = window.WA || {};
   }
 
   window.WA.clearSelection = () => {
-    state.pinnedSelection = '';
+    state.pinnedSelection = null;
     lastSelectionText = '';
     // Update context bar (selection cleared, may still show file count)
     _updateContextBar();
@@ -8559,6 +8687,7 @@ window.WA = window.WA || {};
   }
 
   function _waBuildTaskFiles(currentContent) {
+    void currentContent;
     const files = [];
     const seen = new Set();
 
@@ -8576,15 +8705,6 @@ window.WA = window.WA || {};
         content_preview: _waSampleTaskContext(String(file.content_preview || '')),
       });
     };
-
-    if (state.fileName && currentContent) {
-      addFile({
-        path: state.wsSourcePath || state.filePath || state.fileName || 'current_document',
-        name: state.fileName || 'current_document',
-        type: state.fileType || _waInferFileType(state.fileName),
-        content_preview: currentContent,
-      });
-    }
 
     (state._aiFileContext || []).forEach((file) => {
       addFile({
@@ -8620,11 +8740,17 @@ window.WA = window.WA || {};
       parts.push(`已提供文件: ${opts.attachedFileNames.join(', ')}`);
     }
 
-    if (opts.pinnedSelection) {
-      const snippet = opts.pinnedSelection.length > 500
-        ? opts.pinnedSelection.substring(0, 500) + '...'
-        : opts.pinnedSelection;
-      parts.push(`当前重点选中文本:\n${snippet}`);
+    const selectionText = _selectionContextText(opts.selectionContext || opts.pinnedSelection || null);
+    const selectionSource = _selectionContextSourceLabel(opts.selectionContext || null);
+    if (selectionText) {
+      const snippet = selectionText.length > 500
+        ? selectionText.substring(0, 500) + '...'
+        : selectionText;
+      if (selectionSource) {
+        parts.push(`参考文本来源: ${selectionSource}`);
+      }
+      parts.push(`当前重点参考文本:\n${snippet}`);
+      parts.push('除非用户明确要求，否则不要把参考文本所在文件默认视为修改目标。');
     }
 
     parts.push(`用户要求:\n${userText}`);
@@ -8665,6 +8791,18 @@ window.WA = window.WA || {};
     let phaseBarEl = null;
     const startTime = Date.now();
     const taskFiles = _waBuildTaskFiles(opts.currentContent || '');
+    const targetFile = opts.targetFile || null;
+    const referenceFiles = Array.isArray(opts.referenceFiles) ? opts.referenceFiles : [];
+    const selectionContext = _createPinnedSelectionContext(opts.selectionContext || null);
+    const targetPathKey = _normalizeAIContextPath(targetFile ? (targetFile.path || targetFile.name || '') : '');
+    if (targetPathKey) {
+      taskFiles.sort((left, right) => {
+        const leftIsTarget = _normalizeAIContextPath(left.path || left.name || '') === targetPathKey;
+        const rightIsTarget = _normalizeAIContextPath(right.path || right.name || '') === targetPathKey;
+        if (leftIsTarget === rightIsTarget) return 0;
+        return leftIsTarget ? -1 : 1;
+      });
+    }
     const stepEls = new Map();
     let currentStepId = '';
 
@@ -8806,15 +8944,37 @@ window.WA = window.WA || {};
       _setStreamBtn(true);
 
       const lockedModel = opts.model || state.lockedModel || 'auto';
+      const targetPath = targetFile ? String(targetFile.path || '').trim() : '';
+      const targetName = targetFile ? String(targetFile.name || (targetPath ? targetPath.split(/[\\/]/).pop() : '') || '').trim() : '';
+      const targetType = targetFile
+        ? String(targetFile.type || _waInferFileType(targetPath || targetName)).trim().toLowerCase()
+        : '';
       const payload = {
         action: 'ai_task',
+        context_mode: 'explicit',
         instruction: taskText,
         session_id: _waSession(),
         model_mode: lockedModel === 'local' ? 'local' : 'cloud',
         model_id: (lockedModel && !['auto', 'cloud', 'local'].includes(lockedModel)) ? lockedModel : '',
-        file_type: state.fileType || '',
-        file_name: state.fileName || '',
+        file_type: targetType,
+        file_name: targetName,
         files: taskFiles,
+        selection_context: selectionContext ? {
+          text: selectionContext.text,
+          source_path: selectionContext.sourcePath || '',
+          source_name: selectionContext.sourceName || '',
+          source_type: selectionContext.sourceType || '',
+        } : null,
+        target_file: targetPath || targetName ? {
+          path: targetPath || targetName,
+          name: targetName || (targetPath ? targetPath.split(/[\\/]/).pop() || targetPath : ''),
+          type: targetType,
+        } : null,
+        reference_files: referenceFiles.map((file) => ({
+          path: file.path || '',
+          name: file.name || '',
+          type: file.type || _waInferFileType(file.path || file.name || ''),
+        })),
       };
 
       const resp = await fetch('/api/editor/ai/stream', {
@@ -9099,7 +9259,7 @@ window.WA = window.WA || {};
       file_path: state.wsSourcePath || state.filePath || state.fileName || '',
       file_name: state.fileName || '',
       open_tabs: (state.openTabs || []).map(t => t.name || t.id || ''),
-      selection: state.lastPinnedSel || '',
+      selection: _selectionContextText(state.lastPinnedSel),
       // Paths of files explicitly attached to the AI panel (for tool-based file access)
       analysis_files: (state._aiFileContext || []).map(f => ({ name: f.name, path: f.path })),
     };
@@ -9722,11 +9882,15 @@ window.WA = window.WA || {};
   // ── Chart / code execution SSE (backed by /api/editor/ai/chart) ──
   async function _sendViaSSEChart(payload) {
     let buffer = '';
+    const modelMode = payload.model_mode || _waQuickActionModelMode();
+    const modelId = payload.model_id || _selectedCloudModelId();
     // Map old payload fields to new endpoint schema
     const body = {
       data_context: payload.csv_data || payload.prompt || '',
       instruction: payload.prompt || '',
       lang: payload.language || 'python',
+      model_mode: modelMode,
+      model_id: modelId,
     };
     const ctrl = new AbortController();
     state._streamAbortCtrl = ctrl;
@@ -9850,7 +10014,6 @@ window.WA = window.WA || {};
     if (storedLockedModel !== state.lockedModel) {
       localStorage.setItem('wa_locked_model', state.lockedModel);
       _clearActiveRoute();
-      _syncEditorModelPreference(state.lockedModel, state.lockedModel);
     }
     state.aiOutputMode = 'inline';
     localStorage.removeItem('wa_ai_output_mode');
@@ -12218,7 +12381,7 @@ window.WA = window.WA || {};
     input.value = modifyPrompt;
 
     // Re-pin the original selection so the next response also gets proposal cards
-    state.pinnedSelection = proposal.original_text;
+    state.pinnedSelection = _createPinnedSelectionContext(proposal.original_text);
     WA.sendMessage();
   };
 
@@ -12710,7 +12873,7 @@ window.WA = window.WA || {};
 
       const editor = state.activeEditor;
       const tc     = snapshot.toolCall;
-      const sel    = snapshot.pinnedSel;
+      const sel    = _selectionContextText(snapshot.pinnedSel);
 
       if (tc && editor) {
         // AI produced a structured tool call — most reliable path
@@ -12790,9 +12953,11 @@ window.WA = window.WA || {};
 
       // Capture and clear pinned selection before rendering
       const pinnedSel = state.pinnedSelection;
+      const pinnedSelText = _selectionContextText(pinnedSel);
+      const pinnedSelSource = _selectionContextSourceLabel(pinnedSel);
       state.lastPinnedSel = pinnedSel || null;
       state.pendingToolCall = null;
-      if (pinnedSel) WA.clearSelection();
+      if (pinnedSelText) WA.clearSelection();
 
       const msgs = $('wa-ai-messages');
       _hideWelcome();  // hide welcome card on first send
@@ -12807,11 +12972,17 @@ window.WA = window.WA || {};
         filesNote.textContent = `${state._aiFileContext.map(f => f.name).join(', ')}`;
         uMsg.appendChild(filesNote);
       }
-      if (pinnedSel) {
+      if (pinnedSelText) {
         const quote = document.createElement('div');
         quote.className = 'wa-msg-quote';
-        quote.textContent = pinnedSel.length > 240 ? pinnedSel.substring(0, 240) + '…' : pinnedSel;
+        quote.textContent = pinnedSelText.length > 240 ? pinnedSelText.substring(0, 240) + '…' : pinnedSelText;
         uMsg.appendChild(quote);
+        if (pinnedSelSource) {
+          const quoteMeta = document.createElement('div');
+          quoteMeta.className = 'wa-msg-quote-meta';
+          quoteMeta.textContent = `引用自 ${pinnedSelSource}`;
+          uMsg.appendChild(quoteMeta);
+        }
         const content = document.createElement('div');
         content.textContent = text;
         uMsg.appendChild(content);
@@ -12854,8 +13025,8 @@ window.WA = window.WA || {};
       let fullMessage = text;
       const _hasAttachedTaskFiles = !!(state._aiFileContext && state._aiFileContext.length);
       if (state.fileName && context) {
-        const selHint = pinnedSel
-          ? `\n\n[用户选中的文字]\n"${pinnedSel.length > 500 ? pinnedSel.substring(0, 500) + '…' : pinnedSel}"\n`
+        const selHint = pinnedSelText
+          ? `\n\n[用户选中的文字]\n"${pinnedSelText.length > 500 ? pinnedSelText.substring(0, 500) + '…' : pinnedSelText}"\n${pinnedSelSource ? `[选中文字来源]\n${pinnedSelSource}\n` : ''}`
           : '';
         // Only inject modification proposal hint for queries that intend to edit the document
         // Skip for read-only intents (summarize, analyze, explain, translate for reference, etc.)
@@ -12886,11 +13057,9 @@ window.WA = window.WA || {};
       // Also always use agent when 2+ files are attached — multi-file operations
       // (import, compare, sync) require structured tool use that the basic chat
       // stream cannot provide, and local models struggle with large combined prompts.
-      const _hasCurrentTaskFile = !!(state.fileName && context);
       const _hasOpenFileIntent = _isOpenFileIntent(text);
       const _hasTaskIntent = _isAgentIntent(text);
-      const _useOpenClawTaskForCurrentFile = _hasCurrentTaskFile && (pinnedSel || _isDocEdit || _hasTaskIntent);
-      const _useOpenClawTask = _hasAttachedTaskFiles || _useOpenClawTaskForCurrentFile || _hasTaskIntent || _hasOpenFileIntent;
+      const _useOpenClawTask = _hasAttachedTaskFiles || _hasOpenFileIntent;
       const _useGenericAgent = !_useOpenClawTask && state.useAgentMode;
       if (_useOpenClawTask) {
         const tIdx = state._aiTargetFileIdx;
@@ -12899,16 +13068,18 @@ window.WA = window.WA || {};
           ? state._aiFileContext.filter((_, idx) => idx !== tIdx)
           : (state._aiFileContext || []);
         const taskMessage = _waBuildOpenClawTaskMessage(text, {
-          currentFileName: state.fileName || '',
           targetFileName: targetFile ? targetFile.name : '',
           referenceFileNames: referenceFiles.map((file) => file.name),
           attachedFileNames: (state._aiFileContext || []).map((file) => file.name),
-          pinnedSelection: pinnedSel || '',
+          selectionContext: pinnedSel || null,
         });
         _waSendToOpenClawTask(taskMessage, loadingEl, {
           model: state.lockedModel || 'auto',
           currentContent: context,
           openIntentText: text,
+          selectionContext: pinnedSel || null,
+          targetFile,
+          referenceFiles,
         });
       } else if (_useGenericAgent) {
         _waSendToAgent(fullMessage, loadingEl, {
@@ -12950,34 +13121,9 @@ window.WA = window.WA || {};
   };
 
   window.WA.toggleSettings = () => {
-    window.WA.toggleModelModeMenu();
+    const active = document.querySelector('.wa-model-mode-toggle-btn.active');
+    if (active) active.focus();
   };
-
-  function _setModelModeMenuOpen(open) {
-    const menu = document.getElementById('wa-model-mode-menu');
-    const trigger = document.getElementById('wa-model-mode-trigger');
-    const dropdown = document.getElementById('wa-model-mode-dropdown');
-    if (!menu || !trigger || !dropdown) return;
-    menu.classList.toggle('open', !!open);
-    dropdown.style.display = open ? 'block' : 'none';
-    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-  }
-
-  window.WA.toggleModelModeMenu = () => {
-    const menu = document.getElementById('wa-model-mode-menu');
-    if (!menu) return;
-    _setModelModeMenuOpen(!menu.classList.contains('open'));
-  };
-
-  document.addEventListener('click', (event) => {
-    const menu = document.getElementById('wa-model-mode-menu');
-    if (!menu || menu.contains(event.target)) return;
-    _setModelModeMenuOpen(false);
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') _setModelModeMenuOpen(false);
-  });
 
   // ── Skill Library overlay ──────────────────────────────────
   let _waSkillCache = {};
@@ -13177,9 +13323,11 @@ window.WA = window.WA || {};
     if (!text || state.isLoading) return;
 
     const pinnedSel = state.pinnedSelection;
+    const pinnedSelText = _selectionContextText(pinnedSel);
+    const pinnedSelSource = _selectionContextSourceLabel(pinnedSel);
     state.lastPinnedSel = pinnedSel || null;
     state.pendingToolCall = null;
-    if (pinnedSel) WA.clearSelection();
+    if (pinnedSelText) WA.clearSelection();
 
     const msgArea = $('wa-iai-messages');
     _hideWelcome();
@@ -13187,11 +13335,12 @@ window.WA = window.WA || {};
     // User message
     const uMsg = document.createElement('div');
     uMsg.className = 'wa-iai-msg user';
-    if (pinnedSel) {
+    if (pinnedSelText) {
       const q = document.createElement('div');
       q.style.cssText = 'font-size:11px;font-style:italic;color:var(--text-muted);margin-bottom:2px;overflow:hidden;-webkit-line-clamp:2;-webkit-box-orient:vertical;display:-webkit-box;';
-      q.textContent = pinnedSel.length > 120 ? pinnedSel.substring(0, 120) + '…' : pinnedSel;
+      q.textContent = pinnedSelText.length > 120 ? pinnedSelText.substring(0, 120) + '…' : pinnedSelText;
       uMsg.appendChild(q);
+      if (pinnedSelSource) q.title = `引用自 ${pinnedSelSource}`;
     }
     const uContent = document.createElement('span');
     uContent.textContent = text;
@@ -13217,8 +13366,8 @@ window.WA = window.WA || {};
 
     let fullMessage = text;
     if (state.fileName && context) {
-      const selHint = pinnedSel
-        ? `\n\n[用户选中的文字]\n"${pinnedSel.length > 500 ? pinnedSel.substring(0, 500) + '…' : pinnedSel}"\n`
+      const selHint = pinnedSelText
+        ? `\n\n[用户选中的文字]\n"${pinnedSelText.length > 500 ? pinnedSelText.substring(0, 500) + '…' : pinnedSelText}"\n${pinnedSelSource ? `[选中文字来源]\n${pinnedSelSource}\n` : ''}`
         : '';
       fullMessage = `[工作区文档助手模式]\n当前文件: ${state.fileName} (${fileType})\n\n文档内容:\n${context}${selHint}\n\n用户指令: ${text}`;
     }
@@ -13378,11 +13527,6 @@ window.WA = window.WA || {};
     'gemini-2.5-pro': 'Gemini 2.5 Pro',
   };
 
-  function _normalizeEditorLockedModel(modelId) {
-    if (!modelId || ['auto', 'cloud', 'local'].includes(modelId)) return '';
-    return modelId;
-  }
-
   function _selectedCloudModelId() {
     return (state.lockedModel && !['auto', 'cloud', 'local'].includes(state.lockedModel))
       ? state.lockedModel
@@ -13398,22 +13542,58 @@ window.WA = window.WA || {};
     return (state._availableModels || []).find(model => model.id === modelId) || null;
   }
 
+  function _coerceModelLabel(label, fallback) {
+    if (typeof label === 'string') {
+      const trimmed = label.trim();
+      return trimmed || (fallback || '');
+    }
+    if (label && typeof label === 'object') {
+      if (typeof label.display === 'string' && label.display.trim()) return label.display.trim();
+      if (typeof label.name === 'string' && label.name.trim()) return label.name.trim();
+      if (typeof label.label === 'string' && label.label.trim()) return label.label.trim();
+      if (typeof label.id === 'string' && label.id.trim()) return label.id.trim();
+      if (typeof label.model === 'string' && label.model.trim()) return label.model.trim();
+    }
+    if (label == null) return fallback || '';
+    return (typeof label === 'number' || typeof label === 'boolean') ? String(label) : (fallback || '');
+  }
+
   function _modelDisplayName(modelId, fallback) {
     if (!modelId) return fallback || '云端';
     if (modelId === 'local') return '本地';
     const meta = _lookupModelMeta(modelId);
-    if (meta && meta.display) return meta.display;
-    return _MODEL_LABELS[modelId] || fallback || modelId;
+    const metaDisplay = _coerceModelLabel(meta && meta.display, '');
+    if (metaDisplay) return metaDisplay;
+    return _coerceModelLabel(_MODEL_LABELS[modelId], '') || _coerceModelLabel(fallback, '') || _coerceModelLabel(modelId, '');
+  }
+
+  function _currentCloudModelHint() {
+    const explicitCloudModel = _selectedCloudModelId();
+    if (explicitCloudModel) return _modelDisplayName(explicitCloudModel, explicitCloudModel);
+
+    if (state.lockedModel !== 'local' && state._activeRoute?.modelId && state._activeRoute.modelId !== 'local') {
+      return _coerceModelLabel(state._activeRoute.modelDisplay, '') || _modelDisplayName(state._activeRoute.modelId, state._activeRoute.modelId);
+    }
+
+    const mappedChatModel = state._modelMap?.CHAT || state._modelMap?.DOC_ANNOTATE || state._modelMap?.FILE_GEN || '';
+    if (mappedChatModel) return _modelDisplayName(mappedChatModel, mappedChatModel);
+
+    return _modelDisplayName('gemini-2.5-flash', 'Gemini 2.5 Flash');
   }
 
   function _syncModelStatusUi() {
     const badge = $('wa-ai-model-badge');
-    const modeLabel = $('wa-model-mode-label');
+    const cloudModelEl = $('wa-model-mode-cloud-model');
+    const localModelEl = $('wa-model-mode-local-model');
     const routeInfo = $('wa-ai-route-info');
     const explicitCloudModel = _selectedCloudModelId();
     const activeRoute = state._activeRoute || null;
+    const cloudModelHint = _currentCloudModelHint();
+    const localModelHint = state._localRuntimeModel || '未启动';
+    const activeMode = state.lockedModel === 'local' ? 'local' : 'cloud';
+    const shouldShowModelHint = !!state._hasExplicitModelChoice;
 
-    const modelLabel = activeRoute?.modelDisplay
+    const modelLabel = _coerceModelLabel(activeRoute?.modelDisplay, '')
       || (state.lockedModel === 'local'
         ? '本地'
         : (explicitCloudModel ? _modelDisplayName(explicitCloudModel, explicitCloudModel) : '云端'));
@@ -13422,14 +13602,23 @@ window.WA = window.WA || {};
       badge.textContent = modelLabel;
       badge.title = modelLabel;
     }
-    if (modeLabel) {
-      modeLabel.textContent = state.lockedModel === 'local' ? '本地' : '云端';
-      modeLabel.title = modelLabel;
+    if (cloudModelEl) {
+      cloudModelEl.textContent = cloudModelHint;
+      cloudModelEl.title = `云端模型：${cloudModelHint}`;
+      cloudModelEl.hidden = true;
     }
-    document.querySelectorAll('.wa-model-mode-option[data-model-mode]').forEach((button) => {
-      const isActive = button.dataset.modelMode === (state.lockedModel === 'local' ? 'local' : 'cloud');
+    if (localModelEl) {
+      localModelEl.textContent = localModelHint;
+      localModelEl.title = `本地模型：${localModelHint}`;
+      localModelEl.hidden = !(shouldShowModelHint && activeMode === 'local');
+    }
+    document.querySelectorAll('.wa-model-mode-toggle-btn[data-model-mode]').forEach((button) => {
+      const isActive = button.dataset.modelMode === activeMode;
       button.classList.toggle('active', isActive);
-      button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+      const buttonTitle = button.dataset.modelMode === 'local'
+        ? `本地模型：${localModelHint}`
+        : `云端模型：${cloudModelHint}`;
+      button.title = buttonTitle;
     });
 
     if (!routeInfo) return;
@@ -13468,7 +13657,7 @@ window.WA = window.WA || {};
 
     state._activeRoute = {
       modelId: routeModelId,
-      modelDisplay: evt.model_display || _modelDisplayName(routeModelId, routeModelId || 'Koto AI'),
+      modelDisplay: _coerceModelLabel(evt.model_display, '') || _modelDisplayName(routeModelId, routeModelId || 'Koto AI'),
       taskDisplay,
       routeMethod,
       message: routeMessage,
@@ -13512,49 +13701,29 @@ window.WA = window.WA || {};
     fetch('/api/v1/workspace/ollama-status')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        const localOption = document.querySelector('.wa-model-mode-option[data-model-mode="local"]');
-        const localLabel = document.getElementById('wa-model-mode-option-local-label');
-        if (!localOption) return;
+        const localButton = document.getElementById('wa-model-mode-local-btn');
+        if (!localButton) return;
         if (data && data.running) {
-          localOption.disabled = false;
-          localOption.title = data.model ? `本地 Ollama 模型：${data.model}` : '本地模型';
-          if (localLabel) localLabel.textContent = '本地';
+          state._localRuntimeModel = data.model || 'Ollama';
+          localButton.disabled = false;
         } else {
-          localOption.disabled = state.lockedModel !== 'local';
-          localOption.title = state.lockedModel === 'local' ? '本地模型' : '请先启动 Ollama';
-          if (localLabel) localLabel.textContent = state.lockedModel === 'local' ? '本地' : '本地（未启动）';
+          state._localRuntimeModel = state.lockedModel === 'local' ? '未启动' : '未启动';
+          localButton.disabled = state.lockedModel !== 'local';
         }
+        _syncModelStatusUi();
       })
       .catch(() => {});
-  }
-
-  function _syncEditorModelPreference(mode, lockedModel) {
-    const editorMode = mode === 'local' ? 'local' : 'cloud';
-    const editorLockedModel = editorMode === 'local'
-      ? ''
-      : _normalizeEditorLockedModel(lockedModel);
-
-    localStorage.setItem('editor_model_mode', editorMode);
-    if (editorLockedModel) {
-      localStorage.setItem('editor_locked_model', editorLockedModel);
-    } else {
-      localStorage.removeItem('editor_locked_model');
-    }
-
-    try {
-      window.__koto?.aiPanel?.notifyModelChange?.(editorMode === 'local' ? 'local' : (editorLockedModel || 'cloud'));
-    } catch (_) { /* best-effort UI sync only */ }
   }
 
   window.WA.setUseLocalModel = (useLocal) => {
     const newModel = useLocal ? 'local' : 'auto';
     state.lockedModel = newModel;
+    state._hasExplicitModelChoice = true;
     localStorage.setItem('wa_locked_model', newModel);
+    localStorage.setItem('wa_model_choice_explicit', '1');
     _clearActiveRoute();
-    _syncEditorModelPreference(newModel, newModel);
     _syncModelStatusUi();
     _checkOllamaStatus();
-    _setModelModeMenuOpen(false);
     // Persist to server so file-editor AI (editor_ai_stream) also respects the choice
     fetch('/api/local-model/switch', {
       method: 'POST',

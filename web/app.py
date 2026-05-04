@@ -2389,6 +2389,11 @@ def _get_file_task_default_model() -> str:
     )
 
 
+def _get_configured_local_model_id() -> str:
+    _mode, local_model = _get_local_model_config()
+    return str(local_model or "").strip()
+
+
 _MODEL_LOCK_TASK_ALIASES = {
     "DOC_ANNOTATE": "FILE_TASK",
     "FILE_SEARCH": "AGENT",
@@ -2532,6 +2537,22 @@ def _normalize_file_task_model_id(model_mode: str, requested_model: str) -> str:
         fallback_model=_get_file_task_default_model(),
         task_type="FILE_TASK",
     ) or _get_file_task_default_model()
+
+
+def _normalize_editor_stream_model_id(model_mode: str, requested_model: str) -> str:
+    normalized = str(requested_model or "").strip()
+    if normalized.lower() in {"auto", "local"}:
+        normalized = ""
+
+    if str(model_mode or "cloud").strip().lower() == "local":
+        return ""
+
+    fallback_model = _resolve_legacy_model_alias(MODEL_MAP.get("CHAT", "gemini-3-flash-preview"))
+    return _resolve_requested_model_id(
+        normalized,
+        fallback_model=fallback_model,
+        task_type="CHAT",
+    ) or fallback_model
 
 
 def _sync_model_routes_from_manager(force_refresh: bool = False) -> bool:
@@ -18213,6 +18234,7 @@ def editor_ai_stream():
     if not isinstance(files, list):
         files = []
     requested_model_id = str(data.get("model_id") or "").strip()
+    configured_local_model_id = _get_configured_local_model_id()
 
     try:
         from app.core.editor_skills import get_phases
@@ -18242,6 +18264,63 @@ def editor_ai_stream():
                 return content[:limit]
             return content[:head] + marker + content[-tail:]
 
+        def _normalize_task_path(value):
+            return str(value or "").strip().replace("\\", "/").lower()
+
+        def _normalize_selection_context(payload):
+            if not isinstance(payload, dict):
+                return {}
+            text_value = str(payload.get("text") or "").strip()
+            if not text_value:
+                return {}
+            source_path = str(payload.get("source_path") or payload.get("sourcePath") or "").strip()
+            source_name = str(payload.get("source_name") or payload.get("sourceName") or "").strip()
+            source_type = str(payload.get("source_type") or payload.get("sourceType") or "").strip().lower()
+            if not source_name and source_path:
+                source_name = os.path.basename(source_path)
+            return {
+                "text": text_value,
+                "source_path": source_path,
+                "source_name": source_name,
+                "source_type": source_type,
+            }
+
+        def _normalize_explicit_file(payload):
+            if not isinstance(payload, dict):
+                return {}
+            path = str(payload.get("path") or "").strip()
+            name = str(payload.get("name") or "").strip() or (os.path.basename(path) if path else "")
+            item_type = str(payload.get("type") or "").strip().lower() or (os.path.splitext(name)[1].lstrip(".").lower() if name else "")
+            if not path and not name:
+                return {}
+            return {
+                "path": path or name,
+                "name": name or (os.path.basename(path) if path else "current_document"),
+                "type": item_type,
+            }
+
+        def _normalize_reference_files(payload):
+            normalized_items = []
+            for item in payload or []:
+                normalized = _normalize_explicit_file(item)
+                if normalized:
+                    normalized_items.append(normalized)
+            return normalized_items
+
+        def _resolve_file_preview(target, normalized_items):
+            target_key = _normalize_task_path(target.get("path") or target.get("name") or "")
+            for item in normalized_items:
+                item_key = _normalize_task_path(item.get("path") or item.get("name") or "")
+                if target_key and item_key == target_key:
+                    return str(item.get("content_preview") or "")
+            return ""
+
+        context_mode = str(data.get("context_mode") or "").strip().lower()
+        explicit_context_mode = context_mode == "explicit"
+        normalized_selection_context = _normalize_selection_context(data.get("selection_context"))
+        normalized_target_file = _normalize_explicit_file(data.get("target_file"))
+        normalized_reference_files = _normalize_reference_files(data.get("reference_files"))
+
         normalized_files = []
         for item in files:
             if not isinstance(item, dict):
@@ -18257,7 +18336,13 @@ def editor_ai_stream():
                 "content_preview": _sample_task_preview(content_preview or full_text),
             })
 
-        if not normalized_files and (file_name or file_type or full_text):
+        if explicit_context_mode and normalized_target_file:
+            target_key = _normalize_task_path(normalized_target_file.get("path") or normalized_target_file.get("name") or "")
+            normalized_files.sort(
+                key=lambda item: 0 if _normalize_task_path(item.get("path") or item.get("name") or "") == target_key else 1
+            )
+
+        if not explicit_context_mode and not normalized_files and (file_name or file_type or full_text):
             inferred_name = file_name or "current_document"
             inferred_type = file_type or os.path.splitext(inferred_name)[1].lstrip(".").lower()
             normalized_files.append({
@@ -18271,7 +18356,27 @@ def editor_ai_stream():
 
         current_file = ""
         current_file_name = file_name or ""
-        if normalized_files:
+        current_file_text = full_text
+        if explicit_context_mode:
+            current_file_name = ""
+            current_file_text = ""
+            if normalized_target_file:
+                current_file = str(normalized_target_file.get("path") or normalized_target_file.get("name") or "")
+                current_file_name = (
+                    str(normalized_target_file.get("name") or "").strip()
+                    or current_file_name
+                    or os.path.basename(current_file)
+                )
+                current_file_text = _resolve_file_preview(normalized_target_file, normalized_files)
+            elif len(normalized_files) == 1:
+                current_file = str(normalized_files[0].get("path") or "")
+                current_file_name = (
+                    str(normalized_files[0].get("name") or "").strip()
+                    or current_file_name
+                    or os.path.basename(current_file)
+                )
+                current_file_text = str(normalized_files[0].get("content_preview") or "")
+        elif normalized_files:
             current_file = str(normalized_files[0].get("path") or "")
             current_file_name = (
                 str(normalized_files[0].get("name") or "").strip()
@@ -18282,11 +18387,16 @@ def editor_ai_stream():
         task_options = {
             "model_mode": model_mode,
             "model_id": normalized_model_id,
+            "local_model": configured_local_model_id,
             "session_id": session_id,
             "current_file": current_file,
             "current_file_name": current_file_name,
             "current_file_id": str(data.get("current_file_id") or "").strip(),
-            "current_file_text": full_text,
+            "current_file_text": current_file_text,
+            "context_mode": context_mode,
+            "selection_context": normalized_selection_context,
+            "target_file": normalized_target_file,
+            "reference_files": normalized_reference_files,
         }
 
         def generate_task():
@@ -18334,6 +18444,13 @@ def editor_ai_stream():
         selection_offset,
     )
 
+    resolved_model_id = _normalize_editor_stream_model_id(model_mode, requested_model_id)
+    request_extra = {}
+    if resolved_model_id:
+        request_extra["preferred_model"] = resolved_model_id
+    if configured_local_model_id:
+        request_extra["local_model"] = configured_local_model_id
+
     req = AgentRequest(
         prompt=prompt,
         session_id=session_id,
@@ -18349,6 +18466,7 @@ def editor_ai_stream():
         csv_data=csv_data,
         action_type=action,
         action_system_prompt=action_system_prompt,
+        extra=request_extra,
     )
 
     def generate():
@@ -18775,6 +18893,8 @@ def editor_ai_chart():
     instruction = (data.get("instruction") or "").strip()
     lang = (data.get("lang") or "python").strip().lower()
     model_mode = normalize_model_mode(data.get("model_mode"), default="cloud")  # 'local' | 'cloud'
+    requested_model_id = str(data.get("model_id") or "").strip()
+    configured_local_model_id = _get_configured_local_model_id()
     if lang not in ("python", "r"):
         lang = "python"
 
@@ -18809,7 +18929,7 @@ def editor_ai_chart():
     if data_context:
         code_prompt += f"\n参考数据/文本：\n{data_context[:3000]}\n"
 
-    model_id = MODEL_MAP.get("CHAT", "gemini-2.5-flash")
+    model_id = _normalize_editor_stream_model_id(model_mode, requested_model_id)
 
     def generate():
         import re as _re
@@ -18838,7 +18958,7 @@ def editor_ai_chart():
             # Ollama fallback (or primary when model_mode=='local')
             if not _is_ollama_alive():
                 return "none", None
-            _local = _get_local_provider()
+            _local = _get_local_provider(configured_local_model_id)
             _res = _local.generate_content(prompt=p, stream=False)
             _code = (_res.get("content", "") if isinstance(_res, dict) else str(_res)).strip() or None
             return "local", _code
