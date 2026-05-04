@@ -3,870 +3,1240 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koto (言) — 本地优先 AI 文件工作台</title>
-    <meta name="description" content="Koto 是一款本地优先的 AI 文件工作台，支持 Word、PPT、Excel 文件内联 AI 编辑，内置写作润色、翻译、摘要等 8 种技能，同时提供多模型对话、知识库、语音交互和工作流自动化。数据默认本地存储，按需开启 Gemini 或 Ollama 模型。">
+    <title>Koto - 本地文件助手</title>
+    <meta name="description" content="Koto 是本地优先的文件助手。它直接嵌入你的本地工作流，在文件里实时交互、规划与执行，并按你的要求切换本地或云端能力。">
+    <meta name="theme-color" content="#f3eee4">
+    <meta property="og:title" content="Koto - 本地文件助手">
+    <meta property="og:description" content="本地优先，按需切云，所改即所得，让 AI Agent 从黑盒任务变成白盒实时交互。">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://loganwon.github.io/Koto/">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Noto+Sans+SC:wght@400;500;700;800&family=Sora:wght@500;700;800&display=swap" rel="stylesheet">
     <style>
-            :root {
-            --bg-primary: #05080f;
-            --bg-secondary: #0b111d;
-            --bg-card: #0e1525;
-            --bg-tertiary: #111a2a;
-            --accent-primary: #10b981;
-            --accent-secondary: #34d399;
-            --accent-gradient: linear-gradient(135deg, #059669, #10b981);
-            --text-primary: #e8eefc;
-            --text-secondary: #8896b3;
-            --text-tertiary: #5a6a85;
-            --border-color: rgba(255,255,255,0.07);
-            --border-hover: rgba(16,185,129,0.3);
-            --radius-sm: 10px;
-            --radius-md: 14px;
-            --radius-lg: 18px;
-            --radius-xl: 24px;
-            --transition: all 0.25s ease;
-            --shadow-glow: 0 0 40px rgba(16,185,129,0.12);
-            --shadow-card: 0 4px 24px rgba(0,0,0,0.3);
+        :root {
+            --paper: #f3eee4;
+            --paper-strong: rgba(255, 252, 246, 0.92);
+            --paper-soft: rgba(255, 251, 244, 0.78);
+            --ink: #14161c;
+            --ink-soft: #5c6573;
+            --line: rgba(20, 22, 28, 0.1);
+            --line-strong: rgba(20, 22, 28, 0.18);
+            --accent: #0f766e;
+            --accent-soft: #dff3ee;
+            --signal: #c9793e;
+            --signal-soft: #f6e5d8;
+            --surface-dark: #171b23;
+            --surface-dark-2: #11141b;
+            --title: 'Sora', 'Noto Sans SC', sans-serif;
+            --body: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            --mono: 'IBM Plex Mono', monospace;
+            --shadow-lg: 0 32px 88px rgba(22, 26, 34, 0.14);
+            --shadow-md: 0 18px 44px rgba(22, 26, 34, 0.09);
+            --radius-xl: 32px;
+            --radius-lg: 24px;
+            --radius-md: 18px;
+            --radius-sm: 14px;
+            --max-width: 1180px;
+            --transition: 220ms ease;
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
-        html { scroll-behavior: smooth; }
+        html {
+            scroll-behavior: smooth;
+        }
 
         body {
-            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
+            font-family: var(--body);
+            color: var(--ink);
             min-height: 100vh;
             overflow-x: hidden;
-            font-size: 17px;
-            line-height: 1.6;
+            background:
+                radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 32%),
+                radial-gradient(circle at bottom right, rgba(201, 121, 62, 0.12), transparent 35%),
+                linear-gradient(180deg, #faf6ef 0%, var(--paper) 45%, #f8f2e7 100%);
             -webkit-font-smoothing: antialiased;
         }
 
-        /* ===== BACKGROUND ===== */
-        .bg-texture {
-            position: fixed; inset: 0; z-index: 0; pointer-events: none;
-            background:
-                radial-gradient(ellipse 70% 50% at 15% 15%, rgba(16,185,129,0.07) 0%, transparent 60%),
-                radial-gradient(ellipse 60% 50% at 85% 80%, rgba(52,211,153,0.05) 0%, transparent 60%);
-        }
-        .floating-orb {
-            position: fixed; border-radius: 50%; filter: blur(100px); pointer-events: none;
-            animation: float 22s ease-in-out infinite;
-        }
-        .floating-orb.orb-1 { width: 600px; height: 600px; top: -200px; left: -150px; background: rgba(16,185,129,0.09); opacity: 1; }
-        .floating-orb.orb-2 { width: 400px; height: 400px; bottom: -100px; right: -100px; background: rgba(52,211,153,0.07); opacity: 1; animation-delay: -11s; }
-        @keyframes float {
-            0%, 100% { transform: translate(0, 0); }
-            40% { transform: translate(40px, -40px); }
-            70% { transform: translate(-25px, 25px); }
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(20, 22, 28, 0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(20, 22, 28, 0.04) 1px, transparent 1px);
+            background-size: 28px 28px;
+            mask-image: radial-gradient(circle at center, black 54%, transparent 100%);
+            pointer-events: none;
+            opacity: 0.24;
+            z-index: 0;
         }
 
-        /* ===== NAV ===== */
+        a {
+            color: inherit;
+        }
+
+        .page {
+            position: relative;
+            z-index: 1;
+        }
+
         .nav {
-            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-            padding: 0 48px;
-            height: 68px;
-            display: flex; align-items: center; justify-content: space-between;
-            background: rgba(5,8,15,0.85); backdrop-filter: blur(24px);
-            border-bottom: 1px solid var(--border-color);
-        }
-        .nav-brand {
-            display: flex; align-items: center; gap: 12px;
-            font-size: 22px; font-weight: 700; letter-spacing: -0.3px;
-            text-decoration: none; color: var(--text-primary);
-        }
-        .nav-brand .logo {
-            width: 38px; height: 38px; border-radius: 10px;
-            background: var(--accent-gradient);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 18px; font-weight: 800; color: #05080f;
-            flex-shrink: 0;
-        }
-        .nav-links { display: flex; align-items: center; gap: 8px; }
-        .nav-links a {
-            color: var(--text-secondary); text-decoration: none;
-            font-size: 15px; padding: 6px 14px; border-radius: 8px;
-            transition: var(--transition);
-        }
-        .nav-links a:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
-
-        /* ===== BUTTONS ===== */
-        .btn {
-            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-            padding: 11px 26px; border-radius: var(--radius-sm);
-            font-size: 15px; font-weight: 600; cursor: pointer;
-            transition: var(--transition); border: none; text-decoration: none;
-            white-space: nowrap;
-        }
-        .btn-primary {
-            background: var(--accent-gradient); color: #05080f;
-            box-shadow: 0 4px 16px rgba(16,185,129,0.28);
-        }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(16,185,129,0.4); }
-        .btn-ghost {
-            background: transparent; color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
-        .btn-ghost:hover { background: rgba(255,255,255,0.05); border-color: rgba(16,185,129,0.4); color: var(--accent-secondary); }
-        .btn-lg { padding: 15px 42px; font-size: 17px; border-radius: var(--radius-md); }
-
-        /* ===== SECTION STRUCTURE ===== */
-        .section-wrap {
-            position: relative; z-index: 1;
-            max-width: 1160px; margin: 0 auto;
-            padding: 110px 48px;
-        }
-        .section-label {
-            display: inline-flex; align-items: center; gap: 8px;
-            padding: 5px 14px; border-radius: 20px;
-            background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.18);
-            color: var(--accent-primary); font-size: 13px; font-weight: 600;
-            letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 22px;
-        }
-        .section-title {
-            font-size: clamp(32px, 3.5vw, 48px); font-weight: 800;
-            letter-spacing: -0.5px; line-height: 1.15; margin-bottom: 18px;
-        }
-        .section-desc {
-            font-size: 18px; line-height: 1.7;
-            color: var(--text-secondary); max-width: 540px;
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            border-bottom: 1px solid rgba(20, 22, 28, 0.08);
+            backdrop-filter: blur(18px);
+            background: rgba(248, 243, 234, 0.84);
         }
 
-        /* ===== HERO ===== */
-        .hero {
-            position: relative; z-index: 1;
-            min-height: 100vh;
-            display: flex; align-items: center; justify-content: center;
-            padding: 140px 48px 80px;
-        }
-        .hero-inner {
-            max-width: 820px; text-align: center;
-        }
-        .hero-badge {
-            display: inline-flex; align-items: center; gap: 8px;
-            padding: 7px 18px; border-radius: 24px;
-            background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2);
-            color: var(--accent-secondary); font-size: 14px; font-weight: 500;
-            margin-bottom: 36px;
-        }
-        .hero-badge .dot {
-            width: 7px; height: 7px; border-radius: 50%;
-            background: var(--accent-primary);
-            box-shadow: 0 0 6px rgba(16,185,129,0.7);
-            animation: pulse 2s ease-in-out infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.6; transform: scale(0.8); }
-        }
-        .hero-title {
-            font-size: clamp(52px, 7vw, 88px);
-            font-weight: 900; line-height: 1.05;
-            letter-spacing: -2px; margin-bottom: 28px;
-            color: var(--text-primary);
-        }
-        .hero-title .accent {
-            color: var(--accent-primary);
-        }
-        .hero-desc {
-            font-size: clamp(17px, 2vw, 20px); line-height: 1.7;
-            color: var(--text-secondary);
-            max-width: 620px; margin: 0 auto 52px;
-        }
-        .hero-actions {
-            display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
-            margin-bottom: 60px;
-        }
-        .hero-meta {
-            display: flex; align-items: center; justify-content: center;
-            gap: 24px; flex-wrap: wrap;
-            color: var(--text-tertiary); font-size: 14px;
-        }
-        .hero-meta span { display: flex; align-items: center; gap: 6px; }
-
-        /* ===== SKILL MARKETPLACE ===== */
-        .marketplace-section { background: transparent; }
-        .marketplace-header {
-            display: flex; align-items: flex-end; justify-content: space-between;
-            margin-bottom: 56px; gap: 24px; flex-wrap: wrap;
-        }
-        .marketplace-cats {
-            display: flex; flex-wrap: wrap; gap: 10px;
-            margin-top: 24px;
-        }
-        .cat-pill {
-            padding: 7px 18px; border-radius: 24px; font-size: 14px; font-weight: 500;
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            color: var(--text-secondary); cursor: pointer; transition: var(--transition);
-        }
-        .cat-pill:hover, .cat-pill.active {
-            background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.35);
-            color: var(--accent-secondary);
-        }
-        .skill-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 48px;
-        }
-        .skill-card {
-            padding: 28px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            transition: var(--transition); cursor: pointer; position: relative; overflow: hidden;
-        }
-        .skill-card::before {
-            content: ''; position: absolute; inset: 0;
-            background: linear-gradient(135deg, rgba(16,185,129,0.04) 0%, transparent 60%);
-            opacity: 0; transition: var(--transition);
-        }
-        .skill-card:hover { border-color: var(--border-hover); transform: translateY(-4px); box-shadow: var(--shadow-glow); }
-        .skill-card:hover::before { opacity: 1; }
-        .skill-card-head {
-            display: flex; align-items: flex-start; justify-content: space-between;
-            margin-bottom: 14px;
-        }
-        .skill-icon {
-            width: 52px; height: 52px; border-radius: 14px;
-            background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.12);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 26px; flex-shrink: 0;
-        }
-        .skill-badge {
-            font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px;
-            background: rgba(16,185,129,0.12); color: var(--accent-primary);
-            border: 1px solid rgba(16,185,129,0.2);
-        }
-        .skill-badge.new { background: rgba(251,191,36,0.1); color: #fbbf24; border-color: rgba(251,191,36,0.2); }
-        .skill-card h3 {
-            font-size: 18px; font-weight: 700; margin-bottom: 10px; letter-spacing: -0.2px;
-        }
-        .skill-card p {
-            color: var(--text-secondary); font-size: 15px; line-height: 1.6;
-        }
-        .skill-card-footer {
-            display: flex; align-items: center; gap: 14px; margin-top: 18px;
-            padding-top: 14px; border-top: 1px solid var(--border-color);
-            font-size: 13px; color: var(--text-tertiary);
-        }
-        .marketplace-cta {
-            text-align: center;
-            padding: 56px 40px;
-            background: var(--bg-card);
-            border-radius: var(--radius-xl);
-            border: 1px solid var(--border-color);
-        }
-        .marketplace-cta h3 { font-size: 28px; font-weight: 700; margin-bottom: 12px; }
-        .marketplace-cta p { color: var(--text-secondary); font-size: 17px; margin-bottom: 32px; max-width: 460px; margin-left: auto; margin-right: auto; }
-
-        /* ===== FEATURES GRID ===== */
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .feature-card {
-            padding: 32px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            transition: var(--transition);
-        }
-        .feature-card:hover { border-color: var(--border-hover); transform: translateY(-3px); box-shadow: var(--shadow-card); }
-        .feature-icon {
-            width: 52px; height: 52px; border-radius: 14px;
-            background: rgba(16,185,129,0.08);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 26px; margin-bottom: 22px;
-        }
-        .feature-card h3 { font-size: 19px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.2px; }
-        .feature-card p { color: var(--text-secondary); font-size: 15px; line-height: 1.65; }
-
-        /* ===== STATS ===== */
-        .stats-band {
-            position: relative; z-index: 1;
-            background: linear-gradient(180deg, rgba(16,185,129,0.04) 0%, transparent 100%);
-            border-top: 1px solid var(--border-color);
-            border-bottom: 1px solid var(--border-color);
-        }
-        .stats-inner {
-            max-width: 960px; margin: 0 auto;
-            display: flex; justify-content: center; gap: 0; flex-wrap: wrap;
-        }
-        .stat {
-            text-align: center; padding: 56px 48px;
-            border-right: 1px solid var(--border-color);
-        }
-        .stat:last-child { border-right: none; }
-        .stat-value {
-            font-size: clamp(32px, 4vw, 56px); font-weight: 900; letter-spacing: -2px; line-height: 1.15;
-            color: var(--accent-primary); margin-bottom: 10px;
-        }
-        .stat-label { color: var(--text-secondary); font-size: 15px; font-weight: 500; }
-
-        /* ===== ACTIVATION CODE ===== */
-        .activation-section {
-            position: relative; z-index: 1;
-            background: radial-gradient(ellipse 80% 60% at 50% 100%, rgba(16,185,129,0.06) 0%, transparent 70%);
-        }
-        .activation-inner {
-            max-width: 1160px; margin: 0 auto; padding: 110px 48px;
-        }
-        .steps-row {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
-            margin-top: 56px;
-        }
-        .step-card {
-            padding: 36px 32px; border-radius: var(--radius-xl);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            position: relative; transition: var(--transition);
-        }
-        .step-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow-glow); }
-        .step-num {
-            width: 40px; height: 40px; border-radius: 50%;
-            background: var(--accent-gradient);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 16px; font-weight: 800; color: #05080f;
-            margin-bottom: 22px;
-        }
-        .step-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.2px; }
-        .step-card p { color: var(--text-secondary); font-size: 15px; line-height: 1.7; }
-        .step-card .step-note {
-            margin-top: 18px; padding: 14px 16px;
-            background: rgba(16,185,129,0.06); border-radius: var(--radius-sm);
-            border-left: 3px solid var(--accent-primary);
-            font-size: 14px; color: var(--text-secondary); line-height: 1.6;
-        }
-        .step-card .step-note strong { color: var(--accent-secondary); }
-        .activation-contact {
-            margin-top: 56px; padding: 44px 48px;
-            background: var(--bg-card); border-radius: var(--radius-xl);
-            border: 1px solid var(--border-color);
-            display: flex; align-items: center; justify-content: space-between;
-            gap: 32px; flex-wrap: wrap;
-        }
-        .activation-contact .left h3 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
-        .activation-contact .left p { color: var(--text-secondary); font-size: 16px; max-width: 420px; line-height: 1.6; }
-        .wechat-chip {
-            display: flex; align-items: center; gap: 16px;
-            padding: 20px 28px; border-radius: var(--radius-lg);
-            background: rgba(16,185,129,0.06); border: 1.5px solid rgba(16,185,129,0.25);
-            flex-shrink: 0;
-        }
-        .wechat-chip .wc-icon { font-size: 32px; }
-        .wechat-chip .wc-label { font-size: 12px; color: var(--text-tertiary); font-weight: 500; margin-bottom: 4px; }
-        .wechat-chip .wc-id { font-size: 20px; font-weight: 700; letter-spacing: 1px; color: var(--text-primary); }
-
-        /* ===== DOWNLOAD ===== */
-        .download-section {
-            position: relative; z-index: 1;
-            background: var(--bg-secondary);
-            border-top: 1px solid var(--border-color);
-        }
-        .download-inner {
-            max-width: 1160px; margin: 0 auto; padding: 110px 48px;
-            display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center;
-        }
-        .download-left h2 { font-size: clamp(30px, 3.5vw, 44px); font-weight: 800; letter-spacing: -0.5px; margin-bottom: 18px; }
-        .download-left p { color: var(--text-secondary); font-size: 17px; line-height: 1.7; margin-bottom: 36px; }
-        .download-actions { display: flex; flex-direction: column; gap: 14px; }
-        .download-btn {
-            display: flex; align-items: center; gap: 18px;
-            padding: 20px 24px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            text-decoration: none; color: var(--text-primary);
-            transition: var(--transition); cursor: pointer;
-        }
-        .download-btn:hover { border-color: var(--border-hover); transform: translateX(4px); box-shadow: var(--shadow-card); }
-        .download-btn .dl-icon {
-            width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0;
-            background: var(--accent-gradient);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 22px; color: #05080f;
-        }
-        .download-btn .dl-text { flex: 1; }
-        .download-btn .dl-text strong { display: block; font-size: 16px; font-weight: 700; margin-bottom: 4px; }
-        .download-btn .dl-text span { font-size: 13px; color: var(--text-secondary); }
-        .download-btn .dl-arrow { color: var(--text-tertiary); font-size: 18px; }
-        .download-right {
-            display: flex; flex-direction: column; gap: 20px;
-        }
-        .req-card {
-            padding: 28px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-        }
-        .req-card h4 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
-        .req-item {
-            display: flex; align-items: center; gap: 10px;
-            font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;
-        }
-        .req-item:last-child { margin-bottom: 0; }
-        .req-item .check { color: var(--accent-primary); font-size: 15px; }
-
-        /* ===== FOOTER ===== */
-        .footer {
-            position: relative; z-index: 1;
-            padding: 64px 48px 36px;
-            border-top: 1px solid var(--border-color);
-        }
+        .nav-inner,
+        .hero,
+        .section,
         .footer-inner {
-            max-width: 1160px; margin: 0 auto;
-            display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding-left: 24px;
+            padding-right: 24px;
         }
-        .footer-brand {
-            display: flex; align-items: center; gap: 10px;
-            font-size: 20px; font-weight: 700; text-decoration: none; color: var(--text-primary);
-        }
-        .footer-brand .logo {
-            width: 32px; height: 32px; border-radius: 8px;
-            background: var(--accent-gradient);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 15px; font-weight: 800; color: #05080f;
-        }
-        .footer-links { display: flex; gap: 24px; flex-wrap: wrap; }
-        .footer-links a { color: var(--text-tertiary); text-decoration: none; font-size: 14px; transition: var(--transition); }
-        .footer-links a:hover { color: var(--text-primary); }
-        .footer-copy { color: var(--text-tertiary); font-size: 13px; }
 
-        /* ===== ANIMATIONS ===== */
-        .fade-up { opacity: 0; transform: translateY(28px); animation: fadeUp 0.75s ease forwards; }
-        .fade-up-1 { animation-delay: 0.08s; }
-        .fade-up-2 { animation-delay: 0.18s; }
-        .fade-up-3 { animation-delay: 0.28s; }
-        .fade-up-4 { animation-delay: 0.38s; }
-        @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
-
-        /* ===== RESPONSIVE ===== */
-        @media (max-width: 900px) {
-            .download-inner { grid-template-columns: 1fr; gap: 40px; }
-            .steps-row { grid-template-columns: 1fr; }
-            .stat { border-right: none; border-bottom: 1px solid var(--border-color); padding: 40px 32px; }
-            .stat:last-child { border-bottom: none; }
+        .nav-inner {
+            min-height: 72px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
         }
-        @media (max-width: 680px) {
-            .nav { padding: 0 20px; }
-            .nav-links a { display: none; }
-            .hero { padding: 120px 24px 64px; }
-            .section-wrap, .activation-inner, .download-inner { padding-left: 24px; padding-right: 24px; }
-            .activation-contact { flex-direction: column; }
-            .footer { padding: 48px 24px 28px; }
+
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 14px;
+            text-decoration: none;
+        }
+
+        .brand-mark {
+            width: 42px;
+            height: 42px;
+            border-radius: 14px;
+            display: grid;
+            place-items: center;
+            color: #fff;
+            font-family: var(--title);
+            font-size: 20px;
+            font-weight: 800;
+            background: linear-gradient(135deg, var(--accent), #22a391 72%, #8ecfc4 100%);
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+        }
+
+        .brand-copy strong {
+            display: block;
+            font-family: var(--title);
+            font-size: 1.02rem;
+            letter-spacing: -0.02em;
+        }
+
+        .brand-copy span {
+            display: block;
+            color: var(--ink-soft);
+            font-size: 0.82rem;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .nav-links a {
+            text-decoration: none;
+            color: var(--ink-soft);
+            padding: 10px 14px;
+            border-radius: 999px;
+            transition: background var(--transition), color var(--transition), transform var(--transition);
+        }
+
+        .nav-links a:hover {
+            background: rgba(20, 22, 28, 0.05);
+            color: var(--ink);
+            transform: translateY(-1px);
+        }
+
+        .hero {
+            padding-top: 84px;
+            padding-bottom: 46px;
+            display: grid;
+            grid-template-columns: minmax(0, 0.92fr) minmax(360px, 1.08fr);
+            gap: 34px;
+            align-items: center;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 9px 14px;
+            border-radius: 999px;
+            background: rgba(15, 118, 110, 0.08);
+            border: 1px solid rgba(15, 118, 110, 0.16);
+            color: var(--accent);
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .eyebrow-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: var(--signal);
+            box-shadow: 0 0 0 6px rgba(201, 121, 62, 0.12);
+        }
+
+        .hero-title,
+        .section-title {
+            font-family: var(--title);
+            letter-spacing: -0.05em;
+            line-height: 0.98;
+            font-weight: 800;
+        }
+
+        .hero-title {
+            margin-top: 20px;
+            font-size: clamp(3rem, 7vw, 5.6rem);
+            max-width: 8.6ch;
+        }
+
+        .hero-sub,
+        .section-copy {
+            color: var(--ink-soft);
+            line-height: 1.8;
+            font-size: 1.02rem;
+        }
+
+        .hero-sub {
+            margin-top: 22px;
+            max-width: 54ch;
+        }
+
+        .hero-actions {
+            margin-top: 30px;
+            display: flex;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 52px;
+            padding: 0 22px;
+            border-radius: 999px;
+            border: 1px solid transparent;
+            text-decoration: none;
+            font-weight: 700;
+            transition: transform var(--transition), background var(--transition), border-color var(--transition), box-shadow var(--transition);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-primary {
+            color: #fff;
+            background: linear-gradient(135deg, var(--ink) 0%, #2e3640 100%);
+            box-shadow: var(--shadow-md);
+        }
+
+        .btn-secondary {
+            color: var(--ink);
+            background: rgba(255, 255, 255, 0.52);
+            border-color: var(--line-strong);
+        }
+
+        .pill-row {
+            margin-top: 22px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .pill {
+            padding: 9px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.58);
+            color: var(--ink-soft);
+            font-size: 0.92rem;
+        }
+
+        .product-stage {
+            border-radius: var(--radius-xl);
+            padding: 20px;
+            background:
+                radial-gradient(circle at top left, rgba(34, 163, 145, 0.18), transparent 34%),
+                linear-gradient(180deg, var(--surface-dark) 0%, var(--surface-dark-2) 100%);
+            color: #f4f7fb;
+            box-shadow: var(--shadow-lg);
+            overflow: hidden;
+        }
+
+        .stage-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-bottom: 16px;
+        }
+
+        .stage-label {
+            color: rgba(244, 247, 251, 0.74);
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .mode-toggle {
+            display: inline-flex;
+            gap: 6px;
+            padding: 6px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            font-family: var(--mono);
+            font-size: 0.74rem;
+        }
+
+        .mode-toggle span {
+            padding: 8px 12px;
+            border-radius: 999px;
+            color: rgba(244, 247, 251, 0.68);
+        }
+
+        .mode-toggle .active {
+            background: rgba(223, 243, 238, 0.18);
+            color: #dff3ee;
+        }
+
+        .stage-grid {
+            display: grid;
+            grid-template-columns: 0.78fr 1.2fr 0.9fr;
+            gap: 12px;
+            min-height: 452px;
+        }
+
+        .rail {
+            border-radius: 22px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(255, 255, 255, 0.05);
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            backdrop-filter: blur(10px);
+        }
+
+        .rail-label {
+            color: rgba(244, 247, 251, 0.64);
+            font-family: var(--mono);
+            font-size: 0.74rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .file-item,
+        .plan-item {
+            padding: 12px 13px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.04);
+            color: rgba(244, 247, 251, 0.84);
+            font-size: 0.92rem;
+        }
+
+        .file-item small {
+            display: block;
+            margin-top: 4px;
+            color: rgba(244, 247, 251, 0.5);
+            font-size: 0.76rem;
+        }
+
+        .file-item.active {
+            background: rgba(34, 163, 145, 0.18);
+            border: 1px solid rgba(143, 210, 196, 0.24);
+        }
+
+        .doc-shell {
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .doc-chip,
+        .apply-chip {
+            display: inline-flex;
+            align-items: center;
+            width: fit-content;
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-size: 0.76rem;
+            font-family: var(--mono);
+        }
+
+        .doc-chip {
+            background: rgba(223, 243, 238, 0.14);
+            color: #dff3ee;
+        }
+
+        .doc-surface {
+            flex: 1;
+            border-radius: 18px;
+            background: #f7f5f1;
+            color: var(--ink);
+            padding: 18px;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.44);
+        }
+
+        .doc-surface h3 {
+            font-family: var(--title);
+            font-size: 1.08rem;
+            letter-spacing: -0.03em;
+            margin-bottom: 10px;
+        }
+
+        .doc-surface p {
+            color: #555f6a;
+            line-height: 1.76;
+            font-size: 0.95rem;
+        }
+
+        .doc-highlight {
+            margin: 14px 0;
+            padding: 14px 16px;
+            border-left: 4px solid var(--signal);
+            border-radius: 14px;
+            background: linear-gradient(90deg, rgba(201, 121, 62, 0.18), rgba(201, 121, 62, 0.04));
+            color: #2d343d;
+            font-size: 0.92rem;
+        }
+
+        .diff-card {
+            border: 1px solid rgba(20, 22, 28, 0.08);
+            border-radius: 16px;
+            overflow: hidden;
+            background: #fffdf9;
+        }
+
+        .diff-row {
+            display: grid;
+            grid-template-columns: 28px 1fr;
+            gap: 10px;
+            padding: 12px 14px;
+            border-bottom: 1px solid rgba(20, 22, 28, 0.06);
+        }
+
+        .diff-row:last-child {
+            border-bottom: none;
+        }
+
+        .diff-row span {
+            font-family: var(--mono);
+            font-weight: 700;
+        }
+
+        .diff-row p {
+            font-size: 0.9rem;
+            line-height: 1.68;
+        }
+
+        .diff-row.minus {
+            background: rgba(239, 68, 68, 0.04);
+        }
+
+        .diff-row.minus span {
+            color: #c2410c;
+        }
+
+        .diff-row.plus {
+            background: rgba(15, 118, 110, 0.06);
+        }
+
+        .diff-row.plus span {
+            color: var(--accent);
+        }
+
+        .apply-chip {
+            margin-top: 14px;
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .plan-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .plan-item {
+            position: relative;
+            padding-left: 42px;
+        }
+
+        .plan-item::before {
+            content: "";
+            position: absolute;
+            left: 16px;
+            top: 16px;
+            width: 12px;
+            height: 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.16);
+        }
+
+        .plan-item.done::before {
+            background: rgba(223, 243, 238, 0.82);
+        }
+
+        .plan-item.active {
+            background: rgba(201, 121, 62, 0.14);
+            border: 1px solid rgba(201, 121, 62, 0.22);
+        }
+
+        .plan-item.active::before {
+            background: var(--signal);
+            box-shadow: 0 0 0 5px rgba(201, 121, 62, 0.12);
+        }
+
+        .plan-note,
+        .mini-log {
+            border-radius: 16px;
+            padding: 14px;
+            font-size: 0.86rem;
+            line-height: 1.68;
+        }
+
+        .plan-note {
+            background: rgba(255, 255, 255, 0.05);
+            color: rgba(244, 247, 251, 0.78);
+        }
+
+        .mini-log {
+            background: rgba(223, 243, 238, 0.1);
+            color: rgba(223, 243, 238, 0.86);
+            font-family: var(--mono);
+        }
+
+        .section {
+            max-width: var(--max-width);
+            margin: 0 auto;
+            padding: 74px 24px 0;
+        }
+
+        .promise-grid,
+        .compare-wrap,
+        .download-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .promise-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .promise-card,
+        .compare-card,
+        .download-shell,
+        .download-card {
+            background: var(--paper-soft);
+            border: 1px solid var(--line);
+            box-shadow: var(--shadow-md);
+        }
+
+        .promise-card {
+            border-radius: 24px;
+            padding: 24px;
+        }
+
+        .promise-card .index,
+        .compare-label,
+        .download-tag,
+        .step-index {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 40px;
+            height: 32px;
+            padding: 0 12px;
+            border-radius: 999px;
+            font-family: var(--mono);
+            font-size: 0.74rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .promise-card .index {
+            background: var(--ink);
+            color: #fff;
+            margin-bottom: 16px;
+        }
+
+        .promise-card h3,
+        .compare-card h3,
+        .download-copy h2,
+        .download-card strong,
+        .section-title {
+            font-family: var(--title);
+            letter-spacing: -0.04em;
+        }
+
+        .promise-card h3 {
+            font-size: 1.12rem;
+            margin-bottom: 10px;
+        }
+
+        .promise-card p,
+        .compare-card li,
+        .download-copy p,
+        .download-card small,
+        .section-copy {
+            color: var(--ink-soft);
+            line-height: 1.76;
+        }
+
+        .section-head {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(280px, 0.84fr);
+            gap: 24px;
+            align-items: end;
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            margin-top: 14px;
+            font-size: clamp(2.15rem, 5vw, 3.6rem);
+        }
+
+        .compare-wrap {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .compare-card {
+            border-radius: 28px;
+            padding: 28px;
+        }
+
+        .compare-card.dark {
+            background: linear-gradient(180deg, #1a1d25 0%, #12151c 100%);
+            border-color: rgba(255, 255, 255, 0.06);
+        }
+
+        .compare-card.dark h3,
+        .compare-card.dark li,
+        .compare-card.dark .compare-label {
+            color: #edf1f8;
+        }
+
+        .compare-card.dark li {
+            color: rgba(237, 241, 248, 0.76);
+        }
+
+        .compare-label {
+            background: rgba(20, 22, 28, 0.08);
+            color: var(--ink-soft);
+            margin-bottom: 16px;
+        }
+
+        .compare-card.dark .compare-label {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .compare-card h3 {
+            font-size: 1.28rem;
+            margin-bottom: 10px;
+        }
+
+        .compare-card ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 18px;
+        }
+
+        .compare-card li {
+            position: relative;
+            padding-left: 18px;
+            font-size: 0.98rem;
+        }
+
+        .compare-card li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0.72em;
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: var(--signal);
+        }
+
+        .compare-card.dark li::before {
+            background: rgba(237, 241, 248, 0.84);
+        }
+
+        .capability-strip {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .capability-strip span {
+            padding: 9px 14px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.58);
+            color: var(--ink-soft);
+            font-size: 0.9rem;
+        }
+
+        .download-shell {
+            display: grid;
+            grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+            gap: 18px;
+            padding: 28px;
+            border-radius: var(--radius-xl);
+        }
+
+        .download-copy h2 {
+            margin-top: 14px;
+            font-size: clamp(2rem, 4.5vw, 3.2rem);
+            line-height: 1.02;
+        }
+
+        .download-copy p {
+            margin-top: 14px;
+        }
+
+        .short-steps {
+            margin-top: 22px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .short-step {
+            display: grid;
+            grid-template-columns: 56px 1fr;
+            gap: 12px;
+            align-items: center;
+            padding: 14px 16px;
+            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.52);
+            border: 1px solid var(--line);
+        }
+
+        .step-index {
+            background: linear-gradient(135deg, var(--signal), #e29d67);
+            color: #fff;
+        }
+
+        .download-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            align-content: start;
+        }
+
+        .download-card {
+            border-radius: 24px;
+            padding: 24px;
+            text-decoration: none;
+            transition: transform var(--transition), background var(--transition), border-color var(--transition);
+        }
+
+        .download-card:hover {
+            transform: translateY(-3px);
+            background: rgba(255, 255, 255, 0.92);
+            border-color: rgba(15, 118, 110, 0.24);
+        }
+
+        .download-card.secondary {
+            grid-column: span 2;
+        }
+
+        .download-tag {
+            background: var(--ink);
+            color: #fff;
+        }
+
+        .download-tag.alt {
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .download-tag.subtle {
+            background: rgba(20, 22, 28, 0.08);
+            color: var(--ink-soft);
+        }
+
+        .download-card strong {
+            display: block;
+            font-size: 1.18rem;
+            margin: 12px 0 8px;
+        }
+
+        .footer {
+            padding: 66px 24px 40px;
+        }
+
+        .footer-inner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 18px;
+            flex-wrap: wrap;
+            color: var(--ink-soft);
+            border-top: 1px solid rgba(20, 22, 28, 0.08);
+            padding-top: 22px;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 18px;
+            flex-wrap: wrap;
+        }
+
+        .footer-links a {
+            text-decoration: none;
+            color: var(--ink-soft);
+        }
+
+        .footer-links a:hover {
+            color: var(--ink);
+        }
+
+        .reveal {
+            opacity: 0;
+            transform: translateY(28px);
+            transition: opacity 650ms ease, transform 650ms cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        .reveal.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        @media (max-width: 1080px) {
+            .hero {
+                grid-template-columns: 1fr;
+            }
+
+            .hero-title {
+                max-width: none;
+            }
+
+            .stage-grid,
+            .promise-grid,
+            .download-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .section-head,
+            .download-shell,
+            .compare-wrap {
+                grid-template-columns: 1fr;
+            }
+
+            .download-card.secondary {
+                grid-column: span 2;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .nav-inner {
+                padding-top: 14px;
+                padding-bottom: 14px;
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .nav-links {
+                width: 100%;
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 8px;
+            }
+
+            .nav-links a {
+                white-space: nowrap;
+                text-align: center;
+                padding: 10px 6px;
+                font-size: 0.95rem;
+                background: rgba(20, 22, 28, 0.04);
+            }
+
+            .hero {
+                padding-top: 106px;
+            }
+
+            .hero-title {
+                font-size: clamp(2.6rem, 12vw, 4.1rem);
+            }
+
+            .stage-grid,
+            .promise-grid,
+            .download-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .download-card.secondary {
+                grid-column: span 1;
+            }
+
+            .section {
+                padding-top: 62px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="bg-texture"></div>
-    <div class="floating-orb orb-1"></div>
-    <div class="floating-orb orb-2"></div>
-
-    <!-- ===== NAV ===== -->
-    <nav class="nav">
-        <a href="#" class="nav-brand">
-            <div class="logo">言</div>
-            Koto
-        </a>
-        <div class="nav-links">
-            <a href="#marketplace">技能系统</a>
-            <a href="#features">核心能力</a>
-            <a href="#activation">快速上手</a>
-            <a href="#download">下载</a>
-            <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
-        </div>
-    </nav>
-
-    <!-- ===== HERO ===== -->
-    <section class="hero">
-        <div class="hero-inner">
-            <div class="hero-badge fade-up" id="hero-version-badge">
-                <span class="dot"></span>
-                <span id="version-text">v1.7.1</span> · 开源 · Python · 本地优先
-            </div>
-            <h1 class="hero-title fade-up fade-up-1">
-                属于你的<br><span class="accent">AI 文件工作台</span>
-            </h1>
-            <p class="hero-desc fade-up fade-up-2">
-                在你的电脑上直接打开 Word、PPT、Excel，AI 悬浮工具栏一键润色、翻译、摘要。本地文件管理 + 知识库 + 多模型对话，数据始终留在你的设备上。
-            </p>
-            <div class="hero-actions fade-up fade-up-3">
-                <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-hero" class="btn btn-primary btn-lg" target="_blank" rel="noopener">
-                    ⬇ 下载最新版本
+    <div class="page">
+        <header class="nav">
+            <div class="nav-inner">
+                <a class="brand" href="#top">
+                    <div class="brand-mark">言</div>
+                    <div class="brand-copy">
+                        <strong>Koto</strong>
+                        <span>本地文件助手</span>
+                    </div>
                 </a>
-                <a href="https://github.com/Loganwon/Koto" class="btn btn-ghost btn-lg" target="_blank" rel="noopener">
-                    查看 GitHub
-                </a>
+                <nav class="nav-links">
+                    <a href="#core">核心卖点</a>
+                    <a href="#whitebox">白盒交互</a>
+                    <a href="#download">下载</a>
+                </nav>
             </div>
-            <div class="hero-meta fade-up fade-up-4">
-                <span>🔒 数据本地存储</span>
-                <span>📄 Word / PPT / Excel</span>
-                <span>🤖 Gemini + Ollama</span>
-                <span>🎙️ 语音交互</span>
-            </div>
-        </div>
-    </section>
+        </header>
 
-    <!-- ===== SKILL MARKETPLACE ===== -->
-    <section id="marketplace">
-        <div class="section-wrap">
-            <div class="marketplace-header">
-                <div>
-                    <div class="section-label">🧩 技能系统</div>
-                    <h2 class="section-title">文件内联 AI 技能<br>悬浮工具栏一键调用</h2>
-                    <p class="section-desc">在 Word、PPT、Excel 中选中文字，悬浮工具栏即时弹出。8 种内置技能覆盖日常文档场景，也支持自定义提示词创建专属技能。</p>
-                    <div class="marketplace-cats">
-                        <span class="cat-pill active">全部</span>
-                        <span class="cat-pill">✍️ 写作润色</span>
-                        <span class="cat-pill">🌐 翻译</span>
-                        <span class="cat-pill">📝 摘要</span>
-                        <span class="cat-pill">✨ 续写</span>
-                        <span class="cat-pill">🔄 改写</span>
-                        <span class="cat-pill">💡 注释</span>
-                        <span class="cat-pill">💻 代码执行</span>
+        <main id="top">
+            <section class="hero">
+                <div class="reveal visible">
+                    <div class="eyebrow">
+                        <span class="eyebrow-dot"></span>
+                        <span>Local File Assistant</span>
+                        <span id="version-text">v1.7.2</span>
                     </div>
-                </div>
-            </div>
-
-            <div class="skill-grid">
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">✍️</div>
-                        <span class="skill-badge">常用</span>
-                    </div>
-                    <h3>写作润色</h3>
-                    <p>一键优化文章表达，让文字更流畅自然，保留原意的同时提升文档品质。支持正式 / 轻松 / 专业多种语气。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>✍️ 写作</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">🌐</div>
-                        <span class="skill-badge">常用</span>
-                    </div>
-                    <h3>智能翻译</h3>
-                    <p>基于语境的高质量翻译，中英双向互译，保留专业术语和文档格式，远超机翻质量。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>🌐 翻译</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">📝</div>
-                        <span class="skill-badge">常用</span>
-                    </div>
-                    <h3>内容摘要</h3>
-                    <p>自动提炼文档关键论点和要点，生成简洁中文摘要（200 字以内），快速掌握长文精华。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>📝 摘要</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">✨</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>续写助手</h3>
-                    <p>根据已有文本自然延续写作（100–200 字），保持语气和风格一致，衔接流畅，告别写作卡顿。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>✨ 创作</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">🔄</div>
-                        <span class="skill-badge">精选</span>
-                    </div>
-                    <h3>文本改写</h3>
-                    <p>保留核心意思，用不同措辞和句式重新表达，让语言更多样化，避免重复用词。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>🔄 改写</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">💡</div>
-                        <span class="skill-badge">精选</span>
-                    </div>
-                    <h3>智能注释</h3>
-                    <p>自动为文本添加简洁注释，解释关键概念、术语或难点，注释插入相应位置，不破坏原文结构。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>💡 注释</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">💻</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>代码沙箱执行</h3>
-                    <p>在安全沙箱中执行 AI 生成或用户编写的 Python 代码，支持图表输出，结果直接展示在对话界面。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>💻 代码</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">🎯</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>自定义技能</h3>
-                    <p>用自然语言描述你的需求，AI 自动生成专属技能配置。打造私人 AI 工作流，无需编程，即插即用。</p>
-                    <div class="skill-card-footer">
-                        <span>🛠 DIY</span>
-                        <span>🧩 自定义</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="marketplace-cta">
-                <h3>探索更多用法</h3>
-                <p>8 种内置技能覆盖日常文档场景，自定义技能随时扩展。本地运行保护隐私，Gemini 云端与 Ollama 本地模型自由切换。</p>
-                <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
-                    <a href="#download" class="btn btn-primary">下载体验</a>
-                    <a href="https://github.com/Loganwon/Koto" class="btn btn-ghost" target="_blank" rel="noopener">查看源码</a>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ===== STATS ===== -->
-    <div class="stats-band">
-        <div class="stats-inner">
-            <div class="stat"><div class="stat-value">8+</div><div class="stat-label">内置 AI 技能</div></div>
-            <div class="stat"><div class="stat-value">DOCX<br>PPT<br>XLSX</div><div class="stat-label">全格式文档编辑</div></div>
-            <div class="stat"><div class="stat-value">本地<br>+云端</div><div class="stat-label">双模式运行</div></div>
-            <div class="stat"><div class="stat-value">Gemini<br>+Ollama</div><div class="stat-label">多模型支持</div></div>
-        </div>
-    </div>
-
-    <!-- ===== FEATURES ===== -->
-    <section id="features">
-        <div class="section-wrap">
-            <div style="text-align:center;margin-bottom:64px;">
-                <div class="section-label" style="display:inline-flex;">⚡ 核心能力</div>
-                <h2 class="section-title" style="text-align:center;">不止于对话</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;">文件内联编辑、知识库 RAG、语音交互、代码沙箱——本地处理确保隐私，Gemini 或 Ollama 按需调用</p>
-            </div>
-            <div class="features-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">📄</div>
-                    <h3>文件内联 AI 编辑</h3>
-                    <p>打开 Word、PPT、Excel 文件，选中文字即弹出 AI 悬浮工具栏，一键润色、翻译、摘要，修改结果直接应用到文档，无需复制粘贴。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🗂️</div>
-                    <h3>本地工作区管理</h3>
-                    <p>内置文件浏览器，直接管理本地文件夹。创建、重命名、删除、移动，支持右键菜单，所有操作都在本地完成，文件不上传任何服务器。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">💬</div>
-                    <h3>多模型 AI 对话</h3>
-                    <p>Gemini 云端多模态 + Ollama 本地模型自由切换，多轮记忆，流式实时响应。支持上传图片、附件，结合知识库进行 RAG 问答。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🧠</div>
-                    <h3>知识库 RAG</h3>
-                    <p>上传 TXT、Markdown、PDF、DOCX 文件构建本地知识库，AI 对话时自动语义检索关联内容，让 AI 了解你的私有文档。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🎙️</div>
-                    <h3>语音交互</h3>
-                    <p>语音输入提问，AI 回复支持 TTS 朗读，打造更自然的人机交互体验。完全本地语音处理，无需上传音频数据。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">⚙️</div>
-                    <h3>工作流 · 代码沙箱</h3>
-                    <p>可视化工作流编排复杂任务，代码沙箱安全执行 Python 脚本，支持图表输出。定时任务、批量文件处理，全程自动化。</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ===== ACTIVATION CODE ===== -->
-    <section id="activation" class="activation-section">
-        <div class="activation-inner">
-            <div class="section-label">🚀 开始使用</div>
-            <h2 class="section-title">三步上手 Koto</h2>
-            <p class="section-desc">下载便携包，填入 Gemini API Key 即可开始。数据留在本地，按需开启云端能力。</p>
-
-            <div class="steps-row">
-                <div class="step-card">
-                    <div class="step-num">1</div>
-                    <h3>下载并启动</h3>
-                    <p>前往 GitHub Releases 下载最新 Windows 便携包，解压后运行 <code>koto.exe</code>，或从源码用 <code>python server.py</code> 启动，浏览器访问 <code>localhost:5000</code>。</p>
-                    <div class="step-note">
-                        📦 Windows 便携版，解压即运行<br>
-                        <strong>也可从源码运行（Python 3.11+）</strong>
-                    </div>
-                </div>
-                <div class="step-card">
-                    <div class="step-num">2</div>
-                    <h3>填入 Gemini API Key</h3>
-                    <p>在设置页面填入你的 <strong>Google Gemini API Key</strong>，所有 AI 功能立即解锁。也可配置本地 Ollama 模型实现完全离线运行。</p>
-                    <div class="step-note">
-                        🔑 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent-primary);text-decoration:underline">免费获取 Gemini API Key</a><br>
-                        🤖 或安装 <a href="https://ollama.ai" target="_blank" rel="noopener" style="color:var(--accent-primary);text-decoration:underline">Ollama</a> 本地运行
-                    </div>
-                </div>
-                <div class="step-card">
-                    <div class="step-num">3</div>
-                    <h3>打开文件开始编辑</h3>
-                    <p>在工作区浏览器中打开 Word、PPT 或 Excel 文件，选中文字后 AI 悬浮工具栏自动出现。选择技能，AI 即时处理，一键应用到文档。</p>
-                    <div class="step-note">
-                        📄 支持 DOCX · PPTX · XLSX<br>
-                        <strong>数据始终留在你的设备上</strong>
-                    </div>
-                </div>
-            </div>
-
-            <div class="activation-contact">
-                <div class="left">
-                    <h3>两种运行模式，自由切换</h3>
-                    <p>
-                        <strong>云端模式</strong>：在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent-primary);text-decoration:underline">Google AI Studio</a> 免费申请 Gemini API Key，填入设置即可使用全部功能。<br>
-                        <strong>本地模式</strong>：安装 Ollama 并下载模型（如 llama3、qwen），Koto 自动检测并切换，完全离线运行。<br>
-                        有问题？加微信咨询或发送「Koto 使用帮助」。
+                    <h1 class="hero-title">Koto 让 AI 直接住进你的文件里。</h1>
+                    <p class="hero-sub">
+                        完全嵌入本地，默认本地优先；需要时再切到云端能力。选中即互动，改动实时可见，过程不再是黑盒。
                     </p>
-                </div>
-                <div class="wechat-chip">
-                    <div class="wc-icon">💬</div>
-                    <div class="wc-info">
-                        <div class="wc-label">微信 WeChat</div>
-                        <div class="wc-id">18913921188</div>
+                    <div class="hero-actions">
+                        <a id="hero-download" class="btn btn-primary" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">下载最新版本</a>
+                        <a class="btn btn-secondary" href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">查看 GitHub</a>
+                    </div>
+                    <div class="pill-row">
+                        <span class="pill">本地优先</span>
+                        <span class="pill">本地 / 云端可切换</span>
+                        <span class="pill">快速规划执行</span>
+                        <span class="pill">所改即所得</span>
                     </div>
                 </div>
-            </div>
-        </div>
-    </section>
 
-    <!-- ===== DOWNLOAD ===== -->
-    <section id="download" class="download-section">
-        <div class="download-inner">
-            <div class="download-left">
-                <div class="section-label">⬇ 下载</div>
-                <h2>立即下载<br>开始体验</h2>
-                <p>下载最新 Release，解压即可运行。本地文件管理开箱即用，Gemini / Ollama 按需配置，无需额外安装运行环境。</p>
-                <div class="download-actions">
-                    <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-main" class="download-btn" target="_blank" rel="noopener">
-                        <div class="dl-icon">🪟</div>
-                        <div class="dl-text">
-                            <strong>Windows 便携版</strong>
-                            <span id="dl-subtitle">Latest Release · 64-bit · 免安装</span>
+                <div class="product-stage reveal">
+                    <div class="stage-top">
+                        <span class="stage-label">Workspace Assistant</span>
+                        <div class="mode-toggle">
+                            <span class="active">Local</span>
+                            <span>Cloud</span>
                         </div>
-                        <div class="dl-arrow">↗</div>
-                    </a>
-                    <a href="https://github.com/Loganwon/Koto/releases" class="download-btn" target="_blank" rel="noopener">
-                        <div class="dl-icon" style="background:rgba(255,255,255,0.06);color:var(--text-primary);">📋</div>
-                        <div class="dl-text">
-                            <strong>查看所有版本</strong>
-                            <span>GitHub Releases · 更新日志</span>
+                    </div>
+
+                    <div class="stage-grid">
+                        <aside class="rail">
+                            <div class="rail-label">Files</div>
+                            <div class="file-item active">workspace/方案初稿.docx<small>正在编辑</small></div>
+                            <div class="file-item">workspace/销售台账.xlsx<small>分析与图表</small></div>
+                            <div class="file-item">workspace/客户纪要.pdf<small>摘要与问答</small></div>
+                            <div class="file-item">workspace/发布提纲.pptx<small>改写与生成</small></div>
+                        </aside>
+
+                        <section class="rail doc-shell">
+                            <div class="rail-label">Live Document</div>
+                            <div class="doc-chip">选区已同步到 AI</div>
+                            <div class="doc-surface">
+                                <h3>项目方案 / 执行摘要</h3>
+                                <p>我们建议将交付计划拆成两个阶段，以便降低试点风险，并保留和现有系统的兼容窗口。</p>
+                                <div class="doc-highlight">已选中：把这段改成更短、更有行动感的管理层版本。</div>
+                                <div class="diff-card">
+                                    <div class="diff-row minus">
+                                        <span>-</span>
+                                        <p>我们建议将交付计划拆成两个阶段，以便降低试点风险。</p>
+                                    </div>
+                                    <div class="diff-row plus">
+                                        <span>+</span>
+                                        <p>建议分两阶段推进，先用试点验证，再按结果放量实施。</p>
+                                    </div>
+                                </div>
+                                <div class="apply-chip">应用后立即写回文档并自动保存</div>
+                            </div>
+                        </section>
+
+                        <aside class="rail">
+                            <div class="rail-label">AI Agent</div>
+                            <div class="plan-list">
+                                <div class="plan-item done">读取当前文件与选区</div>
+                                <div class="plan-item active">生成可应用提案</div>
+                                <div class="plan-item">写回文件并保存版本</div>
+                            </div>
+                            <div class="plan-note">你看到的不是一个结果黑盒，而是当前文件、步骤、提案和写回动作。</div>
+                            <div class="mini-log">状态：正在比较原句、上下文语气和当前章节目标…</div>
+                        </aside>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="core">
+                <div class="promise-grid reveal">
+                    <article class="promise-card">
+                        <div class="index">01</div>
+                        <h3>完全嵌入本地</h3>
+                        <p>文件、工作区和聊天历史都留在你的电脑里。</p>
+                    </article>
+                    <article class="promise-card">
+                        <div class="index">02</div>
+                        <h3>快速规划执行</h3>
+                        <p>围绕当前文件快速规划，并直接推进下一步。</p>
+                    </article>
+                    <article class="promise-card">
+                        <div class="index">03</div>
+                        <h3>本地优先，按需上云</h3>
+                        <p>默认走本地工作流，需要时再切云端模型。</p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="section" id="whitebox">
+                <div class="section-head reveal">
+                    <div>
+                        <div class="eyebrow">
+                            <span class="eyebrow-dot"></span>
+                            <span>White-box Agent</span>
                         </div>
-                        <div class="dl-arrow">↗</div>
-                    </a>
+                        <h2 class="section-title">文件助手是核心产品，不是附属功能。</h2>
+                    </div>
+                    <p class="section-copy">它把 AI Agent 从黑盒任务变成白盒实时交互：当前文件可见、步骤可见、提案可见、写回结果也可见。</p>
                 </div>
-            </div>
-            <div class="download-right">
-                <div class="req-card">
-                    <h4>系统要求（便携版）</h4>
-                    <div class="req-item"><span class="check">✓</span> Windows 10 / 11 (64-bit)</div>
-                    <div class="req-item"><span class="check">✓</span> 内存 4GB+（推荐 8GB+）</div>
-                    <div class="req-item"><span class="check">✓</span> 磁盘空间 2GB+</div>
-                    <div class="req-item"><span class="check">✓</span> 网络连接（Gemini API 需要）</div>
+
+                <div class="compare-wrap reveal">
+                    <article class="compare-card dark">
+                        <div class="compare-label">Black box</div>
+                        <h3>传统 AI 任务流</h3>
+                        <ul>
+                            <li>把任务丢进去，等一个最终结果</li>
+                            <li>中间怎么处理基本不可见</li>
+                            <li>不知道会改哪里，也不知道如何写回</li>
+                            <li>文件往往只是附件，不是交互现场</li>
+                        </ul>
+                    </article>
+
+                    <article class="compare-card bright">
+                        <div class="compare-label">Koto</div>
+                        <h3>白盒文件助手</h3>
+                        <ul>
+                            <li>选中内容后立刻进入实时互动</li>
+                            <li>AI 的规划、提案和执行步骤直接展示</li>
+                            <li>先看改动，再决定是否应用到文件</li>
+                            <li>应用即写回，所改即所得</li>
+                        </ul>
+                    </article>
                 </div>
-                <div class="req-card">
-                    <h4>从源码运行（跨平台）</h4>
-                    <div class="req-item"><span class="check">✓</span> Python 3.11+</div>
-                    <div class="req-item"><span class="check">✓</span> pip install -r config/requirements.txt</div>
-                    <div class="req-item"><span class="check">✓</span> python server.py → localhost:5000</div>
-                    <div class="req-item" style="margin-top:8px;">
-                        <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener"
-                           style="color:var(--accent-primary);text-decoration:none;font-size:14px;">
-                            → GitHub 仓库 · Docker 支持
+
+                <div class="capability-strip reveal">
+                    <span>文件工作区</span>
+                    <span>实时提案</span>
+                    <span>流式执行</span>
+                    <span>表格分析</span>
+                    <span>脚本执行</span>
+                    <span>知识检索</span>
+                    <span>本地 / 云端切换</span>
+                </div>
+            </section>
+
+            <section class="section" id="download">
+                <div class="download-shell reveal">
+                    <div class="download-copy">
+                        <div class="eyebrow">
+                            <span class="eyebrow-dot"></span>
+                            <span>Get Started</span>
+                        </div>
+                        <h2>下载，选模型，开始处理文件。</h2>
+                        <p>Windows 发布版适合直接上手；源码和 Docker 适合开发者或团队部署。这个页面会自动绑定最新 Release。</p>
+                        <div class="short-steps">
+                            <div class="short-step">
+                                <div class="step-index">01</div>
+                                <span>下载最新版本</span>
+                            </div>
+                            <div class="short-step">
+                                <div class="step-index">02</div>
+                                <span>选择本地或云端模型路径</span>
+                            </div>
+                            <div class="short-step">
+                                <div class="step-index">03</div>
+                                <span>打开文件开始工作</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="download-grid">
+                        <a id="download-setup" class="download-card" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">
+                            <span class="download-tag">Recommended</span>
+                            <strong>Windows 安装包</strong>
+                            <small id="setup-caption">Latest Release · Setup.exe</small>
+                        </a>
+
+                        <a id="download-zip" class="download-card" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">
+                            <span class="download-tag alt">Portable</span>
+                            <strong>Windows ZIP</strong>
+                            <small id="zip-caption">Latest Release · Portable ZIP</small>
+                        </a>
+
+                        <a class="download-card secondary" href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">
+                            <span class="download-tag subtle">Source / Docker</span>
+                            <strong>源码与部署方式</strong>
+                            <small>GitHub 仓库、源码运行与 Docker 部署入口</small>
                         </a>
                     </div>
                 </div>
-            </div>
-        </div>
-    </section>
+            </section>
+        </main>
 
-    <!-- ===== FOOTER ===== -->
-    <footer class="footer">
-        <div class="footer-inner">
-            <a href="#" class="footer-brand">
-                <div class="logo">言</div>
-                Koto
-            </a>
-            <div class="footer-links">
-                <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
-                <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">下载</a>
-                <a href="#marketplace">技能市场</a>
-                <a href="#activation">使用指南</a>
+        <footer class="footer">
+            <div class="footer-inner">
+                <div>Koto is a local-first file assistant with visible AI execution.</div>
+                <div class="footer-links">
+                    <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
+                    <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener">Releases</a>
+                    <a href="https://github.com/Loganwon/Koto/issues" target="_blank" rel="noopener">Issues</a>
+                </div>
+                <div id="footer-version">© 2026 Koto · v1.7.2</div>
             </div>
-            <div class="footer-copy" id="footer-version">© 2026 Koto · v1.7.1</div>
-        </div>
-    </footer>
+        </footer>
+    </div>
 
     <script>
-        /* ── Auto-fetch latest release and update download URLs & version ── */
         (function () {
-            var REPO = 'Loganwon/Koto';
-            var BTN_IDS = ['btn-download-hero', 'btn-download-main'];
-            fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
-                cache: 'no-store',
-                headers: { 'Accept': 'application/vnd.github.v3+json' }
-            })
-                .then(function(r) {
-                    if (!r.ok) throw new Error(r.status);
-                    return r.json();
-                })
-                .then(function(data) {
-                    if (!data || !data.tag_name) return;
-                    var ver = data.tag_name.replace(/^v/i, '');
-                    var displayVer = 'v' + ver;
-                    var assets = data.assets || [];
+            var repo = 'Loganwon/Koto';
+            var latestReleaseUrl = 'https://github.com/' + repo + '/releases/latest';
 
-                    /* Pick best download asset: prefer Setup.exe > any .exe > .zip */
-                    var asset = assets.find(function(a) {
-                        return /setup.*\.exe$/i.test(a.name);
-                    }) || assets.find(function(a) {
-                        return a.name.endsWith('.exe');
-                    }) || assets.find(function(a) {
-                        return a.name.endsWith('.zip');
+            function byId(id) {
+                return document.getElementById(id);
+            }
+
+            function setText(id, value) {
+                var element = byId(id);
+                if (element && value) {
+                    element.textContent = value;
+                }
+            }
+
+            function setHref(id, value) {
+                var element = byId(id);
+                if (element && value) {
+                    element.href = value;
+                }
+            }
+
+            function formatSize(bytes) {
+                if (!bytes || typeof bytes !== 'number') {
+                    return '';
+                }
+                return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, '') + ' MB';
+            }
+
+            function revealOnScroll() {
+                var elements = document.querySelectorAll('.reveal');
+                if (!('IntersectionObserver' in window)) {
+                    elements.forEach(function (element) {
+                        element.classList.add('visible');
+                    });
+                    return;
+                }
+
+                var observer = new IntersectionObserver(function (entries) {
+                    entries.forEach(function (entry) {
+                        if (entry.isIntersecting) {
+                            entry.target.classList.add('visible');
+                            observer.unobserve(entry.target);
+                        }
+                    });
+                }, { threshold: 0.18 });
+
+                elements.forEach(function (element) {
+                    observer.observe(element);
+                });
+            }
+
+            revealOnScroll();
+
+            fetch('https://api.github.com/repos/' + repo + '/releases/latest', {
+                cache: 'no-store',
+                headers: { 'Accept': 'application/vnd.github+json' }
+            })
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error(String(response.status));
+                    }
+                    return response.json();
+                })
+                .then(function (release) {
+                    if (!release || !release.tag_name) {
+                        return;
+                    }
+
+                    var displayVersion = /^v/i.test(release.tag_name) ? release.tag_name : 'v' + release.tag_name;
+                    var assets = Array.isArray(release.assets) ? release.assets : [];
+                    var setupAsset = assets.find(function (asset) {
+                        return /setup\.exe$/i.test(asset.name || '');
+                    }) || assets.find(function (asset) {
+                        return /\.exe$/i.test(asset.name || '');
+                    });
+                    var zipAsset = assets.find(function (asset) {
+                        return /windows\.zip$/i.test(asset.name || '');
+                    }) || assets.find(function (asset) {
+                        return /\.zip$/i.test(asset.name || '');
                     });
 
-                    if (asset) {
-                        BTN_IDS.forEach(function(id) {
-                            var el = document.getElementById(id);
-                            if (el) el.href = asset.browser_download_url;
-                        });
-                        /* Update download subtitle with real version */
-                        var dlSub = document.getElementById('dl-subtitle');
-                        if (dlSub) dlSub.textContent = displayVer + ' \u00b7 64-bit \u00b7 \u514d\u5b89\u88c5';
+                    setText('version-text', displayVersion);
+                    setText('footer-version', '© ' + new Date().getFullYear() + ' Koto · ' + displayVersion);
+
+                    if (setupAsset && setupAsset.browser_download_url) {
+                        setHref('hero-download', setupAsset.browser_download_url);
+                        setHref('download-setup', setupAsset.browser_download_url);
+                        setText('setup-caption', displayVersion + ' · ' + setupAsset.name + (setupAsset.size ? ' · ' + formatSize(setupAsset.size) : ''));
+                    } else {
+                        setHref('hero-download', latestReleaseUrl);
+                        setHref('download-setup', latestReleaseUrl);
+                        setText('setup-caption', displayVersion + ' · 查看发布页');
                     }
 
-                    /* Update hero badge version */
-                    var versionSpan = document.getElementById('version-text');
-                    if (versionSpan) {
-                        versionSpan.textContent = displayVer;
-                    }
-                    /* Update footer version */
-                    var footer = document.getElementById('footer-version');
-                    if (footer) {
-                        footer.textContent = '\u00a9 2026 Koto \u00b7 ' + displayVer;
+                    if (zipAsset && zipAsset.browser_download_url) {
+                        setHref('download-zip', zipAsset.browser_download_url);
+                        setText('zip-caption', displayVersion + ' · ' + zipAsset.name + (zipAsset.size ? ' · ' + formatSize(zipAsset.size) : ''));
+                    } else {
+                        setHref('download-zip', latestReleaseUrl);
+                        setText('zip-caption', displayVersion + ' · 查看发布页');
                     }
                 })
-                .catch(function() { /* fallback version already in HTML */ });
+                .catch(function () {
+                    setHref('hero-download', latestReleaseUrl);
+                    setHref('download-setup', latestReleaseUrl);
+                    setHref('download-zip', latestReleaseUrl);
+                });
         })();
-
-        document.querySelectorAll('.cat-pill').forEach(function(pill) {
-            pill.addEventListener('click', function() {
-                document.querySelectorAll('.cat-pill').forEach(function(p) { p.classList.remove('active'); });
-                this.classList.add('active');
-            });
-        });
     </script>
 </body>
 </html>
