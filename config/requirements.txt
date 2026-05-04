@@ -60,7 +60,7 @@ langchain-community>=0.3.0       # 文档加载器 / Vector store 工具
 
 # ── Security ──
 cryptography>=42.0.0
-PyJWT>=2.8.0               # JWT token auth for SaaS
+PyJWT>=2.12.1               # JWT token auth for SaaS
 
 # ── Desktop (Windows only, optional for server mode) ──
 pywebview>=5.0.0
