@@ -17,13 +17,13 @@ Routes:
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
-  GET /editor                  — editor_page
-  GET /editor/assets/<file>    — editor_assets
+    GET /workspace-assistant     — workspace_assistant_page
+    GET /editor                  — editor_page
 """
 
 import os
 
-from flask import Blueprint, Response, make_response, render_template, send_from_directory
+from flask import Blueprint, Response, make_response, redirect, render_template, send_from_directory, url_for
 
 pages_bp = Blueprint("pages", __name__)
 
@@ -144,21 +144,11 @@ def doc_compare_ui() -> str:
     """多文档对比界面"""
     return render_template("doc_compare.html")
 
-
-_UNIVER_DIST = os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist")
-
-
 @pages_bp.route("/editor")
 def editor_page() -> Response:
-    """文件助手主页 — 服务 Vite 构建产物 (static/univer-dist/index.html)"""
-    resp = make_response(send_from_directory(_UNIVER_DIST, "index.html"))
+    """兼容旧入口：统一跳转到当前 workspace assistant。"""
+    resp = make_response(redirect(url_for("pages.workspace_assistant_page")))
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     resp.headers["Pragma"] = "no-cache"
     return resp
-
-
-@pages_bp.route("/editor/assets/<path:filename>")
-def editor_assets(filename: str) -> Response:
-    """文件助手静态资源 — JS/CSS 束文件"""
-    return send_from_directory(os.path.join(_UNIVER_DIST, "assets"), filename)
 

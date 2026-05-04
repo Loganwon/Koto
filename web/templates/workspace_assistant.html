@@ -905,25 +905,6 @@
       <!-- Skill Library overlay panel -->
       <div id="wa-skill-library"></div>
 
-      <!-- Settings panel (collapsible) -->
-      <div id="wa-ai-settings-panel">
-        <div class="wa-settings-grid">
-          <span class="wa-settings-grid-label">模型</span>
-          {% set wa_local_model_controls_with_icons = true %}
-          {% include '_workspace_model_controls.html' %}
-          <span class="wa-settings-grid-label">输出</span>
-          <div class="wa-output-mode-toggle">
-            <button data-mode="inline" class="active" onclick="WA.setOutputMode('inline')"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/></svg> 写入文档</button>
-            <button data-mode="chat" onclick="WA.setOutputMode('chat')"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H5l-3 3V4a1 1 0 0 1 1-1z"/></svg> 仅对话框</button>
-          </div>
-          <span class="wa-settings-grid-label">面板</span>
-          <div class="wa-output-mode-toggle">
-            <button id="wa-panel-autoreset-on" class="active" onclick="WA.setPanelAutoReset(true)" title="每次发送消息时自动展开右侧面板"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.9-3.2M13.5 8a5.5 5.5 0 0 1-9.9 3.2"/><path d="M12.4 1.5v3.3h-3.3M3.6 14.5v-3.3h3.3"/></svg> 自动重置</button>
-            <button id="wa-panel-autoreset-off" onclick="WA.setPanelAutoReset(false)" title="保持当前面板宽度，不自动重置"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2.5l6 0 0 4.5-1.5 1.5V11H6.5V8.5L5 7z"/><path d="M8 11v3.5"/></svg> 保持位置</button>
-          </div>
-        </div>
-      </div>
-
       <!-- DocAgent execution phases (step timeline) -->
       <div id="wa-doc-agent-phases" class="doc-agent-phases phases" style="display:none">
         <!-- Dynamically filled by DocAgentUI.phaseTracker -->
@@ -934,18 +915,6 @@
         <span class="subject-icon" id="wa-subject-icon"></span>
         <span class="subject-text" id="wa-subject-text"></span>
         <span class="subject-editor-badge">当前编辑</span>
-      </div>
-
-      <!-- Analysis files panel (shown when ≥1 file is dragged for analysis) -->
-      <div id="wa-ai-file-chips" style="display:none">
-        <div class="wa-ai-file-chips-header">
-          <!-- Header and rows are dynamically filled by _renderAIFileChips() -->
-        </div>
-        <div id="wa-ai-file-chip-list" class="wa-ctx-file-list"></div>
-        <div class="wa-ctx-drop-hint">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          <span>继续拖放文件到此处添加分析</span>
-        </div>
       </div>
 
       <!-- Messages -->
@@ -1003,6 +972,18 @@
           <!-- Dynamically filled by _updateContextBar() -->
         </div>
 
+        <!-- Attached analysis files -->
+        <div id="wa-ai-file-chips" style="display:none">
+          <div class="wa-ai-file-chips-header">
+            <!-- Header and rows are dynamically filled by _renderAIFileChips() -->
+          </div>
+          <div id="wa-ai-file-chip-list" class="wa-ctx-file-list"></div>
+          <div class="wa-ctx-drop-hint">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>继续拖放文件到此处添加分析</span>
+          </div>
+        </div>
+
         <!-- Layer 2: Actions bar (quick actions / workflow activation / workflow chips) -->
         <div id="wa-actions-bar">
           <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容，保留原意但让表达更顺滑')">润色表达</button>
@@ -1024,12 +1005,6 @@
                 <span id="wa-footer-file-icon" class="footer-file-icon"></span>
                 <span id="wa-footer-file-label">文件</span>
               </div>
-              <!-- Model selector button -->
-              <button class="wa-footer-model-btn" id="wa-footer-model-btn" onclick="WA.toggleSettings()" title="AI 模型设置">
-                <span class="model-status-dot"></span>
-                <span id="wa-footer-model-name">Koto AI</span>
-                <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="4 6 8 10 12 6"/></svg>
-              </button>
               <!-- Workflow active indicator -->
               <div id="wa-wf-active-indicator" style="display:none" class="wa-wf-active-chip">
                 <span id="wa-wf-active-icon"></span>
@@ -1037,6 +1012,23 @@
               </div>
             </div>
             <div class="wa-footer-actions">
+              <div id="wa-model-mode-menu" class="wa-model-mode-menu wa-footer-model-mode-select">
+                <span class="wa-model-mode-select-dot"></span>
+                <button id="wa-model-mode-trigger" class="wa-model-mode-trigger" type="button" onclick="WA.toggleModelModeMenu()" aria-haspopup="menu" aria-expanded="false" title="AI 模型选择">
+                  <span id="wa-model-mode-label">云端</span>
+                  <svg class="wa-model-mode-select-caret" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 6 8 10 12 6"/></svg>
+                </button>
+                <div id="wa-model-mode-dropdown" class="wa-model-mode-dropdown" role="menu" aria-label="AI 模型选择" style="display:none">
+                  <button type="button" class="wa-model-mode-option" data-model-mode="cloud" onclick="WA.setLockedModel('cloud')" role="menuitemradio" aria-checked="true">
+                    <span class="wa-model-mode-option-icon">云</span>
+                    <span class="wa-model-mode-option-text">云端</span>
+                  </button>
+                  <button type="button" class="wa-model-mode-option" data-model-mode="local" onclick="WA.setLockedModel('local')" role="menuitemradio" aria-checked="false">
+                    <span class="wa-model-mode-option-icon">本</span>
+                    <span id="wa-model-mode-option-local-label" class="wa-model-mode-option-text">本地</span>
+                  </button>
+                </div>
+              </div>
               <button id="wa-send-btn" type="button" onclick="WA.sendMessage()" title="发送" aria-label="发送">
                 <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
                   <line x1="22" y1="2" x2="11" y2="13"/>
@@ -1047,6 +1039,7 @@
           </div>
         </div>
       </div>
+
     </div>
   </div>
 

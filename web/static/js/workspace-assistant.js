@@ -26,7 +26,7 @@ window.WA = window.WA || {};
     selectedFiles: new Set(),  // paths of selected files
     openTabs: [],          // [{path,name,ext,fileType,fileId,serverData,cache,modified}]
     activeTabPath: null,   // path of the currently active tab
-    aiOutputMode: localStorage.getItem('wa_ai_output_mode') || 'inline',  // 'inline'|'chat'
+    aiOutputMode: 'inline',  // fixed doc-assistant flow; legacy chat-only mode removed from UI
     lockedModel: localStorage.getItem('wa_locked_model') === 'local' ? 'local' : 'auto',  // local or auto only
     _streamAbortCtrl: null,  // AbortController for the active AI task stream
     _recentOpen: true,     // recent files section expanded state
@@ -2988,11 +2988,22 @@ window.WA = window.WA || {};
     }
   }
 
-  // ── Show/hide the persistent analysis-subject bar ──
   function _updateSubjectBar(fileName, fileType) {
-    // Keep the legacy subject-bar hidden — context is shown in the input-area indicator instead
     const bar = $('wa-subject-bar');
-    if (bar) bar.style.display = 'none';
+    const iconEl = $('wa-subject-icon');
+    const txt = $('wa-subject-text');
+    const hasAttachedFiles = Array.isArray(state._aiFileContext) && state._aiFileContext.length > 0;
+
+    if (bar) {
+      if (!fileName || hasAttachedFiles) {
+        bar.style.display = 'none';
+      } else {
+        const icons = { docx: '📝', xlsx: '📊', pptx: '📋', pdf: '📕', text: '📄', code: '⌨️' };
+        if (iconEl) iconEl.textContent = icons[fileType] || '📄';
+        if (txt) txt.textContent = fileName;
+        bar.style.display = 'flex';
+      }
+    }
 
     // ── Footer file chip sync (PEMO-style) ──
     const footerChip = $('wa-footer-file-chip');
@@ -3009,6 +3020,8 @@ window.WA = window.WA || {};
         footerIcon.style.background = EXT_COLORS[ext] || '#6b7280';
       }
       footerChip.style.display = 'flex';
+        const subjectBar = $('wa-subject-bar');
+        if (subjectBar) subjectBar.style.display = 'none';
     }
   }
 
@@ -8134,10 +8147,20 @@ window.WA = window.WA || {};
     if (!pm) return;
     let target = null;
     if (heading.id) {
-      // IDs may be bookmark IDs like "_Toc198131813" placed on any element
-      target = pm.querySelector(`[id="${CSS.escape(heading.id)}"]`);
-      // Also try a nested <span id="..."> (bookmarks are sometimes wrapped)
-      if (!target) target = pm.querySelector(`span[id="${CSS.escape(heading.id)}"]`);
+      const esc = CSS.escape(heading.id);
+      // Prefer actual heading elements — TOC entries use the same bookmark ID on <span>
+      // but appear earlier in the DOM, so querySelector finds the TOC span first.
+      target = pm.querySelector(`h1[id="${esc}"],h2[id="${esc}"],h3[id="${esc}"],h4[id="${esc}"],h5[id="${esc}"],h6[id="${esc}"]`);
+      if (!target) {
+        // Fall back: find all elements with this ID, skip pure bookmark spans/anchors
+        const all = pm.querySelectorAll(`[id="${esc}"]`);
+        for (const el of all) {
+          const t = el.tagName.toLowerCase();
+          if (t !== 'span' && t !== 'a') { target = el; break; }
+        }
+        // Last resort: use the last match (actual heading comes after TOC in document)
+        if (!target && all.length) target = all[all.length - 1];
+      }
     }
     if (!target) {
       // Fallback: find an h-tag with matching text
@@ -8152,7 +8175,16 @@ window.WA = window.WA || {};
       });
     }
     if (target) {
-      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Scroll within the editor's scroll container for correct positioning
+      const editorScroll = document.getElementById('wa-editor-content');
+      if (editorScroll) {
+        const containerRect = editorScroll.getBoundingClientRect();
+        const targetRect = target.getBoundingClientRect();
+        const relativeTop = targetRect.top - containerRect.top + editorScroll.scrollTop;
+        editorScroll.scrollTo({ top: Math.max(0, relativeTop - 80), behavior: 'smooth' });
+      } else {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
       // Highlight the heading briefly
       target.style.transition = 'background .3s';
       target.style.background = 'rgba(79,126,255,.15)';
@@ -9820,17 +9852,11 @@ window.WA = window.WA || {};
       _clearActiveRoute();
       _syncEditorModelPreference(state.lockedModel, state.lockedModel);
     }
-    // Restore local model toggle button active state
-    const isLocal = state.lockedModel === 'local';
-    document.querySelectorAll('[data-local-mode]').forEach(btn => {
-      btn.classList.toggle('active', (btn.dataset.localMode === 'on') === isLocal);
-    });
-    // Restore output mode toggle button active state
-    document.querySelectorAll('.wa-output-mode-toggle button[data-mode]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.mode === state.aiOutputMode);
-    });
+    state.aiOutputMode = 'inline';
+    localStorage.removeItem('wa_ai_output_mode');
     _syncModelStatusUi();
     _refreshModelCatalog();
+    _checkOllamaStatus();
   }
 
   // ── Exports to Window ──
@@ -12918,28 +12944,40 @@ window.WA = window.WA || {};
     }
   };
 
-  window.WA.setOutputMode = (mode) => {
-    state.aiOutputMode = mode;
-    localStorage.setItem('wa_ai_output_mode', mode);
-    // Update toggle buttons if any exist
-    document.querySelectorAll('.wa-output-mode-btn').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.mode === mode);
-    });
-    // Sync the output-mode toggle buttons in settings panel
-    document.querySelectorAll('.wa-output-mode-toggle button[data-mode]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.mode === mode);
-    });
+  window.WA.setOutputMode = () => {
+    state.aiOutputMode = 'inline';
+    localStorage.removeItem('wa_ai_output_mode');
   };
 
   window.WA.toggleSettings = () => {
-    const panel = document.getElementById('wa-ai-settings-panel');
-    if (!panel) return;
-    const isOpen = panel.classList.toggle('open');
-    if (isOpen) {
-      _checkOllamaStatus();
-      _refreshModelCatalog(true);
-    }
+    window.WA.toggleModelModeMenu();
   };
+
+  function _setModelModeMenuOpen(open) {
+    const menu = document.getElementById('wa-model-mode-menu');
+    const trigger = document.getElementById('wa-model-mode-trigger');
+    const dropdown = document.getElementById('wa-model-mode-dropdown');
+    if (!menu || !trigger || !dropdown) return;
+    menu.classList.toggle('open', !!open);
+    dropdown.style.display = open ? 'block' : 'none';
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  window.WA.toggleModelModeMenu = () => {
+    const menu = document.getElementById('wa-model-mode-menu');
+    if (!menu) return;
+    _setModelModeMenuOpen(!menu.classList.contains('open'));
+  };
+
+  document.addEventListener('click', (event) => {
+    const menu = document.getElementById('wa-model-mode-menu');
+    if (!menu || menu.contains(event.target)) return;
+    _setModelModeMenuOpen(false);
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') _setModelModeMenuOpen(false);
+  });
 
   // ── Skill Library overlay ──────────────────────────────────
   let _waSkillCache = {};
@@ -13370,7 +13408,7 @@ window.WA = window.WA || {};
 
   function _syncModelStatusUi() {
     const badge = $('wa-ai-model-badge');
-    const footerName = $('wa-footer-model-name');
+    const modeLabel = $('wa-model-mode-label');
     const routeInfo = $('wa-ai-route-info');
     const explicitCloudModel = _selectedCloudModelId();
     const activeRoute = state._activeRoute || null;
@@ -13384,10 +13422,15 @@ window.WA = window.WA || {};
       badge.textContent = modelLabel;
       badge.title = modelLabel;
     }
-    if (footerName) {
-      footerName.textContent = modelLabel;
-      footerName.title = modelLabel;
+    if (modeLabel) {
+      modeLabel.textContent = state.lockedModel === 'local' ? '本地' : '云端';
+      modeLabel.title = modelLabel;
     }
+    document.querySelectorAll('.wa-model-mode-option[data-model-mode]').forEach((button) => {
+      const isActive = button.dataset.modelMode === (state.lockedModel === 'local' ? 'local' : 'cloud');
+      button.classList.toggle('active', isActive);
+      button.setAttribute('aria-checked', isActive ? 'true' : 'false');
+    });
 
     if (!routeInfo) return;
 
@@ -13469,14 +13512,17 @@ window.WA = window.WA || {};
     fetch('/api/v1/workspace/ollama-status')
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        const badge = document.getElementById('wa-ollama-model-badge');
-        const onBtn = document.getElementById('wa-local-on-btn');
+        const localOption = document.querySelector('.wa-model-mode-option[data-model-mode="local"]');
+        const localLabel = document.getElementById('wa-model-mode-option-local-label');
+        if (!localOption) return;
         if (data && data.running) {
-          if (badge) { badge.textContent = data.model || 'qwen3.5:9b'; badge.style.display = 'inline'; }
-          if (onBtn) { onBtn.disabled = false; onBtn.title = `使用本地 Ollama 模型 (${data.model || 'qwen3.5:9b'})`; }
+          localOption.disabled = false;
+          localOption.title = data.model ? `本地 Ollama 模型：${data.model}` : '本地模型';
+          if (localLabel) localLabel.textContent = '本地';
         } else {
-          if (badge) { badge.style.display = 'none'; }
-          if (onBtn) { onBtn.disabled = true; onBtn.title = '请先启动 Ollama'; }
+          localOption.disabled = state.lockedModel !== 'local';
+          localOption.title = state.lockedModel === 'local' ? '本地模型' : '请先启动 Ollama';
+          if (localLabel) localLabel.textContent = state.lockedModel === 'local' ? '本地' : '本地（未启动）';
         }
       })
       .catch(() => {});
@@ -13506,11 +13552,9 @@ window.WA = window.WA || {};
     localStorage.setItem('wa_locked_model', newModel);
     _clearActiveRoute();
     _syncEditorModelPreference(newModel, newModel);
-    // Update local model toggle buttons
-    document.querySelectorAll('[data-local-mode]').forEach(btn => {
-      btn.classList.toggle('active', (btn.dataset.localMode === 'on') === useLocal);
-    });
     _syncModelStatusUi();
+    _checkOllamaStatus();
+    _setModelModeMenuOpen(false);
     // Persist to server so file-editor AI (editor_ai_stream) also respects the choice
     fetch('/api/local-model/switch', {
       method: 'POST',

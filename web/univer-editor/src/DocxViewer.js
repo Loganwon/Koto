@@ -5,8 +5,75 @@
 //   字体大小/颜色/高亮、段落间距、行间距、表格列宽、
 //   有序列表多级样式、页眉/页脚、分页符、文本框。
 //
-// 依赖：window.docx（由 index.html CDN 脚本提供）
+// 依赖：window.docx / window.JSZip（首次打开 DOCX 时按本地静态资源优先加载）
 // ══════════════════════════════════════════════════════════════
+
+let _docxRuntimePromise = null;
+
+
+function _injectScript(src, label, isReady) {
+  return new Promise((resolve, reject) => {
+    if (isReady()) {
+      resolve();
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = src;
+    script.crossOrigin = 'anonymous';
+    script.dataset.kotoRuntimeLib = label;
+    script.onload = () => {
+      if (isReady()) {
+        resolve();
+      } else {
+        reject(new Error(`${label} 已加载，但运行时对象不可用`));
+      }
+    };
+    script.onerror = () => reject(new Error(`${label} 加载失败: ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+
+async function _loadWithFallback(primarySrc, fallbackSrc, label, isReady) {
+  if (isReady()) return;
+  try {
+    await _injectScript(primarySrc, label, isReady);
+  } catch (primaryError) {
+    console.warn(`[${label}] 本地加载失败，切换至 CDN`, primaryError);
+    await _injectScript(fallbackSrc, label, isReady);
+  }
+}
+
+
+async function ensureDocxRuntimeLoaded() {
+  if (window.JSZip && window.docx && typeof window.docx.renderAsync === 'function') {
+    return;
+  }
+
+  if (!_docxRuntimePromise) {
+    _docxRuntimePromise = (async () => {
+      await _loadWithFallback(
+        '/static/jszip.min.js',
+        'https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js',
+        'jszip',
+        () => !!window.JSZip
+      );
+
+      await _loadWithFallback(
+        '/static/docx-preview.min.js',
+        'https://cdn.jsdelivr.net/npm/docx-preview@latest/dist/docx-preview.min.js',
+        'docx-preview',
+        () => !!(window.docx && typeof window.docx.renderAsync === 'function')
+      );
+    })().catch((error) => {
+      _docxRuntimePromise = null;
+      throw error;
+    });
+  }
+
+  await _docxRuntimePromise;
+}
 
 export class DocxViewer {
   /**
@@ -45,6 +112,15 @@ export class DocxViewer {
     this._setTitle(filename || '文档');
     this._renderArea.innerHTML = '<div class="docx-loading">正在渲染文档…</div>';
     this.show();
+
+    try {
+      await ensureDocxRuntimeLoaded();
+    } catch (err) {
+      console.error('[DocxViewer] runtime load error:', err);
+      this._renderArea.innerHTML =
+        `<div class="docx-error">⚠ 无法加载 docx-preview 运行库：${this._esc(err.message)}</div>`;
+      return;
+    }
 
     const lib = window.docx;
     if (!lib || typeof lib.renderAsync !== 'function') {

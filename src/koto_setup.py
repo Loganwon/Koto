@@ -49,6 +49,35 @@ if str(APP_ROOT) not in sys.path:
 for _d in ["logs", "chats", "config", "workspace"]:
     (APP_ROOT / _d).mkdir(parents=True, exist_ok=True)
 
+
+def _sync_bundled_config_defaults():
+    """将打包内置的默认配置同步到运行目录，仅补缺不覆盖用户文件。"""
+    bundled_config = BUNDLE_DIR / "config"
+    runtime_config = APP_ROOT / "config"
+    if not bundled_config.exists() or bundled_config == runtime_config:
+        return
+
+    import shutil
+
+    for src_dir, _, filenames in os.walk(bundled_config):
+        src_path = Path(src_dir)
+        rel_path = src_path.relative_to(bundled_config)
+        dst_path = runtime_config / rel_path
+        dst_path.mkdir(parents=True, exist_ok=True)
+
+        for filename in filenames:
+            src_file = src_path / filename
+            dst_file = dst_path / filename
+            if dst_file.exists():
+                continue
+            try:
+                shutil.copy2(src_file, dst_file)
+            except Exception:
+                pass
+
+
+_sync_bundled_config_defaults()
+
 # 图标资源目录：打包模式下在 _MEIPASS/assets/，源码模式下在 src/assets/
 ASSETS_DIR = (
     BUNDLE_DIR if getattr(sys, "frozen", False) else APP_ROOT / "src"
@@ -541,7 +570,8 @@ def _prompt_local_model_if_needed():
     import socket as _socket
 
     prompt_flag = APP_ROOT / "config" / "local_model_prompted.json"
-    if prompt_flag.exists():
+    legacy_prompt_flag = APP_ROOT / "config" / "local_model_prompt_shown.flag"
+    if prompt_flag.exists() or legacy_prompt_flag.exists():
         return  # 已提示过，跳过
 
     installer_exe = APP_ROOT / "LocalModelInstaller.exe"

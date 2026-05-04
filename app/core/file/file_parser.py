@@ -1306,11 +1306,31 @@ def _docx_to_rich_html(
             except Exception:
                 pass
 
-        # Bold / Italic / Underline / Strikethrough
-        # Skip bold for TOC runs — CSS normalizes per-level to avoid inconsistency
+        # Bold — implement OOXML toggle property semantics to prevent phantom bold.
+        # When a paragraph's pPr/rPr has <w:b/> set AND a run also has <w:b/>,
+        # the run's bold TOGGLES the paragraph-level bold OFF (net result: not bold).
+        # python-docx's run.font.bold misses this toggle and always returns True.
+        # Skip bold entirely for TOC runs — CSS normalizes per-level.
         decorations: list[str] = []
-        if f.bold and not _is_toc_run:
-            styles.append("font-weight:bold")
+        _run_rpr = run._element.find(qn("w:rPr"))
+        _b_el = _run_rpr.find(qn("w:b")) if _run_rpr is not None else None
+        if _b_el is not None and not _is_toc_run:
+            _b_val = (_b_el.get(qn("w:val")) or "1").lower()
+            _run_bold_on = _b_val not in ("0", "false", "off")
+            # Check paragraph pPr/rPr/w:b as the toggle base
+            _para_ppr_bold = False
+            if _p_el is not None:
+                _p_pPr = _p_el.find(qn("w:pPr"))
+                if _p_pPr is not None:
+                    _p_rpr2 = _p_pPr.find(qn("w:rPr"))
+                    if _p_rpr2 is not None:
+                        _p_b = _p_rpr2.find(qn("w:b"))
+                        if _p_b is not None:
+                            _p_b_val = (_p_b.get(qn("w:val")) or "1").lower()
+                            _para_ppr_bold = _p_b_val not in ("0", "false", "off")
+            # Toggle: run bold XOR paragraph pPr bold
+            if _run_bold_on and not _para_ppr_bold:
+                styles.append("font-weight:bold")
         if f.italic:
             styles.append("font-style:italic")
         if f.underline and not _is_toc_run:
@@ -2140,7 +2160,7 @@ def _docx_to_rich_html(
                             # always concise; skip very long paragraphs.
                             try:
                                 para_text = para.text.strip() if para is not None else ""
-                                if len(para_text) > 30:
+                                if len(para_text) > 20:
                                     return None
                             except Exception:
                                 pass
@@ -2148,30 +2168,33 @@ def _docx_to_rich_html(
         except Exception:
             pass
 
-        # 2) Style-based fallback: some WPS documents define heading level
-        #    via outlineLvl in the style XML rather than the paragraph pPr.
-        #    Guard against false positives from body-text styles that happen
-        #    to have outlineLvl set:
-        #    - skip if paragraph text is long (real headings are concise)
-        #    - skip if paragraph is a list item (numPr present)
-        try:
-            para_text = para.text.strip() if para is not None else ""
-            if len(para_text) > 30:
-                return None
-        except Exception:
-            pass
-
-        try:
-            pPr = p_el.find(qn("w:pPr"))
-            if pPr is not None and pPr.find(qn("w:numPr")) is not None:
-                return None
-        except Exception:
-            pass
-
-        _style_defaults = _resolve_style_defaults(
-            style_ref if style_ref is not None else _resolve_para_style_ref(para)
-        )
-        return _style_defaults.get("outline_tag")
+        # 2) Style-based fallback: walk the basedOn chain to find a recognised
+        #    heading style ancestor.  This is the Word-native approach:
+        #    a paragraph is a structural heading only if its style (or one of its
+        #    base styles) is a named heading style ("Heading N" / "\u6807\u9898N",
+        #    etc.).  We do NOT trust outlineLvl written on arbitrary body-text
+        #    styles, which WPS inserts for its own navigation-pane purposes.
+        _sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        _visited_ids: set[int] = set()
+        _style_iter = _sr
+        while _style_iter is not None:
+            _eid = id(getattr(_style_iter, "_element", None))
+            if _eid in _visited_ids:
+                break
+            _visited_ids.add(_eid)
+            try:
+                _sname = getattr(_style_iter, "name", "") or ""
+                _sid2  = getattr(_style_iter, "style_id", "") or ""
+                _h = _is_heading_style_key(_sname) or _is_heading_style_key(_sid2)
+                if _h:
+                    return _h
+            except Exception:
+                pass
+            try:
+                _style_iter = _style_iter.base_style
+            except Exception:
+                break
+        return None
 
     # ── List tracking ────────────────────────────────────────────────────────
     # We process the document body as a flat list of block elements.
@@ -2405,15 +2428,16 @@ def _docx_to_rich_html(
             if _h_tag and not _p_elem_text_content(child_elem):
                 _h_tag = None
 
-            # Guard: h2–h6 paragraphs whose text is longer than 60 chars are
+            # Guard: h2–h6 paragraphs whose text is longer than 25 chars are
             # almost certainly body text that was *styled* as a heading for
             # visual emphasis (e.g. a company-name paragraph styled as "标题2").
-            # Real subheadings are concise; suppress the heading tag so they
-            # don't appear as false entries in the navigation.
+            # Real subheadings in Chinese documents are concise (typically
+            # under 15 chars); 25 chars gives a safe margin without picking
+            # up body sentences (which are 30-100+ chars).
             # h1 (document-level title) is exempt — it can be longer.
             if _h_tag and _h_tag != "h1":
                 try:
-                    if len((para.text or "").strip()) > 60:
+                    if len((para.text or "").strip()) > 25:
                         _h_tag = None
                 except Exception:
                     pass

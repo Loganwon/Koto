@@ -33,17 +33,27 @@ _TOOL_RESULT_CONTEXT_LIMIT = 24_000
 _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"))
 _REPEATED_TOOL_BATCH_MESSAGE = "检测到模型重复请求同一组工具，已自动停止以避免重复处理。"
 _KOTO_CREATED_MARKER = "__koto_created__:"
+_KOTO_MODIFIED_MARKER = "__koto_modified__:"
+
+
+def _extract_koto_paths(result_str: str, marker: str) -> List[str]:
+    idx = result_str.rfind(marker)
+    if idx == -1:
+        return []
+    try:
+        return json.loads(result_str[idx + len(marker):])
+    except Exception:
+        return []
 
 
 def _extract_koto_created_paths(result_str: str) -> List[str]:
     """Parse __koto_created__:[...] marker appended by run_python_in_sandbox."""
-    idx = result_str.rfind(_KOTO_CREATED_MARKER)
-    if idx == -1:
-        return []
-    try:
-        return json.loads(result_str[idx + len(_KOTO_CREATED_MARKER):])
-    except Exception:
-        return []
+    return _extract_koto_paths(result_str, _KOTO_CREATED_MARKER)
+
+
+def _extract_koto_modified_paths(result_str: str) -> List[str]:
+    """Parse __koto_modified__:[...] marker appended by run_python_in_sandbox."""
+    return _extract_koto_paths(result_str, _KOTO_MODIFIED_MARKER)
 
 
 def _sample_context_text(text: Any, limit: int) -> str:
@@ -552,6 +562,20 @@ class TaskAgent:
                         yield sse_file_change(**py_change)
                         # Track as a write op to prevent the model from writing the same file again
                         write_key = f"run_python_code::{os.path.normcase(created_path)}"
+                        completed_write_ops[write_key] = completed_write_ops.get(write_key, 0) + 1
+                    for modified_path in _extract_koto_modified_paths(result_str):
+                        py_change = {
+                            "path": modified_path,
+                            "file_type": Path(modified_path).suffix.lstrip(".").lower(),
+                            "operation": "run_python_code",
+                            "summary": f"Python 代码修改了 {os.path.basename(modified_path)}",
+                            "preview": "",
+                            "change_type": "modify",
+                            "focus": False,
+                        }
+                        batch_file_changes.append(py_change)
+                        yield sse_file_change(**py_change)
+                        write_key = f"run_python_code::{os.path.normcase(modified_path)}"
                         completed_write_ops[write_key] = completed_write_ops.get(write_key, 0) + 1
 
                 # Track successful write operations for cross-round dedup

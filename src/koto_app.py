@@ -264,6 +264,38 @@ def ensure_directories():
     ]
     for d in dirs:
         (APP_ROOT / d).mkdir(exist_ok=True, parents=True)
+
+    bundled_config = BUNDLE_DIR / "config"
+    runtime_config = APP_ROOT / "config"
+    if bundled_config.exists() and bundled_config != runtime_config:
+        import shutil
+
+        copied_files = 0
+        created_dirs = 0
+        for src_dir, _, filenames in os.walk(bundled_config):
+            src_path = Path(src_dir)
+            rel_path = src_path.relative_to(bundled_config)
+            dst_path = runtime_config / rel_path
+            if not dst_path.exists():
+                dst_path.mkdir(parents=True, exist_ok=True)
+                created_dirs += 1
+
+            for filename in filenames:
+                src_file = src_path / filename
+                dst_file = dst_path / filename
+                if dst_file.exists():
+                    continue
+                try:
+                    shutil.copy2(src_file, dst_file)
+                    copied_files += 1
+                except Exception as exc:
+                    _write_log(f"⚠️ 同步默认配置失败: {src_file.name} -> {exc}")
+
+        if copied_files or created_dirs:
+            _write_log(
+                f"✔ 已同步默认配置到运行目录: {copied_files} 个文件, {created_dirs} 个目录"
+            )
+
     _write_log("✔ 目录检查完成")
 
 

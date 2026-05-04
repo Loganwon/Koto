@@ -1595,6 +1595,147 @@ class TestTaskAgentDocumentEdits:
         )
         assert any(e.get("type") == "done" for e in events)
 
+    def test_run_python_in_sandbox_syncs_modified_attached_file_when_cleanup_fails(self, tmp_path, monkeypatch):
+        from app.core.agent import task_tools
+
+        source_path = tmp_path / "任务说明.txt"
+        source_path.write_text("before", encoding="utf-8")
+
+        cleanup_calls = {"count": 0}
+        original_rmtree = task_tools.shutil.rmtree
+
+        def flaky_rmtree(path, *args, **kwargs):
+            cleanup_calls["count"] += 1
+            if cleanup_calls["count"] == 1:
+                raise PermissionError(32, "locked", path)
+            return original_rmtree(path, *args, **kwargs)
+
+        monkeypatch.setattr(task_tools.shutil, "rmtree", flaky_rmtree)
+
+        result = task_tools.run_python_in_sandbox(
+            (
+                "from pathlib import Path\n"
+                f"p = Path(TASK_SANDBOX_FILE_PATHS[{source_path.name!r}])\n"
+                "p.write_text('after', encoding='utf-8')\n"
+                f"print('KOTO_MODIFIED:' + TASK_FILE_PATHS[{source_path.name!r}])\n"
+            ),
+            timeout=10,
+            task_files=[{"path": str(source_path), "name": source_path.name}],
+        )
+
+        assert "Sandbox error:" not in result
+        assert "__koto_modified__" in result
+        assert source_path.read_text(encoding="utf-8") == "after"
+        assert cleanup_calls["count"] == 1
+
+    def test_task_agent_run_python_code_syncs_modified_attached_file_and_emits_file_change(self, tmp_path, monkeypatch):
+        source_path = tmp_path / "任务说明.txt"
+        source_path.write_text("before", encoding="utf-8")
+
+        from app.core.agent.task_agent import TaskAgent
+
+        responses = iter([
+            {
+                "content": "先用 Python 修改附件内容。",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "name": "run_python_code",
+                    "args": {
+                        "code": (
+                            "from pathlib import Path\n"
+                            f"p = Path(TASK_SANDBOX_FILE_PATHS[{source_path.name!r}])\n"
+                            "p.write_text('after', encoding='utf-8')\n"
+                            f"print('KOTO_MODIFIED:' + TASK_FILE_PATHS[{source_path.name!r}])\n"
+                        )
+                    },
+                }],
+            },
+            {
+                "content": "已完成附件修改。",
+                "tool_calls": [],
+            },
+        ])
+
+        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
+        monkeypatch.setattr(
+            TaskAgent,
+            "_call_llm",
+            lambda self, provider, messages, system, tool_defs, options=None: next(responses),
+        )
+
+        agent = TaskAgent(model_id="test-model")
+        payload = "".join(agent.execute(
+            task="把附件内容改成 after",
+            files=[
+                {"path": str(source_path), "name": source_path.name, "type": "txt"},
+            ],
+            options={"model_mode": "local"},
+        ))
+
+        events = parse_sse_events(payload.encode("utf-8"))
+        assert source_path.read_text(encoding="utf-8") == "after"
+        assert any(
+            e.get("type") == "file_change"
+            and e.get("path") == str(source_path)
+            and e.get("change_type") == "modify"
+            for e in events
+        )
+        assert any(e.get("type") == "done" for e in events)
+
+    def test_task_agent_run_python_code_detects_direct_source_file_modification(self, tmp_path, monkeypatch):
+        source_path = tmp_path / "任务说明.txt"
+        source_path.write_text("before", encoding="utf-8")
+
+        from app.core.agent.task_agent import TaskAgent
+
+        responses = iter([
+            {
+                "content": "直接修改原始附件路径。",
+                "tool_calls": [{
+                    "id": "call_1",
+                    "name": "run_python_code",
+                    "args": {
+                        "code": (
+                            "from pathlib import Path\n"
+                            f"p = Path(TASK_FILE_PATHS[{source_path.name!r}])\n"
+                            "p.write_text('after-direct', encoding='utf-8')\n"
+                            "print('done')\n"
+                        )
+                    },
+                }],
+            },
+            {
+                "content": "已完成原文件修改。",
+                "tool_calls": [],
+            },
+        ])
+
+        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
+        monkeypatch.setattr(
+            TaskAgent,
+            "_call_llm",
+            lambda self, provider, messages, system, tool_defs, options=None: next(responses),
+        )
+
+        agent = TaskAgent(model_id="test-model")
+        payload = "".join(agent.execute(
+            task="把原始附件内容改成 after-direct",
+            files=[
+                {"path": str(source_path), "name": source_path.name, "type": "txt"},
+            ],
+            options={"model_mode": "local"},
+        ))
+
+        events = parse_sse_events(payload.encode("utf-8"))
+        assert source_path.read_text(encoding="utf-8") == "after-direct"
+        assert any(
+            e.get("type") == "file_change"
+            and e.get("path") == str(source_path)
+            and e.get("change_type") == "modify"
+            for e in events
+        )
+        assert any(e.get("type") == "done" for e in events)
+
     def test_task_agent_inserts_excel_table_into_docx_and_emits_file_change(self, tmp_path, monkeypatch):
         openpyxl = pytest.importorskip("openpyxl")
         docx_module = pytest.importorskip("docx")

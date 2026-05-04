@@ -89,14 +89,73 @@ _add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.png'), os.path.join('assets'
 _add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.svg'), os.path.join('assets', 'koto_icon.svg'))
 
 # ── 默认配置模板 ──
-_add(os.path.join(ROOT, 'config', 'gemini_config.env.example'),
-     os.path.join('config', 'gemini_config.env.example'))
-# user_settings.json 不打包：含开发者本机绝对路径，且运行时由 web/settings.py
-# 自动按 DEFAULT_SETTINGS 在 exe 同级 config/ 目录创建，无需预置。
-# skill_packs 目录目前为空，保留 _add 调用确保目录未来有内容时自动打包
-_add(os.path.join(ROOT, 'config', 'skill_packs'),   os.path.join('config', 'skill_packs'))
-_add(os.path.join(ROOT, 'config', 'skills'),        os.path.join('config', 'skills'))
-_add(os.path.join(ROOT, 'config', 'workflows'),     os.path.join('config', 'workflows'))
+_CONFIG_EXCLUDED_DIRS = {
+    '__pycache__',
+    'deploy',
+    'file_rag_index',
+    'memory_rag_index',
+    'rag_index',
+    'skill_cache',
+    'task_skills',
+    'tests',
+    'training_data',
+}
+_CONFIG_EXCLUDED_FILES = {
+    'email_accounts.json',
+    'gemini_config.env',
+    'jwt_secret.txt',
+    'memory.json',
+    'memory_summaries.json',
+    'memory_vectors.json',
+    'model_setup_done.json',
+    'proactive_queue.json',
+    'requirements.lock',
+    'requirements.txt',
+    'requirements_training.txt',
+    'requirements_voice.txt',
+    'shadow_observations.json',
+    'token_usage.json',
+    'user_profile.json',
+    'user_settings.json',
+}
+_CONFIG_EXCLUDED_SUFFIXES = (
+    '.db',
+    '.sqlite',
+    '.sqlite-shm',
+    '.sqlite-wal',
+)
+
+
+def _add_runtime_config(src_dir):
+    """Include shipped config defaults while excluding local state and caches."""
+    if not os.path.isdir(src_dir):
+        return
+
+    for dirpath, dirnames, filenames in os.walk(src_dir):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _CONFIG_EXCLUDED_DIRS
+        ]
+
+        rel_dir = os.path.relpath(dirpath, src_dir)
+        dst_dir = 'config' if rel_dir == '.' else os.path.join('config', rel_dir)
+
+        # PyInstaller does not infer empty config directories from file-based walks.
+        # Include them explicitly so runtime-created defaults still have a packaged home.
+        if rel_dir != '.' and not dirnames and not filenames:
+            _add(dirpath, dst_dir)
+
+        for filename in filenames:
+            if filename in _CONFIG_EXCLUDED_FILES:
+                continue
+            if filename.startswith('test_'):
+                continue
+            if filename.endswith(_CONFIG_EXCLUDED_SUFFIXES):
+                continue
+            _add(os.path.join(dirpath, filename), dst_dir)
+
+
+_add_runtime_config(os.path.join(ROOT, 'config'))
 
 # ── src/ 入口脚本（作为数据一同打包，供 runpy 兜底使用）──
 for _script in ['koto_app.py', 'model_downloader.py', 'koto_setup.py', 'server.py']:

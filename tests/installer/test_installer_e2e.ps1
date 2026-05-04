@@ -36,7 +36,7 @@ param(
     [string]$TestInstallDir = "$env:LOCALAPPDATA\KotoE2ETest",
     [int]$Port              = 5099,
     [int]$HealthTimeoutSec  = 45,
-    [switch]$RequireHealth  = $true   # set to $false in headless/CI to treat as warning
+    [bool]$RequireHealth    = $true   # set to $false in headless/CI to treat as warning
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,6 +66,28 @@ Write-Host "[E2E] Port: $Port"
 $failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string]$msg) { $script:failures.Add($msg); Write-Host "::error:: FAIL: $msg" }
 function Pass([string]$msg) { Write-Host "  PASS: $msg" }
+function Test-WorkspaceAssetBundle([string]$StaticRoot) {
+    $indexHtml = Join-Path $StaticRoot "univer-dist\index.html"
+    if (-not (Test-Path $indexHtml)) {
+        Fail "Workspace asset index missing: $indexHtml"
+        return
+    }
+
+    $html = Get-Content $indexHtml -Raw -Encoding UTF8
+    $refs = [regex]::Matches($html, '(assets/index-[^"''>]+\.(?:js|css))') |
+        ForEach-Object { $_.Groups[1].Value } |
+        Select-Object -Unique
+    if (-not $refs) {
+        Fail "No hashed workspace assets referenced in $indexHtml"
+        return
+    }
+
+    foreach ($rel in $refs) {
+        $assetPath = Join-Path (Split-Path $indexHtml -Parent) $rel
+        if (Test-Path $assetPath) { Pass "Workspace asset exists: $(Split-Path -Leaf $assetPath)" }
+        else                      { Fail "Missing workspace asset: $assetPath" }
+    }
+}
 
 # ── Cleanup any leftover from previous run ───────────────────────────────
 if (Test-Path $TestInstallDir) {
@@ -89,6 +111,8 @@ Pass "Installer exited 0"
 Write-Host "`n[Step 2] Verifying installed files..."
 $exePath = Join-Path $TestInstallDir "Koto.exe"
 $internalDir = Join-Path $TestInstallDir "_internal"
+$staticRoot = Join-Path $internalDir "web\static"
+$configRoot = Join-Path $internalDir "config"
 
 $requiredPaths = @(
     $exePath,
@@ -97,6 +121,26 @@ $requiredPaths = @(
     (Join-Path $internalDir "app"),
     (Join-Path $internalDir "web"),
     (Join-Path $internalDir "config"),
+    (Join-Path $staticRoot "js\workspace-assistant.js"),
+    (Join-Path $staticRoot "jszip.min.js"),
+    (Join-Path $staticRoot "docx-preview.min.js"),
+    (Join-Path $staticRoot "univer-dist\index.html"),
+    (Join-Path $staticRoot "univer-dist\assets\sheets-main.js"),
+    (Join-Path $staticRoot "univer-dist\assets\sheets-main.css"),
+    (Join-Path $configRoot ".builtin_key"),
+    (Join-Path $configRoot "gemini_config.env.example"),
+    (Join-Path $configRoot "macro_suggestions.json"),
+    (Join-Path $configRoot "personality_matrix.json"),
+    (Join-Path $configRoot "skill_affinity.json"),
+    (Join-Path $configRoot "skill_bindings.json"),
+    (Join-Path $configRoot "skill_ratings.json"),
+    (Join-Path $configRoot "triggers.json"),
+    (Join-Path $configRoot "context"),
+    (Join-Path $configRoot "divination_data"),
+    (Join-Path $configRoot "skills"),
+    (Join-Path $configRoot "skill_packs"),
+    (Join-Path $configRoot "tools"),
+    (Join-Path $configRoot "workflows"),
     (Join-Path $TestInstallDir "Start_Koto.bat"),
     (Join-Path $TestInstallDir "unins000.exe")
 )
@@ -105,10 +149,24 @@ foreach ($path in $requiredPaths) {
     else                 { Fail "Missing: $path" }
 }
 
+$unexpectedRuntimePaths = @(
+    (Join-Path $TestInstallDir ".webview2_profile"),
+    (Join-Path $TestInstallDir "config"),
+    (Join-Path $TestInstallDir "chats"),
+    (Join-Path $TestInstallDir "logs"),
+    (Join-Path $TestInstallDir "workspace")
+)
+foreach ($path in $unexpectedRuntimePaths) {
+    if (Test-Path $path) { Fail "Unexpected runtime state shipped: $path" }
+    else                 { Pass "Runtime state excluded: $(Split-Path -Leaf $path)" }
+}
+
 # File size validation — catch empty or corrupt builds
 $exeSize = (Get-Item $exePath).Length / 1MB
 if ($exeSize -lt 40) { Fail "Koto.exe is only $([math]::Round($exeSize,1))MB (expected >= 40MB)" }
 else                  { Pass "Koto.exe size is $([math]::Round($exeSize,1))MB" }
+
+Test-WorkspaceAssetBundle -StaticRoot $staticRoot
 
 # Start Menu shortcut check
 $startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Koto"
@@ -185,7 +243,18 @@ if (-not $healthy) {
 # /api/ping endpoint check
 if ($healthy) {
     try {
-        $pingResp = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 5
+        $assetResp = Invoke-RestMethod "http://localhost:$Port/api/v1/workspace/asset_health" -TimeoutSec 5
+        if ($assetResp.ok -eq $true) {
+            Pass "/api/v1/workspace/asset_health returned ok"
+        } else {
+            Fail "/api/v1/workspace/asset_health reported missing assets: $($assetResp.missing -join ', ')"
+        }
+    } catch {
+        Fail "/api/v1/workspace/asset_health request failed: $($_.Exception.Message)"
+    }
+
+    try {
+        Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 5 | Out-Null
         Pass "/api/ping responded"
     } catch {
         Write-Host "  WARN: /api/ping did not respond"

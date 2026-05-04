@@ -165,13 +165,13 @@ export class ExcelViewer {
       if (!document.querySelector('link[href*="sheets-main.css"]')) {
         const link = document.createElement('link');
         link.rel = 'stylesheet';
-        link.href = '/editor/assets/sheets-main.css';
+        link.href = '/static/univer-dist/assets/sheets-main.css';
         document.head.appendChild(link);
       }
 
       const script = document.createElement('script');
       script.type = 'module';
-      script.src = '/editor/assets/sheets-main.js';
+      script.src = '/static/univer-dist/assets/sheets-main.js';
       script.onload = () => {
         this._sheetsLoaded = true;
         // 等待模块内部赋值完成（模块顶层代码异步执行）

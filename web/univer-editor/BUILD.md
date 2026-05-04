@@ -14,9 +14,9 @@ npm run build
 
 ## Important Notes
 
-1. **Runtime entry**: `/editor` serves `web/static/univer-dist/index.html`
-   - This entry references hashed main bundle files: `index-*.js` and `index-*.css`
-   - Do NOT pin hardcoded `main.js/main.css` for file-assistant main entry
+1. **Runtime page**: file assistant now runs through `/workspace-assistant`
+   - `/editor` is legacy compatibility only and redirects to `/workspace-assistant`
+   - `web/static/univer-dist/` is retained for supporting sheet assets, not as the standalone file-assistant homepage
 
 2. **Sheets entry**: `sheets-main.js` remains a separate build artifact
    - Exports `window.KotoSheetsAPI` for the workspace assistant

@@ -2127,26 +2127,11 @@
                   <div id="wa-skill-library"></div>
                   <!-- Workflow panel -->
                   <div id="wa-workflow-panel" class="wa-workflow-panel" style="display:none"></div>
-                  <div id="wa-ai-settings-panel">
-                                        {% set wa_local_model_controls_with_icons = false %}
-                                        {% include '_workspace_model_controls.html' %}
-                    <div class="wa-setting-label">AI 输出模式</div>
-                    <div class="wa-output-mode-toggle">
-                      <button data-mode="inline" class="active" onclick="WA.setOutputMode('inline')">写入文档</button>
-                      <button data-mode="chat" onclick="WA.setOutputMode('chat')">仅对话框</button>
-                    </div>
-                  </div>
-                  <div id="wa-subject-bar" style="display:none"><span class="subject-tag" id="wa-subject-tag">文件</span><span class="subject-text" id="wa-subject-text"></span></div>
-
-                  <!-- Analysis files panel (shown when ≥1 file is dragged for analysis) -->
-                  <div id="wa-ai-file-chips" style="display:none">
-                    <div class="wa-ai-file-chips-header"><!-- filled by _renderAIFileChips() --></div>
-                    <div id="wa-ai-file-chip-list" class="wa-ctx-file-list"></div>
-                    <div class="wa-ctx-drop-hint">
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                      <span>继续拖放文件到此处添加分析</span>
-                    </div>
-                  </div>
+                                    <div id="wa-subject-bar" style="display:none">
+                                        <span class="subject-icon" id="wa-subject-icon"></span>
+                                        <span class="subject-text" id="wa-subject-text"></span>
+                                        <span class="subject-editor-badge">当前编辑</span>
+                                    </div>
 
                   <!-- 技能快捷栏 — populated by WaSkills.load() -->
                   <div id="wa-skill-bar" style="display:none;flex-shrink:0;padding:5px 10px 4px;border-bottom:1px solid var(--border);background:var(--bg-secondary);flex-wrap:wrap;gap:4px;min-height:34px;align-items:center;"></div>
@@ -2191,14 +2176,22 @@
                     </div>
                   </div>
 
-                  <div id="wa-ai-input-area">
-                    <div id="wa-context-bar" style="display:none"></div>
-                    <div id="wa-actions-bar">
-                                            <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容，保留原意但让表达更顺滑')">润色表达</button>
-                                            <button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结当前内容，提炼重点和待办事项')">提炼要点</button>
-                                            <button class="wa-quick-btn" onclick="WA.quickAction('请检查当前内容中的语病、歧义和逻辑风险')">检查问题</button>
-                                            <button class="wa-quick-btn chart-btn" onclick="WA.sendQuickAction('可视化')" title="将选中数据用 Python 可视化为图表"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="5" rx="0.5"/><rect x="6.5" y="5" width="3" height="9" rx="0.5"/><rect x="11" y="2" width="3" height="12" rx="0.5"/></svg> 可视化</button>
-                    </div>
+                                    <div id="wa-ai-input-area">
+                                        <div id="wa-context-bar" style="display:none"></div>
+                                        <div id="wa-ai-file-chips" style="display:none">
+                                            <div class="wa-ai-file-chips-header"><!-- filled by _renderAIFileChips() --></div>
+                                            <div id="wa-ai-file-chip-list" class="wa-ctx-file-list"></div>
+                                            <div class="wa-ctx-drop-hint">
+                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                                <span>继续拖放文件到此处添加分析</span>
+                                            </div>
+                                        </div>
+                                        <div id="wa-actions-bar">
+                                                                                        <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容，保留原意但让表达更顺滑')">润色表达</button>
+                                                                                        <button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结当前内容，提炼重点和待办事项')">提炼要点</button>
+                                                                                        <button class="wa-quick-btn" onclick="WA.quickAction('请检查当前内容中的语病、歧义和逻辑风险')">检查问题</button>
+                                                                                        <button class="wa-quick-btn chart-btn" onclick="WA.sendQuickAction('可视化')" title="将选中数据用 Python 可视化为图表"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="5" rx="0.5"/><rect x="6.5" y="5" width="3" height="9" rx="0.5"/><rect x="11" y="2" width="3" height="12" rx="0.5"/></svg> 可视化</button>
+                                        </div>
                     <div class="wa-input-box">
                                             <div id="wa-input-row"><textarea id="wa-user-input" placeholder="可以直接告诉我你想要的结果。比如：先读完当前文件，列出 3 个结论，再告诉我下一步该怎么改。" onkeydown="WA.handleInputKeydown(event)" rows="6"></textarea></div>
                       <div class="wa-input-box-footer">
@@ -2207,11 +2200,6 @@
                             <span id="wa-footer-file-icon" class="footer-file-icon"></span>
                             <span id="wa-footer-file-label">文件</span>
                           </div>
-                          <button class="wa-footer-model-btn" id="wa-footer-model-btn" onclick="WA.toggleSettings()" title="AI 模型设置">
-                            <span class="model-status-dot"></span>
-                            <span id="wa-footer-model-name">Koto AI</span>
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-                          </button>
                           <div class="wa-display-mode-toggle" id="wa-display-mode-toggle">
                             <button data-dm="panel" class="active" onclick="WA.setAIDisplayMode('panel')" title="右侧面板">
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
@@ -2222,12 +2210,30 @@
                           </div>
                         </div>
                         <div class="wa-footer-actions">
+                                                    <div id="wa-model-mode-menu" class="wa-model-mode-menu wa-footer-model-mode-select">
+                                                        <span class="wa-model-mode-select-dot"></span>
+                                                        <button id="wa-model-mode-trigger" class="wa-model-mode-trigger" type="button" onclick="WA.toggleModelModeMenu()" aria-haspopup="menu" aria-expanded="false" title="AI 模型选择">
+                                                            <span id="wa-model-mode-label">云端</span>
+                                                            <svg class="wa-model-mode-select-caret" width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 6 8 10 12 6"/></svg>
+                                                        </button>
+                                                        <div id="wa-model-mode-dropdown" class="wa-model-mode-dropdown" role="menu" aria-label="AI 模型选择" style="display:none">
+                                                            <button type="button" class="wa-model-mode-option" data-model-mode="cloud" onclick="WA.setLockedModel('cloud')" role="menuitemradio" aria-checked="true">
+                                                                <span class="wa-model-mode-option-icon">云</span>
+                                                                <span class="wa-model-mode-option-text">云端</span>
+                                                            </button>
+                                                            <button type="button" class="wa-model-mode-option" data-model-mode="local" onclick="WA.setLockedModel('local')" role="menuitemradio" aria-checked="false">
+                                                                <span class="wa-model-mode-option-icon">本</span>
+                                                                <span id="wa-model-mode-option-local-label" class="wa-model-mode-option-text">本地</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
                           <span class="wa-input-hint">Enter 发送 Shift+Enter 换行</span>
                                                     <button id="wa-send-btn" type="button" onclick="WA.sendMessage()" title="发送" aria-label="发送"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
                         </div>
                       </div>
                     </div>
                   </div>
+
                 </div>
               </div><!-- /wa-workspace -->
 

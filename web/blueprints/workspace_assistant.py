@@ -23,10 +23,11 @@ workspace_assistant_bp = Blueprint("workspace_assistant", __name__)
 
 # ─── Critical static asset check ─────────────────────────────────────────────
 # Prevents silent failures when univer-dist bundle files are missing.
+_STATIC_ROOT = Path(__file__).resolve().parent.parent / "static"
 _CRITICAL_ASSETS = [
-    Path("web") / "static" / "univer-dist" / "assets" / "sheets-main.js",
-    Path("web") / "static" / "univer-dist" / "assets" / "sheets-main.css",
-    Path("web") / "static" / "js" / "workspace-assistant.js",
+    _STATIC_ROOT / "univer-dist" / "assets" / "sheets-main.js",
+    _STATIC_ROOT / "univer-dist" / "assets" / "sheets-main.css",
+    _STATIC_ROOT / "js" / "workspace-assistant.js",
 ]
 
 def _check_critical_assets() -> list[str]:

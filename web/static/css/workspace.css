@@ -2390,11 +2390,12 @@
       flex-wrap: wrap;
       gap: 2px;
       padding: 4px 10px;
-      background: #1e2130;
-      border-bottom: 1px solid #2d3147;
+      background: color-mix(in srgb, var(--surface, #ffffff) 92%, var(--bg-secondary, #f7f8fb) 8%);
+      border-bottom: 1px solid var(--border);
       flex-shrink: 0;
       min-height: 38px;
       overflow: hidden;
+      box-shadow: inset 0 -1px 0 rgba(15, 23, 42, 0.03);
     }
     #wa-docx-editor .koto-tt-toolbar .tt-btn {
       display: inline-flex;
@@ -2406,33 +2407,33 @@
       border: none;
       border-radius: 3px;
       background: transparent;
-      color: #c8cedd;
+      color: var(--text-muted);
       font-size: 13px;
       cursor: pointer;
       transition: background 0.12s, color 0.12s;
       white-space: nowrap;
     }
     #wa-docx-editor .koto-tt-toolbar .tt-btn:hover {
-      background: #2d3147;
-      color: #fff;
+      background: var(--hover);
+      color: var(--text);
     }
     #wa-docx-editor .koto-tt-toolbar .tt-btn.is-active {
       background: var(--accent-subtle);
-      color: #6fa3ff;
+      color: var(--accent);
     }
     #wa-docx-editor .koto-tt-toolbar .tt-sep {
       width: 1px;
       height: 18px;
-      background: #2d3147;
+      background: var(--border);
       margin: 0 3px;
     }
     #wa-docx-editor .koto-tt-toolbar .tt-select {
       height: 26px;
       padding: 0 6px;
-      border: 1px solid #2d3147;
+      border: 1px solid var(--border);
       border-radius: 3px;
-      background: #1e2130;
-      color: #c8cedd;
+      background: color-mix(in srgb, var(--surface, #ffffff) 85%, var(--bg-secondary, #f7f8fb) 15%);
+      color: var(--text);
       font-size: 12px;
       cursor: pointer;
     }
@@ -4948,8 +4949,51 @@
       color: var(--text);
     }
 
-    /* ── Subject bar — permanently collapsed (context now inline in header) ── */
-    #wa-subject-bar { display: none !important; height: 0 !important; overflow: hidden !important; }
+    /* ── Subject bar — current editing file indicator ── */
+    #wa-subject-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin: 0 12px 8px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+    #wa-subject-bar .subject-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      color: var(--accent);
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    #wa-subject-bar .subject-text {
+      min-width: 0;
+      flex: 1;
+      font-size: 12px;
+      color: var(--text);
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #wa-subject-bar .subject-editor-badge {
+      flex-shrink: 0;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
 
     /* ── Messages Area ── */
     #wa-ai-messages {
@@ -5271,6 +5315,10 @@
       scrollbar-width: none;
     }
     #wa-actions-bar::-webkit-scrollbar, .wa-ai-quick-actions::-webkit-scrollbar { display: none; }
+    .wa-actions-spacer {
+      flex: 1 1 auto;
+      min-width: 12px;
+    }
 
     /* Workflow active state — replaces quick actions with activation bar */
     #wa-actions-bar.wf-active, .wa-ai-quick-actions.wf-active {
@@ -5527,6 +5575,147 @@
       background: var(--hover);
       color: var(--text);
     }
+    .wa-model-toggle-btn {
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+      padding: 6px 10px;
+      color: var(--text);
+      margin-left: auto;
+    }
+    .wa-model-toggle-btn:hover {
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+
+    .wa-model-mode-menu {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      padding: 0 8px 0 10px;
+      height: 32px;
+      border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border) 84%);
+      border-radius: 11px;
+      background: color-mix(in srgb, var(--surface, #fff) 94%, var(--accent) 6%);
+      color: var(--text);
+      flex-shrink: 0;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+    }
+    .wa-model-mode-menu:hover {
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--border) 72%);
+      background: color-mix(in srgb, var(--surface, #fff) 90%, var(--accent) 10%);
+    }
+    .wa-model-mode-menu:focus-within,
+    .wa-model-mode-menu.open {
+      border-color: color-mix(in srgb, var(--accent) 40%, var(--border) 60%);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+    }
+    .wa-model-mode-select-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success, #16a34a);
+      flex-shrink: 0;
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--success, #16a34a) 14%, transparent);
+    }
+    .wa-model-mode-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: none;
+      background: transparent;
+      color: var(--text);
+      font-size: 11.5px;
+      font-weight: 600;
+      line-height: 30px;
+      height: 30px;
+      padding: 0;
+      outline: none;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #wa-model-mode-label {
+      min-width: 24px;
+      text-align: left;
+    }
+    .wa-model-mode-trigger:disabled {
+      color: var(--text-muted);
+      cursor: not-allowed;
+    }
+    .wa-model-mode-trigger .wa-model-mode-select-caret {
+      transition: transform 0.16s ease, color 0.16s ease;
+    }
+    .wa-model-mode-menu.open .wa-model-mode-select-caret {
+      transform: rotate(180deg);
+      color: var(--accent);
+    }
+    .wa-model-mode-dropdown {
+      position: absolute;
+      right: -1px;
+      bottom: calc(100% + 8px);
+      min-width: 116px;
+      padding: 6px;
+      border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border) 82%);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--surface, #fff) 98%, var(--bg-secondary, #f7f8fb) 2%);
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.16);
+      z-index: 30;
+    }
+    .wa-model-mode-option {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border: none;
+      border-radius: 9px;
+      background: transparent;
+      color: var(--text);
+      text-align: left;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.14s, color 0.14s;
+    }
+    .wa-model-mode-option:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--accent) 10%, transparent);
+      color: var(--text);
+    }
+    .wa-model-mode-option.active {
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      color: var(--accent);
+    }
+    .wa-model-mode-option:disabled {
+      color: var(--text-muted);
+      cursor: not-allowed;
+      opacity: 0.72;
+    }
+    .wa-model-mode-option-icon {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      color: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .wa-model-mode-option[data-model-mode="local"] .wa-model-mode-option-icon {
+      background: color-mix(in srgb, var(--success, #16a34a) 14%, transparent);
+    }
+    .wa-model-mode-option-text {
+      white-space: nowrap;
+    }
+    .wa-model-mode-select-caret {
+      color: var(--text-muted);
+      pointer-events: none;
+      flex-shrink: 0;
+    }
+    .wa-footer-model-mode-select {
+      margin-right: 2px;
+    }
 
     .model-status-dot {
       width: 6px;
@@ -5564,7 +5753,7 @@
     .wa-footer-actions {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 8px;
       flex-shrink: 0;
     }
 
@@ -6124,11 +6313,12 @@
        AI Panel: analysis file list (redesigned rows)
        ═══════════════════════════════════════════════════════════════ */
     #wa-ai-file-chips {
-      padding: 10px 12px 6px;
+      padding: 10px 12px 12px;
       border-bottom: 1px solid var(--border);
       border-left: 3px solid var(--accent);
       background: var(--accent-subtle);
       flex-shrink: 0;
+      margin-bottom: 10px;
     }
     .wa-ai-file-chips-header {
       display: flex;

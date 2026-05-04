@@ -40,9 +40,14 @@ $userSettings = Join-Path $configDir "user_settings.json"
 }
 "@ | Set-Content -Path $userSettings -Encoding UTF8
 
-# --- local_model_prompt_shown.flag -------------------------------------
+# --- local_model_prompted.json -----------------------------------------
 # Prevents the "install local model?" prompt on first boot.
-$flagDir = Join-Path $InstallDir "config"
-"prompted" | Set-Content -Path (Join-Path $flagDir "local_model_prompt_shown.flag") -Encoding UTF8
+$flagPath = Join-Path $configDir "local_model_prompted.json"
+@"
+{
+    "prompted": true,
+    "action": "e2e-seeded"
+}
+"@ | Set-Content -Path $flagPath -Encoding UTF8
 
 Write-Host "[seed_config] Config seeded at: $configDir"

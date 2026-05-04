@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import filecmp
+import hashlib
 import shutil
 import tempfile
 from pathlib import Path
@@ -416,9 +418,37 @@ def _resolve_task_file_entries(task_files: Optional[List[Dict[str, str]]]) -> Li
         resolved_entries.append({
             "display_name": raw_name or os.path.basename(resolved_path),
             "source_path": resolved_path,
+            "source_fingerprint_initial": _fingerprint_file(resolved_path),
         })
 
     return resolved_entries
+
+
+def _fingerprint_file(path: str) -> Dict[str, Any]:
+    """Capture a stable fingerprint for later change detection."""
+    try:
+        stat = os.stat(path)
+        digest = hashlib.sha1()
+        with open(path, "rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return {
+            "size": stat.st_size,
+            "mtime_ns": getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)),
+            "sha1": digest.hexdigest(),
+        }
+    except OSError:
+        return {}
+
+
+def _fingerprint_changed(path: str, fingerprint: Dict[str, Any]) -> bool:
+    """Return True when the file differs from its captured fingerprint."""
+    if not path or not fingerprint or not os.path.isfile(path):
+        return False
+    return _fingerprint_file(path) != fingerprint
 
 
 def _unique_staged_name(name: str, used_names: set[str]) -> str:
@@ -448,6 +478,8 @@ def _stage_task_files_for_sandbox(resolved_entries: List[Dict[str, str]], sandbo
             **entry,
             "staged_name": staged_name,
             "staged_path": staged_path,
+            "staged_mtime_initial": os.stat(staged_path).st_mtime,
+            "staged_fingerprint_initial": _fingerprint_file(staged_path),
         })
 
     return staged_entries
@@ -473,22 +505,98 @@ def _prepend_task_file_context(code: str, staged_entries: List[Dict[str, str]]) 
         f"TASK_FILE_PATHS = {json.dumps(absolute_paths, ensure_ascii=False)}\n"
         f"TASK_SANDBOX_FILE_PATHS = {json.dumps(staged_paths, ensure_ascii=False)}\n"
         f"TASK_SANDBOX_FILES = {json.dumps(staged_names, ensure_ascii=False)}\n"
+        "# After modifying an existing file, print: KOTO_MODIFIED:<absolute_path>\n"
         "# After creating a file in the workspace, print: KOTO_CREATED:<absolute_path>\n"
+        "# e.g. print('KOTO_MODIFIED:' + TASK_FILE_PATHS['report.docx'])\n"
         "# e.g. print('KOTO_CREATED:' + output_path)\n\n"
     )
     return preamble + code
 
 
-def _parse_koto_created_paths(stdout: str) -> List[str]:
-    """Extract KOTO_CREATED:<path> markers printed by sandbox code."""
-    paths: List[str] = []
+def _parse_koto_file_markers(stdout: str) -> Dict[str, List[str]]:
+    """Extract KOTO_CREATED/KOTO_MODIFIED markers printed by sandbox code."""
+    created: List[str] = []
+    modified: List[str] = []
     for line in (stdout or "").splitlines():
         line = line.strip()
         if line.startswith("KOTO_CREATED:"):
             candidate = line[len("KOTO_CREATED:"):].strip()
             if candidate and os.path.isabs(candidate) and os.path.isfile(candidate):
-                paths.append(candidate)
-    return paths
+                created.append(candidate)
+        elif line.startswith("KOTO_MODIFIED:"):
+            candidate = line[len("KOTO_MODIFIED:"):].strip()
+            if candidate and os.path.isabs(candidate) and os.path.isfile(candidate):
+                modified.append(candidate)
+    return {"created": created, "modified": modified}
+
+
+def _sync_staged_files_to_source(
+    staged_entries: List[Dict[str, str]],
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Copy staged-file edits back to source files and emit KOTO_MODIFIED markers."""
+    stdout = str(result.get("stdout") or "")
+    existing_markers = _parse_koto_file_markers(stdout)
+    already_reported = {
+        os.path.normcase(os.path.abspath(path))
+        for path in existing_markers.get("modified", [])
+    }
+    extra_modified: List[str] = []
+
+    for entry in staged_entries:
+        staged_path = str(entry.get("staged_path") or "")
+        source_path = str(entry.get("source_path") or "")
+        if not staged_path or not source_path or not os.path.isfile(staged_path):
+            continue
+
+        staged_changed = _fingerprint_changed(
+            staged_path,
+            entry.get("staged_fingerprint_initial") or {},
+        )
+        source_changed = _fingerprint_changed(
+            source_path,
+            entry.get("source_fingerprint_initial") or {},
+        )
+        if not staged_changed and not source_changed:
+            continue
+
+        files_match_after_run = False
+        if staged_changed:
+            try:
+                files_match_after_run = filecmp.cmp(staged_path, source_path, shallow=False)
+            except OSError:
+                files_match_after_run = False
+
+        if staged_changed and not source_changed:
+            try:
+                shutil.copy2(staged_path, source_path)
+                logger.info("[sandbox] Auto-synced modified staged file -> %s", source_path)
+                source_changed = True
+            except Exception as exc:
+                logger.warning("[sandbox] Sync failed %s -> %s: %s", staged_path, source_path, exc)
+                continue
+        elif staged_changed and source_changed and not files_match_after_run:
+            logger.warning(
+                "[sandbox] Source and staged file both changed; keeping direct source version for %s",
+                source_path,
+            )
+
+        norm_source = os.path.normcase(os.path.abspath(source_path))
+        if source_changed and norm_source not in already_reported:
+            extra_modified.append(source_path)
+
+    if not extra_modified:
+        return result
+
+    extra_lines = "\n".join(f"KOTO_MODIFIED:{path}" for path in extra_modified)
+    merged_stdout = stdout
+    if merged_stdout and not merged_stdout.endswith("\n"):
+        merged_stdout += "\n"
+    merged_stdout += extra_lines
+
+    merged_result = dict(result)
+    merged_result["stdout"] = merged_stdout
+    return merged_result
 
 
 def _format_sandbox_result(result: Dict[str, Any]) -> str:
@@ -509,32 +617,45 @@ def _format_sandbox_result(result: Dict[str, Any]) -> str:
 def run_python_in_sandbox(code: str, timeout: int = 30, task_files: Optional[List[Dict[str, str]]] = None) -> str:
     """Execute Python code in the sandbox. Returns stdout + stderr + images.
 
-    If the code prints ``KOTO_CREATED:<absolute_path>`` lines, those paths are
-    returned as a JSON suffix so the task agent can emit file_change events.
+    If the code prints ``KOTO_CREATED:<absolute_path>`` or
+    ``KOTO_MODIFIED:<absolute_path>`` lines, those paths are returned as hidden
+    JSON suffixes so the task agent can emit file_change events.
     """
+    tmpdir: str | None = None
     try:
         from app.core.sandbox import run_python
 
         resolved_task_files = _resolve_task_file_entries(task_files)
         if resolved_task_files:
-            with tempfile.TemporaryDirectory(prefix="koto-task-") as tmpdir:
-                staged_entries = _stage_task_files_for_sandbox(resolved_task_files, tmpdir)
-                prepared_code = _prepend_task_file_context(code, staged_entries)
-                result = run_python(prepared_code, timeout=timeout, work_dir=tmpdir)
-                return _wrap_sandbox_result(result)
+            tmpdir = tempfile.mkdtemp(prefix="koto-task-")
+            staged_entries = _stage_task_files_for_sandbox(resolved_task_files, tmpdir)
+            prepared_code = _prepend_task_file_context(code, staged_entries)
+            result = run_python(prepared_code, timeout=timeout, work_dir=tmpdir)
+            result = _sync_staged_files_to_source(staged_entries, result)
+            return _wrap_sandbox_result(result)
 
         result = run_python(code, timeout=timeout)
         return _wrap_sandbox_result(result)
     except Exception as e:
         return f"Sandbox error: {e}"
+    finally:
+        if tmpdir and os.path.isdir(tmpdir):
+            try:
+                shutil.rmtree(tmpdir)
+            except OSError as exc:
+                logger.warning("[task_tools] temp sandbox cleanup skipped for %s: %s", tmpdir, exc)
 
 
 def _wrap_sandbox_result(result: Dict[str, Any]) -> str:
-    """Format sandbox result; append __koto_created__ JSON if files were created."""
+    """Format sandbox result; append hidden KOTO file-change markers."""
     text = _format_sandbox_result(result)
-    created = _parse_koto_created_paths(result.get("stdout", ""))
+    markers = _parse_koto_file_markers(str(result.get("stdout", "")))
+    created = markers.get("created", [])
+    modified = markers.get("modified", [])
     if created:
         text += "\n__koto_created__:" + json.dumps(created, ensure_ascii=False)
+    if modified:
+        text += "\n__koto_modified__:" + json.dumps(modified, ensure_ascii=False)
     return text
 
 
