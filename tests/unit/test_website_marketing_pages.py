@@ -87,7 +87,6 @@ class TestWebsiteRouteSource(unittest.TestCase):
         segment = ast.get_source_segment(source, index_fn)
 
         self.assertIsNotNone(segment)
-        assert segment is not None
         self.assertIn('render_template("landing.html")', segment)
         self.assertIn('render_template("index.html"', segment)
         self.assertIn('deploy_mode == "cloud" and auth_enabled', segment)
