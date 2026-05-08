@@ -323,60 +323,78 @@
         }
         .sample-result strong { color: var(--accent-primary); font-weight: 700; }
 
-        /* ===== SCREENSHOTS ===== */
-        .shots-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 20px;
-            margin-top: 52px;
-        }
-        .shot-card {
-            padding: 22px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            transition: var(--transition);
-        }
-        .shot-card:hover {
-            border-color: var(--border-hover);
-            transform: translateY(-3px);
-            box-shadow: var(--shadow-card);
-        }
-        .shot-card-wide { grid-column: span 2; }
-        .shot-media {
-            display: block;
-            border-radius: 16px;
+        /* ===== PRODUCT STORY ===== */
+        .hero-preview {
+            margin-top: 42px;
+            border-radius: 24px;
             overflow: hidden;
             border: 1px solid rgba(255,255,255,0.08);
             background: linear-gradient(180deg, #101827 0%, #0b111d 100%);
-            box-shadow: 0 20px 40px rgba(0,0,0,0.26);
+            box-shadow: 0 24px 60px rgba(0,0,0,0.32);
         }
-        .shot-media img {
+        .hero-preview img {
             width: 100%;
             display: block;
         }
-        .shot-media-mobile {
-            display: flex;
-            justify-content: center;
+        .story-band {
+            margin-top: 36px;
+            display: grid;
+            grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+            gap: 28px;
             align-items: center;
-            padding: 20px;
+            padding: 28px;
+            border-radius: var(--radius-xl);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
         }
-        .shot-media-mobile img {
-            width: min(100%, 250px);
-            border-radius: 22px;
-            box-shadow: 0 18px 40px rgba(0,0,0,0.32);
+        .story-band.reverse {
+            grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.05fr);
         }
-        .shot-copy {
-            padding-top: 18px;
-        }
-        .shot-copy h3 {
-            font-size: 19px;
+        .story-copy h3 {
+            font-size: 24px;
             font-weight: 700;
-            letter-spacing: -0.2px;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
+            letter-spacing: -0.3px;
         }
-        .shot-copy p {
+        .story-copy p {
             color: var(--text-secondary);
             font-size: 15px;
-            line-height: 1.7;
+            line-height: 1.8;
+            margin-bottom: 18px;
+        }
+        .story-points {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .story-points span {
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .story-media {
+            display: block;
+            border-radius: 18px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: linear-gradient(180deg, #101827 0%, #0b111d 100%);
+            box-shadow: 0 20px 44px rgba(0,0,0,0.28);
+        }
+        .story-media img {
+            width: 100%;
+            display: block;
+        }
+        .story-media-mobile {
+            max-width: 300px;
+            margin: 0 auto;
+        }
+        .story-media-mobile img {
+            border-radius: 24px;
+            box-shadow: 0 18px 40px rgba(0,0,0,0.32);
         }
 
         /* ===== STATS ===== */
@@ -538,8 +556,8 @@
             .download-inner { grid-template-columns: 1fr; gap: 40px; }
             .steps-row { grid-template-columns: 1fr; }
             .samples-grid { grid-template-columns: 1fr; }
-            .shots-grid { grid-template-columns: 1fr; }
-            .shot-card-wide { grid-column: span 1; }
+            .story-band,
+            .story-band.reverse { grid-template-columns: 1fr; }
             .stat { border-right: none; border-bottom: 1px solid var(--border-color); padding: 40px 32px; }
             .stat:last-child { border-bottom: none; }
         }
@@ -567,7 +585,6 @@
         <div class="nav-links">
             <a href="#marketplace">技能系统</a>
             <a href="#features">核心能力</a>
-            <a href="#screenshots">截图预览</a>
             <a href="#samples">场景样例</a>
             <a href="#activation">快速上手</a>
             <a href="#download">下载</a>
@@ -603,59 +620,9 @@
                 <span>🧩 90+ AI 技能</span>
                 <span>⚙️ 工作流引擎</span>
             </div>
-        </div>
-    </section>
-
-    <!-- ===== SCREENSHOTS ===== -->
-    <section id="screenshots">
-        <div class="section-wrap">
-            <div style="text-align:center;max-width:760px;margin:0 auto;">
-                <div class="section-label" style="display:inline-flex;">🖼️ 真实截图</div>
-                <h2 class="section-title" style="text-align:center;">打开之后是什么样<br>这里直接给你看</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;max-width:760px;">以下图片来自本地运行中的 Koto 实际界面，覆盖主对话区、文件工作站、技能市场和移动端模式，访问者能更直观看到产品完成度。</p>
-            </div>
-
-            <div class="shots-grid">
-                <article class="shot-card shot-card-wide">
-                    <a class="shot-media" href="assets/screenshots/koto-main-chat.png" target="_blank" rel="noopener">
-                        <img src="assets/screenshots/koto-main-chat.png" alt="Koto 主界面对话与技能工作台截图" loading="lazy">
-                    </a>
-                    <div class="shot-copy">
-                        <h3>主界面 · 对话、技能、工作区三位一体</h3>
-                        <p>侧边栏会话管理、技能库、文件助手与中央对话区自然整合，适合展示 Koto 不只是聊天，而是一个可以持续工作的桌面 AI 工作台。</p>
-                    </div>
-                </article>
-
-                <article class="shot-card">
-                    <a class="shot-media" href="assets/screenshots/koto-workspace-assistant.png" target="_blank" rel="noopener">
-                        <img src="assets/screenshots/koto-workspace-assistant.png" alt="Koto 文件工作站截图" loading="lazy">
-                    </a>
-                    <div class="shot-copy">
-                        <h3>文件工作站 · 面向文档流转设计</h3>
-                        <p>本地文件浏览、临时工作区、文档类型过滤和右侧 AI 助手同时可见，能很好传达 Word、Excel、PPT、PDF 等文件处理场景。</p>
-                    </div>
-                </article>
-
-                <article class="shot-card">
-                    <a class="shot-media" href="assets/screenshots/koto-skill-marketplace.png" target="_blank" rel="noopener">
-                        <img src="assets/screenshots/koto-skill-marketplace.png" alt="Koto 技能市场截图" loading="lazy">
-                    </a>
-                    <div class="shot-copy">
-                        <h3>技能市场 · 90+ 能力可见可扩展</h3>
-                        <p>把技能分类、创作工坊和社区入口直接展示出来，更容易让新用户理解 Koto 的扩展能力和长期使用价值。</p>
-                    </div>
-                </article>
-
-                <article class="shot-card">
-                    <a class="shot-media shot-media-mobile" href="assets/screenshots/koto-mobile.png" target="_blank" rel="noopener">
-                        <img src="assets/screenshots/koto-mobile.png" alt="Koto 移动端界面截图" loading="lazy">
-                    </a>
-                    <div class="shot-copy">
-                        <h3>移动端模式 · 更轻更快的随手入口</h3>
-                        <p>补充展示 Koto 在窄屏设备上的信息密度与交互布局，适合强调多端可用和轻量访问体验。</p>
-                    </div>
-                </article>
-            </div>
+            <a class="hero-preview fade-up fade-up-4" href="assets/screenshots/koto-main-chat.png" target="_blank" rel="noopener">
+                <img src="assets/screenshots/koto-main-chat.png" alt="Koto 主界面对话与技能工作台截图">
+            </a>
         </div>
     </section>
 
@@ -788,6 +755,22 @@
                     <a href="https://github.com/Loganwon/Koto" class="btn btn-ghost" target="_blank" rel="noopener">查看源码</a>
                 </div>
             </div>
+
+            <div class="story-band reverse">
+                <a class="story-media" href="assets/screenshots/koto-skill-marketplace.png" target="_blank" rel="noopener">
+                    <img src="assets/screenshots/koto-skill-marketplace.png" alt="Koto 技能市场截图" loading="lazy">
+                </a>
+                <div class="story-copy">
+                    <h3>让访问者直接看见技能生态</h3>
+                    <p>在介绍技能系统时直接展示真实的技能市场界面，比单纯列能力更容易建立信任。用户能马上理解 Koto 不是只有几个固定按钮，而是一个可扩展、可持续积累的 AI 办公平台。</p>
+                    <div class="story-points">
+                        <span>90+ 内置技能</span>
+                        <span>分类清晰</span>
+                        <span>支持创作工坊</span>
+                        <span>持续扩展</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </section>
 
@@ -850,6 +833,22 @@
                     <h3>代码沙箱 · 多文件协同</h3>
                     <p>安全沙箱执行 Python 脚本，支持图表输出。多文件协同处理器可跨 DOCX/XLSX/PPTX 批量操作，定时任务全程自动化。</p>
                 </div>
+            </div>
+
+            <div class="story-band">
+                <div class="story-copy">
+                    <h3>工作区、文件助手与 AI 对话放在一起</h3>
+                    <p>这张文件工作站截图更适合放在核心能力部分：它把本地文件浏览、工作区整理、右侧 AI 助手与当前任务界面串到一起，准确传达 Koto 的核心体验是“围绕文件工作”，而不是单独聊天。</p>
+                    <div class="story-points">
+                        <span>本地文件浏览</span>
+                        <span>临时工作区</span>
+                        <span>AI 侧栏协作</span>
+                        <span>面向真实办公流</span>
+                    </div>
+                </div>
+                <a class="story-media" href="assets/screenshots/koto-workspace-assistant.png" target="_blank" rel="noopener">
+                    <img src="assets/screenshots/koto-workspace-assistant.png" alt="Koto 文件工作站截图" loading="lazy">
+                </a>
             </div>
         </div>
     </section>
@@ -980,6 +979,22 @@
                         <div class="wc-id">18913921188</div>
                     </div>
                 </div>
+            </div>
+
+            <div class="story-band" style="margin-top:28px;">
+                <div class="story-copy">
+                    <h3>移动端也能快速进入工作状态</h3>
+                    <p>在“快速上手”部分补充移动端截图，可以告诉新用户 Koto 不只适合桌面重度场景，也适合临时查看对话、快速触发技能、随手继续未完成任务，让首次访问者对使用方式有更完整的想象。</p>
+                    <div class="story-points">
+                        <span>窄屏适配</span>
+                        <span>随手继续任务</span>
+                        <span>轻量访问</span>
+                        <span>多端一致体验</span>
+                    </div>
+                </div>
+                <a class="story-media story-media-mobile" href="assets/screenshots/koto-mobile.png" target="_blank" rel="noopener">
+                    <img src="assets/screenshots/koto-mobile.png" alt="Koto 移动端界面截图" loading="lazy">
+                </a>
             </div>
         </div>
     </section>
