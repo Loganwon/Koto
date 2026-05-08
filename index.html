@@ -185,6 +185,39 @@
         }
         .hero-meta span { display: flex; align-items: center; gap: 6px; }
 
+        /* ===== TRUST BAND ===== */
+        .trust-band {
+            position: relative; z-index: 1;
+            border-top: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+            background: linear-gradient(180deg, rgba(16,185,129,0.03) 0%, rgba(255,255,255,0.01) 100%);
+        }
+        .trust-inner {
+            max-width: 1160px;
+            margin: 0 auto;
+            padding: 30px 48px;
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 14px;
+        }
+        .trust-item {
+            padding: 18px 18px 16px;
+            border-radius: var(--radius-md);
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border-color);
+        }
+        .trust-item strong {
+            display: block;
+            font-size: 15px;
+            margin-bottom: 6px;
+            color: var(--text-primary);
+        }
+        .trust-item span {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
         /* ===== SKILL MARKETPLACE ===== */
         .marketplace-section { background: transparent; }
         .marketplace-header {
@@ -397,6 +430,127 @@
             box-shadow: 0 18px 40px rgba(0,0,0,0.32);
         }
 
+        /* ===== COMPARISON ===== */
+        .compare-grid {
+            display: grid;
+            grid-template-columns: 1.2fr repeat(3, minmax(0, 1fr));
+            gap: 16px;
+            margin-top: 52px;
+        }
+        .compare-col {
+            padding: 24px 22px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+        }
+        .compare-col.feature-col {
+            background: transparent;
+            border-style: dashed;
+        }
+        .compare-col.koto-col {
+            border-color: rgba(16,185,129,0.35);
+            box-shadow: var(--shadow-glow);
+        }
+        .compare-head {
+            min-height: 92px;
+            margin-bottom: 18px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .compare-kicker {
+            color: var(--accent-primary);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .compare-head h3 {
+            font-size: 22px;
+            margin-bottom: 8px;
+        }
+        .compare-head p {
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .compare-list {
+            display: grid;
+            gap: 12px;
+        }
+        .compare-row {
+            min-height: 68px;
+            display: flex;
+            align-items: center;
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .compare-row strong {
+            color: var(--text-primary);
+        }
+        .compare-row.good { color: #baf7db; }
+        .compare-row.warn { color: #d5def0; }
+
+        /* ===== FAQ ===== */
+        .faq-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+            gap: 28px;
+            align-items: start;
+            margin-top: 52px;
+        }
+        .faq-side {
+            padding: 28px;
+            border-radius: var(--radius-xl);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            position: sticky;
+            top: 92px;
+        }
+        .faq-side p {
+            color: var(--text-secondary);
+            font-size: 15px;
+            line-height: 1.8;
+            margin-bottom: 20px;
+        }
+        .faq-list {
+            display: grid;
+            gap: 14px;
+        }
+        .faq-item {
+            border-radius: var(--radius-lg);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+        .faq-item summary {
+            list-style: none;
+            cursor: pointer;
+            padding: 22px 24px;
+            font-size: 17px;
+            font-weight: 700;
+            color: var(--text-primary);
+            position: relative;
+        }
+        .faq-item summary::-webkit-details-marker { display: none; }
+        .faq-item summary::after {
+            content: '+';
+            position: absolute;
+            right: 24px;
+            top: 20px;
+            color: var(--accent-primary);
+            font-size: 22px;
+            font-weight: 400;
+        }
+        .faq-item[open] summary::after { content: '−'; }
+        .faq-item p {
+            padding: 0 24px 22px;
+            color: var(--text-secondary);
+            font-size: 15px;
+            line-height: 1.8;
+        }
+
         /* ===== STATS ===== */
         .stats-band {
             position: relative; z-index: 1;
@@ -553,6 +707,10 @@
 
         /* ===== RESPONSIVE ===== */
         @media (max-width: 900px) {
+            .trust-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .compare-grid { grid-template-columns: 1fr; }
+            .faq-grid { grid-template-columns: 1fr; }
+            .faq-side { position: static; }
             .download-inner { grid-template-columns: 1fr; gap: 40px; }
             .steps-row { grid-template-columns: 1fr; }
             .samples-grid { grid-template-columns: 1fr; }
@@ -565,7 +723,8 @@
             .nav { padding: 0 20px; }
             .nav-links a { display: none; }
             .hero { padding: 120px 24px 64px; }
-            .section-wrap, .activation-inner, .download-inner { padding-left: 24px; padding-right: 24px; }
+            .trust-inner { grid-template-columns: 1fr; }
+            .section-wrap, .activation-inner, .download-inner, .trust-inner { padding-left: 24px; padding-right: 24px; }
             .activation-contact { flex-direction: column; }
             .footer { padding: 48px 24px 28px; }
         }
@@ -623,6 +782,31 @@
             <a class="hero-preview fade-up fade-up-4" href="assets/screenshots/koto-main-chat.png" target="_blank" rel="noopener">
                 <img src="assets/screenshots/koto-main-chat.png" alt="Koto 主界面对话与技能工作台截图">
             </a>
+        </div>
+    </section>
+
+    <section class="trust-band" aria-label="Koto 产品信任信息">
+        <div class="trust-inner">
+            <div class="trust-item">
+                <strong>开源可审计</strong>
+                <span>GitHub 仓库公开，版本与更新路径清晰，适合长期评估与持续采用。</span>
+            </div>
+            <div class="trust-item">
+                <strong>本地优先</strong>
+                <span>文件、知识库与工作区优先留在本机，隐私与数据边界更容易掌控。</span>
+            </div>
+            <div class="trust-item">
+                <strong>文件原位处理</strong>
+                <span>围绕 DOCX、PPTX、XLSX 工作，减少复制粘贴和工具来回切换。</span>
+            </div>
+            <div class="trust-item">
+                <strong>90+ 技能体系</strong>
+                <span>从写作、翻译到数据处理与工作流自动化，覆盖高频办公任务。</span>
+            </div>
+            <div class="trust-item">
+                <strong>云端 + 本地模型</strong>
+                <span>Gemini 与 Ollama 按需切换，既能快速接入，也能离线运行。</span>
+            </div>
         </div>
     </section>
 
@@ -926,6 +1110,79 @@
         </div>
     </section>
 
+    <!-- ===== COMPARISON ===== -->
+    <section id="compare">
+        <div class="section-wrap">
+            <div style="text-align:center;max-width:780px;margin:0 auto;">
+                <div class="section-label" style="display:inline-flex;">🆚 对比优势</div>
+                <h2 class="section-title" style="text-align:center;">为什么不是再开一个聊天窗口<br>或再装一个传统插件</h2>
+                <p class="section-desc" style="margin:0 auto;text-align:center;max-width:760px;">世界级产品页会把“为什么选你”讲得非常直接。这里用最关键的工作流差异，说明 Koto 和通用聊天工具、传统办公插件的不同。</p>
+            </div>
+
+            <div class="compare-grid">
+                <div class="compare-col feature-col">
+                    <div class="compare-head">
+                        <div class="compare-kicker">比较维度</div>
+                        <h3>你真正关心的事</h3>
+                        <p>不是模型参数，而是能不能真正把文件工作接住、做完、复用起来。</p>
+                    </div>
+                    <div class="compare-list">
+                        <div class="compare-row"><strong>文件处理方式</strong></div>
+                        <div class="compare-row"><strong>跨文件任务</strong></div>
+                        <div class="compare-row"><strong>工作流复用</strong></div>
+                        <div class="compare-row"><strong>隐私与部署</strong></div>
+                        <div class="compare-row"><strong>适合的工作形态</strong></div>
+                    </div>
+                </div>
+
+                <div class="compare-col koto-col">
+                    <div class="compare-head">
+                        <div class="compare-kicker">Koto</div>
+                        <h3>AI 文件工作台</h3>
+                        <p>围绕真实文件、任务上下文与可复用流程设计。</p>
+                    </div>
+                    <div class="compare-list">
+                        <div class="compare-row good">直接面向 <strong>DOCX / PPTX / XLSX</strong>，减少复制粘贴。</div>
+                        <div class="compare-row good">支持 <strong>多文件提取、对比、汇总</strong> 与连续协作。</div>
+                        <div class="compare-row good">技能、提示词与工作流都可以 <strong>持续沉淀</strong>。</div>
+                        <div class="compare-row good">支持 <strong>本地优先</strong>，也可接入 Gemini / Ollama。</div>
+                        <div class="compare-row good">适合 <strong>长期、重复、复杂</strong> 的文件工作。</div>
+                    </div>
+                </div>
+
+                <div class="compare-col">
+                    <div class="compare-head">
+                        <div class="compare-kicker">通用聊天工具</div>
+                        <h3>强在问答</h3>
+                        <p>适合快速咨询，但通常不是围绕文件流程构建。</p>
+                    </div>
+                    <div class="compare-list">
+                        <div class="compare-row warn">往往需要 <strong>手动复制内容</strong> 再来回整理。</div>
+                        <div class="compare-row warn">跨文件处理更依赖 <strong>人为组织上下文</strong>。</div>
+                        <div class="compare-row warn">复用更多依赖聊天记录，<strong>流程沉淀较弱</strong>。</div>
+                        <div class="compare-row warn">部署方式取决于具体平台，<strong>本地控制力有限</strong>。</div>
+                        <div class="compare-row warn">更适合 <strong>一次性提问</strong> 和轻量创作。</div>
+                    </div>
+                </div>
+
+                <div class="compare-col">
+                    <div class="compare-head">
+                        <div class="compare-kicker">传统办公插件</div>
+                        <h3>强在单点功能</h3>
+                        <p>适合补一个按钮，但往往很难承接完整任务链路。</p>
+                    </div>
+                    <div class="compare-list">
+                        <div class="compare-row warn">通常只覆盖 <strong>单文档内</strong> 的局部动作。</div>
+                        <div class="compare-row warn">面对多文件和复杂任务，<strong>扩展性有限</strong>。</div>
+                        <div class="compare-row warn">可配置空间有限，<strong>难以形成工作台式体验</strong>。</div>
+                        <div class="compare-row warn">依赖宿主软件生态，<strong>灵活性较弱</strong>。</div>
+                        <div class="compare-row warn">更适合 <strong>局部增强</strong>，不适合作为长期 AI 工作台。</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- ===== ACTIVATION CODE ===== -->
     <section id="activation" class="activation-section">
         <div class="activation-inner">
@@ -999,6 +1256,48 @@
         </div>
     </section>
 
+    <!-- ===== FAQ ===== -->
+    <section id="faq">
+        <div class="section-wrap">
+            <div style="text-align:center;max-width:760px;margin:0 auto;">
+                <div class="section-label" style="display:inline-flex;">❓ FAQ</div>
+                <h2 class="section-title" style="text-align:center;">第一次了解 Koto<br>最常见的几个问题</h2>
+                <p class="section-desc" style="margin:0 auto;text-align:center;max-width:740px;">把疑问提前回答清楚，能显著提升产品页的完成度与信任感。下面这些问题也是新用户最常问到的。</p>
+            </div>
+
+            <div class="faq-grid">
+                <div class="faq-side">
+                    <h3 style="font-size:24px;margin-bottom:12px;">如果你在评估是否值得下载</h3>
+                    <p>Koto 最适合那些已经在用 AI，但仍然被文件复制粘贴、跨文档整理、重复流程和隐私顾虑拖慢效率的人。它不是替代聊天，而是把 AI 带进真实文件工作流。</p>
+                    <a href="#download" class="btn btn-primary">立即下载体验</a>
+                </div>
+
+                <div class="faq-list">
+                    <details class="faq-item" open>
+                        <summary>文件和数据会上传到服务器吗？</summary>
+                        <p>Koto 的核心定位是本地优先。文件、工作区与知识库默认围绕本机使用；如果你配置 Gemini 等云端模型，请按对应模型服务的方式使用。若使用 Ollama，本地模式可进一步降低外部依赖。</p>
+                    </details>
+                    <details class="faq-item">
+                        <summary>必须配置 Gemini API Key 才能使用吗？</summary>
+                        <p>不是必须。你可以配置 Gemini 快速开始，也可以安装 Ollama 使用本地模型。产品页里保留两种模式，就是为了让不同隐私要求、网络条件和成本偏好的用户都能找到适合自己的方式。</p>
+                    </details>
+                    <details class="faq-item">
+                        <summary>Koto 更适合哪些类型的工作？</summary>
+                        <p>如果你的日常工作经常围绕 Word、PPT、Excel、PDF 或多份资料协同展开，例如合同审阅、周报整理、问卷填写、信息提取、文档改写、汇报材料统一风格，那么 Koto 的优势会非常明显。</p>
+                    </details>
+                    <details class="faq-item">
+                        <summary>它和普通 AI 聊天工具最大的区别是什么？</summary>
+                        <p>最大的区别是“工作对象”不同。普通聊天工具主要处理对话，而 Koto 主要处理真实文件、任务上下文和可反复复用的技能/工作流，所以更适合把 AI 变成长期生产力，而不是一次性问答。</p>
+                    </details>
+                    <details class="faq-item">
+                        <summary>现在能怎么开始体验？</summary>
+                        <p>最直接的方式是下载 Windows 便携版，解压即用；如果你希望从源码运行，页面下方也保留了 Python 方式。建议第一次体验时直接拿一份真实 Word、PPT 或 Excel 文件试一遍，最容易感受到差异。</p>
+                    </details>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- ===== DOWNLOAD ===== -->
     <section id="download" class="download-section">
         <div class="download-inner">
@@ -1060,6 +1359,8 @@
                 <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
                 <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">下载</a>
                 <a href="#marketplace">技能市场</a>
+                <a href="#compare">对比优势</a>
+                <a href="#faq">FAQ</a>
                 <a href="#activation">使用指南</a>
             </div>
             <div class="footer-copy" id="footer-version">© 2026 Koto · v1.7.2</div>
