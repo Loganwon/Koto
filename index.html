@@ -323,6 +323,62 @@
         }
         .sample-result strong { color: var(--accent-primary); font-weight: 700; }
 
+        /* ===== SCREENSHOTS ===== */
+        .shots-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 20px;
+            margin-top: 52px;
+        }
+        .shot-card {
+            padding: 22px; border-radius: var(--radius-lg);
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            transition: var(--transition);
+        }
+        .shot-card:hover {
+            border-color: var(--border-hover);
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-card);
+        }
+        .shot-card-wide { grid-column: span 2; }
+        .shot-media {
+            display: block;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: linear-gradient(180deg, #101827 0%, #0b111d 100%);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.26);
+        }
+        .shot-media img {
+            width: 100%;
+            display: block;
+        }
+        .shot-media-mobile {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .shot-media-mobile img {
+            width: min(100%, 250px);
+            border-radius: 22px;
+            box-shadow: 0 18px 40px rgba(0,0,0,0.32);
+        }
+        .shot-copy {
+            padding-top: 18px;
+        }
+        .shot-copy h3 {
+            font-size: 19px;
+            font-weight: 700;
+            letter-spacing: -0.2px;
+            margin-bottom: 10px;
+        }
+        .shot-copy p {
+            color: var(--text-secondary);
+            font-size: 15px;
+            line-height: 1.7;
+        }
+
         /* ===== STATS ===== */
         .stats-band {
             position: relative; z-index: 1;
@@ -482,6 +538,8 @@
             .download-inner { grid-template-columns: 1fr; gap: 40px; }
             .steps-row { grid-template-columns: 1fr; }
             .samples-grid { grid-template-columns: 1fr; }
+            .shots-grid { grid-template-columns: 1fr; }
+            .shot-card-wide { grid-column: span 1; }
             .stat { border-right: none; border-bottom: 1px solid var(--border-color); padding: 40px 32px; }
             .stat:last-child { border-bottom: none; }
         }
@@ -509,6 +567,7 @@
         <div class="nav-links">
             <a href="#marketplace">技能系统</a>
             <a href="#features">核心能力</a>
+            <a href="#screenshots">截图预览</a>
             <a href="#samples">场景样例</a>
             <a href="#activation">快速上手</a>
             <a href="#download">下载</a>
@@ -543,6 +602,59 @@
                 <span>🤖 Gemini + Ollama</span>
                 <span>🧩 90+ AI 技能</span>
                 <span>⚙️ 工作流引擎</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== SCREENSHOTS ===== -->
+    <section id="screenshots">
+        <div class="section-wrap">
+            <div style="text-align:center;max-width:760px;margin:0 auto;">
+                <div class="section-label" style="display:inline-flex;">🖼️ 真实截图</div>
+                <h2 class="section-title" style="text-align:center;">打开之后是什么样<br>这里直接给你看</h2>
+                <p class="section-desc" style="margin:0 auto;text-align:center;max-width:760px;">以下图片来自本地运行中的 Koto 实际界面，覆盖主对话区、文件工作站、技能市场和移动端模式，访问者能更直观看到产品完成度。</p>
+            </div>
+
+            <div class="shots-grid">
+                <article class="shot-card shot-card-wide">
+                    <a class="shot-media" href="assets/screenshots/koto-main-chat.png" target="_blank" rel="noopener">
+                        <img src="assets/screenshots/koto-main-chat.png" alt="Koto 主界面对话与技能工作台截图" loading="lazy">
+                    </a>
+                    <div class="shot-copy">
+                        <h3>主界面 · 对话、技能、工作区三位一体</h3>
+                        <p>侧边栏会话管理、技能库、文件助手与中央对话区自然整合，适合展示 Koto 不只是聊天，而是一个可以持续工作的桌面 AI 工作台。</p>
+                    </div>
+                </article>
+
+                <article class="shot-card">
+                    <a class="shot-media" href="assets/screenshots/koto-workspace-assistant.png" target="_blank" rel="noopener">
+                        <img src="assets/screenshots/koto-workspace-assistant.png" alt="Koto 文件工作站截图" loading="lazy">
+                    </a>
+                    <div class="shot-copy">
+                        <h3>文件工作站 · 面向文档流转设计</h3>
+                        <p>本地文件浏览、临时工作区、文档类型过滤和右侧 AI 助手同时可见，能很好传达 Word、Excel、PPT、PDF 等文件处理场景。</p>
+                    </div>
+                </article>
+
+                <article class="shot-card">
+                    <a class="shot-media" href="assets/screenshots/koto-skill-marketplace.png" target="_blank" rel="noopener">
+                        <img src="assets/screenshots/koto-skill-marketplace.png" alt="Koto 技能市场截图" loading="lazy">
+                    </a>
+                    <div class="shot-copy">
+                        <h3>技能市场 · 90+ 能力可见可扩展</h3>
+                        <p>把技能分类、创作工坊和社区入口直接展示出来，更容易让新用户理解 Koto 的扩展能力和长期使用价值。</p>
+                    </div>
+                </article>
+
+                <article class="shot-card">
+                    <a class="shot-media shot-media-mobile" href="assets/screenshots/koto-mobile.png" target="_blank" rel="noopener">
+                        <img src="assets/screenshots/koto-mobile.png" alt="Koto 移动端界面截图" loading="lazy">
+                    </a>
+                    <div class="shot-copy">
+                        <h3>移动端模式 · 更轻更快的随手入口</h3>
+                        <p>补充展示 Koto 在窄屏设备上的信息密度与交互布局，适合强调多端可用和轻量访问体验。</p>
+                    </div>
+                </article>
             </div>
         </div>
     </section>
