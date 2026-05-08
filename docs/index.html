@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Koto (言) — 本地优先 AI 文件工作台</title>
-    <meta name="description" content="Koto 是一款本地优先的 AI 文件工作台，支持 Word、PPT、Excel 文件内联 AI 编辑，内置写作润色、翻译、摘要等 8 种技能，同时提供多模型对话、知识库、语音交互和工作流自动化。数据默认本地存储，按需开启 Gemini 或 Ollama 模型。">
+    <meta name="description" content="Koto 是一款本地优先的 AI 文件工作台，支持 Word、PPT、Excel 文件内联 AI 编辑，内置 90+ AI 技能和工作流，支持文档代理、任务规划、代码沙箱、知识库 RAG、语音交互，本地 + 云端双模式，Gemini 或 Ollama 按需调用。">
     <style>
             :root {
             --bg-primary: #05080f;
@@ -476,13 +476,13 @@
         <div class="hero-inner">
             <div class="hero-badge fade-up" id="hero-version-badge">
                 <span class="dot"></span>
-                <span id="version-text">v1.7.1</span> · 开源 · Python · 本地优先
+                <span id="version-text">v1.7.2</span> · 开源 · Python · 本地优先
             </div>
             <h1 class="hero-title fade-up fade-up-1">
                 属于你的<br><span class="accent">AI 文件工作台</span>
             </h1>
             <p class="hero-desc fade-up fade-up-2">
-                在你的电脑上直接打开 Word、PPT、Excel，AI 悬浮工具栏一键润色、翻译、摘要。本地文件管理 + 知识库 + 多模型对话，数据始终留在你的设备上。
+                在你的电脑上直接打开并 AI 编辑 Word、PPT、Excel，90+ 内置技能覆盖写作润色、翻译、摘要、文档对比、数据分析等全场景。内置 Doc Agent、工作流引擎、知识库 RAG，数据始终留在你的设备上。
             </p>
             <div class="hero-actions fade-up fade-up-3">
                 <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-hero" class="btn btn-primary btn-lg" target="_blank" rel="noopener">
@@ -494,9 +494,10 @@
             </div>
             <div class="hero-meta fade-up fade-up-4">
                 <span>🔒 数据本地存储</span>
-                <span>📄 Word / PPT / Excel</span>
+                <span>📄 DOCX · PPTX · XLSX</span>
                 <span>🤖 Gemini + Ollama</span>
-                <span>🎙️ 语音交互</span>
+                <span>🧩 90+ AI 技能</span>
+                <span>⚙️ 工作流引擎</span>
             </div>
         </div>
     </section>
@@ -508,16 +509,17 @@
                 <div>
                     <div class="section-label">🧩 技能系统</div>
                     <h2 class="section-title">文件内联 AI 技能<br>悬浮工具栏一键调用</h2>
-                    <p class="section-desc">在 Word、PPT、Excel 中选中文字，悬浮工具栏即时弹出。8 种内置技能覆盖日常文档场景，也支持自定义提示词创建专属技能。</p>
+                    <p class="section-desc">在 Word、PPT、Excel 中选中文字，悬浮工具栏即时弹出。90+ 内置技能覆盖文档、数据、代码、办公全场景，也支持自定义提示词创建专属技能。</p>
                     <div class="marketplace-cats">
                         <span class="cat-pill active">全部</span>
                         <span class="cat-pill">✍️ 写作润色</span>
                         <span class="cat-pill">🌐 翻译</span>
-                        <span class="cat-pill">📝 摘要</span>
-                        <span class="cat-pill">✨ 续写</span>
-                        <span class="cat-pill">🔄 改写</span>
-                        <span class="cat-pill">💡 注释</span>
-                        <span class="cat-pill">💻 代码执行</span>
+                        <span class="cat-pill">📝 文档处理</span>
+                        <span class="cat-pill">📊 数据分析</span>
+                        <span class="cat-pill">⚙️ 工作流</span>
+                        <span class="cat-pill">💻 代码</span>
+                        <span class="cat-pill">🔄 文件转换</span>
+                        <span class="cat-pill">🎯 自定义</span>
                     </div>
                 </div>
             </div>
@@ -528,8 +530,8 @@
                         <div class="skill-icon">✍️</div>
                         <span class="skill-badge">常用</span>
                     </div>
-                    <h3>写作润色</h3>
-                    <p>一键优化文章表达，让文字更流畅自然，保留原意的同时提升文档品质。支持正式 / 轻松 / 专业多种语气。</p>
+                    <h3>写作润色 · 翻译 · 摘要</h3>
+                    <p>一键优化文章表达、中英互译、提炼关键要点。支持正式 / 轻松 / 专业多种语气，保留专业术语和文档格式。</p>
                     <div class="skill-card-footer">
                         <span>✅ 内置</span>
                         <span>✍️ 写作</span>
@@ -537,68 +539,68 @@
                 </div>
                 <div class="skill-card">
                     <div class="skill-card-head">
-                        <div class="skill-icon">🌐</div>
-                        <span class="skill-badge">常用</span>
+                        <div class="skill-icon">📋</div>
+                        <span class="skill-badge new">New</span>
                     </div>
-                    <h3>智能翻译</h3>
-                    <p>基于语境的高质量翻译，中英双向互译，保留专业术语和文档格式，远超机翻质量。</p>
+                    <h3>文档深度对比</h3>
+                    <p>跨格式（DOCX/XLSX/PPTX/PDF）逐段对比两份文档，高亮新增、删除、修改内容，输出结构化差异报告。</p>
                     <div class="skill-card-footer">
                         <span>✅ 内置</span>
-                        <span>🌐 翻译</span>
+                        <span>📋 文档</span>
+                    </div>
+                </div>
+                <div class="skill-card">
+                    <div class="skill-card-head">
+                        <div class="skill-icon">📊</div>
+                        <span class="skill-badge new">New</span>
+                    </div>
+                    <h3>Excel 数据填充</h3>
+                    <p>AI 自动识别 Excel 表格结构，根据参考文档或对话指令批量填写数据，处理合并单元格、公式和格式。</p>
+                    <div class="skill-card-footer">
+                        <span>✅ 内置</span>
+                        <span>📊 数据</span>
                     </div>
                 </div>
                 <div class="skill-card">
                     <div class="skill-card-head">
                         <div class="skill-icon">📝</div>
-                        <span class="skill-badge">常用</span>
-                    </div>
-                    <h3>内容摘要</h3>
-                    <p>自动提炼文档关键论点和要点，生成简洁中文摘要（200 字以内），快速掌握长文精华。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>📝 摘要</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">✨</div>
                         <span class="skill-badge new">New</span>
                     </div>
-                    <h3>续写助手</h3>
-                    <p>根据已有文本自然延续写作（100–200 字），保持语气和风格一致，衔接流畅，告别写作卡顿。</p>
+                    <h3>问卷自动填写</h3>
+                    <p>上传问卷文件与参考资料，AI 自动匹配问题与答案，批量填写选择题、填空题，导出完成的表单。</p>
                     <div class="skill-card-footer">
                         <span>✅ 内置</span>
-                        <span>✨ 创作</span>
+                        <span>📝 表单</span>
                     </div>
                 </div>
                 <div class="skill-card">
                     <div class="skill-card-head">
-                        <div class="skill-icon">🔄</div>
-                        <span class="skill-badge">精选</span>
+                        <div class="skill-icon">🔍</div>
+                        <span class="skill-badge new">New</span>
                     </div>
-                    <h3>文本改写</h3>
-                    <p>保留核心意思，用不同措辞和句式重新表达，让语言更多样化，避免重复用词。</p>
+                    <h3>跨格式信息提取</h3>
+                    <p>从 DOCX、XLSX、PPTX 中同时提取关键字段，自动汇总到结构化报告，支持自定义提取规则。</p>
                     <div class="skill-card-footer">
                         <span>✅ 内置</span>
-                        <span>🔄 改写</span>
+                        <span>🔍 提取</span>
                     </div>
                 </div>
                 <div class="skill-card">
                     <div class="skill-card-head">
-                        <div class="skill-icon">💡</div>
-                        <span class="skill-badge">精选</span>
+                        <div class="skill-icon">⚙️</div>
+                        <span class="skill-badge new">New</span>
                     </div>
-                    <h3>智能注释</h3>
-                    <p>自动为文本添加简洁注释，解释关键概念、术语或难点，注释插入相应位置，不破坏原文结构。</p>
+                    <h3>工作流自动化</h3>
+                    <p>可视化编排多步骤 AI 任务：文档生成、数据清洗、报告输出，串联多个技能，一次触发全流程。</p>
                     <div class="skill-card-footer">
                         <span>✅ 内置</span>
-                        <span>💡 注释</span>
+                        <span>⚙️ 工作流</span>
                     </div>
                 </div>
                 <div class="skill-card">
                     <div class="skill-card-head">
                         <div class="skill-icon">💻</div>
-                        <span class="skill-badge new">New</span>
+                        <span class="skill-badge">精选</span>
                     </div>
                     <h3>代码沙箱执行</h3>
                     <p>在安全沙箱中执行 AI 生成或用户编写的 Python 代码，支持图表输出，结果直接展示在对话界面。</p>
@@ -612,8 +614,8 @@
                         <div class="skill-icon">🎯</div>
                         <span class="skill-badge new">New</span>
                     </div>
-                    <h3>自定义技能</h3>
-                    <p>用自然语言描述你的需求，AI 自动生成专属技能配置。打造私人 AI 工作流，无需编程，即插即用。</p>
+                    <h3>自定义技能 · 90+ 总计</h3>
+                    <p>用自然语言描述你的需求，AI 自动生成专属技能配置。内置 90+ 技能覆盖写作、数据、代码、办公全场景。</p>
                     <div class="skill-card-footer">
                         <span>🛠 DIY</span>
                         <span>🧩 自定义</span>
@@ -623,7 +625,7 @@
 
             <div class="marketplace-cta">
                 <h3>探索更多用法</h3>
-                <p>8 种内置技能覆盖日常文档场景，自定义技能随时扩展。本地运行保护隐私，Gemini 云端与 Ollama 本地模型自由切换。</p>
+                <p>90+ 内置技能覆盖写作、数据、代码、办公全场景，自定义技能随时扩展。Doc Agent 自主规划、工作流引擎串联多步骤任务，本地运行全程保护隐私。</p>
                 <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
                     <a href="#download" class="btn btn-primary">下载体验</a>
                     <a href="https://github.com/Loganwon/Koto" class="btn btn-ghost" target="_blank" rel="noopener">查看源码</a>
@@ -635,9 +637,9 @@
     <!-- ===== STATS ===== -->
     <div class="stats-band">
         <div class="stats-inner">
-            <div class="stat"><div class="stat-value">8+</div><div class="stat-label">内置 AI 技能</div></div>
-            <div class="stat"><div class="stat-value">DOCX<br>PPT<br>XLSX</div><div class="stat-label">全格式文档编辑</div></div>
-            <div class="stat"><div class="stat-value">本地<br>+云端</div><div class="stat-label">双模式运行</div></div>
+            <div class="stat"><div class="stat-value">90+</div><div class="stat-label">内置 AI 技能</div></div>
+            <div class="stat"><div class="stat-value">DOCX<br>PPTX<br>XLSX</div><div class="stat-label">全格式文档编辑</div></div>
+            <div class="stat"><div class="stat-value">Doc<br>Agent</div><div class="stat-label">自主文档代理</div></div>
             <div class="stat"><div class="stat-value">Gemini<br>+Ollama</div><div class="stat-label">多模型支持</div></div>
         </div>
     </div>
@@ -654,7 +656,17 @@
                 <div class="feature-card">
                     <div class="feature-icon">📄</div>
                     <h3>文件内联 AI 编辑</h3>
-                    <p>打开 Word、PPT、Excel 文件，选中文字即弹出 AI 悬浮工具栏，一键润色、翻译、摘要，修改结果直接应用到文档，无需复制粘贴。</p>
+                    <p>打开 DOCX、PPTX、XLSX 文件，选中文字即弹出 AI 悬浮工具栏，一键润色、翻译、摘要，修改结果直接应用到文档，无需复制粘贴。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🤖</div>
+                    <h3>Doc Agent 文档代理</h3>
+                    <p>自主规划并执行多步骤文档任务：跨文件提取、批量改写、自动生成报告。基于 Tree-of-Thought 推理，任务进度实时流式展示。</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚙️</div>
+                    <h3>工作流引擎</h3>
+                    <p>内置 12 种开箱即用工作流：文档对比、数据清洗、问卷填写、邮件摘要等。可视化编排，串联多技能，一次触发全流程自动化。</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">🗂️</div>
@@ -677,9 +689,9 @@
                     <p>语音输入提问，AI 回复支持 TTS 朗读，打造更自然的人机交互体验。完全本地语音处理，无需上传音频数据。</p>
                 </div>
                 <div class="feature-card">
-                    <div class="feature-icon">⚙️</div>
-                    <h3>工作流 · 代码沙箱</h3>
-                    <p>可视化工作流编排复杂任务，代码沙箱安全执行 Python 脚本，支持图表输出。定时任务、批量文件处理，全程自动化。</p>
+                    <div class="feature-icon">💻</div>
+                    <h3>代码沙箱 · 多文件协同</h3>
+                    <p>安全沙箱执行 Python 脚本，支持图表输出。多文件协同处理器可跨 DOCX/XLSX/PPTX 批量操作，定时任务全程自动化。</p>
                 </div>
             </div>
         </div>
@@ -690,7 +702,7 @@
         <div class="activation-inner">
             <div class="section-label">🚀 开始使用</div>
             <h2 class="section-title">三步上手 Koto</h2>
-            <p class="section-desc">下载便携包，填入 Gemini API Key 即可开始。数据留在本地，按需开启云端能力。</p>
+            <p class="section-desc">下载 Windows 便携包，填入 Gemini API Key 即可开始。或从源码运行（Python 3.11+）。数据留在本地，按需开启云端能力。</p>
 
             <div class="steps-row">
                 <div class="step-card">
@@ -805,7 +817,7 @@
                 <a href="#marketplace">技能市场</a>
                 <a href="#activation">使用指南</a>
             </div>
-            <div class="footer-copy" id="footer-version">© 2026 Koto · v1.7.1</div>
+            <div class="footer-copy" id="footer-version">© 2026 Koto · v1.7.2</div>
         </div>
     </footer>
 
