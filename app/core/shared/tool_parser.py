@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Collection, Dict, List, Tuple
 
 # Tool types the agent is allowed to emit as structured calls.
 # Keeping this as a module-level constant lets callers extend it if needed.
@@ -82,6 +82,108 @@ def parse_tool_calls(text: str) -> Tuple[str, List[Dict[str, Any]]]:
     text = _bare_pat.sub(_replace_bare, text).strip()
 
     return text, tool_calls
+
+
+def _coerce_task_tool_calls(
+    candidate: Any,
+    allowed_tool_names: Collection[str] | None = None,
+) -> List[Dict[str, Any]]:
+    allowed = {
+        str(name).strip()
+        for name in (allowed_tool_names or [])
+        if str(name).strip()
+    }
+    items = candidate if isinstance(candidate, list) else [candidate]
+    tool_calls: List[Dict[str, Any]] = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            return []
+
+        function_payload = item.get("function") if isinstance(item.get("function"), dict) else {}
+        tool_name = str(
+            item.get("name")
+            or item.get("tool_name")
+            or function_payload.get("name")
+            or ""
+        ).strip()
+        if not tool_name:
+            return []
+        if allowed and tool_name not in allowed:
+            return []
+
+        tool_args = item.get("arguments")
+        if tool_args is None:
+            tool_args = item.get("args")
+        if tool_args is None and function_payload:
+            tool_args = function_payload.get("arguments")
+        if isinstance(tool_args, str):
+            try:
+                tool_args = json.loads(tool_args)
+            except Exception:
+                return []
+        if tool_args is None:
+            tool_args = {}
+        if not isinstance(tool_args, dict):
+            return []
+
+        tool_calls.append({"name": tool_name, "args": tool_args})
+
+    return tool_calls
+
+
+def parse_task_tool_calls(
+    text: str,
+    allowed_tool_names: Collection[str] | None = None,
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """Parse task-tool JSON blocks from plain model text.
+
+    Some cloud models occasionally emit task tool calls as literal JSON in the
+    response body instead of returning provider-native structured tool calls.
+    This helper extracts objects like {"name": "tool", "arguments": {...}}
+    or their list form and removes them from the visible text.
+    """
+    text = str(text or "")
+    if not text.strip():
+        return "", []
+
+    decoder = json.JSONDecoder()
+    tool_calls: List[Dict[str, Any]] = []
+    removal_spans: List[Tuple[int, int]] = []
+    index = 0
+
+    while index < len(text):
+        if text[index] not in "[{":
+            index += 1
+            continue
+        try:
+            candidate, consumed = decoder.raw_decode(text[index:])
+        except Exception:
+            index += 1
+            continue
+
+        parsed_calls = _coerce_task_tool_calls(candidate, allowed_tool_names)
+        if parsed_calls:
+            tool_calls.extend(parsed_calls)
+            removal_spans.append((index, index + consumed))
+            index += consumed
+            continue
+
+        index += 1
+
+    if not tool_calls:
+        return text, []
+
+    cleaned_parts: List[str] = []
+    last_end = 0
+    for start, end in removal_spans:
+        cleaned_parts.append(text[last_end:start])
+        last_end = end
+    cleaned_parts.append(text[last_end:])
+    cleaned_text = "".join(cleaned_parts)
+    cleaned_text = re.sub(r"```(?:json)?\s*```", "", cleaned_text, flags=re.IGNORECASE)
+    cleaned_text = re.sub(r"\n{3,}", "\n\n", cleaned_text)
+    return cleaned_text.strip(), tool_calls
 
 
 def stringify_tool_result(result: Any) -> str:

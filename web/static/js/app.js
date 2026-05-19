@@ -6,6 +6,7 @@ let setupComplete = false;
 let lockedTaskType = null;  // 用户手动选择的任务类型
 let selectedModel = 'auto'; // 用户选择的模型 (auto = 自动选择)
 let enableMiniGame = true; // 是否启用等待小游戏
+const _SIDEBAR_OVERLAY_QUERY = '(max-width: 1200px)';
 const MAX_UPLOAD_FILES = 10;
 const _DEFAULT_PROJECT_OPTIONS = [
     { key: 'default', label: '默认项目' },
@@ -359,10 +360,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     await checkSetupStatus();
     
     // 3. \u52a0\u8f7d\u4f1a\u8bdd\u548c\u72b6\u6001
-    // Restore sidebar collapsed state
-    if (localStorage.getItem('koto.sidebarCollapsed') === '1') {
-        document.querySelector('.app-shell')?.classList.add('sidebar-collapsed');
-    }
+    // Restore sidebar state with a separate narrow-screen overlay mode.
+    _syncSidebarState({ forceOpenOverlay: true });
     initProjectSelector();
     await loadSessions();
     checkStatus();
@@ -396,6 +395,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 9. 智能滚动 + 全局快捷键
     initScrollBehavior();
     window.addEventListener('keydown', handleGlobalKeyDown);
+    window.addEventListener('resize', _syncSidebarState);
 
     // 10. 全局外部链接拦截：防止 webview 导航离开 Koto
     //     在系统浏览器中打开，而不是在 webview 内跳转
@@ -718,9 +718,49 @@ function initProjectSelector() {
 
 // ================= Gemini-style Sidebar =================
 
+function _isSidebarOverlayMode() {
+    try {
+        return window.matchMedia(_SIDEBAR_OVERLAY_QUERY).matches;
+    } catch (_) {
+        return window.innerWidth <= 1200;
+    }
+}
+
+function _syncSidebarState(options = {}) {
+    const shell = document.querySelector('.app-shell');
+    const sideNav = document.getElementById('sideNav');
+    if (!shell || !sideNav) return;
+
+    const overlayMode = _isSidebarOverlayMode();
+    const shouldForceOpenOverlay = !!options.forceOpenOverlay;
+
+    if (overlayMode) {
+        shell.classList.remove('sidebar-collapsed');
+        if (shouldForceOpenOverlay || !sideNav.dataset.overlayReady) {
+            sideNav.classList.add('active');
+        }
+        sideNav.dataset.overlayReady = '1';
+        return;
+    }
+
+    sideNav.classList.remove('active');
+    delete sideNav.dataset.overlayReady;
+    if (localStorage.getItem('koto.sidebarCollapsed') === '1') {
+        shell.classList.add('sidebar-collapsed');
+    } else {
+        shell.classList.remove('sidebar-collapsed');
+    }
+}
+
 function toggleSidebar() {
     const shell = document.querySelector('.app-shell');
-    if (!shell) return;
+    const sideNav = document.getElementById('sideNav');
+    if (!shell || !sideNav) return;
+    if (_isSidebarOverlayMode()) {
+        sideNav.classList.toggle('active');
+        sideNav.dataset.overlayReady = '1';
+        return;
+    }
     const collapsed = shell.classList.toggle('sidebar-collapsed');
     localStorage.setItem('koto.sidebarCollapsed', collapsed ? '1' : '0');
 }
@@ -738,10 +778,6 @@ function toggleSidebarSearch() {
         filterSessions('');
     }
 }
-
-// ================= Model Chip =================
-// Model chip UI removed; updateModelChip is a no-op kept for call-site compatibility.
-function updateModelChip() {}
 
 function onModelChange(value) {
     selectedModel = value;
@@ -1192,6 +1228,16 @@ function renderSessions(sessions) {
     });
 }
 
+function _syncSessionSelectionUi(sessionName) {
+    document.getElementById('chatTitle').textContent = toSessionDisplayName(sessionName);
+    document.querySelectorAll('.session-item').forEach(item => {
+        item.classList.remove('active');
+        if (item.dataset.session === sessionName) {
+            item.classList.add('active');
+        }
+    });
+}
+
 // ================= 返回欢迎页 =================
 function goToWelcome() {
     // Switch back to chat view if in editor view
@@ -1251,8 +1297,6 @@ function renderWelcomeScreen() {
 
 
 async function selectSession(sessionName) {
-    // Switch back to chat view if we're in editor view
-    if (typeof window.switchToChatView === 'function') window.switchToChatView();
     // 离开时：如果当前 session 正在生成，将其 DOM 节点移入 Fragment 缓存
     // 这样后台流继续写入 bodyEl（引用仍有效），切回来时直接恢复，不会丢失流内容
     if (currentSession && currentSession !== sessionName && isSessionGenerating(currentSession)) {
@@ -1264,18 +1308,13 @@ async function selectSession(sessionName) {
         console.log(`[SWITCH] DOM 已缓存 session: ${currentSession}`);
     }
 
+    // Switch back to chat view if we're in editor view
+    if (typeof window.switchToChatView === 'function') window.switchToChatView();
+
     console.log(`[SWITCH] 从 ${currentSession} 切换到 ${sessionName}（保持后台任务运行）`);
     
     currentSession = sessionName;
-    document.getElementById('chatTitle').textContent = toSessionDisplayName(sessionName);
-    
-    // Update active state
-    document.querySelectorAll('.session-item').forEach(item => {
-        item.classList.remove('active');
-        if (item.dataset.session === sessionName) {
-            item.classList.add('active');
-        }
-    });
+    _syncSessionSelectionUi(sessionName);
 
     // 同步发送按钮状态：切换后立即反映新 session 的生成状态
     const _sb = document.getElementById('sendBtn');
@@ -3636,40 +3675,18 @@ async function sendMessage(event) {
                                     }
                                     scrollToBottom();
                                     
-                                } else if (data.type === 'user_confirm') {
-                                    // 需要用户确认 - 显示带倒计时的确认对话框
-                                    console.log('[AGENT] Requesting confirmation for tool:', data.tool_name);
-                                    const confirmResult = await showAgentConfirmDialog(data.tool_name, data.tool_args, data.reason);
-                                    if (confirmResult) {
-                                        // 发送确认结果回后端
-                                        try {
-                                            await fetch('/api/agent/confirm', {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ session: thisSession, confirmed: confirmResult.confirmed })
-                                            });
-                                        } catch(e) { console.error('[AGENT] Confirm callback failed:', e); }
+                                } else if (data.type === 'user_confirm' || data.type === 'user_choice') {
+                                    const retiredHint = data.type === 'user_confirm'
+                                        ? '主聊天里的旧版确认回调已下线。请改用当前文档助手交互，或重新发起无需人工确认的请求。'
+                                        : '主聊天里的旧版选项回调已下线。请改用当前文档助手交互，或重新发起无需人工选择的请求。';
+                                    console.warn('[AGENT] Retired interactive callback received:', data.type, data);
+                                    fullText += `${retiredHint}\n\n`;
+                                    if (bodyEl.querySelector('.agent-answer')) {
+                                        bodyEl.querySelector('.agent-answer').innerHTML = parseMarkdown(fullText);
+                                    } else {
+                                        bodyEl.innerHTML = parseMarkdown(fullText);
                                     }
-                                } else if (data.type === 'user_choice') {
-                                    // 需要用户选择 - 显示多选对话框
-                                    console.log('[AGENT] Requesting choice:', data.question, 'Options:', data.options);
-                                    const choiceResult = await showAgentChoiceDialog(data.question, data.options);
-                                    if (choiceResult && choiceResult.displayText) {
-                                        fullText += choiceResult.displayText + '\n\n';
-                                        if (bodyEl.querySelector('.agent-answer')) {
-                                            bodyEl.querySelector('.agent-answer').innerHTML = parseMarkdown(fullText);
-                                        }
-                                    }
-                                    // 发送选择结果回后端
-                                    if (choiceResult && choiceResult.selected != null) {
-                                        try {
-                                            await fetch('/api/agent/choice', {
-                                                method: 'POST',
-                                                headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ session: thisSession, selected: choiceResult.selected })
-                                            });
-                                        } catch(e) { console.error('[AGENT] Choice callback failed:', e); }
-                                    }
+                                    scrollToBottom();
                                 } else if (data.type === 'open_suggestion_panel') {
                                     // 打开文档建议面板
                                     console.log('[STREAM] 打开建议面板:', data.file_path);

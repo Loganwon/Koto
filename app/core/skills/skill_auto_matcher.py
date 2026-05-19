@@ -1487,12 +1487,16 @@ class SkillAutoMatcher:
         lines: List[str] = []
         tt = task_type.upper() if task_type else ""
 
-        for skill_id, s in SkillManager._registry.items():
+        for s in SkillManager.list_skills():
+            skill_id = s.get("id", "")
             applicable = s.get("task_types", [])
             # 保留所有技能作为候选——task_type 已包含在 Prompt 里，
             # 由 Ollama 语义决定是否适合本轮，而非在目录构建时硬过滤。
             # （原先的过滤会导致 DOC_ANNOTATE 技能在 CHAT 场景下不可见）
-            desc = s.get("intent_description") or s.get("description", "")
+            skill_def = SkillManager.get_definition(skill_id)
+            desc = getattr(skill_def, "intent_description", "") or s.get(
+                "description", ""
+            )
             name = s.get("name", skill_id)
             candidates.append(
                 {
@@ -1518,7 +1522,7 @@ class SkillAutoMatcher:
 
             SkillManager._ensure_init()
             tt = task_type.upper() if task_type else ""
-            for sid, s in SkillManager._registry.items():
+            for s in SkillManager.list_skills():
                 if not s.get("enabled", False):
                     continue
                 # 跳过系统级 Skill（不代表用户的任务导向选择）
@@ -1859,7 +1863,8 @@ class SkillAutoMatcher:
 
                 SkillManager._ensure_init()
                 tt = (task_type or "").upper()
-                for sid, s in SkillManager._registry.items():
+                for s in SkillManager.list_skills():
+                    sid = s.get("id", "")
                     if not s.get("enabled", False):
                         continue
                     if s.get("skill_nature", "") == "system":
@@ -2028,7 +2033,7 @@ class SkillAutoMatcher:
 
             SkillManager._ensure_init()
             names = [
-                SkillManager._registry.get(sid, {}).get("name", sid)
+                (SkillManager.get_runtime_entry(sid) or {}).get("name", sid)
                 for sid in skill_ids
             ]
             return "、".join(names)

@@ -1,0 +1,264 @@
+[
+  {
+    "id": "ftf_48743fef3b729949",
+    "status": "open",
+    "created_at": "2026-05-14T16:53:41.191",
+    "updated_at": "2026-05-14T18:27:33.819",
+    "run_id": "837ec6ae7eab",
+    "session_id": "workspace_runtime_fff85b1260f64245ab245a4aeacdb1ea",
+    "source": "file_task_runtime",
+    "occurrences": 3,
+    "artifact": {
+      "artifact_type": "koto_large_task_resume_v1",
+      "category": "batch_confirmation",
+      "title": "继续执行第 1/5 批",
+      "summary": "处理译稿分段 1-6/27，对照 PDF 窗口 1-20/100（约第 1-80 页正文）。",
+      "suggested_next_step": "确认后继续执行第 1/5 批审校。",
+      "source_task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，重新考虑中文翻译不当的部分或有复议可能性的用词或者替换成别的词的地方都标注出来。学术化翻译和中文学界常用词不对应的地方也标注出来，谨遵原著，不要有任何删减和添加。由于文件比较大内容比较多，我建议你将整个任务拆分成多个分段来处理，以保证最终结果的质量和任务可执行性",
+      "target_path": "C:\\Users\\12524\\Desktop\\Koto\\workspace\\2.1书稿翻译2.docx",
+      "batch_index": 1,
+      "total_batches": 5,
+      "chunk_start": 1,
+      "chunk_end": 6,
+      "action_label": "继续第 1/5 批",
+      "resume_request": {
+        "task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，重新考虑中文翻译不当的部分或有复议可能性的用词或者替换成别的词的地方都标注出来。学术化翻译和中文学界常用词不对应的地方也标注出来，谨遵原著，不要有任何删减和添加。由于文件比较大内容比较多，我建议你将整个任务拆分成多个分段来处理，以保证最终结果的质量和任务可执行性",
+        "target_path": "C:\\Users\\12524\\Desktop\\Koto\\workspace\\2.1书稿翻译2.docx",
+        "files": [
+          {
+            "path": "C:\\Users\\12524\\Desktop\\Koto\\workspace\\The Global Rules of Art The Emergence and Divisions of a Cultural World Economy (Larissa Buchholz) (Z-Library).pdf",
+            "name": "The Global Rules of Art The Emergence and Divisions of a Cultural World Economy (Larissa Buchholz) (Z-Library).pdf",
+            "type": "pdf",
+            "target": false
+          },
+          {
+            "path": "C:\\Users\\12524\\Desktop\\Koto\\workspace\\2.1书稿翻译2.docx",
+            "name": "2.1书稿翻译2.docx",
+            "type": "docx",
+            "target": true
+          }
+        ],
+        "model_mode": "local",
+        "model_id": "",
+        "options": {
+          "local_model": "qwen3.5:9b",
+          "batch_control": {
+            "adapter": "doc_annotate_bridge",
+            "policy": "confirm_each_batch",
+            "batch_index": 1,
+            "total_batches": 5
+          }
+        },
+        "session_id": "workspace_runtime_fff85b1260f64245ab245a4aeacdb1ea"
+      },
+      "runtime_context": {
+        "execution_path": "native",
+        "terminal_status": "awaiting_confirmation"
+      }
+    }
+  },
+  {
+    "id": "ftf_709e02c951dfd9a0",
+    "status": "open",
+    "created_at": "2026-05-14T19:22:15.731",
+    "updated_at": "2026-05-14T19:22:15.731",
+    "run_id": "5d0b6ae1acf3",
+    "session_id": "workspace_runtime_fff85b1260f64245ab245a4aeacdb1ea",
+    "source": "file_task_runtime",
+    "occurrences": 1,
+    "artifact": {
+      "artifact_type": "koto_large_task_resume_v1",
+      "category": "batch_confirmation",
+      "title": "继续执行第 2/5 批",
+      "summary": "处理译稿分段 7-12/27，对照 PDF 窗口 21-40/100（约第 81-160 页正文）。",
+      "suggested_next_step": "确认后继续执行第 2/5 批审校。",
+      "source_task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，重新考虑中文翻译不当的部分或有复议可能性的用词或者替换成别的词的地方都标注出来。学术化翻译和中文学界常用词不对应的地方也标注出来，谨遵原著，不要有任何删减和添加。由于文件比较大内容比较多，我建议你将整个任务拆分成多个分段来处理，以保证最终结果的质量和任务可执行性",
+      "target_path": "C:\\Users\\12524\\Desktop\\Koto\\workspace\\2.1书稿翻译2_revised.docx",
+      "batch_index": 2,
+      "total_batches": 5,
+      "chunk_start": 7,
+      "chunk_end": 12,
+      "action_label": "继续第 2/5 批",
+      "resume_request": {
+        "task": "PDF是原文，docx文件是现有翻译稿。根据原文内容，润色翻译稿的语句，重新考虑中文翻译不当的部分或有复议可能性的用词或者替换成别的词的地方都标注出来。学术化翻译和中文学界常用词不对应的地方也标注出来，谨遵原著，不要有任何删减和添加。由于文件比较大内容比较多，我建议你将整个任务拆分成多个分段来处理，以保证最终结果的质量和任务可执行性",
+        "target_path": "C:\\Users\\12524\\Desktop\\Koto\\workspace\\2.1书稿翻译2_revised.docx",
+        "files": [
+          {
+            "path": "C:\\Users\\12524\\Desktop\\Koto\\workspace\\The Global Rules of Art The Emergence and Divisions of a Cultural World Economy (Larissa Buchholz) (Z-Library).pdf",
+            "name": "The Global Rules of Art The Emergence and Divisions of a Cultural World Economy (Larissa Buchholz) (Z-Library).pdf",
+            "type": "pdf",
+            "target": false
+          },
+          {
+            "path": "C:\\Users\\12524\\Desktop\\Koto\\workspace\\2.1书稿翻译2_revised.docx",
+            "name": "2.1书稿翻译2_revised.docx",
+            "type": "docx",
+            "target": true
+          }
+        ],
+        "model_mode": "local",
+        "model_id": "",
+        "options": {
+          "local_model": "qwen3.5:9b",
+          "batch_control": {
+            "adapter": "doc_annotate_bridge",
+            "policy": "confirm_each_batch",
+            "batch_index": 2,
+            "total_batches": 5
+          }
+        },
+        "session_id": "workspace_runtime_fff85b1260f64245ab245a4aeacdb1ea"
+      },
+      "runtime_context": {
+        "execution_path": "native",
+        "terminal_status": "awaiting_confirmation"
+      }
+    }
+  },
+  {
+    "id": "ftf_8e28cb04abeb7c3e",
+    "status": "open",
+    "created_at": "2026-05-16T14:58:42.425",
+    "updated_at": "2026-05-16T14:58:42.446",
+    "run_id": "e0fad2f6f1ed",
+    "session_id": "workspace_runtime_4b37cd16169a47fd8b42cb1402a1839b",
+    "source": "file_task_runtime",
+    "occurrences": 5,
+    "artifact": {
+      "artifact_type": "koto_next_action_v1",
+      "category": "missing_native_tool",
+      "tool_design_protocol": "koto_tool_design_v1",
+      "tool_design_status": "draft",
+      "generated_by": "koto_file_task_runtime",
+      "external_planner_required": false,
+      "title": "Koto 下一步：replace_file_selection",
+      "summary": "Koto 缺乏直接在文本文件中替换用户选定内容的功能。虽然可以通过 `run_python_code` 读取整个文件、修改字符串再重写，但这并非一个原生的、针对选区进行修改的工具，且效率不高。",
+      "source_task": "请把我选中的内容润色得更专业、更清晰，保持原意；直接写回当前 txt 文件，并在任务过程中告诉我每一步做了什么。",
+      "target_path": "copilot_whitebox_demo.txt",
+      "missing_capability": "replace_file_selection",
+      "why_missing": "现有工具如 `annotate_file` 只能添加批注，`create_file` 和 `extract_to_file` 仅能创建新文件或提取到新文件，`copy_file` 则是文件复制。没有工具可以直接在现有文本文件中，根据选区定位并替换内容。",
+      "suggested_next_step": "添加一个能够接收文件路径、原始选区内容以及新的替换内容的工具，实现文本文件内容的精准修改。",
+      "implementation_scope": "smallest_next_capability",
+      "acceptance_criteria": [
+        "为 replace_file_selection 提供稳定的 Koto 原生工具入口",
+        "工具返回结构需要可被 file-task 规划器直接消费",
+        "补齐能力后可重新执行当前任务而无需改写用户意图"
+      ],
+      "proposed_tool": {
+        "name": "replace_file_selection",
+        "description": "在指定文本文件中，用新内容替换匹配的原始选定内容。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "目标文件的路径。"
+            },
+            "original_selection": {
+              "type": "string",
+              "description": "用户选定的原始文本内容，用于在文件中定位待替换区域。"
+            },
+            "new_content": {
+              "type": "string",
+              "description": "用于替换原始选定内容的新文本。"
+            }
+          },
+          "required": [
+            "path",
+            "original_selection",
+            "new_content"
+          ]
+        },
+        "returns": "标准 file-change payload，指示目标文件已被修改。",
+        "rationale": "用户任务要求直接将润色后的内容写回当前文件并替换原有选区。`replace_file_selection` 是实现此功能所需的最直接和最小的原生能力。它允许 Agent 精确地修改文件中的特定部分，而不是进行整个文件的读写操作，这对于处理选区编辑任务至关重要。"
+      },
+      "runtime_context": {
+        "execution_path": "planner",
+        "terminal_status": "tool_gap",
+        "model_unavailable": false,
+        "readonly_fallback_used": false,
+        "planner": {
+          "backend": "hermes",
+          "source": "external",
+          "policy": "prefer_hermes",
+          "transport": "embedded",
+          "reason": "unsupported_file_types:text",
+          "round": 1
+        }
+      }
+    }
+  },
+  {
+    "id": "ftf_590cd82fc59c19a0",
+    "status": "open",
+    "created_at": "2026-05-16T15:00:34.852",
+    "updated_at": "2026-05-16T15:00:34.884",
+    "run_id": "a388087540ed",
+    "session_id": "workspace_runtime_4b37cd16169a47fd8b42cb1402a1839b",
+    "source": "file_task_runtime",
+    "occurrences": 5,
+    "artifact": {
+      "artifact_type": "koto_next_action_v1",
+      "category": "missing_native_tool",
+      "tool_design_protocol": "koto_tool_design_v1",
+      "tool_design_status": "draft",
+      "generated_by": "koto_file_task_runtime",
+      "external_planner_required": false,
+      "title": "Koto 下一步：edit_file_selection",
+      "summary": "Koto 缺乏一个直接的工具来替换文本文件中用户选中的特定内容。",
+      "source_task": "请把我选中的内容润色得更专业、更清晰，保持原意；直接写回当前 txt 文件，并在任务过程中告诉我每一步做了什么。",
+      "target_path": "copilot_whitebox_demo.txt",
+      "missing_capability": "edit_file_selection",
+      "why_missing": "当前 Koto 提供的文本文件写入工具（如 annotate_file, copy_file, create_file, extract_to_file）均不具备在现有文件中精准替换指定文本选区的功能。尽管 run_python_code 可以通过读写整个文件来模拟这一行为，但这不属于原生的、高效的、针对特定选区修改的能力，尤其对于大文件而言效率低下，且不符合“最小下一能力”的原则。用户任务明确要求“直接写回当前 txt 文件”并对“选中的内容”进行操作，这需要一个原子性的选区替换工具。",
+      "suggested_next_step": "设计并实现一个名为 `edit_file_selection` 的 Koto 原生工具，用于在指定文本文件中替换用户选定的内容。",
+      "implementation_scope": "smallest_next_capability",
+      "acceptance_criteria": [
+        "为 edit_file_selection 提供稳定的 Koto 原生工具入口",
+        "工具返回结构需要可被 file-task 规划器直接消费",
+        "补齐能力后可重新执行当前任务而无需改写用户意图"
+      ],
+      "proposed_tool": {
+        "name": "edit_file_selection",
+        "description": "在指定的文本文件中，用新的内容替换用户选定的精确内容。此工具适用于对文本文件中的特定文本段进行原地修改。",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "file_path": {
+              "type": "string",
+              "description": "需要修改的文本文件的路径。"
+            },
+            "original_content": {
+              "type": "string",
+              "description": "用户选中的原始文本内容，将根据此内容在文件中定位并替换。请确保这是要替换的精确字符串。"
+            },
+            "new_content": {
+              "type": "string",
+              "description": "用于替换原始选定内容的新文本。"
+            }
+          },
+          "required": [
+            "file_path",
+            "original_content",
+            "new_content"
+          ]
+        },
+        "returns": "标准文件变更 payload，例如：{\"file_path\": \"<modified_file_path>\", \"status\": \"modified\", \"change_summary\": \"替换了选定内容\", \"preview\": \"<new_content_preview>\"}",
+        "rationale": "直接替换文件中指定选区的能力是文本文件编辑的核心基础功能。当前缺乏此能力限制了对用户选定内容进行高效、原子性修改。此工具能直接响应用户对选区进行润色、改写并回写的要求，避免了通过完整文件读写或复杂 Python 脚本来模拟这一基本操作，提升了效率和准确性。"
+      },
+      "runtime_context": {
+        "execution_path": "planner",
+        "terminal_status": "tool_gap",
+        "model_unavailable": false,
+        "readonly_fallback_used": false,
+        "planner": {
+          "backend": "hermes",
+          "source": "external",
+          "policy": "prefer_hermes",
+          "transport": "embedded",
+          "reason": "unsupported_file_types:text",
+          "round": 1
+        }
+      }
+    }
+  }
+]

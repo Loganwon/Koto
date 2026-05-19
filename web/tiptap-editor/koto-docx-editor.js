@@ -20,8 +20,6 @@
 
 import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
-import { Table } from '@tiptap/extension-table';
-import { TableRow } from '@tiptap/extension-table-row';
 import { TextAlign } from '@tiptap/extension-text-align';
 import { Selection } from '@tiptap/pm/state';
 import { CellSelection, TableMap, selectionCell, findTable } from '@tiptap/pm/tables';
@@ -34,14 +32,21 @@ import Link from '@tiptap/extension-link';
 import Highlight from '@tiptap/extension-highlight';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
+import { resolveDocxPageChrome, resolveDocxBreakChrome } from './docx-pagination-runtime.js';
 
 import {
+  DOCX_TABLE_RESIZE_TRANSACTION_META,
+  DOCX_ROW_RESIZE_SKIP_AUTOSAVE_META,
   DocxParagraph,
+  DocxTable,
+  DocxTableRow,
   DocxTableCell,
   DocxTableHeader,
   DocxPageBreak,
   DocxImage,
   DocxHeading,
+  DocxTrackChange,
+  DocxTrackChangePart,
   TocTab,
   FontSize,
   LineHeight,
@@ -54,6 +59,8 @@ const _DEFAULT_PAGE_H = 1056;
 // ProseMirror CSS: padding-top:96px + padding-bottom:80px = 176px of vertical padding.
 // Effective content height per page (what Word shows between margins):
 const _PAD_V          = 176;  // top(96) + bottom(80) padding from .ProseMirror CSS
+const _AI_REVIEW_PENDING_HIGHLIGHT = 'wa-ai-review-pending';
+const _AI_REVIEW_FOCUS_HIGHLIGHT = 'wa-ai-review-focus';
 
 function _cloneJson(value, fallback) {
   try {
@@ -61,6 +68,70 @@ function _cloneJson(value, fallback) {
   } catch (_) {
     return fallback;
   }
+}
+
+function _stripAiPreviewHtml(value) {
+  return String(value || '').replace(/<[^>]+>/g, ' ');
+}
+
+function _normalizeAiPreviewText(value) {
+  return _stripAiPreviewHtml(value)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function _previewAnchorText(value, limit = 48) {
+  const text = _stripAiPreviewHtml(value).replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  return text.length > limit ? text.slice(0, limit) + '…' : text;
+}
+
+function _buildAiPreviewTextIndex(root) {
+  if (!root) return null;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+  const rawPositions = [];
+  const normalizedMap = [];
+  let normalizedText = '';
+  let rawIndex = 0;
+  let lastWasSpace = false;
+  let node;
+
+  while ((node = walker.nextNode())) {
+    const value = node.nodeValue || '';
+    for (let offset = 0; offset < value.length; offset += 1) {
+      rawPositions[rawIndex] = { node, offset };
+      const rawChar = value[offset];
+      const normalizedChar = /\s/.test(rawChar) ? ' ' : rawChar.toLowerCase();
+      if (normalizedChar === ' ') {
+        if (!lastWasSpace) {
+          normalizedText += ' ';
+          normalizedMap.push(rawIndex);
+        }
+        lastWasSpace = true;
+      } else {
+        normalizedText += normalizedChar;
+        normalizedMap.push(rawIndex);
+        lastWasSpace = false;
+      }
+      rawIndex += 1;
+    }
+  }
+
+  return { normalizedText, normalizedMap, rawPositions };
+}
+
+function _createAiPreviewRange(index, start, end) {
+  if (!index || end <= start) return null;
+  const rawStartIndex = index.normalizedMap[start];
+  const rawEndIndex = index.normalizedMap[end - 1];
+  const startPos = index.rawPositions[rawStartIndex];
+  const endPos = index.rawPositions[rawEndIndex];
+  if (!startPos || !endPos) return null;
+  const range = document.createRange();
+  range.setStart(startPos.node, startPos.offset);
+  range.setEnd(endPos.node, endPos.offset + 1);
+  return range;
 }
 
 function _getFontSizeNumericValue(value, { pxToPt = false } = {}) {
@@ -529,11 +600,10 @@ function _buildExtensions(onUpdate) {
     }),
     DocxParagraph,
     DocxHeading.configure({ levels: [1, 2, 3, 4, 5, 6] }),
-    Table.configure({
-      resizable: true,             // drag column handles (ProseMirror native)
+    DocxTable.configure({
       HTMLAttributes: { class: 'koto-docx-table' },
     }),
-    TableRow,
+    DocxTableRow,
     DocxTableCell,
     DocxTableHeader,
     TextAlign.configure({
@@ -544,6 +614,8 @@ function _buildExtensions(onUpdate) {
       allowBase64: true,
     }),
     Underline,
+    DocxTrackChange,
+    DocxTrackChangePart,
     TextStyle,
     Color,
     FontFamily,
@@ -569,7 +641,6 @@ export class KotoTipTapEditor {
     this._savedSel      = null;  // saved ProseMirror TextSelection for AI replace
     this._toolbarSelection = null; // last non-empty selection preserved for toolbar dropdowns
     this._lastHtml      = '';
-    this._pbTimer       = null;  // debounce for page-count recalc
     this._pageIndicator = null;
     this._wheelHandler  = null;
     this._scrollHandler = null;  // scroll → _updatePI
@@ -577,8 +648,6 @@ export class KotoTipTapEditor {
     this._totalPages    = 1;
     this._scrollEl      = null;  // <div id="wa-editor-content"> (the scrollable canvas)
     this._zoomWrapper   = null;  // <div class="koto-zoom-wrapper"> — zoom applied here
-    this._pbOverlay     = null;  // overlay div (kept for compat, no longer used)
-    this._recalcFn      = null;  // reference to legacy recalc (kept for setZoom compat)
     this._ctxMenuHandler = null; // bound contextmenu event handler for cleanup
     this._ctxSelectionPreserveHandler = null;
     this._ctxMenuSelection = null;
@@ -586,8 +655,6 @@ export class KotoTipTapEditor {
     this._ctxCloseOnKey   = null;
     // RAF handle for throttled zoom — prevents multiple CSS reflows per frame
     this._pendingZoomRaf  = null;
-    // Debounce timer for post-drag pagination recalculation
-    this._recalcDebounce  = null;
     this._hdrFtrSelectionHandler = null;
     // Table border click handler for whole-table selection
     this._tableBorderHandler = null;
@@ -603,6 +670,10 @@ export class KotoTipTapEditor {
     this._sections       = [];
     this._topHeaderVariant = 'default';
     this._bottomFooterVariant = 'default';
+    this._reviewPreviewProposals = [];
+    this._reviewPreviewMatches = [];
+    this._reviewPreviewFocusedId = '';
+    this._reviewPreviewAnchorLayer = null;
 
     const wrap = document.getElementById(this.containerId);
     if (wrap) wrap.classList.add('active');
@@ -631,8 +702,11 @@ export class KotoTipTapEditor {
 
     const wrap = document.getElementById(this.containerId);
     if (!wrap) return;
-    // Preserve the find/replace bar (injected by the host page) before clearing
+    // Preserve host-managed overlays before clearing so re-renders do not
+    // delete the review rail/launcher that the workspace shell mounts here.
     const _findBar = wrap.querySelector('#wa-docx-find-bar');
+    const _reviewShell = wrap.querySelector('#wa-review-shell');
+    const _reviewLauncher = wrap.querySelector('#wa-review-selection-launcher');
     wrap.innerHTML = '';
     if (_findBar) wrap.insertBefore(_findBar, wrap.firstChild);
 
@@ -668,6 +742,8 @@ export class KotoTipTapEditor {
     pi.innerHTML = '<span id="wa-pi-text">第 1 页 / 共 1 页</span>';
     wrap.appendChild(pi);
     this._pageIndicator = pi.querySelector('#wa-pi-text');
+    if (_reviewShell) wrap.appendChild(_reviewShell);
+    if (_reviewLauncher) wrap.appendChild(_reviewLauncher);
 
     // Sanitize: TipTap (ProseMirror) handles nested tables correctly, but
     // we still sanitize to avoid XSS on loaded document HTML.
@@ -679,17 +755,27 @@ export class KotoTipTapEditor {
       element: zoomEl,
       extensions: _buildExtensions(),
       content: safeHtml,
-      onUpdate: ({ editor }) => {
+      onUpdate: ({ editor, transaction }) => {
+        const isResizeTransaction = !!transaction?.getMeta?.(DOCX_TABLE_RESIZE_TRANSACTION_META)
+          || !!transaction?.getMeta?.(DOCX_ROW_RESIZE_SKIP_AUTOSAVE_META);
         try {
           const h = editor.getHTML();
           const stripped = h.replace(/<p><\/p>/gi, '').trim();
           if (stripped) this._lastHtml = h;
         } catch (_) {}
-        this._markImportedDocxTables(editor.view?.dom);
+        if (!isResizeTransaction) {
+          this._markImportedDocxTables(editor.view?.dom);
+        }
         // Notify workspace auto-save (global WA.scheduleAutoSave)
         if (typeof window.WA !== 'undefined' && typeof window.WA.scheduleAutoSave === 'function') {
-          window.WA.scheduleAutoSave();
+          window.WA.scheduleAutoSave(isResizeTransaction ? { skipDiskWrite: true } : undefined);
         }
+        requestAnimationFrame(() => {
+          this._renderReviewProposalAnchors();
+          if (window.WA && typeof window.WA.relayoutDocxReviewRail === 'function') {
+            window.WA.relayoutDocxReviewRail();
+          }
+        });
       },
     });
 
@@ -740,19 +826,10 @@ export class KotoTipTapEditor {
       // Page count callback: updates the page indicator whenever the plugin
       // finishes a measurement pass (triggered by content changes).
       s.onPageCountChange = (total) => {
-        this._totalPages = total;
-        this._refreshHeaderFooterPageNumbers(total);
-        if (this._pageIndicator) {
-          const maxScroll = Math.max(1, this._scrollEl
-            ? this._scrollEl.scrollHeight - this._scrollEl.clientHeight
-            : 1);
-          const ratio  = this._scrollEl
-            ? Math.min(1, this._scrollEl.scrollTop / maxScroll)
-            : 0;
-          const cur = Math.max(1, Math.min(total,
-            Math.ceil(ratio * total + 0.001)));
-          this._pageIndicator.textContent = `第 ${cur} 页 / 共 ${total} 页`;
-        }
+        this._totalPages = Math.max(1, total || 1);
+        this._refreshPageChromeShells(this._totalPages);
+        this._refreshHeaderFooterPageNumbers(this._totalPages);
+        this._updatePageIndicator(this._totalPages);
       };
     }
 
@@ -764,20 +841,17 @@ export class KotoTipTapEditor {
     // background:#fff, and padding, covering all page content.
     // Instead, dblclick opens an overlay editor (same pattern as page breaks).
     {
-      const topSection = this._ensureDocxSections()[0] || {};
-      const hasFirstHeader = _hasHdrFtrContent(topSection.first_header_html);
-      this._topHeaderVariant = hasFirstHeader ? 'first' : 'default';
-      const firstHdr = hasFirstHeader
-        ? (topSection.first_header_html || '')
-        : (this._headerHtml || topSection.header_html || '');
+      const firstPageChrome = resolveDocxPageChrome(this._getPaginationRuntimeSource(), 1, 0);
+      this._topHeaderVariant = firstPageChrome.headerVariant;
+      const firstHdr = firstPageChrome.headerHtml || '';
       const hdrFirst = document.createElement('div');
       hdrFirst.className = 'koto-page-header-first';
       hdrFirst.dataset.variant = this._topHeaderVariant;
       // NO contenteditable on the wrapper — avoid polluting CSS selector
-      const _pw = this._pageWidthPx || 816;
-      const _ml = this._marginLeftPx || 96;
-      const _mr = this._marginRightPx || 96;
-      const _mt = this._marginTopPx || 96;
+      const _pw = firstPageChrome.pageWidthPx || 816;
+      const _ml = firstPageChrome.marginLeftPx || 96;
+      const _mr = firstPageChrome.marginRightPx || 96;
+      const _mt = firstPageChrome.marginTopPx || 96;
       hdrFirst.style.cssText = `
         position:absolute; top:0; left:50%; transform:translateX(-50%);
         z-index:5; pointer-events:auto; cursor:text;
@@ -832,20 +906,21 @@ export class KotoTipTapEditor {
     // Same pattern: NO contenteditable on wrapper, dblclick opens overlay.
     {
       const sections = this._ensureDocxSections();
-      const sec0 = sections[0] || {};
-      const secLast = sections[sections.length - 1] || sec0;
-      const hasFirstFooter = !_hasHdrFtrContent(this._footerHtml) && _hasHdrFtrContent(sec0.first_footer_html);
-      this._bottomFooterVariant = hasFirstFooter ? 'first' : 'default';
-      const lastFtr = hasFirstFooter
-        ? (sec0.first_footer_html || '')
-        : (this._footerHtml || secLast.footer_html || '');
+      const lastSectionIdx = Math.max(0, sections.length - 1);
+      const lastPageChrome = resolveDocxPageChrome(
+        this._getPaginationRuntimeSource(),
+        Math.max(1, this._totalPages || 1),
+        lastSectionIdx,
+      );
+      this._bottomFooterVariant = lastPageChrome.footerVariant;
+      const lastFtr = lastPageChrome.footerHtml || '';
       const ftrLast = document.createElement('div');
       ftrLast.className = 'koto-page-footer-last';
       ftrLast.dataset.variant = this._bottomFooterVariant;
-      const _pw = this._pageWidthPx || 816;
-      const _ml = this._marginLeftPx || 96;
-      const _mr = this._marginRightPx || 96;
-      const _mb = this._marginBottomPx || 80;
+      const _pw = lastPageChrome.pageWidthPx || 816;
+      const _ml = lastPageChrome.marginLeftPx || 96;
+      const _mr = lastPageChrome.marginRightPx || 96;
+      const _mb = lastPageChrome.marginBottomPx || 80;
       ftrLast.style.cssText = `
         position:absolute; bottom:0; left:50%; transform:translateX(-50%);
         z-index:5; pointer-events:auto; cursor:text;
@@ -894,6 +969,7 @@ export class KotoTipTapEditor {
       zoomEl.appendChild(ftrLast);
     }
 
+    this._refreshPageChromeShells(this._totalPages || 1);
     this._refreshHeaderFooterPageNumbers(this._totalPages || 1);
 
     // Wire toolbar buttons
@@ -932,8 +1008,8 @@ export class KotoTipTapEditor {
     // Apply current zoom
     if (this._zoom !== 100) this._applyZoom();
 
-    // Page breaks — after DOM settles
-    setTimeout(() => this._setupPageFeatures(), 250);
+    // Page indicator wiring only needs the mounted DOM, not a fixed post-render delay.
+    requestAnimationFrame(() => this._setupPageFeatures());
 
     // ── TOC link handler: click internal #anchor links to scroll ───────
     const _edContent = document.getElementById('wa-editor-content');
@@ -946,7 +1022,7 @@ export class KotoTipTapEditor {
         if (!targetId) return;
         const target = this.editor.view.dom.querySelector(`[id="${CSS.escape(targetId)}"]`);
         if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          this._scrollDocxTargetIntoView(target);
           // Brief highlight to indicate the target
           target.style.transition = 'background .3s';
           target.style.background = 'rgba(79,126,255,.15)';
@@ -961,6 +1037,7 @@ export class KotoTipTapEditor {
     if (!scope || typeof scope.querySelectorAll !== 'function') return;
 
     const importedCellSelector = [
+      'td[data-koto-borderless-cell="true"]',
       'td[paddingtop]',
       'td[paddingright]',
       'td[paddingbottom]',
@@ -969,6 +1046,7 @@ export class KotoTipTapEditor {
       'td[borderright]',
       'td[borderbottom]',
       'td[borderleft]',
+      'th[data-koto-borderless-cell="true"]',
       'th[paddingtop]',
       'th[paddingright]',
       'th[paddingbottom]',
@@ -1411,7 +1489,11 @@ export class KotoTipTapEditor {
         window._kotoDocxSelectionChanged();
       }
     });
-    ed.on('update', _updateActiveStates);
+    this._updateHandler = ({ transaction } = {}) => {
+      if (transaction?.getMeta?.(DOCX_TABLE_RESIZE_TRANSACTION_META)) return;
+      _updateActiveStates();
+    };
+    ed.on('update', this._updateHandler);
     // Run once after editor ready
     setTimeout(_updateActiveStates, 100);
   }
@@ -1420,6 +1502,210 @@ export class KotoTipTapEditor {
     if (!this.editor || this.editor.isDestroyed) return null;
     const selection = this.editor.state && this.editor.state.selection;
     return selection instanceof CellSelection ? selection : null;
+  }
+
+  _getCellNodeTextForAI(cellNode) {
+    return String((cellNode && cellNode.textContent) || '')
+      .replace(/[\t\r\n]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  _getTableNodeTextForAI(tableNode) {
+    if (!tableNode) return '';
+    const lines = [];
+    tableNode.forEach((rowNode) => {
+      if (!rowNode || rowNode.type.name !== 'tableRow') return;
+      const cells = [];
+      rowNode.forEach((cellNode) => {
+        cells.push(this._getCellNodeTextForAI(cellNode));
+      });
+      lines.push(cells.join('\t'));
+    });
+    return lines.join('\n').trim();
+  }
+
+  _getCellSelectionInfo(selection = this._getActiveCellSelection()) {
+    if (!this.editor || !selection) return null;
+    const tableInfo = findTable(selection.$anchorCell);
+    if (!tableInfo || !tableInfo.node) return null;
+
+    const selectedCells = new Map();
+    selection.forEachCell((cell, cellPos) => {
+      selectedCells.set(cellPos, cell);
+    });
+    if (!selectedCells.size) return null;
+
+    const tableStart = typeof tableInfo.start === 'number'
+      ? tableInfo.start
+      : (typeof tableInfo.pos === 'number' ? tableInfo.pos + 1 : null);
+    if (tableStart == null) return null;
+
+    const lines = [];
+    let rowCount = 0;
+    let colCount = 0;
+    tableInfo.node.forEach((rowNode, rowOffset) => {
+      if (!rowNode || rowNode.type.name !== 'tableRow') return;
+      const rowStart = tableStart + rowOffset;
+      const cells = [];
+      rowNode.forEach((cellNode, cellOffset) => {
+        const cellPos = rowStart + 1 + cellOffset;
+        if (!selectedCells.has(cellPos)) return;
+        cells.push(this._getCellNodeTextForAI(cellNode));
+      });
+      if (!cells.length) return;
+      rowCount += 1;
+      colCount = Math.max(colCount, cells.length);
+      lines.push(cells.join('\t'));
+    });
+
+    const text = lines.join('\n').trim();
+    if (!text) return null;
+
+    const tableDomPos = typeof tableInfo.pos === 'number'
+      ? tableInfo.pos
+      : (typeof tableInfo.start === 'number' ? tableInfo.start - 1 : null);
+    let tableElement = null;
+    if (tableDomPos != null) {
+      const domNode = this.editor.view.nodeDOM(tableDomPos);
+      if (domNode && domNode.nodeType === Node.ELEMENT_NODE) {
+        tableElement = domNode.tagName === 'TABLE' ? domNode : domNode.querySelector('table');
+      }
+    }
+
+    return {
+      text,
+      rows: rowCount,
+      cols: colCount,
+      selectedCells: selectedCells.size,
+      tableElement,
+    };
+  }
+
+  getCellSelectionInfo() {
+    const selection = this._getPreservedSelection();
+    return selection instanceof CellSelection ? this._getCellSelectionInfo(selection) : null;
+  }
+
+  _getDomWholeTableSelectionInfo() {
+    const root = document.getElementById(this.containerId);
+    if (!root) return null;
+    const table = root.querySelector('.tableWrapper.koto-table-selected table');
+    if (!table) return null;
+
+    const lines = [];
+    Array.from(table.rows || []).forEach((row) => {
+      const cells = Array.from(row.cells || []).map((cell) => String(cell.textContent || '')
+        .replace(/[\t\r\n]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim());
+      lines.push(cells.join('\t'));
+    });
+
+    const text = lines.join('\n').trim();
+    if (!text) return null;
+
+    const rows = table.rows ? table.rows.length : 0;
+    const cols = Math.max(0, ...Array.from(table.rows || []).map((row) => row.cells.length || 0));
+    return { text, rows, cols, tableElement: table };
+  }
+
+  _getWholeTableSelectionInfo(selection = this._getActiveCellSelection()) {
+    if (!this.editor || !selection) return null;
+    const tableInfo = findTable(selection.$anchorCell);
+    if (!tableInfo || !tableInfo.node) return null;
+
+    const selectedCells = new Set();
+    selection.forEachCell((_cell, cellPos) => {
+      selectedCells.add(cellPos);
+    });
+    if (!selectedCells.size) return null;
+
+    let totalCells = 0;
+    tableInfo.node.descendants((node) => {
+      if (node.type.name === 'tableCell' || node.type.name === 'tableHeader') {
+        totalCells += 1;
+      }
+    });
+    if (!totalCells || selectedCells.size !== totalCells) return null;
+
+    let cols = 0;
+    try {
+      cols = TableMap.get(tableInfo.node).width || 0;
+    } catch (_) {}
+
+    const rows = tableInfo.node.childCount || 0;
+    const text = this._getTableNodeTextForAI(tableInfo.node);
+    const tableDomPos = typeof tableInfo.pos === 'number'
+      ? tableInfo.pos
+      : (typeof tableInfo.start === 'number' ? tableInfo.start - 1 : null);
+    let tableElement = null;
+    if (tableDomPos != null) {
+      const domNode = this.editor.view.nodeDOM(tableDomPos);
+      if (domNode && domNode.nodeType === Node.ELEMENT_NODE) {
+        tableElement = domNode.tagName === 'TABLE' ? domNode : domNode.querySelector('table');
+      }
+    }
+
+    return { text, rows, cols, tableElement };
+  }
+
+  isWholeTableSelection() {
+    return !!this.getWholeTableSelectionInfo();
+  }
+
+  _getPreservedSelection() {
+    if (!this.editor || this.editor.isDestroyed) return null;
+    const state = this.editor.state;
+    const liveSelection = state && state.selection;
+    if (liveSelection && (!liveSelection.empty || liveSelection instanceof CellSelection)) {
+      return liveSelection;
+    }
+    if (this._toolbarSelection) {
+      try {
+        const restoredSelection = Selection.fromJSON(state.doc, this._toolbarSelection);
+        if (restoredSelection && (!restoredSelection.empty || restoredSelection instanceof CellSelection)) {
+          return restoredSelection;
+        }
+      } catch (_) {}
+    }
+    if (this._savedSel && this._savedSel.from !== this._savedSel.to) {
+      try {
+        const restoredTextSelection = Selection.fromJSON(state.doc, {
+          type: 'text',
+          anchor: this._savedSel.from,
+          head: this._savedSel.to,
+        });
+        if (restoredTextSelection && !restoredTextSelection.empty) {
+          return restoredTextSelection;
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  getWholeTableSelectionInfo() {
+    const selection = this._getPreservedSelection();
+    const pmWholeTableInfo = selection instanceof CellSelection
+      ? this._getWholeTableSelectionInfo(selection)
+      : null;
+    if (pmWholeTableInfo && pmWholeTableInfo.text) return pmWholeTableInfo;
+    return this._getDomWholeTableSelectionInfo();
+  }
+
+  getSelectionTextForAI() {
+    if (!this.editor) return '';
+    const selection = this._getPreservedSelection();
+    if (!selection) return '';
+    if (selection instanceof CellSelection) {
+      const cellSelectionInfo = this._getCellSelectionInfo(selection) || this._getDomWholeTableSelectionInfo();
+      if (cellSelectionInfo && cellSelectionInfo.text) return cellSelectionInfo.text;
+    }
+    const { doc } = this.editor.state;
+    if (selection.from !== selection.to) {
+      return (doc.textBetween(selection.from, selection.to, ' ') || '').trim();
+    }
+    return '';
   }
 
   _getCellSelectionTextNodes(selection = this._getActiveCellSelection()) {
@@ -1743,6 +2029,72 @@ export class KotoTipTapEditor {
   // measurement it calls storage.autoPageBreak.onPageCountChange(n), which
   // was wired in render() to update _totalPages and refresh the indicator.
   // This method only registers the scroll listener for current-page tracking.
+  _getDocxPageBreakBoundaries() {
+    const scrollEl = this._scrollEl || document.getElementById('wa-editor-content');
+    const boundaryRoot = this._zoomWrapper || this.editor?.view?.dom?.parentElement || this.editor?.view?.dom;
+    if (!scrollEl || !boundaryRoot) return [];
+
+    const scrollRect = scrollEl.getBoundingClientRect();
+    return Array.from(boundaryRoot.querySelectorAll('[data-page-break],[data-soft-page-break]'))
+      .map((el) => el.getBoundingClientRect().top - scrollRect.top + scrollEl.scrollTop)
+      .filter((top) => Number.isFinite(top))
+      .sort((left, right) => left - right)
+      .filter((top, idx, arr) => idx === 0 || Math.abs(top - arr[idx - 1]) > 1);
+  }
+
+  getDocxNavigationAnchorOffset() {
+    const configuredMarginTop = Number(this._marginTopPx);
+    if (Number.isFinite(configuredMarginTop) && configuredMarginTop > 0) {
+      return Math.min(120, configuredMarginTop);
+    }
+
+    const pm = this.editor?.view?.dom;
+    if (pm && typeof window.getComputedStyle === 'function') {
+      const pmStyle = window.getComputedStyle(pm);
+      const paddingTop = parseFloat(pmStyle.paddingTop || '0');
+      if (Number.isFinite(paddingTop) && paddingTop > 0) {
+        return Math.min(120, paddingTop);
+      }
+    }
+
+    return 96;
+  }
+
+  getDocxTargetScrollTop(target) {
+    if (!target) return null;
+    const scrollEl = this._scrollEl || document.getElementById('wa-editor-content');
+    if (!scrollEl) return null;
+
+    const scrollRect = scrollEl.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const relativeTop = targetRect.top - scrollRect.top + scrollEl.scrollTop;
+    return Number.isFinite(relativeTop) ? relativeTop : null;
+  }
+
+  _getCurrentDocxPage(totalPages = this._totalPages) {
+    const normalizedTotal = Math.max(1, totalPages || 1);
+    if (!this._scrollEl) return 1;
+
+    const threshold = this._scrollEl.scrollTop + this.getDocxNavigationAnchorOffset();
+    const boundaries = this._getDocxPageBreakBoundaries();
+    if (!boundaries.length) return 1;
+
+    let currentPage = 1;
+    for (const boundaryTop of boundaries) {
+      if (threshold >= boundaryTop) currentPage += 1;
+      else break;
+    }
+
+    return Math.max(1, Math.min(normalizedTotal, currentPage));
+  }
+
+  _updatePageIndicator(totalPages = this._totalPages) {
+    if (!this._pageIndicator) return;
+    const normalizedTotal = Math.max(1, totalPages || 1);
+    const curPage = this._getCurrentDocxPage(normalizedTotal);
+    this._pageIndicator.textContent = `第 ${curPage} 页 / 共 ${normalizedTotal} 页`;
+  }
+
   _setupPageFeatures() {
     if (!this.editor) return;
     const editable    = this.editor.view.dom;      // .ProseMirror
@@ -1755,14 +2107,7 @@ export class KotoTipTapEditor {
 
     // ── Update page indicator label (scroll-driven) ────────────────────────
     const _updatePI = () => {
-      if (!this._pageIndicator) return;
-      const maxScroll = Math.max(1, scrollEl.scrollHeight - scrollEl.clientHeight);
-      const ratio = Math.min(1, scrollEl.scrollTop / maxScroll);
-      const curPage = Math.max(1, Math.min(
-        this._totalPages,
-        Math.ceil(ratio * this._totalPages + 0.001),
-      ));
-      this._pageIndicator.textContent = `第 ${curPage} 页 / 共 ${this._totalPages} 页`;
+      this._updatePageIndicator();
     };
 
     this._scrollHandler = _updatePI;
@@ -1770,6 +2115,192 @@ export class KotoTipTapEditor {
 
     // Bootstrap indicator (plugin will update totalPages asynchronously)
     requestAnimationFrame(_updatePI);
+  }
+
+  syncReviewProposals(proposals, options = {}) {
+    this._reviewPreviewProposals = Array.isArray(proposals) ? proposals.slice() : [];
+    this._reviewPreviewFocusedId = String(options.focusedId || '').trim();
+    this._reviewPreviewMatches = [];
+    this._clearReviewProposalHighlights();
+    this._clearReviewProposalAnchors();
+
+    if (!this.editor || !this._scrollEl || !this._reviewPreviewProposals.length) return [];
+
+    const index = _buildAiPreviewTextIndex(this.editor.view?.dom);
+    if (!index || !index.normalizedText) return [];
+
+    const occupied = [];
+    this._reviewPreviewProposals.forEach((proposal) => {
+      const reviewId = String((proposal && (proposal.review_id || proposal.id)) || '').trim();
+      const originalText = _normalizeAiPreviewText(proposal && proposal.original_text);
+      if (!reviewId || !originalText) return;
+
+      let searchFrom = 0;
+      while (searchFrom < index.normalizedText.length) {
+        const matchStart = index.normalizedText.indexOf(originalText, searchFrom);
+        if (matchStart === -1) return;
+        const matchEnd = matchStart + originalText.length;
+        const overlaps = occupied.some(([start, end]) => matchStart < end && matchEnd > start);
+        if (!overlaps) {
+          const range = _createAiPreviewRange(index, matchStart, matchEnd);
+          if (!range) return;
+          occupied.push([matchStart, matchEnd]);
+          this._reviewPreviewMatches.push({ proposal, range, reviewId });
+          return;
+        }
+        searchFrom = matchStart + Math.max(1, originalText.length);
+      }
+    });
+
+    this._applyReviewProposalHighlights();
+    this._renderReviewProposalAnchors();
+    if (this._reviewPreviewFocusedId) {
+      requestAnimationFrame(() => this._scrollFocusedReviewProposalIntoView());
+    }
+    return this._reviewPreviewMatches.slice();
+  }
+
+  clearReviewProposals() {
+    this._reviewPreviewProposals = [];
+    this._reviewPreviewMatches = [];
+    this._reviewPreviewFocusedId = '';
+    this._clearReviewProposalHighlights();
+    this._clearReviewProposalAnchors();
+  }
+
+  _clearReviewProposalHighlights() {
+    if (!window.CSS || !CSS.highlights) return;
+    try { CSS.highlights.delete(_AI_REVIEW_PENDING_HIGHLIGHT); } catch (_) {}
+    try { CSS.highlights.delete(_AI_REVIEW_FOCUS_HIGHLIGHT); } catch (_) {}
+  }
+
+  _applyReviewProposalHighlights() {
+    if (!window.CSS || !CSS.highlights) return;
+    const ranges = this._reviewPreviewMatches.map((entry) => entry.range).filter(Boolean);
+    if (!ranges.length) return;
+    CSS.highlights.set(_AI_REVIEW_PENDING_HIGHLIGHT, new Highlight(...ranges));
+
+    const focused = this._reviewPreviewMatches.find((entry) => entry.reviewId === this._reviewPreviewFocusedId || String(entry.proposal?.id || '') === this._reviewPreviewFocusedId);
+    if (focused && focused.range) {
+      CSS.highlights.set(_AI_REVIEW_FOCUS_HIGHLIGHT, new Highlight(focused.range));
+    }
+  }
+
+  _clearReviewProposalAnchors() {
+    if (!this._reviewPreviewAnchorLayer) return;
+    this._reviewPreviewAnchorLayer.innerHTML = '';
+  }
+
+  _ensureReviewProposalAnchorLayer() {
+    if (!this._scrollEl) return null;
+    if (this._reviewPreviewAnchorLayer && this._reviewPreviewAnchorLayer.isConnected) {
+      return this._reviewPreviewAnchorLayer;
+    }
+    if (window.getComputedStyle(this._scrollEl).position === 'static') {
+      this._scrollEl.style.position = 'relative';
+    }
+    const layer = document.createElement('div');
+    layer.className = 'koto-ai-review-anchor-layer';
+    this._scrollEl.appendChild(layer);
+    this._reviewPreviewAnchorLayer = layer;
+    return layer;
+  }
+
+  _renderReviewProposalAnchors() {
+    const layer = this._ensureReviewProposalAnchorLayer();
+    if (!layer || !this._scrollEl) return;
+    layer.innerHTML = '';
+    if (!this._reviewPreviewMatches.length) return;
+
+    layer.style.width = Math.max(this._scrollEl.scrollWidth, this._scrollEl.clientWidth) + 'px';
+    layer.style.height = Math.max(this._scrollEl.scrollHeight, this._scrollEl.clientHeight) + 'px';
+
+    const scrollRect = this._scrollEl.getBoundingClientRect();
+    const scrollTop = this._scrollEl.scrollTop;
+    const scrollLeft = this._scrollEl.scrollLeft;
+    const pageRect = this._zoomWrapper ? this._zoomWrapper.getBoundingClientRect() : null;
+    const pageRight = pageRect
+      ? (pageRect.right - scrollRect.left + scrollLeft + 18)
+      : null;
+
+    const placed = [];
+    this._reviewPreviewMatches.forEach((entry) => {
+      const rect = entry.range.getBoundingClientRect();
+      if (!rect || (!rect.width && !rect.height)) return;
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'koto-ai-review-anchor';
+      if (entry.reviewId === this._reviewPreviewFocusedId || String(entry.proposal?.id || '') === this._reviewPreviewFocusedId) {
+        button.classList.add('focused');
+      }
+
+      const badge = document.createElement('span');
+      badge.className = 'koto-ai-review-anchor-badge';
+      badge.textContent = 'AI 建议';
+      button.appendChild(badge);
+
+      const text = document.createElement('span');
+      text.className = 'koto-ai-review-anchor-text';
+      text.textContent = _previewAnchorText(entry.proposal?.proposed_text || entry.proposal?.value || '') || '查看修改建议';
+      button.appendChild(text);
+
+      const originalPreview = _previewAnchorText(entry.proposal?.original_text || '', 64);
+      const proposedPreview = _previewAnchorText(entry.proposal?.proposed_text || entry.proposal?.value || '', 64);
+      button.title = originalPreview && proposedPreview
+        ? `原文：${originalPreview}\n建议：${proposedPreview}`
+        : (proposedPreview || originalPreview || '查看 AI 修改建议');
+      button.addEventListener('click', () => {
+        if (window.WA && typeof window.WA.focusReviewThread === 'function') {
+          window.WA.focusReviewThread(entry.reviewId);
+        }
+      });
+
+      let top = rect.top - scrollRect.top + scrollTop - 4;
+      let left = pageRight != null
+        ? pageRight
+        : (rect.right - scrollRect.left + scrollLeft + 12);
+
+      const width = 198;
+      left = Math.max(12, Math.min(left, Math.max(12, layer.clientWidth - width - 12)));
+      placed.forEach((item) => {
+        const overlapsVertically = Math.abs(top - item.top) < 30;
+        const overlapsHorizontally = Math.abs(left - item.left) < 210;
+        if (overlapsVertically && overlapsHorizontally) {
+          top = item.top + 34;
+        }
+      });
+      placed.push({ top, left });
+
+      button.style.top = `${Math.max(0, top)}px`;
+      button.style.left = `${left}px`;
+      layer.appendChild(button);
+    });
+  }
+
+  _scrollFocusedReviewProposalIntoView() {
+    if (!this._scrollEl || !this._reviewPreviewFocusedId) return;
+    const focused = this._reviewPreviewMatches.find((entry) => entry.reviewId === this._reviewPreviewFocusedId || String(entry.proposal?.id || '') === this._reviewPreviewFocusedId);
+    if (!focused || !focused.range) return;
+    const rect = focused.range.getBoundingClientRect();
+    const scrollRect = this._scrollEl.getBoundingClientRect();
+    const top = this._scrollEl.scrollTop + (rect.top - scrollRect.top) - 96;
+    this._scrollEl.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }
+
+  _scrollDocxTargetIntoView(target, { behavior = 'smooth', offset = null } = {}) {
+    if (!target) return;
+    const scrollEl = this._scrollEl || document.getElementById('wa-editor-content');
+    if (!scrollEl) {
+      target.scrollIntoView({ behavior, block: 'center' });
+      return;
+    }
+
+    const targetTop = this.getDocxTargetScrollTop(target);
+    if (targetTop === null) return;
+
+    const resolvedOffset = Number.isFinite(offset) ? offset : this.getDocxNavigationAnchorOffset();
+    scrollEl.scrollTo({ top: Math.max(0, targetTop - resolvedOffset), behavior });
   }
 
   _distributeTableColumnsEvenly() {
@@ -2027,9 +2558,13 @@ export class KotoTipTapEditor {
       _setButtonState('setCellAlignBottom', verticalAlign === 'bottom');
     };
 
-    ed.on('selectionUpdate', _updateTableToolbarVisibility);
-    ed.on('update', _updateTableToolbarVisibility);
-    this._tableToolbarUpdateFn = _updateTableToolbarVisibility;
+    const _tableToolbarUpdateHandler = ({ transaction } = {}) => {
+      if (transaction?.getMeta?.(DOCX_TABLE_RESIZE_TRANSACTION_META)) return;
+      _updateTableToolbarVisibility();
+    };
+    ed.on('selectionUpdate', _tableToolbarUpdateHandler);
+    ed.on('update', _tableToolbarUpdateHandler);
+    this._tableToolbarUpdateFn = _tableToolbarUpdateHandler;
 
     // ── Table size picker (for insert table button) ──────────────────────
     this._wireTableSizePicker(wrap);
@@ -2248,6 +2783,13 @@ export class KotoTipTapEditor {
       const extraHeight = zoomEl.offsetHeight * (scale - 1);
       zoomEl.style.marginBottom = Math.max(0, extraHeight) + 'px';
     }
+    requestAnimationFrame(() => {
+      this._updatePageIndicator();
+      this._renderReviewProposalAnchors();
+      if (window.WA && typeof window.WA.relayoutDocxReviewRail === 'function') {
+        window.WA.relayoutDocxReviewRail();
+      }
+    });
   }
 
   _ensureDocxSections() {
@@ -2315,11 +2857,96 @@ export class KotoTipTapEditor {
     });
   }
 
+  _getPaginationRuntimeSource() {
+    return {
+      pageWidthPx: this._pageWidthPx || null,
+      pageHeightPx: this._pageHeightPx || null,
+      marginTopPx: this._marginTopPx || null,
+      marginBottomPx: this._marginBottomPx || null,
+      marginLeftPx: this._marginLeftPx || null,
+      marginRightPx: this._marginRightPx || null,
+      headerHtml: this._headerHtml || '',
+      footerHtml: this._footerHtml || '',
+      sections: this._sections || [],
+    };
+  }
+
+  _refreshRenderedBreakChrome() {
+    const root = document.getElementById(this.containerId);
+    if (!root) return;
+
+    const source = this._getPaginationRuntimeSource();
+    root.querySelectorAll('[data-soft-page-break], [data-page-break][data-page-num]').forEach((breakEl) => {
+      const pageAttr = breakEl.getAttribute('data-soft-page-break') || breakEl.getAttribute('data-page-num') || '';
+      const pageNum = Number.parseInt(pageAttr, 10);
+      if (!Number.isFinite(pageNum) || pageNum < 1) return;
+
+      const currentSectionIdx = Math.max(0, Number.parseInt(breakEl.getAttribute('data-current-section-idx') || breakEl.getAttribute('data-section-idx') || '0', 10) || 0);
+      const nextSectionIdx = Math.max(0, Number.parseInt(breakEl.getAttribute('data-next-section-idx') || breakEl.getAttribute('data-section-idx') || '0', 10) || 0);
+      const breakChrome = resolveDocxBreakChrome(source, pageNum, currentSectionIdx, nextSectionIdx);
+      const footerEl = breakEl.querySelector('.koto-pb-footer');
+      const headerEl = breakEl.querySelector('.koto-pb-header');
+
+      if (footerEl && !footerEl.querySelector('.koto-hdrftr-overlay')) {
+        footerEl.dataset.variant = breakChrome.currentPage.footerVariant || 'default';
+        this._setHeaderFooterSlotState(footerEl, breakChrome.currentPage.footerHtml || '', 'footer');
+        footerEl.querySelectorAll('.koto-hdr-page-num').forEach((el) => {
+          el.textContent = String(pageNum);
+          el.setAttribute('contenteditable', 'false');
+        });
+      }
+
+      if (headerEl && !headerEl.querySelector('.koto-hdrftr-overlay')) {
+        headerEl.dataset.variant = breakChrome.nextPage.headerVariant || 'default';
+        this._setHeaderFooterSlotState(headerEl, breakChrome.nextPage.headerHtml || '', 'header');
+        headerEl.querySelectorAll('.koto-hdr-page-num').forEach((el) => {
+          el.textContent = String(pageNum + 1);
+          el.setAttribute('contenteditable', 'false');
+        });
+      }
+    });
+  }
+
+  _refreshPageChromeShells(totalPages) {
+    const root = document.getElementById(this.containerId);
+    if (!root) return;
+
+    const source = this._getPaginationRuntimeSource();
+    const firstShell = root.querySelector('.koto-page-header-first');
+    const lastShell = root.querySelector('.koto-page-footer-last');
+
+    if (firstShell && !firstShell.querySelector('.koto-hdrftr-overlay')) {
+      const firstPageChrome = resolveDocxPageChrome(source, 1, 0);
+      this._topHeaderVariant = firstPageChrome.headerVariant;
+      firstShell.dataset.variant = firstPageChrome.headerVariant;
+      this._setHeaderFooterSlotState(firstShell, firstPageChrome.headerHtml || '', 'header');
+      firstShell.querySelectorAll('.koto-hdr-page-num').forEach((el) => {
+        el.textContent = '1';
+        el.setAttribute('contenteditable', 'false');
+      });
+    }
+
+    if (lastShell && !lastShell.querySelector('.koto-hdrftr-overlay')) {
+      const lastSectionIdx = Math.max(0, this._ensureDocxSections().length - 1);
+      const lastPageChrome = resolveDocxPageChrome(source, Math.max(1, totalPages || 1), lastSectionIdx);
+      this._bottomFooterVariant = lastPageChrome.footerVariant;
+      lastShell.dataset.variant = lastPageChrome.footerVariant;
+      this._setHeaderFooterSlotState(lastShell, lastPageChrome.footerHtml || '', 'footer');
+      lastShell.querySelectorAll('.koto-hdr-page-num').forEach((el) => {
+        el.textContent = String(Math.max(1, totalPages || 1));
+        el.setAttribute('contenteditable', 'false');
+      });
+    }
+
+    this._refreshRenderedBreakChrome();
+  }
+
   _applyHeaderEdit(newHtml, variant, slotEl) {
     const html = _hasHdrFtrContent(newHtml) ? newHtml : '';
     if (variant === 'first') {
       this._updateSectionField('first_header_html', html);
       this._setHeaderFooterSlotState(slotEl, html, 'header');
+      this._refreshPageChromeShells(this._totalPages || 1);
       this._refreshHeaderFooterPageNumbers(this._totalPages || 1);
       return;
     }
@@ -2329,16 +2956,7 @@ export class KotoTipTapEditor {
     if (this.editor?.storage?.docxPageBreak) this.editor.storage.docxPageBreak.headerHtml = html;
     this._updateSectionField('header_html', html, true);
 
-    const root = document.getElementById(this.containerId);
-    if (root) {
-      root.querySelectorAll('.koto-pb-header').forEach((el) => {
-        this._setHeaderFooterSlotState(el, html, 'header');
-      });
-      const firstShell = root.querySelector('.koto-page-header-first');
-      if (this._topHeaderVariant === 'default' && firstShell) {
-        this._setHeaderFooterSlotState(firstShell, html, 'header');
-      }
-    }
+    this._refreshPageChromeShells(this._totalPages || 1);
     this._refreshHeaderFooterPageNumbers(this._totalPages || 1);
   }
 
@@ -2347,6 +2965,7 @@ export class KotoTipTapEditor {
     if (variant === 'first') {
       this._updateSectionField('first_footer_html', html);
       this._setHeaderFooterSlotState(slotEl, html, 'footer');
+      this._refreshPageChromeShells(this._totalPages || 1);
       this._refreshHeaderFooterPageNumbers(this._totalPages || 1);
       return;
     }
@@ -2356,28 +2975,24 @@ export class KotoTipTapEditor {
     if (this.editor?.storage?.docxPageBreak) this.editor.storage.docxPageBreak.footerHtml = html;
     this._updateSectionField('footer_html', html, true);
 
-    const root = document.getElementById(this.containerId);
-    if (root) {
-      root.querySelectorAll('.koto-pb-footer').forEach((el) => {
-        this._setHeaderFooterSlotState(el, html, 'footer');
-      });
-      const lastShell = root.querySelector('.koto-page-footer-last');
-      if (this._bottomFooterVariant === 'default' && lastShell) {
-        this._setHeaderFooterSlotState(lastShell, html, 'footer');
-      }
-    }
+    this._refreshPageChromeShells(this._totalPages || 1);
     this._refreshHeaderFooterPageNumbers(this._totalPages || 1);
   }
 
   // ── getContent ────────────────────────────────────────────────────────────
   getContent() {
     if (!this.editor) return '';
-    const { selection, doc } = this.editor.state;
-    const { from, to } = selection;
-    if (from !== to) {
-      const selectedText = doc.textBetween(from, to, '\n');
-      if (selectedText) return `[当前选中文本]:\n${selectedText}\n`;
+    const wholeTableInfo = this.getWholeTableSelectionInfo();
+    if (wholeTableInfo && wholeTableInfo.text) {
+      return `[当前选中表格]:\n${wholeTableInfo.text}\n`;
     }
+    const cellSelectionInfo = this.getCellSelectionInfo();
+    if (cellSelectionInfo && cellSelectionInfo.text) {
+      return `[当前选中单元格]:\n${cellSelectionInfo.text}\n`;
+    }
+    const { doc } = this.editor.state;
+    const selectedText = this.getSelectionTextForAI();
+    if (selectedText) return `[当前选中文本]:\n${selectedText}\n`;
     return `[文档全文]:\n${doc.textContent}\n`;
   }
 
@@ -2574,6 +3189,82 @@ export class KotoTipTapEditor {
       _showToast('AI 已更新文档', 'success');
       _scheduleAutoSave();
     }
+  }
+
+  applyImportedReviewDecision(proposal, decision = 'accept') {
+    if (!this.editor || !proposal) return false;
+    const reviewId = String((proposal.review_id || proposal.id || '')).replace(/^proposal:/, '').trim();
+    if (!reviewId) return false;
+
+    const currentHtml = this.serialize();
+    if (!currentHtml) return false;
+
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(`<div id="__koto_review_root">${currentHtml}</div>`, 'text/html');
+    const root = parsed.getElementById('__koto_review_root');
+    if (!root) return false;
+
+    const markers = Array.from(root.querySelectorAll('[data-koto-review-id]')).filter((node) => {
+      return String(node.getAttribute('data-koto-review-id') || '').trim() === reviewId;
+    });
+    if (!markers.length) return false;
+
+    const marker = markers[0];
+
+    const action = String(marker.getAttribute('data-koto-review-action') || proposal.action || proposal.action_type || '').trim() || 'replace';
+    const deletedNode = markers
+      .map((node) => node.querySelector('.koto-docx-track-change-delete'))
+      .find((node) => !!node) || null;
+    const insertedNode = markers
+      .map((node) => node.querySelector('.koto-docx-track-change-insert'))
+      .find((node) => !!node) || null;
+    const domDeletedHtml = deletedNode ? deletedNode.innerHTML : '';
+    const domInsertedHtml = insertedNode ? insertedNode.innerHTML : '';
+    const fallbackDeletedHtml = _toReplacementHtml(proposal.original_text || '');
+    const fallbackInsertedHtml = _toReplacementHtml(proposal.proposed_text || '');
+    const groupedMarkers = markers.length > 1;
+    const ambiguousDomParts = (
+      groupedMarkers
+      ||
+      (action === 'replace' && (
+        !deletedNode
+        || !insertedNode
+        || deletedNode === insertedNode
+        || (domDeletedHtml && domDeletedHtml === domInsertedHtml)
+      ))
+      || (action === 'delete' && !deletedNode)
+      || (action === 'insert' && !insertedNode)
+    );
+    const deletedHtml = ambiguousDomParts && fallbackDeletedHtml
+      ? fallbackDeletedHtml
+      : domDeletedHtml;
+    const insertedHtml = ambiguousDomParts && fallbackInsertedHtml
+      ? fallbackInsertedHtml
+      : domInsertedHtml;
+
+    let replacementHtml = '';
+    if (decision === 'reject') {
+      if (action === 'replace' || action === 'delete') {
+        replacementHtml = deletedHtml;
+      }
+    } else if (action === 'replace' || action === 'insert') {
+      replacementHtml = insertedHtml;
+    }
+
+    if (replacementHtml) {
+      const temp = parsed.createElement('div');
+      temp.innerHTML = replacementHtml;
+      marker.replaceWith(...Array.from(temp.childNodes));
+    } else {
+      marker.remove();
+    }
+
+    markers.slice(1).forEach((node) => node.remove());
+
+    const nextHtml = root.innerHTML;
+    this.editor.commands.setContent(nextHtml, false);
+    this._lastHtml = nextHtml;
+    return true;
   }
 
   _writeToPreservedSelection(mode, clean) {
@@ -2777,16 +3468,7 @@ export class KotoTipTapEditor {
   }
 
   _cleanup() {
-    if (this._pbTimer) { clearTimeout(this._pbTimer); this._pbTimer = null; }
-    if (this._recalcDebounce) { clearTimeout(this._recalcDebounce); this._recalcDebounce = null; }
     if (this._pendingZoomRaf) { cancelAnimationFrame(this._pendingZoomRaf); this._pendingZoomRaf = null; }
-
-    // Remove page-break overlay from DOM
-    if (this._pbOverlay) {
-      try { this._pbOverlay.remove(); } catch (_) {}
-      this._pbOverlay = null;
-    }
-    this._recalcFn = null;
 
     // Remove scroll listener from the canvas div
     if (this._scrollHandler && this._scrollEl) {
@@ -2844,6 +3526,8 @@ export class KotoTipTapEditor {
     this._savedSel     = null;
     this._toolbarSelection = null;
     this._ctxMenuSelection = null;
+    this.clearReviewProposals();
+    this._reviewPreviewAnchorLayer = null;
   }
 }
 
@@ -2855,6 +3539,21 @@ function _toInsertContent(text) {
   // If it looks like HTML, pass through; otherwise escape as text
   if (text.trimStart().startsWith('<')) return text;
   return text;
+}
+
+function _escapeHtmlText(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function _toReplacementHtml(value) {
+  const text = String(value || '');
+  if (!text) return '';
+  if (text.trimStart().startsWith('<')) return text;
+  return _escapeHtmlText(text).replace(/\r\n?|\n/g, '<br>');
 }
 
 /**
@@ -2895,9 +3594,9 @@ function _sanitizeDocxHtml(html) {
 }
 
 /** Proxy helpers — forwards to global WA if available. */
-function _scheduleAutoSave() {
+function _scheduleAutoSave(options) {
   if (typeof window !== 'undefined' && window.WA && typeof window.WA.scheduleAutoSave === 'function') {
-    window.WA.scheduleAutoSave();
+    window.WA.scheduleAutoSave(options);
   }
 }
 

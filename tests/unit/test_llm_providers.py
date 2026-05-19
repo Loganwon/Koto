@@ -229,6 +229,28 @@ class TestOllamaLLMProviderResolveModel:
         assert result == "cached-model:7b"
 
 
+class TestOllamaProviderTimeoutPassthrough:
+    @patch("app.core.llm.ollama_llm_provider._raw_post")
+    def test_generate_content_passes_call_timeout(self, mock_post):
+        from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
+        mock_post.return_value = {
+            "message": {"content": "ok"},
+            "prompt_eval_count": 1,
+            "eval_count": 1,
+        }
+
+        provider = OllamaLLMProvider(model="qwen3.5:9b")
+        result = provider.generate_content("hello", call_timeout=45)
+
+        assert result["content"] == "ok"
+        call = mock_post.call_args
+        timeout_value = call.kwargs.get("timeout_seconds")
+        if timeout_value is None and len(call.args) > 3:
+            timeout_value = call.args[3]
+        assert timeout_value == 45
+
+
 # ---------------------------------------------------------------------------
 # GeminiProvider._format_prompt — role mapping regression tests
 # ---------------------------------------------------------------------------

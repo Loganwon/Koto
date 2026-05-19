@@ -25,6 +25,7 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -292,31 +293,44 @@ class TaskLedger:
             priority=int(priority),
             metadata=json.dumps(metadata or {}, ensure_ascii=False),
         )
-        with self._lock:
-            self._conn.execute(
-                """
-                INSERT INTO koto_tasks
-                  (task_id, session_id, user_input, status, task_type, skill_id,
-                   source, created_at, step_count, tool_calls, retry_count,
-                   interrupt_requested, cancel_requested, priority, metadata)
-                VALUES
-                  (:task_id, :session_id, :user_input, :status, :task_type, :skill_id,
-                   :source, :created_at, 0, 0, 0, 0, 0, :priority, :metadata)
-                """,
-                {
-                    "task_id": task.task_id,
-                    "session_id": task.session_id,
-                    "user_input": task.user_input,
-                    "status": task.status.value,
-                    "task_type": task.task_type,
-                    "skill_id": task.skill_id,
-                    "source": task.source,
-                    "created_at": task.created_at,
-                    "priority": task.priority,
-                    "metadata": task.metadata,
-                },
-            )
-            self._conn.commit()
+        payload = {
+            "task_id": task.task_id,
+            "session_id": task.session_id,
+            "user_input": task.user_input,
+            "status": task.status.value,
+            "task_type": task.task_type,
+            "skill_id": task.skill_id,
+            "source": task.source,
+            "created_at": task.created_at,
+            "priority": task.priority,
+            "metadata": task.metadata,
+        }
+        for attempt in range(5):
+            try:
+                with self._lock:
+                    self._conn.execute(
+                        """
+                        INSERT INTO koto_tasks
+                          (task_id, session_id, user_input, status, task_type, skill_id,
+                           source, created_at, step_count, tool_calls, retry_count,
+                           interrupt_requested, cancel_requested, priority, metadata)
+                        VALUES
+                          (:task_id, :session_id, :user_input, :status, :task_type, :skill_id,
+                           :source, :created_at, 0, 0, 0, 0, 0, :priority, :metadata)
+                        """,
+                        payload,
+                    )
+                    self._conn.commit()
+                break
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == 4:
+                    raise
+                try:
+                    with self._lock:
+                        self._conn.rollback()
+                except Exception:
+                    pass
+                time.sleep(0.1 * (attempt + 1))
         logger.debug(
             f"[TaskLedger] 创建任务 {task.task_id[:8]} session={session_id[:8]}"
         )

@@ -14,10 +14,12 @@ def test_workspace_ai_onboarding_copy_tracks_goal_first_task_flow():
     standalone_html = _read("web/templates/workspace_assistant.html")
 
     for html in (embedded_html, standalone_html):
-        assert "读取并直接处理" in html  # lede
-        assert "wa-welcome-lede" in html
-        assert "wa-welcome-tip" in html
-        assert "支持多步骤工作流" in html
+        assert "欢迎使用 Koto AI" in html
+        assert "直接告诉我你想完成什么，我会结合当前文件、明确选中的内容和补充文件继续处理。" in html
+        assert "wa-welcome-lede" not in html
+        assert "wa-welcome-tip" not in html
+        assert "读取并直接处理" not in html
+        assert "支持多步骤工作流" not in html
         # quick action buttons (wa-actions-bar)
         assert "润色表达" in html
         assert "提炼要点" in html
@@ -39,4 +41,4 @@ def test_workspace_ai_onboarding_placeholder_and_dropzone_match_new_context_rule
     for html in (embedded_html, standalone_html):
         assert "拖放补充文件到这里" in html
         assert "继续添加补充文件" in html
-        assert "直接告诉我你想完成什么。我会结合当前文件、选区和补充文件继续处理。" in html
+        assert "直接告诉我你想完成什么，我会结合当前文件、明确选中的内容和补充文件继续处理。" in html

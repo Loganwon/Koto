@@ -1,0 +1,206 @@
+#!/usr/bin/env python
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import subprocess
+import sys
+from collections import OrderedDict
+
+
+SUITES = OrderedDict(
+    [
+        (
+            "smoke",
+            {
+                "description": "Critical AI assistant routing and runtime regressions.",
+                "nodes": [
+                    "tests/test_ai_stream.py::TestWorkspaceAssistantTaskRemovalRegression::test_workspace_send_message_keeps_open_file_and_uses_whitebox_stream",
+                    "tests/test_ai_stream.py::TestWorkspaceAssistantTaskRemovalRegression::test_workspace_send_message_builds_whitebox_payload_with_current_file_history_and_model_state",
+                    "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_emits_new_contract",
+                    "tests/unit/test_file_task_runtime.py::test_file_task_model_client_passes_file_task_timeout_to_local_provider",
+                    "tests/unit/test_file_task_planner.py::test_file_task_model_client_falls_back_to_local_when_cloud_call_fails",
+                    "tests/unit/test_file_task_planner.py::test_file_task_runtime_surfaces_external_planner_textual_tool_gap_as_next_action_artifact",
+                ],
+            },
+        ),
+        (
+            "contracts",
+            {
+                "description": "Source-level workspace assistant and dispatcher contract guards.",
+                "nodes": [
+                    "tests/test_ai_stream.py::TestWorkspaceAssistantTaskRemovalRegression",
+                ],
+            },
+        ),
+        (
+            "backend",
+            {
+                "description": "Backend SSE task-stream endpoint flows and request normalization.",
+                "nodes": [
+                    "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_executes_xlsx_to_docx_write_loop",
+                    "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_reports_no_write_when_docx_is_unchanged",
+                    "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_emits_new_contract",
+                    "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_requires_task",
+                    "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_normalizes_local_model_config",
+                    "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_persists_finished_run",
+                    "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_merges_persisted_session_history",
+                    "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_injects_memory_router_context",
+                ],
+            },
+        ),
+        (
+            "runtime",
+            {
+                "description": "File-task runtime, planner, tool-gap, and provider fallback behavior.",
+                "nodes": [
+                    "tests/unit/test_llm_providers.py::TestOllamaProviderTimeoutPassthrough::test_generate_content_passes_call_timeout",
+                    "tests/unit/test_file_task_runtime.py::test_file_task_runtime_parses_native_tool_design_protocol_from_model_text",
+                    "tests/unit/test_file_task_runtime.py::test_file_task_model_client_passes_file_task_timeout_to_local_provider",
+                    "tests/unit/test_file_task_planner.py::test_file_task_model_client_falls_back_to_local_when_cloud_call_fails",
+                    "tests/unit/test_file_task_planner.py::test_file_task_model_client_uses_external_fallback_policy_when_native_fails",
+                    "tests/unit/test_file_task_planner.py::test_file_task_model_client_auto_policy_stays_native_for_supported_docx_task",
+                    "tests/unit/test_file_task_planner.py::test_hermes_planner_adapter_normalizes_tool_gap_response",
+                    "tests/unit/test_file_task_planner.py::test_hermes_planner_prompts_reference_shared_tool_design_protocol",
+                    "tests/unit/test_file_task_planner.py::test_file_task_runtime_surfaces_external_planner_textual_tool_gap_as_next_action_artifact",
+                ],
+            },
+        ),
+        (
+            "browser",
+            {
+                "description": "Playwright browser smoke for the workspace AI assistant shell and mocked task-card rendering.",
+                "nodes": [
+                    "tests/e2e/test_workspace_ai_assistant.py",
+                ],
+            },
+        ),
+    ]
+)
+
+COMPOSITE_SUITES = OrderedDict(
+    [
+        ("full", ["smoke", "contracts", "backend", "runtime"]),
+        ("release", ["smoke", "contracts", "backend", "runtime", "browser"]),
+    ]
+)
+
+BROWSER_PREREQUISITES = OrderedDict(
+    [
+        ("pytest_playwright", "pytest-playwright"),
+        ("playwright", "playwright"),
+    ]
+)
+
+
+def _ordered_unique(items: list[str]) -> list[str]:
+    seen = set()
+    ordered = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        ordered.append(item)
+    return ordered
+
+
+def _resolve_suite_names(name: str) -> list[str]:
+    if name in SUITES:
+        return [name]
+    if name in COMPOSITE_SUITES:
+        return list(COMPOSITE_SUITES[name])
+    raise KeyError(name)
+
+
+def _resolve_nodes(name: str) -> list[str]:
+    nodes: list[str] = []
+    for suite_name in _resolve_suite_names(name):
+        nodes.extend(SUITES[suite_name]["nodes"])
+    return _ordered_unique(nodes)
+
+
+def _all_suite_names() -> list[str]:
+    return list(SUITES.keys()) + list(COMPOSITE_SUITES.keys())
+
+
+def _suite_requires_browser(name: str) -> bool:
+    return "browser" in _resolve_suite_names(name)
+
+
+def _missing_browser_prerequisites() -> list[str]:
+    missing = []
+    for module_name, package_name in BROWSER_PREREQUISITES.items():
+        if importlib.util.find_spec(module_name) is None:
+            missing.append(package_name)
+    return missing
+
+
+def _print_browser_prerequisite_error(missing: list[str]) -> None:
+    print(
+        "[ai-assistant-tests] browser prerequisites missing: " + ", ".join(missing),
+        file=sys.stderr,
+    )
+    print(
+        "[ai-assistant-tests] install with: pip install pytest-playwright playwright",
+        file=sys.stderr,
+    )
+    print(
+        "[ai-assistant-tests] then run: python -m playwright install chromium",
+        file=sys.stderr,
+    )
+
+
+def _print_suite_catalog() -> None:
+    print("AI assistant flow suites:")
+    for name, meta in SUITES.items():
+        print(f"- {name}: {meta['description']}")
+        for node in meta["nodes"]:
+            print(f"    {node}")
+    for name, members in COMPOSITE_SUITES.items():
+        joined = ", ".join(members)
+        print(f"- {name}: combines [{joined}]")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Run the curated Koto AI assistant task-flow regression suites.",
+    )
+    parser.add_argument(
+        "suite",
+        nargs="?",
+        default="smoke",
+        choices=_all_suite_names(),
+        help="Suite to run. Use --list to inspect the available suites.",
+    )
+    parser.add_argument("--list", action="store_true", help="Print the suite catalog and exit.")
+    parser.add_argument("--dry-run", action="store_true", help="Print the resolved pytest command without running it.")
+    args, pytest_args = parser.parse_known_args(argv)
+
+    if args.list:
+        _print_suite_catalog()
+        return 0
+
+    nodes = _resolve_nodes(args.suite)
+    command = [sys.executable, "-m", "pytest", *nodes, *pytest_args]
+
+    print(f"[ai-assistant-tests] suite={args.suite} nodes={len(nodes)}")
+    for node in nodes:
+        print(f"  - {node}")
+    if pytest_args:
+        print(f"[ai-assistant-tests] extra pytest args: {' '.join(pytest_args)}")
+    if args.dry_run:
+        print("[ai-assistant-tests] dry-run command:")
+        print(" ".join(command))
+        return 0
+
+    if _suite_requires_browser(args.suite):
+        missing = _missing_browser_prerequisites()
+        if missing:
+            _print_browser_prerequisite_error(missing)
+            return 2
+
+    return subprocess.call(command)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

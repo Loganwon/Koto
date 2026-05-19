@@ -866,3 +866,64 @@ class TestWorkspaceAssistantJsSource:
         assert (
             "serve_abs" in fn_body
         ), "openBrowserFile must still use serve_abs for external files"
+
+    def test_open_recent_file_bridge_routes_workspace_and_absolute_paths(self):
+        """
+        The main app opens Office/PDF files through WA.openRecentFile().
+        That bridge must exist and dispatch relative/workspace paths to
+        openWorkspaceFile, while absolute paths still flow through
+        openBrowserFile.
+        """
+        fn_start = self.src.find("openRecentFile = async")
+        assert fn_start >= 0, "WA.openRecentFile bridge function not found"
+        fn_body = self.src[fn_start : fn_start + 2200]
+        assert "openWorkspaceFile" in fn_body, (
+            "WA.openRecentFile must route workspace-relative paths back through openWorkspaceFile"
+        )
+        assert "openBrowserFile" in fn_body, (
+            "WA.openRecentFile must route absolute paths back through openBrowserFile"
+        )
+        assert "state._workspacePath" in fn_body, (
+            "WA.openRecentFile must compare against the active workspace root before routing"
+        )
+
+    def test_file_type_icons_are_mapped_to_distinct_svgs(self):
+        """Workspace file list should keep colored Office-style icon mappings for common file types."""
+        src = self.src
+        assert "function _waBrandFileSvg(label, opts = {})" in src, "Brand-style file SVG helper should exist"
+        assert "const _WORD_FILE_SVG" in src, "Word files should have a dedicated colored icon definition"
+        assert "const _EXCEL_FILE_SVG" in src, "Excel files should have a dedicated colored icon definition"
+        assert "const _POWERPOINT_FILE_SVG" in src, "PowerPoint files should have a dedicated colored icon definition"
+        assert "const _PDF_SVG" in src, "PDF should have a dedicated colored icon definition"
+        assert "#185ABD" in src, "Word icon should keep Office blue branding"
+        assert "#107C41" in src, "Excel icon should keep Office green branding"
+        assert "#D24726" in src, "PowerPoint icon should keep Office orange branding"
+        assert "#E53935" in src, "PDF icon should keep red branding"
+        assert "docx: _WORD_FILE_SVG" in src, "DOCX extension should map to Word icon"
+        assert "xlsx: _EXCEL_FILE_SVG" in src, "XLSX extension should map to Excel icon"
+        assert "pptx: _POWERPOINT_FILE_SVG" in src, "PPTX extension should map to PowerPoint icon"
+        assert "pdf: _PDF_SVG" in src, "PDF extension should map to PDF icon"
+        assert src.count("const _PDF_SVG") == 1, "PDF icon constant must not be declared twice"
+        assert src.count("const _TEXT_SVG") == 1, "Text icon constant must not be declared twice"
+        assert src.count("const _CODE_SVG") == 1, "Code icon constant must not be declared twice"
+        assert src.count("const _IMAGE_SVG") == 1, "Image icon constant must not be declared twice"
+
+    def test_reload_file_by_path_routes_workspace_relative_paths_through_open_file_by_path(self):
+        """
+        Task-stream refresh uses WA.reloadFileByPath(). When file-change events
+        carry workspace-relative paths, reloadFileByPath must still route them
+        through open_file_by_path instead of misclassifying them as absolute
+        browser files.
+        """
+        fn_start = self.src.find("reloadFileByPath = async")
+        assert fn_start >= 0, "WA.reloadFileByPath function not found"
+        fn_body = self.src[fn_start : fn_start + 2200]
+        assert "open_file_by_path" in fn_body, (
+            "WA.reloadFileByPath must use open_file_by_path for workspace-relative task refreshes"
+        )
+        assert "if (!looksAbsolute)" in fn_body, (
+            "WA.reloadFileByPath must treat non-absolute file-change paths as workspace-relative"
+        )
+        assert "open_abs_file" in fn_body, (
+            "WA.reloadFileByPath must still support absolute-path refreshes for external files"
+        )

@@ -44,7 +44,7 @@ class AnnotationPlugin(AgentPlugin):
                 "name": "annotate_document",
                 "func": self.annotate_document,
                 "description": (
-                    "对本地 Word (.docx) 文档执行批量标注/修改，生成 _revised 副本。"
+                    "对本地 Word (.docx) 文档执行批量标注/修改，直接写回原始 DOCX。"
                     "适用于翻译润色、学术批注、商务文稿规范化等场景。"
                     "file_path: 文档路径（支持绝对路径/工作目录相对路径）；"
                     "requirement: 用户标注需求描述。"

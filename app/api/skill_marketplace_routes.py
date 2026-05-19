@@ -260,8 +260,7 @@ def get_featured():
             skill_def = sm._def_registry.get(skill_id)
             if skill_def:
                 d = skill_def.to_dict()
-                leg = sm._registry.get(skill_id, {})
-                d["enabled"] = leg.get("enabled", skill_def.enabled)
+                d["enabled"] = sm.is_enabled(skill_id)
                 featured.append(_enrich_skill(d, is_builtin=True))
 
         return jsonify({"success": True, "skills": featured})
@@ -304,8 +303,7 @@ def search_skills():
                 if q in text.lower():
                     score += weight
             if score > 0:
-                leg = sm._registry.get(skill_id, {})
-                d["enabled"] = leg.get("enabled", skill_def.enabled)
+                d["enabled"] = sm.is_enabled(skill_id)
                 enriched = _enrich_skill(d, is_builtin=(d.get("author") == "builtin"))
                 enriched["_score"] = score
                 results.append(enriched)
@@ -1163,8 +1161,7 @@ def get_stats():
             else:
                 custom_count += 1
 
-            leg = sm._registry.get(sid, {})
-            if leg.get("enabled", skill_def.enabled):
+            if sm.is_enabled(sid):
                 enabled_count += 1
 
         ratings = _load_ratings()
@@ -1601,7 +1598,7 @@ def get_dependencies(skill_id: str):
             "name": skill.name,
             "version": getattr(skill, "version", ""),
             "installed": True,
-            "enabled": sm._registry.get(sid, {}).get("enabled", skill.enabled),
+            "enabled": sm.is_enabled(sid),
             "dependencies": [_resolve(d, depth + 1) for d in deps],
         }
 
@@ -1666,7 +1663,7 @@ def verify_skill(skill_id: str):
     # 2. 依赖状态
     for dep_id in getattr(skill_def, "dependencies", None) or []:
         dep = sm._def_registry.get(dep_id)
-        dep_enabled = dep and sm._registry.get(dep_id, {}).get("enabled", dep.enabled)
+        dep_enabled = dep and sm.is_enabled(dep_id)
         ok = bool(dep_enabled)
         results.append(
             {
@@ -1927,15 +1924,16 @@ def upload_skill_template():
         # 更新 Skill 注册表中的 template_path 字段
         sm = _sm()
         sm._ensure_init()
-        if skill_id in sm._registry:
-            sm._registry[skill_id]["template_path"] = str(
-                Path("config") / "skill_templates" / skill_id / "template.docx"
+        runtime_entry = sm.get_runtime_entry(skill_id)
+        if runtime_entry:
+            sm.update_runtime_fields(
+                skill_id,
+                template_path=str(Path("config") / "skill_templates" / skill_id / "template.docx"),
+                bound_tools=list(
+                    set(runtime_entry.get("bound_tools", []))
+                    | {"fill_skill_template", "get_template_fields"}
+                ),
             )
-            sm._registry[skill_id]["bound_tools"] = list(
-                set(sm._registry[skill_id].get("bound_tools", []))
-                | {"fill_skill_template", "get_template_fields"}
-            )
-            sm._save_states_to_settings()
 
             # 同步更新 config/skills/{skill_id}.json（若存在）
             skill_json = _SKILLS_DIR / f"{skill_id}.json"
@@ -2019,13 +2017,16 @@ def delete_skill_template(skill_id: str):
 
         sm = _sm()
         sm._ensure_init()
-        if skill_id in sm._registry:
-            sm._registry[skill_id].pop("template_path", None)
-            bt = sm._registry[skill_id].get("bound_tools", [])
-            sm._registry[skill_id]["bound_tools"] = [
-                t for t in bt if t not in {"fill_skill_template", "get_template_fields"}
-            ]
-            sm._save_states_to_settings()
+        runtime_entry = sm.get_runtime_entry(skill_id)
+        if runtime_entry:
+            bt = runtime_entry.get("bound_tools", [])
+            sm.update_runtime_fields(
+                skill_id,
+                remove_fields=["template_path"],
+                bound_tools=[
+                    t for t in bt if t not in {"fill_skill_template", "get_template_fields"}
+                ],
+            )
 
         skill_json = _SKILLS_DIR / f"{skill_id}.json"
         if skill_json.exists():

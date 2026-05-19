@@ -422,9 +422,9 @@ class SkillSuggester:
                 if chain_id in exclude or chain_id in seen_chain_ids:
                     continue
                 seen_chain_ids.add(chain_id)
-                target = SkillManager._registry.get(chain_id)
+                target = SkillManager.get_runtime_entry(chain_id)
                 # 只推荐已注册但尚未启用的 Skill
-                if not target or target.get("enabled", False):
+                if not target or SkillManager.is_enabled(chain_id):
                     continue
                 t_def = SkillManager._def_registry.get(chain_id)
                 result.append(

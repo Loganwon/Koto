@@ -55,6 +55,7 @@ _TASK_CUBE_MAP: dict[str, list[str]] = {
     "WEB_SEARCH": ["topic_summary", "user_fact"],
     "CODER": ["user_fact", "user_preference", "correction", "preference"],
     "FILE_GEN": ["user_fact", "user_preference", "preference"],
+    "FILE_TASK": ["user_preference", "preference", "decision", "correction", "topic_summary"],
     "AGENT": ["decision", "reminder", "user_fact"],
     "MULTI_STEP": ["decision", "reminder", "user_fact"],
 }

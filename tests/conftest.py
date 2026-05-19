@@ -15,8 +15,53 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 import pytest
+
+
+try:
+    import pytest_mock  # noqa: F401
+except ImportError:
+
+    class _PatchProxy:
+        def __init__(self, patchers):
+            self._patchers = patchers
+
+        def __call__(self, target, *args, **kwargs):
+            patcher = mock.patch(target, *args, **kwargs)
+            started = patcher.start()
+            self._patchers.append(patcher)
+            return started
+
+        def object(self, target, attribute, *args, **kwargs):
+            patcher = mock.patch.object(target, attribute, *args, **kwargs)
+            started = patcher.start()
+            self._patchers.append(patcher)
+            return started
+
+
+    class _MiniMocker:
+        Mock = mock.Mock
+        MagicMock = mock.MagicMock
+        mock_open = staticmethod(mock.mock_open)
+
+        def __init__(self):
+            self._patchers = []
+            self.patch = _PatchProxy(self._patchers)
+
+        def stopall(self):
+            while self._patchers:
+                self._patchers.pop().stop()
+
+
+    @pytest.fixture
+    def mocker():
+        helper = _MiniMocker()
+        try:
+            yield helper
+        finally:
+            helper.stopall()
 
 
 def _load_project_api_keys() -> None:

@@ -15,12 +15,18 @@ import runpy
 import sys
 from pathlib import Path
 
+try:
+    from src.runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+except ImportError:
+    from runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+
 # ── 路径配置 ──────────────────────────────────────────
+ROOTS = resolve_runtime_roots(__file__)
+APP_ROOT = ROOTS.app_root
+BUNDLE_DIR = ROOTS.bundle_dir
+
 if getattr(sys, "frozen", False):
     # PyInstaller 环境
-    APP_ROOT = Path(sys.executable).parent
-    BUNDLE_DIR = Path(sys._MEIPASS)
-
     # Fix pythonnet runtime path for pywebview's EdgeChromium backend in frozen environment
     # This must be set before any import of webview or clr
     _internal_py = APP_ROOT / "internal" / "py"
@@ -33,21 +39,13 @@ if getattr(sys, "frozen", False):
             ),
         )
     os.environ.setdefault("PYWEBVIEW_GUI", "edgechromium")
-else:
-    here = Path(__file__).resolve().parent
-    APP_ROOT = here.parent if here.name == "src" else here
-    BUNDLE_DIR = APP_ROOT
 
 
-# 确保 BUNDLE_DIR（包含所有 py/资源）在导入路径最前
-if str(BUNDLE_DIR) not in sys.path:
-    sys.path.insert(0, str(BUNDLE_DIR))
-if str(APP_ROOT) not in sys.path:
-    sys.path.insert(1, str(APP_ROOT))
-
-# 必要目录（assets 已在 src/assets/，无需动态创建）
-for _d in ["logs", "chats", "config", "workspace"]:
-    (APP_ROOT / _d).mkdir(parents=True, exist_ok=True)
+configure_process_environment(
+    ROOTS,
+    prepend_paths=(APP_ROOT, BUNDLE_DIR),
+    required_dirs=("logs", "chats", "config", "workspace"),
+)
 
 
 def _sync_bundled_config_defaults():

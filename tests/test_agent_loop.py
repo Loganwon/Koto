@@ -515,6 +515,58 @@ class TestAgentLoop:
         error_events = [e for e in events if e.type == EventType.ERROR]
         assert "Content policy" in error_events[0].data["text"]
 
+    @patch("app.core.agent.agent_loop._is_ollama_alive", return_value=False)
+    def test_local_mode_reports_local_specific_unavailable_error(self, _mock_alive):
+        from app.core.agent.agent_loop import KotoAgentLoop
+        from app.core.agent.hooks import HookRegistry
+        from app.core.agent.lifecycle import AgentRequest, EventType
+
+        loop = KotoAgentLoop(hook_registry=HookRegistry())
+        request = AgentRequest(
+            prompt="请润色这段文字",
+            file_type="docx",
+            output_mode="chat",
+            model_mode="local",
+            extra={"local_model": "qwen3.5:9b"},
+        )
+
+        events = list(loop.run(request))
+        complete = next(e for e in events if e.type == EventType.TASK_COMPLETE)
+
+        assert "本地模式已启用" in complete.data["error"]
+        assert "qwen3.5:9b" in complete.data["error"]
+        assert "config/gemini_config.env" not in complete.data["error"]
+
+    @patch("app.core.agent.agent_loop._is_ollama_alive", return_value=True)
+    @patch("app.core.agent.agent_loop._get_local_provider")
+    def test_local_mode_provider_exception_returns_local_error(self, mock_provider, _mock_alive):
+        from app.core.agent.agent_loop import KotoAgentLoop
+        from app.core.agent.hooks import HookRegistry
+        from app.core.agent.lifecycle import AgentRequest, EventType
+
+        class FailingLocalProvider:
+            def generate_content(self, **_kwargs):
+                raise RuntimeError("missing local model")
+
+        mock_provider.return_value = FailingLocalProvider()
+
+        loop = KotoAgentLoop(hook_registry=HookRegistry())
+        request = AgentRequest(
+            prompt="请润色这段文字",
+            file_type="docx",
+            output_mode="chat",
+            model_mode="local",
+            extra={"local_model": "qwen3.5:9b"},
+        )
+
+        events = list(loop.run(request))
+        types = [e.type for e in events]
+        complete = next(e for e in events if e.type == EventType.TASK_COMPLETE)
+
+        assert EventType.LIFECYCLE_ERROR not in types
+        assert "本地模式已启用" in complete.data["error"]
+        assert "内部错误" not in complete.data["error"]
+
 
 # ══════════════════════════════════════════════════════════════
 # 5. _parse_tool_calls tests

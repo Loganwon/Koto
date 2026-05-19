@@ -223,6 +223,70 @@ class TestOpenFile:
         file_id = resp.get_json()["file_id"]
         assert file_id.isalnum() and len(file_id) == 32
 
+    def test_open_file_by_path_retries_docx_after_tmp_zip_failure(self, wa_client, monkeypatch):
+        import zipfile
+
+        client, tmp_dir, workspace_dir = wa_client
+        docx_bytes = _fake_docx_bytes()
+        if not docx_bytes:
+            pytest.skip("python-docx not available")
+
+        target = workspace_dir / "retry.docx"
+        target.write_bytes(docx_bytes)
+
+        import app.core.file.file_parser as parser_mod
+
+        real_parse_docx = parser_mod.parse_docx
+        call_count = {"value": 0}
+
+        def flaky_parse_docx(path: str, *args, **kwargs):
+            call_count["value"] += 1
+            if call_count["value"] == 1:
+                raise zipfile.BadZipFile("File is not a zip file")
+            return real_parse_docx(path, *args, **kwargs)
+
+        monkeypatch.setattr(parser_mod, "parse_docx", flaky_parse_docx)
+
+        resp = client.post(
+            "/api/v1/workspace/open_file_by_path",
+            json={"path": "retry.docx"},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        assert call_count["value"] == 2
+        body = resp.get_json()
+        assert body["file_type"] == "docx"
+        assert body.get("data", {}).get("raw_url")
+        tmp_copy = tmp_dir / f"{body['file_id']}.docx"
+        assert tmp_copy.is_file()
+        assert tmp_copy.read_bytes() == docx_bytes
+
+
+class TestAIContextPreview:
+
+    def test_docx_original_chars_uses_full_document_count(self, wa_client):
+        client, _, workspace_dir = wa_client
+        paragraphs = [
+            f"第{idx + 1}段：" + "这是用于验证DOCX统计更接近Word和WPS的测试内容。" * 5
+            for idx in range(360)
+        ]
+        expected_chars = sum(len("".join(text.split())) for text in paragraphs)
+
+        target = workspace_dir / "long-preview.docx"
+        target.write_bytes(_make_docx_bytes(paragraphs))
+
+        resp = client.post(
+            "/api/v1/workspace/ai_context_preview",
+            json={"path": "long-preview.docx"},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json()
+        preview_chars = len("".join(str(body.get("content_preview") or "").split()))
+        assert body["file_type"] == "docx"
+        assert body["original_chars"] == expected_chars
+        assert body["original_chars"] > preview_chars
+
 
 # ── 2b. PDF-specific loading tests ───────────────────────────────────────────
 
@@ -364,6 +428,16 @@ class TestServeWorkspaceFile:
         client, _, _ = wa_client
         resp = client.get("/api/v1/workspace/file/../../../etc/passwd")
         assert resp.status_code in (403, 404)
+
+
+class TestLegacyRoutesRemoved:
+
+    def test_obsolete_workspace_assistant_routes_are_unregistered(self, wa_client):
+        client, _, _ = wa_client
+        rules = {rule.rule for rule in client.application.url_map.iter_rules()}
+        assert "/api/v1/workspace/read_for_ai" not in rules
+        assert "/api/v1/workspace/summarize" not in rules
+        assert "/api/v1/workspace/quick-action" not in rules
 
 
 # ── 5. Round-trip: upload → raw endpoint ─────────────────────────────────────
@@ -509,10 +583,21 @@ class TestRenameEndpoint:
 # ── helpers shared by new test classes ───────────────────────────────────────
 
 
-def _make_docx_bytes(text: str = "Test") -> bytes:
-    """Minimal valid .docx (ZIP) with a single paragraph of text."""
+def _make_docx_bytes(text: str | list[str] = "Test") -> bytes:
+    """Minimal valid .docx (ZIP) with one or more paragraphs of text."""
     import io as _io
     import zipfile
+    from xml.sax.saxutils import escape as _xml_escape
+
+    if isinstance(text, list):
+        body = "".join(
+            f'<w:p><w:r><w:t xml:space="preserve">{_xml_escape(str(item))}</w:t></w:r></w:p>'
+            for item in text
+        )
+    else:
+        body = (
+            f'<w:p><w:r><w:t xml:space="preserve">{_xml_escape(str(text))}</w:t></w:r></w:p>'
+        )
 
     ct = (
         '<?xml version="1.0"?>'
@@ -534,7 +619,7 @@ def _make_docx_bytes(text: str = "Test") -> bytes:
     doc = (
         '<?xml version="1.0"?>'
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-        f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>"
+        f"<w:body>{body}</w:body>"
         "</w:document>"
     )
     dr = (
@@ -763,6 +848,68 @@ class TestAutoSave:
                 for name in header_parts
             )
         assert "PAGE" in header_xml, "header export should preserve Word PAGE field"
+
+    def test_structured_docx_payload_writes_comments_xml(self, wa_client):
+        client, _, _ = wa_client
+        docx_module = pytest.importorskip("docx")
+        import zipfile
+
+        src = io.BytesIO()
+        source_doc = docx_module.Document()
+        source_doc.add_paragraph("第一段原文")
+        source_doc.add_paragraph("第二段保留")
+        source_doc.save(src)
+        src.seek(0)
+
+        upload = client.post(
+            "/api/v1/workspace/open_file",
+            data={"file": (src, "comment_save.docx")},
+            content_type="multipart/form-data",
+        )
+        if upload.status_code != 200:
+            pytest.skip("docx parse not available in this environment")
+        fid = upload.get_json()["file_id"]
+
+        payload = {
+            "html": "<p>第一段原文</p><p>第二段保留</p>",
+            "comments": [
+                {
+                    "id": "comment-1",
+                    "author": "审阅人",
+                    "date": "2026-05-12T10:30:00Z",
+                    "text": "这里需要进一步说明",
+                    "anchor_text": "第一段原文",
+                }
+            ],
+        }
+
+        resp = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "docx",
+                "file_id": fid,
+                "ws_source_path": "comment_save.docx",
+                "explicit": True,
+                "data": payload,
+            },
+        )
+        assert resp.status_code == 200
+
+        raw = client.get(f"/api/v1/workspace/raw/{fid}").data
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            names = archive.namelist()
+            assert "word/comments.xml" in names
+            comments_xml = archive.read("word/comments.xml").decode("utf-8", errors="ignore")
+            document_xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
+            rels_xml = archive.read("word/_rels/document.xml.rels").decode("utf-8", errors="ignore")
+            content_types_xml = archive.read("[Content_Types].xml").decode("utf-8", errors="ignore")
+
+        assert "这里需要进一步说明" in comments_xml
+        assert "审阅人" in comments_xml
+        assert "commentRangeStart" in document_xml
+        assert "commentReference" in document_xml
+        assert "comments.xml" in rels_xml
+        assert "/word/comments.xml" in content_types_xml
 
     def test_src_written_true_when_ws_path_provided(self, wa_client):
         """Response must include src_written=True when ws_source_path is given."""
@@ -1400,6 +1547,22 @@ class TestEmbeddedModeRenderGuards:
             "_waitForEditorLayout must reference 'wa-pptx-editor'"
         )
 
+    def test_prime_editor_layout_helper_exists(self):
+        """xlsx/pptx shells must be pre-activated before waiting for layout."""
+        assert "function _primeEditorLayout" in self.src, (
+            "workspace-assistant.js must define _primeEditorLayout()"
+        )
+
+    def test_prime_editor_layout_activates_hidden_shells(self):
+        """The priming helper must add the active class so hidden shells can size."""
+        src = self.src
+        helper_start = src.find("function _primeEditorLayout")
+        helper_end = src.find("function _waitForEditorLayout", helper_start)
+        helper_body = src[helper_start:helper_end]
+        assert "classList.add('active')" in helper_body, (
+            "_primeEditorLayout must activate the editor shell before waiting"
+        )
+
     def test_wait_for_editor_layout_timeout_resolve(self):
         """Guard must resolve (not reject) on timeout so editors receive a mount attempt."""
         # The guard should call resolve() on deadline, not reject()
@@ -1441,6 +1604,18 @@ class TestEmbeddedModeRenderGuards:
             "_waitForEditorLayout await must precede new KotoXlsxEditor()"
         )
 
+    def test_router_load_primes_layout_before_waiting(self):
+        """The file-open path must prime xlsx/pptx shells before waiting for size."""
+        src = self.src
+        fn_start = src.find("async function _applyFileJson")
+        fn_end = src.find("new KotoXlsxEditor()", fn_start)
+        body = src[fn_start:fn_end + 120] if fn_end != -1 else src[fn_start:fn_start + 3200]
+        prime_pos = body.find("_primeEditorLayout(state.fileType)")
+        guard_pos = body.find("await _waitForEditorLayout(state.fileType)")
+        assert prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos, (
+            "_applyFileJson must prime the editor shell before waiting for layout"
+        )
+
     def test_router_load_guard_before_pptx_editor(self):
         """The guard await must appear before new KotoPptxEditor() in _applyFileJson."""
         src = self.src
@@ -1465,6 +1640,18 @@ class TestEmbeddedModeRenderGuards:
         tab_body  = src[tab_start:tab_end]
         assert "await _waitForEditorLayout" in tab_body, (
             "_switchToTab must await _waitForEditorLayout before creating editors"
+        )
+
+    def test_switch_to_tab_primes_layout_before_waiting(self):
+        """Tab switches must re-activate xlsx/pptx shells before waiting for layout."""
+        src = self.src
+        tab_start = src.find("async function _switchToTab")
+        tab_end = src.find("new KotoXlsxEditor()", tab_start)
+        tab_body = src[tab_start:tab_end + 120] if tab_end != -1 else src[tab_start:tab_start + 2400]
+        prime_pos = tab_body.find("_primeEditorLayout(tab.fileType)")
+        guard_pos = tab_body.find("await _waitForEditorLayout(tab.fileType)")
+        assert prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos, (
+            "_switchToTab must prime the editor shell before waiting for layout"
         )
 
     # ── KotoXlsxEditor size-polling ──────────────────────────────────────

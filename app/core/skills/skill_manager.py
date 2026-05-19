@@ -2037,6 +2037,8 @@ ALL_TASK_TYPES = [
     "DOC_ANNOTATE",
 ]
 
+_SKILL_STATE_UNSET = object()
+
 
 class SkillManager:
     """
@@ -2055,6 +2057,149 @@ class SkillManager:
     _initialized: bool = False
     # 单轮注入的用户启用 Skill 数上限（系统 Skill 不计入），防止 token 膨胀
     _MAX_ACTIVE_INJECT: int = 20
+
+    @classmethod
+    def instance(cls):
+        """Compatibility helper for call sites that expect a singleton accessor."""
+        cls._ensure_init()
+        return cls
+
+    @classmethod
+    def _skill_enabled(
+        cls, skill_id: str, skill_def: Optional[SkillDefinition] = None
+    ) -> bool:
+        legacy = cls._registry.get(skill_id)
+        if legacy is not None and "enabled" in legacy:
+            return bool(legacy.get("enabled", False))
+        if skill_def is None:
+            skill_def = cls._def_registry.get(skill_id)
+        return bool(getattr(skill_def, "enabled", False))
+
+    @classmethod
+    def _skill_prompt(
+        cls, skill_id: str, skill_def: Optional[SkillDefinition] = None
+    ) -> str:
+        legacy = cls._registry.get(skill_id)
+        if legacy is not None and "prompt" in legacy:
+            return legacy.get("prompt", "") or ""
+        if skill_def is None:
+            skill_def = cls._def_registry.get(skill_id)
+        return str(getattr(skill_def, "prompt", "") or "")
+
+    @classmethod
+    def _legacy_entry_from_definition(
+        cls,
+        skill_def: SkillDefinition,
+        existing: Optional[Dict] = None,
+        *,
+        enabled: object = _SKILL_STATE_UNSET,
+        prompt: object = _SKILL_STATE_UNSET,
+    ) -> Dict:
+        """Build the legacy registry view from the canonical SkillDefinition."""
+        entry = dict(existing or {})
+        entry.update(
+            {
+                "id": skill_def.id,
+                "name": skill_def.name,
+                "icon": skill_def.icon,
+                "category": (
+                    skill_def.category.value
+                    if hasattr(skill_def.category, "value")
+                    else skill_def.category
+                ),
+                "skill_nature": (
+                    skill_def.skill_nature.value
+                    if hasattr(skill_def.skill_nature, "value")
+                    else skill_def.skill_nature
+                ),
+                "description": skill_def.description,
+                "task_types": list(skill_def.task_types or []),
+                "author": getattr(skill_def, "author", entry.get("author", "")),
+            }
+        )
+
+        prompt_value = entry.get("prompt", getattr(skill_def, "prompt", "") or "")
+        if prompt is not _SKILL_STATE_UNSET:
+            prompt_value = str(prompt or "")
+        entry["prompt"] = prompt_value
+
+        enabled_value = entry.get("enabled", getattr(skill_def, "enabled", False))
+        if enabled is not _SKILL_STATE_UNSET:
+            enabled_value = bool(enabled)
+        entry["enabled"] = bool(enabled_value)
+
+        optional_list_fields = (
+            "executor_tools",
+            "plan_template",
+            "permissions",
+            "bound_tools",
+            "trigger_keywords",
+        )
+        for field in optional_list_fields:
+            value = getattr(skill_def, field, None)
+            if value:
+                entry[field] = list(value)
+
+        optional_passthrough_fields = (
+            "priority",
+            "ui_config",
+            "ui_extensions",
+            "template_path",
+            "entry_point",
+        )
+        for field in optional_passthrough_fields:
+            value = getattr(skill_def, field, None)
+            if value not in (None, "", {}, []):
+                entry[field] = value
+
+        return entry
+
+    @classmethod
+    def _sync_legacy_entry(
+        cls,
+        skill_id: str,
+        *,
+        enabled: object = _SKILL_STATE_UNSET,
+        prompt: object = _SKILL_STATE_UNSET,
+    ) -> Optional[Dict]:
+        skill_def = cls._def_registry.get(skill_id)
+        if skill_def is None:
+            return cls._registry.get(skill_id)
+        entry = cls._legacy_entry_from_definition(
+            skill_def,
+            existing=cls._registry.get(skill_id),
+            enabled=enabled,
+            prompt=prompt,
+        )
+        cls._registry[skill_id] = entry
+        return entry
+
+    @classmethod
+    def _apply_skill_state(
+        cls,
+        skill_id: str,
+        *,
+        enabled: object = _SKILL_STATE_UNSET,
+        prompt: object = _SKILL_STATE_UNSET,
+    ) -> bool:
+        skill_def = cls._def_registry.get(skill_id)
+        legacy = cls._registry.get(skill_id)
+        if skill_def is None and legacy is None:
+            return False
+
+        if skill_def is not None:
+            if enabled is not _SKILL_STATE_UNSET:
+                skill_def.enabled = bool(enabled)
+            if prompt is not _SKILL_STATE_UNSET:
+                skill_def.prompt = str(prompt or "")
+            cls._sync_legacy_entry(skill_id, enabled=enabled, prompt=prompt)
+            return True
+
+        if enabled is not _SKILL_STATE_UNSET:
+            legacy["enabled"] = bool(enabled)
+        if prompt is not _SKILL_STATE_UNSET:
+            legacy["prompt"] = str(prompt or "")
+        return True
 
     # ── 初始化 ─────────────────────────────────────────────────────────────────
     @classmethod
@@ -2101,11 +2246,15 @@ class SkillManager:
                 data = json.load(f)
             skills_state = data.get("skills", {})
             for skill_id, state in skills_state.items():
-                if skill_id in cls._registry and isinstance(state, dict):
-                    if "enabled" in state:
-                        cls._registry[skill_id]["enabled"] = bool(state["enabled"])
-                    if "prompt_override" in state and state["prompt_override"]:
-                        cls._registry[skill_id]["prompt"] = state["prompt_override"]
+                if not isinstance(state, dict):
+                    continue
+                enabled = state["enabled"] if "enabled" in state else _SKILL_STATE_UNSET
+                prompt = (
+                    state["prompt_override"]
+                    if state.get("prompt_override")
+                    else _SKILL_STATE_UNSET
+                )
+                cls._apply_skill_state(skill_id, enabled=enabled, prompt=prompt)
         except Exception as e:
             print(f"[SkillManager] 加载设置失败: {e}")
 
@@ -2120,12 +2269,15 @@ class SkillManager:
                 with open(p, "r", encoding="utf-8") as f:
                     data = json.load(f)
             skills_state = {}
-            for skill_id, skill in cls._registry.items():
-                state: Dict = {"enabled": skill["enabled"]}
+            all_skill_ids = set(cls._registry) | set(cls._def_registry)
+            for skill_id in all_skill_ids:
+                skill_def = cls._def_registry.get(skill_id)
+                prompt = cls._skill_prompt(skill_id, skill_def)
+                state: Dict = {"enabled": cls._skill_enabled(skill_id, skill_def)}
                 # 如果有自定义 prompt，也保存
                 builtin_prompt = cls._builtin_prompt_index.get(skill_id)
-                if skill["prompt"] != builtin_prompt:
-                    state["prompt_override"] = skill["prompt"]
+                if prompt != builtin_prompt:
+                    state["prompt_override"] = prompt
                 skills_state[skill_id] = state
             data["skills"] = skills_state
             with open(p, "w", encoding="utf-8") as f:
@@ -2147,40 +2299,51 @@ class SkillManager:
         for skill in BUILTIN_SKILLS:
             sid = skill["id"]
             seen_ids.add(sid)
+            skill_def = cls._def_registry.get(sid)
             s = cls._registry.get(sid, skill)
             builtin_prompt = skill["prompt"]
+            prompt = cls._skill_prompt(sid, skill_def)
             result.append(
                 {
-                    "id": s["id"],
-                    "name": s["name"],
-                    "icon": s["icon"],
-                    "category": s["category"],
-                    "skill_nature": s.get("skill_nature", "domain_skill"),
-                    "description": s["description"],
-                    "task_types": s["task_types"],
-                    "enabled": s["enabled"],
-                    "has_custom_prompt": s.get("prompt") != builtin_prompt,
-                    "prompt": s["prompt"],
+                    "id": sid,
+                    "name": getattr(skill_def, "name", s["name"]),
+                    "icon": getattr(skill_def, "icon", s["icon"]),
+                    "category": getattr(
+                        getattr(skill_def, "category", None), "value", s["category"]
+                    ),
+                    "skill_nature": getattr(
+                        getattr(skill_def, "skill_nature", None),
+                        "value",
+                        s.get("skill_nature", "domain_skill"),
+                    ),
+                    "description": getattr(skill_def, "description", s["description"]),
+                    "task_types": list(getattr(skill_def, "task_types", s["task_types"])),
+                    "enabled": cls._skill_enabled(sid, skill_def),
+                    "has_custom_prompt": prompt != builtin_prompt,
+                    "prompt": prompt,
                     "is_builtin": True,
                 }
             )
 
         # 自定义 Skill（不在内置列表中的）
-        for skill_id, s in cls._registry.items():
+        for skill_id, skill_def in cls._def_registry.items():
             if skill_id in seen_ids:
                 continue
+            s = cls._registry.get(skill_id, {})
             result.append(
                 {
-                    "id": s["id"],
-                    "name": s["name"],
-                    "icon": s["icon"],
-                    "category": s["category"],
-                    "description": s["description"],
-                    "task_types": s["task_types"],
-                    "enabled": s["enabled"],
-                    "skill_nature": s.get("skill_nature", "domain_skill"),
+                    "id": skill_id,
+                    "name": skill_def.name,
+                    "icon": skill_def.icon,
+                    "category": getattr(skill_def.category, "value", skill_def.category),
+                    "description": skill_def.description,
+                    "task_types": list(skill_def.task_types or []),
+                    "enabled": cls._skill_enabled(skill_id, skill_def),
+                    "skill_nature": getattr(
+                        skill_def.skill_nature, "value", s.get("skill_nature", "domain_skill")
+                    ),
                     "has_custom_prompt": False,
-                    "prompt": s.get("prompt", ""),
+                    "prompt": cls._skill_prompt(skill_id, skill_def),
                     "is_builtin": False,
                 }
             )
@@ -2212,23 +2375,26 @@ class SkillManager:
         except Exception:
             _perm_mgr = None
 
-        enabled_with_ui = [
-            (sid, s)
-            for sid, s in cls._registry.items()
-            if s.get("enabled") and (s.get("ui_config") or s.get("ui_extensions"))
-        ]
+        enabled_with_ui = []
+        for sid, skill_def in cls._def_registry.items():
+            legacy = cls._registry.get(sid, {})
+            if not cls._skill_enabled(sid, skill_def):
+                continue
+            cfg = legacy.get("ui_config") or getattr(skill_def, "ui_config", None)
+            ext = legacy.get("ui_extensions") or getattr(skill_def, "ui_extensions", None)
+            if cfg or ext:
+                enabled_with_ui.append((sid, skill_def, legacy, cfg or {}, ext or {}))
 
         if not enabled_with_ui:
             return {"has_ui": False, "config": {}, "extensions": {}, "sources": []}
 
         # 低优先级先合并，高优先级后覆盖
-        enabled_with_ui.sort(key=lambda x: x[1].get("priority", 50))
+        enabled_with_ui.sort(key=lambda x: x[2].get("priority", getattr(x[1], "priority", 50)))
 
         merged: dict = {}
         merged_ext: dict = {}
         sources: list = []
-        for sid, s in enabled_with_ui:
-            cfg = s.get("ui_config", {})
+        for sid, skill_def, legacy, cfg, ext in enabled_with_ui:
             if isinstance(cfg, dict) and cfg:
                 css = cfg.get("css_vars")
                 if css and isinstance(css, dict):
@@ -2238,11 +2404,9 @@ class SkillManager:
                         merged[k] = v
 
             # ui_extensions 合并（需要 ui_interactive 权限已授权，或 skill 未声明该权限要求）
-            ext = s.get("ui_extensions", {})
             if ext and isinstance(ext, dict):
-                skill_def = cls._def_registry.get(sid)
                 required_perms = list(
-                    getattr(skill_def, "permissions", None) or s.get("permissions", [])
+                    getattr(skill_def, "permissions", None) or legacy.get("permissions", [])
                 )
                 needs_interactive = "ui_interactive" in required_perms
                 interactive_granted = (
@@ -2279,9 +2443,8 @@ class SkillManager:
     def set_enabled(cls, skill_id: str, enabled: bool) -> bool:
         """启用或禁用一个技能，立即持久化"""
         cls._ensure_init()
-        if skill_id not in cls._registry:
+        if not cls._apply_skill_state(skill_id, enabled=enabled):
             return False
-        cls._registry[skill_id]["enabled"] = enabled
         cls._save_states_to_settings()
         print(f"[SkillManager] {'✅ 启用' if enabled else '⏸️ 禁用'} skill: {skill_id}")
         return True
@@ -2290,9 +2453,8 @@ class SkillManager:
     def update_prompt(cls, skill_id: str, prompt: str) -> bool:
         """更新某个技能的自定义 Prompt 内容（用户可自定义后保存）"""
         cls._ensure_init()
-        if skill_id not in cls._registry:
+        if not cls._apply_skill_state(skill_id, prompt=prompt):
             return False
-        cls._registry[skill_id]["prompt"] = prompt
         cls._save_states_to_settings()
         return True
 
@@ -2300,11 +2462,11 @@ class SkillManager:
     def reset_prompt(cls, skill_id: str) -> bool:
         """将某个技能的 Prompt 恢复为内置默认值"""
         cls._ensure_init()
-        if skill_id not in cls._registry:
+        if skill_id not in cls._registry and skill_id not in cls._def_registry:
             return False
         builtin_prompt = cls._builtin_prompt_index.get(skill_id)
         if builtin_prompt is not None:
-            cls._registry[skill_id]["prompt"] = builtin_prompt
+            cls._apply_skill_state(skill_id, prompt=builtin_prompt)
             cls._save_states_to_settings()
         return True
 
@@ -2763,6 +2925,36 @@ class SkillManager:
         return cls._def_registry.get(skill_id)
 
     @classmethod
+    def is_enabled(cls, skill_id: str) -> bool:
+        """Return the effective enabled state across the v2 definition and legacy runtime view."""
+        cls._ensure_init()
+        return cls._skill_enabled(skill_id, cls._def_registry.get(skill_id))
+
+    @classmethod
+    def get_runtime_entry(cls, skill_id: str) -> Optional[Dict]:
+        """Return the merged runtime view used by legacy call sites while migration is in progress."""
+        cls._ensure_init()
+        entry = cls._sync_legacy_entry(skill_id)
+        if entry is None:
+            return None
+        return dict(entry)
+
+    @classmethod
+    def update_runtime_fields(
+        cls, skill_id: str, *, remove_fields: Optional[List[str]] = None, **changes
+    ) -> bool:
+        """Update legacy runtime metadata through one sync point while external callers migrate off _registry."""
+        cls._ensure_init()
+        entry = cls._sync_legacy_entry(skill_id)
+        if entry is None:
+            return False
+        for field in remove_fields or []:
+            entry.pop(field, None)
+        entry.update(changes)
+        cls._save_states_to_settings()
+        return True
+
+    @classmethod
     def list_mcp_tools(cls) -> List[Dict]:
         """
         将所有 **已启用** 的 Skill 导出为 MCP (Model Context Protocol) 兼容的
@@ -2771,11 +2963,7 @@ class SkillManager:
         cls._ensure_init()
         tools = []
         for skill_id, skill_def in cls._def_registry.items():
-            # 同步最新启用状态
-            legacy = cls._registry.get(skill_id)
-            if legacy:
-                skill_def.enabled = legacy.get("enabled", False)
-            if skill_def.enabled:
+            if cls._skill_enabled(skill_id, skill_def):
                 tools.append(skill_def.to_mcp_tool())
         return tools
 
@@ -2811,31 +2999,11 @@ class SkillManager:
 
         skill_def.author = skill_def.author or "user"
         cls._def_registry[skill_def.id] = skill_def
-
-        # 同步到旧版 _registry（保证 inject_into_prompt 等方法正常工作）
-        reg_entry: dict = {
-            "id": skill_def.id,
-            "name": skill_def.name,
-            "icon": skill_def.icon,
-            "category": (
-                skill_def.category.value
-                if hasattr(skill_def.category, "value")
-                else skill_def.category
-            ),
-            "description": skill_def.description,
-            "task_types": skill_def.task_types,
-            "prompt": skill_def.render_prompt(),
-            "enabled": skill_def.enabled,
-            # 执行层增强字段（供 inject_into_prompt auto-skill 路径使用）
-            "executor_tools": list(getattr(skill_def, "executor_tools", None) or []),
-            "plan_template": list(getattr(skill_def, "plan_template", None) or []),
-            "permissions": list(getattr(skill_def, "permissions", None) or []),
-        }
-        if getattr(skill_def, "ui_config", None):
-            reg_entry["ui_config"] = skill_def.ui_config
-        if getattr(skill_def, "ui_extensions", None):
-            reg_entry["ui_extensions"] = skill_def.ui_extensions
-        cls._registry[skill_def.id] = reg_entry
+        cls._sync_legacy_entry(
+            skill_def.id,
+            enabled=skill_def.enabled,
+            prompt=skill_def.render_prompt(),
+        )
 
         cls._apply_default_triggers(skill_def)
 
@@ -3110,11 +3278,7 @@ class SkillManager:
         cls._ensure_init()
         result = {}
         for skill_id, skill_def in cls._def_registry.items():
-            legacy = cls._registry.get(skill_id, {})
-            if (
-                legacy.get("enabled", skill_def.enabled)
-                and skill_def.intent_description
-            ):
+            if cls._skill_enabled(skill_id, skill_def) and skill_def.intent_description:
                 result[skill_id] = skill_def.intent_description
         return result
 
@@ -3154,10 +3318,8 @@ class SkillManager:
         scores: List[Dict] = []
 
         for skill_id, skill_def in cls._def_registry.items():
-            s = cls._registry.get(skill_id, {})
-
             # 排除已启用的（可选）
-            if exclude_enabled and s.get("enabled", skill_def.enabled):
+            if exclude_enabled and cls._skill_enabled(skill_id, skill_def):
                 continue
 
             # 检查 task_type 适配性
@@ -3265,8 +3427,8 @@ class SkillManager:
         # 当前已启用集合
         enabled_ids = {
             sid
-            for sid, s in cls._registry.items()
-            if s.get("enabled", False) and sid != skill_id
+            for sid, skill_def in cls._def_registry.items()
+            if sid != skill_id and cls._skill_enabled(sid, skill_def)
         }
 
         this_def = cls._def_registry.get(skill_id)
@@ -3352,8 +3514,7 @@ class SkillManager:
         all_passed = True
 
         for skill_id, skill_def in cls._def_registry.items():
-            s = cls._registry.get(skill_id, {})
-            if not s.get("enabled", skill_def.enabled):
+            if not cls._skill_enabled(skill_id, skill_def):
                 continue
             applicable = skill_def.task_types or []
             if not cls._task_type_matches(task_type, applicable):

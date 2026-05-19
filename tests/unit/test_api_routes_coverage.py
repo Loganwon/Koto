@@ -75,25 +75,29 @@ class TestAgentRoutes:
 
     def test_confirm_missing_fields(self, full_client):
         resp = full_client.post("/api/agent/confirm", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
+        assert resp.status_code == 410
+        assert _json(resp)["success"] is False
 
     def test_confirm_valid(self, full_client):
         resp = full_client.post(
             "/api/agent/confirm", json={"session": "s1", "confirmed": True}
         )
-        assert resp.status_code in _ANY_VALID
+        assert resp.status_code == 410
+        assert "已下线" in _json(resp)["error"]
 
     # -- /choice -------------------------------------------------------------
 
     def test_choice_missing_fields(self, full_client):
         resp = full_client.post("/api/agent/choice", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
+        assert resp.status_code == 410
+        assert _json(resp)["success"] is False
 
     def test_choice_valid(self, full_client):
         resp = full_client.post(
             "/api/agent/choice", json={"session": "s1", "selected": "option_a"}
         )
-        assert resp.status_code in _ANY_VALID
+        assert resp.status_code == 410
+        assert "已下线" in _json(resp)["error"]
 
     # -- /plan ---------------------------------------------------------------
 

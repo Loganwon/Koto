@@ -2,8 +2,8 @@
 tool_executor.py — Tool registry construction and result formatting helpers
 extracted from KotoAgentLoop.
 
-Provides a stateless ToolExecutor class so that KotoAgentLoop._build_task_registry
-becomes a thin delegator.
+Provides a stateless ToolExecutor class for constructing the TaskToolsPlugin
+registry used by text/selection assistant flows.
 """
 from __future__ import annotations
 
@@ -23,8 +23,6 @@ class ToolExecutor:
         socketio: Any = None,
     ):
         """Build a ToolRegistry backed by TaskToolsPlugin.
-
-        Mirrors KotoAgentLoop._build_task_registry.
 
         Parameters
         ----------

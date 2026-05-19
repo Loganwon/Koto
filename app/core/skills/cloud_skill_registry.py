@@ -219,16 +219,13 @@ class CloudSkillRegistry:
                 return False
 
             skill_def.author = "cloud"
+            skill_def.enabled = True
             sm._def_registry[skill_id] = skill_def  # type: ignore[attr-defined]
-            # Sync to legacy registry so inject_into_prompt works
-            sm._registry[skill_id] = {  # type: ignore[attr-defined]
-                "id": skill_def.id,
-                "name": skill_def.name,
-                "description": skill_def.description,
-                "prompt": skill_def.render_prompt(),
-                "enabled": True,
-                "author": "cloud",
-            }
+            sm._sync_legacy_entry(  # type: ignore[attr-defined]
+                skill_id,
+                enabled=True,
+                prompt=skill_def.render_prompt(),
+            )
             _ephemeral_skill_ids.add(skill_id)
             logger.info("[CloudSkillRegistry] Registered ephemeral skill: %s", skill_id)
             return True

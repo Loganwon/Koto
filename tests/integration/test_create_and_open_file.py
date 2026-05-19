@@ -71,6 +71,7 @@ def wa_client(tmp_path_factory):
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
+    app.secret_key = "test-secret"
     app.register_blueprint(workspace_assistant_bp)
     app.config["TESTING"] = True
 

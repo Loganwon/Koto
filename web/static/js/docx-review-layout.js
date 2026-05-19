@@ -1,0 +1,747 @@
+(function () {
+  'use strict';
+
+  function create(deps) {
+    const {
+      state,
+      $,
+      _findReviewEntry,
+      _findDocxReviewAnchorElement,
+      _setDocxReviewRailWidth,
+      _getReviewCommentSelectionState,
+      _isReviewCommentModeEnabled,
+      _isReviewEditorFocused,
+      _getSelectionViewportBounds,
+      _previewReviewText,
+    } = deps;
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+
+    function _normalizeReviewSearchText(value) {
+      return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    function _parseReviewScaleFromTransform(transformValue) {
+      const value = String(transformValue || '').trim();
+      if (!value || value === 'none') return null;
+      const matrixMatch = value.match(/^matrix\(([^)]+)\)$/i);
+      if (matrixMatch) {
+        const parts = matrixMatch[1].split(',').map((part) => parseFloat(part.trim()));
+        if (parts.length >= 4 && parts.every((part) => Number.isFinite(part))) {
+          return {
+            x: Math.hypot(parts[0], parts[1]) || 1,
+            y: Math.hypot(parts[2], parts[3]) || 1,
+          };
+        }
+      }
+      const matrix3dMatch = value.match(/^matrix3d\(([^)]+)\)$/i);
+      if (matrix3dMatch) {
+        const parts = matrix3dMatch[1].split(',').map((part) => parseFloat(part.trim()));
+        if (parts.length >= 16 && parts.every((part) => Number.isFinite(part))) {
+          return {
+            x: Math.hypot(parts[0], parts[1], parts[2]) || 1,
+            y: Math.hypot(parts[4], parts[5], parts[6]) || 1,
+          };
+        }
+      }
+      const scaleMatch = value.match(/^scale(?:3d)?\(([^)]+)\)$/i);
+      if (scaleMatch) {
+        const parts = scaleMatch[1]
+          .split(',')
+          .map((part) => parseFloat(part.trim()))
+          .filter((part) => Number.isFinite(part));
+        if (parts.length) {
+          return {
+            x: parts[0] || 1,
+            y: (parts[1] || parts[0]) || 1,
+          };
+        }
+      }
+      return null;
+    }
+
+    function _resolveReviewAxisScale(rectSpan, offsetSpan, fallbackScale) {
+      const rectScale = Number(offsetSpan) > 0 ? (Number(rectSpan) / Number(offsetSpan)) : 0;
+      if (Number.isFinite(rectScale) && rectScale > 0.01) return rectScale;
+      if (Number.isFinite(fallbackScale) && fallbackScale > 0.01) return fallbackScale;
+      return 1;
+    }
+
+    function _buildReviewTextIndex(root) {
+      if (!root || !root.ownerDocument || !root.ownerDocument.createRange || typeof document.createTreeWalker !== 'function') {
+        return null;
+      }
+      const walker = document.createTreeWalker(
+        root,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode(node) {
+            return String(node && node.textContent || '').trim()
+              ? NodeFilter.FILTER_ACCEPT
+              : NodeFilter.FILTER_REJECT;
+          },
+        },
+      );
+      const normalizedMap = [];
+      const rawPositions = [];
+      let normalizedText = '';
+      let rawIndex = 0;
+      let previousWhitespace = false;
+      let node = null;
+      while ((node = walker.nextNode())) {
+        const rawText = String(node.nodeValue || '');
+        for (let index = 0; index < rawText.length; index += 1) {
+          rawPositions[rawIndex] = { node, offset: index };
+          const char = rawText[index];
+          const normalizedChar = /\s/.test(char) ? ' ' : char.toLowerCase();
+          if (normalizedChar === ' ') {
+            if (!previousWhitespace) {
+              normalizedText += ' ';
+              normalizedMap.push(rawIndex);
+              previousWhitespace = true;
+            }
+          } else {
+            normalizedText += normalizedChar;
+            normalizedMap.push(rawIndex);
+            previousWhitespace = false;
+          }
+          rawIndex += 1;
+        }
+      }
+      return { normalizedMap, normalizedText, rawPositions };
+    }
+
+    function _rangeFromReviewTextIndex(index, normalizedStart, normalizedEnd) {
+      if (!index || normalizedEnd <= normalizedStart) return null;
+      const startRawIndex = index.normalizedMap[normalizedStart];
+      const endRawIndex = index.normalizedMap[normalizedEnd - 1];
+      const startPos = index.rawPositions[startRawIndex];
+      const endPos = index.rawPositions[endRawIndex];
+      if (!startPos || !endPos || !startPos.node || !endPos.node) return null;
+      const range = startPos.node.ownerDocument.createRange();
+      range.setStart(startPos.node, startPos.offset);
+      range.setEnd(endPos.node, endPos.offset + 1);
+      return range;
+    }
+
+    function _collectReviewTextMatches(haystack, needle) {
+      const matches = [];
+      if (!haystack || !needle) return matches;
+      let cursor = 0;
+      while (cursor < haystack.length) {
+        const foundAt = haystack.indexOf(needle, cursor);
+        if (foundAt === -1) break;
+        matches.push([foundAt, foundAt + needle.length]);
+        cursor = foundAt + Math.max(1, needle.length);
+      }
+      return matches;
+    }
+
+    function _selectReviewTextMatch(index, matches, item) {
+      if (!index || !Array.isArray(matches) || !matches.length) return null;
+      const occurrence = Number(item && (item.anchor_occurrence ?? item.anchorOccurrence));
+      if (Number.isFinite(occurrence) && occurrence >= 0 && occurrence < matches.length) {
+        return matches[Math.floor(occurrence)];
+      }
+      const beforeNeedle = _normalizeReviewSearchText(
+        item && (item.anchor_context_before ?? item.anchorContextBefore)
+      );
+      const afterNeedle = _normalizeReviewSearchText(
+        item && (item.anchor_context_after ?? item.anchorContextAfter)
+      );
+      let bestMatch = matches[0];
+      let bestScore = -1;
+      matches.forEach((match) => {
+        const beforeText = beforeNeedle
+          ? index.normalizedText.slice(Math.max(0, match[0] - beforeNeedle.length - 8), match[0])
+          : '';
+        const afterText = afterNeedle
+          ? index.normalizedText.slice(match[1], match[1] + afterNeedle.length + 8)
+          : '';
+        let score = 0;
+        if (beforeNeedle && beforeText.includes(beforeNeedle)) score += 2;
+        if (afterNeedle && afterText.includes(afterNeedle)) score += 2;
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = match;
+        }
+      });
+      return bestMatch;
+    }
+
+    function _findDocxReviewAnchorRange(root, item, textIndex) {
+      if (!root) return null;
+      const reviewKey = String(item && (item.id || item.review_id || '') || '')
+        .replace(/^proposal:/, '')
+        .replace(/^comment:/, '')
+        .trim();
+      if (reviewKey) {
+        const exact = Array.from(root.querySelectorAll('[data-koto-review-id]')).find((element) => {
+          return String(element.getAttribute('data-koto-review-id') || '').trim() === reviewKey;
+        }) || null;
+        if (exact && exact.ownerDocument && exact.ownerDocument.createRange) {
+          const range = exact.ownerDocument.createRange();
+          range.selectNodeContents(exact);
+          return range;
+        }
+      }
+      const anchorText = _normalizeReviewSearchText(
+        item && (item.anchor_text || item.original_text || item.text || '')
+      );
+      if (!anchorText || !textIndex || !textIndex.normalizedText) return null;
+      const matches = _collectReviewTextMatches(textIndex.normalizedText, anchorText);
+      if (!matches.length) return null;
+      const selectedMatch = _selectReviewTextMatch(textIndex, matches, item);
+      if (!selectedMatch) return null;
+      return _rangeFromReviewTextIndex(textIndex, selectedMatch[0], selectedMatch[1]);
+    }
+
+    function _collectRangeClientRects(range) {
+      if (!range || typeof range.getClientRects !== 'function') return [];
+      return Array.from(range.getClientRects()).filter((rect) => rect && (rect.width > 0.5 || rect.height > 0.5));
+    }
+
+    function _screenXToReviewContentX(screenX, layoutState) {
+      if (!layoutState || !layoutState.viewportRect) return Math.round(screenX || 0);
+      return Math.round(layoutState.viewportScrollLeft + (screenX - layoutState.viewportRect.left));
+    }
+
+    function _screenYToReviewContentY(screenY, layoutState) {
+      if (!layoutState || !layoutState.viewportRect) return Math.round(screenY || 0);
+      return Math.round(layoutState.viewportScrollTop + (screenY - layoutState.viewportRect.top));
+    }
+
+    function _resolveReviewAnchorGeometry(root, item, layoutState, textIndex) {
+      if (!root || !layoutState || !layoutState.viewportRect) return null;
+      const range = _findDocxReviewAnchorRange(root, item, textIndex);
+      const rangeRects = _collectRangeClientRects(range);
+      if (rangeRects.length) {
+        const lastRect = rangeRects[rangeRects.length - 1];
+        const firstRect = rangeRects[0];
+        return {
+          pointX: _screenXToReviewContentX(lastRect.right, layoutState),
+          pointY: _screenYToReviewContentY(lastRect.top + (lastRect.height / 2), layoutState),
+          top: _screenYToReviewContentY(firstRect.top, layoutState),
+          bottom: _screenYToReviewContentY(lastRect.bottom, layoutState),
+        };
+      }
+      const anchorEl = _findDocxReviewAnchorElement(item);
+      const anchorRect = anchorEl ? anchorEl.getBoundingClientRect() : null;
+      if (!anchorRect) return null;
+      return {
+        pointX: _screenXToReviewContentX(anchorRect.right, layoutState),
+        pointY: _screenYToReviewContentY(anchorRect.top + (anchorRect.height / 2), layoutState),
+        top: _screenYToReviewContentY(anchorRect.top, layoutState),
+        bottom: _screenYToReviewContentY(anchorRect.bottom, layoutState),
+      };
+    }
+
+    function _getReviewContentRoot() {
+      return document.querySelector('#wa-docx-editor .ProseMirror')
+        || $('wa-editor-content')
+        || null;
+    }
+
+    function _getRangeBoundingRect(range, rangeRects) {
+      if (Array.isArray(rangeRects) && rangeRects.length) {
+        const left = Math.min(...rangeRects.map((rect) => rect.left));
+        const top = Math.min(...rangeRects.map((rect) => rect.top));
+        const right = Math.max(...rangeRects.map((rect) => rect.right));
+        const bottom = Math.max(...rangeRects.map((rect) => rect.bottom));
+        return {
+          left,
+          top,
+          right,
+          bottom,
+          width: Math.max(0, right - left),
+          height: Math.max(0, bottom - top),
+        };
+      }
+      if (!range || typeof range.getBoundingClientRect !== 'function') return null;
+      const rect = range.getBoundingClientRect();
+      if (!rect || (!rect.width && !rect.height)) return null;
+      return rect;
+    }
+
+    function _resolveReviewAnchorTarget(item) {
+      const root = _getReviewContentRoot();
+      if (!root) return null;
+      const textIndex = _buildReviewTextIndex(root);
+      const range = _findDocxReviewAnchorRange(root, item, textIndex);
+      const rangeRects = _collectRangeClientRects(range);
+      const rangeRect = _getRangeBoundingRect(range, rangeRects);
+      if (rangeRect) {
+        const container = range && range.commonAncestorContainer
+          ? (range.commonAncestorContainer.nodeType === 1
+              ? range.commonAncestorContainer
+              : range.commonAncestorContainer.parentElement)
+          : null;
+        return {
+          element: container && container.nodeType === 1 ? container : null,
+          rect: rangeRect,
+          root,
+        };
+      }
+      const element = _findDocxReviewAnchorElement(item);
+      if (!element || typeof element.getBoundingClientRect !== 'function') return null;
+      const rect = element.getBoundingClientRect();
+      if (!rect || (!rect.width && !rect.height)) return null;
+      return { element, rect, root };
+    }
+
+    function scrollReviewAnchorIntoView(item) {
+      const viewport = $('wa-editor-content');
+      const target = _resolveReviewAnchorTarget(item);
+      if (!viewport || !target || !target.rect) return { found: false, element: null };
+      const viewportRect = viewport.getBoundingClientRect();
+      const rect = target.rect;
+      const verticalMargin = Math.max(28, Math.round((viewport.clientHeight - Math.min(rect.height || 0, viewport.clientHeight)) * 0.4));
+      const horizontalMargin = Math.max(36, Math.round(Math.min(120, viewport.clientWidth * 0.18)));
+      const nextTop = Math.max(
+        0,
+        Math.round((viewport.scrollTop || 0) + (rect.top - viewportRect.top) - verticalMargin),
+      );
+      const nextLeft = Math.max(
+        0,
+        Math.round((viewport.scrollLeft || 0) + (rect.left - viewportRect.left) - horizontalMargin),
+      );
+      viewport.scrollTo({
+        behavior: 'smooth',
+        left: nextLeft,
+        top: nextTop,
+      });
+      return {
+        found: true,
+        element: target.element || null,
+        rect,
+      };
+    }
+
+    function _ensureReviewConnectorLayer(listEl) {
+      if (!listEl) return null;
+      let layer = listEl.querySelector('.wa-review-connector-layer');
+      if (!layer) {
+        layer = document.createElementNS(SVG_NS, 'svg');
+        layer.classList.add('wa-review-connector-layer');
+        layer.setAttribute('aria-hidden', 'true');
+        listEl.insertBefore(layer, listEl.firstChild);
+      }
+      return layer;
+    }
+
+    function _drawReviewConnector(layer, connector) {
+      if (!layer || !connector) return;
+      const path = document.createElementNS(SVG_NS, 'path');
+      const startX = Math.round(connector.startX);
+      const startY = Math.round(connector.startY);
+      const endX = Math.round(connector.endX);
+      const endY = Math.round(connector.endY);
+      path.setAttribute('d', `M ${startX} ${startY} L ${endX} ${endY}`);
+      path.setAttribute('class', `wa-review-connector-path${connector.isProposal ? ' is-proposal' : ' is-comment'}${connector.isFocused ? ' is-focused' : ''}`);
+      layer.appendChild(path);
+    }
+
+    function _resolveNonOverlappingCardTop(layoutEntries, desiredTop, desiredLeft, cardWidth, cardHeight) {
+      let nextTop = Math.max(0, Math.round(desiredTop));
+      let collided = true;
+      while (collided) {
+        collided = false;
+        for (let index = 0; index < layoutEntries.length; index += 1) {
+          const entry = layoutEntries[index];
+          const horizontalOverlap = desiredLeft < entry.left + entry.width + 22
+            && desiredLeft + cardWidth + 22 > entry.left;
+          const verticalOverlap = nextTop < entry.top + entry.height + 10
+            && nextTop + cardHeight + 10 > entry.top;
+          if (horizontalOverlap && verticalOverlap) {
+            nextTop = entry.top + entry.height + 10;
+            collided = true;
+          }
+        }
+      }
+      return nextTop;
+    }
+
+    function ensureReviewShellHost() {
+      const shell = $('wa-review-shell');
+      const docxEditor = $('wa-docx-editor');
+      if (!shell || !docxEditor) return shell;
+      if (shell.parentElement !== docxEditor) {
+        docxEditor.appendChild(shell);
+      }
+      shell.classList.add('wa-review-shell-docx');
+      return shell;
+    }
+
+    function getDocxReviewRailMetrics(host, viewport) {
+      if (!host || !viewport) return null;
+      // Use the geometry module when available (clean, no persistence).
+      if (window.KotoDocxReviewGeometry) {
+        const geo = window.KotoDocxReviewGeometry.computeReviewGeometry(host, viewport);
+        if (geo) {
+          // Expose legacy field names that workspace-assistant.js may read.
+          return Object.assign(geo, {
+            edgeInset:          8,
+            laneLeft:           geo.cardColLeft,
+            pageContentLeft:    geo.scrollLeft,
+            pageContentTop:     geo.scrollTop,
+            pageEdgeRight:      geo.textColRight,
+            pageOffsetHeight:   geo.pageContentHeight,
+            pageOffsetWidth:    geo.pageRect ? Math.round(geo.pageRect.width) : 0,
+            scaleX:             geo.zoom ? geo.zoom.x : 1,
+            scaleY:             geo.zoom ? geo.zoom.y : 1,
+            viewportScrollLeft: geo.scrollLeft,
+            viewportScrollTop:  geo.scrollTop,
+            viewportRight:      Math.round(geo.scrollLeft + (geo.viewportRect ? geo.viewportRect.width : 0)),
+          });
+        }
+      }
+
+      // Fallback: inline geometry (geometry module not yet loaded).
+      const hostRect = host.getBoundingClientRect();
+      const viewportRect = viewport.getBoundingClientRect();
+      const viewportScrollLeft = Math.max(0, Math.round(viewport.scrollLeft || 0));
+      const viewportScrollTop  = Math.max(0, Math.round(viewport.scrollTop  || 0));
+      const pageEl   = host.querySelector('.ProseMirror');
+      const pageRect = pageEl ? pageEl.getBoundingClientRect() : null;
+      const hostStyles    = window.getComputedStyle(host);
+      const minRailWidth  = 132;
+      const railGap       = Math.max(6, Math.round(parseFloat(hostStyles.getPropertyValue('--wa-review-rail-gap')) || 6));
+      const safeInset     = 8;
+      // Rail width: read from CSS variable only (no stale dataset.noteWidth persistence).
+      const railWidth = Math.max(
+        minRailWidth,
+        Math.round(
+          parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width')) ||
+          Math.max(140, Math.min(172, viewportRect.width * 0.19))
+        )
+      );
+      if (!pageRect) {
+        const contentWidth = Math.max(
+          Math.round(viewport.scrollWidth || 0),
+          Math.round(viewportRect.width || 0),
+          Math.round(railWidth + railGap + 24),
+        );
+        const textColRight = Math.max(0, Math.round(contentWidth - railWidth - safeInset));
+        _setDocxReviewRailWidth(host, railWidth);
+        return {
+          cardColLeft:        textColRight + railGap + 10,
+          contentWidth,
+          edgeInset:          safeInset,
+          hostRect,
+          laneLeft:           textColRight,
+          pageContentLeft:    viewportScrollLeft,
+          pageContentTop:     viewportScrollTop,
+          pageEdgeRight:      textColRight,
+          pageEl:             null,
+          pageOffsetHeight:   0,
+          pageOffsetWidth:    0,
+          pageRect:           null,
+          railGap,
+          railWidth,
+          scaleX:             1,
+          scaleY:             1,
+          shellLeft:          Math.round(viewportRect.left - hostRect.left - viewportScrollLeft),
+          textColRight,
+          viewportRect,
+          viewportRight:      Math.round(viewportScrollLeft + viewportRect.width),
+          viewportScrollLeft,
+          viewportScrollTop,
+        };
+      }
+      const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);
+      const pageContentLeft  = Math.max(0, Math.round(viewportScrollLeft + (pageRect.left - viewportRect.left)));
+      const pageContentTop   = Math.max(0, Math.round(viewportScrollTop  + (pageRect.top  - viewportRect.top)));
+      const pageContentRight = Math.round(pageContentLeft + pageRect.width);
+      const textColRight     = Math.round(pageContentRight - pagePaddingRight);
+      const viewportRight    = Math.round(viewportScrollLeft + viewportRect.width);
+      const anchorGap        = Math.max(6, railGap) + 10;
+      const laneLeft         = Math.round(textColRight + anchorGap);
+      const contentWidth = Math.max(
+        Math.round(viewport.scrollWidth || 0),
+        Math.round(viewportRect.width   || 0),
+        Math.round(laneLeft + railWidth + safeInset),
+      );
+      _setDocxReviewRailWidth(host, railWidth);
+      return {
+        cardColLeft:      laneLeft,
+        contentWidth,
+        edgeInset:        safeInset,
+        hostRect,
+        laneLeft,
+        pageContentLeft,
+        pageContentTop,
+        pageEdgeRight:    pageContentRight,
+        pageEl,
+        pageOffsetHeight: Math.round(pageRect.height || 0),
+        pageOffsetWidth:  Math.round(pageRect.width  || 0),
+        pagePaddingRight: Math.round(pagePaddingRight || 0),
+        pageRect,
+        railGap,
+        railWidth,
+        scaleX:           1,
+        scaleY:           1,
+        shellLeft:        Math.round(viewportRect.left - hostRect.left - viewportScrollLeft),
+        textColRight,
+        viewportRect,
+        viewportRight,
+        viewportScrollLeft,
+        viewportScrollTop,
+      };
+    }
+
+    function layoutReviewShellInDocx() {
+      const shell = $('wa-review-shell');
+      const host = $('wa-docx-editor');
+      const viewport = $('wa-editor-content');
+      const listEl = $('wa-review-list');
+      if (!shell || !host || !viewport || !listEl || shell.style.display === 'none') {
+        if (host) host.classList.remove('has-review-shell');
+        return;
+      }
+      const cards = Array.from(listEl.querySelectorAll('.koto-docx-comment-card, .wa-proposal-card'));
+      if (!cards.length) {
+        host.classList.remove('has-review-shell');
+        return;
+      }
+      host.classList.add('has-review-shell');
+      const railMetrics = getDocxReviewRailMetrics(host, viewport);
+      const hostRect = railMetrics ? railMetrics.hostRect : host.getBoundingClientRect();
+      const viewportRect = railMetrics ? railMetrics.viewportRect : viewport.getBoundingClientRect();
+      const viewportScrollTop = Math.max(0, Math.round(viewport.scrollTop || 0));
+      const shellTop = Math.round(viewportRect.top - hostRect.top - viewportScrollTop);
+      if (railMetrics) {
+        shell.style.left = railMetrics.shellLeft + 'px';
+        shell.style.right = 'auto';
+        shell.style.width = railMetrics.contentWidth + 'px';
+      }
+      shell.style.top = shellTop + 'px';
+      const contentRoot = railMetrics && railMetrics.pageEl
+        ? railMetrics.pageEl
+        : (host.querySelector('.ProseMirror') || host);
+      const textIndex = _buildReviewTextIndex(contentRoot);
+      const connectorLayer = _ensureReviewConnectorLayer(listEl);
+      if (connectorLayer) {
+        connectorLayer.innerHTML = '';
+        connectorLayer.setAttribute('width', String(Math.max(160, Math.round(railMetrics && railMetrics.contentWidth || viewport.scrollWidth || viewportRect.width || 0))));
+      }
+      // All cards share the same column: left edge = text-column right edge + gap.
+      // This produces a clean WPS-style annotation rail where cards line up in a
+      // column and each connector is a short line from the text-column edge to the card.
+      // Use railGap + 10 to match the extra padding the CSS adds to #wa-editor-content.
+      const cardColLeft = railMetrics
+        ? Math.max(12, Math.round(railMetrics.cardColLeft || (railMetrics.textColRight || 0) + Math.max(6, railMetrics.railGap) + 10))
+        : 12;
+      const cardColWidth = railMetrics ? railMetrics.railWidth : 148;
+      const connectorOriginX = railMetrics
+        ? Math.round(railMetrics.textColRight || 0)
+        : Math.max(0, cardColLeft - 20);
+
+      const layoutEntries = [];
+      cards.forEach((card) => {
+        const reviewId = String(card.dataset.reviewId || '').trim();
+        const entry = _findReviewEntry(reviewId);
+        const anchorGeometry = entry && entry.item
+          ? _resolveReviewAnchorGeometry(contentRoot, entry.item, railMetrics, textIndex)
+          : null;
+        // All cards in the same column — never vary left by anchor X.
+        card.style.left = cardColLeft + 'px';
+        card.style.right = 'auto';
+        const connectorOffsetY = Math.min(16, Math.max(11, Math.round((card.offsetHeight || 32) * 0.3)));
+        const desiredTop = anchorGeometry
+          ? Math.max(0, Math.round(anchorGeometry.pointY - connectorOffsetY))
+          : layoutEntries.length
+            ? layoutEntries[layoutEntries.length - 1].top + layoutEntries[layoutEntries.length - 1].height + 10
+            : 0;
+        const top = _resolveNonOverlappingCardTop(
+          layoutEntries,
+          desiredTop,
+          cardColLeft,
+          Math.max(cardColWidth, card.offsetWidth || 148),
+          card.offsetHeight || 32,
+        );
+        card.style.top = top + 'px';
+        layoutEntries.push({
+          height: card.offsetHeight || 32,
+          left: cardColLeft,
+          top,
+          width: Math.max(cardColWidth, card.offsetWidth || 148),
+        });
+        if (connectorLayer && anchorGeometry) {
+          // Connector always starts from the fixed text-column right edge (connectorOriginX),
+          // never from the annotated word's X. This prevents the line from spanning across
+          // the page interior.
+          _drawReviewConnector(connectorLayer, {
+            startX: connectorOriginX,
+            startY: anchorGeometry.pointY,
+            endX: cardColLeft - 4,
+            endY: top + connectorOffsetY,
+            isFocused: card.classList.contains('focused') || card.classList.contains('is-focused'),
+            isProposal: card.classList.contains('wa-proposal-card'),
+          });
+        }
+      });
+      const contentHeight = Math.max(
+        Math.round(viewport.scrollHeight || 0),
+        Math.round((railMetrics && railMetrics.pageContentTop || 0) + (railMetrics && railMetrics.pageOffsetHeight || 0)),
+        layoutEntries.length
+          ? (layoutEntries[layoutEntries.length - 1].top + layoutEntries[layoutEntries.length - 1].height + 24)
+          : 0,
+        160,
+      );
+      shell.style.height = contentHeight + 'px';
+      listEl.style.minHeight = contentHeight + 'px';
+      if (connectorLayer) {
+        connectorLayer.setAttribute('height', String(contentHeight));
+        connectorLayer.setAttribute('viewBox', `0 0 ${Math.max(160, Math.round(railMetrics && railMetrics.contentWidth || viewport.scrollWidth || viewportRect.width || 0))} ${contentHeight}`);
+      }
+    }
+
+    function scheduleReviewShellLayout() {
+      requestAnimationFrame(() => {
+        layoutReviewShellInDocx();
+      });
+    }
+
+    function renderReviewSelectionLauncher() {
+      const host = $('wa-docx-editor');
+      const viewport = $('wa-editor-content');
+      const launcher = ensureReviewSelectionLauncher();
+      if (
+        state.fileType !== 'docx'
+        || !host
+        || !viewport
+        || !launcher
+        || !_isReviewCommentModeEnabled()
+        || state._editingReviewCommentId
+        || _isReviewEditorFocused()
+      ) {
+        hideReviewSelectionLauncher();
+        return;
+      }
+      const selectionState = _getReviewCommentSelectionState();
+      const selection = selectionState && selectionState.selection;
+      const bounds = _getSelectionViewportBounds();
+      if (!selectionState.supported || !selection || !bounds) {
+        hideReviewSelectionLauncher();
+        return;
+      }
+      state._reviewLauncherVisible = true;
+      syncDocxReviewRailHostClass();
+      const railMetrics = getDocxReviewRailMetrics(host, viewport);
+      const hostRect = railMetrics ? railMetrics.hostRect : host.getBoundingClientRect();
+      const viewportRect = railMetrics ? railMetrics.viewportRect : viewport.getBoundingClientRect();
+      const shellTop = Math.max(0, Math.round(viewportRect.top - hostRect.top + 18));
+      const maxTop = Math.max(shellTop, Math.round(viewportRect.bottom - hostRect.top - 54));
+      const top = Math.max(shellTop, Math.min(Math.round(bounds.top - hostRect.top - 8), maxTop));
+      if (railMetrics) {
+        const selectionRight = Number.isFinite(bounds.right)
+          ? Math.round(bounds.right - hostRect.left + railMetrics.railGap)
+          : Math.round(viewportRect.right - hostRect.left - railMetrics.railWidth - 12);
+        const maxLauncherLeft = Math.max(0, Math.round(viewportRect.right - hostRect.left - railMetrics.railWidth - 14));
+        const launcherLeft = Math.max(0, Math.min(selectionRight, maxLauncherLeft));
+        launcher.style.left = launcherLeft + 'px';
+        launcher.style.right = 'auto';
+        launcher.style.width = railMetrics.railWidth + 'px';
+      }
+      launcher.style.top = top + 'px';
+      launcher.style.display = 'flex';
+      const subtitle = launcher.querySelector('.wa-review-selection-subtitle');
+      if (subtitle) {
+        const label = String(selection.countLabel || '').trim() || `${String(selection.rawText || '').trim().length}字`;
+        const preview = _previewReviewText(selection.previewText || selection.rawText || '', 28);
+        subtitle.textContent = preview ? `${label} · ${preview}` : label;
+      }
+      syncDocxReviewRailHostClass();
+    }
+
+    function ensureReviewShellViewportSync() {
+      const viewport = $('wa-editor-content');
+      if (viewport && !viewport._waReviewShellSyncBound) {
+        viewport._waReviewShellSyncBound = true;
+        viewport.addEventListener('scroll', () => {
+          const shell = $('wa-review-shell');
+          if (shell && shell.style.display !== 'none') scheduleReviewShellLayout();
+          renderReviewSelectionLauncher();
+        }, { passive: true });
+      }
+      if (!window.__waReviewShellResizeBound) {
+        window.__waReviewShellResizeBound = true;
+        window.addEventListener('resize', () => {
+          const shell = $('wa-review-shell');
+          if (shell && shell.style.display !== 'none') scheduleReviewShellLayout();
+          renderReviewSelectionLauncher();
+        });
+      }
+    }
+
+    function syncDocxReviewRailHostClass() {
+      const host = $('wa-docx-editor');
+      const shell = $('wa-review-shell');
+      const listEl = $('wa-review-list');
+      if (!host) return;
+      const hasShellCards = !!(
+        shell &&
+        shell.style.display !== 'none' &&
+        listEl &&
+        listEl.children &&
+        listEl.children.length
+      );
+      host.classList.toggle('has-review-shell', hasShellCards || !!state._reviewLauncherVisible);
+    }
+
+    function ensureReviewSelectionLauncher() {
+      const host = $('wa-docx-editor');
+      if (!host) return null;
+      let launcher = $('wa-review-selection-launcher');
+      if (!launcher) {
+        launcher = document.createElement('div');
+        launcher.id = 'wa-review-selection-launcher';
+        launcher.innerHTML = ''
+          + '<button type="button" class="wa-review-selection-add" title="像 Word 一样在当前选区添加批注">'
+          + '  <span class="wa-review-selection-plus" aria-hidden="true">+</span>'
+          + '  <span class="wa-review-selection-copy">'
+          + '    <span class="wa-review-selection-title">新建批注</span>'
+          + '    <span class="wa-review-selection-subtitle"></span>'
+          + '  </span>'
+          + '</button>';
+        const button = launcher.querySelector('.wa-review-selection-add');
+        if (button) {
+          button.addEventListener('mousedown', (event) => {
+            if (event && typeof event.preventDefault === 'function') event.preventDefault();
+            if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+            window.WA.captureReviewSelection(event);
+          });
+          button.addEventListener('click', (event) => {
+            if (event && typeof event.preventDefault === 'function') event.preventDefault();
+            if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+            window.WA.createReviewComment();
+          });
+        }
+        host.appendChild(launcher);
+      }
+      return launcher;
+    }
+
+    function hideReviewSelectionLauncher() {
+      const launcher = $('wa-review-selection-launcher');
+      state._reviewLauncherVisible = false;
+      if (launcher) launcher.style.display = 'none';
+      syncDocxReviewRailHostClass();
+    }
+
+    return {
+      ensureReviewShellHost,
+      getDocxReviewRailMetrics,
+      layoutReviewShellInDocx,
+      scrollReviewAnchorIntoView,
+      scheduleReviewShellLayout,
+      ensureReviewShellViewportSync,
+      syncDocxReviewRailHostClass,
+      ensureReviewSelectionLauncher,
+      hideReviewSelectionLauncher,
+      renderReviewSelectionLauncher,
+    };
+  }
+
+  window.KotoDocxReviewLayout = { create };
+})();

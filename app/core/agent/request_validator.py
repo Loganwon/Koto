@@ -6,82 +6,11 @@ become thin delegators and the prompt-building logic lives here.
 """
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-from typing import Any, Dict, List, Optional
-
-logger = logging.getLogger(__name__)
+from typing import Any
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
-FILE_CONTEXT_PREVIEW_LIMIT = 8_000    # characters for file content preview
-TOOL_RESULT_CONTEXT_LIMIT = 24_000    # characters for tool result context
 MAX_HISTORY_TURNS = 10
-MAX_TASK_ROUNDS = 20
-
-_TASK_SKILL_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "config" / "task_skills"
-
-_TASK_SYSTEM_PROMPT = """你是 Koto 文件任务助手。用户会描述一个涉及文件操作的任务，你需要理解任务、制定计划、使用工具执行。
-
-## 工作模式
-
-1. 理解：分析用户任务和提供的文件上下文
-2. 计划：制定清晰的分步执行计划
-3. 执行：逐步调用工具完成任务
-4. 交付：汇报结果
-
-## 可用工具
-
-你可以调用以下工具来完成任务：
-
-文件读取：
-- `read_sheet_data(path, sheet_name?, max_rows?)` — 读取 Excel 表格数据（结构化 JSON）
-- `read_docx_content(path, max_chars?)` — 读取 Word 文档段落
-- `parse_file_to_text(path, max_chars?, start_page?, end_page?)` — 将任意文件解析为纯文本；PDF 可按页窗口读取
-- `list_workspace_files(path?, recursive?)` — 列出工作区文件
-
-文件写入：
-- `write_sheet_data(path, sheet_name?, updates)` — 写入 Excel 单元格（自动备份）
-- `create_file(path, content)` — 创建新文件
-- `copy_file(source, destination)` — 复制文件
-
-AI 处理：
-- `llm_extract(text, fields, instructions?)` — 从文本中提取结构化数据
-- `llm_transform(text, instruction)` — 按指令转换文本
-
-代码执行：
-- `run_python_code(code, timeout?)` — 在沙盒中执行 Python 代码
-- 当前任务文件会自动复制到沙盒当前目录，可直接按文件名访问；绝对路径见 `TASK_FILE_PATHS`；工作区根目录见 `TASK_WORKSPACE_ROOT`（新建文件请写到此路径下）
-
-## 规则
-
-1. 在执行文件写入操作前，先读取目标文件确认当前状态
-2. `write_sheet_data` 的 `updates` 参数必须是 JSON 字符串格式
-3. 对于复杂数据处理，优先使用 `run_python_code` 而非多次调用 `llm_extract`
-4. 工具调用失败时，分析错误原因，尝试修复后重试（最多重试 2 次）
-5. 每一步都给用户清晰的进展说明
-6. 如果任务不明确，先用已有工具探索文件内容，再决定具体做法
-7. **修改文件时直接使用用户提供的原始文件路径作为写入目标**，严禁创建 xxx_更新版、xxx_副本、xxx_new、xxx_modified 等变体文件名——如果用户没有明确要求新建文件，则一律在原文件上修改"""
-
-
-def _load_task_skill_prompts(task_description: str) -> str:
-    """Load matching task skill prompt files from config/task_skills/."""
-    if not _TASK_SKILL_PROMPTS_DIR.is_dir():
-        return ""
-
-    task_lower = (task_description or "").lower()
-    parts: List[str] = []
-    try:
-        for md_file in _TASK_SKILL_PROMPTS_DIR.glob("*.md"):
-            content = md_file.read_text(encoding="utf-8", errors="replace")
-            first_line = content.split("\n", 1)[0].lower()
-            keywords = [k.strip() for k in first_line.replace("#", "").split(",") if k.strip()]
-            if keywords and any(keyword in task_lower for keyword in keywords):
-                parts.append(content)
-    except Exception as exc:
-        logger.debug("[RequestValidator] Task skill prompt loading error: %s", exc)
-
-    return "\n\n---\n\n".join(parts)
 
 
 class RequestValidator:
@@ -103,13 +32,6 @@ class RequestValidator:
         # FloatingToolbar actions pass a pre-built system prompt
         if request.action_system_prompt:
             return request.action_system_prompt
-
-        if request.action_type == "ai_task":
-            system_instruction = _TASK_SYSTEM_PROMPT
-            skill_prompt = _load_task_skill_prompts(request.prompt)
-            if skill_prompt:
-                system_instruction += f"\n\n## 参考知识\n\n{skill_prompt}"
-            return system_instruction
 
         if request.output_mode == "chat":
             return (

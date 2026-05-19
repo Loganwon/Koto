@@ -923,7 +923,77 @@ class TestSystemToolsPlugin:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 12. TemplateFillPlugin
+# 12. SkillToolsPlugin
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.unit
+class TestSkillToolsPlugin:
+    def _make(self):
+        from app.core.agent.plugins.skill_tools_plugin import SkillToolsPlugin
+
+        return SkillToolsPlugin()
+
+    def test_list_skills_uses_public_api(self):
+        p = self._make()
+        skills = [
+            {
+                "id": "debug_python",
+                "name": "Debug Python",
+                "enabled": True,
+                "category": "domain",
+                "description": "Python debugging helper",
+            },
+            {
+                "id": "concise_mode",
+                "name": "Concise Mode",
+                "enabled": False,
+                "category": "style",
+                "description": "Short answers",
+            },
+        ]
+
+        with patch("app.core.skills.skill_manager.SkillManager._ensure_init"):
+            with patch(
+                "app.core.skills.skill_manager.SkillManager.list_skills",
+                return_value=skills,
+            ):
+                result = p.list_skills(category="domain", enabled_only=True)
+
+        assert "debug_python" in result
+        assert "concise_mode" not in result
+
+    def test_enable_skill_uses_state_mutator(self):
+        p = self._make()
+
+        with patch("app.core.skills.skill_manager.SkillManager._ensure_init"):
+            with patch(
+                "app.core.skills.skill_manager.SkillManager.get_runtime_entry",
+                return_value={"name": "Debug Python"},
+            ):
+                with patch(
+                    "app.core.skills.skill_manager.SkillManager.set_enabled",
+                    return_value=True,
+                ) as mock_set_enabled:
+                    result = p.enable_skill("debug_python")
+
+        mock_set_enabled.assert_called_once_with("debug_python", True)
+        assert "已启用 Skill" in result
+        assert "Debug Python" in result
+
+    def test_disable_skill_missing_returns_not_found(self):
+        p = self._make()
+
+        with patch("app.core.skills.skill_manager.SkillManager._ensure_init"):
+            with patch(
+                "app.core.skills.skill_manager.SkillManager.get_runtime_entry",
+                return_value=None,
+            ):
+                result = p.disable_skill("missing_skill")
+
+        assert "未找到 Skill ID" in result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 13. TemplateFillPlugin
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestTemplateFillPlugin:
@@ -972,6 +1042,23 @@ class TestTemplateFillPlugin:
             result = p.fill_skill_template("bad_skill", {"k": "v"})
             data = json.loads(result)
             assert data["success"] is False
+
+    def test_get_template_path_uses_runtime_entry(self, tmp_path):
+        p = self._make()
+        template_rel = Path("config/skill_templates/my_skill/template.docx")
+        template_path = tmp_path / template_rel
+        template_path.parent.mkdir(parents=True, exist_ok=True)
+        template_path.write_text("placeholder", encoding="utf-8")
+
+        with patch("app.core.agent.plugins.template_fill_plugin._BASE_DIR", tmp_path):
+            with patch("app.core.skills.skill_manager.SkillManager._ensure_init"):
+                with patch(
+                    "app.core.skills.skill_manager.SkillManager.get_runtime_entry",
+                    return_value={"template_path": str(template_rel)},
+                ):
+                    resolved = p._get_template_path("my_skill")
+
+        assert resolved == template_path
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1129,6 +1216,22 @@ class TestWebToolsBridgePlugin:
         # Even if web.tool_registry is not available, should return list
         tools = p.get_tools()
         assert isinstance(tools, list)
+
+    def test_get_tools_silently_skips_missing_legacy_registry(self):
+        from app.core.agent.plugins import web_tools_bridge_plugin as mod
+
+        p = mod.WebToolsBridgePlugin()
+
+        with patch.object(mod, "logger") as mock_logger, patch.object(
+            mod.importlib,
+            "import_module",
+            side_effect=ModuleNotFoundError("No module named 'web.tool_registry'"),
+        ):
+            tools = p.get_tools()
+
+        assert tools == []
+        mock_logger.warning.assert_not_called()
+        mock_logger.debug.assert_called_once()
 
     def test_convert_schema(self):
         from app.core.agent.plugins.web_tools_bridge_plugin import _convert_schema

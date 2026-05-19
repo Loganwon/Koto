@@ -51,6 +51,9 @@ _PRICING: Dict[str, Dict[str, float]] = {
     # ── 深度研究 ────────────────────────────────────────────
     "deep-research": {"input": 2.00, "output": 8.00},  # 按 Pro 估算（官方未公布）
     # ── Embedding ────────────────────────────────────────────
+    "gemini-embedding-2": {"input": 0.025, "output": 0.0},
+    "gemini-embedding-001": {"input": 0.025, "output": 0.0},
+    "gemini-embedding": {"input": 0.025, "output": 0.0},
     "text-embedding-004": {"input": 0.025, "output": 0.0},  # $0.025/M tokens
     "text-embedding": {"input": 0.025, "output": 0.0},  # embedding fallback
     # ── 图像生成 ────────────────────────────────────────────

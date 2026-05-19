@@ -12,7 +12,6 @@
 
   <!-- ── App styles ── -->
   <link rel="stylesheet" href="/static/css/workspace.css?v={{ range(100000,999999)|random }}">
-  <link rel="stylesheet" href="/static/css/doc-agent.css?v={{ range(100000,999999)|random }}">
 </head>
 <body class="wa-standalone">
 
@@ -484,7 +483,7 @@
                 <div class="wa-pptx-tb-grp-btns">
                   <div class="wa-pptx-tb-btn wa-pptx-color-btn" id="wa-pptx-fill-trigger" title="形状填充色" onmousedown="event.preventDefault()" onclick="WA.pptxColorPicker('fill',this)">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" fill="currentColor" opacity="0.3"/></svg>
-                    <div id="wa-pptx-shapefill-swatch" class="wa-pptx-color-swatch" style="background:#fff;border:1px solid #666"></div>
+                    <div id="wa-pptx-shapefill-swatch" class="wa-pptx-color-swatch" style="background:#fff;border:1px solid var(--border)"></div>
                   </div>
                   <div class="wa-pptx-tb-btn wa-pptx-color-btn" id="wa-pptx-border-trigger" title="形状边框色" onmousedown="event.preventDefault()" onclick="WA.pptxColorPicker('border',this)">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
@@ -528,7 +527,7 @@
                       <path d="M8 14 L12 8 L16 14" stroke="currentColor" stroke-width="1.5" fill="none"/>
                       <line x1="9.5" y1="12" x2="14.5" y2="12" stroke="currentColor" stroke-width="1.5"/>
                     </svg>
-                    <div id="wa-pptx-bg-swatch" class="wa-pptx-color-swatch" style="background:#ffffff;border:1px solid #666"></div>
+                    <div id="wa-pptx-bg-swatch" class="wa-pptx-color-swatch" style="background:#ffffff;border:1px solid var(--border)"></div>
                   </div>
                   <!-- Slide background image upload -->
                   <button class="wa-pptx-tb-btn" title="设置背景图片" onmousedown="event.preventDefault()" onclick="document.getElementById('wa-pptx-bg-img-input').click()">
@@ -622,9 +621,9 @@
             </div>
 
             <!-- Context menu -->
-            <div id="wa-pptx-ctx" style="display:none;position:fixed;background:#2b2b2b;border:1px solid #444;border-radius:4px;padding:4px 0;z-index:9999;min-width:140px;box-shadow:0 4px 16px rgba(0,0,0,.5);font-size:13px;color:#eee;"></div>
+            <div id="wa-pptx-ctx" style="display:none;position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px 0;z-index:9999;min-width:140px;box-shadow:0 10px 28px rgba(0,0,0,.16);font-size:13px;color:var(--text);"></div>
             <!-- PPTX floating format hover bar – appears near text selection (like TipTap's hoverbar in DOCX) -->
-            <div id="wa-pptx-hoverbar" onmousedown="event.preventDefault()" style="display:none;position:fixed;background:#2b2b2b;border:1px solid #3d3d3d;border-radius:6px;padding:2px 5px;z-index:9998;box-shadow:0 4px 16px rgba(0,0,0,.6);align-items:center;gap:2px;user-select:none;">
+            <div id="wa-pptx-hoverbar" onmousedown="event.preventDefault()" style="display:none;position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:2px 5px;z-index:9998;box-shadow:0 10px 28px rgba(0,0,0,.16);align-items:center;gap:2px;user-select:none;color:var(--text);">
               <input id="wa-hb-fontname" type="text" value="Calibri" title="字体" class="wa-pptx-tb-input-font" style="width:72px;height:22px;font-size:11px;" onmousedown="event.stopPropagation()" onchange="WA.pptxFontName(this.value)" onblur="WA.pptxFontName(this.value)" onkeydown="if(event.key==='Enter'){WA.pptxFontName(this.value);this.blur();}">
               <select id="wa-hb-fontsize" class="wa-pptx-tb-select" title="字号" style="width:44px;height:22px;font-size:11px;" onmousedown="event.stopPropagation()" onchange="WA.pptxFontSize(this.value)">
                 <option>8</option><option>10</option><option>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>32</option><option>36</option><option>40</option><option>48</option><option>60</option><option>72</option>
@@ -639,19 +638,19 @@
                 <div id="wa-hb-color-swatch" class="wa-pptx-color-swatch" style="background:#000"></div>
               </div>
               <div class="wa-pptx-tb-vsep" style="height:16px;margin:0 1px;"></div>
-              <button class="wa-pptx-tb-btn" style="font-size:11px;padding:1px 6px;color:#9e8fff;" onmousedown="event.preventDefault()" onclick="WA.pptxHoverAI('polish')" title="AI 润色">润色</button>
-              <button class="wa-pptx-tb-btn" style="font-size:11px;padding:1px 6px;color:#9e8fff;" onmousedown="event.preventDefault()" onclick="WA.pptxHoverAI('translate')" title="AI 翻译">翻译</button>
-              <button class="wa-pptx-tb-btn" style="font-size:11px;padding:1px 6px;color:#9e8fff;" onmousedown="event.preventDefault()" onclick="WA.pptxHoverAI('explain')" title="AI 解释">解释</button>
+              <button class="wa-pptx-tb-btn" style="font-size:11px;padding:1px 6px;color:var(--active-text);" onmousedown="event.preventDefault()" onclick="WA.pptxHoverAI('polish')" title="AI 润色">润色</button>
+              <button class="wa-pptx-tb-btn" style="font-size:11px;padding:1px 6px;color:var(--active-text);" onmousedown="event.preventDefault()" onclick="WA.pptxHoverAI('translate')" title="AI 翻译">翻译</button>
+              <button class="wa-pptx-tb-btn" style="font-size:11px;padding:1px 6px;color:var(--active-text);" onmousedown="event.preventDefault()" onclick="WA.pptxHoverAI('explain')" title="AI 解释">解释</button>
             </div>
             <!-- DOCX hoverbar and colour picker moved to body level (outside #wa-pptx-editor) so they are never hidden by a display:none parent -->
 
             <!-- In-page colour picker: no OS dialog, keeps contentEditable focus so selection highlight survives -->
-            <div id="wa-pptx-cp" onmousedown="event.preventDefault()" style="display:none;position:fixed;background:#2b2b2b;border:1px solid #555;border-radius:6px;padding:8px;z-index:10000;box-shadow:0 6px 24px rgba(0,0,0,.65);user-select:none;">
+            <div id="wa-pptx-cp" onmousedown="event.preventDefault()" style="display:none;position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;z-index:10000;box-shadow:0 14px 32px rgba(0,0,0,.18);user-select:none;color:var(--text);">
               <div id="wa-pptx-cp-grid" style="display:grid;grid-template-columns:repeat(8,18px);gap:3px;"></div>
-              <div style="margin-top:6px;padding-top:6px;border-top:1px solid #444;display:flex;align-items:center;gap:6px;">
-                <span style="color:#aaa;font-size:11px;white-space:nowrap;">自定义:</span>
-                <input type="color" id="wa-pptx-cp-custom" value="#000000" style="width:32px;height:20px;padding:1px;border:1px solid #666;border-radius:3px;cursor:pointer;background:transparent" onmousedown="event.stopPropagation()" onchange="WA._pptxPickColor(this.value,true)">
-                <span id="wa-pptx-cp-hex" style="color:#ccc;font-size:11px;font-family:monospace;min-width:54px;">#000000</span>
+              <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px;">
+                <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;">自定义:</span>
+                <input type="color" id="wa-pptx-cp-custom" value="#000000" style="width:32px;height:20px;padding:1px;border:1px solid var(--border);border-radius:3px;cursor:pointer;background:transparent" onmousedown="event.stopPropagation()" onchange="WA._pptxPickColor(this.value,true)">
+                <span id="wa-pptx-cp-hex" style="color:var(--text-muted);font-size:11px;font-family:monospace;min-width:54px;">#000000</span>
               </div>
             </div>
 
@@ -902,20 +901,24 @@
       </div>
       <div id="wa-ai-route-info" style="display:none;padding:0 12px 8px;font-size:11px;color:var(--text-muted);"></div>
 
+      <div id="wa-review-shell" class="wa-review-shell" style="display:none">
+        <div class="wa-review-shell-header">
+          <div class="wa-review-shell-title-group">
+            <span class="wa-review-shell-title">审阅中心</span>
+            <span id="wa-review-summary" class="wa-review-summary">当前文档暂无批注或建议</span>
+          </div>
+          <button type="button" class="wa-review-shell-close" onclick="WA.closeReviewCenter()" title="收起审阅中心">收起</button>
+        </div>
+        <div id="wa-review-mode-group" class="wa-review-mode-group">
+          <button type="button" class="wa-review-mode-btn is-active" data-mode="all" onclick="WA.setReviewMode('all')">全部</button>
+          <button type="button" class="wa-review-mode-btn" data-mode="comments" onclick="WA.setReviewMode('comments')">批注模式</button>
+          <button type="button" class="wa-review-mode-btn" data-mode="proposals" onclick="WA.setReviewMode('proposals')">建议</button>
+        </div>
+        <div id="wa-review-list" class="koto-docx-comment-layer"></div>
+      </div>
+
       <!-- Skill Library overlay panel -->
       <div id="wa-skill-library"></div>
-
-      <!-- DocAgent execution phases (step timeline) -->
-      <div id="wa-doc-agent-phases" class="doc-agent-phases phases" style="display:none">
-        <!-- Dynamically filled by DocAgentUI.phaseTracker -->
-      </div>
-
-      <!-- Current editor file indicator (neutral; hides when analysis files present) -->
-      <div id="wa-subject-bar" style="display:none">
-        <span class="subject-icon" id="wa-subject-icon"></span>
-        <span class="subject-text" id="wa-subject-text"></span>
-        <span class="subject-editor-badge">当前编辑</span>
-      </div>
 
       <!-- Messages -->
       <div id="wa-ai-messages">
@@ -928,31 +931,7 @@
               </svg>
             </div>
             <h2 class="wa-welcome-title">欢迎使用 Koto AI</h2>
-            <p class="wa-welcome-sub">从一个目标开始输入，当前文件、选区和附件会自动并入上下文。</p>
-          </div>
-
-          <div class="wa-scenario-grid">
-            <button class="wa-scenario-card" onclick="WA.useScenario('请先快速读懂当前文件，如果我已经选中了部分内容就优先结合选区，给我一个结构化概览，说明主题、重点和结论')">
-              <div class="scenario-icon" style="color:#f59e0b">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-              </div>
-              <span class="scenario-title">快速读懂当前文件</span>
-              <span class="scenario-desc">先快速建立结构、重点和结论。</span>
-            </button>
-            <button class="wa-scenario-card" onclick="WA.useScenario('请提炼当前文件中的关键信息，整理成结构化要点，并明确结论、风险和待办事项')">
-              <div class="scenario-icon" style="color:#3b82f6">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
-              </div>
-              <span class="scenario-title">提炼重点与待办</span>
-              <span class="scenario-desc">直接得到结论、风险和下一步。</span>
-            </button>
-            <button class="wa-scenario-card" onclick="WA.useScenario('请基于当前文件或已选中的内容进行翻译或改写，保留专业术语，并保持表达自然、结构清晰')">
-              <div class="scenario-icon" style="color:#10b981">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l6 6"/><path d="M4 14l6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="M22 22l-5-10-5 10"/><path d="M14 18h6"/></svg>
-              </div>
-              <span class="scenario-title">翻译或改写内容</span>
-              <span class="scenario-desc">保留术语，同时重写语言表达。</span>
-            </button>
+            <p class="wa-welcome-sub">直接告诉我你想完成什么，我会结合当前文件、明确选中的内容和补充文件继续处理。</p>
           </div>
         </div>
       </div>
@@ -961,7 +940,7 @@
       <div id="wa-ai-file-drop" style="display:none">
         <div class="wa-ai-file-drop-inner">
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-          <span>拖放文件到此处<br>AI 将一起分析</span>
+          <span>拖放补充文件到这里<br>AI 将一起分析</span>
         </div>
       </div>
 
@@ -980,7 +959,7 @@
           <div id="wa-ai-file-chip-list" class="wa-ctx-file-list"></div>
           <div class="wa-ctx-drop-hint">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span>继续拖放文件到此处添加分析</span>
+            <span>继续添加补充文件</span>
           </div>
         </div>
 
@@ -995,26 +974,12 @@
         <!-- Layer 3: Input box -->
         <div class="wa-input-box">
           <div id="wa-input-row">
-            <textarea id="wa-user-input" placeholder="可以直接告诉我你想要的结果。比如：先读完当前文件，列出 3 个结论，再告诉我下一步该怎么改。"
+            <textarea id="wa-user-input" placeholder="可以直接告诉我你想要的结果。比如：基于我选中的内容列出 3 个结论，或结合分析文档告诉我下一步该怎么改。"
                       onkeydown="WA.handleInputKeydown(event)" rows="6"></textarea>
           </div>
           <div class="wa-input-box-footer">
             <div class="wa-footer-meta">
-              <div id="wa-footer-file-chip" style="display:none" class="wa-footer-file-chip-wrap">
-                <span id="wa-footer-file-icon" class="footer-file-icon"></span>
-                <span id="wa-footer-file-label">文件</span>
-              </div>
-              <button id="wa-footer-attach-current-btn" type="button" style="display:none" class="wa-footer-attach-current-btn" onclick="WA.toggleCurrentFileAIContext()">附加到任务</button>
-              <div id="wa-model-mode-toggle" class="wa-model-mode-toggle wa-footer-model-mode-select" role="group" aria-label="AI 模型选择">
-                <button id="wa-model-mode-cloud-btn" type="button" class="wa-model-mode-toggle-btn active" data-model-mode="cloud" onclick="WA.setLockedModel('cloud')" title="云端模型">
-                  <span class="wa-model-mode-main">Gemini</span>
-                  <span id="wa-model-mode-cloud-model" class="wa-model-mode-sub">Gemini 2.5 Flash</span>
-                </button>
-                <button id="wa-model-mode-local-btn" type="button" class="wa-model-mode-toggle-btn" data-model-mode="local" onclick="WA.setLockedModel('local')" title="本地模型">
-                  <span class="wa-model-mode-main">本地</span>
-                  <span id="wa-model-mode-local-model" class="wa-model-mode-sub">未启动</span>
-                </button>
-              </div>
+              {% include '_workspace_model_controls.html' %}
               <!-- Workflow active indicator -->
               <div id="wa-wf-active-indicator" style="display:none" class="wa-wf-active-chip">
                 <span id="wa-wf-active-icon"></span>
@@ -1169,8 +1134,24 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
 
   <!-- ── App JS ── -->
+  <script src="/static/js/workspace-ai-task.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/workspace-ai-transport.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/workspace-ai-results.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/workspace-ai-quick-actions.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/workspace-ai-conversation.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/workspace-task-dispatcher.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/docx-review-geometry.js?v={{ range(100000,999999)|random }}"></script>
+  <!-- KotoReviewRail: WPS-style per-page review rail -->
+  <script src="/static/js/koto-review-rail/geometry.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/koto-review-rail/event-bus.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/koto-review-rail/page-rail-mount.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/koto-review-rail/card.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/koto-review-rail/connector-layer.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/koto-review-rail/rail-controller.js?v={{ range(100000,999999)|random }}"></script>
+  <script src="/static/js/koto-review-rail/index.js?v={{ range(100000,999999)|random }}"></script>
+  <!-- End KotoReviewRail -->
+  <script src="/static/js/docx-review-layout.js?v={{ range(100000,999999)|random }}"></script>
   <script src="/static/js/workspace-assistant.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/doc-agent-ui.js?v={{ range(100000,999999)|random }}"></script>
 
   <!-- ── Open Folder as Workspace overlay ── -->
   <div id="wa-open-folder-overlay" style="display:none" class="wa-dlg-overlay" onclick="if(event.target===this)WA.closeFolderOverlay()">

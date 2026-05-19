@@ -430,6 +430,16 @@ class TestAutoSaveTraversalGuard:
             pytest.skip("docx parse not available")
         return resp.get_json()["file_id"]
 
+    def _upload_text(self, client, name: str = "autosave_test.txt", content: str = "seed") -> str:
+        """Return a valid file_id from a lightweight text upload."""
+        resp = client.post(
+            "/api/v1/workspace/open_file",
+            data={"file": (io.BytesIO(content.encode("utf-8")), name)},
+            content_type="multipart/form-data",
+        )
+        assert resp.status_code == 200, resp.get_json()
+        return resp.get_json()["file_id"]
+
     def test_traversal_ws_path_returns_403_not_500(self, _app_bundle):
         """BUG FIX: traversal in ws_source_path must return 403, not 500."""
         client, _, _ = _app_bundle
@@ -486,6 +496,96 @@ class TestAutoSaveTraversalGuard:
         )
         assert resp.status_code == 200
         assert resp.get_json().get("ok") is True
+
+    def test_text_external_absolute_ws_path_writes_back(self, _app_bundle, tmp_path):
+        """Explicit save must write back to absolute external text paths."""
+        client, _, _ = _app_bundle
+        fid = self._upload_text(client)
+        ext_file = tmp_path / "outside-save.txt"
+        ext_file.write_text("before", encoding="utf-8")
+
+        resp = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "text",
+                "file_id": fid,
+                "ws_source_path": str(ext_file),
+                "explicit": True,
+                "data": "after",
+            },
+        )
+
+        assert resp.status_code == 200, resp.get_json()
+        body = resp.get_json()
+        assert body.get("ok") is True
+        assert body.get("src_written") is True
+        assert ext_file.read_text(encoding="utf-8") == "after"
+
+    def test_text_external_missing_parent_skips_src_write(self, _app_bundle, tmp_path):
+        """Missing external parent should not fail the save, only skip source write."""
+        client, _, _ = _app_bundle
+        fid = self._upload_text(client)
+        missing_parent_path = tmp_path / "missing" / "nested" / "save.txt"
+
+        resp = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "text",
+                "file_id": fid,
+                "ws_source_path": str(missing_parent_path),
+                "explicit": True,
+                "data": "after",
+            },
+        )
+
+        assert resp.status_code == 200, resp.get_json()
+        body = resp.get_json()
+        assert body.get("ok") is True
+        assert body.get("src_written") is False
+        assert not missing_parent_path.exists()
+
+    def test_text_traversal_ws_path_returns_403_not_500(self, _app_bundle):
+        """Traversal guard must also hold for lightweight text saves."""
+        client, _, _ = _app_bundle
+        fid = self._upload_text(client)
+
+        resp = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "text",
+                "file_id": fid,
+                "ws_source_path": "../../evil.txt",
+                "explicit": True,
+                "data": "attack",
+            },
+        )
+
+        assert resp.status_code == 403, resp.get_json()
+        body = resp.get_json() or {}
+        assert body.get("error") == "路径不合法"
+
+    def test_text_valid_relative_ws_path_still_works(self, _app_bundle):
+        """Normal workspace-relative text saves must still write into the workspace."""
+        client, _, workspace_dir = _app_bundle
+        fid = self._upload_text(client)
+        rel_path = f"valid_text_save_{fid[:8]}.txt"
+
+        resp = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "text",
+                "file_id": fid,
+                "ws_source_path": rel_path,
+                "explicit": True,
+                "data": "valid content",
+            },
+        )
+
+        assert resp.status_code == 200, resp.get_json()
+        body = resp.get_json()
+        assert body.get("ok") is True
+        assert body.get("src_written") is True
+        assert (workspace_dir / rel_path).read_text(encoding="utf-8") == "valid content"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

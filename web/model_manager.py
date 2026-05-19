@@ -718,15 +718,23 @@ class ModelManager:
                 return
             collector.append(mid)
 
+        def _coerce_list_response(page: Any) -> List[Any]:
+            if page is None:
+                return []
+            try:
+                return list(page)
+            except TypeError as exc:
+                raise RuntimeError("client.models.list() returned a non-iterable response") from exc
+
         model_ids: List[str] = []
         try:
             # google-genai SDK: client.models.list() 返回 Model 对象的迭代器
             page = self._client.models.list(config={"page_size": 200})
-            for model in page:
+            for model in _coerce_list_response(page):
                 _append_model(model, model_ids)
         except TypeError:
             # 部分 SDK 版本 list() 不接受 config 参数
-            for model in self._client.models.list():
+            for model in _coerce_list_response(self._client.models.list()):
                 _append_model(model, model_ids)
 
         logger.info(f"[ModelManager] API 返回 {len(model_ids)} 个可用模型")

@@ -39,6 +39,23 @@ def _get_output_validator():
     return OutputValidator
 
 
+def _sanitize_user_visible_text(text: str, *, fallback: str) -> str:
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+
+    try:
+        OutputValidator = _get_output_validator()
+        validation = OutputValidator.validate(text=raw)
+        if validation.is_blocked:
+            logger.warning("[UnifiedAgent] user-visible text blocked; using fallback")
+            return fallback
+        return str(validation.text or "").strip() or raw
+    except Exception as exc:
+        logger.debug("[UnifiedAgent] user-visible sanitizer skipped: %s", exc)
+        return raw or fallback
+
+
 def _get_shadow_tracer():
     from app.core.learning.shadow_tracer import ShadowTracer
 
@@ -512,10 +529,14 @@ class UnifiedAgent(Agent):
                 tool_calls = response.get("tool_calls", [])
 
                 if content_text:
-                    yield AgentStep(
-                        step_type=AgentStepType.THOUGHT, content=content_text
+                    safe_thought_text = _sanitize_user_visible_text(
+                        content_text,
+                        fallback="我正在整理答案，请稍等。",
                     )
-                    _pub("THOUGHT", content_text)
+                    yield AgentStep(
+                        step_type=AgentStepType.THOUGHT, content=safe_thought_text
+                    )
+                    _pub("THOUGHT", safe_thought_text)
                     current_history.append({"role": "model", "content": content_text})
 
                 if not tool_calls:
@@ -531,12 +552,16 @@ class UnifiedAgent(Agent):
                             )
                             if val_result.is_blocked:
                                 logger.warning(
-                                    f"[UnifiedAgent] 🚫 输出检测到问题（已忽略拦截）: {val_result.reasons}"
+                                    f"[UnifiedAgent] 🚫 输出检测到问题，已回退为安全文案: {val_result.reasons}"
                                 )
-                                # Disabled — pass through original content instead of blocking
+                                safe_blocked_answer = _sanitize_user_visible_text(
+                                    content_text,
+                                    fallback="抱歉，这段输出包含不应直接展示的内部内容。请换个方式描述你的问题后重试。",
+                                )
+                                # Preserve the warning signal while only emitting safe fallback text.
                                 yield AgentStep(
                                     step_type=AgentStepType.ANSWER,
-                                    content=content_text,
+                                    content=safe_blocked_answer,
                                     metadata={
                                         "validation_action": "WARN",
                                         "reasons": val_result.reasons,

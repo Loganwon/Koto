@@ -9,6 +9,7 @@ Koto 全格式文件解析模块 — Phase 1 BFF 管线核心
 from __future__ import annotations
 
 import base64
+import html
 import io
 import logging
 import math
@@ -507,7 +508,7 @@ def _docx_to_rich_html(
     file_path: str,
     *,
     progressive_preview: bool = False,
-) -> tuple[str, list[dict], dict[str, Any]]:
+) -> tuple[str, list[dict], list[dict], dict[str, Any]]:
     """
     将 DOCX 转换为保留完整 Word 格式的内联样式 HTML。
 
@@ -544,9 +545,17 @@ def _docx_to_rich_html(
         "标题4": "h4", "标题5": "h5", "标题6": "h6",
         # Common alternative Chinese heading names
         "一级标题": "h1", "二级标题": "h2", "三级标题": "h3",
-        "标题": "h1",
         # subheading
         "subheading 1": "h2", "subheading 2": "h3",
+    }
+
+    _VISUAL_TITLE_STYLE_KEYS: set[str] = {
+        "title",
+        "subtitle",
+        "标题",
+        "副标题",
+        "封面标题",
+        "封面副标题",
     }
 
     _HEADING_TYPOGRAPHY_FALLBACKS: dict[str, dict[str, str]] = {
@@ -572,7 +581,12 @@ def _docx_to_rich_html(
         "华文中宋": "STZhongsong", "华文宋体": "STSong",
         "华文黑体": "STHeiti", "华文楷体": "STKaiti",
         "华文仿宋": "STFangsong",
+        "方正书宋": "FZShuSong-Z01", "方正黑体": "FZHei-B01",
     }
+    _CN_FONT_EQUIVALENTS: dict[str, tuple[str, ...]] = {}
+    for _cn_name, _ascii_name in _CN_FONT_MAP_P.items():
+        _CN_FONT_EQUIVALENTS[_cn_name] = (_cn_name, _ascii_name)
+        _CN_FONT_EQUIVALENTS[_ascii_name] = (_cn_name, _ascii_name)
 
     _EMPTY_STYLE_DEFAULTS: dict[str, Any] = {
         "style_name": "",
@@ -581,11 +595,20 @@ def _docx_to_rich_html(
         "space_before": None,
         "space_after": None,
         "line_height": None,
+        "line_spacing_rule": None,
+        "line_spacing_twips": None,
         "font_size": None,
         "font_family": None,
+        "first_line_indent_twips": None,
+        "left_indent_twips": None,
+        "keep_with_next": None,
+        "keep_together": None,
+        "page_break_before": None,
+        "widow_control": None,
     }
-    _para_style_ref_cache: dict[int, Any] = {}
-    _style_defaults_cache: dict[int, dict[str, Any]] = {}
+    _style_defaults_cache: dict[object, dict[str, Any]] = {}
+    _heading_manifest: list[dict[str, Any]] = []
+    _generated_heading_id_counts: dict[str, int] = {}
 
     # ── Helpers ─────────────────────────────────────────────────────────────
     def _twips_to_pt(twips: int | None) -> float | None:
@@ -593,6 +616,11 @@ def _docx_to_rich_html(
         if twips is None:
             return None
         return round(twips / 20, 2)
+
+    def _pt_to_twips(pt_value: float | None) -> int | None:
+        if pt_value is None:
+            return None
+        return int(round(float(pt_value) * 20))
 
     def _emu_to_px(emu: int) -> int:
         """Convert EMU to pixels (96 dpi)."""
@@ -605,6 +633,27 @@ def _docx_to_rich_html(
             return "#{:02X}{:02X}{:02X}".format(int(rgb.red), int(rgb.green), int(rgb.blue))
         except Exception:
             return None
+
+    def _quote_css_font_family(name: str) -> str:
+        _name = str(name or "").strip().strip("'\"")
+        return "'" + _name.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+    def _build_css_font_family_stack(*names: str | None) -> str | None:
+        _tokens: list[str] = []
+        _seen: set[str] = set()
+        for _name in names:
+            _raw = str(_name or "").strip().strip("'\"")
+            if not _raw:
+                continue
+            for _candidate in _CN_FONT_EQUIVALENTS.get(_raw, (_raw,)):
+                _norm = _candidate.lower()
+                if _norm in _seen:
+                    continue
+                _seen.add(_norm)
+                _tokens.append(_candidate)
+        if not _tokens:
+            return None
+        return ",".join(_quote_css_font_family(_token) for _token in _tokens)
 
     def _norm_style_key(val: str | None) -> str:
         """Normalise style key text for robust cross-language matching."""
@@ -633,6 +682,57 @@ def _docx_to_rich_html(
                 if 1 <= _lv <= 6:
                     return f"h{_lv}"
         return None
+
+    def _is_visual_title_style_key(val: str | None) -> bool:
+        """Return True for title-like paragraph styles that are visual, not structural."""
+        _k = _norm_style_key(val)
+        if not _k:
+            return False
+        return _k in _VISUAL_TITLE_STYLE_KEYS
+
+    def _style_chain_has_visual_title(style_ref) -> bool:
+        """Return True when any style in the base-style chain is title-like."""
+        _visited_ids: set[int] = set()
+        _style_iter = style_ref
+        while _style_iter is not None:
+            _eid = id(getattr(_style_iter, "_element", None))
+            if _eid in _visited_ids:
+                break
+            _visited_ids.add(_eid)
+            try:
+                _sname = getattr(_style_iter, "name", "") or ""
+                _sid = getattr(_style_iter, "style_id", "") or ""
+                if _is_visual_title_style_key(_sname) or _is_visual_title_style_key(_sid):
+                    return True
+            except Exception:
+                pass
+            try:
+                _style_iter = _style_iter.base_style
+            except Exception:
+                break
+
+    def _style_chain_has_heading(style_ref) -> bool:
+        """Return True when any style in the base-style chain resolves to a heading."""
+        _visited_ids: set[int] = set()
+        _style_iter = style_ref
+        while _style_iter is not None:
+            _eid = id(getattr(_style_iter, "_element", None))
+            if _eid in _visited_ids:
+                break
+            _visited_ids.add(_eid)
+            try:
+                _sname = getattr(_style_iter, "name", "") or ""
+                _sid = getattr(_style_iter, "style_id", "") or ""
+                if _is_heading_style_key(_sname) or _is_heading_style_key(_sid):
+                    return True
+            except Exception:
+                pass
+            try:
+                _style_iter = _style_iter.base_style
+            except Exception:
+                break
+        return False
+        return False
 
     def _extract_toc_level_from_style(val: str | None) -> str:
         """Extract TOC level from style-like text, defaulting to "1"."""
@@ -698,12 +798,212 @@ def _docx_to_rich_html(
         except Exception:
             return ""
 
+    def _find_bookmark_id(p_el) -> str:
+        """Return the first visible bookmark id attached to a paragraph element."""
+        if p_el is None:
+            return ""
+        try:
+            for _bm in p_el.findall(qn("w:bookmarkStart")):
+                _name = (_bm.get(qn("w:name"), "") or "").strip()
+                if _name and not _name.startswith("_GoBack"):
+                    return _name
+        except Exception:
+            return ""
+        return ""
+
+    def _slugify_heading_anchor(text: str) -> str:
+        """Create a stable HTML id for structural headings without bookmarks."""
+        _slug = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "-", (text or "").strip().lower())
+        _slug = re.sub(r"-{2,}", "-", _slug).strip("-_")
+        return _slug or "heading"
+
+    def _make_generated_heading_anchor(text: str) -> str:
+        """Generate a unique synthetic anchor id for a body heading."""
+        _base = f"koto-heading-{_slugify_heading_anchor(text)}"
+        _count = _generated_heading_id_counts.get(_base, 0)
+        _generated_heading_id_counts[_base] = _count + 1
+        return _base if _count == 0 else f"{_base}-{_count + 1}"
+
+    def _resolve_body_heading_anchor(p_el, tag: str | None, block_role: str) -> str:
+        """Return a stable DOM id for structural headings even when excluded from nav manifest."""
+        if block_role != "structural_heading":
+            return ""
+        if not tag or not re.fullmatch(r"h[1-6]", (tag or "").lower()):
+            return ""
+
+        _text = _p_elem_text_content(p_el)
+        if not _text:
+            return ""
+
+        return _find_bookmark_id(p_el) or _make_generated_heading_anchor(_text)
+
+    def _record_body_heading(p_el, tag: str | None, anchor_id: str | None = None) -> str:
+        """Append a parser-owned body heading manifest entry and return its anchor id."""
+        if not tag or not re.fullmatch(r"h[1-6]", (tag or "").lower()):
+            return ""
+
+        _text = _p_elem_text_content(p_el)
+        if not _text:
+            return ""
+
+        _anchor_id = (anchor_id or "").strip() or _find_bookmark_id(p_el) or _make_generated_heading_anchor(_text)
+        _heading_manifest.append({
+            "level": int(tag[1]),
+            "text": _text,
+            "id": _anchor_id,
+        })
+        return _anchor_id
+
+    def _should_emit_heading_manifest_entry(tag: str | None, block_role: str, p_el=None, style_defaults=None, style_ref=None) -> bool:
+        """Populate the navigation manifest for structural headings with durable title signals."""
+        if block_role != "structural_heading":
+            return False
+        if not tag or not re.fullmatch(r"h[1-6]", str(tag).lower()):
+            return False
+        _style_defaults = style_defaults or {}
+        try:
+            _style_name = _style_defaults.get("style_name") or ""
+        except Exception:
+            _style_name = ""
+        try:
+            _style_id = _style_defaults.get("style_id") or ""
+        except Exception:
+            _style_id = ""
+        if _is_heading_style_key(_style_name) or _is_heading_style_key(_style_id):
+            return True
+        if _style_chain_has_heading(style_ref):
+            return True
+
+        _text = _p_elem_text_content(p_el)
+        return bool(_text and _looks_like_structural_heading_prefix(_text))
+
     def _p_elem_looks_like_toc_line(p_el) -> bool:
         """Heuristic for field-updated TOC lines that only keep visible text."""
         _text = _p_elem_text_content(p_el)
         if not _text or len(_text) > 160:
             return False
-        return re.match(r"^.+?\d{1,4}$", _text) is not None
+        if re.search(r"[。！？；;，,]", _text):
+            return False
+        if re.search(r"(?:\.{2,}|…{2,})\s*\d{1,4}$", _text):
+            return True
+        return re.match(r"^.{1,80}\s+\d{1,4}$", _text) is not None
+
+    def _is_toc_style_key(val: str | None) -> bool:
+        """Return True only for explicit Word/WPS TOC style keys."""
+        _k = _norm_style_key(val)
+        if not _k:
+            return False
+        if _k in {"toc", "tocheading", "tableofcontents", "目录", "目录标题"}:
+            return True
+        if re.fullmatch(r"toc[1-9]", _k):
+            return True
+        if re.fullmatch(r"tableofcontents[1-9]?", _k):
+            return True
+        if re.fullmatch(r"目录[一二三四五六七八九十0-9]?", _k):
+            return True
+        return False
+
+    def _looks_like_structural_heading_prefix(text: str) -> bool:
+        """Best-effort prefix check for numbered or chapter-like headings."""
+        _text = re.sub(r"\s+", "", str(text or ""))
+        if not _text:
+            return False
+        return re.match(
+            r"^(?:"
+            r"第[0-9一二三四五六七八九十百千万零两]+[章节部分篇卷]"
+            r"|[0-9]+(?:\.[0-9]+){0,3}[、.．]?"
+            r"|[一二三四五六七八九十百千万零两]+[、.．]"
+            r"|[(（]?[0-9一二三四五六七八九十百千万零两]+[)）][、.．]?"
+            r")",
+            _text,
+        ) is not None
+
+    def _looks_like_outline_only_body_sentence(text: str) -> bool:
+        """Reject short clause-style prose that only carries outline metadata."""
+        _text = re.sub(r"\s+", "", str(text or ""))
+        if not _text:
+            return False
+        if re.match(r"^(?:19|20)\d{2}年\d{1,2}月\d{1,2}日", _text):
+            return True
+        if re.search(r"(?:\.\.\.|…+)$", _text):
+            return True
+        if re.search(r"[。；;，,]", _text):
+            return not _looks_like_structural_heading_prefix(_text)
+        return False
+
+    def _should_promote_outline_heading(para, p_el, tag: str | None) -> bool:
+        """Reject outlineLvl-only body-like paragraphs from becoming structural headings."""
+        if not tag:
+            return False
+
+        _text = _p_elem_text_content(p_el)
+        if not _text:
+            return False
+
+        _max_len = 90 if tag == "h1" else 60
+        if len(_text) > _max_len:
+            return False
+
+        if _looks_like_outline_only_body_sentence(_text):
+            return False
+
+        try:
+            _first_line_indent = para.paragraph_format.first_line_indent
+            if _first_line_indent is not None and getattr(_first_line_indent, "twips", 0):
+                return False
+        except Exception:
+            pass
+
+        return True
+
+    def _classify_paragraph_block(para, p_el, style_ref=None, style_defaults=None) -> tuple[str, str]:
+        """Classify a body paragraph once into structural heading, visual title, TOC line, or body.
+
+        Returns (html_tag, role), where role is one of:
+        - structural_heading
+        - visual_title
+        - toc_line
+        - body
+
+        This is the parser-owned single source of truth for the heading
+        manifest and emitted heading tags. Callers must not re-canonicalize the
+        result in a second pass.
+        """
+        _sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        _style_defaults = style_defaults if style_defaults is not None else _resolve_style_defaults(_sr)
+
+        try:
+            _style_name = _style_defaults.get("style_name") or ""
+        except Exception:
+            _style_name = ""
+        try:
+            _style_id = _style_defaults.get("style_id") or ""
+        except Exception:
+            _style_id = ""
+
+        _is_toc_para, _ = _detect_toc_info(
+            para=para,
+            p_el=p_el,
+            style_ref=_sr,
+        )
+        if _is_toc_para:
+            return "p", "toc_line"
+
+        if _is_visual_title_style_key(_style_name) or _is_visual_title_style_key(_style_id):
+            return "p", "visual_title"
+
+        _direct_heading_tag = _is_heading_style_key(_style_name) or _is_heading_style_key(_style_id)
+        if _direct_heading_tag:
+            return _direct_heading_tag, "structural_heading"
+
+        if _style_chain_has_visual_title(_sr):
+            return "p", "visual_title"
+
+        _outline_tag, _via_outlinelvl = _detect_outline_level(para, p_el)
+        if _via_outlinelvl and _outline_tag and _should_promote_outline_heading(para, p_el, _outline_tag):
+            return _outline_tag, "structural_heading"
+
+        return "p", "body"
 
     def _line_spacing_to_css(ls, ls_rule) -> str | None:
         from docx.enum.text import WD_LINE_SPACING
@@ -720,7 +1020,13 @@ def _docx_to_rich_html(
             return f"{_FIXED_MULT[ls_rule]}"
         if ls_rule in (WD_LINE_SPACING.MULTIPLE, None):
             try:
-                return f"{round(float(ls), 4)}"
+                mult = round(float(ls), 4)
+                # Browsers visibly overlap wrapped lines when pathological
+                # DOCX multiple spacing values such as 0.25 are preserved
+                # literally. Clamp preview HTML to at least single spacing.
+                if 0 < mult < 1.0:
+                    mult = 1.0
+                return f"{mult}"
             except (TypeError, ValueError):
                 pass
             try:
@@ -733,15 +1039,10 @@ def _docx_to_rich_html(
             return None
 
     def _resolve_para_style_ref(para):
-        _cache_key = id(getattr(para, "_element", para))
-        if _cache_key in _para_style_ref_cache:
-            return _para_style_ref_cache[_cache_key]
         try:
-            _style = para.style if para.style else None
+            return para.style if para.style else None
         except Exception:
-            _style = None
-        _para_style_ref_cache[_cache_key] = _style
-        return _style
+            return None
 
     def _read_on_off_prop(el) -> bool | None:
         """Return OOXML on/off state for elements like <w:b/> or <w:i w:val="0"/>."""
@@ -757,6 +1058,74 @@ def _docx_to_rich_html(
         if _norm in ("0", "false", "off", "no"):
             return False
         return True
+
+    def _parse_int_prop(value) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(str(value).strip())
+        except Exception:
+            return None
+
+    def _read_paragraph_layout_props_from_ppr(p_pr) -> dict[str, Any]:
+        layout = {
+            "space_before_twips": None,
+            "space_after_twips": None,
+            "line_spacing_rule": None,
+            "line_spacing_twips": None,
+            "first_line_indent_twips": None,
+            "left_indent_twips": None,
+            "keep_with_next": None,
+            "keep_together": None,
+            "page_break_before": None,
+            "widow_control": None,
+        }
+        if p_pr is None:
+            return layout
+
+        try:
+            spacing_el = p_pr.find(qn("w:spacing"))
+            if spacing_el is not None:
+                layout["space_before_twips"] = _parse_int_prop(spacing_el.get(qn("w:before")))
+                layout["space_after_twips"] = _parse_int_prop(spacing_el.get(qn("w:after")))
+                layout["line_spacing_twips"] = _parse_int_prop(spacing_el.get(qn("w:line")))
+                line_rule = str(spacing_el.get(qn("w:lineRule")) or "").strip()
+                if line_rule:
+                    layout["line_spacing_rule"] = line_rule
+                elif layout["line_spacing_twips"] is not None:
+                    layout["line_spacing_rule"] = "auto"
+        except Exception:
+            pass
+
+        try:
+            ind_el = p_pr.find(qn("w:ind"))
+            if ind_el is not None:
+                layout["first_line_indent_twips"] = _parse_int_prop(ind_el.get(qn("w:firstLine")))
+                layout["left_indent_twips"] = _parse_int_prop(ind_el.get(qn("w:left")))
+        except Exception:
+            pass
+
+        for tag_name, key in (
+            ("w:keepNext", "keep_with_next"),
+            ("w:keepLines", "keep_together"),
+            ("w:pageBreakBefore", "page_break_before"),
+            ("w:widowControl", "widow_control"),
+        ):
+            try:
+                layout[key] = _read_on_off_prop(p_pr.find(qn(tag_name)))
+            except Exception:
+                pass
+
+        return layout
+
+    def _read_bold_state_from_rpr(rpr_el) -> bool | None:
+        """Read effective bold state from a run-property element, including CJK bCs."""
+        if rpr_el is None:
+            return None
+        _bold_state = _read_on_off_prop(rpr_el.find(qn("w:b")))
+        if _bold_state is None:
+            _bold_state = _read_on_off_prop(rpr_el.find(qn("w:bCs")))
+        return _bold_state
 
     def _read_rpr_font_props(rpr_el) -> dict[str, Any]:
         """Extract default font props from a run-properties XML element."""
@@ -788,18 +1157,16 @@ def _docx_to_rich_html(
                 for _key in ("w:eastAsia", "w:ascii", "w:hAnsi", "w:cs"):
                     _font_name = _rFonts.get(qn(_key), "") or ""
                     if _font_name:
-                        _props["font_family"] = _CN_FONT_MAP_P.get(_font_name, _font_name)
+                        _props["font_family"] = _build_css_font_family_stack(_font_name)
                         break
         except Exception:
             pass
 
         try:
-            _bold_state = _read_on_off_prop(rpr_el.find(qn("w:b")))
-            if _bold_state is None:
-                _bold_state = _read_on_off_prop(rpr_el.find(qn("w:bCs")))
+            _bold_state = _read_bold_state_from_rpr(rpr_el)
             if _bold_state is not None:
                 _props["font_weight_set"] = True
-                _props["font_weight"] = "bold" if _bold_state else None
+                _props["font_weight"] = "bold" if _bold_state else "normal"
         except Exception:
             pass
 
@@ -809,7 +1176,7 @@ def _docx_to_rich_html(
                 _italic_state = _read_on_off_prop(rpr_el.find(qn("w:iCs")))
             if _italic_state is not None:
                 _props["font_style_set"] = True
-                _props["font_style"] = "italic" if _italic_state else None
+                _props["font_style"] = "italic" if _italic_state else "normal"
         except Exception:
             pass
 
@@ -819,7 +1186,20 @@ def _docx_to_rich_html(
         if style_ref is None or not hasattr(style_ref, "_element"):
             return _EMPTY_STYLE_DEFAULTS
 
-        _cache_key = id(style_ref._element)
+        try:
+            _style_id_key = style_ref.style_id or ""
+        except Exception:
+            _style_id_key = ""
+        try:
+            _style_name_key = style_ref.name or ""
+        except Exception:
+            _style_name_key = ""
+
+        if _style_id_key or _style_name_key:
+            _cache_key: object = (_style_id_key, _style_name_key)
+        else:
+            _cache_key = id(style_ref._element)
+
         _cached = _style_defaults_cache.get(_cache_key)
         if _cached is not None:
             return _cached
@@ -842,6 +1222,12 @@ def _docx_to_rich_html(
                 _spf = None
 
             try:
+                _pPr = _style._element.find(qn("w:pPr"))
+            except Exception:
+                _pPr = None
+            _layout_props = _read_paragraph_layout_props_from_ppr(_pPr)
+
+            try:
                 _rPr = _style._element.find(qn("w:rPr"))
             except Exception:
                 _rPr = None
@@ -862,6 +1248,8 @@ def _docx_to_rich_html(
                             _resolved["space_before"] = _twips_to_pt(_val.twips)
                     except Exception:
                         pass
+                    if _resolved["space_before"] is None and _layout_props["space_before_twips"] is not None:
+                        _resolved["space_before"] = _twips_to_pt(_layout_props["space_before_twips"])
                 if _resolved["space_after"] is None:
                     try:
                         _val = _spf.space_after
@@ -869,6 +1257,8 @@ def _docx_to_rich_html(
                             _resolved["space_after"] = _twips_to_pt(_val.twips)
                     except Exception:
                         pass
+                    if _resolved["space_after"] is None and _layout_props["space_after_twips"] is not None:
+                        _resolved["space_after"] = _twips_to_pt(_layout_props["space_after_twips"])
                 if _resolved["line_height"] is None:
                     try:
                         _line_height = _line_spacing_to_css(
@@ -879,6 +1269,23 @@ def _docx_to_rich_html(
                             _resolved["line_height"] = _line_height
                     except Exception:
                         pass
+
+            if _resolved["line_spacing_rule"] is None and _layout_props["line_spacing_rule"] is not None:
+                _resolved["line_spacing_rule"] = _layout_props["line_spacing_rule"]
+            if _resolved["line_spacing_twips"] is None and _layout_props["line_spacing_twips"] is not None:
+                _resolved["line_spacing_twips"] = _layout_props["line_spacing_twips"]
+            if _resolved["first_line_indent_twips"] is None and _layout_props["first_line_indent_twips"] is not None:
+                _resolved["first_line_indent_twips"] = _layout_props["first_line_indent_twips"]
+            if _resolved["left_indent_twips"] is None and _layout_props["left_indent_twips"] is not None:
+                _resolved["left_indent_twips"] = _layout_props["left_indent_twips"]
+            if _resolved["keep_with_next"] is None and _layout_props["keep_with_next"] is not None:
+                _resolved["keep_with_next"] = _layout_props["keep_with_next"]
+            if _resolved["keep_together"] is None and _layout_props["keep_together"] is not None:
+                _resolved["keep_together"] = _layout_props["keep_together"]
+            if _resolved["page_break_before"] is None and _layout_props["page_break_before"] is not None:
+                _resolved["page_break_before"] = _layout_props["page_break_before"]
+            if _resolved["widow_control"] is None and _layout_props["widow_control"] is not None:
+                _resolved["widow_control"] = _layout_props["widow_control"]
 
             if _resolved["font_size"] is None:
                 try:
@@ -897,7 +1304,7 @@ def _docx_to_rich_html(
                     if _resolved["font_family"] is None:
                         _fn = _style.font.name
                         if _fn:
-                            _resolved["font_family"] = _CN_FONT_MAP_P.get(_fn, _fn)
+                            _resolved["font_family"] = _build_css_font_family_stack(_fn)
                 except Exception:
                     pass
 
@@ -931,6 +1338,96 @@ def _docx_to_rich_html(
 
         _style_defaults_cache[_cache_key] = _resolved
         return _resolved
+
+    def _extract_paragraph_layout_semantics(para, style_ref=None) -> dict[str, Any]:
+        style_ref = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        style_defaults = _resolve_style_defaults(style_ref)
+
+        try:
+            p_pr = para._element.find(qn("w:pPr"))
+        except Exception:
+            p_pr = None
+        direct_layout = _read_paragraph_layout_props_from_ppr(p_pr)
+
+        return {
+            "space_before_twips": (
+                direct_layout["space_before_twips"]
+                if direct_layout["space_before_twips"] is not None
+                else _pt_to_twips(style_defaults.get("space_before"))
+            ),
+            "space_after_twips": (
+                direct_layout["space_after_twips"]
+                if direct_layout["space_after_twips"] is not None
+                else _pt_to_twips(style_defaults.get("space_after"))
+            ),
+            "line_spacing_rule": direct_layout["line_spacing_rule"] or style_defaults.get("line_spacing_rule"),
+            "line_spacing_twips": (
+                direct_layout["line_spacing_twips"]
+                if direct_layout["line_spacing_twips"] is not None
+                else style_defaults.get("line_spacing_twips")
+            ),
+            "first_line_indent_twips": (
+                direct_layout["first_line_indent_twips"]
+                if direct_layout["first_line_indent_twips"] is not None
+                else style_defaults.get("first_line_indent_twips")
+            ),
+            "left_indent_twips": (
+                direct_layout["left_indent_twips"]
+                if direct_layout["left_indent_twips"] is not None
+                else style_defaults.get("left_indent_twips")
+            ),
+            "keep_with_next": (
+                direct_layout["keep_with_next"]
+                if direct_layout["keep_with_next"] is not None
+                else style_defaults.get("keep_with_next")
+            ),
+            "keep_together": (
+                direct_layout["keep_together"]
+                if direct_layout["keep_together"] is not None
+                else style_defaults.get("keep_together")
+            ),
+            "page_break_before": (
+                direct_layout["page_break_before"]
+                if direct_layout["page_break_before"] is not None
+                else style_defaults.get("page_break_before")
+            ),
+            "widow_control": (
+                direct_layout["widow_control"]
+                if direct_layout["widow_control"] is not None
+                else style_defaults.get("widow_control")
+            ),
+        }
+
+    def _paragraph_layout_data_attrs(para, style_ref=None) -> dict[str, str]:
+        semantics = _extract_paragraph_layout_semantics(para, style_ref=style_ref)
+        attrs: dict[str, str] = {}
+
+        for key, attr_name in (
+            ("space_before_twips", "data-koto-space-before-twips"),
+            ("space_after_twips", "data-koto-space-after-twips"),
+            ("line_spacing_twips", "data-koto-line-twips"),
+            ("first_line_indent_twips", "data-koto-first-line-indent-twips"),
+            ("left_indent_twips", "data-koto-left-indent-twips"),
+        ):
+            value = semantics.get(key)
+            if value is not None:
+                attrs[attr_name] = str(value)
+
+        line_rule = semantics.get("line_spacing_rule")
+        if line_rule:
+            attrs["data-koto-line-rule"] = str(line_rule)
+
+        for key, attr_name in (
+            ("keep_with_next", "data-koto-keep-next"),
+            ("keep_together", "data-koto-keep-lines"),
+            ("page_break_before", "data-koto-page-break-before"),
+            ("widow_control", "data-koto-widow-control"),
+        ):
+            value = semantics.get(key)
+            if value is not None:
+                attrs[attr_name] = "1" if bool(value) else "0"
+
+        return attrs
 
     def _detect_toc_info(para=None, p_el=None, style_ref=None) -> tuple[bool, str]:
         """Detect whether a paragraph is a TOC entry and return (is_toc, level)."""
@@ -977,19 +1474,16 @@ def _docx_to_rich_html(
         _has_toc_signal = _has_toc_anchor or _has_toc_field or _has_tab or _looks_like_toc_line
 
         for _sv in style_candidates:
-            _sv_norm = _norm_style_key(_sv)
-            if not _sv_norm:
-                continue
-            if "toc" in _sv_norm or "目录" in _sv_norm or "tableofcontents" in _sv_norm:
+            if _is_toc_style_key(_sv):
                 if not _has_toc_signal:
                     continue
                 level = _extract_toc_level_from_style(_sv)
                 return True, level
 
-        # Fallback for custom style names: internal TOC anchor + tab run pattern.
+        # Fallback for custom style names: require real TOC anchors/fields.
         if p_el is not None:
             try:
-                if _has_tab and (_has_toc_anchor or _has_toc_field or _looks_like_toc_line):
+                if _has_tab and (_has_toc_anchor or _has_toc_field):
                     return True, "1"
             except Exception:
                 pass
@@ -1138,7 +1632,26 @@ def _docx_to_rich_html(
             if anchor is not None:
                 return _anchor_img_html(anchor, doc)
 
+        def _note_reference_html() -> str:
+            markers: list[str] = []
+            for tag_name, data_attr in (("w:footnoteReference", "data-koto-footnote-ref"), ("w:endnoteReference", "data-koto-endnote-ref")):
+                for ref_el in run._element.findall(qn(tag_name)):
+                    note_id = str(ref_el.get(qn("w:id")) or "").strip()
+                    if not note_id:
+                        continue
+                    cls_name = "koto-footnote-ref" if "footnote" in tag_name else "koto-endnote-ref"
+                    escaped_id = html.escape(note_id, quote=True)
+                    markers.append(
+                        f'<sup class="{cls_name}" {data_attr}="{escaped_id}">{escaped_id}</sup>'
+                    )
+            return "".join(markers)
+
+        note_ref_html = _note_reference_html()
         text = run.text or ""
+        if not text:
+            deleted_text_nodes = [node.text or "" for node in run._element.findall(qn("w:delText"))]
+            if deleted_text_nodes:
+                text = "".join(deleted_text_nodes)
 
         # Resolve enclosing paragraph element once; needed for robust TOC/tab detection.
         _p_el = run._element.getparent()
@@ -1161,8 +1674,8 @@ def _docx_to_rich_html(
             # In TOC entries, render the tab as a CSS flex-spacer span so
             # the page number sits at the right margin (Word dot-leader effect).
             if _has_tab_elem:
-                return _tab_html
-            return ""
+                return _tab_html + note_ref_html
+            return note_ref_html
 
         def _esc(_t: str) -> str:
             return (_t.replace("&", "&amp;")
@@ -1186,22 +1699,9 @@ def _docx_to_rich_html(
         # Font family
         # python-docx's run.font.name only returns the Latin/ASCII font.
         # East-Asian font names are stored in w:rFonts w:eastAsia and must
-        # be read directly from the XML.  We also map common Chinese font
-        # names to their CSS-equivalent ASCII names where needed.
-        _CN_FONT_MAP: dict[str, str] = {
-            "黑体": "SimHei",
-            "宋体": "SimSun",
-            "楷体": "KaiTi",
-            "仿宋": "FangSong",
-            "微软雅黑": "Microsoft YaHei",
-            "华文中宋": "STZhongsong",
-            "华文宋体": "STSong",
-            "华文黑体": "STHeiti",
-            "华文楷体": "STKaiti",
-            "华文仿宋": "STFangsong",
-            "方正书宋": "FZShuSong-Z01",
-            "方正黑体": "FZHei-B01",
-        }
+        # be read directly from the XML.  Keep both the localized family name
+        # and its ASCII alias in CSS so Chromium can resolve the installed font
+        # more like Word does.
         fn = f.name
         ea_font: str = ""
         try:
@@ -1213,16 +1713,9 @@ def _docx_to_rich_html(
                                _rFonts.get(qn("w:cs"), "") or ""
         except Exception:
             pass
-        # Normalise Chinese names to CSS names
-        fn = _CN_FONT_MAP.get(fn, fn) if fn else fn
-        ea_font = _CN_FONT_MAP.get(ea_font, ea_font) if ea_font else ea_font
-        # Build font-family stack: prefer Latin+EastAsian together
-        if fn and ea_font and fn != ea_font:
-            styles.append(f"font-family:'{fn}','{ea_font}'")
-        elif ea_font:
-            styles.append(f"font-family:'{ea_font}'")
-        elif fn:
-            styles.append(f"font-family:'{fn}'")
+        _font_family_stack = _build_css_font_family_stack(fn, ea_font)
+        if _font_family_stack:
+            styles.append(f"font-family:{_font_family_stack}")
 
         # Font size (Pt object → float pt value)
         # Skip for TOC runs — CSS normalizes sizes per-level to avoid inconsistency
@@ -1254,49 +1747,15 @@ def _docx_to_rich_html(
             except Exception:
                 pass
 
-        # Bold — implement OOXML toggle property semantics to prevent phantom bold.
-        # Rules:
-        #  1) Check both w:b AND w:bCs (required for CJK text in Chinese documents).
-        #  2) When pPr/rPr sets bold, paragraph CSS inherits it.  Any run with an
-        #     explicit <w:b> or <w:bCs> MUST emit font-weight:bold OR font-weight:normal
-        #     to avoid inheriting phantom bold from the paragraph block CSS.
-        #  3) Toggle semantics: run_bold XOR para_ppr_bold gives the net result.
+        # Bold — only explicit run-level bold should style body text here.
+        # <w:pPr><w:rPr> is paragraph-mark formatting, not paragraph text styling,
+        # so projecting it onto the block makes ordinary body paragraphs look bold.
         # Skip bold entirely for TOC runs — CSS normalizes per-level.
         decorations: list[str] = []
         _run_rpr = run._element.find(qn("w:rPr"))
-        if _run_rpr is not None:
-            _b_el = _run_rpr.find(qn("w:b"))
-            if _b_el is None:
-                _b_el = _run_rpr.find(qn("w:bCs"))  # CJK / complex-script bold
-        else:
-            _b_el = None
-        if _b_el is not None and not _is_toc_run:
-            _b_val = (_b_el.get(qn("w:val")) or "1").lower()
-            _run_bold_on = _b_val not in ("0", "false", "off")
-            # Determine paragraph pPr/rPr bold for toggle-base detection.
-            # Check both w:b and w:bCs to mirror the paragraph-level logic.
-            _para_ppr_bold = False
-            if _p_el is not None:
-                _p_pPr = _p_el.find(qn("w:pPr"))
-                if _p_pPr is not None:
-                    _p_rpr2 = _p_pPr.find(qn("w:rPr"))
-                    if _p_rpr2 is not None:
-                        _p_b = _p_rpr2.find(qn("w:b"))
-                        if _p_b is None:
-                            _p_b = _p_rpr2.find(qn("w:bCs"))
-                        if _p_b is not None:
-                            _p_b_val = (_p_b.get(qn("w:val")) or "1").lower()
-                            _para_ppr_bold = _p_b_val not in ("0", "false", "off")
-            # Net bold = OOXML toggle semantics:
-            #   run=on  + pPr=off → bold ON   (run explicitly sets bold)
-            #   run=on  + pPr=on  → bold OFF  (both on = toggle/cancel)
-            #   run=off + pPr=off → bold OFF  (run explicitly clears bold)
-            #   run=off + pPr=on  → bold OFF  (explicit val="0" beats pPr)
-            # NOTE: XOR would wrongly give True for (run=off, pPr=on).
-            # ALWAYS emit an explicit font-weight so the run overrides any
-            # paragraph-level font-weight:bold inherited from the block's CSS.
-            _net_bold = _run_bold_on and not _para_ppr_bold
-            styles.append("font-weight:bold" if _net_bold else "font-weight:normal")
+        _run_bold_state = _read_bold_state_from_rpr(_run_rpr)
+        if _run_bold_state is not None and not _is_toc_run:
+            styles.append("font-weight:bold" if bool(_run_bold_state) else "font-weight:normal")
         if f.italic:
             styles.append("font-style:italic")
         if f.underline and not _is_toc_run:
@@ -1337,13 +1796,191 @@ def _docx_to_rich_html(
             if styles:
                 style_str = ";".join(styles)
                 _styled = [f'<span style="{style_str}">{seg}</span>' if seg else '' for seg in tab_segments]
-                return _tab_html.join(_styled)
-            return _tab_html.join(tab_segments)
+                return _tab_html.join(_styled) + note_ref_html
+            return _tab_html.join(tab_segments) + note_ref_html
 
         if styles:
             style_str = ";".join(styles)
-            return f'<span style="{style_str}">{text}</span>'
-        return text
+            return f'<span style="{style_str}">{text}</span>' + note_ref_html
+        return text + note_ref_html
+
+    def _render_inline_hyperlink_html(hyperlink_el, para, doc, toc_class: str = "") -> str:
+        from docx.text.run import Run
+
+        rId = hyperlink_el.get(qn("r:id"))
+        url = ""
+        if rId:
+            try:
+                url = para.part.relationships[rId].target_ref
+            except Exception:
+                pass
+        if not url:
+            anchor_val = hyperlink_el.get(qn("w:anchor"), "")
+            if anchor_val:
+                url = "#" + anchor_val
+
+        link_inner = ""
+        for r_elem in hyperlink_el.findall(qn("w:r")):
+            link_inner += _run_html(Run(r_elem, para), doc)
+        if not link_inner:
+            return ""
+
+        esc_url = url.replace('"', "&quot;")
+        target_attr = '' if url.startswith('#') else ' target="_blank"'
+        if toc_class:
+            link_style = 'display:flex;align-items:baseline;flex:1;min-width:0;color:#1155CC;'
+        else:
+            link_style = 'color:#1155CC;text-decoration:underline;'
+        return (
+            f'<a href="{esc_url}"{target_attr} '
+            f'style="{link_style}">'
+            f'{link_inner}</a>'
+        )
+
+    def _docx_revision_data_attrs(review_id: str, action: str, author: str = "", date: str = "") -> str:
+        attrs = [
+            ("data-koto-review-id", str(review_id or "").strip()),
+            ("data-koto-review-source", "docx_revision"),
+            ("data-koto-review-action", str(action or "").strip()),
+        ]
+        author_text = str(author or "").strip()
+        date_text = str(date or "").strip()
+        if author_text:
+            attrs.append(("data-koto-review-author", author_text))
+        if date_text:
+            attrs.append(("data-koto-review-date", date_text))
+        return "".join(
+            f' {name}="{html.escape(value, quote=True)}"'
+            for name, value in attrs
+            if value
+        )
+
+    def _render_docx_revision_html(change_el, para, doc, *, action: str, review_id: str, toc_class: str = "", paired_insert_el=None) -> str:
+        deleted_html = _render_inline_children_html(change_el, para, doc, toc_class=toc_class) if change_el is not None else ""
+        inserted_html = _render_inline_children_html(paired_insert_el, para, doc, toc_class=toc_class) if paired_insert_el is not None else ""
+        author_text = str(
+            (paired_insert_el.get(qn("w:author")) if paired_insert_el is not None else "")
+            or (change_el.get(qn("w:author")) if change_el is not None else "")
+            or ""
+        ).strip()
+        date_text = str(
+            (paired_insert_el.get(qn("w:date")) if paired_insert_el is not None else "")
+            or (change_el.get(qn("w:date")) if change_el is not None else "")
+            or ""
+        ).strip()
+        wrapper_attrs = _docx_revision_data_attrs(review_id, action, author_text, date_text)
+        if action == "replace":
+            if not deleted_html and not inserted_html:
+                return ""
+            return (
+                f'<span class="koto-docx-track-change koto-docx-track-change-replace"{wrapper_attrs}>'
+                f'<span class="koto-docx-track-change-delete">{deleted_html}</span>'
+                f'<span class="koto-docx-track-change-insert">{inserted_html}</span>'
+                '</span>'
+            )
+        if action == "delete":
+            if not deleted_html:
+                return ""
+            return (
+                f'<span class="koto-docx-track-change koto-docx-track-change-delete-only"{wrapper_attrs}>'
+                f'<span class="koto-docx-track-change-delete">{deleted_html}</span>'
+                '</span>'
+            )
+        if not inserted_html:
+            return ""
+        return (
+            f'<span class="koto-docx-track-change koto-docx-track-change-insert-only"{wrapper_attrs}>'
+            f'<span class="koto-docx-track-change-insert">{inserted_html}</span>'
+            '</span>'
+        )
+
+    def _render_inline_children_html(container_el, para, doc, toc_class: str = "") -> str:
+        from docx.text.run import Run
+
+        parts: list[str] = []
+        children = list(container_el)
+        index = 0
+        skip_tags = {
+            "bookmarkStart",
+            "bookmarkEnd",
+            "proofErr",
+            "permStart",
+            "permEnd",
+            "commentRangeStart",
+            "commentRangeEnd",
+        }
+
+        while index < len(children):
+            child = children[index]
+            tag_name = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+
+            if tag_name == "hyperlink":
+                parts.append(_render_inline_hyperlink_html(child, para, doc, toc_class=toc_class))
+                index += 1
+                continue
+
+            if tag_name == "r":
+                parts.append(_run_html(Run(child, para), doc))
+                index += 1
+                continue
+
+            if tag_name == "del":
+                change_id = child.get(qn("w:id"), "") or f"inline-del-{index}"
+                next_index = index + 1
+                while next_index < len(children):
+                    next_tag = children[next_index].tag.split("}")[-1] if "}" in children[next_index].tag else children[next_index].tag
+                    if next_tag in skip_tags:
+                        next_index += 1
+                        continue
+                    break
+                if next_index < len(children):
+                    next_child = children[next_index]
+                    next_tag = next_child.tag.split("}")[-1] if "}" in next_child.tag else next_child.tag
+                    if next_tag == "ins":
+                        parts.append(
+                            _render_docx_revision_html(
+                                child,
+                                para,
+                                doc,
+                                action="replace",
+                                review_id=f"docx-revision-{change_id}",
+                                toc_class=toc_class,
+                                paired_insert_el=next_child,
+                            )
+                        )
+                        index = next_index + 1
+                        continue
+                parts.append(
+                    _render_docx_revision_html(
+                        child,
+                        para,
+                        doc,
+                        action="delete",
+                        review_id=f"docx-revision-{change_id}",
+                        toc_class=toc_class,
+                    )
+                )
+                index += 1
+                continue
+
+            if tag_name == "ins":
+                change_id = child.get(qn("w:id"), "") or f"inline-ins-{index}"
+                parts.append(
+                    _render_docx_revision_html(
+                        child,
+                        para,
+                        doc,
+                        action="insert",
+                        review_id=f"docx-revision-{change_id}",
+                        toc_class=toc_class,
+                    )
+                )
+                index += 1
+                continue
+
+            index += 1
+
+        return "".join(parts)
 
     def _para_style(para, style_ref=None) -> dict[str, str]:
         """Extract paragraph CSS properties as a dict."""
@@ -1435,39 +2072,59 @@ def _docx_to_rich_html(
         # ── Font-family from paragraph style chain ────────────────────
         _ff = _para_rpr_props.get("font_family") or _style_defaults.get("font_family")
         if _ff:
-            css["font-family"] = f"'{_ff}'"
+            css["font-family"] = _ff
 
-        if _para_rpr_props.get("font_weight_set"):
-            _fw = _para_rpr_props.get("font_weight")
-        else:
-            # Only apply bold from the paragraph's *direct* named style, not from
-            # ancestor styles.  Walking the full inheritance chain causes all body
-            # paragraphs to appear bold when a base style (Normal / 正文) has
-            # w:b set — a common mishap in WPS / Word document templates.
-            _fw = None
-            _direct_sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
-            if _direct_sr is not None:
+        # Treat paragraph-mark bold asymmetrically:
+        # - explicit normal cancels inherited paragraph style bold
+        # - explicit bold does not force the whole paragraph bold on import
+        # This avoids widespread phantom bold in body/table paragraphs while
+        # still honoring explicit unbold overrides from OOXML.
+        _fw = None
+        if _para_rpr_props.get("font_weight_set") and _para_rpr_props.get("font_weight") == "normal":
+            _fw = "normal"
+        _direct_sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        if _fw is None and _direct_sr is not None:
+            _direct_rpr_props = _read_rpr_font_props(None)
+            try:
+                if hasattr(_direct_sr, "_element"):
+                    _direct_rpr_props = _read_rpr_font_props(_direct_sr._element.find(qn("w:rPr")))
+            except Exception:
+                _direct_rpr_props = _read_rpr_font_props(None)
+            if _direct_rpr_props.get("font_weight_set"):
+                _fw = _direct_rpr_props.get("font_weight")
+            if _fw is None:
                 try:
-                    if _direct_sr.font.bold is True:
+                    _direct_bold = _direct_sr.font.bold
+                    if _direct_bold is True:
                         _fw = "bold"
+                    elif _direct_bold is False:
+                        _fw = "normal"
                 except Exception:
                     pass
+
         if _fw:
             css["font-weight"] = _fw
 
-        if _para_rpr_props.get("font_style_set"):
-            _fi = _para_rpr_props.get("font_style")
-        else:
-            # Only apply italic from the paragraph's *direct* named style, not from
-            # ancestor styles.  Walking the full inheritance chain causes phantom
-            # italic when a base style (Normal / 正文) has w:i set — same issue
-            # that was already fixed for bold above.
-            _fi = None
-            _direct_sr_fi = style_ref if style_ref is not None else _resolve_para_style_ref(para)
-            if _direct_sr_fi is not None:
+        _fi = None
+        if _para_rpr_props.get("font_style_set") and _para_rpr_props.get("font_style") == "normal":
+            _fi = "normal"
+        _direct_sr_fi = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        if _fi is None and _direct_sr_fi is not None:
+            _direct_rpr_props = _read_rpr_font_props(None)
+            try:
+                if hasattr(_direct_sr_fi, "_element"):
+                    _direct_rpr_props = _read_rpr_font_props(_direct_sr_fi._element.find(qn("w:rPr")))
+            except Exception:
+                _direct_rpr_props = _read_rpr_font_props(None)
+            if _direct_rpr_props.get("font_style_set"):
+                _fi = _direct_rpr_props.get("font_style")
+            if _fi is None:
                 try:
-                    if _direct_sr_fi.font.italic is True:
+                    _direct_italic = _direct_sr_fi.font.italic
+                    if _direct_italic is True:
                         _fi = "italic"
+                    elif _direct_italic is False:
+                        _fi = "normal"
                 except Exception:
                     pass
         if _fi:
@@ -1495,18 +2152,22 @@ def _docx_to_rich_html(
 
         return css
 
-    def _para_html(para, doc, tag: str = "p", style_ref=None) -> str:
+    def _para_html(
+        para,
+        doc,
+        tag: str = "p",
+        style_ref=None,
+        anchor_id: str | None = None,
+        extra_class: str | None = None,
+        extra_role: str | None = None,
+    ) -> str:
         """Render a paragraph to an HTML block element."""
         style_ref = style_ref if style_ref is not None else _resolve_para_style_ref(para)
         css = _para_style(para, style_ref=style_ref)
+        layout_attrs = _paragraph_layout_data_attrs(para, style_ref=style_ref)
 
         # ── Scan for bookmark IDs (used as TOC link targets) ─────────
-        bm_id = None
-        for _bm in para._element.findall(qn("w:bookmarkStart")):
-            _name = _bm.get(qn("w:name"), "")
-            if _name and not _name.startswith("_GoBack"):
-                bm_id = _name
-                break
+        bm_id = (anchor_id or _find_bookmark_id(para._element) or "").strip() or None
 
         # ── Detect TOC style → CSS class for front-end styling ───────
         toc_class = ""
@@ -1518,52 +2179,7 @@ def _docx_to_rich_html(
         if _is_toc:
             toc_class = f"koto-toc-{_toc_level}"
 
-        # Collect run HTML
-        inner_parts: list[str] = []
-
-        # Iterate XML children to handle hyperlinks inline
-        for child in para._element:
-            tag_name = child.tag.split("}")[-1] if "}" in child.tag else child.tag
-            if tag_name == "hyperlink":
-                # Extract URL
-                rId = child.get(qn("r:id"))
-                url = ""
-                if rId:
-                    try:
-                        url = para.part.relationships[rId].target_ref
-                    except Exception:
-                        pass
-                if not url:
-                    # w:anchor hyperlink
-                    anchor_val = child.get(qn("w:anchor"), "")
-                    if anchor_val:
-                        url = "#" + anchor_val
-                link_inner = ""
-                from docx.text.run import Run
-                for r_elem in child.findall(qn("w:r")):
-                    run_obj = Run(r_elem, para)
-                    link_inner += _run_html(run_obj, doc)
-                if link_inner:
-                    esc_url = url.replace('"', "&quot;")
-                    # Internal links (#anchor) stay in the editor; external get _blank
-                    target_attr = '' if url.startswith('#') else ' target="_blank"'
-                    if toc_class:
-                        # TOC links need their own flex layout so koto-toc-tab spacer
-                        # stretches between the entry text and the right-aligned page number.
-                        link_style = 'display:flex;align-items:baseline;flex:1;min-width:0;color:#1155CC;'
-                    else:
-                        link_style = 'color:#1155CC;text-decoration:underline;'
-                    inner_parts.append(
-                        f'<a href="{esc_url}"{target_attr} '
-                        f'style="{link_style}">'
-                        f'{link_inner}</a>'
-                    )
-            elif tag_name == "r":
-                from docx.text.run import Run
-                run_obj = Run(child, para)
-                inner_parts.append(_run_html(run_obj, doc))
-
-        inner = "".join(inner_parts)
+        inner = _render_inline_children_html(para._element, para, doc, toc_class=toc_class)
         if not inner.strip():
             inner = "<br/>"
 
@@ -1582,8 +2198,20 @@ def _docx_to_rich_html(
             style_str = "display:flex;align-items:baseline;" + ";".join(f"{k}:{v}" for k, v in toc_parts)
         style_attr = f' style="{style_str}"' if style_str else ""
         id_attr = f' id="{bm_id}"' if bm_id else ""
-        class_attr = f' class="{toc_class}"' if toc_class else ""
-        return f"<{tag}{id_attr}{class_attr}{style_attr}>{inner}</{tag}>"
+        role_attr = f' data-koto-role="{extra_role}"' if extra_role else ""
+        layout_attr = "".join(
+            f' {attr_name}="{html.escape(str(attr_value), quote=True)}"'
+            for attr_name, attr_value in layout_attrs.items()
+        )
+        _class_tokens: list[str] = []
+        if toc_class:
+            _class_tokens.extend(tok for tok in toc_class.split() if tok)
+        if extra_class:
+            _class_tokens.extend(tok for tok in str(extra_class).split() if tok)
+        if _class_tokens:
+            _class_tokens = list(dict.fromkeys(_class_tokens))
+        class_attr = f' class="{" ".join(_class_tokens)}"' if _class_tokens else ""
+        return f"<{tag}{id_attr}{class_attr}{role_attr}{layout_attr}{style_attr}>{inner}</{tag}>"
 
     def _table_has_visible_borders(tbl_elem) -> bool:
         """Check if a table has any non-nil visible border in w:tblBorders or its table style."""
@@ -1784,7 +2412,11 @@ def _docx_to_rich_html(
             if row_h and row_h_rule == "exact":
                 try:
                     h_pt = _twips_to_pt(int(row_h))
-                    row_style = f' style="height:{h_pt}pt"'
+                    # Browser table layout handles Word's exact row heights poorly:
+                    # once imported widths/fonts differ slightly, fixed <tr> heights
+                    # make cell text overflow into adjacent rows. Keep the metadata for
+                    # future export/debugging, but let the browser size the row naturally.
+                    row_style = f' data-koto-row-height="{h_pt}pt"'
                 except Exception:
                     pass
 
@@ -2203,16 +2835,12 @@ def _docx_to_rich_html(
             return ""
 
     def _detect_outline_level(para, p_el, style_ref=None) -> tuple[str | None, bool]:
-        """Detect heading level from w:outlineLvl in paragraph or its style chain.
+        """Detect heading level only from paragraph-level w:outlineLvl metadata.
 
-        Word uses outlineLvl (0-based) as the authoritative heading level.
-        Many Chinese documents (especially WPS) set outlineLvl on custom
-        styles rather than using the standard "Heading 1" style names.
-
-        Returns (tag, via_outlinelvl) where tag is "h1"-"h6" or None, and
-        via_outlinelvl is True when detected via paragraph-level outlineLvl
-        (caller applies a length guard for h2-h6) vs False for style-chain
-        detection (no additional length guard needed).
+        Direct heading styles are handled separately by `_classify_paragraph_block`.
+        Returning `via_outlinelvl=True` means callers must still validate that the
+        paragraph is short-form structural content rather than body prose that only
+        carries outline metadata.
         """
         # 1) Check paragraph-level pPr/outlineLvl (most authoritative).
         #    Word writes this on each heading paragraph.  We trust it directly;
@@ -2231,33 +2859,6 @@ def _docx_to_rich_html(
                             return f"h{lvl + 1}", True  # True = caller applies length guard
         except Exception:
             pass
-
-        # 2) Style-based fallback: walk the basedOn chain to find a recognised
-        #    heading style ancestor.  This is the Word-native approach:
-        #    a paragraph is a structural heading only if its style (or one of its
-        #    base styles) is a named heading style ("Heading N" / "标题N", etc.).
-        #    We do NOT trust outlineLvl written on arbitrary body-text styles,
-        #    which WPS inserts for its own navigation-pane purposes.
-        _sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
-        _visited_ids: set[int] = set()
-        _style_iter = _sr
-        while _style_iter is not None:
-            _eid = id(getattr(_style_iter, "_element", None))
-            if _eid in _visited_ids:
-                break
-            _visited_ids.add(_eid)
-            try:
-                _sname = getattr(_style_iter, "name", "") or ""
-                _sid2  = getattr(_style_iter, "style_id", "") or ""
-                _h = _is_heading_style_key(_sname) or _is_heading_style_key(_sid2)
-                if _h:
-                    return _h, False  # Style-chain match — no additional length guard
-            except Exception:
-                pass
-            try:
-                _style_iter = _style_iter.base_style
-            except Exception:
-                break
         return None, False
 
     # ── List tracking ────────────────────────────────────────────────────────
@@ -2338,6 +2939,7 @@ def _docx_to_rich_html(
 
     stop_render = False
     body_elem = doc.element.body
+    current_section_idx = 0
     for child_elem in body_elem:
         if stop_render:
             break
@@ -2401,32 +3003,7 @@ def _docx_to_rich_html(
                     current_list_tag = list_tag
 
                 # Render list item content (without block tag wrapper)
-                inner_parts: list[str] = []
-                for lc in child_elem:
-                    lt = lc.tag.split("}")[-1] if "}" in lc.tag else lc.tag
-                    if lt == "hyperlink":
-                        rId = lc.get(qn("r:id"))
-                        url = ""
-                        if rId:
-                            try:
-                                url = para.part.relationships[rId].target_ref
-                            except Exception:
-                                pass
-                        link_inner = ""
-                        for r_el in lc.findall(qn("w:r")):
-                            from docx.text.run import Run
-                            link_inner += _run_html(Run(r_el, para), doc)
-                        if link_inner:
-                            esc_url = url.replace('"', "&quot;")
-                            inner_parts.append(
-                                f'<a href="{esc_url}" target="_blank" '
-                                f'style="color:#1155CC;text-decoration:underline;">'
-                                f'{link_inner}</a>'
-                            )
-                    elif lt == "r":
-                        from docx.text.run import Run
-                        inner_parts.append(_run_html(Run(lc, para), doc))
-                current_list_items.append("".join(inner_parts) or "&nbsp;")
+                current_list_items.append(_render_inline_children_html(child_elem, para, doc) or "&nbsp;")
                 continue
 
             # Not a list item — flush pending list
@@ -2463,49 +3040,12 @@ def _docx_to_rich_html(
             except Exception:
                 pass
 
-            # Determine tag (heading vs paragraph)
-            block_tag = "p"
-            _is_toc_para, _ = _detect_toc_info(
-                para=para,
-                p_el=child_elem,
+            block_tag, block_role = _classify_paragraph_block(
+                para,
+                child_elem,
                 style_ref=style_ref,
+                style_defaults=style_defaults,
             )
-            try:
-                _style_name = style_defaults.get("style_name") or ""
-            except Exception:
-                _style_name = ""
-            try:
-                _style_id = style_defaults.get("style_id") or ""
-            except Exception:
-                _style_id = ""
-            _h_tag = None if _is_toc_para else (
-                _is_heading_style_key(_style_name) or _is_heading_style_key(_style_id)
-            )
-
-            # Fallback: check w:outlineLvl in paragraph properties (and
-            # inherited style chain).  Word uses outlineLvl as the
-            # authoritative heading level for the navigation pane, even
-            # when the style name is non-standard (e.g. WPS documents).
-            _via_outlinelvl = False
-            if not _is_toc_para and not _h_tag:
-                _h_tag, _via_outlinelvl = _detect_outline_level(para, child_elem, style_ref=style_ref)
-
-            if _h_tag and not _p_elem_text_content(child_elem):
-                _h_tag = None
-
-            # Guard: h2–h6 detected via paragraph-level outlineLvl whose text
-            # exceeds 60 chars are likely body text that WPS/Word tagged for
-            # nav-pane purposes, not structural headings.  h1 is exempt.
-            # Style-name matches and basedOn-chain matches are always trusted.
-            if _via_outlinelvl and _h_tag and _h_tag != "h1":
-                try:
-                    if len((para.text or "").strip()) > 60:
-                        _h_tag = None
-                except Exception:
-                    pass
-
-            if _h_tag:
-                block_tag = _h_tag
 
             _para_units = _estimate_paragraph_units(para)
             if _would_exceed_preview(_para_units):
@@ -2513,7 +3053,20 @@ def _docx_to_rich_html(
                 stop_render = True
                 break
 
-            body_parts.append(_para_html(para, doc, block_tag, style_ref=style_ref))
+            heading_anchor_id = _resolve_body_heading_anchor(child_elem, block_tag, block_role)
+            if _should_emit_heading_manifest_entry(block_tag, block_role, child_elem, style_defaults, style_ref):
+                heading_anchor_id = _record_body_heading(child_elem, block_tag, anchor_id=heading_anchor_id)
+            body_parts.append(
+                _para_html(
+                    para,
+                    doc,
+                    block_tag,
+                    style_ref=style_ref,
+                    anchor_id=heading_anchor_id,
+                    extra_class="koto-visual-title" if block_role == "visual_title" else None,
+                    extra_role=None if block_role == "body" else block_role,
+                )
+            )
             _record_preview_units(_para_units)
 
             # Emit page-break marker (hard break or section break).
@@ -2522,10 +3075,17 @@ def _docx_to_rich_html(
                     preview_truncated = True
                     stop_render = True
                     break
-                body_parts.append('<div data-page-break="true" '
-                                  'class="koto-page-break" '
-                                  'contenteditable="false"></div>')
+                next_section_idx = current_section_idx + 1 if _has_section_pb else current_section_idx
+                body_parts.append(
+                    '<div data-page-break="true" '
+                    f'data-section-idx="{next_section_idx}" '
+                    f'data-current-section-idx="{current_section_idx}" '
+                    f'data-next-section-idx="{next_section_idx}" '
+                    'class="koto-page-break" '
+                    'contenteditable="false"></div>'
+                )
                 _record_preview_units(1)
+                current_section_idx = next_section_idx
 
         elif tag_local == "tbl":
             if not _flush_list():
@@ -2580,43 +3140,31 @@ def _docx_to_rich_html(
                         para = Paragraph(sdt_child, doc)
                         style_ref = _resolve_para_style_ref(para)
                         style_defaults = _resolve_style_defaults(style_ref)
-                        # Use heading tag if the style declares it
-                        _btag = "p"
-                        _is_toc_para, _ = _detect_toc_info(
-                            para=para,
-                            p_el=sdt_child,
+                        _btag, _block_role = _classify_paragraph_block(
+                            para,
+                            sdt_child,
                             style_ref=style_ref,
+                            style_defaults=style_defaults,
                         )
-                        try:
-                            _style_name = style_defaults.get("style_name") or ""
-                        except Exception:
-                            _style_name = ""
-                        try:
-                            _style_id = style_defaults.get("style_id") or ""
-                        except Exception:
-                            _style_id = ""
-                        _h_tag = None if _is_toc_para else (
-                            _is_heading_style_key(_style_name) or _is_heading_style_key(_style_id)
-                        )
-                        _via_outlinelvl_sdt = False
-                        if not _is_toc_para and not _h_tag:
-                            _h_tag, _via_outlinelvl_sdt = _detect_outline_level(para, sdt_child, style_ref=style_ref)
-                        if _h_tag and not _p_elem_text_content(sdt_child):
-                            _h_tag = None
-                        if _via_outlinelvl_sdt and _h_tag and _h_tag != "h1":
-                            try:
-                                if len((para.text or "").strip()) > 60:
-                                    _h_tag = None
-                            except Exception:
-                                pass
-                        if _h_tag:
-                            _btag = _h_tag
                         _para_units = _estimate_paragraph_units(para)
                         if _would_exceed_preview(_para_units):
                             preview_truncated = True
                             stop_render = True
                             break
-                        body_parts.append(_para_html(para, doc, _btag, style_ref=style_ref))
+                        heading_anchor_id = _resolve_body_heading_anchor(sdt_child, _btag, _block_role)
+                        if _should_emit_heading_manifest_entry(_btag, _block_role, sdt_child, style_defaults, style_ref):
+                            heading_anchor_id = _record_body_heading(sdt_child, _btag, anchor_id=heading_anchor_id)
+                        body_parts.append(
+                            _para_html(
+                                para,
+                                doc,
+                                _btag,
+                                style_ref=style_ref,
+                                anchor_id=heading_anchor_id,
+                                extra_class="koto-visual-title" if _block_role == "visual_title" else None,
+                                extra_role=None if _block_role == "body" else _block_role,
+                            )
+                        )
                         _record_preview_units(_para_units)
                     elif sdt_tag == "tbl":
                         _table_units = _estimate_table_units(sdt_child)
@@ -2661,6 +3209,43 @@ def _docx_to_rich_html(
     sections_data: list[dict] = []
     try:
         _emu_px = lambda e: round(e / 914400 * 96) if e else 0
+        _twips_px = lambda t: round((t / 20.0) / 72.0 * 96.0, 2) if t else 0
+
+        def _parse_int_attr(value) -> int:
+            try:
+                return int(value)
+            except Exception:
+                return 0
+
+        def _extract_section_doc_grid(section) -> dict[str, Any]:
+            grid_info = {
+                "enabled": False,
+                "type": "",
+                "line_pitch_twips": 0,
+                "line_pitch_px": 0,
+                "char_space": 0,
+            }
+            try:
+                sect_pr = getattr(section, "_sectPr", None)
+                if sect_pr is None:
+                    return grid_info
+                doc_grid = sect_pr.find(qn("w:docGrid"))
+                if doc_grid is None:
+                    return grid_info
+
+                line_pitch = _parse_int_attr(doc_grid.get(qn("w:linePitch")))
+                char_space = _parse_int_attr(doc_grid.get(qn("w:charSpace")))
+                grid_info.update({
+                    "enabled": True,
+                    "type": str(doc_grid.get(qn("w:type")) or ""),
+                    "line_pitch_twips": line_pitch,
+                    "line_pitch_px": _twips_px(line_pitch),
+                    "char_space": char_space,
+                })
+            except Exception:
+                return grid_info
+            return grid_info
+
         for sec in doc.sections:
             sec_info: dict = {
                 "page_width_px":  _emu_px(sec.page_width),
@@ -2669,6 +3254,7 @@ def _docx_to_rich_html(
                 "margin_bottom_px": _emu_px(sec.bottom_margin),
                 "margin_left_px": _emu_px(sec.left_margin),
                 "margin_right_px": _emu_px(sec.right_margin),
+                "doc_grid": _extract_section_doc_grid(sec),
             }
             # Default header / footer
             try:
@@ -2706,7 +3292,7 @@ def _docx_to_rich_html(
         "pending": bool(progressive_preview and preview_truncated),
         "target_pages": _DOCX_PREVIEW_TARGET_PAGES if progressive_preview else None,
     }
-    return "\n".join(body_parts), sections_data, preview_meta
+    return "\n".join(body_parts), sections_data, _heading_manifest, preview_meta
 
 
 def _extract_images_from_paragraphs(html: str) -> str:
@@ -2719,82 +3305,226 @@ def _extract_images_from_paragraphs(html: str) -> str:
     - 若段落只包含一个 <img>（忽略空白），则整个 <p>...</p> 替换为裸 <img>。
     - 若段落混合了文字和图片，则将 <img> 提取出来放在段落之后。
     """
-    import re as _re
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return html
 
-    # <img ... > or <img ... /> — both have no '>' inside attributes
-    _IMG = r'<img[^>]*>'
-
-    # Match any <p> that contains at least one <img> anywhere inside.
-    # Group 1 = p opening-tag attributes, Group 2 = full inner content.
-    any_p_with_img = _re.compile(
-        r'<p([^>]*)>((?:(?!</p>).)*' + _IMG + r'(?:(?!</p>).)*)</p>',
-        _re.IGNORECASE | _re.DOTALL,
-    )
-
-    def _process(m: '_re.Match') -> str:
-        p_attrs = m.group(1)
-        p_inner = m.group(2)
-        imgs = _re.findall(_IMG, p_inner, _re.IGNORECASE | _re.DOTALL)
-        clean_inner = _re.sub(_IMG, '', p_inner, flags=_re.IGNORECASE | _re.DOTALL).strip()
-        result = (f'<p{p_attrs}>{clean_inner}</p>' if clean_inner else '') + ''.join(imgs)
-        return result
-
-    return any_p_with_img.sub(_process, html)
-
-
-def _extract_headings_from_html(html: str) -> list[dict]:
-    """Extract a flat list of headings from the rendered HTML for the outline panel.
-
-    First tries <h1>–<h6> tags. If none are found, falls back to extracting
-    headings from TOC entries (koto-toc-N paragraphs with anchor links), which
-    is reliable for Chinese documents that use custom style names.
-
-    Returns a list like [{"level": 1, "text": "Title", "id": "anchorId"}, ...].
-    """
-    import re as _re
-    headings: list[dict] = []
-    _id_re = _re.compile(r'id="([^"]*)"', _re.IGNORECASE)
-    _href_re = _re.compile(r'href="#([^"]*)"', _re.IGNORECASE)
-    _strip_tags = _re.compile(r'<[^>]+>')
-    _strip_toc_tab = _re.compile(r'<span[^>]*class="koto-toc-tab"[^>]*>.*?</span>', _re.IGNORECASE | _re.DOTALL)
-
-    # Primary: look for <h1>-<h6>
-    _heading_re = _re.compile(
-        r'<(h[1-6])([^>]*)>(.*?)</\1>',
-        _re.IGNORECASE | _re.DOTALL,
-    )
-    for m in _heading_re.finditer(html):
-        level = int(m.group(1)[1])
-        attrs = m.group(2)
-        inner_html = m.group(3)
-        id_m = _id_re.search(attrs)
-        hid = id_m.group(1) if id_m else ""
-        text = _strip_tags.sub('', inner_html).strip()
-        if text:
-            headings.append({"level": level, "text": text, "id": hid})
-
-    # Fallback: extract headings from TOC entries (koto-toc-N paragraphs)
-    # These are reliable for Chinese documents using custom role styles.
-    if not headings:
-        _toc_re = _re.compile(
-            r'<p[^>]*class="koto-toc-(\d+)"[^>]*>(.*?)</p>',
-            _re.IGNORECASE | _re.DOTALL,
-        )
-        for m in _toc_re.finditer(html):
-            level = int(m.group(1))
-            inner = m.group(2)
-            # Extract anchor ID from href="#..." in the inner hyperlink
-            href_m = _href_re.search(inner)
-            hid = href_m.group(1) if href_m else ""
-            # Remove the koto-toc-tab spacer span before stripping tags
-            inner = _strip_toc_tab.sub('', inner)
-            text = _strip_tags.sub('', inner).strip()
-            # Remove trailing page number (digits at end, optionally with leading whitespace)
-            text = _re.sub(r'\s*\d+\s*$', '', text).strip()
+    def _has_visible_paragraph_content(tag) -> bool:
+        for child in tag.children:
+            if getattr(child, "name", None) == "img":
+                continue
+            if getattr(child, "name", None) == "br":
+                continue
+            text = str(child).strip()
             if text:
-                headings.append({"level": level, "text": text, "id": hid})
+                return True
+        return False
 
-    return headings
+    soup = BeautifulSoup(html, "html.parser")
+    changed = False
+
+    def _extract_paragraph_images(p_tag, *, wrap_in_paragraph: bool) -> None:
+        nonlocal changed
+        imgs = list(p_tag.find_all("img"))
+        if not imgs:
+            return
+
+        insert_after = p_tag
+        for img in imgs:
+            extracted_img = img.extract()
+            if wrap_in_paragraph:
+                extracted_img["data-koto-layout"] = extracted_img.get("data-koto-layout") or "top-bottom"
+                img_row = soup.new_tag("p")
+                img_row["class"] = "koto-docx-image-row"
+                img_row.append(extracted_img)
+                insert_after.insert_after(img_row)
+                insert_after = img_row
+            else:
+                insert_after.insert_after(extracted_img)
+                insert_after = extracted_img
+            changed = True
+
+        if not _has_visible_paragraph_content(p_tag):
+            p_tag.decompose()
+
+    for p_tag in list(soup.find_all("p")):
+        if "koto-docx-image-row" in (p_tag.get("class") or []):
+            continue
+        if getattr(p_tag.parent, "name", "") in ("td", "th"):
+            continue
+        imgs = list(p_tag.find_all("img"))
+        if not imgs:
+            continue
+        _extract_paragraph_images(p_tag, wrap_in_paragraph=False)
+
+    return str(soup) if changed else html
+
+
+def _xml_local_name(tag: Any) -> str:
+    text = str(tag or "")
+    return text.split("}", 1)[-1] if "}" in text else text
+
+
+def _xml_attr_by_local_name(el: Any, attr_name: str) -> str:
+    if el is None:
+        return ""
+    target = str(attr_name or "").strip()
+    if not target:
+        return ""
+    for key, value in getattr(el, "attrib", {}).items():
+        if _xml_local_name(key) == target and value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def _coerce_docx_comment_flag(value: Any) -> bool | None:
+    if value in (None, ""):
+        return None
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "on", "yes"}:
+        return True
+    if normalized in {"0", "false", "off", "no"}:
+        return False
+    return None
+
+
+def _merge_docx_comment_extension_parts(zf: Any, comments_map: dict[str, dict]) -> None:
+    from xml.etree import ElementTree as ET
+
+    if not comments_map:
+        return
+
+    names = set(zf.namelist())
+    comment_order = list(comments_map.values())
+
+    def _merge_extended_entry(comment: dict[str, Any], entry: dict[str, Any]) -> None:
+        para_id = str(entry.get("para_id") or "").strip()
+        if para_id:
+            comment["para_id"] = para_id
+        parent_para_id = str(entry.get("parent_para_id") or "").strip()
+        if parent_para_id:
+            comment["parent_para_id"] = parent_para_id
+        durable_id = str(entry.get("durable_id") or "").strip()
+        if durable_id:
+            comment["durable_id"] = durable_id
+        if "done" in entry and entry.get("done") is not None:
+            comment["done"] = bool(entry.get("done"))
+        if "resolved" in entry and entry.get("resolved") is not None:
+            comment["resolved"] = bool(entry.get("resolved"))
+
+    def _has_same_para_id(entry: dict[str, Any], comment: dict[str, Any]) -> bool:
+        entry_para_id = str(entry.get("para_id") or "").strip()
+        comment_para_id = str(comment.get("para_id") or "").strip()
+        return bool(entry_para_id and comment_para_id and entry_para_id == comment_para_id)
+
+    ext_by_para: dict[str, dict[str, Any]] = {}
+    ext_sequence: list[dict[str, Any]] = []
+    ext_name = "word/commentsExtended.xml" if "word/commentsExtended.xml" in names else ""
+    if ext_name:
+        try:
+            ext_tree = ET.fromstring(zf.read(ext_name))
+            for ext_el in ext_tree.iter():
+                if _xml_local_name(getattr(ext_el, "tag", "")) != "commentEx":
+                    continue
+                entry: dict[str, Any] = {}
+                para_id = _xml_attr_by_local_name(ext_el, "paraId").strip()
+                parent_para_id = _xml_attr_by_local_name(ext_el, "paraIdParent").strip()
+                done_state = _coerce_docx_comment_flag(_xml_attr_by_local_name(ext_el, "done"))
+                resolved_state = _coerce_docx_comment_flag(_xml_attr_by_local_name(ext_el, "resolved"))
+                if para_id:
+                    entry["para_id"] = para_id
+                if parent_para_id:
+                    entry["parent_para_id"] = parent_para_id
+                if done_state is not None:
+                    entry["done"] = done_state
+                if resolved_state is not None:
+                    entry["resolved"] = resolved_state
+                if not entry:
+                    continue
+                ext_sequence.append(entry)
+                if para_id:
+                    ext_by_para[para_id] = entry
+        except Exception:
+            pass
+
+    matched_comment_ids: set[str] = set()
+    for comment in comment_order:
+        para_id = str(comment.get("para_id") or "").strip()
+        if para_id and para_id in ext_by_para:
+            _merge_extended_entry(comment, ext_by_para[para_id])
+            matched_comment_ids.add(str(comment.get("id") or "").strip())
+
+    unmatched_ext_entries = [
+        entry
+        for entry in ext_sequence
+        if not any(_has_same_para_id(entry, comment) for comment in comment_order)
+    ]
+    unmatched_comments_for_ext = [
+        comment
+        for comment in comment_order
+        if str(comment.get("id") or "").strip() not in matched_comment_ids
+    ]
+    if unmatched_ext_entries and len(unmatched_ext_entries) == len(unmatched_comments_for_ext):
+        for comment, entry in zip(unmatched_comments_for_ext, unmatched_ext_entries):
+            _merge_extended_entry(comment, entry)
+
+    ids_by_para: dict[str, dict[str, Any]] = {}
+    ids_sequence: list[dict[str, Any]] = []
+    ids_name = "word/commentsIds.xml" if "word/commentsIds.xml" in names else ""
+    if ids_name:
+        try:
+            ids_tree = ET.fromstring(zf.read(ids_name))
+            for id_el in ids_tree.iter():
+                if _xml_local_name(getattr(id_el, "tag", "")) != "commentId":
+                    continue
+                para_id = _xml_attr_by_local_name(id_el, "paraId").strip()
+                durable_id = (
+                    _xml_attr_by_local_name(id_el, "durableId").strip()
+                    or _xml_attr_by_local_name(id_el, "val").strip()
+                    or _xml_attr_by_local_name(id_el, "id").strip()
+                )
+                if not durable_id:
+                    continue
+                entry = {"durable_id": durable_id}
+                if para_id:
+                    entry["para_id"] = para_id
+                    ids_by_para[para_id] = entry
+                ids_sequence.append(entry)
+        except Exception:
+            pass
+
+    matched_durable_comment_ids: set[str] = set()
+    for comment in comment_order:
+        para_id = str(comment.get("para_id") or "").strip()
+        if para_id and para_id in ids_by_para:
+            _merge_extended_entry(comment, ids_by_para[para_id])
+            matched_durable_comment_ids.add(str(comment.get("id") or "").strip())
+
+    unmatched_id_entries = [
+        entry
+        for entry in ids_sequence
+        if not any(_has_same_para_id(entry, comment) for comment in comment_order)
+    ]
+    unmatched_comments_for_ids = [
+        comment
+        for comment in comment_order
+        if str(comment.get("id") or "").strip() not in matched_durable_comment_ids
+        and not str(comment.get("durable_id") or "").strip()
+    ]
+    if unmatched_id_entries and len(unmatched_id_entries) == len(unmatched_comments_for_ids):
+        for comment, entry in zip(unmatched_comments_for_ids, unmatched_id_entries):
+            _merge_extended_entry(comment, entry)
+
+    para_to_comment_id = {
+        str(comment.get("para_id") or "").strip(): str(comment.get("id") or "").strip()
+        for comment in comment_order
+        if str(comment.get("para_id") or "").strip() and str(comment.get("id") or "").strip()
+    }
+    for comment in comment_order:
+        parent_para_id = str(comment.get("parent_para_id") or "").strip()
+        if parent_para_id and parent_para_id in para_to_comment_id:
+            comment["parent_id"] = para_to_comment_id[parent_para_id]
 
 
 def _extract_docx_comments(file_path: str) -> list[dict[str, Any]]:
@@ -2802,7 +3532,7 @@ def _extract_docx_comments(file_path: str) -> list[dict[str, Any]]:
     从 DOCX 的 word/comments.xml 提取批注信息。
 
     Returns:
-        [{id, author, date, text, anchor_text}]
+        [{id, author, initials, date, text, anchor_text, para_id, parent_id, durable_id, done}]
         若无批注或解析失败返回空列表。
     """
     import zipfile
@@ -2825,18 +3555,37 @@ def _extract_docx_comments(file_path: str) -> list[dict[str, Any]]:
                 cid = c.get(f"{{{ns['w']}}}id", "")
                 author = c.get(f"{{{ns['w']}}}author", "")
                 date = c.get(f"{{{ns['w']}}}date", "")
+                initials = _xml_attr_by_local_name(c, "initials").strip()
+                para_id = _xml_attr_by_local_name(c, "paraId").strip()
+                parent_para_id = _xml_attr_by_local_name(c, "paraIdParent").strip()
+                done_state = _coerce_docx_comment_flag(_xml_attr_by_local_name(c, "done"))
+                resolved_state = _coerce_docx_comment_flag(_xml_attr_by_local_name(c, "resolved"))
                 # 拼接所有 <w:t> 文本
                 texts = [t.text or "" for t in c.findall(".//w:t", ns)]
-                comments_map[cid] = {
+                comment_payload = {
                     "id": cid,
                     "author": author,
+                    "initials": initials,
                     "date": date,
                     "text": "".join(texts).strip(),
                     "anchor_text": "",
+                    "anchor_start_offset": None,
+                    "anchor_end_offset": None,
+                    "para_id": para_id,
+                    "parent_para_id": parent_para_id,
+                    "parent_id": "",
+                    "durable_id": "",
                 }
+                if done_state is not None:
+                    comment_payload["done"] = done_state
+                if resolved_state is not None:
+                    comment_payload["resolved"] = resolved_state
+                comments_map[cid] = comment_payload
 
             if not comments_map:
                 return []
+
+            _merge_docx_comment_extension_parts(zf, comments_map)
 
             # ── 从 document.xml 提取批注锚定原文 ────────────────────
             if "word/document.xml" in zf.namelist():
@@ -2853,14 +3602,273 @@ def _extract_docx_comments(file_path: str) -> list[dict[str, Any]]:
         return []
 
 
+def _collect_docx_text_from_element(el: Any, *, include_deleted: bool = True) -> str:
+    parts: list[str] = []
+
+    def _walk(node: Any, *, deleted: bool = False) -> None:
+        tag = _xml_local_name(getattr(node, "tag", ""))
+        if tag == "del":
+            deleted = True
+        if deleted and not include_deleted:
+            return
+        if tag == "instrText":
+            return
+        if tag in {"t", "delText"} and getattr(node, "text", None):
+            parts.append(str(node.text))
+        elif tag in {"tab", "br", "cr"}:
+            parts.append(" ")
+        elif tag in {"noBreakHyphen", "softHyphen"}:
+            parts.append("-")
+        for child in list(node):
+            _walk(child, deleted=deleted)
+
+    _walk(el)
+    return re.sub(r"\s+", " ", "".join(parts)).strip()
+
+
+def _format_docx_revision_rationale(change_kind: str, author: str, date: str) -> str:
+    label_map = {
+        "replace": "原生修订",
+        "delete": "原生删除",
+        "insert": "原生插入",
+    }
+    parts = [label_map.get(change_kind, "原生修订")]
+    author_text = str(author or "").strip()
+    date_text = str(date or "").strip()
+    if author_text:
+        parts.append(author_text)
+    if date_text:
+        parts.append(date_text)
+    return " · ".join(parts)
+
+
+def _extract_docx_revisions(file_path: str) -> list[dict[str, Any]]:
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    skip_tags = {
+        "bookmarkStart",
+        "bookmarkEnd",
+        "proofErr",
+        "permStart",
+        "permEnd",
+        "commentRangeStart",
+        "commentRangeEnd",
+    }
+
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            if "word/document.xml" not in zf.namelist():
+                return []
+
+            doc_tree = ET.fromstring(zf.read("word/document.xml"))
+            body = doc_tree.find(".//w:body", ns)
+            if body is None:
+                return []
+
+            revisions: list[dict[str, Any]] = []
+            for paragraph_index, p_el in enumerate(body.findall(".//w:p", ns), start=1):
+                paragraph_text = _collect_docx_text_from_element(p_el, include_deleted=False)
+                children = list(p_el)
+                child_index = 0
+
+                while child_index < len(children):
+                    child = children[child_index]
+                    tag = _xml_local_name(getattr(child, "tag", ""))
+                    if tag not in {"del", "ins"}:
+                        child_index += 1
+                        continue
+
+                    author = child.get(f"{{{ns['w']}}}author", "")
+                    date = child.get(f"{{{ns['w']}}}date", "")
+                    change_id = child.get(f"{{{ns['w']}}}id", "") or f"{paragraph_index}-{child_index}"
+
+                    if tag == "del":
+                        deleted_text = _collect_docx_text_from_element(child, include_deleted=True)
+                        if not deleted_text:
+                            child_index += 1
+                            continue
+
+                        next_index = child_index + 1
+                        while next_index < len(children) and _xml_local_name(getattr(children[next_index], "tag", "")) in skip_tags:
+                            next_index += 1
+
+                        if next_index < len(children) and _xml_local_name(getattr(children[next_index], "tag", "")) == "ins":
+                            ins_child = children[next_index]
+                            inserted_text = _collect_docx_text_from_element(ins_child, include_deleted=True)
+                            ins_author = ins_child.get(f"{{{ns['w']}}}author", "") or author
+                            ins_date = ins_child.get(f"{{{ns['w']}}}date", "") or date
+                            revisions.append({
+                                "id": f"docx-revision-{change_id}",
+                                "source": "docx_revision",
+                                "action": "replace",
+                                "original_text": deleted_text,
+                                "proposed_text": inserted_text,
+                                "anchor_text": paragraph_text or inserted_text or deleted_text,
+                                "rationale": _format_docx_revision_rationale("replace", ins_author, ins_date),
+                                "author": ins_author,
+                                "date": ins_date,
+                                "read_only": True,
+                                "apply_disabled": True,
+                            })
+                            child_index = next_index + 1
+                            continue
+
+                        revisions.append({
+                            "id": f"docx-revision-{change_id}",
+                            "source": "docx_revision",
+                            "action": "delete",
+                            "original_text": deleted_text,
+                            "proposed_text": "",
+                            "anchor_text": paragraph_text or deleted_text,
+                            "rationale": _format_docx_revision_rationale("delete", author, date),
+                            "author": author,
+                            "date": date,
+                            "read_only": True,
+                            "apply_disabled": True,
+                        })
+                        child_index += 1
+                        continue
+
+                    inserted_text = _collect_docx_text_from_element(child, include_deleted=True)
+                    if inserted_text:
+                        revisions.append({
+                            "id": f"docx-revision-{change_id}",
+                            "source": "docx_revision",
+                            "action": "insert",
+                            "original_text": "",
+                            "proposed_text": inserted_text,
+                            "anchor_text": paragraph_text or inserted_text,
+                            "rationale": _format_docx_revision_rationale("insert", author, date),
+                            "author": author,
+                            "date": date,
+                            "read_only": True,
+                            "apply_disabled": True,
+                        })
+                    child_index += 1
+
+            return revisions
+    except Exception as exc:
+        logger.debug("[DocxParser] 修订提取失败 (非致命): %s", exc)
+        return []
+
+
+def _extract_docx_footnotes(file_path: str) -> list[dict[str, Any]]:
+    """Extract referenced DOCX footnotes from word/footnotes.xml."""
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+    def _local_name(tag: str) -> str:
+        return tag.split("}", 1)[-1] if "}" in tag else tag
+
+    def _collect_note_text(note_el: Any) -> str:
+        parts: list[str] = []
+        for child in note_el.iter():
+            tag = _local_name(getattr(child, "tag", ""))
+            if tag == "t" and child.text:
+                parts.append(child.text)
+            elif tag in {"tab", "br", "cr"}:
+                parts.append(" ")
+        return re.sub(r"\s+", " ", "".join(parts)).strip()
+
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            if "word/footnotes.xml" not in zf.namelist():
+                return []
+
+            ref_counts: dict[str, int] = {}
+            if "word/document.xml" in zf.namelist():
+                doc_tree = ET.fromstring(zf.read("word/document.xml"))
+                for ref_el in doc_tree.findall(".//w:footnoteReference", ns):
+                    note_id = str(ref_el.get(f"{{{ns['w']}}}id") or "").strip()
+                    if note_id:
+                        ref_counts[note_id] = ref_counts.get(note_id, 0) + 1
+
+            footnotes_tree = ET.fromstring(zf.read("word/footnotes.xml"))
+            footnotes: list[dict[str, Any]] = []
+            for footnote_el in footnotes_tree.findall(".//w:footnote", ns):
+                note_id = str(footnote_el.get(f"{{{ns['w']}}}id") or "").strip()
+                if not note_id:
+                    continue
+
+                reference_count = ref_counts.get(note_id, 0)
+                if reference_count <= 0:
+                    continue
+
+                footnotes.append({
+                    "id": note_id,
+                    "text": _collect_note_text(footnote_el),
+                    "type": str(footnote_el.get(f"{{{ns['w']}}}type") or "footnote"),
+                    "reference_count": reference_count,
+                })
+
+            return footnotes
+    except Exception as exc:
+        logger.debug("[DocxParser] 脚注提取失败 (非致命): %s", exc)
+        return []
+
+
+def count_docx_visible_chars(file_path: str) -> int:
+    """Approximate Word/WPS-style count from visible main-document text.
+
+    This intentionally counts only visible text in ``word/document.xml`` so the
+    result is not limited by AI preview truncation and does not pull in header,
+    footer, comment, or field-instruction text.
+    """
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+
+    def _local_name(tag: str) -> str:
+        return tag.split("}", 1)[-1] if "}" in tag else tag
+
+    parts: list[str] = []
+
+    def _walk(el: Any, *, deleted: bool = False) -> None:
+        tag = _local_name(getattr(el, "tag", ""))
+        if tag == "del":
+            deleted = True
+        if deleted:
+            for child in el:
+                _walk(child, deleted=True)
+            return
+        if tag == "instrText":
+            return
+        if tag == "t" and el.text:
+            parts.append(el.text)
+        elif tag in {"tab", "br", "cr"}:
+            parts.append(" ")
+        elif tag in {"noBreakHyphen", "softHyphen"}:
+            parts.append("-")
+        for child in el:
+            _walk(child, deleted=deleted)
+
+    try:
+        with zipfile.ZipFile(file_path, "r") as zf:
+            if "word/document.xml" not in zf.namelist():
+                return 0
+            doc_tree = ET.fromstring(zf.read("word/document.xml"))
+            body = doc_tree.find(".//w:body", ns)
+            if body is None:
+                return 0
+            _walk(body)
+    except Exception as exc:
+        logger.debug("[DocxParser] DOCX 可见文字统计失败 (非致命): %s", exc)
+        return 0
+
+    return len(re.sub(r"\s+", "", "".join(parts)))
+
+
 def _extract_anchor_texts(
     body_el: Any, comments_map: dict[str, dict], ns: dict[str, str]
 ) -> None:
-    """遍历 document.xml body，提取 commentRangeStart/End 之间的文本。"""
-    from xml.etree import ElementTree as ET
+    """遍历 document.xml body，提取批注锚点文本与稳定定位元数据。"""
 
-    # 收集所有文本节点和 comment range 标记的顺序
-    events: list[tuple[str, str]] = []  # (type, value_or_id)
+    events: list[tuple[str, str]] = []
 
     def _walk(el: Any) -> None:
         tag = el.tag.split("}")[-1] if "}" in el.tag else el.tag
@@ -2872,22 +3880,73 @@ def _extract_anchor_texts(
             events.append(("end", cid))
         elif tag == "t" and el.text:
             events.append(("text", el.text))
+        elif tag in {"tab", "br", "cr"}:
+            events.append(("text", " "))
+        elif tag in {"noBreakHyphen", "softHyphen"}:
+            events.append(("text", "-"))
         for child in el:
             _walk(child)
+        if tag == "p":
+            events.append(("paragraph_break", "\n"))
 
     _walk(body_el)
 
-    # 按顺序扫描，收集每个 comment id 对应的 anchor 文本
     active_ids: set[str] = set()
+    full_text_parts: list[str] = []
+    cursor = 0
+
     for etype, val in events:
         if etype == "start":
+            if val in comments_map and comments_map[val].get("anchor_start_offset") is None:
+                comments_map[val]["anchor_start_offset"] = cursor
             active_ids.add(val)
-        elif etype == "end":
+            continue
+        if etype == "end":
+            if val in comments_map and comments_map[val].get("anchor_end_offset") is None:
+                comments_map[val]["anchor_end_offset"] = cursor
             active_ids.discard(val)
-        elif etype == "text" and active_ids:
+            continue
+        if etype == "paragraph_break":
+            full_text_parts.append(val)
+            cursor += len(val)
+            continue
+        if etype == "text" and active_ids:
             for cid in active_ids:
                 if cid in comments_map:
                     comments_map[cid]["anchor_text"] += val
+        if etype == "text":
+            full_text_parts.append(val)
+            cursor += len(val)
+
+    full_text = "".join(full_text_parts)
+    for cid in active_ids:
+        if cid in comments_map and comments_map[cid].get("anchor_end_offset") is None:
+            comments_map[cid]["anchor_end_offset"] = cursor
+
+    for comment in comments_map.values():
+        start_offset = comment.get("anchor_start_offset")
+        end_offset = comment.get("anchor_end_offset")
+        if not isinstance(start_offset, int) or not isinstance(end_offset, int):
+            continue
+        if end_offset < start_offset:
+            continue
+
+        comment["anchor_context_before"] = full_text[max(0, start_offset - 48):start_offset]
+        comment["anchor_context_after"] = full_text[end_offset:end_offset + 48]
+
+        anchor_text = str(comment.get("anchor_text") or "")
+        if not anchor_text:
+            continue
+
+        occurrence = 0
+        search_from = 0
+        while search_from < start_offset:
+            hit = full_text.find(anchor_text, search_from)
+            if hit == -1 or hit >= start_offset:
+                break
+            occurrence += 1
+            search_from = hit + max(len(anchor_text), 1)
+        comment["anchor_occurrence"] = occurrence
 
 
 def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str, Any]:
@@ -2908,7 +3967,7 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
 
     # ── Primary path: rich python-docx renderer ───────────────────────────
     try:
-        rich_html, sections_data, preview_meta = _docx_to_rich_html(
+        rich_html, sections_data, headings, preview_meta = _docx_to_rich_html(
             file_path,
             progressive_preview=progressive_preview,
         )
@@ -2951,19 +4010,13 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
                     "margin_bottom_px": _sec0.get("margin_bottom_px", 0),
                     "margin_left_px":   _sec0.get("margin_left_px", 0),
                     "margin_right_px":  _sec0.get("margin_right_px", 0),
+                    "doc_grid":         _sec0.get("doc_grid", {}),
                     "header_html":      _sec0.get("header_html", ""),
                     "footer_html":      _sec0.get("footer_html", ""),
                 }
                 page_meta["sections"] = sections_data
         except Exception as meta_exc:
             logger.debug("[DocxParser] 页面元数据提取失败 (非致命): %s", meta_exc)
-
-        # ── Extract headings for the outline/navigation panel ─────────
-        headings: list[dict] = []
-        try:
-            headings = _extract_headings_from_html(rich_html)
-        except Exception:
-            pass
 
         result = {"html": rich_html, "messages": messages_out, "headings": headings}
         result.update(page_meta)
@@ -2977,6 +4030,23 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
             comments = _extract_docx_comments(file_path)
             if comments:
                 result["comments"] = comments
+        except Exception:
+            pass
+        try:
+            proposals = _extract_docx_revisions(file_path)
+            if proposals:
+                result["proposals"] = proposals
+        except Exception:
+            pass
+        try:
+            footnotes = _extract_docx_footnotes(file_path)
+            if footnotes:
+                result["footnotes"] = footnotes
+                result["footnote_reference_count"] = sum(
+                    int(note.get("reference_count") or 0)
+                    for note in footnotes
+                    if isinstance(note, dict)
+                )
         except Exception:
             pass
         return result
@@ -3073,6 +4143,23 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
             comments = _extract_docx_comments(file_path)
             if comments:
                 fallback_result["comments"] = comments
+        except Exception:
+            pass
+        try:
+            proposals = _extract_docx_revisions(file_path)
+            if proposals:
+                fallback_result["proposals"] = proposals
+        except Exception:
+            pass
+        try:
+            footnotes = _extract_docx_footnotes(file_path)
+            if footnotes:
+                fallback_result["footnotes"] = footnotes
+                fallback_result["footnote_reference_count"] = sum(
+                    int(note.get("reference_count") or 0)
+                    for note in footnotes
+                    if isinstance(note, dict)
+                )
         except Exception:
             pass
         return fallback_result
@@ -4511,6 +5598,7 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         # content doesn't flow under the upper shape.  This reproduces
         # PowerPoint's implicit text-runaround behaviour for overlapping shapes.
         _EXCL_BUFFER = 91440  # 1 EMU point of extra breathing room
+        _MAX_EXCL_OVERLAP_RATIO = 0.6
         _text_shapes = [
             s for s in shapes_data
             if s.get("has_text") and s.get("textInsets") is not None
@@ -4530,6 +5618,23 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 if _bb <= _at or _bt >= _ab:
                     continue
                 if _br <= _al or _bl >= _ar:
+                    continue
+                _overlap_l = max(_al, _bl)
+                _overlap_r = min(_ar, _br)
+                _overlap_t = max(_at, _bt)
+                _overlap_b = min(_ab, _bb)
+                _overlap_w = _overlap_r - _overlap_l
+                _overlap_h = _overlap_b - _overlap_t
+                if _overlap_w <= 0 or _overlap_h <= 0:
+                    continue
+                # Stacked placeholders often overlap by a thin strip while spanning
+                # most of the line width. That is not a side obstruction and should
+                # not force a huge left/right inset on the lower text box.
+                if (
+                    _overlap_w >= _a["width"] * _MAX_EXCL_OVERLAP_RATIO
+                    or _overlap_w >= _b["width"] * _MAX_EXCL_OVERLAP_RATIO
+                    or (_bl < _acx < _br)
+                ):
                     continue
                 # Expand inset on the side where _b sits relative to _a's centre
                 _ins = _a["textInsets"]
@@ -5345,9 +6450,201 @@ def _extract_docx_save_parts(docx_input: Any) -> tuple[str, dict[str, Any]]:
             "header_html": str(docx_input.get("header_html") or ""),
             "footer_html": str(docx_input.get("footer_html") or ""),
             "sections": docx_input.get("sections") if isinstance(docx_input.get("sections"), list) else [],
+            "comments": docx_input.get("comments") if isinstance(docx_input.get("comments"), list) else [],
+            "footnotes": docx_input.get("footnotes") if isinstance(docx_input.get("footnotes"), list) else [],
         }
         return str(html_content or ""), payload
-    return str(docx_input or ""), {"header_html": "", "footer_html": "", "sections": []}
+    return str(docx_input or ""), {"header_html": "", "footer_html": "", "sections": [], "comments": [], "footnotes": []}
+
+
+def _normalize_docx_export_comments(raw_comments: Any) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for item in raw_comments if isinstance(raw_comments, list) else []:
+        if not isinstance(item, dict):
+            continue
+        anchor_text = str(
+            item.get("anchor_text")
+            or item.get("anchorText")
+            or item.get("target_text")
+            or item.get("selected_text")
+            or ""
+        ).strip()
+        text = str(
+            item.get("text")
+            or item.get("content")
+            or item.get("body")
+            or item.get("comment")
+            or ""
+        ).strip()
+        if not anchor_text or not text:
+            continue
+        normalized_item: dict[str, Any] = {
+            "anchor_text": anchor_text,
+            "text": text,
+            "author": str(item.get("author") or "").strip(),
+            "initials": str(item.get("initials") or "").strip(),
+            "date": str(item.get("date") or item.get("created_at") or "").strip(),
+        }
+
+        anchor_start_offset = item.get("anchor_start_offset")
+        if anchor_start_offset in (None, ""):
+            anchor_start_offset = item.get("anchorStartOffset")
+        if anchor_start_offset in (None, ""):
+            anchor_start_offset = item.get("range_start")
+
+        anchor_end_offset = item.get("anchor_end_offset")
+        if anchor_end_offset in (None, ""):
+            anchor_end_offset = item.get("anchorEndOffset")
+        if anchor_end_offset in (None, ""):
+            anchor_end_offset = item.get("range_end")
+
+        anchor_occurrence = item.get("anchor_occurrence")
+        if anchor_occurrence in (None, ""):
+            anchor_occurrence = item.get("anchorOccurrence")
+
+        try:
+            if anchor_start_offset not in (None, ""):
+                normalized_item["anchor_start_offset"] = int(anchor_start_offset)
+        except (TypeError, ValueError):
+            pass
+        try:
+            if anchor_end_offset not in (None, ""):
+                normalized_item["anchor_end_offset"] = int(anchor_end_offset)
+        except (TypeError, ValueError):
+            pass
+        try:
+            if anchor_occurrence not in (None, ""):
+                normalized_item["anchor_occurrence"] = max(0, int(anchor_occurrence))
+        except (TypeError, ValueError):
+            pass
+
+        anchor_context_before = item.get("anchor_context_before")
+        if anchor_context_before in (None, ""):
+            anchor_context_before = item.get("anchorContextBefore")
+        anchor_context_after = item.get("anchor_context_after")
+        if anchor_context_after in (None, ""):
+            anchor_context_after = item.get("anchorContextAfter")
+        if isinstance(anchor_context_before, str) and anchor_context_before:
+            normalized_item["anchor_context_before"] = anchor_context_before
+        if isinstance(anchor_context_after, str) and anchor_context_after:
+            normalized_item["anchor_context_after"] = anchor_context_after
+
+        for key, alt_key in (
+            ("para_id", "paraId"),
+            ("parent_para_id", "parentParaId"),
+            ("parent_id", "parentId"),
+            ("durable_id", "durableId"),
+        ):
+            raw_value = item.get(key)
+            if raw_value in (None, ""):
+                raw_value = item.get(alt_key)
+            text_value = str(raw_value or "").strip()
+            if text_value:
+                normalized_item[key] = text_value
+
+        for key in ("done", "resolved"):
+            flag_state = _coerce_docx_comment_flag(item.get(key))
+            if flag_state is not None:
+                normalized_item[key] = flag_state
+
+        normalized.append(normalized_item)
+    return normalized
+
+
+def _apply_docx_export_comments(doc: Any, raw_comments: Any) -> tuple[int, Any | None]:
+    comments = _normalize_docx_export_comments(raw_comments)
+    if not comments:
+        return 0, None
+    try:
+        from docx.oxml.ns import qn
+        from lxml import etree
+
+        from web.track_changes_editor import TrackChangesEditor
+    except ImportError as exc:
+        logger.warning("[export_docx] comment support unavailable: %s", exc)
+        return 0, None
+
+    comments_el = etree.fromstring(
+        b'<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"'
+        b' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>'
+    )
+    editor = TrackChangesEditor(author="Koto Review")
+    applied = 0
+
+    for index, comment in enumerate(comments, start=1):
+        comment_author = comment.get("author") or editor.author or "Koto Review"
+        editor.author = comment_author
+        before_count = len(comments_el)
+        if not editor._apply_single_comment(
+            doc,
+            comments_el,
+            comment.get("anchor_text", ""),
+            comment.get("text", ""),
+            "",
+            {
+                "anchor_start_offset": comment.get("anchor_start_offset"),
+                "anchor_end_offset": comment.get("anchor_end_offset"),
+                "anchor_occurrence": comment.get("anchor_occurrence"),
+                "anchor_context_before": comment.get("anchor_context_before"),
+                "anchor_context_after": comment.get("anchor_context_after"),
+            },
+        ):
+            logger.info(
+                "[export_docx] skipped comment %d because anchor was not found: %.80s",
+                index,
+                comment.get("anchor_text", ""),
+            )
+            continue
+
+        applied += 1
+        if len(comments_el) > before_count:
+            latest = comments_el[-1]
+            latest.set(qn("w:author"), comment_author)
+            comment_initials = str(comment.get("initials") or "").strip()
+            if comment_initials:
+                latest.set(qn("w:initials"), comment_initials)
+            comment_date = comment.get("date") or ""
+            if comment_date:
+                latest.set(qn("w:date"), comment_date)
+
+    if applied <= 0:
+        return 0, None
+    return applied, comments_el
+
+
+def _inject_docx_comments_part(docx_bytes: bytes, comments_el: Any) -> bytes:
+    import zipfile
+
+    from lxml import etree
+
+    from web.track_changes_editor import TrackChangesEditor
+
+    helper = TrackChangesEditor(author="Koto Review")
+    comments_xml = etree.tostring(
+        comments_el, xml_declaration=True, encoding="UTF-8", standalone=True
+    )
+
+    src = io.BytesIO(docx_bytes)
+    out = io.BytesIO()
+    wrote_comments = False
+
+    with zipfile.ZipFile(src, "r") as zin:
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == "[Content_Types].xml":
+                    data = helper._add_comments_content_type(data)
+                elif item.filename == "word/_rels/document.xml.rels":
+                    data = helper._add_comments_relationship(data)
+                elif item.filename == "word/comments.xml":
+                    data = comments_xml
+                    wrote_comments = True
+                zout.writestr(item, data)
+
+            if not wrote_comments:
+                zout.writestr("word/comments.xml", comments_xml)
+
+    return out.getvalue()
 
 
 def _clear_block_container(container: Any) -> None:
@@ -5594,6 +6891,7 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
     default_header_html = docx_payload.get("header_html", "")
     default_footer_html = docx_payload.get("footer_html", "")
     sections_payload = docx_payload.get("sections") if isinstance(docx_payload.get("sections"), list) else []
+    comments_payload = docx_payload.get("comments") if isinstance(docx_payload.get("comments"), list) else []
 
     # ── Open original as template, or create blank ────────────────────────
     if original_path and os.path.isfile(original_path):
@@ -5928,10 +7226,28 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
             _write_docx_header_footer_html(section.even_page_header, even_header_html, section)
             _write_docx_header_footer_html(section.even_page_footer, even_footer_html, section)
 
+    applied_comment_count = 0
+    comments_el = None
+    if comments_payload:
+        applied_comment_count, comments_el = _apply_docx_export_comments(doc, comments_payload)
+        logger.info(
+            "[export_docx] comment payload=%d applied=%d",
+            len(comments_payload),
+            applied_comment_count,
+        )
+
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
-    return buf.read()
+    data = buf.read()
+
+    if comments_el is not None and applied_comment_count > 0:
+        try:
+            data = _inject_docx_comments_part(data, comments_el)
+        except Exception as exc:
+            logger.warning("[export_docx] failed to inject comments.xml: %s", exc)
+
+    return data
 
 
 def export_docx(docx_input: Any, original_path: str | None = None) -> bytes:

@@ -821,6 +821,7 @@ class DocAgent:
 - `list_workspace_files(path?, recursive?)` — 列出工作区文件
 
 **文件写入:**
+- `insert_image_into_docx(path, image_path, title?, caption?, width_inches?)` — 把图表/图片作为真实 Word 图片插入到 DOCX 文件末尾
 - `insert_excel_as_docx_table(source_path, target_path, sheet_name?, table_title?)` — 把 Excel 表格数据作为 Word 表格插入到 DOCX 文件末尾
 - `write_docx_content(path, content, mode?)` — 写入 Word 文档内容
 - `write_sheet_data(path, data, sheet_name?)` — 写入/更新 Excel 表格数据

@@ -37,16 +37,21 @@ sys.path.insert(0, _koto_root)
 
 from dotenv import load_dotenv
 from flask import (
-    Flask,
     Response,
-    g,
     jsonify,
     request,
     send_file,
     stream_with_context,
 )
-from flask_cors import CORS
 from werkzeug.utils import secure_filename as _werkzeug_secure_filename
+
+from web.app_blueprints import register_blueprints_deferred
+from web.app_factory import create_flask_app
+from web.app_http import configure_http_wiring
+from web.app_observability import configure_observability
+from web.app_realtime import init_notification_socket, init_socketio
+from web.app_runtime import preload_voice_engine, start_background_runtime
+from web.app_storage import resolve_app_storage_paths
 
 
 def _secure_filename(name: str) -> str:
@@ -89,6 +94,7 @@ from app.core.llm.model_capabilities import (
     is_interactions_only_model as _is_interactions_only_model,
     normalize_model_id as _normalize_model_id,
 )
+from app.core.security.output_validator import sanitize_user_visible_text
 
 # 延迟导入 - 这些路由类仅在运行时首次访问时通过 __getattr__ 加载
 # LocalModelRouter, AIRouter, TaskDecomposer, LocalPlanner 通过 app.core.routing.__getattr__ 延迟加载
@@ -1574,217 +1580,28 @@ def stream_with_keepalive(
                 return
 
 
-app = Flask(__name__)
-
-# Read app version from VERSION file
-try:
-    APP_VERSION = (
-        (Path(__file__).parent.parent / "VERSION").read_text(encoding="utf-8").strip()
-    )
-except Exception:
-    APP_VERSION = "unknown"
-# Flask session secret key — read from file or env, fall back to auto-generated
-def _load_secret_key() -> str:
-    import secrets as _secrets
-    _key = os.environ.get("KOTO_SECRET_KEY") or os.environ.get("SECRET_KEY")
-    if _key:
-        return _key
-    _key_file = Path(__file__).parent.parent / "config" / "jwt_secret.txt"
-    if _key_file.exists():
-        _k = _key_file.read_text(encoding="utf-8").strip()
-        if _k:
-            return _k
-    # Auto-generate and persist for this installation
-    _k = _secrets.token_urlsafe(32)
-    try:
-        _key_file.write_text(_k, encoding="utf-8")
-    except Exception as _secret_write_err:
-        logging.getLogger("koto.app").debug(
-            "failed to persist generated secret key: %s", _secret_write_err
-        )
-    return _k
-
-app.config["SECRET_KEY"] = _load_secret_key()
-
-# 静态资源缓存 - 开发期间设为0确保每次加载最新文件
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-# Always re-check templates on disk so edits take effect without server restart
-app.config["TEMPLATES_AUTO_RELOAD"] = True
-# ✅ 允许最大 50MB 请求体（语音 base64 约 1-5MB，保留足够余量）
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
-# Session cookie security hardening
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = os.environ.get("KOTO_DEPLOY_MODE") == "cloud"
-
-# CORS: 云模式限制来源，本地模式打开
-_cors_origins = os.environ.get("KOTO_CORS_ORIGINS", "*")
-if os.environ.get("KOTO_DEPLOY_MODE") == "cloud" and _cors_origins == "*":
-    # 云模式默认只允许自身站点（同源），可通过环境变量覆盖
-    _cors_origins = os.environ.get("KOTO_SITE_URL", "*")
-CORS(app, origins=_cors_origins)
+app, APP_VERSION, _cors_origins = create_flask_app(__name__)
 
 # ── Flask-SocketIO 初始化（文件助手全双工通信）──
-socketio = None
-if _has_socketio and SocketIO is not None:
-    socketio = SocketIO(
-        app,
-        cors_allowed_origins=_cors_origins,
-        async_mode="threading",
-        logger=False,
-        engineio_logger=False,
-        ping_timeout=120,
-        ping_interval=30,
-    )
-    try:
-        from app.core.socket_handler import register_socket_events
-        register_socket_events(socketio)
-        _app_logger.info("[WebSocket] Flask-SocketIO 初始化完成，文件助手 AI 通道就绪")
-    except Exception as _sio_err:
-        _app_logger.warning("[WebSocket] socket_handler 注册失败: %s", _sio_err)
+socketio = init_socketio(
+    app,
+    _app_logger,
+    _cors_origins,
+    has_socketio=_has_socketio,
+    socketio_cls=SocketIO,
+)
 
 
 
-# ── Sentry error tracking (no-op if SENTRY_DSN not set) ──────────────────────
-_sentry_dsn = os.environ.get("SENTRY_DSN", "")
-if _sentry_dsn:
-    try:
-        import sentry_sdk
-        from sentry_sdk.integrations.flask import FlaskIntegration
-
-        sentry_sdk.init(
-            dsn=_sentry_dsn,
-            integrations=[FlaskIntegration()],
-            release=APP_VERSION,
-            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_RATE", "0.1")),
-            send_default_pii=False,
-        )
-        _app_logger.info("Sentry error tracking enabled (release=%s)", APP_VERSION)
-    except ImportError:
-        _app_logger.warning("SENTRY_DSN set but sentry-sdk not installed; skipping")
-
-# ── Prometheus metrics (/metrics) ────────────────────────────────────────────
-try:
-    from prometheus_flask_exporter import PrometheusMetrics
-
-    _metrics_token = os.environ.get("METRICS_TOKEN", "")
-    _prometheus = PrometheusMetrics(app, group_by="endpoint")
-    _prometheus.info("koto_app_info", "Koto application info", version=APP_VERSION)
-
-    if _metrics_token:
-        # Require Bearer token to scrape /metrics
-        @app.before_request
-        def _guard_metrics():
-            if request.path == "/metrics":
-                auth = request.headers.get("Authorization", "")
-                if auth != f"Bearer {_metrics_token}":
-                    return _error_response("Unauthorized", 401)
-
-    _app_logger.info("Prometheus metrics enabled at /metrics")
-except ImportError:
-    _app_logger.debug("prometheus-flask-exporter not installed; /metrics disabled")
-
-# ── Swagger / OpenAPI docs ────────────────────────────────────────────────────
-_swagger_config = {
-    "headers": [],
-    "specs": [
-        {
-            "endpoint": "apispec",
-            "route": "/apispec.json",
-            "rule_filter": lambda rule: True,
-            "model_filter": lambda tag: True,
-        }
-    ],
-    "static_url_path": "/flasgger_static",
-    "swagger_ui": True,
-    "specs_route": "/apidocs/",
-}
-
-_swagger_template = {
-    "info": {
-        "title": "Koto API",
-        "description": "API documentation for Koto AI Assistant",
-        "version": "1.0.0",
-    },
-    "basePath": "/",
-    "schemes": ["http", "https"],
-    "securityDefinitions": {
-        "Bearer": {
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header",
-            "description": "JWT token: `Bearer <token>`",
-        }
-    },
-}
-
-try:
-    from flasgger import Swagger
-
-    swagger = Swagger(app, config=_swagger_config, template=_swagger_template)
-    _app_logger.info("Swagger UI enabled at /apidocs/")
-except ImportError:
-    _app_logger.debug("flasgger not installed; Swagger UI disabled")
+error_response = configure_http_wiring(app, _app_logger)
 
 
-# ── Request ID middleware ─────────────────────────────────────────────────────
-@app.before_request
-def _assign_request_id():
-    """Assign a correlation ID to every request (read from header or generate)."""
-    g.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
-
-
-@app.after_request
-def _attach_request_id(response):
-    """Attach the correlation ID to every outgoing response."""
-    if hasattr(g, "request_id"):
-        response.headers["X-Request-ID"] = g.request_id
-    return response
-
-
-def _error_response(message: str, status: int = 400, details=None):
-    """Return a standardized JSON error envelope."""
-    body = {"error": message, "status": status}
-    if details:
-        body["details"] = details
-    if hasattr(g, "request_id"):
-        body["request_id"] = g.request_id
-    return jsonify(body), status
-
-
-# ── Global error handlers (return JSON, not HTML) ────────────────────────────
-@app.errorhandler(404)
-def _handle_404(exc):
-    return _error_response("Not found", 404)
-
-
-@app.errorhandler(405)
-def _handle_405(exc):
-    return _error_response("Method not allowed", 405)
-
-
-@app.errorhandler(500)
-def _handle_500(exc):
-    _app_logger.exception(
-        "Unhandled server error [request_id=%s]", getattr(g, "request_id", "-")
-    )
-    return _error_response("Internal server error", 500)
-
-
-@app.errorhandler(413)
-def _handle_413(exc):
-    return _error_response("文件过大，请压缩后重试", 413)
-
-
-try:
-    from werkzeug.exceptions import HTTPException as _WerkzeugHTTPException
-
-    @app.errorhandler(_WerkzeugHTTPException)
-    def _handle_http_exception(exc):
-        # Only intercept non-JSON responses; let specific handlers take priority.
-        return _error_response(exc.description or exc.name, exc.code)
-except Exception:  # pragma: no cover
-    pass
+configure_observability(
+    app,
+    _app_logger,
+    APP_VERSION,
+    unauthorized_response=lambda: error_response("Unauthorized", 401),
+)
 
 
 # ================= 用户认证系统 =================
@@ -1811,488 +1628,29 @@ if PARALLEL_SYSTEM_ENABLED:
         PARALLEL_SYSTEM_ENABLED = False
 
 # ================= WebSocket 支持（可选） =================
-sock = None
-if Sock:
-    sock = Sock(app)
-else:
-    _app_logger.warning("[WebSocket] ⚠️ flask-sock 未安装，使用轮询作为通知兜底")
-
-if sock:
-
-    @sock.route("/ws/notifications")
-    def ws_notifications(ws):
-        user_id = request.args.get("user_id", "default")
-        manager = get_notification_manager()
-        manager.register_connection(user_id, ws)
-        try:
-            while True:
-                message = ws.receive()
-                if message is None:
-                    break
-                if isinstance(message, str) and message.lower() == "ping":
-                    ws.send("pong")
-        finally:
-            manager.unregister_connection(user_id, ws)
-
-
-# ================= 延迟注册蓝图（在后台线程中加载，避免阻塞启动） =================
-_blueprints_registered = False
-_blueprints_lock = threading.Lock()
-
-
-def _register_blueprints_deferred():
-    """注册所有蓝图（必须在 app.run() 前调用）。
-    阶段1: 用线程池并行预导入各蓝图模块（重叠 I/O 等待，加速启动）。
-    阶段2: 串行注册到 Flask app（线程安全要求）。
-    """
-    global _blueprints_registered, agent_bp
-    with _blueprints_lock:
-        if _blueprints_registered:
-            return
-        _blueprints_registered = True
-
-    # ── 阶段 1：并行预导入（各模块互相独立，可同时加载）────────────────
-    import concurrent.futures
-    import importlib
-
-    _preload_modules = [
-        "app.api.task_routes",
-        "app.api",
-        "app.api.skill_routes",
-        "app.api.skill_marketplace_routes",
-        "app.api.goal_routes",
-        "app.api.file_hub_routes",
-        "app.api.job_routes",
-        "app.api.ops_routes",
-        "app.api.shadow_routes",
-        "app.api.macro_routes",
-        "web.blueprints.workflow_api",
-    ]
-
-    def _safe_preload(mod_name):
-        try:
-            importlib.import_module(mod_name)
-        except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 导入失败时静默忽略，注册阶段会再次尝试并输出日志
-
-    with concurrent.futures.ThreadPoolExecutor(
-        max_workers=min(6, len(_preload_modules)), thread_name_prefix="BpPreload"
-    ) as _pool:
-        list(_pool.map(_safe_preload, _preload_modules))
-
-    # ── 阶段 2：串行注册蓝图（此时模块已在 sys.modules 中，import 为 O(1)）──
-
-    # 注册任务管理 API（任务台账 + 进度总线 + 打断控制）
-    try:
-        from app.api.task_routes import task_bp as _task_bp
-
-        app.register_blueprint(_task_bp, url_prefix="/api/tasks")
-        _app_logger.info("[TaskAPI] ✅ 任务管理 API 已注册: /api/tasks")
-    except ImportError as e:
-        _app_logger.warning(f"[TaskAPI] ⚠️ 未能导入任务管理 API 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[TaskAPI] ❌ 任务管理 API 注册失败: {e}")
-
-    # 注册统一 Agent API
-    try:
-        from app.api import agent_bp as _agent_bp
-
-        agent_bp = _agent_bp
-        app.register_blueprint(agent_bp, url_prefix="/api/agent")
-        _app_logger.info("[UnifiedAgent] ✅ 统一 Agent API 已注册: /api/agent")
-    except ImportError as e:
-        _app_logger.warning(f"[UnifiedAgent] ⚠️ 未能导入统一 Agent API 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[UnifiedAgent] ❌ 注册失败: {e}")
-
-    # 注册 Skill CRUD + MCP 导出 API（Phase 2）
-    try:
-        from app.api.skill_routes import skill_bp as _skill_bp
-
-        app.register_blueprint(_skill_bp)
-        _app_logger.info("[SkillAPI] ✅ Skill CRUD API 已注册: /api/skills")
-    except ImportError as e:
-        _app_logger.warning(f"[SkillAPI] ⚠️ 未能导入 Skill API 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[SkillAPI] ❌ Skill API 注册失败: {e}")
-
-    # 注册 Skill Marketplace API（风格市场 + 自动构建 + 导入导出）
-    try:
-        from app.api.skill_marketplace_routes import marketplace_bp as _marketplace_bp
-
-        app.register_blueprint(_marketplace_bp)
-        _app_logger.info(
-            "[SkillMarket] ✅ Skill Marketplace API 已注册: /api/skillmarket"
-        )
-    except ImportError as e:
-        _app_logger.warning(
-            f"[SkillMarket] ⚠️ 未能导入 Skill Marketplace API 蓝图: {e}"
-        )
-    except Exception as e:
-        _app_logger.error(f"[SkillMarket] ❌ Skill Marketplace API 注册失败: {e}")
-
-    # 注册训练数据 API + LoRA 蒸馏训练 API
-    # 仅在开发机上启用（需设置环境变量 KOTO_DEV_TRAINING=1）
-    # 公共发行版不包含此功能，设备要求极高（≥16GB VRAM），普通用户无法使用
-    if os.environ.get("KOTO_DEV_TRAINING") == "1":
-        try:
-            from app.core.learning.training_data_builder import (
-                register_training_routes as _reg_training,
-            )
-
-            _reg_training(app)
-        except ImportError as e:
-            _app_logger.warning(f"[TrainingAPI] ⚠️ 未能导入训练数据模块: {e}")
-        except Exception as e:
-            _app_logger.error(f"[TrainingAPI] ❌ 训练数据 API 注册失败: {e}")
-
-        try:
-            from app.api.distill_routes import distill_bp as _distill_bp
-
-            app.register_blueprint(_distill_bp, url_prefix="/api/distill")
-            _app_logger.info(
-                "[DistillAPI] ✅ LoRA 蒸馏训练 API 已注册（开发模式）: /api/distill"
-            )
-        except ImportError as e:
-            _app_logger.warning(f"[DistillAPI] ⚠️ 未能导入蒸馏训练模块: {e}")
-        except Exception as e:
-            _app_logger.error(f"[DistillAPI] ❌ 蒸馏训练 API 注册失败: {e}")
-    else:
-        _app_logger.debug(
-            "[DistillAPI] ℹ️ LoRA 训练 API 已封存（公共版），如需启用请设置 KOTO_DEV_TRAINING=1"
-        )
-
-    # 注册增强语音 API
-    try:
-        from voice_api_enhanced import voice_bp
-
-        app.register_blueprint(voice_bp)
-        _app_logger.debug("[VOICE_API] 已注册增强语音 API 蓝图")
-    except ImportError as e:
-        _app_logger.warning(f"[VOICE_API] ⚠️ 未能导入增强语音模块: {e}")
-
-    # 注册 PPT 编辑 API（P1 功能）
-    try:
-        from web.ppt_api_routes import ppt_api_bp
-
-        app.register_blueprint(ppt_api_bp)
-        _app_logger.info("[PPT_API] ✅ PPT 编辑 API 已注册: /api/ppt")
-    except ImportError as e:
-        _app_logger.warning(f"[PPT_API] ⚠️ 未能导入 PPT 编辑 API: {e}")
-    except Exception as e:
-        _app_logger.warning(f"[PPT_API] ⚠️ PPT 编辑 API 注册失败: {e}")
-
-    # 注册长期目标 API（GoalManager: 跨天持续执行的委托任务）
-    try:
-        from app.api.goal_routes import goal_bp as _goal_bp
-
-        app.register_blueprint(_goal_bp, url_prefix="/api/goals")
-        _app_logger.info("[GoalAPI] ✅ 长期目标 API 已注册: /api/goals")
-    except ImportError as e:
-        _app_logger.warning(f"[GoalAPI] ⚠️ 未能导入长期目标 API 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[GoalAPI] ❌ 长期目标 API 注册失败: {e}")
-
-    # 注册文件 Hub API（FileRegistry + FileWatcher 统一接口）
-    try:
-        from app.api.file_hub_routes import file_hub_bp as _file_hub_bp
-
-        app.register_blueprint(_file_hub_bp, url_prefix="/api/files")
-        _app_logger.info("[FileHubAPI] ✅ 文件 Hub API 已注册: /api/files")
-    except ImportError as e:
-        _app_logger.warning(f"[FileHubAPI] ⚠️ 未能导入文件 Hub 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[FileHubAPI] ❌ 文件 Hub API 注册失败: {e}")
-
-    # 注册后台作业 API（JobRunner + TriggerRegistry）
-    try:
-        from app.api.job_routes import job_bp as _job_bp
-
-        app.register_blueprint(_job_bp)
-        _app_logger.info("[JobAPI] ✅ 后台作业 API 已注册: /api/jobs")
-    except ImportError as e:
-        _app_logger.warning(f"[JobAPI] ⚠️ 未能导入作业 API 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[JobAPI] ❌ 作业 API 注册失败: {e}")
-
-    # 注册 Background Agent API（Cowork 自主任务代理）
-    try:
-        from app.api.bg_agent_routes import bg_agent_bp as _bg_agent_bp
-
-        app.register_blueprint(_bg_agent_bp)
-        _app_logger.info("[BgAgentAPI] ✅ Background Agent API 已注册: /api/bg-agent")
-    except ImportError as e:
-        _app_logger.warning(f"[BgAgentAPI] ⚠️ 未能导入 Background Agent API 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[BgAgentAPI] ❌ Background Agent API 注册失败: {e}")
-
-    # 注册运维健康 API（HealthSnapshot + RemediationPolicy + OpsEventBus）
-    try:
-        from app.api.ops_routes import ops_bp as _ops_bp
-
-        app.register_blueprint(_ops_bp)
-        _app_logger.info("[OpsAPI] ✅ 运维健康 API 已注册: /api/ops")
-    except ImportError as e:
-        _app_logger.warning(f"[OpsAPI] ⚠️ 未能导入运维 API 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[OpsAPI] ❌ 运维 API 注册失败: {e}")
-
-    # 注册影子追踪 API（ShadowWatcher + ProactiveAgent）
-    try:
-        from app.api.shadow_routes import shadow_bp as _shadow_bp
-
-        app.register_blueprint(_shadow_bp)
-        _app_logger.info("[ShadowAPI] ✅ 影子追踪 API 已注册: /api/shadow")
-    except ImportError as e:
-        _app_logger.warning(f"[ShadowAPI] ⚠️ 未能导入影子追踪蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[ShadowAPI] ❌ 影子追踪 API 注册失败: {e}")
-
-    # 注册宏录制 API（MacroRecorder 主动建议）
-    try:
-        from app.api.macro_routes import macro_bp as _macro_bp
-
-        app.register_blueprint(_macro_bp)
-        _app_logger.info("[MacroAPI] ✅ 宏录制 API 已注册: /api/macro")
-    except ImportError as e:
-        _app_logger.warning(f"[MacroAPI] ⚠️ 未能导入宏录制蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[MacroAPI] ❌ 宏录制 API 注册失败: {e}")
-
-    # 注册健康检查 API（/api/health + /api/ping）
-    try:
-        from web.routes.health import health_bp as _health_bp
-
-        app.register_blueprint(_health_bp)
-        _app_logger.info("[HealthAPI] ✅ 健康检查 API 已注册: /api/health")
-    except ImportError as e:
-        _app_logger.warning(f"[HealthAPI] ⚠️ 未能导入健康检查蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[HealthAPI] ❌ 健康检查 API 注册失败: {e}")
-
-    # 注册 Telegram Bot 管理 API（/api/telegram/*）
-    try:
-        from app.api.telegram_bot_routes import telegram_bp as _telegram_bp
-
-        app.register_blueprint(_telegram_bp, url_prefix="/api/telegram")
-        _app_logger.info("[TelegramAPI] ✅ Telegram Bot API 已注册: /api/telegram")
-    except ImportError as e:
-        _app_logger.warning(f"[TelegramAPI] ⚠️ 未能导入 Telegram Bot API 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[TelegramAPI] ❌ Telegram Bot API 注册失败: {e}")
-
-    # 注册工作流 Skill API（跨格式搬运 / 问卷填写 / 文档比对 / 数据清洗 / 待办提取）
-    try:
-        from web.blueprints.workflow_api import workflow_bp as _workflow_bp
-
-        app.register_blueprint(_workflow_bp)
-        _app_logger.info("[WorkflowAPI] ✅ 工作流 API 已注册: /api/workflow")
-    except ImportError as e:
-        _app_logger.warning(f"[WorkflowAPI] ⚠️ 未能导入工作流 API 蓝图: {e}")
-    except Exception as e:
-        _app_logger.error(f"[WorkflowAPI] ❌ 工作流 API 注册失败: {e}")
-
-    # ── web/blueprints/ 路由分层蓝图（页面 / 业务域 API）────────────────────
-    _web_bp_configs = [
-        ("web.blueprints.pages", "pages_bp", None, "Pages"),
-        ("web.blueprints.sessions", "sessions_bp", None, "Sessions"),
-        ("web.blueprints.settings", "settings_bp", None, "Settings"),
-        ("web.blueprints.workspace", "workspace_bp", None, "Workspace"),
-        ("web.blueprints.voice", "voice_bp", None, "VoiceBP"),
-        ("web.blueprints.document", "document_bp", None, "Document"),
-        ("web.blueprints.knowledge", "knowledge_bp", None, "Knowledge"),
-        ("web.blueprints.misc_api", "misc_api_bp", None, "MiscAPI"),
-        ("web.blueprints.analytics", "analytics_bp", None, "Analytics"),
-        ("web.blueprints.proactive", "proactive_bp", None, "Proactive"),
-        ("web.blueprints.execution", "execution_bp", None, "Execution"),
-        ("web.blueprints.file_editor", "file_editor_bp", None, "FileEditor"),
-        ("web.blueprints.file_organize", "file_organize_bp", None, "FileOrganize"),
-        ("web.blueprints.dev", "dev_bp", None, "Dev"),
-        ("web.blueprints.chat", "chat_bp", None, "Chat"),
-        ("web.blueprints.workspace_assistant", "workspace_assistant_bp", None, "WorkspaceAssistant"),
-        ("web.blueprints.pptx_editor", "pptx_editor_bp", None, "PptxEditor"),
-    ]
-    import importlib as _il
-
-    for _mod, _attr, _prefix, _tag in _web_bp_configs:
-        try:
-            _m = _il.import_module(_mod)
-            _bp = getattr(_m, _attr)
-            if _prefix:
-                app.register_blueprint(_bp, url_prefix=_prefix)
-            else:
-                app.register_blueprint(_bp)
-            _app_logger.info(f"[{_tag}] ✅ 蓝图已注册")
-        except ImportError as e:
-            _app_logger.warning(f"[{_tag}] ⚠️ 蓝图导入失败: {e}")
-        except Exception as e:
-            _app_logger.error(f"[{_tag}] ❌ 蓝图注册失败: {e}")
-
-    _app_logger.info("[INIT] ✅ 所有蓝图注册完成")
-
-
-def _initialize_background_runtime():
-    """Warm up long-running subsystems so jobs, triggers, and ops are live after startup."""
-    try:
-        time.sleep(1)
-
-        from app.core.jobs.job_runner import get_job_runner
-        from app.core.jobs.trigger_registry import get_trigger_registry
-        from app.core.ops.ops_event_bus import get_ops_bus
-        from app.core.skills.skill_trigger_binding import get_skill_binding_manager
-
-        get_ops_bus()
-        runner = get_job_runner()
-        registry = get_trigger_registry()
-        bindings = get_skill_binding_manager()
-
-        # 初始化 GoalManager 并注册 goal_check 处理器
-        try:
-            from app.core.goal.goal_job_handler import register_goal_handler
-            from app.core.goal.goal_manager import get_goal_manager
-
-            _gm = get_goal_manager()
-            register_goal_handler(runner)
-            _app_logger.info(
-                f"[GoalManager] ✅ 长期目标管理器已启动 (活跃目标: {_gm.count()} 条)"
-            )
-        except Exception as _ge:
-            _app_logger.warning(f"[GoalManager] ⚠️ 初始化失败（非致命）: {_ge}")
-
-        # 初始化 FileRegistry 并启动 FileWatcher
-        try:
-            from app.core.file.file_registry import get_file_registry
-            from app.core.file.file_watcher import get_file_watcher
-
-            _fr = get_file_registry()
-            _fw = get_file_watcher()
-            # 自动监控 workspace 目录，确保 AI 生成的文件实时收录到「我的内容」
-            _ws_dir = get_workspace_root()
-            if _ws_dir and Path(_ws_dir).is_dir():
-                _fw.add_dir(_ws_dir)
-                # 后台立即扫描一次，把已有文件补录进注册表
-                threading.Thread(
-                    target=_fw.scan_once,
-                    args=(_ws_dir,),
-                    daemon=True,
-                    name="koto-init-scan",
-                ).start()
-            _fw.start()
-            _app_logger.info(
-                f"[FileHub] ✅ 文件注册表已启动 (已收录: {_fr.count()} 个文件，监控: {_ws_dir})"
-            )
-        except Exception as _fe:
-            _app_logger.warning(f"[FileHub] ⚠️ 文件模块初始化失败（非致命）: {_fe}")
-
-        # 初始化工作文件库（后台快速扫描桌面/文档/下载）
-        try:
-            from web.work_file_library import get_work_file_library
-
-            _wfl_inst = get_work_file_library()
-            if not _wfl_inst.is_indexed():
-                _wfl_inst.scan_locations()
-                _app_logger.debug(
-                    "[WorkFileLibrary] 🚀 工作文件库后台扫描已启动（桌面/文档/下载）"
-                )
-            else:
-                _app_logger.info(
-                    f"[WorkFileLibrary] ✅ 工作文件库已加载: {_wfl_inst.count()} 个工作文件"
-                )
-        except Exception as _wfl_e:
-            _app_logger.warning(f"[WorkFileLibrary] ⚠️ 初始化失败（非致命）: {_wfl_e}")
-
-        _app_logger.info(
-            "[Runtime] ✅ 后台运行时已启动: "
-            f"job_runner={runner is not None}, "
-            f"triggers={len(registry.list_all())}, "
-            f"bindings={len(bindings.list_bindings())}"
-        )
-
-        # 注册 ShadowTracer 阈值 → DistillManager 自动提交训练（数据飞轮闭环）
-        try:
-            from app.core.learning.distill_manager import DistillManager
-            from app.core.learning.shadow_tracer import ShadowTracer, TraceEvent
-
-            def _on_training_ready(event: str, skill_id: str, count: int):
-                if event == TraceEvent.TRAINING_READY:
-                    _app_logger.debug(
-                        f"[Flywheel] 🚀 skill={skill_id} 已积累 {count} 条优质记录，自动提交 LoRA 训练..."
-                    )
-                    try:
-                        job_id = DistillManager.instance().submit(skill_id)
-                        _app_logger.info(
-                            f"[Flywheel] ✅ 训练任务已提交 job_id={job_id} skill={skill_id}"
-                        )
-                    except Exception as _e:
-                        _app_logger.warning(f"[Flywheel] ⚠️ 自动提交训练失败: {_e}")
-
-            ShadowTracer.add_listener(_on_training_ready)
-            _app_logger.info(
-                "[Flywheel] ✅ 数据飞轮监听器已注册（ShadowTracer → DistillManager）"
-            )
-        except Exception as _fe:
-            _app_logger.warning(f"[Flywheel] ⚠️ 飞轮监听器注册失败（非致命）: {_fe}")
-
-        # 启动 Telegram Bot（有配置 Token 时自动启动）
-        try:
-            from web.telegram_bot import get_telegram_bot
-
-            tg_bot = get_telegram_bot()
-            if tg_bot:
-                tg_bot.start()
-                _app_logger.info("[Telegram] ✅ Telegram Bot 已启动")
-            else:
-                _app_logger.info("[Telegram] ℹ️ 未配置 TELEGRAM_BOT_TOKEN，Bot 不启动")
-        except Exception as _tg_e:
-            _app_logger.warning(f"[Telegram] ⚠️ Bot 启动失败（非致命）: {_tg_e}")
-
-        # 启动晨间简报调度器
-        try:
-            from app.core.services.morning_brief import get_morning_brief_service
-
-            get_morning_brief_service().start_scheduler()
-            _app_logger.info("[MorningBrief] ✅ 晨间简报调度器已启动")
-        except Exception as _mb_e:
-            _app_logger.warning(f"[MorningBrief] ⚠️ 调度器启动失败（非致命）: {_mb_e}")
-
-        # 初始化 ContactManager（建表）
-        try:
-            from app.core.memory.contact_manager import get_contact_manager
-
-            _cm = get_contact_manager()
-            _app_logger.info(
-                f"[ContactCRM] ✅ 联系人 CRM 已就绪 (已收录: {_cm.count()} 位)"
-            )
-        except Exception as _cm_e:
-            _app_logger.warning(
-                f"[ContactCRM] ⚠️ 联系人 CRM 初始化失败（非致命）: {_cm_e}"
-            )
-
-    except Exception as exc:
-        _app_logger.warning(f"[Runtime] ⚠️ 后台运行时初始化失败: {exc}")
+sock = init_notification_socket(
+    app,
+    _app_logger,
+    Sock,
+    lambda: get_notification_manager(),
+)
 
 
 # 同步注册所有蓝图（必须在 app.run() 之前完成，否则 Flask 3.x 会在首次请求后拒绝注册）
-_register_blueprints_deferred()
-threading.Thread(
-    target=_initialize_background_runtime, name="RuntimeBootstrap", daemon=True
-).start()
+agent_bp = register_blueprints_deferred(app, _app_logger)
+start_background_runtime(_app_logger, get_workspace_root)
 
 # 后台预加载 Vosk 语音模型（减少首次识别延迟）
-try:
-    from web.voice_engine import preload as _voice_preload
-
-    _voice_preload()
-except Exception as _e:
-    _app_logger.debug("[startup] Vosk 预加载跳过: %s", _e)
+preload_voice_engine(_app_logger)
 
 WORKSPACE_DIR = get_workspace_root()
-_chats_from_settings = settings_manager.chats_dir
-CHAT_DIR = _chats_from_settings if _chats_from_settings else os.path.join(PROJECT_ROOT, "chats")
-UPLOAD_DIR = os.path.join(PROJECT_ROOT, "web", "uploads")
-os.makedirs(CHAT_DIR, exist_ok=True)
-os.makedirs(WORKSPACE_DIR, exist_ok=True)
-os.makedirs(UPLOAD_DIR, exist_ok=True)
+_storage_paths = resolve_app_storage_paths(
+    PROJECT_ROOT,
+    WORKSPACE_DIR,
+    settings_manager.chats_dir,
+)
+CHAT_DIR = _storage_paths.chat_dir
+UPLOAD_DIR = _storage_paths.upload_dir
 
 # ================= 动态模型管理器 =================
 # 自动从 API 发现可用模型并按任务类型智能匹配，无需手动维护模型列表。
@@ -2381,12 +1739,6 @@ def _resolve_legacy_model_alias(model_id: str) -> str:
     if not normalized:
         return ""
     return _LEGACY_MODEL_ALIASES.get(normalized, normalized)
-
-
-def _get_file_task_default_model() -> str:
-    return _resolve_legacy_model_alias(
-        MODEL_MAP.get("FILE_TASK", MODEL_MAP.get("AGENT", MODEL_MAP.get("CHAT", "gemini-3.1-pro-preview")))
-    )
 
 
 def _get_configured_local_model_id() -> str:
@@ -2523,20 +1875,47 @@ def _resolve_requested_model_id(
 
     return normalized
 
+def _stream_whitebox_file_task_request(data: dict):
+    """Stream the new Koto-native file task event contract."""
+    from app.core.agent.file_task_contract import FileTaskRequest
+    from app.core.agent.file_task_runtime import FileTaskRuntime
 
-def _normalize_file_task_model_id(model_mode: str, requested_model: str) -> str:
-    normalized = str(requested_model or "").strip()
-    if normalized.lower() in {"auto", "local"}:
-        normalized = ""
-
-    if str(model_mode or "auto").strip().lower() == "local":
-        return ""
-
-    return _resolve_requested_model_id(
-        normalized,
-        fallback_model=_get_file_task_default_model(),
-        task_type="FILE_TASK",
-    ) or _get_file_task_default_model()
+    payload = dict(data or {})
+    model_mode = normalize_model_mode(payload.get("model_mode"), default="cloud")
+    payload["model_mode"] = model_mode
+    if model_mode == "local":
+        raw_model_id = str(payload.get("model_id") or "").strip()
+        if raw_model_id.lower() in {"auto", "cloud", "local"} or raw_model_id.lower().startswith("gemini"):
+            payload["model_id"] = ""
+        configured_local_model = _get_configured_local_model_id()
+        if configured_local_model:
+            raw_options = payload.get("options")
+            options = dict(raw_options) if isinstance(raw_options, dict) else {}
+            options.setdefault("local_model", configured_local_model)
+            payload["options"] = options
+    history = payload.get("history")
+    if not isinstance(history, list):
+        history = []
+    if len(history) > 20:
+        history = history[-20:]
+    payload["history"] = history
+    request_payload = FileTaskRequest.from_mapping(payload)
+    runtime = FileTaskRuntime(workspace_root=WORKSPACE_DIR, gemini_client=client)
+    event_iterable = runtime.run(request_payload)
+    try:
+        for event in event_iterable:
+            yield _file_task_event_to_safe_sse(event)
+    except Exception as exc:
+        _app_logger.exception("[FileTaskRuntime] stream failed: %s", exc)
+        run_id = request_payload.run_id or "file_task"
+        yield _file_task_event_to_safe_sse({
+            "type": "run.error",
+            "run_id": run_id,
+            "seq": 999999,
+            "step_id": "run",
+            "ts": time.time(),
+            "payload": {"text": str(exc)},
+        })
 
 
 def _normalize_editor_stream_model_id(model_mode: str, requested_model: str) -> str:
@@ -2553,6 +1932,105 @@ def _normalize_editor_stream_model_id(model_mode: str, requested_model: str) -> 
         fallback_model=fallback_model,
         task_type="CHAT",
     ) or fallback_model
+
+
+def _editor_ai_safe_sse(payload: dict) -> str:
+    safe_payload = dict(payload or {})
+    event_type = str(safe_payload.get("type") or "").strip().lower()
+
+    if event_type == "tool_result":
+        safe_payload["result_preview"] = sanitize_user_visible_text(
+            safe_payload.get("result_preview", ""),
+            fallback="工具已执行。",
+        )
+    elif event_type == "step_error":
+        safe_payload["error"] = sanitize_user_visible_text(
+            safe_payload.get("error", ""),
+            fallback="处理失败，请稍后重试。",
+            treat_as_error=True,
+        )
+    elif event_type == "error":
+        safe_payload["text"] = sanitize_user_visible_text(
+            safe_payload.get("text", ""),
+            fallback="AI 处理失败，请稍后重试。",
+            treat_as_error=True,
+        )
+    elif event_type == "info":
+        safe_payload["text"] = sanitize_user_visible_text(
+            safe_payload.get("text", ""),
+            fallback="处理中…",
+        )
+
+    return f"data: {json.dumps(safe_payload, ensure_ascii=False)}\n\n"
+
+
+def _legacy_safe_sse(payload: dict) -> str:
+    safe_payload = dict(payload or {})
+    event_type = str(safe_payload.get("type") or "").strip().lower()
+    message_as_error = bool(
+        safe_payload.pop("_message_as_error", event_type == "error")
+    )
+    detail_as_error = bool(safe_payload.pop("_detail_as_error", False))
+    message_fallback = safe_payload.pop("_message_fallback", None)
+    detail_fallback = safe_payload.pop("_detail_fallback", None)
+
+    if "message" in safe_payload:
+        if message_fallback is None:
+            message_fallback = (
+                "AI 处理失败，请稍后重试。" if message_as_error else "处理中…"
+            )
+        safe_payload["message"] = sanitize_user_visible_text(
+            safe_payload.get("message", ""),
+            fallback=message_fallback,
+            treat_as_error=message_as_error,
+        )
+
+    if "detail" in safe_payload:
+        detail_text = str(safe_payload.get("detail") or "").strip()
+        if detail_text:
+            if detail_fallback is None:
+                detail_fallback = "处理失败，请稍后重试。" if detail_as_error else ""
+            safe_payload["detail"] = sanitize_user_visible_text(
+                detail_text,
+                fallback=detail_fallback,
+                treat_as_error=detail_as_error,
+            )
+
+    return f"data: {json.dumps(safe_payload, ensure_ascii=False)}\n\n"
+
+
+def _file_task_event_to_safe_sse(event) -> str:
+    from app.core.agent.file_task_contract import event_to_sse
+
+    payload = event.to_dict() if hasattr(event, "to_dict") else dict(event)
+    event_type = str(payload.get("type") or "").strip()
+    event_payload = payload.get("payload")
+    if not isinstance(event_payload, dict):
+        return event_to_sse(payload)
+
+    safe_event_payload = dict(event_payload)
+    if event_type == "run.error":
+        safe_event_payload["text"] = sanitize_user_visible_text(
+            safe_event_payload.get("text", ""),
+            fallback="任务执行失败，请稍后重试。",
+            treat_as_error=True,
+        )
+    elif event_type == "tool.finished":
+        preview = str(safe_event_payload.get("result_preview") or "").strip()
+        if preview:
+            blocked = bool(safe_event_payload.get("blocked"))
+            success = safe_event_payload.get("success")
+            fallback = "当前调用已被拦截，请调整方案后重试。" if blocked else (
+                "工具执行失败，请调整方案后重试。" if success is False else "工具已执行。"
+            )
+            safe_event_payload["result_preview"] = sanitize_user_visible_text(
+                preview,
+                fallback=fallback,
+                treat_as_error=(success is False and not blocked),
+            )
+
+    payload["payload"] = safe_event_payload
+    return event_to_sse(payload)
 
 
 def _sync_model_routes_from_manager(force_refresh: bool = False) -> bool:
@@ -6839,6 +6317,11 @@ def get_memory_manager():
 def _inject_memory_adapters(mgr):
     """注入摘要与向量适配器到 MemoryManager（如果支持）。"""
     try:
+        from app.core.llm.embedding_model_selector import (
+            resolve_gemini_embedding_model,
+        )
+
+        memory_embedding_model = resolve_gemini_embedding_model()
 
         def _memory_generate(
             prompt: str, temperature: float = 0.2, max_tokens: int = 300
@@ -6856,7 +6339,7 @@ def _inject_memory_adapters(mgr):
         def _memory_embed(texts: list) -> list:
             safe_texts = [(t or "")[:1000] for t in texts]
             resp = client.models.embed_content(
-                model="text-embedding-004", contents=safe_texts
+                model=memory_embedding_model, contents=safe_texts
             )
             embeddings = []
             if hasattr(resp, "embeddings"):
@@ -8426,7 +7909,7 @@ def chat_stream():
                     content = event.get("content", "")
                     done = event.get("done", False)
                     if node == "error":
-                        yield f"data: {json.dumps({'type': 'error', 'message': content})}\n\n"
+                        yield _legacy_safe_sse({"type": "error", "message": content})
                         return
                     if content:
                         yield f"data: {json.dumps({'type': 'status' if not done else 'token', 'message': f'[{node}] {content}' if not done else None, 'content': content if done else None}, ensure_ascii=False)}\n\n"
@@ -8447,7 +7930,10 @@ def chat_stream():
                 _app_logger.error(
                     f"[LG_WORKFLOW] ❌ 工作流失败:\n{traceback.format_exc()}"
                 )
-                yield f"data: {json.dumps({'type': 'error', 'message': f'工作流执行失败: {str(_wf_ex)}'})}\n\n"
+                yield _legacy_safe_sse({
+                    "type": "error",
+                    "message": f"工作流执行失败: {str(_wf_ex)}",
+                })
 
         return Response(generate_langgraph_workflow(), mimetype="text/event-stream")
 
@@ -8538,7 +8024,10 @@ def chat_stream():
                     _app_logger.error(
                         f"[MULTI_AGENT] ❌ MultiAgentOrchestrator 失败: {_tb.format_exc()}"
                     )
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'多Agent执行失败，请重试: {str(_ma_err)}'})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": f"多Agent执行失败，请重试: {str(_ma_err)}",
+                    })
 
             return Response(generate_multi_agent(), mimetype="text/event-stream")
 
@@ -8578,7 +8067,10 @@ def chat_stream():
                             break
 
                 if not doc_path:
-                    yield f"data: {json.dumps({'type': 'error', 'message': '❌ 未找到可执行的文档文件（支持 .docx, .doc, .pdf, .md, .txt, .rtf, .odt, .json）'})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": "❌ 未找到可执行的文档文件（支持 .docx, .doc, .pdf, .md, .txt, .rtf, .odt, .json）",
+                    })
                     return
 
                 status_msg = f"📄 找到文档: {os.path.basename(doc_path)}\n"
@@ -8600,7 +8092,7 @@ def chat_stream():
                         error_msg = (
                             f"❌ 文档解析失败: {load_result.get('error', '未知错误')}\n"
                         )
-                        yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+                        yield _legacy_safe_sse({"type": "error", "message": error_msg})
                         return
 
                     # 显示工作流信息
@@ -8653,7 +8145,12 @@ def chat_stream():
                             step.status = "failed"
                             step.error = str(e)
                             error_msg = f"   ❌ 失败: {e}\n\n"
-                            yield f"data: {json.dumps({'type': 'status', 'message': error_msg})}\n\n"
+                            yield _legacy_safe_sse({
+                                "type": "status",
+                                "message": error_msg,
+                                "_message_as_error": True,
+                                "_message_fallback": "   ❌ 步骤执行失败\n\n",
+                            })
 
                         finally:
                             step.end_time = datetime.now()
@@ -8705,8 +8202,11 @@ def chat_stream():
                     import traceback
 
                     error_detail = traceback.format_exc()
-                    error_msg = f"❌ 工作流执行失败: {str(e)}\n{error_detail}"
-                    yield f"data: {json.dumps({'type': 'error', 'message': error_msg})}\n\n"
+                    _app_logger.error(f"[DOC_WORKFLOW] ❌ 工作流执行失败:\n{error_detail}")
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": f"❌ 工作流执行失败: {str(e)}",
+                    })
                     # 保存失败记录
                     try:
                         session_manager.append_and_save(
@@ -8828,7 +8328,17 @@ def chat_stream():
                             yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'step_index': step_idx, 'step_total': _step_total, 'status': 'done', 'title': evt.get('description', f'步骤 {step_idx}'), 'detail': preview[:120], 'progress': _pct})}\n\n"
                         else:
                             err_msg = evt.get("error") or "执行失败"
-                            yield f"data: {json.dumps({'type': 'progress', 'task_id': _ms_task_id, 'stage': 'step_failed', 'step_number': step_idx, 'step_total': _step_total, 'progress': _pct, 'message': f'步骤 {step_idx} 遇到问题', 'detail': err_msg[:80]})}\n\n"
+                            yield _legacy_safe_sse({
+                                "type": "progress",
+                                "task_id": _ms_task_id,
+                                "stage": "step_failed",
+                                "step_number": step_idx,
+                                "step_total": _step_total,
+                                "progress": _pct,
+                                "message": f"步骤 {step_idx} 遇到问题",
+                                "detail": err_msg[:80],
+                                "_detail_as_error": True,
+                            })
                             yield f"data: {json.dumps({'type': 'task_step', 'task_id': _ms_task_id, 'step_index': step_idx, 'step_total': _step_total, 'status': 'failed', 'title': evt.get('description', f'步骤 {step_idx}'), 'detail': err_msg[:120], 'progress': _pct})}\n\n"
                         # 回补 subtasks 状态（用于后续自检）
                         for _st in subtasks:
@@ -8997,7 +8507,10 @@ def chat_stream():
                 yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': saved_files})}\n\n"
 
             except Exception as e:
-                yield f"data: {json.dumps({'type': 'error', 'message': f'多步任务执行失败: {str(e)}'})}\n\n"
+                yield _legacy_safe_sse({
+                    "type": "error",
+                    "message": f"多步任务执行失败: {str(e)}",
+                })
 
             # 保存 MULTI_STEP 对话历史（基于磁盘完整历史追加）
             try:
@@ -9033,7 +8546,10 @@ def chat_stream():
             if locked_model == "local":
                 from app.core.socket_handler import _is_ollama_alive, _get_local_provider
                 if not _is_ollama_alive():
-                    yield f"data: {json.dumps({'type': 'error', 'message': '本地模式已启用，但 Ollama 未运行。请执行 ollama serve。'})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": "本地模式已启用，但 Ollama 未运行。请执行 ollama serve。",
+                    })
                     return
                 yield f"data: {json.dumps({'type': 'classification', 'task_type': 'AGENT', 'route_method': 'ollama_local', 'message': '🦙 本地模式，使用 Ollama 回答…'})}\n\n"
                 try:
@@ -9052,7 +8568,10 @@ def chat_stream():
                     except Exception as _save_exc:
                         _app_logger.debug("[STREAM] 保存本地模式对话失败: %s", _save_exc)
                 except Exception as _ole:
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'本地模型失败: {_ole}'})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": f"本地模型失败: {_ole}",
+                    })
                 return
 
             yield f"data: {json.dumps({'type': 'classification', 'task_type': 'AGENT', 'route_method': route_method, 'message': '🎯 任务分类: 🤖 智能助手 (LangGraph ReAct)'})}\n\n"
@@ -9148,7 +8667,10 @@ def chat_stream():
                     _app_logger.error(
                         f"[AGENT] ❌ UnifiedAgent 也失败:\n{traceback.format_exc()}"
                     )
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'Agent 执行失败: {str(e)}'})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": f"Agent 执行失败: {str(e)}",
+                    })
                     return
 
             task_payload = {
@@ -10898,7 +10420,7 @@ def chat_stream():
                 except Exception as _me:
                     _app_logger.error(f"[MEETING_EXTRACT] 失败: {_me}")
                     _err = f"❌ 会议提炼失败：{str(_me)[:200]}"
-                    yield f"data: {json.dumps({'type': 'error', 'message': _err})}\n\n"
+                    yield _legacy_safe_sse({"type": "error", "message": _err})
                     session_manager.append_and_save(
                         f"{session_name}.json", user_input, _err
                     )
@@ -11011,7 +10533,10 @@ def chat_stream():
                             f"[DocWorkflow] 转换 {_dw_ext} → .docx 并复制到文档目录: {doc_path}"
                         )
                     except Exception as _dw_conv_err:
-                        yield f"data: {json.dumps({'type': 'error', 'message': f'文档转换失败: {_dw_conv_err}'})}\n\n"
+                        yield _legacy_safe_sse({
+                            "type": "error",
+                            "message": f"文档转换失败: {_dw_conv_err}",
+                        })
                         yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
                         return
 
@@ -11031,7 +10556,10 @@ def chat_stream():
 
                     yield f"data: {json.dumps({'type': 'progress', 'stage': 'init_reading_complete', 'message': f'✅ 文档解析完成', 'detail': f'{doc_filename}: {total_paras} 段  |  {total_chars} 字'})}\n\n"
                 except Exception as e:
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'❌ 读取文档失败: {str(e)}'})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": f"❌ 读取文档失败: {str(e)}",
+                    })
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
                     return
 
@@ -11041,10 +10569,8 @@ def chat_stream():
                 yield f"data: {json.dumps({'type': 'info', 'message': task_info_msg})}\n\n"
 
                 try:
-                    from web.document_feedback import DocumentFeedbackSystem
-
-                    feedback_system = DocumentFeedbackSystem(
-                        gemini_client=client, default_model_id=used_model
+                    from web.document_annotation_compat import (
+                        iter_annotation_progress_events,
                     )
 
                     # 使用流式分析系统，逐步反馈进度
@@ -11086,9 +10612,10 @@ def chat_stream():
                     # 迭代流式结果，传入task_id用于支持取消
                     for (
                         progress_event
-                    ) in feedback_system.full_annotation_loop_streaming(
-                        doc_path,
-                        user_input,
+                    ) in iter_annotation_progress_events(
+                        file_path=doc_path,
+                        user_requirement=user_input,
+                        gemini_client=client,
                         task_id=task_id,
                         model_id=model_id,
                         cancel_check=lambda: _interrupt_manager.is_interrupted(
@@ -11182,7 +10709,10 @@ def chat_stream():
                             user_input,
                             f"❌ 文档标注失败: {error_msg}",
                         )
-                        yield f"data: {json.dumps({'type': 'error', 'message': f'❌ 处理失败: {error_msg}'})}\n\n"
+                        yield _legacy_safe_sse({
+                            "type": "error",
+                            "message": f"❌ 处理失败: {error_msg}",
+                        })
 
                         total_time = time.time() - start_time
                         yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
@@ -11199,7 +10729,10 @@ def chat_stream():
                         f"❌ 文档标注异常: {str(e)[:200]}",
                     )
 
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'❌ 处理异常: {str(e)[:200]}'})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": f"❌ 处理异常: {str(e)[:200]}",
+                    })
                     total_time = time.time() - start_time
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
 
@@ -11441,7 +10974,12 @@ def chat_stream():
                         print(
                             f"[STREAM] ⚠️ 文件分析直通失败，降级标准路径: {_rf_tb.format_exc()}"
                         )
-                        yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 文件读取遇到问题，切换至标准模式...', 'detail': str(_rf_err)[:100]})}\n\n"
+                        yield _legacy_safe_sse({
+                            "type": "progress",
+                            "message": "⚠️ 文件读取遇到问题，切换至标准模式...",
+                            "detail": str(_rf_err)[:100],
+                            "_detail_as_error": True,
+                        })
                         # 降级：继续向下走 ToT / RESEARCH 标准路径
             # ═══════════════════════════════════════════════════════════════════════════
 
@@ -11502,7 +11040,12 @@ def chat_stream():
                                 _elapsed = _evt.get("elapsed", "")
                                 yield f"data: {json.dumps({'type': 'progress', 'message': f'✅ 分支 {_bid}「{_blabel}」完成 ({_elapsed}s)', 'detail': _evt.get('preview', '')[:60]})}\n\n"
                             elif _bstatus == "error":
-                                yield f"data: {json.dumps({'type': 'progress', 'message': f'⚠️ 分支 {_bid} 失败', 'detail': _evt.get('error', '')[:80]})}\n\n"
+                                yield _legacy_safe_sse({
+                                    "type": "progress",
+                                    "message": f"⚠️ 分支 {_bid} 失败",
+                                    "detail": _evt.get("error", "")[:80],
+                                    "_detail_as_error": True,
+                                })
 
                         elif _stage == "evaluate":
                             _bstatus = _evt.get("status", "")
@@ -11526,7 +11069,13 @@ def chat_stream():
                         elif _stage == "error":
                             _errmsg = _evt.get("message", "未知错误")
                             _app_logger.error(f"[ToT] ❌ 错误: {_errmsg}")
-                            yield f"data: {json.dumps({'type': 'progress', 'message': f'⚠️ Tree of Thought 遇到问题，切换至标准模式: {_errmsg[:100]}', 'detail': ''}, ensure_ascii=False)}\n\n"
+                            yield _legacy_safe_sse({
+                                "type": "progress",
+                                "message": f"⚠️ Tree of Thought 遇到问题，切换至标准模式: {_errmsg[:100]}",
+                                "detail": "",
+                                "_message_as_error": True,
+                                "_message_fallback": "⚠️ Tree of Thought 遇到问题，切换至标准模式",
+                            })
                             _tot_enabled_fallback = True
                             _tot_final = ""
                             break
@@ -11559,7 +11108,12 @@ def chat_stream():
                     import traceback as _ttb
 
                     _app_logger.error(f"[ToT] ❌ 异常: {_ttb.format_exc()}")
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ Tree of Thought 异常，切换至标准模式', 'detail': str(_tot_err)[:100]})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "progress",
+                        "message": "⚠️ Tree of Thought 异常，切换至标准模式",
+                        "detail": str(_tot_err)[:100],
+                        "_detail_as_error": True,
+                    })
             # ──────────────────────────────────────────────────────────────────
 
             # === RESEARCH Mode (深度研究 - 流式响应优先) ===
@@ -15516,7 +15070,9 @@ def chat_with_file():
                         f"[FILE UPLOAD] 批量 DOC_ANNOTATE 模式: {filename}"
                     )
                     try:
-                        from web.document_feedback import DocumentFeedbackSystem
+                        from web.document_annotation_compat import (
+                            collect_annotation_result,
+                        )
 
                         _batch_docs_dir = settings_manager.documents_dir
                         os.makedirs(_batch_docs_dir, exist_ok=True)
@@ -15551,19 +15107,15 @@ def chat_with_file():
                             import shutil as _bsh
 
                             _bsh.copy2(_batch_filepath, _batch_target)
-                        _bt_feedback = DocumentFeedbackSystem(
+                        _bt_final = collect_annotation_result(
+                            file_path=_batch_target,
+                            user_requirement=user_input,
                             gemini_client=client,
-                            default_model_id=MODEL_MAP.get(
+                            model_id=MODEL_MAP.get(
                                 "DOC_ANNOTATE",
                                 MODEL_MAP.get("FILE_TASK", "gemini-3.1-pro-preview"),
                             ),
                         )
-                        _bt_final = None
-                        for _bt_evt in _bt_feedback.full_annotation_loop_streaming(
-                            _batch_target, user_input
-                        ):
-                            if _bt_evt.get("stage") == "complete":
-                                _bt_final = _bt_evt.get("result", {})
                         if _bt_final and _bt_final.get("success"):
                             _bt_revised = _bt_final.get("revised_file", "")
                             result["response"] = (
@@ -16221,10 +15773,17 @@ def chat_with_file():
                                 f"[DocConvert] ✅ 转换并复制到文档目录 → {_loc_target_path}"
                             )
                         else:
-                            yield f"data: {json.dumps({'type': 'error', 'message': f'不支持的格式：{_loc_file_ext}'})}\n\n"
+                            yield _legacy_safe_sse({
+                                "type": "error",
+                                "message": f"不支持的格式：{_loc_file_ext}",
+                            })
                             return
                     except Exception as _conv_err:
-                        err_msg = f"❌ 格式转换失败：{_conv_err}"
+                        err_msg = sanitize_user_visible_text(
+                            f"❌ 格式转换失败：{_conv_err}",
+                            fallback="❌ 格式转换失败，请稍后重试。",
+                            treat_as_error=True,
+                        )
                         yield f"data: {json.dumps({'type': 'token', 'content': err_msg})}\n\n"
                         _elapsed = _time.time() - _start
                         session_manager.update_last_model_response(
@@ -16235,11 +15794,8 @@ def chat_with_file():
                 # ─────────────────────────────────────────────────────────────
 
                 try:
-                    from web.document_feedback import DocumentFeedbackSystem
-
-                    feedback_system = DocumentFeedbackSystem(
-                        gemini_client=_ann_client,
-                        default_model_id="gemini-2.5-pro",
+                    from web.document_annotation_compat import (
+                        iter_annotation_progress_events,
                     )
 
                     # 发送分类信息（若上方转换块已发送则跳过重复）
@@ -16328,9 +15884,10 @@ def chat_with_file():
 
                     for (
                         progress_event
-                    ) in feedback_system.full_annotation_loop_streaming(
-                        _loc_target_path,
-                        _ann_user_input,
+                    ) in iter_annotation_progress_events(
+                        file_path=_loc_target_path,
+                        user_requirement=_ann_user_input,
+                        gemini_client=_ann_client,
                         task_id=task_id,
                         model_id=_ann_model,
                         cancel_check=lambda: _interrupt_manager.is_interrupted(
@@ -16482,7 +16039,10 @@ def chat_with_file():
                         session_manager.update_last_model_response(
                             f"{_ann_session}.json", f"❌ 文档标注失败: {err_msg}"
                         )
-                        yield f"data: {json.dumps({'type': 'error', 'message': '❌ ' + err_msg})}\n\n"
+                        yield _legacy_safe_sse({
+                            "type": "error",
+                            "message": "❌ " + err_msg,
+                        })
                         yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed})}\n\n"
 
                 except Exception as e:
@@ -16493,7 +16053,10 @@ def chat_with_file():
                     session_manager.update_last_model_response(
                         f"{_ann_session}.json", f"❌ 标注系统错误: {str(e)[:200]}"
                     )
-                    yield f"data: {json.dumps({'type': 'error', 'message': '❌ 标注系统错误: ' + str(e)[:200]})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": "❌ 标注系统错误: " + str(e)[:200],
+                    })
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
 
             return Response(
@@ -16960,7 +16523,10 @@ def chat_with_file():
                     session_manager.update_last_model_response(
                         f"{session_name}.json", f"❌ 分析失败: {_emsg}"
                     )
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'❌ 分析失败: {_emsg}'})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": f"❌ 分析失败: {_emsg}",
+                    })
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': 0})}\n\n"
 
             return Response(
@@ -17043,7 +16609,10 @@ def chat_with_file():
                     session_manager.update_last_model_response(
                         f"{session_name}.json", f"❌ 文件分析失败: {_emsg}"
                     )
-                    yield f"data: {json.dumps({'type': 'error', 'message': f'❌ 文件分析失败: {_emsg}'})}\n\n"
+                    yield _legacy_safe_sse({
+                        "type": "error",
+                        "message": f"❌ 文件分析失败: {_emsg}",
+                    })
                     yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': 0})}\n\n"
 
             return Response(
@@ -17759,22 +17328,21 @@ def _is_explicit_file_gen_request(requirement: str) -> bool:
 def _call_document_annotate(file_path: str, requirement: str):
     """调用文档标注系统"""
     try:
+        from web.document_annotation_compat import (
+            collect_annotation_result,
+            resolve_document_path,
+        )
+
         # 转换为绝对路径
-        if not os.path.isabs(file_path):
-            file_path = os.path.join(WORKSPACE_DIR, "documents", file_path)
+        file_path = resolve_document_path(file_path, WORKSPACE_DIR)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
 
-        from web.document_feedback import DocumentFeedbackSystem
-
-        feedback_system = DocumentFeedbackSystem(
-            gemini_client=client, default_model_id="gemini-2.5-pro"
-        )
-
-        result = feedback_system.full_annotation_loop(
+        result = collect_annotation_result(
             file_path=file_path,
             user_requirement=requirement,
+            gemini_client=client,
             model_id="gemini-2.5-pro",
         )
 
@@ -17909,6 +17477,31 @@ def _doc_mode_hint(mode: str) -> str:
     return hints.get(mode or 'normal', '')
 
 
+_EDITOR_AI_STREAM_ACTIONS = {
+    "translate",
+    "polish",
+    "summarize",
+    "continue_writing",
+    "check",
+    "explain",
+    "python_chart",
+    "chart",
+    "rewrite",
+    "annotate",
+    "find_replace",
+    "find_reference",
+    "narrative",
+    "format_normalize",
+    "review_checklist",
+    "glossary_translate",
+    "glossary_translate_exec",
+    "meeting_notes",
+    "data_clean",
+    "slide_expand",
+    "custom_instruction",
+}
+
+
 def _build_editor_prompt(action: str, selection: str, instruction: str, full_text: str = "", csv_data: str = "", doc_mode: str = "normal", selection_offset: int = -1) -> str:
     """Build a prompt for the File Assistant AI based on action type.
 
@@ -18013,8 +17606,8 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
             "根据以下数据，生成一段 Python 代码，使用 pandas 和 matplotlib 生成合适的图表（折线图、柱状图或饼图等）。\n"
             "要求：\n"
             "1. 代码完整可直接运行（包含所有必要 import）\n"
-            "2. 中文显示：在代码开头加入 import matplotlib; matplotlib.rcParams['font.sans-serif']=['SimHei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
-            "3. 最后调用 plt.savefig('chart.png', dpi=150, bbox_inches='tight') 然后 plt.close()\n"
+            "2. 中文显示：在代码开头加入 import matplotlib; matplotlib.rcParams['font.sans-serif']=['Microsoft YaHei','SimHei','Noto Sans CJK SC','WenQuanYi Micro Hei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
+            "3. 最后调用 plt.savefig('chart.png', dpi=220, bbox_inches='tight') 然后 plt.close()\n"
             "4. 绝对不要调用 plt.show()\n"
             "5. 只输出代码，不加任何 markdown 代码块标记（不加 ```）\n"
             "6. 数据说明：CSV 中第一列'行'为行号，其余列字母（A/B/C...）对应 Excel 列\n\n"
@@ -18197,7 +17790,21 @@ def _build_editor_prompt(action: str, selection: str, instruction: str, full_tex
                 full_ctx = f"\n\n文档全文（仅供参考）：\n{full_text[:4000]}"
         return f"{_mode_hint}{instruction}{ctx}{full_ctx}"
     else:
-        return selection or instruction
+        raise ValueError(f"Unsupported editor AI action: {action}")
+
+
+@app.route("/api/editor/ai/task-stream", methods=["POST"])
+def editor_ai_task_stream():
+    """Koto-native whitebox file task stream."""
+    data = request.get_json(silent=True) or {}
+    task = (data.get("task") or data.get("instruction") or "").strip()
+    if not task:
+        return jsonify({"error": "Missing 'task' parameter"}), 400
+    data["task"] = task
+    return Response(
+        stream_with_context(_stream_whitebox_file_task_request(data)),
+        mimetype="text/event-stream",
+    )
 
 
 @app.route("/api/editor/ai/stream", methods=["POST"])
@@ -18227,12 +17834,13 @@ def editor_ai_stream():
     if len(history) > 20:
         history = history[-20:]
 
+    if action not in _EDITOR_AI_STREAM_ACTIONS:
+        return jsonify({"error": f"Unsupported editor AI action: {action}"}), 400
+
     _sel_offset_raw = data.get("selection_offset", -1)
     selection_offset: int = int(_sel_offset_raw) if isinstance(_sel_offset_raw, (int, float)) else -1
     session_id = re.sub(r"[^A-Za-z0-9_\-]", "_", (data.get("session_id") or "").strip())[:64]
-    files = data.get("files") or []
-    if not isinstance(files, list):
-        files = []
+
     requested_model_id = str(data.get("model_id") or "").strip()
     configured_local_model_id = _get_configured_local_model_id()
 
@@ -18244,190 +17852,6 @@ def editor_ai_stream():
             {"id": "understand", "label": "理解需求"},
             {"id": "generate", "label": "生成回复"},
         ]
-
-    if action == "ai_task":
-        task = instruction or selection
-        if not task:
-            def _task_err_gen():
-                yield f"data: {json.dumps({'type': 'error', 'text': '任务描述不能为空'}, ensure_ascii=False)}\n\n"
-
-            return Response(_task_err_gen(), mimetype="text/event-stream")
-
-        def _sample_task_preview(text: str, limit: int = 8000) -> str:
-            content = str(text or "").strip()
-            if len(content) <= limit:
-                return content
-            head = max(int(limit * 0.7), 1)
-            tail = max(limit - head - 48, 0)
-            marker = "\n\n...[中间内容已省略]...\n\n"
-            if tail <= 0:
-                return content[:limit]
-            return content[:head] + marker + content[-tail:]
-
-        def _normalize_task_path(value):
-            return str(value or "").strip().replace("\\", "/").lower()
-
-        def _normalize_selection_context(payload):
-            if not isinstance(payload, dict):
-                return {}
-            text_value = str(payload.get("text") or "").strip()
-            if not text_value:
-                return {}
-            source_path = str(payload.get("source_path") or payload.get("sourcePath") or "").strip()
-            source_name = str(payload.get("source_name") or payload.get("sourceName") or "").strip()
-            source_type = str(payload.get("source_type") or payload.get("sourceType") or "").strip().lower()
-            if not source_name and source_path:
-                source_name = os.path.basename(source_path)
-            return {
-                "text": text_value,
-                "source_path": source_path,
-                "source_name": source_name,
-                "source_type": source_type,
-            }
-
-        def _normalize_explicit_file(payload):
-            if not isinstance(payload, dict):
-                return {}
-            path = str(payload.get("path") or "").strip()
-            name = str(payload.get("name") or "").strip() or (os.path.basename(path) if path else "")
-            item_type = str(payload.get("type") or "").strip().lower() or (os.path.splitext(name)[1].lstrip(".").lower() if name else "")
-            if not path and not name:
-                return {}
-            return {
-                "path": path or name,
-                "name": name or (os.path.basename(path) if path else "current_document"),
-                "type": item_type,
-            }
-
-        def _normalize_reference_files(payload):
-            normalized_items = []
-            for item in payload or []:
-                normalized = _normalize_explicit_file(item)
-                if normalized:
-                    normalized_items.append(normalized)
-            return normalized_items
-
-        def _resolve_file_preview(target, normalized_items):
-            target_key = _normalize_task_path(target.get("path") or target.get("name") or "")
-            for item in normalized_items:
-                item_key = _normalize_task_path(item.get("path") or item.get("name") or "")
-                if target_key and item_key == target_key:
-                    return str(item.get("content_preview") or "")
-            return ""
-
-        context_mode = str(data.get("context_mode") or "").strip().lower()
-        explicit_context_mode = context_mode == "explicit"
-        normalized_selection_context = _normalize_selection_context(data.get("selection_context"))
-        normalized_target_file = _normalize_explicit_file(data.get("target_file"))
-        normalized_reference_files = _normalize_reference_files(data.get("reference_files"))
-
-        normalized_files = []
-        for item in files:
-            if not isinstance(item, dict):
-                continue
-            path = str(item.get("path") or "").strip()
-            name = str(item.get("name") or "").strip() or (os.path.basename(path) if path else "")
-            item_type = str(item.get("type") or "").strip().lower() or file_type
-            content_preview = str(item.get("content_preview") or "").strip()
-            normalized_files.append({
-                "path": path or file_name or session_id or "current_document",
-                "name": name or file_name or "current_document",
-                "type": item_type,
-                "content_preview": _sample_task_preview(content_preview or full_text),
-            })
-
-        if explicit_context_mode and normalized_target_file:
-            target_key = _normalize_task_path(normalized_target_file.get("path") or normalized_target_file.get("name") or "")
-            normalized_files.sort(
-                key=lambda item: 0 if _normalize_task_path(item.get("path") or item.get("name") or "") == target_key else 1
-            )
-
-        if not explicit_context_mode and not normalized_files and (file_name or file_type or full_text):
-            inferred_name = file_name or "current_document"
-            inferred_type = file_type or os.path.splitext(inferred_name)[1].lstrip(".").lower()
-            normalized_files.append({
-                "path": file_name or session_id or inferred_name,
-                "name": inferred_name,
-                "type": inferred_type,
-                "content_preview": _sample_task_preview(full_text),
-            })
-
-        normalized_model_id = _normalize_file_task_model_id(model_mode, requested_model_id)
-
-        current_file = ""
-        current_file_name = file_name or ""
-        current_file_text = full_text
-        if explicit_context_mode:
-            current_file_name = ""
-            current_file_text = ""
-            if normalized_target_file:
-                current_file = str(normalized_target_file.get("path") or normalized_target_file.get("name") or "")
-                current_file_name = (
-                    str(normalized_target_file.get("name") or "").strip()
-                    or current_file_name
-                    or os.path.basename(current_file)
-                )
-                current_file_text = _resolve_file_preview(normalized_target_file, normalized_files)
-            elif len(normalized_files) == 1:
-                current_file = str(normalized_files[0].get("path") or "")
-                current_file_name = (
-                    str(normalized_files[0].get("name") or "").strip()
-                    or current_file_name
-                    or os.path.basename(current_file)
-                )
-                current_file_text = str(normalized_files[0].get("content_preview") or "")
-        elif normalized_files:
-            current_file = str(normalized_files[0].get("path") or "")
-            current_file_name = (
-                str(normalized_files[0].get("name") or "").strip()
-                or current_file_name
-                or os.path.basename(current_file)
-            )
-
-        task_options = {
-            "model_mode": model_mode,
-            "model_id": normalized_model_id,
-            "local_model": configured_local_model_id,
-            "session_id": session_id,
-            "current_file": current_file,
-            "current_file_name": current_file_name,
-            "current_file_id": str(data.get("current_file_id") or "").strip(),
-            "current_file_text": current_file_text,
-            "context_mode": context_mode,
-            "selection_context": normalized_selection_context,
-            "target_file": normalized_target_file,
-            "reference_files": normalized_reference_files,
-        }
-
-        def generate_task():
-            try:
-                from app.core.agent.openclaw_task_runtime import OpenClawTaskRuntime, TaskRuntimeRequest
-
-                runtime = OpenClawTaskRuntime(
-                    socketio=socketio,
-                    model_id=normalized_model_id,
-                    api_key=API_KEY or None,
-                    session_store=session_manager,
-                )
-                task_request = TaskRuntimeRequest(
-                    task=task,
-                    files=normalized_files,
-                    options=task_options,
-                    history=history,
-                )
-                event_stream = runtime.execute(task_request)
-
-                for event in event_stream:
-                    if isinstance(event, str):
-                        yield event
-                    else:
-                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-            except Exception as exc:
-                logging.getLogger("koto.web").exception("[editor-ai-stream/task] Error")
-                yield f"data: {json.dumps({'type': 'error', 'text': str(exc)}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'summary': '执行失败'}, ensure_ascii=False)}\n\n"
-
-        return Response(stream_with_context(generate_task()), mimetype="text/event-stream")
 
     if not selection and not instruction:
         def _err_gen():
@@ -18549,7 +17973,7 @@ def editor_ai_stream():
                     "step_id": d.get("step_id", ""),
                     "error": d.get("error", ""),
                 }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                yield _editor_ai_safe_sse(payload)
                 continue
 
             if etype == EventType.TOOL_CALL:
@@ -18569,7 +17993,7 @@ def editor_ai_stream():
                     "tool_name": d.get("tool_name", ""),
                     "result_preview": d.get("result_preview", ""),
                 }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                yield _editor_ai_safe_sse(payload)
                 continue
 
             if etype == EventType.PROPOSAL:
@@ -18599,7 +18023,7 @@ def editor_ai_stream():
                 text = d.get("text", "")
                 if text:
                     evt_type = "error" if d.get("is_error") else "info"
-                    yield f"data: {json.dumps({'type': evt_type, 'text': text}, ensure_ascii=False)}\n\n"
+                    yield _editor_ai_safe_sse({"type": evt_type, "text": text})
                 continue
 
             if etype == EventType.SKILL_SUGGESTIONS:
@@ -18609,12 +18033,12 @@ def editor_ai_stream():
                 continue
 
             if etype == EventType.ERROR:
-                yield f"data: {json.dumps({'type': 'error', 'text': d.get('text', '未知错误')}, ensure_ascii=False)}\n\n"
+                yield _editor_ai_safe_sse({"type": "error", "text": d.get("text", "未知错误")})
                 return
 
             if etype == EventType.TASK_COMPLETE:
                 if d.get("error"):
-                    yield f"data: {json.dumps({'type': 'error', 'text': d.get('error', '执行失败')}, ensure_ascii=False)}\n\n"
+                    yield _editor_ai_safe_sse({"type": "error", "text": d.get("error", "执行失败")})
                     return
                 final_result = d.get("result", "")
                 final_has_proposals = bool(d.get("has_proposals"))
@@ -18626,7 +18050,7 @@ def editor_ai_stream():
                     streamed_parts.append(code_result)
                     yield f"data: {json.dumps({'type': 'token', 'text': code_result}, ensure_ascii=False)}\n\n"
                 if d.get("error"):
-                    yield f"data: {json.dumps({'type': 'error', 'text': d.get('error')}, ensure_ascii=False)}\n\n"
+                    yield _editor_ai_safe_sse({"type": "error", "text": d.get("error")})
                     return
 
         if final_result and not streamed_parts:
@@ -18650,228 +18074,7 @@ def editor_ai_stream():
             }
             yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
 
-        if session_id and streamed_parts:
-            user_str = instruction or selection or action
-            ai_str = "".join(streamed_parts)
-            try:
-                session_manager.append_and_save(
-                    session_id + ".json",
-                    user_str,
-                    ai_str,
-                    task=action,
-                    model_name="openclaw-agent-loop",
-                )
-            except Exception as save_exc:
-                _app_logger.debug("[EditorAI] session save skipped: %s", save_exc)
-
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
-
-
-@app.route("/api/editor/ai/history", methods=["GET"])
-def editor_ai_history():
-    """文件助手 AI — 返回本文件的历史对话记录。
-
-    Query: ?doc_id=<file_id>
-    Response: { "history": [{"role":"user"|"model", "content":str, "timestamp":str}] }
-    """
-    doc_id = (request.args.get("doc_id") or "").strip()
-    if not doc_id:
-        return jsonify({"history": []})
-    _sid = re.sub(r"[^A-Za-z0-9_\-]", "_", doc_id)[:64]
-    if not _sid.startswith("editor_"):
-        _sid = "editor_" + _sid
-    try:
-        records = session_manager.load_full(_sid + ".json")
-        history = []
-        for r in records:
-            role = r.get("role", "")
-            content = (r.get("parts") or [""])[0] if r.get("parts") else ""
-            ts = r.get("timestamp", "")
-            if content:
-                history.append({"role": role, "content": content, "timestamp": ts})
-        return jsonify({"history": history})
-    except Exception:
-        return jsonify({"history": []})
-
-
-@app.route("/api/editor/ai/analyze", methods=["POST"])
-def editor_ai_analyze():
-    """文件助手 AI — 文档结构静默解析。
-
-    Body JSON: { "full_text": str }
-    Response JSON: { "summary": str, "structure": [str], "doc_type": str, "word_count": int }
-
-    Called automatically when a file is opened to provide contextual awareness
-    for all subsequent AI operations in the session.
-    """
-    data = request.get_json(silent=True) or {}
-    full_text = (data.get("full_text") or "").strip()
-    if not full_text or len(full_text) < 30:
-        return jsonify({"summary": "", "structure": [], "doc_type": "其他", "word_count": 0})
-
-    word_count = len(full_text)
-    text_sample = full_text[:6000]
-    prompt = (
-        "请简洁分析这篇文档的结构，输出严格 JSON（不加 ```json 标记也不加任何其他文字），格式：\n"
-        '{"summary":"一句话概括文档主题（20字以内）","structure":["第一部分主题","第二部分主题"],'
-        f'"doc_type":"报告/合同/文案/论文/邮件/表格/其他","word_count":{word_count}}}\n\n'
-        f"文档内容（前6000字）：\n{text_sample}"
-    )
-    try:
-        _resp = client.models.generate_content(
-            model=MODEL_MAP.get("CHAT", "gemini-2.5-flash"),
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.1, max_output_tokens=256),
-        )
-        _text = (_resp.text or "").strip()
-        # Strip possible markdown code fences
-        if _text.startswith("```"):
-            _text = _text.split("```")[-2] if "```" in _text[3:] else _text[3:]
-            _text = _text.lstrip("json").strip()
-        if not _text:
-            raise ValueError("empty LLM response")
-        _result = json.loads(_text)
-        return jsonify(_result)
-    except Exception as _e:
-        _app_logger.warning(f"[EditorAI analyze] cloud failed ({_e}), trying local…")
-        # ── Local Ollama fallback ──────────────────────────────────────────
-        try:
-            from app.core.socket_handler import _is_ollama_alive, _get_local_provider
-            if _is_ollama_alive():
-                _local = _get_local_provider()
-                _res = _local.generate_content(prompt=prompt, stream=False)
-                _text = (_res.get("content", "") if isinstance(_res, dict) else str(_res)).strip()
-                if _text.startswith("```"):
-                    _text = _text.split("```")[-2] if "```" in _text[3:] else _text[3:]
-                    _text = _text.lstrip("json").strip()
-                if not _text:
-                    raise ValueError("empty local LLM response")
-                _result = json.loads(_text)
-                return jsonify(_result)
-        except Exception as _le:
-            _app_logger.warning(f"[EditorAI analyze] local fallback failed: {_le}")
-        return jsonify({"summary": "", "structure": [], "doc_type": "其他", "word_count": word_count})
-
-
-@app.route("/api/editor/ai/agent", methods=["POST"])
-def editor_ai_agent():
-    """文件助手 AI — 综合分析模式 (UnifiedAgent)。
-
-    Routes complex questions and analysis tasks through the full Koto agent
-    (with tool access: web search, memory, calculation, etc.) while injecting
-    the current document as context.
-
-    Body JSON: { "query": str, "doc_context": str, "full_text": str, "session_id": str }
-    SSE events: {"type":"status","text":"..."} | {"type":"token","text":"..."} |
-                {"type":"done"} | {"type":"error","text":"..."}
-    """
-    data = request.get_json(silent=True) or {}
-    query = (data.get("query") or "").strip()
-    doc_context = (data.get("doc_context") or "").strip()
-    full_text = (data.get("full_text") or "")[:6000].strip()
-    _session_id = re.sub(r"[^A-Za-z0-9_\-]", "_", (data.get("session_id") or "").strip())[:64]
-
-    def _err_gen(msg: str):
-        yield f"data: {json.dumps({'type': 'error', 'text': msg}, ensure_ascii=False)}\n\n"
-
-    if not query:
-        return Response(_err_gen("查询内容不能为空"), mimetype="text/event-stream")
-
-    # Build system context block with document awareness
-    _sys_parts = ["你是 Koto 文件助手的 AI 分析模式。你拥有工具调用能力（网页搜索、记忆等）。"]
-    if doc_context:
-        _sys_parts.append(f"【当前文档概况】\n{doc_context}")
-    if full_text:
-        _sys_parts.append(f"【文档内容摘录（前6000字）】\n{full_text}")
-    _system_ctx = "\n\n".join(_sys_parts)
-
-    def generate():
-        try:
-            from app.api.agent_routes import get_agent
-            from app.core.agent.types import AgentStepType
-            _agent = get_agent()
-            _analysis_open = False
-            _answer_open = False
-            _pending_tool = None
-            _tool_counter = 0
-
-            def _preview_text(value: object, limit: int = 220) -> str:
-                text = str(value or "").strip()
-                if len(text) <= limit:
-                    return text
-                return text[: limit - 1] + "…"
-
-            for _step in _agent.run(
-                input_text=query,
-                session_id=_session_id or None,
-                system_context=_system_ctx,
-            ):
-                _stype = getattr(_step, 'step_type', None)
-                _content = (getattr(_step, 'content', '') or '').strip()
-                if _stype == AgentStepType.THOUGHT:
-                    if _content and not _analysis_open:
-                        _analysis_open = True
-                        yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'analyze', 'text': '分析问题与文档上下文'}, ensure_ascii=False)}\n\n"
-                    if _content:
-                        yield f"data: {json.dumps({'type': 'thought', 'text': _content}, ensure_ascii=False)}\n\n"
-                elif _stype == AgentStepType.ACTION:
-                    if _analysis_open:
-                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'analyze', 'text': '问题分析完成'}, ensure_ascii=False)}\n\n"
-                        _analysis_open = False
-                    if _pending_tool:
-                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': _pending_tool['id'], 'text': _pending_tool['name'] + ' 完成'}, ensure_ascii=False)}\n\n"
-                    _tool_counter += 1
-                    _action = getattr(_step, 'action', None)
-                    _tool_name = (getattr(_action, 'tool_name', '') or _content or f'tool_{_tool_counter}').strip()
-                    _tool_args = getattr(_action, 'tool_args', {}) or {}
-                    _pending_tool = {"id": f"tool_{_tool_counter}", "name": _tool_name}
-                    yield f"data: {json.dumps({'type': 'step_start', 'step_id': _pending_tool['id'], 'text': f'调用 {_tool_name}'}, ensure_ascii=False)}\n\n"
-                    yield f"data: {json.dumps({'type': 'tool_call', 'step_id': _pending_tool['id'], 'tool_name': _tool_name, 'tool_args': _tool_args}, ensure_ascii=False)}\n\n"
-                elif _stype == AgentStepType.OBSERVATION:
-                    _obs = getattr(_step, 'observation', None) or _content
-                    _preview = _preview_text(_obs)
-                    if _pending_tool:
-                        yield f"data: {json.dumps({'type': 'tool_result', 'step_id': _pending_tool['id'], 'tool_name': _pending_tool['name'], 'result_preview': _preview}, ensure_ascii=False)}\n\n"
-                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': _pending_tool['id'], 'text': _pending_tool['name'] + ' 完成'}, ensure_ascii=False)}\n\n"
-                        _pending_tool = None
-                    elif _preview:
-                        yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': '观察结果', 'result_preview': _preview}, ensure_ascii=False)}\n\n"
-                elif _stype == AgentStepType.ANSWER:
-                    if _analysis_open:
-                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'analyze', 'text': '问题分析完成'}, ensure_ascii=False)}\n\n"
-                        _analysis_open = False
-                    if _pending_tool:
-                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': _pending_tool['id'], 'text': _pending_tool['name'] + ' 完成'}, ensure_ascii=False)}\n\n"
-                        _pending_tool = None
-                    if not _answer_open:
-                        _answer_open = True
-                        yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'answer', 'text': '生成最终回答'}, ensure_ascii=False)}\n\n"
-                    # Stream answer char by char for typewriter effect
-                    _chunk_size = 8
-                    for _ci in range(0, len(_content), _chunk_size):
-                        yield f"data: {json.dumps({'type': 'token', 'text': _content[_ci:_ci + _chunk_size]}, ensure_ascii=False)}\n\n"
-                    if _answer_open:
-                        yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'answer', 'text': '最终回答已生成'}, ensure_ascii=False)}\n\n"
-                        _answer_open = False
-                    yield f"data: {json.dumps({'type': 'done'})}\n\n"
-                    return
-                elif _stype == AgentStepType.ERROR:
-                    if _pending_tool:
-                        yield f"data: {json.dumps({'type': 'step_error', 'step_id': _pending_tool['id'], 'error': _content or '工具执行失败'}, ensure_ascii=False)}\n\n"
-                        _pending_tool = None
-                    elif _analysis_open:
-                        yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'analyze', 'error': _content or '分析失败'}, ensure_ascii=False)}\n\n"
-                        _analysis_open = False
-                    elif _answer_open:
-                        yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'answer', 'error': _content or '回答生成失败'}, ensure_ascii=False)}\n\n"
-                        _answer_open = False
-                    yield f"data: {json.dumps({'type': 'error', 'text': _content}, ensure_ascii=False)}\n\n"
-                    return
-        except Exception as _ae:
-            _app_logger.error(f"[EditorAI agent] {_ae}")
-            yield f"data: {json.dumps({'type': 'error', 'text': str(_ae)}, ensure_ascii=False)}\n\n"
-
-    return Response(generate(), mimetype="text/event-stream")
 
 
 @app.route("/api/editor/ai/chart", methods=["POST"])
@@ -18899,7 +18102,7 @@ def editor_ai_chart():
         lang = "python"
 
     def _err_gen(msg: str):
-        yield f"data: {json.dumps({'type': 'error', 'text': msg}, ensure_ascii=False)}\n\n"
+        yield _editor_ai_safe_sse({'type': 'error', 'text': msg})
 
     if not data_context and not instruction:
         return Response(_err_gen("没有可用的数据或描述"), mimetype="text/event-stream")
@@ -18913,14 +18116,14 @@ def editor_ai_chart():
     )
     if lang == "python":
         code_prompt += (
-            "2. 在代码开头加入: import matplotlib; matplotlib.rcParams['font.sans-serif']=['SimHei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
-            "3. 最后用 plt.savefig('chart.png', dpi=150, bbox_inches='tight') 保存图表，然后 plt.close()\n"
+            "2. 在代码开头加入: import matplotlib; matplotlib.rcParams['font.sans-serif']=['Microsoft YaHei','SimHei','Noto Sans CJK SC','WenQuanYi Micro Hei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
+            "3. 最后用 plt.savefig('chart.png', dpi=220, bbox_inches='tight') 保存图表，然后 plt.close()\n"
             "4. 绝对不要调用 plt.show()\n"
         )
     else:
         code_prompt += (
             "2. 使用 ggplot2 绘图\n"
-            "3. 用 ggsave('chart.png', dpi=150) 保存图表\n"
+            "3. 用 ggsave('chart.png', dpi=220) 保存图表\n"
         )
     code_prompt += (
         "5. 只输出代码，不加任何 markdown 代码块标记（不加 ```）\n\n"
@@ -18970,14 +18173,14 @@ def editor_ai_chart():
             # ── Step 1: Generate code via LLM ──
             _llm_source, raw_code = _gen_code_via_llm(code_prompt)
             if not raw_code:
-                yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'generate_code', 'error': 'AI 代码生成失败'}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'error', 'text': 'AI 代码生成失败（云端不可用且 Ollama 未运行）'}, ensure_ascii=False)}\n\n"
+                yield _editor_ai_safe_sse({'type': 'step_error', 'step_id': 'generate_code', 'error': 'AI 代码生成失败'})
+                yield _editor_ai_safe_sse({'type': 'error', 'text': 'AI 代码生成失败（云端不可用且 Ollama 未运行）'})
                 return
             if _llm_source == "local":
                 _local_info_text = ('🦙 本次由本地模型 (Ollama) 生成代码'
                                     if model_mode == 'local'
                                     else '⚠️ 云端 AI 暂时不可用，已切换到本地模型 (Ollama) 生成代码，速度可能较慢。')
-                yield f"data: {json.dumps({'type': 'info', 'text': _local_info_text}, ensure_ascii=False)}\n\n"
+                yield _editor_ai_safe_sse({'type': 'info', 'text': _local_info_text})
 
             # Strip markdown code fences if model added them
             raw_code = _re.sub(r"^```[a-z]*\n?", "", raw_code, flags=_re.MULTILINE)
@@ -18992,8 +18195,8 @@ def editor_ai_chart():
             try:
                 from app.core.sandbox import run_python, run_r
             except ImportError as ie:
-                yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'execute_code', 'error': f'沙盒模块加载失败: {ie}'}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'error', 'text': f'沙盒模块加载失败: {ie}'}, ensure_ascii=False)}\n\n"
+                yield _editor_ai_safe_sse({'type': 'step_error', 'step_id': 'execute_code', 'error': f'沙盒模块加载失败: {ie}'})
+                yield _editor_ai_safe_sse({'type': 'error', 'text': f'沙盒模块加载失败: {ie}'})
                 return
 
             result = run_python(raw_code) if lang == "python" else run_r(raw_code)
@@ -19006,8 +18209,8 @@ def editor_ai_chart():
                 yield f"data: {json.dumps({'type': 'stderr', 'text': result['stderr'][:2048]}, ensure_ascii=False)}\n\n"
 
             if result.get("error"):
-                yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'execute_code', 'error': result['error']}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'error', 'text': result['error']}, ensure_ascii=False)}\n\n"
+                yield _editor_ai_safe_sse({'type': 'step_error', 'step_id': 'execute_code', 'error': result['error']})
+                yield _editor_ai_safe_sse({'type': 'error', 'text': result['error']})
                 return
 
             images = result.get("files", {})
@@ -19027,35 +18230,9 @@ def editor_ai_chart():
 
         except Exception as _e:
             _app_logger.warning(f"[EditorAIChart] error: {_e}")
-            yield f"data: {json.dumps({'type': 'error', 'text': str(_e)}, ensure_ascii=False)}\n\n"
+            yield _editor_ai_safe_sse({'type': 'error', 'text': str(_e)})
 
     return Response(generate(), mimetype="text/event-stream")
-
-
-@app.route("/api/editor/ai/chart-rerun", methods=["POST"])
-def editor_ai_chart_rerun():
-    """直接运行用户修改后的代码（跳过 LLM），返回 JSON 结果。
-
-    Body JSON: { "code": str, "lang": "python"|"r" }
-    Response JSON: { "stdout": str, "stderr": str, "files": {name: base64}, "error": str|null }
-    """
-    data = request.get_json(silent=True) or {}
-    code = (data.get("code") or "").strip()
-    lang = (data.get("lang") or "python").strip().lower()
-
-    if not code:
-        return jsonify({"error": "代码不能为空", "stdout": "", "stderr": "", "files": {}})
-
-    if lang not in ("python", "r"):
-        lang = "python"
-
-    try:
-        from app.core.sandbox import run_python, run_r
-    except ImportError as ie:
-        return jsonify({"error": f"沙盒模块加载失败: {ie}", "stdout": "", "stderr": "", "files": {}})
-
-    result = run_python(code) if lang == "python" else run_r(code)
-    return jsonify(result)
 
 
 # ══════════════════ Skill System API ══════════════════
@@ -19123,239 +18300,6 @@ def editor_skill_list():
         app_logger = logging.getLogger("koto.web")
         app_logger.exception("[skill-list] Error")
         return jsonify({"skills": [], "error": str(exc)})
-
-
-@app.route("/api/editor/ai/skill-upload", methods=["POST"])
-def editor_skill_upload():
-    """Upload extra files for a skill execution session."""
-    import uuid as _uuid
-    session_id = request.form.get("session_id") or _uuid.uuid4().hex
-    files = request.files.getlist("files[]")
-    if not files:
-        return jsonify({"success": False, "error": "No files provided"})
-    upload_dir = os.path.join(WORKSPACE_DIR, "skill_uploads", session_id)
-    os.makedirs(upload_dir, exist_ok=True)
-    paths = []
-    for f in files:
-        fname = os.path.basename(f.filename or "upload")
-        dest = os.path.join(upload_dir, fname)
-        f.save(dest)
-        paths.append(dest)
-    return jsonify({"success": True, "session_id": session_id, "paths": paths})
-
-
-@app.route("/api/editor/ai/skill-execute", methods=["POST"])
-def editor_skill_execute():
-    """Execute a skill through the unified OpenClaw task runtime."""
-    data = request.get_json(silent=True) or {}
-    skill_id = (data.get("skill_id") or "").strip()
-    params = data.get("params") or {}
-    request_session_id = str(data.get("session_id") or "").strip()
-
-    if skill_id not in _OPENCLAW_SKILL_IDS:
-        return jsonify({"error": f"Unknown skill: {skill_id}"}), 400
-
-    def _resolve_path(raw_path: str) -> str:
-        if not raw_path:
-            return ""
-        p = raw_path
-        if os.path.isabs(p) and os.path.exists(p):
-            return p
-        cands = [
-            os.path.join(WORKSPACE_DIR, p),
-            os.path.join(WORKSPACE_DIR, "uploads", p),
-        ]
-        for cand in cands:
-            if os.path.exists(cand):
-                return cand
-        return p
-
-    def _build_openclaw_task(skill_meta: dict, run_params: dict, files_ctx: list) -> str:
-        name = skill_meta.get("name") or skill_id
-        desc = skill_meta.get("description") or ""
-        lines = [f"执行技能：{name}（{skill_id}）"]
-        if desc:
-            lines.append(f"目标：{desc}")
-        if run_params:
-            lines.append("参数：")
-            for k, v in run_params.items():
-                if not v:
-                    continue
-                if isinstance(v, list):
-                    shown = ", ".join(str(x) for x in v[:5])
-                    lines.append(f"- {k}: {shown}")
-                else:
-                    lines.append(f"- {k}: {v}")
-        if files_ctx:
-            lines.append("请优先读取以上文件，再完成任务并输出结构化结果。")
-        else:
-            lines.append("当前未提供文件，请根据参数内容完成分析任务。")
-        return "\n".join(lines)
-
-    def _iter_sse_payloads(event: str):
-        if not isinstance(event, str):
-            return
-        line = event.strip()
-        if not line.startswith("data: "):
-            return
-        try:
-            payload = json.loads(line[6:])
-        except Exception:
-            return
-        yield payload
-
-    def generate():
-        try:
-            from app.core.agent.openclaw_task_runtime import OpenClawTaskRuntime, TaskRuntimeRequest
-            from app.core.skills.skill_manager import SkillManager
-
-            sm = SkillManager()
-            all_skills = sm.get_all_skills() if hasattr(sm, "get_all_skills") else []
-            skill_meta = next((s for s in all_skills if s.get("id") == skill_id), {})
-
-            run_params = dict(params)
-            files_ctx = []
-            file_keys = ["current_file", "source_files", "compare_file", "reference_files", "files"]
-
-            for key in file_keys:
-                val = run_params.get(key)
-                if not val:
-                    continue
-                if isinstance(val, list):
-                    resolved = [_resolve_path(str(x)) for x in val]
-                    run_params[key] = resolved
-                    for p in resolved:
-                        if p:
-                            files_ctx.append({
-                                "path": p,
-                                "name": os.path.basename(p),
-                                "type": os.path.splitext(p)[1].lstrip(".").lower(),
-                            })
-                elif isinstance(val, str):
-                    p = _resolve_path(val)
-                    run_params[key] = p
-                    if p:
-                        files_ctx.append({
-                            "path": p,
-                            "name": os.path.basename(p),
-                            "type": os.path.splitext(p)[1].lstrip(".").lower(),
-                        })
-
-            task = _build_openclaw_task(skill_meta, run_params, files_ctx)
-            _task_model_mode = normalize_model_mode(run_params.get("model_mode"), default="cloud")
-            session_id = request_session_id or str(run_params.get("session_id") or "").strip()
-            options = {
-                "model_mode": _task_model_mode,
-                "model_id": _normalize_file_task_model_id(_task_model_mode, run_params.get("model_id") or ""),
-                "session_id": session_id,
-                "skill_id": skill_id,
-                "skill_name": skill_meta.get("name", skill_id),
-                "current_file": run_params.get("current_file", ""),
-                "current_file_name": os.path.basename(run_params.get("current_file", "") or ""),
-                "current_file_id": run_params.get("current_file_id", ""),
-            }
-
-            runtime = OpenClawTaskRuntime(
-                socketio=socketio,
-                model_id=options.get("model_id") or "",
-                api_key=API_KEY or None,
-                session_store=session_manager,
-            )
-            task_request = TaskRuntimeRequest(
-                task=task,
-                files=files_ctx,
-                options=options,
-                history=list(run_params.get("history") or []),
-            )
-
-            for event in runtime.execute(task_request):
-                for payload in _iter_sse_payloads(event):
-                    et = payload.get("type", "")
-
-                    if et == "error":
-                        text = payload.get("error") or payload.get("text") or "执行失败"
-                        yield f"data: {json.dumps({'type': 'error', 'text': text}, ensure_ascii=False)}\n\n"
-                        continue
-
-                    if et == "result":
-                        out_evt = {
-                            "type": "output",
-                            "output_type": payload.get("output_type", "markdown"),
-                            "data": payload.get("data"),
-                            "label": payload.get("summary") or skill_meta.get("name") or skill_id,
-                        }
-                        yield f"data: {json.dumps(out_evt, ensure_ascii=False)}\n\n"
-                        continue
-
-                    if et == "done":
-                        done_evt = {"type": "done", "summary": payload.get("summary", "任务完成")}
-                        yield f"data: {json.dumps(done_evt, ensure_ascii=False)}\n\n"
-                        continue
-
-                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
-        except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'text': str(exc)}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'summary': '执行失败'}, ensure_ascii=False)}\n\n"
-
-    return Response(generate(), mimetype="text/event-stream")
-
-
-# ── Dynamic AI Task Engine endpoint ────────────────────────────────────
-
-@app.route("/api/editor/ai/task-execute", methods=["POST"])
-def editor_task_execute():
-    """Execute a dynamic AI task and stream SSE progress events.
-
-    Replaces rigid skill-execute for tasks that benefit from LLM-driven planning.
-    The AI reads files, decides what tools to call, and streams progress.
-
-    Request JSON:
-        task (str):  Natural language task description
-        files (list, optional): [{path, name, type, content_preview}]
-        options (dict, optional): {model_mode, auto_approve, ...}
-    """
-    data = request.get_json(silent=True) or {}
-    task = (data.get("task") or "").strip()
-    if not task:
-        return jsonify({"error": "Missing 'task' parameter"}), 400
-
-    files = data.get("files") or []
-    options = data.get("options") or {}
-
-    _model_mode = normalize_model_mode(options.get("model_mode"), default="cloud")
-    options["model_mode"] = _model_mode
-    options["model_id"] = _normalize_file_task_model_id(_model_mode, options.get("model_id", "") or "")
-    history = list(data.get("history") or options.get("history") or [])
-
-    def generate():
-        try:
-            from app.core.agent.openclaw_task_runtime import OpenClawTaskRuntime, TaskRuntimeRequest
-
-            runtime = OpenClawTaskRuntime(
-                socketio=socketio,
-                model_id=options.get("model_id") or "",
-                api_key=API_KEY or None,
-                session_store=session_manager,
-            )
-            task_request = TaskRuntimeRequest(
-                task=task,
-                files=files,
-                options=options,
-                history=history,
-            )
-            for event in runtime.execute(task_request):
-                if isinstance(event, str):
-                    yield event
-                else:
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-        except Exception as exc:
-            logging.getLogger("koto.web").exception("[task-execute] Error")
-            yield f"data: {json.dumps({'type': 'error', 'text': str(exc)})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'summary': '执行失败'})}\n\n"
-
-    return Response(generate(), mimetype="text/event-stream")
-
 
 # ================= 主程序入口 =================
 

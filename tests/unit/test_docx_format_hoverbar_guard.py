@@ -38,6 +38,96 @@ def test_docx_font_size_extension_defines_commands_and_stores_point_sizes():
     assert "return `${formatted}pt`;" in ext_js
 
 
+def test_docx_image_toolbar_uses_word_like_wrap_and_position_groups():
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+    css = (_repo_root() / "web" / "static" / "css" / "workspace.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'data-wrap="inline"' in ext_js
+    assert 'data-wrap="square"' in ext_js
+    assert 'data-wrap="tight"' in ext_js
+    assert 'data-wrap="top-bottom"' in ext_js
+    assert 'data-align="left"' in ext_js
+    assert 'data-align="center"' in ext_js
+    assert 'data-align="right"' in ext_js
+    assert 'data-role="status"' in ext_js
+    assert '表格内仅影响当前单元格中的文本环绕' in ext_js
+    assert '.koto-img-layout-card' in css
+    assert '.koto-img-position-group' in css
+    assert '.koto-img-toolbar-status' in css
+    assert '.koto-img-toolbar-note' in css
+
+
+def test_docx_image_toolbar_pointerdown_keeps_node_selected_and_runtime_bundle_matches():
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+    bundle_js = (_repo_root() / "web" / "static" / "js" / "tiptap-docx-bundle.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "toolbar.addEventListener('pointerdown'" in ext_js
+    assert "NodeSelection.create(tr.doc, pos)" in ext_js
+    assert "editor.view.focus()" in ext_js
+    assert 'data-wrap="inline"' in bundle_js
+    assert 'data-align="center"' in bundle_js
+    assert 'pointerdown' in bundle_js
+    assert 'setSelection(' in bundle_js
+
+
+def test_docx_image_layout_reads_parent_wrapper_hints_and_clears_top_bottom():
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+    bundle_js = (_repo_root() / "web" / "static" / "js" / "tiptap-docx-bundle.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function _docxImageLayoutContainer(el)" in ext_js
+    assert "container?.getAttribute('data-koto-layout')" in ext_js
+    assert "_docxImageStyleValue(container, 'textAlign')" in ext_js
+    assert "const looksAnchored = !!container" in ext_js
+    assert "'clear:both'" in ext_js
+    assert "parentElement" in bundle_js
+    assert "clear:both" in bundle_js
+
+
+def test_docx_image_layout_enables_center_for_square_and_tight_modes():
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+    bundle_js = (_repo_root() / "web" / "static" / "js" / "tiptap-docx-bundle.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "square-center" in ext_js
+    assert "tight-center" in ext_js
+    assert "align === 'left' || align === 'center' || align === 'right'" in ext_js
+    assert "居中为网页近似效果" in ext_js
+    assert "square-center" in bundle_js
+    assert "tight-center" in bundle_js
+
+
+def test_docx_image_toolbar_uses_explicit_launcher_and_selection_state():
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+    css = (_repo_root() / "web" / "static" / "css" / "workspace.css").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'koto-img-toolbar-trigger' in ext_js
+    assert '_setToolbarOpen(!isToolbarOpen)' in ext_js
+    assert 'selectNode()' in ext_js
+    assert 'deselectNode()' in ext_js
+    assert '.koto-img-toolbar-trigger' in css
+    assert '.koto-img-wrapper.is-toolbar-open .koto-img-toolbar' in css
+    assert '.koto-img-wrapper:hover .koto-img-toolbar' not in css
+
+
 def test_docx_paragraph_extension_preserves_block_font_weight_and_style():
     ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
         encoding="utf-8"
@@ -45,8 +135,40 @@ def test_docx_paragraph_extension_preserves_block_font_weight_and_style():
 
     assert "fontWeight:" in ext_js
     assert "fontStyle:" in ext_js
+    assert "kotoRole:" in ext_js
+    assert "data-koto-role" in ext_js
     assert "styles.push(`font-weight:${a.fontWeight}`);" in ext_js
     assert "styles.push(`font-style:${a.fontStyle}`);" in ext_js
+
+
+def test_docx_nodes_preserve_parser_role_attributes():
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "getAttribute('data-koto-role')" in ext_js
+    assert "'data-koto-role': attrs.kotoRole" in ext_js
+
+
+def test_docx_tiptap_package_defines_runtime_build_script():
+    package_json = (_repo_root() / "web" / "tiptap-editor" / "package.json").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"scripts"' in package_json
+    assert '"build": "esbuild koto-docx-editor.js --bundle --outfile=../static/js/tiptap-docx-bundle.js --format=iife --global-name=KotoDocxEditorLib --minify --sourcemap"' in package_json
+
+
+def test_docx_runtime_bundle_contains_role_and_shared_geometry_contracts():
+    bundle_js = (_repo_root() / "web" / "static" / "js" / "tiptap-docx-bundle.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "data-koto-role" in bundle_js
+    assert "getDocxNavigationAnchorOffset()" in bundle_js
+    assert "getDocxTargetScrollTop(" in bundle_js
+    assert "scrollTop+this.getDocxNavigationAnchorOffset()" in bundle_js
+    assert "this.getDocxTargetScrollTop(" in bundle_js
 
 
 def test_docx_toggle_bold_and_italic_can_clear_block_level_text_styles():
@@ -71,9 +193,59 @@ def test_docx_workspace_shell_uses_shared_tiptap_mount_and_no_slate_selection_fa
 
     assert "async function _mountDocxEditor(tab, html, docxData, headings)" in shell_js
     assert shell_js.count("new KotoDocxEditorLib.KotoTipTapEditor();") == 1
-    assert shell_js.count("await _mountDocxEditor(") >= 3
+    assert shell_js.count("await _mountDocxEditor(") >= 2
     assert "state.activeEditor.editor.selection" not in shell_js
     assert "Legacy Slate fallback (unused — kept for safety)" not in shell_js
+
+
+def test_docx_outline_prefers_manifest_but_has_structural_dom_fallback():
+    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function _isValidDocxHeadingEntry(heading)" in shell_js
+    assert ".filter(_isValidDocxHeadingEntry)" in shell_js
+    assert "function _resolveDocxOutlineTarget(pm, heading)" in shell_js
+    assert "function _collectDocxOutlineHeadingsFromDom(pm)" in shell_js
+    assert "function _resolveDocxOutlineHeadings(headings)" in shell_js
+    assert 'data-koto-role="structural_heading"' in shell_js
+    assert 'h1#${escapedId}[data-koto-role="structural_heading"]' in shell_js
+    assert "function _filterDocxOutlineHeadingsByDomTargets(headings)" in shell_js
+    assert "headings = _resolveDocxOutlineHeadings(headings);" in shell_js
+    assert "if (_resolveDocxOutlineTarget(pm, heading)) resolved.push(heading);" in shell_js
+    assert "DOCX outline manifest underfilled; falling back to DOM structural headings" in shell_js
+    assert "function _bindDocxOutlineScrollSync(outline, headings)" in shell_js
+    assert "_syncDocxOutlineAfterMount(fullData.headings || []);" in shell_js
+    assert "p[class^=\"koto-toc-\"]" not in shell_js
+    assert "textContent.trim().startsWith(heading.text)" not in shell_js
+    assert "setTimeout(() => _setupDocOutline([]), 300);" not in shell_js
+    assert "_setupDocOutline(fullData.headings || []);" not in shell_js
+
+
+def test_docx_outline_click_and_scroll_sync_share_measured_offset_helpers():
+    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
+        encoding="utf-8"
+    )
+    editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function _getDocxNavigationAnchorOffset(editorScroll, pm)" in shell_js
+    assert "function _getDocxTargetScrollTop(editorScroll, target)" in shell_js
+    assert "state.activeEditor" in shell_js
+    assert "editorHost.getDocxNavigationAnchorOffset" in shell_js
+    assert "editorHost.getDocxTargetScrollTop" in shell_js
+    assert "editorScroll.scrollTop + _getDocxNavigationAnchorOffset(editorScroll, pm)" in shell_js
+    assert "const targetTop = _getDocxTargetScrollTop(editorScroll, entry.target);" in shell_js
+    assert "const targetTop = _getDocxTargetScrollTop(editorScroll, target);" in shell_js
+    assert "const offset = _getDocxNavigationAnchorOffset(editorScroll, pm);" in shell_js
+    assert "getBoundingClientRect().top + 120" not in shell_js
+    assert "relativeTop - 80" not in shell_js
+    assert "getDocxNavigationAnchorOffset()" in editor_js
+    assert "getDocxTargetScrollTop(target)" in editor_js
+    assert "this._scrollEl.scrollTop + this.getDocxNavigationAnchorOffset()" in editor_js
+    assert "const targetTop = this.getDocxTargetScrollTop(target);" in editor_js
+    assert "const resolvedOffset = Number.isFinite(offset) ? offset : this.getDocxNavigationAnchorOffset();" in editor_js
 
 
 def test_docx_font_size_toolbars_use_point_units_and_numeric_sync():
@@ -131,6 +303,20 @@ def test_docx_body_selection_prefers_live_native_selection_rects():
     assert "range.getClientRects ? range.getClientRects() : []" in js
     assert "const nativeBounds = _getDocxNativeSelectionBounds(pm, pmR.left);" in js
     assert "const anchorY = bounds.bottom > 0" in js
+
+
+def test_docx_ai_selection_prefers_editor_table_payloads_over_native_last_cell_text():
+    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function _getDocxSelectionPayload" in js
+    assert "editorHost.getWholeTableSelectionInfo" in js
+    assert "editorHost.getCellSelectionInfo" in js
+    assert "editorHost.getSelectionTextForAI" in js
+    assert "aiText: `[当前选中表格数据]:\\n${wholeTableText}\\n`," in js
+    assert "_pinSelectionChip({ text: docxSelection.aiText, previewText: docxSelection.previewText });" in js
+    assert "_updateContextBar({ table: docxSelection.previewText });" in js
 
 
 def test_docx_header_footer_overlay_footer_alignment_and_marker_hooks_exist():
@@ -223,6 +409,24 @@ def test_docx_first_page_header_markers_visible_and_header_overlay_has_no_outlin
     assert "const overlayOutline = type === 'header'" in ext_js
     assert "outline:none;outline-offset:0;" in ext_js
 
+def test_docx_pagination_uses_boundary_markers_without_fixed_overlay_delay():
+    editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
+        encoding="utf-8"
+    )
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+    e2e_test = (_repo_root() / "tests" / "e2e" / "test_docx_render.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "requestAnimationFrame(() => this._setupPageFeatures());" in editor_js
+    assert "setTimeout(() => this._setupPageFeatures(), 250);" not in editor_js
+    assert "_forceRecalc" not in ext_js
+    assert 'PAGE_BOUNDARY_SELECTOR = "[data-page-break],[data-soft-page-break]"' in e2e_test
+    assert "koto-pb-overlay" not in e2e_test
+    assert ".koto-pb-line" not in e2e_test
+
 
 def test_docx_header_shells_neutralize_legacy_header_footer_separator_rules():
     css = (_repo_root() / "web" / "static" / "css" / "workspace.css").read_text(
@@ -295,7 +499,7 @@ def test_docx_typography_css_keeps_font_fallbacks_non_forcing():
     )
 
     editable_block = re.search(
-        r"#wa-docx-editor \[data-slate-editor\],\s*#wa-docx-editor \[contenteditable=\"true\"\] \{(.*?)\}",
+        r"#wa-docx-editor \[contenteditable=\"true\"\]\s*\{(.*?)\}",
         css,
         flags=re.S,
     )
@@ -326,6 +530,32 @@ def test_docx_sanitizer_removes_forced_imported_table_widths():
     assert "style.removeProperty('max-width')" in js
 
 
+def test_docx_borderless_cell_marker_survives_live_dom_detection():
+    css = (_repo_root() / "web" / "static" / "css" / "workspace.css").read_text(
+        encoding="utf-8"
+    )
+    editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
+        encoding="utf-8"
+    )
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "td[data-koto-borderless-cell=\"true\"]" in css
+    assert "th[data-koto-borderless-cell=\"true\"]" in css
+    assert "td[data-koto-borderless-cell=\"true\"]" in editor_js
+    assert "th[data-koto-borderless-cell=\"true\"]" in editor_js
+    assert re.search(
+        r"kotoBorderlessCell:\s*\{\s*default:\s*false,\s*parseHTML:\s*el => el\.getAttribute\('data-koto-borderless-cell'\) === 'true'",
+        ext_js,
+        flags=re.S,
+    )
+    assert re.search(
+        r"renderHTML:\s*attrs => attrs\.kotoBorderlessCell \? \{ 'data-koto-borderless-cell': 'true' \} : \{\}",
+        ext_js,
+    )
+
+
 def test_docx_tables_paginate_with_row_level_soft_break_widgets():
     css = (_repo_root() / "web" / "static" / "css" / "workspace.css").read_text(
         encoding="utf-8"
@@ -337,5 +567,7 @@ def test_docx_tables_paginate_with_row_level_soft_break_widgets():
     assert "koto-table-page-break-row" in css
     assert "koto-table-page-break-cell" in css
     assert "_buildSoftBreakTableRow" in ext_js
+    assert "_consumeTableRowspanState" in ext_js
+    assert "_collectTableRowPaginationGroups" in ext_js
     assert "TableMap.get(node).width" in ext_js
     assert "tableCols" in ext_js

@@ -22,12 +22,15 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+try:
+    from src.runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+except ImportError:
+    from runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+
 # ───────── 路径解析 ─────────
-if getattr(sys, "frozen", False):
-    APP_ROOT = Path(sys.executable).parent
-else:
-    here = Path(__file__).resolve().parent
-    APP_ROOT = here.parent if here.name == "src" else here
+ROOTS = resolve_runtime_roots(__file__)
+APP_ROOT = ROOTS.app_root
+configure_process_environment(ROOTS, required_dirs=("config",))
 
 SETUP_FLAG = APP_ROOT / "config" / "model_setup_done.json"
 

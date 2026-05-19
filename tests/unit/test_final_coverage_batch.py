@@ -556,6 +556,33 @@ class TestTrackChangesEditorDeep:
             result = editor.apply_tracked_changes("/fake.docx", annotations)
         assert result.get("failed", 0) >= 1 or result.get("applied", 0) == 0
 
+    def test_apply_tracked_changes_emits_saved_progress_when_callback_present(self):
+        editor = self._make_editor()
+        mock_doc = MagicMock()
+        mock_para = MagicMock()
+        mock_para.text = "旧文本"
+        mock_doc.paragraphs = [mock_para]
+        mock_doc.tables = []
+        events = []
+
+        with patch("web.track_changes_editor.Document", return_value=mock_doc), patch.object(
+            editor, "_apply_change_to_paragraph", return_value=True
+        ):
+            result = editor.apply_tracked_changes(
+                "/fake.docx",
+                [{"原文片段": "旧文本", "修改后文本": "新文本"}],
+                progress_callback=lambda current, total, status, detail, **meta: events.append((status, detail, meta)),
+            )
+
+        assert result["success"] is True
+        assert any(
+            status == "saved"
+            and meta.get("file_updated") is True
+            and meta.get("file_path") == "/fake.docx"
+            and meta.get("updated_in_place") is True
+            for status, _detail, meta in events
+        )
+
     # -- apply_hybrid_changes classification --------------------------------
     def test_apply_hybrid_changes_classifies_suggestion_as_comment(self):
         editor = self._make_editor()

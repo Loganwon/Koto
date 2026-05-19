@@ -20,6 +20,11 @@ _logger = logging.getLogger("koto.routes.sessions")
 sessions_bp = Blueprint("sessions", __name__)
 
 
+def _is_workspace_assistant_session(filename: str) -> bool:
+  normalized = str(filename or "").replace(".json", "").strip().lower()
+  return normalized.startswith("workspace_") or normalized.startswith("editor_")
+
+
 def _get_session_manager():
     """Lazy import to avoid circular dependency with app.py."""
     from web.app import session_manager
@@ -44,7 +49,11 @@ def get_sessions() -> Response:
               items:
                 type: string
     """
-    sessions = _get_session_manager().list_sessions()
+    sessions = [
+      session
+      for session in _get_session_manager().list_sessions()
+      if not _is_workspace_assistant_session(session)
+    ]
     return jsonify({"sessions": [s.replace(".json", "") for s in sessions]})
 
 

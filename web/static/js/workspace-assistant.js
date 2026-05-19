@@ -4,15 +4,242 @@
  */
 
 window.WA = window.WA || {};
+/** Incremented when the public WA API surface changes in a backward-incompatible way. */
+window.WA.__contract = "1.0";
 
 (function() {
+  function $(id) {
+    return document.getElementById(id);
+  }
+
+  let _waToastTimer = null;
+  function showToast(message, kind = 'info', duration = 2600) {
+    const toast = $('wa-toast');
+    if (!toast) return;
+    const tone = kind === 'success' || kind === 'error' || kind === 'info'
+      ? kind
+      : 'info';
+    toast.textContent = String(message || '');
+    toast.className = '';
+    toast.classList.add(tone, 'show');
+    clearTimeout(_waToastTimer);
+    _waToastTimer = setTimeout(() => {
+      toast.classList.remove('show');
+    }, Math.max(800, Number(duration) || 2600));
+  }
+  window.showToast = showToast;
+
+  function _waIcon(paths, opts = {}) {
+    const width = opts.width || 14;
+    const height = opts.height || 14;
+    const viewBox = opts.viewBox || '0 0 24 24';
+    const strokeWidth = opts.strokeWidth || 1.8;
+    return `<svg width="${width}" height="${height}" viewBox="${viewBox}" fill="none" stroke="currentColor" stroke-width="${strokeWidth}" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+  }
+
+  function _waBrandFileSvg(label, opts = {}) {
+    const width = opts.width || 14;
+    const height = opts.height || 14;
+    const pageFill = opts.pageFill || '#ffffff';
+    const pageStroke = opts.pageStroke || '#cbd5e1';
+    const foldFill = opts.foldFill || '#e2e8f0';
+    const badgeFill = opts.badgeFill || '#2563eb';
+    const lineColor = opts.lineColor || '#dbe3ee';
+    const labelColor = opts.labelColor || '#ffffff';
+    const fontSize = opts.fontSize || (String(label || '').length > 1 ? 4.2 : 7.2);
+    const fontWeight = opts.fontWeight || 700;
+    const safeLabel = String(label || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+    return `
+      <svg width="${width}" height="${height}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M7 2.75h7L18.25 7v12A2.25 2.25 0 0 1 16 21.25H7A2.25 2.25 0 0 1 4.75 19V5A2.25 2.25 0 0 1 7 2.75Z" fill="${pageFill}" stroke="${pageStroke}" stroke-width="1.2"/>
+        <path d="M14 2.75V7h4.25" fill="${foldFill}" stroke="${pageStroke}" stroke-width="1.2" stroke-linejoin="round"/>
+        <path d="M15.2 11.5h2.2" stroke="${lineColor}" stroke-width="1.2" stroke-linecap="round"/>
+        <path d="M15.2 14.2h2.2" stroke="${lineColor}" stroke-width="1.2" stroke-linecap="round"/>
+        <path d="M15.2 16.9h1.5" stroke="${lineColor}" stroke-width="1.2" stroke-linecap="round"/>
+        <rect x="3" y="9.25" width="10.5" height="10.5" rx="1.9" fill="${badgeFill}"/>
+        <text x="8.25" y="16.15" text-anchor="middle" font-size="${fontSize}" font-weight="${fontWeight}" fill="${labelColor}" font-family="Segoe UI, Arial, sans-serif">${safeLabel}</text>
+      </svg>`;
+  }
+
+  function _waImageFileSvg(opts = {}) {
+    const width = opts.width || 14;
+    const height = opts.height || 14;
+    return `
+      <svg width="${width}" height="${height}" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="3.5" y="4" width="17" height="15.5" rx="2.5" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+        <rect x="6" y="7" width="12" height="9.5" rx="1.4" fill="#dbeafe"/>
+        <circle cx="9.2" cy="10" r="1.4" fill="#f59e0b"/>
+        <path d="M7.2 15.2 10.3 12l2.6 2.6 1.8-1.8 2.1 2.4Z" fill="#22c55e"/>
+      </svg>`;
+  }
+
+  const _DEFAULT_FILE_SVG = _waIcon(
+    '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />' +
+    '<path d="M14 3v5h5" />'
+  );
+  const _DOC_SVG = _waIcon(
+    '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />' +
+    '<path d="M14 3v5h5" />' +
+    '<path d="M8.5 13h7" />' +
+    '<path d="M8.5 16h7" />'
+  );
+  const _FOLDER_SVG = _waIcon('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />');
+  const _FOLDER_OPEN_SVG = _waIcon(
+    '<path d="M3 9a2 2 0 0 1 2-2h4l2 2h9l-2 8a2 2 0 0 1-2 1.5H6a2 2 0 0 1-2-1.5z" />' +
+    '<path d="M3 9V7a2 2 0 0 1 2-2h4l2 2h4" />'
+  );
+  const _FOLDER_PICK_SVG = _waIcon(
+    '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v2" />' +
+    '<path d="M3 9v8a2 2 0 0 0 2 2h8" />' +
+    '<path d="M17 14v6" /><path d="M14 17h6" />'
+  );
+  const _PIN_SVG = _waIcon(
+    '<path d="M9 4h6l-1 4 2 2H8l2-2z" />' +
+    '<path d="M12 10v10" />'
+  );
+  const _PENCIL_SVG = _waIcon(
+    '<path d="m4 20 4.5-1 8.8-8.8a2.1 2.1 0 0 0-3-3L5.5 16 4 20z" />' +
+    '<path d="m13.5 6.5 4 4" />'
+  );
+  const _SEARCH_SVG = _waIcon('<circle cx="11" cy="11" r="6" /><path d="m20 20-3.5-3.5" />');
+  const _CLIPBOARD_SVG = _waIcon(
+    '<rect x="7" y="5" width="10" height="14" rx="2" />' +
+    '<path d="M9 5.5h6" />' +
+    '<path d="M10 3h4a1 1 0 0 1 1 1v1.5H9V4a1 1 0 0 1 1-1z" />'
+  );
+  const _CHART_SVG = _waIcon('<path d="M4 19h16" /><path d="M7 16v-5" /><path d="M12 16V7" /><path d="M17 16v-8" />');
+  const _LIGHTBULB_SVG = _waIcon(
+    '<path d="M9 18h6" />' +
+    '<path d="M10 21h4" />' +
+    '<path d="M8.7 14.3A6 6 0 1 1 15.3 14.3C14.5 15 14 16 14 17h-4c0-1-.5-2-1.3-2.7" />'
+  );
+  const _TRASH_SVG = _waIcon(
+    '<path d="M4 6h16" />' +
+    '<path d="M9 6V4h6v2" />' +
+    '<path d="M7 6l1 14h8l1-14" />' +
+    '<path d="M10 10v6" /><path d="M14 10v6" />'
+  );
+  const _PAUSE_SVG = _waIcon('<path d="M9 5v14" /><path d="M15 5v14" />');
+  const _SEND_SVG = _waIcon('<path d="M3 11.5 21 3l-4 18-5-6-6-3.5Z" /><path d="m12 15 5-12" />');
+  const _DOWNLOAD_SVG = _waIcon('<path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M4 21h16" />');
+  const _CHAT_SVG = _waIcon('<path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />');
+  const _SLIDES_SVG = _waIcon('<rect x="4" y="5" width="16" height="12" rx="2" /><path d="M8 19h8" /><path d="M12 17v2" />');
+  const _SUN_SVG = _waIcon(
+    '<circle cx="12" cy="12" r="4" />' +
+    '<path d="M12 2v2" /><path d="M12 20v2" />' +
+    '<path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" />' +
+    '<path d="M2 12h2" /><path d="M20 12h2" />' +
+    '<path d="m4.93 19.07 1.41-1.41" /><path d="m17.66 6.34 1.41-1.41" />'
+  );
+  const _MOON_SVG = _waIcon('<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4 6.5 6.5 0 0 0 20 14.5z" />');
+
+  const _WORD_FILE_SVG = _waBrandFileSvg('W', {
+    badgeFill: '#185ABD',
+    foldFill: '#DBEAFE',
+    lineColor: '#BFDBFE',
+  });
+  const _EXCEL_FILE_SVG = _waBrandFileSvg('X', {
+    badgeFill: '#107C41',
+    foldFill: '#DCFCE7',
+    lineColor: '#BBF7D0',
+  });
+  const _POWERPOINT_FILE_SVG = _waBrandFileSvg('P', {
+    badgeFill: '#D24726',
+    foldFill: '#FEE2E2',
+    lineColor: '#FECACA',
+  });
+  const _PDF_SVG = _waBrandFileSvg('PDF', {
+    badgeFill: '#E53935',
+    foldFill: '#FEE2E2',
+    lineColor: '#FECACA',
+    fontSize: 3.9,
+    fontWeight: 800,
+  });
+  const _TEXT_SVG = _waBrandFileSvg('T', {
+    badgeFill: '#64748B',
+    foldFill: '#E2E8F0',
+    lineColor: '#CBD5E1',
+  });
+  const _CODE_SVG = _waBrandFileSvg('</>', {
+    badgeFill: '#7C3AED',
+    foldFill: '#F3E8FF',
+    lineColor: '#E9D5FF',
+    fontSize: 3.5,
+    fontWeight: 800,
+  });
+  const _IMAGE_SVG = _waImageFileSvg();
+
+  const _EXT_ICON = {
+    doc: _WORD_FILE_SVG,
+    docx: _WORD_FILE_SVG,
+    pdf: _PDF_SVG,
+    ppt: _POWERPOINT_FILE_SVG,
+    pptx: _POWERPOINT_FILE_SVG,
+    xls: _EXCEL_FILE_SVG,
+    xlsx: _EXCEL_FILE_SVG,
+    csv: _EXCEL_FILE_SVG,
+    txt: _TEXT_SVG,
+    md: _TEXT_SVG,
+    markdown: _TEXT_SVG,
+    py: _CODE_SVG,
+    js: _CODE_SVG,
+    ts: _CODE_SVG,
+    json: _CODE_SVG,
+    html: _CODE_SVG,
+    css: _CODE_SVG,
+    xml: _CODE_SVG,
+    yaml: _CODE_SVG,
+    yml: _CODE_SVG,
+    png: _IMAGE_SVG,
+    jpg: _IMAGE_SVG,
+    jpeg: _IMAGE_SVG,
+    gif: _IMAGE_SVG,
+    bmp: _IMAGE_SVG,
+    webp: _IMAGE_SVG,
+    svg: _IMAGE_SVG,
+  };
+
+  function _fileIcon(ext, category = '') {
+    const normalizedExt = String(ext || '').toLowerCase().replace(/^\./, '');
+    const normalizedCategory = String(category || '').toLowerCase();
+    const classSuffix = (normalizedExt || normalizedCategory || 'default').replace(/[^a-z0-9_-]/g, '');
+    const icon = _EXT_ICON[normalizedExt]
+      || (normalizedCategory === 'docx' || normalizedCategory === 'word'
+        ? _WORD_FILE_SVG
+        : normalizedCategory === 'pdf'
+          ? _PDF_SVG
+          : normalizedCategory === 'xlsx' || normalizedCategory === 'spreadsheet' || normalizedCategory === 'csv'
+            ? _EXCEL_FILE_SVG
+            : normalizedCategory === 'pptx' || normalizedCategory === 'presentation'
+              ? _POWERPOINT_FILE_SVG
+              : normalizedCategory === 'image'
+                ? _IMAGE_SVG
+                : normalizedCategory === 'code'
+                  ? _CODE_SVG
+                  : normalizedCategory === 'text'
+                    ? _TEXT_SVG
+                    : normalizedCategory === 'folder'
+                      ? _FOLDER_SVG
+                      : _DEFAULT_FILE_SVG);
+    return `<span class="wa-file-icon ext-${classSuffix}">${icon}</span>`;
+  }
+
   // ── Global State ──
+  const _WA_EMPTY_WORKSPACE_LAYOUT = {
+    open_tabs: [],
+    active_tab_path: null,
+  };
+
   const state = {
     fileId: null,
     fileType: null,
     fileName: null,
     filePath: null,      // task/tool-accessible path (workspace path or session temp path)
     wsSourcePath: null,  // workspace-relative path of the open file (e.g. "foo.docx")
+    capabilityProfile: null,
     activeEditor: null,
     socket: null,
     isLoading: false,
@@ -25,10 +252,19 @@ window.WA = window.WA || {};
     lastPinnedSel: null,
     selectMode: false,  // multi-select mode
     selectedFiles: new Set(),  // paths of selected files
-    openTabs: [],          // [{path,name,ext,fileType,fileId,serverData,cache,modified}]
-    activeTabPath: null,   // path of the currently active tab
+    openTabs: [..._WA_EMPTY_WORKSPACE_LAYOUT.open_tabs],          // [{path,name,ext,fileType,fileId,serverData,cache,modified,capabilityProfile,reviewState}]
+    activeTabPath: _WA_EMPTY_WORKSPACE_LAYOUT.active_tab_path,   // path of the currently active tab
     aiOutputMode: 'inline',  // fixed doc-assistant flow; legacy chat-only mode removed from UI
     lockedModel: localStorage.getItem('wa_locked_model') === 'local' ? 'local' : 'auto',  // local or auto only
+    _reviewCenterOpen: localStorage.getItem('wa_review_center_open') !== '0',
+    _reviewMode: ['all', 'comments', 'proposals'].includes(localStorage.getItem('wa_review_mode'))
+      ? localStorage.getItem('wa_review_mode')
+      : 'all',
+    _editingReviewCommentId: '',
+    _reviewSelectionSnapshot: null,
+    _reviewLauncherVisible: false,
+    _activeProposalBatch: [],
+    _useWpsReviewRail: true,   // feature flag: WPS-style per-page rail
     _streamAbortCtrl: null,  // AbortController for the active AI task stream
     _recentOpen: true,     // recent files section expanded state
     _workspacePath: '',    // absolute workspace root path for openRecentFile comparison
@@ -41,7 +277,6 @@ window.WA = window.WA || {};
     _searchActive: false,      // true when showing flat search results
     _browserSort: localStorage.getItem('wa_browser_sort') || 'name',  // 'name'|'date'|'type'
     _livePollTimer: null,      // setInterval handle for live folder refresh
-    aiDisplayMode: localStorage.getItem('wa_ai_display_mode') || 'panel', // 'panel' | 'inline'
     _availableModels: [],
     _modelMap: {},
     _modelsReady: false,
@@ -49,28 +284,158 @@ window.WA = window.WA || {};
     _activeRoute: null,
     _localRuntimeModel: '',
     _hasExplicitModelChoice: localStorage.getItem('wa_model_choice_explicit') === '1' || localStorage.getItem('wa_locked_model') === 'local',
-    useAgentMode: localStorage.getItem('wa_use_agent') !== 'off',  // P0: enable agent ReAct loop
   };
 
-  // Persistent fsHandle map — survives tab entry replacement
-  const _fsHandleMap = new Map();
+  // WPS-style review rail controller (created lazily, destroyed on tab switch)
+  let _wpsRailCtrl = null;
 
-  // ── Tab management (VS Code style) ──────────────────────────────────────────
+  const _fsHandleMap = new Map();
+  const _WA_RUNTIME_SESSION_ID = (() => {
+    try {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return `workspace_runtime_${window.crypto.randomUUID().replace(/-/g, '')}`;
+      }
+    } catch (_) {}
+    return `workspace_runtime_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  })();
+
+  const _CAPABILITY_ACTION_LABELS = {
+    preview: '预览',
+    edit: '编辑',
+    analyze: '分析',
+    compare: '对比',
+    annotate: '批注',
+    ocr: 'OCR',
+    sandbox: '沙盒',
+  };
+
+  function _inferCapabilityFormat(fileType, fileName) {
+    const fromName = (String(fileName || '').split('.').pop() || '').toLowerCase();
+    if (fromName) return fromName;
+    if (fileType === 'text') return 'txt';
+    if (fileType === 'code') return 'code';
+    return String(fileType || 'unknown').toLowerCase();
+  }
+
+  function _fallbackCapabilityProfile(fileType, fileName) {
+    const type = String(fileType || '').toLowerCase();
+    const format = _inferCapabilityFormat(type, fileName);
+    if (type === 'pdf') {
+      return {
+        format,
+        family: 'document',
+        workspace: { open_mode: 'native', edit_mode: 'annotate_only', progressive_loading: false },
+        task: { analysis_mode: 'native_with_ocr', annotation_support: 'best_effort', write_support: 'none' },
+        ocr_mode: 'fallback',
+        actions: ['preview', 'analyze', 'annotate'],
+      };
+    }
+    if (type === 'image') {
+      return {
+        format,
+        family: 'image',
+        workspace: { open_mode: 'native', edit_mode: 'none', progressive_loading: false },
+        task: { analysis_mode: 'sidecar_only', annotation_support: 'none', write_support: 'none' },
+        ocr_mode: 'auxiliary',
+        actions: ['preview'],
+      };
+    }
+    if (type === 'docx' || type === 'xlsx' || type === 'pptx' || type === 'text' || type === 'code') {
+      return {
+        format,
+        family: type === 'xlsx' ? 'spreadsheet' : type === 'pptx' ? 'presentation' : type === 'docx' ? 'document' : type,
+        workspace: { open_mode: 'native', edit_mode: 'native', progressive_loading: type === 'docx' },
+        task: { analysis_mode: 'native', annotation_support: 'none', write_support: 'native' },
+        ocr_mode: 'none',
+        actions: ['preview', 'edit', 'analyze'],
+      };
+    }
+    return {
+      format,
+      family: type || 'unknown',
+      workspace: { open_mode: 'unsupported', edit_mode: 'none', progressive_loading: false },
+      task: { analysis_mode: 'none', annotation_support: 'none', write_support: 'none' },
+      ocr_mode: 'none',
+      actions: ['preview'],
+    };
+  }
+
+  function _normalizeCapabilityProfile(profile, fileType, fileName) {
+    const fallback = _fallbackCapabilityProfile(fileType, fileName);
+    if (!profile || typeof profile !== 'object') return fallback;
+    const normalized = Object.assign({}, fallback, _cloneSerializable(profile, {}) || {});
+    normalized.workspace = Object.assign({}, fallback.workspace, normalized.workspace || {});
+    normalized.task = Object.assign({}, fallback.task, normalized.task || {});
+    normalized.actions = Array.isArray(normalized.actions) ? normalized.actions.slice() : fallback.actions.slice();
+    normalized.notes = Array.isArray(normalized.notes) ? normalized.notes.slice() : [];
+    normalized.format = String(normalized.format || fallback.format || 'unknown').toLowerCase();
+    normalized.family = String(normalized.family || fallback.family || 'unknown').toLowerCase();
+    normalized.ocr_mode = String(normalized.ocr_mode || fallback.ocr_mode || 'none').toLowerCase();
+    return normalized;
+  }
+
+  function _capabilityActionList(profile) {
+    const labels = Array.isArray(profile && profile.actions)
+      ? profile.actions.map((action) => _CAPABILITY_ACTION_LABELS[action] || '').filter(Boolean)
+      : [];
+    return Array.from(new Set(labels)).slice(0, 3);
+  }
+
+  function _capabilityPrimaryBadge(profile) {
+    const workspace = (profile && profile.workspace) || {};
+    const task = (profile && profile.task) || {};
+    if (workspace.edit_mode === 'native' && task.write_support === 'native') return '编辑';
+    if ((profile && profile.ocr_mode) && profile.ocr_mode !== 'none') return 'OCR';
+    if (workspace.edit_mode === 'annotate_only' || (task.annotation_support && task.annotation_support !== 'none')) return '批注';
+    if (task.analysis_mode && task.analysis_mode !== 'none' && task.analysis_mode !== 'metadata_only' && task.analysis_mode !== 'sidecar_only') return '分析';
+    return '预览';
+  }
+
+  function _tabDisplayInfo(tab) {
+    const profile = _normalizeCapabilityProfile(tab && tab.capabilityProfile, tab && tab.fileType, tab && tab.name);
+    const actions = _capabilityActionList(profile);
+    const badge = _capabilityPrimaryBadge(profile);
+    const extAttr = String(profile.format || tab.ext || tab.fileType || '').toLowerCase();
+    const titleParts = [String(tab && tab.name || '').trim()];
+    if (badge) titleParts.push(`能力：${badge}`);
+    if (actions.length) titleParts.push(`支持：${actions.join(' / ')}`);
+    return {
+      badge,
+      extAttr,
+      title: titleParts.filter(Boolean).join(' · '),
+    };
+  }
+
+  function _activeCapabilityProfile(tab) {
+    const source = tab || state.openTabs.find((item) => item.path === state.activeTabPath) || null;
+    if (source) return _normalizeCapabilityProfile(source.capabilityProfile, source.fileType, source.name);
+    return _normalizeCapabilityProfile(state.capabilityProfile, state.fileType, state.fileName);
+  }
 
   function _renderTabs() {
     const bar = $('wa-tab-bar');
     if (!bar) return;
+    bar.classList.toggle('single-tab', state.openTabs.length <= 1);
     bar.innerHTML = state.openTabs.map(tab => {
       const active = tab.path === state.activeTabPath ? ' active' : '';
       const modified = tab.modified ? ' modified' : '';
       const pathEsc = tab.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      return `<div class="wa-tab${active}${modified}" data-path="${tab.path.replace(/"/g, '&quot;')}"
-          onclick="WA._tabClick('${pathEsc}')" title="${tab.name}">
-        <span class="tab-icon">${_fileIcon(tab.ext)}</span>
-        <span class="tab-label">${tab.name}</span>
-        <span class="tab-dirty"></span>
-        <button class="tab-close" onclick="event.stopPropagation();WA._closeTab('${pathEsc}')" title="关闭">×</button>
-      </div>`;
+      const info = _tabDisplayInfo(tab);
+      const extAttr = _escHtml(info.extAttr || '');
+      const nameEsc = _escHtml(tab.name || '');
+      const titleEsc = _escHtml(info.title || tab.name || '');
+      const badgeEsc = info.badge ? _escHtml(info.badge) : '';
+      const badgeHtml = badgeEsc ? `<span class="tab-badge">${badgeEsc}</span>` : '';
+      return `<div class="wa-tab${active}${modified}" data-path="${tab.path.replace(/"/g, '&quot;')}" data-ext="${extAttr}"`
+        + ` onclick="WA._tabClick('${pathEsc}')" title="${titleEsc}">`
+        + `<span class="tab-icon">${_fileIcon(tab.ext)}</span>`
+        + `<span class="tab-main">`
+        + `<span class="tab-label">${nameEsc}</span>`
+        + badgeHtml
+        + `</span>`
+        + `<span class="tab-dirty"></span>`
+        + `<button class="tab-close" onclick="event.stopPropagation();WA._closeTab('${pathEsc}')" title="关闭">×</button>`
+        + `</div>`;
     }).join('');
     _updateStatusBar();
   }
@@ -78,77 +443,80 @@ window.WA = window.WA || {};
   async function _switchToTab(path) {
     if (state.activeTabPath === path) return;
 
-    // Hide floating toolbars that may be visible from the previous tab's selection
-    const _tt = $('wa-pdf-tooltip');
-    if (_tt) _tt.style.display = 'none';
+    const tooltip = $('wa-pdf-tooltip');
+    if (tooltip) tooltip.style.display = 'none';
     _hideDocxHoverBar();
-    const _pptxHb = $('wa-pptx-hoverbar');
-    if (_pptxHb) _pptxHb.style.display = 'none';
-    // Close find bars from previous tab
-    const _dfb = $('wa-docx-find-bar'); if (_dfb) _dfb.style.display = 'none';
-    const _pfb = $('wa-pptx-find-bar'); if (_pfb) _pfb.style.display = 'none';
+    const pptxHoverbar = $('wa-pptx-hoverbar');
+    if (pptxHoverbar) pptxHoverbar.style.display = 'none';
+    const docxFindBar = $('wa-docx-find-bar');
+    if (docxFindBar) docxFindBar.style.display = 'none';
+    const pptxFindBar = $('wa-pptx-find-bar');
+    if (pptxFindBar) pptxFindBar.style.display = 'none';
 
-    // Serialize + cache current tab before switching
     if (state.activeEditor && state.activeTabPath) {
-      const curTab = state.openTabs.find(t => t.path === state.activeTabPath);
-      if (curTab && state.fileType !== 'pdf') {
-        const serialized = _serializeEditorForTab(curTab, state.activeEditor);
-        if (curTab.fileType !== 'docx') curTab.cache = serialized;
+      const currentTab = state.openTabs.find((tab) => tab.path === state.activeTabPath);
+      if (currentTab && state.fileType !== 'pdf') {
+        const serialized = _serializeEditorForTab(currentTab, state.activeEditor);
+        if (currentTab.fileType !== 'docx') currentTab.cache = serialized;
       }
-      // Serialize into cache so we can restore when switching back — no disk write
       try {
-            state.activeEditor.destroy();
-          } catch(e) {
-            console.error('Editor destroy failed:', e);
-            const canvas = document.getElementById('wa-canvas');
-            if (canvas) canvas.innerHTML = '';
-          }
+        state.activeEditor.destroy();
+      } catch (error) {
+        console.error('Editor destroy failed:', error);
+        const canvas = $('wa-canvas');
+        if (canvas) canvas.innerHTML = '';
+      }
       state.activeEditor = null;
     }
 
     state.activeTabPath = path;
-    const tab = state.openTabs.find(t => t.path === path);
+    const tab = state.openTabs.find((item) => item.path === path);
     if (!tab) return;
+
+    // Destroy WPS rail on any tab switch — it will be re-created for docx tabs in _syncWpsReviewRail
+    if (_wpsRailCtrl) { _wpsRailCtrl.destroy(); _wpsRailCtrl = null; }
 
     state.fileId = tab.fileId;
     state.fileType = tab.fileType;
     state.fileName = tab.name;
     state.filePath = tab.filePath || tab.path || null;
     state.wsSourcePath = tab.path;
+    state.capabilityProfile = tab.capabilityProfile || null;
+    _hydrateAiConversation(true).catch((error) => console.warn('[WA] AI history hydrate failed:', error));
 
     const fileNameEl = $('wa-file-name');
     if (fileNameEl) fileNameEl.textContent = tab.name;
     _syncPrimarySaveButtons(tab);
-    const _archBtn1 = $('wa-archive-btn'); if (_archBtn1) _archBtn1.disabled = false;
-    const _histBtn  = $('wa-history-btn'); if (_histBtn) _histBtn.disabled = false;
+    const archiveBtn = $('wa-archive-btn');
+    if (archiveBtn) archiveBtn.disabled = false;
+    const historyBtn = $('wa-history-btn');
+    if (historyBtn) historyBtn.disabled = false;
     _updateSubjectBar(tab.name, tab.fileType);
     toggleWorkspace(true);
 
-    // Show PDF/DOCX zoom control only when the relevant file type is open
-    const _pdfZoomCtrl = $('wa-pdf-zoom-ctrl');
-    if (_pdfZoomCtrl) _pdfZoomCtrl.style.display = (tab.fileType === 'pdf') ? 'flex' : 'none';
-    const _docxZoomCtrl = $('wa-docx-zoom-ctrl');
-    if (_docxZoomCtrl) _docxZoomCtrl.style.display = (tab.fileType === 'docx') ? 'flex' : 'none';
+    const pdfZoomCtrl = $('wa-pdf-zoom-ctrl');
+    if (pdfZoomCtrl) pdfZoomCtrl.style.display = tab.fileType === 'pdf' ? 'flex' : 'none';
+    const docxZoomCtrl = $('wa-docx-zoom-ctrl');
+    if (docxZoomCtrl) docxZoomCtrl.style.display = tab.fileType === 'docx' ? 'flex' : 'none';
 
-    // Guard: wait for the target editor container to be fully laid out before
-    // mounting dimension-sensitive editors (mirrors the same guard in Router.load).
+    _primeEditorLayout(tab.fileType);
     await _waitForEditorLayout(tab.fileType);
 
-    const data = tab.cache;
+    const cachedData = tab.cache;
     if (tab.fileType === 'docx') {
-      // Use cache if it has real content, otherwise fall back to server HTML
-      const _freshData = tab.cache;
-      const docxHtml = (_freshData && typeof _freshData === 'string' && _freshData.replace(/<p><\/p>/gi,'').trim()) ? _freshData : tab.serverData.html;
+      const freshData = tab.cache;
+      const docxHtml = (freshData && typeof freshData === 'string' && freshData.replace(/<p><\/p>/gi, '').trim())
+        ? freshData
+        : tab.serverData.html;
       await _mountDocxEditor(tab, docxHtml, tab.serverData);
     } else if (tab.fileType === 'xlsx') {
       await _ensureUniverSheets();
       state.activeEditor = new KotoXlsxEditor();
-      // cache is {snapshot: IWorkbookData, _images} from serialize(); fall back to serverData
-      const xlsxData = _ensureWorkbookDefaults((data && data.snapshot) ? data.snapshot : tab.serverData);
+      const xlsxData = _ensureWorkbookDefaults((cachedData && cachedData.snapshot) ? cachedData.snapshot : tab.serverData);
       state.activeEditor.render(xlsxData);
     } else if (tab.fileType === 'pptx') {
       state.activeEditor = new KotoPptxEditor();
-      state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData);
+      state.activeEditor.render(cachedData !== null && cachedData !== undefined ? cachedData : tab.serverData);
     } else if (tab.fileType === 'pdf') {
       await _ensurePdfJS();
       state.activeEditor = new KotoPdfViewer();
@@ -158,26 +526,26 @@ window.WA = window.WA || {};
       state.activeEditor.render(tab.serverData.raw_url);
     } else if (tab.fileType === 'text' || tab.fileType === 'code') {
       state.activeEditor = new KotoTextEditor(tab.fileType);
-      state.activeEditor.render(data !== null && data !== undefined ? data : tab.serverData);
+      state.activeEditor.render(cachedData !== null && cachedData !== undefined ? cachedData : tab.serverData);
     }
 
     _renderTabs();
-    // highlight active file in left panel
-    document.querySelectorAll('.wa-file-item').forEach(el => {
-      el.classList.toggle('active', el.dataset.path === path || el.title === tab.name);
+    _syncReviewStateForActiveFile().catch(() => {});
+    document.querySelectorAll('.wa-file-item').forEach((element) => {
+      element.classList.toggle('active', element.dataset.path === path || element.title === tab.name);
     });
   }
 
+  window.WA._renderTabs = _renderTabs;
   window.WA._tabClick = async (path) => {
     await _switchToTab(path);
   };
 
   window.WA._closeTab = async (path) => {
-    const idx = state.openTabs.findIndex(t => t.path === path);
+    const idx = state.openTabs.findIndex((tab) => tab.path === path);
     if (idx < 0) return;
     const tab = state.openTabs[idx];
 
-    // Warn before discarding unsaved changes
     if (tab.modified) {
       if (!confirm(`"${tab.name}" 有未保存的修改，关闭后将丢失。\n是否继续关闭？`)) return;
     }
@@ -187,25 +555,31 @@ window.WA = window.WA || {};
     if (isActive) {
       if (state.activeEditor) {
         try {
-            state.activeEditor.destroy();
-          } catch(e) {
-            console.error('Editor destroy failed:', e);
-            const canvas = document.getElementById('wa-canvas');
-            if (canvas) canvas.innerHTML = '';
-          }
+          state.activeEditor.destroy();
+        } catch (error) {
+          console.error('Editor destroy failed:', error);
+          const canvas = $('wa-canvas');
+          if (canvas) canvas.innerHTML = '';
+        }
         state.activeEditor = null;
       }
+      // Tear down WPS review rail when the active tab is closed
+      if (_wpsRailCtrl) { _wpsRailCtrl.destroy(); _wpsRailCtrl = null; }
       state.activeTabPath = null;
       state.fileId = null;
       state.fileType = null;
       state.fileName = null;
       state.filePath = null;
       state.wsSourcePath = null;
+      state.capabilityProfile = null;
       const fileNameEl = $('wa-file-name');
       if (fileNameEl) fileNameEl.textContent = '全格式 AI 工作区';
-      $('wa-save-btn').disabled = true;
-      const _saBtn1 = $('wa-saveas-btn'); if (_saBtn1) _saBtn1.disabled = true;
-      const _archBtn2 = $('wa-archive-btn'); if (_archBtn2) _archBtn2.disabled = true;
+      const saveBtn = $('wa-save-btn');
+      if (saveBtn) saveBtn.disabled = true;
+      const saveAsBtn = $('wa-saveas-btn');
+      if (saveAsBtn) saveAsBtn.disabled = true;
+      const archiveBtn = $('wa-archive-btn');
+      if (archiveBtn) archiveBtn.disabled = true;
       _updateSubjectBar(null, null);
     }
 
@@ -218,42 +592,40 @@ window.WA = window.WA || {};
       } else {
         toggleWorkspace(false);
         _renderTabs();
+        _syncReviewStateForActiveFile().catch(() => {});
       }
     } else {
       _renderTabs();
     }
   };
 
-  // ── Utility ──
-  const $ = id => document.getElementById(id);
+  function _editorLayoutContainerId(fileType) {
+    return fileType === 'xlsx'
+      ? 'wa-xlsx-editor'
+      : fileType === 'pptx'
+        ? 'wa-pptx-editor'
+        : null;
+  }
 
-  /**
-   * Wait until the editor container for a given fileType has non-zero layout
-   * dimensions and is visible in the DOM.  Returns a Promise that resolves when
-   * the container is ready, or rejects after `timeoutMs`.
-   *
-   * This guards against the embedded-mode race where #workspaceView transitions
-   * from display:none → flex immediately before Router.load or _switchToTab
-   * attempts to mount Univer or the PPTX canvas — both requiring real pixel
-   * dimensions to initialise correctly.
-   *
-   * @param {string} fileType  – 'xlsx' | 'pptx' | any other type (resolves immediately)
-   * @param {number} timeoutMs – max wait (default 800 ms)
-   */
+  function _primeEditorLayout(fileType) {
+    const containerId = _editorLayoutContainerId(fileType);
+    if (!containerId) return;
+    const el = $(containerId);
+    if (el) el.classList.add('active');
+  }
+
   function _waitForEditorLayout(fileType, timeoutMs = 800) {
-    const containerId = fileType === 'xlsx' ? 'wa-xlsx-editor'
-                      : fileType === 'pptx' ? 'wa-pptx-editor'
-                      : null;
-    if (!containerId) return Promise.resolve();  // DOCX / PDF don't have layout deps
+    const containerId = _editorLayoutContainerId(fileType);
+    if (!containerId) return Promise.resolve();
     const isReady = () => {
-      const el = document.getElementById(containerId);
+      const el = $(containerId);
       return !!(el && el.offsetWidth > 0 && el.offsetHeight > 0);
     };
     if (isReady()) return Promise.resolve();
     return new Promise((resolve) => {
       const deadline = Date.now() + timeoutMs;
       function check() {
-        const el = document.getElementById(containerId);
+        const el = $(containerId);
         if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
           resolve();
           return;
@@ -262,7 +634,7 @@ window.WA = window.WA || {};
           console.warn('[WA] _waitForEditorLayout timeout for', containerId,
             'offsetW:', el ? el.offsetWidth : 'null',
             'offsetH:', el ? el.offsetHeight : 'null');
-          resolve();  // proceed anyway — editors have their own fallback retries
+          resolve();
           return;
         }
         requestAnimationFrame(check);
@@ -271,15 +643,9 @@ window.WA = window.WA || {};
     });
   }
 
-  function showToast(msg, type = 'success', duration = 3000) {
-    const t = $('wa-toast');
-    t.textContent = msg;
-    t.className = type + ' show';
-    setTimeout(() => { t.className = t.className.replace('show', ''); }, duration);
-  }
-
   function toggleWorkspace(show) {
-    $('wa-drop-zone').classList.toggle('hidden', show);
+    const dropZone = $('wa-drop-zone');
+    if (dropZone) dropZone.classList.toggle('hidden', show);
   }
 
   function setLoading(show, msg) {
@@ -287,7 +653,8 @@ window.WA = window.WA || {};
     const list = $('wa-files-list');
     if (show) {
       if (overlay) {
-        overlay.querySelector('.wa-loading-text').textContent = msg || '加载中...';
+        const text = overlay.querySelector('.wa-loading-text');
+        if (text) text.textContent = msg || '加载中...';
         overlay.style.display = 'flex';
       }
       if (list) list.classList.add('loading');
@@ -297,150 +664,49 @@ window.WA = window.WA || {};
     }
   }
 
-  // ── Additional file type SVGs (code / image / text) ──────────────────────
-  const _CODE_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#519aba"/><path d="M10 2v3h3" fill="none" stroke="white" stroke-width="0.7" opacity="0.5"/><text x="3" y="12" font-size="5" font-family="monospace" fill="white" opacity="0.9">&lt;/&gt;</text></svg>`;
-  const _MD_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#5c6bc0"/><path d="M10 2v3h3" fill="none" stroke="white" stroke-width="0.7" opacity="0.5"/><path d="M4 10V6l1.5 2L7 6v4" stroke="white" stroke-width="0.9" fill="none"/><path d="M8.5 6v4M11 6l-1.5 2.5L11 10" stroke="white" stroke-width="0.9" fill="none"/></svg>`;
-  const _IMG_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="#4caf50"/><circle cx="5" cy="6" r="1.2" fill="white" opacity="0.9"/><path d="M1.5 10l3.5-3 3 3.5 2.5-2 3 3.5" stroke="white" stroke-width="0.9" fill="none" opacity="0.85"/></svg>`;
-  const _TXT_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#75828d"/><path d="M10 2v3h3" fill="none" stroke="white" stroke-width="0.7" opacity="0.5"/><rect x="4" y="6" width="5" height="0.9" rx="0.3" fill="white" opacity="0.7"/><rect x="4" y="8" width="5" height="0.9" rx="0.3" fill="white" opacity="0.7"/><rect x="4" y="10" width="3.5" height="0.9" rx="0.3" fill="white" opacity="0.5"/></svg>`;
-
-  // VS Code-style SVG file type icons
-  const _FILE_SVGS = {
-    docx: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#2b579a"/><path d="M11 1l3 3v10H11V1z" fill="#1a3f6f"/><path d="M11 1v3h3" fill="none" stroke="white" stroke-width="0.5" opacity="0.4"/><rect x="4" y="5" width="5" height="1" rx="0.4" fill="white" opacity="0.85"/><rect x="4" y="7" width="5" height="1" rx="0.4" fill="white" opacity="0.85"/><rect x="4" y="9" width="3.5" height="1" rx="0.4" fill="white" opacity="0.6"/></svg>`,
-    xlsx: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#217346"/><path d="M11 1l3 3v10H11V1z" fill="#165b32"/><path d="M4.5 5.5l1.5 2-1.5 2M7 5.5l1.5 2-1.5 2" stroke="white" stroke-width="0.9" stroke-linecap="round" fill="none" opacity="0.85"/></svg>`,
-    pptx: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#c43e1c"/><path d="M11 1l3 3v10H11V1z" fill="#8c2d13"/><rect x="3.5" y="4.5" width="6" height="3.5" rx="0.5" fill="white" opacity="0.7"/><rect x="3.5" y="9.5" width="5" height="0.8" rx="0.3" fill="white" opacity="0.5"/><rect x="3.5" y="11" width="3.5" height="0.8" rx="0.3" fill="white" opacity="0.5"/></svg>`,
-    pdf: `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#e74c3c"/><path d="M11 1l3 3v10H11V1z" fill="#a93226"/><text x="3.2" y="10.5" font-size="4.5" font-family="sans-serif" font-weight="bold" fill="white" opacity="0.9">PDF</text></svg>`,
-  };
-  const _DEFAULT_FILE_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M3 2h7l3 3v9a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#75828d"/><path d="M10 2v3h3" fill="none" stroke="white" stroke-width="0.7" opacity="0.5"/></svg>`;
-  // Extend _FILE_SVGS with additional types after definition
-  function _resolveFileIcon(ext, category) {
-    const s = _FILE_SVGS[ext];
-    if (s) return `<span class="wa-file-icon">${s}</span>`;
-    if (category === 'code') return `<span class="wa-file-icon">${_CODE_SVG}</span>`;
-    if (category === 'image') return `<span class="wa-file-icon">${_IMG_SVG}</span>`;
-    if (ext === 'md' || ext === 'markdown') return `<span class="wa-file-icon">${_MD_SVG}</span>`;
-    if (category === 'text') return `<span class="wa-file-icon">${_TXT_SVG}</span>`;
-    return `<span class="wa-file-icon">${_DEFAULT_FILE_SVG}</span>`;
-  }
-  const _FOLDER_OPEN_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z" fill="#5b9bd5"/><path d="M1.5 6.5h13" stroke="white" stroke-width="0.5" opacity="0.35"/></svg>`;
-  const _FOLDER_SVG = `<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z" fill="#4a8fc4"/></svg>`;
-  function _fileIcon(ext, category) { return _resolveFileIcon(ext, category); }
-
-  // ── Unified SVG icon system (16×16, 1.5px stroke, currentColor) ──────────
-  const _IC = (d, vb = '0 0 16 16') => `<svg viewBox="${vb}" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">${d}</svg>`;
-  const _IC20 = (d) => _IC(d, '0 0 20 20');
-  const _SUN_SVG = _IC(`<circle cx="8" cy="8" r="3"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>`);
-  const _MOON_SVG = _IC(`<path d="M13.5 8.5a5.5 5.5 0 1 1-6-6 4 4 0 0 0 6 6z"/>`);
-  const _PENCIL_SVG = _IC(`<path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/>`);
-  const _SEND_SVG = `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>`;
-  const _CHAT_SVG = _IC(`<path d="M2 3h12a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H5l-3 3V4a1 1 0 0 1 1-1z"/>`);
-  const _PAUSE_SVG = _IC(`<rect x="4.25" y="3" width="2.25" height="10" rx="0.8"/><rect x="9.5" y="3" width="2.25" height="10" rx="0.8"/>`);
-  const _PIN_SVG = _IC(`<path d="M5 2.5l6 0 0 4.5-1.5 1.5V11H6.5V8.5L5 7z"/><path d="M8 11v3.5"/>`);
-  const _TRASH_SVG = _IC(`<path d="M3 4h10M6.5 4V2.5h3V4M5 4v9h6V4"/><path d="M7 7v3.5M9 7v3.5"/>`);
-  const _CHART_SVG = _IC(`<rect x="2" y="9" width="3" height="5" rx="0.5"/><rect x="6.5" y="5" width="3" height="9" rx="0.5"/><rect x="11" y="2" width="3" height="12" rx="0.5"/>`);
-  const _CLIPBOARD_SVG = _IC(`<rect x="3" y="2" width="10" height="12" rx="1.5"/><path d="M6 2V1h4v1"/><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3"/>`);
-  const _SLIDES_SVG = _IC(`<rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M5 7h6M5 9.5h4"/>`);
-  const _DOC_SVG = _IC(`<path d="M4 1.5h5.5L13 5v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z"/><path d="M9.5 1.5V5H13"/><path d="M5.5 8h5M5.5 10.5h3.5"/>`);
-  const _CONTRACT_SVG = _IC(`<path d="M4 1.5h8a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1z"/><path d="M5.5 5h5M5.5 7.5h5M5.5 10h3"/><path d="M9 12.5c1-1 2.5-.5 2.5-.5"/>`);
-  const _ROBOT_SVG = _IC(`<rect x="3.5" y="4" width="9" height="8" rx="2"/><circle cx="6" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="1" fill="currentColor" stroke="none"/><path d="M8 1.5v2.5"/><circle cx="8" cy="1.5" r="0.8" fill="currentColor" stroke="none"/><path d="M1.5 8h2M12.5 8h2"/>`);
-  const _REFRESH_SVG = _IC(`<path d="M2.5 8a5.5 5.5 0 0 1 9.9-3.2M13.5 8a5.5 5.5 0 0 1-9.9 3.2"/><path d="M12.4 1.5v3.3h-3.3M3.6 14.5v-3.3h3.3"/>`);
-  const _MIC_SVG = _IC(`<rect x="5.5" y="2" width="5" height="8" rx="2.5"/><path d="M3 9a5 5 0 0 0 10 0"/><path d="M8 14v1.5"/>`);
-  const _BOOKS_SVG = _IC(`<path d="M2 3h3v10H2zM5 3h3v10H5zM8.5 3.5l3-.8 2.6 9.8-3 .8z"/>`);
-  const _TAG_SVG = _IC(`<path d="M1.5 2h6l7 6.5-5 5-7-6.5V2z"/><circle cx="4.5" cy="5" r="1" fill="currentColor" stroke="none"/>`);
-  const _LIGHTBULB_SVG = _IC(`<path d="M5.5 13.5h5M6 11.5h4"/><path d="M5 9.5C3.5 8.5 3 7 3.5 5.3A4.5 4.5 0 0 1 8 2.5a4.5 4.5 0 0 1 4.5 2.8c.5 1.7 0 3.2-1.5 4.2"/>`);
-  const _STOP_SVG = _IC(`<rect x="3" y="3" width="10" height="10" rx="2"/>`);
-  const _SORT_SVG = _IC(`<path d="M4 5l4-3 4 3M4 11l4 3 4-3"/>`);
-  const _FOLDER_PICK_SVG = _IC(`<path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z"/>`);
-  const _DOWNLOAD_SVG = _IC(`<path d="M8 2v8.5M4.5 8L8 11.5 11.5 8"/><path d="M2.5 12.5h11"/>`);
-  const _CLOUD_UP_SVG = _IC(`<path d="M4 11a3.5 3.5 0 0 1-.5-7A5 5 0 0 1 13 5.5a3 3 0 0 1-.5 6H4z"/><path d="M8 7v5M6 9l2-2 2 2"/>`);
-  const _SETTINGS_SVG = _IC(`<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>`);
-  const _CLEAR_CHAT_SVG = _IC(`<path d="M3 4h10M6.5 4V2.5h3V4M5 4v9h6V4"/>`);
-  const _MORE_SVG = _IC(`<circle cx="4" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r="1" fill="currentColor" stroke="none"/>`);
-  const _SEARCH_SVG = _IC(`<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/>`);
-  const _PLUS_SVG = _IC(`<path d="M8 3v10M3 8h10"/>`);
-  const _UPLOAD_SVG = _IC(`<path d="M8 10V2.5M4.5 5.5L8 2l3.5 3.5"/><path d="M2.5 11v2.5h11V11"/>`);
-  const _FILE_PLUS_SVG = _IC(`<path d="M4 1.5h5.5L13 5v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z"/><path d="M9.5 1.5V5H13"/><path d="M8 8v4M6 10h4"/>`);
-  const _FOLDER_PLUS_SVG = _IC(`<path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z"/><path d="M8 6.5v4M6 8.5h4"/>`);
-
-  const _EXT_ICON = {
-    'docx': _FILE_SVGS.docx,
-    'xlsx': _FILE_SVGS.xlsx,
-    'pptx': _FILE_SVGS.pptx,
-    'pdf':  _FILE_SVGS.pdf
-  };
-  const _SORT_LABELS = { name: '名称', date: '日期', type: '类型' };
-
-  function _applySort(items) {
-    const by = state.sortBy;
-    return [...items].sort((a, b) => {
-      if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
-      if (by === 'date') return (b.mtime || 0) - (a.mtime || 0);
-      if (by === 'type') return (a.ext || '').localeCompare(b.ext || '') || a.name.localeCompare(b.name);
-      return a.name.localeCompare(b.name);
-    });
-  }
-
-  function _matchesSearch(item, q) {
-    if (!q) return true;
-    q = q.toLowerCase();
-    if (item.type === 'file') return item.name.toLowerCase().includes(q);
-    // For folders: keep if any child matches
-    if (item.children) item._filteredChildren = item.children.filter(c => _matchesSearch(c, q));
-    return item._filteredChildren && item._filteredChildren.length > 0;
-  }
-
-  function _formatDate(mtime) {
-    if (!mtime) return '';
-    const d = new Date(mtime);
-    const now = new Date();
-    const diff = (now - d) / 1000;
-    if (diff < 60) return '刚才';
-    if (diff < 3600) return Math.floor(diff / 60) + '分钟前';
-    if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
-    if (diff < 7 * 86400) return Math.floor(diff / 86400) + '天前';
-    return `${d.getMonth() + 1}/${d.getDate()}`;
-  }
-
   async function loadWorkspaceFiles() {
-    // Update workspace metadata then soft-refresh the FS browser.
-    // (Kept for backward compatibility — called after file ops like rename/delete/create.)
     try {
       const res = await fetch('/api/v1/workspace/current_dir');
       if (res.ok) {
-        const d = await res.json();
-        state._workspaceName = d.name || 'workspace';
-        state._workspacePath = d.path || '';
+        const data = await res.json();
+        state._workspaceName = data.name || 'workspace';
+        state._workspacePath = data.path || '';
         _renderWorkspaceRoot();
-      } else { throw new Error(res.status); }
-    } catch (err) {
-      console.error('Fetch dir error', err);
+      } else {
+        throw new Error(res.status);
+      }
+    } catch (error) {
+      console.error('Fetch dir error', error);
       showToast('获取工作区目录网络异常...', 'error');
     }
     await _softRefreshBrowser();
   }
 
   function _renderWorkspaceRoot() {
-    const el = $('wa-ws-root-label');
-    if (el) {
-      el.textContent = (state._workspaceName || 'workspace').toUpperCase();
-      el.title = state._workspacePath || '';
+    const rootLabel = $('wa-ws-root-label');
+    if (rootLabel) {
+      rootLabel.textContent = (state._workspaceName || 'workspace').toUpperCase();
+      rootLabel.title = state._workspacePath || '';
     }
-    const pt = $('wa-panel-title-ws');
-    if (pt) pt.textContent = state._workspaceName || 'workspace';
+    const panelTitle = $('wa-panel-title-ws');
+    if (panelTitle) panelTitle.textContent = state._workspaceName || 'workspace';
   }
 
   function _renderWorkspaceTree() {
-    // No-op: replaced by _renderBrowserTree() in full-FS browser mode.
-    // Kept so existing call sites don't throw.
+    // Replaced by _renderBrowserTree in full filesystem mode.
   }
 
   window.WA.refreshFiles = async () => {
     const btn = document.querySelector('.wa-icon-btn');
-    if (btn) { btn.classList.add('spinning'); setTimeout(() => btn.classList.remove('spinning'), 700); }
+    if (btn) {
+      btn.classList.add('spinning');
+      setTimeout(() => btn.classList.remove('spinning'), 700);
+    }
     await loadWorkspaceFiles();
   };
 
-  window.WA.filterFiles = (q) => {
-    state.searchQuery = q.trim();
+  window.WA.filterFiles = (query) => {
+    state.searchQuery = query.trim();
     const clear = $('wa-search-clear');
     if (clear) clear.style.display = state.searchQuery ? '' : 'none';
     if (!state.searchQuery) {
@@ -451,13 +717,16 @@ window.WA = window.WA || {};
     }
   };
 
-  window.WA.setSearchFilter = (cat) => {
-    state._searchFilter = cat;
-    document.querySelectorAll('.wa-filter-chip').forEach(el => {
-      el.classList.toggle('active', el.dataset.cat === cat);
+  window.WA.setSearchFilter = (category) => {
+    state._searchFilter = category;
+    document.querySelectorAll('.wa-filter-chip').forEach((element) => {
+      element.classList.toggle('active', element.dataset.cat === category);
     });
     if (state.searchQuery) _doSearch();
-    else { state._searchActive = false; _renderBrowserTree(); }
+    else {
+      state._searchActive = false;
+      _renderBrowserTree();
+    }
   };
 
   window.WA.clearSearch = () => {
@@ -478,8 +747,6 @@ window.WA = window.WA || {};
     }
   };
 
-  // ── Recent files section  ─────────────────────────────────────────────────
-  // Tracks user-opened files in localStorage (not system mtime).
   const _WA_RECENT_KEY = 'wa_user_recent_v1';
 
   function _trackUserOpen(path) {
@@ -487,97 +754,94 @@ window.WA = window.WA || {};
     const name = path.split(/[\\/]/).pop() || path;
     try {
       const list = JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]');
-      const filtered = list.filter(f => f.path !== path);
+      const filtered = list.filter((file) => file.path !== path);
       filtered.unshift({ path, name, ts: Date.now() });
       localStorage.setItem(_WA_RECENT_KEY, JSON.stringify(filtered.slice(0, 30)));
-    } catch(e) {}
+    } catch (_) {}
   }
 
   async function loadRecentFiles() {
-    const list = document.getElementById('wa-recent-list');
+    const list = $('wa-recent-list');
     if (!list) return;
     let userRecent = [];
-    // Phase 4: try backend first (richer metadata)
     try {
       const res = await fetch('/api/files/recent?days=30&limit=20');
       if (res.ok) {
-        const d = await res.json();
-        if (d.files && d.files.length) {
-          const backendPaths = new Set(d.files.map(f => f.path));
-          const localExtra = (() => { try { return JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]'); } catch(_) { return []; } })();
+        const data = await res.json();
+        if (data.files && data.files.length) {
+          const backendPaths = new Set(data.files.map((file) => file.path));
+          const localExtra = (() => {
+            try {
+              return JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]');
+            } catch (_) {
+              return [];
+            }
+          })();
           userRecent = [
-            ...d.files.map(f => ({
-              path: f.path, name: f.name,
-              ts: ((f.mtime || 0) * 1000) || Date.now(),
-              category: f.category, size_bytes: f.size_bytes,
+            ...data.files.map((file) => ({
+              path: file.path,
+              name: file.name,
+              ts: ((file.mtime || 0) * 1000) || Date.now(),
+              category: file.category,
+              size_bytes: file.size_bytes,
             })),
-            ...localExtra.filter(f => !backendPaths.has(f.path)).slice(0, 5),
+            ...localExtra.filter((file) => !backendPaths.has(file.path)).slice(0, 5),
           ].slice(0, 20);
         }
       }
     } catch (_) {}
-    // Fallback to localStorage
+
     if (!userRecent.length) {
-      try { userRecent = JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]'); } catch(_) {}
+      try {
+        userRecent = JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]');
+      } catch (_) {
+        userRecent = [];
+      }
     }
+
     if (!userRecent.length) {
       list.innerHTML = '<div class="wa-empty-row">暂无最近文件</div>';
       return;
     }
-    list.innerHTML = userRecent.slice(0, 20).map(f => {
-      const name = f.name || (f.path || '').split(/[\\/]/).pop() || '';
-      const ext  = (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
-      const icon = _fileIcon(ext, f.category || null);
-      const date = f.ts ? new Date(f.ts).toLocaleDateString('zh-CN') : '';
-      const size = f.size_bytes ? ' · ' + _formatSize(f.size_bytes) : '';
+
+    list.innerHTML = userRecent.slice(0, 20).map((file) => {
+      const name = file.name || (file.path || '').split(/[\\/]/).pop() || '';
+      const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
+      const icon = _fileIcon(ext, file.category || null);
+      const date = file.ts ? new Date(file.ts).toLocaleDateString('zh-CN') : '';
+      const size = file.size_bytes ? ' · ' + _formatSize(file.size_bytes) : '';
       const supported = _isSupportedExt(ext);
-      return `<div class="wa-file-item" title="${_escHtml(f.path || '')}"
-        data-path="${_escHtml(f.path || '')}" data-supported="${supported}"
-        onclick="WA.openRecentFile(${JSON.stringify(f.path || '')})"
-        oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)">
-        <span style="padding-left:8px"></span>
-        ${icon}
-        <span class="wa-file-label">${_escHtml(name)}</span>
-        <span class="wa-recent-date">${date}${size}</span>
-      </div>`;
+      return `<div class="wa-file-item" title="${_escHtml(file.path || '')}"`
+        + ` data-path="${_escHtml(file.path || '')}" data-supported="${supported}"`
+        + ` onclick="WA.openRecentFile(${JSON.stringify(file.path || '')})"`
+        + ` oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)">`
+        + `<span style="padding-left:8px"></span>${icon}`
+        + `<span class="wa-file-label">${_escHtml(name)}</span>`
+        + `<span class="wa-recent-date">${date}${size}</span>`
+        + `</div>`;
     }).join('');
   }
-
-  window.WA.openRecentFile = async (filePath) => {
-    if (!filePath) return;
-    _trackUserOpen(filePath);  // record user-open event immediately
-    // Check if this path is inside the workspace — if so use normal open
-    const workspacePath = (state._workspacePath || '').replace(/\\/g, '/');
-    const normalizedPath = filePath.replace(/\\/g, '/');
-    const isInWorkspace = workspacePath && (normalizedPath.startsWith(workspacePath + '/') || normalizedPath === workspacePath);
-    if (isInWorkspace) {
-      // Derive relative path within workspace
-      const rel = normalizedPath.slice(workspacePath.length).replace(/^\//, '');
-      WA.openWorkspaceFile(rel);
-      return;
-    }
-    // External file — use openBrowserFile (fetches bytes via serve_abs, then parses)
-    // open_file_by_path only accepts workspace-relative paths and will 403 on absolute paths
-    const _reqExt = filePath.split('.').pop().toLowerCase();
-    WA.openBrowserFile(filePath, _isSupportedExt(_reqExt));
-  };
 
   window.WA.refreshRecent = () => loadRecentFiles();
 
   window.WA.toggleRecentSection = () => {
     state._recentOpen = !state._recentOpen;
-    const list = document.getElementById('wa-recent-list');
-    const arrow = document.getElementById('wa-recent-arrow');
+    const list = $('wa-recent-list');
+    const arrow = $('wa-recent-arrow');
     if (list) list.style.display = state._recentOpen ? '' : 'none';
     if (arrow) arrow.classList.toggle('open', state._recentOpen);
   };
 
-  // ── My Workspace: pinned files ─────────────────────────────────────────────
   const _MYWS_KEY = 'wa_my_workspace_v1';
 
   function _loadMyWorkspace() {
-    try { return JSON.parse(localStorage.getItem(_MYWS_KEY) || '[]'); } catch(e) { return []; }
+    try {
+      return JSON.parse(localStorage.getItem(_MYWS_KEY) || '[]');
+    } catch (_) {
+      return [];
+    }
   }
+
   function _saveMyWorkspace(list) {
     localStorage.setItem(_MYWS_KEY, JSON.stringify(list));
   }
@@ -600,7 +864,11 @@ window.WA = window.WA || {};
     const files = _loadMyWorkspace();
     if (badge) badge.textContent = files.length || '';
     const isOpen = state.sectionOpen.myworkspace !== false;
-    if (!isOpen) { list.style.display = 'none'; if (empty) empty.style.display = 'none'; return; }
+    if (!isOpen) {
+      list.style.display = 'none';
+      if (empty) empty.style.display = 'none';
+      return;
+    }
     if (!files.length) {
       list.innerHTML = '';
       list.style.display = 'none';
@@ -609,61 +877,61 @@ window.WA = window.WA || {};
     }
     if (empty) empty.style.display = 'none';
     list.style.display = '';
-    list.innerHTML = files.map(f => {
-      const pathEsc = _escHtml(f.path);
-      const nameEsc = _escHtml(f.name);
-      const icon = _fileIcon(f.ext || f.name.split('.').pop() || '');
-      const active = state.activeTabPath === f.path ? ' active' : '';
-      return `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"
-        onclick="WA.openBrowserFile('${f.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}', true)"
-        draggable="true">
-        ${icon}<span class="wa-file-label">${nameEsc}</span>
-        <button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromMyWorkspace('${f.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'")}')" title="从工作区移除">×</button>
-      </div>`;
+    list.innerHTML = files.map((file) => {
+      const pathEsc = _escHtml(file.path);
+      const nameEsc = _escHtml(file.name);
+      const icon = _fileIcon(file.ext || file.name.split('.').pop() || '');
+      const active = state.activeTabPath === file.path ? ' active' : '';
+      const pathJs = file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      return `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"`
+        + ` onclick="WA.openBrowserFile('${pathJs}', true)" draggable="true">`
+        + `${icon}<span class="wa-file-label">${nameEsc}</span>`
+        + `<button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromMyWorkspace('${pathJs}')" title="从工作区移除">×</button>`
+        + `</div>`;
     }).join('');
-    // Add dragstart for files in My Workspace
-    list.querySelectorAll('.wa-myws-item[draggable]').forEach(el => {
-      el.addEventListener('dragstart', (e) => {
-        const p = el.dataset.path;
-        e.dataTransfer.effectAllowed = 'copyMove';
-        e.dataTransfer.setData('application/wa-file-path', p);
-        e.dataTransfer.setData('text/plain', p);
-        el.classList.add('dragging');
+    list.querySelectorAll('.wa-myws-item[draggable]').forEach((element) => {
+      element.addEventListener('dragstart', (event) => {
+        const path = element.dataset.path;
+        event.dataTransfer.effectAllowed = 'copyMove';
+        event.dataTransfer.setData('application/wa-file-path', path);
+        event.dataTransfer.setData('text/plain', path);
+        element.classList.add('dragging');
         document.body.classList.add('wa-file-dragging');
       });
-      el.addEventListener('dragend', () => {
-        el.classList.remove('dragging');
+      element.addEventListener('dragend', () => {
+        element.classList.remove('dragging');
         document.body.classList.remove('wa-file-dragging');
       });
     });
   }
 
   window.WA.addToMyWorkspace = (path) => {
-    if (!path) {
-      // No path provided — use current file
-      path = state.activeTabPath || (state.wsSourcePath);
+    let targetPath = path;
+    if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath;
+    if (!targetPath) {
+      showToast('请先打开一个文件', 'info');
+      return;
     }
-    if (!path) { showToast('请先打开一个文件', 'info'); return; }
-    const name = path.split(/[\\/]/).pop() || path;
+    const name = targetPath.split(/[\\/]/).pop() || targetPath;
     const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
     const files = _loadMyWorkspace();
-    if (files.some(f => f.path === path)) { showToast(`"${name}" 已在工作区中`, 'info'); return; }
-    files.push({ path, name, ext, addedAt: Date.now() });
+    if (files.some((file) => file.path === targetPath)) {
+      showToast(`"${name}" 已在工作区中`, 'info');
+      return;
+    }
+    files.push({ path: targetPath, name, ext, addedAt: Date.now() });
     _saveMyWorkspace(files);
     _renderMyWorkspace();
     showToast(`"${name}" 已加入工作区`, 'success');
   };
 
   window.WA.removeFromMyWorkspace = (path) => {
-    const files = _loadMyWorkspace().filter(f => f.path !== path);
+    const files = _loadMyWorkspace().filter((file) => file.path !== path);
     _saveMyWorkspace(files);
     _renderMyWorkspace();
   };
 
-  // ── Temp Workspace: session-only in-memory file list ─────────────────────
-  // Files are NOT persisted to localStorage; they live only in state._tempWorkspace
-  // and cleared when Koto closes.
-  state._tempWorkspace = [];  // [{path, name, ext, addedAt}]
+  state._tempWorkspace = [];
 
   function _toggleTempWorkspaceSection() {
     const open = state.sectionOpen.tmpworkspace !== false;
@@ -683,7 +951,11 @@ window.WA = window.WA || {};
     const files = state._tempWorkspace;
     if (badge) badge.textContent = files.length || '';
     const isOpen = state.sectionOpen.tmpworkspace !== false;
-    if (!isOpen) { list.style.display = 'none'; if (empty) empty.style.display = 'none'; return; }
+    if (!isOpen) {
+      list.style.display = 'none';
+      if (empty) empty.style.display = 'none';
+      return;
+    }
     if (!files.length) {
       list.innerHTML = '';
       list.style.display = 'none';
@@ -692,55 +964,55 @@ window.WA = window.WA || {};
     }
     if (empty) empty.style.display = 'none';
     list.style.display = '';
-    list.innerHTML = files.map(f => {
-      const pathEsc = _escHtml(f.path);
-      const nameEsc = _escHtml(f.name);
-      const icon = _fileIcon(f.ext || f.name.split('.').pop() || '');
-      const active = state.activeTabPath === f.path ? ' active' : '';
-      const pathJs = f.path.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-      return `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"
-        onclick="WA.openBrowserFile('${pathJs}', true)"
-        draggable="true">
-        ${icon}<span class="wa-file-label">${nameEsc}</span>
-        <button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromTempWorkspace('${pathJs}')" title="从临时工作区移除">×</button>
-      </div>`;
+    list.innerHTML = files.map((file) => {
+      const pathEsc = _escHtml(file.path);
+      const nameEsc = _escHtml(file.name);
+      const icon = _fileIcon(file.ext || file.name.split('.').pop() || '');
+      const active = state.activeTabPath === file.path ? ' active' : '';
+      const pathJs = file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      return `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"`
+        + ` onclick="WA.openBrowserFile('${pathJs}', true)" draggable="true">`
+        + `${icon}<span class="wa-file-label">${nameEsc}</span>`
+        + `<button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromTempWorkspace('${pathJs}')" title="从临时工作区移除">×</button>`
+        + `</div>`;
     }).join('');
-    list.querySelectorAll('.wa-myws-item[draggable]').forEach(el => {
-      el.addEventListener('dragstart', (e) => {
-        const p = el.dataset.path;
-        e.dataTransfer.effectAllowed = 'copyMove';
-        e.dataTransfer.setData('application/wa-file-path', p);
-        e.dataTransfer.setData('text/plain', p);
-        el.classList.add('dragging');
+    list.querySelectorAll('.wa-myws-item[draggable]').forEach((element) => {
+      element.addEventListener('dragstart', (event) => {
+        const path = element.dataset.path;
+        event.dataTransfer.effectAllowed = 'copyMove';
+        event.dataTransfer.setData('application/wa-file-path', path);
+        event.dataTransfer.setData('text/plain', path);
+        element.classList.add('dragging');
         document.body.classList.add('wa-file-dragging');
       });
-      el.addEventListener('dragend', () => {
-        el.classList.remove('dragging');
+      element.addEventListener('dragend', () => {
+        element.classList.remove('dragging');
         document.body.classList.remove('wa-file-dragging');
       });
     });
   }
 
   window.WA.addToTempWorkspace = (path) => {
-    if (!path) {
-      path = state.activeTabPath || state.wsSourcePath;
+    let targetPath = path;
+    if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath;
+    if (!targetPath) {
+      showToast('请先打开一个文件', 'info');
+      return;
     }
-    if (!path) { showToast('请先打开一个文件', 'info'); return; }
-    const name = path.split(/[\\/]/).pop() || path;
+    const name = targetPath.split(/[\\/]/).pop() || targetPath;
     const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
-    if (state._tempWorkspace.some(f => f.path === path)) {
+    if (state._tempWorkspace.some((file) => file.path === targetPath)) {
       showToast(`"${name}" 已在临时工作区中`, 'info');
       return;
     }
-    state._tempWorkspace.push({ path, name, ext, addedAt: Date.now() });
+    state._tempWorkspace.push({ path: targetPath, name, ext, addedAt: Date.now() });
     _renderTempWorkspace();
-    // Open the file in a tab so it's loaded into memory
-    WA.openBrowserFile(path, true);
+    WA.openBrowserFile(targetPath, true);
     showToast(`"${name}" 已加入临时工作区`, 'success');
   };
 
   window.WA.removeFromTempWorkspace = (path) => {
-    state._tempWorkspace = state._tempWorkspace.filter(f => f.path !== path);
+    state._tempWorkspace = state._tempWorkspace.filter((file) => file.path !== path);
     _renderTempWorkspace();
   };
 
@@ -755,13 +1027,10 @@ window.WA = window.WA || {};
   // ── AI multi-file context ─────────────────────────────────────────────────
   state._aiFileContext = [];  // [{path, name, content}]
   state._aiTargetFileIdx = -1; // index into _aiFileContext designated as write-back target (-1 = none)
+  const _WA_EXPLICIT_CONTEXT_RULE = '只处理用户明确提供的选中文本和分析文档';
 
   function _normalizeAIContextPath(value) {
     return String(value || '').trim().replace(/\\/g, '/').toLowerCase();
-  }
-
-  function _currentAIContextPath() {
-    return String(state.wsSourcePath || state.filePath || '').trim();
   }
 
   function _findAIContextFileIndex(path) {
@@ -807,7 +1076,7 @@ window.WA = window.WA || {};
       const isLoading = !!f.loading;
       const icon = _fileIcon(f.name.split('.').pop() || '');
       const chars = f.originalChars != null ? f.originalChars : (f.content || '').length;
-      const sizeLabel = isLoading ? '读取中…' : (chars < 1000 ? chars + ' 字' : (chars / 1000).toFixed(1) + 'k字');
+      const sizeLabel = isLoading ? '读取中…' : (chars < 1000 ? '约' + chars + ' 字' : '约' + (chars / 1000).toFixed(1) + 'k字');
       const pinTitle = isTarget ? '取消目标文件' : '设为修改目标文件';
       return `<div class="wa-ctx-file-row${isTarget ? ' ai-target' : ''}${isLoading ? ' loading' : ''}" title="${_escHtml(f.path)}">` +
         `<span class="ctx-row-icon">${icon}</span>` +
@@ -881,30 +1150,6 @@ window.WA = window.WA || {};
     else if (state._aiTargetFileIdx > idx) state._aiTargetFileIdx--;
     _renderAIFileChips();
   };
-
-
-  window.WA.addCurrentFileToAIContext = async () => {
-    const currentPath = _currentAIContextPath();
-    if (!currentPath) {
-      showToast('当前打开的文件暂时不能附加为任务输入', 'warn');
-      return;
-    }
-    await _addFileToAIContext(currentPath);
-  };
-
-  window.WA.toggleCurrentFileAIContext = async () => {
-    const currentPath = _currentAIContextPath();
-    if (!currentPath) {
-      showToast('当前打开的文件暂时不能附加为任务输入', 'warn');
-      return;
-    }
-    const existingIdx = _findAIContextFileIndex(currentPath);
-    if (existingIdx >= 0) {
-      window.WA.removeAIFileContext(existingIdx);
-      return;
-    }
-    await window.WA.addCurrentFileToAIContext();
-  };
   window.WA.clearAIFileContext = () => {
     state._aiFileContext = [];
     state._aiTargetFileIdx = -1;
@@ -931,75 +1176,28 @@ window.WA = window.WA || {};
     state._aiFileContext.push({ path: absPath, name, content: null, loading: true });
     _renderAIFileChips();
     try {
-      // Download the raw file bytes, then parse via the upload endpoint
-      const rawRes = await fetch('/api/v1/workspace/serve_abs?path=' + encodeURIComponent(absPath));
-      if (!rawRes.ok) throw new Error(`HTTP ${rawRes.status}`);
-      const blob = await rawRes.blob();
-      const formData = new FormData();
-      formData.append('file', blob, name);
-      const parseRes = await fetch('/api/v1/workspace/open_file', { method: 'POST', body: formData });
-      if (!parseRes.ok) throw new Error(`Parse HTTP ${parseRes.status}`);
-      const data = await parseRes.json();
-      // Extract text content from the parsed data
-      let content = '';
-      if (typeof data.data === 'string') {
-        content = data.data;
-      } else if (data.data && data.data.html) {
-        const tmp = document.createElement('div');
-        tmp.innerHTML = data.data.html;
-        content = tmp.textContent || tmp.innerText || '';
-      } else if (data.data && typeof data.data === 'object') {
-        // Format-specific text extraction to avoid counting styling/metadata/base64 as chars
-        const _extractStructuredText = (d) => {
-          // PPTX: { slides: [{ shapes: [{ paragraphs: [{ runs: [{ text }] }], rows?: [[{paragraphs}]] }] }] }
-          if (Array.isArray(d.slides)) {
-            const parts = [];
-            for (const slide of d.slides) {
-              for (const shape of (slide.shapes || [])) {
-                for (const para of (shape.paragraphs || [])) {
-                  for (const run of (para.runs || [])) { if (run.text) parts.push(run.text); }
-                }
-                for (const row of (shape.rows || [])) {
-                  for (const cell of (row || [])) {
-                    for (const para of (cell.paragraphs || [])) {
-                      for (const run of (para.runs || [])) { if (run.text) parts.push(run.text); }
-                    }
-                  }
-                }
-              }
-            }
-            return parts.join(' ');
-          }
-          // XLSX: { sheets: { id: { cellData: { row: { col: { v } } } } } }
-          if (d.sheets && typeof d.sheets === 'object') {
-            const parts = [];
-            for (const sheet of Object.values(d.sheets)) {
-              for (const row of Object.values(sheet.cellData || {})) {
-                for (const cell of Object.values(row)) {
-                  if (cell.v != null) parts.push(String(cell.v));
-                }
-              }
-            }
-            return parts.join(' ');
-          }
-          // Generic fallback: skip base64 / URLs / long encoded strings
-          const parts = [];
-          const walk = (v) => {
-            if (typeof v === 'string' && v.length < 300 && !/^data:|^https?:|^[A-Za-z0-9+/]{50,}/.test(v)) { parts.push(v); }
-            else if (Array.isArray(v)) { v.forEach(walk); }
-            else if (v && typeof v === 'object') { Object.values(v).forEach(walk); }
-          };
-          walk(d);
-          return parts.join(' ');
-        };
-        content = _extractStructuredText(data.data);
-        if (!content.trim()) content = JSON.stringify(data.data).substring(0, 8000);
-      }
-      const originalChars = content.length;
-      content = _waSampleTaskContext(content);
+      // Keep large file attachment parsing on the server so the WebView only receives
+      // a bounded text preview instead of raw bytes or full rich parser payloads.
+      const previewRes = await fetch('/api/v1/workspace/ai_context_preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: absPath }),
+      });
+      const data = await _safeJson(previewRes);
+      if (!previewRes.ok) throw new Error(data.error || `HTTP ${previewRes.status}`);
+
+      let content = _waSampleTaskContext(String(data.content_preview || ''));
+      const originalChars = Number.isFinite(Number(data.original_chars))
+        ? Number(data.original_chars)
+        : content.replace(/\s/g, '').length;
       // Replace the loading placeholder with real content
       const placeholder = state._aiFileContext.find(f => f.path === absPath);
-      if (placeholder) { placeholder.content = content; placeholder.originalChars = originalChars; delete placeholder.loading; }
+      if (placeholder) {
+        placeholder.content = content;
+        placeholder.originalChars = originalChars;
+        placeholder.type = String(data.file_type || _waInferFileType(absPath));
+        delete placeholder.loading;
+      }
       _renderAIFileChips();
       showToast(`"${name}" 已添加到 AI 分析`, 'success');
     } catch (e) {
@@ -1197,7 +1395,7 @@ window.WA = window.WA || {};
    */
   let _livePollRunning = false;
   async function _livePollTick() {
-    if (_livePollRunning || state._searchActive) return;
+    if (_livePollRunning || state._searchActive || document.hidden) return;
     const expanded = Array.from(state._browserExpanded);
     if (!expanded.length) return;
     _livePollRunning = true;
@@ -1226,7 +1424,7 @@ window.WA = window.WA || {};
 
   function _startLivePoll() {
     if (state._livePollTimer) return;
-    state._livePollTimer = setInterval(_livePollTick, 3000);
+    state._livePollTimer = setInterval(_livePollTick, 10000);
   }
 
   function _stopLivePoll() {
@@ -1453,6 +1651,1951 @@ window.WA = window.WA || {};
     }
   }
 
+  function _escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function _normalizeReviewSearchText(value) {
+    return String(value || '')
+      .replace(/\s+/g, '')
+      .replace(/[\u200b-\u200d\ufeff]/g, '')
+      .trim()
+      .toLowerCase();
+  }
+
+  function _previewReviewText(value, limit = 84) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!text) return '';
+    return text.length > limit ? `${text.slice(0, Math.max(0, limit - 1)).trim()}…` : text;
+  }
+
+  function _formatReviewDateLabel(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    try {
+      return parsed.toLocaleString('zh-CN', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  function _cloneReviewSelection(selection) {
+    return selection ? (_cloneSerializable(selection, null) || null) : null;
+  }
+
+  function _selectionSupportsReviewComment(selection) {
+    return !!(selection && selection.kind === 'text' && String(selection.rawText || '').trim());
+  }
+
+  function _isReviewEditorFocused() {
+    const active = document.activeElement;
+    if (!active || typeof active.closest !== 'function') return false;
+    return !!active.closest('.koto-docx-comment-edit');
+  }
+
+  function _isReviewShellFocused() {
+    const active = document.activeElement;
+    if (!active || typeof active.closest !== 'function') return false;
+    return !!active.closest('#wa-review-shell');
+  }
+
+  function _reviewCommentTextareaId(reviewId) {
+    return 'wa-review-comment-input-' + String(reviewId || '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  function _ensureTabReviewState(tab) {
+    if (!tab || typeof tab !== 'object') return null;
+    if (!tab.reviewState || typeof tab.reviewState !== 'object') {
+      tab.reviewState = { comments: [], proposals: [], focusedId: '', expandedId: '', items: [] };
+    }
+    if (!Array.isArray(tab.reviewState.comments)) tab.reviewState.comments = [];
+    if (!Array.isArray(tab.reviewState.proposals)) tab.reviewState.proposals = [];
+    if (!Array.isArray(tab.reviewState.items)) tab.reviewState.items = [];
+    if (typeof tab.reviewState.focusedId !== 'string') tab.reviewState.focusedId = '';
+    if (typeof tab.reviewState.expandedId !== 'string') tab.reviewState.expandedId = '';
+    return tab.reviewState;
+  }
+
+  function _activeReviewTab() {
+    return state.openTabs.find((tab) => tab.path === state.activeTabPath) || null;
+  }
+
+  function _setStoredReviewMode(mode) {
+    const nextMode = mode === 'comments' || mode === 'proposals' ? mode : 'all';
+    state._reviewMode = nextMode;
+    localStorage.setItem('wa_review_mode', nextMode);
+    return nextMode;
+  }
+
+  function _isReviewCommentModeEnabled() {
+    return state.fileType === 'docx' && state._reviewCenterOpen && state._reviewMode === 'comments';
+  }
+
+  function _focusFirstReviewEntry(reviewState, preferredKind = '') {
+    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
+    if (!currentState) return '';
+    if (String(currentState.focusedId || '').trim()) return currentState.focusedId;
+    const firstComment = currentState.comments[0] || null;
+    const firstProposal = currentState.proposals[0] || null;
+    const firstEntry = preferredKind === 'comment'
+      ? firstComment
+      : preferredKind === 'proposal'
+        ? firstProposal
+        : (firstComment || firstProposal);
+    if (!firstEntry) return '';
+    currentState.focusedId = String(firstEntry.review_id || firstEntry.id || '').trim();
+    return currentState.focusedId;
+  }
+
+  function _reviewModeHasVisibleEntries(reviewState, mode = state._reviewMode) {
+    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
+    if (!currentState) return false;
+    const nextMode = mode === 'comments' || mode === 'proposals' ? mode : 'all';
+    const hasComments = Array.isArray(currentState.comments) && currentState.comments.length > 0;
+    const hasProposals = Array.isArray(currentState.proposals) && currentState.proposals.length > 0;
+    if (nextMode === 'comments') return hasComments;
+    if (nextMode === 'proposals') return hasProposals;
+    return hasComments || hasProposals;
+  }
+
+  function _coerceReviewModeForVisibleContent(reviewState, preferredKind = '') {
+    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
+    if (!currentState) return state._reviewMode;
+    if (_reviewModeHasVisibleEntries(currentState, state._reviewMode)) {
+      return state._reviewMode;
+    }
+    const hasComments = Array.isArray(currentState.comments) && currentState.comments.length > 0;
+    const hasProposals = Array.isArray(currentState.proposals) && currentState.proposals.length > 0;
+    let nextMode = 'all';
+    if (preferredKind === 'comment' && hasComments) {
+      nextMode = 'comments';
+    } else if (preferredKind === 'proposal' && hasProposals) {
+      nextMode = 'proposals';
+    } else if (hasComments && hasProposals) {
+      nextMode = 'all';
+    } else if (hasComments) {
+      nextMode = 'comments';
+    } else if (hasProposals) {
+      nextMode = 'proposals';
+    }
+    return _setStoredReviewMode(nextMode);
+  }
+
+  function _coerceReviewBoolean(value) {
+    if (value === true || value === false) return value;
+    const normalized = String(value == null ? '' : value).trim().toLowerCase();
+    if (!normalized) return false;
+    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+  }
+
+  function _normalizeReviewComment(comment, index) {
+    const raw = (comment && typeof comment === 'object') ? (_cloneSerializable(comment, {}) || {}) : {};
+    const rawId = String(raw.id || index + 1);
+    return Object.assign({}, raw, {
+      id: rawId,
+      review_id: 'comment:' + rawId,
+      kind: 'comment',
+      source: 'docx',
+      author: String(raw.author || '').trim() || '文档批注',
+      initials: String(raw.initials || '').trim(),
+      date: String(raw.date || '').trim(),
+      text: String(raw.text || '').trim(),
+      anchor_text: String(raw.anchor_text || '').trim(),
+      para_id: String(raw.para_id || raw.paraId || '').trim(),
+      parent_para_id: String(raw.parent_para_id || raw.parentParaId || '').trim(),
+      parent_id: String(raw.parent_id || raw.parentId || '').trim(),
+      durable_id: String(raw.durable_id || raw.durableId || '').trim(),
+      done: _coerceReviewBoolean(raw.done),
+      resolved: _coerceReviewBoolean(raw.resolved),
+    });
+  }
+
+  function _normalizeReviewProposal(proposal, index) {
+    const raw = (proposal && typeof proposal === 'object') ? (_cloneSerializable(proposal, {}) || {}) : {};
+    const fallbackId = 'proposal-'
+      + String(index + 1)
+      + '-'
+      + String(raw.original_text || raw.proposed_text || 'item')
+        .toLowerCase()
+        .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 24);
+    const proposalId = String(raw.id || fallbackId || ('proposal-' + (index + 1)));
+    return Object.assign({}, raw, {
+      id: proposalId,
+      review_id: String(raw.review_id || ('proposal:' + proposalId)),
+      kind: 'proposal',
+      source: String(raw.source || '').trim() || 'ai',
+      _reviewStatus: String(raw._reviewStatus || raw.status || '').trim(),
+    });
+  }
+
+  function _syncDocCommentStateForActiveFile(nextComments) {
+    const tab = _activeReviewTab();
+    if (!tab) return [];
+    const reviewState = _ensureTabReviewState(tab);
+    const sourceComments = Array.isArray(nextComments)
+      ? nextComments
+      : ((tab.serverData && Array.isArray(tab.serverData.comments)) ? tab.serverData.comments : []);
+    reviewState.comments = sourceComments
+      .map((comment, index) => _normalizeReviewComment(comment, index))
+      .filter((comment) => comment.text || comment.anchor_text);
+    if (tab.serverData && typeof tab.serverData === 'object') {
+      tab.serverData.comments = sourceComments.map((comment) => _cloneSerializable(comment, {}) || {});
+    }
+    return reviewState.comments;
+  }
+
+  function _mergeReviewProposals(existing, incoming) {
+    const merged = new Map();
+    (Array.isArray(existing) ? existing : []).forEach((proposal, index) => {
+      const normalized = _normalizeReviewProposal(proposal, index);
+      merged.set(String(normalized.id), normalized);
+    });
+    (Array.isArray(incoming) ? incoming : []).forEach((proposal, index) => {
+      const normalized = _normalizeReviewProposal(proposal, index);
+      const key = String(normalized.id);
+      const previous = merged.get(key);
+      if (previous && previous._reviewStatus && !normalized._reviewStatus) {
+        normalized._reviewStatus = previous._reviewStatus;
+      }
+      merged.set(key, Object.assign({}, previous || {}, normalized));
+    });
+    return Array.from(merged.values());
+  }
+
+  function _syncProposalStateForActiveFile(proposals, options = {}) {
+    const tab = _activeReviewTab();
+    if (!tab) return [];
+    const reviewState = _ensureTabReviewState(tab);
+    reviewState.proposals = _mergeReviewProposals(options.replace ? [] : reviewState.proposals, proposals);
+    if (tab.serverData && typeof tab.serverData === 'object' && Array.isArray(proposals)) {
+      tab.serverData.proposals = proposals.map((proposal) => _cloneSerializable(proposal, {}) || {});
+    }
+    return reviewState.proposals;
+  }
+
+  function _normalizeReviewProgressPath(path) {
+    const rawPath = String(path || '').trim();
+    if (!rawPath) return '';
+    const normalizedPath = rawPath.replace(/\\/g, '/');
+    const workspacePath = String(state._workspacePath || '').replace(/\\/g, '/');
+    const looksAbsolute = /^(?:[a-zA-Z]:\/|\/|\/\/)/.test(normalizedPath);
+    if (workspacePath && looksAbsolute && (
+      normalizedPath === workspacePath || normalizedPath.startsWith(workspacePath + '/')
+    )) {
+      return normalizedPath.slice(workspacePath.length).replace(/^\//, '');
+    }
+    return normalizedPath.replace(/^\//, '');
+  }
+
+  async function _applyStructuredReviewProgressProposals(payload, options = {}) {
+    const proposals = Array.isArray(payload && payload.partial_proposals) ? payload.partial_proposals : [];
+    if (!proposals.length) return false;
+
+    const targetPath = String((payload && (payload.target_path || payload.path || payload.file_path)) || '').trim();
+    const activeTab = _activeReviewTab();
+    const activePath = String((activeTab && (activeTab.path || activeTab.wsSourcePath || '')) || '').trim();
+    const normalizedTargetPath = _normalizeReviewProgressPath(targetPath);
+    const normalizedActivePath = _normalizeReviewProgressPath(activePath);
+    if (normalizedTargetPath && (!activeTab || normalizedActivePath !== normalizedTargetPath)) {
+      if (!window.WA || typeof window.WA.reloadFileByPath !== 'function') return false;
+      try {
+        await window.WA.reloadFileByPath(targetPath, true);
+      } catch (error) {
+        console.warn('[WA review progress] target open failed:', error);
+      }
+    }
+
+    const targetTab = _activeReviewTab();
+    if (!targetTab || state.fileType !== 'docx') return false;
+
+    const mergedProposals = _syncProposalStateForActiveFile(proposals);
+    const reviewState = _ensureTabReviewState(targetTab);
+    if (!reviewState) return false;
+
+    const latestProposal = mergedProposals[mergedProposals.length - 1] || null;
+    if (latestProposal) {
+      reviewState.focusedId = String(latestProposal.review_id || ('proposal:' + latestProposal.id) || '').trim();
+    }
+
+    if (!state._reviewCenterOpen || state._reviewMode === 'comments') {
+      _setStoredReviewMode(reviewState.comments.length ? 'all' : 'proposals');
+    }
+    if (!state._reviewCenterOpen) {
+      _setReviewCenterOpen(true);
+    }
+
+    state._activeProposals = mergedProposals.slice();
+    _syncInlineReviewPreviewForActiveFile();
+    _syncDocxReviewToolbar();
+    _renderReviewShell();
+
+    if (reviewState.focusedId) {
+      requestAnimationFrame(() => {
+        _scrollReviewCardIntoView(reviewState.focusedId);
+        if (reviewState.focusedId.indexOf('proposal:') === 0) {
+          _scrollProposalCardIntoView(reviewState.focusedId.replace(/^proposal:/, ''));
+        }
+      });
+    }
+
+    if (options.notify !== false) {
+      showToast(options.toastText || `AI 已同步 ${proposals.length} 条处理中建议`, 'success');
+    }
+    return true;
+  }
+
+  function _pendingInlineReviewProposals(tab) {
+    const reviewState = _ensureTabReviewState(tab);
+    if (!reviewState) return [];
+    return reviewState.proposals.filter((proposal) => {
+      if (!proposal) return false;
+      if (proposal._reviewStatus === 'accepted' || proposal._reviewStatus === 'rejected') return false;
+      if (_isImportedDocxRevisionProposal(proposal)) return false;
+      if (!_proposalCanApply(proposal)) return false;
+      return !!String(proposal.original_text || '').trim();
+    });
+  }
+
+  function _reviewSummaryCounts(tab) {
+    const reviewState = _ensureTabReviewState(tab);
+    if (!reviewState) return { proposalCount: 0, commentCount: 0 };
+    return {
+      proposalCount: reviewState.proposals.length,
+      commentCount: reviewState.comments.length,
+    };
+  }
+
+  function _reviewPanelCounts(tab) {
+    const reviewState = _ensureTabReviewState(tab);
+    if (!reviewState) return { proposalCount: 0, pendingProposalCount: 0, commentCount: 0 };
+    return {
+      proposalCount: reviewState.proposals.length,
+      pendingProposalCount: _pendingInlineReviewProposals(tab).length,
+      commentCount: reviewState.comments.length,
+    };
+  }
+
+  function _shouldShowPassiveDocxReviewRail(reviewState) {
+    if (state.fileType !== 'docx') return false;
+    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
+    if (!currentState) return false;
+    return !!(
+      (Array.isArray(currentState.comments) && currentState.comments.length)
+      || (Array.isArray(currentState.proposals) && currentState.proposals.length)
+    );
+  }
+
+  function _buildReviewNavItems(tab) {
+    const reviewState = _ensureTabReviewState(tab);
+    if (!reviewState) return [];
+
+    const items = [];
+    reviewState.comments.forEach((comment, index) => {
+      const reviewId = String((comment && (comment.review_id || comment.id)) || '').trim();
+      if (!reviewId) return;
+      const preview = _previewReviewText(comment && (comment.anchor_text || comment.text), 60) || '未找到正文锚点';
+      const meta = _previewReviewText(comment && comment.text, 42) || '未填写批注内容';
+      items.push({
+        reviewId,
+        kind: 'comment',
+        label: `批注 ${index + 1}`,
+        preview,
+        meta,
+      });
+    });
+
+    reviewState.proposals.forEach((proposal, index) => {
+      const reviewId = String((proposal && (proposal.review_id || proposal.id)) || '').trim();
+      if (!reviewId) return;
+      const preview = _previewReviewText(proposal && (proposal.original_text || proposal.anchor_text || proposal.proposed_text), 60) || '未找到正文锚点';
+      const rationale = _previewReviewText(_getProposalRationaleText(proposal), 38);
+      const meta = rationale
+        ? `${_reviewProposalStatusLabel(proposal)} · ${rationale}`
+        : _reviewProposalStatusLabel(proposal);
+      items.push({
+        reviewId,
+        kind: 'proposal',
+        label: `建议 ${index + 1}`,
+        preview,
+        meta,
+      });
+    });
+
+    return items;
+  }
+
+  function _renderReviewNavMenuItems(items) {
+    if (!Array.isArray(items) || !items.length) {
+      return '<div class="wa-docx-review-nav-empty">当前文档暂无批注或建议</div>';
+    }
+
+    const parts = [
+      '<button type="button" class="wa-docx-review-nav-overview" data-review-nav-overview="1">打开审阅中心</button>',
+    ];
+    items.forEach((item) => {
+      parts.push(''
+        + `<button type="button" class="wa-docx-review-nav-item" data-review-nav-id="${_escapeHtml(item.reviewId)}">`
+        + `  <span class="wa-docx-review-nav-item-badge${item.kind === 'proposal' ? ' is-proposal' : ''}">${_escapeHtml(item.label)}</span>`
+        + `  <span class="wa-docx-review-nav-item-preview">${_escapeHtml(item.preview || '')}</span>`
+        + `  <span class="wa-docx-review-nav-item-meta">${_escapeHtml(item.meta || '')}</span>`
+        + '</button>');
+    });
+    return parts.join('');
+  }
+
+  function _clearInlineReviewPreviewForActiveFile() {
+    const editor = state.activeEditor;
+    if (!editor) return [];
+
+    if (typeof editor.clearReviewProposals === 'function') {
+      try {
+        editor.clearReviewProposals();
+      } catch (e) {
+        console.warn('[WA review preview] clear failed:', e);
+      }
+    }
+    return [];
+  }
+
+  function _syncInlineReviewPreviewForActiveFile() {
+    const editor = state.activeEditor;
+    const tab = _activeReviewTab();
+    if (!editor || state.fileType !== 'docx') {
+      return _clearInlineReviewPreviewForActiveFile();
+    }
+    if (!tab) {
+      return _clearInlineReviewPreviewForActiveFile();
+    }
+
+    const proposals = _pendingInlineReviewProposals(tab);
+    if (!proposals.length) {
+      return _clearInlineReviewPreviewForActiveFile();
+    }
+    if (typeof editor.syncReviewProposals !== 'function') {
+      return proposals;
+    }
+
+    try {
+      editor.syncReviewProposals(proposals, {
+        focusedId: (_ensureTabReviewState(tab) || {}).focusedId || '',
+      });
+    } catch (e) {
+      console.warn('[WA review preview] sync failed:', e);
+    }
+    return proposals;
+  }
+
+  function _findProposalEntry(proposalId) {
+    const key = String(proposalId || '');
+    if (!key) return { proposal: null, tab: null };
+    const activeTab = _activeReviewTab();
+    const tabs = activeTab
+      ? [activeTab].concat(state.openTabs.filter((tab) => tab.path !== activeTab.path))
+      : state.openTabs.slice();
+    for (const tab of tabs) {
+      const reviewState = _ensureTabReviewState(tab);
+      const proposal = reviewState.proposals.find((item) => String(item.id) === key);
+      if (proposal) return { proposal, tab };
+    }
+    return { proposal: null, tab: null };
+  }
+
+  function _findReviewEntry(reviewId) {
+    const key = String(reviewId || '').trim();
+    if (!key) return { item: null, tab: null, kind: '' };
+    const activeTab = _activeReviewTab();
+    const tabs = activeTab
+      ? [activeTab].concat(state.openTabs.filter((tab) => tab.path !== activeTab.path))
+      : state.openTabs.slice();
+    for (const tab of tabs) {
+      const reviewState = _ensureTabReviewState(tab);
+      const proposal = reviewState.proposals.find((item) => {
+        return item.review_id === key || String(item.id) === key || String(item.review_id || '').replace(/^proposal:/, '') === key;
+      });
+      if (proposal) return { item: proposal, tab, kind: 'proposal' };
+      const comment = reviewState.comments.find((item) => {
+        return item.review_id === key || String(item.id) === key || String(item.review_id || '').replace(/^comment:/, '') === key;
+      });
+      if (comment) return { item: comment, tab, kind: 'comment' };
+    }
+    return { item: null, tab: null, kind: '' };
+  }
+
+  function _scrollProposalCardIntoView(proposalId) {
+    const key = String(proposalId || '').trim();
+    if (!key) return;
+    const selector = `.wa-proposal-card[data-proposal-id="${CSS.escape(key)}"]`;
+    const card = document.querySelector(selector);
+    if (!card) return;
+    card.classList.add('focused');
+    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // No auto-dismiss: focused state is cleared only by click-outside or explicit deselect
+  }
+
+  function _scrollReviewCardIntoView(reviewId) {
+    const key = String(reviewId || '').trim();
+    if (!key) return;
+    const selector = `.koto-docx-comment-card[data-review-id="${CSS.escape(key)}"]`;
+    const card = document.querySelector(selector);
+    if (!card) return;
+    card.classList.add('is-focused');
+    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    // No auto-dismiss: focused state is cleared only by click-outside or explicit deselect
+  }
+
+  function _findDocxReviewAnchorElement(item) {
+    if (state.fileType !== 'docx') return null;
+    const reviewKey = String(item && (item.id || item.review_id || '') || '').replace(/^proposal:/, '').replace(/^comment:/, '').trim();
+    const root = (state.activeEditor && state.activeEditor.editor && state.activeEditor.editor.view && state.activeEditor.editor.view.dom)
+      || document.querySelector('#wa-docx-editor .ProseMirror')
+      || $('wa-editor-content');
+    if (!root || !root.querySelectorAll) return null;
+    if (reviewKey) {
+      const exact = Array.from(root.querySelectorAll('[data-koto-review-id]')).find((element) => {
+        return String(element.getAttribute('data-koto-review-id') || '').trim() === reviewKey;
+      }) || null;
+      if (exact) return exact;
+    }
+    return null;
+  }
+
+  function _flashReviewAnchorElement(element) {
+    if (!element || !element.classList) return;
+    element.classList.add('koto-docx-review-focus-flash');
+    setTimeout(() => {
+      if (element.classList) element.classList.remove('koto-docx-review-focus-flash');
+    }, 1600);
+  }
+
+  function _scrollDocxReviewAnchorIntoView(item) {
+    if (state.fileType !== 'docx') return false;
+    let resolved = null;
+    try {
+      const layout = _getDocxReviewLayout();
+      if (layout && typeof layout.scrollReviewAnchorIntoView === 'function') {
+        resolved = layout.scrollReviewAnchorIntoView(item);
+      }
+    } catch (error) {
+      console.warn('[WA review scroll] layout resolver unavailable:', error);
+    }
+    if (resolved && resolved.found) {
+      if (resolved.element) _flashReviewAnchorElement(resolved.element);
+      return true;
+    }
+    const matched = _findDocxReviewAnchorElement(item);
+    if (!matched) return false;
+    matched.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    _flashReviewAnchorElement(matched);
+    return true;
+  }
+
+  function _scrollDocxCommentAnchorIntoView(comment) {
+    return _scrollDocxReviewAnchorIntoView(comment);
+  }
+
+  function _setDocxReviewRailWidth(host, railWidth) {
+    if (!host || !Number.isFinite(railWidth) || railWidth <= 0) return;
+    host.style.setProperty('--wa-review-rail-width', `${Math.round(railWidth)}px`);
+  }
+
+  let _docxReviewLayout = null;
+
+  function _getDocxReviewLayout() {
+    if (_docxReviewLayout) return _docxReviewLayout;
+    if (!window.KotoDocxReviewLayout || typeof window.KotoDocxReviewLayout.create !== 'function') {
+      throw new Error('KotoDocxReviewLayout module not loaded');
+    }
+    _docxReviewLayout = window.KotoDocxReviewLayout.create({
+      state,
+      $,
+      _findReviewEntry,
+      _findDocxReviewAnchorElement,
+      _setDocxReviewRailWidth,
+      _getReviewCommentSelectionState,
+      _isReviewCommentModeEnabled,
+      _isReviewEditorFocused,
+      _getSelectionViewportBounds,
+      _previewReviewText,
+    });
+    return _docxReviewLayout;
+  }
+
+  function _closeDocxReviewNavMenu() {
+    const nav = document.querySelector('#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav');
+    if (!nav) return;
+    nav.classList.remove('is-open');
+    const summaryBtn = nav.querySelector('.wa-docx-review-summary');
+    if (summaryBtn) summaryBtn.setAttribute('aria-expanded', 'false');
+  }
+
+  function _bindDocxReviewToolbarInteractions(group) {
+    if (!group || group._waReviewToolbarBound) return;
+    group._waReviewToolbarBound = true;
+
+    group.addEventListener('click', (event) => {
+      const target = event && event.target;
+      if (!target || typeof target.closest !== 'function') return;
+
+      const navItem = target.closest('[data-review-nav-id]');
+      if (navItem) {
+        const reviewId = String(navItem.getAttribute('data-review-nav-id') || '').trim();
+        if (!reviewId) return;
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        _closeDocxReviewNavMenu();
+        window.WA.focusReviewThread(reviewId);
+        return;
+      }
+
+      const overviewBtn = target.closest('[data-review-nav-overview="1"]');
+      if (overviewBtn) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        _closeDocxReviewNavMenu();
+        window.WA.toggleReviewOverview();
+      }
+    });
+
+    if (!window.__waDocxReviewNavDismissBound) {
+      window.__waDocxReviewNavDismissBound = true;
+      document.addEventListener('mousedown', (event) => {
+        const target = event && event.target;
+        if (target && typeof target.closest === 'function' && target.closest('.wa-docx-review-nav')) return;
+        _closeDocxReviewNavMenu();
+      });
+      document.addEventListener('keydown', (event) => {
+        if (String(event && event.key || '') === 'Escape') {
+          _closeDocxReviewNavMenu();
+        }
+      });
+    }
+  }
+
+  function _ensureReviewShellHost() {
+    return _getDocxReviewLayout().ensureReviewShellHost();
+  }
+
+  function _layoutReviewShellInDocx() {
+    return _getDocxReviewLayout().layoutReviewShellInDocx();
+  }
+
+  function _scheduleReviewShellLayout() {
+    return _getDocxReviewLayout().scheduleReviewShellLayout();
+  }
+
+  function _scrollReviewNodeIntoViewport(node, options = {}) {
+    const viewport = $('wa-editor-content');
+    if (!node || !viewport || typeof node.getBoundingClientRect !== 'function') return;
+    const viewportRect = viewport.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    if (!nodeRect || (!nodeRect.width && !nodeRect.height)) return;
+    const topMargin = Number.isFinite(Number(options.topMargin)) ? Number(options.topMargin) : 18;
+    const bottomMargin = Number.isFinite(Number(options.bottomMargin)) ? Number(options.bottomMargin) : 20;
+    let nextTop = null;
+    if (nodeRect.bottom > (viewportRect.bottom - bottomMargin)) {
+      nextTop = (viewport.scrollTop || 0) + (nodeRect.bottom - (viewportRect.bottom - bottomMargin));
+    } else if (nodeRect.top < (viewportRect.top + topMargin)) {
+      nextTop = Math.max(0, (viewport.scrollTop || 0) - ((viewportRect.top + topMargin) - nodeRect.top));
+    }
+    if (nextTop === null) return;
+    viewport.scrollTo({
+      top: Math.max(0, Math.round(nextTop)),
+      behavior: options.behavior || 'smooth',
+    });
+  }
+
+  function _relayoutDocxReviewRailAndScrollNode(node, options = {}) {
+    if (state.fileType !== 'docx') return;
+    _scheduleReviewShellLayout();
+    requestAnimationFrame(() => {
+      _scrollReviewNodeIntoViewport(node, options);
+      requestAnimationFrame(() => {
+        _scheduleReviewShellLayout();
+        requestAnimationFrame(() => {
+          _scrollReviewNodeIntoViewport(node, Object.assign({}, options, { behavior: 'auto' }));
+        });
+      });
+    });
+  }
+
+  function _ensureReviewShellViewportSync() {
+    _getDocxReviewLayout().ensureReviewShellViewportSync();
+    // Click-outside: deselect focused card when user clicks outside the review shell
+    if (!window.__waReviewClickOutsideBound) {
+      window.__waReviewClickOutsideBound = true;
+      document.addEventListener('click', (evt) => {
+        const shell = document.getElementById('wa-review-shell');
+        if (!shell || !evt.target || typeof evt.target.closest !== 'function') return;
+        if (!evt.target.closest('#wa-review-shell, [data-koto-review-id]')) {
+          // Clear all focused states
+          shell.querySelectorAll('.focused,.is-focused').forEach((el) => {
+            el.classList.remove('focused', 'is-focused');
+          });
+        }
+      }, { capture: false });
+    }
+  }
+
+  function _syncDocxReviewRailHostClass() {
+    return _getDocxReviewLayout().syncDocxReviewRailHostClass();
+  }
+
+  function _ensureReviewSelectionLauncher() {
+    return _getDocxReviewLayout().ensureReviewSelectionLauncher();
+  }
+
+  function _hideReviewSelectionLauncher() {
+    return _getDocxReviewLayout().hideReviewSelectionLauncher();
+  }
+
+  function _renderReviewSelectionLauncher() {
+    return _getDocxReviewLayout().renderReviewSelectionLauncher();
+  }
+
+  function _reviewProposalStatusLabel(proposal) {
+    const status = String((proposal && (proposal._reviewStatus || proposal.status)) || '').trim();
+    if (status === 'accepted') return '已接受';
+    if (status === 'rejected') return '已拒绝';
+    return _proposalCanApply(proposal) ? '待处理' : '仅查看';
+  }
+
+  function _syncReviewSelectionSnapshot(options = {}) {
+    const preserveExisting = !!(options && options.preserveExisting);
+    const previousSelection = _selectionSupportsReviewComment(state._reviewSelectionSnapshot)
+      ? _cloneReviewSelection(state._reviewSelectionSnapshot)
+      : null;
+    if (state.fileType !== 'docx') {
+      state._reviewSelectionSnapshot = null;
+      return null;
+    }
+    const liveSelection = _getDocxSelectionPayload({ includeOverlay: true, allowStaleFallback: false, includeAnchorMeta: true });
+    state._reviewSelectionSnapshot = _selectionSupportsReviewComment(liveSelection)
+      ? _cloneReviewSelection(liveSelection)
+      : (preserveExisting ? previousSelection : null);
+    return state._reviewSelectionSnapshot;
+  }
+
+  function _getReviewCommentSelectionState(options = {}) {
+    const includeAnchorMeta = !!(options && options.includeAnchorMeta);
+    if (state.fileType !== 'docx') {
+      return { selection: null, supported: false, message: '当前仅 DOCX 文档支持批注' };
+    }
+    const liveSelection = _getDocxSelectionPayload({ includeOverlay: true, allowStaleFallback: false, includeAnchorMeta });
+    const selection = _selectionSupportsReviewComment(liveSelection)
+      ? liveSelection
+      : (_selectionSupportsReviewComment(state._reviewSelectionSnapshot) ? state._reviewSelectionSnapshot : null);
+    if (!selection) {
+      const rawSelection = liveSelection || state._reviewSelectionSnapshot;
+      if (rawSelection && rawSelection.kind && rawSelection.kind !== 'text') {
+        return { selection: null, supported: false, message: '当前仅支持对正文文本添加批注' };
+      }
+      return { selection: null, supported: false, message: '先在文档中选中正文，再添加批注' };
+    }
+    return {
+      selection,
+      supported: true,
+      message: '会像 Word 一样把批注锚定到当前选中文本',
+    };
+  }
+
+  function _buildNewReviewComment(selection) {
+    const now = new Date();
+    const uniqueId = `user-${now.getTime().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const nextComment = {
+      id: uniqueId,
+      author: '我',
+      date: now.toISOString(),
+      text: '',
+      anchor_text: String((selection && selection.rawText) || '').trim(),
+      _draft: true,
+    };
+    const anchorStartOffset = Number(selection && (selection.anchor_start_offset ?? selection.anchorStartOffset));
+    const anchorEndOffset = Number(selection && (selection.anchor_end_offset ?? selection.anchorEndOffset));
+    const anchorOccurrence = Number(selection && (selection.anchor_occurrence ?? selection.anchorOccurrence));
+    const anchorContextBefore = String(selection && (selection.anchor_context_before ?? selection.anchorContextBefore) || '');
+    const anchorContextAfter = String(selection && (selection.anchor_context_after ?? selection.anchorContextAfter) || '');
+
+    if (Number.isFinite(anchorStartOffset)) nextComment.anchor_start_offset = anchorStartOffset;
+    if (Number.isFinite(anchorEndOffset)) nextComment.anchor_end_offset = anchorEndOffset;
+    if (Number.isFinite(anchorOccurrence) && anchorOccurrence >= 0) {
+      nextComment.anchor_occurrence = Math.max(0, Math.floor(anchorOccurrence));
+    }
+    if (anchorContextBefore) nextComment.anchor_context_before = anchorContextBefore;
+    if (anchorContextAfter) nextComment.anchor_context_after = anchorContextAfter;
+    return nextComment;
+  }
+
+  function _renderReviewCommentCard(comment, index, focusedId) {
+    const reviewId = String((comment && (comment.review_id || comment.id)) || '').trim();
+    const anchorPreview = _previewReviewText(comment && comment.anchor_text, 64);
+    const bodyText = String((comment && comment.text) || '').trim();
+    const author = String((comment && comment.author) || '').trim() || '文档批注';
+    const initials = String((comment && comment.initials) || '').trim();
+    const dateLabel = _formatReviewDateLabel(comment && comment.date);
+    const isFocused = !!reviewId && (focusedId === reviewId || focusedId === String((comment && comment.id) || ''));
+    const isEditing = state._editingReviewCommentId === reviewId;
+    const isDraft = !bodyText;
+    const isReply = !!String((comment && comment.parent_id) || '').trim();
+    const isDone = !!(comment && (comment.done || comment.resolved));
+    const badgeLabel = (initials || author || String(index + 1)).slice(0, 2);
+    const metaParts = [];
+    if (isReply) metaParts.push('回复');
+    if (isDone) metaParts.push('已处理');
+    if (dateLabel) metaParts.push(dateLabel);
+    const metaLabel = metaParts.join(' · ');
+    const anchorLabel = anchorPreview ? `定位文本：${anchorPreview}` : '';
+    const bodyPreview = bodyText || '输入后保存，这条批注会随 DOCX 一起导出到 Word。';
+    const bodyTitle = anchorLabel ? `${anchorLabel} | ${bodyPreview}` : bodyPreview;
+    const textareaId = _reviewCommentTextareaId(reviewId || ('comment-' + index));
+    const reviewArg = JSON.stringify(reviewId);
+    return `
+      <article class="koto-docx-comment-card${isFocused ? ' is-focused' : ''}${isDraft ? ' is-draft' : ''}${isReply ? ' is-thread-reply' : ''}${isDone ? ' is-done' : ''}" data-review-id="${_escapeHtml(reviewId)}" data-kind="comment"${isEditing ? '' : ' tabindex="0" role="button" aria-label="打开批注编辑" data-action="activate"'}>
+        <div class="koto-docx-comment-head">
+          <div class="koto-docx-comment-title-group">
+            <span class="koto-docx-comment-badge">${_escapeHtml(badgeLabel)}</span>
+            <span class="koto-docx-comment-author">${_escapeHtml(author)}</span>
+          </div>
+          <div class="koto-docx-comment-head-end">
+            ${metaLabel ? `<span class="koto-docx-comment-meta">${_escapeHtml(metaLabel)}</span>` : ''}
+            ${anchorPreview ? `<button type="button" class="wa-review-anchor-inline" data-review-action="focus" data-review-id="${_escapeHtml(reviewId)}" title="${_escapeHtml(anchorLabel)}" aria-label="${_escapeHtml(anchorLabel)}">定位</button>` : ''}
+            ${
+              isEditing
+                ? `<button type="button" class="koto-docx-comment-inline-action" data-review-action="delete" data-review-id="${_escapeHtml(reviewId)}" title="删除这条批注">删除</button>`
+                : `<button type="button" class="koto-docx-comment-inline-action" data-review-action="edit" data-review-id="${_escapeHtml(reviewId)}" title="编辑这条批注">编辑</button>
+                   <button type="button" class="koto-docx-comment-inline-action" data-review-action="delete" data-review-id="${_escapeHtml(reviewId)}" title="删除这条批注">删除</button>`
+            }
+          </div>
+        </div>
+        ${
+          isEditing
+            ? `<textarea id="${textareaId}" class="koto-docx-comment-edit" rows="3" oninput="WA.onReviewCommentInput(event)" placeholder="输入批注内容">${_escapeHtml(bodyText)}</textarea>`
+            : `<div class="koto-docx-comment-body" title="${_escapeHtml(bodyTitle)}">${_escapeHtml(bodyPreview)}</div>`
+        }
+        ${isDraft ? '<div class="koto-docx-comment-draft-hint">这是一个未完成的批注草稿，保存后才会进入文档导出。</div>' : ''}
+        ${
+          isEditing
+            ? `<div class="koto-docx-comment-actions">
+                 <button type="button" class="wa-proposal-btn accept small" data-review-action="save" data-review-id="${_escapeHtml(reviewId)}">保存</button>
+                 <button type="button" class="wa-proposal-btn reject small" data-review-action="cancel" data-review-id="${_escapeHtml(reviewId)}">取消</button>
+                 <button type="button" class="wa-proposal-btn reject small" data-review-action="delete" data-review-id="${_escapeHtml(reviewId)}">删除</button>
+               </div>`
+            : ''
+        }
+      </article>`;
+  }
+
+  function _renderCompactReviewProposalDiff(proposal) {
+    const action = String(proposal?.action || proposal?.action_type || '').trim().toLowerCase();
+    const originalText = _previewReviewText(proposal?.original_text || proposal?.anchor_text || '', 34) || '未找到原文';
+    const proposedText = _previewReviewText(proposal?.proposed_text || proposal?.value || '', 34)
+      || (action === 'delete' ? '删除这段内容' : '未生成修改文本');
+    let label = '建议';
+    let contentText = proposedText;
+    if (action === 'delete') {
+      label = '删除';
+      contentText = originalText;
+    } else if (action === 'insert') {
+      label = '插入';
+    } else if (action === 'replace') {
+      label = '改为';
+    }
+    return `
+      <div class="wa-proposal-note">
+        <span class="wa-proposal-note-label">${_escapeHtml(label)}：</span>
+        <span class="wa-proposal-note-text">${_escapeHtml(contentText)}</span>
+      </div>`;
+  }
+
+  function _renderReviewProposalCard(proposal, index, focusedId, expandedId) {
+    const reviewId = String((proposal && (proposal.review_id || proposal.id)) || '').trim();
+    const proposalId = String((proposal && proposal.id) || reviewId.replace(/^proposal:/, '')).trim();
+    const isFocused = !!reviewId && (focusedId === reviewId || focusedId === proposalId);
+    const isExpanded = !!reviewId && (expandedId === reviewId || expandedId === proposalId);
+    const status = String((proposal && proposal._reviewStatus) || '').trim();
+    const canApply = _proposalCanApply(proposal);
+    const statusLabel = _reviewProposalStatusLabel(proposal);
+    const rationale = _getProposalRationaleText(proposal);
+    const anchorPreview = _previewReviewText(proposal?.original_text || proposal?.anchor_text || '', 56);
+    const anchorLabel = anchorPreview ? `定位文本：${anchorPreview}` : '';
+    const classes = ['wa-proposal-card'];
+    if (status === 'accepted') classes.push('accepted');
+    if (status === 'rejected') classes.push('rejected');
+    if (isFocused) classes.push('focused');
+    if (isExpanded) classes.push('is-expanded');
+    const reviewArg = JSON.stringify(reviewId);
+    const proposalArg = JSON.stringify(proposalId);
+    return `
+      <article class="${classes.join(' ')}" data-proposal-id="${_escapeHtml(proposalId)}" data-review-id="${_escapeHtml(reviewId)}" data-can-apply="${canApply ? '1' : '0'}" data-expanded="${isExpanded ? '1' : '0'}" tabindex="0" role="button" aria-expanded="${isExpanded ? 'true' : 'false'}" aria-label="定位修改建议 ${index + 1}" title="${_escapeHtml((anchorLabel ? `${anchorLabel} | ` : '') + (_previewReviewText(rationale, 56) || rationale || ''))}" data-action="activate">
+        <div class="wa-proposal-header">
+          <span class="wa-proposal-badge">Koto AI</span>
+          <span class="koto-docx-comment-meta">${_escapeHtml(statusLabel)}</span>
+        </div>
+        <div class="wa-proposal-diff">${_renderCompactReviewProposalDiff(proposal)}</div>
+        <div class="wa-proposal-actions">
+          ${
+            canApply && status !== 'accepted' && status !== 'rejected'
+              ? `<button type="button" class="wa-proposal-btn accept small" data-action="accept" data-review-id="${_escapeHtml(proposalId)}">接受</button>
+                 <button type="button" class="wa-proposal-btn reject small" data-action="reject" data-review-id="${_escapeHtml(proposalId)}">拒绝</button>`
+              : ''
+          }
+        </div>
+      </article>`;
+  }
+
+  function _renderReviewShell() {
+    const shell = _ensureReviewShellHost();
+    const listEl = $('wa-review-list');
+    const summaryEl = $('wa-review-summary');
+    const activeTab = state.fileType === 'docx' ? _activeReviewTab() : null;
+    const host = $('wa-docx-editor');
+    if (!shell || !listEl) {
+      return;
+    }
+    _bindReviewShellInteractions(listEl);
+    if (!activeTab) {
+      shell.style.display = 'none';
+      shell.classList.remove('is-open');
+      listEl.innerHTML = '';
+      listEl.style.minHeight = '';
+      if (host) host.classList.remove('has-review-shell');
+      if (summaryEl) summaryEl.textContent = '当前文档暂无批注或建议';
+      _renderReviewSelectionLauncher();
+      return;
+    }
+    const counts = _reviewPanelCounts(activeTab);
+    const total = counts.commentCount + counts.proposalCount;
+    if (summaryEl) {
+      summaryEl.textContent = total
+        ? `${counts.commentCount} 条批注 / ${counts.proposalCount} 条建议${counts.pendingProposalCount ? `（${counts.pendingProposalCount} 条待处理）` : ''}`
+        : '当前文档暂无批注或建议';
+    }
+    document.querySelectorAll('#wa-review-mode-group .wa-review-mode-btn').forEach((button) => {
+      button.classList.toggle('is-active', button.dataset.mode === state._reviewMode);
+    });
+    const reviewState = _ensureTabReviewState(activeTab);
+    const showPassiveRail = _shouldShowPassiveDocxReviewRail(reviewState);
+    const showRail = !!state._reviewCenterOpen || showPassiveRail;
+    shell.style.display = showRail ? '' : 'none';
+    shell.classList.toggle('is-open', showRail);
+    shell.dataset.hasItems = total > 0 ? '1' : '0';
+    shell.dataset.passiveRail = (!state._reviewCenterOpen && showPassiveRail) ? '1' : '0';
+    if (!showRail) {
+      if (host) host.classList.remove('has-review-shell');
+      _renderReviewSelectionLauncher();
+      return;
+    }
+    _ensureReviewShellViewportSync();
+    if (!reviewState) {
+      listEl.innerHTML = '';
+      if (host) host.classList.remove('has-review-shell');
+      _renderReviewSelectionLauncher();
+      return;
+    }
+    if (
+      state._editingReviewCommentId &&
+      !reviewState.comments.some((item) => String((item && (item.review_id || item.id)) || '').trim() === state._editingReviewCommentId)
+    ) {
+      state._editingReviewCommentId = '';
+    }
+    const focusedId = String(reviewState.focusedId || '').trim();
+    const expandedId = String(reviewState.expandedId || '').trim();
+    const includeComments = state._reviewMode === 'all' || state._reviewMode === 'comments';
+    const includeProposals = state._reviewMode === 'all' || state._reviewMode === 'proposals';
+    const sections = [];
+    if (includeComments) {
+      sections.push(...reviewState.comments.map((comment, index) => _renderReviewCommentCard(comment, index, focusedId)));
+    }
+    if (includeProposals) {
+      sections.push(...reviewState.proposals.map((proposal, index) => _renderReviewProposalCard(proposal, index, focusedId, expandedId)));
+    }
+    if (!sections.length) {
+        const hasAnyVisibleReviewEntries = _reviewModeHasVisibleEntries(reviewState, 'all');
+        const preserveCommentModeEmptyState = _isReviewCommentModeEnabled() && !hasAnyVisibleReviewEntries;
+        if (!preserveCommentModeEmptyState) {
+        _coerceReviewModeForVisibleContent(reviewState);
+        if (_reviewModeHasVisibleEntries(reviewState, state._reviewMode)) {
+          _renderReviewShell();
+          return;
+        }
+      }
+      listEl.innerHTML = '';
+      shell.style.display = 'none';
+      shell.classList.remove('is-open');
+      listEl.style.minHeight = '';
+      if (host) host.classList.remove('has-review-shell');
+      _renderReviewSelectionLauncher();
+      return;
+    }
+    listEl.innerHTML = sections.join('');
+    _syncDocxReviewRailHostClass();
+    _renderReviewSelectionLauncher();
+    _scheduleReviewShellLayout();
+  }
+
+  function _setReviewCenterOpen(open) {
+    state._reviewCenterOpen = open !== false;
+    localStorage.setItem('wa_review_center_open', state._reviewCenterOpen ? '1' : '0');
+    _renderReviewShell();
+    _renderReviewSelectionLauncher();
+  }
+
+  function _maybeAutoOpenReviewCenterForImportedItems(reviewState) {
+    const activeTab = state.fileType === 'docx' ? _activeReviewTab() : null;
+    if (!activeTab || !reviewState || state._reviewCenterOpen) return;
+
+    const counts = _reviewPanelCounts(activeTab);
+    if (!counts.commentCount && !counts.proposalCount) return;
+
+    const preferredKind = counts.commentCount ? 'comment' : 'proposal';
+    _coerceReviewModeForVisibleContent(reviewState, preferredKind);
+    _focusFirstReviewEntry(reviewState, preferredKind);
+    _setReviewCenterOpen(true);
+
+    if (reviewState.focusedId) {
+      requestAnimationFrame(() => {
+        _scrollReviewCardIntoView(reviewState.focusedId);
+        if (preferredKind === 'proposal') {
+          _scrollProposalCardIntoView(reviewState.focusedId.replace(/^proposal:/, ''));
+        }
+      });
+    }
+  }
+
+  function _serializeReviewComment(comment) {
+    const raw = _cloneSerializable(comment, {}) || {};
+    delete raw.review_id;
+    delete raw.kind;
+    delete raw.source;
+    raw.id = String(raw.id || '');
+    raw.author = String(raw.author || '').trim();
+    raw.date = String(raw.date || '').trim();
+    raw.text = String(raw.text || '').trim();
+    raw.anchor_text = String(raw.anchor_text || '').trim();
+    return raw;
+  }
+
+  function _normalizeReviewPath(value) {
+    return String(value || '').replace(/\\/g, '/').trim();
+  }
+
+  function _reviewPathsMatch(left, right) {
+    const lhs = _normalizeReviewPath(left);
+    const rhs = _normalizeReviewPath(right);
+    if (!lhs || !rhs) return false;
+    return lhs === rhs || lhs.endsWith('/' + rhs) || rhs.endsWith('/' + lhs);
+  }
+
+  function _resolveStructuredReviewTargetTab(payload) {
+    const activeTab = _activeReviewTab();
+    if (!activeTab || activeTab.fileType !== 'docx') return null;
+    const args = (payload && payload.tool_args && typeof payload.tool_args === 'object')
+      ? payload.tool_args
+      : ((payload && payload.args && typeof payload.args === 'object') ? payload.args : {});
+    const payloadPath = _normalizeReviewPath(
+      (payload && (payload.path || payload.file_path || payload.source_path)) || args.path || ''
+    );
+    if (!payloadPath) return activeTab;
+    return (
+      _reviewPathsMatch(payloadPath, activeTab.path)
+      || _reviewPathsMatch(payloadPath, state.filePath)
+      || _reviewPathsMatch(payloadPath, state.wsSourcePath)
+    ) ? activeTab : null;
+  }
+
+  function _getActiveDocxPlainText() {
+    const doc = state.activeEditor && state.activeEditor.editor && state.activeEditor.editor.state && state.activeEditor.editor.state.doc;
+    if (!doc) return '';
+    try {
+      return String(doc.textBetween(0, doc.content.size, '\n', '\n') || '').replace(/\u00a0/g, ' ');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function _coerceStructuredReviewItems(raw) {
+    if (Array.isArray(raw)) return raw;
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (_) {
+        return [];
+      }
+    }
+    return [];
+  }
+
+  function _sliceStructuredReviewAnchor(fullText, start, end) {
+    const source = String(fullText || '');
+    if (!source) return '';
+    const safeStart = Math.max(0, Math.min(source.length, Math.round(Number(start) || 0)));
+    const safeEnd = Math.max(safeStart, Math.min(source.length, Math.round(Number(end) || 0)));
+    const slice = safeEnd > safeStart
+      ? source.slice(safeStart, safeEnd)
+      : source.slice(safeStart, Math.min(source.length, safeStart + 48));
+    return String(slice || '').replace(/\u00a0/g, ' ').trim();
+  }
+
+  function _collectStructuredReviewItems(payload) {
+    const root = (payload && typeof payload === 'object') ? payload : {};
+    const args = (root.tool_args && typeof root.tool_args === 'object')
+      ? root.tool_args
+      : ((root.args && typeof root.args === 'object') ? root.args : {});
+    const fromComments = _coerceStructuredReviewItems(root.comments || args.comments);
+    if (fromComments.length) return fromComments;
+    const fromAnnotations = _coerceStructuredReviewItems(root.annotations || args.annotations);
+    if (fromAnnotations.length) return fromAnnotations;
+    if (Array.isArray(root.changes)) return root.changes;
+    const kind = String(root.tool_name || root.name || root.type || '').trim().toLowerCase();
+    if (['comment', 'review_comment', 'add_comment', 'create_comment', 'annotate', 'annotation', 'annotate_file'].includes(kind)) {
+      return [Object.assign({}, args, root)];
+    }
+    return [];
+  }
+
+  function _buildStructuredReviewComment(item, index, { author = 'AI', fullText = '', fallbackSelection = null } = {}) {
+    const raw = (item && typeof item === 'object') ? item : {};
+    const range = Array.isArray(raw.range) ? raw.range : [];
+    const rangeStart = Number.isFinite(Number(raw.range_start))
+      ? Number(raw.range_start)
+      : (range.length > 0 && Number.isFinite(Number(range[0])) ? Number(range[0]) : NaN);
+    const rangeEnd = Number.isFinite(Number(raw.range_end))
+      ? Number(raw.range_end)
+      : (range.length > 1 && Number.isFinite(Number(range[1])) ? Number(range[1]) : NaN);
+    const text = String(
+      raw.comment
+      || raw.text
+      || raw.modified
+      || raw.note
+      || raw.message
+      || raw.value
+      || raw.rationale
+      || ''
+    ).trim();
+    if (!text) return null;
+    let anchorText = String(
+      raw.anchor_text
+      || raw.original_text
+      || raw.original
+      || raw.selection
+      || raw.quoted_text
+      || raw.target_text
+      || ''
+    ).trim();
+    if (!anchorText && Number.isFinite(rangeStart) && Number.isFinite(rangeEnd)) {
+      anchorText = _sliceStructuredReviewAnchor(fullText, rangeStart, rangeEnd);
+    }
+    if (!anchorText && fallbackSelection && index === 0) {
+      anchorText = String(fallbackSelection.rawText || '').trim();
+    }
+    if (!anchorText) return null;
+    const anchorStartOffset = Number.isFinite(Number(raw.anchor_start_offset))
+      ? Number(raw.anchor_start_offset)
+      : (Number.isFinite(Number(raw.anchorStartOffset))
+        ? Number(raw.anchorStartOffset)
+        : (Number.isFinite(rangeStart) ? rangeStart : Number.NaN));
+    const anchorEndOffset = Number.isFinite(Number(raw.anchor_end_offset))
+      ? Number(raw.anchor_end_offset)
+      : (Number.isFinite(Number(raw.anchorEndOffset))
+        ? Number(raw.anchorEndOffset)
+        : (Number.isFinite(rangeEnd) ? rangeEnd : Number.NaN));
+    const fallbackAnchorStartOffset = Number(fallbackSelection && (fallbackSelection.anchor_start_offset ?? fallbackSelection.anchorStartOffset));
+    const fallbackAnchorEndOffset = Number(fallbackSelection && (fallbackSelection.anchor_end_offset ?? fallbackSelection.anchorEndOffset));
+    const fallbackAnchorOccurrence = Number(fallbackSelection && (fallbackSelection.anchor_occurrence ?? fallbackSelection.anchorOccurrence));
+    const anchorOccurrence = Number.isFinite(Number(raw.anchor_occurrence))
+      ? Number(raw.anchor_occurrence)
+      : (Number.isFinite(Number(raw.anchorOccurrence))
+        ? Number(raw.anchorOccurrence)
+        : fallbackAnchorOccurrence);
+    const anchorContextBefore = String(
+      raw.anchor_context_before
+      || raw.anchorContextBefore
+      || (fallbackSelection && (fallbackSelection.anchor_context_before || fallbackSelection.anchorContextBefore))
+      || ''
+    );
+    const anchorContextAfter = String(
+      raw.anchor_context_after
+      || raw.anchorContextAfter
+      || (fallbackSelection && (fallbackSelection.anchor_context_after || fallbackSelection.anchorContextAfter))
+      || ''
+    );
+    const nextComment = {
+      id: `ai-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+      author: String(raw.author || author || 'AI').trim() || 'AI',
+      date: new Date().toISOString(),
+      text,
+      anchor_text: anchorText,
+    };
+    if (Number.isFinite(anchorStartOffset)) {
+      nextComment.anchor_start_offset = anchorStartOffset;
+    } else if (Number.isFinite(fallbackAnchorStartOffset)) {
+      nextComment.anchor_start_offset = fallbackAnchorStartOffset;
+    }
+    if (Number.isFinite(anchorEndOffset)) {
+      nextComment.anchor_end_offset = anchorEndOffset;
+    } else if (Number.isFinite(fallbackAnchorEndOffset)) {
+      nextComment.anchor_end_offset = fallbackAnchorEndOffset;
+    }
+    if (Number.isFinite(anchorOccurrence) && anchorOccurrence >= 0) {
+      nextComment.anchor_occurrence = Math.max(0, Math.floor(anchorOccurrence));
+    }
+    if (anchorContextBefore) nextComment.anchor_context_before = anchorContextBefore;
+    if (anchorContextAfter) nextComment.anchor_context_after = anchorContextAfter;
+    return nextComment;
+  }
+
+  function _appendStructuredReviewComments(payload, options = {}) {
+    const targetTab = _resolveStructuredReviewTargetTab(payload);
+    if (!targetTab || targetTab.path !== state.activeTabPath || state.fileType !== 'docx') return false;
+    const reviewState = _ensureTabReviewState(targetTab);
+    if (!reviewState) return false;
+    const items = _collectStructuredReviewItems(payload);
+    if (!items.length) return false;
+    const existingComments = reviewState.comments.map((item) => _serializeReviewComment(item));
+    const seen = new Set(existingComments.map((item) => `${String(item.anchor_text || '').trim()}\u0000${String(item.text || '').trim()}`));
+    const fullText = _getActiveDocxPlainText();
+    const fallbackSelection = (_getReviewCommentSelectionState({ includeAnchorMeta: true }) || {}).selection || null;
+    const author = String(
+      options.author
+      || payload.author
+      || ((payload.tool_args || payload.args || {}).author)
+      || 'AI'
+    ).trim() || 'AI';
+    const additions = [];
+    items.forEach((item, index) => {
+      const nextComment = _buildStructuredReviewComment(item, index, { author, fullText, fallbackSelection });
+      if (!nextComment) return;
+      const dedupeKey = `${nextComment.anchor_text}\u0000${nextComment.text}`;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      additions.push(nextComment);
+    });
+    if (!additions.length) return false;
+    window.WA.onDocxCommentsChanged(existingComments.concat(additions), targetTab.path);
+    const focusId = 'comment:' + additions[additions.length - 1].id;
+    const nextReviewState = _ensureTabReviewState(targetTab);
+    if (nextReviewState) {
+      nextReviewState.focusedId = focusId;
+      _coerceReviewModeForVisibleContent(nextReviewState, 'comment');
+    }
+    state._reviewCenterOpen = true;
+    localStorage.setItem('wa_review_center_open', '1');
+    _renderReviewShell();
+    requestAnimationFrame(() => {
+      _scrollReviewCardIntoView(focusId);
+      _scrollDocxCommentAnchorIntoView(additions[additions.length - 1]);
+    });
+    if (typeof window.WA.scheduleAutoSave === 'function') {
+      window.WA.scheduleAutoSave();
+    }
+    if (options.notify !== false) {
+      showToast(options.toastText || `AI 已添加 ${additions.length} 条批注`, 'success');
+    }
+    return true;
+  }
+
+  window.WA.applyStructuredDocToolCall = (toolCall, options = {}) => {
+    return _appendStructuredReviewComments(toolCall, options);
+  };
+
+  window.WA.applyStructuredReviewChangePayload = (payload, options = {}) => {
+    try {
+      const operation = String((payload && (payload.operation || payload.change_type)) || '').trim().toLowerCase();
+      const annotationsAdded = Number((payload && payload.annotations_added) || 0);
+      if (!Array.isArray(payload && payload.changes) && operation !== 'annotate_file' && operation !== 'annotate' && !annotationsAdded) {
+        return false;
+      }
+      return _appendStructuredReviewComments(payload, options);
+    } catch (err) {
+      console.error('[WA applyStructuredReviewChangePayload] error:', err);
+      return false;
+    }
+  };
+
+  window.WA.applyStructuredReviewProgressPayload = async (payload, options = {}) => {
+    return _applyStructuredReviewProgressProposals(payload, options);
+  };
+
+  function _syncDocxReviewToolbar() {
+    const ribbon = _getDocxRibbonToolbar();
+    if (!ribbon) return;
+
+    let group = ribbon.querySelector('.wa-docx-review-group');
+    if (!group) {
+      group = document.createElement('div');
+      group.className = 'wa-docx-review-group';
+      group.innerHTML = ''
+        + '<button type="button" class="tt-btn wa-docx-review-mode" onclick="WA.toggleReviewCommentMode()">批注模式</button>'
+        + '<div class="wa-docx-review-nav">'
+        + '  <button type="button" class="tt-btn wa-docx-review-summary" onclick="WA.toggleReviewNavMenu(event)" aria-haspopup="menu" aria-expanded="false">无批注或建议</button>'
+        + '  <div class="wa-docx-review-nav-menu" role="menu"></div>'
+        + '</div>';
+      ribbon.appendChild(group);
+    }
+    _bindDocxReviewToolbarInteractions(group);
+
+    const activeTab = state.fileType === 'docx' ? _activeReviewTab() : null;
+    const commentModeBtn = group.querySelector('.wa-docx-review-mode');
+    const summaryBtn = group.querySelector('.wa-docx-review-summary');
+    const nav = group.querySelector('.wa-docx-review-nav');
+    const navMenu = group.querySelector('.wa-docx-review-nav-menu');
+
+    if (!activeTab) {
+      _closeDocxReviewNavMenu();
+      group.style.display = 'none';
+      return;
+    }
+
+    const counts = _reviewSummaryCounts(activeTab);
+    const total = counts.commentCount + counts.proposalCount;
+    const commentModeEnabled = _isReviewCommentModeEnabled();
+    const navOpen = !!(nav && nav.classList.contains('is-open'));
+    const navItems = _buildReviewNavItems(activeTab);
+    group.style.display = 'inline-flex';
+    group.classList.toggle('has-items', total > 0);
+    group.classList.toggle('is-comment-mode', commentModeEnabled);
+    if (commentModeBtn) {
+      commentModeBtn.classList.toggle('is-active', commentModeEnabled);
+      commentModeBtn.setAttribute('aria-pressed', commentModeEnabled ? 'true' : 'false');
+      commentModeBtn.title = commentModeEnabled
+        ? '退出批注模式'
+        : '开启批注模式后，选中文本会出现批注入口';
+    }
+    if (nav) {
+      nav.classList.toggle('has-items', total > 0);
+      nav.classList.toggle('is-open', navOpen && total > 0);
+    }
+    if (summaryBtn) {
+      summaryBtn.disabled = total === 0;
+      summaryBtn.classList.toggle('is-active', navOpen && total > 0);
+      if (counts.commentCount && counts.proposalCount) {
+        summaryBtn.textContent = `${counts.commentCount}条批注 · ${counts.proposalCount}条建议`;
+      } else if (counts.commentCount) {
+        summaryBtn.textContent = `${counts.commentCount}条批注`;
+      } else if (counts.proposalCount) {
+        summaryBtn.textContent = `${counts.proposalCount}条建议`;
+      } else {
+        summaryBtn.textContent = '无批注或建议';
+      }
+      summaryBtn.setAttribute('aria-expanded', navOpen && total > 0 ? 'true' : 'false');
+      summaryBtn.title = total
+        ? '展开批注/建议导航并快速定位'
+        : '当前文档暂无批注或建议';
+    }
+    if (navMenu) {
+      navMenu.innerHTML = _renderReviewNavMenuItems(navItems);
+    }
+  }
+
+  function _setProposalReviewStatus(proposalId, status) {
+    const entry = _findProposalEntry(proposalId);
+    if (!entry.proposal) return null;
+    entry.proposal._reviewStatus = status;
+    return entry;
+  }
+
+  function _syncProposalDomState(proposalId, status) {
+    const selector = `[data-proposal-id="${CSS.escape(String(proposalId || ''))}"]`;
+    document.querySelectorAll(selector).forEach((node) => {
+      node.classList.toggle('accepted', status === 'accepted');
+      node.classList.toggle('rejected', status === 'rejected');
+    });
+  }
+
+  async function _syncReviewStateForActiveFile() {
+    const tab = _activeReviewTab();
+    if (!tab) {
+      state._reviewSelectionSnapshot = null;
+      state._activeProposals = [];
+      _clearInlineReviewPreviewForActiveFile();
+      _syncDocxReviewToolbar();
+      _renderReviewShell();
+      _syncWpsReviewRail(null);
+      return null;
+    }
+    const reviewState = _ensureTabReviewState(tab);
+    _syncDocCommentStateForActiveFile();
+    if (tab.serverData && Array.isArray(tab.serverData.proposals)) {
+      _syncProposalStateForActiveFile(tab.serverData.proposals, { replace: true });
+    } else {
+      reviewState.proposals = _mergeReviewProposals([], reviewState.proposals);
+    }
+    // Rebuild normalized items for the WPS rail
+    _rebuildNormalizedReviewItems(reviewState);
+    _syncReviewSelectionSnapshot();
+    state._activeProposals = reviewState.proposals.slice();
+    _syncInlineReviewPreviewForActiveFile();
+    _syncDocxReviewToolbar();
+    _renderReviewShell();
+    _syncWpsReviewRail(reviewState);
+    return reviewState;
+  }
+
+  /** Rebuild reviewState.items from comments + proposals (+ optional revisions). */
+  function _rebuildNormalizedReviewItems(reviewState) {
+    if (!reviewState) return;
+    if (!window.KotoReviewRail) return;
+    try {
+      reviewState.items = window.KotoReviewRail.normalizeReviewItems(
+        reviewState.comments || [],
+        reviewState.proposals || [],
+        (reviewState.revisions || []),
+      );
+    } catch (_) {}
+  }
+
+  /** Sync the WPS rail controller with current review state. */
+  function _syncWpsReviewRail(reviewState) {
+    if (!state._useWpsReviewRail || !window.KotoReviewRail) return;
+    const host = $('wa-docx-editor');
+    if (!host || state.fileType !== 'docx') {
+      if (_wpsRailCtrl) { _wpsRailCtrl.destroy(); _wpsRailCtrl = null; }
+      return;
+    }
+    if (!_wpsRailCtrl) {
+      _wpsRailCtrl = window.KotoReviewRail.createController({
+        editorRoot: host,
+        getPreviewText: (s, n) => _previewReviewText(s, n),
+        onAction: (action, itemId) => _handleWpsRailAction(action, itemId),
+      });
+      if (_wpsRailCtrl) _wpsRailCtrl.mount();
+    }
+    if (!_wpsRailCtrl) return;
+    const items = reviewState ? (reviewState.items || []) : [];
+    _wpsRailCtrl.updateItems(items);
+    const focusedId = reviewState ? String(reviewState.focusedId || '') : '';
+    if (focusedId) _wpsRailCtrl.setFocused(focusedId);
+    // Wire up event bus → legacy WA actions
+    const bus = _wpsRailCtrl.getBus && _wpsRailCtrl.getBus();
+    if (bus && !bus._kotoWired) {
+      bus._kotoWired = true;
+      bus.on('review:accept',   (e) => { const { itemId } = e.detail; window.WA.acceptProposal(itemId, null); });
+      bus.on('review:reject',   (e) => { const { itemId } = e.detail; window.WA.rejectProposal(itemId, null); });
+      bus.on('review:delete',   (e) => { const { itemId } = e.detail; window.WA.deleteReviewComment(itemId); });
+      bus.on('review:scroll-into-view', (e) => {
+        const { itemId } = e.detail;
+        const entry = _findReviewEntry(itemId);
+        if (entry && entry.item) _scrollDocxReviewAnchorIntoView(entry.item);
+      });
+      bus.on('review:save-comment', (e) => {
+        const { itemId } = e.detail;
+        window.WA.editReviewComment(itemId, 'save');
+      });
+      bus.on('review:reply', (e) => {
+        const { parentId } = e.detail;
+        // Creating a new reply comment anchored to the same anchor as parent
+        const entry = _findReviewEntry(parentId);
+        if (entry && entry.item) window.WA.createReviewComment();
+      });
+    }
+  }
+
+  function _handleWpsRailAction(action, itemId) {
+    // Keeps the legacy rail in sync for actions that mutate state
+    switch (action) {
+      case 'activate':
+      case 'focus': {
+        const reviewState = _ensureTabReviewState(_activeReviewTab());
+        if (reviewState) reviewState.focusedId = itemId;
+        break;
+      }
+    }
+  }
+
+  function _focusReviewProposal(proposal, options = {}) {
+    const activeTab = _activeReviewTab();
+    const reviewState = _ensureTabReviewState(activeTab);
+    if (!proposal || !reviewState) return;
+    reviewState.focusedId = String(proposal.review_id || proposal.id || '').trim();
+    state._reviewCenterOpen = true;
+    localStorage.setItem('wa_review_center_open', '1');
+    if (_wpsRailCtrl) _wpsRailCtrl.setFocused(reviewState.focusedId);
+    _syncReviewStateForActiveFile().catch(() => {});
+    if (options.scrollCard !== false) {
+      _scrollProposalCardIntoView(proposal.id);
+    }
+    if (options.scrollDoc !== false) {
+      requestAnimationFrame(() => _scrollDocxReviewAnchorIntoView(proposal));
+    }
+  }
+
+  function _expandReviewProposal(reviewId, { scrollCard = true } = {}) {
+    const reviewState = _ensureTabReviewState(_activeReviewTab());
+    const resolvedReviewId = String(reviewId || '').trim();
+    if (!reviewState || !resolvedReviewId) return;
+    reviewState.expandedId = resolvedReviewId;
+    _renderReviewShell();
+    if (scrollCard) _scrollReviewCardIntoView(resolvedReviewId);
+  }
+
+  function _focusReviewComment(comment, options = {}) {
+    const activeTab = _activeReviewTab();
+    const reviewState = _ensureTabReviewState(activeTab);
+    if (!comment || !reviewState) return;
+    reviewState.focusedId = String(comment.review_id || comment.id || '').trim();
+    state._reviewCenterOpen = true;
+    localStorage.setItem('wa_review_center_open', '1');
+    if (_wpsRailCtrl) _wpsRailCtrl.setFocused(reviewState.focusedId);
+    _renderReviewShell();
+    if (options.scrollCard !== false) {
+      _scrollReviewCardIntoView(reviewState.focusedId);
+    }
+    if (options.scrollDoc !== false) {
+      _scrollDocxCommentAnchorIntoView(comment);
+    }
+  }
+
+  function _resizeReviewCommentEditor(textarea) {
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    const nextHeight = Math.max(56, Math.min(textarea.scrollHeight || 0, 132));
+    textarea.style.height = nextHeight + 'px';
+  }
+
+  function _bindReviewShellInteractions(listEl) {
+    if (!listEl || listEl._waReviewActionBound) return;
+    listEl._waReviewActionBound = true;
+    listEl.addEventListener('mousedown', (event) => {
+      const target = event && event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      if (target.closest('textarea, input, select, option')) return;
+
+      const interactiveEl = target.closest(
+        '[data-review-action][data-review-id], [data-action], .koto-docx-comment-card[tabindex], .wa-proposal-card[tabindex], .wa-review-anchor-link'
+      );
+      if (!interactiveEl) return;
+
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+      if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    });
+    listEl.addEventListener('click', (event) => {
+      const target = event && event.target;
+      if (!target || typeof target.closest !== 'function') return;
+
+      // --- accept / reject buttons (data-action on button, data-review-id on button) ---
+      const actionBtn = target.closest('[data-action="accept"],[data-action="reject"]');
+      if (actionBtn) {
+        const reviewId = String(actionBtn.getAttribute('data-review-id') || '').trim();
+        const action   = String(actionBtn.getAttribute('data-action')    || '').trim();
+        if (reviewId) {
+          if (typeof event.preventDefault === 'function') event.preventDefault();
+          if (typeof event.stopPropagation === 'function') event.stopPropagation();
+          if (action === 'accept') window.WA.acceptProposal(reviewId, actionBtn);
+          if (action === 'reject') window.WA.rejectProposal(reviewId, actionBtn);
+        }
+        return;
+      }
+
+      // --- card activate (data-action="activate" on article) ---
+      const cardEl = target.closest('[data-action="activate"]');
+      if (cardEl) {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        if (typeof event.stopPropagation === 'function') event.stopPropagation();
+        const reviewId = String(cardEl.getAttribute('data-review-id') || '').trim();
+        if (cardEl.classList.contains('wa-proposal-card')) {
+          _expandReviewProposal(reviewId, { scrollCard: false });
+          window.WA.focusReviewThread(reviewId);
+        } else if (cardEl.classList.contains('koto-docx-comment-card')) {
+          window.WA.editReviewComment(reviewId, 'start');
+        }
+        return;
+      }
+
+      // --- legacy data-review-action buttons (edit, delete, save, cancel, focus) ---
+      const actionEl = target.closest('[data-review-action][data-review-id]');
+      if (!actionEl) return;
+      const reviewId = String(actionEl.getAttribute('data-review-id') || '').trim();
+      const action = String(actionEl.getAttribute('data-review-action') || '').trim();
+      if (!reviewId || !action) return;
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+      if (typeof event.stopPropagation === 'function') event.stopPropagation();
+      if (action === 'focus') {
+        window.WA.focusReviewThread(reviewId);
+        return;
+      }
+      if (action === 'edit') {
+        window.WA.editReviewComment(reviewId, 'start');
+        return;
+      }
+      if (action === 'delete') {
+        window.WA.deleteReviewComment(reviewId);
+        return;
+      }
+      if (action === 'save' || action === 'cancel') {
+        window.WA.editReviewComment(reviewId, action);
+      }
+    });
+  }
+
+  function _isInteractiveReviewTarget(event) {
+    const target = event && event.target;
+    if (!target || typeof target.closest !== 'function') return false;
+    return !!target.closest('button, textarea, input, select, option, a, label');
+  }
+
+  window.WA.onReviewCommentInput = (event) => {
+    const textarea = event && (event.currentTarget || event.target);
+    if (!textarea) return;
+    _resizeReviewCommentEditor(textarea);
+    _scheduleReviewShellLayout();
+  };
+
+  window.WA.handleReviewCommentCardActivate = (event, reviewId) => {
+    const evt = event || window.event;
+    if (evt && evt.type === 'keydown') {
+      const key = String(evt.key || evt.code || '');
+      if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+      if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    }
+    if (_isInteractiveReviewTarget(evt)) return;
+    window.WA.editReviewComment(reviewId, 'start');
+  };
+
+  window.WA.handleReviewProposalCardActivate = (event, reviewId) => {
+    const evt = event || window.event;
+    if (evt && evt.type === 'keydown') {
+      const key = String(evt.key || evt.code || '');
+      if (key !== 'Enter' && key !== ' ' && key !== 'Spacebar') return;
+      if (typeof evt.preventDefault === 'function') evt.preventDefault();
+    }
+    if (_isInteractiveReviewTarget(evt)) return;
+    _expandReviewProposal(reviewId, { scrollCard: false });
+    window.WA.focusReviewThread(reviewId);
+  };
+
+  window.WA.toggleReviewCommentMode = (forceOpen) => {
+    if (state.fileType !== 'docx') {
+      showToast('当前仅 DOCX 文档支持批注模式', 'info');
+      return;
+    }
+    _closeDocxReviewNavMenu();
+    const nextState = typeof forceOpen === 'boolean' ? forceOpen : !_isReviewCommentModeEnabled();
+    _saveEditorRange();
+    _syncReviewSelectionSnapshot({ preserveExisting: true });
+    if (!nextState) {
+      state._editingReviewCommentId = '';
+      _setReviewCenterOpen(false);
+      _syncDocxReviewToolbar();
+      return;
+    }
+    _setStoredReviewMode('comments');
+    const activeTab = _activeReviewTab();
+    const reviewState = _ensureTabReviewState(activeTab);
+    _focusFirstReviewEntry(reviewState, 'comment');
+    _setReviewCenterOpen(true);
+    if (reviewState && reviewState.focusedId) {
+      _scrollReviewCardIntoView(reviewState.focusedId);
+    }
+    _syncDocxReviewToolbar();
+  };
+
+  window.WA.toggleReviewNavMenu = (event) => {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+    if (state.fileType !== 'docx') {
+      showToast('当前仅 DOCX 文档支持批注导航', 'info');
+      return;
+    }
+    const activeTab = _activeReviewTab();
+    if (!activeTab) return;
+    const counts = _reviewPanelCounts(activeTab);
+    const total = counts.commentCount + counts.proposalCount;
+    if (!total) {
+      showToast('当前文档暂无批注或建议', 'info');
+      return;
+    }
+    _syncDocxReviewToolbar();
+    const nav = document.querySelector('#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav');
+    if (!nav) return;
+    const shouldOpen = !nav.classList.contains('is-open');
+    _closeDocxReviewNavMenu();
+    if (!shouldOpen) return;
+    nav.classList.add('is-open');
+    const summaryBtn = nav.querySelector('.wa-docx-review-summary');
+    if (summaryBtn) summaryBtn.setAttribute('aria-expanded', 'true');
+  };
+
+  window.WA.toggleReviewOverview = () => {
+    if (state.fileType !== 'docx') {
+      showToast('审阅中心当前仅支持 DOCX 文档', 'info');
+      return;
+    }
+    _closeDocxReviewNavMenu();
+    const activeTab = _activeReviewTab();
+    if (!activeTab) return;
+    const counts = _reviewPanelCounts(activeTab);
+    const total = counts.commentCount + counts.proposalCount;
+    if (!total) {
+      showToast('当前文档暂无批注或建议', 'info');
+      return;
+    }
+    if (state._reviewCenterOpen && state._reviewMode === 'all') {
+      window.WA.closeReviewCenter();
+      _syncDocxReviewToolbar();
+      return;
+    }
+    _saveEditorRange();
+    _syncReviewSelectionSnapshot({ preserveExisting: true });
+    _setStoredReviewMode('all');
+    const reviewState = _ensureTabReviewState(activeTab);
+    _focusFirstReviewEntry(reviewState);
+    _setReviewCenterOpen(true);
+    if (reviewState && reviewState.focusedId) {
+      _scrollReviewCardIntoView(reviewState.focusedId);
+      _scrollProposalCardIntoView(reviewState.focusedId.replace(/^proposal:/, ''));
+    }
+    _syncDocxReviewToolbar();
+  };
+
+  window.WA.openReviewCenter = () => {
+    if (state.fileType !== 'docx') {
+      showToast('审阅中心当前仅支持 DOCX 文档', 'info');
+      return;
+    }
+    if (state._reviewCenterOpen) {
+      window.WA.closeReviewCenter();
+      return;
+    }
+    _saveEditorRange();
+    _syncReviewSelectionSnapshot({ preserveExisting: true });
+    _setReviewCenterOpen(true);
+    const activeTab = _activeReviewTab();
+    const reviewState = _ensureTabReviewState(activeTab);
+    if (!reviewState) return;
+    _coerceReviewModeForVisibleContent(reviewState);
+    _focusFirstReviewEntry(reviewState);
+    _renderReviewShell();
+    if (reviewState.focusedId) {
+      _scrollReviewCardIntoView(reviewState.focusedId);
+      _scrollProposalCardIntoView(reviewState.focusedId.replace(/^proposal:/, ''));
+    }
+  };
+
+  window.WA.closeReviewCenter = () => {
+    _closeDocxReviewNavMenu();
+    state._editingReviewCommentId = '';
+    _setReviewCenterOpen(false);
+  };
+
+  window.WA.setReviewMode = (mode) => {
+    _setStoredReviewMode(mode);
+    _renderReviewShell();
+    _syncDocxReviewToolbar();
+    _renderReviewSelectionLauncher();
+  };
+
+  window.WA.relayoutDocxReviewRail = () => {
+    if (state.fileType !== 'docx') return;
+    const shell = $('wa-review-shell');
+    if (shell && shell.style.display !== 'none') {
+      _scheduleReviewShellLayout();
+    }
+    // Also refresh the WPS-style per-page rail
+    if (_wpsRailCtrl) _wpsRailCtrl.refresh();
+    _renderReviewSelectionLauncher();
+  };
+
+  window.WA.captureReviewSelection = (event) => {
+    if (event && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+    _saveEditorRange();
+    _syncReviewSelectionSnapshot();
+    _syncDocxReviewToolbar();
+    if (state._reviewCenterOpen) {
+      _renderReviewShell();
+    }
+    _renderReviewSelectionLauncher();
+  };
+
+  window.WA.createReviewComment = () => {
+    if (state.fileType !== 'docx') {
+      showToast('当前仅 DOCX 文档支持批注', 'info');
+      return;
+    }
+    _saveEditorRange();
+    _syncReviewSelectionSnapshot({ preserveExisting: true });
+    const selectionState = _getReviewCommentSelectionState({ includeAnchorMeta: true });
+    if (!selectionState.supported || !selectionState.selection) {
+      showToast(selectionState.message || '请先在文档中选中要批注的文字', 'info');
+      return;
+    }
+    const targetTab = _activeReviewTab();
+    const reviewState = _ensureTabReviewState(targetTab);
+    if (!targetTab || !reviewState) return;
+    const nextComments = reviewState.comments.map((item) => _serializeReviewComment(item));
+    const newComment = _buildNewReviewComment(selectionState.selection);
+    nextComments.push(newComment);
+    window.WA.onDocxCommentsChanged(nextComments, targetTab.path);
+    const nextReviewState = _ensureTabReviewState(targetTab);
+    const reviewId = 'comment:' + newComment.id;
+    if (nextReviewState) {
+      nextReviewState.focusedId = reviewId;
+      _coerceReviewModeForVisibleContent(nextReviewState, 'comment');
+    }
+    state._editingReviewCommentId = reviewId;
+    _setReviewCenterOpen(true);
+    _renderReviewShell();
+    requestAnimationFrame(() => {
+      _scrollReviewCardIntoView(reviewId);
+      const input = $(_reviewCommentTextareaId(reviewId));
+      if (input) {
+        _resizeReviewCommentEditor(input);
+        if (typeof input.focus === 'function') input.focus();
+      }
+    });
+  };
+
+  window.WA.deleteReviewComment = (reviewId) => {
+    const entry = _findReviewEntry(reviewId);
+    if (!entry.item || entry.kind !== 'comment') return;
+    const targetTab = entry.tab || _activeReviewTab();
+    const reviewState = _ensureTabReviewState(targetTab);
+    if (!targetTab || !reviewState) return;
+    const resolvedReviewId = String(entry.item.review_id || entry.item.id || '').trim();
+    const currentComments = reviewState.comments.slice();
+    const removedIndex = currentComments.findIndex((item) => {
+      const itemReviewId = String((item && (item.review_id || item.id)) || '').trim();
+      return itemReviewId === resolvedReviewId;
+    });
+    if (removedIndex < 0) return;
+    const remainingComments = currentComments
+      .filter((item) => String((item && (item.review_id || item.id)) || '').trim() !== resolvedReviewId)
+      .map((item) => _serializeReviewComment(item));
+    state._editingReviewCommentId = '';
+    window.WA.onDocxCommentsChanged(remainingComments, targetTab.path);
+    const nextReviewState = _ensureTabReviewState(targetTab);
+    if (nextReviewState) {
+      const nextFocusedComment = nextReviewState.comments[removedIndex] || nextReviewState.comments[removedIndex - 1] || null;
+      nextReviewState.focusedId = nextFocusedComment
+        ? String((nextFocusedComment.review_id || nextFocusedComment.id) || '').trim()
+        : '';
+    }
+    if (targetTab.path === state.activeTabPath) {
+      _renderReviewShell();
+      if (nextReviewState && nextReviewState.focusedId) {
+        _scrollReviewCardIntoView(nextReviewState.focusedId);
+      }
+    }
+    WA.scheduleAutoSave();
+    showToast('已删除批注', 'success');
+  };
+
+  window.WA.editReviewComment = (reviewId, action = 'start') => {
+    const entry = _findReviewEntry(reviewId);
+    if (!entry.item || entry.kind !== 'comment') return;
+    const resolvedReviewId = String(entry.item.review_id || entry.item.id || '').trim();
+    if (action === 'start') {
+      state._editingReviewCommentId = resolvedReviewId;
+      _setStoredReviewMode('comments');
+      _setReviewCenterOpen(true);
+      requestAnimationFrame(() => {
+        _scrollReviewCardIntoView(resolvedReviewId);
+        const input = $(_reviewCommentTextareaId(resolvedReviewId));
+        if (input && typeof input.focus === 'function') {
+          _resizeReviewCommentEditor(input);
+          input.focus();
+          if (typeof input.setSelectionRange === 'function') {
+            const end = String(input.value || '').length;
+            input.setSelectionRange(end, end);
+          }
+        }
+      });
+      return;
+    }
+    if (action === 'cancel') {
+      const targetTab = entry.tab || _activeReviewTab();
+      const reviewState = _ensureTabReviewState(targetTab);
+      const currentComment = reviewState
+        ? reviewState.comments.find((item) => String((item && (item.review_id || item.id)) || '').trim() === resolvedReviewId)
+        : null;
+      state._editingReviewCommentId = '';
+      if (targetTab && reviewState && currentComment && !String(currentComment.text || '').trim()) {
+        const remaining = reviewState.comments
+          .filter((item) => String((item && (item.review_id || item.id)) || '').trim() !== resolvedReviewId)
+          .map((item) => _serializeReviewComment(item));
+        window.WA.onDocxCommentsChanged(remaining, targetTab.path);
+      }
+      _renderReviewShell();
+      return;
+    }
+    const targetTab = entry.tab || _activeReviewTab();
+    const reviewState = _ensureTabReviewState(targetTab);
+    if (!reviewState) return;
+    const textarea = $(_reviewCommentTextareaId(resolvedReviewId));
+    const nextText = textarea ? String(textarea.value || '').trim() : String(entry.item.text || '').trim();
+    if (!nextText) {
+      showToast('批注内容不能为空', 'info');
+      if (textarea && typeof textarea.focus === 'function') textarea.focus();
+      return;
+    }
+    const wasDraft = !String(entry.item.text || '').trim();
+    const nextComments = reviewState.comments.map((item) => _serializeReviewComment(item));
+    const commentIndex = reviewState.comments.findIndex((item) => {
+      const itemReviewId = String((item && (item.review_id || item.id)) || '').trim();
+      return itemReviewId === resolvedReviewId || String((item && item.id) || '').trim() === String(reviewId || '').trim();
+    });
+    if (commentIndex < 0) return;
+    nextComments[commentIndex] = Object.assign({}, nextComments[commentIndex], { text: nextText, _draft: false });
+    state._editingReviewCommentId = '';
+    window.WA.onDocxCommentsChanged(nextComments, targetTab.path);
+    const nextReviewState = _ensureTabReviewState(targetTab);
+    if (nextReviewState) nextReviewState.focusedId = resolvedReviewId;
+    state._reviewCenterOpen = true;
+    localStorage.setItem('wa_review_center_open', '1');
+    _renderReviewShell();
+    _scrollReviewCardIntoView(resolvedReviewId);
+    WA.scheduleAutoSave();
+    showToast(wasDraft ? '已添加批注' : '批注内容已更新', 'success');
+  };
+
+  window.WA.focusReviewThread = async (reviewId) => {
+    const entry = _findReviewEntry(reviewId);
+    if (!entry.item) return;
+    if (entry.tab && entry.tab.path !== state.activeTabPath) {
+      await _switchToTab(entry.tab.path);
+    }
+    if (entry.kind === 'proposal') {
+      _focusReviewProposal(entry.item);
+      return;
+    }
+    _focusReviewComment(entry.item);
+  };
+
+  window.WA.onDocxCommentsChanged = (comments, tabPath) => {
+    const targetTab = tabPath
+      ? state.openTabs.find((tab) => tab.path === tabPath)
+      : _activeReviewTab();
+    if (!targetTab) return;
+    const reviewState = _ensureTabReviewState(targetTab);
+    const sourceComments = Array.isArray(comments) ? comments : [];
+    reviewState.comments = sourceComments.map((comment, index) => _normalizeReviewComment(comment, index));
+    if (targetTab.serverData && typeof targetTab.serverData === 'object') {
+      targetTab.serverData.comments = sourceComments.map((comment) => _cloneSerializable(comment, {}) || {});
+    }
+    if (targetTab.path === state.activeTabPath) {
+      _syncReviewStateForActiveFile().catch(() => {});
+    } else {
+      _renderReviewSelectionLauncher();
+    }
+  };
+
   function _getDocxRenderOpts(docxData) {
     const data = (docxData && typeof docxData === 'object') ? docxData : {};
     return {
@@ -1469,11 +3612,7 @@ window.WA = window.WA || {};
   }
 
   function _syncDocxOutlineAfterMount(headings) {
-    if (Array.isArray(headings)) {
-      _setupDocOutline(headings);
-      return;
-    }
-    setTimeout(() => _setupDocOutline([]), 300);
+    _setupDocOutline(Array.isArray(headings) ? headings : []);
   }
 
   async function _mountDocxEditor(tab, html, docxData, headings) {
@@ -1525,10 +3664,9 @@ window.WA = window.WA || {};
 
   function _syncPrimarySaveButtons(tab) {
     const activeTab = tab || state.openTabs.find(t => t.path === state.activeTabPath) || null;
-    const activeType = activeTab ? activeTab.fileType : state.fileType;
+    const profile = _activeCapabilityProfile(activeTab);
     const disabled = (
-      activeType === 'pdf' ||
-      activeType === 'image' ||
+      profile.workspace.edit_mode !== 'native' ||
       _isDocxProgressivePendingTab(activeTab)
     );
     const saveBtn = $('wa-save-btn');
@@ -1646,7 +3784,7 @@ window.WA = window.WA || {};
               nextScrollEl.scrollTop = Math.min(prevScrollTop, maxScroll);
             }
           });
-          _setupDocOutline(fullData.headings || []);
+          _syncDocxOutlineAfterMount(fullData.headings || []);
         }
       } catch (err) {
         progressive.loading = false;
@@ -1681,6 +3819,9 @@ window.WA = window.WA || {};
     if (Object.prototype.hasOwnProperty.call(payload, 'margin_bottom_px')) docxData.margin_bottom_px = payload.margin_bottom_px;
     if (Object.prototype.hasOwnProperty.call(payload, 'margin_left_px')) docxData.margin_left_px = payload.margin_left_px;
     if (Object.prototype.hasOwnProperty.call(payload, 'margin_right_px')) docxData.margin_right_px = payload.margin_right_px;
+    if (Array.isArray(payload.comments)) {
+      docxData.comments = payload.comments.map((comment) => _cloneSerializable(comment, {}) || {});
+    }
     tab.serverData = docxData;
   }
 
@@ -1688,10 +3829,110 @@ window.WA = window.WA || {};
     if (!editor || typeof editor.serialize !== 'function') return null;
     if (tab && tab.fileType === 'docx' && typeof editor.getDocxSavePayload === 'function') {
       const payload = editor.getDocxSavePayload();
+      const reviewState = _ensureTabReviewState(tab);
+      if (reviewState && Array.isArray(reviewState.comments)) {
+        payload.comments = reviewState.comments
+          .map((comment) => _serializeReviewComment(comment))
+          .filter((comment) => comment.anchor_text && comment.text);
+      }
       _cacheDocxTabState(tab, payload);
       return payload;
     }
     return editor.serialize();
+  }
+
+  function _ctxMenuZoom() {
+    const inlineZoom = parseFloat(document.documentElement?.style?.zoom || '');
+    if (Number.isFinite(inlineZoom) && inlineZoom > 0) return inlineZoom;
+    const computedZoom = parseFloat(window.getComputedStyle(document.documentElement).zoom || '');
+    return Number.isFinite(computedZoom) && computedZoom > 0 ? computedZoom : 1;
+  }
+
+  function _logicalCtxValue(value, zoom) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number / zoom : 0;
+  }
+
+  function _logicalCtxRect(rect, zoom) {
+    return {
+      left: _logicalCtxValue(rect?.left, zoom),
+      top: _logicalCtxValue(rect?.top, zoom),
+      right: _logicalCtxValue(rect?.right, zoom),
+      bottom: _logicalCtxValue(rect?.bottom, zoom),
+      width: _logicalCtxValue(rect?.width, zoom),
+      height: _logicalCtxValue(rect?.height, zoom),
+    };
+  }
+
+  function _measureCtxMenu(menu) {
+    const zoom = _ctxMenuZoom();
+    const rect = _logicalCtxRect(menu.getBoundingClientRect(), zoom);
+    const itemCount = menu.querySelectorAll('.wa-ctx-item').length;
+    const separatorCount = menu.querySelectorAll('.wa-ctx-separator').length;
+    return {
+      zoom,
+      viewportWidth: window.innerWidth / zoom,
+      viewportHeight: window.innerHeight / zoom,
+      width: rect.width || menu.offsetWidth || 180,
+      height: rect.height || menu.scrollHeight || menu.offsetHeight ||
+        (itemCount * 28 + separatorCount * 7 + 8),
+    };
+  }
+
+  function _logicalCtxPoint(event, zoom) {
+    return {
+      x: _logicalCtxValue(event?.clientX, zoom),
+      y: _logicalCtxValue(event?.clientY, zoom),
+    };
+  }
+
+  function _clampCtxMenuPosition(x, y, menuW, menuH, zoom, { clampToLeftPanel = false } = {}) {
+    const viewportWidth = window.innerWidth / zoom;
+    const viewportHeight = window.innerHeight / zoom;
+    if (clampToLeftPanel) {
+      const leftPanel = document.getElementById('wa-left');
+      if (leftPanel) {
+        const panelRect = _logicalCtxRect(leftPanel.getBoundingClientRect(), zoom);
+        if (x + menuW > panelRect.right) x = panelRect.right - menuW - 4;
+        if (x < panelRect.left) x = panelRect.left + 4;
+      }
+    }
+    if (x + menuW > viewportWidth) x = viewportWidth - menuW - 4;
+    if (x < 4) x = 4;
+    if (y + menuH > viewportHeight - 2) y = Math.max(4, viewportHeight - menuH - 4);
+    if (y < 4) y = 4;
+    return { x, y };
+  }
+
+  function _positionCtxMenu(menu, event, { alignToButton = false, clampToLeftPanel = false } = {}) {
+    menu.classList.add('open');
+    menu.style.visibility = 'hidden';
+    menu.style.top = '0px';
+    menu.style.left = '0px';
+    void menu.getBoundingClientRect();
+    const metrics = _measureCtxMenu(menu);
+    menu.style.visibility = '';
+
+    let { x, y } = _logicalCtxPoint(event, metrics.zoom);
+    const btn = alignToButton
+      ? event?.currentTarget?.closest?.('button') || event?.target?.closest?.('button')
+      : null;
+    if (btn) {
+      const btnRect = _logicalCtxRect(btn.getBoundingClientRect(), metrics.zoom);
+      x = btnRect.right - metrics.width;
+      y = (btnRect.bottom + metrics.height + 4 <= metrics.viewportHeight)
+        ? btnRect.bottom + 2
+        : Math.max(4, btnRect.top - metrics.height - 2);
+    } else {
+      y = (y + metrics.height + 4 <= metrics.viewportHeight)
+        ? y
+        : Math.max(4, y - metrics.height);
+    }
+
+    ({ x, y } = _clampCtxMenuPosition(x, y, metrics.width, metrics.height, metrics.zoom, { clampToLeftPanel }));
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    _clampMenuPos(menu);
   }
 
   window.WA._showBrowserCtx = (event, el) => {
@@ -1711,6 +3952,7 @@ window.WA = window.WA || {};
     const SVG = {
       open:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
       copy:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+      cut:    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88"/><path d="M14.47 14.48 20 20"/><path d="M8.12 8.12 12 12"/></svg>`,
       paste:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/></svg>`,
       rename: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
       newf:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>`,
@@ -1756,49 +3998,10 @@ window.WA = window.WA || {};
       html += `<div class="wa-ctx-item danger" onclick="WA._fsBrowserDelete();_closeCtxMenu()">${SVG.del} 删除</div>`;
     }
     menu.innerHTML = html;
-    // Show at (0,0) hidden — browser computes real layout; no flash because paint
-    // is batched until after this synchronous handler returns.
-    menu.classList.add('open');
-    menu.style.visibility = 'hidden';
-    menu.style.top  = '0px';
-    menu.style.left = '0px';
-    void menu.getBoundingClientRect(); // force synchronous reflow
-    const menuH = menu.scrollHeight || menu.offsetHeight ||
-      (menu.querySelectorAll('.wa-ctx-item').length * 28 +
-       menu.querySelectorAll('.wa-ctx-separator').length * 7 + 8);
-    const menuW = menu.offsetWidth || 180;
-    menu.style.visibility = '';
-    const vw = window.innerWidth, vh = window.innerHeight;
-    let x, y;
-    if (event.type === 'click') {
-      const btn = event.target.closest('button');
-      if (btn) {
-        const btnRect = btn.getBoundingClientRect();
-        x = btnRect.right - menuW;
-        // Enough room below button? show below; otherwise flip above
-        y = (btnRect.bottom + menuH + 4 <= vh)
-          ? btnRect.bottom + 2
-          : Math.max(4, btnRect.top - menuH - 2);
-      } else {
-        x = event.clientX;
-        y = (event.clientY + menuH + 4 <= vh)
-          ? event.clientY
-          : Math.max(4, event.clientY - menuH);
-      }
-    } else {
-      x = event.clientX;
-      y = (event.clientY + menuH + 4 <= vh)
-        ? event.clientY
-        : Math.max(4, event.clientY - menuH);
-    }
-    if (x + menuW > vw) x = vw - menuW - 4;
-    if (x < 4) x = 4;
-    // Final safety clamp — catches edge cases where menuH was mis-measured
-    if (y + menuH > vh - 2) y = Math.max(4, vh - menuH - 4);
-    if (y < 4) y = 4;
-    menu.style.left = x + 'px';
-    menu.style.top  = y + 'px';
-    _clampMenuPos(menu); // secondary pass using actual rendered rect
+    _positionCtxMenu(menu, event, {
+      alignToButton: event.type === 'click',
+      clampToLeftPanel: true,
+    });
   };
 
   // ── Browser context menu actions ──────────────────────────────────────────
@@ -2319,38 +4522,7 @@ window.WA = window.WA || {};
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
         删除
       </div>`;
-    // Show at (0,0) hidden — browser computes real layout; no flash because paint
-    // is batched until after this synchronous handler returns.
-    menu.classList.add('open');
-    menu.style.visibility = 'hidden';
-    menu.style.top  = '0px';
-    menu.style.left = '0px';
-    void menu.getBoundingClientRect(); // force synchronous reflow
-    const menuH2 = menu.scrollHeight || menu.offsetHeight ||
-      (menu.querySelectorAll('.wa-ctx-item').length * 28 +
-       menu.querySelectorAll('.wa-ctx-separator').length * 7 + 8);
-    const menuW2 = menu.offsetWidth || 180;
-    menu.style.visibility = '';
-    const vw = window.innerWidth, vh = window.innerHeight;
-    let x = event.clientX;
-    // Enough room below cursor? show below; otherwise flip above
-    let y = (event.clientY + menuH2 + 4 <= vh)
-      ? event.clientY
-      : Math.max(4, event.clientY - menuH2);
-    // Clamp within left panel
-    const leftPanel = document.getElementById('wa-left');
-    if (leftPanel) {
-      const lRect = leftPanel.getBoundingClientRect();
-      if (x + menuW2 > lRect.right) x = lRect.right - menuW2 - 4;
-      if (x < lRect.left) x = lRect.left + 4;
-    }
-    if (x + menuW2 > vw) x = vw - menuW2 - 4;
-    if (x < 4) x = 4;
-    if (y + menuH2 > vh - 2) y = Math.max(4, vh - menuH2 - 4);
-    if (y < 4) y = 4;
-    menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
-    _clampMenuPos(menu); // secondary pass using actual rendered rect
+    _positionCtxMenu(menu, event, { clampToLeftPanel: true });
   };
 
   function _closeCtxMenu() {
@@ -2364,8 +4536,10 @@ window.WA = window.WA || {};
   // corrects overflow in all directions. Handles cases where the pre-position
   // height measurement (scrollHeight/offsetHeight) returned 0 or was wrong.
   function _clampMenuPos(menu) {
-    const r = menu.getBoundingClientRect();
-    const vw2 = window.innerWidth, vh2 = window.innerHeight;
+    const zoom = _ctxMenuZoom();
+    const r = _logicalCtxRect(menu.getBoundingClientRect(), zoom);
+    const vw2 = window.innerWidth / zoom;
+    const vh2 = window.innerHeight / zoom;
     let t = parseFloat(menu.style.top), l = parseFloat(menu.style.left);
     if (r.bottom > vh2 - 2) t = Math.max(4, t - (r.bottom - vh2 + 4));
     if (r.right  > vw2 - 2) l = Math.max(4, vw2 - r.width - 4);
@@ -2524,37 +4698,7 @@ window.WA = window.WA || {};
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
         删除文件夹
       </div>`;
-    // Measure actual height before positioning (same pattern as _showBrowserCtx)
-    menu.classList.add('open');
-    menu.style.visibility = 'hidden';
-    menu.style.top  = '0px';
-    menu.style.left = '0px';
-    void menu.getBoundingClientRect();
-    const menuH3 = menu.scrollHeight || menu.offsetHeight ||
-      (menu.querySelectorAll('.wa-ctx-item').length * 28 +
-       menu.querySelectorAll('.wa-ctx-separator').length * 7 + 8);
-    const menuW3 = menu.offsetWidth || 180;
-    menu.style.visibility = '';
-    const vw = window.innerWidth, vh = window.innerHeight;
-    let x = event.clientX;
-    // Flip above cursor if not enough room below
-    let y = (event.clientY + menuH3 + 4 <= vh)
-      ? event.clientY
-      : Math.max(4, event.clientY - menuH3);
-    // Clamp menu within the left panel
-    const leftPanel = document.getElementById('wa-left');
-    if (leftPanel) {
-      const lRect = leftPanel.getBoundingClientRect();
-      if (x + menuW3 > lRect.right) x = lRect.right - menuW3 - 4;
-      if (x < lRect.left) x = lRect.left + 4;
-    }
-    if (x + menuW3 > vw) x = vw - menuW3 - 4;
-    if (x < 4) x = 4;
-    if (y + menuH3 > vh - 2) y = Math.max(4, vh - menuH3 - 4);
-    if (y < 4) y = 4;
-    menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
-    _clampMenuPos(menu); // secondary pass using actual rendered rect
+    _positionCtxMenu(menu, event, { clampToLeftPanel: true });
   };
 
   window.WA._ctxFolderRename = () => {
@@ -2790,6 +4934,7 @@ window.WA = window.WA || {};
     if (state.openTabs.some(t => t.path === path)) {
       _trackUserOpen(path);  // still track re-opens as user intent
       await _switchToTab(path);
+      _maybeAutoOpenReviewCenterForImportedItems(_ensureTabReviewState(_activeReviewTab()));
       return;
     }
     const baseName = path.split('/').pop();
@@ -2823,18 +4968,24 @@ window.WA = window.WA || {};
 
   window.WA.reloadFileByPath = async (filePath, supported = true) => {
     if (!filePath) return;
+    const rawPath = String(filePath);
+    const normalizedPath = rawPath.replace(/\\/g, '/');
     const workspacePath = (state._workspacePath || '').replace(/\\/g, '/');
-    const normalizedPath = String(filePath).replace(/\\/g, '/');
-    const isInWorkspace = workspacePath && (
-      normalizedPath.startsWith(workspacePath + '/') || normalizedPath === workspacePath
-    );
+    const looksAbsolute = /^(?:[a-zA-Z]:\/|\/|\/\/)/.test(normalizedPath);
+    let relativePath = '';
+    if (workspacePath && looksAbsolute && (
+      normalizedPath === workspacePath || normalizedPath.startsWith(workspacePath + '/')
+    )) {
+      relativePath = normalizedPath.slice(workspacePath.length).replace(/^\//, '');
+    } else if (!looksAbsolute) {
+      relativePath = normalizedPath.replace(/^\//, '');
+    }
 
     try {
       let res;
       let json;
       let wsPath = filePath;
-      if (isInWorkspace) {
-        const relativePath = normalizedPath.slice(workspacePath.length).replace(/^\//, '');
+      if (relativePath) {
         res = await fetch('/api/v1/workspace/open_file_by_path', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2847,10 +4998,10 @@ window.WA = window.WA || {};
         res = await fetch('/api/v1/workspace/open_abs_file', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: filePath }),
+          body: JSON.stringify({ path: rawPath }),
         });
         json = await _safeJson(res);
-        wsPath = filePath;
+        wsPath = rawPath;
       }
 
       if (!res.ok) throw new Error(json.error || '刷新失败');
@@ -2877,6 +5028,30 @@ window.WA = window.WA || {};
       state.isLoading = false;
       setLoading(false);
     }
+  };
+
+  window.WA.openRecentFile = async (filePath) => {
+    if (!filePath) return;
+
+    const rawPath = String(filePath);
+    const normalizedPath = rawPath.replace(/\\/g, '/');
+    const workspacePath = (state._workspacePath || '').replace(/\\/g, '/');
+    const ext = normalizedPath.includes('.') ? normalizedPath.split('.').pop().toLowerCase() : '';
+    const supported = _isSupportedExt(ext);
+    const looksAbsolute = /^(?:[a-zA-Z]:\/|\/|\/\/)/.test(normalizedPath);
+
+    if (workspacePath && looksAbsolute && (
+      normalizedPath === workspacePath || normalizedPath.startsWith(workspacePath + '/')
+    )) {
+      const relativePath = normalizedPath.slice(workspacePath.length).replace(/^\//, '');
+      return window.WA.openWorkspaceFile(relativePath);
+    }
+
+    if (!looksAbsolute) {
+      return window.WA.openWorkspaceFile(normalizedPath.replace(/^\//, ''));
+    }
+
+    return window.WA.openBrowserFile(rawPath, supported);
   };
 
   // ── Global Selection Tooltip ──
@@ -2954,6 +5129,12 @@ window.WA = window.WA || {};
   }
 
   function _selectionContextPreview(selectionContext, limit = 60) {
+    if (selectionContext && typeof selectionContext === 'object') {
+      const previewText = String(selectionContext.previewText || selectionContext.preview_text || '').trim();
+      if (previewText) {
+        return previewText.length > limit ? previewText.substring(0, limit) + '…' : previewText;
+      }
+    }
     const text = _selectionContextText(selectionContext);
     if (!text) return '';
     return text.length > limit ? text.substring(0, limit) + '…' : text;
@@ -2963,11 +5144,13 @@ window.WA = window.WA || {};
     if (text && typeof text === 'object') {
       const normalizedText = _selectionContextText(text);
       if (!normalizedText) return null;
+      const previewText = String(text.previewText || text.preview_text || '').trim();
       const sourcePath = String(text.sourcePath || text.source_path || '').trim();
       const sourceName = String(text.sourceName || text.source_name || '').trim();
       const sourceType = String(text.sourceType || text.source_type || '').trim();
       return {
         text: normalizedText,
+        previewText,
         sourcePath,
         sourceName: sourceName || (sourcePath ? sourcePath.split(/[\\/]/).pop() || sourcePath : ''),
         sourceType,
@@ -2977,10 +5160,12 @@ window.WA = window.WA || {};
     const normalizedText = String(text || '').trim();
     if (!normalizedText) return null;
     const meta = sourceMeta || _getPinnedSelectionSourceMeta();
+    const previewText = String(meta.previewText || meta.preview_text || '').trim();
     const sourcePath = String(meta.sourcePath || meta.source_path || '').trim();
     const sourceName = String(meta.sourceName || meta.source_name || '').trim();
     return {
       text: normalizedText,
+      previewText,
       sourcePath,
       sourceName: sourceName || (sourcePath ? sourcePath.split(/[\\/]/).pop() || sourcePath : ''),
       sourceType: String(meta.sourceType || meta.source_type || '').trim(),
@@ -2990,26 +5175,28 @@ window.WA = window.WA || {};
   function _updateContextBar(opts) {
     const bar = $('wa-context-bar');
     if (!bar) return;
+    bar.dataset.rule = _WA_EXPLICIT_CONTEXT_RULE;
     const nFiles = (opts && opts.files != null) ? opts.files : (state._aiFileContext ? state._aiFileContext.length : 0);
     const selText = (opts && opts.selection) || '';
     const tableInfo = (opts && opts.table) || '';
     const pinnedSelectionText = _selectionContextText(state.pinnedSelection);
     const pinnedSelectionSource = _selectionContextSourceLabel(state.pinnedSelection);
+    const clearSelectionButton = '<button class="ctx-bar-clear" onclick="WA.clearSelection()" title="取消选区">&times;</button>';
 
     const parts = [];
 
     // Selection preview
     if (selText) {
       const preview = selText.length > 60 ? selText.substring(0, 60) + '…' : selText;
-      parts.push(`<span class="ctx-bar-sel">已选中：<b>${_escHtml(preview)}</b></span>`);
+      parts.push(`<span class="ctx-bar-sel">已选中：<b>${_escHtml(preview)}</b>${clearSelectionButton}</span>`);
     } else if (tableInfo) {
-      parts.push(`<span class="ctx-bar-sel">已选中：<b>${_escHtml(tableInfo)}</b></span>`);
+      parts.push(`<span class="ctx-bar-sel">已选中：<b>${_escHtml(tableInfo)}</b>${clearSelectionButton}</span>`);
     } else if (pinnedSelectionText) {
       const preview = _selectionContextPreview(state.pinnedSelection, 60);
       const sourceHint = pinnedSelectionSource
         ? `<span class="ctx-bar-source">来自 <b>${_escHtml(pinnedSelectionSource)}</b></span>`
         : '';
-      parts.push(`<span class="ctx-bar-sel"><span class="ctx-bar-quote"></span>${_escHtml(preview)}${sourceHint}<button class="ctx-bar-clear" onclick="WA.clearSelection()" title="取消选区">&times;</button></span>`);
+      parts.push(`<span class="ctx-bar-sel"><span class="ctx-bar-quote"></span>${_escHtml(preview)}${sourceHint}${clearSelectionButton}</span>`);
     }
 
     // File context
@@ -3024,6 +5211,17 @@ window.WA = window.WA || {};
       bar.innerHTML = '';
       bar.style.display = 'none';
     }
+
+    if (state.fileType === 'docx') {
+      _syncReviewSelectionSnapshot();
+      _syncDocxReviewToolbar();
+      if (state._reviewCenterOpen && !state._editingReviewCommentId && !_isReviewEditorFocused() && !_isReviewShellFocused()) {
+        _renderReviewShell();
+      }
+      _renderReviewSelectionLauncher();
+    } else {
+      _hideReviewSelectionLauncher();
+    }
   }
 
   // Update the selection chip UI with new text (used in multiple places)
@@ -3033,21 +5231,19 @@ window.WA = window.WA || {};
       WA.clearSelection();
       return;
     }
+    state._selectionDismissed = false;
     state.pinnedSelection = selectionContext;
     const preview = _selectionContextPreview(selectionContext, 200);
 
     // Update the unified context bar
     _updateContextBar();
-
-    // Also pin in inline AI dialog's chip (if it exists)
-    const iaiPreview = $('wa-iai-selection-preview');
-    if (iaiPreview) iaiPreview.textContent = preview;
-    const iaiChip = $('wa-iai-selection-chip');
-    if (iaiChip) iaiChip.style.display = 'flex';
   }
 
   function _hasUsableDocxSelectionTarget() {
     if (state.fileType !== 'docx' || !state.activeEditor || !state.activeEditor.editor) {
+      return false;
+    }
+    if (state._selectionDismissed) {
       return false;
     }
     const editorHost = state.activeEditor;
@@ -3062,26 +5258,206 @@ window.WA = window.WA || {};
     return !!editorHost._toolbarSelection;
   }
 
+  function _trimDocxAnchorSlice(rawText) {
+    const sourceText = String(rawText || '');
+    if (!sourceText) return null;
+    const trimmedText = sourceText.trim();
+    if (!trimmedText) return null;
+    const leadingMatch = sourceText.match(/^\s*/);
+    return {
+      text: trimmedText,
+      leadingLength: leadingMatch ? leadingMatch[0].length : 0,
+    };
+  }
+
+  function _countTextOccurrencesBefore(sourceText, targetText, endOffset) {
+    const haystack = String(sourceText || '');
+    const needle = String(targetText || '');
+    const limit = Math.max(0, Number(endOffset) || 0);
+    if (!haystack || !needle || limit <= 0) return 0;
+    let count = 0;
+    let cursor = 0;
+    while (cursor < limit) {
+      const hitIndex = haystack.indexOf(needle, cursor);
+      if (hitIndex === -1 || hitIndex >= limit) break;
+      count += 1;
+      cursor = hitIndex + Math.max(needle.length, 1);
+    }
+    return count;
+  }
+
+  function _buildDocxTextAnchorMeta(editorHost, from, to) {
+    const liveEditor = editorHost && editorHost.editor;
+    const liveDoc = liveEditor && liveEditor.state && liveEditor.state.doc;
+    if (!liveDoc) return null;
+    const selectionFrom = Math.max(0, Number(from) || 0);
+    const selectionTo = Math.max(selectionFrom, Number(to) || 0);
+    if (selectionTo <= selectionFrom) return null;
+
+    const fullText = String(liveDoc.textBetween(0, liveDoc.content.size, '\n', '\n') || '');
+    const rawSelectionText = String(liveDoc.textBetween(selectionFrom, selectionTo, '\n', '\n') || '');
+    const trimmedSelection = _trimDocxAnchorSlice(rawSelectionText);
+    if (!trimmedSelection || !trimmedSelection.text) return null;
+
+    const leadingText = String(liveDoc.textBetween(0, selectionFrom, '\n', '\n') || '');
+    const anchorStartOffset = Math.max(0, leadingText.length + trimmedSelection.leadingLength);
+    const anchorEndOffset = Math.max(anchorStartOffset, anchorStartOffset + trimmedSelection.text.length);
+
+    return {
+      anchor_text: trimmedSelection.text,
+      anchor_start_offset: anchorStartOffset,
+      anchor_end_offset: anchorEndOffset,
+      anchor_occurrence: _countTextOccurrencesBefore(fullText, trimmedSelection.text, anchorStartOffset),
+      anchor_context_before: fullText.slice(Math.max(0, anchorStartOffset - 48), anchorStartOffset),
+      anchor_context_after: fullText.slice(anchorEndOffset, anchorEndOffset + 48),
+    };
+  }
+
+  function _getDocxSelectionPayload({ includeOverlay = true, allowStaleFallback = true, includeAnchorMeta = false } = {}) {
+    if (state.fileType !== 'docx') return null;
+
+    const _makePayload = (kind, rawText, {
+      previewText = '',
+      countLabel = '',
+      aiText = '',
+      tableElement = null,
+      anchorMeta = null,
+    } = {}) => {
+      const normalizedText = String(rawText || '').trim();
+      if (!normalizedText) return null;
+      const normalizedPreview = String(previewText || '').trim() || normalizedText;
+      const payload = {
+        kind,
+        rawText: normalizedText,
+        aiText: String(aiText || normalizedText).trim(),
+        previewText: normalizedPreview,
+        countLabel: String(countLabel || '').trim(),
+        tableElement: tableElement || null,
+      };
+      const normalizedAnchorMeta = (anchorMeta && typeof anchorMeta === 'object')
+        ? (_cloneSerializable(anchorMeta, {}) || {})
+        : null;
+      if (normalizedAnchorMeta) {
+        Object.assign(payload, normalizedAnchorMeta);
+      }
+      return payload;
+    };
+
+    if (includeOverlay) {
+      const overlaySelection = _getDocxHdrFtrSelectionInfo();
+      if (overlaySelection && overlaySelection.text) {
+        const overlayText = String(overlaySelection.text || '').trim();
+        return _makePayload('text', overlayText, {
+          countLabel: `${overlayText.replace(/\s/g, '').length}字`,
+        });
+      }
+    }
+
+    const editorHost = state.activeEditor;
+    if (!editorHost) return null;
+    const _ed = editorHost.editor;
+    const _s = _ed && _ed.state && _ed.state.selection;
+    const liveTextAnchorMeta = (includeAnchorMeta && _ed && _s && _s.from < _s.to)
+      ? _buildDocxTextAnchorMeta(editorHost, _s.from, _s.to)
+      : null;
+
+    if (typeof editorHost.getWholeTableSelectionInfo === 'function') {
+      const wholeTableInfo = editorHost.getWholeTableSelectionInfo();
+      const wholeTableText = String(wholeTableInfo && wholeTableInfo.text || '').trim();
+      if (wholeTableText) {
+        const rows = Math.max(0, Number(wholeTableInfo.rows) || 0);
+        const cols = Math.max(0, Number(wholeTableInfo.cols) || 0);
+        const tableLabel = rows > 0 && cols > 0
+          ? `${rows}×${cols} 表格`
+          : (rows > 0 ? `${rows} 行表格` : '表格');
+        return _makePayload('table', wholeTableText, {
+          previewText: tableLabel,
+          countLabel: tableLabel,
+          aiText: `[当前选中表格数据]:\n${wholeTableText}\n`,
+          tableElement: wholeTableInfo.tableElement || null,
+        });
+      }
+    }
+
+    if (typeof editorHost.getCellSelectionInfo === 'function') {
+      const cellSelectionInfo = editorHost.getCellSelectionInfo();
+      const cellSelectionText = String(cellSelectionInfo && cellSelectionInfo.text || '').trim();
+      if (cellSelectionText) {
+        const rows = Math.max(0, Number(cellSelectionInfo.rows) || 0);
+        const cols = Math.max(0, Number(cellSelectionInfo.cols) || 0);
+        const selectedCells = Math.max(0, Number(cellSelectionInfo.selectedCells) || 0);
+        const cellLabel = rows > 0 && cols > 0
+          ? `${rows}×${cols} 单元格区域`
+          : (selectedCells > 0 ? `${selectedCells} 个单元格` : '单元格');
+        return _makePayload('cell', cellSelectionText, {
+          previewText: cellLabel,
+          countLabel: cellLabel,
+          aiText: `[当前选中表格数据]:\n${cellSelectionText}\n`,
+          tableElement: cellSelectionInfo.tableElement || null,
+        });
+      }
+    }
+
+    if (typeof editorHost.getSelectionTextForAI === 'function') {
+      const selectionTextForAI = String(editorHost.getSelectionTextForAI() || '').trim();
+      if (selectionTextForAI) {
+        return _makePayload('text', (liveTextAnchorMeta && liveTextAnchorMeta.anchor_text) || selectionTextForAI, {
+          countLabel: `${selectionTextForAI.replace(/\s/g, '').length}字`,
+          anchorMeta: liveTextAnchorMeta,
+        });
+      }
+    }
+
+    if (_hasUsableDocxSelectionTarget()) {
+      if (_ed && _s && _s.from < _s.to) {
+        const liveText = (_ed.state.doc.textBetween(_s.from, _s.to, ' ') || '').trim();
+        if (liveText) {
+          return _makePayload('text', (liveTextAnchorMeta && liveTextAnchorMeta.anchor_text) || liveText, {
+            countLabel: `${liveText.replace(/\s/g, '').length}字`,
+            anchorMeta: liveTextAnchorMeta,
+          });
+        }
+      }
+    }
+
+    if (allowStaleFallback) {
+      const fallbackText = String(lastSelectionText || '').trim();
+      if (fallbackText) {
+        return _makePayload('text', fallbackText, {
+          countLabel: `${fallbackText.replace(/\s/g, '').length}字`,
+        });
+      }
+    }
+
+    return null;
+  }
+
   function _getDocxSelectionTextForAI() {
-    if (state.fileType !== 'docx' || !state.activeEditor || !state.activeEditor.editor) {
-      return '';
-    }
-    if (!_hasUsableDocxSelectionTarget()) {
-      return '';
-    }
-    const _ed = state.activeEditor.editor;
-    const _s = _ed.state.selection;
-    if (_s.from < _s.to) {
-      return (_ed.state.doc.textBetween(_s.from, _s.to, ' ') || '').trim();
-    }
-    return (lastSelectionText || '').trim();
+    const docxSelection = _getDocxSelectionPayload();
+    return docxSelection ? docxSelection.aiText : '';
+  }
+
+  function _getActiveTextEditorSelectionForAI() {
+    const editor = state.activeEditor;
+    const textarea = editor && editor._ta ? editor._ta : $('wa-text-content');
+    if (!textarea || typeof textarea.value !== 'string') return '';
+    if (typeof textarea.selectionStart !== 'number' || typeof textarea.selectionEnd !== 'number') return '';
+    const start = Math.max(0, Number(textarea.selectionStart) || 0);
+    const end = Math.max(start, Number(textarea.selectionEnd) || 0);
+    if (end <= start) return '';
+    const liveText = String(textarea.value || '').slice(start, end).trim();
+    if (liveText) lastSelectionText = liveText;
+    return liveText;
   }
 
   function _getLiveEditorSelectionForAI() {
-    let sel = lastSelectionText;
     if (state.fileType === 'docx') {
-      sel = _getDocxSelectionTextForAI();
+      const docxSelection = _getDocxSelectionPayload();
+      return docxSelection
+        ? { text: docxSelection.aiText, previewText: docxSelection.previewText }
+        : null;
     }
+    let sel = _getActiveTextEditorSelectionForAI() || lastSelectionText;
     if (!sel && state.fileType === 'xlsx' && state.activeEditor) {
       const rangeText = state.activeEditor.getContent();
       if (rangeText && !rangeText.includes('未选中区域')) sel = rangeText;
@@ -3099,27 +5475,10 @@ window.WA = window.WA || {};
   }
 
   function _updateSubjectBar(fileName, fileType) {
-    const bar = $('wa-subject-bar');
-    const iconEl = $('wa-subject-icon');
-    const txt = $('wa-subject-text');
-    const hasAttachedFiles = Array.isArray(state._aiFileContext) && state._aiFileContext.length > 0;
     const footerChip = $('wa-footer-file-chip');
     const footerLabel = $('wa-footer-file-label');
     const footerIcon = $('wa-footer-file-icon');
     const footerAttachBtn = $('wa-footer-attach-current-btn');
-    const currentPath = _currentAIContextPath();
-    const currentFileAttached = _findAIContextFileIndex(currentPath) >= 0;
-
-    if (bar) {
-      if (!fileName || hasAttachedFiles) {
-        bar.style.display = 'none';
-      } else {
-        const icons = { docx: '📝', xlsx: '📊', pptx: '📋', pdf: '📕', text: '📄', code: '⌨️' };
-        if (iconEl) iconEl.textContent = icons[fileType] || '📄';
-        if (txt) txt.textContent = fileName;
-        bar.style.display = 'flex';
-      }
-    }
 
     if (!fileName) {
       if (footerChip) footerChip.style.display = 'none';
@@ -3139,30 +5498,54 @@ window.WA = window.WA || {};
     }
 
     if (footerAttachBtn) {
-      if (!currentPath) {
-        footerAttachBtn.style.display = 'none';
-      } else {
-        footerAttachBtn.style.display = 'inline-flex';
-        footerAttachBtn.classList.toggle('active', currentFileAttached);
-        footerAttachBtn.textContent = currentFileAttached ? '已附加' : '附加到任务';
-        footerAttachBtn.title = currentFileAttached
-          ? '从当前任务上下文移除当前文件'
-          : '将当前打开文件附加到当前任务上下文';
-      }
+      footerAttachBtn.style.display = 'none';
     }
 
   }
 
   // ── Extract PPTX table shape data as tab-separated text (for AI actions) ──
-  function _extractPptxTableText(shape) {
+  function _normalizePptxTableSelection(selection, maxRows, maxCols) {
+    if (!selection || maxRows <= 0 || maxCols <= 0) return null;
+
+    const anchorRow = Math.max(0, Math.min(maxRows - 1, Number(selection.anchorRow)));
+    const anchorCol = Math.max(0, Math.min(maxCols - 1, Number(selection.anchorCol)));
+    const headRow = Math.max(0, Math.min(maxRows - 1, Number(selection.headRow)));
+    const headCol = Math.max(0, Math.min(maxCols - 1, Number(selection.headCol)));
+    if (![anchorRow, anchorCol, headRow, headCol].every(Number.isFinite)) return null;
+
+    const startRow = Math.min(anchorRow, headRow);
+    const endRow = Math.max(anchorRow, headRow);
+    const startCol = Math.min(anchorCol, headCol);
+    const endCol = Math.max(anchorCol, headCol);
+
+    return {
+      anchorRow,
+      anchorCol,
+      headRow,
+      headCol,
+      startRow,
+      endRow,
+      startCol,
+      endCol,
+      rows: endRow - startRow + 1,
+      cols: endCol - startCol + 1,
+    };
+  }
+
+  function _extractPptxTableText(shape, selection = null) {
     const rows = shape.table_rows || 0;
     const cols = shape.table_cols || 0;
+    const range = _normalizePptxTableSelection(selection, rows, cols);
     const cellDataMap = {};
     (shape.cells || []).forEach(c => { cellDataMap[c.row + '_' + c.col] = c; });
     const lines = [];
-    for (let r = 0; r < rows; r++) {
+    const startRow = range ? range.startRow : 0;
+    const endRow = range ? range.endRow : rows - 1;
+    const startCol = range ? range.startCol : 0;
+    const endCol = range ? range.endCol : cols - 1;
+    for (let r = startRow; r <= endRow; r++) {
       const rowData = [];
-      for (let c = 0; c < cols; c++) {
+      for (let c = startCol; c <= endCol; c++) {
         const cell = cellDataMap[r + '_' + c];
         rowData.push((cell && cell.text) ? cell.text.replace(/[\t\n]/g, ' ').trim() : '');
       }
@@ -3208,7 +5591,7 @@ window.WA = window.WA || {};
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // Selection geometry helper — returns { top, bottom, centerX }
+  // Selection geometry helper — returns { top, bottom, left, right, centerX }
   // in VIEWPORT coordinates, suitable for position:fixed elements.
   //
   // Uses getClientRects() across ALL line fragments and takes the
@@ -3222,12 +5605,15 @@ window.WA = window.WA || {};
 
     // Collect the TRUE outermost top/bottom from every line fragment
     let top = Infinity, bottom = -Infinity;
+    let minLeft = Infinity, maxRight = -Infinity;
     const rects = range.getClientRects();
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
       if (r.height <= 0 || r.width <= 0) continue;
       if (r.top < top) top = r.top;
       if (r.bottom > bottom) bottom = r.bottom;
+      if (r.left < minLeft) minLeft = r.left;
+      if (r.right > maxRight) maxRight = r.right;
     }
 
     // Fallback: bounding rect (works for single-line)
@@ -3236,6 +5622,8 @@ window.WA = window.WA || {};
       if (!br || br.height <= 0) return null;
       top = br.top;
       bottom = br.bottom;
+      minLeft = br.left;
+      maxRight = br.right;
     }
 
     // Horizontal centre: prefer editor page element for consistent centering
@@ -3249,16 +5637,16 @@ window.WA = window.WA || {};
       centerX = rr.left + rr.width / 2;
     } else {
       // Compute center from the rects themselves
-      let minL = Infinity, maxR = -Infinity;
-      for (let i = 0; i < rects.length; i++) {
-        if (rects[i].height <= 0) continue;
-        if (rects[i].left < minL) minL = rects[i].left;
-        if (rects[i].right > maxR) maxR = rects[i].right;
-      }
-      if (minL !== Infinity) centerX = (minL + maxR) / 2;
+      if (minLeft !== Infinity && maxRight !== -Infinity) centerX = (minLeft + maxRight) / 2;
     }
 
-    return { top, bottom, centerX };
+    return {
+      top,
+      bottom,
+      left: minLeft !== Infinity ? minLeft : centerX,
+      right: maxRight !== -Infinity ? maxRight : centerX,
+      centerX,
+    };
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -3357,6 +5745,9 @@ window.WA = window.WA || {};
       }, 120);
       return;
     }
+    if (_el && _el.closest && (_el.closest('#wa-review-shell') || _el.closest('#wa-review-selection-launcher'))) {
+      return;
+    }
     
     if (state.fileType === 'xlsx') return;
 
@@ -3366,6 +5757,8 @@ window.WA = window.WA || {};
     // hoverbar & AI tooltip would reappear after mousedown already hid them.
     const _insideEditor = _el && _el.closest &&
       (_el.closest('#wa-editor-content') ||
+       _el.closest('#wa-review-shell') ||
+       _el.closest('#wa-review-selection-launcher') ||
        _el.closest('#wa-pdf-viewer') ||
        _el.closest('#wa-pptx-editor') ||
        _el.closest('#wa-pdf-tooltip') ||
@@ -3381,19 +5774,40 @@ window.WA = window.WA || {};
     // During the drag _docxMouseIsDown was true so _kotoDocxSelectionChanged
     // skipped showing.  mouseup is the right moment to display them.
     // Click-to-deselect is caught by the collapsed check below.
-    if (state.fileType === 'docx') {
-      const _dSel = window.getSelection();
-      if (!_dSel || _dSel.isCollapsed || !_dSel.toString().trim()) {
-        // Collapsed / empty → fall through to else-branch for table handling
-      } else {
-        _showDocxHoverBar();
-      }
+    const docxSelection = state.fileType === 'docx'
+      ? _getDocxSelectionPayload({ allowStaleFallback: false })
+      : null;
+
+    if (state.fileType === 'docx' && docxSelection) {
+      _showDocxHoverBar();
     }
 
-    const sel = window.getSelection().toString().trim();
+    if (state.fileType === 'docx' && docxSelection && docxSelection.kind === 'table') {
+      state._selectionDismissed = false;
+      lastSelectionText = docxSelection.rawText;
+
+      const countEl = $('wa-tooltip-count');
+      if (countEl) countEl.textContent = docxSelection.countLabel || docxSelection.previewText;
+
+      if (state.pinnedSelection) {
+        _saveEditorRange();
+        _pinSelectionChip({ text: docxSelection.aiText, previewText: docxSelection.previewText });
+        _clearPinnedHighlight();
+        _applyPinnedHighlight();
+      }
+
+      _updateContextBar({ table: docxSelection.previewText });
+      return;
+    }
+
+    const browserSelection = window.getSelection ? window.getSelection().toString().trim() : '';
+    const sel = state.fileType === 'docx' && docxSelection && docxSelection.kind !== 'table'
+      ? (docxSelection.rawText || browserSelection)
+      : browserSelection;
     const tt = $('wa-pdf-tooltip');
     
     if (sel && sel.length > 0) {
+      state._selectionDismissed = false;
       lastSelectionText = sel;
       
       // DOCX positions the AI tooltip together with its format hoverbar.
@@ -3433,18 +5847,30 @@ window.WA = window.WA || {};
 
       // Update character count badge in tooltip
       const countEl = $('wa-tooltip-count');
-      if (countEl) countEl.textContent = `${sel.replace(/\s/g, '').length}\u5b57`;
+      if (countEl) {
+        countEl.textContent = state.fileType === 'docx' && docxSelection && docxSelection.countLabel
+          ? docxSelection.countLabel
+          : `${sel.replace(/\s/g, '').length}\u5b57`;
+      }
 
       // If the chip is already showing (prior pinned context), update it immediately
       if (state.pinnedSelection) {
         _saveEditorRange();
-        _pinSelectionChip(sel);
+        if (state.fileType === 'docx' && docxSelection) {
+          _pinSelectionChip({ text: docxSelection.aiText, previewText: docxSelection.previewText });
+        } else {
+          _pinSelectionChip(sel);
+        }
         _clearPinnedHighlight();
         _applyPinnedHighlight();
       }
 
       // Live-update the context bar to show selected text preview
-      _updateContextBar({ selection: sel });
+      if (state.fileType === 'docx' && docxSelection && docxSelection.kind !== 'text') {
+        _updateContextBar({ table: docxSelection.previewText });
+      } else {
+        _updateContextBar({ selection: sel });
+      }
     } else {
       // ── PPTX table shape selected: expose its data to AI quick-actions ──
       if (state.fileType === 'pptx' && state.activeEditor && state.activeEditor._lastTableText) {
@@ -3461,6 +5887,7 @@ window.WA = window.WA || {};
           _hideDocxHoverBar();  // hide format bar even when clicking into a table cell
           const tableText = _extractHtmlTableText(tbl);
           if (tableText) {
+            state._selectionDismissed = false;
             lastSelectionText = tableText;
             const rows = tbl.rows.length;
             const cols = rows > 0 ? tbl.rows[0].cells.length : 0;
@@ -3521,9 +5948,9 @@ window.WA = window.WA || {};
       // clicking their buttons collapses the editor selection, but
       // lastSelectionText must survive until the action handler reads it.
       const _ae = document.activeElement;
-      if (_ae && (_ae.closest('#wa-pdf-tooltip') || _ae.closest('#wa-docx-hoverbar') || _ae.closest('#wa-docx-cp'))) return;
+      if (_ae && (_ae.closest('#wa-pdf-tooltip') || _ae.closest('#wa-docx-hoverbar') || _ae.closest('#wa-docx-cp') || _ae.closest('#wa-review-shell') || _ae.closest('#wa-review-selection-launcher'))) return;
       // Also skip while mouse is held on the tooltip (mousedown fires before selectionchange resolves)
-      if (_docxMouseIsDown && document.querySelector('#wa-pdf-tooltip:hover, #wa-docx-hoverbar:hover')) return;
+      if (_docxMouseIsDown && document.querySelector('#wa-pdf-tooltip:hover, #wa-docx-hoverbar:hover, #wa-review-shell:hover, #wa-review-selection-launcher:hover')) return;
       const _ws = window.getSelection();
       if (!_ws || _ws.isCollapsed || !_ws.rangeCount) {
         _resetDocxSelection();  // collapsed — always hide
@@ -3580,6 +6007,11 @@ window.WA = window.WA || {};
   };
   const _WA_READ_ONLY_QUICK_ACTIONS = new Set(['总结', '解释', '翻译']);
   const _WA_FULL_DOC_QUICK_ACTIONS = new Set(['总结', '续写', '检查']);
+  let _waAiTransport = null;
+  let _waAiResultsRuntime = null;
+  let _waQuickActionRuntime = null;
+  let _waConversationRuntime = null;
+  let _waTaskDispatcher = null;
 
   function _waRenderMarkdown(text) {
     if (window.marked) {
@@ -3596,286 +6028,17 @@ window.WA = window.WA || {};
     return state.lockedModel === 'local' ? 'local' : 'cloud';
   }
 
-  async function _sendViaEditorActionSSE(payload) {
-    const msgs = $('wa-ai-messages');
-    const action = payload.action;
-    const editorAction = _WA_QUICK_ACTION_TO_EDITOR_ACTION[action];
-    const loadingEl = payload.loadingEl;
-    const selectionText = payload.selectionText || '';
-    const fullDocText = payload.fullDocText || '';
-    const hasSelection = !!payload.hasSelection;
-    const isReadOnly = _WA_READ_ONLY_QUICK_ACTIONS.has(action);
-    let fullText = '';
-    let buffer = '';
-    let hasStructuredOutput = false;
-    let loadingRemoved = false;
-
-    if (!editorAction) throw new Error(`未知动作: ${action}`);
-
-    const appendSystemNote = (text, html) => {
-      if (!text && !html) return;
-      const noteEl = document.createElement('div');
-      noteEl.className = 'wa-msg system';
-      noteEl.style.cssText = 'font-size:11px;font-style:italic;opacity:.75;padding:2px 8px;';
-      if (html) noteEl.innerHTML = html;
-      else noteEl.textContent = text;
-      msgs.appendChild(noteEl);
-      msgs.scrollTop = msgs.scrollHeight;
-    };
-
-    const setProgress = (text) => {
-      if (!loadingEl || loadingRemoved || hasStructuredOutput || fullText) return;
-      loadingEl.innerHTML = `<span class="wa-progress-text">⏳ ${_escHtml(text || '处理中…')}</span>`;
-      msgs.scrollTop = msgs.scrollHeight;
-    };
-
-    const renderPlainResult = (resultText) => {
-      const trimmed = (resultText || '').trim();
-      if (!trimmed) {
-        if (loadingEl && !loadingRemoved) {
-          loadingEl.classList.remove('streaming');
-          loadingEl.textContent = '⚠ AI 未返回有效内容，请重试';
-        }
-        return;
-      }
-
-      if (loadingEl && !loadingRemoved) loadingEl.classList.remove('streaming');
-
-      if (isReadOnly) {
-        if (loadingEl && !loadingRemoved) {
-          loadingEl.innerHTML = _waRenderMarkdown(trimmed);
-          loadingEl.dataset.rawText = trimmed;
-        }
-        return;
-      }
-
-      if (hasSelection) {
-        if (loadingEl && !loadingRemoved) {
-          loadingEl.remove();
-          loadingRemoved = true;
-        }
-        _handleProposals({
-          proposals: [{
-            id: 'qa_' + Date.now(),
-            original_text: selectionText,
-            proposed_text: trimmed,
-            rationale: _WA_QUICK_ACTION_LABELS[action] || action,
-          }],
-        });
-        return;
-      }
-
-      if (loadingEl && !loadingRemoved) {
-        loadingEl.innerHTML = _waRenderMarkdown(trimmed);
-        loadingEl.dataset.rawText = trimmed;
-      }
-      msgs.appendChild(_makeAIActionBar({
-        pinnedSel: null,
-        toolCall: null,
-        outputMode: 'chat',
-      }));
-      requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
-    };
-
-    const ctrl = new AbortController();
-    state._streamAbortCtrl = ctrl;
-    state.isLoading = true;
-    _setStreamBtn(true);
-
-    try {
-      const modelId = (state.lockedModel && !['auto', 'cloud', 'local'].includes(state.lockedModel))
-        ? state.lockedModel
-        : '';
-      const resp = await fetch('/api/editor/ai/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: editorAction,
-          selection: selectionText,
-          instruction: '',
-          full_text: fullDocText,
-          file_type: state.fileType || 'general',
-          file_name: state.fileName || '',
-          model_mode: _waQuickActionModelMode(),
-          model_id: modelId,
-          output_mode: isReadOnly ? 'chat' : 'inline',
-          session_id: state.fileId ? 'editor_' + state.fileId : '',
-        }),
-        signal: ctrl.signal,
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
-        for (const part of parts) {
-          if (!part.startsWith('data: ')) continue;
-          let parsed;
-          try { parsed = JSON.parse(part.slice(6)); } catch (e) { continue; }
-
-          if (parsed.type === 'token') {
-            fullText += parsed.text || '';
-            if (loadingEl && !loadingRemoved && !hasStructuredOutput) {
-              loadingEl.innerHTML = _waRenderMarkdown(fullText) + '<span class="typing-cursor">▊</span>';
-              msgs.scrollTop = msgs.scrollHeight;
-            }
-            continue;
-          }
-
-          if (parsed.type === 'phase') {
-            if ((parsed.status || '') !== 'done') {
-              setProgress(parsed.current ? `执行 ${parsed.current}…` : '处理中…');
-            }
-            continue;
-          }
-
-          if (parsed.type === 'plan') {
-            setProgress('生成执行计划…');
-            continue;
-          }
-
-          if (parsed.type === 'step_start') {
-            setProgress(parsed.text || '处理中…');
-            continue;
-          }
-
-          if (parsed.type === 'step_progress') {
-            setProgress(parsed.detail || '处理中…');
-            continue;
-          }
-
-          if (parsed.type === 'step_done') {
-            setProgress(parsed.text || '步骤完成');
-            continue;
-          }
-
-          if (parsed.type === 'thought') {
-            setProgress(parsed.text || '处理中…');
-            continue;
-          }
-
-          if (parsed.type === 'tool_call') {
-            setProgress(parsed.tool_name ? `调用 ${parsed.tool_name}…` : '调用工具中…');
-            continue;
-          }
-
-          if (parsed.type === 'tool_result') {
-            setProgress(parsed.result_preview || (parsed.tool_name ? `${parsed.tool_name} 已完成` : '处理中…'));
-            continue;
-          }
-
-          if (parsed.type === 'info') {
-            appendSystemNote(parsed.text || '');
-            continue;
-          }
-
-          if (parsed.type === 'rag_info') {
-            if ((parsed.total_chunks || 0) > 0 && (parsed.retrieved_chunks || 0) > 0) {
-              appendSystemNote('', `${_SLIDES_SVG} 长文档检索：已从 <b>${parsed.total_chunks}</b> 段中检索最相关 <b>${parsed.retrieved_chunks}</b> 段`);
-            }
-            continue;
-          }
-
-          if (parsed.type === 'proposals') {
-            hasStructuredOutput = true;
-            if (loadingEl && !loadingRemoved) {
-              loadingEl.remove();
-              loadingRemoved = true;
-            }
-            _handleProposals({
-              proposals: parsed.proposals || [],
-              summary: parsed.summary || '',
-            });
-            continue;
-          }
-
-          if (parsed.type === 'doc_tool_call') {
-            hasStructuredOutput = true;
-            state.pendingToolCall = parsed;
-            if (loadingEl && !loadingRemoved) {
-              loadingEl.classList.remove('streaming');
-              const previewText = parsed.value || `已生成文档操作：${parsed.type || 'tool_call'}`;
-              loadingEl.innerHTML = _waRenderMarkdown(previewText);
-              loadingEl.dataset.rawText = previewText;
-            }
-            msgs.appendChild(_makeAIActionBar({
-              pinnedSel: null,
-              toolCall: parsed,
-              outputMode: 'inline',
-            }));
-            requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
-            continue;
-          }
-
-          if (parsed.type === 'done') {
-            if (!hasStructuredOutput) {
-              renderPlainResult(parsed.result || fullText);
-            } else if (loadingEl && !loadingRemoved) {
-              loadingEl.classList.remove('streaming');
-            }
-            msgs.scrollTop = msgs.scrollHeight;
-            return;
-          }
-
-          if (parsed.type === 'error') {
-            if (loadingEl && !loadingRemoved) {
-              loadingEl.classList.remove('streaming');
-              loadingEl.textContent = parsed.text || 'AI 处理失败';
-            } else {
-              const errEl = document.createElement('div');
-              errEl.className = 'wa-msg ai';
-              errEl.textContent = parsed.text || 'AI 处理失败';
-              msgs.appendChild(errEl);
-            }
-            msgs.scrollTop = msgs.scrollHeight;
-            return;
-          }
-        }
-      }
-
-      if (!hasStructuredOutput && fullText) {
-        renderPlainResult(fullText);
-      } else if (loadingEl && !loadingRemoved && loadingEl.classList.contains('streaming')) {
-        loadingEl.classList.remove('streaming');
-      }
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        if (loadingEl && !loadingRemoved) {
-          loadingEl.classList.remove('streaming');
-          loadingEl.textContent = loadingEl.textContent.trim() ? `${loadingEl.textContent} [已取消]` : '[已取消]';
-        }
-      } else {
-        console.error('[WorkspaceAI] Quick-action stream error:', err);
-        if (loadingEl && !loadingRemoved) {
-          loadingEl.classList.remove('streaming');
-          loadingEl.textContent = `网络错误：${err.message}`;
-        } else {
-          const errEl = document.createElement('div');
-          errEl.className = 'wa-msg ai';
-          errEl.textContent = `网络错误：${err.message}`;
-          msgs.appendChild(errEl);
-        }
-      }
-      msgs.scrollTop = msgs.scrollHeight;
-    } finally {
-      state.isLoading = false;
-      state._streamAbortCtrl = null;
-      _setStreamBtn(false);
-    }
-  }
-
   window.WA.sendQuickAction = (action) => {
     if (state.isLoading) {
       showToast('请先等待当前任务完成，或点击右下角暂停', 'info');
       return;
     }
 
-    let sel = state.fileType === 'docx' ? _getDocxSelectionTextForAI() : lastSelectionText;
+    const liveSelection = _getLiveEditorSelectionForAI();
+    const docxSelection = liveSelection && typeof liveSelection === 'object' ? liveSelection : null;
+    let sel = typeof liveSelection === 'string'
+      ? liveSelection
+      : (docxSelection ? String(docxSelection.text || '') : '');
     let hasSelection = !!sel;
     let fullDocText = state.activeEditor ? (state.activeEditor.getContent() || '') : '';
 
@@ -3895,7 +6058,9 @@ window.WA = window.WA || {};
       hasSelection = !!sel;
     }
 
-    const canUseFullDocument = _WA_FULL_DOC_QUICK_ACTIONS.has(action) || (action === '可视化' && state.fileType === 'xlsx');
+    const canUseFullDocument = (_waQuickActionRuntime && typeof _waQuickActionRuntime.canUseFullDocument === 'function')
+      ? _waQuickActionRuntime.canUseFullDocument(action, state.fileType)
+      : (_WA_FULL_DOC_QUICK_ACTIONS.has(action) || (action === '可视化' && state.fileType === 'xlsx'));
     if (!hasSelection && canUseFullDocument && fullDocText.trim()) {
       sel = fullDocText;
     }
@@ -3911,7 +6076,9 @@ window.WA = window.WA || {};
       // Save editor selection BEFORE clearing browser selection, so
       // acceptProposal can restore it for an in-place, Undo-safe replacement.
       _saveEditorRange();
-      state.pinnedSelection = _createPinnedSelectionContext(sel);
+      state.pinnedSelection = docxSelection
+        ? _createPinnedSelectionContext(docxSelection)
+        : _createPinnedSelectionContext(sel);
     } else {
       state.pinnedSelection = null;
     }
@@ -3922,37 +6089,53 @@ window.WA = window.WA || {};
 
     const msgs = $('wa-ai-messages');
     const preview = hasSelection
-      ? (sel.length > 60 ? sel.substring(0, 60) + '…' : sel)
+      ? ((docxSelection && docxSelection.previewText)
+        ? docxSelection.previewText
+          : (sel.length > 60 ? sel.substring(0, 60) + '…' : sel))
       : (action === '可视化' ? '当前表格数据' : '全文');
-    const uMsg = document.createElement('div');
-    uMsg.className = 'wa-msg user';
-    uMsg.textContent = `${action}：${preview}`;
-    msgs.appendChild(uMsg);
-
-    const loadingEl = document.createElement('div');
-    loadingEl.className = 'wa-msg ai streaming';
-    loadingEl.innerHTML = '<span class="wa-progress-text">⏳ 处理中…</span>';
-    msgs.appendChild(loadingEl);
-    msgs.scrollTop = msgs.scrollHeight;
+    const userText = `${action}：${preview}`;
+    const turnUi = _waConversationRuntime && typeof _waConversationRuntime.appendUserMessageWithLoading === 'function'
+      ? _waConversationRuntime.appendUserMessageWithLoading({
+          content: userText,
+          task_kind: 'quick_action',
+          loadingHtml: '<span class="wa-progress-text">⏳ 处理中…</span>',
+        })
+      : null;
+    const loadingEl = turnUi && turnUi.loadingEl ? turnUi.loadingEl : document.createElement('div');
+    if (!turnUi) {
+      const uMsg = document.createElement('div');
+      uMsg.className = 'wa-msg user';
+      uMsg.textContent = userText;
+      msgs.appendChild(uMsg);
+      loadingEl.className = 'wa-msg ai streaming';
+      loadingEl.innerHTML = '<span class="wa-progress-text">⏳ 处理中…</span>';
+      msgs.appendChild(loadingEl);
+      msgs.scrollTop = msgs.scrollHeight;
+    }
 
     state.lastPinnedSel = hasSelection ? state.pinnedSelection : null;
     state.pendingToolCall = null;
 
-    if (action === '可视化') {
-      _sendViaSSEChart({
-        csv_data: sel,
-        prompt: '请基于当前数据生成最合适、最清晰的图表，并在必要时自动清洗列名与空值。',
-        language: 'python',
-      });
+    if (!_waTaskDispatcher || typeof _waTaskDispatcher.dispatchQuickAction !== 'function') {
+      loadingEl.classList.remove('streaming');
+      loadingEl.textContent = '快捷动作运行时未加载，请刷新后重试。';
+      msgs.scrollTop = msgs.scrollHeight;
       return;
     }
 
-    _sendViaEditorActionSSE({
-      action,
+    _waTaskDispatcher.dispatchQuickAction(action, {
       selectionText: sel,
+      selectionSource: _selectionContextSourceLabel(state.pinnedSelection),
+      pinnedSelSource: _selectionContextSourceLabel(state.pinnedSelection),
       fullDocText,
       hasSelection,
       loadingEl,
+      msgs,
+      csv_data: action === '可视化' ? sel : '',
+      prompt: action === '可视化'
+        ? '请基于当前数据生成最合适、最清晰的图表，并在必要时自动清洗列名与空值。'
+        : '',
+      language: action === '可视化' ? 'python' : '',
     }).catch(err => {
       loadingEl.classList.remove('streaming');
       loadingEl.textContent = `网络错误：${err.message}`;
@@ -3964,16 +6147,20 @@ window.WA = window.WA || {};
   };
 
   window.WA.sendSelectionToAI = () => {
-    let sel = state.fileType === 'docx' ? _getDocxSelectionTextForAI() : lastSelectionText;
-    if (state.fileType === 'xlsx' && state.activeEditor) {
-      const rangeText = state.activeEditor.getContent();
-      if (!rangeText.includes('未选中区域')) sel = rangeText;
-    }
+    const liveSelection = _getLiveEditorSelectionForAI();
+    const docxSelection = liveSelection && typeof liveSelection === 'object' ? liveSelection : null;
+    const sel = typeof liveSelection === 'string'
+      ? liveSelection
+      : (docxSelection ? String(docxSelection.text || '') : '');
     if (!sel) return;
     _saveEditorRange();
     _applyPinnedHighlight();
     // Pin as Copilot-style chip — user types their question separately
-    _pinSelectionChip(sel);
+    if (docxSelection) {
+      _pinSelectionChip(docxSelection);
+    } else {
+      _pinSelectionChip(sel);
+    }
     $('wa-pdf-tooltip').style.display = 'none';
     // Auto-expand AI panel when transferring selection
     _expandWAPanel();
@@ -3996,12 +6183,11 @@ window.WA = window.WA || {};
 
   window.WA.clearSelection = () => {
     state.pinnedSelection = null;
+    state.lastPinnedSel = null;
+    state._selectionDismissed = true;
     lastSelectionText = '';
     // Update context bar (selection cleared, may still show file count)
     _updateContextBar();
-    // Also clear inline AI chip
-    const iaiChip = $('wa-iai-selection-chip');
-    if (iaiChip) iaiChip.style.display = 'none';
     _clearPinnedHighlight();
   };
 
@@ -4518,6 +6704,18 @@ window.WA = window.WA || {};
     return parts.join(' ') || '';
   }
 
+  function _shouldIgnorePptxGlobalKeydown(target) {
+    const element = target && target.nodeType === 3 ? target.parentElement : target;
+    if (!element) return false;
+    const editableHost = element.isContentEditable
+      ? element
+      : (typeof element.closest === 'function'
+          ? element.closest('textarea, input, select, option, [contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"], .wa-rename-input')
+          : null);
+    if (!editableHost) return false;
+    return !(typeof editableHost.closest === 'function' && editableHost.closest('#wa-pptx-slide-canvas'));
+  }
+
   class KotoPptxEditor {
     constructor() {
       this.data = null;
@@ -4533,6 +6731,8 @@ window.WA = window.WA || {};
       this._redoStack = [];         // history for Ctrl+Y / Ctrl+Shift+Z
       this._shapeClipboard = null;  // shape copy buffer for Ctrl+C/V
       this._nudgeTimer = null;      // debounce timer for arrow-key nudge
+      this._tableSelection = null;
+      this._tableSelectionCleanup = null;
       $('wa-pptx-editor').classList.add('active');
     }
 
@@ -4658,6 +6858,7 @@ window.WA = window.WA || {};
       $('wa-pptx-thumbstrip').innerHTML = '';
       const canvas = $('wa-pptx-slide-canvas');
       if (canvas) canvas.innerHTML = '';
+      this._clearTableSelection({ restoreWholeTableSummary: false });
       this._closeCtxMenu();
       document.removeEventListener('keydown', this._keyHandler);
       if (this._selChangeHandler) document.removeEventListener('selectionchange', this._selChangeHandler);
@@ -4817,6 +7018,7 @@ window.WA = window.WA || {};
         // Only act when PPTX editor is active
         if (!$('wa-pptx-editor').classList.contains('active')) return;
         const active = document.activeElement;
+        if (_shouldIgnorePptxGlobalKeydown(e.target) || _shouldIgnorePptxGlobalKeydown(active)) return;
 
         // ── Escape ──────────────────────────────────────────────────────────
         if (e.key === 'Escape') {
@@ -5181,6 +7383,7 @@ window.WA = window.WA || {};
 
     _renderSlide(idx) {
       this._curIdx = idx;
+      this._clearTableSelection({ restoreWholeTableSummary: false });
       this._selShape = null;
       this._activeSpan = null;
       this._savedRange = null;   // clear stale selection when slide is re-rendered
@@ -5462,12 +7665,15 @@ window.WA = window.WA || {};
           });
         } else if (shape._type === 'TABLE' && shape.cells) {
           // ── Table shape ──────────────────────────────────────────────────
+          el.classList.add('wa-shape-table');
           const rows = shape.table_rows || 0;
           const cols = shape.table_cols || 0;
           // Keep a mutable map to cell data objects so input handlers update shape.cells in place
           const cellDataMap = {};
           (shape.cells || []).forEach(c => { cellDataMap[c.row + '_' + c.col] = c; });
           const tbl = document.createElement('table');
+          tbl.dataset.tableRows = String(rows);
+          tbl.dataset.tableCols = String(cols);
           tbl.style.cssText = 'width:100%;height:100%;border-collapse:collapse;table-layout:fixed;';
           // Build <colgroup> with per-column proportional widths from parsed col_widths
           const colWidths = shape.col_widths && shape.col_widths.length === cols ? shape.col_widths : null;
@@ -5552,15 +7758,32 @@ window.WA = window.WA || {};
           });
           el.addEventListener('mousedown', e => {
             if (this._insertMode) return;
+            if (e.button !== 0) return;
             if (this._editMode && this._selShape === el) return;
+
+            const rect = el.getBoundingClientRect();
+            const BORDER_T = 8;
+            const onBorder = e.clientX < rect.left + BORDER_T || e.clientX > rect.right - BORDER_T ||
+              e.clientY < rect.top + BORDER_T || e.clientY > rect.bottom - BORDER_T;
+            const targetCell = e.target && e.target.closest ? e.target.closest('.wa-pptx-cell') : null;
+
             this._selectShape(el, shape);
-            this._startMove(e, el, shape, canvas, scale);
+            if (onBorder || !targetCell) {
+              this._clearTableSelection();
+              this._startMove(e, el, shape, canvas, scale);
+              return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+            this._beginTableSelection(e, el, shape, tbl, targetCell);
           });
           el.addEventListener('dblclick', e => {
             if (this._insertMode) return;
             e.stopPropagation();
             // Enter table edit mode: make all cells editable
             if (this._editMode && this._selShape === el) return;
+            this._clearTableSelection();
             this._editMode = true;
             el.classList.add('wa-pptx-editing');
             el.querySelectorAll('.wa-pptx-cell').forEach(td => { td.contentEditable = 'true'; });
@@ -5863,6 +8086,181 @@ window.WA = window.WA || {};
       }
     }
 
+    _setActiveTableSummary(shape, selection = null) {
+      if (shape && shape._type === 'TABLE' && Array.isArray(shape.cells)) {
+        const normalized = _normalizePptxTableSelection(selection, shape.table_rows || 0, shape.table_cols || 0);
+        this._lastTableText = _extractPptxTableText(shape, normalized);
+        this._lastTableRows = normalized ? normalized.rows : (shape.table_rows || 0);
+        this._lastTableCols = normalized ? normalized.cols : (shape.table_cols || 0);
+        return;
+      }
+      this._lastTableText = null;
+      this._lastTableRows = 0;
+      this._lastTableCols = 0;
+    }
+
+    _clearTableSelection({ restoreWholeTableSummary = true } = {}) {
+      if (this._tableSelectionCleanup) {
+        try { this._tableSelectionCleanup(); } catch (_) {}
+        this._tableSelectionCleanup = null;
+      }
+
+      const previousSelection = this._tableSelection;
+      if (previousSelection && previousSelection.tableEl) {
+        previousSelection.tableEl.querySelectorAll('.wa-pptx-cell-selected').forEach((cell) => {
+          cell.classList.remove('wa-pptx-cell-selected');
+        });
+      }
+      this._tableSelection = null;
+
+      if (restoreWholeTableSummary && previousSelection && this._selShape) {
+        const activeShapeId = Number(this._selShape.dataset.shapeId);
+        if (activeShapeId === previousSelection.shapeId) {
+          this._setActiveTableSummary(previousSelection.shape);
+        }
+      }
+    }
+
+    _setTableSelection(shapeEl, shape, tableEl, anchorCell, headCell = anchorCell) {
+      const normalized = _normalizePptxTableSelection({
+        anchorRow: anchorCell && anchorCell.row,
+        anchorCol: anchorCell && anchorCell.col,
+        headRow: headCell && headCell.row,
+        headCol: headCell && headCell.col,
+      }, shape.table_rows || 0, shape.table_cols || 0);
+      if (!normalized || !tableEl) return null;
+
+      this._tableSelection = Object.assign({
+        shapeId: shape.id,
+        shape,
+        shapeEl,
+        tableEl,
+      }, normalized);
+
+      tableEl.querySelectorAll('.wa-pptx-cell').forEach((cell) => {
+        const row = Number(cell.dataset.row);
+        const col = Number(cell.dataset.col);
+        const isSelected = Number.isFinite(row) && Number.isFinite(col)
+          && row >= normalized.startRow && row <= normalized.endRow
+          && col >= normalized.startCol && col <= normalized.endCol;
+        cell.classList.toggle('wa-pptx-cell-selected', isSelected);
+      });
+
+      this._setActiveTableSummary(shape, this._tableSelection);
+      return this._tableSelection;
+    }
+
+    _beginTableSelection(event, shapeEl, shape, tableEl, startCellEl) {
+      if (!event || event.button !== 0 || !startCellEl) return;
+
+      const startCell = {
+        row: Number(startCellEl.dataset.row),
+        col: Number(startCellEl.dataset.col),
+      };
+      if (!Number.isFinite(startCell.row) || !Number.isFinite(startCell.col)) return;
+
+      const previousSelection = this._tableSelection;
+      const anchorCell = event.shiftKey && previousSelection && previousSelection.shapeId === shape.id
+        ? { row: previousSelection.anchorRow, col: previousSelection.anchorCol }
+        : startCell;
+
+      this._clearTableSelection({ restoreWholeTableSummary: false });
+      this._setTableSelection(shapeEl, shape, tableEl, anchorCell, startCell);
+
+      const resolveCellFromPoint = (clientX, clientY) => {
+        const target = document.elementFromPoint(clientX, clientY);
+        const cell = target && target.closest ? target.closest('.wa-pptx-cell') : null;
+        if (!cell || !tableEl.contains(cell)) return null;
+
+        const row = Number(cell.dataset.row);
+        const col = Number(cell.dataset.col);
+        return Number.isFinite(row) && Number.isFinite(col) ? { row, col } : null;
+      };
+
+      const cleanup = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        if (this._tableSelectionCleanup === cleanup) this._tableSelectionCleanup = null;
+      };
+
+      const onMove = (moveEvent) => {
+        if ((moveEvent.buttons & 1) === 0) {
+          cleanup();
+          return;
+        }
+
+        const headCell = resolveCellFromPoint(moveEvent.clientX, moveEvent.clientY);
+        if (!headCell) return;
+
+        moveEvent.preventDefault();
+        this._setTableSelection(shapeEl, shape, tableEl, anchorCell, headCell);
+      };
+
+      const onUp = (upEvent) => {
+        const headCell = resolveCellFromPoint(upEvent.clientX, upEvent.clientY);
+        if (headCell) this._setTableSelection(shapeEl, shape, tableEl, anchorCell, headCell);
+        cleanup();
+      };
+
+      this._tableSelectionCleanup = cleanup;
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+
+    getCellSelectionInfo() {
+      const selection = this._tableSelection;
+      if (!selection || !selection.shape || !selection.tableEl) return null;
+
+      const totalRows = selection.shape.table_rows || 0;
+      const totalCols = selection.shape.table_cols || 0;
+      if (selection.rows === totalRows && selection.cols === totalCols) return null;
+
+      const text = _extractPptxTableText(selection.shape, selection).trim();
+      if (!text) return null;
+
+      return {
+        text,
+        rows: selection.rows,
+        cols: selection.cols,
+        selectedCells: selection.rows * selection.cols,
+        tableElement: selection.tableEl,
+      };
+    }
+
+    getWholeTableSelectionInfo() {
+      const selection = this._tableSelection;
+      if (selection && selection.shape && selection.tableEl) {
+        const totalRows = selection.shape.table_rows || 0;
+        const totalCols = selection.shape.table_cols || 0;
+        if (selection.rows !== totalRows || selection.cols !== totalCols) return null;
+
+        const text = _extractPptxTableText(selection.shape, selection).trim();
+        if (!text) return null;
+        return {
+          text,
+          rows: totalRows,
+          cols: totalCols,
+          tableElement: selection.tableEl,
+        };
+      }
+
+      if (!this._selShape) return null;
+      const slide = this.data && this.data.slides && this.data.slides[this._curIdx];
+      const shapeId = Number(this._selShape.dataset.shapeId);
+      const shape = slide && (slide.shapes || []).find((item) => item.id === shapeId);
+      if (!shape || shape._type !== 'TABLE' || !shape.cells) return null;
+
+      const text = _extractPptxTableText(shape).trim();
+      if (!text) return null;
+
+      return {
+        text,
+        rows: shape.table_rows || 0,
+        cols: shape.table_cols || 0,
+        tableElement: this._selShape.querySelector('table'),
+      };
+    }
+
     _selectShape(el, shape) {
       if (el === this._selShape) return;  // already selected — don't wipe edit mode
       this._clearSelection();
@@ -5882,15 +8280,7 @@ window.WA = window.WA || {};
         el.appendChild(hEl);
       });
       // Store table data so the mouseup handler can expose it to AI quick-actions
-      if (shape && shape._type === 'TABLE' && shape.cells) {
-        this._lastTableText = _extractPptxTableText(shape);
-        this._lastTableRows = shape.table_rows || 0;
-        this._lastTableCols = shape.table_cols || 0;
-      } else {
-        this._lastTableText = null;
-        this._lastTableRows = 0;
-        this._lastTableCols = 0;
-      }
+      this._setActiveTableSummary(shape);
       // Show PPTX format hoverbar when a text shape is selected (even without entering edit mode)
       if (shape && shape.has_text) {
         setTimeout(() => {
@@ -5942,6 +8332,7 @@ window.WA = window.WA || {};
     }
 
     _clearSelection() {
+      this._clearTableSelection({ restoreWholeTableSummary: false });
       if (this._selShape) {
         this._selShape.classList.remove('wa-pptx-selected');
         // Remove resize handles
@@ -8089,6 +10480,9 @@ window.WA = window.WA || {};
 
     // Remove previous outline if it exists
     const prevOutline = $('wa-doc-outline');
+    if (prevOutline && typeof prevOutline._scrollSyncCleanup === 'function') {
+      try { prevOutline._scrollSyncCleanup(); } catch (_) {}
+    }
     if (prevOutline) prevOutline.remove();
     const prevRow = docxEditor.querySelector('.wa-docx-body-row');
     if (prevRow) {
@@ -8097,10 +10491,11 @@ window.WA = window.WA || {};
       prevRow.remove();
     }
 
-    // Fall back to DOM extraction if backend didn't provide headings
-    if (!headings || !headings.length) {
-      headings = _extractHeadingsFromDOM();
-    }
+    headings = Array.isArray(headings)
+      ? headings
+          .filter(_isValidDocxHeadingEntry)
+          .map(heading => ({ ...heading, text: heading.text.trim(), id: heading.id.trim() }))
+      : [];
 
     // Create the outline panel
     const outline = document.createElement('div');
@@ -8123,6 +10518,8 @@ window.WA = window.WA || {};
     bodyRow.appendChild(outline);
     bodyRow.appendChild(edContent);
 
+    headings = _resolveDocxOutlineHeadings(headings);
+
     // Populate heading items
     const body = outline.querySelector('.wa-outline-body');
     _renderOutlineItems(body, headings);
@@ -8144,45 +10541,203 @@ window.WA = window.WA || {};
     // Add toggle button to the page indicator bar (if not already there)
     _ensureOutlineToggleBtn();
 
+    _bindDocxOutlineScrollSync(outline, headings);
+
     // Auto-show when headings are available so the user sees the navigation
     _toggleDocOutline(headings.length > 0);
   }
 
-  function _extractHeadingsFromDOM() {
-    const headings = [];
-    const pm = document.querySelector('#wa-docx-editor .ProseMirror');
-    if (!pm) return headings;
+  function _isValidDocxHeadingEntry(heading) {
+    const level = Number(heading && heading.level);
+    const text = typeof heading?.text === 'string' ? heading.text.trim() : '';
+    const id = typeof heading?.id === 'string' ? heading.id.trim() : '';
+    return Number.isInteger(level) && level >= 1 && level <= 6 && !!text && !!id;
+  }
 
-    // Primary: h1–h6 tags
-    pm.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach(el => {
-      const level = parseInt(el.tagName[1], 10);
-      const text = el.textContent.trim();
-      const id = el.getAttribute('id') || '';
-      if (text) headings.push({ level, text, id });
-    });
+  function _resolveDocxOutlineTarget(pm, heading) {
+    if (!pm || !_isValidDocxHeadingEntry(heading)) return null;
+    const escapedId = CSS.escape(heading.id.trim());
+    return pm.querySelector(
+      `h1#${escapedId}[data-koto-role="structural_heading"],`
+      + `h2#${escapedId}[data-koto-role="structural_heading"],`
+      + `h3#${escapedId}[data-koto-role="structural_heading"],`
+      + `h4#${escapedId}[data-koto-role="structural_heading"],`
+      + `h5#${escapedId}[data-koto-role="structural_heading"],`
+      + `h6#${escapedId}[data-koto-role="structural_heading"]`
+    );
+  }
 
-    // Fallback: extract from TOC entries (koto-toc-N paragraphs with <a> anchors)
-    // Reliable for Chinese documents that use custom/WPS style names instead of Heading 1–6.
-    if (!headings.length) {
-      pm.querySelectorAll('p[class^="koto-toc-"]').forEach(el => {
-        const m = el.className.match(/koto-toc-(\d+)/);
-        if (!m) return;
-        const level = parseInt(m[1], 10);
-        const a = el.querySelector('a');
-        if (!a) return;
-        const id = (a.getAttribute('href') || '').replace(/^#/, '');
-        // Remove the dot-leader spacer span text (empty) and trailing page number
-        let text = '';
-        a.childNodes.forEach(node => {
-          if (node.nodeType === Node.TEXT_NODE) text += node.textContent;
-          else if (node.nodeName !== 'SPAN') text += node.textContent;
-        });
-        text = text.replace(/\s*\d+\s*$/, '').trim();
-        if (text) headings.push({ level, text, id });
+  function _collectDocxOutlineHeadingsFromDom(pm) {
+    if (!pm) return [];
+
+    const seenIds = new Set();
+    return [...pm.querySelectorAll('h1[data-koto-role="structural_heading"],h2[data-koto-role="structural_heading"],h3[data-koto-role="structural_heading"],h4[data-koto-role="structural_heading"],h5[data-koto-role="structural_heading"],h6[data-koto-role="structural_heading"]')]
+      .map((el) => ({
+        level: Number(String(el.tagName || '').replace(/[^0-9]/g, '')),
+        text: (el.textContent || '').trim(),
+        id: (el.id || '').trim(),
+      }))
+      .filter(_isValidDocxHeadingEntry)
+      .filter((heading) => {
+        if (seenIds.has(heading.id)) return false;
+        seenIds.add(heading.id);
+        return true;
       });
+  }
+
+  function _resolveDocxOutlineHeadings(headings) {
+    const manifestHeadings = Array.isArray(headings) ? headings : [];
+    const resolvedManifest = _filterDocxOutlineHeadingsByDomTargets(manifestHeadings);
+    const pm = document.querySelector('#wa-docx-editor .ProseMirror');
+    if (!pm) return resolvedManifest;
+
+    const domHeadings = _collectDocxOutlineHeadingsFromDom(pm);
+    if (!domHeadings.length) return resolvedManifest;
+
+    const manifestLooksUnderfilled = resolvedManifest.length === 0
+      || resolvedManifest.length < Math.ceil(domHeadings.length / 2);
+    if (manifestLooksUnderfilled) {
+      console.warn('[WA] DOCX outline manifest underfilled; falling back to DOM structural headings', {
+        manifestCount: resolvedManifest.length,
+        domCount: domHeadings.length,
+      });
+      return domHeadings;
     }
 
-    return headings;
+    return resolvedManifest;
+  }
+
+  function _getDocxNavigationAnchorOffset(editorScroll, pm) {
+    const editorHost = state.activeEditor;
+    if (editorHost && typeof editorHost.getDocxNavigationAnchorOffset === 'function') {
+      const offset = Number(editorHost.getDocxNavigationAnchorOffset());
+      if (Number.isFinite(offset) && offset > 0) {
+        return offset;
+      }
+    }
+
+    const configuredMarginTop = Number(state?.activeEditor?._marginTopPx);
+    if (Number.isFinite(configuredMarginTop) && configuredMarginTop > 0) {
+      return Math.min(120, configuredMarginTop);
+    }
+
+    if (pm && typeof window.getComputedStyle === 'function') {
+      const pmStyle = window.getComputedStyle(pm);
+      const paddingTop = parseFloat(pmStyle.paddingTop || '0');
+      if (Number.isFinite(paddingTop) && paddingTop > 0) {
+        return Math.min(120, paddingTop);
+      }
+    }
+
+    return 96;
+  }
+
+  function _getDocxTargetScrollTop(editorScroll, target) {
+    const editorHost = state.activeEditor;
+    if (editorHost && typeof editorHost.getDocxTargetScrollTop === 'function') {
+      const top = Number(editorHost.getDocxTargetScrollTop(target));
+      if (Number.isFinite(top)) {
+        return top;
+      }
+    }
+
+    if (!editorScroll || !target) return null;
+    const containerRect = editorScroll.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const relativeTop = targetRect.top - containerRect.top + editorScroll.scrollTop;
+    return Number.isFinite(relativeTop) ? relativeTop : null;
+  }
+
+  function _filterDocxOutlineHeadingsByDomTargets(headings) {
+    if (!Array.isArray(headings) || !headings.length) return [];
+    const pm = document.querySelector('#wa-docx-editor .ProseMirror');
+    if (!pm) return [];
+
+    const resolved = [];
+    const unresolved = [];
+    headings.forEach((heading) => {
+      if (_resolveDocxOutlineTarget(pm, heading)) resolved.push(heading);
+      else unresolved.push(heading);
+    });
+
+    if (unresolved.length) {
+      console.debug('[WA] DOCX outline headings without DOM targets', unresolved.map(h => ({
+        level: h.level,
+        text: h.text,
+        id: h.id,
+      })));
+    }
+
+    return resolved;
+  }
+
+  function _setActiveDocxOutlineItem(itemEl) {
+    if (!itemEl) return;
+    const body = itemEl.closest('.wa-outline-body');
+    if (body) body.querySelectorAll('.wa-outline-item.active').forEach(el => el.classList.remove('active'));
+
+    let parentChildren = itemEl.closest('.wa-outline-children');
+    while (parentChildren) {
+      parentChildren.style.display = '';
+      const parentWrapper = parentChildren.parentElement;
+      const parentArrow = parentWrapper?.querySelector(':scope > .wa-outline-item .wa-outline-arrow');
+      if (parentArrow) {
+        parentArrow.classList.add('expanded');
+        parentArrow.classList.remove('collapsed');
+        parentArrow.innerHTML = '▾';
+      }
+      parentChildren = parentWrapper?.closest('.wa-outline-children') || null;
+    }
+
+    itemEl.classList.add('active');
+  }
+
+  function _bindDocxOutlineScrollSync(outline, headings) {
+    const editorScroll = document.getElementById('wa-editor-content');
+    const pm = document.querySelector('#wa-docx-editor .ProseMirror');
+    const body = outline ? outline.querySelector('.wa-outline-body') : null;
+    if (!outline || !editorScroll || !pm || !body || !Array.isArray(headings) || !headings.length) return;
+
+    const itemEls = [...body.querySelectorAll('.wa-outline-item')];
+    const entries = headings.map((heading, idx) => ({
+      heading,
+      itemEl: itemEls[idx] || null,
+      target: _resolveDocxOutlineTarget(pm, heading),
+    })).filter(entry => entry.itemEl && entry.target);
+    if (!entries.length) return;
+
+    let frameId = 0;
+    const updateActive = () => {
+      frameId = 0;
+      const threshold = editorScroll.scrollTop + _getDocxNavigationAnchorOffset(editorScroll, pm);
+      let activeEntry = null;
+
+      for (const entry of entries) {
+        const targetTop = _getDocxTargetScrollTop(editorScroll, entry.target);
+        if (targetTop !== null && targetTop <= threshold) {
+          activeEntry = entry;
+          continue;
+        }
+        if (activeEntry) break;
+      }
+
+      if (!activeEntry) activeEntry = entries[0];
+      if (!activeEntry) return;
+
+      _setActiveDocxOutlineItem(activeEntry.itemEl);
+      activeEntry.itemEl.scrollIntoView({ block: 'nearest' });
+    };
+
+    const onScroll = () => {
+      if (!frameId) frameId = requestAnimationFrame(updateActive);
+    };
+
+    editorScroll.addEventListener('scroll', onScroll, { passive: true });
+    outline._scrollSyncCleanup = () => {
+      if (frameId) cancelAnimationFrame(frameId);
+      editorScroll.removeEventListener('scroll', onScroll);
+    };
+    requestAnimationFrame(updateActive);
   }
 
   function _renderOutlineItems(container, headings) {
@@ -8224,9 +10779,10 @@ window.WA = window.WA || {};
 
         // Toggle arrow for items with children
         if (node.children.length > 0) {
+          const defaultExpanded = h.level <= 1;
           const arrow = document.createElement('span');
-          arrow.className = 'wa-outline-arrow expanded';
-          arrow.innerHTML = '▾';
+          arrow.className = `wa-outline-arrow ${defaultExpanded ? 'expanded' : 'collapsed'}`;
+          arrow.innerHTML = defaultExpanded ? '▾' : '▸';
           arrow.addEventListener('click', (e) => {
             e.stopPropagation();
             const childContainer = wrapper.querySelector('.wa-outline-children');
@@ -8258,6 +10814,7 @@ window.WA = window.WA || {};
         if (node.children.length > 0) {
           const childContainer = document.createElement('div');
           childContainer.className = 'wa-outline-children';
+          if (h.level > 1) childContainer.style.display = 'none';
           _renderTree(node, childContainer);
           wrapper.appendChild(childContainer);
         }
@@ -8270,46 +10827,18 @@ window.WA = window.WA || {};
   }
 
   function _navigateToHeading(heading, itemEl) {
-    // Try to find the heading in the ProseMirror DOM
     const pm = document.querySelector('#wa-docx-editor .ProseMirror');
     if (!pm) return;
-    let target = null;
-    if (heading.id) {
-      const esc = CSS.escape(heading.id);
-      // Prefer actual heading elements — TOC entries use the same bookmark ID on <span>
-      // but appear earlier in the DOM, so querySelector finds the TOC span first.
-      target = pm.querySelector(`h1[id="${esc}"],h2[id="${esc}"],h3[id="${esc}"],h4[id="${esc}"],h5[id="${esc}"],h6[id="${esc}"]`);
-      if (!target) {
-        // Fall back: find all elements with this ID, skip pure bookmark spans/anchors
-        const all = pm.querySelectorAll(`[id="${esc}"]`);
-        for (const el of all) {
-          const t = el.tagName.toLowerCase();
-          if (t !== 'span' && t !== 'a') { target = el; break; }
-        }
-        // Last resort: use the last match (actual heading comes after TOC in document)
-        if (!target && all.length) target = all[all.length - 1];
-      }
-    }
-    if (!target) {
-      // Fallback: find an h-tag with matching text
-      pm.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(el => {
-        if (!target && el.textContent.trim() === heading.text) target = el;
-      });
-    }
-    if (!target) {
-      // Fallback: any element whose text exactly starts with the heading text
-      pm.querySelectorAll('p, h1, h2, h3, h4, h5, h6').forEach(el => {
-        if (!target && el.textContent.trim().startsWith(heading.text) && heading.text.length > 2) target = el;
-      });
-    }
+    const target = _resolveDocxOutlineTarget(pm, heading);
     if (target) {
       // Scroll within the editor's scroll container for correct positioning
       const editorScroll = document.getElementById('wa-editor-content');
       if (editorScroll) {
-        const containerRect = editorScroll.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        const relativeTop = targetRect.top - containerRect.top + editorScroll.scrollTop;
-        editorScroll.scrollTo({ top: Math.max(0, relativeTop - 80), behavior: 'smooth' });
+        const targetTop = _getDocxTargetScrollTop(editorScroll, target);
+        const offset = _getDocxNavigationAnchorOffset(editorScroll, pm);
+        if (targetTop !== null) {
+          editorScroll.scrollTo({ top: Math.max(0, targetTop - offset), behavior: 'smooth' });
+        }
       } else {
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
@@ -8318,10 +10847,7 @@ window.WA = window.WA || {};
       target.style.background = 'rgba(79,126,255,.15)';
       setTimeout(() => { target.style.background = ''; }, 1800);
     }
-    // Highlight the nav item
-    const body = itemEl.closest('.wa-outline-body');
-    if (body) body.querySelectorAll('.wa-outline-item').forEach(el => el.classList.remove('active'));
-    itemEl.classList.add('active');
+    _setActiveDocxOutlineItem(itemEl);
   }
 
   function _toggleDocOutline(show) {
@@ -8358,9 +10884,11 @@ window.WA = window.WA || {};
     state.fileType = json.file_type;
     state.fileName = json.file_name;
     state.filePath = json.temp_path || wsPath || null;
+    state.capabilityProfile = _normalizeCapabilityProfile(json.capability_profile, json.file_type, json.file_name);
     const ext = json.file_name.split('.').pop().toLowerCase();
     state.wsSourcePath = wsPath;
     state.activeTabPath = wsPath;
+    _hydrateAiConversation(true).catch((error) => console.warn('[WA] AI history hydrate failed:', error));
     const fileNameEl = $('wa-file-name');
     if (fileNameEl) fileNameEl.textContent = state.fileName;
     const _archBtn = $('wa-archive-btn'); if (_archBtn) _archBtn.disabled = false;
@@ -8381,11 +10909,16 @@ window.WA = window.WA || {};
     state.activeEditor = null;
 
     const existingTabIdx = state.openTabs.findIndex(t => t.path === wsPath);
+    const existingTab = existingTabIdx >= 0 ? state.openTabs[existingTabIdx] : null;
     const tabEntry = {
       path: wsPath, name: json.file_name, ext,
       filePath: json.temp_path || wsPath || null,
       fileType: json.file_type, fileId: json.file_id,
       serverData: json.data, cache: null, modified: false,
+      capabilityProfile: _normalizeCapabilityProfile(json.capability_profile, json.file_type, json.file_name),
+      reviewState: existingTab && existingTab.reviewState
+        ? (_cloneSerializable(existingTab.reviewState, { comments: [], proposals: [], focusedId: '', expandedId: '' }) || { comments: [], proposals: [], focusedId: '', expandedId: '' })
+        : { comments: [], proposals: [], focusedId: '', expandedId: '' },
       fsHandle: fsHandle || null,
     };
     if (fsHandle) _fsHandleMap.set(wsPath, fsHandle);
@@ -8394,6 +10927,7 @@ window.WA = window.WA || {};
     _syncPrimarySaveButtons(tabEntry);
 
     toggleWorkspace(true);
+    _primeEditorLayout(state.fileType);
     await _waitForEditorLayout(state.fileType);
 
     if (state.fileType === 'docx') {
@@ -8421,6 +10955,8 @@ window.WA = window.WA || {};
     }
 
     _renderTabs();
+    const reviewState = await _syncReviewStateForActiveFile().catch(() => null);
+    _maybeAutoOpenReviewCenterForImportedItems(reviewState);
     setTimeout(loadWorkspaceFiles, 600);
   }
 
@@ -8462,7 +10998,7 @@ window.WA = window.WA || {};
     }
   };
 
-  // ── Unified AI Chat Stream (backed by /api/chat/stream) ─────────────────
+  // ── Shared AI stream controls ────────────────────────────────────────────
 
   /** Switch the footer send button into a pause state while an AI task is active. */
   function _setStreamBtn(streaming) {
@@ -8484,191 +11020,15 @@ window.WA = window.WA || {};
   };
 
   function _waSession() {
-    return 'workspace_' + (state.fileId || 'default');
+    return _WA_RUNTIME_SESSION_ID;
   }
 
-  /**
-   * Stream a message through /api/chat/stream (same endpoint as main Koto chat).
-   * Handles token/progress/done/error events and extracts TOOL calls + proposals.
-   * @param {string}  message   Full message body (includes document context prefix)
-   * @param {Element} loadingEl  The streaming bubble element already in the DOM
-   * @param {Object}  opts       { task?, model? }
-   */
-  async function _waSendToChat(message, loadingEl, opts) {
-    opts = opts || {};
-    const msgs = $('wa-ai-messages');
-    let fullText = '';
-    let streamBuffer = '';
-    const renderMd = (text) => {
-      if (window.marked) { try { return window.marked.parse(text || ''); } catch(e) {} }
-      return (text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-    };
-    const payload = {
-      session:     _waSession(),
-      message:     message,
-      locked_task: opts.task || 'CHAT',
-      locked_model: opts.model || state.lockedModel || 'auto',
-      // Document-edit context — instructs backend to use proposals system prompt
-      doc_edit:    opts.doc_edit  || false,
-      doc_file_type: opts.file_type || '',
-      doc_has_sel: opts.has_sel   || false,
-    };
-    try {
-      const ctrl = new AbortController();
-      state._streamAbortCtrl = ctrl;
-      _setStreamBtn(true);
-      const resp = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-      if (!resp.ok) {
-        if (resp.status === 404) {
-          throw new Error('后端服务未就绪 (404)，请重启应用后重试');
-        }
-        throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-      }
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        streamBuffer += decoder.decode(value, { stream: true });
-        const lines = streamBuffer.split('\n');
-        streamBuffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === 'classification') {
-              _applyRouteEvent(evt);
-              continue;
-            }
-            if (evt.type === 'token') {
-              fullText += evt.content || '';
-              const visible = fullText
-                .replace(/<TOOL>[\s\S]*?<\/TOOL>/g, '')
-                .replace(/\n?\{"proposals"\s*:\s*\[[\s\S]*?\]\s*\}\s*$/m, '')
-                .trim();
-              if (loadingEl) {
-                loadingEl.innerHTML = _parseCitations(renderMd(visible)) + '<span class="typing-cursor">▊</span>';
-              }
-              msgs.scrollTop = msgs.scrollHeight;
-            } else if (evt.type === 'progress') {
-              if (!fullText && loadingEl && !loadingEl.querySelector('.wa-progress-text')) {
-                loadingEl.innerHTML = `<span class="wa-progress-text">⏳ ${_escHtml(evt.message || '处理中…')}</span>`;
-              }
-            } else if (evt.type === 'done') {
-              let proposalsRendered = false;
-              let proposalData = null;
-              const visible = fullText
-                .replace(/<TOOL>[\s\S]*?<\/TOOL>/g, '')
-                .replace(/\n?\{"proposals"\s*:\s*\[[\s\S]*?\]\s*\}\s*$/m, '')
-                .trim();
-              const finalText = visible || evt.content || '';
-              const propMatch = fullText.match(/\{"proposals"\s*:\s*\[[\s\S]*?\]\s*\}/);
-              if (propMatch) {
-                try {
-                  const parsedProposals = JSON.parse(propMatch[0]);
-                  if (Array.isArray(parsedProposals.proposals) && parsedProposals.proposals.length) {
-                    proposalData = parsedProposals;
-                  }
-                } catch(e) { /* ignore */ }
-              }
-              if (loadingEl) {
-                loadingEl.classList.remove('streaming');
-                if (proposalData) {
-                  // Proposal cards supersede the transient chat bubble.
-                  loadingEl.remove();
-                } else {
-                  loadingEl.innerHTML = _parseCitations(renderMd(finalText));
-                  if (finalText) {
-                    loadingEl.dataset.rawText = finalText;
-                  }
-                }
-              }
-              if (finalText) {
-                state.conversation.push({ role: 'assistant', content: finalText });
-              }
-              msgs.scrollTop = msgs.scrollHeight;
-              // Extract and apply TOOL calls
-              const toolMatches = [...fullText.matchAll(/<TOOL>([\s\S]*?)<\/TOOL>/g)];
-              toolMatches.forEach(m => {
-                try { _handleToolCall(JSON.parse(m[1].trim())); } catch(e) { /* ignore */ }
-              });
-              if (proposalData) {
-                _handleProposals(proposalData);
-                proposalsRendered = true;
-              }
-              // Show AI action bar only for write-intent replies. Translation and
-              // other read-only requests should stay in preview mode.
-              const _canApply = !proposalsRendered && opts.allow_apply !== false && loadingEl && loadingEl.dataset.rawText && state.activeEditor;
-              if (_canApply) {
-                // Snapshot state at response-complete time so buttons remain
-                // correct even if the user sends another message before clicking.
-                const _barSnap = {
-                  pinnedSel:  state.lastPinnedSel,
-                  toolCall:   state.pendingToolCall,
-                  outputMode: state.aiOutputMode,
-                  allowWrite: true,
-                };
-                msgs.appendChild(_makeAIActionBar(_barSnap));
-                // Scroll to show the action bar — it was appended AFTER the
-                // earlier scrollTop call so without this it renders off-screen.
-                requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
-              }
-              state.isLoading = false;
-              return;
-            } else if (evt.type === 'error') {
-              if (loadingEl) {
-                loadingEl.classList.remove('streaming');
-                loadingEl.innerHTML = `<span style="color:var(--error,#ef4444)">${_escHtml(evt.message || 'AI 处理失败')}</span>`;
-              }
-              state.isLoading = false;
-              return;
-            }
-            // agent_step, agent_thought etc. — silently ignore in workspace mode
-          } catch(e) { /* ignore malformed SSE line */ }
-        }
-      }
-      // Stream ended without 'done' — finalize gracefully
-      if (loadingEl && loadingEl.classList.contains('streaming')) {
-        loadingEl.classList.remove('streaming');
-        const visible = fullText.replace(/<TOOL>[\s\S]*?<\/TOOL>/g, '').trim();
-        if (visible) {
-          loadingEl.innerHTML = renderMd(visible);
-          state.conversation.push({ role: 'assistant', content: visible });
-        }
-      }
-      state.isLoading = false;
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        // User cancelled — finalize the streaming bubble gracefully
-        if (loadingEl) {
-          loadingEl.classList.remove('streaming');
-          if (!loadingEl.textContent.trim()) loadingEl.textContent = '[已取消]';
-          else loadingEl.innerHTML += '<span style="color:var(--muted,#888);font-size:11px"> [已取消]</span>';
-        }
-      } else {
-        console.error('[WorkspaceAI] Chat stream error:', err);
-        if (loadingEl) {
-          loadingEl.classList.remove('streaming');
-          const msg = err.message || String(err);
-          if (msg.includes('404')) {
-            loadingEl.textContent = '⚠️ 后端接口未就绪，请重启 Koto 后重试';
-          } else if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
-            loadingEl.textContent = '⚠️ 无法连接后端服务，请检查 Koto 是否正在运行';
-          } else {
-            loadingEl.textContent = `网络错误：${msg}`;
-          }
-        }
-      }
-      state.isLoading = false;
-    } finally {
-      state._streamAbortCtrl = null;
-      _setStreamBtn(false);
-    }
+  function _hydrateAiConversation(force = false) {
+    if (!_waConversationRuntime || typeof _waConversationRuntime.hydrate !== 'function') return Promise.resolve([]);
+    return _waConversationRuntime.hydrate({
+      force,
+      sessionId: _waSession(),
+    });
   }
 
   function _waInferFileType(pathOrName) {
@@ -8718,902 +11078,6 @@ window.WA = window.WA || {};
     return files;
   }
 
-  function _waBuildOpenClawTaskMessage(userText, opts) {
-    opts = opts || {};
-    const parts = [
-      '请按文件任务方式执行下面的请求。优先使用文件工具读取、分析、修改或生成结果文件，而不是把文件内容当作普通聊天文本复述。',
-      '你必须对最终文件结果负责：如果任务涉及文档修改，必须实际完成文件写入，并在结束前确认目标文件已经更新。',
-      '如果用户只是想打开/查看某个文件，直接调用 open_file_in_editor 工具，无需读取内容或修改文件。',
-    ];
-
-    if (opts.currentFileName) {
-      parts.push(`当前编辑文件: ${opts.currentFileName}`);
-    }
-
-    if (opts.targetFileName) {
-      parts.push(`目标文件: ${opts.targetFileName}`);
-      if (opts.referenceFileNames && opts.referenceFileNames.length) {
-        parts.push(`参考文件: ${opts.referenceFileNames.join(', ')}`);
-        parts.push('除非用户明确要求，否则优先围绕目标文件产出修改或结果，参考文件主要用于比对、抽取和校验。');
-      }
-    } else if (opts.attachedFileNames && opts.attachedFileNames.length) {
-      parts.push(`已提供文件: ${opts.attachedFileNames.join(', ')}`);
-    }
-
-    const selectionText = _selectionContextText(opts.selectionContext || opts.pinnedSelection || null);
-    const selectionSource = _selectionContextSourceLabel(opts.selectionContext || null);
-    if (selectionText) {
-      const snippet = selectionText.length > 500
-        ? selectionText.substring(0, 500) + '...'
-        : selectionText;
-      if (selectionSource) {
-        parts.push(`参考文本来源: ${selectionSource}`);
-      }
-      parts.push(`当前重点参考文本:\n${snippet}`);
-      parts.push('除非用户明确要求，否则不要把参考文本所在文件默认视为修改目标。');
-    }
-
-    parts.push(`用户要求:\n${userText}`);
-    return parts.join('\n\n');
-  }
-
-  async function _waSendToOpenClawTask(taskText, loadingEl, opts) {
-    opts = opts || {};
-    const msgs = $('wa-ai-messages');
-
-    // ── Quick-path: pure "open file" intent ──────────────────────────────
-    // If the user typed just a filename (or "打开/查看 filename"), skip the
-    // full task agent and open the file directly in the editor.
-    const _trimmed = String(opts.openIntentText || taskText || '').trim();
-    const _openIntent = _trimmed.match(
-      /^(?:打开|open|查看|show|打开文件)?\s*([\w\u4e00-\u9fff\u3400-\u4dbf\-. ()（）]+\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|json))\s*$/i
-    );
-    if (_openIntent) {
-      const _fname = _openIntent[1].trim();
-      if (loadingEl) {
-        loadingEl.classList.remove('streaming');
-        loadingEl.innerHTML = `<span style="opacity:.7">正在打开 ${_escHtml(_fname)}…</span>`;
-      }
-      try {
-        await Promise.resolve(WA.openWorkspaceFile(_fname));
-        if (loadingEl) loadingEl.innerHTML = `✅ 已打开 ${_escHtml(_fname)}`;
-      } catch (e) {
-        if (loadingEl) loadingEl.innerHTML = `❌ 未找到文件 ${_escHtml(_fname)}`;
-      }
-      state.isLoading = false;
-      _setStreamBtn(false);
-      return;
-    }
-    // ─────────────────────────────────────────────────────────────────────
-
-    let finalAnswer = '';
-    let stepCount = 0;
-    let phaseBarEl = null;
-    const startTime = Date.now();
-    const taskFiles = _waBuildTaskFiles(opts.currentContent || '');
-    const targetFile = opts.targetFile || null;
-    const referenceFiles = Array.isArray(opts.referenceFiles) ? opts.referenceFiles : [];
-    const selectionContext = _createPinnedSelectionContext(opts.selectionContext || null);
-    const targetPathKey = _normalizeAIContextPath(targetFile ? (targetFile.path || targetFile.name || '') : '');
-    if (targetPathKey) {
-      taskFiles.sort((left, right) => {
-        const leftIsTarget = _normalizeAIContextPath(left.path || left.name || '') === targetPathKey;
-        const rightIsTarget = _normalizeAIContextPath(right.path || right.name || '') === targetPathKey;
-        if (leftIsTarget === rightIsTarget) return 0;
-        return leftIsTarget ? -1 : 1;
-      });
-    }
-    const stepEls = new Map();
-    let currentStepId = '';
-
-    const renderMd = (text) => {
-      if (window.marked) { try { return window.marked.parse(text || ''); } catch(e) {} }
-      return (text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-    };
-
-    const timelineEl = document.createElement('div');
-    timelineEl.className = 'wa-agent-timeline';
-    if (loadingEl) {
-      loadingEl.innerHTML = '';
-      loadingEl.appendChild(timelineEl);
-    }
-
-    // Single "thinking" status element that shows the latest model thought
-    // (not accumulated — updates in-place so it doesn't clutter the step list)
-    let thinkingEl = null;
-    function _setThinking(text) {
-      if (!text) {
-        if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
-        return;
-      }
-      if (!thinkingEl) {
-        thinkingEl = document.createElement('div');
-        thinkingEl.className = 'wa-agent-step step-thinking';
-        thinkingEl.innerHTML = '<span class="wa-step-icon">💭</span><span class="wa-step-label"></span>';
-        timelineEl.appendChild(thinkingEl);
-      }
-      const labelEl = thinkingEl.querySelector('.wa-step-label');
-      if (labelEl) labelEl.textContent = text.length > 160 ? text.substring(0, 160) + '…' : text;
-      // Keep it at the bottom
-      timelineEl.appendChild(thinkingEl);
-      if (msgs) msgs.scrollTop = msgs.scrollHeight;
-    }
-    function _clearThinking() {
-      if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
-    }
-
-    let filesModified = 0;
-    let filesCreated = 0;
-    let chartsGenerated = 0;
-    const refreshedPaths = new Set();
-
-    function _addStep(icon, label, cls) {
-      const step = document.createElement('div');
-      step.className = `wa-agent-step ${cls || ''}`;
-      step.innerHTML = `<span class="wa-step-icon">${icon}</span><span class="wa-step-label">${_escHtml(label)}</span>`;
-      timelineEl.appendChild(step);
-      if (msgs) msgs.scrollTop = msgs.scrollHeight;
-      return step;
-    }
-
-    function _updateStep(stepEl, icon, label, cls) {
-      if (!stepEl) return;
-      stepEl.className = `wa-agent-step ${cls || ''}`;
-      const iconEl = stepEl.querySelector('.wa-step-icon');
-      if (iconEl) iconEl.innerHTML = icon;
-      const labelEl = stepEl.querySelector('.wa-step-label');
-      if (labelEl) labelEl.textContent = label;
-    }
-
-    function _ensureStep(stepId, label, cls, icon) {
-      if (stepId && stepEls.has(stepId)) return stepEls.get(stepId);
-      const stepEl = _addStep(icon || '⚙️', label, cls || 'step-action');
-      if (stepId) stepEls.set(stepId, stepEl);
-      return stepEl;
-    }
-
-    function _toolPathFromArgs(args) {
-      if (!args || typeof args !== 'object') return '';
-      return args.path || args.destination || args.file_path || args.source || '';
-    }
-
-    function _openFileIfUseful(toolName, toolPath) {
-      if (!toolPath) return;
-      if (toolName !== 'create_file' && toolName !== 'copy_file') return;
-      setTimeout(() => {
-        try { WA.openWorkspaceFile(toolPath); } catch(e) { console.warn('[TaskAgent] Auto-open failed:', e); }
-      }, 300);
-    }
-
-    function _normalizeTaskPath(value) {
-      return String(value || '').replace(/\\/g, '/');
-    }
-
-    function _refreshChangedFile(filePath, fileType, focus) {
-      const normalizedPath = _normalizeTaskPath(filePath);
-      if (!normalizedPath) return;
-      const currentPath = _normalizeTaskPath(state.wsSourcePath || '');
-      const alreadyOpen = (state.openTabs || []).some((tab) => _normalizeTaskPath(tab.path) === normalizedPath);
-      if (!focus && normalizedPath !== currentPath && !alreadyOpen) return;
-      if (refreshedPaths.has(normalizedPath)) return;
-      refreshedPaths.add(normalizedPath);
-      const supported = _isSupportedExt(fileType || _waInferFileType(normalizedPath));
-      setTimeout(() => {
-        if (focus && !alreadyOpen && normalizedPath !== currentPath) {
-          Promise.resolve(WA.openWorkspaceFile(normalizedPath))
-            .catch((e) => console.warn('[TaskAgent] Auto-open failed:', e))
-            .finally(() => setTimeout(() => refreshedPaths.delete(normalizedPath), 800));
-        } else {
-          Promise.resolve(WA.reloadFileByPath(normalizedPath, supported))
-            .catch((error) => console.warn('[TaskAgent] File refresh failed:', error))
-            .finally(() => setTimeout(() => refreshedPaths.delete(normalizedPath), 800));
-        }
-      }, 250);
-    }
-
-    function _finalizeTask(summaryText) {
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-      if (finalAnswer) {
-        const answerEl = document.createElement('div');
-        answerEl.className = 'wa-agent-answer';
-        answerEl.innerHTML = _parseCitations(renderMd(finalAnswer));
-        if (loadingEl) loadingEl.appendChild(answerEl);
-        loadingEl.dataset.rawText = finalAnswer;
-        state.conversation.push({ role: 'assistant', content: finalAnswer });
-      }
-
-      const footerEl = document.createElement('div');
-      footerEl.className = 'wa-agent-footer';
-      const footerParts = [`完成 ${stepCount} 步`, `${elapsed}s`, `${taskFiles.length} 文件`];
-      if (filesModified > 0) footerParts.push(`修改 ${filesModified} 文件`);
-      if (filesCreated > 0) footerParts.push(`生成 ${filesCreated} 文件`);
-      if (chartsGenerated > 0) footerParts.push(`生成 ${chartsGenerated} 图表`);
-      if (summaryText) footerParts.push(summaryText);
-      footerEl.innerHTML = `<span>${footerParts.join(' · ')}</span>`;
-      if (loadingEl) loadingEl.appendChild(footerEl);
-
-      if (loadingEl) loadingEl.classList.remove('streaming');
-      if (msgs) msgs.scrollTop = msgs.scrollHeight;
-      state.isLoading = false;
-    }
-
-    try {
-      const ctrl = new AbortController();
-      state._streamAbortCtrl = ctrl;
-      _setStreamBtn(true);
-
-      const lockedModel = opts.model || state.lockedModel || 'auto';
-      const targetPath = targetFile ? String(targetFile.path || '').trim() : '';
-      const targetName = targetFile ? String(targetFile.name || (targetPath ? targetPath.split(/[\\/]/).pop() : '') || '').trim() : '';
-      const targetType = targetFile
-        ? String(targetFile.type || _waInferFileType(targetPath || targetName)).trim().toLowerCase()
-        : '';
-      const payload = {
-        action: 'ai_task',
-        context_mode: 'explicit',
-        instruction: taskText,
-        session_id: _waSession(),
-        model_mode: lockedModel === 'local' ? 'local' : 'cloud',
-        model_id: (lockedModel && !['auto', 'cloud', 'local'].includes(lockedModel)) ? lockedModel : '',
-        file_type: targetType,
-        file_name: targetName,
-        files: taskFiles,
-        selection_context: selectionContext ? {
-          text: selectionContext.text,
-          source_path: selectionContext.sourcePath || '',
-          source_name: selectionContext.sourceName || '',
-          source_type: selectionContext.sourceType || '',
-        } : null,
-        target_file: targetPath || targetName ? {
-          path: targetPath || targetName,
-          name: targetName || (targetPath ? targetPath.split(/[\\/]/).pop() || targetPath : ''),
-          type: targetType,
-        } : null,
-        reference_files: referenceFiles.map((file) => ({
-          path: file.path || '',
-          name: file.name || '',
-          type: file.type || _waInferFileType(file.path || file.name || ''),
-        })),
-      };
-
-      const resp = await fetch('/api/editor/ai/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let streamBuffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        streamBuffer += decoder.decode(value, { stream: true });
-        const lines = streamBuffer.split('\n');
-        streamBuffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-
-            if (evt.type === 'classification') {
-              _applyRouteEvent(evt);
-              continue;
-            }
-
-            if (evt.type === 'thought') {
-              const text = evt.text || '';
-              if (text) _setThinking(text);
-              continue;
-            }
-
-            if (evt.type === 'plan_summary') {
-              _clearThinking();
-              _addStep('📋', evt.text || '已生成执行计划', 'step-planning');
-              continue;
-            }
-
-            if (evt.type === 'plan') {
-              const steps = Array.isArray(evt.steps) ? evt.steps : [];
-              const summary = steps
-                .map((step) => step.text || step.title || step.label || step.description || '')
-                .filter(Boolean)
-                .join(' -> ');
-              if (summary) {
-                _addStep('📋', summary.length > 180 ? summary.substring(0, 180) + '...' : `计划: ${summary}`, 'step-planning');
-              }
-              continue;
-            }
-
-            if (evt.type === 'step_start') {
-              _clearThinking();
-              currentStepId = evt.step_id || `step_${stepCount}`;
-              const stepEl = _ensureStep(currentStepId, evt.text || '执行步骤', 'step-action', '⚙️');
-              if (!stepEl.querySelector('.wa-step-spinner')) {
-                const spinner = document.createElement('span');
-                spinner.className = 'wa-step-spinner';
-                stepEl.appendChild(spinner);
-              }
-              continue;
-            }
-
-            if (evt.type === 'step_progress') {
-              const stepId = evt.step_id || currentStepId || `step_${stepCount || 1}`;
-              const stepEl = _ensureStep(stepId, evt.detail || '处理中...', 'step-action', '⚙️');
-              _updateStep(stepEl, '⚙️', evt.detail || '处理中...', 'step-action');
-              if (!stepEl.querySelector('.wa-step-spinner')) {
-                const spinner = document.createElement('span');
-                spinner.className = 'wa-step-spinner';
-                stepEl.appendChild(spinner);
-              }
-              continue;
-            }
-
-            if (evt.type === 'tool_call') {
-              _clearThinking();
-              stepCount++;
-              const stepId = evt.step_id || currentStepId || `tool_${stepCount}`;
-              const toolName = evt.tool_name || 'tool';
-              const toolArgs = evt.tool_args || {};
-              const toolLabel = _toolDisplayName(toolName, toolArgs);
-              const stepEl = _ensureStep(stepId, `${toolLabel}...`, 'step-action', '⚙️');
-              stepEl.dataset.toolName = toolName;
-              stepEl.dataset.toolPath = _toolPathFromArgs(toolArgs);
-              _updateStep(stepEl, '⚙️', `${toolLabel}...`, 'step-action');
-              if (!stepEl.querySelector('.wa-step-spinner')) {
-                const spinner = document.createElement('span');
-                spinner.className = 'wa-step-spinner';
-                stepEl.appendChild(spinner);
-              }
-              currentStepId = stepId;
-              continue;
-            }
-
-            if (evt.type === 'tool_result') {
-              const stepId = evt.step_id || currentStepId;
-              const stepEl = stepId ? stepEls.get(stepId) : null;
-              const preview = evt.result_preview || (evt.tool_name ? `${evt.tool_name} 已完成` : '工具执行完成');
-              if (/image\(s\) generated/i.test(preview) || /figure_\d+\.png/i.test(preview)) {
-                chartsGenerated++;
-              }
-              if (stepEl) {
-                _updateStep(stepEl, '⚙️', preview.length > 140 ? preview.substring(0, 140) + '...' : preview, 'step-action');
-              }
-              continue;
-            }
-
-            if (evt.type === 'file_change') {
-              const changedPath = String(evt.path || '').trim();
-              const changedName = changedPath ? changedPath.split(/[\\/]/).pop() : '文件';
-              const changeType = evt.change_type || 'modify';
-              const changeSummary = evt.summary || `${changedName} 已更新`;
-              if (changeType === 'open') {
-                _clearThinking();
-                _addStep('📂', changeSummary, 'step-done');
-              } else {
-                if (changeType === 'create') filesCreated++;
-                else filesModified++;
-                const stepEl = _addStep('📝', changeSummary, 'step-done');
-                if (stepEl && evt.preview && evt.preview.trim()) {
-                  const previewEl = document.createElement('div');
-                  previewEl.className = 'wa-file-preview';
-                  previewEl.textContent = evt.preview.length > 200
-                    ? evt.preview.slice(0, 200) + '…'
-                    : evt.preview;
-                  stepEl.appendChild(previewEl);
-                }
-              }
-              _refreshChangedFile(changedPath, evt.file_type || '', !!evt.focus);
-              continue;
-            }
-
-            if (evt.type === 'step_done') {
-              _clearThinking();
-              const stepId = evt.step_id || currentStepId;
-              const stepEl = stepId ? stepEls.get(stepId) : null;
-              const label = evt.text || (stepEl && stepEl.querySelector('.wa-step-label')
-                ? stepEl.querySelector('.wa-step-label').textContent.replace(/\.\.\.$/, '')
-                : '步骤完成');
-              if (stepEl) {
-                _updateStep(stepEl, '✅', label, 'step-done');
-                const spinner = stepEl.querySelector('.wa-step-spinner');
-                if (spinner) spinner.remove();
-                _openFileIfUseful(stepEl.dataset.toolName || '', stepEl.dataset.toolPath || '');
-              } else {
-                _addStep('✅', label, 'step-done');
-              }
-              currentStepId = '';
-              continue;
-            }
-
-            if (evt.type === 'step_error') {
-              const stepId = evt.step_id || currentStepId;
-              const stepEl = stepId ? stepEls.get(stepId) : null;
-              const errorText = evt.error || '步骤执行失败';
-              if (stepEl) {
-                _updateStep(stepEl, '❌', errorText, 'step-error');
-                const spinner = stepEl.querySelector('.wa-step-spinner');
-                if (spinner) spinner.remove();
-              } else {
-                _addStep('❌', errorText, 'step-error');
-              }
-              continue;
-            }
-
-            if (evt.type === 'phase') {
-              const phases = evt.phases || [
-                {id: 'decision', label: '决策'},
-                {id: 'execution', label: '执行'},
-                {id: 'check', label: '验证'},
-              ];
-              const current = evt.current || '';
-              const status = evt.status || '';
-              if (!phaseBarEl && loadingEl) {
-                phaseBarEl = document.createElement('div');
-                phaseBarEl.className = 'wa-phase-bar';
-                loadingEl.insertBefore(phaseBarEl, loadingEl.firstChild);
-              }
-              if (phaseBarEl) {
-                phaseBarEl.innerHTML = phases.map(p => {
-                  let cls = 'wa-phase-dot';
-                  if (p.id === current) cls += status === 'done' ? ' done' : ' active';
-                  else if (phases.findIndex(x => x.id === p.id) < phases.findIndex(x => x.id === current)) cls += ' done';
-                  return `<span class="${cls}" title="${_escHtml(p.label || p.id)}">${_escHtml(p.label || p.id)}</span>`;
-                }).join('<span class="wa-phase-sep">›</span>');
-              }
-              continue;
-            }
-
-            if (evt.type === 'verification') {
-              const vStatus = evt.status || 'unknown';
-              const vSummary = evt.summary || '';
-              const iconMap = {completed: '✅', partial: '⚠️', failed: '❌', unknown: '❓'};
-              const clsMap  = {completed: 'step-done', partial: 'step-warn', failed: 'step-error', unknown: 'step-action'};
-              const icon = iconMap[vStatus] || '❓';
-              const cls  = clsMap[vStatus]  || 'step-action';
-              const label = vSummary
-                ? (vSummary.length > 120 ? vSummary.slice(0, 120) + '…' : vSummary)
-                : {completed: '任务验证通过', partial: '任务部分完成', failed: '任务未完成', unknown: '验证结果未知'}[vStatus];
-              _addStep(icon, label, cls);
-              continue;
-            }
-
-            if (evt.type === 'result') {
-              finalAnswer = typeof evt.data === 'string'
-                ? evt.data
-                : (evt.data && (evt.data.text || evt.data.content || '')) || '';
-              continue;
-            }
-
-            if (evt.type === 'done') {
-              _finalizeTask(evt.summary || '');
-              return;
-            }
-
-            if (evt.type === 'error') {
-              if (loadingEl) {
-                loadingEl.classList.remove('streaming');
-                loadingEl.innerHTML = `<span style="color:var(--error,#ef4444)">${_escHtml(evt.text || '任务处理失败')}</span>`;
-              }
-              state.isLoading = false;
-              return;
-            }
-          } catch (e) { /* ignore malformed SSE line */ }
-        }
-      }
-
-      if (loadingEl && loadingEl.classList.contains('streaming')) {
-        _finalizeTask('');
-      }
-      state.isLoading = false;
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        if (loadingEl) {
-          loadingEl.classList.remove('streaming');
-          if (!loadingEl.textContent.trim()) loadingEl.textContent = '[已取消]';
-          else loadingEl.innerHTML += '<span style="color:var(--muted,#888);font-size:11px"> [已取消]</span>';
-        }
-      } else {
-        console.error('[WorkspaceAI] OpenClaw task error:', err);
-        if (loadingEl) {
-          loadingEl.classList.remove('streaming');
-          loadingEl.textContent = `网络错误：${err.message}`;
-        }
-      }
-      state.isLoading = false;
-    } finally {
-      state._streamAbortCtrl = null;
-      _setStreamBtn(false);
-    }
-  }
-
-  // ── Agent-backed AI Stream (backed by /agent/chat) ──────────────────────
-  //
-  // Uses the full Agent ReAct protocol with agent_step / task_final events.
-  // Renders THOUGHT → ACTION → OBSERVATION → ANSWER as a step timeline.
-
-  /**
-   * Stream a message through /agent/chat (SSE agent_step protocol).
-    */
-  async function _waSendToAgent(message, loadingEl, opts) {
-    opts = opts || {};
-    const msgs = $('wa-ai-messages');
-    let finalAnswer = '';
-    let stepCount = 0;
-    const startTime = Date.now();
-
-    const renderMd = (text) => {
-      if (window.marked) { try { return window.marked.parse(text || ''); } catch(e) {} }
-      return (text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-    };
-
-    // Build file_context from current workspace state
-    const fileContext = {
-      file_id: state.fileId || '',
-      file_type: state.fileType || '',
-      file_path: state.wsSourcePath || state.filePath || state.fileName || '',
-      file_name: state.fileName || '',
-      open_tabs: (state.openTabs || []).map(t => t.name || t.id || ''),
-      selection: _selectionContextText(state.lastPinnedSel),
-      // Paths of files explicitly attached to the AI panel (for tool-based file access)
-      analysis_files: (state._aiFileContext || []).map(f => ({ name: f.name, path: f.path })),
-    };
-
-    const payload = {
-      session_id: _waSession(),
-      message: message,
-      model: opts.model || state.lockedModel || 'auto',
-      task_type: opts.task_type || 'FILE_ASSISTANT',
-      file_context: fileContext,
-    };
-
-    // ── @File reference extraction ──────────────────────────────
-    // Matches @filename.ext patterns in the message (Chinese + ASCII filenames)
-    const atFileRe = /@([\w\u4e00-\u9fff\u3400-\u4dbf\-. ()（）]+\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|json))/gi;
-    const atMatches = message.match(atFileRe);
-    if (atMatches && atMatches.length) {
-      payload.context_files = atMatches.map(m => m.slice(1).trim());
-    }
-
-    // Create a timeline container inside the loading bubble
-    const timelineEl = document.createElement('div');
-    timelineEl.className = 'wa-agent-timeline';
-    if (loadingEl) {
-      loadingEl.innerHTML = '';
-      loadingEl.appendChild(timelineEl);
-    }
-
-    // ── Step 4.1: Track files modified, charts generated ──────────
-    let filesModified = 0;
-    let filesCreated = 0;
-    let chartsGenerated = 0;
-    let thinkingEl = null;
-    const _fileTrackTools = new Set(['workspace_create_file', 'workspace_save_file', 'editor_apply']);
-
-    function _addStep(icon, label, cls) {
-      const step = document.createElement('div');
-      step.className = `wa-agent-step ${cls || ''}`;
-      step.innerHTML = `<span class="wa-step-icon">${icon}</span><span class="wa-step-label">${_escHtml(label)}</span>`;
-      timelineEl.appendChild(step);
-      if (msgs) msgs.scrollTop = msgs.scrollHeight;
-      return step;
-    }
-
-    function _updateStep(stepEl, icon, label, cls) {
-      if (!stepEl) return;
-      stepEl.className = `wa-agent-step ${cls || ''}`;
-      const iconEl = stepEl.querySelector('.wa-step-icon');
-      if (iconEl) iconEl.innerHTML = icon;
-      const labelEl = stepEl.querySelector('.wa-step-label');
-      if (labelEl) labelEl.textContent = label;
-    }
-
-    try {
-      const ctrl = new AbortController();
-      state._streamAbortCtrl = ctrl;
-      _setStreamBtn(true);
-
-      // ── Step 4.3: Create pre-agent checkpoint ─────────────────
-      let _agentCheckpoint = null;
-      if (state.wsSourcePath) {
-        try {
-          const cpResp = await fetch('/api/v1/workspace/checkpoint', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path: state.wsSourcePath, label: 'agent_pre' }),
-          });
-          if (cpResp.ok) _agentCheckpoint = await cpResp.json();
-        } catch (e) { /* non-critical */ }
-      }
-
-      const resp = await fetch('/api/agent/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let streamBuffer = '';
-      let currentActionStep = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        streamBuffer += decoder.decode(value, { stream: true });
-        const lines = streamBuffer.split('\n');
-        streamBuffer = lines.pop();
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-
-            if (evt.type === 'agent_step' && evt.data) {
-              const step = evt.data;
-              const stepType = (step.step_type || '').toUpperCase();
-
-              if (stepType === 'THOUGHT') {
-                const content = step.content || '';
-                const phase = (step.metadata || {}).phase || '';
-                if (phase === 'planning') {
-                  _addStep('📋', content || '规划任务...', 'step-planning');
-                } else if (content) {
-                  // Show as updating status, not as an accumulated step
-                  if (!thinkingEl) {
-                    thinkingEl = _addStep('💭', '', 'step-thinking');
-                  }
-                  const lbl = thinkingEl.querySelector('.wa-step-label');
-                  if (lbl) lbl.textContent = content.length > 160 ? content.substring(0, 160) + '…' : content;
-                  timelineEl.appendChild(thinkingEl);
-                  if (msgs) msgs.scrollTop = msgs.scrollHeight;
-                }
-              }
-
-              else if (stepType === 'ACTION') {
-                // Clear thinking indicator when real work begins
-                if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
-                stepCount++;
-                const toolName = (step.action || {}).tool_name || 'tool';
-                const toolArgs = (step.action || {}).tool_args || {};
-                const toolLabel = _toolDisplayName(toolName, toolArgs);
-                currentActionStep = _addStep('⚙️', `${toolLabel}...`, 'step-action');
-                // Store tool info for auto-focus in OBSERVATION handler
-                currentActionStep.dataset.toolName = toolName;
-                currentActionStep.dataset.toolPath = toolArgs.path || toolArgs.file_path || '';
-                // Track file modifications
-                if (toolName === 'workspace_create_file') filesCreated++;
-                if (_fileTrackTools.has(toolName)) filesModified++;
-                // Add a spinner
-                const spinner = document.createElement('span');
-                spinner.className = 'wa-step-spinner';
-                currentActionStep.appendChild(spinner);
-              }
-
-              else if (stepType === 'OBSERVATION') {
-                if (currentActionStep) {
-                  // Update the ACTION step to show completion
-                  const labelEl = currentActionStep.querySelector('.wa-step-label');
-                  const label = labelEl ? labelEl.textContent.replace('...', '') : '';
-                  _updateStep(currentActionStep, '✅', label + ' ✓', 'step-done');
-                  const spinner = currentActionStep.querySelector('.wa-step-spinner');
-                  if (spinner) spinner.remove();
-
-                  // ── Step 4.2: Auto-focus on created/opened files ──────
-                  const prevAction = currentActionStep.dataset;
-                  if (prevAction && prevAction.toolName) {
-                    const tn = prevAction.toolName;
-                    const tp = prevAction.toolPath;
-                    if ((tn === 'workspace_create_file' || tn === 'editor_open_file') && tp) {
-                      // Defer file opening to avoid blocking the stream
-                      setTimeout(() => {
-                        try { WA.openWorkspaceFile(tp); } catch(e) { console.warn('[Agent] Auto-open failed:', e); }
-                      }, 300);
-                    }
-                    if (tn === 'editor_apply') {
-                      // Flash the editor to show changes were applied
-                      const canvas = document.getElementById('wa-canvas');
-                      if (canvas) {
-                        canvas.style.transition = 'box-shadow 0.3s';
-                        canvas.style.boxShadow = 'inset 0 0 30px rgba(255,200,0,0.25)';
-                        setTimeout(() => { canvas.style.boxShadow = ''; }, 1200);
-                      }
-                    }
-                  }
-                  currentActionStep = null;
-                }
-                // Detect chart/image outputs in observation content
-                const obsText = step.observation || step.content || '';
-                const imgMatches = obsText.match(/\[file:(figure_\d+\.png)\]/g);
-                if (imgMatches) {
-                  chartsGenerated += imgMatches.length;
-                }
-              }
-
-              else if (stepType === 'ANSWER') {
-                finalAnswer = step.content || '';
-              }
-
-              else if (stepType === 'ERROR') {
-                _addStep('❌', step.content || 'Agent 执行失败', 'step-error');
-              }
-            }
-
-            else if (evt.type === 'task_final' && evt.data) {
-              const result = evt.data.result || finalAnswer || '';
-              const meta = evt.data.meta || {};
-              const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-              const pipelineStatus = evt.data.status || meta.pipeline_status;
-              const resumeToken = evt.data.resume_token || meta.resume_token;
-
-              // Render final answer
-              if (result) {
-                const answerEl = document.createElement('div');
-                answerEl.className = 'wa-agent-answer';
-                answerEl.innerHTML = _parseCitations(renderMd(result));
-                if (loadingEl) loadingEl.appendChild(answerEl);
-                state.conversation.push({ role: 'assistant', content: result });
-                loadingEl.dataset.rawText = result;
-              }
-
-              // ── Approval gate card ──────────────────────────────
-              if (pipelineStatus === 'needs_approval' && resumeToken) {
-                const approvalEl = document.createElement('div');
-                approvalEl.className = 'wa-approval-card';
-                approvalEl.innerHTML = `
-                  <div class="wa-approval-header">⏸ 需要确认后继续执行</div>
-                  <div class="wa-approval-desc">${_escHtml(meta.approval_desc || '即将执行下一步操作，请确认是否继续。')}</div>
-                  <div class="wa-approval-actions">
-                    <button class="wa-btn-approve" data-action="approve">✅ 批准继续</button>
-                    <button class="wa-btn-reject" data-action="reject">❌ 拒绝</button>
-                  </div>
-                `;
-                if (loadingEl) loadingEl.appendChild(approvalEl);
-
-                approvalEl.querySelector('.wa-btn-approve').addEventListener('click', async () => {
-                  approvalEl.innerHTML = '<span style="color:var(--success,#22c55e)">✅ 已批准，继续执行…</span>';
-                  try {
-                    const resp = await fetch('/api/agent/resume', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ resume_token: resumeToken }),
-                    });
-                    if (resp.ok) {
-                      // TODO: stream continuation results
-                      const data = await resp.json();
-                      if (data.result) {
-                        const contEl = document.createElement('div');
-                        contEl.className = 'wa-agent-answer';
-                        contEl.innerHTML = renderMd(data.result);
-                        loadingEl.appendChild(contEl);
-                      }
-                    }
-                  } catch (e) {
-                    approvalEl.innerHTML = `<span style="color:var(--error,#ef4444)">恢复执行失败: ${_escHtml(e.message)}</span>`;
-                  }
-                });
-                approvalEl.querySelector('.wa-btn-reject').addEventListener('click', () => {
-                  approvalEl.innerHTML = '<span style="color:var(--muted,#888)">❌ 已拒绝</span>';
-                });
-              }
-
-              // Render summary footer with enriched stats (Step 4.1)
-              const footerEl = document.createElement('div');
-              footerEl.className = 'wa-agent-footer';
-              let footerParts = [`完成 ${stepCount} 步`, `${elapsed}s`];
-              if (filesModified > 0) footerParts.push(`修改 ${filesModified} 文件`);
-              if (chartsGenerated > 0) footerParts.push(`生成 ${chartsGenerated} 图表`);
-              footerEl.innerHTML = `<span>${footerParts.join(' · ')}</span>`;
-              if (meta.skill_id) footerEl.innerHTML += ` · <span class="wa-skill-tag">${_escHtml(meta.skill_id)}</span>`;
-
-              // ── Step 4.3: Undo button when agent modified files ────
-              if (filesModified > 0 && _agentCheckpoint && _agentCheckpoint.snap_path) {
-                const undoBtn = document.createElement('button');
-                undoBtn.className = 'wa-btn-undo-agent';
-                undoBtn.textContent = '↩️ 撤销 Agent 修改';
-                undoBtn.addEventListener('click', async () => {
-                  if (!confirm('将文件恢复到 Agent 操作前的状态？')) return;
-                  try {
-                    const r = await fetch('/api/v1/workspace/restore-version', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        snap_path: _agentCheckpoint.snap_path,
-                        target_path: _agentCheckpoint.target_path,
-                      }),
-                    });
-                    if (r.ok) {
-                      undoBtn.textContent = '✅ 已恢复';
-                      undoBtn.disabled = true;
-                      showToast('已恢复到 Agent 操作前的版本', 'success');
-                      // Reload the file
-                      if (state.wsSourcePath) {
-                        setTimeout(() => WA.openWorkspaceFile(state.wsSourcePath), 500);
-                      }
-                    } else {
-                      const d = await r.json();
-                      showToast(d.error || '恢复失败', 'error');
-                    }
-                  } catch (e) {
-                    showToast('恢复失败: ' + e.message, 'error');
-                  }
-                });
-                footerEl.appendChild(undoBtn);
-              }
-
-              if (loadingEl) loadingEl.appendChild(footerEl);
-
-              if (loadingEl) loadingEl.classList.remove('streaming');
-              if (msgs) msgs.scrollTop = msgs.scrollHeight;
-
-              // Show action bar if applicable
-              if (result && state.activeEditor && opts.allow_apply !== false) {
-                const _barSnap = {
-                  pinnedSel: state.lastPinnedSel,
-                  toolCall: state.pendingToolCall,
-                  outputMode: state.aiOutputMode,
-                  allowWrite: true,
-                };
-                msgs.appendChild(_makeAIActionBar(_barSnap));
-                requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
-              }
-
-              state.isLoading = false;
-              return;
-            }
-
-            else if (evt.type === 'error') {
-              if (loadingEl) {
-                loadingEl.classList.remove('streaming');
-                loadingEl.innerHTML = `<span style="color:var(--error,#ef4444)">${_escHtml((evt.data || {}).error || 'Agent 处理失败')}</span>`;
-              }
-              state.isLoading = false;
-              return;
-            }
-          } catch(e) { /* ignore malformed SSE line */ }
-        }
-      }
-
-      // Stream ended without task_final — finalize
-      if (loadingEl && loadingEl.classList.contains('streaming')) {
-        loadingEl.classList.remove('streaming');
-        if (finalAnswer) {
-          const answerEl = document.createElement('div');
-          answerEl.className = 'wa-agent-answer';
-          answerEl.innerHTML = renderMd(finalAnswer);
-          loadingEl.appendChild(answerEl);
-          state.conversation.push({ role: 'assistant', content: finalAnswer });
-        }
-      }
-      state.isLoading = false;
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        if (loadingEl) {
-          loadingEl.classList.remove('streaming');
-          if (!loadingEl.textContent.trim()) loadingEl.textContent = '[已取消]';
-          else loadingEl.innerHTML += '<span style="color:var(--muted,#888);font-size:11px"> [已取消]</span>';
-        }
-      } else {
-        console.error('[WorkspaceAI] Agent stream error:', err);
-        if (loadingEl) {
-          loadingEl.classList.remove('streaming');
-          loadingEl.textContent = `网络错误：${err.message}`;
-        }
-      }
-      state.isLoading = false;
-    } finally {
-      state._streamAbortCtrl = null;
-      _setStreamBtn(false);
-    }
-  }
-
   /** Map tool names to user-friendly labels for the agent step timeline. */
   function _toolDisplayName(toolName, args) {
     const nameMap = {
@@ -9622,6 +11086,8 @@ window.WA = window.WA || {};
       'run_shell_command': '💻 执行命令',
       'list_workspace_files': '📂 浏览工作区文件',
       'parse_file_to_text': '📄 解析文件内容',
+      'inspect_workbook_structure': '🧭 检查表格结构',
+      'audit_financial_workbook': '💰 审计财务模型',
       'read_docx_content': '📖 读取 Word 内容',
       'write_docx_content': '📝 写入 Word 内容',
       'insert_excel_as_docx_table': '📄 插入 Word 表格',
@@ -9648,12 +11114,19 @@ window.WA = window.WA || {};
   }
 
   function _handleProposals(data) {
-     const msgs = $('wa-ai-messages');
-     const proposals = data.proposals || [];
+     const proposals = Array.isArray(data && data.proposals) ? data.proposals : [];
      if (!proposals.length) return;
-     state._activeProposals = proposals;
-     if (proposals.length > 1) msgs.appendChild(_makeProposalBatchBar(proposals));
-     proposals.forEach((p, i) => msgs.appendChild(_makeProposalCard(p, i, proposals.length)));
+     const mergedProposals = _syncProposalStateForActiveFile(proposals);
+      const normalizedBatch = proposals.map((proposal, index) => _normalizeReviewProposal(proposal, index));
+      state._activeProposalBatch = normalizedBatch;
+     state._activeProposals = mergedProposals.length ? mergedProposals.slice() : state._activeProposalBatch.slice();
+     _syncReviewStateForActiveFile().catch(() => {});
+     if (_waAiResultsRuntime && typeof _waAiResultsRuntime.handleProposals === 'function') {
+       return _waAiResultsRuntime.handleProposals(data);
+     }
+     const msgs = $('wa-ai-messages');
+      if (normalizedBatch.length > 1) msgs.appendChild(_makeProposalBatchBar(normalizedBatch));
+      normalizedBatch.forEach((proposal, index) => msgs.appendChild(_makeProposalCard(proposal, index, normalizedBatch.length)));
      // Use rAF so the browser finishes laying out the (potentially tall) proposal
      // cards before we measure scrollHeight — otherwise scrollHeight is stale and
      // the viewport lands in the middle of the content instead of the bottom.
@@ -9840,6 +11313,8 @@ window.WA = window.WA || {};
      return imgWrap;
   }
 
+    window.WA.makeChartImageWrap = _makeWAChartImageWrap;
+
   function _makeAIImgDraggable(img, imgSrc) {
      // Drag insertion removed — use the 「插入文档」 button instead.
      _preUploadChartImage(imgSrc, img);
@@ -9879,8 +11354,8 @@ window.WA = window.WA || {};
      msgs.scrollTop = msgs.scrollHeight;
   }
 
-  // ── Chart / code execution SSE (backed by /api/editor/ai/chart) ──
-  async function _sendViaSSEChart(payload) {
+  // ── Legacy chart SSE fallback (R / compatibility) ──
+  async function _sendViaLegacyChartSSE(payload) {
     let buffer = '';
     const modelMode = payload.model_mode || _waQuickActionModelMode();
     const modelId = payload.model_id || _selectedCloudModelId();
@@ -10008,6 +11483,14 @@ window.WA = window.WA || {};
     }
   }
 
+  async function _sendViaSSEChart(payload) {
+    const language = String(payload && payload.language || 'python').trim().toLowerCase();
+    if (language === 'python' && _waQuickActionRuntime && typeof _waQuickActionRuntime.sendChartAction === 'function') {
+      return _waQuickActionRuntime.sendChartAction(payload);
+    }
+    return _sendViaLegacyChartSSE(payload);
+  }
+
   // ── AI init ───────────────────────────────────────────────────────────────
   function initSocket() {
     const storedLockedModel = localStorage.getItem('wa_locked_model');
@@ -10019,7 +11502,9 @@ window.WA = window.WA || {};
     localStorage.removeItem('wa_ai_output_mode');
     _syncModelStatusUi();
     _refreshModelCatalog();
-    _checkOllamaStatus();
+    _syncLockedModelFromServer().finally(() => {
+      _checkOllamaStatus();
+    });
   }
 
   // ── Exports to Window ──
@@ -10032,20 +11517,20 @@ window.WA = window.WA || {};
   };
 
   window.WA.quickAction = (text) => {
-      // Route the built-in editing actions through the same editor SSE endpoints
-      // used by the canonical file assistant, instead of the legacy JSON adapter.
       const ACTION_KEYWORDS = ['润色', '翻译', '总结', '续写', '改写', '解释', '检查', '可视化'];
-      const matchedAction = ACTION_KEYWORDS.find(a => (text || '').includes(a));
+    const matchedAction = (_waTaskDispatcher && typeof _waTaskDispatcher.matchQuickAction === 'function')
+      ? _waTaskDispatcher.matchQuickAction(text)
+      : ACTION_KEYWORDS.find(a => (text || '').includes(a));
 
       // Capture current selection
-      let sel = state.fileType === 'docx' ? _getDocxSelectionTextForAI() : lastSelectionText;
-      if (!sel && state.fileType === 'xlsx' && state.activeEditor) {
-        const rangeText = state.activeEditor.getContent();
-        if (rangeText && !rangeText.includes('未选中区域')) sel = rangeText;
-      }
+      const liveSelection = _getLiveEditorSelectionForAI();
+      const docxSelection = liveSelection && typeof liveSelection === 'object' ? liveSelection : null;
+      const sel = typeof liveSelection === 'string'
+        ? liveSelection
+        : (docxSelection ? String(docxSelection.text || '') : '');
 
       if (matchedAction) {
-        lastSelectionText = sel;
+        if (sel) lastSelectionText = sel;
         WA.sendQuickAction(matchedAction);
         return;
       }
@@ -10054,7 +11539,11 @@ window.WA = window.WA || {};
       if (sel) {
         _saveEditorRange();
         _applyPinnedHighlight();
-        _pinSelectionChip(sel);
+        if (docxSelection) {
+          _pinSelectionChip(docxSelection);
+        } else {
+          _pinSelectionChip(sel);
+        }
       }
       $('wa-user-input').value = text;
       WA.sendMessage();
@@ -10566,6 +12055,9 @@ window.WA = window.WA || {};
     const ed = state.activeEditor && state.activeEditor.editor;
     if (!ed) return;
     const overlaySelection = _getDocxHdrFtrSelectionInfo();
+    const docxSelection = overlaySelection
+      ? null
+      : _getDocxSelectionPayload({ includeOverlay: false, allowStaleFallback: false });
     let bounds = null;
     let selText = '';
     if (overlaySelection) {
@@ -10573,10 +12065,30 @@ window.WA = window.WA || {};
       selText = overlaySelection.text;
     } else {
       const sel = ed.state.selection;
-      if (sel.from >= sel.to) { _resetDocxSelection(); return; }
+      if (docxSelection && docxSelection.kind === 'table' && docxSelection.tableElement) {
+        _hideDocxHoverBar();
+        _showTableTooltipNear(docxSelection.tableElement);
+        lastSelectionText = docxSelection.rawText;
+        const countEl = $('wa-tooltip-count');
+        if (countEl) countEl.textContent = docxSelection.countLabel || docxSelection.previewText;
+        _updateContextBar({ table: docxSelection.previewText });
+        return;
+      }
+      if (!docxSelection && sel.from >= sel.to) { _resetDocxSelection(); return; }
       bounds = _getDocxSelBounds(ed);
+      if (!bounds && docxSelection && docxSelection.tableElement) {
+        const rect = docxSelection.tableElement.getBoundingClientRect();
+        if (rect && rect.width > 0 && rect.height > 0) {
+          bounds = {
+            top: rect.top,
+            bottom: rect.bottom,
+            left: rect.left,
+            centerX: rect.left + (rect.width / 2),
+          };
+        }
+      }
       if (!bounds) { _hideDocxHoverBar(); return; }
-      selText = ed.state.doc.textBetween(sel.from, sel.to, ' ').trim();
+      selText = docxSelection ? docxSelection.rawText : ed.state.doc.textBetween(sel.from, sel.to, ' ').trim();
     }
     if (!selText) { _resetDocxSelection(); return; }
 
@@ -10659,8 +12171,16 @@ window.WA = window.WA || {};
     if (selText) {
       lastSelectionText = selText;
       const countEl = $('wa-tooltip-count');
-      if (countEl) countEl.textContent = `${selText.replace(/\s/g, '').length}字`;
-      _updateContextBar({ selection: selText });
+      if (countEl) {
+        countEl.textContent = docxSelection && docxSelection.countLabel
+          ? docxSelection.countLabel
+          : `${selText.replace(/\s/g, '').length}字`;
+      }
+      if (docxSelection && docxSelection.kind !== 'text') {
+        _updateContextBar({ table: docxSelection.previewText });
+      } else {
+        _updateContextBar({ selection: selText });
+      }
     }
   }
 
@@ -10672,8 +12192,8 @@ window.WA = window.WA || {};
       const ed = state.activeEditor && state.activeEditor.editor;
       if (!ed) return;
       const overlaySelection = _getDocxHdrFtrSelectionInfo();
-      const hasPmSelection = ed.state.selection.from < ed.state.selection.to;
-      if (!overlaySelection && !hasPmSelection) {
+      const docxSelection = _getDocxSelectionPayload({ includeOverlay: false, allowStaleFallback: false });
+      if (!overlaySelection && !docxSelection) {
         _resetDocxSelection();
       } else if (!_docxMouseIsDown) {
         _showDocxHoverBar();
@@ -10690,6 +12210,7 @@ window.WA = window.WA || {};
   function _resetDocxSelection() {
     _docxNativeSelBottom = 0;
     _hideDocxHoverBar();
+    _hideReviewSelectionLauncher();
     const _ttReset = $('wa-pdf-tooltip');
     if (_ttReset) _ttReset.style.display = 'none';
     lastSelectionText = '';
@@ -11950,6 +13471,7 @@ window.WA = window.WA || {};
       const html = (tab.cache && typeof tab.cache === 'string' && tab.cache.trim()) ? tab.cache : tab.serverData.html;
       await _mountDocxEditor(tab, html, tab.serverData);
       tab._docxViewMode = 'edit';
+      _syncReviewStateForActiveFile().catch(() => {});
       // Inject "预览" button into the editor toolbar
       setTimeout(() => {
         const toolbar = $('wa-editor-toolbar');
@@ -12204,6 +13726,9 @@ window.WA = window.WA || {};
   }
 
   function _getProposalRationaleText(proposal) {
+    if (_waAiResultsRuntime && typeof _waAiResultsRuntime.getProposalRationaleText === 'function') {
+      return _waAiResultsRuntime.getProposalRationaleText(proposal);
+    }
     const raw = (proposal?.rationale || '').replace(/<[^>]+>/g, '').trim();
     if (!raw) return '';
     const rationaleKey = _normalizeProposalText(raw);
@@ -12213,9 +13738,18 @@ window.WA = window.WA || {};
     return raw;
   }
 
+  function _isImportedDocxRevisionProposal(proposal) {
+    if (!proposal) return false;
+    const source = String(proposal.source || '').trim();
+    const actionType = String(proposal.action || proposal.action_type || '').trim();
+    return source === 'docx_revision' && ['replace', 'delete', 'insert'].includes(actionType);
+  }
+
   function _proposalCanApply(proposal) {
     if (!proposal) return false;
-    if (proposal.read_only || proposal.apply_disabled) return false;
+    const importedDocxRevision = _isImportedDocxRevisionProposal(proposal);
+    if (!importedDocxRevision && (proposal.read_only || proposal.apply_disabled)) return false;
+    if (importedDocxRevision) return !!String(proposal.id || proposal.review_id || '').trim();
     const rationale = (proposal.rationale || '').replace(/<[^>]+>/g, '').trim();
     const actionType = String(proposal.action || proposal.action_type || '').trim();
     if (/翻译/.test(rationale) || /translate/i.test(actionType)) return false;
@@ -12250,8 +13784,7 @@ window.WA = window.WA || {};
     actions.className = 'wa-proposal-actions';
     actions.innerHTML = canApply
       ? `<button class="wa-proposal-btn accept" onclick="WA.acceptProposal('${proposal.id}',this)">接受</button>` +
-        `<button class="wa-proposal-btn reject" onclick="WA.rejectProposal('${proposal.id}',this)">拒绝</button>` +
-        `<button class="wa-proposal-btn modify" onclick="WA.modifyProposal('${proposal.id}',this)">${_PENCIL_SVG} 再修改</button>`
+        `<button class="wa-proposal-btn reject" onclick="WA.rejectProposal('${proposal.id}',this)">拒绝</button>`
       : `<button class="wa-proposal-btn reject" onclick="WA.rejectProposal('${proposal.id}',this)">关闭</button>`;
 
     card.appendChild(header);
@@ -12288,22 +13821,28 @@ window.WA = window.WA || {};
     counter.textContent = `${done.length}/${all.length} 已处理`;
   }
 
-  window.WA.acceptProposal = (proposalId, btn) => {
-    const card = btn.closest('.wa-proposal-card');
-    if (!card || card.classList.contains('accepted') || card.classList.contains('rejected')) return;
-    const proposals = state._activeProposals || [];
-    const proposal = proposals.find(p => p.id === proposalId);
+  window.WA.acceptProposal = async (proposalId, btn) => {
+    const entry = _findProposalEntry(proposalId);
+    const proposal = entry.proposal;
     if (!proposal) return;
+    if (proposal._reviewStatus === 'accepted' || proposal._reviewStatus === 'rejected') return;
     if (!_proposalCanApply(proposal)) {
       showToast('该结果仅供查看，不支持直接写入文档', 'info');
       return;
     }
 
+    if (entry.tab && entry.tab.path && entry.tab.path !== state.activeTabPath) {
+      await _switchToTab(entry.tab.path);
+    }
+
     if (state.activeEditor) {
       try {
-        if (proposal.tool_call) {
+        if (_isImportedDocxRevisionProposal(proposal) && typeof state.activeEditor.applyImportedReviewDecision === 'function') {
+          state.activeEditor.applyImportedReviewDecision(proposal, 'accept');
+        } else if (proposal.tool_call) {
           // Server-provided tool call (e.g. from socket_handler agent_proposals)
-          state.activeEditor.applyToolCall(proposal.tool_call);
+          const handled = window.WA.applyStructuredDocToolCall(proposal.tool_call, { notify: false });
+          if (!handled) state.activeEditor.applyToolCall(proposal.tool_call);
         } else if (proposal.original_text && proposal.proposed_text) {
           // Proposals built on the frontend (quick actions: translate / rewrite / etc.)
           // have no tool_call — synthesise a replace_text command.
@@ -12319,29 +13858,57 @@ window.WA = window.WA || {};
       }
     }
 
-    card.classList.add('accepted');
+    _setProposalReviewStatus(proposalId, 'accepted');
+    _syncProposalDomState(proposalId, 'accepted');
     showToast('已接受修改', 'success');
     WA.scheduleAutoSave();
     _updateProposalCounter();
+    _syncReviewStateForActiveFile().catch(() => {});
   };
 
   window.WA.rejectProposal = (proposalId, btn) => {
-    const card = btn.closest('.wa-proposal-card');
-    if (!card || card.classList.contains('accepted') || card.classList.contains('rejected')) return;
-    card.classList.add('rejected');
+    const entry = _findProposalEntry(proposalId);
+    if (!entry.proposal) return;
+    if (entry.proposal._reviewStatus === 'accepted' || entry.proposal._reviewStatus === 'rejected') return;
+    if (_isImportedDocxRevisionProposal(entry.proposal) && state.activeEditor && typeof state.activeEditor.applyImportedReviewDecision === 'function') {
+      try {
+        state.activeEditor.applyImportedReviewDecision(entry.proposal, 'reject');
+      } catch (e) {
+        console.warn('rejectProposal imported revision failed:', e);
+      }
+    }
+    _setProposalReviewStatus(proposalId, 'rejected');
+    _syncProposalDomState(proposalId, 'rejected');
     showToast('已拒绝修改', 'info');
     _updateProposalCounter();
+    _syncReviewStateForActiveFile().catch(() => {});
   };
 
-  window.WA.modifyProposal = (proposalId, btn) => {
-    const card = btn.closest('.wa-proposal-card');
-    if (!card) return;
-    // Check if input already open
-    if (card.querySelector('.wa-proposal-modify-input')) return;
-
-    const proposals = state._activeProposals || [];
-    const proposal = proposals.find(p => p.id === proposalId);
+  window.WA.modifyProposal = async (proposalId, btn) => {
+    const entry = _findProposalEntry(proposalId);
+    const proposal = entry.proposal;
     if (!proposal) return;
+    if (entry.tab && entry.tab.path && entry.tab.path !== state.activeTabPath) {
+      await _switchToTab(entry.tab.path);
+    }
+    const card = btn && btn.closest
+      ? btn.closest('.wa-proposal-card')
+      : (document.querySelector(`[data-proposal-id="${CSS.escape(String(proposalId || ''))}"]`) || null);
+    if (!card) return;
+    const existingInput = card.querySelector('.wa-proposal-modify-input');
+    if (existingInput) {
+      const textarea = existingInput.querySelector('.wa-proposal-modify-textarea');
+      if (textarea && typeof textarea.focus === 'function') {
+        try {
+          textarea.focus({ preventScroll: true });
+        } catch (_) {
+          textarea.focus();
+        }
+      }
+      _relayoutDocxReviewRailAndScrollNode(existingInput, { behavior: 'auto', topMargin: 12, bottomMargin: 16 });
+      return;
+    }
+
     if (!_proposalCanApply(proposal)) {
       showToast('该结果仅供查看，不支持继续修改并写回文档', 'info');
       return;
@@ -12353,10 +13920,31 @@ window.WA = window.WA || {};
       '<textarea class="wa-proposal-modify-textarea" placeholder="输入修改意见，如：语气再正式一些…" rows="2"></textarea>' +
       '<div class="wa-proposal-modify-actions">' +
       `<button class="wa-proposal-btn accept small" onclick="WA._submitModify('${proposalId}',this)">发送</button>` +
-      '<button class="wa-proposal-btn reject small" onclick="this.closest(\'.wa-proposal-modify-input\').remove()">取消</button>' +
+      `<button class="wa-proposal-btn reject small" onclick="WA.cancelModifyProposal('${proposalId}',this)">取消</button>` +
       '</div>';
     card.appendChild(inputWrap);
-    inputWrap.querySelector('textarea').focus();
+    const textarea = inputWrap.querySelector('textarea');
+    if (textarea && typeof textarea.focus === 'function') {
+      try {
+        textarea.focus({ preventScroll: true });
+      } catch (_) {
+        textarea.focus();
+      }
+    }
+    _relayoutDocxReviewRailAndScrollNode(inputWrap, { behavior: 'auto', topMargin: 12, bottomMargin: 16 });
+  };
+
+  window.WA.cancelModifyProposal = (proposalId, btn) => {
+    const card = btn && btn.closest
+      ? btn.closest('.wa-proposal-card')
+      : (document.querySelector(`[data-proposal-id="${CSS.escape(String(proposalId || ''))}"]`) || null);
+    const inputWrap = btn && btn.closest
+      ? btn.closest('.wa-proposal-modify-input')
+      : (card ? card.querySelector('.wa-proposal-modify-input') : null);
+    if (inputWrap) inputWrap.remove();
+    if (card) {
+      _relayoutDocxReviewRailAndScrollNode(card, { behavior: 'auto', topMargin: 12, bottomMargin: 16 });
+    }
   };
 
   window.WA._submitModify = (proposalId, btn) => {
@@ -12365,15 +13953,18 @@ window.WA = window.WA || {};
     const feedback = textarea ? textarea.value.trim() : '';
     if (!feedback) return;
 
-    const proposals = state._activeProposals || [];
-    const proposal = proposals.find(p => p.id === proposalId);
+    const entry = _findProposalEntry(proposalId);
+    const proposal = entry.proposal;
     if (!proposal) return;
 
     // Remove input
     const inputWrap = card.querySelector('.wa-proposal-modify-input');
     if (inputWrap) inputWrap.remove();
-    card.classList.add('rejected');
+    _relayoutDocxReviewRailAndScrollNode(card, { behavior: 'auto', topMargin: 12, bottomMargin: 16 });
+    _setProposalReviewStatus(proposalId, 'rejected');
+    _syncProposalDomState(proposalId, 'rejected');
     _updateProposalCounter();
+    _syncReviewStateForActiveFile().catch(() => {});
 
     // Send a new message with context from this proposal
     const input = $('wa-user-input');
@@ -12407,7 +13998,7 @@ window.WA = window.WA || {};
       showToast('请先设置目标文件（点击文件旁的 Pin 图标）', 'warn');
       return;
     }
-    const proposals = (specificProposals || state._activeProposals || []).filter(_proposalCanApply);
+    const proposals = (specificProposals || state._activeProposalBatch || state._activeProposals || []).filter(_proposalCanApply);
     if (!proposals.length) {
       showToast('没有可应用的修改建议', 'warn');
       return;
@@ -12549,59 +14140,7 @@ window.WA = window.WA || {};
 
   // ── Key Topic Extraction ──────────────────────────────────────────────────
   window.WA.extractTopics = async () => {
-    if (!state._aiFileContext.length) { showToast('请先附加文件', 'warn'); return; }
-    const bar = $('wa-topic-chips-bar');
-    const list = $('wa-topic-chips-list');
-    if (!bar || !list) return;
-    list.innerHTML = '<span class="wa-spinner-sm"></span> 提炼中…';
-    bar.style.display = 'flex';
-
-    const combined = state._aiFileContext.map(f =>
-      `=== ${f.name} ===\n${(f.content || '').slice(0, 8000)}`
-    ).join('\n\n');
-
-    // Use the chat endpoint for topic extraction
-    const prompt = `请从以下资料中提炼6-10个核心主题或关键概念，仅用JSON数组回复，格式:["主题1","主题2",...]\n\n${combined}`;
-    try {
-      const res = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session: _waSession(),
-          message: prompt,
-          locked_task: 'CHAT',
-          locked_model: state.lockedModel || 'auto',
-        }),
-      });
-      let fullText = '';
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const ln of lines) {
-          if (!ln.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(ln.slice(6));
-            if (evt.type === 'token') fullText += evt.content || '';
-            if (evt.type === 'done') break;
-          } catch(e) {}
-        }
-      }
-      // Parse JSON array
-      const m = fullText.match(/\[[\s\S]*?\]/);
-      const topics = m ? JSON.parse(m[0]) : [];
-      if (!topics.length) throw new Error('未提取到主题');
-      list.innerHTML = topics.map(t =>
-        `<button class="wa-topic-chip" onclick="WA._topicClick(this)">${_escHtml(t)}</button>`
-      ).join('');
-    } catch(e) {
-      list.innerHTML = `<span style="color:var(--error,red)">提炼失败: ${_escHtml(e.message)}</span>`;
-    }
+    showToast('文件助手 AI 对话任务流已移除；请使用快捷功能键。', 'warn');
   };
 
   window.WA._topicClick = (btn) => {
@@ -12822,6 +14361,9 @@ window.WA = window.WA || {};
   // snapshot = { pinnedSel, toolCall, outputMode } — captured at response-complete
   // time so UI buttons are isolated from subsequent state changes.
   function _makeAIActionBar(snapshot) {
+    if (_waAiResultsRuntime && typeof _waAiResultsRuntime.makeAIActionBar === 'function') {
+      return _waAiResultsRuntime.makeAIActionBar(snapshot);
+    }
     const bar = document.createElement('div');
     bar.className = 'wa-ai-action-bar';
 
@@ -12907,19 +14449,6 @@ window.WA = window.WA || {};
     bar.remove();
   }
 
-  // Legacy entry point kept for backward compatibility (quick-action cards may call this).
-  window.WA.applyAIResponse = (mode, btn) => {
-    const bar = btn.closest('.wa-ai-action-bar');
-    if (!bar) return;
-    _execWriteToDoc(mode, {
-      pinnedSel:  state.lastPinnedSel,
-      toolCall:   state.pendingToolCall,
-      outputMode: state.aiOutputMode,
-    }, bar);
-    state.pendingToolCall = null;
-    state.lastPinnedSel = null;
-  };
-
   // ── Hide welcome card on first message ──
   function _hideWelcome() {
     const w = $('wa-ai-welcome');
@@ -12935,6 +14464,108 @@ window.WA = window.WA || {};
       input.focus();
       autoResize(input);
     }
+  };
+
+  window.WA.beginTaskResultFollowup = (details) => {
+    const payload = details || {};
+    const action = String(payload.action || '').trim().toLowerCase();
+    const completedTask = payload.completed_task === true;
+    let previousTaskFileChanges = [];
+    if (Array.isArray(payload.file_changes) && payload.file_changes.length) {
+      try {
+        previousTaskFileChanges = JSON.parse(JSON.stringify(payload.file_changes.slice(-8)));
+      } catch (_) {
+        previousTaskFileChanges = payload.file_changes
+          .slice(-8)
+          .filter((item) => item && typeof item === 'object')
+          .map((item) => Object.assign({}, item));
+      }
+    }
+    const followupContext = {
+      kind: 'review_last_task',
+      source: 'task_result_action',
+      followup_action: action || 'question',
+      user_feedback: '',
+      previous_run_id: String(payload.run_id || '').trim(),
+      previous_task_summary: String(payload.summary || '').trim(),
+      previous_task_status: String(payload.terminal_status || '').trim() || (completedTask ? 'completed' : 'failed'),
+      previous_task_request: String(payload.task || '').trim(),
+      previous_task_mode: String(payload.mode || '').trim(),
+      previous_task_request_kind: String(payload.request_kind || '').trim(),
+      previous_task_family: String(payload.task_family || '').trim(),
+      previous_task_operation_kind: String(payload.operation_kind || '').trim(),
+      previous_task_execution_mode: String(payload.execution_mode || '').trim(),
+      previous_task_output_mode: String(payload.output_mode || '').trim(),
+      previous_task_intent_strategy: String(payload.intent_strategy || '').trim(),
+      previous_task_intent_can_apply: Object.prototype.hasOwnProperty.call(payload, 'intent_can_apply')
+        ? (payload.intent_can_apply ? 'true' : 'false')
+        : '',
+      previous_task_intent_requires_confirmation: Object.prototype.hasOwnProperty.call(payload, 'intent_requires_confirmation')
+        ? (payload.intent_requires_confirmation ? 'true' : 'false')
+        : '',
+      previous_task_target_file_type: String(payload.target_file_type || '').trim(),
+      previous_completed_task: completedTask ? 'true' : 'false',
+    };
+    if (previousTaskFileChanges.length) followupContext.previous_task_file_changes = previousTaskFileChanges;
+
+    const defaultPrompt = action === 'apply'
+      ? '请把上一轮已经给出的建议直接应用到目标文件；沿用同一任务上下文继续写回，不要重新从头分析。'
+      : action === 'improve'
+      ? (completedTask
+          ? '请继续优化上一轮任务结果，指出当前不足，并在同一任务里继续处理。'
+          : '请继续修复上一轮任务，解释失败原因并继续处理，直到给出更好的结果。')
+      : (completedTask
+          ? '为什么这次结果会这样？请解释你的处理依据、当前可能的不足，以及如果要继续优化应该怎么做。'
+          : '为什么这次任务没有做好？请解释卡在哪一步、失败原因是什么，以及下一步应该怎么修。');
+
+    const input = $('wa-user-input');
+    state._pendingTaskFollowupContext = followupContext;
+    _hideWelcome();
+    if (input) {
+      const existing = String(input.value || '').trim();
+      if (!existing) {
+        input.value = defaultPrompt;
+      } else if (!existing.includes(defaultPrompt)) {
+        input.value = `${existing}\n${defaultPrompt}`;
+      }
+      input.focus();
+      autoResize(input);
+    }
+    showToast(
+      action === 'apply'
+        ? '已绑定上一任务，发送后会沿上一轮建议继续写回。'
+        : (action === 'improve'
+            ? '已绑定上一任务，发送后会在同一任务里继续优化。'
+            : '已绑定上一任务，发送后会围绕上一结果继续追问。'),
+      'info'
+    );
+  };
+
+  window.WA.resumeTaskArtifact = (details) => {
+    const payload = details || {};
+    const taskPayload = payload.taskPayload && typeof payload.taskPayload === 'object'
+      ? JSON.parse(JSON.stringify(payload.taskPayload))
+      : null;
+    if (!taskPayload) {
+      showToast('恢复任务规格无效', 'warning');
+      return false;
+    }
+    if (state.isLoading) {
+      showToast('当前已有任务在执行，请稍后再试', 'warning');
+      return false;
+    }
+
+    const actionLabel = String(payload.actionLabel || payload.title || taskPayload.task || '继续执行').trim() || '继续执行';
+    const input = $('wa-user-input');
+    state._pendingTaskFollowupContext = null;
+    state._pendingTaskPayload = taskPayload;
+    _hideWelcome();
+    if (input) {
+      input.value = actionLabel;
+      autoResize(input);
+    }
+    window.WA.sendMessage();
+    return true;
   };
 
   window.WA.sendMessage = () => {
@@ -12959,143 +14590,63 @@ window.WA = window.WA || {};
       state.pendingToolCall = null;
       if (pinnedSelText) WA.clearSelection();
 
-      const msgs = $('wa-ai-messages');
-      _hideWelcome();  // hide welcome card on first send
-
-      // Add user message bubble — with optional Copilot-style quote block
-      const uMsg = document.createElement('div');
-      uMsg.className = 'wa-msg user';
-      // Show attached files indicator in the message
-      if (state._aiFileContext && state._aiFileContext.length) {
-        const filesNote = document.createElement('div');
-        filesNote.className = 'wa-msg-files-note';
-        filesNote.textContent = `${state._aiFileContext.map(f => f.name).join(', ')}`;
-        uMsg.appendChild(filesNote);
-      }
-      if (pinnedSelText) {
-        const quote = document.createElement('div');
-        quote.className = 'wa-msg-quote';
-        quote.textContent = pinnedSelText.length > 240 ? pinnedSelText.substring(0, 240) + '…' : pinnedSelText;
-        uMsg.appendChild(quote);
-        if (pinnedSelSource) {
-          const quoteMeta = document.createElement('div');
-          quoteMeta.className = 'wa-msg-quote-meta';
-          quoteMeta.textContent = `引用自 ${pinnedSelSource}`;
-          uMsg.appendChild(quoteMeta);
-        }
-        const content = document.createElement('div');
-        content.textContent = text;
-        uMsg.appendChild(content);
-      } else {
+      const turnUi = _waConversationRuntime && typeof _waConversationRuntime.appendUserMessageWithLoading === 'function'
+        ? _waConversationRuntime.appendUserMessageWithLoading({
+            content: text,
+            files: state._aiFileContext || [],
+            quoteText: pinnedSelText,
+            quoteSource: pinnedSelSource,
+            task_kind: 'message',
+          })
+        : null;
+      const msgs = turnUi && turnUi.msgs ? turnUi.msgs : $('wa-ai-messages');
+      const loadingEl = turnUi && turnUi.loadingEl ? turnUi.loadingEl : document.createElement('div');
+      if (!turnUi) {
+        _hideWelcome();
+        const uMsg = document.createElement('div');
+        uMsg.className = 'wa-msg user';
         uMsg.textContent = text;
+        msgs.appendChild(uMsg);
+        loadingEl.className = 'wa-msg ai streaming';
+        msgs.appendChild(loadingEl);
+        msgs.scrollTop = msgs.scrollHeight;
+        state.conversation.push({ role: 'user', content: text });
       }
-      msgs.appendChild(uMsg);
-
-      // Add streaming bubble
-      const loadingEl = document.createElement('div');
-      loadingEl.className = 'wa-msg ai streaming';
-      msgs.appendChild(loadingEl);
-      msgs.scrollTop = msgs.scrollHeight;
 
       input.value = '';
       autoResize(input);
 
-      const MAX_CONTEXT = 6000;
-      let contextRaw = state.activeEditor ? state.activeEditor.getContent() : '';
-      const context = contextRaw.length > MAX_CONTEXT
-          ? contextRaw.substring(0, MAX_CONTEXT) + '\n…[内容过长已截断，请缩小选区]'
-          : contextRaw;
-      const fileType = state.fileType || 'general';
-
-      // Build full message with document context + tool/proposal format instructions
-      // NOTE: defined at function scope so it's accessible both inside and outside the if block below
-      const _isTranslateIntent = (t) => /翻译|中译英|英译中|译成|翻成|translate/i.test(t || '');
-      const _isReadOnlyIntent = (t) => {
-        if (_isTranslateIntent(t)) return true;
-        const roRe = /总结|摘要|分析|解释|讲解|简介|介绍|是什么|描述|概括|审阅/;
-        const modRe = /修改|改写|润色|删除|替换|更正|修复|优化|重写|调整|纠正|校对|添加|插入|精简|压缩|扩充|完善|补充|修订|转换|改进/;
-        return !pinnedSel && roRe.test(t) && !modRe.test(t);
-      };
-      const _isOpenFileIntent = (t) => /^(?:打开|open|查看|show|打开文件)?\s*[\w\u4e00-\u9fff\u3400-\u4dbf\-. ()（）]+\.(?:docx?|xlsx?|pptx?|pdf|txt|md|csv|json)\s*$/i.test(t || '');
-      // Detect intents that benefit from the agent ReAct loop (multi-step tasks)
-      const _isAgentIntent = (t) => {
-        if (!t) return false;
-        return /对比|比较|diff|合并|汇总多|可视化|画.*图|趋势|图表|批量|格式化整理|报告|审查|条款|风险|检查|校验|审校|分析.*数据|数据.*分析|执行.*代码|运行|chart|plot|merge|compare|batch|report/.test(t);
-      };
-      let fullMessage = text;
-      const _hasAttachedTaskFiles = !!(state._aiFileContext && state._aiFileContext.length);
-      if (state.fileName && context) {
-        const selHint = pinnedSelText
-          ? `\n\n[用户选中的文字]\n"${pinnedSelText.length > 500 ? pinnedSelText.substring(0, 500) + '…' : pinnedSelText}"\n${pinnedSelSource ? `[选中文字来源]\n${pinnedSelSource}\n` : ''}`
-          : '';
-        // Only inject modification proposal hint for queries that intend to edit the document
-        // Skip for read-only intents (summarize, analyze, explain, translate for reference, etc.)
-        const _isReadOnly = _isReadOnlyIntent(text);
-        let toolHint = '';
-        if (state.aiOutputMode !== 'chat' && !_isReadOnly) {
-          if (fileType === 'docx') {
-            toolHint = '\n\n如需修改文档，在回复末尾另起一行输出 JSON 提案（不要 Markdown 代码块）：\n{"proposals":[{"id":"p1","original_text":"被替换的原文","proposed_text":"修改后内容","rationale":"修改理由"}]}\n如有多处修改，并列多条。不需要修改时不要输出该 JSON。';
-          } else if (fileType === 'xlsx') {
-            toolHint = '\n\n如需修改表格单元格，在回复末尾输出 JSON 提案：\n{"proposals":[{"id":"p1","original_text":"原値","proposed_text":"新値","rationale":"理由","tool":{"type":"set_cell","r":行号,"c":列号,"value":"新値"}}]}';
-          } else if (fileType === 'pptx') {
-            toolHint = '\n\n如需修改幻灯片文字，在回复末尾输出 JSON 提案：\n{"proposals":[{"id":"p1","original_text":"原文","proposed_text":"新内容","rationale":"理由","tool":{"type":"set_pptx_text","slide_index":0,"shape_id":1,"value":"新内容"}}]}';
-          }
-        }
-        fullMessage = `[工作区文档助手模式]\n当前文件: ${state.fileName} (${fileType})\n\n文档内容:\n${context}${selHint}${toolHint}\n\n用户指令: ${text}`;
-      }
-
-      state.conversation.push({ role: 'user', content: text });
       state.isLoading = true;
+      const pendingTaskPayload = state._pendingTaskPayload && typeof state._pendingTaskPayload === 'object'
+        ? JSON.parse(JSON.stringify(state._pendingTaskPayload))
+        : null;
+      const pendingTaskFollowupContext = state._pendingTaskFollowupContext && typeof state._pendingTaskFollowupContext === 'object'
+        ? Object.assign({}, state._pendingTaskFollowupContext, { user_feedback: text })
+        : null;
 
-      // Pass doc_edit context so backend can inject the right system prompt
-      const _isDocEdit = !!(state.fileName && state.aiOutputMode !== 'chat' && !_isReadOnlyIntent(text));
-
-      // ── Route: Agent mode (full ReAct loop) vs. simple chat stream ──
-      // Use agent mode when explicitly enabled or when the intent looks like
-      // a task that benefits from multi-step tool use (data analysis, file
-      // operations, code execution, comparison, batch processing).
-      // Also always use agent when 2+ files are attached — multi-file operations
-      // (import, compare, sync) require structured tool use that the basic chat
-      // stream cannot provide, and local models struggle with large combined prompts.
-      const _hasOpenFileIntent = _isOpenFileIntent(text);
-      const _hasTaskIntent = _isAgentIntent(text);
-      const _useOpenClawTask = _hasAttachedTaskFiles || _hasOpenFileIntent;
-      const _useGenericAgent = !_useOpenClawTask && state.useAgentMode;
-      if (_useOpenClawTask) {
-        const tIdx = state._aiTargetFileIdx;
-        const targetFile = (tIdx >= 0 && tIdx < state._aiFileContext.length) ? state._aiFileContext[tIdx] : null;
-        const referenceFiles = targetFile
-          ? state._aiFileContext.filter((_, idx) => idx !== tIdx)
-          : (state._aiFileContext || []);
-        const taskMessage = _waBuildOpenClawTaskMessage(text, {
-          targetFileName: targetFile ? targetFile.name : '',
-          referenceFileNames: referenceFiles.map((file) => file.name),
-          attachedFileNames: (state._aiFileContext || []).map((file) => file.name),
-          selectionContext: pinnedSel || null,
-        });
-        _waSendToOpenClawTask(taskMessage, loadingEl, {
-          model: state.lockedModel || 'auto',
-          currentContent: context,
-          openIntentText: text,
-          selectionContext: pinnedSel || null,
-          targetFile,
-          referenceFiles,
-        });
-      } else if (_useGenericAgent) {
-        _waSendToAgent(fullMessage, loadingEl, {
-          model:       state.lockedModel || 'auto',
-          file_type:   state.fileType || '',
-          allow_apply: !_isReadOnlyIntent(text),
-        });
-      } else {
-        _waSendToChat(fullMessage, loadingEl, {
-          model:    state.lockedModel || 'auto',
-          doc_edit: _isDocEdit,
-          file_type: state.fileType || '',
-          has_sel:  !!pinnedSel,
-          allow_apply: !_isReadOnlyIntent(text),
-        });
+      if (!_waTaskDispatcher || typeof _waTaskDispatcher.dispatchMessage !== 'function') {
+        loadingEl.classList.remove('streaming');
+        loadingEl.textContent = '文件任务运行时未加载，请刷新后重试。';
+        state.isLoading = false;
+        return;
       }
+
+      _waTaskDispatcher.dispatchMessage({
+        text,
+        pinnedSelText,
+        pinnedSelSource,
+        msgs,
+        loadingEl,
+        taskPayload: pendingTaskPayload,
+        options: pendingTaskFollowupContext ? { followup_context: pendingTaskFollowupContext } : {},
+      }).catch((error) => {
+        loadingEl.classList.remove('streaming');
+        loadingEl.textContent = `网络错误：${error && error.message ? error.message : error}`;
+        state.isLoading = false;
+        _setStreamBtn(false);
+      });
+      state._pendingTaskFollowupContext = null;
+      state._pendingTaskPayload = null;
   };
 
   // ── Auto-save ──────────────────────────────────────────────────────────────
@@ -13113,11 +14664,6 @@ window.WA = window.WA || {};
       status.textContent = _autoSaveEnabled ? '自动保存已开启' : '自动保存已关闭';
       setTimeout(() => { if (status) { status.className = ''; status.textContent = ''; } }, 2000);
     }
-  };
-
-  window.WA.setOutputMode = () => {
-    state.aiOutputMode = 'inline';
-    localStorage.removeItem('wa_ai_output_mode');
   };
 
   window.WA.toggleSettings = () => {
@@ -13287,213 +14833,6 @@ window.WA = window.WA || {};
 
   window.WA.toggleWorkflowPanel = () => _waRenderSkillLibrary();
 
-  function _refreshWorkflowChips() {}
-
-  async function _appendWorkflowChips() {}
-
-  async function _suggestWorkflows() {}
-
-  // ── AI display mode: 'panel' (right side) or 'inline' (bottom of canvas) ──
-  window.WA.setAIDisplayMode = (mode) => {
-    if (mode !== 'panel' && mode !== 'inline') return;
-    state.aiDisplayMode = mode;
-    localStorage.setItem('wa_ai_display_mode', mode);
-
-    const aiPanel = $('wa-ai');
-    const inlineAi = $('wa-inline-ai');
-
-    // Toggle buttons
-    document.querySelectorAll('.wa-display-mode-toggle button[data-dm]').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.dm === mode);
-    });
-
-    if (mode === 'inline') {
-      // Show inline dialog at bottom of canvas — AI panel stays visible
-      if (inlineAi) inlineAi.style.display = 'flex';
-    } else {
-      // Hide inline dialog, AI panel stays as-is
-      if (inlineAi) inlineAi.style.display = 'none';
-    }
-  };
-
-  // ── Inline AI dialog messaging ──
-  window.WA.sendInlineMessage = () => {
-    const input = $('wa-iai-input');
-    const text = input.value.trim();
-    if (!text || state.isLoading) return;
-
-    const pinnedSel = state.pinnedSelection;
-    const pinnedSelText = _selectionContextText(pinnedSel);
-    const pinnedSelSource = _selectionContextSourceLabel(pinnedSel);
-    state.lastPinnedSel = pinnedSel || null;
-    state.pendingToolCall = null;
-    if (pinnedSelText) WA.clearSelection();
-
-    const msgArea = $('wa-iai-messages');
-    _hideWelcome();
-
-    // User message
-    const uMsg = document.createElement('div');
-    uMsg.className = 'wa-iai-msg user';
-    if (pinnedSelText) {
-      const q = document.createElement('div');
-      q.style.cssText = 'font-size:11px;font-style:italic;color:var(--text-muted);margin-bottom:2px;overflow:hidden;-webkit-line-clamp:2;-webkit-box-orient:vertical;display:-webkit-box;';
-      q.textContent = pinnedSelText.length > 120 ? pinnedSelText.substring(0, 120) + '…' : pinnedSelText;
-      uMsg.appendChild(q);
-      if (pinnedSelSource) q.title = `引用自 ${pinnedSelSource}`;
-    }
-    const uContent = document.createElement('span');
-    uContent.textContent = text;
-    uMsg.appendChild(uContent);
-    msgArea.appendChild(uMsg);
-
-    // AI streaming bubble
-    const aiMsg = document.createElement('div');
-    aiMsg.className = 'wa-iai-msg ai streaming';
-    msgArea.appendChild(aiMsg);
-    msgArea.scrollTop = msgArea.scrollHeight;
-
-    input.value = '';
-    autoResize(input);
-
-    // Build context (same logic as sendMessage)
-    const MAX_CONTEXT = 6000;
-    let contextRaw = state.activeEditor ? state.activeEditor.getContent() : '';
-    const context = contextRaw.length > MAX_CONTEXT
-        ? contextRaw.substring(0, MAX_CONTEXT) + '\n…[内容过长已截断]'
-        : contextRaw;
-    const fileType = state.fileType || 'general';
-
-    let fullMessage = text;
-    if (state.fileName && context) {
-      const selHint = pinnedSelText
-        ? `\n\n[用户选中的文字]\n"${pinnedSelText.length > 500 ? pinnedSelText.substring(0, 500) + '…' : pinnedSelText}"\n${pinnedSelSource ? `[选中文字来源]\n${pinnedSelSource}\n` : ''}`
-        : '';
-      fullMessage = `[工作区文档助手模式]\n当前文件: ${state.fileName} (${fileType})\n\n文档内容:\n${context}${selHint}\n\n用户指令: ${text}`;
-    }
-
-    state.conversation.push({ role: 'user', content: text });
-    state.isLoading = true;
-
-    // Stream to the inline dialog's AI bubble
-    _waSendToInline(fullMessage, aiMsg, {
-      model: state.lockedModel || 'auto',
-    });
-  };
-
-  window.WA.handleInlineInputKeydown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      WA.sendInlineMessage();
-    }
-  };
-
-  window.WA.inlineQuickAction = (text) => {
-    $('wa-iai-input').value = text;
-    WA.sendInlineMessage();
-  };
-
-  // Lightweight streaming handler for inline dialog (reuses fetch logic from _waSendToChat)
-  async function _waSendToInline(message, loadingEl, opts) {
-    opts = opts || {};
-    const msgArea = $('wa-iai-messages');
-    let fullText = '';
-    let streamBuffer = '';
-    const renderMd = (text) => {
-      if (window.marked) { try { return window.marked.parse(text || ''); } catch(e) {} }
-      return (text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
-    };
-    const payload = {
-      session:      _waSession(),
-      message:      message,
-      locked_task:  opts.task || 'CHAT',
-      locked_model: opts.model || state.lockedModel || 'auto',
-      doc_edit:     false,
-      doc_file_type: state.fileType || '',
-      doc_has_sel:  false,
-    };
-    try {
-      const ctrl = new AbortController();
-      state._streamAbortCtrl = ctrl;
-      _setStreamBtn(true);
-      const resp = await fetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        streamBuffer += decoder.decode(value, { stream: true });
-        const lines = streamBuffer.split('\n');
-        streamBuffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            if (evt.type === 'classification') {
-              _applyRouteEvent(evt);
-              continue;
-            }
-            if (evt.type === 'token') {
-              fullText += evt.content || '';
-              const visible = fullText.replace(/<TOOL>[\s\S]*?<\/TOOL>/g, '').trim();
-              if (loadingEl) loadingEl.innerHTML = renderMd(visible);
-              if (msgArea) msgArea.scrollTop = msgArea.scrollHeight;
-            } else if (evt.type === 'done') {
-              if (loadingEl) {
-                loadingEl.classList.remove('streaming');
-                const visible = fullText.replace(/<TOOL>[\s\S]*?<\/TOOL>/g, '').trim();
-                const finalText = visible || evt.content || '';
-                loadingEl.innerHTML = renderMd(finalText);
-                if (finalText) state.conversation.push({ role: 'assistant', content: finalText });
-              }
-              state.isLoading = false;
-              return;
-            } else if (evt.type === 'error') {
-              if (loadingEl) {
-                loadingEl.classList.remove('streaming');
-                loadingEl.innerHTML = `<span style="color:var(--error,#ef4444)">${_escHtml(evt.message || 'AI 处理失败')}</span>`;
-              }
-              state.isLoading = false;
-              return;
-            }
-          } catch(e) { /* ignore malformed SSE */ }
-        }
-      }
-      // Stream ended without done
-      if (loadingEl && loadingEl.classList.contains('streaming')) {
-        loadingEl.classList.remove('streaming');
-        const visible = fullText.replace(/<TOOL>[\s\S]*?<\/TOOL>/g, '').trim();
-        if (visible) {
-          loadingEl.innerHTML = renderMd(visible);
-          state.conversation.push({ role: 'assistant', content: visible });
-        }
-      }
-      state.isLoading = false;
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        if (loadingEl) {
-          loadingEl.classList.remove('streaming');
-          if (!loadingEl.textContent.trim()) loadingEl.textContent = '[已取消]';
-        }
-      } else {
-        if (loadingEl) {
-          loadingEl.classList.remove('streaming');
-          loadingEl.textContent = `网络错误：${err.message}`;
-        }
-      }
-      state.isLoading = false;
-    } finally {
-      state._streamAbortCtrl = null;
-      _setStreamBtn(false);
-    }
-  }
-
   window.WA.toggleTheme = () => {
     const html = document.documentElement;
     const isDark = html.getAttribute('data-wa-theme') === 'dark';
@@ -13532,6 +14871,120 @@ window.WA = window.WA || {};
       ? state.lockedModel
       : '';
   }
+
+  function _initWorkspaceAiRuntimes() {
+    _waAiTransport = (window.WA && typeof window.WA.createWorkspaceAiTransport === 'function')
+      ? window.WA.createWorkspaceAiTransport({
+          state,
+          setStreamButton: _setStreamBtn,
+        })
+      : null;
+
+    _waAiResultsRuntime = (window.WA && typeof window.WA.createWorkspaceAiResultsRuntime === 'function')
+      ? window.WA.createWorkspaceAiResultsRuntime({
+          state,
+          getMessagesElement: () => $('wa-ai-messages'),
+          selectionContextText: _selectionContextText,
+          createPinnedSelectionContext: _createPinnedSelectionContext,
+          showToast,
+          scheduleAutoSave: () => WA.scheduleAutoSave && WA.scheduleAutoSave(),
+          getUserInputElement: () => $('wa-user-input'),
+          sendMessage: () => window.WA.sendMessage && window.WA.sendMessage(),
+          lightbulbIcon: _LIGHTBULB_SVG,
+          pencilIcon: _PENCIL_SVG,
+          computeInlineDiff: _computeInlineDiff,
+        })
+      : null;
+
+    _waConversationRuntime = (window.WA && typeof window.WA.createWorkspaceAiConversation === 'function')
+      ? window.WA.createWorkspaceAiConversation({
+          state,
+          getMessagesElement: () => $('wa-ai-messages'),
+          getSessionId: _waSession,
+          hideWelcome: _hideWelcome,
+          renderMarkdown: _waRenderMarkdown,
+        })
+      : null;
+
+    _waTaskDispatcher = (window.WA && typeof window.WA.createTaskDispatcher === 'function')
+      ? window.WA.createTaskDispatcher({
+          state,
+          openWorkspaceFile: (path) => window.WA.openWorkspaceFile(path),
+          getCurrentAIContextPath: () => state.wsSourcePath || state.filePath || '',
+          getActiveEditorContent: () => (state.activeEditor && typeof state.activeEditor.getContent === 'function')
+            ? (state.activeEditor.getContent() || '')
+            : '',
+          sampleTaskContext: _waSampleTaskContext,
+          getSessionId: _waSession,
+          getModelMode: _waQuickActionModelMode,
+          getSelectedCloudModelId: _selectedCloudModelId,
+          getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'
+            ? _waConversationRuntime.getHistoryForModel(12)
+            : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []),
+          beginAssistantTaskTurn: (metadata) => _waConversationRuntime && typeof _waConversationRuntime.beginAssistantTaskTurn === 'function'
+            ? _waConversationRuntime.beginAssistantTaskTurn(metadata || {})
+            : null,
+          syncAssistantTaskTurn: (turnId, metadata) => _waConversationRuntime && typeof _waConversationRuntime.syncAssistantTaskTurn === 'function'
+            ? _waConversationRuntime.syncAssistantTaskTurn(turnId, metadata || {})
+            : null,
+          appendAssistantTurn: (text, metadata) => _waConversationRuntime && typeof _waConversationRuntime.appendAssistantTurn === 'function'
+            ? _waConversationRuntime.appendAssistantTurn(text, Object.assign({ render: false }, metadata || {}))
+            : null,
+          streamWhiteboxTask: (options) => window.WA.streamWhiteboxTask(options),
+          setStreamButton: _setStreamBtn,
+        })
+      : null;
+
+    _waQuickActionRuntime = (window.WA && typeof window.WA.createWorkspaceQuickActionRuntime === 'function' && _waAiTransport)
+      ? window.WA.createWorkspaceQuickActionRuntime({
+          state,
+          transport: _waAiTransport,
+          getMessagesElement: () => $('wa-ai-messages'),
+          getModelMode: _waQuickActionModelMode,
+          getSelectedCloudModelId: _selectedCloudModelId,
+          handleProposals: _handleProposals,
+          makeAIActionBar: _makeAIActionBar,
+          applyRouteEvent: _applyRouteEvent,
+          setPendingToolCall: (parsed) => { state.pendingToolCall = parsed; },
+          appendAssistantTurn: (text, metadata) => _waConversationRuntime && typeof _waConversationRuntime.appendAssistantTurn === 'function'
+            ? _waConversationRuntime.appendAssistantTurn(text, Object.assign({ render: false }, metadata || {}))
+            : null,
+          getSessionId: _waSession,
+          getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'
+            ? _waConversationRuntime.getHistoryForModel(12)
+            : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []),
+          slidesIcon: _SLIDES_SVG,
+        })
+      : null;
+
+    if (_waQuickActionRuntime && _waTaskDispatcher && typeof _waQuickActionRuntime.attachDispatcher === 'function') {
+      _waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);
+    }
+  }
+
+  _initWorkspaceAiRuntimes();
+
+  window.WA.hydrateAiHistory = (force = true) => _hydrateAiConversation(force);
+
+  window.WA.registerTaskQuickAction = (definition) => {
+    if (!_waQuickActionRuntime || typeof _waQuickActionRuntime.registerAction !== 'function') return null;
+    return _waQuickActionRuntime.registerAction(definition);
+  };
+
+  window.WA.registerTaskEntryRoute = (route) => {
+    if (!_waTaskDispatcher || typeof _waTaskDispatcher.registerMessageRoute !== 'function') return null;
+    return _waTaskDispatcher.registerMessageRoute(route);
+  };
+
+  window.WA.registerTaskActionHandler = (action, handler) => {
+    if (!_waTaskDispatcher || typeof _waTaskDispatcher.registerQuickActionHandler !== 'function') return null;
+    return _waTaskDispatcher.registerQuickActionHandler(action, handler);
+  };
+
+  window.WA.registerTaskActionKeyword = (keyword, action) => {
+    if (!_waTaskDispatcher || typeof _waTaskDispatcher.registerQuickActionKeyword !== 'function') return null;
+    return _waTaskDispatcher.registerQuickActionKeyword(keyword, action);
+  };
 
   function _clearActiveRoute() {
     state._activeRoute = null;
@@ -13715,6 +15168,27 @@ window.WA = window.WA || {};
       .catch(() => {});
   }
 
+  function _syncLockedModelFromServer() {
+    return fetch('/api/local-model/status', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data || data.success === false) return null;
+        const serverLockedModel = data.mode === 'local' ? 'local' : 'auto';
+        if (state.lockedModel !== serverLockedModel) {
+          state.lockedModel = serverLockedModel;
+          localStorage.setItem('wa_locked_model', serverLockedModel);
+          _clearActiveRoute();
+        }
+        if (data.mode === 'local') {
+          state._hasExplicitModelChoice = true;
+          if (data.model) state._localRuntimeModel = data.model;
+        }
+        _syncModelStatusUi();
+        return data;
+      })
+      .catch(() => null);
+  }
+
   window.WA.setUseLocalModel = (useLocal) => {
     const newModel = useLocal ? 'local' : 'auto';
     state.lockedModel = newModel;
@@ -13747,22 +15221,28 @@ window.WA = window.WA || {};
     } catch (_e) { /* non-fatal */ }
   }
 
-  window.WA.scheduleAutoSave = () => {
+  window.WA.scheduleAutoSave = (options) => {
+    const skipDiskWrite = !!(options && options.skipDiskWrite);
     if (!state.fileId || !state.fileType || state.fileType === 'pdf' || state.fileType === 'image') return;
     // Mark active tab as modified (dirty indicator)
     const tab = state.openTabs.find(t => t.path === state.activeTabPath);
     if (tab && !tab.modified) { tab.modified = true; _notifyPyModified(tab, true); _renderTabs(); }
+    if (skipDiskWrite) return;
     // If auto-save is enabled, schedule a disk write after 2 s of inactivity
     if (_autoSaveEnabled) {
       clearTimeout(_autoSaveTimer);
       const status = $('wa-autosave-status');
       if (status) { status.className = 'saving'; status.textContent = '保存中…'; }
-      _autoSaveTimer = setTimeout(WA.autoSave, 2000);
+      _autoSaveTimer = setTimeout(() => {
+        _autoSaveTimer = null;
+        WA.autoSave();
+      }, 2000);
     }
   };
 
   // autoSave: called by the timer when auto-save is ON — saves to workspace in-place.
   window.WA.autoSave = async () => {
+    _autoSaveTimer = null;
     if (!state.activeEditor || !state.fileId || !state.fileType || state.fileType === 'pdf' || state.fileType === 'image') return;
     const status = $('wa-autosave-status');
     try {
@@ -14305,10 +15785,6 @@ window.WA = window.WA || {};
 
   // Init
   initSocket();
-  // Restore AI display mode preference
-  if (state.aiDisplayMode === 'inline') {
-    WA.setAIDisplayMode('inline');
-  }
   // loadFileBrowser / loadRecentFiles are deferred to first open (openInMainView)
   // to avoid issuing API requests before the user has ever opened the workspace panel.
   _renderMyWorkspace();
@@ -14766,20 +16242,15 @@ window.WA = window.WA || {};
     }
   });
 
-  // Ctrl+K — Focus inline AI input (when in inline mode) or right panel input
+  // Ctrl+K — Focus the right-panel input
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
       // Don't intercept in contentEditable or dedicated inputs
       const f = document.activeElement;
       if (f && f.isContentEditable) return;
       e.preventDefault();
-      if (state.aiDisplayMode === 'inline') {
-        const iaiInput = $('wa-iai-input');
-        if (iaiInput) iaiInput.focus();
-      } else {
-        const waInput = $('wa-user-input');
-        if (waInput) waInput.focus();
-      }
+      const waInput = $('wa-user-input');
+      if (waInput) waInput.focus();
     }
   });
 

@@ -1379,50 +1379,32 @@ def process_stream_compat():
 # ======================================================================
 
 
-def _get_legacy_agent():
-    """Try to import the old agent_loop singleton."""
-    try:
-        from agent_loop import get_agent_loop
-
-        return get_agent_loop()
-    except Exception:
-        return None
-
-
 @agent_bp.route("/confirm", methods=["POST"])
 def agent_confirm():
-    """User confirmation callback (legacy compat)."""
-    data = request.json or {}
-    session = data.get("session", "")
-    confirmed = data.get("confirmed", False)
-
-    agent = _get_legacy_agent()
-    if agent is None:
-        return jsonify({"success": False, "error": "Agent 尚未初始化"}), 400
-
-    try:
-        agent.submit_confirmation(session, confirmed)
-        return jsonify({"success": True, "confirmed": confirmed})
-    except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 500
+    """Retired legacy confirmation callback for the removed agent-loop protocol."""
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": "旧版 Agent 确认回调已下线，请改用当前主聊天流或文档助手交互。",
+            }
+        ),
+        410,
+    )
 
 
 @agent_bp.route("/choice", methods=["POST"])
 def agent_choice():
-    """User choice callback (legacy compat)."""
-    data = request.json or {}
-    session = data.get("session", "")
-    selected = data.get("selected", "")
-
-    agent = _get_legacy_agent()
-    if agent is None:
-        return jsonify({"success": False, "error": "Agent 尚未初始化"}), 400
-
-    try:
-        agent.submit_choice(session, selected)
-        return jsonify({"success": True, "selected": selected})
-    except Exception as exc:
-        return jsonify({"success": False, "error": str(exc)}), 500
+    """Retired legacy choice callback for the removed agent-loop protocol."""
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": "旧版 Agent 选项回调已下线，请改用当前主聊天流或文档助手交互。",
+            }
+        ),
+        410,
+    )
 
 
 @agent_bp.route("/resume", methods=["POST"])

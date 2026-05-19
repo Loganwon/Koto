@@ -15,12 +15,15 @@
 # ══════════════════════════════════════════════════════════════
 
 import base64
+import logging
 import os
 import subprocess
 import sys
 import tempfile
 import textwrap
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30  # seconds
 OUTPUT_SIZE_LIMIT = 512 * 1024  # 512 KB
@@ -93,6 +96,18 @@ def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None =
         try:
             import matplotlib
             matplotlib.use('Agg')
+            matplotlib.rcParams['font.sans-serif'] = [
+                'Microsoft YaHei',
+                'SimHei',
+                'Noto Sans CJK SC',
+                'WenQuanYi Micro Hei',
+                'PingFang SC',
+                'Arial Unicode MS',
+                'DejaVu Sans',
+            ]
+            matplotlib.rcParams['axes.unicode_minus'] = False
+            matplotlib.rcParams['figure.dpi'] = 160
+            matplotlib.rcParams['savefig.dpi'] = 220
             import matplotlib.pyplot as _plt
 
             _orig_show = _plt.show
@@ -100,7 +115,7 @@ def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None =
 
             def _auto_show(*args, **kwargs):
                 _fig_counter[0] += 1
-                _plt.savefig(f'figure_{_fig_counter[0]}.png', dpi=150, bbox_inches='tight')
+                _plt.savefig(f'figure_{_fig_counter[0]}.png', dpi=220, bbox_inches='tight')
                 _plt.close('all')
 
             _plt.show = _auto_show
@@ -130,7 +145,7 @@ def run_r(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None
         options(device = function(...) {
             .fig_counter <<- .fig_counter + 1L
             grDevices::png(filename = paste0("figure_", .fig_counter, ".png"),
-                           width = 1200, height = 900, res = 150)
+                           width = 1600, height = 1200, res = 220)
         })
     """)
 
@@ -195,7 +210,8 @@ def _run_in_dir(lang: str, cmd: list, timeout: int, cwd: str) -> dict:
             else " 请安装 R 并将 Rscript 加入 PATH。"
         )
     except Exception as exc:
-        error = f"执行失败：{exc}"
+        logger.warning("[Sandbox] execution failed: %s", exc)
+        error = "执行失败，请检查代码语法或依赖后重试。"
 
     # Collect image output files
     if error is None:

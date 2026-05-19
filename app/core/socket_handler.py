@@ -13,6 +13,7 @@
 import logging
 
 from app.core.llm.model_mode import is_explicit_model_mode, normalize_model_mode
+from app.core.security.output_validator import sanitize_user_visible_text
 from app.core.shared.tool_parser import parse_tool_calls, stringify_tool_result  # noqa: F401
 from app.core.shared.llm_helpers import (  # noqa: F401
     is_online_failure as _is_online_failure_shared,
@@ -21,6 +22,14 @@ from app.core.shared.llm_helpers import (  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_user_error_text(text, fallback: str) -> str:
+    return sanitize_user_visible_text(text, fallback=fallback, treat_as_error=True)
+
+
+def _safe_user_preview_text(text, fallback: str) -> str:
+    return sanitize_user_visible_text(text, fallback=fallback)
 
 def register_socket_events(socketio):
     """Register all /doc namespace WebSocket event handlers."""
@@ -79,7 +88,10 @@ def register_socket_events(socketio):
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": f"服务端处理失败: {exc}",
+                    "text": _safe_user_error_text(
+                        f"服务端处理失败: {exc}",
+                        "服务端处理失败，请稍后重试。",
+                    ),
                     "is_error": True,
                 },
                 namespace="/doc",
@@ -301,7 +313,12 @@ def _handle_code_exec(emit, payload, use_local_only: bool = False):
         logger.exception("[DocAssistant] sandbox error: %s", exc)
         emit(
             "code_result",
-            {"error": str(exc), "stdout": "", "stderr": "", "files": {}},
+            {
+                "error": _safe_user_error_text(str(exc), "代码执行失败，请稍后重试。"),
+                "stdout": "",
+                "stderr": "",
+                "files": {},
+            },
             namespace="/doc",
         )
 
@@ -380,7 +397,17 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
             return "".join(full) if full else ""
         except Exception as exc_lo:
             logger.error("[DocAssistant] Local-only stream failed: %s", exc_lo)
-            emit("agent_task_complete", {"full_text": "", "error": str(exc_lo)}, namespace="/doc")
+            emit(
+                "agent_task_complete",
+                {
+                    "full_text": "",
+                    "error": _safe_user_error_text(
+                        str(exc_lo),
+                        "本地 AI 调用失败，请检查 Ollama 后重试。",
+                    ),
+                },
+                namespace="/doc",
+            )
             return None
 
     # ── Attempt 1: Online ────────────────────────────────────────────────────
@@ -407,14 +434,20 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": f"❌ AI 调用失败：{exc}",
+                    "text": _safe_user_error_text(
+                        f"❌ AI 调用失败：{exc}",
+                        "❌ AI 调用失败，请稍后重试。",
+                    ),
                     "is_error": True,
                 },
                 namespace="/doc",
             )
             emit(
                 "agent_task_complete",
-                {"full_text": "", "error": str(exc)},
+                {
+                    "full_text": "",
+                    "error": _safe_user_error_text(str(exc), "AI 调用失败，请稍后重试。"),
+                },
                 namespace="/doc",
             )
             return None
@@ -471,7 +504,13 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
         )
         emit(
             "agent_task_complete",
-            {"full_text": "", "error": str(exc2)},
+            {
+                "full_text": "",
+                "error": _safe_user_error_text(
+                    str(exc2),
+                    "本地 AI 调用失败，请检查 Ollama 后重试。",
+                ),
+            },
             namespace="/doc",
         )
         return None
@@ -648,7 +687,10 @@ def _emit_agent_event(socketio, sid, event) -> None:
         socketio.emit("agent_event", {
             "type": "step_error",
             "step_id": d.get("step_id", ""),
-            "error": d.get("error", ""),
+            "error": _safe_user_error_text(
+                d.get("error", ""),
+                "处理失败，请稍后重试。",
+            ),
         }, namespace=ns, to=sid)
 
     elif etype == EventType.TOOL_CALL:
@@ -663,7 +705,10 @@ def _emit_agent_event(socketio, sid, event) -> None:
         socketio.emit("agent_event", {
             "type": "tool_result",
             "tool_name": d.get("tool_name", ""),
-            "result_preview": d.get("result_preview", ""),
+            "result_preview": _safe_user_preview_text(
+                d.get("result_preview", ""),
+                "工具已执行。",
+            ),
         }, namespace=ns, to=sid)
 
     elif etype == EventType.STATUS_MESSAGE:
@@ -671,11 +716,14 @@ def _emit_agent_event(socketio, sid, event) -> None:
         is_error = d.get("is_error", False)
         if is_error:
             socketio.emit("agent_execute_command", {
-                "action": "show_message", "text": text, "is_error": True,
+                "action": "show_message",
+                "text": _safe_user_error_text(text, "AI 调用失败，请稍后重试。"),
+                "is_error": True,
             }, namespace=ns, to=sid)
         else:
             socketio.emit("agent_progress", {
-                "step": "status", "detail": text,
+                "step": "status",
+                "detail": _safe_user_preview_text(text, "处理中…"),
             }, namespace=ns, to=sid)
 
     elif etype == EventType.PROPOSAL:

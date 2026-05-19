@@ -306,6 +306,31 @@ class TrackChangesEditor:
         )
         return el, None
 
+    def _sync_comments_part(self, doc, comments_el, comments_part_ref):
+        """将 comments XML 同步到文档 part，并返回当前 part 引用。"""
+        comments_bytes = etree.tostring(
+            comments_el, xml_declaration=True, encoding="UTF-8", standalone=True
+        )
+
+        if comments_part_ref is not None:
+            comments_part_ref._blob = comments_bytes
+            return comments_part_ref
+
+        from docx.opc.packuri import PackURI
+        from docx.opc.part import Part
+
+        comments_content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
+        comments_rel_type = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+
+        new_part = Part(
+            PackURI("/word/comments.xml"),
+            comments_content_type,
+            comments_bytes,
+            doc.part.package,
+        )
+        doc.part.relate_to(new_part, comments_rel_type)
+        return new_part
+
     def _add_comment_element(self, comments_el, comment_id, modified, reason=""):
         """在 comments XML 里添加一条批注"""
         WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -353,73 +378,16 @@ class TrackChangesEditor:
         添加 commentRangeStart / commentRangeEnd / commentReference
         """
         try:
-            p = para._element
-            runs = list(p.findall(qn("w:r")))
-
-            if not runs:
-                return False
-
-            # 构建文本 → run 映射
-            text_parts = []
-            run_map = []
-            for run in runs:
-                run_text = self._get_run_text(run)
-                start = len("".join(text_parts))
-                text_parts.append(run_text)
-                end = len("".join(text_parts))
-                run_map.append((start, end, run))
-
-            full_text = "".join(text_parts)
-            pos = full_text.find(original)
+            pos = para.text.find(original)
             if pos == -1:
                 return False
-
-            target_end = pos + len(original)
-
-            # 找到起始和结束 run
-            start_run_idx = None
-            end_run_idx = None
-
-            for i, (s, e, run) in enumerate(run_map):
-                if start_run_idx is None and s <= pos < e:
-                    start_run_idx = i
-                if s < target_end <= e:
-                    end_run_idx = i
-                    break
-
-            if start_run_idx is None:
-                return False
-            if end_run_idx is None:
-                end_run_idx = len(run_map) - 1
-
-            cid = str(comment_id)
-            WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-
-            # 在起始 run 前插入 commentRangeStart
-            range_start = parse_xml(
-                f'<w:commentRangeStart w:id="{cid}" xmlns:w="{WNS}"/>'
+            return self._insert_comment_range_markers(
+                para,
+                pos,
+                para,
+                pos + len(original),
+                comment_id,
             )
-            start_run_el = run_map[start_run_idx][2]
-            idx = list(p).index(start_run_el)
-            p.insert(idx, range_start)
-
-            # 在结束 run 后插入 commentRangeEnd
-            range_end = parse_xml(f'<w:commentRangeEnd w:id="{cid}" xmlns:w="{WNS}"/>')
-            end_run_el = run_map[end_run_idx][2]
-            idx = list(p).index(end_run_el)
-            p.insert(idx + 1, range_end)
-
-            # 紧跟 commentRangeEnd 后插入 commentReference run
-            ref_run = parse_xml(
-                f'<w:r xmlns:w="{WNS}">'
-                f'  <w:rPr><w:rStyle w:val="CommentReference"/></w:rPr>'
-                f'  <w:commentReference w:id="{cid}"/>'
-                f"</w:r>"
-            )
-            idx = list(p).index(range_end)
-            p.insert(idx + 1, ref_run)
-
-            return True
 
         except Exception as e:
             logger.warning(f"[Comments] ⚠️ 添加批注标记失败: {str(e)}")
@@ -469,6 +437,31 @@ class TrackChangesEditor:
                     0, len(normalized), "start", f"开始应用 {len(normalized)} 条修订"
                 )
 
+            def _emit_saved_progress(current_index: int, original_text: str) -> None:
+                if not progress_callback:
+                    return
+                try:
+                    doc.save(file_path)
+                except Exception as save_error:
+                    logger.warning(f"[TrackChanges] ⚠️ 增量保存失败: {save_error}")
+                    progress_callback(
+                        current_index,
+                        len(normalized),
+                        "failed",
+                        f"⚠️ 增量写回失败: {str(save_error)[:80]}",
+                    )
+                    return
+                progress_callback(
+                    current_index,
+                    len(normalized),
+                    "saved",
+                    f"已写回原文 {applied_count}/{len(normalized)}：{original_text[:20]}...",
+                    file_updated=True,
+                    applied=applied_count,
+                    file_path=file_path,
+                    updated_in_place=True,
+                )
+
             for idx, anno in enumerate(normalized, 1):
                 original = anno["original"]
                 modified = anno["modified"]
@@ -499,6 +492,7 @@ class TrackChangesEditor:
                                 progress_callback(
                                     idx, len(normalized), "success", detail_msg
                                 )
+                            _emit_saved_progress(idx, original)
                             break
 
                 # 再在表格中查找
@@ -527,6 +521,7 @@ class TrackChangesEditor:
                                                     "success",
                                                     detail_msg,
                                                 )
+                                            _emit_saved_progress(idx, original)
                                             break
 
                 if not found:
@@ -550,6 +545,7 @@ class TrackChangesEditor:
                 "applied": applied_count,
                 "failed": failed_count,
                 "total": len(normalized),
+                "updated_in_place": True,
             }
 
         except Exception as e:
@@ -717,6 +713,360 @@ class TrackChangesEditor:
                 parts.append(t.text)
         return "".join(parts)
 
+    def _iter_commentable_paragraphs(self, doc: Document) -> list[Any]:
+        paragraphs: list[Any] = []
+        try:
+            body = doc._element.body
+        except Exception:
+            body = None
+
+        body_paragraphs = list(doc.paragraphs)
+        body_tables = list(doc.tables)
+        para_index = 0
+        table_index = 0
+
+        if body is not None:
+            for child in body.iterchildren():
+                if child.tag == qn("w:p"):
+                    if para_index < len(body_paragraphs):
+                        paragraphs.append(body_paragraphs[para_index])
+                        para_index += 1
+                elif child.tag == qn("w:tbl"):
+                    if table_index >= len(body_tables):
+                        continue
+                    table = body_tables[table_index]
+                    table_index += 1
+                    for row in table.rows:
+                        for cell in row.cells:
+                            paragraphs.extend(cell.paragraphs)
+            if paragraphs:
+                return paragraphs
+
+        paragraphs = list(doc.paragraphs)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    paragraphs.extend(cell.paragraphs)
+        return paragraphs
+
+    def _build_comment_anchor_index(self, doc: Document) -> tuple[str, list[dict[str, Any]]]:
+        paragraphs = self._iter_commentable_paragraphs(doc)
+        spans: list[dict[str, Any]] = []
+        parts: list[str] = []
+        cursor = 0
+
+        for index, para in enumerate(paragraphs):
+            para_text = para.text or ""
+            start_offset = cursor
+            parts.append(para_text)
+            cursor += len(para_text)
+            spans.append({
+                "para": para,
+                "start": start_offset,
+                "end": cursor,
+            })
+            if index + 1 < len(paragraphs):
+                parts.append("\n")
+                cursor += 1
+
+        return "".join(parts), spans
+
+    @staticmethod
+    def _coerce_anchor_int(value: Any) -> int | None:
+        if value in (None, ""):
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _matching_prefix_len(expected: str, actual: str) -> int:
+        limit = min(len(expected), len(actual))
+        matched = 0
+        while matched < limit and expected[matched] == actual[matched]:
+            matched += 1
+        return matched
+
+    @staticmethod
+    def _matching_suffix_len(expected: str, actual: str) -> int:
+        limit = min(len(expected), len(actual))
+        matched = 0
+        while matched < limit and expected[-(matched + 1)] == actual[-(matched + 1)]:
+            matched += 1
+        return matched
+
+    def _score_comment_anchor_candidate(
+        self,
+        full_text: str,
+        start_offset: int,
+        end_offset: int,
+        occurrence_index: int,
+        anchor_meta: dict[str, Any],
+    ) -> int:
+        before_context = str(anchor_meta.get("anchor_context_before") or "")
+        after_context = str(anchor_meta.get("anchor_context_after") or "")
+        score = 0
+
+        if before_context:
+            actual_before = full_text[max(0, start_offset - len(before_context)):start_offset]
+            score += self._matching_suffix_len(before_context, actual_before) * 4
+        if after_context:
+            actual_after = full_text[end_offset:end_offset + len(after_context)]
+            score += self._matching_prefix_len(after_context, actual_after) * 4
+
+        occurrence_hint = self._coerce_anchor_int(anchor_meta.get("anchor_occurrence"))
+        if occurrence_hint is not None:
+            score += max(0, 96 - min(96, abs(occurrence_index - occurrence_hint) * 24))
+
+        start_hint = self._coerce_anchor_int(anchor_meta.get("anchor_start_offset"))
+        if start_hint is not None:
+            score += max(0, 96 - min(96, abs(start_offset - start_hint)))
+
+        end_hint = self._coerce_anchor_int(anchor_meta.get("anchor_end_offset"))
+        if end_hint is not None:
+            score += max(0, 48 - min(48, abs(end_offset - end_hint)))
+
+        return score
+
+    def _offsets_to_paragraph_range(
+        self,
+        spans: list[dict[str, Any]],
+        start_offset: int,
+        end_offset: int,
+    ) -> dict[str, Any] | None:
+        if not spans or end_offset <= start_offset:
+            return None
+
+        def _locate(offset: int, *, is_end: bool) -> tuple[int, int] | None:
+            for index, span in enumerate(spans):
+                span_start = int(span["start"])
+                span_end = int(span["end"])
+                para_length = max(0, span_end - span_start)
+                if span_start <= offset <= span_end:
+                    return index, max(0, min(offset - span_start, para_length))
+                if index + 1 < len(spans):
+                    next_start = int(spans[index + 1]["start"])
+                    if span_end < offset < next_start:
+                        return (index, para_length) if is_end else (index + 1, 0)
+            last_index = len(spans) - 1
+            last_span = spans[last_index]
+            last_length = max(0, int(last_span["end"]) - int(last_span["start"]))
+            if offset >= int(last_span["end"]):
+                return last_index, last_length
+            return None
+
+        start_loc = _locate(start_offset, is_end=False)
+        end_loc = _locate(end_offset, is_end=True)
+        if start_loc is None or end_loc is None:
+            return None
+
+        start_index, start_in_para = start_loc
+        end_index, end_in_para = end_loc
+        if start_index > end_index:
+            return None
+        if start_index == end_index and end_in_para <= start_in_para:
+            return None
+
+        return {
+            "start_para": spans[start_index]["para"],
+            "start_offset": start_in_para,
+            "end_para": spans[end_index]["para"],
+            "end_offset": end_in_para,
+        }
+
+    def _resolve_comment_anchor_range(
+        self,
+        doc: Document,
+        original_text: str,
+        anchor_meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        full_text, spans = self._build_comment_anchor_index(doc)
+        if not spans:
+            return None
+
+        anchor_meta = anchor_meta if isinstance(anchor_meta, dict) else {}
+        search_texts: list[str] = []
+        stripped_text = _strip_md_formatting(original_text)
+        for candidate in (original_text, stripped_text):
+            if candidate and candidate not in search_texts:
+                search_texts.append(candidate)
+        if not search_texts:
+            return None
+
+        start_hint = self._coerce_anchor_int(anchor_meta.get("anchor_start_offset"))
+        end_hint = self._coerce_anchor_int(anchor_meta.get("anchor_end_offset"))
+        before_context = str(anchor_meta.get("anchor_context_before") or "")
+        after_context = str(anchor_meta.get("anchor_context_after") or "")
+
+        if start_hint is not None and end_hint is not None and end_hint > start_hint:
+            range_info = self._offsets_to_paragraph_range(spans, start_hint, end_hint)
+            if range_info is not None:
+                candidate_slice = full_text[start_hint:end_hint]
+                normalized_slice = _normalize_text_for_match(candidate_slice)
+                text_matches = any(
+                    candidate_slice == candidate
+                    or normalized_slice == _normalize_text_for_match(candidate)
+                    for candidate in search_texts
+                )
+                before_matches = (
+                    not before_context
+                    or full_text[max(0, start_hint - len(before_context)):start_hint] == before_context
+                )
+                after_matches = (
+                    not after_context
+                    or full_text[end_hint:end_hint + len(after_context)] == after_context
+                )
+                if text_matches or (before_context or after_context) and before_matches and after_matches:
+                    return range_info
+
+        best_match: dict[str, Any] | None = None
+        for candidate in search_texts:
+            occurrence_index = 0
+            search_from = 0
+            while True:
+                hit = full_text.find(candidate, search_from)
+                if hit == -1:
+                    break
+                match_end = hit + len(candidate)
+                range_info = self._offsets_to_paragraph_range(spans, hit, match_end)
+                if range_info is not None:
+                    score = self._score_comment_anchor_candidate(
+                        full_text,
+                        hit,
+                        match_end,
+                        occurrence_index,
+                        anchor_meta,
+                    )
+                    if best_match is None or score > int(best_match["score"]):
+                        best_match = {
+                            **range_info,
+                            "score": score,
+                        }
+                occurrence_index += 1
+                search_from = hit + max(len(candidate), 1)
+
+        if best_match is not None:
+            best_match.pop("score", None)
+            return best_match
+
+        all_paragraphs = [span["para"] for span in spans]
+        para, matched_text = _find_para_with_text(all_paragraphs, original_text)
+        if para is None or not matched_text:
+            return None
+        pos = para.text.index(matched_text)
+        return {
+            "start_para": para,
+            "start_offset": pos,
+            "end_para": para,
+            "end_offset": pos + len(matched_text),
+        }
+
+    def _split_run_at_paragraph_offset(self, para, split_offset: int) -> None:
+        if split_offset <= 0 or split_offset >= len(para.text or ""):
+            return
+
+        p = para._element
+        accumulated = 0
+        for run_el in list(p.findall(qn("w:r"))):
+            run_text = self._get_run_text(run_el)
+            run_length = len(run_text)
+            if run_length <= 0:
+                continue
+
+            run_start = accumulated
+            run_end = run_start + run_length
+            if not (run_start < split_offset < run_end):
+                accumulated = run_end
+                continue
+
+            split_index = split_offset - run_start
+            left_text = run_text[:split_index]
+            right_text = run_text[split_index:]
+            rpr_xml = self._clone_rPr(run_el.find(qn("w:rPr")))
+            insert_at = list(p).index(run_el)
+            p.remove(run_el)
+            if left_text:
+                p.insert(insert_at, self._make_run(left_text, rpr_xml))
+                insert_at += 1
+            if right_text:
+                p.insert(insert_at, self._make_run(right_text, rpr_xml))
+            return
+
+    def _find_run_at_or_after_offset(self, para, offset: int):
+        accumulated = 0
+        first_text_run = None
+        for run_el in para._element.findall(qn("w:r")):
+            run_text = self._get_run_text(run_el)
+            run_length = len(run_text)
+            if run_length <= 0:
+                continue
+            if first_text_run is None:
+                first_text_run = run_el
+            run_start = accumulated
+            run_end = run_start + run_length
+            if offset <= run_start or run_start <= offset < run_end:
+                return run_el
+            accumulated = run_end
+        return first_text_run if offset <= 0 else None
+
+    def _find_run_at_or_before_offset(self, para, offset: int):
+        accumulated = 0
+        last_text_run = None
+        for run_el in para._element.findall(qn("w:r")):
+            run_text = self._get_run_text(run_el)
+            run_length = len(run_text)
+            if run_length <= 0:
+                continue
+            run_start = accumulated
+            run_end = run_start + run_length
+            if run_start < offset <= run_end or run_end == offset:
+                return run_el
+            accumulated = run_end
+            last_text_run = run_el
+        return last_text_run
+
+    def _insert_comment_range_markers(
+        self,
+        start_para,
+        start_offset: int,
+        end_para,
+        end_offset: int,
+        comment_id: str | int,
+    ) -> bool:
+        if start_para is None or end_para is None:
+            return False
+        if start_para is end_para and end_offset <= start_offset:
+            return False
+
+        self._split_run_at_paragraph_offset(end_para, end_offset)
+        self._split_run_at_paragraph_offset(start_para, start_offset)
+
+        start_run_el = self._find_run_at_or_after_offset(start_para, start_offset)
+        end_run_el = self._find_run_at_or_before_offset(end_para, end_offset)
+        if start_run_el is None or end_run_el is None:
+            return False
+
+        cid = str(comment_id)
+        wns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        start_marker = parse_xml(
+            f'<w:commentRangeStart w:id="{cid}" xmlns:w="{wns}"/>'
+        )
+        end_marker = parse_xml(
+            f'<w:commentRangeEnd w:id="{cid}" xmlns:w="{wns}"/>'
+        )
+        ref_run = parse_xml(
+            f'<w:r xmlns:w="{wns}">'
+            f'  <w:rPr><w:rStyle w:val="CommentReference"/></w:rPr>'
+            f'  <w:commentReference w:id="{cid}"/>'
+            f"</w:r>"
+        )
+
+        start_run_el.addprevious(start_marker)
+        end_run_el.addnext(end_marker)
+        end_marker.addnext(ref_run)
+        return True
+
     def _clone_rPr(self, rPr) -> str:
         """克隆格式属性"""
         if rPr is None:
@@ -811,6 +1161,8 @@ class TrackChangesEditor:
                         {"original": original, "modified": modified, "reason": reason}
                     )
 
+            total_items = len(track_changes_items) + len(comment_items)
+
             logger.info(f"\n[Hybrid] 🎯 混合标注模式")
             logger.info(
                 f"[Hybrid] ✏️  精确修改: {len(track_changes_items)} 条（Track Changes）"
@@ -839,6 +1191,18 @@ class TrackChangesEditor:
 
                     if success:
                         tracked_success += 1
+                        doc.save(file_path)
+                        if progress_callback:
+                            progress_callback(
+                                idx,
+                                total_items,
+                                "saved",
+                                f"已写回原文 {tracked_success + commented_success}/{total_items}：{item['original'][:20]}...",
+                                file_updated=True,
+                                applied=tracked_success + commented_success,
+                                file_path=file_path,
+                                updated_in_place=True,
+                            )
                     else:
                         tracked_failed += 1
                         logger.warning(
@@ -876,6 +1240,21 @@ class TrackChangesEditor:
 
                     if success:
                         commented_success += 1
+                        comments_part_ref = self._sync_comments_part(
+                            doc, comments_el, comments_part_ref
+                        )
+                        doc.save(file_path)
+                        if progress_callback:
+                            progress_callback(
+                                len(track_changes_items) + idx,
+                                total_items,
+                                "saved",
+                                f"已写回原文 {tracked_success + commented_success}/{total_items}：{item['original'][:20]}...",
+                                file_updated=True,
+                                applied=tracked_success + commented_success,
+                                file_path=file_path,
+                                updated_in_place=True,
+                            )
                     else:
                         commented_failed += 1
                         logger.warning(
@@ -884,28 +1263,9 @@ class TrackChangesEditor:
 
             # 将 comments XML 写入文档 Part（python-docx OPC 方式）
             if commented_success > 0 and comments_el is not None:
-                comments_bytes = etree.tostring(
-                    comments_el, xml_declaration=True, encoding="UTF-8", standalone=True
+                comments_part_ref = self._sync_comments_part(
+                    doc, comments_el, comments_part_ref
                 )
-
-                if comments_part_ref is not None:
-                    # 已有 comments part，更新内容
-                    comments_part_ref._blob = comments_bytes
-                else:
-                    # 新建 comments part（与非混合模式相同的方式）
-                    from docx.opc.packuri import PackURI
-                    from docx.opc.part import Part
-
-                    COMMENTS_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
-                    COMMENTS_RT = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
-
-                    new_part = Part(
-                        PackURI("/word/comments.xml"),
-                        COMMENTS_CT,
-                        comments_bytes,
-                        doc.part.package,
-                    )
-                    doc.part.relate_to(new_part, COMMENTS_RT)
 
             # 保存文档
             doc.save(file_path)
@@ -1219,6 +1579,7 @@ class TrackChangesEditor:
         original_text: str,
         suggestion_text: str,
         reason: str = "",
+        anchor_meta: dict[str, Any] | None = None,
     ) -> bool:
         """应用单个批注（内部方法）"""
         try:
@@ -1227,26 +1588,22 @@ class TrackChangesEditor:
             effective_original = (
                 stripped if (stripped and stripped != original_text) else original_text
             )
+            anchor_range = self._resolve_comment_anchor_range(
+                doc,
+                effective_original,
+                anchor_meta=anchor_meta,
+            )
+            if not anchor_range:
+                return False
 
-            # Search body paragraphs AND table cells
-            all_paragraphs = list(doc.paragraphs)
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        all_paragraphs.extend(cell.paragraphs)
+            self.change_id += 1
+            comment_id = str(self.change_id)
 
-            for para in all_paragraphs:
-                if effective_original in para.text:
-                    self.change_id += 1
-                    comment_id = str(self.change_id)
+            comment_content = suggestion_text
+            if reason:
+                comment_content = f"{suggestion_text}\n\n原因：{reason}"
 
-                    # 构建批注内容
-                    comment_content = suggestion_text
-                    if reason:
-                        comment_content = f"{suggestion_text}\n\n原因：{reason}"
-
-                    # 创建批注元素
-                    comment_xml = f"""
+            comment_xml = f"""
                     <w:comment w:id="{comment_id}" w:author="{self.author}" w:date="{datetime.now().isoformat()}" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
                         <w:p>
                             <w:pPr>
@@ -1258,60 +1615,15 @@ class TrackChangesEditor:
                         </w:p>
                     </w:comment>
                     """
-                    comments_el.append(parse_xml(comment_xml))
+            comments_el.append(parse_xml(comment_xml))
 
-                    # 在段落中标记批注范围
-                    pos = para.text.index(effective_original)
-
-                    # 分割 runs
-                    accumulated = 0
-                    start_run_idx = -1
-                    start_offset = 0
-                    end_run_idx = -1
-                    end_offset = 0
-
-                    for idx, run in enumerate(para.runs):
-                        run_len = len(run.text)
-
-                        if start_run_idx == -1 and accumulated + run_len > pos:
-                            start_run_idx = idx
-                            start_offset = pos - accumulated
-
-                        if accumulated + run_len >= pos + len(effective_original):
-                            end_run_idx = idx
-                            end_offset = pos + len(effective_original) - accumulated
-                            break
-
-                        accumulated += run_len
-
-                    if start_run_idx >= 0:
-                        # 在起始位置插入 commentRangeStart
-                        start_marker = parse_xml(
-                            f'<w:commentRangeStart w:id="{comment_id}" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
-                        )
-                        para.runs[start_run_idx]._element.addprevious(start_marker)
-
-                        # 在结束位置插入 commentRangeEnd
-                        if end_run_idx >= 0:
-                            end_marker = parse_xml(
-                                f'<w:commentRangeEnd w:id="{comment_id}" xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"/>'
-                            )
-                            para.runs[end_run_idx]._element.addnext(end_marker)
-
-                            # 插入 comment reference
-                            ref_run_xml = f"""
-                            <w:r xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-                                <w:rPr>
-                                    <w:rStyle w:val="CommentReference"/>
-                                </w:rPr>
-                                <w:commentReference w:id="{comment_id}"/>
-                            </w:r>
-                            """
-                            para._element.append(parse_xml(ref_run_xml))
-
-                            return True
-
-            return False
+            return self._insert_comment_range_markers(
+                anchor_range["start_para"],
+                int(anchor_range["start_offset"]),
+                anchor_range["end_para"],
+                int(anchor_range["end_offset"]),
+                comment_id,
+            )
 
         except Exception as e:
             logger.info(f"[Comment] 单条批注失败: {e}")

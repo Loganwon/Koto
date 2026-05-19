@@ -119,6 +119,8 @@ config/skill_ratings.json
 web/app.py.bak
 
 # Temporary debug/analysis files (generated during development, not for repo)
+.tmp_external_agents/
+tmp_*
 *_log.txt
 git_log_*.txt
 diff_parser.txt

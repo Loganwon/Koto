@@ -61,9 +61,10 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
         )
 
     # ── 可选生产力插件（两种模式均尝试加载，失败则跳过） ─────────────
+    # WebToolsBridgePlugin 依赖已移除的 legacy web.tool_registry，
+    # 其历史能力已由 Search/Productivity 等核心插件覆盖，不再默认加载。
     for plugin_path, name in [
         ("app.core.agent.plugins.productivity_plugin", "ProductivityPlugin"),
-        ("app.core.agent.plugins.web_tools_bridge_plugin", "WebToolsBridgePlugin"),
     ]:
         try:
             import importlib
