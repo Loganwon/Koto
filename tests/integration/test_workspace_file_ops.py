@@ -11,7 +11,9 @@ Bugs fixed (regression-guarded here):
 
 New coverage:
   - DELETE /api/v1/workspace/file  (all extensions + traversal + missing)
+    - POST /api/v1/workspace/create_file
   - POST /api/v1/workspace/create_folder
+    - POST /api/v1/workspace/set_workspace_dir
   - PATCH /api/v1/workspace/rename  (folder rename)
   - DELETE /api/v1/workspace/folder
   - POST /api/v1/workspace/auto_save  (traversal guard)
@@ -26,6 +28,7 @@ New coverage:
 
 from __future__ import annotations
 
+import json
 import io
 import os
 import uuid
@@ -40,7 +43,7 @@ import pytest
 def _app_bundle(tmp_path_factory):
     """
     Minimal Flask app with only workspace_assistant_bp registered.
-    Workspace and tmp dirs are isolated per module run.
+    Workspace and tmp roots are isolated per module run.
     """
     os.environ.setdefault("KOTO_AUTH_ENABLED", "false")
 
@@ -53,9 +56,9 @@ def _app_bundle(tmp_path_factory):
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
 
-    _orig_tmp = _wa._TMP_DIR
+    _orig_tmp_root = _wa._TMP_ROOT
     _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
-    _wa._TMP_DIR = tmp_dir
+    _wa._TMP_ROOT = tmp_dir
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
@@ -64,11 +67,12 @@ def _app_bundle(tmp_path_factory):
     app = Flask(__name__)
     app.register_blueprint(workspace_assistant_bp)
     app.config["TESTING"] = True
+    app.secret_key = "test-workspace-file-ops"
 
     with app.test_client() as client:
         yield client, tmp_dir, workspace_dir
 
-    _wa._TMP_DIR = _orig_tmp
+    _wa._TMP_ROOT = _orig_tmp_root
     if _orig_ws is not None:
         _shared.WORKSPACE_DIR = _orig_ws
 
@@ -158,6 +162,56 @@ class TestDeleteWorkspaceFile:
         resp = client.delete("/api/v1/workspace/file?path=subdir_del/inner.txt")
         assert resp.status_code == 200
         assert not (sub / "inner.txt").exists()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/create_file
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCreateFile:
+
+    def test_create_file_in_root(self, _app_bundle):
+        client, _, ws = _app_bundle
+        name = f"note_{uuid.uuid4().hex[:8]}.txt"
+        resp = client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": name}
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data.get("ok") is True
+        assert data.get("name") == name
+        assert data.get("path") == name
+        assert (ws / name).is_file()
+        assert (ws / name).read_text(encoding="utf-8") == ""
+
+    def test_create_file_in_subfolder(self, _app_bundle):
+        client, _, ws = _app_bundle
+        folder = ws / f"parent_{uuid.uuid4().hex[:6]}"
+        folder.mkdir(exist_ok=True)
+        name = f"child_{uuid.uuid4().hex[:6]}.md"
+        resp = client.post(
+            "/api/v1/workspace/create_file",
+            json={"folder": folder.name, "name": name},
+        )
+        assert resp.status_code == 200
+        assert (folder / name).is_file()
+
+    def test_create_file_duplicate_returns_409(self, _app_bundle):
+        client, _, ws = _app_bundle
+        name = f"dup_{uuid.uuid4().hex[:8]}.txt"
+        (ws / name).write_text("existing", encoding="utf-8")
+        resp = client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": name}
+        )
+        assert resp.status_code == 409
+
+    def test_create_file_invalid_name_returns_400(self, _app_bundle):
+        client, _, _ = _app_bundle
+        resp = client.post(
+            "/api/v1/workspace/create_file", json={"folder": "", "name": "a/b.txt"}
+        )
+        assert resp.status_code == 400
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -768,6 +822,64 @@ class TestCurrentDir:
         resp = client.get("/api/v1/workspace/current_dir")
         assert resp.status_code == 200
         assert resp.get_json()["name"] == ws.name
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v1/workspace/set_workspace_dir
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestSetWorkspaceDir:
+
+    def test_set_workspace_dir_creates_missing_folder_and_persists_setting(
+        self, _app_bundle, tmp_path, monkeypatch
+    ):
+        client, _, _ = _app_bundle
+
+        fake_project_root = tmp_path / "project_root"
+        config_dir = fake_project_root / "config"
+        config_dir.mkdir(parents=True)
+        settings_path = config_dir / "user_settings.json"
+        settings_path.write_text("{}", encoding="utf-8")
+
+        target_dir = tmp_path / "new_workspace_root"
+
+        import web.shared as _shared
+
+        cleared = {"called": False}
+        original_workspace_dir = _shared.WORKSPACE_DIR
+        monkeypatch.setattr(_shared, "PROJECT_ROOT", str(fake_project_root))
+        monkeypatch.setattr(_shared, "WORKSPACE_DIR", original_workspace_dir)
+        monkeypatch.setattr(
+            _shared,
+            "clear_user_settings_cache",
+            lambda: cleared.__setitem__("called", True),
+        )
+
+        resp = client.post(
+            "/api/v1/workspace/set_workspace_dir",
+            json={"path": str(target_dir)},
+        )
+        assert resp.status_code == 200
+        body = resp.get_json()
+        assert body.get("ok") is True
+        assert target_dir.is_dir()
+        assert cleared["called"] is True
+        assert _shared.WORKSPACE_DIR == str(target_dir)
+
+        persisted = json.loads(settings_path.read_text(encoding="utf-8"))
+        assert persisted["storage"]["workspace_dir"] == str(target_dir.resolve())
+
+    def test_set_workspace_dir_rejects_file_path(self, _app_bundle, tmp_path):
+        client, _, _ = _app_bundle
+        file_path = tmp_path / "not_a_dir.txt"
+        file_path.write_text("x", encoding="utf-8")
+
+        resp = client.post(
+            "/api/v1/workspace/set_workspace_dir",
+            json={"path": str(file_path)},
+        )
+        assert resp.status_code == 400
 
 
 # ─────────────────────────────────────────────────────────────────────────────
