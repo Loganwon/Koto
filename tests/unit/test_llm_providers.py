@@ -23,10 +23,10 @@ class TestGeminiProviderBasic:
         assert GeminiProvider.MAX_RETRIES > 0
 
     def test_normal_model_not_substituted(self):
-        from app.core.llm.gemini import _INTERACTIONS_ONLY_MODELS
+        from app.core.llm.model_capabilities import is_interactions_only_model
 
-        # Normal model should NOT be in the interactions-only set
-        assert "gemini-2.5-flash" not in _INTERACTIONS_ONLY_MODELS
+        # Normal chat models should not be routed through Interactions API.
+        assert not is_interactions_only_model("gemini-2.5-flash")
 
     def test_generate_content_tracks_usage(self):
         from app.core.llm.gemini import GeminiProvider
