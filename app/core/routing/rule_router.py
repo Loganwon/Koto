@@ -6,14 +6,15 @@ RuleRouter — deterministic keyword/pattern based routing rules.
 All pure-logic helpers that do NOT depend on ML models, external I/O, or
 mutable class state live here.  SmartDispatcher delegates to these methods.
 """
+
 from __future__ import annotations
 
 import re
 
 from app.core.routing.routing_config import (
+    TRIVIAL_EXCLUDE,
     TRIVIAL_GREETINGS,
     TRIVIAL_IDENTITY,
-    TRIVIAL_EXCLUDE,
 )
 
 

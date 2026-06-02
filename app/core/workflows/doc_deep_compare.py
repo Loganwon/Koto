@@ -16,11 +16,11 @@ from typing import Any
 
 from app.core.workflow_engine import (
     WorkflowExecutor,
+    sse_error,
     sse_output,
     sse_progress,
     sse_step_done,
     sse_step_start,
-    sse_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,9 @@ class DocDeepCompare(WorkflowExecutor):
         model_mode: str = params.get("model_mode") or "auto"
 
         if not original_file or not compare_file:
-            yield sse_error("请同时提供原始文档（original_file）和对比文档（compare_file）")
+            yield sse_error(
+                "请同时提供原始文档（original_file）和对比文档（compare_file）"
+            )
             return
 
         # ── Step 1: 解析原始文档 ──────────────────────────────────────────────
@@ -99,7 +101,9 @@ class DocDeepCompare(WorkflowExecutor):
         if not original_text.strip():
             yield sse_error("原始文档解析失败或内容为空")
             return
-        yield sse_step_done("parse_original", f"📄 原始文档已解析（{len(original_text)} 字）")
+        yield sse_step_done(
+            "parse_original", f"📄 原始文档已解析（{len(original_text)} 字）"
+        )
 
         # ── Step 2: 解析对比文档（含 OCR） ───────────────────────────────────
         yield sse_step_start("parse_compare", "📸 解析对比文档（可能需要 OCR）…")
@@ -110,7 +114,9 @@ class DocDeepCompare(WorkflowExecutor):
         if not compare_text.strip():
             yield sse_error("对比文档解析失败，请确认文件格式或 Tesseract-OCR 已安装")
             return
-        yield sse_step_done("parse_compare", f"📸 对比文档已解析（{len(compare_text)} 字）")
+        yield sse_step_done(
+            "parse_compare", f"📸 对比文档已解析（{len(compare_text)} 字）"
+        )
 
         # ── Step 3: 分割为条款 ────────────────────────────────────────────────
         yield sse_step_start("split_clauses", "✂️ 分割条款…")
@@ -118,14 +124,16 @@ class DocDeepCompare(WorkflowExecutor):
         compare_clauses = self._split_clauses(compare_text[:16000], model_mode)
         yield sse_step_done(
             "split_clauses",
-            f"✂️ 原始 {len(original_clauses)} 条 ↔ 对比 {len(compare_clauses)} 条"
+            f"✂️ 原始 {len(original_clauses)} 条 ↔ 对比 {len(compare_clauses)} 条",
         )
 
         # ── Step 4: 语义对齐 & 差异比对 ──────────────────────────────────────
         yield sse_step_start("compare", "🔍 逐条款语义比对…")
         alignments = self._compare_clauses(
-            original_clauses, compare_clauses, model_mode, 
-            lambda cur, tot: (yield sse_progress(cur, tot, f"比对第 {cur}/{tot} 批"))
+            original_clauses,
+            compare_clauses,
+            model_mode,
+            lambda cur, tot: (yield sse_progress(cur, tot, f"比对第 {cur}/{tot} 批")),
         )
         yield sse_step_done("compare", f"🔍 比对完成，共 {len(alignments)} 对条款")
 
@@ -136,10 +144,18 @@ class DocDeepCompare(WorkflowExecutor):
         yield sse_step_done("gen_report", "📋 报告生成完成")
 
         # ── 输出 ──────────────────────────────────────────────────────────────
-        changes = [a for a in alignments if a.get("diff_type") not in ("unchanged", "minor_format")]
+        changes = [
+            a
+            for a in alignments
+            if a.get("diff_type") not in ("unchanged", "minor_format")
+        ]
         high_risk = [a for a in alignments if a.get("risk_flag")]
 
-        yield sse_output("html", diff_html, f"比对报告（{len(changes)} 处变更，{len(high_risk)} 处高风险）")
+        yield sse_output(
+            "html",
+            diff_html,
+            f"比对报告（{len(changes)} 处变更，{len(high_risk)} 处高风险）",
+        )
         yield sse_output("markdown", summary_md, "变更摘要")
 
     # ── 辅助方法 ──────────────────────────────────────────────────────────────
@@ -148,7 +164,9 @@ class DocDeepCompare(WorkflowExecutor):
         """强制对 PDF 进行 OCR（调用 file_parser 内置 OCR 逻辑）。"""
         try:
             import uuid
+
             from app.core.file.file_parser import parse_pdf
+
             result = parse_pdf(file_path, str(uuid.uuid4()))
             return result.get("text", "")
         except Exception as e:
@@ -180,8 +198,8 @@ class DocDeepCompare(WorkflowExecutor):
         """
         patterns = [
             r"第[一二三四五六七八九十百\d]+条[\s　]",  # 第X条
-            r"(\d+[\.\、])\s*\S",                       # 1. 或 1、
-            r"([A-Z]\.\d+)\s",                          # A.1
+            r"(\d+[\.\、])\s*\S",  # 1. 或 1、
+            r"([A-Z]\.\d+)\s",  # A.1
         ]
         # 尝试按段落分割（空行分隔）
         paras = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
@@ -189,7 +207,9 @@ class DocDeepCompare(WorkflowExecutor):
             return [{"idx": i, "heading": "", "text": p} for i, p in enumerate(paras)]
 
         # 按句子分割（回退）
-        sentences = [s.strip() for s in re.split(r"[。！？\.\!\?]", text) if len(s.strip()) > 20]
+        sentences = [
+            s.strip() for s in re.split(r"[。！？\.\!\?]", text) if len(s.strip()) > 20
+        ]
         return [{"idx": i, "heading": "", "text": s} for i, s in enumerate(sentences)]
 
     def _compare_clauses(
@@ -220,7 +240,7 @@ class DocDeepCompare(WorkflowExecutor):
             except StopIteration:
                 pass
 
-            batch = pairs[batch_idx * _COMPARE_BATCH: (batch_idx + 1) * _COMPARE_BATCH]
+            batch = pairs[batch_idx * _COMPARE_BATCH : (batch_idx + 1) * _COMPARE_BATCH]
             batch_results = self._compare_batch(batch, model_mode)
             alignments.extend(batch_results)
 
@@ -230,11 +250,13 @@ class DocDeepCompare(WorkflowExecutor):
         """对一批条款对进行 LLM 比较。"""
         formatted_pairs = []
         for i, (orig, comp) in enumerate(pairs):
-            formatted_pairs.append({
-                "pair_idx": i,
-                "original": orig["text"] if orig else "[已删除]",
-                "scanned": comp["text"] if comp else "[已删除]",
-            })
+            formatted_pairs.append(
+                {
+                    "pair_idx": i,
+                    "original": orig["text"] if orig else "[已删除]",
+                    "scanned": comp["text"] if comp else "[已删除]",
+                }
+            )
 
         prompt = (
             f"请比较以下 {len(formatted_pairs)} 对合同条款，识别实质性变更：\n\n"
@@ -314,9 +336,17 @@ class DocDeepCompare(WorkflowExecutor):
             rows_html.append(row)
 
         if not rows_html:
-            rows_html = ["<p style='text-align:center;color:#4caf50;padding:20px;'>✅ 未发现实质性变更</p>"]
+            rows_html = [
+                "<p style='text-align:center;color:#4caf50;padding:20px;'>✅ 未发现实质性变更</p>"
+            ]
 
-        changes_count = len([a for a in alignments if a.get("diff_type") not in ("unchanged", "minor_format", None)])
+        changes_count = len(
+            [
+                a
+                for a in alignments
+                if a.get("diff_type") not in ("unchanged", "minor_format", None)
+            ]
+        )
         risk_count = len([a for a in alignments if a.get("risk_flag")])
 
         return f"""<!DOCTYPE html>
@@ -340,15 +370,26 @@ class DocDeepCompare(WorkflowExecutor):
 
     def _generate_summary(self, alignments: list[dict], model_mode: str) -> str:
         """用 LLM 生成 Markdown 变更摘要（仅高优先级变更）。"""
-        critical = [a for a in alignments if a.get("severity") in ("critical", "high") or a.get("risk_flag")]
+        critical = [
+            a
+            for a in alignments
+            if a.get("severity") in ("critical", "high") or a.get("risk_flag")
+        ]
         if not critical:
             return "# 比对摘要\n\n✅ **未发现重大条款变更。**\n\n所有条款内容与原始版本一致（可能存在少量格式差异）。"
 
         critical_summary = json.dumps(
-            [{"diff": a.get("diff_detail"), "original": a.get("original_text", "")[:100],
-              "changed_to": a.get("scanned_text", "")[:100], "risk": a.get("risk_flag")}
-             for a in critical[:20]],
-            ensure_ascii=False, indent=2
+            [
+                {
+                    "diff": a.get("diff_detail"),
+                    "original": a.get("original_text", "")[:100],
+                    "changed_to": a.get("scanned_text", "")[:100],
+                    "risk": a.get("risk_flag"),
+                }
+                for a in critical[:20]
+            ],
+            ensure_ascii=False,
+            indent=2,
         )
 
         prompt = (
@@ -368,5 +409,9 @@ class DocDeepCompare(WorkflowExecutor):
     @staticmethod
     def _esc(text: str) -> str:
         """HTML 转义。"""
-        return (text.replace("&", "&amp;").replace("<", "&lt;")
-                .replace(">", "&gt;").replace('"', "&quot;"))
+        return (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )

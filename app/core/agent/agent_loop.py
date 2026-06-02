@@ -32,13 +32,12 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
-from app.core.agent.hooks import HookContext, HookPoint, HookRegistry, get_default_registry
-from app.core.llm.model_mode import normalize_model_mode
-from app.core.shared.tool_parser import parse_tool_calls, stringify_tool_result
-from app.core.shared.llm_helpers import is_online_failure, is_ollama_alive, get_local_provider
-from app.core.agent.request_validator import RequestValidator
-from app.core.agent.tool_executor import ToolExecutor
-from app.core.agent.response_formatter import ResponseFormatter
+from app.core.agent.hooks import (
+    HookContext,
+    HookPoint,
+    HookRegistry,
+    get_default_registry,
+)
 from app.core.agent.lifecycle import (
     AgentEvent,
     AgentRequest,
@@ -51,24 +50,34 @@ from app.core.agent.lifecycle import (
     evt_lifecycle_end,
     evt_lifecycle_error,
     evt_lifecycle_start,
+    evt_live_doc_commit,
     evt_phase,
+    evt_plan,
     evt_proposal,
     evt_rag_info,
     evt_skill_suggestions,
-    evt_plan,
+    evt_status_message,
     evt_step_done,
     evt_step_error,
     evt_step_progress,
     evt_step_start,
-    evt_status_message,
     evt_stream_block,
     evt_stream_chunk,
     evt_task_complete,
-    evt_live_doc_commit,
     evt_thought,
     evt_tool_call,
     evt_tool_result,
 )
+from app.core.agent.request_validator import RequestValidator
+from app.core.agent.response_formatter import ResponseFormatter
+from app.core.agent.tool_executor import ToolExecutor
+from app.core.llm.model_mode import normalize_model_mode
+from app.core.shared.llm_helpers import (
+    get_local_provider,
+    is_ollama_alive,
+    is_online_failure,
+)
+from app.core.shared.tool_parser import parse_tool_calls, stringify_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +97,7 @@ def _extract_koto_created_paths(result_str: str) -> List[str]:
     if idx == -1:
         return []
     try:
-        return json.loads(result_str[idx + len(_KOTO_CREATED_MARKER):])
+        return json.loads(result_str[idx + len(_KOTO_CREATED_MARKER) :])
     except Exception:
         return []
 
@@ -148,7 +157,12 @@ AI 处理：
 
 # Insert-at-cursor trigger phrases (Chinese)
 _INSERT_TRIGGERS = (
-    "在光标处插入", "插入文档", "插入到文档", "请插入", "插入内容", "写入文档",
+    "在光标处插入",
+    "插入文档",
+    "插入到文档",
+    "请插入",
+    "插入内容",
+    "写入文档",
 )
 
 
@@ -187,8 +201,8 @@ class KotoAgentLoop:
         meta = RunMetadata(session_id=request.session_id)
         meta.start()
         # Capture live-doc flags for this run
-        self._live_doc = getattr(request, 'live_doc', False)
-        self._live_mode = getattr(request, 'live_mode', 'replace')
+        self._live_doc = getattr(request, "live_doc", False)
+        self._live_mode = getattr(request, "live_mode", "replace")
         self._live_request_id = meta.run_id
         yield evt_lifecycle_start(meta.run_id, meta.session_id)
 
@@ -233,7 +247,9 @@ class KotoAgentLoop:
         if phase_steps:
             yield evt_plan(phase_steps)
 
-        analyze_phase = phases[0] if phases else {"id": "understand", "label": "理解需求"}
+        analyze_phase = (
+            phases[0] if phases else {"id": "understand", "label": "理解需求"}
+        )
         analyze_step_id = analyze_phase.get("id", "understand")
 
         yield evt_step_start(analyze_step_id, analyze_phase.get("label", "理解需求"))
@@ -271,7 +287,9 @@ class KotoAgentLoop:
             return
 
         # Apply hook mutations
-        system_instruction = hook_ctx.metadata.get("system_instruction", system_instruction)
+        system_instruction = hook_ctx.metadata.get(
+            "system_instruction", system_instruction
+        )
         prompt = hook_ctx.metadata.get("prompt", prompt)
         pipeline_skill_ids = hook_ctx.metadata.get("skill_ids", [])
         pipeline_mask_result = hook_ctx.metadata.get("mask_result")
@@ -299,10 +317,15 @@ class KotoAgentLoop:
             return
 
         # ── Phase transition: generating ──────────────────────────────
-        yield evt_step_done(analyze_step_id, f"{analyze_phase.get('label', '理解需求')}完成")
+        yield evt_step_done(
+            analyze_step_id, f"{analyze_phase.get('label', '理解需求')}完成"
+        )
         yield evt_phase(phases, analyze_step_id, "done")
         gen_phase = phases[-1]["id"] if len(phases) <= 2 else phases[1]["id"]
-        gen_label = next((p.get("label", gen_phase) for p in phases if p.get("id") == gen_phase), gen_phase)
+        gen_label = next(
+            (p.get("label", gen_phase) for p in phases if p.get("id") == gen_phase),
+            gen_phase,
+        )
         yield evt_step_start(gen_phase, gen_label)
         yield evt_phase(phases, gen_phase, "running")
         yield evt_step_progress(gen_phase, "正在生成回复…")
@@ -310,16 +333,21 @@ class KotoAgentLoop:
 
         # ── Stream LLM response ───────────────────────────────────────
         result_text = yield from self._stream_llm(
-            full_prompt, system_instruction, use_local, meta,
+            full_prompt,
+            system_instruction,
+            use_local,
+            meta,
         )
 
         if result_text is None:
             meta.finish(RunState.FAILED, "LLM returned empty")
             yield evt_step_error(gen_phase, "未能生成有效回复")
-            yield evt_task_complete(error=(
-                "在线 AI 不可用，本地 Ollama 也未运行。\n"
-                "请执行: ollama serve，或在 config/gemini_config.env 配置 API 密钥。"
-            ))
+            yield evt_task_complete(
+                error=(
+                    "在线 AI 不可用，本地 Ollama 也未运行。\n"
+                    "请执行: ollama serve，或在 config/gemini_config.env 配置 API 密钥。"
+                )
+            )
             return
 
         yield evt_step_done(gen_phase, f"{gen_label}完成")
@@ -365,7 +393,9 @@ class KotoAgentLoop:
         has_proposals = False
         if request.output_mode != "chat":
             if request.selection and tool_calls:
-                proposals = self._build_proposals(request.selection, tool_calls, clean_text)
+                proposals = self._build_proposals(
+                    request.selection, tool_calls, clean_text
+                )
                 if proposals:
                     proposal_summary = proposals[0].get("rationale", "")
                     has_proposals = True
@@ -379,7 +409,9 @@ class KotoAgentLoop:
                 doc_tool_step_open = False
                 for tc in tool_calls:
                     if not doc_tool_step_open:
-                        yield evt_step_start("prepare_doc_tool_calls", "生成文档变更指令")
+                        yield evt_step_start(
+                            "prepare_doc_tool_calls", "生成文档变更指令"
+                        )
                         doc_tool_step_open = True
                     yield evt_doc_tool_call(tc)
                 if doc_tool_step_open:
@@ -414,12 +446,19 @@ class KotoAgentLoop:
         pipeline_mask_result: Any,
     ) -> Generator[AgentEvent, None, None]:
         """Execute provider-native task/tool rounds for ai_task requests."""
-        analyze_phase = phases[0] if phases else {"id": "understand", "label": "理解需求"}
+        analyze_phase = (
+            phases[0] if phases else {"id": "understand", "label": "理解需求"}
+        )
         analyze_step_id = analyze_phase.get("id", "understand")
         gen_phase = phases[-1]["id"] if len(phases) <= 2 else phases[1]["id"]
-        gen_label = next((p.get("label", gen_phase) for p in phases if p.get("id") == gen_phase), gen_phase)
+        gen_label = next(
+            (p.get("label", gen_phase) for p in phases if p.get("id") == gen_phase),
+            gen_phase,
+        )
 
-        yield evt_step_done(analyze_step_id, f"{analyze_phase.get('label', '理解需求')}完成")
+        yield evt_step_done(
+            analyze_step_id, f"{analyze_phase.get('label', '理解需求')}完成"
+        )
         yield evt_phase(phases, analyze_step_id, "done")
         yield evt_step_start(gen_phase, gen_label)
         yield evt_phase(phases, gen_phase, "running")
@@ -443,8 +482,12 @@ class KotoAgentLoop:
         # Stage verification state
         file_states: List[Dict[str, Any]] = []
         _MODIFIER_TOOL_NAMES = {
-            "write_sheet_data", "write_docx_content", "create_file",
-            "copy_file", "extract_to_file", "insert_excel_as_docx_table",
+            "write_sheet_data",
+            "write_docx_content",
+            "create_file",
+            "copy_file",
+            "extract_to_file",
+            "insert_excel_as_docx_table",
         }
         _MAX_WRITE_OPS_PER_FILE = 3
 
@@ -460,7 +503,9 @@ class KotoAgentLoop:
                     request,
                 )
             except Exception as exc:
-                logger.warning("[AgentLoop] Task LLM call failed: %s", exc, exc_info=True)
+                logger.warning(
+                    "[AgentLoop] Task LLM call failed: %s", exc, exc_info=True
+                )
                 if not active_use_local and _is_online_failure(exc):
                     yield evt_status_message(
                         "⚠️ 云端 AI 暂时不可用，已自动切换到本地模型 (Ollama)，响应速度可能较慢。"
@@ -476,7 +521,11 @@ class KotoAgentLoop:
                             request,
                         )
                     except Exception as local_exc:
-                        logger.warning("[AgentLoop] Local task fallback failed: %s", local_exc, exc_info=True)
+                        logger.warning(
+                            "[AgentLoop] Local task fallback failed: %s",
+                            local_exc,
+                            exc_info=True,
+                        )
                         exc = local_exc
                         response = None
 
@@ -551,22 +600,27 @@ class KotoAgentLoop:
                 if not tool_name:
                     err = "模型返回了无效的工具调用"
                     yield evt_step_error(step_id, err)
-                    messages.append({
-                        "role": "function",
-                        "name": "invalid_tool_call",
-                        "content": err,
-                    })
+                    messages.append(
+                        {
+                            "role": "function",
+                            "name": "invalid_tool_call",
+                            "content": err,
+                        }
+                    )
                     continue
 
                 # Cross-round write dedup: prevent repeated writes to the same file
                 if tool_name in _MODIFIER_TOOL_NAMES:
                     _target_path = (
-                        tool_args.get("path") or tool_args.get("target_path")
-                        or tool_args.get("destination") or ""
+                        tool_args.get("path")
+                        or tool_args.get("target_path")
+                        or tool_args.get("destination")
+                        or ""
                     )
                     _canonical = (
                         os.path.normcase(os.path.abspath(str(_target_path)))
-                        if _target_path else "__unknown__"
+                        if _target_path
+                        else "__unknown__"
                     )
                     # Do NOT include sheet_name for insert_excel_as_docx_table —
                     # all sheet insertions to the same DOCX share a single write cap.
@@ -579,25 +633,33 @@ class KotoAgentLoop:
                         )
                         yield evt_thought(_skip_msg)
                         yield evt_step_done(step_id, f"{tool_name} 跳过重复写入")
-                        messages.append({
-                            "role": "function",
-                            "name": tool_name,
-                            "content": _skip_msg,
-                        })
+                        messages.append(
+                            {
+                                "role": "function",
+                                "name": tool_name,
+                                "content": _skip_msg,
+                            }
+                        )
                         continue
 
                 yield evt_step_start(step_id, f"调用 {tool_name}")
-                yield evt_tool_call({
-                    "id": tool_call.get("id") or uuid.uuid4().hex[:8],
-                    "name": tool_name,
-                    "args": tool_args,
-                })
+                yield evt_tool_call(
+                    {
+                        "id": tool_call.get("id") or uuid.uuid4().hex[:8],
+                        "name": tool_name,
+                        "args": tool_args,
+                    }
+                )
 
                 try:
-                    result = registry.execute(tool_name, tool_args) if registry else None
+                    result = (
+                        registry.execute(tool_name, tool_args) if registry else None
+                    )
                     result_str = _stringify_tool_result(result)
                 except Exception as exc:
-                    logger.warning("[AgentLoop] Tool %s failed: %s", tool_name, exc, exc_info=True)
+                    logger.warning(
+                        "[AgentLoop] Tool %s failed: %s", tool_name, exc, exc_info=True
+                    )
                     result_str = f"Error: {exc}"
                     yield evt_step_error(step_id, str(exc))
 
@@ -621,52 +683,86 @@ class KotoAgentLoop:
                 yield evt_step_done(step_id, f"{tool_name} 完成")
 
                 # Track successful write ops for cross-round dedup
-                if tool_name in _MODIFIER_TOOL_NAMES and not result_str.startswith("Error:"):
+                if tool_name in _MODIFIER_TOOL_NAMES and not result_str.startswith(
+                    "Error:"
+                ):
                     completed_write_ops[_write_key] = completed_write_ops.get(_write_key, 0) + 1  # type: ignore[name-defined]
                     # Track file change for stage verification
                     try:
                         _payload = json.loads(result_str)
                         if isinstance(_payload, dict) and not _payload.get("error"):
                             _fc_path = (
-                                _payload.get("path") or _payload.get("file_path")
-                                or tool_args.get("path") or tool_args.get("target_path") or ""
+                                _payload.get("path")
+                                or _payload.get("file_path")
+                                or tool_args.get("path")
+                                or tool_args.get("target_path")
+                                or ""
                             )
                             if _fc_path:
                                 _fc_preview = str(_payload.get("preview") or "")[:200]
-                                file_states = _merge_file_states_loop(file_states, [{
-                                    "path": str(_fc_path),
-                                    "file_type": str(_payload.get("file_type") or ""),
-                                    "summary": str(_payload.get("summary") or f"{tool_name} 完成"),
-                                    "preview": _fc_preview,
-                                    "change_type": str(_payload.get("change_type") or "modify"),
-                                }])
+                                file_states = _merge_file_states_loop(
+                                    file_states,
+                                    [
+                                        {
+                                            "path": str(_fc_path),
+                                            "file_type": str(
+                                                _payload.get("file_type") or ""
+                                            ),
+                                            "summary": str(
+                                                _payload.get("summary")
+                                                or f"{tool_name} 完成"
+                                            ),
+                                            "preview": _fc_preview,
+                                            "change_type": str(
+                                                _payload.get("change_type") or "modify"
+                                            ),
+                                        }
+                                    ],
+                                )
                     except Exception:
                         pass
 
                 # run_python_code may modify/create workspace files — detect KOTO_CREATED markers
-                if tool_name == "run_python_code" and not result_str.startswith("Error:"):
+                if tool_name == "run_python_code" and not result_str.startswith(
+                    "Error:"
+                ):
                     for _created_path in _extract_koto_created_paths(result_str):
                         _ext = Path(_created_path).suffix.lstrip(".").lower()
-                        file_states = _merge_file_states_loop(file_states, [{
-                            "path": _created_path,
-                            "file_type": _ext,
-                            "summary": f"Python 代码修改了 {os.path.basename(_created_path)}",
-                            "preview": "",
-                            "change_type": "modify",
-                        }])
-                        _py_write_key = f"run_python_code::{os.path.normcase(_created_path)}"
-                        completed_write_ops[_py_write_key] = completed_write_ops.get(_py_write_key, 0) + 1
+                        file_states = _merge_file_states_loop(
+                            file_states,
+                            [
+                                {
+                                    "path": _created_path,
+                                    "file_type": _ext,
+                                    "summary": f"Python 代码修改了 {os.path.basename(_created_path)}",
+                                    "preview": "",
+                                    "change_type": "modify",
+                                }
+                            ],
+                        )
+                        _py_write_key = (
+                            f"run_python_code::{os.path.normcase(_created_path)}"
+                        )
+                        completed_write_ops[_py_write_key] = (
+                            completed_write_ops.get(_py_write_key, 0) + 1
+                        )
 
-                messages.append({
-                    "role": "function",
-                    "name": tool_name,
-                    "tool_call_id": tool_call_id,
-                    "content": _sample_task_context_text(result_str, _TASK_TOOL_RESULT_CONTEXT_LIMIT),
-                })
+                messages.append(
+                    {
+                        "role": "function",
+                        "name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "content": _sample_task_context_text(
+                            result_str, _TASK_TOOL_RESULT_CONTEXT_LIMIT
+                        ),
+                    }
+                )
 
             # ── Stage verification after each batch of write tool calls ──────
             if file_states and not final_text:
-                _verify_result = _run_task_stage_verify(prompt, file_states, completed_write_ops, request)
+                _verify_result = _run_task_stage_verify(
+                    prompt, file_states, completed_write_ops, request
+                )
                 if _verify_result:
                     _v_completed = _verify_result.get("completed") is True
                     _v_summary = str(_verify_result.get("summary") or "")
@@ -674,36 +770,53 @@ class KotoAgentLoop:
                     _verify_step_id = f"verify_{rounds}"
                     yield evt_step_start(_verify_step_id, "阶段检测")
                     if _v_completed:
-                        yield evt_step_done(_verify_step_id, _v_summary or "阶段检测通过，任务完成")
+                        yield evt_step_done(
+                            _verify_step_id, _v_summary or "阶段检测通过，任务完成"
+                        )
                         final_text = _v_summary or "任务已完成。"
-                        messages.append({
-                            "role": "function",
-                            "name": "verify_task_completion",
-                            "content": json.dumps(_verify_result, ensure_ascii=False),
-                        })
+                        messages.append(
+                            {
+                                "role": "function",
+                                "name": "verify_task_completion",
+                                "content": json.dumps(
+                                    _verify_result, ensure_ascii=False
+                                ),
+                            }
+                        )
                         break
                     else:
                         _v_msg = _v_summary
                         if _v_remaining:
-                            _v_msg += "；待完成：" + "；".join(str(s) for s in _v_remaining[:3])
+                            _v_msg += "；待完成：" + "；".join(
+                                str(s) for s in _v_remaining[:3]
+                            )
                         yield evt_thought(f"阶段检测：{_v_msg}")
                         yield evt_step_done(_verify_step_id, _v_msg or "阶段检测完成")
                         # Inject warning about already-completed write ops
-                        _done_writes = list(dict.fromkeys(
-                            k.split("::")[0] for k in completed_write_ops if completed_write_ops[k] >= 1
-                        ))
+                        _done_writes = list(
+                            dict.fromkeys(
+                                k.split("::")[0]
+                                for k in completed_write_ops
+                                if completed_write_ops[k] >= 1
+                            )
+                        )
                         _v_inject = json.dumps(_verify_result, ensure_ascii=False)
                         if _done_writes:
                             _warn = (
                                 f"⚠️ 已执行的写入工具：{', '.join(_done_writes)}。"
                                 "请勿重复调用这些工具，改用 run_python_code 修复剩余问题。"
                             )
-                            _v_inject = _v_inject[:-1] + f', "_dedup_warning": {json.dumps(_warn, ensure_ascii=False)}}}'
-                        messages.append({
-                            "role": "function",
-                            "name": "verify_task_completion",
-                            "content": _sample_task_context_text(_v_inject, 4_000),
-                        })
+                            _v_inject = (
+                                _v_inject[:-1]
+                                + f', "_dedup_warning": {json.dumps(_warn, ensure_ascii=False)}}}'
+                            )
+                        messages.append(
+                            {
+                                "role": "function",
+                                "name": "verify_task_completion",
+                                "content": _sample_task_context_text(_v_inject, 4_000),
+                            }
+                        )
 
         if not final_text:
             err = "任务达到最大执行轮次，请缩小范围后重试。"
@@ -740,17 +853,20 @@ class KotoAgentLoop:
         # CJK text has no spaces → split at sentence punctuation; Latin → word chunks.
         if final_text:
             import re as _re
-            _CJK = bool(_re.search(r'[\u4e00-\u9fff\u3040-\u30ff]', final_text[:80]))
+
+            _CJK = bool(_re.search(r"[\u4e00-\u9fff\u3040-\u30ff]", final_text[:80]))
             if _CJK:
                 # Split at sentence-ending punctuation, keeping the delimiter attached
-                _parts = _re.split(r'(?<=[。！？\n；])', final_text)
+                _parts = _re.split(r"(?<=[。！？\n；])", final_text)
                 _parts = [p for p in _parts if p]
                 # If no sentence breaks, fall back to 30-char chunks
                 if len(_parts) <= 1:
-                    _parts = [final_text[i:i + 30] for i in range(0, len(final_text), 30)]
+                    _parts = [
+                        final_text[i : i + 30] for i in range(0, len(final_text), 30)
+                    ]
             else:
                 _words = final_text.split()
-                _parts = [" ".join(_words[i:i + 8]) for i in range(0, len(_words), 8)]
+                _parts = [" ".join(_words[i : i + 8]) for i in range(0, len(_words), 8)]
                 # Re-add trailing spaces for interior chunks
                 _parts = [
                     p + " " if idx < len(_parts) - 1 else p
@@ -786,14 +902,22 @@ class KotoAgentLoop:
         try:
             from app.core.sandbox import run_python, run_r
         except ImportError as e:
-            yield evt_code_result({
-                "error": f"Sandbox 模块加载失败: {e}",
-                "stdout": "", "stderr": "", "files": {},
-            })
+            yield evt_code_result(
+                {
+                    "error": f"Sandbox 模块加载失败: {e}",
+                    "stdout": "",
+                    "stderr": "",
+                    "files": {},
+                }
+            )
             meta.finish(RunState.FAILED, str(e))
             return
 
-        lang_label = "Python (matplotlib/pandas)" if request.language == "python" else "R (ggplot2)"
+        lang_label = (
+            "Python (matplotlib/pandas)"
+            if request.language == "python"
+            else "R (ggplot2)"
+        )
         gen_prompt = (
             f"请根据以下任务，编写一段可以直接运行的 {lang_label} 代码。\n"
             "要求：\n"
@@ -810,12 +934,18 @@ class KotoAgentLoop:
 
         yield evt_stream_chunk(f"🤖 正在为你生成 {request.language.upper()} 代码…\n")
 
-        code = _call_llm_sync(gen_prompt, use_local_only=(request.model_mode == "local"))
+        code = _call_llm_sync(
+            gen_prompt, use_local_only=(request.model_mode == "local")
+        )
         if not code:
-            yield evt_code_result({
-                "error": "AI 代码生成失败，请检查 API Key 配置。",
-                "stdout": "", "stderr": "", "files": {},
-            })
+            yield evt_code_result(
+                {
+                    "error": "AI 代码生成失败，请检查 API Key 配置。",
+                    "stdout": "",
+                    "stderr": "",
+                    "files": {},
+                }
+            )
             meta.finish(RunState.FAILED, "code gen failed")
             return
 
@@ -860,9 +990,13 @@ class KotoAgentLoop:
         else:
             # Try online first, fall back to local
             try:
-                result_text = yield from self._try_online(full_prompt, system_instruction)
+                result_text = yield from self._try_online(
+                    full_prompt, system_instruction
+                )
             except Exception as exc:
-                logger.warning("[AgentLoop] Online LLM failed: %s: %s", type(exc).__name__, exc)
+                logger.warning(
+                    "[AgentLoop] Online LLM failed: %s: %s", type(exc).__name__, exc
+                )
                 if _is_online_failure(exc):
                     result_text = None
                 else:
@@ -874,7 +1008,9 @@ class KotoAgentLoop:
                     "⚠️ 云端 AI 暂时不可用，已自动切换到本地模型 (Ollama)，响应速度可能较慢。"
                 )
                 try:
-                    result_text = yield from self._try_local(full_prompt, system_instruction)
+                    result_text = yield from self._try_local(
+                        full_prompt, system_instruction
+                    )
                 except Exception as exc2:
                     logger.error("[AgentLoop] Local fallback failed: %s", exc2)
                     result_text = None
@@ -898,9 +1034,12 @@ class KotoAgentLoop:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part, live_doc=self._live_doc,
-                                       live_mode=self._live_mode,
-                                       request_id=self._live_request_id)
+                yield evt_stream_chunk(
+                    part,
+                    live_doc=self._live_doc,
+                    live_mode=self._live_mode,
+                    request_id=self._live_request_id,
+                )
         return "".join(parts) or None
 
     def _try_local(
@@ -917,9 +1056,12 @@ class KotoAgentLoop:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part, live_doc=self._live_doc,
-                                       live_mode=self._live_mode,
-                                       request_id=self._live_request_id)
+                yield evt_stream_chunk(
+                    part,
+                    live_doc=self._live_doc,
+                    live_mode=self._live_mode,
+                    request_id=self._live_request_id,
+                )
         return "".join(parts) or None
 
     # ══════════════════════════════════════════════════════════════
@@ -930,6 +1072,7 @@ class KotoAgentLoop:
         """Resolve UI phase indicators for the action type."""
         try:
             from app.core.editor_skills import get_phases
+
             action_hint = request.action_type or ""
             return get_phases(action_hint) if action_hint else get_phases("")
         except Exception:
@@ -938,9 +1081,7 @@ class KotoAgentLoop:
                 {"id": "generate", "label": "生成回复"},
             ]
 
-    def _apply_rag_chunking(
-        self, request: AgentRequest, prompt: str
-    ) -> str:
+    def _apply_rag_chunking(self, request: AgentRequest, prompt: str) -> str:
         """Apply RAG chunking if document context is long."""
         context = request.context
         if not context:
@@ -948,6 +1089,7 @@ class KotoAgentLoop:
 
         try:
             from app.core.file.doc_chunker import DocChunker as _DC
+
             if len(context) > _DC.CHUNK_THRESHOLD:
                 chunks = _DC.chunk(context)
                 query = request.selection if request.selection else prompt
@@ -980,28 +1122,46 @@ class KotoAgentLoop:
                 if not isinstance(item, dict):
                     continue
                 path = str(item.get("path") or "").strip()
-                name = str(item.get("name") or "").strip() or (os.path.basename(path) if path else "")
-                file_type = str(item.get("type") or "").strip().lower() or request.file_type
+                name = str(item.get("name") or "").strip() or (
+                    os.path.basename(path) if path else ""
+                )
+                file_type = (
+                    str(item.get("type") or "").strip().lower() or request.file_type
+                )
                 preview = str(item.get("content_preview") or "").strip()
-                normalized.append({
-                    "path": path or request.file_name or request.session_id or "current_document",
-                    "name": name or request.file_name or "current_document",
-                    "type": file_type,
-                    "content_preview": _sample_task_context_text(preview or request.context, _TASK_FILE_CONTEXT_PREVIEW_LIMIT),
-                })
+                normalized.append(
+                    {
+                        "path": path
+                        or request.file_name
+                        or request.session_id
+                        or "current_document",
+                        "name": name or request.file_name or "current_document",
+                        "type": file_type,
+                        "content_preview": _sample_task_context_text(
+                            preview or request.context, _TASK_FILE_CONTEXT_PREVIEW_LIMIT
+                        ),
+                    }
+                )
 
         if normalized:
             return normalized
 
         if request.file_name or request.file_type or request.context:
             inferred_name = request.file_name or "current_document"
-            inferred_type = request.file_type or os.path.splitext(inferred_name)[1].lstrip(".").lower()
-            return [{
-                "path": request.file_name or request.session_id or inferred_name,
-                "name": inferred_name,
-                "type": inferred_type,
-                "content_preview": _sample_task_context_text(request.context, _TASK_FILE_CONTEXT_PREVIEW_LIMIT),
-            }]
+            inferred_type = (
+                request.file_type
+                or os.path.splitext(inferred_name)[1].lstrip(".").lower()
+            )
+            return [
+                {
+                    "path": request.file_name or request.session_id or inferred_name,
+                    "name": inferred_name,
+                    "type": inferred_type,
+                    "content_preview": _sample_task_context_text(
+                        request.context, _TASK_FILE_CONTEXT_PREVIEW_LIMIT
+                    ),
+                }
+            ]
 
         return []
 
@@ -1013,15 +1173,21 @@ class KotoAgentLoop:
         parts = ["## 当前文件上下文", ""]
         for item in files:
             path = item.get("path", "")
-            name = item.get("name", os.path.basename(path) if path else "current_document")
-            item_type = item.get("type", os.path.splitext(path)[1].lstrip(".").lower() if path else "")
+            name = item.get(
+                "name", os.path.basename(path) if path else "current_document"
+            )
+            item_type = item.get(
+                "type", os.path.splitext(path)[1].lstrip(".").lower() if path else ""
+            )
             preview = item.get("content_preview", "")
 
             parts.append(f"### 文件: {name}")
             parts.append(f"- 路径: {path}")
             parts.append(f"- 类型: {item_type or 'unknown'}")
             if preview:
-                parts.append(f"- 内容预览:\n```\n{_sample_task_context_text(preview, _TASK_FILE_CONTEXT_PREVIEW_LIMIT)}\n```")
+                parts.append(
+                    f"- 内容预览:\n```\n{_sample_task_context_text(preview, _TASK_FILE_CONTEXT_PREVIEW_LIMIT)}\n```"
+                )
             parts.append("")
 
         return "\n".join(parts).strip()
@@ -1035,7 +1201,7 @@ class KotoAgentLoop:
         """Convert chat history + current task into provider chat messages."""
         messages: List[Dict[str, Any]] = []
         history = request.history or []
-        recent = history[-MAX_HISTORY_TURNS * 2:] if history else []
+        recent = history[-MAX_HISTORY_TURNS * 2 :] if history else []
         for turn in recent:
             if not isinstance(turn, dict):
                 continue
@@ -1113,7 +1279,9 @@ class KotoAgentLoop:
             return response
         return {"content": str(response or ""), "tool_calls": []}
 
-    def _should_use_local(self, request: AgentRequest, force_local: bool = False) -> bool:
+    def _should_use_local(
+        self, request: AgentRequest, force_local: bool = False
+    ) -> bool:
         """Determine whether to use local model."""
         normalized_mode = normalize_model_mode(request.model_mode, default="auto")
         if normalized_mode == "local":
@@ -1124,13 +1292,16 @@ class KotoAgentLoop:
             return True
         try:
             from web.settings import SettingsManager as _SM
+
             if bool(_SM().get("ai", "use_local_only")):
                 return True
         except Exception:
             pass
         return False
 
-    def _pick_model(self, use_local: bool, request: Optional[AgentRequest] = None) -> str:
+    def _pick_model(
+        self, use_local: bool, request: Optional[AgentRequest] = None
+    ) -> str:
         if use_local:
             return "ollama-local"
         preferred_model = ""
@@ -1158,6 +1329,7 @@ class KotoAgentLoop:
 
         # Find last assistant turn with substantive content
         import html as _html
+
         last_ai = ""
         for turn in reversed(request.history or []):
             if turn.get("role") == "assistant":
@@ -1199,9 +1371,11 @@ _get_local_provider = get_local_provider
 
 # ── LLM helpers (delegate to existing provider infrastructure) ─────────
 
+
 def _pick_online_model() -> str:
     try:
         from web.app import MODEL_MAP
+
         m = MODEL_MAP.get("CHAT", "")
         if m:
             return m
@@ -1212,6 +1386,7 @@ def _pick_online_model() -> str:
 
 def _get_provider():
     from app.core.llm.provider_factory import get_llm_provider
+
     return get_llm_provider(provider="gemini", allow_local_fallback=False)
 
 
@@ -1264,14 +1439,18 @@ def _merge_file_states_loop(
         if not path:
             continue
         state = state_by_path.get(path, {"path": path})
-        state.update({
-            "path": path,
-            "exists": True,
-            "modified": change.get("change_type") != "none",
-            "preview": str(change.get("preview") or ""),
-            "summary": str(change.get("summary") or state.get("summary") or ""),
-            "file_type": str(change.get("file_type") or state.get("file_type") or ""),
-        })
+        state.update(
+            {
+                "path": path,
+                "exists": True,
+                "modified": change.get("change_type") != "none",
+                "preview": str(change.get("preview") or ""),
+                "summary": str(change.get("summary") or state.get("summary") or ""),
+                "file_type": str(
+                    change.get("file_type") or state.get("file_type") or ""
+                ),
+            }
+        )
         state_by_path[path] = state
     return list(state_by_path.values())
 
@@ -1305,8 +1484,11 @@ def _run_task_stage_verify(
     if not all_modified:
         return None  # Some files not yet modified; let the loop continue
 
-    modified_names = [
-        os.path.basename(str(s.get("path") or "")) for s in file_states
-    ]
+    modified_names = [os.path.basename(str(s.get("path") or "")) for s in file_states]
     summary = "文件已成功修改：" + "、".join(n for n in modified_names if n)
-    return {"completed": True, "confidence": 1.0, "summary": summary, "remaining_steps": []}
+    return {
+        "completed": True,
+        "confidence": 1.0,
+        "summary": summary,
+        "remaining_steps": [],
+    }

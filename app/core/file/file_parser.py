@@ -28,9 +28,13 @@ logger = logging.getLogger(__name__)
 
 # ── Shared image compression settings ────────────────────────────────────────
 _MAX_IMG_DIMENSION = 1200  # px — max width or height
-_MAX_IMG_BYTES = 300 * 1024   # 300 KB threshold for triggering compression
-_MAX_BLOB_BYTES = 15 * 1024 * 1024  # 15 MB hard limit — blobs larger than this are skipped entirely
-_MAX_PPTX_BYTES = 100 * 1024 * 1024  # 100 MB PPTX size cap (likely contains embedded video)
+_MAX_IMG_BYTES = 300 * 1024  # 300 KB threshold for triggering compression
+_MAX_BLOB_BYTES = (
+    15 * 1024 * 1024
+)  # 15 MB hard limit — blobs larger than this are skipped entirely
+_MAX_PPTX_BYTES = (
+    100 * 1024 * 1024
+)  # 100 MB PPTX size cap (likely contains embedded video)
 _DOCX_PREVIEW_TARGET_PAGES = 3
 _DOCX_PREVIEW_UNITS_PER_PAGE = 34
 _DOCX_PREVIEW_MAX_TABLE_ROWS = 18
@@ -56,9 +60,7 @@ def _compress_image_bytes(
         # Downscale if either dimension exceeds limit
         if w > _MAX_IMG_DIMENSION or h > _MAX_IMG_DIMENSION:
             ratio = min(_MAX_IMG_DIMENSION / w, _MAX_IMG_DIMENSION / h)
-            pil_img = pil_img.resize(
-                (int(w * ratio), int(h * ratio)), PILImage.LANCZOS
-            )
+            pil_img = pil_img.resize((int(w * ratio), int(h * ratio)), PILImage.LANCZOS)
 
         # Convert to RGB (JPEG doesn't support alpha)
         if pil_img.mode in ("RGBA", "P", "LA"):
@@ -73,8 +75,12 @@ def _compress_image_bytes(
         compressed = buf.getvalue()
         logger.info(
             "[_compress_image_bytes] %dx%d → %dx%d, %.0f KB → %.0f KB",
-            w, h, pil_img.size[0], pil_img.size[1],
-            len(img_bytes) / 1024, len(compressed) / 1024,
+            w,
+            h,
+            pil_img.size[0],
+            pil_img.size[1],
+            len(img_bytes) / 1024,
+            len(compressed) / 1024,
         )
         return compressed, "image/jpeg"
     except ImportError:
@@ -155,7 +161,11 @@ def _extract_table_styles(docx_path: str) -> list[dict]:
 
                 # ── Colspan (w:gridSpan) ─────────────────────────────────
                 grid_span_el = tc.find(f".//{_w('gridSpan')}")
-                colspan = int(grid_span_el.get(_w("val"), 1)) if grid_span_el is not None else 1
+                colspan = (
+                    int(grid_span_el.get(_w("val"), 1))
+                    if grid_span_el is not None
+                    else 1
+                )
 
                 # ── Rowspan: count how many rows below start with w:vMerge (no val attr) ──
                 # The first cell of a vertical merge has w:vMerge val="restart";
@@ -180,8 +190,7 @@ def _extract_table_styles(docx_path: str) -> list[dict]:
 
                 # ── Skip continuation vMerge cells (they'll be expressed via rowspan) ──
                 is_merge_continuation = (
-                    v_merge_el is not None
-                    and v_merge_el.get(_w("val"), "") == ""
+                    v_merge_el is not None and v_merge_el.get(_w("val"), "") == ""
                 )
                 if is_merge_continuation:
                     continue  # nothing to write; the HTML rowspan covers it
@@ -245,7 +254,9 @@ def _inject_table_styles(html: str, table_styles: list[dict]) -> str:
                     w_css = f"width:{col_pcts[ci_col]:.1f}%;"
                     # Don't double-inject
                     if "width:" not in existing:
-                        cell_tag["style"] = (existing.rstrip(";") + ";" + w_css).lstrip(";")
+                        cell_tag["style"] = (existing.rstrip(";") + ";" + w_css).lstrip(
+                            ";"
+                        )
 
         for ri, row_tag in enumerate(rows):
             cells = row_tag.find_all(["td", "th"])
@@ -265,7 +276,9 @@ def _inject_table_styles(html: str, table_styles: list[dict]) -> str:
                 if bg:
                     existing = cell_tag.get("style", "")
                     bg_css = f"background-color:#{bg.lower()};"
-                    cell_tag["style"] = (existing.rstrip(";") + ";" + bg_css).lstrip(";")
+                    cell_tag["style"] = (existing.rstrip(";") + ";" + bg_css).lstrip(
+                        ";"
+                    )
 
     # ── Remove entirely-empty trailing columns ─────────────────────────────
     # The editor sometimes pads rows with phantom empty cells; stripping
@@ -305,14 +318,16 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
     fixed page position, e.g. a resume photo) are silently skipped.
     Uses namespace-aware ElementTree parsing so attribute order never matters.
     """
-    import zipfile as _zipfile
     import xml.etree.ElementTree as _ET
+    import zipfile as _zipfile
 
     # Full OOXML namespace URIs — must match exactly (not prefix aliases)
-    IMG_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-    WP_NS    = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-    A_NS     = "http://schemas.openxmlformats.org/drawingml/2006/main"
-    R_NS     = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    IMG_TYPE = (
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    )
+    WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
     result: list[str] = []
     try:
@@ -324,7 +339,8 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
                 (n for n in file_list if n.lower() == "word/document.xml"), None
             )
             rels_name = next(
-                (n for n in file_list if n.lower() == "word/_rels/document.xml.rels"), None
+                (n for n in file_list if n.lower() == "word/_rels/document.xml.rels"),
+                None,
             )
             if not doc_name or not rels_name:
                 return result
@@ -333,9 +349,9 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
             rels_root = _ET.fromstring(z.read(rels_name))
             rel_map: dict[str, str] = {}
             for rel in rels_root:
-                rid   = rel.get("Id", "")
+                rid = rel.get("Id", "")
                 rtype = rel.get("Type", "")
-                tgt   = rel.get("Target", "")
+                tgt = rel.get("Target", "")
                 if rid and IMG_TYPE in rtype and tgt:
                     rel_map[rid] = tgt if tgt.startswith("word/") else f"word/{tgt}"
 
@@ -366,7 +382,8 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
                 if not media_path:
                     logger.debug(
                         "[floating_imgs] no media path for rel_id=%s; rel_map keys=%s",
-                        rel_id, list(rel_map)[:8],
+                        rel_id,
+                        list(rel_map)[:8],
                     )
                     continue
                 try:
@@ -491,12 +508,12 @@ def _deduplicate_images(html: str) -> str:
             prefix = src_m.group(1)
             if prefix in seen_prefixes:
                 # Duplicate — skip this <img> tag
-                result_parts.append(html[pos:m.start()])
+                result_parts.append(html[pos : m.start()])
                 pos = m.end()
                 continue
             seen_prefixes.add(prefix)
 
-        result_parts.append(html[pos:m.end()])
+        result_parts.append(html[pos : m.end()])
         pos = m.end()
 
     result_parts.append(html[pos:])
@@ -523,30 +540,49 @@ def _docx_to_rich_html(
     """
     try:
         from docx import Document
-        from docx.oxml.ns import qn
+        from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE
         from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_CELL_VERTICAL_ALIGNMENT
+        from docx.oxml.ns import qn
         from docx.shared import Pt, RGBColor
     except ImportError:
         raise RuntimeError("python-docx 未安装，请执行: pip install python-docx")
 
     # ── Heading style name → tag map ────────────────────────────────────────
     _HEADING_MAP: dict[str, str] = {
-        "heading 1": "h1", "heading 2": "h2", "heading 3": "h3",
-        "heading 4": "h4", "heading 5": "h5", "heading 6": "h6",
+        "heading 1": "h1",
+        "heading 2": "h2",
+        "heading 3": "h3",
+        "heading 4": "h4",
+        "heading 5": "h5",
+        "heading 6": "h6",
         # Some documents use style IDs/names without spaces.
-        "heading1": "h1", "heading2": "h2", "heading3": "h3",
-        "heading4": "h4", "heading5": "h5", "heading6": "h6",
-        "标题 1": "h1", "标题 2": "h2", "标题 3": "h3",
-        "标题 4": "h4", "标题 5": "h5", "标题 6": "h6",
+        "heading1": "h1",
+        "heading2": "h2",
+        "heading3": "h3",
+        "heading4": "h4",
+        "heading5": "h5",
+        "heading6": "h6",
+        "标题 1": "h1",
+        "标题 2": "h2",
+        "标题 3": "h3",
+        "标题 4": "h4",
+        "标题 5": "h5",
+        "标题 6": "h6",
         # WPS / Word Chinese no-space variants (e.g. "标题1" not "标题 1")
-        "标题1": "h1", "标题2": "h2", "标题3": "h3",
-        "标题4": "h4", "标题5": "h5", "标题6": "h6",
+        "标题1": "h1",
+        "标题2": "h2",
+        "标题3": "h3",
+        "标题4": "h4",
+        "标题5": "h5",
+        "标题6": "h6",
         # Common alternative Chinese heading names
-        "一级标题": "h1", "二级标题": "h2", "三级标题": "h3",
+        "一级标题": "h1",
+        "二级标题": "h2",
+        "三级标题": "h3",
         "标题": "h1",
         # subheading
-        "subheading 1": "h2", "subheading 2": "h3",
+        "subheading 1": "h2",
+        "subheading 2": "h3",
     }
 
     _HEADING_TYPOGRAPHY_FALLBACKS: dict[str, dict[str, str]] = {
@@ -567,10 +603,15 @@ def _docx_to_rich_html(
     }
 
     _CN_FONT_MAP_P: dict[str, str] = {
-        "黑体": "SimHei", "宋体": "SimSun", "楷体": "KaiTi",
-        "仿宋": "FangSong", "微软雅黑": "Microsoft YaHei",
-        "华文中宋": "STZhongsong", "华文宋体": "STSong",
-        "华文黑体": "STHeiti", "华文楷体": "STKaiti",
+        "黑体": "SimHei",
+        "宋体": "SimSun",
+        "楷体": "KaiTi",
+        "仿宋": "FangSong",
+        "微软雅黑": "Microsoft YaHei",
+        "华文中宋": "STZhongsong",
+        "华文宋体": "STSong",
+        "华文黑体": "STHeiti",
+        "华文楷体": "STKaiti",
         "华文仿宋": "STFangsong",
     }
 
@@ -605,7 +646,9 @@ def _docx_to_rich_html(
         if rgb is None:
             return None
         try:
-            return "#{:02X}{:02X}{:02X}".format(int(rgb.red), int(rgb.green), int(rgb.blue))
+            return "#{:02X}{:02X}{:02X}".format(
+                int(rgb.red), int(rgb.green), int(rgb.blue)
+            )
         except Exception:
             return None
 
@@ -647,7 +690,9 @@ def _docx_to_rich_html(
                 return _ch
         return "1"
 
-    def _apply_heading_typography_fallback(tag: str, css: dict[str, str], inner_html: str) -> None:
+    def _apply_heading_typography_fallback(
+        tag: str, css: dict[str, str], inner_html: str
+    ) -> None:
         """Keep semantic headings readable when DOCX outline metadata has no font props."""
         _fallback = _HEADING_TYPOGRAPHY_FALLBACKS.get((tag or "").lower())
         if not _fallback:
@@ -678,15 +723,13 @@ def _docx_to_rich_html(
             return False
         try:
             _instr = " ".join(
-                (_node.text or "")
-                for _node in p_el.iter(qn("w:instrText"))
+                (_node.text or "") for _node in p_el.iter(qn("w:instrText"))
             )
             _instr_norm = re.sub(r"\s+", " ", _instr).strip().upper()
             if not _instr_norm:
                 return False
-            return (
-                " TOC " in f" {_instr_norm} "
-                or (" PAGEREF " in f" {_instr_norm} " and "_TOC" in _instr_norm)
+            return " TOC " in f" {_instr_norm} " or (
+                " PAGEREF " in f" {_instr_norm} " and "_TOC" in _instr_norm
             )
         except Exception:
             return False
@@ -791,7 +834,9 @@ def _docx_to_rich_html(
                 for _key in ("w:eastAsia", "w:ascii", "w:hAnsi", "w:cs"):
                     _font_name = _rFonts.get(qn(_key), "") or ""
                     if _font_name:
-                        _props["font_family"] = _CN_FONT_MAP_P.get(_font_name, _font_name)
+                        _props["font_family"] = _CN_FONT_MAP_P.get(
+                            _font_name, _font_name
+                        )
                         break
         except Exception:
             pass
@@ -908,7 +953,10 @@ def _docx_to_rich_html(
                         _resolved["font_size"] = round(_fsize.pt, 1)
                 except Exception:
                     pass
-                if _resolved["font_size"] is None and _rpr_props["font_size"] is not None:
+                if (
+                    _resolved["font_size"] is None
+                    and _rpr_props["font_size"] is not None
+                ):
                     _resolved["font_size"] = _rpr_props["font_size"]
 
             if not _font_weight_locked:
@@ -1026,7 +1074,9 @@ def _docx_to_rich_html(
             except Exception:
                 _has_tab = False
         _looks_like_toc_line = _p_elem_looks_like_toc_line(p_el)
-        _has_toc_signal = _has_toc_anchor or _has_toc_field or _has_tab or _looks_like_toc_line
+        _has_toc_signal = (
+            _has_toc_anchor or _has_toc_field or _has_tab or _looks_like_toc_line
+        )
 
         for _sv in style_candidates:
             _sv_norm = _norm_style_key(_sv)
@@ -1041,7 +1091,9 @@ def _docx_to_rich_html(
         # Fallback for custom style names: internal TOC anchor + tab run pattern.
         if p_el is not None:
             try:
-                if _has_tab and (_has_toc_anchor or _has_toc_field or _looks_like_toc_line):
+                if _has_tab and (
+                    _has_toc_anchor or _has_toc_field or _looks_like_toc_line
+                ):
                     return True, "1"
             except Exception:
                 pass
@@ -1141,14 +1193,16 @@ def _docx_to_rich_html(
             if pos_h is not None:
                 align_el = pos_h.find(qn("wp:align"))
                 if align_el is not None and align_el.text:
-                    h_align = align_el.text.strip().lower()  # left | center | right | inside | outside
+                    h_align = (
+                        align_el.text.strip().lower()
+                    )  # left | center | right | inside | outside
 
             # ── Wrap mode ─────────────────────────────────────────────────
             # Determine CSS positioning from wrap type.
-            has_wrap_square  = drawing_elem.find(qn("wp:wrapSquare"))  is not None
-            has_wrap_tight   = drawing_elem.find(qn("wp:wrapTight"))   is not None
-            has_wrap_none    = drawing_elem.find(qn("wp:wrapNone"))    is not None
-            has_wrap_tb      = drawing_elem.find(qn("wp:wrapTopAndBottom")) is not None
+            has_wrap_square = drawing_elem.find(qn("wp:wrapSquare")) is not None
+            has_wrap_tight = drawing_elem.find(qn("wp:wrapTight")) is not None
+            has_wrap_none = drawing_elem.find(qn("wp:wrapNone")) is not None
+            has_wrap_tb = drawing_elem.find(qn("wp:wrapTopAndBottom")) is not None
 
             # ── Build CSS ─────────────────────────────────────────────────
             if has_wrap_none:
@@ -1206,7 +1260,9 @@ def _docx_to_rich_html(
         _has_tab_char = "\t" in text
         _tab_html = ""
         if _has_tab_elem or _has_tab_char:
-            _tab_html = '<span class="koto-toc-tab"></span>' if _is_toc_run else ('\u00a0' * 6)
+            _tab_html = (
+                '<span class="koto-toc-tab"></span>' if _is_toc_run else ("\u00a0" * 6)
+            )
 
         if not text:
             # Tab character → render appropriately based on context.
@@ -1217,10 +1273,12 @@ def _docx_to_rich_html(
             return ""
 
         def _esc(_t: str) -> str:
-            return (_t.replace("&", "&amp;")
-                      .replace("<", "&lt;")
-                      .replace(">", "&gt;")
-                      .replace('"', "&quot;"))
+            return (
+                _t.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+            )
 
         tab_segments: list[str] | None = None
         if _has_tab_char:
@@ -1261,8 +1319,11 @@ def _docx_to_rich_html(
             if _rPr is not None:
                 _rFonts = _rPr.find(qn("w:rFonts"))
                 if _rFonts is not None:
-                    ea_font = _rFonts.get(qn("w:eastAsia"), "") or \
-                               _rFonts.get(qn("w:cs"), "") or ""
+                    ea_font = (
+                        _rFonts.get(qn("w:eastAsia"), "")
+                        or _rFonts.get(qn("w:cs"), "")
+                        or ""
+                    )
         except Exception:
             pass
         # Normalise Chinese names to CSS names
@@ -1335,12 +1396,20 @@ def _docx_to_rich_html(
             if highlight_xml is not None:
                 hval = highlight_xml.get(qn("w:val"), "")
                 _HL_MAP = {
-                    "yellow": "#FFFF00", "green": "#00FF00", "cyan": "#00FFFF",
-                    "magenta": "#FF00FF", "blue": "#0000FF", "red": "#FF0000",
-                    "darkBlue": "#00008B", "darkCyan": "#008B8B",
-                    "darkGreen": "#006400", "darkMagenta": "#8B008B",
-                    "darkRed": "#8B0000", "darkYellow": "#808000",
-                    "darkGray": "#A9A9A9", "lightGray": "#D3D3D3",
+                    "yellow": "#FFFF00",
+                    "green": "#00FF00",
+                    "cyan": "#00FFFF",
+                    "magenta": "#FF00FF",
+                    "blue": "#0000FF",
+                    "red": "#FF0000",
+                    "darkBlue": "#00008B",
+                    "darkCyan": "#008B8B",
+                    "darkGreen": "#006400",
+                    "darkMagenta": "#8B008B",
+                    "darkRed": "#8B0000",
+                    "darkYellow": "#808000",
+                    "darkGray": "#A9A9A9",
+                    "lightGray": "#D3D3D3",
                 }
                 if hval in _HL_MAP:
                     styles.append(f"background-color:{_HL_MAP[hval]}")
@@ -1350,7 +1419,10 @@ def _docx_to_rich_html(
         if tab_segments is not None:
             if styles:
                 style_str = ";".join(styles)
-                _styled = [f'<span style="{style_str}">{seg}</span>' if seg else '' for seg in tab_segments]
+                _styled = [
+                    f'<span style="{style_str}">{seg}</span>' if seg else ""
+                    for seg in tab_segments
+                ]
                 return _tab_html.join(_styled)
             return _tab_html.join(tab_segments)
 
@@ -1459,7 +1531,9 @@ def _docx_to_rich_html(
             # paragraphs to appear bold when a base style (Normal / 正文) has
             # w:b set — a common mishap in WPS / Word document templates.
             _fw = None
-            _direct_sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+            _direct_sr = (
+                style_ref if style_ref is not None else _resolve_para_style_ref(para)
+            )
             if _direct_sr is not None:
                 try:
                     if _direct_sr.font.bold is True:
@@ -1500,7 +1574,9 @@ def _docx_to_rich_html(
 
     def _para_html(para, doc, tag: str = "p", style_ref=None) -> str:
         """Render a paragraph to an HTML block element."""
-        style_ref = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        style_ref = (
+            style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        )
         css = _para_style(para, style_ref=style_ref)
 
         # ── Scan for bookmark IDs (used as TOC link targets) ─────────
@@ -1543,26 +1619,28 @@ def _docx_to_rich_html(
                         url = "#" + anchor_val
                 link_inner = ""
                 from docx.text.run import Run
+
                 for r_elem in child.findall(qn("w:r")):
                     run_obj = Run(r_elem, para)
                     link_inner += _run_html(run_obj, doc)
                 if link_inner:
                     esc_url = url.replace('"', "&quot;")
                     # Internal links (#anchor) stay in the editor; external get _blank
-                    target_attr = '' if url.startswith('#') else ' target="_blank"'
+                    target_attr = "" if url.startswith("#") else ' target="_blank"'
                     if toc_class:
                         # TOC links need their own flex layout so koto-toc-tab spacer
                         # stretches between the entry text and the right-aligned page number.
-                        link_style = 'display:flex;align-items:baseline;flex:1;min-width:0;color:#1155CC;'
+                        link_style = "display:flex;align-items:baseline;flex:1;min-width:0;color:#1155CC;"
                     else:
-                        link_style = 'color:#1155CC;text-decoration:underline;'
+                        link_style = "color:#1155CC;text-decoration:underline;"
                     inner_parts.append(
                         f'<a href="{esc_url}"{target_attr} '
                         f'style="{link_style}">'
-                        f'{link_inner}</a>'
+                        f"{link_inner}</a>"
                     )
             elif tag_name == "r":
                 from docx.text.run import Run
+
                 run_obj = Run(child, para)
                 inner_parts.append(_run_html(run_obj, doc))
 
@@ -1579,10 +1657,19 @@ def _docx_to_rich_html(
         # Keep only font-family and spacing. Then inject display:flex.
         if toc_class:
             # Rebuild style without the properties CSS will normalize
-            _skip = {"font-size", "font-weight", "line-height", "margin-top",
-                     "margin-bottom", "display", "align-items"}
+            _skip = {
+                "font-size",
+                "font-weight",
+                "line-height",
+                "margin-top",
+                "margin-bottom",
+                "display",
+                "align-items",
+            }
             toc_parts = [p for p in css.items() if p[0] not in _skip]
-            style_str = "display:flex;align-items:baseline;" + ";".join(f"{k}:{v}" for k, v in toc_parts)
+            style_str = "display:flex;align-items:baseline;" + ";".join(
+                f"{k}:{v}" for k, v in toc_parts
+            )
         style_attr = f' style="{style_str}"' if style_str else ""
         id_attr = f' id="{bm_id}"' if bm_id else ""
         class_attr = f' class="{toc_class}"' if toc_class else ""
@@ -1596,8 +1683,14 @@ def _docx_to_rich_html(
         # Check explicit tblBorders first
         tblBorders = tblPr.find(qn("w:tblBorders"))
         if tblBorders is not None:
-            border_tags = ["w:top", "w:left", "w:bottom", "w:right",
-                           "w:insideH", "w:insideV"]
+            border_tags = [
+                "w:top",
+                "w:left",
+                "w:bottom",
+                "w:right",
+                "w:insideH",
+                "w:insideV",
+            ]
             for bt in border_tags:
                 b_elem = tblBorders.find(qn(bt))
                 if b_elem is not None:
@@ -1638,20 +1731,31 @@ def _docx_to_rich_html(
         Each value is a CSS border string like '0.5pt solid #000', 'none',
         or None when the element is absent.
         """
-        defaults = {"top": None, "bottom": None, "left": None, "right": None,
-                    "insideH": None, "insideV": None}
+        defaults = {
+            "top": None,
+            "bottom": None,
+            "left": None,
+            "right": None,
+            "insideH": None,
+            "insideV": None,
+        }
         tblPr = tbl_elem.find(qn("w:tblPr"))
         if tblPr is None:
             return defaults
         tblBorders = tblPr.find(qn("w:tblBorders"))
         if tblBorders is None:
             return defaults
-        for key, wtag in (("top", "w:top"), ("bottom", "w:bottom"),
-                          ("left", "w:left"), ("right", "w:right"),
-                          ("insideH", "w:insideH"), ("insideV", "w:insideV")):
+        for key, wtag in (
+            ("top", "w:top"),
+            ("bottom", "w:bottom"),
+            ("left", "w:left"),
+            ("right", "w:right"),
+            ("insideH", "w:insideH"),
+            ("insideV", "w:insideV"),
+        ):
             b_el = tblBorders.find(qn(wtag))
             css = _border_elem_to_css(b_el)
-            if css != "":   # only store when element actually exists
+            if css != "":  # only store when element actually exists
                 defaults[key] = css
         return defaults
 
@@ -1660,8 +1764,14 @@ def _docx_to_rich_html(
         tblBorders as a border-defaults dict (same format as _get_table_border_defaults).
         Returns all-None dict if no style, no borders, or any error.
         """
-        defaults = {"top": None, "bottom": None, "left": None, "right": None,
-                    "insideH": None, "insideV": None}
+        defaults = {
+            "top": None,
+            "bottom": None,
+            "left": None,
+            "right": None,
+            "insideH": None,
+            "insideV": None,
+        }
         try:
             tblPr = tbl_elem.find(qn("w:tblPr"))
             if tblPr is None:
@@ -1684,9 +1794,14 @@ def _docx_to_rich_html(
             style_tblBorders = target_style._element.find(".//" + qn("w:tblBorders"))
             if style_tblBorders is None:
                 return defaults
-            for key, wtag in (("top", "w:top"), ("bottom", "w:bottom"),
-                              ("left", "w:left"), ("right", "w:right"),
-                              ("insideH", "w:insideH"), ("insideV", "w:insideV")):
+            for key, wtag in (
+                ("top", "w:top"),
+                ("bottom", "w:bottom"),
+                ("left", "w:left"),
+                ("right", "w:right"),
+                ("insideH", "w:insideH"),
+                ("insideV", "w:insideV"),
+            ):
                 b_el = style_tblBorders.find(qn(wtag))
                 css = _border_elem_to_css(b_el)
                 if css != "":
@@ -1724,13 +1839,19 @@ def _docx_to_rich_html(
                 tbl_border_defs = style_borders
         all_row_elems = tbl_elem.findall(qn("w:tr"))
         table_is_truncated = bool(max_rows and len(all_row_elems) > max_rows)
-        render_row_elems = all_row_elems[:max_rows] if table_is_truncated else all_row_elems
+        render_row_elems = (
+            all_row_elems[:max_rows] if table_is_truncated else all_row_elems
+        )
         num_rows = len(render_row_elems)
         num_cols_grid = len(col_widths_twips) or 1
 
         # Pre-compute pixel widths per grid column (for ProseMirror colwidth).
         # ProseMirror expects absolute pixel values.  1 twip = 1/20 pt; 1 pt = 96/72 px → px = twips/15.
-        col_widths_px: list[int] = [max(1, round(t / 15)) for t in col_widths_twips] if col_widths_twips else []
+        col_widths_px: list[int] = (
+            [max(1, round(t / 15)) for t in col_widths_twips]
+            if col_widths_twips
+            else []
+        )
 
         # Table-level default cell margins (OOXML defaults: 0pt vert, 5.4pt horiz)
         _WORD_DEFAULT_CELL_MAR = {"top": 0.0, "bottom": 0.0, "left": 5.4, "right": 5.4}
@@ -1747,14 +1868,18 @@ def _docx_to_rich_html(
                         _el = _tblCellMar.find(qn("w:end"))
                     if _el is not None:
                         try:
-                            _tbl_cell_mar[_side] = round(int(_el.get(qn("w:w"), 0)) / 20, 2)
+                            _tbl_cell_mar[_side] = round(
+                                int(_el.get(qn("w:w"), 0)) / 20, 2
+                            )
                         except (TypeError, ValueError):
                             pass
 
         parts: list[str] = ["<table"]
         # border-collapse:collapse is always needed so cell borders merge cleanly.
         # Don't set a table-level border — all borders are expressed per-cell.
-        parts.append(' class="koto-docx-table" style="border-collapse:collapse;width:100%;">')
+        parts.append(
+            ' class="koto-docx-table" style="border-collapse:collapse;width:100%;">'
+        )
 
         # Emit <colgroup>/<col> for visual percentage widths (non-TipTap renderers).
         # TipTap strips these, so we also emit data-colwidth on each <td> below.
@@ -1822,30 +1947,43 @@ def _docx_to_rich_html(
                         for prev_tc in tc_elems:
                             if prev_tc is cell_elem:
                                 break
-                            prev_gs_elem = prev_tc.find(qn("w:tcPr") + "/" + qn("w:gridSpan"))
+                            prev_gs_elem = prev_tc.find(
+                                qn("w:tcPr") + "/" + qn("w:gridSpan")
+                            )
                             if prev_gs_elem is not None:
                                 try:
-                                    col_idx_in_grid += int(prev_gs_elem.get(qn("w:val"), 1))
+                                    col_idx_in_grid += int(
+                                        prev_gs_elem.get(qn("w:val"), 1)
+                                    )
                                 except (TypeError, ValueError):
                                     col_idx_in_grid += 1
                             else:
                                 col_idx_in_grid += 1
 
                         # Walk subsequent rows looking for vMerge continuation
-                        for next_row_elem in render_row_elems[ri + 1:]:
+                        for next_row_elem in render_row_elems[ri + 1 :]:
                             next_cells = next_row_elem.findall(qn("w:tc"))
                             target_ci = 0
                             found_continue = False
                             for nc in next_cells:
                                 if target_ci == col_idx_in_grid:
-                                    nc_vmerge = nc.find(qn("w:tcPr") + "/" + qn("w:vMerge"))
-                                    if nc_vmerge is not None and nc_vmerge.get(qn("w:val")) != "restart":
+                                    nc_vmerge = nc.find(
+                                        qn("w:tcPr") + "/" + qn("w:vMerge")
+                                    )
+                                    if (
+                                        nc_vmerge is not None
+                                        and nc_vmerge.get(qn("w:val")) != "restart"
+                                    ):
                                         rowspan += 1
                                         found_continue = True
                                     break
                                 nc_gs = nc.find(qn("w:tcPr") + "/" + qn("w:gridSpan"))
                                 try:
-                                    target_ci += int(nc_gs.get(qn("w:val"), 1)) if nc_gs is not None else 1
+                                    target_ci += (
+                                        int(nc_gs.get(qn("w:val"), 1))
+                                        if nc_gs is not None
+                                        else 1
+                                    )
                                 except (TypeError, ValueError):
                                     target_ci += 1
                             if not found_continue:
@@ -1900,22 +2038,26 @@ def _docx_to_rich_html(
                         if _prev is cell_elem:
                             break
                         _prev_gs = _prev.find(qn("w:tcPr") + "/" + qn("w:gridSpan"))
-                        _cell_grid_col += int(_prev_gs.get(qn("w:val"), 1)) if _prev_gs is not None else 1
+                        _cell_grid_col += (
+                            int(_prev_gs.get(qn("w:val"), 1))
+                            if _prev_gs is not None
+                            else 1
+                        )
                     _cell_grid_end_col = _cell_grid_col + colspan - 1
                 except Exception:
                     _cell_grid_col = ci
                     _cell_grid_end_col = ci
 
-                _is_first_row = (ri == 0)
-                _is_last_row  = (ri == num_rows - 1)
-                _is_first_col = (_cell_grid_col == 0)
-                _is_last_col  = (_cell_grid_end_col >= num_cols_grid - 1)
+                _is_first_row = ri == 0
+                _is_last_row = ri == num_rows - 1
+                _is_first_col = _cell_grid_col == 0
+                _is_last_col = _cell_grid_end_col >= num_cols_grid - 1
 
                 _side_map = {
-                    "top":    ("w:top",    "insideH" if not _is_first_row else "top"),
-                    "bottom": ("w:bottom", "insideH" if not _is_last_row  else "bottom"),
-                    "left":   ("w:left",   "insideV" if not _is_first_col else "left"),
-                    "right":  ("w:right",  "insideV" if not _is_last_col  else "right"),
+                    "top": ("w:top", "insideH" if not _is_first_row else "top"),
+                    "bottom": ("w:bottom", "insideH" if not _is_last_row else "bottom"),
+                    "left": ("w:left", "insideV" if not _is_first_col else "left"),
+                    "right": ("w:right", "insideV" if not _is_last_col else "right"),
                 }
                 _border_css_values: list[str] = []
                 for side, (wtag, tbl_def_key) in _side_map.items():
@@ -1947,11 +2089,15 @@ def _docx_to_rich_html(
                             _el = _tcMar.find(qn("w:end"))
                         if _el is not None:
                             try:
-                                _cell_pad[_side] = round(int(_el.get(qn("w:w"), 0)) / 20, 2)
+                                _cell_pad[_side] = round(
+                                    int(_el.get(qn("w:w"), 0)) / 20, 2
+                                )
                             except (TypeError, ValueError):
                                 pass
-                _pt = _cell_pad["top"]; _pb = _cell_pad["bottom"]
-                _pl = _cell_pad["left"]; _pr = _cell_pad["right"]
+                _pt = _cell_pad["top"]
+                _pb = _cell_pad["bottom"]
+                _pl = _cell_pad["left"]
+                _pr = _cell_pad["right"]
                 if _pt == _pb == 0 and _pl == _pr:
                     cell_style_parts.append(f"padding:0 {_pr}pt")
                 elif _pt == _pb and _pl == _pr:
@@ -1961,7 +2107,9 @@ def _docx_to_rich_html(
 
                 cell_style = ";".join(cell_style_parts)
                 td_attrs = f' style="{cell_style}"'
-                if _border_css_values and all(_val.strip().lower() == "none" for _val in _border_css_values):
+                if _border_css_values and all(
+                    _val.strip().lower() == "none" for _val in _border_css_values
+                ):
                     td_attrs += ' data-koto-borderless-cell="true"'
                 if colspan > 1:
                     td_attrs += f' colspan="{colspan}"'
@@ -1977,10 +2125,16 @@ def _docx_to_rich_html(
                             if _prev is cell_elem:
                                 break
                             _prev_gs = _prev.find(qn("w:tcPr") + "/" + qn("w:gridSpan"))
-                            _cw_start += int(_prev_gs.get(qn("w:val"), 1)) if _prev_gs is not None else 1
-                        _cw_vals = col_widths_px[_cw_start:_cw_start + colspan]
+                            _cw_start += (
+                                int(_prev_gs.get(qn("w:val"), 1))
+                                if _prev_gs is not None
+                                else 1
+                            )
+                        _cw_vals = col_widths_px[_cw_start : _cw_start + colspan]
                         if _cw_vals:
-                            td_attrs += f' data-colwidth="{",".join(str(v) for v in _cw_vals)}"'
+                            td_attrs += (
+                                f' data-colwidth="{",".join(str(v) for v in _cw_vals)}"'
+                            )
                     except Exception:
                         pass
 
@@ -1989,6 +2143,7 @@ def _docx_to_rich_html(
                 cell_inner: list[str] = []
                 for p_elem in cell_elem.findall(qn("w:p")):
                     from docx.text.paragraph import Paragraph as _Paragraph
+
                     cell_para = _Paragraph(p_elem, doc)
                     cell_inner.append(_para_html(cell_para, doc, "p"))
                 # Ensure every cell has at least one child so ProseMirror
@@ -2001,10 +2156,10 @@ def _docx_to_rich_html(
         if table_is_truncated:
             remaining_rows = max(0, len(all_row_elems) - len(render_row_elems))
             parts.append(
-                "<tr data-koto-preview-more=\"true\">"
-                f"<td colspan=\"{num_cols_grid}\" "
+                '<tr data-koto-preview-more="true">'
+                f'<td colspan="{num_cols_grid}" '
                 'style="padding:6pt 5.4pt;border-top:1px dashed #aeb7c6;'
-                'border-bottom:none;border-left:none;border-right:none;'
+                "border-bottom:none;border-left:none;border-right:none;"
                 'background:#f6f8fb;color:#5f6b7a;font-style:italic;">'
                 f"表格其余 {remaining_rows} 行正在后台加载…"
                 "</td></tr>"
@@ -2031,20 +2186,25 @@ def _docx_to_rich_html(
                 if p.text.strip():
                     return True
                 xml = p._element.xml if hasattr(p._element, "xml") else ""
-                return ("fldChar" in xml or "instrText" in xml)
+                return "fldChar" in xml or "instrText" in xml
 
             def _inject_page_field(p_html: str, p) -> str:
                 """Replace runs that are PAGE fields with a styled placeholder."""
                 try:
                     instr = " ".join(
                         e.text or ""
-                        for e in p._element.iter("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}instrText")
+                        for e in p._element.iter(
+                            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}instrText"
+                        )
                     ).strip()
                     if "PAGE" in instr.upper():
                         # Insert page number span before closing </p>
                         if p_html.endswith("</p>"):
                             inner = p_html[:-4]
-                            p_html = inner + '<span class="koto-hdr-page-num" style="font-size:inherit;color:inherit">1</span></p>'
+                            p_html = (
+                                inner
+                                + '<span class="koto-hdr-page-num" style="font-size:inherit;color:inherit">1</span></p>'
+                            )
                 except Exception:
                     pass
                 return p_html
@@ -2057,25 +2217,26 @@ def _docx_to_rich_html(
                 use them as separators to create a flex layout.
                 """
                 import re as _re
+
                 # Check if it contains tab characters at all
-                if '\t' not in p_html:
+                if "\t" not in p_html:
                     return p_html
-                m = _re.match(r'(<p[^>]*>)(.*)(</p>)$', p_html, _re.DOTALL)
+                m = _re.match(r"(<p[^>]*>)(.*)(</p>)$", p_html, _re.DOTALL)
                 if not m:
                     return p_html
                 open_tag, inner, close_tag = m.group(1), m.group(2), m.group(3)
                 # Replace <span ...>\t</span> with a special marker
-                _TAB_MARKER = '\x00TAB\x00'
+                _TAB_MARKER = "\x00TAB\x00"
                 # Match spans containing only a tab (with optional trailing whitespace)
-                inner = _re.sub(r'<span[^>]*>\s*\t\s*</span>', _TAB_MARKER, inner)
+                inner = _re.sub(r"<span[^>]*>\s*\t\s*</span>", _TAB_MARKER, inner)
                 # Also handle bare tab characters between spans
-                inner = inner.replace('\t', _TAB_MARKER)
+                inner = inner.replace("\t", _TAB_MARKER)
                 parts = inner.split(_TAB_MARKER)
                 parts = [p.strip() for p in parts]
                 if len(parts) < 2:
                     return p_html
                 # Build flex container
-                flex_style = 'display:flex;justify-content:space-between;align-items:baseline;width:100%'
+                flex_style = "display:flex;justify-content:space-between;align-items:baseline;width:100%"
                 if 'style="' in open_tag:
                     open_tag = open_tag.replace('style="', f'style="{flex_style};', 1)
                 else:
@@ -2083,10 +2244,16 @@ def _docx_to_rich_html(
                 spans = []
                 for i, part in enumerate(parts):
                     if not part:
-                        part = '&nbsp;'
-                    align = 'left' if i == 0 else ('right' if i == len(parts) - 1 else 'center')
-                    spans.append(f'<span class="koto-hdr-col" style="text-align:{align};flex-shrink:0">{part}</span>')
-                return open_tag + ''.join(spans) + close_tag
+                        part = "&nbsp;"
+                    align = (
+                        "left"
+                        if i == 0
+                        else ("right" if i == len(parts) - 1 else "center")
+                    )
+                    spans.append(
+                        f'<span class="koto-hdr-col" style="text-align:{align};flex-shrink:0">{part}</span>'
+                    )
+                return open_tag + "".join(spans) + close_tag
 
             texts = []
             for p in paras:
@@ -2097,8 +2264,8 @@ def _docx_to_rich_html(
                 # _run_html replaces w:tab with 6 × &nbsp; for non-TOC runs,
                 # but we need actual \t characters for _tabs_to_flex detection.
                 # Restore tab markers from the raw XML w:tab elements.
-                _nbsp6 = '\u00a0' * 6
-                p_html = p_html.replace(_nbsp6, '\t')
+                _nbsp6 = "\u00a0" * 6
+                p_html = p_html.replace(_nbsp6, "\t")
                 # Inject class
                 if p_html.startswith("<p>"):
                     p_html = f'<p class="{cls}">' + p_html[3:]
@@ -2139,7 +2306,9 @@ def _docx_to_rich_html(
                             # navigation-pane purposes.  Real headings are
                             # always concise; skip very long paragraphs.
                             try:
-                                para_text = para.text.strip() if para is not None else ""
+                                para_text = (
+                                    para.text.strip() if para is not None else ""
+                                )
                                 if len(para_text) > 30:
                                     return None
                             except Exception:
@@ -2194,8 +2363,8 @@ def _docx_to_rich_html(
 
     # ── Iterate body elements ─────────────────────────────────────────────
     # Use document.element.body children to interleave paragraphs and tables
-    from docx.text.paragraph import Paragraph
     from docx.table import Table
+    from docx.text.paragraph import Paragraph
 
     # Buffer for list grouping
     current_list_id: int | None = None
@@ -2254,7 +2423,9 @@ def _docx_to_rich_html(
     for child_elem in body_elem:
         if stop_render:
             break
-        tag_local = child_elem.tag.split("}")[-1] if "}" in child_elem.tag else child_elem.tag
+        tag_local = (
+            child_elem.tag.split("}")[-1] if "}" in child_elem.tag else child_elem.tag
+        )
 
         if tag_local == "p":
             para = Paragraph(child_elem, doc)
@@ -2271,8 +2442,12 @@ def _docx_to_rich_html(
             if numPr is not None:
                 numId_elem = numPr.find(qn("w:numId"))
                 ilvl_elem = numPr.find(qn("w:ilvl"))
-                num_id = int(numId_elem.get(qn("w:val"), 0)) if numId_elem is not None else 0
-                ilvl = int(ilvl_elem.get(qn("w:val"), 0)) if ilvl_elem is not None else 0
+                num_id = (
+                    int(numId_elem.get(qn("w:val"), 0)) if numId_elem is not None else 0
+                )
+                ilvl = (
+                    int(ilvl_elem.get(qn("w:val"), 0)) if ilvl_elem is not None else 0
+                )
 
                 # Determine list type from numbering.xml (best-effort)
                 list_tag = "ul"
@@ -2298,8 +2473,12 @@ def _docx_to_rich_html(
                                         if numFmt is not None:
                                             fmt_val = numFmt.get(qn("w:val"), "")
                                             if fmt_val in (
-                                                "decimal", "lowerLetter", "upperLetter",
-                                                "lowerRoman", "upperRoman", "chineseCounting",
+                                                "decimal",
+                                                "lowerLetter",
+                                                "upperLetter",
+                                                "lowerRoman",
+                                                "upperRoman",
+                                                "chineseCounting",
                                             ):
                                                 list_tag = "ol"
                 except Exception:
@@ -2328,16 +2507,18 @@ def _docx_to_rich_html(
                         link_inner = ""
                         for r_el in lc.findall(qn("w:r")):
                             from docx.text.run import Run
+
                             link_inner += _run_html(Run(r_el, para), doc)
                         if link_inner:
                             esc_url = url.replace('"', "&quot;")
                             inner_parts.append(
                                 f'<a href="{esc_url}" target="_blank" '
                                 f'style="color:#1155CC;text-decoration:underline;">'
-                                f'{link_inner}</a>'
+                                f"{link_inner}</a>"
                             )
                     elif lt == "r":
                         from docx.text.run import Run
+
                         inner_parts.append(_run_html(Run(lc, para), doc))
                 current_list_items.append("".join(inner_parts) or "&nbsp;")
                 continue
@@ -2370,7 +2551,11 @@ def _docx_to_rich_html(
                         # OOXML: section type is a CHILD element, not an attribute:
                         #   <w:sectPr><w:type w:val="nextPage"/></w:sectPr>
                         _type_el = _sectPr.find(qn("w:type"))
-                        _stype = _type_el.get(qn("w:val"), "nextPage") if _type_el is not None else "nextPage"
+                        _stype = (
+                            _type_el.get(qn("w:val"), "nextPage")
+                            if _type_el is not None
+                            else "nextPage"
+                        )
                         if _stype != "continuous":
                             _has_section_pb = True
             except Exception:
@@ -2391,8 +2576,13 @@ def _docx_to_rich_html(
                 _style_id = style_defaults.get("style_id") or ""
             except Exception:
                 _style_id = ""
-            _h_tag = None if _is_toc_para else (
-                _is_heading_style_key(_style_name) or _is_heading_style_key(_style_id)
+            _h_tag = (
+                None
+                if _is_toc_para
+                else (
+                    _is_heading_style_key(_style_name)
+                    or _is_heading_style_key(_style_id)
+                )
             )
 
             # Fallback: check w:outlineLvl in paragraph properties (and
@@ -2436,9 +2626,11 @@ def _docx_to_rich_html(
                     preview_truncated = True
                     stop_render = True
                     break
-                body_parts.append('<div data-page-break="true" '
-                                  'class="koto-page-break" '
-                                  'contenteditable="false"></div>')
+                body_parts.append(
+                    '<div data-page-break="true" '
+                    'class="koto-page-break" '
+                    'contenteditable="false"></div>'
+                )
                 _record_preview_units(1)
 
         elif tag_local == "tbl":
@@ -2455,7 +2647,13 @@ def _docx_to_rich_html(
                     stop_render = True
                     break
                 if not body_parts and _remaining_units <= _table_units:
-                    _table_row_limit = max(4, min(_DOCX_PREVIEW_MAX_TABLE_ROWS, max(4, _remaining_units // 2 or 4)))
+                    _table_row_limit = max(
+                        4,
+                        min(
+                            _DOCX_PREVIEW_MAX_TABLE_ROWS,
+                            max(4, _remaining_units // 2 or 4),
+                        ),
+                    )
                     preview_truncated = True
             tbl = Table(child_elem, doc)
             body_parts.append(_table_html(tbl, doc, max_rows=_table_row_limit))
@@ -2489,7 +2687,11 @@ def _docx_to_rich_html(
             sdtContent = child_elem.find(qn("w:sdtContent"))
             if sdtContent is not None:
                 for sdt_child in sdtContent:
-                    sdt_tag = sdt_child.tag.split("}")[-1] if "}" in sdt_child.tag else sdt_child.tag
+                    sdt_tag = (
+                        sdt_child.tag.split("}")[-1]
+                        if "}" in sdt_child.tag
+                        else sdt_child.tag
+                    )
                     if sdt_tag == "p":
                         para = Paragraph(sdt_child, doc)
                         style_ref = _resolve_para_style_ref(para)
@@ -2509,11 +2711,18 @@ def _docx_to_rich_html(
                             _style_id = style_defaults.get("style_id") or ""
                         except Exception:
                             _style_id = ""
-                        _h_tag = None if _is_toc_para else (
-                            _is_heading_style_key(_style_name) or _is_heading_style_key(_style_id)
+                        _h_tag = (
+                            None
+                            if _is_toc_para
+                            else (
+                                _is_heading_style_key(_style_name)
+                                or _is_heading_style_key(_style_id)
+                            )
                         )
                         if not _is_toc_para and not _h_tag:
-                            _h_tag = _detect_outline_level(para, sdt_child, style_ref=style_ref)
+                            _h_tag = _detect_outline_level(
+                                para, sdt_child, style_ref=style_ref
+                            )
                         if _h_tag and not _p_elem_text_content(sdt_child):
                             _h_tag = None
                         if _h_tag:
@@ -2523,29 +2732,41 @@ def _docx_to_rich_html(
                             preview_truncated = True
                             stop_render = True
                             break
-                        body_parts.append(_para_html(para, doc, _btag, style_ref=style_ref))
+                        body_parts.append(
+                            _para_html(para, doc, _btag, style_ref=style_ref)
+                        )
                         _record_preview_units(_para_units)
                     elif sdt_tag == "tbl":
                         _table_units = _estimate_table_units(sdt_child)
                         _table_row_limit = None
                         if preview_units_limit is not None:
-                            _remaining_units = max(0, preview_units_limit - preview_units_used)
+                            _remaining_units = max(
+                                0, preview_units_limit - preview_units_used
+                            )
                             if body_parts and _remaining_units < _table_units:
                                 preview_truncated = True
                                 stop_render = True
                                 break
                             if not body_parts and _remaining_units <= _table_units:
-                                _table_row_limit = max(4, min(_DOCX_PREVIEW_MAX_TABLE_ROWS, max(4, _remaining_units // 2 or 4)))
+                                _table_row_limit = max(
+                                    4,
+                                    min(
+                                        _DOCX_PREVIEW_MAX_TABLE_ROWS,
+                                        max(4, _remaining_units // 2 or 4),
+                                    ),
+                                )
                                 preview_truncated = True
                         tbl = Table(sdt_child, doc)
-                        body_parts.append(_table_html(tbl, doc, max_rows=_table_row_limit))
+                        body_parts.append(
+                            _table_html(tbl, doc, max_rows=_table_row_limit)
+                        )
                         if _table_row_limit is not None:
                             _record_preview_units(max(6, _table_row_limit * 2))
                             stop_render = True
                             break
                         _record_preview_units(_table_units)
             if _is_toc_sdt:
-                body_parts.append('</div>')
+                body_parts.append("</div>")
             if stop_render:
                 break
 
@@ -2570,9 +2791,9 @@ def _docx_to_rich_html(
         _emu_px = lambda e: round(e / 914400 * 96) if e else 0
         for sec in doc.sections:
             sec_info: dict = {
-                "page_width_px":  _emu_px(sec.page_width),
+                "page_width_px": _emu_px(sec.page_width),
                 "page_height_px": _emu_px(sec.page_height),
-                "margin_top_px":  _emu_px(sec.top_margin),
+                "margin_top_px": _emu_px(sec.top_margin),
                 "margin_bottom_px": _emu_px(sec.bottom_margin),
                 "margin_left_px": _emu_px(sec.left_margin),
                 "margin_right_px": _emu_px(sec.right_margin),
@@ -2588,26 +2809,41 @@ def _docx_to_rich_html(
                 sec_info["footer_html"] = ""
             # First-page header / footer (Word's "Different First Page")
             try:
-                sec_info["first_header_html"] = _section_html(sec.first_page_header, doc, "koto-header") if sec.different_first_page_header_footer else ""
+                sec_info["first_header_html"] = (
+                    _section_html(sec.first_page_header, doc, "koto-header")
+                    if sec.different_first_page_header_footer
+                    else ""
+                )
             except Exception:
                 sec_info["first_header_html"] = ""
             try:
-                sec_info["first_footer_html"] = _section_html(sec.first_page_footer, doc, "koto-footer") if sec.different_first_page_header_footer else ""
+                sec_info["first_footer_html"] = (
+                    _section_html(sec.first_page_footer, doc, "koto-footer")
+                    if sec.different_first_page_header_footer
+                    else ""
+                )
             except Exception:
                 sec_info["first_footer_html"] = ""
             # Even-page header / footer
             try:
-                sec_info["even_header_html"] = _section_html(sec.even_page_header, doc, "koto-header")
+                sec_info["even_header_html"] = _section_html(
+                    sec.even_page_header, doc, "koto-header"
+                )
             except Exception:
                 sec_info["even_header_html"] = ""
             try:
-                sec_info["even_footer_html"] = _section_html(sec.even_page_footer, doc, "koto-footer")
+                sec_info["even_footer_html"] = _section_html(
+                    sec.even_page_footer, doc, "koto-footer"
+                )
             except Exception:
                 sec_info["even_footer_html"] = ""
             sections_data.append(sec_info)
     except Exception as sec_exc:
         import logging as _log
-        _log.getLogger(__name__).debug("[DocxParser] 节段信息提取失败 (非致命): %s", sec_exc)
+
+        _log.getLogger(__name__).debug(
+            "[DocxParser] 节段信息提取失败 (非致命): %s", sec_exc
+        )
 
     preview_meta = {
         "pending": bool(progressive_preview and preview_truncated),
@@ -2629,21 +2865,25 @@ def _extract_images_from_paragraphs(html: str) -> str:
     import re as _re
 
     # <img ... > or <img ... /> — both have no '>' inside attributes
-    _IMG = r'<img[^>]*>'
+    _IMG = r"<img[^>]*>"
 
     # Match any <p> that contains at least one <img> anywhere inside.
     # Group 1 = p opening-tag attributes, Group 2 = full inner content.
     any_p_with_img = _re.compile(
-        r'<p([^>]*)>((?:(?!</p>).)*' + _IMG + r'(?:(?!</p>).)*)</p>',
+        r"<p([^>]*)>((?:(?!</p>).)*" + _IMG + r"(?:(?!</p>).)*)</p>",
         _re.IGNORECASE | _re.DOTALL,
     )
 
-    def _process(m: '_re.Match') -> str:
+    def _process(m: "_re.Match") -> str:
         p_attrs = m.group(1)
         p_inner = m.group(2)
         imgs = _re.findall(_IMG, p_inner, _re.IGNORECASE | _re.DOTALL)
-        clean_inner = _re.sub(_IMG, '', p_inner, flags=_re.IGNORECASE | _re.DOTALL).strip()
-        result = (f'<p{p_attrs}>{clean_inner}</p>' if clean_inner else '') + ''.join(imgs)
+        clean_inner = _re.sub(
+            _IMG, "", p_inner, flags=_re.IGNORECASE | _re.DOTALL
+        ).strip()
+        result = (f"<p{p_attrs}>{clean_inner}</p>" if clean_inner else "") + "".join(
+            imgs
+        )
         return result
 
     return any_p_with_img.sub(_process, html)
@@ -2659,15 +2899,18 @@ def _extract_headings_from_html(html: str) -> list[dict]:
     Returns a list like [{"level": 1, "text": "Title", "id": "anchorId"}, ...].
     """
     import re as _re
+
     headings: list[dict] = []
     _id_re = _re.compile(r'id="([^"]*)"', _re.IGNORECASE)
     _href_re = _re.compile(r'href="#([^"]*)"', _re.IGNORECASE)
-    _strip_tags = _re.compile(r'<[^>]+>')
-    _strip_toc_tab = _re.compile(r'<span[^>]*class="koto-toc-tab"[^>]*>.*?</span>', _re.IGNORECASE | _re.DOTALL)
+    _strip_tags = _re.compile(r"<[^>]+>")
+    _strip_toc_tab = _re.compile(
+        r'<span[^>]*class="koto-toc-tab"[^>]*>.*?</span>', _re.IGNORECASE | _re.DOTALL
+    )
 
     # Primary: look for <h1>-<h6>
     _heading_re = _re.compile(
-        r'<(h[1-6])([^>]*)>(.*?)</\1>',
+        r"<(h[1-6])([^>]*)>(.*?)</\1>",
         _re.IGNORECASE | _re.DOTALL,
     )
     for m in _heading_re.finditer(html):
@@ -2676,7 +2919,7 @@ def _extract_headings_from_html(html: str) -> list[dict]:
         inner_html = m.group(3)
         id_m = _id_re.search(attrs)
         hid = id_m.group(1) if id_m else ""
-        text = _strip_tags.sub('', inner_html).strip()
+        text = _strip_tags.sub("", inner_html).strip()
         if text:
             headings.append({"level": level, "text": text, "id": hid})
 
@@ -2694,10 +2937,10 @@ def _extract_headings_from_html(html: str) -> list[dict]:
             href_m = _href_re.search(inner)
             hid = href_m.group(1) if href_m else ""
             # Remove the koto-toc-tab spacer span before stripping tags
-            inner = _strip_toc_tab.sub('', inner)
-            text = _strip_tags.sub('', inner).strip()
+            inner = _strip_toc_tab.sub("", inner)
+            text = _strip_tags.sub("", inner).strip()
             # Remove trailing page number (digits at end, optionally with leading whitespace)
-            text = _re.sub(r'\s*\d+\s*$', '', text).strip()
+            text = _re.sub(r"\s*\d+\s*$", "", text).strip()
             if text:
                 headings.append({"level": level, "text": text, "id": hid})
 
@@ -2852,14 +3095,14 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
             if sections_data:
                 _sec0 = sections_data[0]
                 page_meta = {
-                    "page_width_px":    _sec0.get("page_width_px", 0),
-                    "page_height_px":   _sec0.get("page_height_px", 0),
-                    "margin_top_px":    _sec0.get("margin_top_px", 0),
+                    "page_width_px": _sec0.get("page_width_px", 0),
+                    "page_height_px": _sec0.get("page_height_px", 0),
+                    "margin_top_px": _sec0.get("margin_top_px", 0),
                     "margin_bottom_px": _sec0.get("margin_bottom_px", 0),
-                    "margin_left_px":   _sec0.get("margin_left_px", 0),
-                    "margin_right_px":  _sec0.get("margin_right_px", 0),
-                    "header_html":      _sec0.get("header_html", ""),
-                    "footer_html":      _sec0.get("footer_html", ""),
+                    "margin_left_px": _sec0.get("margin_left_px", 0),
+                    "margin_right_px": _sec0.get("margin_right_px", 0),
+                    "header_html": _sec0.get("header_html", ""),
+                    "footer_html": _sec0.get("footer_html", ""),
                 }
                 page_meta["sections"] = sections_data
         except Exception as meta_exc:
@@ -2877,7 +3120,8 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
         if progressive_preview:
             result["progressive"] = {
                 "pending": bool(preview_meta.get("pending")),
-                "target_pages": preview_meta.get("target_pages") or _DOCX_PREVIEW_TARGET_PAGES,
+                "target_pages": preview_meta.get("target_pages")
+                or _DOCX_PREVIEW_TARGET_PAGES,
             }
         # ── 提取 DOCX 批注 ──────────────────────────────────────────
         try:
@@ -2889,15 +3133,15 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
         return result
 
     except Exception as primary_exc:
-        logger.warning(
-            "[DocxParser] 富格式渲染失败，回退到 mammoth: %s", primary_exc
-        )
+        logger.warning("[DocxParser] 富格式渲染失败，回退到 mammoth: %s", primary_exc)
 
     # ── Fallback path: mammoth semantic renderer ──────────────────────────
     try:
         import mammoth
     except ImportError:
-        raise RuntimeError("python-docx 和 mammoth 均未安装，请执行: pip install python-docx mammoth")
+        raise RuntimeError(
+            "python-docx 和 mammoth 均未安装，请执行: pip install python-docx mammoth"
+        )
 
     def _img_handler(image: Any) -> dict[str, str]:
         """将图片转换为内联 base64 data URI，自动压缩大图。"""
@@ -3048,8 +3292,10 @@ def _openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
                 style["it"] = 1
             if font.size:
                 style["fs"] = int(font.size)
-            if font.color and font.color.type == "rgb" and font.color.rgb not in (
-                "00000000", "FF000000"
+            if (
+                font.color
+                and font.color.type == "rgb"
+                and font.color.rgb not in ("00000000", "FF000000")
             ):
                 # Univer expects { rgb: "#RRGGBB" }
                 style["cl"] = {"rgb": "#" + font.color.rgb[2:]}
@@ -3101,6 +3347,7 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
 
     # ── 公式检测：通过 ZIP 级 sheet XML 快速扫描，避免额外完整加载一遍 workbook ──
     _warnings: list[str] = []
+
     def _xlsx_contains_formula_fast(path: str) -> bool:
         import zipfile
 
@@ -3108,7 +3355,9 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
             with zipfile.ZipFile(path, "r") as zf:
                 for info in zf.infolist():
                     name = info.filename
-                    if not name.startswith("xl/worksheets/") or not name.endswith(".xml"):
+                    if not name.startswith("xl/worksheets/") or not name.endswith(
+                        ".xml"
+                    ):
                         continue
                     with zf.open(info) as fh:
                         tail = b""
@@ -3148,6 +3397,7 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
     def _get_style_id(style_obj: dict[str, Any]) -> str:
         """Return a stable string key for *style_obj*, registering it if new."""
         import json as _json
+
         h = _json.dumps(style_obj, sort_keys=True, ensure_ascii=False)
         if h not in _style_hash_to_id:
             sid = str(len(_style_hash_to_id))
@@ -3177,12 +3427,14 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
         # ── Merge data ────────────────────────────────────────────────────────
         merge_data: list[dict[str, int]] = []
         for merge_range in ws.merged_cells.ranges:
-            merge_data.append({
-                "startRow": merge_range.min_row - 1,
-                "startColumn": merge_range.min_col - 1,
-                "endRow": merge_range.max_row - 1,
-                "endColumn": merge_range.max_col - 1,
-            })
+            merge_data.append(
+                {
+                    "startRow": merge_range.min_row - 1,
+                    "startColumn": merge_range.min_col - 1,
+                    "endRow": merge_range.max_row - 1,
+                    "endColumn": merge_range.max_col - 1,
+                }
+            )
 
         # ── Column widths ─────────────────────────────────────────────────────
         # openpyxl width is in Excel "character units"; Univer IColumnData.w is pixels.
@@ -3220,8 +3472,8 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
     return {
         "id": workbook_id,
         "name": workbook_name,
-        "appVersion": "0.5.0",   # required by IWorkbookData; Univer fails silently without it
-        "locale": "zh-CN",       # required by IWorkbookData; used for cell formatting
+        "appVersion": "0.5.0",  # required by IWorkbookData; Univer fails silently without it
+        "locale": "zh-CN",  # required by IWorkbookData; used for cell formatting
         "sheetOrder": sheet_order,
         "sheets": sheets,
         "styles": _styles_registry,  # style-id → IStyleData (populated during cell scan)
@@ -3357,15 +3609,20 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 for _r2 in _mst_part.rels.values():
                     if "theme" in _r2.reltype:
                         import lxml.etree as _ET
+
                         _theme_el = _ET.fromstring(_r2.target_part.blob)
                         _cs = _theme_el.find(f".//{{{_NS_T}}}clrScheme")
                         if _cs is not None:
                             for _c in _cs:
-                                _name = _c.tag.split("}")[1]  # e.g. "dk1", "lt1", "accent1"
+                                _name = _c.tag.split("}")[
+                                    1
+                                ]  # e.g. "dk1", "lt1", "accent1"
                                 _srgb = _c.find(f"{{{_NS_T}}}srgbClr")
-                                _sys  = _c.find(f"{{{_NS_T}}}sysClr")
+                                _sys = _c.find(f"{{{_NS_T}}}sysClr")
                                 if _srgb is not None:
-                                    _theme_colors[_name] = "#" + _srgb.get("val", "000000").lower()
+                                    _theme_colors[_name] = (
+                                        "#" + _srgb.get("val", "000000").lower()
+                                    )
                                 elif _sys is not None:
                                     _last = _sys.get("lastClr", "")
                                     if _last:
@@ -3416,13 +3673,23 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             pass
         try:
             from pptx.enum.dml import MSO_THEME_COLOR
+
             # python-pptx theme_color names like DARK_1, LIGHT_1, ACCENT_1 etc.
             # Map to OOXML scheme names: DARK_1→dk1, LIGHT_1→lt1, ACCENT_N→accentN, etc.
             _tc = color_obj.theme_color
             _name_map = {
-                1: "dk1", 2: "lt1", 3: "dk2", 4: "lt2",
-                5: "accent1", 6: "accent2", 7: "accent3", 8: "accent4",
-                9: "accent5", 10: "accent6", 11: "hlink", 12: "folHlink",
+                1: "dk1",
+                2: "lt1",
+                3: "dk2",
+                4: "lt2",
+                5: "accent1",
+                6: "accent2",
+                7: "accent3",
+                8: "accent4",
+                9: "accent5",
+                10: "accent6",
+                11: "hlink",
+                12: "folHlink",
             }
             _hex = _theme_colors.get(_name_map.get(int(_tc), ""))
             if _hex:
@@ -3479,21 +3746,22 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         to avoid picking up shape images as backgrounds.
         """
         from pptx.oxml.ns import qn as _qn_bg
-        _R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-        _P_NS = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+
+        _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        _P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
 
         def _resolve_blip_image(bg_pr_element: Any, part: Any) -> dict:
             """Find <a:blip r:embed="rIdN"/> in <p:bgPr> XML, resolve to compressed data URI."""
             try:
-                blip = bg_pr_element.find('.//' + _qn_bg('a:blip'))
+                blip = bg_pr_element.find(".//" + _qn_bg("a:blip"))
                 if blip is not None:
-                    rId = blip.get(f'{{{_R_NS}}}embed')
-                    if rId and hasattr(part, 'rels') and rId in part.rels:
+                    rId = blip.get(f"{{{_R_NS}}}embed")
+                    if rId and hasattr(part, "rels") and rId in part.rels:
                         img_part = part.rels[rId].target_part
                         img_bytes, mime = _compress_image_bytes(
-                            img_part.blob, img_part.content_type or 'image/png'
+                            img_part.blob, img_part.content_type or "image/png"
                         )
-                        b64 = base64.b64encode(img_bytes).decode('ascii')
+                        b64 = base64.b64encode(img_bytes).decode("ascii")
                         return {"image": f"data:{mime};base64,{b64}"}
             except Exception:
                 pass
@@ -3502,18 +3770,22 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         def _resolve_solid_color(bg_pr_element: Any) -> dict:
             """Find <a:solidFill><a:srgbClr val="..."/> in <p:bgPr> XML."""
             try:
-                solid = bg_pr_element.find('.//' + _qn_bg('a:solidFill'))
+                solid = bg_pr_element.find(".//" + _qn_bg("a:solidFill"))
                 if solid is not None:
-                    srgb = solid.find(_qn_bg('a:srgbClr'))
+                    srgb = solid.find(_qn_bg("a:srgbClr"))
                     if srgb is not None:
-                        val = srgb.get('val', '')
+                        val = srgb.get("val", "")
                         if len(val) == 6:
                             return {"color": "#" + val.lower()}
             except Exception:
                 pass
             return {}
 
-        for src in (slide, getattr(slide, "slide_layout", None), getattr(slide, "slide_master", None)):
+        for src in (
+            slide,
+            getattr(slide, "slide_layout", None),
+            getattr(slide, "slide_master", None),
+        ):
             if src is None:
                 continue
             try:
@@ -3521,12 +3793,12 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 # slide.background._element is <p:cSld>; searching it directly
                 # would also find <a:blip> inside shape tree → wrong image!
                 cSld = src.background._element
-                bg_el = cSld.find(f'{{{_P_NS}}}bg')
+                bg_el = cSld.find(f"{{{_P_NS}}}bg")
                 if bg_el is None:
                     continue  # this source has no background definition
 
-                bgPr = bg_el.find(f'{{{_P_NS}}}bgPr')
-                src_part = getattr(src, 'part', None)
+                bgPr = bg_el.find(f"{{{_P_NS}}}bgPr")
+                src_part = getattr(src, "part", None)
 
                 if bgPr is not None and src_part is not None:
                     # Check for image fill (blipFill)
@@ -3539,22 +3811,24 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                         return result
                     # Check for gradient fill
                     f = src.background.fill
-                    if getattr(f.type, 'name', '') == 'GRADIENT':
+                    if getattr(f.type, "name", "") == "GRADIENT":
                         css = _extract_grad_css(f)
                         if css:
                             return {"gradient": css}
 
                 # bgRef (theme reference) — use python-pptx fill API
-                bgRef = bg_el.find(f'{{{_P_NS}}}bgRef')
+                bgRef = bg_el.find(f"{{{_P_NS}}}bgRef")
                 if bgRef is not None:
                     f = src.background.fill
-                    fill_name = getattr(f.type, 'name', '') if f.type is not None else ''
-                    if fill_name == 'SOLID':
+                    fill_name = (
+                        getattr(f.type, "name", "") if f.type is not None else ""
+                    )
+                    if fill_name == "SOLID":
                         try:
                             return {"color": "#" + str(f.fore_color.rgb).lower()}
                         except Exception:
                             pass
-                    if fill_name == 'GRADIENT':
+                    if fill_name == "GRADIENT":
                         css = _extract_grad_css(f)
                         if css:
                             return {"gradient": css}
@@ -3562,7 +3836,9 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 pass
         return {"color": "#FFFFFF"}
 
-    def _parse_tf(tf: Any, layout_defaults: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def _parse_tf(
+        tf: Any, layout_defaults: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """Convert a python-pptx TextFrame into our [{align, runs:[...]}] format.
 
         Handles three common cases that cause text to disappear:
@@ -3609,7 +3885,9 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                         if _sol is not None:
                             _srgb = _sol.find(f"{{{_NS}}}srgbClr")
                             if _srgb is not None and len(_srgb.get("val", "")) == 6:
-                                _body_defaults["color"] = "#" + _srgb.get("val", "").lower()
+                                _body_defaults["color"] = (
+                                    "#" + _srgb.get("val", "").lower()
+                                )
         except Exception:
             pass
 
@@ -3666,7 +3944,12 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 ea = rpr_el.find(f"{{{_NS}}}ea")
                 if ea is not None:
                     ea_tf = ea.get("typeface", "")
-                    if ea_tf and not ea_tf.startswith("+") and ea_tf != "+mj-ea" and ea_tf != "+mn-ea":
+                    if (
+                        ea_tf
+                        and not ea_tf.startswith("+")
+                        and ea_tf != "+mj-ea"
+                        and ea_tf != "+mn-ea"
+                    ):
                         out["eaFontName"] = ea_tf
             except Exception:
                 pass
@@ -3789,7 +4072,16 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     # Merge: run → paragraph → layout placeholder → body (lstStyle) defaults
                     _layout_defs = layout_defaults or {}
                     r: dict[str, Any] = {"text": text_val}
-                    for key in ("size", "bold", "italic", "underline", "fontName", "eaFontName", "color", "charSpacing"):
+                    for key in (
+                        "size",
+                        "bold",
+                        "italic",
+                        "underline",
+                        "fontName",
+                        "eaFontName",
+                        "color",
+                        "charSpacing",
+                    ):
                         if key in run_attrs:
                             r[key] = run_attrs[key]
                         elif key in para_defaults:
@@ -3849,7 +4141,11 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     fallback_run: dict[str, Any] = {"text": raw}
                     # Apply body defaults first, layout, then para defaults (higher priority)
                     _layout_defs = layout_defaults or {}
-                    for key, val in {**_body_defaults, **_layout_defs, **para_defaults}.items():
+                    for key, val in {
+                        **_body_defaults,
+                        **_layout_defs,
+                        **para_defaults,
+                    }.items():
                         fallback_run.setdefault(key, val)
                     p_obj["runs"] = [fallback_run]
 
@@ -3860,11 +4156,14 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # runs in the same paragraph (e.g.  sz=2100 | sz=None | sz=2100 →
             # the middle run should also be 2100, not the global default).
             _runs = p_obj["runs"]
-            if _runs and any("size" not in r for r in _runs if r.get("text", "").strip()):
+            if _runs and any(
+                "size" not in r for r in _runs if r.get("text", "").strip()
+            ):
                 _sibling_sizes = [r["size"] for r in _runs if "size" in r]
                 if _sibling_sizes:
                     # Use the most common size among siblings
                     from collections import Counter
+
                     _best_size = Counter(_sibling_sizes).most_common(1)[0][0]
                     for r in _runs:
                         if "size" not in r and r.get("text", "").strip():
@@ -3899,9 +4198,9 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # always explicitly sized, which is why only they were visible.
             # Fix: pull the real geometry from the matching layout placeholder.
             eff_left = shape.left
-            eff_top  = shape.top
-            eff_w    = shape.width
-            eff_h    = shape.height
+            eff_top = shape.top
+            eff_w = shape.width
+            eff_h = shape.height
 
             if None in (eff_left, eff_top, eff_w, eff_h):
                 try:
@@ -3927,7 +4226,11 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                     pass
                         # Walk slide master if layout didn't resolve everything
                         if None in (eff_left, eff_top, eff_w, eff_h):
-                            slide_master = getattr(slide_layout, "slide_master", None) if slide_layout else None
+                            slide_master = (
+                                getattr(slide_layout, "slide_master", None)
+                                if slide_layout
+                                else None
+                            )
                             if slide_master is not None:
                                 for mph in slide_master.placeholders:
                                     try:
@@ -3946,29 +4249,47 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                         # If still None after layout+master, use standard widescreen EMU defaults
                         if None in (eff_left, eff_top, eff_w, eff_h):
                             _ph_idx = getattr(ph_fmt, "idx", -1)
-                            _prs_shape = getattr(getattr(shape, "part", None), "presentation", None)
-                            _sw = int(getattr(_prs_shape, "slide_width",  None) or 9144000)
-                            _sh = int(getattr(_prs_shape, "slide_height", None) or 6858000)
-                            if _ph_idx == 0:   # Title
-                                if eff_left is None: eff_left = 457200
-                                if eff_top  is None: eff_top  = 274638
-                                if eff_w    is None: eff_w    = 8229600
-                                if eff_h    is None: eff_h    = 1143000
+                            _prs_shape = getattr(
+                                getattr(shape, "part", None), "presentation", None
+                            )
+                            _sw = int(
+                                getattr(_prs_shape, "slide_width", None) or 9144000
+                            )
+                            _sh = int(
+                                getattr(_prs_shape, "slide_height", None) or 6858000
+                            )
+                            if _ph_idx == 0:  # Title
+                                if eff_left is None:
+                                    eff_left = 457200
+                                if eff_top is None:
+                                    eff_top = 274638
+                                if eff_w is None:
+                                    eff_w = 8229600
+                                if eff_h is None:
+                                    eff_h = 1143000
                             elif _ph_idx == 1:  # Body / Content
-                                if eff_left is None: eff_left = 457200
-                                if eff_top  is None: eff_top  = 1600200
-                                if eff_w    is None: eff_w    = 8229600
-                                if eff_h    is None: eff_h    = 4525963
+                                if eff_left is None:
+                                    eff_left = 457200
+                                if eff_top is None:
+                                    eff_top = 1600200
+                                if eff_w is None:
+                                    eff_w = 8229600
+                                if eff_h is None:
+                                    eff_h = 4525963
                             else:
-                                if eff_left is None: eff_left = 0
-                                if eff_top  is None: eff_top  = 0
-                                if eff_w    is None: eff_w    = _sw
-                                if eff_h    is None: eff_h    = _sh
+                                if eff_left is None:
+                                    eff_left = 0
+                                if eff_top is None:
+                                    eff_top = 0
+                                if eff_w is None:
+                                    eff_w = _sw
+                                if eff_h is None:
+                                    eff_h = _sh
                 except Exception:
                     pass
 
-            abs_left = off_left + round((( eff_left or 0) - grp_ch_off_x) * grp_scale_x)
-            abs_top  = off_top  + round((( eff_top  or 0) - grp_ch_off_y) * grp_scale_y)
+            abs_left = off_left + round(((eff_left or 0) - grp_ch_off_x) * grp_scale_x)
+            abs_top = off_top + round(((eff_top or 0) - grp_ch_off_y) * grp_scale_y)
             # Also scale the shape's own width/height when inside a group
             if grp_scale_x != 1.0 and eff_w is not None:
                 eff_w = round(eff_w * grp_scale_x)
@@ -3989,9 +4310,7 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     _NS_A2 = "http://schemas.openxmlformats.org/drawingml/2006/main"
                     xfrm = shape.element.find(
                         f"{{{_NS_P}}}grpSpPr/{{{_NS_A2}}}xfrm"
-                    ) or shape.element.find(
-                        f"{{{_NS_A2}}}grpSpPr/{{{_NS_A2}}}xfrm"
-                    )
+                    ) or shape.element.find(f"{{{_NS_A2}}}grpSpPr/{{{_NS_A2}}}xfrm")
                     ch_off_x = ch_off_y = 0
                     ch_ext_cx = eff_w or 1
                     ch_ext_cy = eff_h or 1
@@ -4033,7 +4352,10 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # MSO_SHAPE_TYPE.MEDIA = 16.  python-pptx cannot render video/audio
             # and attempting to read their blobs would base64-encode hundreds of MB.
             try:
-                if getattr(MSO_SHAPE_TYPE, 'MEDIA', None) is not None and shape.shape_type == MSO_SHAPE_TYPE.MEDIA:
+                if (
+                    getattr(MSO_SHAPE_TYPE, "MEDIA", None) is not None
+                    and shape.shape_type == MSO_SHAPE_TYPE.MEDIA
+                ):
                     continue
             except Exception:
                 pass
@@ -4043,7 +4365,7 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 "name": shape.name,
                 "left": abs_left,
                 "top": abs_top,
-                "width":  eff_w or 0,
+                "width": eff_w or 0,
                 "height": eff_h or 0,
                 "z_order": z_base + z_idx,
                 "fill": None,
@@ -4052,29 +4374,39 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # Shape fill — solid, gradient, or picture
             try:
                 fill = shape.fill
-                fill_name = getattr(fill.type, 'name', '') if fill.type is not None else ''
-                if fill_name == 'SOLID':
+                fill_name = (
+                    getattr(fill.type, "name", "") if fill.type is not None else ""
+                )
+                if fill_name == "SOLID":
                     _fc = _resolve_color(fill.fore_color)
                     if _fc:
                         s["fill"] = _fc
-                elif fill_name == 'GRADIENT':
+                elif fill_name == "GRADIENT":
                     css = _extract_grad_css(fill)
                     if css:
                         s["fillGradient"] = css
-                elif fill_name == 'PICTURE':
+                elif fill_name == "PICTURE":
                     try:
                         from pptx.oxml.ns import qn as _qn_sh
-                        blip = shape.element.find('.//' + _qn_sh('a:blip'))
+
+                        blip = shape.element.find(".//" + _qn_sh("a:blip"))
                         if blip is not None:
-                            rId = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                            rId = blip.get(
+                                "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
+                            )
                             if rId:
                                 img_part = shape.part.related_parts[rId]
                                 _raw_blob = img_part.blob
-                                _raw_mime = img_part.content_type or 'image/png'
+                                _raw_mime = img_part.content_type or "image/png"
                                 # Skip non-image blobs (e.g. video used as fill) or oversized media
-                                if _raw_mime.startswith('image/') and len(_raw_blob) <= _MAX_BLOB_BYTES:
-                                    img_bytes, mime = _compress_image_bytes(_raw_blob, _raw_mime)
-                                    b64 = base64.b64encode(img_bytes).decode('ascii')
+                                if (
+                                    _raw_mime.startswith("image/")
+                                    and len(_raw_blob) <= _MAX_BLOB_BYTES
+                                ):
+                                    img_bytes, mime = _compress_image_bytes(
+                                        _raw_blob, _raw_mime
+                                    )
+                                    b64 = base64.b64encode(img_bytes).decode("ascii")
                                     s["fillImage"] = f"data:{mime};base64,{b64}"
                     except Exception:
                         pass
@@ -4091,7 +4423,10 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     except Exception:
                         pass
                     # line.width is in EMU; store as-is, frontend scales
-                    s["border"] = {"widthEmu": int(line.width), "color": _lc or "#000000"}
+                    s["border"] = {
+                        "widthEmu": int(line.width),
+                        "color": _lc or "#000000",
+                    }
             except Exception:
                 pass
 
@@ -4109,13 +4444,19 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     img_blob = shape.image.blob
                     img_mime = shape.image.content_type or "image/png"
                     # Guard: skip if non-image MIME (video poster frame) or oversized blob
-                    if not img_mime.startswith("image/") or len(img_blob) > _MAX_BLOB_BYTES:
+                    if (
+                        not img_mime.startswith("image/")
+                        or len(img_blob) > _MAX_BLOB_BYTES
+                    ):
                         logger.warning(
                             "[parse_pptx] skipping oversized/non-image blob: mime=%s size=%.1f MB",
-                            img_mime, len(img_blob) / 1048576,
+                            img_mime,
+                            len(img_blob) / 1048576,
                         )
                         s["_type"] = "PICTURE"
-                        s["image_b64"] = ""  # placeholder — too large or non-image media
+                        s["image_b64"] = (
+                            ""  # placeholder — too large or non-image media
+                        )
                         out.append(s)
                         continue
                     img_blob, img_mime = _compress_image_bytes(img_blob, img_mime)
@@ -4152,11 +4493,18 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                 )
                             except Exception:
                                 pass
-                            cell_d: dict[str, Any] = {"row": r_idx, "col": c_idx, "text": cell_text}
+                            cell_d: dict[str, Any] = {
+                                "row": r_idx,
+                                "col": c_idx,
+                                "text": cell_text,
+                            }
                             # Cell fill
                             try:
                                 cfill = cell.fill
-                                if cfill.type is not None and getattr(cfill.type, 'name', '') == 'SOLID':
+                                if (
+                                    cfill.type is not None
+                                    and getattr(cfill.type, "name", "") == "SOLID"
+                                ):
                                     _cf = _resolve_color(cfill.fore_color)
                                     if _cf:
                                         cell_d["fill"] = _cf
@@ -4168,10 +4516,19 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                     fp = cell.text_frame.paragraphs[0]
                                     if fp.runs:
                                         fr = fp.runs[0]
-                                        if fr.font.size:   cell_d["fontSize"] = round(fr.font.size.pt, 1)
-                                        if fr.font.bold:   cell_d["bold"] = True
-                                        if fr.font.color and fr.font.color.type is not None:
-                                            cell_d["color"] = "#" + str(fr.font.color.rgb).lower()
+                                        if fr.font.size:
+                                            cell_d["fontSize"] = round(
+                                                fr.font.size.pt, 1
+                                            )
+                                        if fr.font.bold:
+                                            cell_d["bold"] = True
+                                        if (
+                                            fr.font.color
+                                            and fr.font.color.type is not None
+                                        ):
+                                            cell_d["color"] = (
+                                                "#" + str(fr.font.color.rgb).lower()
+                                            )
                                     cell_d["align"] = (
                                         fp.alignment.name if fp.alignment else "LEFT"
                                     )
@@ -4192,17 +4549,23 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # ── Generic Shapes / Icons / SVGs / Charts / Connectors ────────
             try:
                 _st = getattr(shape, "shape_type", None)
-                if _st in (MSO_SHAPE_TYPE.AUTO_SHAPE, MSO_SHAPE_TYPE.FREEFORM,
-                           MSO_SHAPE_TYPE.GRAPHIC_FRAME):
+                if _st in (
+                    MSO_SHAPE_TYPE.AUTO_SHAPE,
+                    MSO_SHAPE_TYPE.FREEFORM,
+                    MSO_SHAPE_TYPE.GRAPHIC_FRAME,
+                ):
                     s["_type"] = "SHAPE"
                     # Rounded rectangle: extract corner radius from XML
                     try:
                         from pptx.oxml.ns import qn as _qn_r
-                        prstGeom = shape.element.find('.//' + _qn_r('a:prstGeom'))
+
+                        prstGeom = shape.element.find(".//" + _qn_r("a:prstGeom"))
                         if prstGeom is not None:
                             s["autoShapeType"] = prstGeom.get("prst", "")
-                            avLst = prstGeom.find('.//' + _qn_r('a:gd'))
-                            if avLst is not None and avLst.get("fmla", "").startswith("val "):
+                            avLst = prstGeom.find(".//" + _qn_r("a:gd"))
+                            if avLst is not None and avLst.get("fmla", "").startswith(
+                                "val "
+                            ):
                                 s["cornerRadiusEmu"] = int(avLst.get("fmla").split()[1])
                     except Exception:
                         pass
@@ -4225,6 +4588,7 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     is_title = False
                     try:
                         from pptx.enum.shapes import PP_PLACEHOLDER
+
                         ph = shape.placeholder_format
                         if ph is not None:
                             is_title = ph.type in (
@@ -4247,26 +4611,52 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                     _ph_fmt = getattr(shape, "placeholder_format", None)
                                     if _ph_fmt is not None:
                                         _ph_idx = _ph_fmt.idx
-                                        _sl_layout = getattr(getattr(shape, "part", None), "slide_layout", None)
+                                        _sl_layout = getattr(
+                                            getattr(shape, "part", None),
+                                            "slide_layout",
+                                            None,
+                                        )
                                         if _sl_layout is not None:
                                             for _lph in _sl_layout.placeholders:
                                                 try:
-                                                    if _lph.placeholder_format.idx == _ph_idx:
-                                                        _lbPr = _lph.text_frame._txBody.find(f"{{{_NS_A}}}bodyPr")
+                                                    if (
+                                                        _lph.placeholder_format.idx
+                                                        == _ph_idx
+                                                    ):
+                                                        _lbPr = _lph.text_frame._txBody.find(
+                                                            f"{{{_NS_A}}}bodyPr"
+                                                        )
                                                         if _lbPr is not None:
-                                                            anchor = _lbPr.get("anchor") or anchor
+                                                            anchor = (
+                                                                _lbPr.get("anchor")
+                                                                or anchor
+                                                            )
                                                         break
                                                 except Exception:
                                                     pass
                                         if not anchor:
-                                            _sl_master = getattr(_sl_layout, "slide_master", None) if _sl_layout else None
+                                            _sl_master = (
+                                                getattr(
+                                                    _sl_layout, "slide_master", None
+                                                )
+                                                if _sl_layout
+                                                else None
+                                            )
                                             if _sl_master is not None:
                                                 for _mph in _sl_master.placeholders:
                                                     try:
-                                                        if _mph.placeholder_format.idx == _ph_idx:
-                                                            _mbPr = _mph.text_frame._txBody.find(f"{{{_NS_A}}}bodyPr")
+                                                        if (
+                                                            _mph.placeholder_format.idx
+                                                            == _ph_idx
+                                                        ):
+                                                            _mbPr = _mph.text_frame._txBody.find(
+                                                                f"{{{_NS_A}}}bodyPr"
+                                                            )
                                                             if _mbPr is not None:
-                                                                anchor = _mbPr.get("anchor") or anchor
+                                                                anchor = (
+                                                                    _mbPr.get("anchor")
+                                                                    or anchor
+                                                                )
                                                             break
                                                     except Exception:
                                                         pass
@@ -4286,7 +4676,7 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                 "b": int(bIns) if bIns is not None else 45720,
                             }
                             # Text autofit mode: spAutoFit | normAutofit (with fontScale) | noAutofit
-                            _af_sp   = bodyPr.find(f"{{{_NS_A}}}spAutoFit")
+                            _af_sp = bodyPr.find(f"{{{_NS_A}}}spAutoFit")
                             _af_norm = bodyPr.find(f"{{{_NS_A}}}normAutofit")
                             if _af_sp is not None:
                                 s["autoFit"] = "sp"
@@ -4314,52 +4704,116 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                         _ph_fmt2 = getattr(shape, "placeholder_format", None)
                         if _ph_fmt2 is not None:
                             _ph_idx2 = _ph_fmt2.idx
-                            _sl_layout2 = getattr(getattr(shape, "part", None), "slide_layout", None)
+                            _sl_layout2 = getattr(
+                                getattr(shape, "part", None), "slide_layout", None
+                            )
                             if _sl_layout2 is not None:
                                 for _lph2 in _sl_layout2.placeholders:
                                     try:
                                         if _lph2.placeholder_format.idx == _ph_idx2:
                                             _ltxBody = _lph2.text_frame._txBody
-                                            _llstStyle = _ltxBody.find(f"{{{_NS_A}}}lstStyle")
+                                            _llstStyle = _ltxBody.find(
+                                                f"{{{_NS_A}}}lstStyle"
+                                            )
                                             if _llstStyle is not None:
-                                                _llvl1 = _llstStyle.find(f"{{{_NS_A}}}lvl1pPr")
+                                                _llvl1 = _llstStyle.find(
+                                                    f"{{{_NS_A}}}lvl1pPr"
+                                                )
                                                 if _llvl1 is not None:
-                                                    _ldefRPr = _llvl1.find(f"{{{_NS_A}}}defRPr")
+                                                    _ldefRPr = _llvl1.find(
+                                                        f"{{{_NS_A}}}defRPr"
+                                                    )
                                                     if _ldefRPr is not None:
                                                         _lsz = _ldefRPr.get("sz")
                                                         if _lsz:
                                                             try:
                                                                 _lv = int(_lsz)
                                                                 if _lv > 0:
-                                                                    _layout_defaults["size"] = round(_lv / 100.0, 1)
+                                                                    _layout_defaults[
+                                                                        "size"
+                                                                    ] = round(
+                                                                        _lv / 100.0, 1
+                                                                    )
                                                             except Exception:
                                                                 pass
-                                                        for _lk, _la in (("bold", "b"), ("italic", "i")):
+                                                        for _lk, _la in (
+                                                            ("bold", "b"),
+                                                            ("italic", "i"),
+                                                        ):
                                                             _lav = _ldefRPr.get(_la)
-                                                            if _lav and _lav.lower() not in ("0", "false"):
-                                                                _layout_defaults[_lk] = True
-                                                        _llat = _ldefRPr.find(f"{{{_NS_A}}}latin")
+                                                            if (
+                                                                _lav
+                                                                and _lav.lower()
+                                                                not in ("0", "false")
+                                                            ):
+                                                                _layout_defaults[
+                                                                    _lk
+                                                                ] = True
+                                                        _llat = _ldefRPr.find(
+                                                            f"{{{_NS_A}}}latin"
+                                                        )
                                                         if _llat is not None:
-                                                            _ltf = _llat.get("typeface", "")
-                                                            if _ltf and not _ltf.startswith("+"):
-                                                                _layout_defaults["fontName"] = _ltf
-                                                        _lea = _ldefRPr.find(f"{{{_NS_A}}}ea")
+                                                            _ltf = _llat.get(
+                                                                "typeface", ""
+                                                            )
+                                                            if (
+                                                                _ltf
+                                                                and not _ltf.startswith(
+                                                                    "+"
+                                                                )
+                                                            ):
+                                                                _layout_defaults[
+                                                                    "fontName"
+                                                                ] = _ltf
+                                                        _lea = _ldefRPr.find(
+                                                            f"{{{_NS_A}}}ea"
+                                                        )
                                                         if _lea is not None:
-                                                            _leaf = _lea.get("typeface", "")
-                                                            if _leaf and not _leaf.startswith("+"):
-                                                                _layout_defaults["eaFontName"] = _leaf
-                                                        _lsol = _ldefRPr.find(f"{{{_NS_A}}}solidFill")
+                                                            _leaf = _lea.get(
+                                                                "typeface", ""
+                                                            )
+                                                            if (
+                                                                _leaf
+                                                                and not _leaf.startswith(
+                                                                    "+"
+                                                                )
+                                                            ):
+                                                                _layout_defaults[
+                                                                    "eaFontName"
+                                                                ] = _leaf
+                                                        _lsol = _ldefRPr.find(
+                                                            f"{{{_NS_A}}}solidFill"
+                                                        )
                                                         if _lsol is not None:
-                                                            _lsrgb = _lsol.find(f"{{{_NS_A}}}srgbClr")
-                                                            if _lsrgb is not None and len(_lsrgb.get("val", "")) == 6:
-                                                                _layout_defaults["color"] = "#" + _lsrgb.get("val", "").lower()
+                                                            _lsrgb = _lsol.find(
+                                                                f"{{{_NS_A}}}srgbClr"
+                                                            )
+                                                            if (
+                                                                _lsrgb is not None
+                                                                and len(
+                                                                    _lsrgb.get(
+                                                                        "val", ""
+                                                                    )
+                                                                )
+                                                                == 6
+                                                            ):
+                                                                _layout_defaults[
+                                                                    "color"
+                                                                ] = (
+                                                                    "#"
+                                                                    + _lsrgb.get(
+                                                                        "val", ""
+                                                                    ).lower()
+                                                                )
                                             break
                                     except Exception:
                                         pass
                     except Exception:
                         pass
 
-                    s["paragraphs"] = _parse_tf(shape.text_frame, layout_defaults=_layout_defaults)
+                    s["paragraphs"] = _parse_tf(
+                        shape.text_frame, layout_defaults=_layout_defaults
+                    )
                     out.append(s)
             except Exception:
                 pass
@@ -4368,7 +4822,6 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # TEXT, PICTURE, TABLE which already called out.append+continue).
             if s.get("_type") in ("SHAPE", "CHART"):
                 out.append(s)
-
 
     # ── Main loop ────────────────────────────────────────────────────────
 
@@ -4388,11 +4841,16 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         # These form the visual theme/background template visible behind slide content.
         try:
             _slide_layout = getattr(slide, "slide_layout", None)
-            _slide_master = getattr(_slide_layout, "slide_master", None) if _slide_layout else None
+            _slide_master = (
+                getattr(_slide_layout, "slide_master", None) if _slide_layout else None
+            )
             # Slide master shapes (z_base=-2000, bottom-most layer)
             if _slide_master is not None:
-                _mst_decos = [_s for _s in _slide_master.shapes
-                              if not getattr(_s, "is_placeholder", False)]
+                _mst_decos = [
+                    _s
+                    for _s in _slide_master.shapes
+                    if not getattr(_s, "is_placeholder", False)
+                ]
                 _mst_out: list[dict[str, Any]] = []
                 _collect_shapes(_mst_decos, _mst_out, z_base=-2000)
                 for _ms in _mst_out:
@@ -4400,8 +4858,11 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 shapes_data.extend(_mst_out)
             # Slide layout shapes (z_base=-1000, above master, below slide content)
             if _slide_layout is not None:
-                _lay_decos = [_s for _s in _slide_layout.shapes
-                              if not getattr(_s, "is_placeholder", False)]
+                _lay_decos = [
+                    _s
+                    for _s in _slide_layout.shapes
+                    if not getattr(_s, "is_placeholder", False)
+                ]
                 _lay_out: list[dict[str, Any]] = []
                 _collect_shapes(_lay_decos, _lay_out, z_base=-1000)
                 for _ls in _lay_out:
@@ -4419,20 +4880,25 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         # PowerPoint's implicit text-runaround behaviour for overlapping shapes.
         _EXCL_BUFFER = 91440  # 1 EMU point of extra breathing room
         _text_shapes = [
-            s for s in shapes_data
+            s
+            for s in shapes_data
             if s.get("has_text") and s.get("textInsets") is not None
         ]
         for _a in _text_shapes:
-            _al  = _a["left"];  _at  = _a["top"]
-            _ar  = _al + _a["width"];  _ab  = _at + _a["height"]
+            _al = _a["left"]
+            _at = _a["top"]
+            _ar = _al + _a["width"]
+            _ab = _at + _a["height"]
             _acx = _al + _a["width"] / 2
             for _b in shapes_data:
                 if _b.get("z_order", 0) <= _a.get("z_order", 0):
                     continue  # only consider shapes rendered ON TOP of _a
                 if not _b.get("has_text"):
                     continue  # only exclude space for text-bearing shapes
-                _bl = _b["left"];  _bt = _b["top"]
-                _br = _bl + _b["width"];  _bb = _bt + _b["height"]
+                _bl = _b["left"]
+                _bt = _b["top"]
+                _br = _bl + _b["width"]
+                _bb = _bt + _b["height"]
                 # Must overlap in BOTH axes
                 if _bb <= _at or _bt >= _ab:
                     continue
@@ -4472,7 +4938,6 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
     }
 
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # PDF → 文本提取 + 原始 URL
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4499,12 +4964,11 @@ def _configure_tesseract() -> bool:
             return True
     # If already on PATH, keep default
     import shutil
+
     return shutil.which("tesseract") is not None
 
 
-def _ocr_pdf_pages(
-    file_path: str, page_indices: list[int]
-) -> dict[int, str]:
+def _ocr_pdf_pages(file_path: str, page_indices: list[int]) -> dict[int, str]:
     """
     Render the given 0-based page indices with PyMuPDF and run Tesseract OCR.
     Returns {page_index: text}. Silently returns {} if any dependency is missing.
@@ -4530,9 +4994,10 @@ def _ocr_pdf_pages(
         # Determine available language packs; prefer Chinese + English
         try:
             langs = pytesseract.get_languages()
-            lang = "+".join(
-                lc for lc in ("chi_sim", "chi_tra", "eng") if lc in langs
-            ) or "eng"
+            lang = (
+                "+".join(lc for lc in ("chi_sim", "chi_tra", "eng") if lc in langs)
+                or "eng"
+            )
         except Exception:
             lang = "eng"
 
@@ -4569,13 +5034,17 @@ def _flatten_pdf_outline(reader: Any, items: list, depth: int = 0) -> list:
                 page_num = reader.get_destination_page_number(item) + 1
             except Exception:
                 pass
-            children = _flatten_pdf_outline(reader, getattr(item, "children", []), depth + 1)
-            result.append({
-                "title": str(getattr(item, "title", "") or ""),
-                "page": page_num,
-                "depth": depth,
-                "children": children,
-            })
+            children = _flatten_pdf_outline(
+                reader, getattr(item, "children", []), depth + 1
+            )
+            result.append(
+                {
+                    "title": str(getattr(item, "title", "") or ""),
+                    "page": page_num,
+                    "depth": depth,
+                    "children": children,
+                }
+            )
     return result
 
 
@@ -4585,6 +5054,7 @@ def _get_pdf_meta(file_path: str) -> tuple:
     meta: dict = {}
     try:
         from pypdf import PdfReader as _PdfReader  # type: ignore
+
         reader = _PdfReader(file_path)
         if reader.metadata:
             rm = reader.metadata
@@ -4630,13 +5100,17 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                 try:
                     page_text = page.extract_text() or ""
                 except Exception as e:
-                    logger.warning(f"[PdfParser/pdfplumber] 第 {i+1} 页文本提取失败: {e}")
+                    logger.warning(
+                        f"[PdfParser/pdfplumber] 第 {i+1} 页文本提取失败: {e}"
+                    )
                     page_text = ""
                 pages_text.append({"page": i + 1, "text": page_text})
                 if page_text:
                     full_text_parts.append(page_text)
 
-        return _apply_ocr_fallback(file_path, pages_text, full_text_parts, page_count, raw_url, outline, meta)
+        return _apply_ocr_fallback(
+            file_path, pages_text, full_text_parts, page_count, raw_url, outline, meta
+        )
     except ImportError:
         logger.info("[PdfParser] pdfplumber 未安装，尝试 pypdf/PyPDF2")
     except Exception as e:
@@ -4654,13 +5128,23 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
                     try:
                         page_text = pg.extract_text() or ""
                     except Exception as e:
-                        logger.warning(f"[PdfParser/{pkg_name}] 第 {i+1} 页文本提取失败: {e}")
+                        logger.warning(
+                            f"[PdfParser/{pkg_name}] 第 {i+1} 页文本提取失败: {e}"
+                        )
                         page_text = ""
                     pages_text.append({"page": i + 1, "text": page_text})
                     if page_text:
                         full_text_parts.append(page_text)
 
-            return _apply_ocr_fallback(file_path, pages_text, full_text_parts, page_count, raw_url, outline, meta)
+            return _apply_ocr_fallback(
+                file_path,
+                pages_text,
+                full_text_parts,
+                page_count,
+                raw_url,
+                outline,
+                meta,
+            )
         except ImportError:
             logger.info(f"[PdfParser] {pkg_name} 未安装，尝试下一库")
             continue
@@ -4677,6 +5161,7 @@ def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
     )
     try:
         import fitz  # PyMuPDF
+
         doc = fitz.open(file_path)
         page_count = len(doc)
         doc.close()
@@ -4725,7 +5210,8 @@ def _apply_ocr_fallback(
     run OCR on those pages, and merge the results back.
     """
     scanned_indices = [
-        i for i, p in enumerate(pages_text)
+        i
+        for i, p in enumerate(pages_text)
         if len(p["text"].strip()) < _PDF_OCR_THRESHOLD
     ]
     ocr_applied = False
@@ -4816,10 +5302,12 @@ def _set_run_east_asian_font(run: Any, font_name: str) -> None:
     """Set East Asian font on a run via direct XML manipulation."""
     try:
         from docx.oxml.ns import qn as _qn
+
         rPr = run._element.get_or_add_rPr()
         rFonts = rPr.find(_qn("w:rFonts"))
         if rFonts is None:
             from lxml import etree
+
             rFonts = etree.SubElement(rPr, _qn("w:rFonts"))
         rFonts.set(_qn("w:eastAsia"), font_name)
     except Exception:
@@ -4843,10 +5331,22 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
             else:
                 # Check if the single font is a CJK font — also set as eastAsia
                 _CJK_FONTS = {
-                    "SimHei", "SimSun", "KaiTi", "FangSong",
-                    "Microsoft YaHei", "STZhongsong", "STSong", "STHeiti",
-                    "STKaiti", "STFangsong", "FZShuSong-Z01", "FZHei-B01",
-                    "NSimSun", "DengXian", "YouYuan", "LiSu",
+                    "SimHei",
+                    "SimSun",
+                    "KaiTi",
+                    "FangSong",
+                    "Microsoft YaHei",
+                    "STZhongsong",
+                    "STSong",
+                    "STHeiti",
+                    "STKaiti",
+                    "STFangsong",
+                    "FZShuSong-Z01",
+                    "FZHei-B01",
+                    "NSimSun",
+                    "DengXian",
+                    "YouYuan",
+                    "LiSu",
                 }
                 if fonts[0] in _CJK_FONTS:
                     _set_run_east_asian_font(run, fonts[0])
@@ -4872,7 +5372,11 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
     # ── Text color ───────────────────────────────────────────────────────
     color_hex = _css_color_to_hex(css.get("color", ""))
     if color_hex:
-        r, g, b = int(color_hex[0:2], 16), int(color_hex[2:4], 16), int(color_hex[4:6], 16)
+        r, g, b = (
+            int(color_hex[0:2], 16),
+            int(color_hex[2:4], 16),
+            int(color_hex[4:6], 16),
+        )
         run.font.color.rgb = RGBColor(r, g, b)
 
     # ── Highlight / background color ─────────────────────────────────────
@@ -4882,6 +5386,7 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
         try:
             from docx.oxml.ns import qn as _qn
             from lxml import etree
+
             rPr = run._element.get_or_add_rPr()
             shd = rPr.find(_qn("w:shd"))
             if shd is None:
@@ -4903,10 +5408,12 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
     if ls_pt is not None:
         try:
             from docx.oxml.ns import qn as _qn
+
             rPr = run._element.get_or_add_rPr()
             spacing = rPr.find(_qn("w:spacing"))
             if spacing is None:
                 from lxml import etree
+
                 spacing = etree.SubElement(rPr, _qn("w:spacing"))
             # OOXML spacing is in half-points (1/144 inch)
             spacing.set(_qn("w:val"), str(int(ls_pt * 20)))
@@ -4916,8 +5423,8 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
 
 def _apply_para_format(para: Any, pcss: dict[str, str]) -> None:
     """Apply paragraph-level CSS properties to a python-docx Paragraph."""
-    from docx.shared import Pt, Twips
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, Twips
 
     # Text alignment
     align = pcss.get("text-align", "")
@@ -4947,11 +5454,14 @@ def _apply_para_format(para: Any, pcss: dict[str, str]) -> None:
     if lh:
         try:
             # Only use _css_length_to_pt if the value has a unit suffix
-            has_unit = any(lh.rstrip().endswith(u) for u in ("pt", "px", "em", "cm", "mm", "in"))
+            has_unit = any(
+                lh.rstrip().endswith(u) for u in ("pt", "px", "em", "cm", "mm", "in")
+            )
             if has_unit:
                 lh_pt = _css_length_to_pt(lh)
                 if lh_pt is not None and lh_pt > 0:
                     from docx.enum.text import WD_LINE_SPACING
+
                     pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                     pf.line_spacing = Pt(lh_pt)
             else:
@@ -4980,8 +5490,8 @@ def _apply_para_format(para: Any, pcss: dict[str, str]) -> None:
 
 def _add_paragraph_from_tag(doc: Any, tag: Any) -> None:
     """Convert a single <p>/<h1>-<h6>/<li> BS4 tag into a python-docx paragraph."""
-    from docx.shared import Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
 
     tag_name = tag.name.lower()
     if tag_name in ("h1", "h2", "h3", "h4", "h5", "h6"):
@@ -5015,18 +5525,23 @@ def _add_paragraph_from_tag(doc: Any, tag: Any) -> None:
                 if img_bytes:
                     try:
                         from docx.shared import Inches, Pt
+
                         run = para.add_run()
-                        
+
                         img_css = _parse_css_inline(child.get("style", ""))
                         w_str = img_css.get("width", child.get("width", ""))
                         w_val = None
                         if w_str:
                             try:
-                                if w_str.endswith("px"): w_val = Pt(float(w_str.replace("px", "")) * 0.75)
-                                elif w_str.endswith("in"): w_val = Inches(float(w_str.replace("in", "")))
-                                elif w_str.isdigit(): w_val = Pt(float(w_str) * 0.75)
-                            except: pass
-                        
+                                if w_str.endswith("px"):
+                                    w_val = Pt(float(w_str.replace("px", "")) * 0.75)
+                                elif w_str.endswith("in"):
+                                    w_val = Inches(float(w_str.replace("in", "")))
+                                elif w_str.isdigit():
+                                    w_val = Pt(float(w_str) * 0.75)
+                            except:
+                                pass
+
                         if w_val:
                             run.add_picture(io.BytesIO(img_bytes), width=w_val)
                         else:
@@ -5074,6 +5589,7 @@ def _set_cell_shading(cell: Any, fill_hex: str) -> None:
 def _apply_border_xml(tcBorders: Any, side: str, val: str, sz: str, color: str) -> None:
     """Helper to add/update an individual border to tcBorders xml."""
     from lxml import etree
+
     WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     el = tcBorders.find(f"{{{WNS}}}{side}")
     if el is None:
@@ -5086,10 +5602,12 @@ def _apply_border_xml(tcBorders: Any, side: str, val: str, sz: str, color: str) 
         if color:
             el.set(f"{{{WNS}}}color", color.upper())
 
+
 def _set_cell_borders(cell: Any, css: dict[str, str]) -> None:
     """Apply borders to a cell by parsing border/border-* CSS."""
-    from lxml import etree
     import re
+
+    from lxml import etree
 
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
@@ -5103,20 +5621,23 @@ def _set_cell_borders(cell: Any, css: dict[str, str]) -> None:
         if not val_str or val_str == "none":
             return "none", "0", ""
         # defaults
-        sz, color = "4", "auto" 
+        sz, color = "4", "auto"
         parts = val_str.split()
         for p in parts:
             if "px" in p:
-                try: # 1px is approx 4 eighths-of-a-point
+                try:  # 1px is approx 4 eighths-of-a-point
                     sz = str(int(float(p.replace("px", "")) * 4))
-                except Exception: pass
+                except Exception:
+                    pass
             elif "pt" in p:
-                try: # 1pt is 8 eighths-of-a-point
+                try:  # 1pt is 8 eighths-of-a-point
                     sz = str(int(float(p.replace("pt", "")) * 8))
-                except Exception: pass
+                except Exception:
+                    pass
             elif p.startswith("#") or p.startswith("rgb"):
                 h = _css_color_to_hex(p)
-                if h: color = h.upper()
+                if h:
+                    color = h.upper()
         return "single", sz, color
 
     # Apply general border
@@ -5124,7 +5645,7 @@ def _set_cell_borders(cell: Any, css: dict[str, str]) -> None:
         val, sz, color = parse_border(css["border"])
         for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
             _apply_border_xml(tcBorders, side, val, sz, color)
-    
+
     # Override sides
     # We map CSS border sides to Word sides
     for css_prop, w_side in [
@@ -5136,7 +5657,6 @@ def _set_cell_borders(cell: Any, css: dict[str, str]) -> None:
         if css_prop in css:
             val, sz, color = parse_border(css[css_prop])
             _apply_border_xml(tcBorders, w_side, val, sz, color)
-
 
 
 def _resolve_img_src(src: str) -> bytes | None:
@@ -5164,11 +5684,13 @@ def _resolve_img_src(src: str) -> bytes | None:
         # expected: ['', 'api', 'v1', 'workspace', 'tmp_image', '{sid}', '{fname}']
         if len(parts) == 7:
             session_id, filename = parts[5], parts[6]
-            if (len(session_id) == 32
-                    and all(c in "0123456789abcdef" for c in session_id)
-                    and "/" not in filename
-                    and "\\" not in filename
-                    and ".." not in filename):
+            if (
+                len(session_id) == 32
+                and all(c in "0123456789abcdef" for c in session_id)
+                and "/" not in filename
+                and "\\" not in filename
+                and ".." not in filename
+            ):
                 img_path = Path("workspace") / "tmp" / session_id / "images" / filename
                 if img_path.is_file():
                     try:
@@ -5199,17 +5721,22 @@ def _insert_block_image(doc: Any, tag: Any) -> None:
     img_bytes = _resolve_img_src(src)
     if not img_bytes:
         return
-    
+
     img_css = _parse_css_inline(img_el.get("style", ""))
     w_str = img_css.get("width", img_el.get("width", ""))
     from docx.shared import Pt
+
     w_val = None
     if w_str:
         try:
-            if w_str.endswith("px"): w_val = Pt(float(w_str.replace("px", "")) * 0.75)
-            elif w_str.endswith("in"): w_val = Inches(float(w_str.replace("in", "")))
-            elif w_str.isdigit(): w_val = Pt(float(w_str) * 0.75)
-        except: pass
+            if w_str.endswith("px"):
+                w_val = Pt(float(w_str.replace("px", "")) * 0.75)
+            elif w_str.endswith("in"):
+                w_val = Inches(float(w_str.replace("in", "")))
+            elif w_str.isdigit():
+                w_val = Pt(float(w_str) * 0.75)
+        except:
+            pass
 
     try:
         if w_val:
@@ -5222,19 +5749,20 @@ def _insert_block_image(doc: Any, tag: Any) -> None:
 
 def _setup_blank_doc_defaults(doc: Any) -> None:
     """Configure default styles for a blank python-docx Document."""
-    from docx.shared import Pt
     from docx.oxml.ns import qn as _qn
+    from docx.shared import Pt
 
-    doc_style = doc.styles['Normal']
-    doc_style.font.name = 'Calibri'
+    doc_style = doc.styles["Normal"]
+    doc_style.font.name = "Calibri"
     doc_style.font.size = Pt(10.5)  # 五号 — standard Chinese document size
     try:
         rPr = doc_style.element.get_or_add_rPr()
-        rFonts = rPr.find(_qn('w:rFonts'))
+        rFonts = rPr.find(_qn("w:rFonts"))
         if rFonts is None:
             from lxml import etree
-            rFonts = etree.SubElement(rPr, _qn('w:rFonts'))
-        rFonts.set(_qn('w:eastAsia'), 'DengXian')
+
+            rFonts = etree.SubElement(rPr, _qn("w:rFonts"))
+        rFonts.set(_qn("w:eastAsia"), "DengXian")
     except Exception:
         pass
     # Remove default empty paragraph
@@ -5251,7 +5779,11 @@ def _extract_docx_save_parts(docx_input: Any) -> tuple[str, dict[str, Any]]:
         payload = {
             "header_html": str(docx_input.get("header_html") or ""),
             "footer_html": str(docx_input.get("footer_html") or ""),
-            "sections": docx_input.get("sections") if isinstance(docx_input.get("sections"), list) else [],
+            "sections": (
+                docx_input.get("sections")
+                if isinstance(docx_input.get("sections"), list)
+                else []
+            ),
         }
         return str(html_content or ""), payload
     return str(docx_input or ""), {"header_html": "", "footer_html": "", "sections": []}
@@ -5281,7 +5813,9 @@ def _apply_run_marks(run: Any, marks: dict[str, bool] | None) -> None:
         run.font.subscript = True
 
 
-def _add_page_number_field(para: Any, css: dict[str, str] | None = None, marks: dict[str, bool] | None = None) -> None:
+def _add_page_number_field(
+    para: Any, css: dict[str, str] | None = None, marks: dict[str, bool] | None = None
+) -> None:
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
@@ -5315,7 +5849,12 @@ def _add_page_number_field(para: Any, css: dict[str, str] | None = None, marks: 
     end_run._r.append(fld_end)
 
 
-def _append_inline_html_to_paragraph(para: Any, node: Any, inherited_css: dict[str, str] | None = None, marks: dict[str, bool] | None = None) -> None:
+def _append_inline_html_to_paragraph(
+    para: Any,
+    node: Any,
+    inherited_css: dict[str, str] | None = None,
+    marks: dict[str, bool] | None = None,
+) -> None:
     from bs4.element import NavigableString, Tag
     from docx.shared import Inches, Pt
 
@@ -5397,12 +5936,20 @@ def _configure_header_footer_tabs(para: Any, section: Any) -> None:
         from docx.enum.text import WD_TAB_ALIGNMENT, WD_TAB_LEADER
         from docx.shared import Emu
 
-        usable_width = int(section.page_width) - int(section.left_margin) - int(section.right_margin)
+        usable_width = (
+            int(section.page_width)
+            - int(section.left_margin)
+            - int(section.right_margin)
+        )
         if usable_width <= 0:
             return
         tab_stops = para.paragraph_format.tab_stops
-        tab_stops.add_tab_stop(Emu(usable_width // 2), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES)
-        tab_stops.add_tab_stop(Emu(usable_width), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
+        tab_stops.add_tab_stop(
+            Emu(usable_width // 2), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES
+        )
+        tab_stops.add_tab_stop(
+            Emu(usable_width), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES
+        )
     except Exception:
         pass
 
@@ -5414,7 +5961,8 @@ def _add_header_footer_paragraph(container: Any, tag: Any, section: Any) -> None
         _apply_para_format(para, pcss)
 
     direct_cols = [
-        child for child in list(getattr(tag, "children", []))
+        child
+        for child in list(getattr(tag, "children", []))
         if getattr(child, "name", None) and "koto-hdr-col" in (child.get("class") or [])
     ]
     if direct_cols:
@@ -5431,7 +5979,9 @@ def _add_header_footer_paragraph(container: Any, tag: Any, section: Any) -> None
     _append_inline_html_to_paragraph(para, tag, pcss, {})
 
 
-def _write_docx_header_footer_html(container: Any, html_content: str, section: Any) -> None:
+def _write_docx_header_footer_html(
+    container: Any, html_content: str, section: Any
+) -> None:
     from bs4 import BeautifulSoup
 
     _clear_block_container(container)
@@ -5471,7 +6021,9 @@ def _write_docx_header_footer_html(container: Any, html_content: str, section: A
         container.add_paragraph("")
 
 
-def _payload_value(section_payload: dict[str, Any] | None, key: str, fallback: str = "") -> str:
+def _payload_value(
+    section_payload: dict[str, Any] | None, key: str, fallback: str = ""
+) -> str:
     if isinstance(section_payload, dict) and key in section_payload:
         return str(section_payload.get(key) or "")
     return fallback
@@ -5490,17 +6042,21 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
     try:
         from bs4 import BeautifulSoup
         from docx import Document
-        from docx.shared import Inches, Pt, RGBColor
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.enum.table import WD_ALIGN_VERTICAL
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.oxml.ns import qn
+        from docx.shared import Inches, Pt, RGBColor
     except ImportError as exc:
         raise RuntimeError(f"python-docx 或 beautifulsoup4 未安装: {exc}") from exc
 
     html_content, docx_payload = _extract_docx_save_parts(docx_input)
     default_header_html = docx_payload.get("header_html", "")
     default_footer_html = docx_payload.get("footer_html", "")
-    sections_payload = docx_payload.get("sections") if isinstance(docx_payload.get("sections"), list) else []
+    sections_payload = (
+        docx_payload.get("sections")
+        if isinstance(docx_payload.get("sections"), list)
+        else []
+    )
 
     # ── Open original as template, or create blank ────────────────────────
     if original_path and os.path.isfile(original_path):
@@ -5508,13 +6064,17 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
             doc = Document(original_path)
             # Clear body content but keep section properties
             body = doc.element.body
-            sect_pr = body.findall(qn('w:sectPr'))
+            sect_pr = body.findall(qn("w:sectPr"))
             for child in list(body):
-                if child.tag != qn('w:sectPr'):
+                if child.tag != qn("w:sectPr"):
                     body.remove(child)
-            logger.info("[export_docx] using original DOCX as template: %s", original_path)
+            logger.info(
+                "[export_docx] using original DOCX as template: %s", original_path
+            )
         except Exception as exc:
-            logger.warning("[export_docx] failed to open original (%s), creating blank", exc)
+            logger.warning(
+                "[export_docx] failed to open original (%s), creating blank", exc
+            )
             doc = Document()
             _setup_blank_doc_defaults(doc)
     else:
@@ -5628,7 +6188,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                     is_header = cell_tag.name.lower() == "th"
 
                     # Check if cell contains <p> sub-elements (TipTap style)
-                    p_tags = cell_tag.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"], recursive=False)
+                    p_tags = cell_tag.find_all(
+                        ["p", "h1", "h2", "h3", "h4", "h5", "h6"], recursive=False
+                    )
                     if p_tags:
                         # Multi-paragraph cell: each <p> becomes a paragraph
                         for pi, p_tag in enumerate(p_tags):
@@ -5647,14 +6209,18 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                                             run.bold = True
                                         _apply_run_inline(run, merged_p)
                                 else:
-                                    child_name = child.name.lower() if child.name else ""
+                                    child_name = (
+                                        child.name.lower() if child.name else ""
+                                    )
                                     text = child.get_text()
                                     if not text:
                                         continue
                                     run = cell_para.add_run(text)
                                     if is_header:
                                         run.bold = True
-                                    child_css_inner = _parse_css_inline(child.get("style", ""))
+                                    child_css_inner = _parse_css_inline(
+                                        child.get("style", "")
+                                    )
                                     merged = dict(merged_p)
                                     merged.update(child_css_inner)
                                     if child_name in ("strong", "b"):
@@ -5693,7 +6259,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                                 run = cell_para.add_run(text)
                                 if is_header:
                                     run.bold = True
-                                child_css_inner = _parse_css_inline(child.get("style", ""))
+                                child_css_inner = _parse_css_inline(
+                                    child.get("style", "")
+                                )
                                 merged = dict(cell_css)
                                 merged.update(child_css_inner)
                                 if child_name in ("strong", "b"):
@@ -5707,7 +6275,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                                 _apply_run_inline(run, merged)
 
                     # ── Cell background colour ───────────────────────────
-                    bg = cell_css.get("background-color", "") or cell_css.get("background", "")
+                    bg = cell_css.get("background-color", "") or cell_css.get(
+                        "background", ""
+                    )
                     bg_hex = _css_color_to_hex(bg)
                     if not bg_hex and is_header:
                         bg_hex = "EEF1F8"  # default header shading
@@ -5719,7 +6289,7 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                         _set_cell_borders(tbl_cell, {"border": "1px solid #000000"})
                     else:
                         _set_cell_borders(tbl_cell, cell_css)
-                    
+
                     # ── Border colour override (legacy) ──────────────────
                     border_raw = cell_css.get("border-color", "")
                     border_hex = _css_color_to_hex(border_raw)
@@ -5732,18 +6302,19 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
             col_tags = top.find_all("col")
             if not col_tags and rows_tags:
                 col_tags = rows_tags[0].find_all(["td", "th"], recursive=False)
-            
+
             if col_tags:
                 # Force table to not auto-fit so widths are respected
                 try:
                     tbl.allow_autofit = False
                     from docx.oxml.ns import qn
-                    tblPr = tbl._element.xpath('w:tblPr')
+
+                    tblPr = tbl._element.xpath("w:tblPr")
                     if tblPr:
-                        tblW = tblPr[0].xpath('w:tblW')
+                        tblW = tblPr[0].xpath("w:tblW")
                         if tblW:
-                            tblW[0].set(qn('w:type'), 'pct')
-                            tblW[0].set(qn('w:w'), '5000') # 100%
+                            tblW[0].set(qn("w:type"), "pct")
+                            tblW[0].set(qn("w:w"), "5000")  # 100%
                 except Exception:
                     pass
 
@@ -5753,7 +6324,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                     if width_str:
                         try:
                             if width_str.endswith("px"):
-                                emu = int(float(width_str[:-2]) * 9144)  # 1px ≈ 9144 EMU
+                                emu = int(
+                                    float(width_str[:-2]) * 9144
+                                )  # 1px ≈ 9144 EMU
                                 for r in range(len(rows_tags)):
                                     tbl.cell(r, idx).width = emu
                             elif width_str.endswith("%"):
@@ -5763,7 +6336,7 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                                     try:
                                         tc = tbl.cell(r, idx)._tc
                                         tcW = tc.get_or_add_tcPr().get_or_add_tcW()
-                                        tcW.type = 'pct'
+                                        tcW.type = "pct"
                                         tcW.w = w_val
                                     except Exception:
                                         pass
@@ -5779,7 +6352,8 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
 
     try:
         has_even = any(
-            _payload_value(section_payload, "even_header_html") or _payload_value(section_payload, "even_footer_html")
+            _payload_value(section_payload, "even_header_html")
+            or _payload_value(section_payload, "even_footer_html")
             for section_payload in sections_payload
             if isinstance(section_payload, dict)
         )
@@ -5789,9 +6363,17 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
         has_even = False
 
     for idx, section in enumerate(doc.sections):
-        section_payload = sections_payload[idx] if idx < len(sections_payload) and isinstance(sections_payload[idx], dict) else None
-        section_header_html = _payload_value(section_payload, "header_html", default_header_html)
-        section_footer_html = _payload_value(section_payload, "footer_html", default_footer_html)
+        section_payload = (
+            sections_payload[idx]
+            if idx < len(sections_payload) and isinstance(sections_payload[idx], dict)
+            else None
+        )
+        section_header_html = _payload_value(
+            section_payload, "header_html", default_header_html
+        )
+        section_footer_html = _payload_value(
+            section_payload, "footer_html", default_footer_html
+        )
         first_header_html = _payload_value(section_payload, "first_header_html", "")
         first_footer_html = _payload_value(section_payload, "first_footer_html", "")
         even_header_html = _payload_value(section_payload, "even_header_html", "")
@@ -5809,7 +6391,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
         _write_docx_header_footer_html(section.footer, section_footer_html, section)
 
         try:
-            section.different_first_page_header_footer = bool(first_header_html or first_footer_html)
+            section.different_first_page_header_footer = bool(
+                first_header_html or first_footer_html
+            )
         except Exception:
             pass
         try:
@@ -5820,8 +6404,12 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
             section.first_page_footer.is_linked_to_previous = False
         except Exception:
             pass
-        _write_docx_header_footer_html(section.first_page_header, first_header_html, section)
-        _write_docx_header_footer_html(section.first_page_footer, first_footer_html, section)
+        _write_docx_header_footer_html(
+            section.first_page_header, first_header_html, section
+        )
+        _write_docx_header_footer_html(
+            section.first_page_footer, first_footer_html, section
+        )
 
         if has_even:
             try:
@@ -5832,8 +6420,12 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                 section.even_page_footer.is_linked_to_previous = False
             except Exception:
                 pass
-            _write_docx_header_footer_html(section.even_page_header, even_header_html, section)
-            _write_docx_header_footer_html(section.even_page_footer, even_footer_html, section)
+            _write_docx_header_footer_html(
+                section.even_page_header, even_header_html, section
+            )
+            _write_docx_header_footer_html(
+                section.even_page_footer, even_footer_html, section
+            )
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -5871,7 +6463,10 @@ def export_docx(docx_input: Any, original_path: str | None = None) -> bytes:
     try:
         return _export_docx_python(docx_input, original_path=original_path)
     except Exception as exc:
-        logger.warning("[export_docx] python-docx builder failed (%s), falling back to html2docx", exc)
+        logger.warning(
+            "[export_docx] python-docx builder failed (%s), falling back to html2docx",
+            exc,
+        )
 
     # ── Fallback: html2docx (handles edge cases the builder misses) ─────────
     try:
@@ -5892,7 +6487,9 @@ def export_docx(docx_input: Any, original_path: str | None = None) -> bytes:
     except ImportError:
         pass
 
-    raise RuntimeError("export_docx: 所有路径均失败，请确认 python-docx 和 beautifulsoup4 已安装")
+    raise RuntimeError(
+        "export_docx: 所有路径均失败，请确认 python-docx 和 beautifulsoup4 已安装"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5900,9 +6497,7 @@ def export_docx(docx_input: Any, original_path: str | None = None) -> bytes:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def export_xlsx(
-    sheets_json: Any, images: list[dict] | None = None
-) -> bytes:
+def export_xlsx(sheets_json: Any, images: list[dict] | None = None) -> bytes:
     """
     将编辑器序列化数据重建为 .xlsx 字节流。
 
@@ -5947,7 +6542,9 @@ def export_xlsx(
         for sheet_data in sheets_json:
             ws = wb.create_sheet(title=sheet_data.get("name", "Sheet"))
             for cell_entry in sheet_data.get("celldata", []):
-                r = cell_entry.get("r", 0) + 1  # Luckysheet 0-indexed → openpyxl 1-indexed
+                r = (
+                    cell_entry.get("r", 0) + 1
+                )  # Luckysheet 0-indexed → openpyxl 1-indexed
                 c = cell_entry.get("c", 0) + 1
                 v = cell_entry.get("v", {})
                 if v:
@@ -6040,8 +6637,9 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
         if fill_color is None:
             return
         try:
-            from pptx.util import Pt
             from pptx.dml.color import RGBColor
+            from pptx.util import Pt
+
             hex_val = fill_color.lstrip("#")
             if len(hex_val) != 6:
                 return
@@ -6057,8 +6655,9 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
         if not border_data:
             return
         try:
-            from pptx.util import Pt, Emu
             from pptx.dml.color import RGBColor
+            from pptx.util import Emu, Pt
+
             width = border_data.get("width", 0)
             color = border_data.get("color", "#000000")
             if width and width > 0:
@@ -6066,7 +6665,9 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
                 hex_val = color.lstrip("#")
                 if len(hex_val) == 6:
                     shape.line.color.rgb = RGBColor(
-                        int(hex_val[0:2], 16), int(hex_val[2:4], 16), int(hex_val[4:6], 16)
+                        int(hex_val[0:2], 16),
+                        int(hex_val[2:4], 16),
+                        int(hex_val[4:6], 16),
                     )
         except Exception:
             pass
@@ -6076,13 +6677,15 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
         if not paragraphs_data:
             return
         try:
-            from pptx.util import Pt, Emu
             from pptx.dml.color import RGBColor
             from pptx.enum.text import PP_ALIGN
+            from pptx.util import Emu, Pt
 
             _AL = {
-                "LEFT": PP_ALIGN.LEFT, "CENTER": PP_ALIGN.CENTER,
-                "RIGHT": PP_ALIGN.RIGHT, "JUSTIFY": PP_ALIGN.JUSTIFY,
+                "LEFT": PP_ALIGN.LEFT,
+                "CENTER": PP_ALIGN.CENTER,
+                "RIGHT": PP_ALIGN.RIGHT,
+                "JUSTIFY": PP_ALIGN.JUSTIFY,
             }
 
             # We iterate paragraphs in parallel: reuse existing para XML elements where possible
@@ -6095,6 +6698,7 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
                     para = tf.paragraphs[0]  # fallback, will be overwritten
                     try:
                         from lxml import etree
+
                         _NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
                         new_p = etree.SubElement(tf._txBody, f"{{{_NS}}}p")
                         # Re-read paragraphs
@@ -6141,7 +6745,9 @@ def export_pptx(original_path: str, slides_json: Any) -> bytes:
                             hex_val = str(r_data["color"]).lstrip("#")
                             if len(hex_val) == 6:
                                 run.font.color.rgb = RGBColor(
-                                    int(hex_val[0:2], 16), int(hex_val[2:4], 16), int(hex_val[4:6], 16)
+                                    int(hex_val[0:2], 16),
+                                    int(hex_val[2:4], 16),
+                                    int(hex_val[4:6], 16),
                                 )
                     except Exception:
                         pass

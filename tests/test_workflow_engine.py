@@ -6,23 +6,24 @@ Tests for WorkflowExecutor base class and SSE event builders.
 from __future__ import annotations
 
 import json
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from app.core.workflow_engine import (
-    sse_status,
-    sse_progress,
-    sse_step_start,
-    sse_step_done,
-    sse_output,
-    sse_error,
-    sse_done,
     call_llm,
     call_llm_json,
+    sse_done,
+    sse_error,
+    sse_output,
+    sse_progress,
+    sse_status,
+    sse_step_done,
+    sse_step_start,
 )
 
-
 # ── SSE event builder unit tests ────────────────────────────────────────────
+
 
 class TestSseBuilders:
     def test_sse_status(self):
@@ -86,6 +87,7 @@ class TestSseBuilders:
 
 # ── call_llm tests ──────────────────────────────────────────────────────────
 
+
 class TestCallLlm:
     @patch("app.core.llm.provider_factory.get_llm_provider")
     def test_call_llm_online_success(self, mock_factory):
@@ -104,16 +106,16 @@ class TestCallLlm:
         mock_provider.generate_content.return_value = '{"key": "value", "num": 42}'
         mock_factory.return_value = mock_provider
 
-        result = call_llm_json('返回json')
+        result = call_llm_json("返回json")
         assert result == {"key": "value", "num": 42}
 
     @patch("app.core.llm.provider_factory.get_llm_provider")
     def test_call_llm_json_strips_markdown_fence(self, mock_factory):
         mock_provider = MagicMock()
-        mock_provider.generate_content.return_value = "```json\n{\"a\": 1}\n```"
+        mock_provider.generate_content.return_value = '```json\n{"a": 1}\n```'
         mock_factory.return_value = mock_provider
 
-        result = call_llm_json('返回json')
+        result = call_llm_json("返回json")
         assert result == {"a": 1}
 
     @patch("app.core.llm.provider_factory.get_llm_provider")
@@ -122,12 +124,13 @@ class TestCallLlm:
         mock_provider.generate_content.return_value = "这不是JSON"
         mock_factory.return_value = mock_provider
 
-        result = call_llm_json('bad')
+        result = call_llm_json("bad")
         # When JSON parsing fails, raw text is returned as fallback
         assert result == "这不是JSON"
 
 
 # ── WorkflowExecutor lifecycle test ─────────────────────────────────────────
+
 
 class TestWorkflowExecutorLifecycle:
     def test_run_yields_sse_events(self):

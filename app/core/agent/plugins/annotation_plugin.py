@@ -231,7 +231,9 @@ class AnnotationPlugin(AgentPlugin):
                 paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()][
                     :max_paragraphs
                 ]
-                lines = [f"【{os.path.basename(resolved_path)}，显示 {len(paras)} 段】\n"]
+                lines = [
+                    f"【{os.path.basename(resolved_path)}，显示 {len(paras)} 段】\n"
+                ]
                 lines += [f"[{i}] {t}" for i, t in enumerate(paras, 1)]
                 return "\n".join(lines)
             except Exception as e2:

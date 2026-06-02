@@ -24,10 +24,10 @@ class AIRouter:
     # 路由模型降级链（所有模型必须支持 generate_content，不能是 interactions_only）
     _ROUTER_MODEL_CHAIN: list = [
         "gemini-3-flash-preview",  # 首选：当前主力快速模型
-        "gemini-2.5-flash",        # 稳定快速回退
-        "gemini-2.5-flash-lite",   # 轻量回退
-        "gemini-2.5-pro",          # 质量兜底
-        "gemini-3-pro-preview",    # 最后再尝试慢速 preview pro
+        "gemini-2.5-flash",  # 稳定快速回退
+        "gemini-2.5-flash-lite",  # 轻量回退
+        "gemini-2.5-pro",  # 质量兜底
+        "gemini-3-pro-preview",  # 最后再尝试慢速 preview pro
     ]
 
     # 判定模型不可用的错误信号词

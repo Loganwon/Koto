@@ -42,8 +42,9 @@ class SessionQueue:
             run_agent(...)
     """
 
-    def __init__(self, max_sessions: int = _MAX_SESSIONS,
-                 global_concurrency: int = 0) -> None:
+    def __init__(
+        self, max_sessions: int = _MAX_SESSIONS, global_concurrency: int = 0
+    ) -> None:
         self._sessions: OrderedDict[str, _SessionState] = OrderedDict()
         self._meta_lock = threading.Lock()
         self._max_sessions = max_sessions

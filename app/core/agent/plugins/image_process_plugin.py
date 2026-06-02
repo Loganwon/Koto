@@ -162,7 +162,9 @@ class ImageProcessPlugin(AgentPlugin):
             return f"Error resizing image: {exc}"
 
     @classmethod
-    def image_convert(cls, filepath: str, target_format: str, output_path: str = "") -> str:
+    def image_convert(
+        cls, filepath: str, target_format: str, output_path: str = ""
+    ) -> str:
         """Convert an image to another format."""
         try:
             from PIL import Image

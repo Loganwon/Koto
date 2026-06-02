@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Optional
 
-
 _EXPLICIT_MODEL_MODES = {"local", "cloud"}
 
 

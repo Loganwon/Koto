@@ -6,7 +6,6 @@ import sys
 
 import pytest
 
-
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -22,7 +21,9 @@ def _make_table_heavy_docx() -> bytes:
         for col_idx, cell in enumerate(row.cells):
             cell.text = f"第 {row_idx + 1} 行 / 第 {col_idx + 1} 列 / 渐进加载测试内容"
     for idx in range(80):
-        doc.add_paragraph(f"正文补充段落 {idx + 1}。" + "这是用于触发 DOCX 后台补全的测试内容。" * 2)
+        doc.add_paragraph(
+            f"正文补充段落 {idx + 1}。" + "这是用于触发 DOCX 后台补全的测试内容。" * 2
+        )
     doc.save(buf)
     return buf.getvalue()
 
@@ -30,6 +31,7 @@ def _make_table_heavy_docx() -> bytes:
 @pytest.fixture()
 def wa_client():
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
@@ -38,6 +40,7 @@ def wa_client():
     app.config["TESTING"] = True
 
     import tempfile
+
     import web.blueprints.workspace_assistant as _wa_mod
 
     tmp_root = tempfile.mkdtemp()
@@ -75,7 +78,9 @@ def test_workspace_docx_open_file_returns_full_payload_by_default(wa_client):
     assert resp.status_code == 200, resp.get_data(as_text=True)
     open_json = resp.get_json()
     assert open_json["file_type"] == "docx"
-    assert open_json["data"].get("progressive") in (None, {}) or not open_json["data"].get("progressive", {}).get("pending")
+    assert open_json["data"].get("progressive") in (None, {}) or not open_json[
+        "data"
+    ].get("progressive", {}).get("pending")
     assert "正在后台加载" not in open_json["data"].get("html", "")
 
     full_resp = wa_client.post(
@@ -85,5 +90,9 @@ def test_workspace_docx_open_file_returns_full_payload_by_default(wa_client):
     assert full_resp.status_code == 200, full_resp.get_data(as_text=True)
     full_json = full_resp.get_json()
     assert full_json["file_type"] == "docx"
-    assert len(full_json["data"].get("html", "")) == len(open_json["data"].get("html", ""))
-    assert full_json["data"].get("progressive") in (None, {}) or not full_json["data"].get("progressive", {}).get("pending")
+    assert len(full_json["data"].get("html", "")) == len(
+        open_json["data"].get("html", "")
+    )
+    assert full_json["data"].get("progressive") in (None, {}) or not full_json[
+        "data"
+    ].get("progressive", {}).get("pending")

@@ -18,54 +18,54 @@
 
 PHASES_SIMPLE = [
     {"id": "understand", "label": "理解需求"},
-    {"id": "generate",   "label": "生成回复"},
+    {"id": "generate", "label": "生成回复"},
 ]
 
 PHASES_ANALYZE = [
     {"id": "understand", "label": "理解需求"},
-    {"id": "analyze",    "label": "分析文档"},
-    {"id": "generate",   "label": "生成结果"},
-    {"id": "verify",     "label": "检查质量"},
+    {"id": "analyze", "label": "分析文档"},
+    {"id": "generate", "label": "生成结果"},
+    {"id": "verify", "label": "检查质量"},
 ]
 
 PHASES_FORMAT_NORMALIZE = [
-    {"id": "scan",      "label": "扫描文档结构"},
-    {"id": "identify",  "label": "识别格式问题"},
-    {"id": "preview",   "label": "生成修改方案"},
-    {"id": "apply",     "label": "应用修改"},
+    {"id": "scan", "label": "扫描文档结构"},
+    {"id": "identify", "label": "识别格式问题"},
+    {"id": "preview", "label": "生成修改方案"},
+    {"id": "apply", "label": "应用修改"},
 ]
 
 PHASES_REVIEW = [
-    {"id": "identify",  "label": "识别文档类型"},
+    {"id": "identify", "label": "识别文档类型"},
     {"id": "checklist", "label": "生成检查项"},
-    {"id": "check",     "label": "逐项审查"},
-    {"id": "report",    "label": "总结报告"},
+    {"id": "check", "label": "逐项审查"},
+    {"id": "report", "label": "总结报告"},
 ]
 
 PHASES_GLOSSARY_TRANSLATE = [
-    {"id": "extract",   "label": "提取术语"},
-    {"id": "confirm",   "label": "确认术语表"},
-    {"id": "translate",  "label": "逐段翻译"},
-    {"id": "verify",    "label": "一致性检查"},
+    {"id": "extract", "label": "提取术语"},
+    {"id": "confirm", "label": "确认术语表"},
+    {"id": "translate", "label": "逐段翻译"},
+    {"id": "verify", "label": "一致性检查"},
 ]
 
 PHASES_MEETING_NOTES = [
-    {"id": "parse",     "label": "识别议题"},
+    {"id": "parse", "label": "识别议题"},
     {"id": "structure", "label": "结构化整理"},
-    {"id": "actions",   "label": "提取行动项"},
+    {"id": "actions", "label": "提取行动项"},
 ]
 
 PHASES_DATA_CLEAN = [
-    {"id": "analyze",   "label": "分析数据质量"},
-    {"id": "plan",      "label": "生成清洗方案"},
-    {"id": "execute",   "label": "执行清洗"},
-    {"id": "preview",   "label": "预览结果"},
+    {"id": "analyze", "label": "分析数据质量"},
+    {"id": "plan", "label": "生成清洗方案"},
+    {"id": "execute", "label": "执行清洗"},
+    {"id": "preview", "label": "预览结果"},
 ]
 
 PHASES_SLIDE_EXPAND = [
-    {"id": "outline",   "label": "解析大纲"},
-    {"id": "generate",  "label": "逐页生成"},
-    {"id": "preview",   "label": "预览确认"},
+    {"id": "outline", "label": "解析大纲"},
+    {"id": "generate", "label": "逐页生成"},
+    {"id": "preview", "label": "预览确认"},
 ]
 
 # ── Skill 注册表 ──────────────────────────────────────────────
@@ -138,7 +138,6 @@ EDITOR_SKILLS = {
         "needs_selection": True,
         "multi_step": False,
     },
-
     # ── 复杂多阶段 Skill ──
     "format_normalize": {
         "id": "format_normalize",
@@ -176,12 +175,12 @@ EDITOR_SKILLS = {
     "glossary_translate_exec": {
         "id": "glossary_translate_exec",
         "name": "执行翻译",
-        "slash_cmd": None,   # triggered programmatically from approval card
+        "slash_cmd": None,  # triggered programmatically from approval card
         "icon": "🌐",
         "description": "用确认的术语表翻译全文（第二阶段）",
         "phases": [
             {"id": "translate", "label": "逐段翻译"},
-            {"id": "verify",    "label": "一致性检查"},
+            {"id": "verify", "label": "一致性检查"},
         ],
         "file_types": [],
         "needs_selection": False,

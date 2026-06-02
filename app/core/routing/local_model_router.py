@@ -76,15 +76,15 @@ class LocalModelRouter:
 
     # 推荐的快速模型（按优先级排序）
     OLLAMA_MODELS = [
-        "qwen3.5:9b",    # ★ 最佳中英文能力
-        "qwen3:8b",      # 次选
-        "qwen3:4b",      # 快速备选
-        "qwen3:1.7b",    # 轻量备选
-        "qwen2.5:7b",    # 旧版但质量好
-        "qwen2.5:3b",    # 旧版快速
+        "qwen3.5:9b",  # ★ 最佳中英文能力
+        "qwen3:8b",  # 次选
+        "qwen3:4b",  # 快速备选
+        "qwen3:1.7b",  # 轻量备选
+        "qwen2.5:7b",  # 旧版但质量好
+        "qwen2.5:3b",  # 旧版快速
         "qwen2.5:1.5b",  # 旧版轻量
-        "llama3.2:3b",   # 英文为主
-        "koto-router",   # 自定义路由器（如未充分训练则不稳定，保留作备选）
+        "llama3.2:3b",  # 英文为主
+        "koto-router",  # 自定义路由器（如未充分训练则不稳定，保留作备选）
     ]
 
     # 分类 Prompt（固定 JSON 格式，确保输出一致）
@@ -413,7 +413,10 @@ class LocalModelRouter:
             return ""
         try:
             import requests as _requests
-            resp = _requests.get(f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY)
+
+            resp = _requests.get(
+                f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY
+            )
             if resp.status_code != 200:
                 return ""
             models_data = resp.json().get("models", [])
@@ -441,7 +444,9 @@ class LocalModelRouter:
 
         # 获取已安装的模型
         try:
-            resp = requests.get(f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY)
+            resp = requests.get(
+                f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY
+            )
             if resp.status_code != 200:
                 return False
             installed = [
@@ -893,8 +898,8 @@ class LocalModelRouter:
     # 用于响应生成的模型（按偏好排序，比分类模型可以更大）
     OLLAMA_RESPONSE_MODELS = [
         "qwen3.5:9b",  # ★ 最佳，中英文流畅
-        "qwen3:8b",    # 次选
-        "qwen3:4b",    # 快速备选
+        "qwen3:8b",  # 次选
+        "qwen3:4b",  # 快速备选
         "qwen2.5:7b",  # 旧版质量好
         "qwen2.5:3b",  # 旧版快速
         "llama3.2:3b",
@@ -912,7 +917,9 @@ class LocalModelRouter:
             return False
 
         try:
-            resp = requests.get(f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY)
+            resp = requests.get(
+                f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY
+            )
             if resp.status_code != 200:
                 return False
             installed = [m["name"] for m in resp.json().get("models", [])]
@@ -1352,7 +1359,9 @@ class LocalModelRouter:
                                 yield _think_buf
                             elif _think_buf and _in_think:
                                 # <think> 未正常关闭（网络截断等），紧急输出缓冲内容
-                                logger.warning("[LocalModelRouter] <think> unclosed at stream end, flushing buffer")
+                                logger.warning(
+                                    "[LocalModelRouter] <think> unclosed at stream end, flushing buffer"
+                                )
                                 yield _think_buf
                             break
                     except Exception:

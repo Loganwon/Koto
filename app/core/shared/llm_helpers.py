@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 # ── Online-failure detection ──────────────────────────────────────────────────
 
+
 def is_online_failure(exc: Exception) -> bool:
     """Return True if *exc* is a recoverable online-availability failure.
 
@@ -72,6 +73,7 @@ def is_online_failure(exc: Exception) -> bool:
 
 # ── Ollama helpers ────────────────────────────────────────────────────────────
 
+
 def is_ollama_alive() -> bool:
     """Return True if local Ollama is reachable within 2 seconds.
 
@@ -80,6 +82,7 @@ def is_ollama_alive() -> bool:
     """
     try:
         import urllib.request as _ur
+
         _opener = _ur.build_opener(_ur.ProxyHandler({}))
         _opener.open("http://127.0.0.1:11434/api/tags", timeout=2).close()
         return True
@@ -110,7 +113,9 @@ def get_local_provider():
                 (
                     m
                     for m in models
-                    if any(k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b"))
+                    if any(
+                        k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b")
+                    )
                 ),
                 models[0],
             )
