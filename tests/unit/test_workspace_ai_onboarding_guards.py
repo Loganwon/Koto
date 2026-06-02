@@ -15,7 +15,7 @@ def test_workspace_ai_onboarding_copy_tracks_goal_first_task_flow():
 
     for html in (embedded_html, standalone_html):
         assert "欢迎使用 Koto AI" in html
-        assert "直接告诉我你想完成什么，我会结合当前文件、明确选中的内容和补充文件继续处理。" in html
+        assert "直接告诉我你想完成什么，只有明确选中的文本和分析文档会进入当前任务上下文。" in html
         assert "wa-welcome-lede" not in html
         assert "wa-welcome-tip" not in html
         assert "读取并直接处理" not in html
@@ -41,4 +41,4 @@ def test_workspace_ai_onboarding_placeholder_and_dropzone_match_new_context_rule
     for html in (embedded_html, standalone_html):
         assert "拖放补充文件到这里" in html
         assert "继续添加补充文件" in html
-        assert "直接告诉我你想完成什么，我会结合当前文件、明确选中的内容和补充文件继续处理。" in html
+        assert "直接告诉我你想完成什么，只有明确选中的文本和分析文档会进入当前任务上下文。" in html

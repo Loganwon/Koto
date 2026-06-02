@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.css">
 
   <!-- ── App styles ── -->
-  <link rel="stylesheet" href="/static/css/workspace.css?v={{ range(100000,999999)|random }}">
+  <link rel="stylesheet" href="/static/css/workspace-assistant.css?v={{ range(100000,999999)|random }}">
 </head>
 <body class="wa-standalone">
 
@@ -27,7 +27,7 @@
     <span class="wa-file-name" id="wa-file-name">文件工作站</span>
     <div class="wa-header-actions">
       <!-- Hidden file input used by _openFilePicker fallback -->
-      <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" style="display:none">
+      <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" style="display:none">
       <button class="wa-btn" id="wa-autosave-toggle" onclick="WA.toggleAutoSave()" title="自动保存 — 开启后每次编辑都会自动保存到工作区">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
@@ -95,7 +95,7 @@
           <label class="wa-icon-btn" for="wa-file-input-left" title="上传文件到工作区">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           </label>
-          <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" multiple style="display:none">
+          <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" multiple style="display:none">
           <!-- Refresh -->
           <button class="wa-icon-btn" onclick="WA.refreshFiles()" title="刷新">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -145,8 +145,9 @@
       <div id="wa-local-btns">
         <button id="wa-pick-local-file-btn" title="打开本地文件（不上传到工作区）"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.5h5.5L13 5v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z"/><path d="M9.5 1.5V5H13"/><path d="M5.5 8h5M5.5 10.5h3.5"/></svg> 本地文件</button>
         <button id="wa-pick-local-folder-btn" title="打开本地文件夹"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z"/></svg> 本地文件夹</button>
-        <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
-        <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
+        <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json" multiple style="display:none">
+        <input type="file" id="wa-ai-context-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" multiple style="display:none">
+        <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json" multiple webkitdirectory style="display:none">
       </div>
       <!-- Temp Workspace: in-memory session-only files for temporary processing -->
       <div class="wa-section-label collapsible" id="wa-tmpws-label">
@@ -210,21 +211,7 @@
     <div id="wa-docx-ctx"></div>
 
     <!-- Close-warning dialog (shown when Koto closes with unsaved WA files) -->
-    <div id="wa-close-warn-overlay" class="wa-dlg-overlay" style="display:none">
-      <div class="wa-dlg-box" style="width:420px;max-width:95vw">
-        <div class="wa-dlg-title">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#e8a838" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          有未保存的文件
-        </div>
-        <p class="wa-dlg-hint" style="margin:12px 0">以下文件助手中的文件<b>尚未保存</b>，关闭后修改将会丢失：</p>
-        <ul id="wa-close-warn-list" style="font-size:12px;color:var(--text-muted);margin:0 0 16px 16px;padding:0;list-style:disc"></ul>
-        <div class="wa-dlg-actions" style="display:flex;gap:8px;justify-content:flex-end">
-          <button class="wa-btn" onclick="WA._closeWarnCancel()">取消（继续使用）</button>
-          <button class="wa-btn" onclick="WA._closeWarnDiscard()">不保存，直接关闭</button>
-          <button class="wa-btn primary" onclick="WA._closeWarnSaveAll()">保存全部并关闭</button>
-        </div>
-      </div>
-    </div>
+    {% include '_workspace_close_warn_dialog.html' %}
 
     <!-- Archive/Organize panel overlay -->
     <div id="wa-archive-overlay" class="wa-dlg-overlay" style="display:none" onclick="if(event.target===this)WA.hideArchivePanel()">
@@ -767,7 +754,7 @@
                 <button class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfSaveAnnotations()" title="保存批注到 PDF">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>保存批注
                 </button>
-                <button class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAIAnnotate()" title="AI 标注迁移中，暂不可用">
+                <button class="wa-pdf-abt" disabled onmousedown="event.preventDefault()" title="AI 标注迁移中，暂不可用">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3-3.8-2.8-3.8 2.8 1.4-4.3-3.6-2.7h4.5Z" fill="currentColor"/></svg>AI 标注
                 </button>
               </div>
@@ -812,8 +799,8 @@
                   </div>
                 </div>
               </div>
-              <button class="wa-pdf-sb-btn" onmousedown="event.preventDefault()" onclick="WA.pdfRemoveWatermark()" title="AI 去水印">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ff7070" stroke-width="2"/></svg>&nbsp;去水印
+              <button class="wa-pdf-sb-btn" onmousedown="event.preventDefault()" onclick="WA.pdfRemoveWatermark()" title="清理自有文档水印">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ff7070" stroke-width="2"/></svg>&nbsp;清理水印
               </button>
               <div class="wa-pdf-sb-sep"></div>
               <span id="wa-pdf-page-counter" class="wa-pdf-sb-counter">第 1 页，共 1 页</span>
@@ -855,19 +842,19 @@
           <div id="wa-pdf-watermark-dialog">
             <div class="wa-pwm-header">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
-              <span>AI 去水印</span>
+              <span>清理自有文档水印</span>
               <span style="flex:1"></span>
               <button class="wa-pwm-close" onclick="WA.pdfWatermarkClose()">✕</button>
             </div>
             <div class="wa-pwm-body">
-              <p id="wa-pwm-status" style="margin:0 0 10px;font-size:13px;color:var(--text-muted)">正在检测水印…</p>
+              <p id="wa-pwm-status" style="margin:0 0 10px;font-size:13px;color:var(--text-muted)">正在检测自有文档水印…</p>
               <div id="wa-pwm-progress" style="height:4px;background:#3a3d50;border-radius:2px;overflow:hidden;margin-bottom:12px">
                 <div id="wa-pwm-bar" style="height:100%;width:0%;background:var(--primary,#7c6af5);transition:width .3s"></div>
               </div>
               <div id="wa-pwm-result" style="font-size:12px;color:var(--text-muted)"></div>
             </div>
             <div class="wa-pwm-footer">
-              <a id="wa-pwm-download" href="#" download style="display:none" class="wa-pmgr-btn wa-pmgr-btn-primary">下载去水印 PDF</a>
+              <a id="wa-pwm-download" href="#" download style="display:none" class="wa-pmgr-btn wa-pmgr-btn-primary">下载清理后 PDF</a>
               <button onclick="WA.pdfWatermarkClose()" class="wa-pmgr-btn">关闭</button>
             </div>
           </div>
@@ -904,15 +891,15 @@
       <div id="wa-review-shell" class="wa-review-shell" style="display:none">
         <div class="wa-review-shell-header">
           <div class="wa-review-shell-title-group">
-            <span class="wa-review-shell-title">审阅中心</span>
-            <span id="wa-review-summary" class="wa-review-summary">当前文档暂无批注或建议</span>
+            <span class="wa-review-shell-title">批注与修订</span>
+            <span id="wa-review-summary" class="wa-review-summary">当前文档暂无批注或修订</span>
           </div>
-          <button type="button" class="wa-review-shell-close" onclick="WA.closeReviewCenter()" title="收起审阅中心">收起</button>
+          <button type="button" class="wa-review-shell-close" onclick="WA.closeReviewCenter()" title="关闭批注栏">关闭</button>
         </div>
         <div id="wa-review-mode-group" class="wa-review-mode-group">
           <button type="button" class="wa-review-mode-btn is-active" data-mode="all" onclick="WA.setReviewMode('all')">全部</button>
-          <button type="button" class="wa-review-mode-btn" data-mode="comments" onclick="WA.setReviewMode('comments')">批注模式</button>
-          <button type="button" class="wa-review-mode-btn" data-mode="proposals" onclick="WA.setReviewMode('proposals')">建议</button>
+          <button type="button" class="wa-review-mode-btn" data-mode="comments" onclick="WA.setReviewMode('comments')">批注</button>
+          <button type="button" class="wa-review-mode-btn" data-mode="proposals" onclick="WA.setReviewMode('proposals')">修订</button>
         </div>
         <div id="wa-review-list" class="koto-docx-comment-layer"></div>
       </div>
@@ -931,7 +918,7 @@
               </svg>
             </div>
             <h2 class="wa-welcome-title">欢迎使用 Koto AI</h2>
-            <p class="wa-welcome-sub">直接告诉我你想完成什么，我会结合当前文件、明确选中的内容和补充文件继续处理。</p>
+            <p class="wa-welcome-sub">直接告诉我你想完成什么，只有明确选中的文本和分析文档会进入当前任务上下文。</p>
           </div>
         </div>
       </div>
@@ -965,10 +952,11 @@
 
         <!-- Layer 2: Actions bar (quick actions / workflow activation / workflow chips) -->
         <div id="wa-actions-bar">
-          <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容，保留原意但让表达更顺滑')">润色表达</button>
-          <button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结当前内容，提炼重点和待办事项')">提炼要点</button>
-          <button class="wa-quick-btn" onclick="WA.quickAction('请检查当前内容中的语病、歧义和逻辑风险')">检查问题</button>
-          <button class="wa-quick-btn chart-btn" onclick="WA.sendQuickAction('可视化')" title="将选中数据用 Python 可视化为图表">可视化</button>
+          <button type="button" class="wa-quick-btn" onclick="WA.sendQuickAction('润色')" title="润色选区；未选择时处理当前文件">润色表达</button>
+          <button type="button" class="wa-quick-btn" onclick="WA.sendQuickAction('翻译')" title="翻译选区；未选择时处理当前文件">翻译内容</button>
+          <button type="button" class="wa-quick-btn" onclick="WA.sendQuickAction('总结')" title="总结选区；未选择时处理当前文件">提炼要点</button>
+          <button type="button" class="wa-quick-btn" onclick="WA.sendQuickAction('检查')" title="检查选区；未选择时处理当前文件">检查问题</button>
+          <button type="button" class="wa-quick-btn chart-btn" onclick="WA.sendQuickAction('可视化')" title="将选中数据用 Python 可视化为图表">可视化</button>
         </div>
 
         <!-- Layer 3: Input box -->
@@ -1044,53 +1032,15 @@
     </div>
   </div>
   <!-- DOCX in-page colour picker – body level -->
-  <div id="wa-docx-cp" onmousedown="event.preventDefault()">
-    <div id="wa-docx-cp-grid" class="wa-dcp-grid"></div>
-    <div class="wa-dcp-custom-row">
-      <span class="wa-dcp-custom-label">自定义:</span>
-      <input type="color" id="wa-docx-cp-custom" value="#000000" class="wa-dcp-custom-input" onmousedown="event.stopPropagation()" onchange="WA._docxPickColor(this.value,true)">
-      <span id="wa-docx-cp-hex" class="wa-dcp-hex">#000000</span>
-    </div>
-  </div>
+  {% include '_workspace_docx_color_picker.html' %}
 
   <!-- Floating Selection Toolbar — AI quick actions on selected text -->
-  <div id="wa-pdf-tooltip" class="wa-sel-toolbar">
-    <button class="wa-sel-close" onmousedown="event.preventDefault(); WA.closeSelectionToolbar(); return false;" title="关闭">
-      <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="2" y1="2" x2="10" y2="10"/><line x1="10" y1="2" x2="2" y2="10"/></svg>
-    </button>
-    <span id="wa-tooltip-count" class="wa-sel-count"></span>
-    <div class="wa-sel-divider"></div>
-    <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('润色')">润色</button>
-    <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('翻译')">翻译</button>
-    <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('总结')">总结</button>
-    <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('检查')">检查</button>
-    <div class="wa-sel-divider"></div>
-    <button class="wa-sel-action wa-sel-ai-action" onmousedown="event.preventDefault()" onclick="WA.sendSelectionToAI()">
-      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2 L10 6 L14 7 L10 8 L8 12 L6 8 L2 7 L6 6 Z"/></svg>
-      转交 AI
-    </button>
-    <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.sendQuickAction('可视化')" title="将表格数据可视化为图表">
-      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="5" rx="0.5"/><rect x="6.5" y="5" width="3" height="9" rx="0.5"/><rect x="11" y="2" width="3" height="12" rx="0.5"/></svg>
-      可视化
-    </button>
-    <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotateSelection('highlight')" id="wa-tooltip-highlight" style="display:none" title="高亮选中文字">🖍 高亮</button>
-    <button class="wa-sel-action" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotateSelection('underline')" id="wa-tooltip-underline" style="display:none" title="下划线">_ 划线</button>
-  </div>
+  {% set wa_pdf_tooltip_root_onmousedown = None %}
+  {% set wa_pdf_tooltip_show_pdf_annotation_actions = true %}
+  {% include '_workspace_selection_toolbar.html' %}
 
   <!-- Chart Generation Dialog -->
-  <div id="wa-chart-dialog">
-    <div class="wa-dialog-box">
-      <h3 id="wa-chart-dialog-title">Python 画图</h3>
-      <textarea id="wa-chart-prompt" placeholder="描述你想要的图表，例如：&#10;用柱状图显示各季度的销售额对比&#10;画一个折线图显示时间趋势&#10;用饼图展示各类别占比"></textarea>
-      <div style="font-size:12px;color:var(--text-muted)">
-        <span id="wa-chart-data-hint"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M5.5 13.5h5M6 11.5h4"/><path d="M5 9.5C3.5 8.5 3 7 3.5 5.3A4.5 4.5 0 0 1 8 2.5a4.5 4.5 0 0 1 4.5 2.8c.5 1.7 0 3.2-1.5 4.2"/></svg> 将使用当前表格的全量数据</span>
-      </div>
-      <div class="wa-dialog-actions">
-        <button class="wa-btn" onclick="WA.closeChartDialog()">取消</button>
-        <button class="wa-btn primary" onclick="WA.submitChartRequest()">生成图表</button>
-      </div>
-    </div>
-  </div>
+  {% include '_workspace_chart_dialog_and_toast.html' %}
 
   <!-- Source Preview Drawer →── anchored to bottom of AI panel -->
   <div id="wa-source-preview" style="display:none">
@@ -1123,9 +1073,6 @@
     <div id="wa-notebook-body"><div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成学习包…</div></div>
   </div>
 
-  <!-- Toast -->
-  <div id="wa-toast"></div>
-
   <!-- ── CDN Scripts ── -->
   <!-- Split.js served locally so a CDN failure cannot crash the IIFE -->
   <script src="/static/vendor/split.min.js"></script>
@@ -1134,24 +1081,7 @@
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
 
   <!-- ── App JS ── -->
-  <script src="/static/js/workspace-ai-task.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/workspace-ai-transport.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/workspace-ai-results.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/workspace-ai-quick-actions.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/workspace-ai-conversation.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/workspace-task-dispatcher.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/docx-review-geometry.js?v={{ range(100000,999999)|random }}"></script>
-  <!-- KotoReviewRail: WPS-style per-page review rail -->
-  <script src="/static/js/koto-review-rail/geometry.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/koto-review-rail/event-bus.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/koto-review-rail/page-rail-mount.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/koto-review-rail/card.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/koto-review-rail/connector-layer.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/koto-review-rail/rail-controller.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/koto-review-rail/index.js?v={{ range(100000,999999)|random }}"></script>
-  <!-- End KotoReviewRail -->
-  <script src="/static/js/docx-review-layout.js?v={{ range(100000,999999)|random }}"></script>
-  <script src="/static/js/workspace-assistant.js?v={{ range(100000,999999)|random }}"></script>
+  {% include '_workspace_asset_scripts.html' %}
 
   <!-- ── Open Folder as Workspace overlay ── -->
   <div id="wa-open-folder-overlay" style="display:none" class="wa-dlg-overlay" onclick="if(event.target===this)WA.closeFolderOverlay()">
