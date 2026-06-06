@@ -271,12 +271,14 @@ class TestGetLocalProvider:
 
         mock_provider = MagicMock(name="OllamaLLMProvider_instance")
         mock_cls = MagicMock(return_value=mock_provider)
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = FakeResponse()
 
         with patch.dict(
             sys.modules,
             {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)},
         ):
-            with patch("urllib.request.urlopen", return_value=FakeResponse()):
+            with patch("urllib.request.build_opener", return_value=mock_opener):
                 result = sh._get_local_provider()
 
         return result, mock_cls
@@ -304,9 +306,9 @@ class TestGetLocalProvider:
             sys.modules,
             {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)},
         ):
-            with patch(
-                "urllib.request.urlopen", side_effect=OSError("connection refused")
-            ):
+            mock_opener = MagicMock()
+            mock_opener.open.side_effect = OSError("connection refused")
+            with patch("urllib.request.build_opener", return_value=mock_opener):
                 sh._get_local_provider()
         mock_cls.assert_called_once_with(model=None)
 

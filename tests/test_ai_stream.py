@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
 
 # ── Helper ──
 
+
 def parse_sse_events(response_data: bytes) -> list:
     """Parse SSE response bytes into list of event dicts."""
     events = []
@@ -43,6 +44,7 @@ def parse_sse_events(response_data: bytes) -> list:
 
 # ── Mock LLM fixture ──
 
+
 class FakeChunk:
     def __init__(self, text):
         self.text = text
@@ -50,12 +52,14 @@ class FakeChunk:
 
 def _make_fake_stream(prompt_keyword_responses: dict):
     """Create a fake generate_content_stream that returns deterministic output."""
+
     def fake_stream(model, contents, config=None):
         for keyword, response in prompt_keyword_responses.items():
             if keyword in str(contents):
                 yield FakeChunk(response)
                 return
         yield FakeChunk("默认 AI 回复。")
+
     return fake_stream
 
 
@@ -64,27 +68,35 @@ def app_client():
     """Create a Flask test client with mocked LLM."""
     # Mock the Gemini client before importing app
     mock_client = MagicMock()
-    mock_client.models.generate_content_stream = _make_fake_stream({
-        "润色": "这是一段经过精心润色的优雅文本。",
-        "翻译": "This is the translated text.",
-        "总结": "本文主要讨论了三个核心观点。",
-        "替换": '{"replacements": [{"from": "你好", "to": "您好"}, {"from": "世界", "to": "地球"}], "summary": "共替换 2 处"}',
-        "引用": "1. 【论文】Smith et al. (2024) — AI辅助写作综述\n   链接：待核实",
-        "检查": "1. 【第2行】你好 → 您好（更正式）",
-        "改写": "这是用全新措辞表达的内容。",
-        "续写": "接下来，我们将探讨更深层次的问题。",
-    })
+    mock_client.models.generate_content_stream = _make_fake_stream(
+        {
+            "润色": "这是一段经过精心润色的优雅文本。",
+            "翻译": "This is the translated text.",
+            "总结": "本文主要讨论了三个核心观点。",
+            "替换": '{"replacements": [{"from": "你好", "to": "您好"}, {"from": "世界", "to": "地球"}], "summary": "共替换 2 处"}',
+            "引用": "1. 【论文】Smith et al. (2024) — AI辅助写作综述\n   链接：待核实",
+            "检查": "1. 【第2行】你好 → 您好（更正式）",
+            "改写": "这是用全新措辞表达的内容。",
+            "续写": "接下来，我们将探讨更深层次的问题。",
+        }
+    )
 
     with patch.dict("sys.modules", {}):
         # We need to patch the client object in web.app
         try:
             import app.core.agent.agent_loop as agent_loop_module
             from app.core.security.output_validator import OutputValidator
-            from app.core.agent.lifecycle import evt_error, evt_stream_chunk, evt_task_complete
+            from app.core.agent.lifecycle import (
+                evt_error,
+                evt_stream_chunk,
+                evt_task_complete,
+            )
             from web.app import app
+
             app.config["TESTING"] = True
             # Patch the client and types (to avoid google.genai circular import under test)
             import web.app as web_app_module
+
             original_client = getattr(web_app_module, "client", None)
             original_api_key = getattr(web_app_module, "API_KEY", None)
             original_types = getattr(web_app_module, "types", None)
@@ -107,7 +119,9 @@ def app_client():
 
             def fake_loop_run(self, request):
                 model_mode = (getattr(request, "model_mode", "") or "").strip().lower()
-                action_name = (getattr(request, "action_type", "") or "").strip().lower()
+                action_name = (
+                    (getattr(request, "action_type", "") or "").strip().lower()
+                )
 
                 if model_mode == "local":
                     if not agent_loop_module._is_ollama_alive():
@@ -117,7 +131,9 @@ def app_client():
                 elif model_mode == "cloud":
                     result_text = "云端Gemini响应"
                 else:
-                    result_text = default_action_results.get(action_name, "默认 AI 回复。")
+                    result_text = default_action_results.get(
+                        action_name, "默认 AI 回复。"
+                    )
 
                 yield evt_stream_chunk(result_text)
                 yield evt_task_complete(result=result_text)
@@ -125,7 +141,9 @@ def app_client():
             web_app_module.client = mock_client
             web_app_module.API_KEY = "test-key-mock"
             web_app_module.types = mock_types
-            OutputValidator._llm_judge = classmethod(lambda cls, text, original_prompt: None)
+            OutputValidator._llm_judge = classmethod(
+                lambda cls, text, original_prompt: None
+            )
             agent_loop_module.KotoAgentLoop.run = fake_loop_run
             yield app.test_client()
             # Restore
@@ -142,10 +160,13 @@ def app_client():
 # Tests
 # ══════════════════════════════════════════════════════════════
 
+
 class TestEditorAIStream:
     """Tests for POST /api/editor/ai/stream"""
 
-    def test_whitebox_task_stream_executes_xlsx_to_docx_write_loop(self, app_client, tmp_path, monkeypatch):
+    def test_whitebox_task_stream_executes_xlsx_to_docx_write_loop(
+        self, app_client, tmp_path, monkeypatch
+    ):
         import openpyxl
         from docx import Document
 
@@ -166,33 +187,39 @@ class TestEditorAIStream:
         document.add_paragraph("雷鸟访谈问题")
         document.save(target_path)
 
-        responses = iter([
-            {
-                "content": "先读取 Excel。",
-                "tool_calls": [
-                    {
-                        "name": "read_sheet_data",
-                        "args": {"path": str(workbook_path), "sheet_name": "Sheet1", "max_rows": "2"},
-                    }
-                ],
-            },
-            {
-                "content": "把 Excel 表格加入 Word。",
-                "tool_calls": [
-                    {
-                        "name": "insert_excel_as_docx_table",
-                        "args": {
-                            "source_path": str(workbook_path),
-                            "target_path": str(target_path),
-                            "sheet_name": "Sheet1",
-                            "table_title": "销售台账数据",
-                            "max_rows": "2",
-                        },
-                    }
-                ],
-            },
-            {"content": "已将销售台账数据加入 Word。", "tool_calls": []},
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先读取 Excel。",
+                    "tool_calls": [
+                        {
+                            "name": "read_sheet_data",
+                            "args": {
+                                "path": str(workbook_path),
+                                "sheet_name": "Sheet1",
+                                "max_rows": "2",
+                            },
+                        }
+                    ],
+                },
+                {
+                    "content": "把 Excel 表格加入 Word。",
+                    "tool_calls": [
+                        {
+                            "name": "insert_excel_as_docx_table",
+                            "args": {
+                                "source_path": str(workbook_path),
+                                "target_path": str(target_path),
+                                "sheet_name": "Sheet1",
+                                "table_title": "销售台账数据",
+                                "max_rows": "2",
+                            },
+                        }
+                    ],
+                },
+                {"content": "已将销售台账数据加入 Word。", "tool_calls": []},
+            ]
+        )
 
         def fake_call_model(self, **kwargs):
             return next(responses)
@@ -207,23 +234,42 @@ class TestEditorAIStream:
                 "model_mode": "local",
                 "target_path": str(target_path),
                 "files": [
-                    {"path": str(workbook_path), "name": "销售台账.xlsx", "type": "xlsx", "content": "Excel 上下文"},
-                    {"path": str(target_path), "name": "雷鸟访谈问题.docx", "type": "docx", "content": "Word 上下文", "target": True},
+                    {
+                        "path": str(workbook_path),
+                        "name": "销售台账.xlsx",
+                        "type": "xlsx",
+                        "content": "Excel 上下文",
+                    },
+                    {
+                        "path": str(target_path),
+                        "name": "雷鸟访谈问题.docx",
+                        "type": "docx",
+                        "content": "Word 上下文",
+                        "target": True,
+                    },
                 ],
             },
         )
 
         events = parse_sse_events(resp.get_data())
         read_finished = next(
-            event for event in events
-            if event.get("type") == "tool.finished" and event.get("payload", {}).get("tool_name") == "read_sheet_data"
+            event
+            for event in events
+            if event.get("type") == "tool.finished"
+            and event.get("payload", {}).get("tool_name") == "read_sheet_data"
         )
-        file_changed = next(event for event in events if event.get("type") == "file.changed")
-        check_finished = next(event for event in events if event.get("type") == "check.finished")
+        file_changed = next(
+            event for event in events if event.get("type") == "file.changed"
+        )
+        check_finished = next(
+            event for event in events if event.get("type") == "check.finished"
+        )
         run_finished = events[-1]
 
         assert resp.status_code == 200
-        assert "汇总表" in str(read_finished.get("payload", {}).get("result_preview", ""))
+        assert "汇总表" in str(
+            read_finished.get("payload", {}).get("result_preview", "")
+        )
         assert file_changed["payload"]["sheet"] == "汇总表"
         assert file_changed["payload"]["requested_sheet"] == "Sheet1"
         assert file_changed["payload"]["rows_written"] == 2
@@ -237,7 +283,7 @@ class TestEditorAIStream:
         assert saved.tables[0].cell(1, 0).text == "杭州新汇鑫光电有限公司"
         assert saved.tables[0].cell(2, 0).text == "山东镭鸟激光设备有限公司"
 
-    def test_whitebox_task_stream_uses_native_docx_writer_for_stepwise_pdf_summary(
+    def test_whitebox_task_stream_uses_model_docx_writer_for_stepwise_pdf_summary(
         self,
         app_client,
         tmp_path,
@@ -259,8 +305,43 @@ class TestEditorAIStream:
             ),
         )
 
+        model_calls = []
+
         def fake_call_model(self, **kwargs):
-            raise AssertionError("stepwise PDF DOCX summaries should use the native writer before model generation")
+            model_calls.append(kwargs)
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "name": "write_docx_content",
+                        "args": {
+                            "path": str(target_path),
+                            "paragraphs": json.dumps(
+                                [
+                                    {
+                                        "text": "当前页窗摘要（第 1-3 页）",
+                                        "style": "Heading 1",
+                                    },
+                                    {
+                                        "text": "文档识别：当前页窗来自 The Global Rules of Art，记录书籍出版信息和目录入口。"
+                                    },
+                                    {
+                                        "text": "段落主题：模型将目录页窗概括为全书问题意识和章节结构的定位材料。"
+                                    },
+                                    {
+                                        "text": "结构线索：Part I 从全球场域方法进入，随后讨论艺术场域生成和文化世界经济中的分化。"
+                                    },
+                                    {
+                                        "text": "内容线索：这是模型生成的综合摘要，用于验证文件助手入口没有直接走固定兜底模板。"
+                                    },
+                                    {"text": "来源页码：第 1-3 页"},
+                                ],
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                ],
+            }
 
         monkeypatch.setattr(FileTaskRuntime, "_call_model", fake_call_model)
         target_path = tmp_path / "global-rules-summary.docx"
@@ -280,7 +361,8 @@ class TestEditorAIStream:
                         "path": "global-rules.pdf",
                         "name": "The Global Rules of Art.pdf",
                         "type": "pdf",
-                        "content": "[Page 4] " + ("book metadata table of contents " * 300),
+                        "content": "[Page 4] "
+                        + ("book metadata table of contents " * 300),
                     }
                 ],
             },
@@ -288,18 +370,35 @@ class TestEditorAIStream:
         events = parse_sse_events(resp.get_data())
 
         assert resp.status_code == 200
-        file_changed = next(event for event in events if event.get("type") == "file.changed")
-        check_finished = next(event for event in events if event.get("type") == "check.finished")
+        assert len(model_calls) >= 1
+        file_changed = next(
+            event for event in events if event.get("type") == "file.changed"
+        )
+        check_finished = next(
+            event for event in events if event.get("type") == "check.finished"
+        )
         run_finished = events[-1]
 
         assert file_changed["payload"]["operation"] == "write_docx_content"
         assert file_changed["payload"]["paragraphs_written"] >= 4
         assert check_finished["payload"]["status"] == "awaiting_confirmation"
-        assert check_finished["payload"]["next_action_artifact"]["route"] == "long_pdf_stepwise_docx_summary"
-        assert run_finished["payload"]["runtime"]["terminal_status"] == "awaiting_confirmation"
+        assert (
+            check_finished["payload"]["next_action_artifact"]["route"]
+            == "long_pdf_stepwise_docx_summary"
+        )
+        assert (
+            run_finished["payload"]["runtime"]["terminal_status"]
+            == "awaiting_confirmation"
+        )
         assert target_path.exists()
+        from docx import Document
 
-    def test_whitebox_task_stream_reports_no_write_when_docx_is_unchanged(self, app_client, tmp_path, monkeypatch):
+        written_text = "\n".join(p.text for p in Document(str(target_path)).paragraphs)
+        assert "模型生成的综合摘要" in written_text
+
+    def test_whitebox_task_stream_reports_no_write_when_docx_is_unchanged(
+        self, app_client, tmp_path, monkeypatch
+    ):
         from docx import Document
 
         from app.core.agent.file_task_runtime import FileTaskRuntime
@@ -309,23 +408,25 @@ class TestEditorAIStream:
         document.add_paragraph("雷鸟访谈问题")
         document.save(target_path)
 
-        responses = iter([
-            {
-                "content": "尝试把 Excel 表格加入 Word。",
-                "tool_calls": [
-                    {
-                        "name": "insert_excel_as_docx_table",
-                        "args": {
-                            "source_path": str(tmp_path / "missing.xlsx"),
-                            "target_path": str(target_path),
-                            "sheet_name": "Sheet1",
-                            "max_rows": "50",
-                        },
-                    }
-                ],
-            },
-            {"content": "已完成。", "tool_calls": []},
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "尝试把 Excel 表格加入 Word。",
+                    "tool_calls": [
+                        {
+                            "name": "insert_excel_as_docx_table",
+                            "args": {
+                                "source_path": str(tmp_path / "missing.xlsx"),
+                                "target_path": str(target_path),
+                                "sheet_name": "Sheet1",
+                                "max_rows": "50",
+                            },
+                        }
+                    ],
+                },
+                {"content": "已完成。", "tool_calls": []},
+            ]
+        )
 
         def fake_call_model(self, **kwargs):
             return next(responses)
@@ -339,17 +440,28 @@ class TestEditorAIStream:
                 "session_id": "editor_demo",
                 "target_path": str(target_path),
                 "files": [
-                    {"path": str(target_path), "name": "雷鸟访谈问题.docx", "type": "docx", "content": "Word 上下文", "target": True},
+                    {
+                        "path": str(target_path),
+                        "name": "雷鸟访谈问题.docx",
+                        "type": "docx",
+                        "content": "Word 上下文",
+                        "target": True,
+                    },
                 ],
             },
         )
 
         events = parse_sse_events(resp.get_data())
         insert_finished = next(
-            event for event in events
-            if event.get("type") == "tool.finished" and event.get("payload", {}).get("tool_name") == "insert_excel_as_docx_table"
+            event
+            for event in events
+            if event.get("type") == "tool.finished"
+            and event.get("payload", {}).get("tool_name")
+            == "insert_excel_as_docx_table"
         )
-        check_finished = next(event for event in events if event.get("type") == "check.finished")
+        check_finished = next(
+            event for event in events if event.get("type") == "check.finished"
+        )
         run_finished = events[-1]
 
         assert resp.status_code == 200
@@ -362,10 +474,13 @@ class TestEditorAIStream:
 
     def test_polish_returns_sse(self, app_client):
         """润色请求应返回 SSE 流，包含 token 和 done 事件"""
-        resp = app_client.post("/api/editor/ai/stream", json={
-            "action": "polish",
-            "selection": "这段文字需要被润色一下。",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/stream",
+            json={
+                "action": "polish",
+                "selection": "这段文字需要被润色一下。",
+            },
+        )
         assert resp.status_code == 200
         assert "text/event-stream" in resp.content_type
         events = parse_sse_events(resp.data)
@@ -375,66 +490,84 @@ class TestEditorAIStream:
 
     def test_polish_with_full_text_context(self, app_client):
         """润色请求带 full_text 应正常工作"""
-        resp = app_client.post("/api/editor/ai/stream", json={
-            "action": "polish",
-            "selection": "这段文字需要润色。",
-            "full_text": "第一段落。这段文字需要润色。第三段落结尾。",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/stream",
+            json={
+                "action": "polish",
+                "selection": "这段文字需要润色。",
+                "full_text": "第一段落。这段文字需要润色。第三段落结尾。",
+            },
+        )
         assert resp.status_code == 200
         events = parse_sse_events(resp.data)
         assert len(events) >= 1
 
     def test_translate_action(self, app_client):
         """翻译请求应返回翻译结果"""
-        resp = app_client.post("/api/editor/ai/stream", json={
-            "action": "translate",
-            "selection": "你好世界",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/stream",
+            json={
+                "action": "translate",
+                "selection": "你好世界",
+            },
+        )
         assert resp.status_code == 200
         events = parse_sse_events(resp.data)
         assert len(events) >= 1
 
     def test_find_replace_action(self, app_client):
         """查找替换请求应返回 JSON 格式替换列表"""
-        resp = app_client.post("/api/editor/ai/stream", json={
-            "action": "find_replace",
-            "instruction": "把所有你好替换成您好",
-            "full_text": "你好世界，你好中国，你好大家。",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/stream",
+            json={
+                "action": "find_replace",
+                "instruction": "把所有你好替换成您好",
+                "full_text": "你好世界，你好中国，你好大家。",
+            },
+        )
         assert resp.status_code == 200
         events = parse_sse_events(resp.data)
         assert len(events) >= 1
 
     def test_find_reference_action(self, app_client):
         """引用查找请求应返回引用列表"""
-        resp = app_client.post("/api/editor/ai/stream", json={
-            "action": "find_reference",
-            "selection": "人工智能在教育中的应用越来越广泛。",
-            "full_text": "本文探讨人工智能在教育中的应用。",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/stream",
+            json={
+                "action": "find_reference",
+                "selection": "人工智能在教育中的应用越来越广泛。",
+                "full_text": "本文探讨人工智能在教育中的应用。",
+            },
+        )
         assert resp.status_code == 200
         events = parse_sse_events(resp.data)
         assert len(events) >= 1
 
     def test_empty_selection_returns_error(self, app_client):
         """空选区应返回错误"""
-        resp = app_client.post("/api/editor/ai/stream", json={
-            "action": "polish",
-            "selection": "",
-            "instruction": "",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/stream",
+            json={
+                "action": "polish",
+                "selection": "",
+                "instruction": "",
+            },
+        )
         assert resp.status_code == 200
         events = parse_sse_events(resp.data)
         assert any(e.get("type") == "error" for e in events)
 
     def test_custom_instruction_with_context(self, app_client):
         """自定义指令应带上选区和全文上下文"""
-        resp = app_client.post("/api/editor/ai/stream", json={
-            "action": "custom_instruction",
-            "selection": "AI技术",
-            "instruction": "用更学术的方式描述",
-            "full_text": "本篇论文探讨AI技术的发展趋势。",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/stream",
+            json={
+                "action": "custom_instruction",
+                "selection": "AI技术",
+                "instruction": "用更学术的方式描述",
+                "full_text": "本篇论文探讨AI技术的发展趋势。",
+            },
+        )
         assert resp.status_code == 200
         events = parse_sse_events(resp.data)
         assert len(events) >= 1
@@ -476,17 +609,27 @@ class TestEditorAIStream:
         event_types = [event.get("type") for event in events]
 
         assert resp.status_code == 200
-        assert event_types[:5] == ["run.started", "task.classified", "plan.checked", "plan.created", "step.started"]
+        assert event_types[:5] == [
+            "run.started",
+            "task.classified",
+            "plan.checked",
+            "plan.created",
+            "step.started",
+        ]
         assert "check.started" in event_types
         assert "check.finished" in event_types
         assert event_types[-1] == "run.finished"
         assert [event.get("seq") for event in events] == list(range(1, len(events) + 1))
         assert events[0]["payload"]["mode"] == "whitebox_v1"
 
-    def test_whitebox_task_stream_preserves_runtime_metadata_and_followup_context(self, app_client, monkeypatch, tmp_path):
+    def test_whitebox_task_stream_preserves_runtime_metadata_and_followup_context(
+        self, app_client, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_runtime import FileTaskRuntime
 
-        monkeypatch.setenv("KOTO_FILE_TASK_FOLLOWUP_PATH", str(tmp_path / "followups.json"))
+        monkeypatch.setenv(
+            "KOTO_FILE_TASK_FOLLOWUP_PATH", str(tmp_path / "followups.json")
+        )
         monkeypatch.setattr(
             FileTaskRuntime,
             "_call_model",
@@ -517,25 +660,43 @@ class TestEditorAIStream:
         )
 
         events = parse_sse_events(resp.get_data())
-        tool_missing = next(event for event in events if event.get("type") == "tool.missing")
-        check_finished = next(event for event in events if event.get("type") == "check.finished")
-        run_finished = next(event for event in events if event.get("type") == "run.finished")
+        tool_missing = next(
+            event for event in events if event.get("type") == "tool.missing"
+        )
+        check_finished = next(
+            event for event in events if event.get("type") == "check.finished"
+        )
+        run_finished = next(
+            event for event in events if event.get("type") == "run.finished"
+        )
 
         assert resp.status_code == 200
         assert tool_missing["payload"]["runtime"]["execution_path"] == "native"
         assert tool_missing["payload"]["runtime"]["planner"]["backend"] == "native"
-        assert tool_missing["payload"]["next_action_artifact"]["runtime_context"]["execution_path"] == "native"
-        assert tool_missing["payload"]["next_action_artifact"]["missing_capability"] == "read_cad_file"
+        assert (
+            tool_missing["payload"]["next_action_artifact"]["runtime_context"][
+                "execution_path"
+            ]
+            == "native"
+        )
+        assert (
+            tool_missing["payload"]["next_action_artifact"]["missing_capability"]
+            == "read_cad_file"
+        )
         assert check_finished["payload"]["runtime"]["terminal_status"] == "tool_gap"
         assert run_finished["payload"]["runtime"]["execution_path"] == "native"
         assert run_finished["payload"]["runtime"]["terminal_status"] == "tool_gap"
 
     def test_whitebox_task_stream_requires_task(self, app_client):
-        resp = app_client.post("/api/editor/ai/task-stream", json={"selection": "hello"})
+        resp = app_client.post(
+            "/api/editor/ai/task-stream", json={"selection": "hello"}
+        )
         assert resp.status_code == 400
         assert resp.get_json()["error"] == "Missing 'task' parameter"
 
-    def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge(self, app_client, monkeypatch, tmp_path):
+    def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge(
+        self, app_client, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
         import app.core.agent.file_task_doc_annotate_bridge as bridge
@@ -605,13 +766,19 @@ class TestEditorAIStream:
             )
 
         def unexpected_build_tool_gateway(self, request, context_files):
-            raise AssertionError("generic FileTaskRuntime loop should not execute for doc annotate bridge requests")
+            raise AssertionError(
+                "generic FileTaskRuntime loop should not execute for doc annotate bridge requests"
+            )
 
         def unexpected_call_model(self, **kwargs):
-            raise AssertionError("generic model loop should not execute for doc annotate bridge requests")
+            raise AssertionError(
+                "generic model loop should not execute for doc annotate bridge requests"
+            )
 
         monkeypatch.setattr(bridge, "stream_request", fake_stream)
-        monkeypatch.setattr(FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway)
+        monkeypatch.setattr(
+            FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway
+        )
         monkeypatch.setattr(FileTaskRuntime, "_call_model", unexpected_call_model)
 
         resp = app_client.post(
@@ -622,7 +789,12 @@ class TestEditorAIStream:
                 "target_path": str(docx_path),
                 "files": [
                     {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {"path": str(docx_path), "name": "translation.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "translation.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
             },
         )
@@ -631,14 +803,25 @@ class TestEditorAIStream:
 
         assert resp.status_code == 200
         assert captured["request"].target_path == str(docx_path)
-        run_started = next(event for event in events if event.get("type") == "run.started")
+        run_started = next(
+            event for event in events if event.get("type") == "run.started"
+        )
         assert run_started["payload"]["mode"] == "doc_annotate_bridge"
         assert any(event["type"] == "plan.created" for event in events)
-        assert any(event["type"] == "step_progress" and event["payload"].get("file_updated") for event in events)
-        assert any(event["type"] == "file.changed" and event["payload"].get("path") == str(docx_path) for event in events)
+        assert any(
+            event["type"] == "step_progress" and event["payload"].get("file_updated")
+            for event in events
+        )
+        assert any(
+            event["type"] == "file.changed"
+            and event["payload"].get("path") == str(docx_path)
+            for event in events
+        )
         assert events[-1]["payload"]["completed_task"] is True
 
-    def test_whitebox_task_stream_routes_single_docx_annotation_to_doc_annotate_bridge(self, app_client, monkeypatch, tmp_path):
+    def test_whitebox_task_stream_routes_single_docx_annotation_to_doc_annotate_bridge(
+        self, app_client, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
         import app.core.agent.file_task_doc_annotate_bridge as bridge
@@ -696,13 +879,19 @@ class TestEditorAIStream:
             )
 
         def unexpected_build_tool_gateway(self, request, context_files):
-            raise AssertionError("generic FileTaskRuntime loop should not execute for doc annotate bridge requests")
+            raise AssertionError(
+                "generic FileTaskRuntime loop should not execute for doc annotate bridge requests"
+            )
 
         def unexpected_call_model(self, **kwargs):
-            raise AssertionError("generic model loop should not execute for doc annotate bridge requests")
+            raise AssertionError(
+                "generic model loop should not execute for doc annotate bridge requests"
+            )
 
         monkeypatch.setattr(bridge, "stream_request", fake_stream)
-        monkeypatch.setattr(FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway)
+        monkeypatch.setattr(
+            FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway
+        )
         monkeypatch.setattr(FileTaskRuntime, "_call_model", unexpected_call_model)
 
         resp = app_client.post(
@@ -712,7 +901,12 @@ class TestEditorAIStream:
                 "session_id": "workspace_demo",
                 "target_path": str(docx_path),
                 "files": [
-                    {"path": str(docx_path), "name": "interview.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "interview.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
             },
         )
@@ -721,13 +915,24 @@ class TestEditorAIStream:
 
         assert resp.status_code == 200
         assert captured["request"].target_path == str(docx_path)
-        run_started = next(event for event in events if event.get("type") == "run.started")
+        run_started = next(
+            event for event in events if event.get("type") == "run.started"
+        )
         assert run_started["payload"]["mode"] == "doc_annotate_bridge"
-        assert any(event["type"] == "step_progress" and event["payload"].get("file_updated") for event in events)
-        assert any(event["type"] == "file.changed" and event["payload"].get("path") == str(docx_path) for event in events)
+        assert any(
+            event["type"] == "step_progress" and event["payload"].get("file_updated")
+            for event in events
+        )
+        assert any(
+            event["type"] == "file.changed"
+            and event["payload"].get("path") == str(docx_path)
+            for event in events
+        )
         assert events[-1]["payload"]["completed_task"] is True
 
-    def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge_in_local_mode(self, app_client, monkeypatch, tmp_path):
+    def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge_in_local_mode(
+        self, app_client, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
         import app.core.agent.file_task_doc_annotate_bridge as bridge
@@ -764,13 +969,19 @@ class TestEditorAIStream:
             )
 
         def unexpected_build_tool_gateway(self, request, context_files):
-            raise AssertionError("generic FileTaskRuntime loop should not execute for doc annotate bridge requests")
+            raise AssertionError(
+                "generic FileTaskRuntime loop should not execute for doc annotate bridge requests"
+            )
 
         def unexpected_call_model(self, **kwargs):
-            raise AssertionError("generic model loop should not execute for doc annotate bridge requests")
+            raise AssertionError(
+                "generic model loop should not execute for doc annotate bridge requests"
+            )
 
         monkeypatch.setattr(bridge, "stream_request", fake_stream)
-        monkeypatch.setattr(FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway)
+        monkeypatch.setattr(
+            FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway
+        )
         monkeypatch.setattr(FileTaskRuntime, "_call_model", unexpected_call_model)
 
         resp = app_client.post(
@@ -783,7 +994,12 @@ class TestEditorAIStream:
                 "target_path": str(docx_path),
                 "files": [
                     {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {"path": str(docx_path), "name": "translation.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "translation.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
             },
         )
@@ -792,11 +1008,15 @@ class TestEditorAIStream:
 
         assert resp.status_code == 200
         assert captured["request"].model_mode == "local"
-        run_started = next(event for event in events if event.get("type") == "run.started")
+        run_started = next(
+            event for event in events if event.get("type") == "run.started"
+        )
         assert run_started["payload"]["mode"] == "doc_annotate_bridge"
         assert events[-1]["payload"]["completed_task"] is True
 
-    def test_whitebox_task_stream_followup_feedback_bypasses_doc_annotate_bridge(self, app_client, monkeypatch, tmp_path):
+    def test_whitebox_task_stream_followup_feedback_bypasses_doc_annotate_bridge(
+        self, app_client, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
         import app.core.agent.file_task_doc_annotate_bridge as bridge
@@ -809,13 +1029,27 @@ class TestEditorAIStream:
         captured = {}
 
         def fail_stream(request, **kwargs):
-            raise AssertionError("doc annotate bridge should not handle review-last-task follow-up feedback")
+            raise AssertionError(
+                "doc annotate bridge should not handle review-last-task follow-up feedback"
+            )
 
         def fake_run(self, request):
             captured["request"] = request
             ledger = FileTaskLedger(request.run_id)
-            yield ledger.event("run.started", {"task": request.task, "mode": "whitebox_v1"}, step_id="run")
-            yield ledger.event("run.finished", {"summary": "先反馈上一轮结果。", "completed_task": True, "mode": "whitebox_v1"}, step_id="run")
+            yield ledger.event(
+                "run.started",
+                {"task": request.task, "mode": "whitebox_v1"},
+                step_id="run",
+            )
+            yield ledger.event(
+                "run.finished",
+                {
+                    "summary": "先反馈上一轮结果。",
+                    "completed_task": True,
+                    "mode": "whitebox_v1",
+                },
+                step_id="run",
+            )
 
         monkeypatch.setattr(bridge, "stream_request", fail_stream)
         monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
@@ -828,7 +1062,12 @@ class TestEditorAIStream:
                 "target_path": str(docx_path),
                 "files": [
                     {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {"path": str(docx_path), "name": "translation.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "translation.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
                 "options": {
                     "followup_context": {
@@ -843,12 +1082,19 @@ class TestEditorAIStream:
         events = parse_sse_events(resp.get_data())
 
         assert resp.status_code == 200
-        assert captured["request"].options["followup_context"]["kind"] == "review_last_task"
-        run_started = next(event for event in events if event.get("type") == "run.started")
+        assert (
+            captured["request"].options["followup_context"]["kind"]
+            == "review_last_task"
+        )
+        run_started = next(
+            event for event in events if event.get("type") == "run.started"
+        )
         assert run_started["payload"]["mode"] == "whitebox_v1"
         assert events[-1]["payload"]["completed_task"] is True
 
-    def test_whitebox_task_stream_followup_improve_routes_back_to_doc_annotate_bridge(self, app_client, monkeypatch, tmp_path):
+    def test_whitebox_task_stream_followup_improve_routes_back_to_doc_annotate_bridge(
+        self, app_client, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
         import app.core.agent.file_task_doc_annotate_bridge as bridge
@@ -897,13 +1143,19 @@ class TestEditorAIStream:
             )
 
         def unexpected_build_tool_gateway(self, request, context_files):
-            raise AssertionError("generic FileTaskRuntime loop should not execute for doc annotate bridge requests")
+            raise AssertionError(
+                "generic FileTaskRuntime loop should not execute for doc annotate bridge requests"
+            )
 
         def unexpected_call_model(self, **kwargs):
-            raise AssertionError("generic model loop should not execute for doc annotate bridge requests")
+            raise AssertionError(
+                "generic model loop should not execute for doc annotate bridge requests"
+            )
 
         monkeypatch.setattr(bridge, "stream_request", fake_stream)
-        monkeypatch.setattr(FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway)
+        monkeypatch.setattr(
+            FileTaskRuntime, "_build_tool_gateway", unexpected_build_tool_gateway
+        )
         monkeypatch.setattr(FileTaskRuntime, "_call_model", unexpected_call_model)
 
         resp = app_client.post(
@@ -914,7 +1166,12 @@ class TestEditorAIStream:
                 "target_path": str(docx_path),
                 "files": [
                     {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {"path": str(docx_path), "name": "translation.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "translation.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
                 "options": {
                     "followup_context": {
@@ -931,12 +1188,19 @@ class TestEditorAIStream:
         events = parse_sse_events(resp.get_data())
 
         assert resp.status_code == 200
-        assert captured["request"].options["followup_context"]["followup_action"] == "improve"
-        run_started = next(event for event in events if event.get("type") == "run.started")
+        assert (
+            captured["request"].options["followup_context"]["followup_action"]
+            == "improve"
+        )
+        run_started = next(
+            event for event in events if event.get("type") == "run.started"
+        )
         assert run_started["payload"]["mode"] == "doc_annotate_bridge"
         assert events[-1]["payload"]["completed_task"] is True
 
-    def test_doc_annotate_bridge_forwards_review_and_write_progress(self, monkeypatch, tmp_path):
+    def test_doc_annotate_bridge_forwards_review_and_write_progress(
+        self, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
@@ -953,11 +1217,36 @@ class TestEditorAIStream:
                 self.gemini_client = gemini_client
 
             def full_annotation_loop_streaming(self, *args, **kwargs):
-                yield {"stage": "reading", "progress": 5, "message": "📖 正在读取文档", "detail": "解析Word文件结构"}
-                yield {"stage": "reading_complete", "progress": 10, "message": "✅ 文档读取完成", "detail": "12 段，3000 字"}
-                yield {"stage": "analyzing", "progress": 24, "message": "🤖 正在分析文档...", "detail": "第 1/5 段已完成，累计 2 条建议"}
-                yield {"stage": "warning", "progress": 30, "message": "⚠️ AI 分析未成功（1/5分段使用本地规则兜底）", "detail": "API 错误: timeout"}
-                yield {"stage": "analysis_complete", "progress": 50, "message": "✅ 分析完成", "detail": "找到 6 处修改"}
+                yield {
+                    "stage": "reading",
+                    "progress": 5,
+                    "message": "📖 正在读取文档",
+                    "detail": "解析Word文件结构",
+                }
+                yield {
+                    "stage": "reading_complete",
+                    "progress": 10,
+                    "message": "✅ 文档读取完成",
+                    "detail": "12 段，3000 字",
+                }
+                yield {
+                    "stage": "analyzing",
+                    "progress": 24,
+                    "message": "🤖 正在分析文档...",
+                    "detail": "第 1/5 段已完成，累计 2 条建议",
+                }
+                yield {
+                    "stage": "warning",
+                    "progress": 30,
+                    "message": "⚠️ AI 分析未成功（1/5分段使用本地规则兜底）",
+                    "detail": "API 错误: timeout",
+                }
+                yield {
+                    "stage": "analysis_complete",
+                    "progress": 50,
+                    "message": "✅ 分析完成",
+                    "detail": "找到 6 处修改",
+                }
                 yield {
                     "stage": "applying",
                     "progress": 78,
@@ -982,7 +1271,10 @@ class TestEditorAIStream:
         monkeypatch.setattr(
             bridge,
             "_build_pdf_reference_windows",
-            lambda path: (["[Page 1]\nOriginal source text"], {"window_count": 1, "page_count": 1, "window_pages": 4}),
+            lambda path: (
+                ["[Page 1]\nOriginal source text"],
+                {"window_count": 1, "page_count": 1, "window_pages": 4},
+            ),
         )
         monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
 
@@ -992,7 +1284,12 @@ class TestEditorAIStream:
                 "target_path": str(docx_path),
                 "files": [
                     {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {"path": str(docx_path), "name": "translation.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "translation.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
             }
         )
@@ -1024,7 +1321,9 @@ class TestEditorAIStream:
         assert events[-1].type == "run.finished"
         assert events[-1].payload["completed_task"] is True
 
-    def test_doc_annotate_bridge_handles_single_docx_annotation_requests(self, monkeypatch, tmp_path):
+    def test_doc_annotate_bridge_handles_single_docx_annotation_requests(
+        self, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
@@ -1039,10 +1338,30 @@ class TestEditorAIStream:
                 self.gemini_client = gemini_client
 
             def full_annotation_loop_streaming(self, *args, **kwargs):
-                yield {"stage": "reading", "progress": 5, "message": "📖 正在读取文档", "detail": "解析Word文件结构"}
-                yield {"stage": "reading_complete", "progress": 10, "message": "✅ 文档读取完成", "detail": "21 段，553 字"}
-                yield {"stage": "analyzing", "progress": 40, "message": "🤖 正在分析文档...", "detail": "已整理 10 条批注建议"}
-                yield {"stage": "analysis_complete", "progress": 65, "message": "✅ 分析完成", "detail": "找到 10 处修改"}
+                yield {
+                    "stage": "reading",
+                    "progress": 5,
+                    "message": "📖 正在读取文档",
+                    "detail": "解析Word文件结构",
+                }
+                yield {
+                    "stage": "reading_complete",
+                    "progress": 10,
+                    "message": "✅ 文档读取完成",
+                    "detail": "21 段，553 字",
+                }
+                yield {
+                    "stage": "analyzing",
+                    "progress": 40,
+                    "message": "🤖 正在分析文档...",
+                    "detail": "已整理 10 条批注建议",
+                }
+                yield {
+                    "stage": "analysis_complete",
+                    "progress": 65,
+                    "message": "✅ 分析完成",
+                    "detail": "找到 10 处修改",
+                }
                 yield {
                     "stage": "applying",
                     "progress": 82,
@@ -1071,7 +1390,12 @@ class TestEditorAIStream:
                 "task": "将你觉得写得不好的地方批注出来",
                 "target_path": str(docx_path),
                 "files": [
-                    {"path": str(docx_path), "name": "interview.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "interview.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
             }
         )
@@ -1097,7 +1421,9 @@ class TestEditorAIStream:
         assert events[-1].type == "run.finished"
         assert events[-1].payload["completed_task"] is True
 
-    def test_doc_annotate_bridge_merges_followup_improve_requirement(self, monkeypatch, tmp_path):
+    def test_doc_annotate_bridge_merges_followup_improve_requirement(
+        self, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskRequest, FileTaskFile
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
@@ -1130,7 +1456,15 @@ class TestEditorAIStream:
         monkeypatch.setattr(
             bridge,
             "_build_pdf_reference_windows",
-            lambda path: (["[Page 1]\nOriginal source text"], {"window_count": 1, "page_count": 1, "pages_with_text": 1, "window_pages": 4}),
+            lambda path: (
+                ["[Page 1]\nOriginal source text"],
+                {
+                    "window_count": 1,
+                    "page_count": 1,
+                    "pages_with_text": 1,
+                    "window_pages": 4,
+                },
+            ),
         )
 
         request = FileTaskRequest(
@@ -1139,7 +1473,12 @@ class TestEditorAIStream:
             target_path=str(docx_path),
             files=[
                 FileTaskFile(path=str(pdf_path), name="source.pdf", type="pdf"),
-                FileTaskFile(path=str(docx_path), name="translation.docx", type="docx", target=True),
+                FileTaskFile(
+                    path=str(docx_path),
+                    name="translation.docx",
+                    type="docx",
+                    target=True,
+                ),
             ],
             options={
                 "followup_context": {
@@ -1152,12 +1491,21 @@ class TestEditorAIStream:
             },
         )
 
-        list(bridge.stream_request(request, workspace_root=str(tmp_path), gemini_client=object()))
+        list(
+            bridge.stream_request(
+                request, workspace_root=str(tmp_path), gemini_client=object()
+            )
+        )
 
-        assert "上一轮任务要求：根据原文审校这个译稿，给出学术化批注" in captured["user_requirement"]
+        assert (
+            "上一轮任务要求：根据原文审校这个译稿，给出学术化批注"
+            in captured["user_requirement"]
+        )
         assert "当前追加反馈：请继续优化上一轮审校结果" in captured["user_requirement"]
 
-    def test_doc_annotate_bridge_emits_confirmed_batch_plan_for_large_files(self, monkeypatch, tmp_path):
+    def test_doc_annotate_bridge_emits_confirmed_batch_plan_for_large_files(
+        self, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
@@ -1196,7 +1544,15 @@ class TestEditorAIStream:
         monkeypatch.setattr(
             bridge,
             "_build_pdf_reference_windows",
-            lambda path: ([f"[Page {idx}]\ntext" for idx in range(1, 101)], {"window_count": 100, "page_count": 417, "pages_with_text": 399, "window_pages": 4}),
+            lambda path: (
+                [f"[Page {idx}]\ntext" for idx in range(1, 101)],
+                {
+                    "window_count": 100,
+                    "page_count": 417,
+                    "pages_with_text": 399,
+                    "window_pages": 4,
+                },
+            ),
         )
         monkeypatch.setattr(
             bridge,
@@ -1218,7 +1574,12 @@ class TestEditorAIStream:
                 "target_path": str(docx_path),
                 "files": [
                     {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {"path": str(docx_path), "name": "translation.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "translation.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
             }
         )
@@ -1236,7 +1597,9 @@ class TestEditorAIStream:
         assert "539 段" in confirmed.payload["note"]
         assert "目标单批约 6 分钟" in confirmed.payload["note"]
 
-    def test_large_translation_review_uses_finer_batches_in_local_mode(self, monkeypatch, tmp_path):
+    def test_large_translation_review_uses_finer_batches_in_local_mode(
+        self, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
@@ -1276,7 +1639,15 @@ class TestEditorAIStream:
         monkeypatch.setattr(
             bridge,
             "_build_pdf_reference_windows",
-            lambda path: ([f"[Page {idx}]\ntext" for idx in range(1, 101)], {"window_count": 100, "page_count": 417, "pages_with_text": 399, "window_pages": 4}),
+            lambda path: (
+                [f"[Page {idx}]\ntext" for idx in range(1, 101)],
+                {
+                    "window_count": 100,
+                    "page_count": 417,
+                    "pages_with_text": 399,
+                    "window_pages": 4,
+                },
+            ),
         )
         monkeypatch.setattr(
             bridge,
@@ -1300,7 +1671,12 @@ class TestEditorAIStream:
                 "target_path": str(docx_path),
                 "files": [
                     {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {"path": str(docx_path), "name": "translation.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "translation.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
             }
         )
@@ -1315,7 +1691,9 @@ class TestEditorAIStream:
         assert "约 1.2 万字/批" in confirmed.payload["summary"]
         assert "目标单批约 5 分钟" in confirmed.payload["note"]
 
-    def test_local_docx_review_bridge_uses_local_model_identity(self, monkeypatch, tmp_path):
+    def test_local_docx_review_bridge_uses_local_model_identity(
+        self, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
@@ -1362,20 +1740,29 @@ class TestEditorAIStream:
                 "target_path": str(docx_path),
                 "options": {"local_model": "qwen3.5:9b"},
                 "files": [
-                    {"path": str(docx_path), "name": docx_path.name, "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": docx_path.name,
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
             }
         )
 
         events = list(bridge.stream_request(request, workspace_root=str(tmp_path)))
 
-        review_progress = next(event for event in events if event.type == "step_progress")
+        review_progress = next(
+            event for event in events if event.type == "step_progress"
+        )
 
         assert captured["default_model_id"] == "qwen3.5:9b"
         assert captured["stream_model_id"] == "qwen3.5:9b"
         assert "qwen3.5:9b" in review_progress.payload["detail"]
 
-    def test_large_translation_review_cloud_mode_batches_by_char_budget(self, monkeypatch, tmp_path):
+    def test_large_translation_review_cloud_mode_batches_by_char_budget(
+        self, monkeypatch, tmp_path
+    ):
         from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
@@ -1411,7 +1798,15 @@ class TestEditorAIStream:
         monkeypatch.setattr(
             bridge,
             "_build_pdf_reference_windows",
-            lambda path: ([f"[Page {idx}]\ntext" for idx in range(1, 21)], {"window_count": 20, "page_count": 90, "pages_with_text": 84, "window_pages": 4}),
+            lambda path: (
+                [f"[Page {idx}]\ntext" for idx in range(1, 21)],
+                {
+                    "window_count": 20,
+                    "page_count": 90,
+                    "pages_with_text": 84,
+                    "window_pages": 4,
+                },
+            ),
         )
         monkeypatch.setattr(
             bridge,
@@ -1423,7 +1818,16 @@ class TestEditorAIStream:
                 "content_chars": 104000,
                 "chunk_size": 4000,
                 "chunk_count": 8,
-                "chunk_char_counts": [20000, 4000, 4000, 20000, 4000, 4000, 24000, 24000],
+                "chunk_char_counts": [
+                    20000,
+                    4000,
+                    4000,
+                    20000,
+                    4000,
+                    4000,
+                    24000,
+                    24000,
+                ],
             },
         )
         monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
@@ -1434,7 +1838,12 @@ class TestEditorAIStream:
                 "target_path": str(docx_path),
                 "files": [
                     {"path": str(pdf_path), "name": "source.pdf", "type": "pdf"},
-                    {"path": str(docx_path), "name": "translation.docx", "type": "docx", "target": True},
+                    {
+                        "path": str(docx_path),
+                        "name": "translation.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
                 ],
             }
         )
@@ -1453,16 +1862,20 @@ class TestEditorAIStream:
         assert "预计用时约 6 分钟" in confirmed.payload["steps"][0]["description"]
         assert "目标单批约 6 分钟" in confirmed.payload["note"]
 
-    def test_build_pdf_reference_windows_keeps_all_windows_by_default(self, monkeypatch):
+    def test_build_pdf_reference_windows_keeps_all_windows_by_default(
+        self, monkeypatch
+    ):
         import app.core.agent.file_task_doc_annotate_bridge as bridge
 
-        fake_pages = [
-            {"page": idx, "text": f"Page {idx} text"}
-            for idx in range(1, 10)
-        ]
+        fake_pages = [{"page": idx, "text": f"Page {idx} text"} for idx in range(1, 10)]
 
-        with patch("app.core.file.file_parser.parse_pdf", return_value={"page_count": 9, "pages": fake_pages, "text": ""}):
-            windows, meta = bridge._build_pdf_reference_windows("dummy.pdf", window_pages=4, per_window_chars=1000)
+        with patch(
+            "app.core.file.file_parser.parse_pdf",
+            return_value={"page_count": 9, "pages": fake_pages, "text": ""},
+        ):
+            windows, meta = bridge._build_pdf_reference_windows(
+                "dummy.pdf", window_pages=4, per_window_chars=1000
+            )
 
         assert len(windows) == 3
         assert meta["page_count"] == 9
@@ -1470,7 +1883,9 @@ class TestEditorAIStream:
         assert meta["window_count"] == 3
         assert "[Page 9]" in windows[-1]
 
-    def test_whitebox_task_stream_normalizes_local_model_config(self, app_client, monkeypatch):
+    def test_whitebox_task_stream_normalizes_local_model_config(
+        self, app_client, monkeypatch
+    ):
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
 
@@ -1503,7 +1918,9 @@ class TestEditorAIStream:
         assert request_payload.model_id == ""
         assert request_payload.options["local_model"] == "qwen3.5:9b"
 
-    def test_whitebox_task_stream_keeps_finished_run_runtime_only(self, app_client, monkeypatch):
+    def test_whitebox_task_stream_keeps_finished_run_runtime_only(
+        self, app_client, monkeypatch
+    ):
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
         import web.app as web_app_module
@@ -1516,7 +1933,11 @@ class TestEditorAIStream:
                 run_id=request.run_id,
                 seq=1,
                 step_id="execute",
-                payload={"path": "report.docx", "operation": "write_docx_content", "summary": "已写入"},
+                payload={
+                    "path": "report.docx",
+                    "operation": "write_docx_content",
+                    "summary": "已写入",
+                },
             )
             yield FileTaskEvent(
                 type="run.finished",
@@ -1533,7 +1954,9 @@ class TestEditorAIStream:
             calls["extract"] += 1
 
         monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
-        monkeypatch.setattr(web_app_module.session_manager, "append_and_save", fake_append)
+        monkeypatch.setattr(
+            web_app_module.session_manager, "append_and_save", fake_append
+        )
         monkeypatch.setattr(web_app_module, "_start_memory_extraction", fake_memory)
 
         resp = app_client.post(
@@ -1547,7 +1970,9 @@ class TestEditorAIStream:
         assert not any(event.get("type") == "memory.loaded" for event in events)
         assert calls == {"save": 0, "extract": 0}
 
-    def test_whitebox_task_stream_uses_request_history_only(self, app_client, monkeypatch):
+    def test_whitebox_task_stream_uses_request_history_only(
+        self, app_client, monkeypatch
+    ):
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
         import web.app as web_app_module
@@ -1596,7 +2021,9 @@ class TestEditorAIStream:
             {"role": "user", "content": "继续处理当前文件"},
         ]
 
-    def test_whitebox_task_stream_does_not_inject_memory_router_context(self, app_client, monkeypatch):
+    def test_whitebox_task_stream_does_not_inject_memory_router_context(
+        self, app_client, monkeypatch
+    ):
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
         import web.app as web_app_module
@@ -1613,11 +2040,21 @@ class TestEditorAIStream:
             )
 
         monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
-        monkeypatch.setattr(web_app_module, "get_memory_manager", lambda: (_ for _ in ()).throw(AssertionError("memory manager should not be used")))
+        monkeypatch.setattr(
+            web_app_module,
+            "get_memory_manager",
+            lambda: (_ for _ in ()).throw(
+                AssertionError("memory manager should not be used")
+            ),
+        )
 
         resp = app_client.post(
             "/api/editor/ai/task-stream",
-            json={"task": "整理当前 Word 文档", "session_id": "workspace_demo", "file_name": "report.docx"},
+            json={
+                "task": "整理当前 Word 文档",
+                "session_id": "workspace_demo",
+                "file_name": "report.docx",
+            },
         )
         events = parse_sse_events(resp.get_data())
 
@@ -1626,7 +2063,9 @@ class TestEditorAIStream:
         assert not any(event.get("type") == "memory.loaded" for event in events)
         assert "memory_context" not in (request_payload.options or {})
 
-    def test_editor_ai_history_is_empty_for_runtime_only_conversations(self, app_client, monkeypatch):
+    def test_editor_ai_history_is_empty_for_runtime_only_conversations(
+        self, app_client, monkeypatch
+    ):
         import web.app as web_app_module
 
         loaded = []
@@ -1637,7 +2076,9 @@ class TestEditorAIStream:
 
         monkeypatch.setattr(web_app_module.session_manager, "load_full", fake_load_full)
 
-        resp = app_client.get("/api/editor/ai/history?session_id=workspace_demo&doc_id=demo")
+        resp = app_client.get(
+            "/api/editor/ai/history?session_id=workspace_demo&doc_id=demo"
+        )
         data = resp.get_json()
 
         assert resp.status_code == 200
@@ -1673,7 +2114,13 @@ class TestEditorAIStream:
 
     def test_main_stream_forwards_plan_and_step_events(self, app_client):
         """主 editor_ai_stream 应转发 KotoAgentLoop 的 plan/step 事件。"""
-        from app.core.agent.lifecycle import evt_plan, evt_step_done, evt_step_progress, evt_step_start, evt_task_complete
+        from app.core.agent.lifecycle import (
+            evt_plan,
+            evt_step_done,
+            evt_step_progress,
+            evt_step_start,
+            evt_task_complete,
+        )
 
         def fake_run(self, request):
             yield evt_plan([{"id": "understand", "description": "理解需求"}])
@@ -1701,7 +2148,9 @@ class TestEditorAIStream:
         done_events = [e for e in events if e.get("type") == "done"]
         assert done_events and done_events[0].get("result") == "处理完成"
 
-    def test_main_stream_keeps_editor_actions_runtime_only(self, app_client, monkeypatch):
+    def test_main_stream_keeps_editor_actions_runtime_only(
+        self, app_client, monkeypatch
+    ):
         import web.app as web_app_module
         from app.core.agent.lifecycle import evt_task_complete
 
@@ -1714,7 +2163,9 @@ class TestEditorAIStream:
         def fake_run(self, request):
             yield evt_task_complete(result="润色完成")
 
-        monkeypatch.setattr(web_app_module.session_manager, "append_and_save", fake_append)
+        monkeypatch.setattr(
+            web_app_module.session_manager, "append_and_save", fake_append
+        )
 
         with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run):
             resp = app_client.post(
@@ -1737,7 +2188,9 @@ class TestEditorAIStream:
         done_events = [e for e in events if e.get("type") == "done"]
         assert done_events and done_events[0].get("result") == "润色完成"
 
-    def test_non_task_stream_passes_preferred_and_local_model_into_agent_request(self, app_client):
+    def test_non_task_stream_passes_preferred_and_local_model_into_agent_request(
+        self, app_client
+    ):
         """普通 editor SSE 请求应把显式云端模型和配置的本地模型一起传入 AgentLoop。"""
         captured = {}
         from app.core.agent.lifecycle import evt_task_complete
@@ -1746,8 +2199,9 @@ class TestEditorAIStream:
             captured["request"] = request
             yield evt_task_complete(result="ok")
 
-        with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run), \
-             patch("web.app._get_configured_local_model_id", return_value="qwen3.5:9b"):
+        with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run), patch(
+            "web.app._get_configured_local_model_id", return_value="qwen3.5:9b"
+        ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -1774,11 +2228,15 @@ class TestEditorAIAgent:
 
         class FakeAgent:
             def run(self, input_text, session_id=None, system_context=None):
-                yield AgentStep(step_type=AgentStepType.THOUGHT, content="先理解文档问题")
+                yield AgentStep(
+                    step_type=AgentStepType.THOUGHT, content="先理解文档问题"
+                )
                 yield AgentStep(
                     step_type=AgentStepType.ACTION,
                     content="执行搜索",
-                    action=AgentAction(tool_name="web_search", tool_args={"query": "AI"}),
+                    action=AgentAction(
+                        tool_name="web_search", tool_args={"query": "AI"}
+                    ),
                 )
                 yield AgentStep(
                     step_type=AgentStepType.OBSERVATION,
@@ -1820,7 +2278,11 @@ class TestChartStream:
         with patch("app.core.sandbox.run_python", return_value=fake_result):
             resp = app_client.post(
                 "/api/editor/ai/chart",
-                json={"data_context": "类别,值\nA,10", "instruction": "画一个简单图表", "lang": "python"},
+                json={
+                    "data_context": "类别,值\nA,10",
+                    "instruction": "画一个简单图表",
+                    "lang": "python",
+                },
             )
             payload = resp.get_data()
 
@@ -1839,20 +2301,26 @@ class TestChartRerun:
 
     def test_empty_code_returns_error(self, app_client):
         """空代码应返回错误"""
-        resp = app_client.post("/api/editor/ai/chart-rerun", json={
-            "code": "",
-            "lang": "python",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/chart-rerun",
+            json={
+                "code": "",
+                "lang": "python",
+            },
+        )
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["error"]
 
     def test_simple_python_code(self, app_client):
         """简单 Python 代码应成功执行"""
-        resp = app_client.post("/api/editor/ai/chart-rerun", json={
-            "code": "print('hello')",
-            "lang": "python",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/chart-rerun",
+            json={
+                "code": "print('hello')",
+                "lang": "python",
+            },
+        )
         assert resp.status_code == 200
         data = resp.get_json()
         assert "hello" in (data.get("stdout") or "")
@@ -1867,10 +2335,13 @@ class TestChartRerun:
             "plt.savefig('chart.png', dpi=72)\n"
             "plt.close()\n"
         )
-        resp = app_client.post("/api/editor/ai/chart-rerun", json={
-            "code": code,
-            "lang": "python",
-        })
+        resp = app_client.post(
+            "/api/editor/ai/chart-rerun",
+            json={
+                "code": code,
+                "lang": "python",
+            },
+        )
         assert resp.status_code == 200
         data = resp.get_json()
         assert data.get("error") is None or data["error"] == ""
@@ -1971,80 +2442,128 @@ class TestLocalModelMode:
 
         # Mock Ollama provider to return a known response
         mock_provider = MagicMock()
-        mock_provider.generate_content.return_value = iter([
-            {"content": "本地", "tool_calls": [], "usage": {}},
-            {"content": "Ollama", "tool_calls": [], "usage": {}},
-            {"content": "响应", "tool_calls": [], "usage": {}},
-        ])
+        mock_provider.generate_content.return_value = iter(
+            [
+                {"content": "本地", "tool_calls": [], "usage": {}},
+                {"content": "Ollama", "tool_calls": [], "usage": {}},
+                {"content": "响应", "tool_calls": [], "usage": {}},
+            ]
+        )
 
-        with patch("app.core.socket_handler._is_ollama_alive", return_value=True), \
-             patch("app.core.socket_handler._get_local_provider", return_value=mock_provider), \
-             patch("app.core.agent.agent_loop._is_ollama_alive", return_value=True), \
-             patch("app.core.agent.agent_loop._get_local_provider", return_value=mock_provider):
-            resp = app_client.post("/api/editor/ai/stream", json={
-                "action": "polish",
-                "selection": "需要润色的文字",
-                "model_mode": "local",
-            })
+        with patch(
+            "app.core.socket_handler._is_ollama_alive", return_value=True
+        ), patch(
+            "app.core.socket_handler._get_local_provider", return_value=mock_provider
+        ), patch(
+            "app.core.agent.agent_loop._is_ollama_alive", return_value=True
+        ), patch(
+            "app.core.agent.agent_loop._get_local_provider", return_value=mock_provider
+        ):
+            resp = app_client.post(
+                "/api/editor/ai/stream",
+                json={
+                    "action": "polish",
+                    "selection": "需要润色的文字",
+                    "model_mode": "local",
+                },
+            )
             # Force stream consumption while patches are active.
             resp_data = resp.get_data()
 
         assert resp.status_code == 200
         events = parse_sse_events(resp_data)
-        token_texts = "".join(e.get("text", "") for e in events if e.get("type") == "token")
+        token_texts = "".join(
+            e.get("text", "") for e in events if e.get("type") == "token"
+        )
         assert "Ollama" in token_texts or "本地" in token_texts
 
     def test_local_mode_ollama_not_running_returns_error(self, app_client):
         """model_mode=local + Ollama not running → returns error event."""
         from unittest.mock import patch
 
-        with patch("app.core.socket_handler._is_ollama_alive", return_value=False), \
-             patch("app.core.agent.agent_loop._is_ollama_alive", return_value=False):
-            resp = app_client.post("/api/editor/ai/stream", json={
-                "action": "polish",
-                "selection": "需要润色的文字",
-                "model_mode": "local",
-            })
+        with patch(
+            "app.core.socket_handler._is_ollama_alive", return_value=False
+        ), patch("app.core.agent.agent_loop._is_ollama_alive", return_value=False):
+            resp = app_client.post(
+                "/api/editor/ai/stream",
+                json={
+                    "action": "polish",
+                    "selection": "需要润色的文字",
+                    "model_mode": "local",
+                },
+            )
             # Force stream consumption while patches are active.
             resp_data = resp.get_data()
 
         assert resp.status_code == 200
         events = parse_sse_events(resp_data)
         error_events = [e for e in events if e.get("type") == "error"]
-        assert len(error_events) > 0, "Expected an error event when Ollama is not running"
+        assert (
+            len(error_events) > 0
+        ), "Expected an error event when Ollama is not running"
 
-    def test_explicit_cloud_mode_is_not_overridden_by_legacy_local_only_setting(self, app_client):
+    def test_explicit_cloud_mode_is_not_overridden_by_legacy_local_only_setting(
+        self, app_client
+    ):
         """model_mode=cloud must keep using cloud first even if legacy local-only is enabled."""
+
         class FakeCloudProvider:
-            def generate_content(self, prompt=None, model=None, system_instruction=None, stream=False, **kwargs):
+            def generate_content(
+                self,
+                prompt=None,
+                model=None,
+                system_instruction=None,
+                stream=False,
+                **kwargs,
+            ):
                 assert stream is True
-                return iter([
-                    {"content": "云端", "tool_calls": [], "usage": {}},
-                    {"content": "Gemini", "tool_calls": [], "usage": {}},
-                ])
+                return iter(
+                    [
+                        {"content": "云端", "tool_calls": [], "usage": {}},
+                        {"content": "Gemini", "tool_calls": [], "usage": {}},
+                    ]
+                )
 
         class FakeLocalProvider:
-            def generate_content(self, prompt=None, model=None, system_instruction=None, stream=False, **kwargs):
+            def generate_content(
+                self,
+                prompt=None,
+                model=None,
+                system_instruction=None,
+                stream=False,
+                **kwargs,
+            ):
                 assert stream is True
-                return iter([
-                    {"content": "本地", "tool_calls": [], "usage": {}},
-                    {"content": "Ollama", "tool_calls": [], "usage": {}},
-                ])
+                return iter(
+                    [
+                        {"content": "本地", "tool_calls": [], "usage": {}},
+                        {"content": "Ollama", "tool_calls": [], "usage": {}},
+                    ]
+                )
 
-        with patch("web.settings.SettingsManager.get", return_value=True), \
-             patch("app.core.agent.agent_loop._get_provider", return_value=FakeCloudProvider()), \
-             patch("app.core.agent.agent_loop._get_local_provider", return_value=FakeLocalProvider()), \
-             patch("app.core.agent.agent_loop._is_ollama_alive", return_value=True):
-            resp = app_client.post("/api/editor/ai/stream", json={
-                "action": "polish",
-                "selection": "需要润色的文字",
-                "model_mode": "cloud",
-            })
+        with patch("web.settings.SettingsManager.get", return_value=True), patch(
+            "app.core.agent.agent_loop._get_provider", return_value=FakeCloudProvider()
+        ), patch(
+            "app.core.agent.agent_loop._get_local_provider",
+            return_value=FakeLocalProvider(),
+        ), patch(
+            "app.core.agent.agent_loop._is_ollama_alive", return_value=True
+        ):
+            resp = app_client.post(
+                "/api/editor/ai/stream",
+                json={
+                    "action": "polish",
+                    "selection": "需要润色的文字",
+                    "model_mode": "cloud",
+                },
+            )
             resp_data = resp.get_data()
 
         assert resp.status_code == 200
         events = parse_sse_events(resp_data)
-        token_texts = "".join(e.get("text", "") for e in events if e.get("type") == "token")
+        token_texts = "".join(
+            e.get("text", "") for e in events if e.get("type") == "token"
+        )
         assert "云端" in token_texts
         assert "Gemini" in token_texts
         assert "Ollama" not in token_texts
@@ -2052,13 +2571,23 @@ class TestLocalModelMode:
     def test_workspace_quick_actions_use_whitebox_only(self):
         """Workspace quick actions should use whitebox routes without editor SSE fallback."""
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
-        transport = Path("web/static/js/workspace-ai-transport.js").read_text(encoding="utf-8")
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
+        transport = Path("web/static/js/workspace-ai-transport.js").read_text(
+            encoding="utf-8"
+        )
         assert "window.WA.sendQuickAction = (action) => {" in src
         assert "window.WA.createWorkspaceQuickActionRuntime" in quick_actions
         assert "attachDispatcher" in quick_actions
-        assert "return Promise.reject(new Error(`快捷动作 ${actionId} 未配置可用的执行路径`));" in quick_actions
-        assert "if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {" in quick_actions
+        assert (
+            "return Promise.reject(new Error(`快捷动作 ${actionId} 未配置可用的执行路径`));"
+            in quick_actions
+        )
+        assert (
+            "if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {"
+            in quick_actions
+        )
         assert "/api/editor/ai/stream" not in quick_actions
         assert "legacyEditorFallback" not in quick_actions
         assert "sendEditorAction" not in quick_actions
@@ -2068,21 +2597,31 @@ class TestLocalModelMode:
         assert "async function streamEventBlocks(options)" in transport
 
     def test_workspace_readonly_quick_actions_can_use_simple_whitebox(self):
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "whiteboxMode: 'simple'" in quick_actions
         assert "function usesSimpleWhitebox(action) {" in quick_actions
-        assert "function sendSimpleWhiteboxAction(payload, providedAction) {" in quick_actions
+        assert (
+            "function sendSimpleWhiteboxAction(payload, providedAction) {"
+            in quick_actions
+        )
         assert "return attachedDispatcher.dispatchMessage({" in quick_actions
         assert "quick_action_mode: 'simple'" in quick_actions
 
     def test_workspace_edit_quick_actions_can_use_proposal_whitebox(self):
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "whiteboxMode: 'proposal'" in quick_actions
         assert "function usesProposalWhitebox(action) {" in quick_actions
         assert "function buildProposalWhiteboxTask(payload, action) {" in quick_actions
-        assert "function sendProposalWhiteboxAction(payload, providedAction) {" in quick_actions
+        assert (
+            "function sendProposalWhiteboxAction(payload, providedAction) {"
+            in quick_actions
+        )
         assert "quick_action_mode: 'proposal'" in quick_actions
         assert "options.handleProposals({" in quick_actions
         assert "sendEditorAction" not in quick_actions
@@ -2098,44 +2637,67 @@ class TestLocalModelMode:
         assert "editor_model_mode" not in src
         assert "editor_locked_model" not in src
         assert "localStorage.setItem('wa_locked_model', newModel);" in toggle_section
-        assert "localStorage.setItem('wa_model_choice_explicit', '1');" in toggle_section
+        assert (
+            "localStorage.setItem('wa_model_choice_explicit', '1');" in toggle_section
+        )
 
     def test_workspace_chart_requests_delegate_to_whitebox_dispatcher(self):
         """Python chart requests should route through the whitebox dispatcher instead of the legacy chart SSE helper."""
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
         assert "async function _sendViaSSEChart(payload) {" not in src
         assert "_sendViaLegacyChartSSE" not in src
         assert "fetch('/api/editor/ai/chart'" not in src
         assert "_waQuickActionRuntime.sendChartAction(payload);" not in src
         assert "attachedDispatcher.dispatchMessage({" in quick_actions
         assert "url: '/api/editor/ai/chart'" not in quick_actions
-        assert "model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto'," in dispatcher
-        assert "model_id: typeof options.getSelectedCloudModelId === 'function' ? options.getSelectedCloudModelId() : ''," in dispatcher
+        assert (
+            "model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto',"
+            in dispatcher
+        )
+        assert (
+            "model_id: typeof options.getSelectedCloudModelId === 'function' ? options.getSelectedCloudModelId() : '',"
+            in dispatcher
+        )
 
     def test_workspace_task_renderer_supports_python_artifacts(self):
         """The whitebox task renderer should render image artifacts emitted by run_python_code."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
         assert "function appendToolArtifacts(row, payload)" in renderer
         assert "payload.artifacts" in renderer
         assert "wa-task-artifact-image" in renderer
 
     def test_workspace_task_renderer_distinguishes_blocked_python_calls(self):
         """Blocked run_python_code guidance should be labeled as an interception reason, not Python output."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
         assert "payload.blocked ? '查看拦截原因' : '查看执行输出'" in renderer
         assert "const blocked = !!payload.blocked;" in renderer
         assert "const chipText = blocked ? '拦截'" in renderer
 
     def test_workspace_task_renderer_eagerly_refreshes_changed_files(self):
         """Segmented file tasks should try to refresh the edited document as soon as file.changed arrives."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
-        refresh = Path("web/static/js/workspace-ai-task-refresh.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
+        refresh = Path("web/static/js/workspace-ai-task-refresh.js").read_text(
+            encoding="utf-8"
+        )
         assert "window.WA.createFileTaskRefreshController" in refresh
         assert "card._fileRefreshPromise" in refresh
         assert "void flush(card).catch" in refresh
-        assert "if (!((card._pendingFileRefreshes && card._pendingFileRefreshes.size) || card._fileRefreshPromise))" in refresh
+        assert (
+            "if (!((card._pendingFileRefreshes && card._pendingFileRefreshes.size) || card._fileRefreshPromise))"
+            in refresh
+        )
         assert "function upsertEntry(card, item)" in refresh
         assert "status: supported ? 'pending' : 'unsupported'" in refresh
         assert "status: 'refreshing'" in refresh
@@ -2147,7 +2709,9 @@ class TestLocalModelMode:
 
     def test_workspace_task_renderer_keeps_write_tool_milestones_visible(self):
         """Successful file-writing tool events should remain visible instead of being fully suppressed."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "return isInternalTool(name) || isReadTool(name);" in renderer
         assert "ALWAYS_SUPPRESS_TOOL_FINISHED_NAMES.has(name)" in renderer
@@ -2155,12 +2719,21 @@ class TestLocalModelMode:
         assert "'readonly_answer_guard'" in renderer
         assert "return false;" in renderer
         assert "toolStepTitle(payload.tool_name)" in renderer
-        assert "setStepTitle(step, blocked ? `${toolLabel(payload.tool_name)}已拦截`" in renderer
+        assert (
+            "setStepTitle(step, blocked ? `${toolLabel(payload.tool_name)}已拦截`"
+            in renderer
+        )
 
-    def test_workspace_task_renderer_refreshes_terminal_files_without_final_notice(self):
+    def test_workspace_task_renderer_refreshes_terminal_files_without_final_notice(
+        self,
+    ):
         """Terminal refresh should reload files without adding a separate completion notice."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
-        refresh = Path("web/static/js/workspace-ai-task-refresh.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
+        refresh = Path("web/static/js/workspace-ai-task-refresh.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function finalizeTerminalRefresh(card, payload, options)" in renderer
         assert "queueTerminalFileChanges(card, payload || {});" in renderer
@@ -2170,7 +2743,9 @@ class TestLocalModelMode:
 
     def test_workspace_task_renderer_warns_when_whitebox_stream_seq_is_incomplete(self):
         """Dropped or out-of-order SSE events should be surfaced to users as whitebox visibility warnings."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function noteStreamIssue(card, key, text)" in renderer
         assert "state.streamIssueKeys" in renderer
@@ -2180,7 +2755,9 @@ class TestLocalModelMode:
 
     def test_workspace_task_renderer_supports_step_result_rollups(self):
         """The renderer should display backend step.result rollups for major whitebox phases."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function renderStepResult(payload)" in renderer
         assert "function upsertStepResultRow(step, payload)" in renderer
@@ -2191,28 +2768,44 @@ class TestLocalModelMode:
 
     def test_workspace_task_renderer_supports_step_progress_updates(self):
         """The whitebox task renderer should keep the current step alive with incremental progress updates."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function upsertProgressRow(step, payload)" in renderer
         assert "type === 'step_progress' || type === 'step.progress'" in renderer
         assert "step._progressRow" in renderer
-        assert "if ((payload.file_updated || payload.fileUpdated) && (payload.path || payload.file_path || payload.output_path || payload.target_path))" in renderer
+        assert (
+            "if ((payload.file_updated || payload.fileUpdated) && (payload.path || payload.file_path || payload.output_path || payload.target_path))"
+            in renderer
+        )
         assert "queueFileRefresh(card, payload, {" in renderer
 
     def test_workspace_task_renderer_preserves_structured_run_errors(self):
         """Structured run.error messages should survive transport failures instead of collapsing to generic network errors."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function makeTaskError(message) {" in renderer
-        assert "const fatalText = payload.text || payload.error || '任务失败';" in renderer
+        assert (
+            "const fatalText = payload.text || payload.error || '任务失败';" in renderer
+        )
         assert "fatalText," in renderer
-        assert "if (card._fatalErrorText) throw makeTaskError(card._fatalErrorText);" in renderer
+        assert (
+            "if (card._fatalErrorText) throw makeTaskError(card._fatalErrorText);"
+            in renderer
+        )
         assert "error && error.waTaskError ? error.message" in dispatcher
 
     def test_workspace_task_renderer_surfaces_runtime_metadata(self):
         """The task renderer should expose runtime execution metadata from whitebox SSE terminal events."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function runtimeExecutionLabel(runtime) {" in renderer
         assert "function runtimeMetaHtml(payload) {" in renderer
@@ -2225,38 +2818,75 @@ class TestLocalModelMode:
         assert "setStatus(card, finalRunStatusText(payload));" in renderer
 
         tool_gap_start = renderer.find("function renderToolGap(evt) {")
-        tool_gap_end = renderer.find("function renderFollowupRecord(record) {", tool_gap_start)
+        tool_gap_end = renderer.find(
+            "function renderFollowupRecord(record) {", tool_gap_start
+        )
         run_summary_start = renderer.find("function renderRunSummary(payload, card) {")
-        run_summary_end = renderer.find("function renderFileChange(evt) {", run_summary_start)
+        run_summary_end = renderer.find(
+            "function renderFileChange(evt) {", run_summary_start
+        )
         check_finished_start = renderer.find("if (type === 'check.finished') {")
-        check_finished_end = renderer.find("if (type === 'step.finished') {", check_finished_start)
+        check_finished_end = renderer.find(
+            "if (type === 'step.finished') {", check_finished_start
+        )
 
         assert tool_gap_start != -1 and tool_gap_end != -1
         assert run_summary_start != -1 and run_summary_end != -1
         assert check_finished_start != -1 and check_finished_end != -1
         assert "runtimeMetaHtml(payload)" in renderer[tool_gap_start:tool_gap_end]
-        assert "runtimeExecutionLabel(artifact.runtime_context)" in renderer[tool_gap_start:run_summary_end]
+        assert (
+            "runtimeExecutionLabel(artifact.runtime_context)"
+            in renderer[tool_gap_start:run_summary_end]
+        )
         assert "runtimeMetaHtml(payload)" in renderer[run_summary_start:run_summary_end]
-        assert "runtimeMetaHtml(payload)" in renderer[check_finished_start:check_finished_end]
+        assert (
+            "runtimeMetaHtml(payload)"
+            in renderer[check_finished_start:check_finished_end]
+        )
 
     def test_workspace_task_renderer_surfaces_task_classification_metadata(self):
         """The whitebox task renderer should persist classification metadata from run lifecycle events."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function normalizedTaskLifecyclePayload(payload) {" in renderer
-        assert "const classification = data.classification && typeof data.classification === 'object'" in renderer
+        assert (
+            "const classification = data.classification && typeof data.classification === 'object'"
+            in renderer
+        )
         assert "if (type === 'task.classified') {" in renderer
         assert "function classificationMetaHtml(card) {" in renderer
         assert "function renderTaskClassification(evt, card) {" in renderer
         assert "const data = normalizedTaskLifecyclePayload(payload);" in renderer
-        assert "card.dataset.taskRequestKind = String(data.request_kind || '').trim();" in renderer
-        assert "card.dataset.taskFamily = String(data.task_family || '').trim();" in renderer
-        assert "card.dataset.taskOutputMode = String(data.output_mode || '').trim();" in renderer
-        assert "card.dataset.taskSelectedRecipe = String(data.selected_recipe || '').trim();" in renderer
+        assert (
+            "card.dataset.taskRequestKind = String(data.request_kind || '').trim();"
+            in renderer
+        )
+        assert (
+            "card.dataset.taskFamily = String(data.task_family || '').trim();"
+            in renderer
+        )
+        assert (
+            "card.dataset.taskOutputMode = String(data.output_mode || '').trim();"
+            in renderer
+        )
+        assert (
+            "card.dataset.taskSelectedRecipe = String(data.selected_recipe || '').trim();"
+            in renderer
+        )
         assert "card.dataset.taskIntentStrategy = intentStrategy;" in renderer
-        assert "card.dataset.taskIntentCanApply = intentPlan.can_apply ? 'true' : 'false';" in renderer
-        assert "card.dataset.taskIntentRequiresConfirmation = intentPlan.requires_confirmation ? 'true' : 'false';" in renderer
+        assert (
+            "card.dataset.taskIntentCanApply = intentPlan.can_apply ? 'true' : 'false';"
+            in renderer
+        )
+        assert (
+            "card.dataset.taskIntentRequiresConfirmation = intentPlan.requires_confirmation ? 'true' : 'false';"
+            in renderer
+        )
         assert "if (type === 'run.started') {" in renderer
         assert "if (type === 'run.finished') {" in renderer
         assert "产出：" in renderer
@@ -2270,19 +2900,47 @@ class TestLocalModelMode:
         assert "chips.push(`分类：" not in renderer
         assert "${classificationHtml}${pendingResumeHtml}${runtimeHtml}" in renderer
 
-        assert "if (dataset.taskRequestKind) metadata.task_request_kind = String(dataset.taskRequestKind || '').trim();" in dispatcher
-        assert "if (dataset.taskFamily) metadata.task_family = String(dataset.taskFamily || '').trim();" in dispatcher
-        assert "if (dataset.taskExecutionMode) metadata.task_execution_mode = String(dataset.taskExecutionMode || '').trim();" in dispatcher
-        assert "if (dataset.taskSelectedRecipe) metadata.task_selected_recipe = String(dataset.taskSelectedRecipe || '').trim();" in dispatcher
-        assert "if (dataset.taskOutputMode) metadata.task_output_mode = String(dataset.taskOutputMode || '').trim();" in dispatcher
-        assert "if (dataset.taskIntentStrategy) metadata.task_intent_strategy = String(dataset.taskIntentStrategy || '').trim();" in dispatcher
-        assert "metadata.task_intent_can_apply = String(dataset.taskIntentCanApply || '').trim().toLowerCase() === 'true';" in dispatcher
-        assert "metadata.task_intent_requires_confirmation = String(dataset.taskIntentRequiresConfirmation || '').trim().toLowerCase() === 'true';" in dispatcher
+        assert (
+            "if (dataset.taskRequestKind) metadata.task_request_kind = String(dataset.taskRequestKind || '').trim();"
+            in dispatcher
+        )
+        assert (
+            "if (dataset.taskFamily) metadata.task_family = String(dataset.taskFamily || '').trim();"
+            in dispatcher
+        )
+        assert (
+            "if (dataset.taskExecutionMode) metadata.task_execution_mode = String(dataset.taskExecutionMode || '').trim();"
+            in dispatcher
+        )
+        assert (
+            "if (dataset.taskSelectedRecipe) metadata.task_selected_recipe = String(dataset.taskSelectedRecipe || '').trim();"
+            in dispatcher
+        )
+        assert (
+            "if (dataset.taskOutputMode) metadata.task_output_mode = String(dataset.taskOutputMode || '').trim();"
+            in dispatcher
+        )
+        assert (
+            "if (dataset.taskIntentStrategy) metadata.task_intent_strategy = String(dataset.taskIntentStrategy || '').trim();"
+            in dispatcher
+        )
+        assert (
+            "metadata.task_intent_can_apply = String(dataset.taskIntentCanApply || '').trim().toLowerCase() === 'true';"
+            in dispatcher
+        )
+        assert (
+            "metadata.task_intent_requires_confirmation = String(dataset.taskIntentRequiresConfirmation || '').trim().toLowerCase() === 'true';"
+            in dispatcher
+        )
 
     def test_workspace_task_renderer_labels_answer_and_hybrid_output_modes(self):
         """Answer-first and hybrid file tasks should show explicit non-write guidance in the task card."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "if (normalized === 'answer') return '只给答案';" in renderer
         assert "if (normalized === 'write') return '写入文件';" in renderer
@@ -2292,50 +2950,99 @@ class TestLocalModelMode:
         assert "本轮完成分析，未写入文件。" in renderer
         assert 'data-task-followup-action="apply"' in renderer
         assert "应用建议" in renderer
-        assert "if (outputMode === 'hybrid' && canApply) chips.push(`后续：${requiresConfirmation ? '确认后可写入' : '可继续写入'}`);" in renderer
-        assert "const previousTaskOutputMode = previewText(previousTaskTurn.task_output_mode || '', 120);" in dispatcher
-        assert "if (previousTaskOutputMode) context.previous_task_output_mode = previousTaskOutputMode;" in dispatcher
+        assert (
+            "if (outputMode === 'hybrid' && canApply) chips.push(`后续：${requiresConfirmation ? '确认后可写入' : '可继续写入'}`);"
+            in renderer
+        )
+        assert (
+            "const previousTaskOutputMode = previewText(previousTaskTurn.task_output_mode || '', 120);"
+            in dispatcher
+        )
+        assert (
+            "if (previousTaskOutputMode) context.previous_task_output_mode = previousTaskOutputMode;"
+            in dispatcher
+        )
 
     def test_workspace_task_renderer_surfaces_intent_plan_hints(self):
         """Intent-plan metadata should add user-facing strategy and applyability hints without exposing raw internals."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function intentStrategyLabel(value, outputMode) {" in renderer
-        assert "if (normalized === 'analyze_then_confirm') return '先分析后确认';" in renderer
+        assert (
+            "if (normalized === 'analyze_then_confirm') return '先分析后确认';"
+            in renderer
+        )
         assert "if (normalized === 'design_new_tool') return '需补工具';" in renderer
-        assert "if (normalized === 'answer_only' && normalizedOutput === 'answer') return '';" in renderer
-        assert "if (normalized === 'write_through' && normalizedOutput === 'write') return '';" in renderer
+        assert (
+            "if (normalized === 'answer_only' && normalizedOutput === 'answer') return '';"
+            in renderer
+        )
+        assert (
+            "if (normalized === 'write_through' && normalizedOutput === 'write') return '';"
+            in renderer
+        )
         assert "if (strategyLabel) chips.push(`策略：${strategyLabel}`);" in renderer
         assert "继续细化方案" in renderer
-        assert "const previousTaskIntentStrategy = previewText(previousTaskTurn.task_intent_strategy || '', 120);" in dispatcher
-        assert "context.previous_task_intent_strategy = previousTaskIntentStrategy;" in dispatcher
-        assert "context.previous_task_intent_can_apply = previousTaskIntentCanApply;" in dispatcher
-        assert "context.previous_task_intent_requires_confirmation = previousTaskIntentRequiresConfirmation;" in dispatcher
+        assert (
+            "const previousTaskIntentStrategy = previewText(previousTaskTurn.task_intent_strategy || '', 120);"
+            in dispatcher
+        )
+        assert (
+            "context.previous_task_intent_strategy = previousTaskIntentStrategy;"
+            in dispatcher
+        )
+        assert (
+            "context.previous_task_intent_can_apply = previousTaskIntentCanApply;"
+            in dispatcher
+        )
+        assert (
+            "context.previous_task_intent_requires_confirmation = previousTaskIntentRequiresConfirmation;"
+            in dispatcher
+        )
 
     def test_workspace_task_renderer_hides_placeholder_classification_metadata(self):
         """Default whitebox classification placeholders should stay internal unless they add user-facing meaning."""
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function shouldDisplayClassificationLabel(kind, value) {" in renderer
         assert "if (kind === 'request') return normalized !== 'new_task';" in renderer
         assert "if (kind === 'family') return normalized !== 'analyze';" in renderer
         assert "if (kind === 'operation') return normalized !== 'read';" in renderer
-        assert "if (kind === 'execution') return normalized !== 'generic_tool_loop';" in renderer
+        assert (
+            "if (kind === 'execution') return normalized !== 'generic_tool_loop';"
+            in renderer
+        )
         assert "if (selectedRecipe) chips.push(`路线：${selectedRecipe}`);" in renderer
-        assert "if (targetFileType && chips.length) chips.push(`目标：${targetFileType.toUpperCase()}`);" in renderer
+        assert (
+            "if (targetFileType && chips.length) chips.push(`目标：${targetFileType.toUpperCase()}`);"
+            in renderer
+        )
         assert "if (!classificationHtml && !reasonHtml) return '';" in renderer
         assert "chips.push(`置信：${Math.round(confidence * 100)}%`);" not in renderer
 
     def test_workspace_task_renderer_supports_plan_briefed_updates(self):
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "if (type === 'plan.briefed') {" in renderer
         assert "setStatus(card, '已分析任务');" in renderer
-        assert "const title = String(payload.title || '执行方案').trim() || '执行方案';" in renderer
+        assert (
+            "const title = String(payload.title || '执行方案').trim() || '执行方案';"
+            in renderer
+        )
 
     def test_workspace_task_renderer_surfaces_whitebox_plan_gate(self):
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function renderWhiteboxExecutionPlan(card, payload) {" in renderer
         assert "if (type === 'plan.proposed') {" in renderer
@@ -2345,12 +3052,20 @@ class TestLocalModelMode:
         assert "renderPlanGateIssue(payload)" in renderer
 
     def test_workspace_task_renderer_supports_simple_quick_action_mode(self):
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "card.dataset.taskQuickActionMode = quickActionMode;" in renderer
         assert "data.quick_action_mode" in renderer
-        assert "card.dataset.taskQuickActionMode || '').trim().toLowerCase() === 'simple'" in renderer
-        assert "card.dataset.taskQuickActionMode || '').trim().toLowerCase() === 'proposal'" in renderer
+        assert (
+            "card.dataset.taskQuickActionMode || '').trim().toLowerCase() === 'simple'"
+            in renderer
+        )
+        assert (
+            "card.dataset.taskQuickActionMode || '').trim().toLowerCase() === 'proposal'"
+            in renderer
+        )
 
     def test_workspace_model_selector_fetches_dynamic_catalog(self):
         """Workspace assistant should fetch the dynamic model catalog instead of relying on hardcoded options."""
@@ -2369,11 +3084,21 @@ class TestLocalModelMode:
 
     def test_workspace_stream_handlers_consume_classification_events(self):
         """Workspace assistant streams should surface backend classification/model routing events."""
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
         assert "applyRouteEvent: _applyRouteEvent," in assistant
-        assert "if (parsed.type === 'classification' || parsed.type === 'route') {" in quick_actions
-        assert "if (evt.type === 'classification' || evt.type === 'route') {" in quick_actions
+        assert (
+            "if (parsed.type === 'classification' || parsed.type === 'route') {"
+            in quick_actions
+        )
+        assert (
+            "if (evt.type === 'classification' || evt.type === 'route') {"
+            in quick_actions
+        )
         assert "options.applyRouteEvent(parsed);" in quick_actions
         assert "options.applyRouteEvent(evt);" in quick_actions
 
@@ -2395,14 +3120,18 @@ class TestLocalModelMode:
         assert "textarea.selectionEnd" in src
 
         send_selection_start = src.find("window.WA.sendSelectionToAI = () => {")
-        send_selection_end = src.find("// Auto-expand the right AI panel if it's collapsed", send_selection_start)
+        send_selection_end = src.find(
+            "// Auto-expand the right AI panel if it's collapsed", send_selection_start
+        )
         assert send_selection_start != -1 and send_selection_end != -1
         send_selection = src[send_selection_start:send_selection_end]
         assert "const liveSelection = _getLiveEditorSelectionForAI();" in send_selection
 
     def test_workspace_task_dispatcher_does_not_keep_current_file_heuristics(self):
         """Current-file heuristics should stay removed from the whitebox dispatcher."""
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
         assert "function wantsCurrentFile(text)" not in dispatcher
         assert "function currentFileContext(text)" not in dispatcher
         assert "wantsCurrentFile," not in dispatcher
@@ -2412,13 +3141,18 @@ class TestLocalModelMode:
     def test_workspace_quick_action_keyword_list_includes_check(self):
         """The workspace assistant quick-action keyword routing must recognize 检查."""
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
         quick_start = src.find("window.WA.quickAction = (text) => {")
         quick_end = src.find("window.WA.pptxSync = (ta) => {", quick_start)
         assert quick_start != -1 and quick_end != -1
         quick_section = src[quick_start:quick_end]
         assert "_waTaskDispatcher.matchQuickAction(text)" in quick_section
-        assert "attachedDispatcher.registerQuickActionKeyword(keyword, action.action);" in quick_actions
+        assert (
+            "attachedDispatcher.registerQuickActionKeyword(keyword, action.action);"
+            in quick_actions
+        )
         assert "action: '检查'" in quick_actions
         assert "keywords: ['检查']" in quick_actions
         assert "WA.sendQuickAction(matchedAction);" in quick_section
@@ -2436,14 +3170,20 @@ class TestLocalModelMode:
 
     def test_pdf_ai_annotate_button_title_marks_temporary_unavailability(self):
         """The PDF toolbar button should advertise that AI annotate is temporarily unavailable."""
-        html = Path("web/templates/workspace_assistant.html").read_text(encoding="utf-8")
+        html = Path("web/templates/workspace_assistant.html").read_text(
+            encoding="utf-8"
+        )
         assert 'title="AI 标注迁移中，暂不可用"' in html
 
     def test_workspace_templates_use_shared_model_controls_partial(self):
         """Workspace templates should share provider/local model controls without exposing a redundant model picker."""
-        standalone_html = Path("web/templates/workspace_assistant.html").read_text(encoding="utf-8")
+        standalone_html = Path("web/templates/workspace_assistant.html").read_text(
+            encoding="utf-8"
+        )
         index_html = Path("web/templates/index.html").read_text(encoding="utf-8")
-        partial_html = Path("web/templates/_workspace_model_controls.html").read_text(encoding="utf-8")
+        partial_html = Path("web/templates/_workspace_model_controls.html").read_text(
+            encoding="utf-8"
+        )
         assert "{% include '_workspace_model_controls.html' %}" in standalone_html
         assert "{% include '_workspace_model_controls.html' %}" in index_html
         assert 'id="wa-model-mode-toggle"' in partial_html
@@ -2460,18 +3200,35 @@ class TestLocalModelMode:
 
     def test_workspace_cloud_selection_maps_request_model_mode_to_cloud(self):
         js = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
-        assert "const _WA_MODEL_MODES = new Set(['cloud', 'gemini', 'deepseek', 'local']);" in js
-        assert "lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model'), 'cloud')" in js
-        assert "const storedLockedModel = localStorage.getItem('wa_locked_model');" in js
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
+        assert (
+            "const _WA_MODEL_MODES = new Set(['cloud', 'gemini', 'deepseek', 'local']);"
+            in js
+        )
+        assert (
+            "lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model'), 'cloud')"
+            in js
+        )
+        assert (
+            "const storedLockedModel = localStorage.getItem('wa_locked_model');" in js
+        )
         assert "return _normalizeWorkspaceModelMode(state.lockedModel, 'cloud');" in js
         assert "model_mode: payload.model_mode || getModelMode()," in quick_actions
         assert "model_mode: modelMode," in quick_actions
-        assert "window.WA.setLockedModel = (val) => {\n    _setWorkspaceModelMode(val);\n  };" in js
+        assert (
+            "window.WA.setLockedModel = (val) => {\n    _setWorkspaceModelMode(val);\n  };"
+            in js
+        )
         assert "body: JSON.stringify({ mode: newModel })," in js
 
-    def test_workspace_quick_actions_do_not_render_raw_tool_result_previews_as_progress(self):
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
+    def test_workspace_quick_actions_do_not_render_raw_tool_result_previews_as_progress(
+        self,
+    ):
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
         assert "function toolResultProgressText(parsed) {" in quick_actions
         assert "setProgress(toolResultProgressText(parsed));" in quick_actions
         assert "setProgress(parsed.result_preview" not in quick_actions
@@ -2497,7 +3254,9 @@ class TestRemovedLegacyTaskRoutes:
         assert resp.status_code == 404
 
     def test_task_execute_route_is_not_registered(self, app_client):
-        resp = app_client.post("/api/editor/ai/task-execute", json={"task": "整理当前文件"})
+        resp = app_client.post(
+            "/api/editor/ai/task-execute", json={"task": "整理当前文件"}
+        )
         assert resp.status_code == 404
 
 
@@ -2520,11 +3279,15 @@ class TestLegacyDocumentCompatRoutes:
         app = Flask(__name__)
         app.config["TESTING"] = True
         monkeypatch.setattr(document_routes, "_get_client", lambda: object())
-        monkeypatch.setattr(document_routes, "_get_workspace_dir", lambda: str(workspace_root))
+        monkeypatch.setattr(
+            document_routes, "_get_workspace_dir", lambda: str(workspace_root)
+        )
         app.register_blueprint(document_routes.document_bp)
         return app.test_client()
 
-    def test_document_annotate_route_uses_streaming_compat_path(self, monkeypatch, tmp_path):
+    def test_document_annotate_route_uses_streaming_compat_path(
+        self, monkeypatch, tmp_path
+    ):
         import web.document_feedback as feedback_module
 
         docx_path = tmp_path / "legacy-annotate.docx"
@@ -2566,7 +3329,9 @@ class TestLegacyDocumentCompatRoutes:
         assert body["revised_file"] == str(revised_path)
         assert body["applied"] == 3
 
-    def test_document_analyze_annotations_route_uses_chunked_feedback_path(self, monkeypatch, tmp_path):
+    def test_document_analyze_annotations_route_uses_chunked_feedback_path(
+        self, monkeypatch, tmp_path
+    ):
         import web.document_feedback as feedback_module
 
         docx_path = tmp_path / "legacy-analyze.docx"
@@ -2601,7 +3366,9 @@ class TestLegacyDocumentCompatRoutes:
         assert body["annotation_count"] == 1
         assert body["annotations"][0]["原文片段"] == "foo"
 
-    def test_document_batch_annotate_stream_route_uses_feedback_streaming_path(self, monkeypatch, tmp_path):
+    def test_document_batch_annotate_stream_route_uses_feedback_streaming_path(
+        self, monkeypatch, tmp_path
+    ):
         import web.document_feedback as feedback_module
 
         docx_path = tmp_path / "legacy-batch.docx"
@@ -2646,7 +3413,9 @@ class TestLegacyDocumentCompatRoutes:
         assert "event: complete" in body
         assert revised_path.name in body
 
-    def test_document_feedback_route_resolves_relative_path_before_wrapper(self, monkeypatch, tmp_path):
+    def test_document_feedback_route_resolves_relative_path_before_wrapper(
+        self, monkeypatch, tmp_path
+    ):
         import web.document_feedback as feedback_module
 
         documents_dir = tmp_path / "documents"
@@ -2661,13 +3430,17 @@ class TestLegacyDocumentCompatRoutes:
                 self.gemini_client = gemini_client
                 self.default_model_id = default_model_id
 
-            def full_feedback_loop(self, file_path, user_requirement="", auto_apply=True):
+            def full_feedback_loop(
+                self, file_path, user_requirement="", auto_apply=True
+            ):
                 captured["file_path"] = file_path
                 captured["user_requirement"] = user_requirement
                 captured["auto_apply"] = auto_apply
                 return {
                     "success": True,
-                    "new_file_path": str(docx_path.with_name("legacy-feedback_revised.docx")),
+                    "new_file_path": str(
+                        docx_path.with_name("legacy-feedback_revised.docx")
+                    ),
                     "applied_count": 1,
                 }
 
@@ -2690,6 +3463,7 @@ class TestLegacyDocumentCompatRoutes:
             "user_requirement": "请润色措辞",
             "auto_apply": False,
         }
+
 
 class TestLegacyEditorRemovalRegression:
     """Regression checks for removing the old Univer editor stack."""
@@ -2723,7 +3497,10 @@ class TestTaskAgentDocumentEdits:
 
         assert "insert_excel_as_docx_table" in prompt
         assert "insert_image_into_docx" in prompt
-        assert "先用 `write_docx_content` 把基于真实表格数据生成的摘要/结论写入目标文档" in prompt
+        assert (
+            "先用 `write_docx_content` 把基于真实表格数据生成的摘要/结论写入目标文档"
+            in prompt
+        )
         assert "write_docx_content" in prompt
 
     def test_task_agent_runs_stage_verification_after_file_change(self, monkeypatch):
@@ -2742,25 +3519,31 @@ class TestTaskAgentDocumentEdits:
             def execute(self, tool_name, tool_args):
                 self.executions.append((tool_name, dict(tool_args)))
                 if tool_name == "insert_excel_as_docx_table":
-                    return json.dumps({
-                        "success": True,
-                        "summary": "已将工作表“汇总表”的 200 行数据写入 Word 表格",
-                        "path": "target.docx",
-                        "file_type": "docx",
-                        "change_type": "modify",
-                        "operation": tool_name,
-                        "preview": "表格已写入目标文档",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "summary": "已将工作表“汇总表”的 200 行数据写入 Word 表格",
+                            "path": "target.docx",
+                            "file_type": "docx",
+                            "change_type": "modify",
+                            "operation": tool_name,
+                            "preview": "表格已写入目标文档",
+                        },
+                        ensure_ascii=False,
+                    )
                 if tool_name == "verify_task_completion":
                     assert tool_args["model_mode"] == "local"
                     payload = json.loads(tool_args["file_states"])
                     assert payload and payload[0]["path"] == "target.docx"
-                    return json.dumps({
-                        "completed": True,
-                        "confidence": 0.96,
-                        "summary": "结果符合要求，目标文档已经完成更新",
-                        "remaining_steps": [],
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "completed": True,
+                            "confidence": 0.96,
+                            "summary": "结果符合要求，目标文档已经完成更新",
+                            "remaining_steps": [],
+                        },
+                        ensure_ascii=False,
+                    )
                 raise AssertionError(f"Unexpected tool call: {tool_name}")
 
         registry = FakeRegistry()
@@ -2770,27 +3553,35 @@ class TestTaskAgentDocumentEdits:
             llm_call_count["count"] += 1
             return {
                 "content": "先执行插表，再检查结果。",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "name": "insert_excel_as_docx_table",
-                    "args": {
-                        "source_path": "sales.xlsx",
-                        "target_path": "target.docx",
-                        "sheet_name": "汇总表",
-                    },
-                }],
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "name": "insert_excel_as_docx_table",
+                        "args": {
+                            "source_path": "sales.xlsx",
+                            "target_path": "target.docx",
+                            "sheet_name": "汇总表",
+                        },
+                    }
+                ],
             }
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
-        monkeypatch.setattr(TaskAgent, "_build_registry", lambda self, files=None: registry)
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
+        monkeypatch.setattr(
+            TaskAgent, "_build_registry", lambda self, files=None: registry
+        )
         monkeypatch.setattr(TaskAgent, "_call_llm", fake_call_llm)
 
         agent = TaskAgent(model_id="test-model")
-        payload = "".join(agent.execute(
-            task="将 xls 表格加入 docx，并确认结果符合要求",
-            files=[],
-            options={"model_mode": "local"},
-        ))
+        payload = "".join(
+            agent.execute(
+                task="将 xls 表格加入 docx，并确认结果符合要求",
+                files=[],
+                options={"model_mode": "local"},
+            )
+        )
 
         assert llm_call_count["count"] == 1
         assert [name for name, _ in registry.executions] == [
@@ -2799,7 +3590,8 @@ class TestTaskAgentDocumentEdits:
         ]
         events = parse_sse_events(payload.encode("utf-8"))
         assert any(
-            e.get("type") == "step_progress" and "检查当前结果是否符合任务要求" in str(e.get("detail", ""))
+            e.get("type") == "step_progress"
+            and "检查当前结果是否符合任务要求" in str(e.get("detail", ""))
             for e in events
         )
         assert any(
@@ -2827,22 +3619,28 @@ class TestTaskAgentDocumentEdits:
             def execute(self, tool_name, tool_args):
                 self.executions.append((tool_name, dict(tool_args)))
                 if tool_name == "insert_excel_as_docx_table":
-                    return json.dumps({
-                        "success": True,
-                        "summary": "已将工作表“销售台账”的 24 行数据写入 Word 表格",
-                        "path": "target.docx",
-                        "file_type": "docx",
-                        "change_type": "modify",
-                        "operation": tool_name,
-                        "preview": "客户 | 地区 | 金额",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "summary": "已将工作表“销售台账”的 24 行数据写入 Word 表格",
+                            "path": "target.docx",
+                            "file_type": "docx",
+                            "change_type": "modify",
+                            "operation": tool_name,
+                            "preview": "客户 | 地区 | 金额",
+                        },
+                        ensure_ascii=False,
+                    )
                 if tool_name == "verify_task_completion":
-                    return json.dumps({
-                        "completed": True,
-                        "confidence": 0.93,
-                        "summary": "目标文档已追加销售台账表格",
-                        "remaining_steps": [],
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "completed": True,
+                            "confidence": 0.93,
+                            "summary": "目标文档已追加销售台账表格",
+                            "remaining_steps": [],
+                        },
+                        ensure_ascii=False,
+                    )
                 raise AssertionError(f"Unexpected tool call: {tool_name}")
 
         registry = FakeRegistry()
@@ -2855,22 +3653,28 @@ class TestTaskAgentDocumentEdits:
                     "为了将《销售台账.xlsx》中的信息加入到《雷鸟访谈问题.docx》中，我将直接把销售台账的数据作为 Word 表格追加到文档末尾。\n\n"
                     "下面开始执行插入操作。\n\n"
                     "```json\n"
-                    "{\"name\": \"insert_excel_as_docx_table\", \"arguments\": {\"source_path\": \"sales.xlsx\", \"target_path\": \"target.docx\", \"table_title\": \"附录：销售台账数据\"}}\n"
+                    '{"name": "insert_excel_as_docx_table", "arguments": {"source_path": "sales.xlsx", "target_path": "target.docx", "table_title": "附录：销售台账数据"}}\n'
                     "```"
                 ),
                 "tool_calls": [],
             }
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
-        monkeypatch.setattr(TaskAgent, "_build_registry", lambda self, files=None: registry)
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
+        monkeypatch.setattr(
+            TaskAgent, "_build_registry", lambda self, files=None: registry
+        )
         monkeypatch.setattr(TaskAgent, "_call_llm", fake_call_llm)
 
         agent = TaskAgent(model_id="test-model")
-        payload = "".join(agent.execute(
-            task="将 xlsx 信息加入 docx，并确认已经写入目标文件",
-            files=[],
-            options={"model_mode": "cloud"},
-        ))
+        payload = "".join(
+            agent.execute(
+                task="将 xlsx 信息加入 docx，并确认已经写入目标文件",
+                files=[],
+                options={"model_mode": "cloud"},
+            )
+        )
 
         assert llm_call_count["count"] == 1
         assert [name for name, _ in registry.executions] == [
@@ -2879,19 +3683,24 @@ class TestTaskAgentDocumentEdits:
         ]
         events = parse_sse_events(payload.encode("utf-8"))
         assert any(
-            e.get("type") == "tool_call" and e.get("tool_name") == "insert_excel_as_docx_table"
+            e.get("type") == "tool_call"
+            and e.get("tool_name") == "insert_excel_as_docx_table"
             for e in events
         )
         assert any(
-            e.get("type") == "done" and "目标文档已追加销售台账表格" in str(e.get("summary", ""))
+            e.get("type") == "done"
+            and "目标文档已追加销售台账表格" in str(e.get("summary", ""))
             for e in events
         )
         assert not any(
-            e.get("type") == "result" and "insert_excel_as_docx_table" in str(e.get("data", ""))
+            e.get("type") == "result"
+            and "insert_excel_as_docx_table" in str(e.get("data", ""))
             for e in events
         )
 
-    def test_task_agent_reinjects_stage_verification_feedback_when_incomplete(self, monkeypatch):
+    def test_task_agent_reinjects_stage_verification_feedback_when_incomplete(
+        self, monkeypatch
+    ):
         from app.core.agent.task_agent import TaskAgent
 
         class FakeRegistry:
@@ -2903,42 +3712,56 @@ class TestTaskAgentDocumentEdits:
 
             def execute(self, tool_name, tool_args):
                 if tool_name == "write_docx_content":
-                    return json.dumps({
-                        "success": True,
-                        "summary": "已写入 2 个段落到 Word 文档",
-                        "path": "draft.docx",
-                        "file_type": "docx",
-                        "change_type": "modify",
-                        "operation": tool_name,
-                        "preview": "第一段\n第二段",
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "success": True,
+                            "summary": "已写入 2 个段落到 Word 文档",
+                            "path": "draft.docx",
+                            "file_type": "docx",
+                            "change_type": "modify",
+                            "operation": tool_name,
+                            "preview": "第一段\n第二段",
+                        },
+                        ensure_ascii=False,
+                    )
                 if tool_name == "verify_task_completion":
-                    return json.dumps({
-                        "completed": False,
-                        "confidence": 0.41,
-                        "summary": "当前文档还缺少结论段",
-                        "remaining_steps": ["补充结论段"],
-                    }, ensure_ascii=False)
+                    return json.dumps(
+                        {
+                            "completed": False,
+                            "confidence": 0.41,
+                            "summary": "当前文档还缺少结论段",
+                            "remaining_steps": ["补充结论段"],
+                        },
+                        ensure_ascii=False,
+                    )
                 raise AssertionError(f"Unexpected tool call: {tool_name}")
 
         seen_message_batches = []
-        responses = iter([
-            {
-                "content": "先写入主体内容。",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "name": "write_docx_content",
-                    "args": {"path": "draft.docx", "paragraphs": []},
-                }],
-            },
-            {
-                "content": "继续补充结论段。",
-                "tool_calls": [],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先写入主体内容。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "write_docx_content",
+                            "args": {"path": "draft.docx", "paragraphs": []},
+                        }
+                    ],
+                },
+                {
+                    "content": "继续补充结论段。",
+                    "tool_calls": [],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
-        monkeypatch.setattr(TaskAgent, "_build_registry", lambda self, files=None: FakeRegistry())
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
+        monkeypatch.setattr(
+            TaskAgent, "_build_registry", lambda self, files=None: FakeRegistry()
+        )
 
         def fake_call_llm(self, provider, messages, system, tool_defs, options=None):
             seen_message_batches.append(messages)
@@ -2950,11 +3773,17 @@ class TestTaskAgentDocumentEdits:
         _ = "".join(agent.execute(task="补全文档并保证结构完整", files=[], options={}))
 
         assert len(seen_message_batches) == 2
-        verify_messages = [m for m in seen_message_batches[1] if m.get("name") == "verify_task_completion"]
+        verify_messages = [
+            m
+            for m in seen_message_batches[1]
+            if m.get("name") == "verify_task_completion"
+        ]
         assert verify_messages
         assert "缺少结论段" in verify_messages[-1]["content"]
 
-    def test_task_agent_skips_duplicate_tool_calls_within_single_batch(self, monkeypatch):
+    def test_task_agent_skips_duplicate_tool_calls_within_single_batch(
+        self, monkeypatch
+    ):
         from app.core.agent.task_agent import TaskAgent
 
         class FakeRegistry:
@@ -2966,14 +3795,17 @@ class TestTaskAgentDocumentEdits:
 
             def execute(self, tool_name, tool_args):
                 self.executions.append((tool_name, dict(tool_args)))
-                return json.dumps({
-                    "success": True,
-                    "summary": "已将工作表“汇总表”的 200 行数据写入 Word 表格",
-                    "path": "target.docx",
-                    "file_type": "docx",
-                    "change_type": "modify",
-                    "operation": tool_name,
-                }, ensure_ascii=False)
+                return json.dumps(
+                    {
+                        "success": True,
+                        "summary": "已将工作表“汇总表”的 200 行数据写入 Word 表格",
+                        "path": "target.docx",
+                        "file_type": "docx",
+                        "change_type": "modify",
+                        "operation": tool_name,
+                    },
+                    ensure_ascii=False,
+                )
 
         registry = FakeRegistry()
         duplicate_args = {
@@ -2982,30 +3814,48 @@ class TestTaskAgentDocumentEdits:
             "sheet_name": "汇总表",
             "table_title": "汇总表",
         }
-        responses = iter([
-            {
-                "content": "先把 Excel 插入 Word 表格。",
-                "tool_calls": [
-                    {"id": "call_1", "name": "insert_excel_as_docx_table", "args": duplicate_args},
-                    {"id": "call_2", "name": "insert_excel_as_docx_table", "args": dict(duplicate_args)},
-                ],
-            },
-            {
-                "content": "目标文档已经更新完成。",
-                "tool_calls": [],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先把 Excel 插入 Word 表格。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "insert_excel_as_docx_table",
+                            "args": duplicate_args,
+                        },
+                        {
+                            "id": "call_2",
+                            "name": "insert_excel_as_docx_table",
+                            "args": dict(duplicate_args),
+                        },
+                    ],
+                },
+                {
+                    "content": "目标文档已经更新完成。",
+                    "tool_calls": [],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
-        monkeypatch.setattr(TaskAgent, "_build_registry", lambda self, files=None: registry)
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
+        monkeypatch.setattr(
+            TaskAgent, "_build_registry", lambda self, files=None: registry
+        )
         monkeypatch.setattr(
             TaskAgent,
             "_call_llm",
-            lambda self, provider, messages, system, tool_defs, options=None: next(responses),
+            lambda self, provider, messages, system, tool_defs, options=None: next(
+                responses
+            ),
         )
 
         agent = TaskAgent(model_id="test-model")
-        payload = "".join(agent.execute(task="将 xls 表格插入 docx", files=[], options={}))
+        payload = "".join(
+            agent.execute(task="将 xls 表格插入 docx", files=[], options={})
+        )
 
         assert registry.executions == [("insert_excel_as_docx_table", duplicate_args)]
         events = parse_sse_events(payload.encode("utf-8"))
@@ -3014,11 +3864,14 @@ class TestTaskAgentDocumentEdits:
             for e in events
         )
         assert any(
-            e.get("type") == "tool_result" and "已跳过重复工具调用" in str(e.get("result_preview", ""))
+            e.get("type") == "tool_result"
+            and "已跳过重复工具调用" in str(e.get("result_preview", ""))
             for e in events
         )
 
-    def test_task_agent_stops_before_repeating_identical_successful_tool_batch(self, monkeypatch):
+    def test_task_agent_stops_before_repeating_identical_successful_tool_batch(
+        self, monkeypatch
+    ):
         from app.core.agent.task_agent import TaskAgent
 
         class FakeRegistry:
@@ -3038,36 +3891,49 @@ class TestTaskAgentDocumentEdits:
             "name": "parse_file_to_text",
             "args": {"path": "demo.txt", "max_chars": 12000},
         }
-        responses = iter([
-            {
-                "content": "先读取当前文件。",
-                "tool_calls": [repeated_call],
-            },
-            {
-                "content": "继续读取当前文件。",
-                "tool_calls": [{
-                    "id": "call_2",
-                    "name": "parse_file_to_text",
-                    "args": {"path": "demo.txt", "max_chars": 12000},
-                }],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先读取当前文件。",
+                    "tool_calls": [repeated_call],
+                },
+                {
+                    "content": "继续读取当前文件。",
+                    "tool_calls": [
+                        {
+                            "id": "call_2",
+                            "name": "parse_file_to_text",
+                            "args": {"path": "demo.txt", "max_chars": 12000},
+                        }
+                    ],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
-        monkeypatch.setattr(TaskAgent, "_build_registry", lambda self, files=None: registry)
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
+        monkeypatch.setattr(
+            TaskAgent, "_build_registry", lambda self, files=None: registry
+        )
         monkeypatch.setattr(
             TaskAgent,
             "_call_llm",
-            lambda self, provider, messages, system, tool_defs, options=None: next(responses),
+            lambda self, provider, messages, system, tool_defs, options=None: next(
+                responses
+            ),
         )
 
         agent = TaskAgent(model_id="test-model")
         payload = "".join(agent.execute(task="总结当前文件", files=[], options={}))
 
-        assert registry.executions == [("parse_file_to_text", {"path": "demo.txt", "max_chars": 12000})]
+        assert registry.executions == [
+            ("parse_file_to_text", {"path": "demo.txt", "max_chars": 12000})
+        ]
         events = parse_sse_events(payload.encode("utf-8"))
         assert any(
-            e.get("type") == "thought" and "重复请求同一组工具" in str(e.get("text", ""))
+            e.get("type") == "thought"
+            and "重复请求同一组工具" in str(e.get("text", ""))
             for e in events
         )
         assert any(
@@ -3075,7 +3941,9 @@ class TestTaskAgentDocumentEdits:
             for e in events
         )
 
-    def test_task_agent_reinjects_failed_tool_feedback_for_sandbox_style_errors(self, monkeypatch):
+    def test_task_agent_reinjects_failed_tool_feedback_for_sandbox_style_errors(
+        self, monkeypatch
+    ):
         from app.core.agent.task_agent import TaskAgent
 
         class FakeRegistry:
@@ -3091,23 +3959,31 @@ class TestTaskAgentDocumentEdits:
 
         registry = FakeRegistry()
         seen_message_batches = []
-        responses = iter([
-            {
-                "content": "先执行 Python 代码。",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "name": "run_python_code",
-                    "args": {"code": "print(1)"},
-                }],
-            },
-            {
-                "content": "我已经知道上一轮失败了。",
-                "tool_calls": [],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先执行 Python 代码。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "run_python_code",
+                            "args": {"code": "print(1)"},
+                        }
+                    ],
+                },
+                {
+                    "content": "我已经知道上一轮失败了。",
+                    "tool_calls": [],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
-        monkeypatch.setattr(TaskAgent, "_build_registry", lambda self, files=None: registry)
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
+        monkeypatch.setattr(
+            TaskAgent, "_build_registry", lambda self, files=None: registry
+        )
 
         def fake_call_llm(self, provider, messages, system, tool_defs, options=None):
             seen_message_batches.append(messages)
@@ -3116,12 +3992,17 @@ class TestTaskAgentDocumentEdits:
         monkeypatch.setattr(TaskAgent, "_call_llm", fake_call_llm)
 
         agent = TaskAgent(model_id="test-model")
-        payload = "".join(agent.execute(task="把 xlsx 信息加入 docx", files=[], options={"model_mode": "local"}))
+        payload = "".join(
+            agent.execute(
+                task="把 xlsx 信息加入 docx", files=[], options={"model_mode": "local"}
+            )
+        )
 
         events = parse_sse_events(payload.encode("utf-8"))
         assert registry.executions == [("run_python_code", {"code": "print(1)"})]
         assert any(
-            e.get("type") == "step_error" and "unsupported operand type" in str(e.get("error", ""))
+            e.get("type") == "step_error"
+            and "unsupported operand type" in str(e.get("error", ""))
             for e in events
         )
         assert not any(
@@ -3133,13 +4014,16 @@ class TestTaskAgentDocumentEdits:
         corrective_prompts = [
             msg.get("content", "")
             for msg in seen_message_batches[1]
-            if msg.get("role") == "user" and "上一轮工具调用失败" in str(msg.get("content", ""))
+            if msg.get("role") == "user"
+            and "上一轮工具调用失败" in str(msg.get("content", ""))
         ]
         assert corrective_prompts
         assert "unsupported operand type" in corrective_prompts[-1]
         assert "不要重复完全相同的工具调用、参数或代码" in corrective_prompts[-1]
 
-    def test_task_agent_stops_before_repeating_identical_failed_tool_batch(self, monkeypatch):
+    def test_task_agent_stops_before_repeating_identical_failed_tool_batch(
+        self, monkeypatch
+    ):
         from app.core.agent.task_agent import TaskAgent
 
         class FakeRegistry:
@@ -3159,40 +4043,56 @@ class TestTaskAgentDocumentEdits:
             "name": "run_python_code",
             "args": {"code": "print(1)"},
         }
-        responses = iter([
-            {
-                "content": "先执行 Python 代码。",
-                "tool_calls": [repeated_call],
-            },
-            {
-                "content": "再试一次相同代码。",
-                "tool_calls": [{
-                    "id": "call_2",
-                    "name": "run_python_code",
-                    "args": {"code": "print(1)"},
-                }],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先执行 Python 代码。",
+                    "tool_calls": [repeated_call],
+                },
+                {
+                    "content": "再试一次相同代码。",
+                    "tool_calls": [
+                        {
+                            "id": "call_2",
+                            "name": "run_python_code",
+                            "args": {"code": "print(1)"},
+                        }
+                    ],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
-        monkeypatch.setattr(TaskAgent, "_build_registry", lambda self, files=None: registry)
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
+        monkeypatch.setattr(
+            TaskAgent, "_build_registry", lambda self, files=None: registry
+        )
         monkeypatch.setattr(
             TaskAgent,
             "_call_llm",
-            lambda self, provider, messages, system, tool_defs, options=None: next(responses),
+            lambda self, provider, messages, system, tool_defs, options=None: next(
+                responses
+            ),
         )
 
         agent = TaskAgent(model_id="test-model")
-        payload = "".join(agent.execute(task="把 xlsx 信息加入 docx", files=[], options={"model_mode": "local"}))
+        payload = "".join(
+            agent.execute(
+                task="把 xlsx 信息加入 docx", files=[], options={"model_mode": "local"}
+            )
+        )
 
         assert registry.executions == [("run_python_code", {"code": "print(1)"})]
         events = parse_sse_events(payload.encode("utf-8"))
         assert any(
-            e.get("type") == "thought" and "重复提交上一轮失败的工具调用" in str(e.get("text", ""))
+            e.get("type") == "thought"
+            and "重复提交上一轮失败的工具调用" in str(e.get("text", ""))
             for e in events
         )
         assert any(
-            e.get("type") == "done" and "检测到重复失败步骤" in str(e.get("summary", ""))
+            e.get("type") == "done"
+            and "检测到重复失败步骤" in str(e.get("summary", ""))
             for e in events
         )
 
@@ -3249,7 +4149,9 @@ class TestTaskAgentDocumentEdits:
             == "gemini-2.5-flash"
         )
 
-    def test_resolve_requested_model_id_rejects_model_without_required_task_capability(self, monkeypatch):
+    def test_resolve_requested_model_id_rejects_model_without_required_task_capability(
+        self, monkeypatch
+    ):
         import web.app as webapp
 
         class _DummyManager:
@@ -3306,23 +4208,31 @@ class TestTaskAgentDocumentEdits:
                 return "B" * 12_000
 
         seen_message_batches = []
-        responses = iter([
-            {
-                "content": "先读取文件全文。",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "name": "parse_file_to_text",
-                    "args": {"path": "demo.txt", "max_chars": 12000},
-                }],
-            },
-            {
-                "content": "已完成。",
-                "tool_calls": [],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先读取文件全文。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "parse_file_to_text",
+                            "args": {"path": "demo.txt", "max_chars": 12000},
+                        }
+                    ],
+                },
+                {
+                    "content": "已完成。",
+                    "tool_calls": [],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
-        monkeypatch.setattr(TaskAgent, "_build_registry", lambda self, files=None: FakeRegistry())
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
+        monkeypatch.setattr(
+            TaskAgent, "_build_registry", lambda self, files=None: FakeRegistry()
+        )
 
         def fake_call_llm(self, provider, messages, system, tool_defs, options=None):
             seen_message_batches.append(messages)
@@ -3334,11 +4244,15 @@ class TestTaskAgentDocumentEdits:
         _ = "".join(agent.execute(task="读取大文件", files=[], options={}))
 
         assert len(seen_message_batches) == 2
-        function_messages = [m for m in seen_message_batches[1] if m.get("role") == "function"]
+        function_messages = [
+            m for m in seen_message_batches[1] if m.get("role") == "function"
+        ]
         assert function_messages
         assert len(function_messages[-1]["content"]) > 4000
 
-    def test_task_agent_run_python_code_can_open_attached_file_by_basename(self, tmp_path, monkeypatch):
+    def test_task_agent_run_python_code_can_open_attached_file_by_basename(
+        self, tmp_path, monkeypatch
+    ):
         openpyxl = pytest.importorskip("openpyxl")
 
         source_path = tmp_path / "销售台账.xlsx"
@@ -3353,53 +4267,70 @@ class TestTaskAgentDocumentEdits:
 
         from app.core.agent.task_agent import TaskAgent
 
-        responses = iter([
-            {
-                "content": "先用 Python 读取附件中的 Excel。",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "name": "run_python_code",
-                    "args": {
-                        "code": (
-                            "import openpyxl\n"
-                            "wb = openpyxl.load_workbook('销售台账.xlsx', read_only=True, data_only=True)\n"
-                            "ws = wb.active\n"
-                            "print(ws['A2'].value)\n"
-                            "wb.close()\n"
-                        )
-                    },
-                }],
-            },
-            {
-                "content": "已成功读取附件文件。",
-                "tool_calls": [],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先用 Python 读取附件中的 Excel。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "run_python_code",
+                            "args": {
+                                "code": (
+                                    "import openpyxl\n"
+                                    "wb = openpyxl.load_workbook('销售台账.xlsx', read_only=True, data_only=True)\n"
+                                    "ws = wb.active\n"
+                                    "print(ws['A2'].value)\n"
+                                    "wb.close()\n"
+                                )
+                            },
+                        }
+                    ],
+                },
+                {
+                    "content": "已成功读取附件文件。",
+                    "tool_calls": [],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
         monkeypatch.setattr(
             TaskAgent,
             "_call_llm",
-            lambda self, provider, messages, system, tool_defs, options=None: next(responses),
+            lambda self, provider, messages, system, tool_defs, options=None: next(
+                responses
+            ),
         )
 
         agent = TaskAgent(model_id="test-model")
-        payload = "".join(agent.execute(
-            task="读取附件里的 Excel 并打印第一行数据",
-            files=[
-                {"path": str(source_path), "name": source_path.name, "type": "xlsx"},
-            ],
-            options={},
-        ))
+        payload = "".join(
+            agent.execute(
+                task="读取附件里的 Excel 并打印第一行数据",
+                files=[
+                    {
+                        "path": str(source_path),
+                        "name": source_path.name,
+                        "type": "xlsx",
+                    },
+                ],
+                options={},
+            )
+        )
 
         events = parse_sse_events(payload.encode("utf-8"))
         assert any(
-            e.get("type") == "tool_result" and "张三" in str(e.get("result_preview", ""))
+            e.get("type") == "tool_result"
+            and "张三" in str(e.get("result_preview", ""))
             for e in events
         )
         assert any(e.get("type") == "done" for e in events)
 
-    def test_run_python_in_sandbox_syncs_modified_attached_file_when_cleanup_fails(self, tmp_path, monkeypatch):
+    def test_run_python_in_sandbox_syncs_modified_attached_file_when_cleanup_fails(
+        self, tmp_path, monkeypatch
+    ):
         from app.core.agent import task_tools
 
         source_path = tmp_path / "任务说明.txt"
@@ -3442,49 +4373,61 @@ class TestTaskAgentDocumentEdits:
         assert result.get("error") == ""
         assert result.get("stdout", "").strip() == "ok"
 
-    def test_task_agent_run_python_code_syncs_modified_attached_file_and_emits_file_change(self, tmp_path, monkeypatch):
+    def test_task_agent_run_python_code_syncs_modified_attached_file_and_emits_file_change(
+        self, tmp_path, monkeypatch
+    ):
         source_path = tmp_path / "任务说明.txt"
         source_path.write_text("before", encoding="utf-8")
 
         from app.core.agent.task_agent import TaskAgent
 
-        responses = iter([
-            {
-                "content": "先用 Python 修改附件内容。",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "name": "run_python_code",
-                    "args": {
-                        "code": (
-                            "from pathlib import Path\n"
-                            f"p = Path(TASK_SANDBOX_FILE_PATHS[{source_path.name!r}])\n"
-                            "p.write_text('after', encoding='utf-8')\n"
-                            f"print('KOTO_MODIFIED:' + TASK_SANDBOX_FILE_PATHS[{source_path.name!r}])\n"
-                        )
-                    },
-                }],
-            },
-            {
-                "content": "已完成附件修改。",
-                "tool_calls": [],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先用 Python 修改附件内容。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "run_python_code",
+                            "args": {
+                                "code": (
+                                    "from pathlib import Path\n"
+                                    f"p = Path(TASK_SANDBOX_FILE_PATHS[{source_path.name!r}])\n"
+                                    "p.write_text('after', encoding='utf-8')\n"
+                                    f"print('KOTO_MODIFIED:' + TASK_SANDBOX_FILE_PATHS[{source_path.name!r}])\n"
+                                )
+                            },
+                        }
+                    ],
+                },
+                {
+                    "content": "已完成附件修改。",
+                    "tool_calls": [],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
         monkeypatch.setattr(
             TaskAgent,
             "_call_llm",
-            lambda self, provider, messages, system, tool_defs, options=None: next(responses),
+            lambda self, provider, messages, system, tool_defs, options=None: next(
+                responses
+            ),
         )
 
         agent = TaskAgent(model_id="test-model")
-        payload = "".join(agent.execute(
-            task="把附件内容改成 after",
-            files=[
-                {"path": str(source_path), "name": source_path.name, "type": "txt"},
-            ],
-            options={"model_mode": "local"},
-        ))
+        payload = "".join(
+            agent.execute(
+                task="把附件内容改成 after",
+                files=[
+                    {"path": str(source_path), "name": source_path.name, "type": "txt"},
+                ],
+                options={"model_mode": "local"},
+            )
+        )
 
         events = parse_sse_events(payload.encode("utf-8"))
         assert source_path.read_text(encoding="utf-8") == "after"
@@ -3496,49 +4439,61 @@ class TestTaskAgentDocumentEdits:
         )
         assert any(e.get("type") == "done" for e in events)
 
-    def test_task_agent_run_python_code_detects_direct_source_file_modification(self, tmp_path, monkeypatch):
+    def test_task_agent_run_python_code_detects_direct_source_file_modification(
+        self, tmp_path, monkeypatch
+    ):
         source_path = tmp_path / "任务说明.txt"
         source_path.write_text("before", encoding="utf-8")
 
         from app.core.agent.task_agent import TaskAgent
 
-        responses = iter([
-            {
-                "content": "直接修改原始附件路径。",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "name": "run_python_code",
-                    "args": {
-                        "code": (
-                            "from pathlib import Path\n"
-                            f"p = Path(TASK_FILE_PATHS[{source_path.name!r}])\n"
-                            "p.write_text('after-direct', encoding='utf-8')\n"
-                            "print('done')\n"
-                        )
-                    },
-                }],
-            },
-            {
-                "content": "已完成原文件修改。",
-                "tool_calls": [],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "直接修改原始附件路径。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "run_python_code",
+                            "args": {
+                                "code": (
+                                    "from pathlib import Path\n"
+                                    f"p = Path(TASK_FILE_PATHS[{source_path.name!r}])\n"
+                                    "p.write_text('after-direct', encoding='utf-8')\n"
+                                    "print('done')\n"
+                                )
+                            },
+                        }
+                    ],
+                },
+                {
+                    "content": "已完成原文件修改。",
+                    "tool_calls": [],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
         monkeypatch.setattr(
             TaskAgent,
             "_call_llm",
-            lambda self, provider, messages, system, tool_defs, options=None: next(responses),
+            lambda self, provider, messages, system, tool_defs, options=None: next(
+                responses
+            ),
         )
 
         agent = TaskAgent(model_id="test-model")
-        payload = "".join(agent.execute(
-            task="把原始附件内容改成 after-direct",
-            files=[
-                {"path": str(source_path), "name": source_path.name, "type": "txt"},
-            ],
-            options={"model_mode": "local"},
-        ))
+        payload = "".join(
+            agent.execute(
+                task="把原始附件内容改成 after-direct",
+                files=[
+                    {"path": str(source_path), "name": source_path.name, "type": "txt"},
+                ],
+                options={"model_mode": "local"},
+            )
+        )
 
         events = parse_sse_events(payload.encode("utf-8"))
         assert source_path.read_text(encoding="utf-8") == "after-direct"
@@ -3550,7 +4505,9 @@ class TestTaskAgentDocumentEdits:
         )
         assert any(e.get("type") == "done" for e in events)
 
-    def test_task_agent_inserts_excel_table_into_docx_and_emits_file_change(self, tmp_path, monkeypatch):
+    def test_task_agent_inserts_excel_table_into_docx_and_emits_file_change(
+        self, tmp_path, monkeypatch
+    ):
         openpyxl = pytest.importorskip("openpyxl")
         docx_module = pytest.importorskip("docx")
 
@@ -3572,47 +4529,66 @@ class TestTaskAgentDocumentEdits:
 
         from app.core.agent.task_agent import TaskAgent
 
-        responses = iter([
-            {
-                "content": "先读取 Excel，并把数据写成 Word 表格。",
-                "tool_calls": [{
-                    "id": "call_1",
-                    "name": "insert_excel_as_docx_table",
-                    "args": {
-                        "source_path": str(source_path),
-                        "target_path": str(target_path),
-                        "sheet_name": "销售数据",
-                        "table_title": "销售台账",
-                    },
-                }],
-            },
-            {
-                "content": "已完成 Excel 到 Word 表格写入，并校验目标文档。",
-                "tool_calls": [],
-            },
-        ])
+        responses = iter(
+            [
+                {
+                    "content": "先读取 Excel，并把数据写成 Word 表格。",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "name": "insert_excel_as_docx_table",
+                            "args": {
+                                "source_path": str(source_path),
+                                "target_path": str(target_path),
+                                "sheet_name": "销售数据",
+                                "table_title": "销售台账",
+                            },
+                        }
+                    ],
+                },
+                {
+                    "content": "已完成 Excel 到 Word 表格写入，并校验目标文档。",
+                    "tool_calls": [],
+                },
+            ]
+        )
 
-        monkeypatch.setattr(TaskAgent, "_get_provider", lambda self, options=None: object())
+        monkeypatch.setattr(
+            TaskAgent, "_get_provider", lambda self, options=None: object()
+        )
         monkeypatch.setattr(
             TaskAgent,
             "_call_llm",
-            lambda self, provider, messages, system, tool_defs, options=None: next(responses),
+            lambda self, provider, messages, system, tool_defs, options=None: next(
+                responses
+            ),
         )
 
         agent = TaskAgent(model_id="test-model")
-        payload = "".join(agent.execute(
-            task="将excel数据加入word，做一个新表格",
-            files=[
-                {"path": str(source_path), "name": source_path.name, "type": "xlsx"},
-                {"path": str(target_path), "name": target_path.name, "type": "docx"},
-            ],
-            options={},
-        ))
+        payload = "".join(
+            agent.execute(
+                task="将excel数据加入word，做一个新表格",
+                files=[
+                    {
+                        "path": str(source_path),
+                        "name": source_path.name,
+                        "type": "xlsx",
+                    },
+                    {
+                        "path": str(target_path),
+                        "name": target_path.name,
+                        "type": "docx",
+                    },
+                ],
+                options={},
+            )
+        )
 
         events = parse_sse_events(payload.encode("utf-8"))
         assert any(e.get("type") == "file_change" for e in events)
         assert any(
-            e.get("type") == "file_change" and str(e.get("path", "")).endswith("雷鸟访问问题.docx")
+            e.get("type") == "file_change"
+            and str(e.get("path", "")).endswith("雷鸟访问问题.docx")
             for e in events
         )
         assert any(e.get("type") == "done" for e in events)
@@ -3658,9 +4634,15 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "_waSendToAgent(" not in send_block
         assert "_waSendToChat(" not in send_block
 
-    def test_workspace_send_message_builds_whitebox_payload_with_target_path_history_and_model_state(self):
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
+    def test_workspace_send_message_builds_whitebox_payload_with_target_path_history_and_model_state(
+        self,
+    ):
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
 
         send_start = assistant.index("window.WA.sendMessage = () => {")
         send_end = assistant.index("// ── Auto-save", send_start)
@@ -3669,21 +4651,41 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "pinnedSelText," in send_block
         assert "pinnedSelSource," in send_block
         assert "_waTaskDispatcher.dispatchMessage({" in send_block
-        assert "function buildWhiteboxTaskPayload(text, pinnedSelText, pinnedSelSource, overrides) {" in dispatcher
+        assert (
+            "function buildWhiteboxTaskPayload(text, pinnedSelText, pinnedSelSource, overrides) {"
+            in dispatcher
+        )
         assert "current_file:" not in dispatcher
         assert "getCurrentAIContextPath" not in dispatcher
-        assert "target_path: targetFile ? (targetFile.path || targetFile.name || '') : ''," in dispatcher
-        assert "model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto'," in dispatcher
-        assert "model_id: typeof options.getSelectedCloudModelId === 'function' ? options.getSelectedCloudModelId() : ''," in dispatcher
+        assert (
+            "target_path: targetFile ? (targetFile.path || targetFile.name || '') : '',"
+            in dispatcher
+        )
+        assert (
+            "model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto',"
+            in dispatcher
+        )
+        assert (
+            "model_id: typeof options.getSelectedCloudModelId === 'function' ? options.getSelectedCloudModelId() : '',"
+            in dispatcher
+        )
         assert "options: overrideOptions," in dispatcher
-        assert "history: typeof options.getConversationHistory === 'function'" in dispatcher
-        assert "const payload = buildWhiteboxTaskPayload(context.text, context.pinnedSelText, context.pinnedSelSource, context);" in dispatcher
+        assert (
+            "history: typeof options.getConversationHistory === 'function'"
+            in dispatcher
+        )
+        assert (
+            "const payload = buildWhiteboxTaskPayload(context.text, context.pinnedSelText, context.pinnedSelSource, context);"
+            in dispatcher
+        )
         assert "return Promise.resolve(streamWhiteboxTask({" in dispatcher
         assert "payload," in dispatcher
         assert "taskTurnMetadataFromLoadingEl(loadingEl)" in dispatcher
 
     def test_workspace_dispatcher_marks_short_task_critiques_as_followup_context(self):
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function latestCompletedFileTaskTurn()" in dispatcher
         assert "function looksLikeDiagnosticLead(text)" in dispatcher
@@ -3694,18 +4696,37 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "overrideOptions.followup_context = followupContext;" in dispatcher
         assert "context.previous_run_id = previousRunId;" in dispatcher
         assert "context.previous_task_mode = previousTaskMode;" in dispatcher
-        assert "context.previous_task_file_changes = previousTaskFileChanges;" in dispatcher
+        assert (
+            "context.previous_task_file_changes = previousTaskFileChanges;"
+            in dispatcher
+        )
 
     def test_workspace_task_cards_offer_run_bound_followup_actions(self):
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        task_renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
+        task_renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "window.WA.beginTaskResultFollowup = (details) => {" in assistant
         assert "state._pendingTaskFollowupContext = followupContext;" in assistant
-        assert "options: pendingTaskFollowupContext ? { followup_context: pendingTaskFollowupContext } : {}," in assistant
-        assert "请把上一轮已经给出的建议直接应用到目标文件；沿用同一任务上下文继续写回，不要重新从头分析。" in assistant
-        assert "previous_task_output_mode: String(payload.output_mode || '').trim()," in assistant
-        assert "previous_task_intent_strategy: String(payload.intent_strategy || '').trim()," in assistant
+        assert (
+            "options: pendingTaskFollowupContext ? { followup_context: pendingTaskFollowupContext } : {},"
+            in assistant
+        )
+        assert (
+            "请把上一轮已经给出的建议直接应用到目标文件；沿用同一任务上下文继续写回，不要重新从头分析。"
+            in assistant
+        )
+        assert (
+            "previous_task_output_mode: String(payload.output_mode || '').trim(),"
+            in assistant
+        )
+        assert (
+            "previous_task_intent_strategy: String(payload.intent_strategy || '').trim(),"
+            in assistant
+        )
         assert "previous_task_intent_can_apply" in assistant
         assert "previous_task_intent_requires_confirmation" in assistant
         assert "function taskResultActionsHtml(card) {" in task_renderer
@@ -3714,24 +4735,53 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert 'data-task-followup-action="improve"' in task_renderer
         assert "window.WA.beginTaskResultFollowup({" in task_renderer
         assert "output_mode: card.dataset.taskOutputMode || ''," in task_renderer
-        assert "intent_strategy: card.dataset.taskIntentStrategy || ''," in task_renderer
-        assert "intent_can_apply: boolAttr(card.dataset.taskIntentCanApply)," in task_renderer
-        assert "intent_requires_confirmation: boolAttr(card.dataset.taskIntentRequiresConfirmation)," in task_renderer
-        assert "file_changes: Array.isArray(taskState.fileChanges) ? taskState.fileChanges.slice(-8) : []," in task_renderer
+        assert (
+            "intent_strategy: card.dataset.taskIntentStrategy || ''," in task_renderer
+        )
+        assert (
+            "intent_can_apply: boolAttr(card.dataset.taskIntentCanApply),"
+            in task_renderer
+        )
+        assert (
+            "intent_requires_confirmation: boolAttr(card.dataset.taskIntentRequiresConfirmation),"
+            in task_renderer
+        )
+        assert (
+            "file_changes: Array.isArray(taskState.fileChanges) ? taskState.fileChanges.slice(-8) : [],"
+            in task_renderer
+        )
         assert "card.dataset.taskRunId" in task_renderer
         assert "previous_task_file_changes = previousTaskFileChanges" in assistant
 
     def test_workspace_whitebox_renderer_is_extracted(self):
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
-        ai_transport = Path("web/static/js/workspace-ai-transport.js").read_text(encoding="utf-8")
-        ai_results = Path("web/static/js/workspace-ai-results.js").read_text(encoding="utf-8")
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
-        conversation = Path("web/static/js/workspace-ai-conversation.js").read_text(encoding="utf-8")
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
-        standalone = Path("web/templates/workspace_assistant.html").read_text(encoding="utf-8")
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
+        ai_transport = Path("web/static/js/workspace-ai-transport.js").read_text(
+            encoding="utf-8"
+        )
+        ai_results = Path("web/static/js/workspace-ai-results.js").read_text(
+            encoding="utf-8"
+        )
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
+        conversation = Path("web/static/js/workspace-ai-conversation.js").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
+        standalone = Path("web/templates/workspace_assistant.html").read_text(
+            encoding="utf-8"
+        )
         main = Path("web/templates/index.html").read_text(encoding="utf-8")
-        asset_scripts = Path("web/templates/_workspace_asset_scripts.html").read_text(encoding="utf-8")
+        asset_scripts = Path("web/templates/_workspace_asset_scripts.html").read_text(
+            encoding="utf-8"
+        )
 
         assert "window.WA.streamWhiteboxTask" in renderer
         assert "fetch('/api/editor/ai/task-stream'" in renderer
@@ -3741,10 +4791,18 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "window.WA.createWorkspaceAiConversation" in conversation
         assert "model' || value === 'ai'" in conversation
         assert "window.WA.createTaskDispatcher" in dispatcher
-        assert "typeof window.WA.createWorkspaceAiResultsRuntime === 'function'" in assistant
-        assert "typeof window.WA.createWorkspaceAiConversation === 'function'" in assistant
+        assert (
+            "typeof window.WA.createWorkspaceAiResultsRuntime === 'function'"
+            in assistant
+        )
+        assert (
+            "typeof window.WA.createWorkspaceAiConversation === 'function'" in assistant
+        )
         assert "window.WA.hydrateAiHistory" in assistant
-        assert "typeof window.WA.createWorkspaceQuickActionRuntime === 'function'" in assistant
+        assert (
+            "typeof window.WA.createWorkspaceQuickActionRuntime === 'function'"
+            in assistant
+        )
         assert "_waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);" in assistant
         assert "typeof window.WA.createTaskDispatcher === 'function'" in assistant
         assert "fetch('/api/editor/ai/task-stream'" not in assistant
@@ -3759,12 +4817,18 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "doc-agent-ui.js" not in standalone
         assert "wa-doc-agent-phases" not in standalone
         assert "wa-inline-ai" not in main
-        assert "data-dm=\"inline\"" not in main
+        assert 'data-dm="inline"' not in main
 
     def test_workspace_dispatcher_exposes_extension_registration_points(self):
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "registerMessageRoute" in dispatcher
         assert "registerQuickActionHandler" in dispatcher
@@ -3776,20 +4840,35 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "window.WA.registerTaskActionKeyword" in assistant
 
     def test_workspace_dispatcher_records_assistant_turns_for_task_history(self):
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function appendAssistantConversationTurn(text, metadata)" in dispatcher
         assert "options.appendAssistantTurn(content" in dispatcher
         assert "options.getConversationHistory()" in dispatcher
         assert ".then((streamResult) =>" in dispatcher
-        assert "function finalizeWhiteboxTaskTurn(taskTurnId, loadingEl, result, fallbackStatus, skipModelContext)" in dispatcher
-        assert "appendAssistantConversationTurn(assistantText, turnMetadata);" in dispatcher
+        assert (
+            "function finalizeWhiteboxTaskTurn(taskTurnId, loadingEl, result, fallbackStatus, skipModelContext)"
+            in dispatcher
+        )
+        assert (
+            "appendAssistantConversationTurn(assistantText, turnMetadata);"
+            in dispatcher
+        )
 
-    def test_workspace_conversation_runtime_uses_in_memory_session_store_and_model_context(self):
-        conversation = Path("web/static/js/workspace-ai-conversation.js").read_text(encoding="utf-8")
+    def test_workspace_conversation_runtime_uses_in_memory_session_store_and_model_context(
+        self,
+    ):
+        conversation = Path("web/static/js/workspace-ai-conversation.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "function normalizeRole(role)" in conversation
-        assert "if (value === 'model' || value === 'ai') return 'assistant';" in conversation
+        assert (
+            "if (value === 'model' || value === 'ai') return 'assistant';"
+            in conversation
+        )
         assert "const sessionStore = new Map();" in conversation
         assert "function normalizedSessionId(rawSessionId)" in conversation
         assert "async function hydrate(params)" in conversation
@@ -3800,7 +4879,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "turn.status !== 'error'" in conversation
 
     def test_workspace_assistant_uses_runtime_scoped_ai_session(self):
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "_linkedAiSessionId" not in assistant
         assert "function _waConversationDocId()" not in assistant
@@ -3811,31 +4892,63 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "window.WA.openAiSessionFromSidebar" not in assistant
         assert "window.WA.renameLinkedAiSession" not in assistant
         assert "window.WA.removeLinkedAiSession" not in assistant
-        assert "getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'" in assistant
+        assert (
+            "getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'"
+            in assistant
+        )
 
     def test_workspace_task_cards_are_snapshotted_for_runtime_history_restore(self):
-        conversation = Path("web/static/js/workspace-ai-conversation.js").read_text(encoding="utf-8")
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        task_renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        conversation = Path("web/static/js/workspace-ai-conversation.js").read_text(
+            encoding="utf-8"
+        )
+        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+            encoding="utf-8"
+        )
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
+        task_renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
-        assert "turn.task_card_snapshot && window.WA && typeof window.WA.restoreTaskRunCard === 'function'" in conversation
+        assert (
+            "turn.task_card_snapshot && window.WA && typeof window.WA.restoreTaskRunCard === 'function'"
+            in conversation
+        )
         assert "task_card_snapshot:" in conversation
         assert "function beginAssistantTaskTurn(metadata) {" in conversation
         assert "function syncAssistantTaskTurn(turnId, metadata) {" in conversation
         assert "任务处理中…" in conversation
         assert "loadingEl.classList.contains('wa-task-run')" in conversation
         assert "if (loadingEl && loadingEl.isConnected) {" in conversation
-        assert "const taskTurn = typeof options.beginAssistantTaskTurn === 'function'" in dispatcher
+        assert (
+            "const taskTurn = typeof options.beginAssistantTaskTurn === 'function'"
+            in dispatcher
+        )
         assert "onTaskCardSnapshot: (card) => {" in dispatcher
         assert "options.syncAssistantTaskTurn(taskTurnId" in dispatcher
-        assert "beginAssistantTaskTurn: (metadata) => _waConversationRuntime && typeof _waConversationRuntime.beginAssistantTaskTurn === 'function'" in assistant
-        assert "syncAssistantTaskTurn: (turnId, metadata) => _waConversationRuntime && typeof _waConversationRuntime.syncAssistantTaskTurn === 'function'" in assistant
-        assert "window.WA.restoreTaskRunCard = function restoreTaskRunCard(snapshot) {" in task_renderer
+        assert (
+            "beginAssistantTaskTurn: (metadata) => _waConversationRuntime && typeof _waConversationRuntime.beginAssistantTaskTurn === 'function'"
+            in assistant
+        )
+        assert (
+            "syncAssistantTaskTurn: (turnId, metadata) => _waConversationRuntime && typeof _waConversationRuntime.syncAssistantTaskTurn === 'function'"
+            in assistant
+        )
+        assert (
+            "window.WA.restoreTaskRunCard = function restoreTaskRunCard(snapshot) {"
+            in task_renderer
+        )
         assert "function isTaskCardElement(value) {" in task_renderer
-        assert "if (!isTaskCardElement(card) || card._waRunCardBehaviorAttached) return card;" in task_renderer
+        assert (
+            "if (!isTaskCardElement(card) || card._waRunCardBehaviorAttached) return card;"
+            in task_renderer
+        )
         assert "if (!isTaskCardElement(card)) return null;" in task_renderer
-        assert "const card = isTaskCardElement(loadingEl) ? loadingEl : document.createElement('div');" in task_renderer
+        assert (
+            "const card = isTaskCardElement(loadingEl) ? loadingEl : document.createElement('div');"
+            in task_renderer
+        )
         assert "if (typeof opts.onTaskCardSnapshot === 'function') {" in task_renderer
         assert "return attachRunCardBehavior(card);" in task_renderer
 
@@ -3847,11 +4960,15 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "_maybeOpenWorkspaceAssistantSession" not in app_js
         assert "_notifyWorkspaceAssistantSessionRenamed" not in app_js
         assert "_notifyWorkspaceAssistantSessionDeleted" not in app_js
-        assert "def _is_workspace_assistant_session(filename: str) -> bool:" in sessions_bp
+        assert (
+            "def _is_workspace_assistant_session(filename: str) -> bool:" in sessions_bp
+        )
         assert "if not _is_workspace_assistant_session(session)" in sessions_bp
 
     def test_workspace_task_renderer_drops_loaded_memory_context_step(self):
-        renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
 
         assert "type === 'memory.loaded'" not in renderer
         assert "已读取相关对话记忆" not in renderer
@@ -3859,13 +4976,21 @@ class TestWorkspaceAssistantTaskRemovalRegression:
 
     def test_workspace_quick_actions_remove_editor_ai_stream_fallback(self):
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
+        quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(
+            encoding="utf-8"
+        )
         assert "async function _sendViaEditorActionSSE(payload)" not in src
         assert "window.WA.sendQuickAction = (action) => {" in src
-        assert "getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'" in src
+        assert (
+            "getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'"
+            in src
+        )
         assert "/api/editor/ai/stream" not in quick_actions
         assert "action: editorAction" not in quick_actions
-        assert "history: typeof options.getConversationHistory === 'function'" not in quick_actions
+        assert (
+            "history: typeof options.getConversationHistory === 'function'"
+            not in quick_actions
+        )
         assert "options.appendAssistantTurn(trimmed" not in quick_actions
         assert "options.getSessionId()" not in quick_actions
         assert "streamEventBlocks({" not in quick_actions
@@ -3875,7 +5000,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "window.WA.quickAction =" in src
 
     def test_workspace_transport_accepts_pre_serialized_json_bodies(self):
-        transport = Path("web/static/js/workspace-ai-transport.js").read_text(encoding="utf-8")
+        transport = Path("web/static/js/workspace-ai-transport.js").read_text(
+            encoding="utf-8"
+        )
         assert "const requestBody = typeof options.body === 'string'" in transport
         assert "body: requestBody," in transport
 
@@ -3890,18 +5017,23 @@ class TestWorkspaceAssistantTaskRemovalRegression:
     def test_workspace_topic_ai_stub_remains_disabled(self):
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
         assert "window.WA.extractTopics = async () =>" in src
-        assert "showToast('文件助手 AI 对话任务流已移除；请使用快捷功能键。', 'warn');" in src
+        assert (
+            "showToast('文件助手 AI 对话任务流已移除；请使用快捷功能键。', 'warn');"
+            in src
+        )
 
     def test_workspace_templates_do_not_expose_retired_inline_ai_controls(self):
         embedded_html = Path("web/templates/index.html").read_text(encoding="utf-8")
-        standalone_html = Path("web/templates/workspace_assistant.html").read_text(encoding="utf-8")
+        standalone_html = Path("web/templates/workspace_assistant.html").read_text(
+            encoding="utf-8"
+        )
 
         assert not Path("web/static/js/doc-agent-ui.js").exists()
         assert not Path("web/static/css/doc-agent.css").exists()
         assert "wa-inline-ai" not in embedded_html
         assert "WA.sendInlineMessage()" not in embedded_html
         assert "WA.inlineQuickAction(" not in embedded_html
-        assert "data-dm=\"inline\"" not in embedded_html
+        assert 'data-dm="inline"' not in embedded_html
         assert "doc-agent.css" not in standalone_html
         assert "doc-agent-ui.js" not in standalone_html
         assert "wa-doc-agent-phases" not in standalone_html
@@ -3918,7 +5050,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "_pinSelectionChip(liveSelection);" in input_section
 
     def test_workspace_scripts_do_not_reference_retired_ai_input_id(self):
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
         embedded_html = Path("web/templates/index.html").read_text(encoding="utf-8")
 
         assert "wa-ai-input')" not in assistant
@@ -3964,17 +5098,27 @@ class TestWorkspaceAssistantTaskRemovalRegression:
 
     def test_workspace_proposal_card_filters_duplicate_rationale_text(self):
         """Proposal cards should hide rationale text when it just repeats original/proposed content."""
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        results = Path("web/static/js/workspace-ai-results.js").read_text(encoding="utf-8")
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
+        results = Path("web/static/js/workspace-ai-results.js").read_text(
+            encoding="utf-8"
+        )
         assert "function _getProposalRationaleText(proposal)" in assistant
         assert "_waAiResultsRuntime.getProposalRationaleText(proposal)" in assistant
         assert "function getProposalRationaleText(proposal)" in results
         assert "rationaleKey === originalKey || rationaleKey === proposedKey" in results
 
     def test_workspace_ai_review_tool_calls_route_into_docx_review_surface(self):
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        results = Path("web/static/js/workspace-ai-results.js").read_text(encoding="utf-8")
-        task_renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(
+            encoding="utf-8"
+        )
+        results = Path("web/static/js/workspace-ai-results.js").read_text(
+            encoding="utf-8"
+        )
+        task_renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
         assert "window.WA.applyStructuredDocToolCall" in assistant
         assert "window.WA.applyStructuredReviewChangePayload" in assistant
         assert "window.WA.applyStructuredDocToolCall(proposal.tool_call" in results
@@ -3993,7 +5137,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         """Structured proposal summary should reuse the sanitized note, not raw clean_text."""
         src = Path("app/core/agent/agent_loop.py").read_text(encoding="utf-8")
         assert 'proposal_summary = proposals[0].get("rationale", "")' in src
-        assert 'yield evt_proposal(proposals, proposal_summary)' in src
+        assert "yield evt_proposal(proposals, proposal_summary)" in src
 
     def test_workspace_assistant_docx_helpers_stay_outside_browser_ctx(self):
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")

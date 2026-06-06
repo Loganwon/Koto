@@ -1,7 +1,7 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-NetworkPlugin — 网络请求、网页内容抓取
+NetworkPlugin — 只读网络请求、网页内容抓取
 
 从 web/adaptive_agent.py 的 network_ops 工具迁移而来,
 适配 UnifiedAgent 插件体系。
@@ -13,7 +13,7 @@ from app.core.agent.base import AgentPlugin
 
 
 class NetworkPlugin(AgentPlugin):
-    """Provides HTTP fetching and basic HTML parsing capabilities."""
+    """Provides read-only HTTP fetching and basic HTML parsing capabilities."""
 
     @property
     def name(self) -> str:
@@ -21,7 +21,7 @@ class NetworkPlugin(AgentPlugin):
 
     @property
     def description(self) -> str:
-        return "Fetch web pages, download content, and parse HTML."
+        return "Fetch web pages and parse HTML."
 
     def get_tools(self) -> List[Dict[str, Any]]:
         return [
@@ -36,22 +36,6 @@ class NetworkPlugin(AgentPlugin):
                         "url": {"type": "STRING", "description": "The URL to fetch."}
                     },
                     "required": ["url"],
-                },
-            },
-            {
-                "name": "http_post",
-                "func": self.http_post,
-                "description": "Perform an HTTP POST request with a JSON body.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "url": {"type": "STRING", "description": "The URL to post to."},
-                        "body": {
-                            "type": "STRING",
-                            "description": "JSON string to send as the request body.",
-                        },
-                    },
-                    "required": ["url", "body"],
                 },
             },
             {
@@ -92,22 +76,6 @@ class NetworkPlugin(AgentPlugin):
             )
         except Exception as exc:
             return f"HTTP GET error: {exc}"
-
-    @staticmethod
-    def http_post(url: str, body: str) -> str:
-        """POST JSON to a URL."""
-        try:
-            import json as _json
-
-            import requests
-
-            data = _json.loads(body)
-            resp = requests.post(
-                url, json=data, timeout=15, headers={"User-Agent": "Koto/1.0"}
-            )
-            return f"Status: {resp.status_code}\n" f"{resp.text[:2000]}"
-        except Exception as exc:
-            return f"HTTP POST error: {exc}"
 
     @staticmethod
     def parse_html(url: str, selector: str) -> str:

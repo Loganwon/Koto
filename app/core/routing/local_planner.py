@@ -30,7 +30,7 @@ class LocalPlanner:
 - FILE_GEN   : 生成文档/PPT/Word/PDF/Excel
 - PAINTER    : 生成配图（AI绘画）
 - CODER      : 编写/运行代码、数据可视化图表
-- SYSTEM     : 系统操作（打开应用、截图等）
+- SYSTEM     : 查询系统信息（时间、日期、CPU/内存/磁盘状态）
 - AGENT      : 复杂自动化（微信发消息、浏览器操作等）
 
 字段说明:
