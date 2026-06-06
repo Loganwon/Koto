@@ -74,53 +74,21 @@ class _MockWebSearcher:
 
 
 class _MockLocalExecutor:
-    APP_ALIASES = {
-        "微信": [],
-        "qq": [],
-        "chrome": [],
-        "edge": [],
-        "steam": [],
-        "vscode": [],
-        "计算器": [],
-        "截图": [],
-        "西瓜加速": ["西瓜加速器"],
-    }
-    SYSTEM_KEYWORDS = [
-        "截图",
-        "屏幕截图",
+    INFO_KEYWORDS = [
         "系统时间",
-        "关机",
-        "重启",
-        "休眠",
-        "音量",
-        "亮度",
+        "当前时间",
+        "今天日期",
+        "系统状态",
+        "系统信息",
+        "cpu",
+        "内存",
+        "硬盘",
     ]
 
     @classmethod
     def is_system_command(cls, text):
         text_lower = text.lower().strip()
-        has_app = any(alias in text_lower for alias in cls.APP_ALIASES)
-        is_standalone = text_lower in cls.APP_ALIASES or any(
-            kw in text_lower for kw in cls.SYSTEM_KEYWORDS
-        )
-        _cmd_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
-        _exclude_metaphors = (
-            "文件",
-            "网页",
-            "网站",
-            "url",
-            "思路",
-            "方式",
-            "方法",
-            "问题",
-            "功能",
-        )
-        is_action_command = (
-            len(text_lower) <= 18
-            and any(text_lower.startswith(s) for s in _cmd_starters)
-            and not any(k in text_lower for k in _exclude_metaphors)
-        )
-        return has_app or is_standalone or is_action_command
+        return any(kw in text_lower for kw in cls.INFO_KEYWORDS)
 
 
 class _MockContextAnalyzer:
@@ -158,12 +126,12 @@ CASES = [
     ("目前伊朗局势如何", "WEB_SEARCH", "时效-局势"),
     ("最新AI新闻", "WEB_SEARCH", "时效-新闻"),
     ("近期的AI动态", "WEB_SEARCH", "时效-动态"),
-    # ─── 系统命令 ─────────────────────────────────────────────
-    ("打开微信", "SYSTEM", "系统-打开微信"),
-    ("启动Chrome", "SYSTEM", "系统-启动Chrome"),
-    ("关闭QQ", "SYSTEM", "系统-关闭QQ"),
-    ("打开西瓜加速", "SYSTEM", "系统-打开加速器"),
-    ("截图", "SYSTEM", "系统-截图"),
+    # ─── 系统信息 / 已退役系统控制 ─────────────────────────────
+    ("系统状态怎么样", "SYSTEM", "系统-状态"),
+    ("当前时间", "SYSTEM", "系统-时间"),
+    ("启动Chrome", "CHAT", "退役-启动Chrome"),
+    ("关闭QQ", "CHAT", "退役-关闭QQ"),
+    ("截图", "CHAT", "退役-截图"),
     # ─── 代码 ─────────────────────────────────────────────────
     ("帮我写一个Python排序函数", "CODER", "代码-写函数"),
     ("做一个折线图", "CODER", "图表-折线图"),

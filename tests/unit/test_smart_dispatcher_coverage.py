@@ -77,7 +77,6 @@ class TestIsTrivialInput:
         [
             "帮我画一张图片",
             "写一个python代码",
-            "打开chrome",
             "今天天气怎么样",
             "生成word文档",
             "目前金价是多少",
@@ -103,11 +102,11 @@ class TestQuickTaskHint:
     def setup_method(self):
         self.SD = _fresh_dispatcher()
 
-    def test_system_command_open_chrome(self):
-        assert self.SD._quick_task_hint("打开chrome") == "SYSTEM"
+    def test_open_app_command_no_longer_routes_system(self):
+        assert self.SD._quick_task_hint("打开chrome") == "CHAT"
 
-    def test_system_command_close_app(self):
-        assert self.SD._quick_task_hint("关闭qq") == "SYSTEM"
+    def test_close_app_command_no_longer_routes_system(self):
+        assert self.SD._quick_task_hint("关闭qq") == "CHAT"
 
     def test_painter_draw_picture(self):
         assert self.SD._quick_task_hint("画一幅画") == "PAINTER"
@@ -424,14 +423,13 @@ class TestAnalyze:
             for p in patches:
                 p.stop()
 
-    def test_system_command_fast_track(self):
+    def test_open_app_command_no_longer_fast_tracks_system(self):
         patches = self._patch_lazy_imports()
         for p in patches:
             p.start()
         try:
             task, confidence, ctx = self.SD.analyze("打开chrome")
-            assert task == "SYSTEM"
-            assert "Action" in confidence or "SYSTEM" in str(ctx)
+            assert task != "SYSTEM"
         finally:
             for p in patches:
                 p.stop()
@@ -735,7 +733,7 @@ class TestAnalyzeCaching:
             p.start()
         try:
             r1 = self.SD.analyze("你好")
-            r2 = self.SD.analyze("打开chrome")
+            r2 = self.SD.analyze("明天北京天气怎么样")
             assert r1[0] != r2[0] or r1[1] != r2[1]
         finally:
             for p in patches:

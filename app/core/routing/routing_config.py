@@ -88,22 +88,14 @@ TASK_CORPUS: dict[str, list[str]] = {
     "FILE_SEARCH": ["找文件", "哪个文件", "文件在哪", "find file", "search for"],
     "CHAT": ["你好", "是什么", "介绍一下", "tell me about", "help me understand"],
     "SYSTEM": [
-        "打开微信",
-        "启动chrome",
-        "关闭qq",
-        "截图",
         "系统时间",
-        "shutdown",
-        "关机",
-        "打开steam",
-        "打开edge",
-        "启动vscode",
-        "打开计算器",
-        "关掉任务管理器",
-        "打开加速器",
-        "启动游戏",
-        "打开软件",
-        "运行程序",
+        "当前时间",
+        "今天日期",
+        "系统状态",
+        "系统信息",
+        "cpu状态",
+        "内存状态",
+        "磁盘状态",
     ],
     "AGENT": [
         "发微信",
@@ -154,7 +146,7 @@ TRIVIAL_IDENTITY: tuple[str, ...] = (
 TRIVIAL_EXCLUDE: tuple[str, ...] = (
     "画", "图片", "照片", "图", "代码", "程序", "脚本", "文件", "文档", "报告",
     "pdf", "word", "excel", "ppt", "天气", "股价", "新闻", "汇率",
-    "打开", "关闭", "截图", "启动", "运行", "搜索", "微信", "发送",
+    "搜索", "微信", "发送",
     "发消息", "发邮件", "购票", "研究", "分析", "深入", "全面",
     # Chart/dataviz
     "作图", "图表", "折线图", "柱状图", "饼图", "散点图", "直方图",
@@ -166,6 +158,8 @@ TRIVIAL_EXCLUDE: tuple[str, ...] = (
     "金价", "油价", "银价", "气价",
     # Weather variants
     "下雨", "下雪", "气温", "天气",
+    # Low-risk system info
+    "系统状态", "系统信息", "系统时间", "当前时间", "日期", "cpu", "内存", "硬盘",
     # Programming
     "python", "javascript", "java", "golang", "rust", "c++", "sql",
     "函数", "算法", "脚本", "接口", "api",
