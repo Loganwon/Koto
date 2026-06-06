@@ -2036,8 +2036,8 @@ class TestLocalModelMode:
     def test_workspace_model_state_uses_wa_keys_only(self):
         """Workspace assistant should use wa_* model state only and not write legacy editor_* keys."""
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        toggle_start = src.find("window.WA.setUseLocalModel = (useLocal) => {")
-        toggle_end = src.find("window.WA.setLockedModel = (val) => {", toggle_start)
+        toggle_start = src.find("function _setWorkspaceModelMode(mode) {")
+        toggle_end = src.find("window.WA.refreshModelCatalog", toggle_start)
         assert toggle_start != -1 and toggle_end != -1
         toggle_section = src[toggle_start:toggle_end]
         assert "function _syncEditorModelPreference(" not in src
@@ -2370,30 +2370,35 @@ class TestLocalModelMode:
         assert 'title="AI 标注迁移中，暂不可用"' in html
 
     def test_workspace_templates_use_shared_model_controls_partial(self):
-        """Workspace templates should share the same local/cloud model controls without exposing a redundant model picker."""
+        """Workspace templates should share provider/local model controls without exposing a redundant model picker."""
         standalone_html = Path("web/templates/workspace_assistant.html").read_text(encoding="utf-8")
         index_html = Path("web/templates/index.html").read_text(encoding="utf-8")
         partial_html = Path("web/templates/_workspace_model_controls.html").read_text(encoding="utf-8")
         assert "{% include '_workspace_model_controls.html' %}" in standalone_html
         assert "{% include '_workspace_model_controls.html' %}" in index_html
         assert 'id="wa-model-mode-toggle"' in partial_html
-        assert 'id="wa-model-mode-cloud-btn"' in partial_html
+        assert 'id="wa-model-mode-gemini-btn"' in partial_html
+        assert 'id="wa-model-mode-deepseek-btn"' in partial_html
         assert 'id="wa-model-mode-local-btn"' in partial_html
         assert 'id="wa-model-select"' not in partial_html
-        assert 'id="wa-model-mode-cloud-btn"' not in standalone_html
+        assert 'id="wa-model-mode-gemini-btn"' not in standalone_html
+        assert 'id="wa-model-mode-deepseek-btn"' not in standalone_html
         assert 'id="wa-model-mode-local-btn"' not in standalone_html
-        assert 'id="wa-model-mode-cloud-btn"' not in index_html
+        assert 'id="wa-model-mode-gemini-btn"' not in index_html
+        assert 'id="wa-model-mode-deepseek-btn"' not in index_html
         assert 'id="wa-model-mode-local-btn"' not in index_html
 
     def test_workspace_cloud_selection_maps_request_model_mode_to_cloud(self):
         js = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
         quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
-        assert "lockedModel: localStorage.getItem('wa_locked_model') === 'local' ? 'local' : 'auto'" in js
+        assert "const _WA_MODEL_MODES = new Set(['cloud', 'gemini', 'deepseek', 'local']);" in js
+        assert "lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model'), 'cloud')" in js
         assert "const storedLockedModel = localStorage.getItem('wa_locked_model');" in js
-        assert "return state.lockedModel === 'local' ? 'local' : 'cloud';" in js
+        assert "return _normalizeWorkspaceModelMode(state.lockedModel, 'cloud');" in js
         assert "model_mode: payload.model_mode || getModelMode()," in quick_actions
         assert "model_mode: modelMode," in quick_actions
-        assert "window.WA.setLockedModel = (val) => {\n    window.WA.setUseLocalModel(val === 'local');\n  };" in js
+        assert "window.WA.setLockedModel = (val) => {\n    _setWorkspaceModelMode(val);\n  };" in js
+        assert "body: JSON.stringify({ mode: newModel })," in js
 
     def test_workspace_quick_actions_do_not_render_raw_tool_result_previews_as_progress(self):
         quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")

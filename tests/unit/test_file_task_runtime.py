@@ -3358,6 +3358,49 @@ def test_file_task_model_client_routes_local_and_cloud():
     assert calls == ["cloud", "local"]
 
 
+def test_file_task_model_client_routes_deepseek_cloud_provider(monkeypatch):
+    from app.core.agent import file_task_model as file_task_model_module
+    import app.core.llm.model_fallback as fallback_module
+    import app.core.llm.provider_factory as provider_factory
+
+    captured = {}
+
+    class FakeProvider:
+        pass
+
+    class FakeFallbackExecutor:
+        def generate_with_fallback(self, **kwargs):
+            captured["fallback"] = kwargs
+            return {"content": "deepseek ok", "tool_calls": []}
+
+    def fake_get_llm_provider(**kwargs):
+        captured["provider_kwargs"] = kwargs
+        return FakeProvider()
+
+    monkeypatch.setattr(
+        file_task_model_module,
+        "get_configured_cloud_model",
+        lambda **kwargs: "deepseek-v4-pro",
+    )
+    monkeypatch.setattr(provider_factory, "get_llm_provider", fake_get_llm_provider)
+    monkeypatch.setattr(fallback_module, "get_fallback_executor", lambda: FakeFallbackExecutor())
+
+    client = FileTaskModelClient()
+    response = client.call(
+        request=FileTaskRequest(task="t", model_mode="deepseek", model_id="deepseek"),
+        messages=[{"role": "user", "content": "hi"}],
+        system="system",
+        tools=[{"name": "parse_file_to_text"}],
+    )
+
+    assert response["content"] == "deepseek ok"
+    assert captured["provider_kwargs"] == {"provider": "deepseek", "model": "deepseek-v4-pro"}
+    assert captured["fallback"]["preferred_model"] == "deepseek-v4-pro"
+    assert captured["fallback"]["task_type"] == "FILE_TASK"
+    assert captured["fallback"]["system_instruction"] == "system"
+    assert captured["fallback"]["tools"] == [{"name": "parse_file_to_text"}]
+
+
 def test_file_task_model_client_passes_file_task_timeout_to_local_provider(monkeypatch):
     from app.core.agent import file_task_model as file_task_model_module
     import app.core.llm.ollama_llm_provider as ollama_module

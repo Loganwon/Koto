@@ -193,8 +193,14 @@ def local_model_status() -> Response:
     """
     try:
         from app.core.llm.ollama_provider import get_local_model_info
+        from app.core.llm.model_selection import get_configured_cloud_provider
 
         info = get_local_model_info()
+        if info.get("mode") in {"cloud", "gemini", "deepseek"}:
+            provider = get_configured_cloud_provider()
+            info["cloud_provider"] = provider
+            if info.get("mode") == "cloud":
+                info["mode"] = provider
         return jsonify({"success": True, **info})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -250,7 +256,8 @@ def local_model_switch() -> Response:
     try:
         mod = _app()
         data = request.json or {}
-        mode = data.get("mode", "cloud")  # "local" 或 "cloud"
+        raw_mode = str(data.get("mode") or "cloud").strip().lower()
+        mode = raw_mode if raw_mode in {"local", "cloud", "gemini", "deepseek"} else "cloud"
         model_tag = data.get("model_tag")  # 本地模式时可指定模型
 
         sm = _get_settings_manager()
@@ -259,6 +266,12 @@ def local_model_switch() -> Response:
         # the lock + _save_settings directly to ensure atomic write.
         with sm._lock:
             sm._settings["model_mode"] = mode
+            ai_settings = sm._settings.setdefault("ai", {})
+            if isinstance(ai_settings, dict):
+                if mode in {"gemini", "deepseek"}:
+                    ai_settings["cloud_provider"] = mode
+                elif mode == "cloud":
+                    ai_settings.setdefault("cloud_provider", "gemini")
             if model_tag:
                 sm._settings["local_model"] = model_tag
             save_ok = sm._save_settings()
