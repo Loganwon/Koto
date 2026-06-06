@@ -233,6 +233,12 @@ window.WA.__contract = "1.0";
     active_tab_path: null,
   };
 
+  const _WA_MODEL_MODES = new Set(['cloud', 'gemini', 'deepseek', 'local']);
+  function _normalizeWorkspaceModelMode(value, fallback = 'cloud') {
+    const normalized = String(value || '').trim().toLowerCase();
+    return _WA_MODEL_MODES.has(normalized) ? normalized : fallback;
+  }
+
   const state = {
     fileId: null,
     fileType: null,
@@ -255,7 +261,7 @@ window.WA.__contract = "1.0";
     openTabs: [..._WA_EMPTY_WORKSPACE_LAYOUT.open_tabs],          // [{path,name,ext,fileType,fileId,serverData,cache,modified,capabilityProfile,reviewState}]
     activeTabPath: _WA_EMPTY_WORKSPACE_LAYOUT.active_tab_path,   // path of the currently active tab
     aiOutputMode: 'inline',  // fixed doc-assistant flow; legacy chat-only mode removed from UI
-    lockedModel: localStorage.getItem('wa_locked_model') === 'local' ? 'local' : 'auto',  // local or auto only
+    lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model'), 'cloud'),
     _reviewCenterOpen: localStorage.getItem('wa_review_center_open') !== '0',
     _reviewMode: ['all', 'comments', 'proposals'].includes(localStorage.getItem('wa_review_mode'))
       ? localStorage.getItem('wa_review_mode')
@@ -280,10 +286,11 @@ window.WA.__contract = "1.0";
     _availableModels: [],
     _modelMap: {},
     _modelsReady: false,
+    _cloudProvider: 'gemini',
     _modelCatalogPromise: null,
     _activeRoute: null,
     _localRuntimeModel: '',
-    _hasExplicitModelChoice: localStorage.getItem('wa_model_choice_explicit') === '1' || localStorage.getItem('wa_locked_model') === 'local',
+    _hasExplicitModelChoice: localStorage.getItem('wa_model_choice_explicit') === '1' || _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model'), '') === 'local',
   };
 
   // WPS-style review rail controller (created lazily, destroyed on tab switch)
@@ -6025,7 +6032,7 @@ window.WA.__contract = "1.0";
   }
 
   function _waQuickActionModelMode() {
-    return state.lockedModel === 'local' ? 'local' : 'cloud';
+    return _normalizeWorkspaceModelMode(state.lockedModel, 'cloud');
   }
 
   window.WA.sendQuickAction = (action) => {
@@ -14864,10 +14871,12 @@ window.WA.__contract = "1.0";
     'gemini-2.5-flash': 'Gemini 2.5 Flash',
     'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
     'gemini-2.5-pro': 'Gemini 2.5 Pro',
+    'deepseek-v4-pro': 'DeepSeek V4 Pro',
+    'deepseek-v4-flash': 'DeepSeek V4 Flash',
   };
 
   function _selectedCloudModelId() {
-    return (state.lockedModel && !['auto', 'cloud', 'local'].includes(state.lockedModel))
+    return (state.lockedModel && !['cloud', 'gemini', 'deepseek', 'local'].includes(state.lockedModel))
       ? state.lockedModel
       : '';
   }
@@ -15012,8 +15021,10 @@ window.WA.__contract = "1.0";
   }
 
   function _modelDisplayName(modelId, fallback) {
-    if (!modelId) return fallback || '云端';
-    if (modelId === 'local') return '本地';
+    if (!modelId) return fallback || '??';
+    if (modelId === 'gemini') return 'Gemini';
+    if (modelId === 'deepseek') return 'DeepSeek';
+    if (modelId === 'local') return '??';
     const meta = _lookupModelMeta(modelId);
     const metaDisplay = _coerceModelLabel(meta && meta.display, '');
     if (metaDisplay) return metaDisplay;
@@ -15023,6 +15034,10 @@ window.WA.__contract = "1.0";
   function _currentCloudModelHint() {
     const explicitCloudModel = _selectedCloudModelId();
     if (explicitCloudModel) return _modelDisplayName(explicitCloudModel, explicitCloudModel);
+
+    if (state.lockedModel === 'deepseek') {
+      return _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');
+    }
 
     if (state.lockedModel !== 'local' && state._activeRoute?.modelId && state._activeRoute.modelId !== 'local') {
       return _coerceModelLabel(state._activeRoute.modelDisplay, '') || _modelDisplayName(state._activeRoute.modelId, state._activeRoute.modelId);
@@ -15036,29 +15051,44 @@ window.WA.__contract = "1.0";
 
   function _syncModelStatusUi() {
     const badge = $('wa-ai-model-badge');
-    const cloudModelEl = $('wa-model-mode-cloud-model');
+    const geminiModelEl = $('wa-model-mode-gemini-model');
+    const deepseekModelEl = $('wa-model-mode-deepseek-model');
     const localModelEl = $('wa-model-mode-local-model');
     const routeInfo = $('wa-ai-route-info');
     const explicitCloudModel = _selectedCloudModelId();
     const activeRoute = state._activeRoute || null;
     const cloudModelHint = _currentCloudModelHint();
-    const localModelHint = state._localRuntimeModel || '未启动';
-    const activeMode = state.lockedModel === 'local' ? 'local' : 'cloud';
+    const geminiModelHint = state.lockedModel === 'gemini' ? cloudModelHint : '??';
+    const deepseekModelHint = _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');
+    const localModelHint = state._localRuntimeModel || '???';
+    const lockedMode = _normalizeWorkspaceModelMode(state.lockedModel, 'cloud');
+    const activeMode = lockedMode === 'cloud'
+      ? _normalizeWorkspaceModelMode(state._cloudProvider, 'gemini')
+      : lockedMode;
     const shouldShowModelHint = !!state._hasExplicitModelChoice;
 
     const modelLabel = _coerceModelLabel(activeRoute?.modelDisplay, '')
       || (state.lockedModel === 'local'
-        ? '本地'
-        : (explicitCloudModel ? _modelDisplayName(explicitCloudModel, explicitCloudModel) : '云端'));
+        ? '??'
+        : state.lockedModel === 'deepseek'
+          ? 'DeepSeek'
+          : state.lockedModel === 'gemini'
+            ? 'Gemini'
+            : (explicitCloudModel ? _modelDisplayName(explicitCloudModel, explicitCloudModel) : '??'));
 
     if (badge) {
       badge.textContent = modelLabel;
       badge.title = modelLabel;
     }
-    if (cloudModelEl) {
-      cloudModelEl.textContent = cloudModelHint;
-      cloudModelEl.title = `云端模型：${cloudModelHint}`;
-      cloudModelEl.hidden = true;
+    if (geminiModelEl) {
+      geminiModelEl.textContent = geminiModelHint;
+      geminiModelEl.title = `Gemini ???????${geminiModelHint}`;
+      geminiModelEl.hidden = !(shouldShowModelHint && activeMode === 'gemini');
+    }
+    if (deepseekModelEl) {
+      deepseekModelEl.textContent = deepseekModelHint;
+      deepseekModelEl.title = `DeepSeek ???????${deepseekModelHint}`;
+      deepseekModelEl.hidden = !(shouldShowModelHint && activeMode === 'deepseek');
     }
     if (localModelEl) {
       localModelEl.textContent = localModelHint;
@@ -15069,8 +15099,10 @@ window.WA.__contract = "1.0";
       const isActive = button.dataset.modelMode === activeMode;
       button.classList.toggle('active', isActive);
       const buttonTitle = button.dataset.modelMode === 'local'
-        ? `本地模型：${localModelHint}`
-        : `云端模型：${cloudModelHint}`;
+        ? `?????${localModelHint}`
+        : button.dataset.modelMode === 'deepseek'
+          ? `DeepSeek ???????${deepseekModelHint}`
+          : `Gemini ???????${geminiModelHint}`;
       button.title = buttonTitle;
     });
 
@@ -15078,7 +15110,8 @@ window.WA.__contract = "1.0";
 
     const routeBits = [];
     if (state.lockedModel === 'local') { /* mode already shown in header badge */ }
-    else if (explicitCloudModel) routeBits.push('已锁定模型');
+    else if (state.lockedModel === 'gemini' || state.lockedModel === 'deepseek') routeBits.push('??????');
+    else if (explicitCloudModel) routeBits.push('?????');
     else if (activeRoute) routeBits.push('自动路由');
 
     if (activeRoute?.taskDisplay) routeBits.push(activeRoute.taskDisplay);
@@ -15129,6 +15162,7 @@ window.WA.__contract = "1.0";
       })
       .then((data) => {
         state._modelsReady = !!(data && data.ready);
+        state._cloudProvider = _normalizeWorkspaceModelMode(data && data.cloud_provider, state._cloudProvider || 'gemini');
         state._modelMap = (data && data.model_map) || {};
         state._availableModels = Array.isArray(data?.available) ? data.available : [];
         _syncModelStatusUi();
@@ -15173,11 +15207,15 @@ window.WA.__contract = "1.0";
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (!data || data.success === false) return null;
-        const serverLockedModel = data.mode === 'local' ? 'local' : 'auto';
+        const serverMode = _normalizeWorkspaceModelMode(data.mode, 'cloud');
+        const serverLockedModel = serverMode === 'local' ? 'local' : serverMode;
         if (state.lockedModel !== serverLockedModel) {
           state.lockedModel = serverLockedModel;
           localStorage.setItem('wa_locked_model', serverLockedModel);
           _clearActiveRoute();
+        }
+        if (serverMode === 'gemini' || serverMode === 'deepseek') {
+          state._cloudProvider = serverMode;
         }
         if (data.mode === 'local') {
           state._hasExplicitModelChoice = true;
@@ -15189,9 +15227,10 @@ window.WA.__contract = "1.0";
       .catch(() => null);
   }
 
-  window.WA.setUseLocalModel = (useLocal) => {
-    const newModel = useLocal ? 'local' : 'auto';
+  function _setWorkspaceModelMode(mode) {
+    const newModel = _normalizeWorkspaceModelMode(mode, 'cloud');
     state.lockedModel = newModel;
+    if (newModel === 'gemini' || newModel === 'deepseek') state._cloudProvider = newModel;
     state._hasExplicitModelChoice = true;
     localStorage.setItem('wa_locked_model', newModel);
     localStorage.setItem('wa_model_choice_explicit', '1');
@@ -15202,13 +15241,19 @@ window.WA.__contract = "1.0";
     fetch('/api/local-model/switch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: newModel === 'local' ? 'local' : 'cloud' }),
-    }).catch(() => {/* silent — localStorage state still works for chat/stream path */});
+      body: JSON.stringify({ mode: newModel }),
+    }).catch(() => {/* silent ? localStorage state still works for chat/stream path */});
+  }
+
+  window.WA.setUseLocalModel = (useLocal) => {
+    _setWorkspaceModelMode(useLocal ? 'local' : (state._cloudProvider || 'gemini'));
   };
 
   window.WA.setLockedModel = (val) => {
-    window.WA.setUseLocalModel(val === 'local');
+    _setWorkspaceModelMode(val);
   };
+
+  window.WA.refreshModelCatalog = (force = true) => _refreshModelCatalog(force);
 
   // Notify Python of dirty-state changes so _on_closing never needs evaluate_js
   // (avoids EdgeChromium COM deadlock that caused "未响应" on every close).

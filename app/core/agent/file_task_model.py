@@ -6,6 +6,10 @@ from typing import Any, Dict, List, Optional
 
 from app.core.agent.file_task_contract import FileTaskRequest
 from app.core.llm.model_mode import normalize_model_mode
+from app.core.llm.model_selection import (
+    get_configured_cloud_model,
+    get_provider_for_model_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,14 +85,17 @@ class FileTaskModelClient:
         system: str,
         tools: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        from app.core.llm.gemini import GeminiProvider
+        from app.core.llm.provider_factory import get_llm_provider
 
-        api_key = self._api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        if not api_key:
-            raise RuntimeError("No Gemini API key configured")
-
-        provider = GeminiProvider(api_key=api_key)
         model_id = self._cloud_model_id(request)
+        provider_name = get_provider_for_model_mode(request.model_mode)
+        provider_kwargs = {"provider": provider_name, "model": model_id}
+        if provider_name == "gemini" and self._api_key:
+            from app.core.llm.gemini import GeminiProvider
+
+            provider = GeminiProvider(api_key=self._api_key)
+        else:
+            provider = get_llm_provider(**provider_kwargs)
         try:
             from app.core.llm.model_fallback import get_fallback_executor
 
@@ -148,22 +155,42 @@ class FileTaskModelClient:
 
     def _cloud_model_id(self, request: FileTaskRequest) -> str:
         requested = str(request.model_id or "").strip()
-        if requested and requested.lower() not in {"auto", "cloud", "local"}:
+        mode = normalize_model_mode(request.model_mode, default="cloud")
+        provider = get_provider_for_model_mode(mode)
+        ignored = {"auto", "cloud", "local", "gemini", "deepseek", "openai", "anthropic", "ollama"}
+        if requested and requested.lower() not in ignored:
             return requested
+        if provider != "gemini":
+            return get_configured_cloud_model(
+                task_type="FILE_TASK",
+                fallback_model=self._default_model,
+                provider=provider,
+            )
         try:
-            from web.app import MODEL_MAP  # type: ignore
+            from web.runtime_context import get_model_map
 
+            model_map = get_model_map()
             for task_key in ("FILE_TASK", "CHAT"):
-                model_from_app = str(MODEL_MAP.get(task_key) or "").strip()
+                model_from_app = str(model_map.get(task_key) or "").strip()
                 if model_from_app:
                     return model_from_app
+        except Exception:
+            pass
+        try:
+            from web.app import MODEL_MAP
+
+            if isinstance(MODEL_MAP, dict):
+                for task_key in ("FILE_TASK", "CHAT"):
+                    model_from_app = str(MODEL_MAP.get(task_key) or "").strip()
+                    if model_from_app:
+                        return model_from_app
         except Exception:
             pass
         return self._default_model
 
     def _local_model_id(self, request: FileTaskRequest) -> str:
         configured = str(request.options.get("local_model") or request.model_id or "").strip()
-        if configured.lower().startswith("gemini") or configured.lower() in {"auto", "cloud", "local"}:
+        if configured.lower().startswith("gemini") or configured.lower() in {"auto", "cloud", "local", "deepseek", "openai", "anthropic", "ollama"}:
             return ""
         return configured
 
