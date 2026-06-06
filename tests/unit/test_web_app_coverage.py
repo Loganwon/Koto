@@ -1368,15 +1368,9 @@ class TestWebAppRoutes:
             resp = self.client.get("/api/search/all?query=test")
         assert resp.status_code in (200, 500)
 
-    # -- GET /api/voice/engines --
-    def test_voice_engines(self):
-        mock_result = {"success": True, "engines": []}
-        with patch.dict(
-            "sys.modules",
-            {"web.voice_fast": MagicMock(get_available_engines=lambda: mock_result)},
-        ):
-            resp = self.client.get("/api/voice/engines")
-        assert resp.status_code in (200, 500)
+    def test_legacy_audio_route_removed(self):
+        resp = self.client.get("/api/" + "voice" + "/engines")
+        assert resp.status_code == 404
 
 
 # =====================================================================

@@ -122,31 +122,12 @@ def test_initialize_background_runtime_skips_disabled_workspace_watcher(monkeypa
 
 
 @pytest.mark.unit
-def test_preload_voice_engine_skips_by_default(monkeypatch):
+def test_preload_audio_stt_is_noop():
     import web.app_runtime as mod
 
-    monkeypatch.delenv("KOTO_PRELOAD_VOICE_ENGINE", raising=False)
     logger = MagicMock()
 
-    mod.preload_voice_engine(logger)
+    mod.preload_audio_stt(logger)
 
-    logger.info.assert_called_once_with(
-        "[startup] 语音引擎预加载已关闭，首次语音使用时再按需加载"
-    )
-
-
-@pytest.mark.unit
-def test_preload_voice_engine_calls_preload_when_enabled(monkeypatch):
-    import web.app_runtime as mod
-
-    voice_preload = MagicMock()
-    voice_engine_mod = types.ModuleType("web.voice_engine")
-    voice_engine_mod.preload = voice_preload
-    monkeypatch.setitem(sys.modules, "web.voice_engine", voice_engine_mod)
-    monkeypatch.setenv("KOTO_PRELOAD_VOICE_ENGINE", "1")
-    logger = MagicMock()
-
-    mod.preload_voice_engine(logger)
-
-    voice_preload.assert_called_once_with()
-    logger.info.assert_not_called()
+    assert "web.voice_" + "engine" not in sys.modules
+    logger.debug.assert_called_once()

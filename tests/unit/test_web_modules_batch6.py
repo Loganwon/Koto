@@ -6,7 +6,7 @@ Unit tests for web modules batch 6:
   - DocumentComparator
   - DocumentReader
   - DocumentValidator
-  - EmailManager / EmailAccount / Email
+  - Retired EmailManager guard
   - FileOrganizer
   - FileScanner
   - NotificationManager
@@ -21,6 +21,7 @@ import sqlite3
 import tempfile
 import threading
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch
 
 import pytest
@@ -438,89 +439,15 @@ class TestDocumentValidator:
 
 
 # ---------------------------------------------------------------------------
-# EmailManager / EmailAccount / Email
+# Retired EmailManager
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 class TestEmailManager:
 
-    def test_email_account_init(self):
-        from web.email_manager import EmailAccount
-
-        acc = EmailAccount("test@example.com", "pass", "smtp.example.com")
-        assert acc.email_address == "test@example.com"
-        assert acc.imap_server == "imap.example.com"
-        assert acc.smtp_port == 587
-
-    def test_email_object_init(self):
-        from web.email_manager import Email
-
-        e = Email("from@x.com", "to@x.com", "Sub", "Body")
-        assert e.to_addrs == ["to@x.com"]
-        assert e.cc_addrs == []
-        assert e.attachments == []
-        assert e.html is False
-
-    def test_email_object_list_to(self):
-        from web.email_manager import Email
-
-        e = Email("f@x.com", ["a@x.com", "b@x.com"], "S", "B")
-        assert len(e.to_addrs) == 2
-
-    @patch("web.email_manager.os.path.exists", return_value=False)
-    @patch("web.email_manager.os.makedirs")
-    def test_email_manager_init_no_config(self, mock_mkdirs, mock_exists):
-        from web.email_manager import EmailManager
-
-        mgr = EmailManager()
-        assert mgr.accounts == {}
-        assert mgr.default_account is None
-
-    @patch("web.email_manager.os.path.exists", return_value=False)
-    @patch("web.email_manager.os.makedirs")
-    def test_add_account(self, mock_mkdirs, mock_exists):
-        from web.email_manager import EmailManager
-
-        mgr = EmailManager()
-        with patch.object(mgr, "_save_accounts"):
-            result = mgr.add_account(
-                "user@x.com", "pw", "smtp.x.com", set_as_default=True
-            )
-        assert result is True
-        assert mgr.default_account == "user@x.com"
-
-    @patch("web.email_manager.os.path.exists", return_value=False)
-    @patch("web.email_manager.os.makedirs")
-    def test_send_email_no_account(self, mock_mkdirs, mock_exists):
-        from web.email_manager import EmailManager
-
-        mgr = EmailManager()
-        result = mgr.send_email(["to@x.com"], "Hi", "Body")
-        assert result is False
-
-    def test_decode_header_empty(self):
-        from web.email_manager import EmailManager
-
-        with patch("web.email_manager.os.path.exists", return_value=False), patch(
-            "web.email_manager.os.makedirs"
-        ):
-            mgr = EmailManager()
-        assert mgr._decode_header(None) == ""
-        assert mgr._decode_header("") == ""
-
-    def test_get_email_body_non_multipart(self):
-        from web.email_manager import EmailManager
-
-        with patch("web.email_manager.os.path.exists", return_value=False), patch(
-            "web.email_manager.os.makedirs"
-        ):
-            mgr = EmailManager()
-        msg = MagicMock()
-        msg.is_multipart.return_value = False
-        msg.get_payload.return_value = b"Hello"
-        body = mgr._get_email_body(msg)
-        assert "Hello" in body
+    def test_email_manager_module_removed(self):
+        assert not Path("web/email_manager.py").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -699,10 +626,9 @@ class TestFileScanner:
         assert "running" in status
         assert status["running"] is False
 
-    def test_open_file_not_found(self):
+    def test_native_open_file_helper_removed(self):
         FS = self._reset_scanner()
-        result = FS.open_file("/nonexistent/file.txt")
-        assert result["success"] is False
+        assert not hasattr(FS, "open_file")
 
     def test_stats_empty(self):
         FS = self._reset_scanner()

@@ -38,15 +38,15 @@ execution_bp = Blueprint("execution", __name__)
 
 
 def _get_auto_execution():
-    from web.app import get_auto_execution
+    from web.runtime_context import call_app_factory
 
-    return get_auto_execution()
+    return call_app_factory("get_auto_execution")
 
 
 def _get_trigger_system():
-    from web.app import get_trigger_system
+    from web.runtime_context import call_app_factory
 
-    return get_trigger_system()
+    return call_app_factory("get_trigger_system")
 
 
 # ==================== 自动执行引擎 API ====================

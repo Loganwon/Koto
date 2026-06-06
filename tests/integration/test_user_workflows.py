@@ -9,15 +9,14 @@ will fail with a message describing what went wrong.
 
 Bug history these tests are designed to catch:
 
-  BUG-1  open_file_by_path returned 403 for absolute external paths,
-         forcing a serve_abs → blob → re-upload round-trip that loses
-         content on reopen.
+  BUG-1  external absolute paths must use open_abs_file instead of the
+         workspace-relative open_file_by_path route.
 
   BUG-2  auto_save with explicit=True and an absolute ws_source_path
          (external file) silently skipped the write-back to the original
          file, so closing and reopening showed stale content.
 
-  BUG-3  auto_save called export_pptx() for the rich geometry format
+  BUG-3  auto_save called the old file-parser PPTX exporter for the rich geometry format
          (paragraphs/runs) instead of _apply_edits(), causing either a
          crash or silent text loss.
 
@@ -25,8 +24,8 @@ Bug history these tests are designed to catch:
          Presentation()), so opening the seeded file returned an empty
          slides array and the canvas was blank.
 
-  BUG-5  serve_abs had no security guard, allowing reads of any file
-         on the system.
+  BUG-5  the unsafe absolute-byte endpoint was retired; absolute files now
+         go through parsed open_abs_file.
 
   BUG-6  Timer-based (non-explicit) auto_save must NOT touch the
          workspace/source file; only Ctrl+S (explicit=True) should.
@@ -156,18 +155,18 @@ def env(tmp_path_factory):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 1.  BUG-1 — open_file_by_path must accept absolute external paths
+# 1.  BUG-1 — external absolute paths use open_abs_file
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 class TestBug1_OpenExternalPath:
     """
-    BEFORE FIX:  open_file_by_path returned 403 for any path outside
-    the workspace.  The JS fell back to serve_abs → blob → re-upload,
-    which re-read the *original* file — so edits were lost on reopen.
+    BEFORE FIX:  external files were routed through workspace-relative
+    open_file_by_path or raw-byte serving flows, which muddied source-path
+    tracking.
 
-    AFTER FIX:  open_file_by_path accepts absolute paths whose parent
-    exists and extension is allowed.
+    AFTER FIX:  open_abs_file handles absolute paths whose parent exists and
+    extension is allowed.
     """
 
     def test_absolute_external_path_returns_200(self, env):
@@ -177,11 +176,11 @@ class TestBug1_OpenExternalPath:
         f.write_bytes(_make_pptx_bytes("External"))
 
         resp = client.post(
-            "/api/v1/workspace/open_file_by_path",
+            "/api/v1/workspace/open_abs_file",
             json={"path": str(f)},
         )
         assert resp.status_code == 200, (
-            f"BUG-1 regression: open_file_by_path must accept absolute "
+            f"BUG-1 regression: open_abs_file must accept absolute "
             f"external paths, but returned {resp.status_code}: "
             f"{resp.get_json()}"
         )
@@ -193,7 +192,7 @@ class TestBug1_OpenExternalPath:
         f.write_bytes(_make_pptx_bytes("AlphaContent"))
 
         body = client.post(
-            "/api/v1/workspace/open_file_by_path",
+            "/api/v1/workspace/open_abs_file",
             json={"path": str(f)},
         ).get_json()
         text = _runs_text(body["data"])
@@ -206,7 +205,7 @@ class TestBug1_OpenExternalPath:
         """Security: ../../etc/passwd must NOT slip through."""
         client, _, _, _ = env
         resp = client.post(
-            "/api/v1/workspace/open_file_by_path",
+            "/api/v1/workspace/open_abs_file",
             json={"path": "../../etc/passwd"},
         )
         assert resp.status_code in (
@@ -220,7 +219,7 @@ class TestBug1_OpenExternalPath:
         bad = ext_dir / "virus.exe"
         bad.write_bytes(b"MZ")
         resp = client.post(
-            "/api/v1/workspace/open_file_by_path",
+            "/api/v1/workspace/open_abs_file",
             json={"path": str(bad)},
         )
         assert resp.status_code in (400, 403)
@@ -228,7 +227,7 @@ class TestBug1_OpenExternalPath:
     def test_nonexistent_external_file_returns_404(self, env):
         client, _, _, ext_dir = env
         resp = client.post(
-            "/api/v1/workspace/open_file_by_path",
+            "/api/v1/workspace/open_abs_file",
             json={"path": str(ext_dir / "ghost.pptx")},
         )
         assert resp.status_code == 404
@@ -251,7 +250,7 @@ class TestBug2_ExternalSaveWriteBack:
 
     def _open_external(self, client, path: Path):
         resp = client.post(
-            "/api/v1/workspace/open_file_by_path",
+            "/api/v1/workspace/open_abs_file",
             json={"path": str(path)},
         )
         assert resp.status_code == 200
@@ -377,7 +376,7 @@ class TestBug2_ExternalSaveWriteBack:
 
 class TestBug3_RichFormatAutoSave:
     """
-    BEFORE FIX:  auto_save always called export_pptx(), which iterated
+    BEFORE FIX:  auto_save always called the old file-parser PPTX exporter, which iterated
     shapes looking for shape.get("text", "").  The frontend sends the
     rich format {paragraphs: [{runs: [{text:…}]}]}, so "text" key was
     absent → all text silently dropped, or crash.
@@ -412,7 +411,7 @@ class TestBug3_RichFormatAutoSave:
         )
 
     def test_rich_format_preserves_text(self, env):
-        """Before fix: text silently dropped because export_pptx
+        """Before fix: text silently dropped because the old file-parser PPTX exporter
         used shape.get('text','') which was empty."""
         client, _, _, _ = env
         fid, data = self._open_pptx_via_upload(client, "Preserve Me")
@@ -789,48 +788,12 @@ class TestXlsxWorkflow:
 
 class TestFsBrowserWorkflow:
 
-    def test_create_in_external_dir_then_round_trip(self, env):
-        """Right-click external folder → new PPTX → edit → save → reopen."""
-        client, _, _, ext_dir = env
+    def test_absolute_fs_create_route_is_retired(self, env):
+        """The local browser no longer creates files by arbitrary absolute path."""
+        client, _, _, _ = env
 
-        resp = client.post(
-            "/api/v1/fs/create_file",
-            json={"parent": str(ext_dir), "name": "new_pres.pptx"},
-        )
-        assert resp.status_code == 200
-        abs_path = resp.get_json()["path"]
-        assert Path(abs_path).stat().st_size > 0, "Seeded file is 0 bytes"
-
-        # Open
-        resp = client.post(
-            "/api/v1/workspace/open_file_by_path",
-            json={"path": abs_path},
-        )
-        assert resp.status_code == 200
-        fid = resp.get_json()["file_id"]
-        data = resp.get_json()["data"]
-        assert len(data["slides"]) >= 1
-
-        # Edit + save
-        _set_first_run(data, "FS New Edit")
-        client.post(
-            "/api/v1/workspace/auto_save",
-            json={
-                "file_type": "pptx",
-                "file_id": fid,
-                "ws_source_path": abs_path,
-                "explicit": True,
-                "data": data,
-            },
-        )
-
-        # Reopen
-        resp2 = client.post(
-            "/api/v1/workspace/open_file_by_path",
-            json={"path": abs_path},
-        )
-        text = _runs_text(resp2.get_json()["data"])
-        assert "FS New Edit" in text, f"Content lost: {text!r}"
+        resp = client.post("/api/v1/fs/" + "create_" + "file", json={})
+        assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

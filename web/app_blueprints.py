@@ -19,6 +19,7 @@ _PRELOAD_MODULES = [
     "app.api.goal_routes",
     "app.api.file_hub_routes",
     "app.api.job_routes",
+    "app.api.mcp_routes",
     "app.api.ops_routes",
     "app.api.shadow_routes",
     "app.api.macro_routes",
@@ -41,12 +42,14 @@ _WEB_BLUEPRINT_CONFIGS = [
     ("web.blueprints.file_organize", "file_organize_bp", None, "FileOrganize"),
     ("web.blueprints.dev", "dev_bp", None, "Dev"),
     ("web.blueprints.chat", "chat_bp", None, "Chat"),
+    ("web.blueprints.editor_ai", "editor_ai_bp", None, "EditorAI"),
     (
         "web.blueprints.workspace_assistant",
         "workspace_assistant_bp",
         None,
         "WorkspaceAssistant",
     ),
+    ("web.blueprints.ppt_legacy", "ppt_legacy_bp", None, "PptLegacy"),
     ("web.blueprints.pptx_editor", "pptx_editor_bp", None, "PptxEditor"),
 ]
 
@@ -148,14 +151,6 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
         )
 
     try:
-        from voice_api_enhanced import voice_bp
-
-        app.register_blueprint(voice_bp)
-        logger.debug("[VOICE_API] 已注册增强语音 API 蓝图")
-    except ImportError as exc:
-        logger.warning(f"[VOICE_API] ⚠️ 未能导入增强语音模块: {exc}")
-
-    try:
         from web.ppt_api_routes import ppt_api_bp
 
         app.register_blueprint(ppt_api_bp)
@@ -204,6 +199,16 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
         logger.warning(f"[BgAgentAPI] ⚠️ 未能导入 Background Agent API 蓝图: {exc}")
     except Exception as exc:
         logger.error(f"[BgAgentAPI] ❌ Background Agent API 注册失败: {exc}")
+
+    try:
+        from app.api.mcp_routes import mcp_bp as _mcp_bp
+
+        app.register_blueprint(_mcp_bp)
+        logger.info("[MCPAPI] ✅ MCP 监管入口已注册: /api/mcp")
+    except ImportError as exc:
+        logger.warning(f"[MCPAPI] ⚠️ 未能导入 MCP API 蓝图: {exc}")
+    except Exception as exc:
+        logger.error(f"[MCPAPI] ❌ MCP API 注册失败: {exc}")
 
     try:
         from app.api.ops_routes import ops_bp as _ops_bp

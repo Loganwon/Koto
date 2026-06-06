@@ -13,8 +13,6 @@ import json
 import logging
 import os
 import re
-
-_app_logger = logging.getLogger("koto.app")
 import subprocess
 import sys
 import threading
@@ -22,6 +20,10 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
+
+_sys = sys
+_app_logger = logging.getLogger("koto.app")
 
 # 确保 web/ 目录在模块搜索路径中（通过 koto_app.py 启动时需要）
 _web_dir = os.path.dirname(os.path.abspath(__file__))
@@ -50,42 +52,34 @@ from web.app_factory import create_flask_app
 from web.app_http import configure_http_wiring
 from web.app_observability import configure_observability
 from web.app_realtime import init_notification_socket, init_socketio
-from web.app_runtime import preload_voice_engine, start_background_runtime
+from web.app_runtime import preload_audio_stt, start_background_runtime
 from web.app_storage import resolve_app_storage_paths
+from web.chat_file_handlers import (
+    handle_multi_file_chat_request,
+    handle_single_file_chat_request,
+)
 
 
 def _secure_filename(name: str) -> str:
-    """Unicode-safe filename sanitizer that preserves Chinese/CJK characters.
-
-    werkzeug.secure_filename strips all non-ASCII chars, turning '王宇轩-简历.docx'
-    into '-.docx' which is both misleading and collision-prone.
-    This wrapper keeps Unicode letters/digits while still removing
-    truly dangerous characters (null bytes, path separators, etc.).
-    """
+    """Unicode-safe filename sanitizer that preserves Chinese/CJK characters."""
     import re as _re_fn
     import unicodedata
 
     if not name:
         return ""
-    # Normalise to NFC (avoid composed/decomposed mismatch)
     name = unicodedata.normalize("NFC", name)
-    # Kill null bytes and path traversal characters
     name = name.replace("\x00", "").replace("/", "_").replace("\\", "_")
     name = name.replace(":", "_").replace("*", "_").replace("?", "_")
     name = name.replace('"', "_").replace("<", "_").replace(">", "_").replace("|", "_")
-    # Collapse multiple spaces/underscores to single underscore
     name = _re_fn.sub(r"[\s_]+", "_", name)
-    # Strip leading/trailing dots/underscores/spaces (Windows dislikes trailing dots)
     name = name.strip(". _")
-    # If after all sanitization the base (without ext) is empty, fall back to werkzeug
-    base, _, ext = name.rpartition(".")
+    base, _, _ext = name.rpartition(".")
     if not base.strip(". _"):
         fallback = _werkzeug_secure_filename(name)
         return fallback if fallback else ""
     return name
 
 
-# Import new routing modules
 from app.core.routing import SmartDispatcher
 from app.core.llm.model_mode import normalize_model_mode
 from app.core.llm.model_capabilities import (
@@ -96,13 +90,8 @@ from app.core.llm.model_capabilities import (
 )
 from app.core.security.output_validator import sanitize_user_visible_text
 
-# 延迟导入 - 这些路由类仅在运行时首次访问时通过 __getattr__ 加载
-# LocalModelRouter, AIRouter, TaskDecomposer, LocalPlanner 通过 app.core.routing.__getattr__ 延迟加载
+agent_bp = None
 
-# Import unified agent API blueprint — 延迟到蓝图注册时加载
-agent_bp = None  # 延迟加载，见下方蓝图注册区
-
-# ================= 并行执行系统导入 =================
 try:
     try:
         from parallel_api import register_parallel_api
@@ -149,7 +138,6 @@ try:
 except ImportError:
     Sock = None
 
-# ── Flask-SocketIO（文件助手全双工通信）──
 try:
     from flask_socketio import SocketIO
     _has_socketio = True
@@ -158,221 +146,21 @@ except ImportError:
     _has_socketio = False
     _app_logger.warning("[WebSocket] flask-socketio 未安装，文件助手 AI 面板不可用")
 
-# ================= 懒加载重型模块（启动优化） =================
-# google.genai (~4.7s), requests (~0.5s) 延迟到首次使用时加载
 
-
-class _LazyModule:
-    """延迟导入代理 - 首次属性访问时才触发实际 import"""
-
-    __slots__ = ("_import_func", "_module")
-
-    def __init__(self, import_func):
-        object.__setattr__(self, "_import_func", import_func)
-        object.__setattr__(self, "_module", None)
-
-    def _load(self):
-        mod = object.__getattribute__(self, "_module")
-        if mod is None:
-            import_func = object.__getattribute__(self, "_import_func")
-            mod = import_func()
-            object.__setattr__(self, "_module", mod)
-        return mod
-
-    def __getattr__(self, name):
-        return getattr(self._load(), name)
-
-    def __repr__(self):
-        mod = object.__getattribute__(self, "_module")
-        if mod is None:
-            return "<LazyModule (not loaded)>"
-        return repr(mod)
-
-
-def _import_genai():
-    _app_logger.debug("[LAZY_IMPORT] 加载 google.genai ...")
-    from google import genai as _genai
-
-    return _genai
-
-
-def _import_types():
-    _app_logger.debug("[LAZY_IMPORT] 加载 google.genai.types ...")
-    from google.genai import types as _types
-
-    return _types
-
-
-def _import_requests():
-    _app_logger.debug("[LAZY_IMPORT] 加载 requests ...")
-    import requests as _requests
-
-    return _requests
-
-
-genai = _LazyModule(_import_genai)
-types = _LazyModule(_import_types)
-requests = _LazyModule(_import_requests)
-
-# ================= 懒加载文档和PPT模块（启动加速） =================
-# 延迟导入 python-docx (~572ms) 和 python-pptx (~666ms)
-
-# 文档工作流执行器懒加载
-_document_workflow_cache = {}
-
-
-def get_document_workflow_executor():
-    """懒加载文档工作流执行器"""
-    if "executor" not in _document_workflow_cache:
-        _app_logger.debug("[LAZY_IMPORT] 加载文档工作流执行器...")
-        try:
-            from web.document_workflow_executor import (
-                DocumentWorkflowExecutor,
-                execute_document_workflow,
-            )
-        except ImportError:
-            try:
-                from document_workflow_executor import (
-                    DocumentWorkflowExecutor,
-                    execute_document_workflow,
-                )
-            except ImportError:
-                DocumentWorkflowExecutor = None
-                execute_document_workflow = None
-                _app_logger.warning("[WARNING] 文档工作流执行器未安装")
-        _document_workflow_cache["executor"] = DocumentWorkflowExecutor
-        _document_workflow_cache["execute"] = execute_document_workflow
-    return _document_workflow_cache.get("executor"), _document_workflow_cache.get(
-        "execute"
-    )
-
-
-# DocumentWorkflowExecutor 和 execute_document_workflow 的懒加载代理
-class _DocWorkflowProxy:
-    def __getattr__(self, name):
-        executor_cls, _ = get_document_workflow_executor()
-        if executor_cls is None:
-            raise ImportError("文档工作流执行器未安装")
-        return getattr(executor_cls, name)
-
-
-DocumentWorkflowExecutor = _DocWorkflowProxy()
-
-
-def execute_document_workflow(*args, **kwargs):
-    _, execute_func = get_document_workflow_executor()
-    if execute_func is None:
-        raise ImportError("文档工作流执行器未安装")
-    return execute_func(*args, **kwargs)
-
-
-# PPT多模型系统懒加载
-_ppt_system_cache = {}
-
-
-def get_ppt_system():
-    """懒加载PPT生成系统"""
-    if "loaded" not in _ppt_system_cache:
-        _app_logger.debug("[LAZY_IMPORT] 加载PPT多模型生成系统...")
-        try:
-            from web.ppt_master import PPTBlueprint, PPTMasterOrchestrator
-            from web.ppt_pipeline import (
-                PPTGenerationPipeline,
-                PPTGenerationTaskHandler,
-                format_ppt_generation_result,
-            )
-            from web.ppt_synthesizer import PPTSynthesizer
-
-            _app_logger.info("[PPT_SYSTEM] ✅ 多模型PPT生成系统已加载")
-        except ImportError:
-            try:
-                from ppt_master import PPTBlueprint, PPTMasterOrchestrator
-                from ppt_pipeline import (
-                    PPTGenerationPipeline,
-                    PPTGenerationTaskHandler,
-                    format_ppt_generation_result,
-                )
-                from ppt_synthesizer import PPTSynthesizer
-
-                _app_logger.info("[PPT_SYSTEM] ✅ 多模型PPT生成系统已加载（相对导入）")
-            except ImportError:
-                PPTMasterOrchestrator = None
-                PPTBlueprint = None
-                PPTSynthesizer = None
-                PPTGenerationPipeline = None
-                PPTGenerationTaskHandler = None
-                format_ppt_generation_result = None
-                _app_logger.warning("[WARNING] 多模型PPT生成系统未安装")
-        _ppt_system_cache["orchestrator"] = PPTMasterOrchestrator
-        _ppt_system_cache["blueprint"] = PPTBlueprint
-        _ppt_system_cache["synthesizer"] = PPTSynthesizer
-        _ppt_system_cache["pipeline"] = PPTGenerationPipeline
-        _ppt_system_cache["handler"] = PPTGenerationTaskHandler
-        _ppt_system_cache["formatter"] = format_ppt_generation_result
-        _ppt_system_cache["loaded"] = True
-
-    return (
-        _ppt_system_cache.get("orchestrator"),
-        _ppt_system_cache.get("blueprint"),
-        _ppt_system_cache.get("synthesizer"),
-        _ppt_system_cache.get("pipeline"),
-        _ppt_system_cache.get("handler"),
-        _ppt_system_cache.get("formatter"),
-    )
-
-
-# 懒加载代理类
-class _PPTModuleProxy:
-    def __init__(self, index):
-        self._index = index
-
-    def __getattr__(self, name):
-        modules = get_ppt_system()
-        module = modules[self._index]
-        if module is None:
-            raise ImportError("PPT生成系统未安装")
-        return getattr(module, name)
-
-    def __call__(self, *args, **kwargs):
-        modules = get_ppt_system()
-        module = modules[self._index]
-        if module is None:
-            raise ImportError("PPT生成系统未安装")
-        if callable(module):
-            return module(*args, **kwargs)
-        raise TypeError(f"{module} is not callable")
-
-
-PPTMasterOrchestrator = _PPTModuleProxy(0)
-PPTBlueprint = _PPTModuleProxy(1)
-PPTSynthesizer = _PPTModuleProxy(2)
-PPTGenerationPipeline = _PPTModuleProxy(3)
-PPTGenerationTaskHandler = _PPTModuleProxy(4)
-format_ppt_generation_result = _PPTModuleProxy(5)
-
-# ================= Configuration =================
-# 从 web 目录向上查找
-import os
-import sys as _sys
-
-
-# 中断信号存储 - 改进版本，支持实时流中止
 class StreamInterruptManager:
     """管理每个 session 的流中止状态和控制"""
 
     def __init__(self):
-        self.interrupts = {}  # session_name -> {'flag': bool, 'event': threading.Event}
+        self.interrupts = {}
         self._lock = threading.Lock()
 
     def _ensure(self, session_name):
-        """确保 session 记录存在 (must be called with self._lock held)"""
         if session_name not in self.interrupts:
             self.interrupts[session_name] = {"flag": False, "event": threading.Event()}
         elif self.interrupts[session_name].get("event") is None:
             self.interrupts[session_name]["event"] = threading.Event()
 
     def set_interrupt(self, session_name):
-        """设置中断标志"""
         with self._lock:
             self._ensure(session_name)
             self.interrupts[session_name]["flag"] = True
@@ -381,7 +169,6 @@ class StreamInterruptManager:
         _app_logger.debug(f"[INTERRUPT] Marked session {session_name} for interruption")
 
     def is_interrupted(self, session_name):
-        """检查是否被中断"""
         with self._lock:
             if session_name not in self.interrupts:
                 return False
@@ -390,39 +177,30 @@ class StreamInterruptManager:
             return bool(record.get("flag")) or event_flag
 
     def reset(self, session_name):
-        """重置中断标志"""
         with self._lock:
             self._ensure(session_name)
             self.interrupts[session_name]["flag"] = False
             if self.interrupts[session_name]["event"]:
                 self.interrupts[session_name]["event"].clear()
-        _app_logger.debug(
-            f"[INTERRUPT] Reset interrupt flag for session {session_name}"
-        )
+        _app_logger.debug(f"[INTERRUPT] Reset interrupt flag for session {session_name}")
 
     def get_event(self, session_name):
-        """获取/创建中断事件对象"""
         with self._lock:
             self._ensure(session_name)
             return self.interrupts[session_name]["event"]
 
     def cleanup(self, session_name):
-        """清理 session 的中断记录"""
         with self._lock:
             if session_name in self.interrupts:
                 del self.interrupts[session_name]
 
 
 _interrupt_manager = StreamInterruptManager()
-# 保留向后兼容
 _interrupt_flags = {}  # 仅用于向后兼容
 
-# 判断是否为打包后运行
 if getattr(_sys, "frozen", False):
-    # PyInstaller 打包后 - exe所在目录（持久化数据目录）
     PROJECT_ROOT = os.path.dirname(_sys.executable)
 else:
-    # 开发环境 - 从 web 目录向上找
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
@@ -433,12 +211,15 @@ from app.core.llm.gemini_config import (
     write_gemini_config_file,
 )
 
+try:
+    from google import genai
+    from google.genai import types
+except Exception:  # pragma: no cover - surfaced when cloud features are used
+    genai = None
+    types = None
+
 _loaded_gemini_config = load_gemini_config_env(override=False)
-
-# 尝试读取 GEMINI_API_KEY 或兼容别名
 API_KEY = get_gemini_api_key(ensure_loaded=False)
-
-# 读取自定义 API 端点（用于中转服务）
 GEMINI_API_BASE = os.getenv("GEMINI_API_BASE", "").strip()
 FORCE_PROXY = os.getenv("FORCE_PROXY", "").strip()
 
@@ -486,17 +267,13 @@ def get_default_wechat_files_dir() -> str:
 
 
 if not API_KEY:
-    _app_logger.warning(
-        "⚠️ Warning: Gemini API key not found in gemini_config.env"
-    )
+    _app_logger.warning("⚠️ Warning: Gemini API key not found in gemini_config.env")
     _app_logger.info("   请在 config/gemini_config.env 中配置 API 密钥")
     _app_logger.info("   应用将继续启动，但 AI 功能不可用")
-    # 不再 sys.exit — 允许应用启动并在 UI 中提示用户配置
 
 if GEMINI_API_BASE:
     _app_logger.info(f"📡 使用自定义 API 端点: {GEMINI_API_BASE}")
 
-# 检测并设置代理
 PROXY_OPTIONS = [
     "http://127.0.0.1:7890",
     "http://127.0.0.1:10809",
@@ -514,6 +291,53 @@ def _normalize_proxy_url(proxy_value: str) -> str:
     if "://" not in value:
         value = f"http://{value}"
     return value
+
+
+_document_workflow_cache = {}
+
+
+def get_document_workflow_executor():
+    """懒加载文档工作流执行器"""
+    if "executor" not in _document_workflow_cache:
+        _app_logger.debug("[LAZY_IMPORT] 加载文档工作流执行器...")
+        try:
+            from web.document_workflow_executor import (
+                DocumentWorkflowExecutor,
+                execute_document_workflow,
+            )
+        except ImportError:
+            try:
+                from document_workflow_executor import (
+                    DocumentWorkflowExecutor,
+                    execute_document_workflow,
+                )
+            except ImportError:
+                DocumentWorkflowExecutor = None
+                execute_document_workflow = None
+                _app_logger.warning("[WARNING] 文档工作流执行器未安装")
+        _document_workflow_cache["executor"] = DocumentWorkflowExecutor
+        _document_workflow_cache["execute"] = execute_document_workflow
+    return _document_workflow_cache.get("executor"), _document_workflow_cache.get(
+        "execute"
+    )
+
+
+class _DocWorkflowProxy:
+    def __getattr__(self, name):
+        executor_cls, _ = get_document_workflow_executor()
+        if executor_cls is None:
+            raise ImportError("文档工作流执行器未安装")
+        return getattr(executor_cls, name)
+
+
+DocumentWorkflowExecutor = _DocWorkflowProxy()
+
+
+def execute_document_workflow(*args, **kwargs):
+    _, execute_func = get_document_workflow_executor()
+    if execute_func is None:
+        raise ImportError("文档工作流执行器未安装")
+    return execute_func(*args, **kwargs)
 
 
 def _extract_system_proxy_candidates() -> list:
@@ -731,8 +555,11 @@ def _get_local_model_config() -> tuple:
         with open(settings_path, "r", encoding="utf-8") as _f:
             _data = json.load(_f)
         mode = _data.get("model_mode", "cloud")
-        tag = _data.get("local_model")
-        return mode, tag
+        ai_settings = _data.get("ai")
+        if not isinstance(ai_settings, dict):
+            ai_settings = {}
+        tag = ai_settings.get("local_model") or _data.get("local_model")
+        return mode, tag or None
     except Exception:
         return "cloud", None
 
@@ -1641,7 +1468,7 @@ agent_bp = register_blueprints_deferred(app, _app_logger)
 start_background_runtime(_app_logger, get_workspace_root)
 
 # 后台预加载 Vosk 语音模型（减少首次识别延迟）
-preload_voice_engine(_app_logger)
+preload_audio_stt(_app_logger)
 
 WORKSPACE_DIR = get_workspace_root()
 _storage_paths = resolve_app_storage_paths(
@@ -1831,10 +1658,19 @@ def _resolve_requested_model_id(
 ) -> str:
     normalized = _resolve_legacy_model_alias(requested_model)
     resolved_fallback = _resolve_legacy_model_alias(fallback_model)
+    try:
+        from app.core.llm.model_selection import get_configured_cloud_model
+
+        cloud_fallback = get_configured_cloud_model(
+            task_type=task_type,
+            fallback_model=resolved_fallback,
+        )
+    except Exception:
+        cloud_fallback = resolved_fallback
 
     if _model_manager is None:
-        if not normalized or normalized in {"auto", "local"}:
-            return resolved_fallback
+        if not normalized or normalized in {"auto", "local", "cloud"}:
+            return cloud_fallback
         return normalized
 
     try:
@@ -1847,19 +1683,23 @@ def _resolve_requested_model_id(
         _app_logger.debug(
             "[ModelLock] 获取可用模型列表失败，跳过显式模型校验: %s", exc
         )
-        if not normalized or normalized in {"auto", "local"}:
-            return resolved_fallback
+        if not normalized or normalized in {"auto", "local", "cloud"}:
+            return cloud_fallback
         return normalized
 
-    if not normalized or normalized in {"auto", "local"}:
+    if not normalized or normalized in {"auto", "local", "cloud"}:
+        if cloud_fallback and cloud_fallback not in available_ids and cloud_fallback.lower().startswith("deepseek"):
+            return cloud_fallback
         return _pick_available_fallback_model(resolved_fallback, task_type, available_ids)
 
     if available_ids and normalized not in set(available_ids):
+        if normalized.lower().startswith("deepseek"):
+            return normalized
         resolved_target = _pick_available_fallback_model(resolved_fallback, task_type, available_ids)
         _app_logger.warning(
             "[ModelLock] 请求的模型 %s 当前不可用，回退到 %s",
             normalized,
-            resolved_target or "auto",
+            resolved_target or "cloud",
         )
         return resolved_target
 
@@ -1869,69 +1709,601 @@ def _resolve_requested_model_id(
             "[ModelLock] 请求的模型 %s 不满足任务 %s 的能力约束，回退到 %s",
             normalized,
             task_type or "unknown",
-            resolved_target or "auto",
+            resolved_target or "cloud",
         )
         return resolved_target
 
     return normalized
 
-def _stream_whitebox_file_task_request(data: dict):
-    """Stream the new Koto-native file task event contract."""
-    from app.core.agent.file_task_contract import FileTaskRequest
-    from app.core.agent.file_task_runtime import FileTaskRuntime
 
+def _normalize_file_task_payload(data: dict) -> dict:
     payload = dict(data or {})
     model_mode = normalize_model_mode(payload.get("model_mode"), default="cloud")
     payload["model_mode"] = model_mode
+    raw_options = payload.get("options")
+    options = dict(raw_options) if isinstance(raw_options, dict) else {}
+    if "allow_local_fallback" not in options:
+        options["allow_local_fallback"] = False
+    payload["options"] = options
     if model_mode == "local":
         raw_model_id = str(payload.get("model_id") or "").strip()
         if raw_model_id.lower() in {"auto", "cloud", "local"} or raw_model_id.lower().startswith("gemini"):
             payload["model_id"] = ""
         configured_local_model = _get_configured_local_model_id()
         if configured_local_model:
-            raw_options = payload.get("options")
-            options = dict(raw_options) if isinstance(raw_options, dict) else {}
             options.setdefault("local_model", configured_local_model)
-            payload["options"] = options
     history = payload.get("history")
     if not isinstance(history, list):
         history = []
-    if len(history) > 20:
-        history = history[-20:]
-    payload["history"] = history
-    request_payload = FileTaskRequest.from_mapping(payload)
-    runtime = FileTaskRuntime(workspace_root=WORKSPACE_DIR, gemini_client=client)
-    event_iterable = runtime.run(request_payload)
+    payload["history"] = history[-20:]
+    return payload
+
+
+def _inject_recent_file_task_summary_context(
+    payload: dict,
+    *,
+    load_recent_summaries_fn,
+    format_summaries_as_context_fn,
+) -> dict:
     try:
-        for event in event_iterable:
-            yield _file_task_event_to_safe_sse(event)
+        raw_files = payload.get("files") or []
+        file_paths = [
+            str(item.get("path") or item.get("name") or "")
+            for item in raw_files
+            if isinstance(item, dict)
+        ]
+        if payload.get("target_path"):
+            file_paths.append(str(payload["target_path"]))
+        file_paths = list(dict.fromkeys(path for path in file_paths if path))
+        recent = load_recent_summaries_fn(file_paths, limit=5)
+        if recent:
+            ctx_text = format_summaries_as_context_fn(recent)
+            raw_options = payload.get("options")
+            options = dict(raw_options) if isinstance(raw_options, dict) else {}
+            if ctx_text and not options.get("memory_context"):
+                options["memory_context"] = ctx_text
+                payload["options"] = options
+    except Exception as exc:
+        _app_logger.debug("[FileTaskRuntime] recent summary context injection skipped: %s", exc)
+    return payload
+
+
+def _coerce_file_task_event_dict(event) -> dict:
+    payload = event.to_dict() if hasattr(event, "to_dict") else dict(event or {})
+    if not isinstance(payload.get("payload"), dict):
+        payload["payload"] = {}
+    return payload
+
+
+def _safe_file_task_event_dict(event) -> dict:
+    payload = _coerce_file_task_event_dict(event)
+    event_type = str(payload.get("type") or "").strip()
+    event_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+
+    safe_event_payload = dict(event_payload)
+    if event_type == "run.error":
+        _sanitize_sse_text_field(
+            safe_event_payload,
+            "text",
+            fallback="任务执行失败，请稍后重试。",
+            treat_as_error=True,
+        )
+    elif (
+        event_type == "tool.finished"
+        and str(safe_event_payload.get("tool_name") or "").strip() in {"provided_file_context", "selection_context", "parse_file_to_text"}
+        and "result_preview" in safe_event_payload
+    ):
+        tool_name = str(safe_event_payload.get("tool_name") or "").strip()
+        if tool_name == "parse_file_to_text" and safe_event_payload.get("success") is False:
+            _sanitize_sse_text_field(
+                safe_event_payload,
+                "result_preview",
+                fallback="文件读取失败，请调整任务或文件后重试。",
+                treat_as_error=True,
+                skip_empty=True,
+            )
+        else:
+            preview_text = str(safe_event_payload.get("result_preview") or "")
+            safe_event_payload["result_preview"] = (
+                f"已读取上下文片段（约 {len(preview_text)} 字），正文已隐藏。"
+                if preview_text
+                else "已读取上下文片段，正文已隐藏。"
+            )
+    elif event_type == "tool.finished" and "result_preview" in safe_event_payload:
+        blocked = bool(safe_event_payload.get("blocked"))
+        success = safe_event_payload.get("success")
+        fallback = "当前调用已被拦截，请调整方案后重试。" if blocked else (
+            "工具执行失败，请调整方案后重试。" if success is False else "工具已执行。"
+        )
+        _sanitize_sse_text_field(
+            safe_event_payload,
+            "result_preview",
+            fallback=fallback,
+            treat_as_error=(success is False and not blocked),
+            skip_empty=True,
+        )
+
+    payload["payload"] = safe_event_payload
+    try:
+        from app.core.agent.file_task_ui_stream import normalize_ui_state
+
+        ui_state = normalize_ui_state(payload)
+        if ui_state is not None:
+            payload["ui_state"] = ui_state.to_payload()
+    except Exception as exc:
+        _app_logger.debug("[FileTaskRuntime] ui_state normalization skipped: %s", exc)
+    return payload
+
+
+def _trim_file_task_text(value, limit: int = 320) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+_FILE_TASK_SOURCE = "file_task"
+_FILE_TASK_CONTRACT = "file_task_v1"
+
+
+def _file_task_record_metadata(request_payload) -> dict:
+    files = []
+    for file_info in getattr(request_payload, "files", []) or []:
+        if hasattr(file_info, "public_dict"):
+            files.append(file_info.public_dict())
+    metadata = {
+        "task_contract": _FILE_TASK_CONTRACT,
+        "task_mode": _FILE_TASK_CONTRACT,
+        "run_id": str(getattr(request_payload, "run_id", "") or "").strip(),
+        "target_path": str(getattr(request_payload, "target_path", "") or "").strip(),
+        "model_mode": str(getattr(request_payload, "model_mode", "") or "").strip(),
+        "model_id": str(getattr(request_payload, "model_id", "") or "").strip(),
+        "selection_source": str(getattr(request_payload, "selection_source", "") or "").strip(),
+        "has_selection": bool(getattr(request_payload, "selection", "")),
+        "file_count": len(files),
+        "files": files[:8],
+    }
+    task_context = getattr(request_payload, "task_context", None)
+    if isinstance(task_context, dict) and task_context:
+        metadata["task_context"] = task_context
+    selection_context = None
+    if hasattr(request_payload, "selection_context_file"):
+        try:
+            selection_context = request_payload.selection_context_file()
+        except Exception:
+            selection_context = None
+    if selection_context is not None and hasattr(selection_context, "public_dict"):
+        metadata["current_file"] = selection_context.public_dict()
+    return metadata
+
+
+def _ensure_file_task_record(request_payload) -> str:
+    from app.core.tasks.task_ledger import get_ledger
+
+    ledger = get_ledger()
+    requested_task_id = str(getattr(request_payload, "task_id", "") or "").strip()
+    if requested_task_id:
+        existing = ledger.get(requested_task_id)
+        if existing is not None:
+            ledger.update_metadata(existing.task_id, _file_task_record_metadata(request_payload))
+            request_payload.task_id = existing.task_id
+            return existing.task_id
+
+    record = ledger.create(
+        session_id=str(getattr(request_payload, "session_id", "") or getattr(request_payload, "run_id", "") or "file_task_session")[:96],
+        user_input=str(getattr(request_payload, "task", "") or "")[:1000],
+        task_type="file_task",
+        source=_FILE_TASK_SOURCE,
+        metadata=_file_task_record_metadata(request_payload),
+    )
+    request_payload.task_id = record.task_id
+    return record.task_id
+
+
+def _file_task_message(event_type: str, event_payload: dict) -> str:
+    for key in ("summary", "detail", "text", "title", "message", "status"):
+        text = _trim_file_task_text(event_payload.get(key), 320)
+        if text:
+            return text
+    tool_name = _trim_file_task_text(event_payload.get("tool_name") or event_payload.get("tool"), 120)
+    if tool_name:
+        return f"{event_type}: {tool_name}"
+    return event_type or "file_task_event"
+
+
+def _file_task_progress(event_type: str) -> int:
+    explicit = {
+        "run.started": 5,
+        "task.classified": 12,
+        "plan.checked": 18,
+        "plan.created": 24,
+        "multi_target.started": 8,
+        "multi_target.subrun.started": 28,
+        "multi_target.subrun.finished": 72,
+        "multi_target.finished": 100,
+        "check.started": 84,
+        "check.finished": 94,
+        "run.finished": 100,
+        "run.cancelled": 0,
+        "run.error": 0,
+    }
+    if event_type in explicit:
+        return explicit[event_type]
+    if event_type.startswith("tool."):
+        return 62 if event_type.endswith("finished") else 46
+    if event_type.startswith("step."):
+        return 36 if event_type.endswith("started") else 70
+    return 40
+
+
+def _file_task_terminal_status(event_type: str, event_payload: dict) -> str:
+    runtime = event_payload.get("runtime") if isinstance(event_payload.get("runtime"), dict) else {}
+    raw_status = str(
+        runtime.get("terminal_status")
+        or event_payload.get("terminal_status")
+        or event_payload.get("status")
+        or ""
+    ).strip().lower()
+    if raw_status in {"awaiting_confirmation", "waiting"} or event_payload.get("awaiting_confirmation"):
+        return "waiting"
+    if event_type == "run.started" or event_type == "multi_target.started":
+        return "running"
+    if event_type == "run.cancelled":
+        return "cancelled"
+    if event_type == "run.error":
+        return "failed"
+    if event_type == "run.finished":
+        if raw_status in {"cancelled", "canceled"}:
+            return "cancelled"
+        if bool(event_payload.get("completed_task")):
+            return "completed"
+        return "failed"
+    if event_type == "multi_target.finished":
+        return "completed" if str(event_payload.get("status") or "").strip().lower() == "succeeded" else "failed"
+    return ""
+
+
+def _file_task_step_type(event_type: str) -> str:
+    if event_type.startswith("tool."):
+        return "ACTION"
+    if event_type == "run.error" or event_type.endswith(".error"):
+        return "ERROR"
+    if event_type in {"run.finished", "multi_target.finished", "check.finished", "step.result"}:
+        return "ANSWER"
+    return "OBSERVATION"
+
+
+def _persist_file_task_progress_event(request_payload, event) -> None:
+    task_id = str(getattr(request_payload, "task_id", "") or "").strip()
+    if not task_id:
+        return
+
+    try:
+        from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+        from app.core.tasks.task_ledger import get_ledger
+
+        safe_event = _safe_file_task_event_dict(event)
+        event_type = str(safe_event.get("type") or "").strip()
+        event_payload = safe_event.get("payload") if isinstance(safe_event.get("payload"), dict) else {}
+        message = _file_task_message(event_type, event_payload)
+        terminal_status = _file_task_terminal_status(event_type, event_payload)
+        step_type = _file_task_step_type(event_type)
+        tool_name = _trim_file_task_text(event_payload.get("tool_name") or event_payload.get("tool"), 120) or None
+        observation = _trim_file_task_text(event_payload.get("result_preview") or event_payload.get("summary"), 800) or None
+
+        ledger = get_ledger()
+        task_record = ledger.get(task_id)
+        current_status = task_record.status.value if task_record is not None else ""
+
+        if terminal_status == "running":
+            if current_status != "running":
+                ledger.mark_running(task_id)
+        elif terminal_status == "waiting":
+            if current_status != "waiting":
+                ledger.mark_waiting(task_id, reason=message or "awaiting_confirmation")
+        elif terminal_status == "completed":
+            if current_status != "completed":
+                ledger.mark_completed(task_id, result_summary=str(event_payload.get("summary") or message or "")[:500])
+        elif terminal_status == "failed":
+            if current_status != "failed":
+                ledger.mark_failed(task_id, message or "任务执行失败")
+        elif terminal_status == "cancelled":
+            if current_status != "cancelled":
+                ledger.mark_cancelled(task_id)
+
+        metadata_patch = {
+            "run_id": str(getattr(request_payload, "run_id", "") or "").strip(),
+            "last_event_type": event_type,
+            "last_event_seq": safe_event.get("seq", 0),
+            "last_event_step_id": str(safe_event.get("step_id") or "").strip(),
+            "last_event_ts": safe_event.get("ts"),
+            "last_message": message,
+        }
+        if terminal_status:
+            metadata_patch["last_status"] = terminal_status
+        if terminal_status in {"waiting", "completed", "failed", "cancelled"}:
+            metadata_patch["terminal_event"] = safe_event
+        if terminal_status == "waiting":
+            metadata_patch["waiting_event"] = safe_event
+        ledger.update_metadata(task_id, metadata_patch)
+
+        if event_type not in {"run.started", "multi_target.started"}:
+            ledger.add_step(
+                task_id,
+                step_type=step_type,
+                content=message,
+                tool_name=tool_name,
+                observation=observation,
+            )
+
+        bus = get_progress_bus()
+        bus.publish(
+            ProgressEvent(
+                task_id=task_id,
+                session_id=str(getattr(request_payload, "session_id", "") or ""),
+                event_type="file_task_event",
+                status=terminal_status or (current_status or "running"),
+                message=message,
+                progress=_file_task_progress(event_type),
+                step_type=step_type,
+                tool_name=tool_name,
+                detail={"event": safe_event},
+            )
+        )
+    except Exception as exc:
+        _app_logger.debug("[FileTaskRuntime] progress persistence skipped: %s", exc)
+
+
+def _persist_file_task_summary_event(
+    request_payload,
+    event,
+    *,
+    save_task_summary_fn,
+) -> None:
+    try:
+        event_payload = _coerce_file_task_event_dict(event)
+        event_type = str(event_payload.get("type") or "").strip()
+        if event_type not in {"run.finished", "multi_target.subrun.finished"}:
+            return
+        payload = event_payload.get("payload") if isinstance(event_payload.get("payload"), dict) else {}
+        event_summary = str(payload.get("summary") or "").strip()
+        event_completed = bool(payload.get("completed_task"))
+        event_target = str(payload.get("target") or request_payload.target_path or "").strip()
+        if not event_summary or not event_target:
+            return
+        save_task_summary_fn(
+            file_path=event_target,
+            task=str(request_payload.task or "")[:500],
+            outcome="completed" if event_completed else "needs_attention",
+            summary=event_summary,
+        )
+    except Exception as exc:
+        _app_logger.debug("[FileTaskRuntime] task summary persistence skipped: %s", exc)
+
+
+def _build_file_task_ui_message_sse(request_payload, event, *, normalize_event_fn, seq_override=None):
+    try:
+        ui_message = normalize_event_fn(event)
+    except Exception as exc:
+        _app_logger.debug("[FileTaskRuntime] ui stream normalization skipped: %s", exc)
+        return None
+    if ui_message is None:
+        return None
+    event_payload = _safe_file_task_event_dict(event)
+    return _file_task_event_to_safe_sse({
+        "type": "ui.message",
+        "task_id": event_payload.get("task_id") or getattr(request_payload, "task_id", "") or "",
+        "run_id": event_payload.get("run_id") or request_payload.run_id or "file_task",
+        "seq": int(seq_override) if seq_override is not None else event_payload.get("seq", 0),
+        "step_id": event_payload.get("step_id") or "ui",
+        "ts": event_payload.get("ts") or time.time(),
+        "payload": ui_message.to_payload(),
+    })
+
+
+def _build_file_task_orchestrator(*, workspace_root, gemini_client):
+    from app.core.agent.file_task_runtime import FileTaskRuntime
+    from app.core.agent.file_task_model import FileTaskModelClient
+
+    model_client = FileTaskModelClient()
+    return FileTaskRuntime(
+        workspace_root=workspace_root,
+        gemini_client=gemini_client,
+        model_client=model_client,
+    )
+
+
+def _build_file_task_request(
+    data: dict,
+    *,
+    request_cls,
+    load_recent_summaries_fn,
+    format_summaries_as_context_fn,
+):
+    payload = _normalize_file_task_payload(data)
+    payload = _inject_recent_file_task_summary_context(
+        payload,
+        load_recent_summaries_fn=load_recent_summaries_fn,
+        format_summaries_as_context_fn=format_summaries_as_context_fn,
+    )
+    return request_cls.from_mapping(payload)
+
+
+def _build_file_task_request_from_data(data: dict):
+    from app.core.agent.file_task_contract import FileTaskRequest
+    from app.core.agent.file_task_session_store import (
+        load_recent_summaries,
+        format_summaries_as_context,
+    )
+
+    return _build_file_task_request(
+        data,
+        request_cls=FileTaskRequest,
+        load_recent_summaries_fn=load_recent_summaries,
+        format_summaries_as_context_fn=format_summaries_as_context,
+    )
+
+
+def _iter_file_task_stream_events(
+    request_payload,
+    event_iterable,
+    *,
+    save_task_summary_fn,
+    normalize_event_fn,
+    persist_progress_fn,
+):
+    outbound_seq = 0
+    for event in event_iterable:
+        safe_event = _safe_file_task_event_dict(event)
+        _persist_file_task_summary_event(
+            request_payload,
+            safe_event,
+            save_task_summary_fn=save_task_summary_fn,
+        )
+        persist_progress_fn(request_payload, safe_event)
+        outbound_seq += 1
+        outbound_event = dict(safe_event)
+        outbound_event["seq"] = outbound_seq
+        raw_sse = _file_task_event_to_safe_sse(outbound_event)
+        next_ui_seq = outbound_seq + 1
+        ui_sse = _build_file_task_ui_message_sse(
+            request_payload,
+            event,
+            normalize_event_fn=normalize_event_fn,
+            seq_override=next_ui_seq,
+        )
+        yield raw_sse
+        if ui_sse is not None:
+            outbound_seq = next_ui_seq
+            yield ui_sse
+
+
+def _drain_file_task_stream_output_in_background(request_payload, stream_iter) -> None:
+    task_id = str(getattr(request_payload, "task_id", "") or "").strip()
+
+    def _drain():
+        try:
+            for _ in stream_iter:
+                pass
+        except Exception as exc:
+            _app_logger.exception(
+                "[FileTaskRuntime] background stream drain failed (task_id=%s): %s",
+                task_id or "?",
+                exc,
+            )
+            try:
+                error_event = _build_file_task_error_event(request_payload, exc)
+                _persist_file_task_progress_event(request_payload, error_event)
+            except Exception as persist_exc:
+                _app_logger.debug(
+                    "[FileTaskRuntime] background drain error persistence skipped (task_id=%s): %s",
+                    task_id or "?",
+                    persist_exc,
+                )
+
+    threading.Thread(
+        target=_drain,
+        daemon=True,
+        name=f"file-task-drain-{task_id[:8] or 'anon'}",
+    ).start()
+
+
+def _iter_file_task_stream_output(request_payload, event_iterable):
+    from app.core.agent.file_task_session_store import save_task_summary
+    from app.core.agent.file_task_ui_stream import normalize_event as _ui_normalize_event
+
+    yield from _iter_file_task_stream_events(
+        request_payload,
+        event_iterable,
+        save_task_summary_fn=save_task_summary,
+        normalize_event_fn=_ui_normalize_event,
+        persist_progress_fn=_persist_file_task_progress_event,
+    )
+
+
+def _build_file_task_error_event(request_payload, exc):
+    return {
+        "type": "run.error",
+        "task_id": getattr(request_payload, "task_id", "") or "",
+        "run_id": request_payload.run_id or "file_task",
+        "seq": 999999,
+        "step_id": "run",
+        "ts": time.time(),
+        "payload": {"text": str(exc)},
+    }
+
+
+def _build_file_task_error_sse(request_payload, exc):
+    return _file_task_event_to_safe_sse(_build_file_task_error_event(request_payload, exc))
+
+
+def _fallback_file_task_request_for_error(data: dict):
+    return SimpleNamespace(
+        task=str((data or {}).get("task") or (data or {}).get("instruction") or ""),
+        run_id=str((data or {}).get("run_id") or "file_task"),
+        session_id=str((data or {}).get("session_id") or ""),
+        target_path=str((data or {}).get("target_path") or (data or {}).get("target") or ""),
+    )
+
+
+def _stream_file_task_request(data: dict):
+    """Stream the new Koto-native file task event contract."""
+    request_payload = None
+    try:
+        request_payload = _build_file_task_request_from_data(data)
+        _ensure_file_task_record(request_payload)
+        orchestrator = _build_file_task_orchestrator(
+            workspace_root=WORKSPACE_DIR,
+            gemini_client=client,
+        )
+        event_iterable = orchestrator.run(request_payload)
+        stream_iter = _iter_file_task_stream_output(request_payload, event_iterable)
+        for frame in stream_iter:
+            try:
+                yield frame
+            except GeneratorExit:
+                try:
+                    from app.core.agent.file_task_runtime import is_cancel_requested
+                    cancelled = is_cancel_requested(getattr(request_payload, "run_id", "") or "")
+                except Exception:
+                    cancelled = False
+                if not cancelled:
+                    _drain_file_task_stream_output_in_background(
+                        request_payload,
+                        stream_iter,
+                    )
+                raise
     except Exception as exc:
         _app_logger.exception("[FileTaskRuntime] stream failed: %s", exc)
-        run_id = request_payload.run_id or "file_task"
-        yield _file_task_event_to_safe_sse({
-            "type": "run.error",
-            "run_id": run_id,
-            "seq": 999999,
-            "step_id": "run",
-            "ts": time.time(),
-            "payload": {"text": str(exc)},
-        })
+        if request_payload is None:
+            request_payload = _fallback_file_task_request_for_error(data)
+        error_event = _build_file_task_error_event(request_payload, exc)
+        _persist_file_task_progress_event(request_payload, error_event)
+        yield _file_task_event_to_safe_sse(error_event)
 
 
-def _normalize_editor_stream_model_id(model_mode: str, requested_model: str) -> str:
-    normalized = str(requested_model or "").strip()
-    if normalized.lower() in {"auto", "local"}:
-        normalized = ""
+def _sanitize_sse_text_field(
+    payload: dict,
+    field_name: str,
+    *,
+    fallback: str,
+    treat_as_error: bool = False,
+    skip_empty: bool = False,
+) -> None:
+    if field_name not in payload:
+        return
 
-    if str(model_mode or "cloud").strip().lower() == "local":
-        return ""
+    raw_value = payload.get(field_name, "")
+    if skip_empty:
+        raw_value = str(raw_value or "").strip()
+        if not raw_value:
+            return
 
-    fallback_model = _resolve_legacy_model_alias(MODEL_MAP.get("CHAT", "gemini-3-flash-preview"))
-    return _resolve_requested_model_id(
-        normalized,
-        fallback_model=fallback_model,
-        task_type="CHAT",
-    ) or fallback_model
+    payload[field_name] = sanitize_user_visible_text(
+        raw_value,
+        fallback=fallback,
+        treat_as_error=treat_as_error,
+    )
 
 
 def _editor_ai_safe_sse(payload: dict) -> str:
@@ -1939,25 +2311,29 @@ def _editor_ai_safe_sse(payload: dict) -> str:
     event_type = str(safe_payload.get("type") or "").strip().lower()
 
     if event_type == "tool_result":
-        safe_payload["result_preview"] = sanitize_user_visible_text(
-            safe_payload.get("result_preview", ""),
+        _sanitize_sse_text_field(
+            safe_payload,
+            "result_preview",
             fallback="工具已执行。",
         )
     elif event_type == "step_error":
-        safe_payload["error"] = sanitize_user_visible_text(
-            safe_payload.get("error", ""),
+        _sanitize_sse_text_field(
+            safe_payload,
+            "error",
             fallback="处理失败，请稍后重试。",
             treat_as_error=True,
         )
     elif event_type == "error":
-        safe_payload["text"] = sanitize_user_visible_text(
-            safe_payload.get("text", ""),
+        _sanitize_sse_text_field(
+            safe_payload,
+            "text",
             fallback="AI 处理失败，请稍后重试。",
             treat_as_error=True,
         )
     elif event_type == "info":
-        safe_payload["text"] = sanitize_user_visible_text(
-            safe_payload.get("text", ""),
+        _sanitize_sse_text_field(
+            safe_payload,
+            "text",
             fallback="处理中…",
         )
 
@@ -1979,22 +2355,23 @@ def _legacy_safe_sse(payload: dict) -> str:
             message_fallback = (
                 "AI 处理失败，请稍后重试。" if message_as_error else "处理中…"
             )
-        safe_payload["message"] = sanitize_user_visible_text(
-            safe_payload.get("message", ""),
+        _sanitize_sse_text_field(
+            safe_payload,
+            "message",
             fallback=message_fallback,
             treat_as_error=message_as_error,
         )
 
     if "detail" in safe_payload:
-        detail_text = str(safe_payload.get("detail") or "").strip()
-        if detail_text:
-            if detail_fallback is None:
-                detail_fallback = "处理失败，请稍后重试。" if detail_as_error else ""
-            safe_payload["detail"] = sanitize_user_visible_text(
-                detail_text,
-                fallback=detail_fallback,
-                treat_as_error=detail_as_error,
-            )
+        if detail_fallback is None:
+            detail_fallback = "处理失败，请稍后重试。" if detail_as_error else ""
+        _sanitize_sse_text_field(
+            safe_payload,
+            "detail",
+            fallback=detail_fallback,
+            treat_as_error=detail_as_error,
+            skip_empty=True,
+        )
 
     return f"data: {json.dumps(safe_payload, ensure_ascii=False)}\n\n"
 
@@ -2002,35 +2379,7 @@ def _legacy_safe_sse(payload: dict) -> str:
 def _file_task_event_to_safe_sse(event) -> str:
     from app.core.agent.file_task_contract import event_to_sse
 
-    payload = event.to_dict() if hasattr(event, "to_dict") else dict(event)
-    event_type = str(payload.get("type") or "").strip()
-    event_payload = payload.get("payload")
-    if not isinstance(event_payload, dict):
-        return event_to_sse(payload)
-
-    safe_event_payload = dict(event_payload)
-    if event_type == "run.error":
-        safe_event_payload["text"] = sanitize_user_visible_text(
-            safe_event_payload.get("text", ""),
-            fallback="任务执行失败，请稍后重试。",
-            treat_as_error=True,
-        )
-    elif event_type == "tool.finished":
-        preview = str(safe_event_payload.get("result_preview") or "").strip()
-        if preview:
-            blocked = bool(safe_event_payload.get("blocked"))
-            success = safe_event_payload.get("success")
-            fallback = "当前调用已被拦截，请调整方案后重试。" if blocked else (
-                "工具执行失败，请调整方案后重试。" if success is False else "工具已执行。"
-            )
-            safe_event_payload["result_preview"] = sanitize_user_visible_text(
-                preview,
-                fallback=fallback,
-                treat_as_error=(success is False and not blocked),
-            )
-
-    payload["payload"] = safe_event_payload
-    return event_to_sse(payload)
+    return event_to_sse(_safe_file_task_event_dict(event))
 
 
 def _sync_model_routes_from_manager(force_refresh: bool = False) -> bool:
@@ -6613,6 +6962,15 @@ class KotoBrain:
                 model_id = SmartDispatcher.get_model_for_task(
                     target_key, has_image=bool(file_data)
                 )
+                try:
+                    from app.core.llm.model_selection import get_configured_cloud_model
+
+                    model_id = get_configured_cloud_model(
+                        task_type=target_key,
+                        fallback_model=model_id,
+                    ) or model_id
+                except Exception:
+                    pass
 
         # 使用小模型将请求转换为结构化 Markdown（仅在大模型处理时启用）
         # ⚠️ 跳过条件：有文件附件时（file_data）、或输入很大（含嵌入文件内容）
@@ -7070,6 +7428,21 @@ class KotoBrain:
             else:
                 _brain_sys_instruction = _get_chat_system_instruction(original_input)
 
+            try:
+                from app.core.llm.model_selection import is_deepseek_model
+            except Exception:
+                def is_deepseek_model(_model_id):
+                    return False
+
+            if file_data and is_deepseek_model(model_id):
+                _doc_model = _INTERACTIONS_FALLBACK_MODEL
+                _app_logger.info(
+                    "[brain.chat] DeepSeek selected with binary file; using Gemini file-capable fallback %s",
+                    _doc_model,
+                )
+                model_id = _doc_model
+                result["model"] = model_id
+
             if file_data:
                 # 构建 Part 格式（适用于图片和 PDF/文档）
                 doc_part = types.Part.from_bytes(
@@ -7131,41 +7504,79 @@ class KotoBrain:
                     )
                     accumulated_text = response.text if response.text else ""
             else:
-                # gemini-3-preview 只支持 Interactions API，不支持 generate_content
-                if _is_interactions_only(model_id):
-                    try:
-                        # 将历史记录折叠进 prompt（Interactions API 不支持多轮历史）
-                        history_prefix = ""
-                        if formatted_history:
-                            history_lines = []
-                            for turn in formatted_history[-6:]:  # 最近 3 轮
-                                role_label = "用户" if turn.role == "user" else "助手"
-                                turn_text = " ".join(
-                                    p.text
-                                    for p in turn.parts
-                                    if hasattr(p, "text") and p.text
-                                )
-                                if turn_text:
-                                    history_lines.append(f"{role_label}: {turn_text}")
-                            if history_lines:
-                                history_prefix = (
-                                    "[对话历史]\n" + "\n".join(history_lines) + "\n\n"
-                                )
-                        full_prompt = history_prefix + model_input
-                        accumulated_text = _call_interactions_api_sync(
-                            model_id,
-                            full_prompt,
-                            sys_instruction=_brain_sys_instruction,
-                        )
-                        if not accumulated_text:
-                            raise ValueError("Interactions API 返回空响应")
-                    except Exception as _ia_err:
-                        _app_logger.info(
-                            f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}"
-                        )
-                        model_id = _INTERACTIONS_FALLBACK_MODEL
-                        result["model"] = model_id
-                        _fb_resp = client.models.generate_content(
+                if is_deepseek_model(model_id):
+                    from app.core.llm.provider_factory import get_llm_provider
+
+                    provider = get_llm_provider(
+                        provider="deepseek",
+                        model=model_id,
+                        allow_local_fallback=False,
+                    )
+                    messages = []
+                    for turn in history_for_model[-6:]:
+                        role = "assistant" if turn.get("role") == "model" else turn.get("role", "user")
+                        content = "\n".join(str(p) for p in turn.get("parts", []) if str(p or "").strip())
+                        if content:
+                            messages.append({"role": role, "content": content})
+                    messages.append({"role": "user", "content": model_input})
+                    response = provider.generate_content(
+                        prompt=messages,
+                        model=model_id,
+                        system_instruction=_brain_sys_instruction,
+                        stream=False,
+                    )
+                    accumulated_text = response.get("content", "") if isinstance(response, dict) else str(response)
+                else:
+                    # gemini-3-preview 只支持 Interactions API，不支持 generate_content
+                    if _is_interactions_only(model_id):
+                        try:
+                            # 将历史记录折叠进 prompt（Interactions API 不支持多轮历史）
+                            history_prefix = ""
+                            if formatted_history:
+                                history_lines = []
+                                for turn in formatted_history[-6:]:  # 最近 3 轮
+                                    role_label = "用户" if turn.role == "user" else "助手"
+                                    turn_text = " ".join(
+                                        p.text
+                                        for p in turn.parts
+                                        if hasattr(p, "text") and p.text
+                                    )
+                                    if turn_text:
+                                        history_lines.append(f"{role_label}: {turn_text}")
+                                if history_lines:
+                                    history_prefix = (
+                                        "[对话历史]\n" + "\n".join(history_lines) + "\n\n"
+                                    )
+                            full_prompt = history_prefix + model_input
+                            accumulated_text = _call_interactions_api_sync(
+                                model_id,
+                                full_prompt,
+                                sys_instruction=_brain_sys_instruction,
+                            )
+                            if not accumulated_text:
+                                raise ValueError("Interactions API 返回空响应")
+                        except Exception as _ia_err:
+                            _app_logger.info(
+                                f"[brain.chat] {model_id} Interactions API 失败: {_ia_err} → 降级到 {_INTERACTIONS_FALLBACK_MODEL}"
+                            )
+                            model_id = _INTERACTIONS_FALLBACK_MODEL
+                            result["model"] = model_id
+                            _fb_resp = client.models.generate_content(
+                                model=model_id,
+                                contents=formatted_history
+                                + [
+                                    types.Content(
+                                        role="user",
+                                        parts=[types.Part.from_text(text=model_input)],
+                                    )
+                                ],
+                                config=types.GenerateContentConfig(
+                                    system_instruction=_brain_sys_instruction
+                                ),
+                            )
+                            accumulated_text = _fb_resp.text if _fb_resp.text else ""
+                    else:
+                        response = client.models.generate_content(
                             model=model_id,
                             contents=formatted_history
                             + [
@@ -7178,22 +7589,7 @@ class KotoBrain:
                                 system_instruction=_brain_sys_instruction
                             ),
                         )
-                        accumulated_text = _fb_resp.text if _fb_resp.text else ""
-                else:
-                    response = client.models.generate_content(
-                        model=model_id,
-                        contents=formatted_history
-                        + [
-                            types.Content(
-                                role="user",
-                                parts=[types.Part.from_text(text=model_input)],
-                            )
-                        ],
-                        config=types.GenerateContentConfig(
-                            system_instruction=_brain_sys_instruction
-                        ),
-                    )
-                    accumulated_text = response.text if response.text else ""
+                        accumulated_text = response.text if response.text else ""
 
             first_token_latency = (time.time() - start_time) * 1000
             result["latency"] = first_token_latency
@@ -7322,7 +7718,6 @@ brain = KotoBrain()
 # ================= Routes =================
 
 
-@app.route("/api/chat", methods=["POST"])
 def chat():
     """Send a chat message and get a response (non-streaming).
     ---
@@ -7337,7 +7732,7 @@ def chat():
           properties:
             session: {type: string, description: Session/conversation name}
             message: {type: string, description: User message}
-            locked_model: {type: string, default: auto}
+            locked_model: {type: string, default: cloud}
             locked_task: {type: string}
     responses:
       200:
@@ -7351,74 +7746,9 @@ def chat():
       500:
         description: Internal error
     """
-    data = request.json
-    session_name = data.get("session")
-    user_input = data.get("message", "")
-    locked_task = data.get("locked_task")
-    locked_model = data.get("locked_model", "auto")
+    from web.blueprints.chat import chat as _chat_handler
 
-    if not session_name or not user_input:
-        return jsonify({"error": "Missing session or message"}), 400
-
-    user_input = Utils.sanitize_string(user_input)
-
-    # Load history
-    full_history = session_manager.load_full(f"{session_name}.json")
-    history = session_manager._trim_history(full_history)
-
-    # 确定使用的模型
-    if locked_model == "local":
-        model = locked_model
-        auto_model = False
-    elif locked_model and locked_model != "auto":
-        requested_model = _resolve_requested_model_id(
-            locked_model,
-            fallback_model="",
-            task_type=locked_task or "CHAT",
-        )
-        if requested_model:
-            model = requested_model
-            auto_model = False
-        elif locked_task:
-            model = MODEL_MAP.get(locked_task, MODEL_MAP["CHAT"])
-            auto_model = False
-        else:
-            model = None
-            auto_model = True
-    elif locked_task:
-        model = MODEL_MAP.get(locked_task, MODEL_MAP["CHAT"])
-        auto_model = False
-    else:
-        model = None
-        auto_model = True
-
-    # Get response
-    result = brain.chat(history, user_input, model=model, auto_model=auto_model)
-
-    # 代码任务: 自动检查依赖并安装
-    if result.get("task") == "CODER" and result.get("response"):
-        pkgs = Utils.detect_required_packages(result["response"])
-        if pkgs:
-            install_result = Utils.auto_install_packages(pkgs)
-            installed = install_result.get("installed", [])
-            failed = install_result.get("failed", [])
-            skipped = install_result.get("skipped", [])
-            msg_parts = []
-            if installed:
-                msg_parts.append(f"✅ 已安装: {', '.join(installed)}")
-            if skipped:
-                msg_parts.append(f"ℹ️ 已存在: {', '.join(skipped)}")
-            if failed:
-                msg_parts.append(f"⚠️ 安装失败: {', '.join(failed)}")
-            if msg_parts:
-                result["response"] += "\n\n" + "\n".join(msg_parts)
-
-    # Update history (基于磁盘完整历史追加，避免截断丢失)
-    session_manager.append_and_save(
-        f"{session_name}.json", user_input, result["response"]
-    )
-
-    return jsonify(result)
+    return _chat_handler()
 
 
 # ============== Agent 确认 API ==============
@@ -7426,12 +7756,12 @@ def chat():
 #       (app/api/agent_routes.py) under /api/agent/confirm and /api/agent/choice.
 #       Kept here as comments for reference.
 
-# @app.route('/api/agent/confirm', methods=['POST'])
+# legacy route: POST /api/agent/confirm
 # def agent_confirm():
 #     """Agent 用户确认 API — 前端点击确认/取消后回调"""
 #     ...
 
-# @app.route('/api/agent/choice', methods=['POST'])
+# legacy route: POST /api/agent/choice
 # def agent_choice():
 #     """Agent 用户选择 API — 前端选择后回调"""
 #     ...
@@ -7439,7 +7769,7 @@ def chat():
 
 # NOTE: /api/agent/plan has been migrated to the unified agent blueprint
 #       (app/api/agent_routes.py). Kept as comment for reference.
-# @app.route('/api/agent/plan', methods=['POST'])
+# legacy route: POST /api/agent/plan
 # def agent_plan(): ...
 
 
@@ -7461,7 +7791,7 @@ def chat_stream():
               type: string
             locked_model:
               type: string
-              default: auto
+              default: cloud
             locked_task:
               type: string
     responses:
@@ -7472,7 +7802,9 @@ def chat_stream():
     session_name = data.get("session")
     user_input = data.get("message", "")
     locked_task = data.get("locked_task")
-    locked_model = data.get("locked_model", "auto")
+    locked_model = data.get("locked_model", "cloud")
+    if str(locked_model or "").strip().lower() in {"", "auto"}:
+        locked_model = "cloud"
     # 影子对话上下文（影子模型发出的消息原文，用于让 AI 知道这是哪条影子消息的回复）
     shadow_context = data.get("shadow_context", "")
     # Document-edit mode flag sent by workspace-assistant.js when a file is open
@@ -8709,7 +9041,7 @@ def chat_stream():
         task_type, complexity=_complexity
     )
 
-    if locked_model and locked_model not in {"auto", "local"}:
+    if locked_model and locked_model not in {"cloud", "local"}:
         model_id = _resolve_requested_model_id(
             locked_model,
             fallback_model=routed_model_id,
@@ -8719,10 +9051,10 @@ def chat_stream():
         model_id = routed_model_id
 
     # 🦙 locked_model='local' → 强制走本地 Ollama，绝不调用云端
-    # 🌐 其他情况（auto/具体云模型）→ 云端优先，本地仅作兜底（CHAT简单问题优化除外）
+    # 🌐 其他情况（cloud/具体云模型）→ 云端模型
     # _local_chat_override 在此不设 True：
     #   - locked_model='local' 由各任务分支入口的专用 local 路由块拦截处理
-    #   - CHAT 的 auto-local 快速通道由 RouterDecision.forward_to_cloud=False 触发，
+    #   - CHAT 的本地快速通道由 RouterDecision.forward_to_cloud=False 触发，
     #     并在 CHAT 分支内用 locked_model != 'local' 守卫隔离，不影响其他任务类型
 
     _app_logger.debug(
@@ -10167,8 +10499,9 @@ def chat_stream():
                         yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})}\n\n"
                         return
 
-                    # 判断是否直接打开（唯一高置信匹配）
-                    auto_open = (
+                    # 判断是否高置信匹配。Koto 不再在后端拉起系统默认程序；
+                    # 高置信时只返回路径，让用户在文件助手内解析或复制路径。
+                    high_confidence_match = (
                         len(disk_results) == 1 and disk_results[0]["score"] >= 0.9
                     ) or (
                         len(disk_results) >= 1
@@ -10176,17 +10509,14 @@ def chat_stream():
                         and (len(disk_results) < 2 or disk_results[1]["score"] < 0.7)
                     )
 
-                    if auto_open:
+                    if high_confidence_match:
                         best = disk_results[0]
-                        open_result = FileScanner.open_file(best["path"])
-                        if open_result["success"]:
-                            response_text = (
-                                f"✅ 已为您打开文件：**{best['name']}**\n\n"
-                                f"📁 路径: `{best['path']}`\n"
-                                f"📂 分类: {best['category']}　大小: {best['size_str']}　修改: {best['mtime_str']}"
-                            )
-                        else:
-                            response_text = f"⚠️ 找到文件但打开失败: {open_result.get('error', '')}\n\n📁 路径: `{best['path']}`"
+                        response_text = (
+                            f"✅ 找到高匹配文件：**{best['name']}**\n\n"
+                            f"📁 路径: `{best['path']}`\n"
+                            f"📂 分类: {best['category']}　大小: {best['size_str']}　修改: {best['mtime_str']}\n\n"
+                            "如需处理内容，请把这个路径交给文件助手。"
+                        )
                         yield f"data: {json.dumps({'type': 'token', 'content': response_text}, ensure_ascii=False)}\n\n"
                         session_manager.append_and_save(
                             f"{session_name}.json",
@@ -10570,10 +10900,12 @@ def chat_stream():
 
                 try:
                     from web.document_annotation_compat import (
+                        collect_annotation_result,
                         iter_annotation_progress_events,
                     )
 
                     # 使用流式分析系统，逐步反馈进度
+                    # Non-streaming DOC_ANNOTATE compatibility remains centralized in collect_annotation_result(...).
                     yield f"data: {json.dumps({'type': 'progress', 'stage': 'processing_start', 'message': '🔍 开始处理文档...', 'detail': '这个过程会涉及多个阶段'})}\n\n"
 
                     revised_file = None
@@ -14413,158 +14745,8 @@ def chat_stream():
     return response
 
 
-@app.route("/api/chat/file", methods=["POST"])
 def chat_with_file():
     """处理文件上传和聊天请求"""
-    from web.document_generator import save_docx, save_pdf
-    from web.file_processor import process_uploaded_file
-
-    def _strip_code_blocks(text: str) -> str:
-        if not text:
-            return text
-        # Remove fenced code blocks entirely
-        text = re.sub(r"```[\s\S]*?```", "", text)
-        # Remove inline code ticks but keep the content
-        text = text.replace("`", "")
-        return text.strip()
-
-    def _build_analysis_title(user_text: str, filename: str, is_binary: bool) -> str:
-        name_base = os.path.splitext(filename)[0]
-        text_lower = (user_text or "").lower()
-        ext = os.path.splitext(filename)[1].lower()
-
-        # 1. Determine File Type Prefix
-        if ext in [".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp"]:
-            prefix = "图片"
-        elif ext == ".pdf":
-            prefix = "PDF"
-        elif ext in [".doc", ".docx"]:
-            prefix = "Word"
-        elif ext in [".ppt", ".pptx"]:
-            prefix = "PPT"
-        else:
-            prefix = "文件" if is_binary else "文档"
-
-        # 2. Determine Intent
-        intent = "分析"
-        intent_map = {
-            "翻译": ["翻译", "translate", "译文", "中译英", "英译中"],
-            "总结": ["总结", "归纳", "摘要", "summary", "概括", "核心内容"],
-            "文字识别": ["提取", "识别", "ocr", "文字", "转文字", "读图"],
-            "表格识别": ["表格", "table", "excel", "转表"],
-            "对比分析": ["对比", "比较", "diff", "区别", "差异"],
-            "校对": ["校对", "检查", "审阅", "纠错", "改错"],
-            "润色": ["润色", "改写", "polish", "rewrite", "优化", "美化"],
-            "续写": ["续写", "扩写", "continue", "补充"],
-            "大纲": ["大纲", "框架", "outline", "目录"],
-            "解释": ["解释", "explain", "什么意思", "含义"],
-        }
-
-        found_intent_keywords = []
-        for k, v in intent_map.items():
-            for kw in v:
-                if kw in text_lower:
-                    intent = k
-                    found_intent_keywords.append(kw)
-                    break
-            if intent != "分析":
-                break
-
-        # 3. Extract Topic Keywords (Improved)
-        stop_words = [
-            "帮我",
-            "请",
-            "一下",
-            "把",
-            "这个",
-            "这篇",
-            "文件",
-            "文章",
-            "内容",
-            "生成",
-            "写一个",
-            "做一份",
-            "koto",
-            "分析",
-            "阅读",
-            "提取",
-            "识别",
-            "output",
-            "make",
-            "create",
-            "generate",
-            "please",
-            "the",
-            "a",
-            "an",
-            "is",
-            "of",
-            "to",
-            "for",
-            "with",
-            "in",
-            "on",
-            "user",
-            "file",
-            "document",
-            "from",
-            "this",
-            "that",
-            "it",
-            "what",
-            "how",
-            "why",
-            "where",
-            "into",
-            "check",
-            "run",
-        ]
-
-        # Prepare text
-        text_lower = user_text.lower()
-
-        # Safe replacement for Chinese phrases (which don't use spaces)
-        zh_stops = [w for w in stop_words if re.match(r"[\u4e00-\u9fa5]+", w)]
-        for stop in zh_stops + found_intent_keywords:
-            if re.match(r"[\u4e00-\u9fa5]+", stop):  # Only safe-replace Chinese phrases
-                text_lower = text_lower.replace(stop, " ")
-
-        # Tokenize by non-word chars (separates English words, breaks Chinese into blocks if spaces inserted)
-        # Regex: Keep Chinese chars and English words
-        # This splits "summary of report" -> "summary", "of", "report"
-        tokens = re.findall(r"[a-zA-Z0-9\u4e00-\u9fa5]+", text_lower)
-
-        # Filter tokens
-        valid_keywords = []
-        en_stops = set([w for w in stop_words if not re.match(r"[\u4e00-\u9fa5]+", w)])
-
-        for token in tokens:
-            if token in en_stops:
-                continue
-            if token in found_intent_keywords:
-                continue  # Filter intent words token-wise
-            if len(token) < 2:
-                continue
-            valid_keywords.append(token)
-
-        # Select best keyword
-        topic = ""
-        if valid_keywords:
-            topic = "_".join(valid_keywords[:3])
-
-        # 4. Construct Final Title
-        # Strategy:
-        # If user provided a specific topic, prioritize it: "{Intent}_{Topic}_{Filename}"
-        # If no detected topic but intent exists: "{Intent}_{Filename}"
-        # Fallback: "{Prefix}{Intent}_{Filename}"
-
-        sanitized_name = name_base.replace(" ", "_")
-
-        if topic:
-            return f"{intent}_{topic}_{sanitized_name}"
-        else:
-            return f"{prefix}{intent}_{sanitized_name}"
-
     session_name = request.form.get("session")
     user_input = request.form.get("message", "")
     files = request.files.getlist("file")
@@ -14589,7 +14771,9 @@ def chat_with_file():
             )
 
     locked_task = request.form.get("locked_task")
-    locked_model = request.form.get("locked_model", "auto")
+    locked_model = request.form.get("locked_model", "cloud")
+    if str(locked_model or "").strip().lower() in {"", "auto"}:
+        locked_model = "cloud"
     stream_mode = request.form.get("stream", "").lower() in ("1", "true", "yes")
 
     _app_logger.info(f"[FILE UPLOAD DEBUG] 最终 files 列表: {len(files)} 个文件")
@@ -14601,2052 +14785,28 @@ def chat_with_file():
         return jsonify({"error": "最多一次上传 10 个文件"}), 400
 
     if len(files) > 1:
-        # 检测是否是 PPT 生成意图 (多文件合并生成 PPT)
-        ppt_keywords = ["ppt", "slide", "幻灯片", "演示文稿", "powerpoint"]
-        is_ppt_intent = any(kw in (user_input or "").lower() for kw in ppt_keywords)
-
-        if is_ppt_intent:
-            _app_logger.info(f"[FILE UPLOAD] 检测到多文件 PPT 生成意图: {user_input}")
-
-            # 预先保存所有文件，避免在生成器中访问已关闭的 FileStorage
-            saved_file_paths = []
-            source_filenames = []
-
-            for f in files:
-                if f and f.filename:
-                    fname = f.filename
-                    fpath = os.path.join(UPLOAD_DIR, fname)
-                    # 如果文件指针不在开头，重置它
-                    f.seek(0)
-                    f.save(fpath)
-                    saved_file_paths.append(fpath)
-                    source_filenames.append(fname)
-
-            def generate_ppt_stream():
-                try:
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '📊 正在准备 PPT 生成...', 'detail': f'检测到 {len(saved_file_paths)} 个源文件'})}\n\n"
-
-                    context_text = ""
-
-                    # 1. 提取所有已保存文件内容
-                    for i, filepath in enumerate(saved_file_paths):
-                        filename = os.path.basename(filepath)
-                        yield f"data: {json.dumps({'type': 'progress', 'message': f'📖 正在读取文件 ({i+1}/{len(saved_file_paths)})...', 'detail': filename})}\n\n"
-
-                        try:
-                            # 提取内容
-                            from web.file_processor import FileProcessor
-
-                            processor = FileProcessor()
-                            # 简化版的 process
-                            f_result = processor.process_file(filepath)
-                            content = f_result.get("text_content") or f_result.get(
-                                "content", ""
-                            )
-
-                            # 截断过长内容避免Token爆炸，但保留足够上下文
-                            if len(content) > 50000:
-                                content = content[:50000] + "...(truncated)"
-
-                            context_text += f"\n\n=== {filename} ===\n{content}\n"
-
-                        except Exception as e:
-                            _app_logger.info(
-                                f"[PPT BATCH] 读取文件 {filename} 失败: {e}"
-                            )
-                            context_text += (
-                                f"\n\n=== {filename} (Error) ===\n无法读取内容\n"
-                            )
-
-                    # 2. 调用 PPT 生成管道
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '🎨 正在设计 PPT 结构...', 'detail': '基于多个文件内容'})}\n\n"
-
-                    import asyncio
-
-                    from web.ppt_pipeline import PPTGenerationPipeline
-
-                    # 构造增强后的 Prompt
-                    enhanced_prompt = f"{user_input}\n\n【参考资料】\n基于以下文件生成的 PPT:\n{context_text}"
-
-                    # 限制 Prompt 长度
-                    if len(enhanced_prompt) > 100000:
-                        enhanced_prompt = (
-                            enhanced_prompt[:100000] + "\n...(context truncated)"
-                        )
-
-                    # 异步执行 PPT 生成
-                    # 使用项目内的 get_client() 获取 Gemini 客户端
-                    ai_client = get_client()
-                    pipeline = PPTGenerationPipeline(ai_client=ai_client)
-
-                    import queue
-                    import threading
-                    import traceback
-
-                    pipeline_timeout_sec = 300
-                    start_ts = time.time()
-
-                    # 混合消息队列（进度+思考）
-                    event_queue = queue.Queue()
-
-                    def _progress_listener(msg, p=None):
-                        event_queue.put({"type": "progress", "msg": msg, "progress": p})
-
-                    def _thought_listener(text):
-                        # Use a dedicated type for thought/reasoning text
-                        event_queue.put({"type": "thought", "text": text})
-
-                    run_state = {
-                        "done": False,
-                        "result": None,
-                        "error": None,
-                        "traceback": "",
-                    }
-
-                    def _run_pipeline_bg():
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        try:
-                            # 传递 progress_callback 和 thought_callback
-                            run_state["result"] = loop.run_until_complete(
-                                pipeline.generate(
-                                    user_request=enhanced_prompt,
-                                    output_path=os.path.join(
-                                        settings_manager.documents_dir,
-                                        f"Koto_Presentation_{int(time.time())}.pptx",
-                                    ),
-                                    enable_auto_images=True,  # 允许自动配图
-                                    progress_callback=_progress_listener,
-                                    thought_callback=_thought_listener,
-                                )
-                            )
-                        except Exception as bg_err:
-                            run_state["error"] = str(bg_err)
-                            run_state["traceback"] = traceback.format_exc()
-                        finally:
-                            try:
-                                loop.close()
-                            except Exception:
-                                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-                            run_state["done"] = True
-
-                    worker = threading.Thread(target=_run_pipeline_bg, daemon=True)
-                    worker.start()
-
-                    # 实时轮询进度队列，转发给前端
-                    last_progress_msg = "初始化生成环境..."
-
-                    while not run_state["done"]:
-                        elapsed = int(time.time() - start_ts)
-                        if elapsed > pipeline_timeout_sec:
-                            _progress_listener("生成超时，正在强制停止...", 100)
-                            run_state["error"] = (
-                                f"PPT 生成超时（>{pipeline_timeout_sec}s）"
-                            )
-                            break
-
-                        # 消费所有的事件
-                        try:
-                            while not event_queue.empty():
-                                item = event_queue.get_nowait()
-
-                                if item["type"] == "progress":
-                                    msg = item["msg"]
-                                    p = item["progress"]
-                                    last_progress_msg = msg
-                                    detail_text = (
-                                        f"进度: {p}%"
-                                        if p is not None
-                                        else f"已用时 {elapsed}s"
-                                    )
-                                    yield f"data: {json.dumps({'type': 'progress', 'message': msg, 'detail': detail_text})}\n\n"
-
-                                elif item["type"] == "thought":
-                                    # Send thought as a partial text response or a special 'thought' event
-                                    # Assuming frontend can handle 'text' type for appending to the assistant's message
-                                    # or 'thought' for a distinct UI block.
-                                    # Let's use 'text' for now to ensure it appears in the chat stream.
-                                    thought_text = (
-                                        f"\n\n> 🤖 **Koto 思考**: {item['text']}\n"
-                                    )
-                                    yield f"data: {json.dumps({'type': 'text', 'content': thought_text})}\n\n"
-
-                        except queue.Empty:
-                            pass
-
-                        # 如果没有新消息，每2秒发一次心跳防止连接断开
-                        if elapsed % 2 == 0 and event_queue.empty():
-                            yield f"data: {json.dumps({'type': 'progress', 'message': last_progress_msg, 'detail': f'已用时 {elapsed}s'})}\n\n"
-
-                        time.sleep(0.5)
-
-                    # 发送最后剩余的消息
-                    try:
-                        while not event_queue.empty():
-                            item = event_queue.get_nowait()
-                            if item["type"] == "progress":
-                                yield f"data: {json.dumps({'type': 'progress', 'message': item['msg'], 'detail': ''})}\n\n"
-                            elif item["type"] == "thought":
-                                thought_text = (
-                                    f"\n\n> 🤖 **Koto 思考**: {item['text']}\n"
-                                )
-                                yield f"data: {json.dumps({'type': 'text', 'content': thought_text})}\n\n"
-                    except Exception:
-                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-
-                    if run_state["error"]:
-                        err = run_state["error"]
-                        tb = run_state.get("traceback", "")
-                        _app_logger.info(
-                            f"[PPT BATCH] Background pipeline error: {err}"
-                        )
-                        if tb:
-                            _app_logger.info(f"[PPT BATCH] Traceback: {tb[:800]}")
-                        raise Exception(f"PPT 管道异常: {err}")
-
-                    ppt_result = run_state["result"] or {}
-
-                    # pipeline returns 'output_path', also check 'file_path' for compat
-                    saved_path = ppt_result.get("output_path") or ppt_result.get(
-                        "file_path"
-                    )
-
-                    if not ppt_result.get("success"):
-                        err_detail = ppt_result.get("error", "未知错误")
-                        tb = ppt_result.get("traceback", "")
-                        _app_logger.info(
-                            f"[PPT BATCH] Pipeline returned failure: {err_detail}"
-                        )
-                        if tb:
-                            _app_logger.info(f"[PPT BATCH] Traceback: {tb[:500]}")
-                        raise Exception(f"PPT 管道生成失败: {err_detail}")
-
-                    if saved_path and os.path.exists(saved_path):
-                        yield f"data: {json.dumps({'type': 'progress', 'message': '✅ PPT 生成完成！', 'detail': os.path.basename(saved_path)})}\n\n"
-
-                        rel_path = os.path.relpath(saved_path, WORKSPACE_DIR).replace(
-                            "\\", "/"
-                        )
-                        success_msg = f"✅ **PPT 生成成功！**\n\n基于 {len(saved_file_paths)} 个文件生成的演示文稿。\n📁 文件: **{os.path.basename(saved_path)}**"
-
-                        yield f"data: {json.dumps({'type': 'token', 'content': success_msg})}\n\n"
-
-                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [rel_path], 'total_time': 0})}\n\n"
-                    else:
-                        raise Exception("PPT 文件生成失败，未返回路径")
-
-                except Exception as e:
-                    _app_logger.info(f"[PPT BATCH ERROR] {e}")
-                    import traceback
-
-                    traceback.print_exc()
-                    err_msg = f"❌ 生成失败: {str(e)}"
-                    yield f"data: {json.dumps({'type': 'token', 'content': err_msg})}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': 0})}\n\n"
-
-            return Response(
-                stream_with_context(generate_ppt_stream()), mimetype="text/event-stream"
-            )
-
-        history = session_manager.load(f"{session_name}.json")
-        file_names = [f.filename for f in files if f and f.filename]
-        user_message = f"[Files: {', '.join(file_names)}] {user_input}"
-        session_manager.append_user_early(f"{session_name}.json", user_message)
-
-        batch_results = []
-        combined_saved_files = []
-        combined_images = []
-
-        def _process_single_file(file):
-            if not file or not file.filename:
-                return None
-
-            filename = _secure_filename(file.filename) or f"upload_{uuid.uuid4().hex}"
-            filepath = os.path.join(UPLOAD_DIR, filename)
-            file.save(filepath)
-            file_type = file.mimetype or file.content_type or ""
-            file_ext = os.path.splitext(filename)[1].lower()
-
-            # 检测是否是纯归档/整理请求（不需要AI分析内容）
-            organize_keywords = [
-                "整理",
-                "归档",
-                "归纳",
-                "分类",
-                "整理一下",
-                "整理下",
-                "帮我整理",
-                "文件整理",
-                "organize",
-                "sort",
-            ]
-            is_organize_only = any(kw in (user_input or "") for kw in organize_keywords)
-
-            try:
-                # formatted_message, file_data = process_uploaded_file(filepath, user_input)
-                # --- Modify to use FileProcessor directly for simultaneous KB indexing ---
-                from web.file_processor import FileProcessor
-
-                _processor = FileProcessor()
-                _file_raw = _processor.process_file(filepath)
-
-                # 1. 自动建库 (Auto-Indexing to Knowledge Base) - Use threading to not block UI
-                try:
-                    _text_content = _file_raw.get("text_content", "")
-                    if _text_content and len(_text_content) > 50:  # Ignore tiny files
-
-                        def _bg_index(content, meta):
-                            try:
-                                from web.knowledge_base import KnowledgeBase
-
-                                _kb = KnowledgeBase()
-                                res = _kb.add_content(content, meta)
-                                _app_logger.debug(
-                                    f"[KB] Auto-indexing completed: {res}"
-                                )
-                            except Exception as e:
-                                _app_logger.debug(f"[KB] Auto-indexing failed: {e}")
-
-                        import threading
-
-                        _idx_thread = threading.Thread(
-                            target=_bg_index,
-                            args=(
-                                _text_content,
-                                {
-                                    "file_path": filepath,
-                                    "file_name": filename,
-                                    "file_type": file_ext,
-                                    "mtime": os.path.getmtime(filepath),
-                                },
-                            ),
-                        )
-                        _idx_thread.start()
-                        _app_logger.debug(f"[KB] 已启动后台建库任务: {filename}")
-                except Exception as _kb_err:
-                    _app_logger.debug(f"[KB] Indexing trigger failed: {_kb_err}")
-
-                # 1-B. 注册到 FileRegistry（统一文件元数据中心）
-                try:
-
-                    def _bg_register_file(_fpath, _sid):
-                        try:
-                            from app.core.file.file_registry import get_file_registry
-
-                            _reg = get_file_registry()
-                            _reg.register(
-                                _fpath,
-                                source="upload",
-                                session_id=_sid,
-                                extract_content=True,
-                            )
-                            _app_logger.info(
-                                f"[FileRegistry] ✅ 已注册上传文件: {os.path.basename(_fpath)}"
-                            )
-                        except Exception as _re:
-                            _app_logger.warning(
-                                f"[FileRegistry] ⚠️ 注册失败（非致命）: {_re}"
-                            )
-
-                    import threading as _thr
-
-                    _reg_thread = _thr.Thread(
-                        target=_bg_register_file,
-                        args=(filepath, session_name),
-                        daemon=True,
-                    )
-                    _reg_thread.start()
-                except Exception as _rge:
-                    _app_logger.warning(f"[FileRegistry] ⚠️ 启动注册线程失败: {_rge}")
-
-                # 2. Continue with standard chat formatting
-                formatted_message, file_data = _processor.format_result_for_chat(
-                    _file_raw, user_input
-                )
-
-                task_type = locked_task
-                context_info = None
-                route_method = "Auto"
-                if not task_type:
-                    if file_data and file_type and file_type.startswith("image"):
-                        message_lower = (user_input or "").lower()
-                        is_edit = any(
-                            kw in message_lower for kw in KotoBrain.IMAGE_EDIT_KEYWORDS
-                        )
-                        task_type = "PAINTER" if is_edit else "VISION"
-                        route_method = (
-                            "🖼️ Image Edit" if is_edit else "👁️ Image Analysis"
-                        )
-                        _app_logger.info(
-                            f"[FILE UPLOAD] 图片任务直通路由: {task_type} (方法: {route_method})"
-                        )
-                    else:
-                        _ann_exts = {
-                            ".doc",
-                            ".docx",
-                            ".pdf",
-                            ".txt",
-                            ".md",
-                            ".markdown",
-                            ".rtf",
-                            ".odt",
-                        }
-                        use_annotation = (
-                            _should_use_annotation_system(user_input, has_file=True)
-                            and file_ext in _ann_exts
-                        )
-
-                        if use_annotation:
-                            task_type = "DOC_ANNOTATE"
-                            route_method = "📌 Annotation-Strict"
-                        elif _is_explicit_file_gen_request(user_input):
-                            # 用户明确要生成新文件，直接路由，无需模型分类
-                            task_type = "FILE_GEN"
-                            route_method = "📄 Explicit-Gen"
-                        else:
-                            # ★ 主路径：让本地模型做语义路由
-                            # 传入 [FILE_ATTACHED:ext] 标记，模型通过训练好的规则判断
-                            # CHAT=读文件回答  RESEARCH=深入研究  FILE_GEN=生成新文档
-                            _dispatch_q = (
-                                user_input or ""
-                            ).strip() or "请分析这份文件的内容"
-                            _dispatch_input = (
-                                f"[FILE_ATTACHED:{file_ext or '.file'}] {_dispatch_q}"
-                            )
-                            task_analysis, route_method, context_info = (
-                                SmartDispatcher.analyze(
-                                    _dispatch_input, history=history
-                                )
-                            )
-                            task_type = task_analysis
-
-                complexity = "complex" if file_data is None else "normal"
-                if context_info and context_info.get("complexity"):
-                    complexity = context_info["complexity"]
-
-                if task_type == "FILE_GEN":
-                    routed_model_to_use = SmartDispatcher.get_model_for_task(
-                        task_type, has_image=bool(file_data), complexity=complexity
-                    )
-                else:
-                    routed_model_to_use = SmartDispatcher.get_model_for_task(
-                        task_type, has_image=bool(file_data)
-                    )
-
-                if locked_model == "local":
-                    model_to_use = locked_model
-                elif locked_model != "auto":
-                    model_to_use = _resolve_requested_model_id(
-                        locked_model,
-                        fallback_model=routed_model_to_use,
-                        task_type=task_type,
-                    ) or routed_model_to_use
-                else:
-                    model_to_use = routed_model_to_use
-
-                _app_logger.info(
-                    f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}"
-                )
-
-                result = {
-                    "task": task_type,
-                    "model": model_to_use,
-                    "route_method": route_method,
-                    "response": "",
-                    "images": [],
-                    "saved_files": [],
-                }
-
-                # 纯归档模式：跳过AI内容分析，直接归档
-                if is_organize_only:
-                    _app_logger.info(
-                        f"[FILE UPLOAD] 纯归档模式: {filename}，跳过AI分析"
-                    )
-                    result["response"] = ""
-                    result["task"] = "FILE_ORGANIZE"
-                elif task_type == "DOC_ANNOTATE":
-                    # 批量/多文件模式下的标注：同步运行标注管道
-                    _app_logger.info(
-                        f"[FILE UPLOAD] 批量 DOC_ANNOTATE 模式: {filename}"
-                    )
-                    try:
-                        from web.document_annotation_compat import (
-                            collect_annotation_result,
-                        )
-
-                        _batch_docs_dir = settings_manager.documents_dir
-                        os.makedirs(_batch_docs_dir, exist_ok=True)
-                        # 如需转换先转换
-                        _batch_filepath = filepath
-                        _batch_file_ext = file_ext
-                        if _batch_file_ext != ".docx":
-                            try:
-                                import tempfile as _bttmp
-
-                                from web.doc_converter import convert_to_docx as _btc
-
-                                _bt_tmp = _bttmp.mkdtemp(prefix="koto_bt_")
-                                _bt_conv, _ = _btc(_batch_filepath, output_dir=_bt_tmp)
-                                _bt_dest = os.path.join(
-                                    _batch_docs_dir, os.path.basename(_bt_conv)
-                                )
-                                import shutil as _bt_sh
-
-                                _bt_sh.copy2(_bt_conv, _bt_dest)
-                                _batch_filepath = _bt_dest
-                            except Exception as _bt_err:
-                                _app_logger.info(
-                                    f"[BATCH DOC_ANNOTATE] 转换失败: {_bt_err}"
-                                )
-                        _batch_target = os.path.join(
-                            _batch_docs_dir, os.path.basename(_batch_filepath)
-                        )
-                        if os.path.abspath(_batch_filepath) != os.path.abspath(
-                            _batch_target
-                        ):
-                            import shutil as _bsh
-
-                            _bsh.copy2(_batch_filepath, _batch_target)
-                        _bt_final = collect_annotation_result(
-                            file_path=_batch_target,
-                            user_requirement=user_input,
-                            gemini_client=client,
-                            model_id=MODEL_MAP.get(
-                                "DOC_ANNOTATE",
-                                MODEL_MAP.get("FILE_TASK", "gemini-3.1-pro-preview"),
-                            ),
-                        )
-                        if _bt_final and _bt_final.get("success"):
-                            _bt_revised = _bt_final.get("revised_file", "")
-                            result["response"] = (
-                                f"✅ 文档标注完成: {os.path.basename(_bt_revised)}"
-                            )
-                            result["saved_files"] = [_bt_revised] if _bt_revised else []
-                        else:
-                            result["response"] = (
-                                f"❌ 批量标注失败: {(_bt_final or {}).get('message', '未知错误')}"
-                            )
-                    except Exception as _bt_exc:
-                        result["response"] = f"❌ 批量标注异常: {_bt_exc}"
-                else:
-                    _app_logger.info(
-                        f"[FILE UPLOAD] 处理文件: {filename}, 使用 brain.chat"
-                    )
-                    brain_result = brain.chat(
-                        history=history,
-                        user_input=formatted_message,
-                        file_data=file_data,
-                        model=model_to_use,
-                        auto_model=(locked_model == "auto"),
-                    )
-                    result.update(brain_result)
-
-                # 🗂️ 关键：为每个文件调用FileOrganizer进行归档
-                organize_info = {"success": False, "message": "未归档"}
-                try:
-                    # 使用AI分析文件类型和建议目录
-                    from web.file_analyzer import FileAnalyzer
-
-                    analyzer = FileAnalyzer()
-                    analysis = analyzer.analyze_file(filepath)  # 只传文件路径
-                    suggested_folder = analysis.get("suggested_folder")
-                    entity_name = analysis.get("entity")
-                    entity_type = analysis.get("entity_type")
-                    organizer = get_file_organizer()
-
-                    # 如果已存在同名公司/项目文件夹，则复用
-                    if entity_name:
-                        existing_folder = organizer.find_entity_folder(entity_name)
-                        if existing_folder:
-                            suggested_folder = existing_folder
-
-                    if suggested_folder:
-                        org_result = organizer.organize_file(
-                            filepath,
-                            suggested_folder,
-                            auto_confirm=True,
-                            metadata={
-                                "entity": entity_name,
-                                "entity_type": entity_type,
-                            },
-                        )
-
-                        if org_result.get("success"):
-                            organize_info = {
-                                "success": True,
-                                "message": f"✅ 已归档到: {org_result.get('relative_path', suggested_folder)}",
-                                "category": suggested_folder,
-                                "path": org_result.get("dest_file"),
-                            }
-                            _app_logger.info(
-                                f"[FILE ORGANIZE] ✅ {filename} -> {suggested_folder}"
-                            )
-                        else:
-                            organize_info = {
-                                "success": False,
-                                "message": f"⚠️ 归档失败: {org_result.get('error', '未知错误')}",
-                            }
-                    else:
-                        organize_info = {
-                            "success": False,
-                            "message": "⚠️ 无法确定文件分类",
-                        }
-                except Exception as e:
-                    organize_info = {
-                        "success": False,
-                        "message": f"⚠️ 归档异常: {str(e)}",
-                    }
-                    _app_logger.info(f"[FILE ORGANIZE ERROR] {filename}: {e}")
-
-                result["file_name"] = filename
-                result["organize"] = organize_info
-                return result
-
-            except Exception as e:
-                return {
-                    "file_name": filename,
-                    "task": "ERROR",
-                    "model": "none",
-                    "response": f"❌ 处理文件时出错: {str(e)}",
-                    "images": [],
-                    "saved_files": [],
-                    "organize": {"success": False, "message": "❌ 处理失败，未归档"},
-                }
-
-        if stream_mode:
-
-            def generate_progress():
-                total = len([f for f in files if f and f.filename])
-                started = {
-                    "type": "progress",
-                    "current": 0,
-                    "total": total,
-                    "status": "start",
-                    "detail": f"开始处理 {total} 个文件",
-                }
-                yield f"data: {json.dumps(started)}\n\n"
-
-                current = 0
-                for file in files:
-                    if not file or not file.filename:
-                        continue
-
-                    current += 1
-                    payload = {
-                        "type": "progress",
-                        "current": current,
-                        "total": total,
-                        "status": "processing",
-                        "detail": f"处理中: {file.filename} ({current}/{total})",
-                    }
-                    yield f"data: {json.dumps(payload)}\n\n"
-
-                    result = _process_single_file(file)
-                    if result:
-                        batch_results.append(result)
-                        combined_saved_files.extend(result.get("saved_files", []))
-                        combined_images.extend(result.get("images", []))
-
-                    payload = {
-                        "type": "progress",
-                        "current": current,
-                        "total": total,
-                        "status": "done",
-                        "detail": f"完成: {file.filename} ({current}/{total})",
-                    }
-                    yield f"data: {json.dumps(payload)}\n\n"
-
-                summary_lines = [f"📦 批量处理完成，共 {len(batch_results)} 个文件", ""]
-
-                organized_count = sum(
-                    1
-                    for item in batch_results
-                    if item.get("organize", {}).get("success")
-                )
-                if organized_count > 0:
-                    summary_lines.append(f"✅ 已归档: {organized_count} 个文件")
-
-                summary_lines.append("\n📄 **文件详情：**")
-                for i, item in enumerate(batch_results, 1):
-                    fname = item.get("file_name", "unknown")
-                    task = item.get("task", "UNKNOWN")
-                    organize = item.get("organize", {})
-
-                    status = "✅" if task != "ERROR" else "❌"
-                    org_status = organize.get("message", "未归档")
-
-                    summary_lines.append(f"{i}. {status} **{fname}**")
-                    summary_lines.append(f"   📂 {org_status}")
-
-                    response = item.get("response", "")
-                    if response and len(response) > 100:
-                        summary_lines.append(f"   💬 {response[:100]}...")
-                    elif response:
-                        summary_lines.append(f"   💬 {response}")
-
-                summary_msg = "\n".join(summary_lines)
-
-                session_manager.update_last_model_response(
-                    f"{session_name}.json",
-                    summary_msg,
-                    task="FILE_BATCH",
-                    model_name=locked_model if locked_model != "auto" else "auto",
-                    saved_files=combined_saved_files,
-                    images=combined_images,
-                )
-
-                final_payload = {
-                    "type": "final",
-                    "response": summary_msg,
-                    "task": "FILE_BATCH",
-                    "model": locked_model if locked_model != "auto" else "auto",
-                    "results": batch_results,
-                    "images": combined_images,
-                    "saved_files": combined_saved_files,
-                }
-                yield f"data: {json.dumps(final_payload)}\n\n"
-
-            return Response(generate_progress(), mimetype="text/event-stream")
-
-        for file in files:
-            result = _process_single_file(file)
-            if not result:
-                continue
-            batch_results.append(result)
-            combined_saved_files.extend(result.get("saved_files", []))
-            combined_images.extend(result.get("images", []))
-
-        # 生成详细摘要，包含归档信息
-        summary_lines = [f"📦 批量处理完成，共 {len(batch_results)} 个文件", ""]
-
-        organized_count = sum(
-            1 for item in batch_results if item.get("organize", {}).get("success")
+        return handle_multi_file_chat_request(
+            app_module=sys.modules[__name__],
+            session_name=session_name,
+            user_input=user_input,
+            files=files,
+            locked_task=locked_task,
+            locked_model=locked_model,
+            stream_mode=stream_mode,
         )
-        if organized_count > 0:
-            summary_lines.append(f"✅ 已归档: {organized_count} 个文件")
-
-        summary_lines.append("\n📄 **文件详情：**")
-        for i, item in enumerate(batch_results, 1):
-            fname = item.get("file_name", "unknown")
-            task = item.get("task", "UNKNOWN")
-            organize = item.get("organize", {})
-
-            status = "✅" if task != "ERROR" else "❌"
-            org_status = organize.get("message", "未归档")
-
-            summary_lines.append(f"{i}. {status} **{fname}**")
-            summary_lines.append(f"   📂 {org_status}")
-
-            # 显示AI响应摘要（截取前100字）
-            response = item.get("response", "")
-            if response and len(response) > 100:
-                summary_lines.append(f"   💬 {response[:100]}...")
-            elif response:
-                summary_lines.append(f"   💬 {response}")
-
-        summary_msg = "\n".join(summary_lines)
-
-        session_manager.update_last_model_response(
-            f"{session_name}.json",
-            summary_msg,
-            task="FILE_BATCH",
-            model_name=locked_model if locked_model != "auto" else "auto",
-            saved_files=combined_saved_files,
-            images=combined_images,
-        )
-
-        return jsonify(
-            {
-                "response": summary_msg,
-                "task": "FILE_BATCH",
-                "model": locked_model if locked_model != "auto" else "auto",
-                "results": batch_results,
-                "images": combined_images,
-                "saved_files": combined_saved_files,
-            }
-        )
-
-    file = files[0]
-
-    # Save uploaded file
-    filename = _secure_filename(file.filename) or f"upload_{uuid.uuid4().hex}"
-    filepath = os.path.join(UPLOAD_DIR, filename)
-    file.save(filepath)
-    file_type = file.mimetype or file.content_type or ""
-    file_ext = os.path.splitext(filename)[1].lower()
-
-    # Load history first (保证即使出错也能保存用户输入)
-    history = session_manager.load(f"{session_name}.json")
-    user_message = f"[File: {filename}] {user_input}"
-
-    # 🔒 立即保存用户消息到磁盘，防止断连/崩溃导致丢失
-    session_manager.append_user_early(f"{session_name}.json", user_message)
-
-    try:
-        # 使用新的文件处理器（提取文本/二进制）
-        formatted_message, file_data = process_uploaded_file(filepath, user_input)
-
-        # ==================== 智能文档分析引擎 ====================
-        # 对 .docx/.doc 文件，使用 LLM 驱动的智能分析引擎判断用户意图
-        # 不再硬编码正则，而是让分析器理解用户真实需求
-        if file_ext in [".docx", ".doc"]:
-            # ── 翻译请求：最高优先级，直接走服务器端翻译管道 ──────────────
-            _TRANSLATE_KWS = [
-                "翻译",
-                "译成",
-                "译为",
-                "转成英文",
-                "转成日文",
-                "转成中文",
-                "translate",
-                "翻成",
-                "转译",
-            ]
-            _is_translate_request = any(
-                kw in (user_input or "").lower() for kw in _TRANSLATE_KWS
-            )
-            if _is_translate_request and locked_task != "DOC_ANNOTATE":
-                _app_logger.info(
-                    f"[DOCX TRANSLATE] 检测到翻译请求，启用格式保留翻译管道"
-                )
-
-                def generate_docx_translation():
-                    try:
-                        from web.docx_translator_module import (
-                            detect_target_language,
-                            translate_docx_streaming,
-                        )
-
-                        target_lang = detect_target_language(user_input or "")
-                        docs_dir = os.path.join(WORKSPACE_DIR, "documents")
-                        os.makedirs(docs_dir, exist_ok=True)
-
-                        yield f"data: {json.dumps({'type': 'classification', 'task_type': 'FILE_GEN', 'task_display': '🌐 Word 文档翻译', 'route_method': '🌐 DocxTranslator', 'message': f'🎯 启动格式保留翻译 → {target_lang}'})}\n\n"
-
-                        for event in translate_docx_streaming(
-                            filepath, target_lang, client, output_dir=docs_dir
-                        ):
-                            stage = event.get("stage", "")
-                            msg = event.get("message", "")
-                            progress = event.get("progress", 0)
-
-                            if stage == "error":
-                                yield f"data: {json.dumps({'type': 'token', 'content': f'❌ 翻译失败: {msg}'})}\n\n"
-                                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
-                                return
-
-                            elif stage == "complete":
-                                out_path = event.get("output_path", "")
-                                out_name = event.get(
-                                    "output_filename", os.path.basename(out_path)
-                                )
-                                count = event.get("translated_count", 0)
-                                lang = event.get("target_language", target_lang)
-                                rel_path = os.path.relpath(
-                                    out_path, WORKSPACE_DIR
-                                ).replace("\\", "/")
-
-                                success_msg = (
-                                    f"✅ **Word 文档翻译完成！**\n\n"
-                                    f"🌐 目标语言: **{lang}**\n"
-                                    f"📝 翻译段落: **{count}** 段\n"
-                                    f"📁 文件名: **{out_name}**\n"
-                                    f"📍 位置: `workspace/documents/`\n\n"
-                                    f"格式已完整保留（字体/加粗/斜体/颜色/表格/页眉页脚）"
-                                )
-                                yield f"data: {json.dumps({'type': 'token', 'content': success_msg})}\n\n"
-                                session_manager.append_and_save(
-                                    f"{session_name}.json",
-                                    user_input,
-                                    f"翻译完成 → {out_name} ({count}段, {lang})",
-                                )
-                                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [rel_path]})}\n\n"
-                                return
-
-                            else:
-                                yield f"data: {json.dumps({'type': 'progress', 'message': msg, 'detail': f'{progress}%'})}\n\n"
-
-                    except Exception as _te:
-                        import traceback as _tb
-
-                        _app_logger.error(
-                            f"[DOCX TRANSLATE] ❌ 翻译异常: {_tb.format_exc()}"
-                        )
-                        yield f"data: {json.dumps({'type': 'token', 'content': f'❌ 翻译出错: {str(_te)}'})}\n\n"
-                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
-
-                return Response(
-                    stream_with_context(generate_docx_translation()),
-                    content_type="text/event-stream",
-                )
-
-            # 标注任务优先级更高：显式标注意图或用户锁定 DOC_ANNOTATE 时，不进入智能分析引擎
-            force_annotation = (
-                locked_task == "DOC_ANNOTATE"
-            ) or _should_use_annotation_system(user_input, has_file=True)
-
-            # 智能检测：任何对文档内容有实质性处理需求的请求
-            # 包括但不限于：写摘要、改引言、改结论、润色、分析结构等
-            _doc_intent_keywords = [
-                # 生成类
-                "写",
-                "生成",
-                "帮我写",
-                "写一段",
-                "写个",
-                # 修改/改善类
-                "改",
-                "改善",
-                "改进",
-                "优化",
-                "润色",
-                "重写",
-                "修改",
-                "提升",
-                # 学术部件
-                "摘要",
-                "引言",
-                "结论",
-                "abstract",
-                "前言",
-                "导言",
-                # 分析类
-                "分析",
-                "总结",
-                "梳理",
-                "概述",
-                "评估",
-                # 质量类
-                "不满意",
-                "不好",
-                "不够",
-                "需要改",
-                "有问题",
-            ]
-            is_doc_processing_request = any(
-                kw in user_input.lower() for kw in _doc_intent_keywords
-            )
-
-            if is_doc_processing_request and not force_annotation:
-                _app_logger.info(
-                    f"[INTELLIGENT ANALYZER] 检测到文档处理请求，启用智能分析引擎"
-                )
-                from web.intelligent_document_analyzer import (
-                    create_intelligent_analyzer,
-                )
-
-                # 创建智能分析器
-                analyzer = create_intelligent_analyzer(client)
-
-                # 流式处理文档分析
-                def generate_intelligent_analysis():
-                    """生成智能文档分析的流式响应"""
-                    try:
-                        # 使用async生成器（需要在async context中）
-                        import asyncio
-
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-
-                        async def run_analysis():
-                            async for (
-                                event
-                            ) in analyzer.process_document_intelligent_streaming(
-                                filepath, user_input, session_name
-                            ):
-                                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-                        gen = run_analysis()
-                        while True:
-                            try:
-                                result = loop.run_until_complete(gen.__anext__())
-                                yield result
-                            except StopAsyncIteration:
-                                break
-                    except Exception as e:
-                        error_event = {
-                            "stage": "error",
-                            "message": f"智能分析失败: {str(e)}",
-                        }
-                        yield f"data: {json.dumps(error_event, ensure_ascii=False)}\n\n"
-                    finally:
-                        loop.close()
-
-                return Response(
-                    stream_with_context(generate_intelligent_analysis()),
-                    content_type="text/event-stream",
-                )
-        # ==================== 智能文档分析引擎结束 ====================
-
-        # 智能任务分析
-        task_type = locked_task
-        context_info = None
-        route_method = "Auto"
-        if not task_type:
-            # 如果是图片上传，直接判断编辑或分析，避免初始化本地路由器导致卡顿
-            if file_data and file_type and file_type.startswith("image"):
-                message_lower = (user_input or "").lower()
-                is_edit = any(
-                    kw in message_lower for kw in KotoBrain.IMAGE_EDIT_KEYWORDS
-                )
-                task_type = "PAINTER" if is_edit else "VISION"
-                route_method = "🖼️ Image Edit" if is_edit else "👁️ Image Analysis"
-                _app_logger.info(
-                    f"[FILE UPLOAD] 图片任务直通路由: {task_type} (方法: {route_method})"
-                )
-            else:
-                # 文档上传：严格检测标注意图（必须明确要求在原文上标记）
-                _ann_exts = {
-                    ".doc",
-                    ".docx",
-                    ".pdf",
-                    ".txt",
-                    ".md",
-                    ".markdown",
-                    ".rtf",
-                    ".odt",
-                }
-                use_annotation = (
-                    _should_use_annotation_system(user_input, has_file=True)
-                    and file_ext in _ann_exts
-                )
-
-                if use_annotation:
-                    task_type = "DOC_ANNOTATE"
-                    route_method = "📌 Annotation-Strict"
-                elif _is_explicit_file_gen_request(user_input):
-                    # 用户明确要生成新文件，直接路由，无需模型分类
-                    task_type = "FILE_GEN"
-                    route_method = "📄 Explicit-Gen"
-                    _app_logger.info(
-                        f"[FILE UPLOAD] 🎯 检测到明确文件生成请求，启用 FILE_GEN 模式"
-                    )
-                else:
-                    # ★ 主路径：让本地模型做语义路由
-                    # 传入 [FILE_ATTACHED:ext] 标记，模型通过训练好的规则判断
-                    # CHAT=读文件回答  RESEARCH=深入研究  FILE_GEN=生成新文档
-                    _dispatch_q = (user_input or "").strip() or "请分析这份文件的内容"
-                    _dispatch_input = (
-                        f"[FILE_ATTACHED:{file_ext or '.file'}] {_dispatch_q}"
-                    )
-                    task_analysis, route_method, context_info = SmartDispatcher.analyze(
-                        _dispatch_input, history=history
-                    )
-                    task_type = task_analysis
-
-                _app_logger.info(
-                    f"[FILE UPLOAD] 智能路由选择任务类型: {task_type} (方法: {route_method})"
-                )
-
-        # 确定使用的模型
-        complexity = "complex" if file_data is None else "normal"
-        if context_info and context_info.get("complexity"):
-            complexity = context_info["complexity"]
-
-        if task_type == "DOC_ANNOTATE":
-            # 文档标注需要强模型
-            routed_model_to_use = MODEL_MAP.get(
-                "DOC_ANNOTATE",
-                MODEL_MAP.get("FILE_TASK", "gemini-3.1-pro-preview"),
-            )
-        elif task_type == "FILE_GEN":
-            routed_model_to_use = SmartDispatcher.get_model_for_task(
-                task_type, has_image=bool(file_data), complexity=complexity
-            )
-        else:
-            routed_model_to_use = SmartDispatcher.get_model_for_task(
-                task_type, has_image=bool(file_data)
-            )
-
-        if locked_model == "local":
-            model_to_use = locked_model
-        elif locked_model != "auto":
-            model_to_use = _resolve_requested_model_id(
-                locked_model,
-                fallback_model=routed_model_to_use,
-                task_type=task_type,
-            ) or routed_model_to_use
-        else:
-            model_to_use = routed_model_to_use
-
-        # 最早拦截：文件分析不能使用 interactions-only 模型（不支持 generate_content 也不支持文件附件）
-        if _is_interactions_only(model_to_use):
-            _orig_model = model_to_use
-            model_to_use = _INTERACTIONS_FALLBACK_MODEL
-            _app_logger.warning(
-                f"[FILE UPLOAD] ⚠️ {_orig_model} 是 interactions-only，文件分析降级到 {_INTERACTIONS_FALLBACK_MODEL}"
-            )
-
-        _app_logger.info(f"[FILE UPLOAD] 任务类型: {task_type}, 模型: {model_to_use}")
-
-        # 安全兜底：locked_task 预设时 prefer_ppt 可能未定义
-        if "prefer_ppt" not in locals():
-            _ppt_kws = [
-                "ppt",
-                "幻灯片",
-                "演示",
-                "汇报",
-                "presentation",
-                "slide",
-                "deck",
-            ]
-            prefer_ppt = any(kw in (user_input or "").lower() for kw in _ppt_kws)
-
-        # 如果是文本类文件，按任务类型处理
-        result = {
-            "task": "FILE_GEN" if task_type == "DOC_ANNOTATE" else task_type,
-            "subtask": "DOC_ANNOTATE" if task_type == "DOC_ANNOTATE" else None,
-            "model": model_to_use,
-            "route_method": route_method,
-            "response": "",
-            "images": [],
-            "saved_files": [],
-        }
-
-        # 文档标注任务 - 流式反馈，生成带Track Changes的Word文档
-        if task_type == "DOC_ANNOTATE":
-            docs_dir = settings_manager.documents_dir
-            os.makedirs(docs_dir, exist_ok=True)
-
-            source_path = filepath
-            target_path = os.path.join(docs_dir, filename)
-            if os.path.abspath(source_path) != os.path.abspath(target_path):
-                import shutil as _shutil_ann
-
-                _shutil_ann.copy2(source_path, target_path)
-
-            # 使用流式SSE返回进度，让前端能实时显示
-            # 捕获闭包变量（防止generator延迟执行时变量已改变）
-            _ann_target_path = target_path
-            _ann_filename = filename
-            _ann_file_ext = file_ext
-            _ann_route_method = route_method
-            _ann_model = model_to_use
-            _ann_session = session_name
-            _ann_user_input = user_input
-            _ann_client = client
-            _ann_docs_dir = docs_dir  # 确保转换后的文件和输出都保存到标准目录
-            _ann_context_info = context_info  # 用于 Skill prompt 注入
-
-            def generate_doc_annotate_stream():
-                import time as _time
-
-                _start = _time.time()
-                task_id = f"doc_annotate_{_ann_session}_{int(_start * 1000)}"
-
-                # Local mutable copies of closure vars (Python makes vars local if assigned anywhere
-                # in the function, so we cannot reassign _ann_* directly without UnboundLocalError)
-                _loc_target_path = _ann_target_path
-                _loc_filename = _ann_filename
-                _loc_file_ext = _ann_file_ext
-
-                # ── 非 .docx 格式自动转换 ──────────────────────────────────────
-                # 对 .doc / .pdf / .txt / .md / .rtf / .odt 先转换为 .docx 再进标注
-                _converted_warning = ""
-                _classif_sent = False
-                if _loc_file_ext != ".docx":
-                    yield f"data: {json.dumps({'type': 'classification', 'task_type': 'DOC_ANNOTATE', 'route_method': _ann_route_method, 'model': _ann_model, 'task_id': task_id, 'message': '📄 DOC_ANNOTATE'})}\n\n"
-                    _classif_sent = True
-                    yield f"data: {json.dumps({'type': 'progress', 'stage': 'converting', 'message': f'🔄 正在将 {_loc_file_ext} 转换为可编辑 .docx...', 'detail': _loc_filename, 'progress': 3})}\n\n"
-                    try:
-                        from web.doc_converter import convert_to_docx, needs_conversion
-
-                        if needs_conversion(_loc_file_ext):
-                            import tempfile as _tmpmod
-
-                            _conv_dir = _tmpmod.mkdtemp(prefix="koto_conv_")
-                            _conv_path, _converted_warning = convert_to_docx(
-                                _loc_target_path, output_dir=_conv_dir
-                            )
-                            # 将转换后的 .docx 复制到标准文档目录，确保输出也在该目录
-                            _conv_basename = os.path.basename(_conv_path)
-                            _conv_in_docs = os.path.join(_ann_docs_dir, _conv_basename)
-                            import shutil as _shutil_conv
-
-                            _shutil_conv.copy2(_conv_path, _conv_in_docs)
-                            _loc_target_path = (
-                                _conv_in_docs  # 用 docs_dir 路径，输出也会在此
-                            )
-                            _loc_filename = _conv_basename
-                            _loc_file_ext = ".docx"
-                            _app_logger.info(
-                                f"[DocConvert] ✅ 转换并复制到文档目录 → {_loc_target_path}"
-                            )
-                        else:
-                            yield _legacy_safe_sse({
-                                "type": "error",
-                                "message": f"不支持的格式：{_loc_file_ext}",
-                            })
-                            return
-                    except Exception as _conv_err:
-                        err_msg = sanitize_user_visible_text(
-                            f"❌ 格式转换失败：{_conv_err}",
-                            fallback="❌ 格式转换失败，请稍后重试。",
-                            treat_as_error=True,
-                        )
-                        yield f"data: {json.dumps({'type': 'token', 'content': err_msg})}\n\n"
-                        _elapsed = _time.time() - _start
-                        session_manager.update_last_model_response(
-                            f"{_ann_session}.json", err_msg
-                        )
-                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed})}\n\n"
-                        return
-                # ─────────────────────────────────────────────────────────────
-
-                try:
-                    from web.document_annotation_compat import (
-                        iter_annotation_progress_events,
-                    )
-
-                    # 发送分类信息（若上方转换块已发送则跳过重复）
-                    if not _classif_sent:
-                        yield f"data: {json.dumps({'type': 'classification', 'task_type': 'DOC_ANNOTATE', 'route_method': _ann_route_method, 'model': _ann_model, 'task_id': task_id, 'message': '📄 DOC_ANNOTATE'})}\n\n"
-                    if _converted_warning:
-                        yield f"data: {json.dumps({'type': 'info', 'message': _converted_warning})}\n\n"
-
-                    # 发送初始进度
-                    yield f"data: {json.dumps({'type': 'progress', 'stage': 'init_reading', 'message': '📖 正在读取文档...', 'detail': _loc_filename, 'progress': 5})}\n\n"
-
-                    # ── 转换质量检查：如果段落数过多或内容为乱码，拒绝标注 ──────
-                    try:
-                        from docx import Document as _QDoc
-
-                        _qd = _QDoc(_loc_target_path)
-                        _q_paras = [p.text for p in _qd.paragraphs if p.text.strip()]
-                        _max_para_limit = 500
-                        # 乱码检测：短垃圾段落比例 > 60% 或 字母比例过低
-                        _q_short = sum(1 for p in _q_paras if len(p) < 15)
-                        _q_short_ratio = _q_short / max(len(_q_paras), 1)
-                        _q_alpha_ratio = sum(
-                            sum(1 for c in p if c.isalpha()) / max(len(p), 1)
-                            for p in _q_paras[:200]
-                        ) / max(min(len(_q_paras), 200), 1)
-                        _is_garbage = (
-                            len(_q_paras) > _max_para_limit and _q_short_ratio > 0.5
-                        ) or (len(_q_paras) > 200 and _q_short_ratio > 0.7)
-                        if _is_garbage:
-                            _q_err = (
-                                f"❌ **文件转换质量过低**，检测到 {len(_q_paras):,} 个段落"
-                                f"（{_q_short_ratio:.0%} 为乱码短行），内容无法识别。\n\n"
-                                "**原因**：`.doc` 格式使用了旧版二进制结构，无法自动解析。\n\n"
-                                "**解决方法**：\n"
-                                "1. 用 **Microsoft Word** 打开 `.doc` 文件\n"
-                                "2. 点击【文件】→【另存为】\n"
-                                "3. 选择格式 **Word 文档 (*.docx)**\n"
-                                "4. 重新上传 `.docx` 文件"
-                            )
-                            session_manager.update_last_model_response(
-                                f"{_ann_session}.json", _q_err
-                            )
-                            yield f"data: {json.dumps({'type': 'token', 'content': _q_err})}\n\n"
-                            _elapsed = _time.time() - _start
-                            yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed})}\n\n"
-                            return
-                    except Exception:
-                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 检查失败时继续正常流程
-                    # ──────────────────────────────────────────────────────────
-
-                    revised_file = None
-                    final_result = None
-
-                    # 获取匹配到的批注类Skill专项要求
-                    _ann_skill_prompt = (_ann_context_info or {}).get(
-                        "skill_prompt", ""
-                    )
-                    if not _ann_skill_prompt:
-                        try:
-                            from app.core.skills.skill_manager import SkillManager
-                            from app.core.skills.skill_trigger_binding import (
-                                get_skill_binding_manager,
-                            )
-
-                            _sk_matched = get_skill_binding_manager().match_intent(
-                                _ann_user_input or ""
-                            )
-                            SkillManager._ensure_init()
-                            for _sk_id in _sk_matched:
-                                _sk_def = SkillManager.get_definition(_sk_id)
-                                if (
-                                    _sk_def
-                                    and "DOC_ANNOTATE"
-                                    in (getattr(_sk_def, "task_types", None) or [])
-                                    and getattr(_sk_def, "prompt", "")
-                                ):
-                                    _ann_skill_prompt = _sk_def.prompt
-                                    _app_logger.debug(
-                                        f"[generate_doc_annotate_stream] 注入Skill: {_sk_id}"
-                                    )
-                                    break
-                        except Exception as _sk_e:
-                            _app_logger.debug(
-                                f"[generate_doc_annotate_stream] Skill匹配跳过: {_sk_e}"
-                            )
-
-                    for (
-                        progress_event
-                    ) in iter_annotation_progress_events(
-                        file_path=_loc_target_path,
-                        user_requirement=_ann_user_input,
-                        gemini_client=_ann_client,
-                        task_id=task_id,
-                        model_id=_ann_model,
-                        cancel_check=lambda: _interrupt_manager.is_interrupted(
-                            _ann_session
-                        ),
-                        skill_prompt=_ann_skill_prompt,
-                    ):
-                        stage = progress_event.get("stage", "unknown")
-                        progress = progress_event.get("progress", 0)
-                        message_text = progress_event.get("message", "")
-                        detail = progress_event.get("detail", "")
-
-                        if stage == "cancelled":
-                            yield f"data: {json.dumps({'type': 'info', 'message': '⏸️ 任务已取消'})}\n\n"
-                            _elapsed = _time.time() - _start
-                            # 保存取消记录
-                            session_manager.update_last_model_response(
-                                f"{_ann_session}.json", "⏸️ 文档标注任务已取消"
-                            )
-                            yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed, 'cancelled': True})}\n\n"
-                            return
-
-                        yield f"data: {json.dumps({'type': 'progress', 'stage': stage, 'message': message_text, 'detail': detail, 'progress': progress})}\n\n"
-
-                        if stage == "complete":
-                            final_result = progress_event.get("result", {})
-                            revised_file = final_result.get("revised_file")
-
-                    _elapsed = _time.time() - _start
-
-                    if final_result and final_result.get("success"):
-                        applied = final_result.get("applied", 0)
-                        failed = final_result.get("failed", 0)
-                        total = final_result.get("total", applied + failed)
-
-                        # ── 兜底检测 ───────────────────────────────────────────
-                        _fb_used = final_result.get("fallback_used", False)
-                        _fb_partial = final_result.get("partial_fallback", False)
-                        _fb_err = final_result.get("last_api_error", "")
-                        _fb_chunks = final_result.get("fallback_chunk_count", 0)
-                        _ai_chunks = final_result.get("ai_chunk_count", 0)
-
-                        # 读取文档信息
-                        try:
-                            from docx import Document as _Doc
-
-                            _d = _Doc(_loc_target_path)
-                            # 收集所有段落（含表格单元格内的段落，适配表格排版简历）
-                            _all_paras = list(_d.paragraphs)
-                            for _tbl in _d.tables:
-                                for _row in _tbl.rows:
-                                    for _cell in _row.cells:
-                                        _all_paras.extend(_cell.paragraphs)
-                            _total_paras = len(
-                                [p for p in _all_paras if p.text.strip()]
-                            )
-                            _total_chars = sum(len(p.text) for p in _all_paras)
-                        except Exception:
-                            _total_paras = 0
-                            _total_chars = 0
-
-                        density = (
-                            (applied / _total_chars * 1000) if _total_chars > 0 else 0
-                        )
-
-                        # ── 构建模型行 / 兜底警告 ─────────────────────────────
-                        if _fb_used:
-                            model_display = (
-                                f"`{_ann_model}` ⚠️ **（AI未成功，已用本地规则兜底）**"
-                            )
-                        elif _fb_partial:
-                            model_display = f"`{_ann_model}` ⚠️ **（{_fb_chunks}段兜底 / {_ai_chunks}段AI）**"
-                        else:
-                            model_display = f"`{_ann_model}`"
-
-                        summary_lines = [
-                            "## ✅ 文档修改完成！",
-                            "",
-                            "### 📊 修改统计",
-                            f"- 找到并应用: **{applied}** 处修改",
-                            f"- 定位失败: {failed} 处",
-                            f"- 总计分析: {total} 处",
-                            "",
-                            "### 📋 文档信息",
-                            f"- 文件名: `{_loc_filename}`",
-                            f"- 段落数: {_total_paras} 段",
-                            f"- 字数: {_total_chars} 字",
-                            f"- 修改密度: **{density:.1f}** 处/千字",
-                            "",
-                            f"### 📄 模型: {model_display}",
-                            "",
-                            f"### 📝 输出文件: `{os.path.basename(revised_file) if revised_file else '待生成'}`",
-                        ]
-
-                        # ── 当使用兜底时，插入显眼的警告块 ──────────────────
-                        if _fb_used or _fb_partial:
-                            fb_label = (
-                                "全部分段"
-                                if _fb_used
-                                else f"{_fb_chunks}/{_fb_chunks+_ai_chunks} 分段"
-                            )
-                            summary_lines += [
-                                "",
-                                "---",
-                                "### ⚠️ 质量警告：本次使用了本地规则兜底",
-                                "",
-                                f"**问题**: Gemini API 在 {fb_label} 中调用失败，系统自动降级为基于正则规则的本地标注。",
-                                "本地兜底标注质量**明显低于** AI 分析，主要覆盖被动句、名词化、冗余连接词等固定模式，",
-                                "无法理解上下文语义。",
-                                "",
-                                f"**错误信息**: `{_fb_err[:120] if _fb_err else '（无详细错误日志）'}`",
-                                "",
-                                "**建议排查**:",
-                                "1. 检查 Koto 后台控制台，找 `[DocumentFeedback] ❌` 或 `⚠️` 开头的日志行",
-                                "2. 确认 API Key 有效：`config/gemini_config.env` → `GEMINI_API_KEY`",
-                                "3. 确认 `gemini-2.5-pro` 对您的账号可用（部分账号受访问限制）",
-                                "4. 重试一次，如仍失败可换用 `gemini-2.5-flash`",
-                                "---",
-                            ]
-
-                        summary_lines += [
-                            "",
-                            "### 💡 使用方法",
-                            "1. 用 Microsoft Word 打开输出文件",
-                            "2. 点击「审阅」标签页",
-                            "3. 右侧气泡中查看全部修改建议",
-                            "4. 逐条接受或忽略（右键批注可操作）",
-                        ]
-                        summary_msg = "\n".join(summary_lines)
-
-                        yield f"data: {json.dumps({'type': 'token', 'content': summary_msg})}\n\n"
-
-                        session_manager.update_last_model_response(
-                            f"{_ann_session}.json",
-                            summary_msg,
-                            task="DOC_ANNOTATE",
-                            model_name=_ann_model,
-                            saved_files=[revised_file] if revised_file else [],
-                        )
-
-                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [revised_file] if revised_file else [], 'total_time': _elapsed})}\n\n"
-                    else:
-                        err_msg = (
-                            final_result.get("message", "未知错误")
-                            if final_result
-                            else "处理失败"
-                        )
-                        # 保存失败记录
-                        session_manager.update_last_model_response(
-                            f"{_ann_session}.json", f"❌ 文档标注失败: {err_msg}"
-                        )
-                        yield _legacy_safe_sse({
-                            "type": "error",
-                            "message": "❌ " + err_msg,
-                        })
-                        yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': _elapsed})}\n\n"
-
-                except Exception as e:
-                    import traceback
-
-                    traceback.print_exc()
-                    # 保存异常记录
-                    session_manager.update_last_model_response(
-                        f"{_ann_session}.json", f"❌ 标注系统错误: {str(e)[:200]}"
-                    )
-                    yield _legacy_safe_sse({
-                        "type": "error",
-                        "message": "❌ 标注系统错误: " + str(e)[:200],
-                    })
-                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': []})}\n\n"
-
-            return Response(
-                stream_with_context(generate_doc_annotate_stream()),
-                mimetype="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",
-                    "Connection": "keep-alive",
-                },
-            )
-
-        # 🎯 FILE_GEN + PPT 生成（P0 新增）
-        elif task_type == "FILE_GEN" and prefer_ppt:
-            _app_logger.info(f"[FILE_GEN PPT] 开始 PPT 生成流程")
-
-            # 第 1 步：使用 FileParser 提取结构化内容
-            from web.file_parser import FileParser
-            from web.ppt_session_manager import PPTSessionManager
-
-            parser = FileParser()
-            parse_result = parser.parse_file(filepath)
-            file_content = parse_result.get("content", "") if parse_result else ""
-
-            # 第 2 步：创建 PPT 会话
-            ppt_session_dir = os.path.join(WORKSPACE_DIR, "workspace", "ppt_sessions")
-            os.makedirs(ppt_session_dir, exist_ok=True)
-
-            session_manager_ppt = PPTSessionManager(ppt_session_dir)
-            ppt_session_id = session_manager_ppt.create_session(
-                title=f"PPT from {os.path.splitext(filename)[0]}",
-                user_input=user_input,
-                theme="business",
-            )
-            _app_logger.info(f"[FILE_GEN PPT] 创建会话: {ppt_session_id}")
-
-            # 第 3 步：保存文件内容到会话
-            session_manager_ppt.save_generation_data(
-                session_id=ppt_session_id,
-                ppt_data=None,
-                ppt_file_path=None,
-                uploaded_file_context=file_content[:3000],  # 将内容限制为前3000字符
-            )
-            _app_logger.info(f"[FILE_GEN PPT] 文件内容已保存到会话")
-
-            # 构造包含文件内容的增强 Prompt，送入高质量 PPT 管道
-            _doc_context = file_content if file_content else ""
-            if not _doc_context:
-                # 兜底：从已提取的 formatted_message 中取内容
-                _fc_marker = "=== 文件内容 ==="
-                if _fc_marker in formatted_message:
-                    _doc_context = formatted_message[
-                        formatted_message.index(_fc_marker) + len(_fc_marker) :
-                    ].strip()
-                else:
-                    _doc_context = formatted_message
-
-            if len(_doc_context) > 50000:
-                _doc_context = _doc_context[:50000] + "...(截断)"
-
-            _ppt_enhanced_prompt = (
-                f"{user_input}\n\n"
-                f"【参考资料】\n"
-                f"以下是上传文件 《{filename}》 的完整内容，PPT 必须严格基于此内容生成：\n\n"
-                f"=== {filename} ===\n{_doc_context}\n"
-            )
-            if len(_ppt_enhanced_prompt) > 100000:
-                _ppt_enhanced_prompt = (
-                    _ppt_enhanced_prompt[:100000] + "\n...(context truncated)"
-                )
-
-            # 使用流式响应（Streamed Response）以支持实时进度显示
-            def generate_ppt_file_stream():
-                import asyncio
-                import queue as _queue_mod
-                import threading
-                import time as _time
-                import traceback as _traceback
-
-                from web.ppt_pipeline import PPTGenerationPipeline
-
-                _start = _time.time()
-                pipeline_timeout_sec = 300
-
-                event_queue = _queue_mod.Queue()
-
-                def _progress_listener(msg, p=None):
-                    event_queue.put({"type": "progress", "msg": msg, "progress": p})
-
-                def _thought_listener(text):
-                    event_queue.put({"type": "thought", "text": text})
-
-                run_state = {
-                    "done": False,
-                    "result": None,
-                    "error": None,
-                    "traceback": "",
-                }
-
-                def _run_pipeline_bg():
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    try:
-                        ai_client = get_client()
-                        pipeline = PPTGenerationPipeline(ai_client=ai_client)
-                        run_state["result"] = loop.run_until_complete(
-                            pipeline.generate(
-                                user_request=_ppt_enhanced_prompt,
-                                output_path=os.path.join(
-                                    settings_manager.documents_dir,
-                                    f"Koto_Presentation_{int(_time.time())}.pptx",
-                                ),
-                                enable_auto_images=True,
-                                progress_callback=_progress_listener,
-                                thought_callback=_thought_listener,
-                            )
-                        )
-                    except Exception as bg_err:
-                        run_state["error"] = str(bg_err)
-                        run_state["traceback"] = _traceback.format_exc()
-                    finally:
-                        try:
-                            loop.close()
-                        except Exception:
-                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-                        run_state["done"] = True
-
-                worker = threading.Thread(target=_run_pipeline_bg, daemon=True)
-                worker.start()
-
-                yield f"data: {json.dumps({'type': 'progress', 'message': '📊 正在启动 PPT 生成管道...', 'detail': f'基于文件: {filename}'})}\n\n"
-
-                last_progress_msg = "正在初始化..."
-                while not run_state["done"]:
-                    elapsed = int(_time.time() - _start)
-                    if elapsed > pipeline_timeout_sec:
-                        run_state["error"] = f"PPT 生成超时（>{pipeline_timeout_sec}s）"
-                        break
-
-                    try:
-                        while not event_queue.empty():
-                            item = event_queue.get_nowait()
-                            if item["type"] == "progress":
-                                last_progress_msg = item["msg"]
-                                detail_text = (
-                                    f"进度: {item['progress']}%"
-                                    if item["progress"] is not None
-                                    else f"已用时 {elapsed}s"
-                                )
-                                yield f"data: {json.dumps({'type': 'progress', 'message': item['msg'], 'detail': detail_text})}\n\n"
-                            elif item["type"] == "thought":
-                                thought_text = (
-                                    f"\n\n> 🤖 **Koto 思考**: {item['text']}\n"
-                                )
-                                yield f"data: {json.dumps({'type': 'text', 'content': thought_text})}\n\n"
-                    except _queue_mod.Empty:
-                        pass
-
-                    if elapsed % 2 == 0 and event_queue.empty():
-                        yield f"data: {json.dumps({'type': 'progress', 'message': last_progress_msg, 'detail': f'已用时 {elapsed}s'})}\n\n"
-
-                    _time.sleep(0.5)
-
-                # 排空剩余事件
-                try:
-                    while not event_queue.empty():
-                        item = event_queue.get_nowait()
-                        if item["type"] == "progress":
-                            yield f"data: {json.dumps({'type': 'progress', 'message': item['msg'], 'detail': ''})}\n\n"
-                        elif item["type"] == "thought":
-                            thought_text = f"\n\n> 🤖 **Koto 思考**: {item['text']}\n"
-                            yield f"data: {json.dumps({'type': 'text', 'content': thought_text})}\n\n"
-                except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-
-                if run_state["error"]:
-                    err = run_state["error"]
-                    _app_logger.error(f"[FILE_GEN PPT] 管道错误: {err}")
-                    yield f"data: {json.dumps({'type': 'token', 'content': f'❌ 生成失败: {err}'})}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': round(_time.time()-_start,2)})}\n\n"
-                    return
-
-                ppt_result = run_state["result"] or {}
-                saved_path = ppt_result.get("output_path") or ppt_result.get(
-                    "file_path"
-                )
-
-                if (
-                    not ppt_result.get("success")
-                    or not saved_path
-                    or not os.path.exists(saved_path)
-                ):
-                    err_detail = ppt_result.get("error", "未返回有效文件路径")
-                    _app_logger.error(f"[FILE_GEN PPT] 管道返回失败: {err_detail}")
-                    yield f"data: {json.dumps({'type': 'token', 'content': f'❌ 生成失败: {err_detail}'})}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': round(_time.time()-_start,2)})}\n\n"
-                    return
-
-                _elapsed = round(_time.time() - _start, 2)
-                rel_path = os.path.relpath(saved_path, WORKSPACE_DIR).replace("\\", "/")
-
-                # 保存会话数据
-                try:
-                    session_manager_ppt.save_generation_data(
-                        session_id=ppt_session_id,
-                        ppt_data=ppt_result.get("ppt_data"),
-                        ppt_file_path=saved_path,
-                    )
-                except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-
-                success_msg = (
-                    f"✅ **PPT 生成成功！**\n\n"
-                    f"基于上传文件《{filename}》生成的演示文稿。\n"
-                    f"📁 文件: **{os.path.basename(saved_path)}**\n"
-                    f"⏱️ 耗时: {_elapsed}s"
-                )
-                yield f"data: {json.dumps({'type': 'progress', 'message': '✅ PPT 生成完成！', 'detail': os.path.basename(saved_path)})}\n\n"
-                yield f"data: {json.dumps({'type': 'token', 'content': success_msg})}\n\n"
-
-                session_manager.update_last_model_response(
-                    f"{session_name}.json",
-                    success_msg,
-                    task="FILE_GEN",
-                    model_name=model_to_use,
-                    saved_files=[rel_path],
-                )
-
-                yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [rel_path], 'total_time': _elapsed, 'ppt_session_id': ppt_session_id})}\n\n"
-
-            return Response(
-                stream_with_context(generate_ppt_file_stream()),
-                mimetype="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",
-                    "Connection": "keep-alive",
-                },
-            )
-
-        elif task_type in ["FILE_GEN", "RESEARCH", "CHAT"]:
-            # ── 文本类文件分析（SSE 流式，修复原 blocking brain.chat 卡死问题）──
-            _captured_context = context_info  # closure capture
-            _captured_model = model_to_use
-            _captured_task = task_type
-
-            def generate_file_analysis_stream():
-                import time as _time
-
-                _start = _time.time()
-                try:
-                    _skill = (_captured_context or {}).get("skill_prompt")
-
-                    # 根据任务类型选择 system instruction
-                    if _captured_task == "RESEARCH":
-                        _sys = (
-                            "你是一位专业的文档分析助手，擅长深度解读各类文件（商业计划书、研究报告、技术文档等）。\n"
-                            "请仔细阅读用户提供的文件内容，并按以下结构输出分析报告：\n\n"
-                            "## 核心摘要\n- 用 3-5 条要点概括文件核心内容\n\n"
-                            "## 详细解读\n### 背景与目标\n### 关键内容分析\n### 数据与证据\n\n"
-                            "## 结论与建议\n- 综合评判与可行性/价值判断\n\n"
-                            "要求：用中文，条理清晰，避免冗余，不输出代码块标记。"
-                        )
-                    elif _captured_task == "CHAT":
-                        # 用户上传文件+提问 → 读取分析文件，不生成新文件模板
-                        _sys = (
-                            "你是一位专业的文档阅读与分析助手。用户上传了一份文件并提出了问题，"
-                            "请认真阅读文件的完整内容，用中文给出详细、准确的分析和回答。\n"
-                            "注意：\n"
-                            "- 直接回答用户的具体问题，不要生成新文档模板\n"
-                            "- 引用文件中的具体数据和信息支撑你的判断\n"
-                            "- 如涉及投资价值/风险，结合文件内容给出有依据的评估\n"
-                            "- 用清晰的结构输出，避免空泛表述"
-                        )
-                    else:
-                        _sys = _get_filegen_brief_instruction()
-
-                    if _skill:
-                        _sys += f"\n\n[分析重点] {_skill}"
-
-                    # ── 二进制文件（PDF/Word等）+ CHAT/RESEARCH：传字节流给模型直接读取 ──
-                    # 如果有 file_data（非图片二进制），强制使用支持 generate_content 的模型
-                    # 并将 PDF 字节附加到请求中，而不是依赖提取的文本
-                    _stream_model = _captured_model
-                    _stream_contents = formatted_message  # 默认：文本消息
-
-                    # 通用拦截：interactions-only 模型不支持 generate_content_stream
-                    # 覆盖所有情况（包括文本嵌入模式，不仅是 binary doc）
-                    if _is_interactions_only(_stream_model):
-                        _app_logger.warning(
-                            f"[FILE STREAM] ⚠️ {_stream_model} 是 interactions-only，降级到 {_INTERACTIONS_FALLBACK_MODEL}"
-                        )
-                        _stream_model = _INTERACTIONS_FALLBACK_MODEL
-
-                    _has_binary_doc = file_data is not None and not (
-                        file_data.get("mime_type") or ""
-                    ).lower().startswith("image/")
-                    # 需要降级到 generate_content 兼容模型的条件：
-                    # 1. 二进制文件（PDF/Word）+ CHAT/RESEARCH 任务
-                    # 2. 所选模型是 Interactions-only 模型（如 deep-research），不支持 generate_content_stream
-                    _need_fallback = (
-                        _has_binary_doc and _captured_task in ("CHAT", "RESEARCH")
-                    ) or _is_interactions_only(_stream_model)
-                    if _need_fallback:
-                        if _is_interactions_only(_stream_model):
-                            print(
-                                f"[FILE STREAM] interactions-only 模型 {_stream_model} 不支持文件流，降级到 {_INTERACTIONS_FALLBACK_MODEL}"
-                            )
-                        _stream_model = _INTERACTIONS_FALLBACK_MODEL
-                        if _has_binary_doc:
-                            _bin_mime = (
-                                file_data.get("mime_type") or "application/octet-stream"
-                            ).lower()
-                            _is_pdf_for_gemini = "pdf" in _bin_mime
-                            if _is_pdf_for_gemini:
-                                # PDF：Gemini 原生支持字节流读取
-                                try:
-                                    _doc_part = types.Part.from_bytes(
-                                        data=file_data["data"],
-                                        mime_type="application/pdf",
-                                    )
-                                    _stream_contents = [formatted_message, _doc_part]
-                                    print(
-                                        f"[FILE STREAM] 📄 PDF-Binary-Read: model={_stream_model}, bytes={len(file_data['data'])}"
-                                    )
-                                except Exception as _bp_err:
-                                    print(
-                                        f"[FILE STREAM] ⚠️ 无法创建 pdf doc_part，回退到文本模式: {_bp_err}"
-                                    )
-                                    _stream_contents = formatted_message
-                            else:
-                                # Office 格式（PPTX/PPTM/DOCX/XLSX 等）：Gemini 无法解析二进制
-                                # 先用 FileParser 提取文本，再以文本方式输入给模型
-                                _text_extracted = False
-                                try:
-                                    from web.file_parser import FileParser
-
-                                    _fp_result = FileParser.parse_file(filepath)
-                                    if (
-                                        _fp_result
-                                        and _fp_result.get("success")
-                                        and _fp_result.get("content")
-                                    ):
-                                        _extracted_text = _fp_result["content"][:60000]
-                                        _stream_contents = (
-                                            f"{formatted_message}\n\n"
-                                            f"=== 文件内容：{filename} ===\n{_extracted_text}"
-                                        )
-                                        _text_extracted = True
-                                        print(
-                                            f"[FILE STREAM] 📄 Office-Text-Extract: {filename}, {len(_extracted_text)} chars"
-                                        )
-                                except Exception as _text_err:
-                                    print(
-                                        f"[FILE STREAM] ⚠️ 文本提取失败({_text_err})，尝试字节流回退"
-                                    )
-                                if not _text_extracted:
-                                    # 兜底：直接传字节（可能效果有限）
-                                    try:
-                                        _doc_part = types.Part.from_bytes(
-                                            data=file_data["data"], mime_type=_bin_mime
-                                        )
-                                        _stream_contents = [
-                                            formatted_message,
-                                            _doc_part,
-                                        ]
-                                    except Exception as _bp_err2:
-                                        print(
-                                            f"[FILE STREAM] ⚠️ 字节流回退也失败: {_bp_err2}"
-                                        )
-                                        _stream_contents = formatted_message
-
-                    yield f"data: {json.dumps({'type': 'classification', 'task_type': _captured_task, 'model': _stream_model, 'message': f'📄 正在分析: {filename}'})}\n\n"
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '📂 文件内容已就绪', 'stage': 'file_ready_complete', 'progress': 15})}\n\n"
-                    _task_display = {
-                        "FILE_GEN": "📝 文件生成",
-                        "RESEARCH": "🔬 深度分析",
-                        "CHAT": "💬 对话分析",
-                    }.get(_captured_task, _captured_task)
-                    yield f"data: {json.dumps({'type': 'progress', 'message': f'🎯 任务类型: {_task_display}', 'stage': 'routing_complete', 'progress': 25})}\n\n"
-                    yield f"data: {json.dumps({'type': 'progress', 'message': f'⚡ 正在请求 {_stream_model}，请稍候...', 'stage': 'api_calling', 'progress': 35})}\n\n"
-
-                    response_stream = client.models.generate_content_stream(
-                        model=_stream_model,
-                        contents=_stream_contents,
-                        config=types.GenerateContentConfig(
-                            system_instruction=_sys,
-                            temperature=0.7,
-                            max_output_tokens=8000,
-                        ),
-                    )
-
-                    full_text = ""
-                    _first_token = True
-                    for _chunk in response_stream:
-                        _t = getattr(_chunk, "text", None)
-                        if _t:
-                            if _first_token:
-                                yield f"data: {json.dumps({'type': 'progress', 'message': '✍️ 模型正在生成回复...', 'stage': 'generating_complete', 'progress': 55})}\n\n"
-                                _first_token = False
-                            full_text += _t
-                            yield f"data: {json.dumps({'type': 'token', 'content': _t})}\n\n"
-
-                    _elapsed = round(_time.time() - _start, 2)
-                    _saved_files = []
-
-                    # 自动保存为 DOCX
-                    if full_text and len(full_text) > 50:
-                        yield f"data: {json.dumps({'type': 'progress', 'message': '💾 正在保存文档...', 'stage': 'saving', 'progress': 90})}\n\n"
-                        try:
-                            _title = _build_analysis_title(
-                                user_input, filename, is_binary=False
-                            )
-                            _cleaned = _strip_code_blocks(full_text)
-                            _docx = save_docx(
-                                _cleaned,
-                                title=_title,
-                                output_dir=settings_manager.documents_dir,
-                            )
-                            _docx_rel = os.path.relpath(_docx, WORKSPACE_DIR).replace(
-                                "\\", "/"
-                            )
-                            _saved_files.append(_docx_rel)
-                            _app_logger.info(
-                                f"[FILE UPLOAD] ✅ 分析已保存 DOCX: {_docx_rel}"
-                            )
-                            # 按需同时保存 PDF
-                            if any(
-                                kw in (user_input or "").lower()
-                                for kw in ["pdf", "两种格式", "both"]
-                            ):
-                                try:
-                                    _pdf = save_pdf(
-                                        _cleaned,
-                                        title=_title,
-                                        output_dir=settings_manager.documents_dir,
-                                    )
-                                    _saved_files.append(
-                                        os.path.relpath(_pdf, WORKSPACE_DIR).replace(
-                                            "\\", "/"
-                                        )
-                                    )
-                                except Exception:
-                                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-                        except Exception as _de:
-                            _app_logger.warning(
-                                f"[FILE UPLOAD] ⚠️ 保存 DOCX 失败: {_de}"
-                            )
-
-                    session_manager.update_last_model_response(
-                        f"{session_name}.json",
-                        full_text,
-                        task=_captured_task,
-                        model_name=_captured_model,
-                        saved_files=_saved_files,
-                    )
-                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': _saved_files, 'total_time': _elapsed})}\n\n"
-
-                except Exception as _e:
-                    import traceback as _tb
-
-                    _tb.print_exc()
-                    _emsg = str(_e)[:200]
-                    session_manager.update_last_model_response(
-                        f"{session_name}.json", f"❌ 分析失败: {_emsg}"
-                    )
-                    yield _legacy_safe_sse({
-                        "type": "error",
-                        "message": f"❌ 分析失败: {_emsg}",
-                    })
-                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': 0})}\n\n"
-
-            return Response(
-                stream_with_context(generate_file_analysis_stream()),
-                mimetype="text/event-stream",
-            )
-
-        else:
-            # ── 图片 / 二进制文件：视觉分析（SSE 流式包装）──
-            _captured_fdata = file_data
-            _captured_model_v = model_to_use
-            _captured_task_v = task_type
-
-            def generate_vision_stream():
-                import time as _time
-
-                _start = _time.time()
-                try:
-                    yield f"data: {json.dumps({'type': 'classification', 'task_type': _captured_task_v, 'model': _captured_model_v, 'message': f'👁️ 正在分析: {filename}'})}\n\n"
-                    yield f"data: {json.dumps({'type': 'progress', 'message': '� 文件已接收', 'stage': 'file_ready_complete', 'progress': 15})}\n\n"
-                    yield f"data: {json.dumps({'type': 'progress', 'message': f'⚡ 正在请求视觉模型 {_captured_model_v}...', 'stage': 'api_calling', 'progress': 35})}\n\n"
-
-                    # 调用 brain.chat（vision 路径通常较快）
-                    _brain_result = brain.chat(
-                        history=history,
-                        user_input=formatted_message,
-                        file_data=_captured_fdata,
-                        model=_captured_model_v,
-                        auto_model=(locked_model == "auto"),
-                    )
-                    _resp_text = _brain_result.get("response", "")
-                    _elapsed = round(_time.time() - _start, 2)
-                    _saved_files = list(_brain_result.get("saved_files", []))
-
-                    # 输出内容
-                    if _resp_text:
-                        yield f"data: {json.dumps({'type': 'progress', 'message': '✍️ 分析完成，正在输出...', 'stage': 'generating_complete', 'progress': 70})}\n\n"
-                        yield f"data: {json.dumps({'type': 'token', 'content': _resp_text})}\n\n"
-
-                    # 自动保存视觉分析为 DOCX
-                    if _resp_text and len(_resp_text) > 50:
-                        yield f"data: {json.dumps({'type': 'progress', 'message': '💾 正在保存文档...', 'stage': 'saving', 'progress': 90})}\n\n"
-                        try:
-                            _title = _build_analysis_title(
-                                user_input, filename, is_binary=True
-                            )
-                            _cleaned = _strip_code_blocks(_resp_text)
-                            _docx = save_docx(
-                                _cleaned,
-                                title=_title,
-                                output_dir=settings_manager.documents_dir,
-                            )
-                            _docx_rel = os.path.relpath(_docx, WORKSPACE_DIR).replace(
-                                "\\", "/"
-                            )
-                            _saved_files.append(_docx_rel)
-                            _app_logger.info(
-                                f"[FILE UPLOAD] ✅ 视觉分析已保存 DOCX: {_docx_rel}"
-                            )
-                        except Exception as _de:
-                            _app_logger.warning(
-                                f"[FILE UPLOAD] ⚠️ 视觉 DOCX 保存失败: {_de}"
-                            )
-
-                    session_manager.update_last_model_response(
-                        f"{session_name}.json",
-                        _resp_text,
-                        task=_captured_task_v,
-                        model_name=_captured_model_v,
-                        saved_files=_saved_files,
-                        images=_brain_result.get("images", []),
-                    )
-                    yield f"data: {json.dumps({'type': 'done', 'images': _brain_result.get('images', []), 'saved_files': _saved_files, 'total_time': _elapsed})}\n\n"
-
-                except Exception as _e:
-                    import traceback as _tb
-
-                    _tb.print_exc()
-                    _emsg = str(_e)[:200]
-                    session_manager.update_last_model_response(
-                        f"{session_name}.json", f"❌ 文件分析失败: {_emsg}"
-                    )
-                    yield _legacy_safe_sse({
-                        "type": "error",
-                        "message": f"❌ 文件分析失败: {_emsg}",
-                    })
-                    yield f"data: {json.dumps({'type': 'done', 'images': [], 'saved_files': [], 'total_time': 0})}\n\n"
-
-            return Response(
-                stream_with_context(generate_vision_stream()),
-                mimetype="text/event-stream",
-            )
-
-    except Exception as e:
-        # 即使出错也保存用户的问题和错误信息
-        import traceback
-
-        error_detail = traceback.format_exc()
-        _app_logger.info(f"[FILE UPLOAD ERROR] {error_detail}")
-
-        error_response = f"❌ 处理文件时出错: {str(e)}"
-        session_manager.update_last_model_response(
-            f"{session_name}.json", error_response
-        )
-
-        return jsonify(
-            {
-                "response": error_response,
-                "task": "ERROR",
-                "model": "none",
-                "images": [],
-                "saved_files": [],
-            }
-        )
+    return handle_single_file_chat_request(
+        app_module=sys.modules[__name__],
+        session_name=session_name,
+        user_input=user_input,
+        file=files[0],
+        locked_task=locked_task,
+        locked_model=locked_model,
+    )
 
 
 # ==================== PPT 相关 API 端点（P0 补充）====================
 
 
-@app.route("/api/ppt/download", methods=["POST"])
 def download_ppt():
     """下载 PPT PPTX 文件"""
     try:
@@ -16690,7 +14850,6 @@ def download_ppt():
         return jsonify({"error": f"Download failed: {str(e)}"}), 500
 
 
-@app.route("/api/ppt/session/<session_id>", methods=["GET"])
 def get_ppt_session(session_id):
     """获取 PPT 会话信息"""
     try:
@@ -16739,7 +14898,6 @@ def get_ppt_session(session_id):
 # ================= Setup & Initialization API =================
 
 
-@app.route("/api/setup/status", methods=["GET"])
 def get_setup_status():
     """检查首次设置状态"""
     config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
@@ -16757,7 +14915,6 @@ def get_setup_status():
     )
 
 
-@app.route("/api/setup/apikey", methods=["POST"])
 def setup_api_key():
     """设置 API Key"""
     data = request.json
@@ -16780,7 +14937,6 @@ def setup_api_key():
         return jsonify({"success": False, "error": str(e)})
 
 
-@app.route("/api/setup/activate", methods=["POST"])
 def activate_with_code():
     """使用激活码激活 Koto（自动配置内置 API Key）"""
     import hmac
@@ -16829,7 +14985,6 @@ def activate_with_code():
         return jsonify({"success": False, "error": str(e)})
 
 
-@app.route("/api/setup/workspace", methods=["POST"])
 def setup_workspace():
     """设置工作区目录"""
     data = request.json
@@ -16852,7 +15007,6 @@ def setup_workspace():
         return jsonify({"success": False, "error": str(e)})
 
 
-@app.route("/api/setup/test", methods=["GET"])
 def test_api_connection():
     """测试 API 连接"""
     try:
@@ -16869,7 +15023,6 @@ def test_api_connection():
         return jsonify({"success": False, "error": str(e)})
 
 
-@app.route("/api/diagnose", methods=["GET"])
 def diagnose_models():
     """诊断所有模型的可用性"""
     import threading
@@ -16956,7 +15109,6 @@ def diagnose_models():
     return jsonify(results)
 
 
-@app.route("/api/browse", methods=["GET"])
 def browse_folders():
     import os
 
@@ -16990,50 +15142,6 @@ def browse_folders():
         return jsonify({"error": str(e), "folders": [], "parent": None})
 
 
-@app.route("/api/chat/interrupt", methods=["POST"])
-def interrupt_chat():
-    """中断当前对话生成"""
-    payload = request.json or {}
-    session_name = payload.get("session")
-    task_id = payload.get("task_id")
-    if not session_name:
-        return jsonify({"error": "Missing session"}), 400
-
-    # 使用新的中断管理器
-    _interrupt_manager.set_interrupt(session_name)
-    # 保持向后兼容
-    _interrupt_flags[session_name] = True
-
-    # 可选：如果前端传入 task_id，同步取消调度器任务（用于 DOC_ANNOTATE 等流式长任务）
-    if task_id:
-        try:
-            from task_scheduler import get_task_scheduler
-
-            get_task_scheduler().cancel_task(task_id)
-            _app_logger.debug(f"[INTERRUPT] Cancel task_id={task_id}")
-        except Exception as e:
-            _app_logger.debug(f"[INTERRUPT] cancel task failed: {e}")
-
-    # 同步中断标志到 AgentLoop（如果正在执行 Agent 任务）
-    # NOTE: Legacy agent_loop retired — interrupt handled by _interrupt_manager above
-    pass
-
-    return jsonify({"success": True, "message": "Chat interrupted"})
-
-
-@app.route("/api/chat/reset-interrupt", methods=["POST"])
-def reset_interrupt():
-    """重置中断标志"""
-    session_name = request.json.get("session")
-    if session_name:
-        # 使用新的中断管理器
-        _interrupt_manager.reset(session_name)
-        # 保持向后兼容
-        if session_name in _interrupt_flags:
-            del _interrupt_flags[session_name]
-    return jsonify({"success": True})
-
-
 # ================= 新功能 API 路由 =================
 
 
@@ -17062,7 +15170,6 @@ def reset_interrupt():
 # ================= 增强功能 API (场景1-3) =================
 
 
-@app.route("/api/ppt/generate", methods=["POST"])
 def ppt_generate():
     """PPT生成 - 场景3：高质量演示文稿"""
     try:
@@ -17111,53 +15218,7 @@ def _should_use_annotation_system(requirement: str, has_file: bool = False) -> b
     注意："修改"、"优化"、"改善"等词太宽泛，不能单独触发标注。
     只有与"在原文上"、"标出来"、"标红"等定位词组合才触发。
     """
-    if not requirement:
-        return False
-
-    requirement_lower = requirement.lower()
-
-    # 第一层：明确的标注/批注关键词 — 直接触发
-    explicit_annotation = [
-        "标注",
-        "标记",
-        "批注",
-        "标出",
-        "标红",
-        "track changes",
-        "批改",
-    ]
-    if any(kw in requirement_lower for kw in explicit_annotation):
-        return True
-
-    # 第二层：编辑意图 + 定位词组合才触发
-    # "修改"单独出现 ≠ 标注，"修改+标出来" = 标注
-    edit_words = ["修改", "改正", "纠正", "校对", "审校", "纠错"]
-    location_words = [
-        "在原文",
-        "原文上",
-        "标出",
-        "标记出",
-        "指出.*位置",
-        "哪些地方",
-        "哪些位置",
-    ]
-    has_edit = any(kw in requirement_lower for kw in edit_words)
-    has_location = any(re.search(kw, requirement_lower) for kw in location_words)
-
-    if has_edit and has_location:
-        return True
-
-    # 第三层：审查/修改+质量描述组合
-    review_words = ["审查", "评审", "审核", "改善", "优化", "修改", "润色", "调整"]
-    quality_words = ["不合适", "生硬", "翻译腔", "语序", "用词", "逻辑", "问题"]
-    has_review = any(kw in requirement_lower for kw in review_words)
-    has_quality = any(kw in requirement_lower for kw in quality_words)
-
-    if has_review and has_quality:
-        return True
-
-    # 默认不触发 — 宁可漏判也不误判
-    return False
+    return _resolve_annotation_system(requirement, has_file=has_file)
 
 
 def _is_analysis_request(requirement: str) -> bool:
@@ -17292,134 +15353,7 @@ def _is_analysis_request(requirement: str) -> bool:
 
 def _is_explicit_file_gen_request(requirement: str) -> bool:
     """判断用户是否明确要求生成/输出一个新文件（报告、Word、PDF等）"""
-    if not requirement:
-        return False
-    requirement_lower = requirement.lower()
-    gen_keywords = [
-        "生成一份",
-        "生成一个",
-        "帮我生成",
-        "写一份报告",
-        "写一个报告",
-        "写报告",
-        "写一份",
-        "帮我写",
-        "做一份",
-        "做一个",
-        "帮我做",
-        "导出",
-        "输出为",
-        "保存为",
-        "转成",
-        "生成word",
-        "生成pdf",
-        "生成excel",
-        "生成ppt",
-        "创建文档",
-        "新建文档",
-        "制作报告",
-        "整理成文档",
-        "形成报告",
-        "输出报告",
-    ]
-    return any(kw in requirement_lower for kw in gen_keywords)
-
-
-def _call_document_annotate(file_path: str, requirement: str):
-    """调用文档标注系统"""
-    try:
-        from web.document_annotation_compat import (
-            collect_annotation_result,
-            resolve_document_path,
-        )
-
-        # 转换为绝对路径
-        file_path = resolve_document_path(file_path, WORKSPACE_DIR)
-
-        if not os.path.exists(file_path):
-            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
-
-        result = collect_annotation_result(
-            file_path=file_path,
-            user_requirement=requirement,
-            gemini_client=client,
-            model_id="gemini-2.5-pro",
-        )
-
-        # 添加处理模式标记
-        result["processing_mode"] = "annotation"
-        result["mode_description"] = "文档自动标注"
-
-        return jsonify(result)
-
-    except Exception as e:
-        return (
-            jsonify(
-                {"success": False, "error": str(e), "processing_mode": "annotation"}
-            ),
-            500,
-        )
-
-
-def _call_document_analysis(file_path: str, requirement: str):
-    """调用传统的文件分析系统"""
-    try:
-        # 这里调用现有的文件分析逻辑
-        # 临时返回说明（实际应该调用现有的分析端点）
-        return (
-            jsonify(
-                {
-                    "success": False,
-                    "error": "文件分析系统需要单独实现",
-                    "processing_mode": "analysis",
-                    "mode_description": "文件分析",
-                }
-            ),
-            501,
-        )
-
-    except Exception as e:
-        return (
-            jsonify({"success": False, "error": str(e), "processing_mode": "analysis"}),
-            500,
-        )
-
-
-# ==================== 新功能 API 路由 ====================
-
-# ==================== 改进的建议式标注 API ====================
-
-
-# 知识库 API
-
-# ==================== 文件网络索引 API ====================
-
-
-# 批量处理 API
-
-# 模板库 API
-
-# 一致性检查 API
-
-# 文档对比 API
-
-# ── 多文档对比 API ──────────────────────────────────────────────────────────
-
-_COMPARE_UPLOAD_DIR = os.path.join(PROJECT_ROOT, "web", "uploads", "compare")
-os.makedirs(_COMPARE_UPLOAD_DIR, exist_ok=True)
-
-_ALLOWED_COMPARE_EXTS = {
-    ".txt",
-    ".md",
-    ".markdown",
-    ".docx",
-    ".doc",
-    ".pdf",
-    ".xlsx",
-    ".xls",
-    ".pptx",
-    ".ppt",
-}
+    return _resolve_explicit_file_gen_request(requirement)
 
 # 临时 file_id → 实际路径映射（进程内缓存，重启后失效属正常）
 _compare_file_registry: dict = {}
@@ -17434,872 +15368,61 @@ _compare_file_registry: dict = {}
 # ================= 文件助手 AI 端点 =================
 
 
-def _get_user_writing_style() -> str:
-    """Return a one-line writing-preference hint from user_profile.json.
-
-    Injected into prompts that modify document style (polish, rewrite, etc.)
-    so the AI respects the user's established preferences.
-    """
-    try:
-        _profile_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'user_profile.json')
-        with open(_profile_path, encoding='utf-8') as _f:
-            _profile = json.load(_f)
-        _style = _profile.get('communication_style', {})
-        _prefs = []
-        _formality = _style.get('formality', '')
-        if _formality == 'casual':
-            _prefs.append('语气自然随和')
-        elif _formality == 'formal':
-            _prefs.append('语气正式严谨')
-        _detail = _style.get('preferred_detail_level', '')
-        if _detail == 'concise':
-            _prefs.append('表达简洁')
-        elif _detail == 'detailed':
-            _prefs.append('表达详尽')
-        _likes = _profile.get('preferences', {}).get('likes', [])
-        _habits = _profile.get('preferences', {}).get('habits', [])
-        _notes = [str(x) for x in (_likes + _habits) if x][:2]
-        if _notes:
-            _prefs.append('偏好：' + '、'.join(_notes))
-        return ('【用户写作风格偏好】' + '；'.join(_prefs) + '\n') if _prefs else ''
-    except Exception:
-        return ''
-
-
-def _doc_mode_hint(mode: str) -> str:
-    """Return a writing-tone directive for the given document mode."""
-    hints = {
-        'formal':   '【行文基调：正式、专业、严谨，避免口语化表达】\n',
-        'casual':   '【行文基调：轻松自然、口语化，表达亲切流畅】\n',
-        'academic': '【行文基调：学术严谨，逻辑清晰，术语准确，引用规范】\n',
-        'concise':  '【行文基调：简洁有力，去除冗余，每句话都要有信息量】\n',
-    }
-    return hints.get(mode or 'normal', '')
-
-
-_EDITOR_AI_STREAM_ACTIONS = {
-    "translate",
-    "polish",
-    "summarize",
-    "continue_writing",
-    "check",
-    "explain",
-    "python_chart",
-    "chart",
-    "rewrite",
-    "annotate",
-    "find_replace",
-    "find_reference",
-    "narrative",
-    "format_normalize",
-    "review_checklist",
-    "glossary_translate",
-    "glossary_translate_exec",
-    "meeting_notes",
-    "data_clean",
-    "slide_expand",
-    "custom_instruction",
-}
-
-
-def _build_editor_prompt(action: str, selection: str, instruction: str, full_text: str = "", csv_data: str = "", doc_mode: str = "normal", selection_offset: int = -1) -> str:
-    """Build a prompt for the File Assistant AI based on action type.
-
-    When full_text is provided, it's used as context so AI can match
-    the document's tone and style.
-    When csv_data is provided, it's appended as structured table context (P8 fix).
-    When doc_mode is provided (formal/casual/academic/concise), a tone directive is prepended.
-    When selection_offset >= 0, it's used as the exact char offset into full_text to avoid
-    first-occurrence indexOf ambiguity.
-    """
-    # Helper: build surrounding context (max ~4000 chars around selection)
-    def _context_snippet():
-        if not full_text or not selection:
-            return ""
-        # Use provided offset when valid (avoids first-occurrence problem); fall back to find()
-        if (selection_offset >= 0
-                and selection_offset + len(selection) <= len(full_text)
-                and full_text[selection_offset:selection_offset + len(selection)] == selection):
-            idx = selection_offset
-        else:
-            idx = full_text.find(selection)
-        if idx < 0:
-            # Can't locate selection, send truncated full text
-            return full_text[:4000]
-        before = full_text[max(0, idx - 2000):idx]
-        after = full_text[idx + len(selection):idx + len(selection) + 2000]
-        return f"{before}[[[SELECTED]]]{selection}[[[/SELECTED]]]{after}"
-
-    _style_hint = _get_user_writing_style()
-    _mode_hint = _doc_mode_hint(doc_mode)
-
-    if action == "translate":
-        ctx = ""
-        if full_text:
-            ctx = f"\n\n【文档上下文（仅供参考语气，不要翻译全文）】\n{_context_snippet()}\n"
-        return (
-            f"{_mode_hint}{_style_hint}"
-            "请将以下文本准确翻译为英文，只输出译文，不要添加任何解释或前缀："
-            f"{ctx}\n\n【需要翻译的内容】\n{selection}"
-        )
-    elif action == "polish":
-        ctx = ""
-        if full_text:
-            ctx = f"\n\n【文档全文（仅供参考语气和上下文，不要修改全文）】\n{_context_snippet()}\n"
-        _extra_inst = ""
-        if instruction:
-            _extra_inst = f"\n用户补充要求：{instruction}"
-        return (
-            f"{_mode_hint}{_style_hint}"
-            "你是一名专业编辑。请对以下【选中部分】进行润色，使其更加流畅、优雅，"
-            "保持原意不变，并与全文语气保持一致。\n"
-            "重要规则：只输出润色后的文本，不要添加任何解释、前缀、后缀、标题、分隔符或“以下是…”之类的引导语。"
-            "直接输出纯文本，不要使用 Markdown 格式。"
-            f"{_extra_inst}"
-            f"{ctx}\n\n【需要润色的内容】\n{selection}"
-        )
-    elif action == "summarize":
-        return (
-            "请对以下文本进行摘要，提炼核心要点，使用简洁的中文输出，不超过 200 字：\n\n"
-            + selection
-        )
-    elif action == "continue_writing":
-        ctx = ""
-        if full_text:
-            ctx = f"\n\n[文档上下文（仅供参考语气，不要重复输出）]｜{_context_snippet()}\n"
-        return (
-            f"{_mode_hint}{_style_hint}"
-            "请根据以下文本内容进行续写，保持风格一致，直接输出续写内容，不加任何前缀："
-            f"{ctx}\n\n[要续写的内容]\n{selection}"
-        )
-    elif action == "check":
-        ctx = ""
-        if full_text:
-            ctx = f"\n\n[文档上下文（仅供参考）]｜{_context_snippet()}\n"
-        return (
-            "请仔细检查以下文本中的语法错误、错别字、标点问题和表达不当之处。\n"
-            "用中文逐条列出发现的问题，格式为：\n"
-            "1. 【位置描述】原文 → 建议修改\n"
-            "重要规则：\n"
-            "- 不要在开头预告“共发现X个问题”或任何总数总结，直接逐条列出\n"
-            "- 每条建议必须有对应的具体原文和修改方案\n"
-            "- 列完后不要添加总结性文字\n"
-            "如果没有发现问题，请直接说\"未发现明显问题\"。\n"
-            f"{ctx}\n"
-            f"[需要检查的内容]\n{selection}"
-        )
-    elif action == "explain":
-        ctx = ""
-        if full_text:
-            ctx = f"\n\n文档上下文（仅供参考）：\n{full_text[:3000]}"
-        inst = instruction or "请解释以下内容的含义、背景或重要性，语言简洁易懂："
-        return f"{inst}\n\n{selection}{ctx}"
-    elif action in ("python_chart", "chart"):
-        csv_ctx = ""
-        # Prefer explicit csv_data; fall back to full_text when it looks like spreadsheet data
-        table_src = csv_data or (full_text if ('[' in full_text and '\n' in full_text) else '')
-        if table_src:
-            csv_ctx = f"\n\n# 输入数据（电子表格 CSV 格式，行N=第N行，列字母=Excel列）\n{table_src[:4000]}\n"
-        elif selection:
-            csv_ctx = f"\n\n# 参考数据\n{selection}\n"
-        return (
-            "根据以下数据，生成一段 Python 代码，使用 pandas 和 matplotlib 生成合适的图表（折线图、柱状图或饼图等）。\n"
-            "要求：\n"
-            "1. 代码完整可直接运行（包含所有必要 import）\n"
-            "2. 中文显示：在代码开头加入 import matplotlib; matplotlib.rcParams['font.sans-serif']=['Microsoft YaHei','SimHei','Noto Sans CJK SC','WenQuanYi Micro Hei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
-            "3. 最后调用 plt.savefig('chart.png', dpi=220, bbox_inches='tight') 然后 plt.close()\n"
-            "4. 绝对不要调用 plt.show()\n"
-            "5. 只输出代码，不加任何 markdown 代码块标记（不加 ```）\n"
-            "6. 数据说明：CSV 中第一列'行'为行号，其余列字母（A/B/C...）对应 Excel 列\n\n"
-            + csv_ctx
-        )
-    elif action == "rewrite":
-        ctx = ""
-        if full_text:
-            ctx = f"\n\n【文档上下文（仅供参考）】\n{_context_snippet()}\n"
-        return (
-            f"{_mode_hint}{_style_hint}"
-            "请对以下文本进行改写，使其用词更准确、逻辑更清晰，保留原意，与全文语气一致，只输出改写后的文本："
-            f"{ctx}\n\n【需要改写的内容】\n{selection}"
-        )
-    elif action == "annotate":
-        ctx = ""
-        if full_text:
-            ctx = f"\n\n[文档上下文（仅供参考）｜{_context_snippet()}\n"
-        return (
-            "请为以下文本添加注解说明，解释关键概念、背景或难点，格式为在原文后附注解：\n"
-            f"{ctx}\n"
-            f"[需要注解的内容]\n{selection}"
-        )
-    elif action == "find_replace":
-        return (
-            "你是一个文本处理助手。根据用户的替换需求，分析以下全文并输出替换方案。\n"
-            "输出格式（严格 JSON，不要添加任何其他文字）：\n"
-            '{"replacements": [{"from": "原文", "to": "替换为"}], "summary": "共替换 N 处"}\n\n'
-            "注意：\n"
-            "- from 字段必须是全文中实际存在的文本\n"
-            "- 如果用户描述的是模糊替换（如“把所有人的名字隐藏”），请找出所有具体匹配项\n"
-            "- 只输出 JSON，不要加 ```json 标记\n\n"
-            f"全文内容：\n{full_text[:8000]}\n\n"
-            f"用户替换需求：{instruction}"
-        )
-    elif action == "find_reference":
-        ctx = ""
-        if full_text:
-            ctx = f"\n\n文档上下文（仅供参考）：\n{full_text[:3000]}\n"
-        return (
-            "请为以下内容提供可靠的参考文献和支持信息。列出 3-5 个相关来源，格式：\n"
-            "1. 【来源类型】来源名称 — 关键引用内容\n"
-            "   链接（如可获取）\n\n"
-            "注意：只提供真实可靠的来源，不要捏造。如果不确定，请明确标注“待核实”。\n\n"
-            f"选中内容：\n{selection}"
-            f"{ctx}"
-        )
-    elif action == "narrative":
-        # Data→Narrative: generate an analytical paragraph describing the data
-        style = _style_hint or ''
-        return (
-            f"{style}"
-            "你是一名数据分析撰稿人。根据以下数据/表格内容，生成一段简洁有力的分析性文字，"
-            "准确描述数据的关键趋势、最大值/最小值、变化幅度等核心发现。"
-            "直接输出段落，不要加标题也不要重复原始数据：\n\n"
-            + selection
-        )
-    elif action == "format_normalize":
-        return (
-            "你是一名排版专家。请对以下文档全文进行格式统一处理：\n"
-            "1. 统一标题层级（一级用#，二级用##，以此类推）\n"
-            "2. 统一列表样式（有序/无序保持一致）\n"
-            "3. 统一数字与单位格式（如千分位、百分号、货币符号）\n"
-            "4. 统一标点符号（全角/半角保持一致）\n"
-            "5. 统一日期格式\n"
-            "6. 去除多余空行和空格\n\n"
-            "直接输出格式化后的完整文本，不要添加解释：\n\n"
-            f"{full_text[:12000]}"
-        )
-    elif action == "review_checklist":
-        return (
-            "你是一名资深审稿编辑。请对以下文档进行全面审查，输出结构化审查清单：\n\n"
-            "## 审查维度\n"
-            "1. **事实核查**：标记可能不准确的数字、日期、名称\n"
-            "2. **逻辑一致性**：检查前后表述是否矛盾\n"
-            "3. **语法与表达**：发现的语法错误和表述不当\n"
-            "4. **格式与排版**：不一致的格式问题\n"
-            "5. **遗漏检查**：可能缺失的重要内容\n\n"
-            "输出格式：\n"
-            "### [维度名称]\n"
-            "- ⚠️ [问题描述] → 建议：[修改建议]\n"
-            "- ✅ [该维度无问题时的说明]\n\n"
-            "最后给出总体评分（1-10）和总结。\n\n"
-            f"【待审查文档】\n{full_text[:12000]}"
-        )
-    elif action == "glossary_translate":
-        inst_part = ""
-        if instruction:
-            inst_part = f"\n\n用户补充说明：{instruction}"
-        return (
-            "你是一名专业翻译，擅长术语一致性管理。\n"
-            "请扫描以下文档，提取所有专业术语、人名、地名、机构名、专有名词（10-30个）。\n\n"
-            "严格按以下格式输出，不要输出任何其他内容：\n"
-            "TERM_TABLE_BEGIN\n"
-            "[{\"orig\": \"原文术语\", \"trans\": \"建议译文\", \"n\": 出现次数}, ...]\n"
-            "TERM_TABLE_END\n\n"
-            "规则：\n"
-            "- orig: 原文中的术语（与原文完全一致）\n"
-            "- trans: 建议的标准译文\n"
-            "- n: 该术语在全文中大约出现的次数（整数）\n"
-            "- 只输出 JSON 数组，不要加 ```json 标记\n\n"
-            f"【文档全文】\n{full_text[:12000]}"
-            f"{inst_part}"
-        )
-    elif action == "glossary_translate_exec":
-        # instruction contains the user-confirmed term JSON from the approval card
-        terms_hint = ""
-        if instruction:
-            terms_hint = f"\n\n【术语对照表（请严格遵守，不得私自更改）】\n{instruction}"
-        return (
-            "你是一名专业翻译。请使用以下术语对照表，将文档全文翻译为英文"
-            "（如原文已是英文则翻译为中文）。\n"
-            "规则：\n"
-            "1. 术语对照表中的每个术语必须严格按照表中译文翻译\n"
-            "2. 保持原文的段落结构和格式\n"
-            "3. 直接输出完整译文，不要有任何前缀说明\n"
-            f"{terms_hint}\n\n"
-            f"【待翻译全文】\n{full_text[:12000]}"
-        )
-    elif action == "meeting_notes":
-        return (
-            "你是一名高效的会议记录整理助手。请将以下原始会议记录/笔记整理为结构化文档：\n\n"
-            "**输出格式：**\n"
-            "# 会议纪要\n"
-            "- **日期**：（从文本推断或标注【未提及】）\n"
-            "- **参会人**：（从文本推断或标注【未提及】）\n\n"
-            "## 议题摘要\n"
-            "（按讨论主题分段，每段 2-3 句话概括）\n\n"
-            "## 决议事项\n"
-            "（编号列表，标注负责人和截止时间）\n\n"
-            "## 待办跟进\n"
-            "（编号列表，标注优先级：高/中/低）\n\n"
-            f"【原始记录】\n{full_text[:12000]}"
-        )
-    elif action == "data_clean":
-        csv_ctx = csv_data or full_text
-        return (
-            "你是一名数据清洗专家。请对以下表格数据进行清洗并输出修复后的 CSV 数据：\n\n"
-            "**清洗步骤：**\n"
-            "1. 识别并修复空值（合理填充或标记）\n"
-            "2. 统一日期格式为 YYYY-MM-DD\n"
-            "3. 去除重复行\n"
-            "4. 统一文本大小写和空格\n"
-            "5. 修复明显的数据录入错误（如数字中混入字母）\n"
-            "6. 统一数字精度\n\n"
-            "**输出格式：**\n"
-            "先输出清洗报告（发现了哪些问题、做了什么处理），\n"
-            "然后输出清洗后的完整数据。\n\n"
-            f"【原始数据】\n{csv_ctx[:8000]}"
-        )
-    elif action == "slide_expand":
-        return (
-            "你是一名演示文稿设计顾问。请根据以下幻灯片大纲/摘要，为每页扩展详细内容：\n\n"
-            "**对每页幻灯片，请输出：**\n"
-            "### 第 N 页：[标题]\n"
-            "- **要点**：3-5 个关键演讲要点（每点 1-2 句话）\n"
-            "- **演讲备注**：演讲时可以说的详细内容（3-5 句话）\n"
-            "- **视觉建议**：建议的图表/图片/图标类型\n\n"
-            "保持专业、简洁，适合商务演示。\n\n"
-            f"【幻灯片大纲】\n{full_text[:12000]}"
-        )
-    elif action == "custom_instruction":
-        ctx = f"\n\n参考文本：\n{selection}" if selection else ""
-        full_ctx = ""
-        if csv_data:
-            full_ctx = (
-                "\n\n【电子表格数据（CSV 格式）】\n"
-                "格式说明：第一列'行'为行号（1开始），其余列字母（A/B/C...）对应 Excel 列。\n"
-                f"{csv_data[:4000]}"
-            )
-        elif full_text:
-            # Check if full_text looks like spreadsheet output (has [SheetName] sections)
-            if full_text.lstrip().startswith('['):
-                full_ctx = (
-                    "\n\n【电子表格数据（CSV 格式）】\n"
-                    "格式说明：第一列'行'为行号（1开始），其余列字母（A/B/C...）对应 Excel 列。\n"
-                    f"{full_text[:4000]}"
-                )
-            else:
-                full_ctx = f"\n\n文档全文（仅供参考）：\n{full_text[:4000]}"
-        return f"{_mode_hint}{instruction}{ctx}{full_ctx}"
-    else:
-        raise ValueError(f"Unsupported editor AI action: {action}")
-
-
-@app.route("/api/editor/ai/task-stream", methods=["POST"])
 def editor_ai_task_stream():
-    """Koto-native whitebox file task stream."""
+    """Koto-native file task stream."""
     data = request.get_json(silent=True) or {}
     task = (data.get("task") or data.get("instruction") or "").strip()
     if not task:
         return jsonify({"error": "Missing 'task' parameter"}), 400
     data["task"] = task
     return Response(
-        stream_with_context(_stream_whitebox_file_task_request(data)),
+        stream_with_context(_stream_file_task_request(data)),
         mimetype="text/event-stream",
     )
 
 
-@app.route("/api/editor/ai/stream", methods=["POST"])
+def editor_ai_task_stream_cancel():
+    """Request cancellation of an in-flight file task by run_id."""
+    from app.core.agent.file_task_runtime import request_cancel
+    data = request.get_json(silent=True) or {}
+    run_id = str(data.get("run_id") or "").strip()
+    if not run_id:
+        return jsonify({"error": "Missing 'run_id'"}), 400
+    registered = request_cancel(run_id)
+    return jsonify({"ok": True, "run_id": run_id, "registered": registered})
+
+
 def editor_ai_stream():
-    """文件助手 AI — OpenClaw 统一 SSE 端点。"""
-    from app.core.agent.agent_loop import KotoAgentLoop
-    from app.core.agent.hooks import HookRegistry
-    from app.core.agent.lifecycle import AgentRequest, EventType
-    from app.core.agent.pipeline_hooks import register_pipeline_hooks
+    """Compatibility wrapper for the editor AI stream blueprint."""
+    from web.blueprints.editor_ai import editor_ai_stream as _editor_ai_stream_handler
 
-    data = request.get_json(silent=True) or {}
-    action = (data.get("action") or "custom_instruction").strip()
-    selection = (data.get("selection") or "").strip()
-    instruction = (data.get("instruction") or "").strip()
-    full_text = (data.get("full_text") or "").strip()
-    csv_data = (data.get("csv_data") or "").strip()
-    doc_mode = (data.get("doc_mode") or "normal").strip()
-    model_mode = normalize_model_mode(data.get("model_mode"), default="cloud")
-    output_mode = (data.get("output_mode") or "inline").strip() or "inline"
-    file_type = (data.get("file_type") or "").lower().strip()
-    file_name = (data.get("file_name") or "").strip()
-    language = (data.get("language") or "").strip().lower()
-    action_system_prompt = (data.get("_action_system_prompt") or "").strip()
-    history = data.get("history") or []
-    if not isinstance(history, list):
-        history = []
-    if len(history) > 20:
-        history = history[-20:]
-
-    if action not in _EDITOR_AI_STREAM_ACTIONS:
-        return jsonify({"error": f"Unsupported editor AI action: {action}"}), 400
-
-    _sel_offset_raw = data.get("selection_offset", -1)
-    selection_offset: int = int(_sel_offset_raw) if isinstance(_sel_offset_raw, (int, float)) else -1
-    session_id = re.sub(r"[^A-Za-z0-9_\-]", "_", (data.get("session_id") or "").strip())[:64]
-
-    requested_model_id = str(data.get("model_id") or "").strip()
-    configured_local_model_id = _get_configured_local_model_id()
-
-    try:
-        from app.core.editor_skills import get_phases
-        fallback_phases = get_phases(action)
-    except Exception:
-        fallback_phases = [
-            {"id": "understand", "label": "理解需求"},
-            {"id": "generate", "label": "生成回复"},
-        ]
-
-    if not selection and not instruction:
-        def _err_gen():
-            yield f"data: {json.dumps({'type': 'error', 'text': '选中内容或指令不能为空'}, ensure_ascii=False)}\n\n"
-        return Response(_err_gen(), mimetype="text/event-stream")
-
-    prompt = _build_editor_prompt(
-        action,
-        selection,
-        instruction,
-        full_text,
-        csv_data,
-        doc_mode,
-        selection_offset,
-    )
-
-    resolved_model_id = _normalize_editor_stream_model_id(model_mode, requested_model_id)
-    request_extra = {}
-    if resolved_model_id:
-        request_extra["preferred_model"] = resolved_model_id
-    if configured_local_model_id:
-        request_extra["local_model"] = configured_local_model_id
-
-    req = AgentRequest(
-        prompt=prompt,
-        session_id=session_id,
-        file_type=file_type,
-        file_name=file_name,
-        context=full_text,
-        selection=selection,
-        has_selection=bool(selection),
-        history=history,
-        output_mode=output_mode,
-        model_mode=model_mode,
-        language=language,
-        csv_data=csv_data,
-        action_type=action,
-        action_system_prompt=action_system_prompt,
-        extra=request_extra,
-    )
-
-    def generate():
-        registry = HookRegistry()
-        register_pipeline_hooks(registry)
-        loop = KotoAgentLoop(hook_registry=registry)
-
-        streamed_parts = []
-        final_result = ""
-        final_has_proposals = False
-        emitted_done = False
-        phases = fallback_phases
-
-        for event in loop.run(req):
-            etype = event.type
-            d = event.data or {}
-
-            if etype == EventType.PHASE:
-                phases = d.get("phases", phases) or phases
-                payload = {
-                    "type": "phase",
-                    "phases": phases,
-                    "current": d.get("current", ""),
-                    "status": d.get("status", "running"),
-                }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.STREAM_CHUNK:
-                chunk = d.get("chunk", "")
-                if chunk:
-                    streamed_parts.append(chunk)
-                    yield f"data: {json.dumps({'type': 'token', 'text': chunk}, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.THOUGHT:
-                text = d.get("text", "")
-                if text:
-                    yield f"data: {json.dumps({'type': 'thought', 'text': text}, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.PLAN:
-                payload = {
-                    "type": "plan",
-                    "steps": d.get("steps", []),
-                }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.STEP_START:
-                payload = {
-                    "type": "step_start",
-                    "step_id": d.get("step_id", ""),
-                    "text": d.get("text", ""),
-                }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.STEP_PROGRESS:
-                payload = {
-                    "type": "step_progress",
-                    "step_id": d.get("step_id", ""),
-                    "detail": d.get("detail", ""),
-                }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.STEP_DONE:
-                payload = {
-                    "type": "step_done",
-                    "step_id": d.get("step_id", ""),
-                    "text": d.get("text", ""),
-                }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.STEP_ERROR:
-                payload = {
-                    "type": "step_error",
-                    "step_id": d.get("step_id", ""),
-                    "error": d.get("error", ""),
-                }
-                yield _editor_ai_safe_sse(payload)
-                continue
-
-            if etype == EventType.TOOL_CALL:
-                tool_call = d.get("tool_call", {})
-                if tool_call:
-                    payload = {
-                        "type": "tool_call",
-                        "tool_name": tool_call.get("name", ""),
-                        "tool_args": tool_call.get("args", {}),
-                    }
-                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.TOOL_RESULT:
-                payload = {
-                    "type": "tool_result",
-                    "tool_name": d.get("tool_name", ""),
-                    "result_preview": d.get("result_preview", ""),
-                }
-                yield _editor_ai_safe_sse(payload)
-                continue
-
-            if etype == EventType.PROPOSAL:
-                payload = {
-                    "type": "proposals",
-                    "proposals": d.get("proposals", []),
-                    "summary": d.get("summary", ""),
-                }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.DOC_TOOL_CALL:
-                payload = {"type": "doc_tool_call", **d}
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.RAG_INFO:
-                payload = {
-                    "type": "rag_info",
-                    "total_chunks": d.get("total_chunks", 0),
-                    "retrieved_chunks": d.get("retrieved_chunks", 0),
-                }
-                yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.STATUS_MESSAGE:
-                text = d.get("text", "")
-                if text:
-                    evt_type = "error" if d.get("is_error") else "info"
-                    yield _editor_ai_safe_sse({"type": evt_type, "text": text})
-                continue
-
-            if etype == EventType.SKILL_SUGGESTIONS:
-                suggestions = d.get("suggestions", [])
-                if suggestions:
-                    yield f"data: {json.dumps({'type': 'skill_suggestions', 'suggestions': suggestions}, ensure_ascii=False)}\n\n"
-                continue
-
-            if etype == EventType.ERROR:
-                yield _editor_ai_safe_sse({"type": "error", "text": d.get("text", "未知错误")})
-                return
-
-            if etype == EventType.TASK_COMPLETE:
-                if d.get("error"):
-                    yield _editor_ai_safe_sse({"type": "error", "text": d.get("error", "执行失败")})
-                    return
-                final_result = d.get("result", "")
-                final_has_proposals = bool(d.get("has_proposals"))
-                continue
-
-            if etype == EventType.CODE_RESULT:
-                code_result = d.get("stdout", "") or d.get("stderr", "") or ""
-                if code_result:
-                    streamed_parts.append(code_result)
-                    yield f"data: {json.dumps({'type': 'token', 'text': code_result}, ensure_ascii=False)}\n\n"
-                if d.get("error"):
-                    yield _editor_ai_safe_sse({"type": "error", "text": d.get("error")})
-                    return
-
-        if final_result and not streamed_parts:
-            streamed_parts.append(final_result)
-            yield f"data: {json.dumps({'type': 'token', 'text': final_result}, ensure_ascii=False)}\n\n"
-
-        for p in phases:
-            done_evt = {
-                "type": "phase",
-                "phases": phases,
-                "current": p.get("id", ""),
-                "status": "done",
-            }
-            yield f"data: {json.dumps(done_evt, ensure_ascii=False)}\n\n"
-
-        if not emitted_done:
-            done_payload = {
-                "type": "done",
-                "result": final_result or "".join(streamed_parts),
-                "has_proposals": final_has_proposals,
-            }
-            yield f"data: {json.dumps(done_payload, ensure_ascii=False)}\n\n"
-
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+    return _editor_ai_stream_handler()
 
 
-@app.route("/api/editor/ai/chart", methods=["POST"])
 def editor_ai_chart():
-    """文件助手 AI — 沙盒图表执行端点。
+    """Compatibility wrapper for the editor chart blueprint."""
+    from web.blueprints.editor_ai import editor_ai_chart as _editor_ai_chart_handler
 
-    Body JSON: { "data_context": str, "instruction": str, "lang": "python"|"r" }
-    SSE events:
-      {"type":"status","text":"..."}              — 进度提示
-      {"type":"code","text":"..."}                — 生成的代码（供展示）
-      {"type":"image","name":"...","data":"..."}  — base64 图片
-      {"type":"stdout","text":"..."}              — 沙盒 stdout（如有）
-      {"type":"stderr","text":"..."}              — 沙盒 stderr（如有）
-      {"type":"done"}                             — 完成
-      {"type":"error","text":"..."}               — 错误
-    """
-    data = request.get_json(silent=True) or {}
-    data_context = (data.get("data_context") or data.get("selection") or "").strip()
-    instruction = (data.get("instruction") or "").strip()
-    lang = (data.get("lang") or "python").strip().lower()
-    model_mode = normalize_model_mode(data.get("model_mode"), default="cloud")  # 'local' | 'cloud'
-    requested_model_id = str(data.get("model_id") or "").strip()
-    configured_local_model_id = _get_configured_local_model_id()
-    if lang not in ("python", "r"):
-        lang = "python"
-
-    def _err_gen(msg: str):
-        yield _editor_ai_safe_sse({'type': 'error', 'text': msg})
-
-    if not data_context and not instruction:
-        return Response(_err_gen("没有可用的数据或描述"), mimetype="text/event-stream")
-
-    lang_label = "Python (matplotlib/pandas)" if lang == "python" else "R (ggplot2)"
-    task_desc = instruction if instruction else "根据以下数据自动选择合适的图表类型并可视化"
-    code_prompt = (
-        f"请根据以下任务，编写一段可以直接运行的 {lang_label} 代码。\n"
-        "要求：\n"
-        "1. 包含所有必要的 import\n"
-    )
-    if lang == "python":
-        code_prompt += (
-            "2. 在代码开头加入: import matplotlib; matplotlib.rcParams['font.sans-serif']=['Microsoft YaHei','SimHei','Noto Sans CJK SC','WenQuanYi Micro Hei','DejaVu Sans']; matplotlib.rcParams['axes.unicode_minus']=False\n"
-            "3. 最后用 plt.savefig('chart.png', dpi=220, bbox_inches='tight') 保存图表，然后 plt.close()\n"
-            "4. 绝对不要调用 plt.show()\n"
-        )
-    else:
-        code_prompt += (
-            "2. 使用 ggplot2 绘图\n"
-            "3. 用 ggsave('chart.png', dpi=220) 保存图表\n"
-        )
-    code_prompt += (
-        "5. 只输出代码，不加任何 markdown 代码块标记（不加 ```）\n\n"
-        f"任务描述：{task_desc}\n"
-    )
-    if data_context:
-        code_prompt += f"\n参考数据/文本：\n{data_context[:3000]}\n"
-
-    model_id = _normalize_editor_stream_model_id(model_mode, requested_model_id)
-
-    def generate():
-        import re as _re
-        from app.core.socket_handler import _is_ollama_alive, _get_local_provider, _is_online_failure
-
-        def _gen_code_via_llm(p: str) -> tuple[str, str] | None:
-            """Try cloud LLM first (unless local-only mode), fall back to local Ollama."""
-            if API_KEY and model_mode != "local":
-                try:
-                    _chunks = []
-                    _stream = client.models.generate_content_stream(
-                        model=model_id,
-                        contents=p,
-                        config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=2048),
-                    )
-                    for _ck in _stream:
-                        _t = getattr(_ck, "text", None)
-                        if _t:
-                            _chunks.append(_t)
-                    if _chunks:
-                        return "joined", "".join(_chunks).strip()
-                except Exception as _ce:
-                    if not _is_online_failure(_ce):
-                        raise
-                    _app_logger.warning(f"[EditorAIChart] cloud failed ({_ce}), trying Ollama…")
-            # Ollama fallback (or primary when model_mode=='local')
-            if not _is_ollama_alive():
-                return "none", None
-            _local = _get_local_provider(configured_local_model_id)
-            _res = _local.generate_content(prompt=p, stream=False)
-            _code = (_res.get("content", "") if isinstance(_res, dict) else str(_res)).strip() or None
-            return "local", _code
-
-        try:
-            yield f"data: {json.dumps({'type': 'status', 'text': f'🤖 正在生成 {lang.upper()} 图表代码…'}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'generate_code', 'text': '生成图表代码'}, ensure_ascii=False)}\n\n"
-
-            # ── Step 1: Generate code via LLM ──
-            _llm_source, raw_code = _gen_code_via_llm(code_prompt)
-            if not raw_code:
-                yield _editor_ai_safe_sse({'type': 'step_error', 'step_id': 'generate_code', 'error': 'AI 代码生成失败'})
-                yield _editor_ai_safe_sse({'type': 'error', 'text': 'AI 代码生成失败（云端不可用且 Ollama 未运行）'})
-                return
-            if _llm_source == "local":
-                _local_info_text = ('🦙 本次由本地模型 (Ollama) 生成代码'
-                                    if model_mode == 'local'
-                                    else '⚠️ 云端 AI 暂时不可用，已切换到本地模型 (Ollama) 生成代码，速度可能较慢。')
-                yield _editor_ai_safe_sse({'type': 'info', 'text': _local_info_text})
-
-            # Strip markdown code fences if model added them
-            raw_code = _re.sub(r"^```[a-z]*\n?", "", raw_code, flags=_re.MULTILINE)
-            raw_code = raw_code.strip().strip("`").strip()
-
-            yield f"data: {json.dumps({'type': 'code', 'text': raw_code}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'generate_code', 'text': '图表代码生成完成'}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'execute_code', 'text': '在沙盒执行代码'}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'status', 'text': '▶ 在沙盒中执行代码…'}, ensure_ascii=False)}\n\n"
-
-            # ── Step 2: Execute in sandbox ──
-            try:
-                from app.core.sandbox import run_python, run_r
-            except ImportError as ie:
-                yield _editor_ai_safe_sse({'type': 'step_error', 'step_id': 'execute_code', 'error': f'沙盒模块加载失败: {ie}'})
-                yield _editor_ai_safe_sse({'type': 'error', 'text': f'沙盒模块加载失败: {ie}'})
-                return
-
-            result = run_python(raw_code) if lang == "python" else run_r(raw_code)
-
-            if result.get("stdout", "").strip():
-                yield f"data: {json.dumps({'type': 'step_progress', 'step_id': 'execute_code', 'detail': '代码正在输出日志'}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'stdout', 'text': result['stdout'][:4096]}, ensure_ascii=False)}\n\n"
-            if result.get("stderr", "").strip():
-                yield f"data: {json.dumps({'type': 'step_progress', 'step_id': 'execute_code', 'detail': '代码输出了调试信息'}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'stderr', 'text': result['stderr'][:2048]}, ensure_ascii=False)}\n\n"
-
-            if result.get("error"):
-                yield _editor_ai_safe_sse({'type': 'step_error', 'step_id': 'execute_code', 'error': result['error']})
-                yield _editor_ai_safe_sse({'type': 'error', 'text': result['error']})
-                return
-
-            images = result.get("files", {})
-            if not images:
-                yield f"data: {json.dumps({'type': 'step_error', 'step_id': 'execute_code', 'error': '代码执行成功但未生成图片'}, ensure_ascii=False)}\n\n"
-                yield f"data: {json.dumps({'type': 'error', 'text': '代码执行成功但未生成图片，请检查代码中是否有保存图片的语句'}, ensure_ascii=False)}\n\n"
-                return
-
-            yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'execute_code', 'text': f'沙盒执行完成，生成 {len(images)} 张图表'}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'step_start', 'step_id': 'collect_output', 'text': '整理图表结果'}, ensure_ascii=False)}\n\n"
-
-            for name, b64 in images.items():
-                yield f"data: {json.dumps({'type': 'image', 'name': name, 'data': b64}, ensure_ascii=False)}\n\n"
-
-            yield f"data: {json.dumps({'type': 'step_done', 'step_id': 'collect_output', 'text': f'已返回 {len(images)} 张图表'}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-        except Exception as _e:
-            _app_logger.warning(f"[EditorAIChart] error: {_e}")
-            yield _editor_ai_safe_sse({'type': 'error', 'text': str(_e)})
-
-    return Response(generate(), mimetype="text/event-stream")
+    return _editor_ai_chart_handler()
 
 
-# ══════════════════ Skill System API ══════════════════
+def _build_editor_prompt(
+    action: str,
+    selection: str,
+    instruction: str = "",
+    full_text: str = "",
+) -> str:
+    """Compatibility wrapper for editor prompt construction."""
+    from web.blueprints.editor_ai import _build_editor_prompt as _build_prompt
 
-# OpenClaw mode: expose only canonical merged workflow skill IDs in the editor.
-_OPENCLAW_SKILL_IDS = {
-    "cross_format_extractor",
-    "doc_smart_compare",
-    "questionnaire_filler",
-    "comm_digest",
-    "data_format_cleaner",
-    "contract_clause_matrix",
-    "multi_file_synthesis_report",
-    "pptx_data_refresh",
-    "doc_ai_review",
-    "data_anomaly_report",
-}
+    return _build_prompt(action, selection, instruction, full_text)
 
 
-@app.route("/api/editor/ai/skill-list", methods=["GET"])
 def editor_skill_list():
-    """Return skills that have executor support, optionally filtered by file_type."""
-    try:
-        from app.core.skills.skill_manager import SkillManager
-        sm = SkillManager()
-        all_skills = sm.get_all_skills() if hasattr(sm, "get_all_skills") else []
-        file_type = (request.args.get("file_type") or "").strip().lower().lstrip(".")
+    """Compatibility wrapper for the editor skill-list blueprint."""
+    from web.blueprints.editor_ai import editor_skill_list as _editor_skill_list_handler
 
-        result = []
-        for s in all_skills:
-            sid = s.get("id", "")
-            if sid not in _OPENCLAW_SKILL_IDS:
-                continue
-            if not s.get("enabled", True):
-                # workflow skills may have enabled=False by default — still expose if has_executor
-                pass
-            entry = {
-                "id":           sid,
-                "name":         s.get("name", sid),
-                "icon":         s.get("icon", "🔧"),
-                "description":  s.get("description", ""),
-                "category":     s.get("category", ""),
-                "task_types":   s.get("task_types", []),
-                "has_executor": True,
-                "params_schema": s.get("params_schema", {}),
-            }
-            # If file_type given, filter by task_types (light heuristic)
-            if file_type:
-                task_types = [t.lower() for t in s.get("task_types", [])]
-                type_map = {
-                    "docx": "doc", "doc": "doc", "txt": "doc",
-                    "xlsx": "data", "xls": "data", "csv": "data",
-                    "pdf": "doc",
-                    "pptx": "doc", "ppt": "doc",
-                }
-                mapped = type_map.get(file_type, "")
-                if mapped and task_types and not any(mapped in t for t in task_types):
-                    # Only skip if task_types are set AND none match — otherwise always include
-                    if task_types:
-                        pass  # Include all — let user decide
-            result.append(entry)
-
-        return jsonify({"skills": result})
-    except Exception as exc:
-        app_logger = logging.getLogger("koto.web")
-        app_logger.exception("[skill-list] Error")
-        return jsonify({"skills": [], "error": str(exc)})
+    return _editor_skill_list_handler()
 
 # ================= 主程序入口 =================
 

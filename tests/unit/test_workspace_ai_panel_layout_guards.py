@@ -25,7 +25,13 @@ def test_workspace_templates_remove_top_settings_use_bottom_toggle_and_keep_file
         assert '只有明确选中的文本和分析文档会进入当前任务上下文。' in html
         assert '快速读懂当前文件' not in html
         assert '当前文件、选区和附件会自动并入上下文。' not in html
-        assert html.index('<div id="wa-ai-file-chips"') < html.index('<div id="wa-actions-bar">')
+        assert '未选择时处理当前文件' not in html
+        assert 'id="wa-actions-bar"' not in html
+        assert 'class="wa-quick-btn"' not in html
+        assert '润色表达' not in html
+        assert '翻译内容' not in html
+        assert '提炼要点' not in html
+        assert '检查问题' not in html
         assert html.index('<div id="wa-ai-file-chips"') < html.index('<div class="wa-input-box">')
         assert html.index('<div class="wa-input-box-footer">') < html.index("{% include '_workspace_model_controls.html' %}")
         assert html.index("{% include '_workspace_model_controls.html' %}") < html.index('<div class="wa-footer-actions">')
@@ -45,15 +51,28 @@ def test_workspace_templates_remove_top_settings_use_bottom_toggle_and_keep_file
 def test_workspace_subject_bar_and_action_row_styles_support_restored_layout():
     js = _read("web/static/js/workspace-assistant.js")
     css = _read("web/static/css/workspace.css")
+    dispatcher = _read("web/static/js/workspace-task-dispatcher.js")
 
     assert "toggleCurrentFileAIContext" not in js
     assert "addCurrentFileToAIContext" not in js
+    assert "attachCurrentFileToAIContext" not in js
+    assert "_ensureCurrentFileAttachedForQuickAction" not in js
     assert "只处理用户明确提供的选中文本和分析文档" in js
+    assert "未选择时处理当前文件" not in js
+    assert "当前文件上下文" not in js
+    assert "处理当前文件任务" not in js
+    assert "files.push(currentFile)" not in dispatcher
+    assert "getCurrentAIContextPath" not in dispatcher
+    assert "looksLikeCurrentFileMutation" not in dispatcher
+    assert "current_file: currentFile" not in dispatcher
+    assert "currentFile: null," in dispatcher
     assert "按提取文本估算" not in js
     assert "open_tabs: []," in js
     assert "当前文件: ${state.fileName}" not in js
     assert "#wa-subject-bar { display: none !important;" not in css
-    assert ".wa-actions-spacer" in css
+    assert ".wa-actions-spacer" not in css
+    assert "#wa-actions-bar" not in css
+    assert ".wa-quick-btn" not in css
     assert ".wa-model-mode-toggle" in css
     assert ".wa-model-mode-toggle-btn" in css
     assert ".wa-model-mode-sub[hidden]" in css

@@ -1,0 +1,13 @@
+<!-- Split.js served locally so a CDN failure cannot crash the workspace runtime -->
+<script src="/static/vendor/split.min.js"></script>
+<script src="{{ url_for('static', filename='js/workspace-ai-task-refresh.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/workspace-ai-transport.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/workspace-ai-task.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/workspace-ai-results.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/workspace-ai-quick-actions.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/workspace-ai-conversation.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/workspace-task-dispatcher.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/docx-review-geometry.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/docx-review-layout.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/docx-review-state.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ url_for('static', filename='js/workspace-assistant.js') }}?v={{ range(100000,999999)|random }}"></script>

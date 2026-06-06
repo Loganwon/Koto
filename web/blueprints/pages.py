@@ -30,7 +30,11 @@ pages_bp = Blueprint("pages", __name__)
 def _get_initial_theme() -> str:
     """从已保存的用户设置读取初始主题，默认 light。"""
     try:
-        from web.app import settings_manager
+        from web.runtime_context import get_settings_manager
+
+        settings_manager = get_settings_manager()
+        if settings_manager is None:
+            return "light"
         theme = settings_manager.get("appearance", "theme")
         return theme if theme else "light"
     except Exception:

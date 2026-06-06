@@ -6,17 +6,14 @@ Workspace and browser automation blueprint.
 Routes:
   GET    /api/workspace/<path:filepath>  — Serve a file from the workspace
   GET    /api/workspace                  — List files in the workspace root
-  POST   /api/open-file                  — Open a file with the native OS handler
   GET    /api/browse                     — Browse folders on the local filesystem
   POST   /api/browser/open               — Open a URL via browser automation
   POST   /api/browser/search             — Google search via browser automation
   POST   /api/browser/screenshot         — Take a browser screenshot
-  POST   /api/open-workspace             — Open the workspace folder in the OS file manager
 """
 
 import logging
 import os
-import subprocess
 import sys
 import time
 
@@ -66,59 +63,6 @@ def get_workspace_file(filepath: str) -> Response:
 def list_workspace_files() -> Response:
     files = os.listdir(WORKSPACE_DIR)
     return jsonify({"files": files})
-
-
-@workspace_bp.route("/api/open-file", methods=["POST"])
-def open_file_native() -> Response:
-    """用系统默认程序打开文件（不经过浏览器）"""
-    try:
-        data = request.get_json()
-        filepath = data.get("filepath", "")
-        if not filepath:
-            return jsonify({"success": False, "error": "No filepath provided"}), 400
-
-        full_path = os.path.join(WORKSPACE_DIR, filepath)
-        resolved_path = os.path.abspath(full_path)
-        resolved_workspace = os.path.abspath(WORKSPACE_DIR)
-
-        if not resolved_path.startswith(resolved_workspace):
-            return jsonify({"success": False, "error": "Access denied"}), 403
-
-        if not os.path.exists(resolved_path):
-            return jsonify({"success": False, "error": "File not found"}), 404
-
-        _logger.debug(f"[API] Opening file natively: {resolved_path}")
-        if sys.platform == "win32":
-            os.startfile(resolved_path)
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", resolved_path])
-        else:
-            subprocess.Popen(["xdg-open", resolved_path])
-
-        return jsonify({"success": True, "path": resolved_path})
-    except Exception as e:
-        _logger.debug(f"[API] Error opening file: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@workspace_bp.route("/api/open-workspace", methods=["POST"])
-def open_workspace() -> Response:
-    """打开 workspace 文件夹"""
-    try:
-        if sys.platform == "win32":
-            subprocess.Popen(
-                f'explorer "{WORKSPACE_DIR}"',
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", WORKSPACE_DIR])
-        else:
-            subprocess.Popen(["xdg-open", WORKSPACE_DIR])
-        return jsonify({"success": True, "path": WORKSPACE_DIR})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
 
 
 # ─── Folder browsing ─────────────────────────────────────────────────────────

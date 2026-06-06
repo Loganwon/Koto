@@ -4,8 +4,6 @@
  */
 
 window.WA = window.WA || {};
-/** Incremented when the public WA API surface changes in a backward-incompatible way. */
-window.WA.__contract = "1.0";
 
 (function() {
   function $(id) {
@@ -28,6 +26,10 @@ window.WA.__contract = "1.0";
     }, Math.max(800, Number(duration) || 2600));
   }
   window.showToast = showToast;
+
+  window.WA.extractTopics = async () => {
+    showToast('文件助手 AI 对话任务流已移除；请使用快捷功能键。', 'warn');
+  };
 
   function _waIcon(paths, opts = {}) {
     const width = opts.width || 14;
@@ -267,11 +269,15 @@ window.WA.__contract = "1.0";
       ? localStorage.getItem('wa_review_mode')
       : 'all',
     _editingReviewCommentId: '',
+    _editingReviewProposalId: '',
     _reviewSelectionSnapshot: null,
     _reviewLauncherVisible: false,
     _activeProposalBatch: [],
-    _useWpsReviewRail: true,   // feature flag: WPS-style per-page rail
     _streamAbortCtrl: null,  // AbortController for the active AI task stream
+    _pendingTaskPayload: null,
+    _pendingTaskPayloadUsesFeedback: false,
+    _pendingTaskFollowupContext: null,
+    _pendingTaskFollowupPrompt: null,
     _recentOpen: true,     // recent files section expanded state
     _workspacePath: '',    // absolute workspace root path for openRecentFile comparison
     // ── File system browser state (replaces single-workspace tree) ──
@@ -289,32 +295,31 @@ window.WA.__contract = "1.0";
     _cloudProvider: 'gemini',
     _modelCatalogPromise: null,
     _activeRoute: null,
+    _activeTaskReconnectors: new Map(),
     _localRuntimeModel: '',
     _hasExplicitModelChoice: localStorage.getItem('wa_model_choice_explicit') === '1' || _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model'), '') === 'local',
+    useAgentMode: localStorage.getItem('wa_use_agent') !== 'off',  // P0: enable agent ReAct loop
   };
-
-  // WPS-style review rail controller (created lazily, destroyed on tab switch)
-  let _wpsRailCtrl = null;
 
   const _fsHandleMap = new Map();
   const _WA_RUNTIME_SESSION_ID = (() => {
     try {
+      const stored = sessionStorage.getItem('wa_runtime_session_id');
+      if (stored && /^workspace_runtime_/i.test(stored)) return stored;
+    } catch (_) {}
+
+    let generated = '';
+    try {
       if (window.crypto && typeof window.crypto.randomUUID === 'function') {
-        return `workspace_runtime_${window.crypto.randomUUID().replace(/-/g, '')}`;
+        generated = `workspace_runtime_${window.crypto.randomUUID().replace(/-/g, '')}`;
       }
     } catch (_) {}
-    return `workspace_runtime_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    if (!generated) {
+      generated = `workspace_runtime_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    }
+    try { sessionStorage.setItem('wa_runtime_session_id', generated); } catch (_) {}
+    return generated;
   })();
-
-  const _CAPABILITY_ACTION_LABELS = {
-    preview: '预览',
-    edit: '编辑',
-    analyze: '分析',
-    compare: '对比',
-    annotate: '批注',
-    ocr: 'OCR',
-    sandbox: '沙盒',
-  };
 
   function _inferCapabilityFormat(fileType, fileName) {
     const fromName = (String(fileName || '').split('.').pop() || '').toLowerCase();
@@ -381,35 +386,12 @@ window.WA.__contract = "1.0";
     return normalized;
   }
 
-  function _capabilityActionList(profile) {
-    const labels = Array.isArray(profile && profile.actions)
-      ? profile.actions.map((action) => _CAPABILITY_ACTION_LABELS[action] || '').filter(Boolean)
-      : [];
-    return Array.from(new Set(labels)).slice(0, 3);
-  }
-
-  function _capabilityPrimaryBadge(profile) {
-    const workspace = (profile && profile.workspace) || {};
-    const task = (profile && profile.task) || {};
-    if (workspace.edit_mode === 'native' && task.write_support === 'native') return '编辑';
-    if ((profile && profile.ocr_mode) && profile.ocr_mode !== 'none') return 'OCR';
-    if (workspace.edit_mode === 'annotate_only' || (task.annotation_support && task.annotation_support !== 'none')) return '批注';
-    if (task.analysis_mode && task.analysis_mode !== 'none' && task.analysis_mode !== 'metadata_only' && task.analysis_mode !== 'sidecar_only') return '分析';
-    return '预览';
-  }
-
   function _tabDisplayInfo(tab) {
     const profile = _normalizeCapabilityProfile(tab && tab.capabilityProfile, tab && tab.fileType, tab && tab.name);
-    const actions = _capabilityActionList(profile);
-    const badge = _capabilityPrimaryBadge(profile);
     const extAttr = String(profile.format || tab.ext || tab.fileType || '').toLowerCase();
-    const titleParts = [String(tab && tab.name || '').trim()];
-    if (badge) titleParts.push(`能力：${badge}`);
-    if (actions.length) titleParts.push(`支持：${actions.join(' / ')}`);
     return {
-      badge,
       extAttr,
-      title: titleParts.filter(Boolean).join(' · '),
+      title: String(tab && tab.name || '').trim(),
     };
   }
 
@@ -417,6 +399,67 @@ window.WA.__contract = "1.0";
     const source = tab || state.openTabs.find((item) => item.path === state.activeTabPath) || null;
     if (source) return _normalizeCapabilityProfile(source.capabilityProfile, source.fileType, source.name);
     return _normalizeCapabilityProfile(state.capabilityProfile, state.fileType, state.fileName);
+  }
+
+  function _clearActiveFileState() {
+    state.activeTabPath = null;
+    state.fileId = null;
+    state.fileType = null;
+    state.fileName = null;
+    state.filePath = null;
+    state.wsSourcePath = null;
+    state.capabilityProfile = null;
+    const fileNameEl = $('wa-file-name');
+    if (fileNameEl) fileNameEl.textContent = '全格式 AI 工作区';
+    const saveBtn = $('wa-save-btn');
+    if (saveBtn) saveBtn.disabled = true;
+    const saveAsBtn = $('wa-saveas-btn');
+    if (saveAsBtn) saveAsBtn.disabled = true;
+    const archiveBtn = $('wa-archive-btn');
+    if (archiveBtn) archiveBtn.disabled = true;
+    const historyBtn = $('wa-history-btn');
+    if (historyBtn) historyBtn.disabled = true;
+    _updateSubjectBar(null, null);
+  }
+
+  function _destroyActiveEditorForClosedFile() {
+    if (!state.activeEditor) return;
+    try {
+      state.activeEditor.destroy();
+    } catch (error) {
+      console.error('Editor destroy failed:', error);
+      const canvas = $('wa-canvas');
+      if (canvas) canvas.innerHTML = '';
+    }
+    state.activeEditor = null;
+  }
+
+  async function _removeOpenTabAfterFileDeleted(path) {
+    const idx = state.openTabs.findIndex((tab) => tab.path === path);
+    if (idx < 0) return false;
+    const wasActive = state.openTabs[idx].path === state.activeTabPath;
+    if (wasActive) {
+      _destroyActiveEditorForClosedFile();
+      _clearActiveFileState();
+      const canvas = $('wa-canvas');
+      if (canvas) canvas.innerHTML = '';
+    }
+    state.openTabs.splice(idx, 1);
+    clearTimeout(_autoSaveTimer);
+    _autoSaveTimer = null;
+    if (wasActive) {
+      if (state.openTabs.length > 0) {
+        const neighborIdx = Math.min(idx, state.openTabs.length - 1);
+        await _switchToTab(state.openTabs[neighborIdx].path);
+      } else {
+        toggleWorkspace(false);
+        _renderTabs();
+        _syncReviewStateForActiveFile().catch(() => {});
+      }
+    } else {
+      _renderTabs();
+    }
+    return true;
   }
 
   function _renderTabs() {
@@ -431,14 +474,11 @@ window.WA.__contract = "1.0";
       const extAttr = _escHtml(info.extAttr || '');
       const nameEsc = _escHtml(tab.name || '');
       const titleEsc = _escHtml(info.title || tab.name || '');
-      const badgeEsc = info.badge ? _escHtml(info.badge) : '';
-      const badgeHtml = badgeEsc ? `<span class="tab-badge">${badgeEsc}</span>` : '';
       return `<div class="wa-tab${active}${modified}" data-path="${tab.path.replace(/"/g, '&quot;')}" data-ext="${extAttr}"`
         + ` onclick="WA._tabClick('${pathEsc}')" title="${titleEsc}">`
         + `<span class="tab-icon">${_fileIcon(tab.ext)}</span>`
         + `<span class="tab-main">`
         + `<span class="tab-label">${nameEsc}</span>`
-        + badgeHtml
         + `</span>`
         + `<span class="tab-dirty"></span>`
         + `<button class="tab-close" onclick="event.stopPropagation();WA._closeTab('${pathEsc}')" title="关闭">×</button>`
@@ -480,16 +520,13 @@ window.WA.__contract = "1.0";
     const tab = state.openTabs.find((item) => item.path === path);
     if (!tab) return;
 
-    // Destroy WPS rail on any tab switch — it will be re-created for docx tabs in _syncWpsReviewRail
-    if (_wpsRailCtrl) { _wpsRailCtrl.destroy(); _wpsRailCtrl = null; }
-
     state.fileId = tab.fileId;
     state.fileType = tab.fileType;
     state.fileName = tab.name;
     state.filePath = tab.filePath || tab.path || null;
     state.wsSourcePath = tab.path;
     state.capabilityProfile = tab.capabilityProfile || null;
-    _hydrateAiConversation(true).catch((error) => console.warn('[WA] AI history hydrate failed:', error));
+    _hydrateAiConversation(false).catch((error) => console.warn('[WA] AI history hydrate failed:', error));
 
     const fileNameEl = $('wa-file-name');
     if (fileNameEl) fileNameEl.textContent = tab.name;
@@ -560,34 +597,8 @@ window.WA.__contract = "1.0";
     const isActive = tab.path === state.activeTabPath;
 
     if (isActive) {
-      if (state.activeEditor) {
-        try {
-          state.activeEditor.destroy();
-        } catch (error) {
-          console.error('Editor destroy failed:', error);
-          const canvas = $('wa-canvas');
-          if (canvas) canvas.innerHTML = '';
-        }
-        state.activeEditor = null;
-      }
-      // Tear down WPS review rail when the active tab is closed
-      if (_wpsRailCtrl) { _wpsRailCtrl.destroy(); _wpsRailCtrl = null; }
-      state.activeTabPath = null;
-      state.fileId = null;
-      state.fileType = null;
-      state.fileName = null;
-      state.filePath = null;
-      state.wsSourcePath = null;
-      state.capabilityProfile = null;
-      const fileNameEl = $('wa-file-name');
-      if (fileNameEl) fileNameEl.textContent = '全格式 AI 工作区';
-      const saveBtn = $('wa-save-btn');
-      if (saveBtn) saveBtn.disabled = true;
-      const saveAsBtn = $('wa-saveas-btn');
-      if (saveAsBtn) saveAsBtn.disabled = true;
-      const archiveBtn = $('wa-archive-btn');
-      if (archiveBtn) archiveBtn.disabled = true;
-      _updateSubjectBar(null, null);
+      _destroyActiveEditorForClosedFile();
+      _clearActiveFileState();
     }
 
     state.openTabs.splice(idx, 1);
@@ -1035,6 +1046,8 @@ window.WA.__contract = "1.0";
   state._aiFileContext = [];  // [{path, name, content}]
   state._aiTargetFileIdx = -1; // index into _aiFileContext designated as write-back target (-1 = none)
   const _WA_EXPLICIT_CONTEXT_RULE = '只处理用户明确提供的选中文本和分析文档';
+  const _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS = 30000;
+  const _WA_AI_LOCAL_SAVE_TIMEOUT_MS = 60000;
 
   function _normalizeAIContextPath(value) {
     return String(value || '').trim().replace(/\\/g, '/').toLowerCase();
@@ -1058,7 +1071,6 @@ window.WA.__contract = "1.0";
       wrap.style.display = 'none';
       // Clear AI-queued markers on file tree items
       document.querySelectorAll('.wa-file-item.ai-queued').forEach(el => el.classList.remove('ai-queued'));
-      _restoreDefaultQuickActions();
       // Restore file context indicator now that no docs are attached
       _updateContextBar();
       _updateSubjectBar(state.fileName, state.fileType);
@@ -1081,28 +1093,31 @@ window.WA.__contract = "1.0";
     list.innerHTML = state._aiFileContext.map((f, i) => {
       const isTarget = (i === tIdx);
       const isLoading = !!f.loading;
+      const hasError = !!f.error;
+      const hasWarning = !!f.warning;
       const icon = _fileIcon(f.name.split('.').pop() || '');
       const chars = f.originalChars != null ? f.originalChars : (f.content || '').length;
-      const sizeLabel = isLoading ? '读取中…' : (chars < 1000 ? '约' + chars + ' 字' : '约' + (chars / 1000).toFixed(1) + 'k字');
+      const sizeLabel = isLoading
+        ? '读取中…'
+        : hasError
+          ? '读取失败'
+          : hasWarning
+            ? '预览受限'
+            : (chars < 1000 ? '约' + chars + ' 字' : '约' + (chars / 1000).toFixed(1) + 'k字');
       const pinTitle = isTarget ? '取消目标文件' : '设为修改目标文件';
-      return `<div class="wa-ctx-file-row${isTarget ? ' ai-target' : ''}${isLoading ? ' loading' : ''}" title="${_escHtml(f.path)}">` +
+      const rowTitle = hasError ? `${f.path}\n${f.error}` : (hasWarning ? `${f.path}\n${f.warning}` : f.path);
+      return `<div class="wa-ctx-file-row${isTarget ? ' ai-target' : ''}${isLoading ? ' loading' : ''}${hasError ? ' error' : ''}${hasWarning ? ' warning' : ''}" title="${_escHtml(rowTitle)}">` +
         `<span class="ctx-row-icon">${icon}</span>` +
         `<span class="ctx-row-name">${_escHtml(f.name)}</span>` +
         `<span class="ctx-row-size">${sizeLabel}</span>` +
-        (isLoading ? '' : `<button class="ctx-row-pin${isTarget ? ' active' : ''}" onclick="WA.setAITargetFile(${i})" title="${pinTitle}">${_PIN_SVG}</button>`) +
+        (isLoading || hasError ? '' : `<button class="ctx-row-pin${isTarget ? ' active' : ''}" onclick="WA.setAITargetFile(${i})" title="${pinTitle}">${_PIN_SVG}</button>`) +
+        (hasError ? `<button class="ctx-row-retry" onclick="WA.retryAIFileContext(${i})" title="重试">重试</button>` : '') +
         (isLoading ? '' : `<span class="ctx-row-remove" onclick="WA.removeAIFileContext(${i})" title="移除">×</span>`) +
         `</div>`;
     }).join('');
 
     // Update context bar with file count
     _updateContextBar({ files: n });
-
-    // Update quick-action bar for multi-doc mode
-    if (n >= 2) {
-      _renderMultiDocQuickActions(n, targetFile);
-    } else {
-      _restoreDefaultQuickActions();
-    }
 
     // Mark queued files in the browser file tree
     document.querySelectorAll('.wa-file-item.ai-queued').forEach(el => el.classList.remove('ai-queued'));
@@ -1113,41 +1128,6 @@ window.WA.__contract = "1.0";
 
     _updateSubjectBar(state.fileName, state.fileType);
 
-  }
-  function _renderMultiDocQuickActions(n, targetFile) {
-    const bar = ($('wa-actions-bar') || $('wa-quick-actions'));
-    if (!bar) return;
-    const tName = targetFile ? targetFile.name : null;
-    const btns = [
-      { label: `${_CHART_SVG} 对比差异`, prompt: `请对比这${n}份文件的主要内容差异，列出相同点和不同点` },
-      { label: `${_SEARCH_SVG} 查找引用`, prompt: `请分析这${n}份文件之间是否存在引用或描述关系，列出具体对应内容` },
-      {
-        label: tName ? `${_PENCIL_SVG} 同步到 ${tName}` : `${_PENCIL_SVG} 同步内容`,
-        prompt: tName
-          ? `请分析参考文件中有哪些内容需要同步更新到目标文件"${tName}"中，给出具体的逐条修改建议`
-          : `请分析这${n}份文件中有哪些内容需要互相同步更新，给出具体修改建议`
-      },
-      { label: `${_CLIPBOARD_SVG} 综合摘要`, prompt: `请综合这${n}份文件的核心内容，生成一份结构化摘要` },
-    ];
-    bar.innerHTML = btns.map(b =>
-      `<button class="wa-quick-btn multi-doc" data-prompt="${_escHtml(b.prompt)}">${b.label}</button>`
-    ).join('');
-    bar.querySelectorAll('.wa-quick-btn.multi-doc').forEach(btn => {
-      btn.addEventListener('click', () => WA.quickAction(btn.dataset.prompt));
-    });
-    // Append context-aware workflow chips for multi-doc mode
-    // (workflows are already shown as suggestion cards in chat area; skip chips here)
-  }
-
-  // Restore the default single-doc quick-action buttons
-  function _restoreDefaultQuickActions() {
-    const bar = ($('wa-actions-bar') || $('wa-quick-actions'));
-    if (!bar || !bar.querySelector('.wa-quick-btn.multi-doc')) return; // nothing to restore
-    bar.innerHTML =
-      `<button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容，保留原意但让表达更顺滑')">润色表达</button>` +
-      `<button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结当前内容，提炼重点和待办事项')">提炼要点</button>` +
-      `<button class="wa-quick-btn" onclick="WA.quickAction('请检查当前内容中的语病、歧义和逻辑风险')">检查问题</button>` +
-      `<button class="wa-quick-btn chart-btn" onclick="WA.sendQuickAction('可视化')" title="将选中数据用 Python 可视化为图表">可视化</button>`;
   }
 
   window.WA.removeAIFileContext = (idx) => {
@@ -1162,6 +1142,37 @@ window.WA.__contract = "1.0";
     state._aiTargetFileIdx = -1;
     _renderAIFileChips();
   };
+  window.WA.retryAIFileContext = (idx) => {
+    const file = state._aiFileContext[idx];
+    if (!file || file.loading) return;
+    const path = file.path || file.name;
+    state._aiFileContext.splice(idx, 1);
+    if (state._aiTargetFileIdx === idx) state._aiTargetFileIdx = -1;
+    else if (state._aiTargetFileIdx > idx) state._aiTargetFileIdx--;
+    _renderAIFileChips();
+    _addFileToAIContext(path);
+  };
+  function _readyAIFileContext() {
+    return (state._aiFileContext || []).filter((file) => !file.loading && !file.error);
+  }
+  function _markAIContextFileFailed(path, requestId, message) {
+    const file = (state._aiFileContext || []).find((item) => item.path === path);
+    if (!file || file.requestId !== requestId || !file.loading) return false;
+    file.loading = false;
+    file.error = message || '读取失败';
+    delete file.requestId;
+    _renderAIFileChips();
+    return true;
+  }
+  function _startAIContextWatchdog(path, requestId, timeoutMs) {
+    return setTimeout(() => {
+      const name = String(path || '').split(/[\\/]/).pop() || path;
+      const msg = '文件读取超时，请重试或选择较小文件';
+      if (_markAIContextFileFailed(path, requestId, msg)) {
+        showToast(`无法读取 "${name}": ${msg}`, 'error');
+      }
+    }, timeoutMs);
+  }
 
   // Set or toggle the write-back target file
   window.WA.setAITargetFile = (idx) => {
@@ -1172,25 +1183,168 @@ window.WA.__contract = "1.0";
     else showToast('已取消目标文件设置', 'info');
   };
 
+  function _readFileAsBase64(file, timeoutMs = _WA_AI_LOCAL_SAVE_TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      const timer = setTimeout(() => {
+        try { reader.abort(); } catch (_) {}
+        reject(new Error('本地文件读取超时，请重试或选择较小文件'));
+      }, timeoutMs);
+      reader.onload = () => {
+        clearTimeout(timer);
+        const dataUrl = String(reader.result || '');
+        const commaIdx = dataUrl.indexOf(',');
+        resolve(commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '');
+      };
+      reader.onerror = () => {
+        clearTimeout(timer);
+        reject(reader.error || new Error('读取文件失败'));
+      };
+      reader.onabort = () => {
+        clearTimeout(timer);
+        reject(new Error('本地文件读取已取消'));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function _fetchJsonWithTimeout(url, options = {}, timeoutMs = 45000, timeoutMessage = '请求超时，请稍后重试') {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const fetchOptions = Object.assign({}, options);
+    if (controller) fetchOptions.signal = controller.signal;
+    let timer = null;
+    try {
+      const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          if (controller) {
+            try { controller.abort(); } catch (_) {}
+          }
+          reject(new Error(timeoutMessage));
+        }, timeoutMs);
+      });
+      const requestPromise = (async () => {
+        const res = await fetch(url, fetchOptions);
+        const data = await _safeJson(res);
+        return { res, data };
+      })();
+      return await Promise.race([requestPromise, timeoutPromise]);
+    } catch (error) {
+      if (error && error.name === 'AbortError') {
+        throw new Error(timeoutMessage);
+      }
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  async function _saveLocalFileToWorkspaceForAI(file) {
+    const ext = (file && file.name ? file.name.split('.').pop() : '').toLowerCase();
+    if (!_isSupportedExt(ext)) {
+      throw new Error('不支持的文件格式');
+    }
+    const fileData = await _readFileAsBase64(file, _WA_AI_LOCAL_SAVE_TIMEOUT_MS);
+    const { res: saveRes, data: saveData } = await _fetchJsonWithTimeout('/api/v1/workspace/save_to_workspace', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'file',
+        filename: file.name,
+        data: fileData,
+      }),
+    }, _WA_AI_LOCAL_SAVE_TIMEOUT_MS, '保存到工作区超时，请重试或选择较小文件');
+    if (!saveRes.ok) throw new Error(saveData.error || `HTTP ${saveRes.status}`);
+    return String(saveData.ws_path || file.name);
+  }
+
+  async function _addLocalFilesToAIContext(files) {
+    const candidates = Array.from(files || []).filter((file) => {
+      const ext = (file && file.name ? file.name.split('.').pop() : '').toLowerCase();
+      return _isSupportedExt(ext);
+    });
+    if (!candidates.length) {
+      showToast('未找到可附加的支持文件', 'error');
+      return;
+    }
+
+    let uploadedCount = 0;
+    for (const file of candidates) {
+      try {
+        const wsPath = await _saveLocalFileToWorkspaceForAI(file);
+        await _addFileToAIContext(wsPath);
+        uploadedCount += 1;
+      } catch (e) {
+        const msg = e && e.message ? e.message : String(e || '添加失败');
+        showToast(`无法添加 "${file.name}": ${msg}`, 'error');
+      }
+    }
+
+    if (uploadedCount > 0) {
+      await _softRefreshBrowser();
+      _expandWAPanel();
+      const input = $('wa-user-input');
+      if (input) setTimeout(() => input.focus(), 150);
+    }
+  }
+
+  async function _pickAIContextFiles() {
+    const fallbackInput = $('wa-ai-context-file-input');
+    if (window.showOpenFilePicker) {
+      try {
+        const handles = await window.showOpenFilePicker({
+          multiple: true,
+          types: [{ description: 'AI Attachments', accept: {
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+            'application/pdf': ['.pdf'],
+            'text/plain': ['.txt', '.md', '.markdown', '.csv', '.py', '.js', '.ts', '.html', '.css', '.xml', '.sh', '.bash', '.yaml', '.yml', '.c', '.cpp', '.h', '.hpp', '.java', '.rb', '.go', '.rs', '.cs', '.php', '.swift', '.kt', '.r', '.sql', '.toml', '.ini', '.cfg', '.conf'],
+            'application/json': ['.json'],
+            'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'],
+          }}],
+        });
+        if (!handles.length) return;
+        const files = [];
+        for (const handle of handles) {
+          files.push(await handle.getFile());
+        }
+        await _addLocalFilesToAIContext(files);
+      } catch (e) {
+        if (e.name !== 'AbortError') showToast('无法添加补充文件: ' + e.message, 'error');
+      }
+      return;
+    }
+    if (fallbackInput) fallbackInput.click();
+  }
+
+  window.WA.pickAIContextFiles = _pickAIContextFiles;
+
   async function _addFileToAIContext(absPath) {
     const name = absPath.split(/[\\/]/).pop() || absPath;
     // Don't add duplicates
-    if (state._aiFileContext.some(f => f.path === absPath)) {
+    const existingIdx = state._aiFileContext.findIndex(f => f.path === absPath);
+    if (existingIdx >= 0) {
+      const existing = state._aiFileContext[existingIdx];
+      if (existing && existing.error && !existing.loading) {
+        window.WA.retryAIFileContext(existingIdx);
+        return;
+      }
       showToast(`"${name}" 已在分析列表中`, 'info');
       return;
     }
     // Push a loading placeholder immediately so the user sees the file row at once
-    state._aiFileContext.push({ path: absPath, name, content: null, loading: true });
+    const requestId = `ai_ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    state._aiFileContext.push({ path: absPath, name, content: null, loading: true, requestId });
     _renderAIFileChips();
+    const watchdog = _startAIContextWatchdog(absPath, requestId, _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS);
     try {
       // Keep large file attachment parsing on the server so the WebView only receives
       // a bounded text preview instead of raw bytes or full rich parser payloads.
-      const previewRes = await fetch('/api/v1/workspace/ai_context_preview', {
+      const { res: previewRes, data } = await _fetchJsonWithTimeout('/api/v1/workspace/ai_context_preview', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: absPath }),
-      });
-      const data = await _safeJson(previewRes);
+      }, _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS, '文件读取超时，请重试或选择较小文件');
       if (!previewRes.ok) throw new Error(data.error || `HTTP ${previewRes.status}`);
 
       let content = _waSampleTaskContext(String(data.content_preview || ''));
@@ -1199,19 +1353,28 @@ window.WA.__contract = "1.0";
         : content.replace(/\s/g, '').length;
       // Replace the loading placeholder with real content
       const placeholder = state._aiFileContext.find(f => f.path === absPath);
-      if (placeholder) {
+      if (placeholder && placeholder.requestId === requestId) {
         placeholder.content = content;
         placeholder.originalChars = originalChars;
         placeholder.type = String(data.file_type || _waInferFileType(absPath));
+        if (data.preview_error) placeholder.warning = String(data.preview_error || '');
+        else delete placeholder.warning;
         delete placeholder.loading;
+        delete placeholder.error;
+        delete placeholder.requestId;
       }
       _renderAIFileChips();
-      showToast(`"${name}" 已添加到 AI 分析`, 'success');
+      if (placeholder && !placeholder.error) {
+        if (placeholder.warning) showToast(`"${name}" 已添加，但预览受限`, 'warning');
+        else showToast(`"${name}" 已添加到 AI 分析`, 'success');
+      }
     } catch (e) {
-      // Remove placeholder on failure
-      state._aiFileContext = state._aiFileContext.filter(f => f.path !== absPath);
-      _renderAIFileChips();
-      showToast(`无法读取 "${name}": ${e.message}`, 'error');
+      const msg = e && e.message ? e.message : String(e || '读取失败');
+      if (_markAIContextFileFailed(absPath, requestId, msg)) {
+        showToast(`无法读取 "${name}": ${msg}`, 'error');
+      }
+    } finally {
+      clearTimeout(watchdog);
     }
   }
 
@@ -1258,8 +1421,16 @@ window.WA.__contract = "1.0";
 
   // ── Helper: extension support + size formatting ───────────────────────────
   function _isSupportedExt(ext) {
-    const s = new Set(['docx','doc','xlsx','xls','pptx','ppt','pdf','txt','md','markdown',
-      'png','jpg','jpeg','gif','bmp','webp','svg']);
+    const s = new Set([
+      'docx', 'xlsx', 'pptx', 'pdf',
+      'txt', 'md', 'markdown', 'csv',
+      'py', 'js', 'ts', 'json', 'html', 'css', 'xml',
+      'sh', 'bash', 'yaml', 'yml',
+      'c', 'cpp', 'h', 'hpp', 'java', 'rb', 'go',
+      'rs', 'cs', 'php', 'swift', 'kt', 'r', 'sql',
+      'toml', 'ini', 'cfg', 'conf',
+      'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg',
+    ]);
     return s.has((ext || '').toLowerCase().replace(/^\./, ''));
   }
 
@@ -1518,7 +1689,7 @@ window.WA.__contract = "1.0";
         `draggable="true" ` +
         `onclick="WA.openBrowserFile(this.dataset.path, this.dataset.supported !== 'false')" ` +
         `oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)" ` +
-        `ondragstart="event.dataTransfer.effectAllowed='copyMove';event.dataTransfer.setData('application/wa-file-path',this.dataset.path);event.dataTransfer.setData('text/plain',this.dataset.path);this.classList.add('dragging');document.body.classList.add('wa-file-dragging')" ` +
+        `ondragstart="event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/wa-file-path',this.dataset.path);event.dataTransfer.setData('text/plain',this.dataset.path);this.classList.add('dragging');document.body.classList.add('wa-file-dragging')" ` +
         `ondragend="this.classList.remove('dragging');document.body.classList.remove('wa-file-dragging')" ` +
         `title="${_escHtml(entry.name)}">` +
         `${checkHtml}${_fileIcon(ext, entry.category)}` +
@@ -1552,67 +1723,9 @@ window.WA.__contract = "1.0";
     _renderBrowserTree();
   };
 
-  /** Open a file from the browser by absolute path. */
-  window.WA.openBrowserFile = async (absPath, supported = true) => {
-    if (!supported) {
-      showToast('此格式暂不支持在线编辑，已触发本地打开', 'info');
-      fetch('/api/v1/workspace/open-native', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: absPath }),
-      }).catch(() => {});
-      return;
-    }
-    // If an existing tab for this path has user-generated edits (cache !== null),
-    // or is already the active tab, just switch to it without re-reading from disk.
-    // Otherwise (no edits / stale serverData), discard the stale tab entry and
-    // re-load fresh from disk — this fixes the case where the workspace file was
-    // updated externally or a previous parse produced corrupt/empty data.
-    const _existingTab = state.openTabs.find(t => t.path === absPath);
-    if (_existingTab) {
-      if (_existingTab.cache !== null || state.activeTabPath === absPath) {
-        await _switchToTab(absPath);
-        return;
-      }
-      // Stale tab with no user edits — drop it and re-load below
-      const _staleIdx = state.openTabs.findIndex(t => t.path === absPath);
-      if (_staleIdx >= 0) state.openTabs.splice(_staleIdx, 1);
-    }
-    const baseName = absPath.replace(/\\/g, '/').split('/').pop() || absPath;
-    _trackUserOpen(absPath);
-    showToast('正在加载 ' + baseName, 'info');
-    setLoading(true, `正在打开 ${baseName}…`);
-    $('upload-progress').style.width = '30%';
-    try {
-      // Server-side parse — avoids downloading the entire file to the browser.
-      // The old serve_abs → blob → Router.load path would cause memory crashes
-      // on large files (e.g. PPTX with embedded video).
-      const res = await fetch('/api/v1/workspace/open_abs_file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: absPath }),
-      });
-      const json = await _safeJson(res);
-      if (!res.ok) throw new Error(json.error || 'HTTP ' + res.status);
-      $('upload-progress').style.width = '100%';
-      await _applyFileJson(json, absPath, null);
-      loadRecentFiles();
-      _renderBrowserTree();     // refresh active highlight
-    } catch (e) { showToast('无法打开文件: ' + e.message, 'error'); }
-    finally { setLoading(false); $('upload-progress').style.width = '0%'; }
-  };
-
-  /**
-   * Handle a drop event onto a folder row.
-   * Supports two drop modes:
-   *   1. Internal tree drag  — dataTransfer contains 'application/wa-file-path'
-   *      → copies the file into the folder via /api/v1/workspace/fs_copy
-   *   2. External OS drag    — dataTransfer.files contains file data
-   *      → uploads files into the folder via /api/v1/workspace/upload-to-folder
-   */
   window.WA._dropOntoFolder = async (event, destPath) => {
     const srcPath = event.dataTransfer.getData('application/wa-file-path');
     if (srcPath) {
-      // ── Internal copy ──
       try {
         const r = await fetch('/api/v1/workspace/fs_copy', {
           method: 'POST',
@@ -1622,9 +1735,11 @@ window.WA.__contract = "1.0";
         const d = await r.json();
         if (!r.ok) { showToast(d.error || '复制失败', 'error'); return; }
         showToast(`已复制到 ${destPath.split(/[\\/]/).pop()}`, 'success');
-      } catch (e) { showToast('复制出错: ' + e.message, 'error'); return; }
+      } catch (e) {
+        showToast('复制出错: ' + e.message, 'error');
+        return;
+      }
     } else if (event.dataTransfer.files && event.dataTransfer.files.length) {
-      // ── External OS file drop ──
       const fd = new FormData();
       fd.append('dest_dir', destPath);
       for (const f of event.dataTransfer.files) fd.append('file', f);
@@ -1634,17 +1749,165 @@ window.WA.__contract = "1.0";
         if (!r.ok) { showToast(d.error || '上传失败', 'error'); return; }
         const names = (d.saved || []).map(s => s.name).join(', ');
         showToast(`已加入：${names}`, 'success');
-      } catch (e) { showToast('上传出错: ' + e.message, 'error'); return; }
-    } else { return; }
-    // Refresh the target folder
-    state._browserCache[destPath] = null;
-    if (state._browserExpanded.has(destPath)) {
-      try {
-        const r = await fetch('/api/v1/workspace/browse_local?path=' + encodeURIComponent(destPath));
-        state._browserCache[destPath] = r.ok ? (await r.json()).entries || [] : [];
-      } catch (_) { state._browserCache[destPath] = []; }
+      } catch (e) {
+        showToast('上传出错: ' + e.message, 'error');
+        return;
+      }
+    } else {
+      return;
     }
-    _renderBrowserTree();
+
+    delete state._browserCache[destPath];
+    state._browserExpanded.add(destPath);
+    await _softRefreshBrowser();
+  };
+
+  function _workspaceRelativePath(rawPath) {
+    const raw = String(rawPath || '').trim();
+    if (!raw) return '';
+    const normalized = raw.replace(/\\/g, '/');
+    const workspaceRoot = String(state._workspacePath || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    if (workspaceRoot && (normalized === workspaceRoot || normalized.startsWith(workspaceRoot + '/'))) {
+      return normalized.slice(workspaceRoot.length).replace(/^\/+/, '');
+    }
+    return normalized.replace(/^\/+/, '');
+  }
+
+  function _isAbsolutePath(rawPath) {
+    return /^(?:[a-zA-Z]:[\\/]|\/|\\\\)/.test(String(rawPath || '').trim());
+  }
+
+  function _isInsideWorkspace(rawPath) {
+    const raw = String(rawPath || '').replace(/\\/g, '/');
+    const root = String(state._workspacePath || '').replace(/\\/g, '/').replace(/\/+$/, '');
+    return !!root && (raw === root || raw.startsWith(root + '/'));
+  }
+
+  function _displayFileName(rawPath, fallback = '文件') {
+    return String(rawPath || fallback).split(/[\\/]/).pop() || fallback;
+  }
+
+  function _createFallbackWorkspaceFileLoader() {
+    async function openParsedFile(json, wsPath, fsHandle = null) {
+      const resolvedPath = wsPath || json.ws_source_path || json.source_path || json.temp_path || json.file_name;
+      await _applyFileJson(json, resolvedPath, fsHandle);
+      if (resolvedPath) _trackUserOpen(resolvedPath, json.file_name || _displayFileName(resolvedPath));
+      return json;
+    }
+
+    async function openWorkspaceFile(path, supported = true) {
+      const requestPath = _workspaceRelativePath(path);
+      if (!requestPath) return null;
+      if (!supported) {
+        showToast('此格式暂不支持在线编辑：' + _displayFileName(requestPath), 'info');
+        return null;
+      }
+      setLoading(true, '正在打开文件...');
+      try {
+        const res = await fetch('/api/v1/workspace/open_file_by_path', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: requestPath }),
+        });
+        const data = await _safeJson(res);
+        if (!res.ok) throw new Error(data.error || '打开文件失败');
+        return await openParsedFile(data, requestPath, null);
+      } catch (error) {
+        console.error('[WA] openWorkspaceFile failed:', error);
+        showToast(error.message || '打开文件失败', 'error');
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    async function openBrowserFile(absPath, supported = true) {
+      if (!supported) {
+        showToast('此格式暂不支持在线编辑：' + _displayFileName(absPath), 'info');
+        return null;
+      }
+      if (_isAbsolutePath(absPath) && !_isInsideWorkspace(absPath)) {
+        setLoading(true, '正在打开文件...');
+        try {
+          const res = await fetch('/api/v1/workspace/open_abs_file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: absPath }),
+          });
+          const data = await _safeJson(res);
+          if (!res.ok) throw new Error(data.error || '打开文件失败');
+          return await openParsedFile(data, absPath, null);
+        } catch (error) {
+          console.error('[WA] openBrowserFile failed:', error);
+          showToast(error.message || '打开文件失败', 'error');
+          return null;
+        } finally {
+          setLoading(false);
+        }
+      }
+      return openWorkspaceFile(absPath, supported);
+    }
+
+    async function reloadFileByPath(filePath, supported = true) {
+      if (_isAbsolutePath(filePath) && !_isInsideWorkspace(filePath)) {
+        return openBrowserFile(filePath, supported);
+      }
+      return openWorkspaceFile(filePath, supported);
+    }
+
+    async function load(file) {
+      if (!file) return null;
+      if (file._waPath) return openWorkspaceFile(file._waPath, true);
+      const fsHandle = file._fsHandle || null;
+      setLoading(true, '正在解析文件...');
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/v1/workspace/open_file', {
+          method: 'POST',
+          body: formData,
+        });
+        const data = await _safeJson(res);
+        if (!res.ok) throw new Error(data.error || '打开文件失败');
+        return await openParsedFile(data, data.ws_source_path || file.name, fsHandle);
+      } catch (error) {
+        console.error('[WA] load file failed:', error);
+        showToast(error.message || '打开文件失败', 'error');
+        return null;
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    return { openBrowserFile, openWorkspaceFile, reloadFileByPath, openParsedFile, fromParsed: openParsedFile, load };
+  }
+
+  const _waSharedFileLoader = (window.WA && typeof window.WA.createWorkspaceFileLoader === 'function')
+    ? window.WA.createWorkspaceFileLoader({
+        state,
+        getElement: $,
+        showToast,
+        setLoading,
+        trackUserOpen: _trackUserOpen,
+        switchToTab: _switchToTab,
+        safeJson: _safeJson,
+        applyFileJson: _applyFileJson,
+        loadRecentFiles,
+        renderBrowserTree: _renderBrowserTree,
+        maybeAutoOpenReviewCenter: _maybeAutoOpenReviewCenterForImportedItems,
+        ensureTabReviewState: _ensureTabReviewState,
+        activeReviewTab: _activeReviewTab,
+      })
+    : _createFallbackWorkspaceFileLoader();
+
+  function _requireWorkspaceFileLoader() {
+    if (_waSharedFileLoader) return _waSharedFileLoader;
+    throw new Error('workspace file loader unavailable');
+  }
+
+  /** Open a file from the browser by absolute path. */
+  window.WA.openBrowserFile = async (absPath, supported = true) => {
+    return _requireWorkspaceFileLoader().openBrowserFile(absPath, supported);
   };
 
   // ── File-browser context menu ─────────────────────────────────────────────
@@ -1724,176 +1987,81 @@ window.WA.__contract = "1.0";
       .replace(/^-+|-+$/g, '');
   }
 
-  function _ensureTabReviewState(tab) {
-    if (!tab || typeof tab !== 'object') return null;
-    if (!tab.reviewState || typeof tab.reviewState !== 'object') {
-      tab.reviewState = { comments: [], proposals: [], focusedId: '', expandedId: '', items: [] };
+  let _docxReviewStateRuntime = null;
+  function _getDocxReviewState() {
+    if (_docxReviewStateRuntime) return _docxReviewStateRuntime;
+    if (!window.KotoDocxReviewState || typeof window.KotoDocxReviewState.create !== 'function') {
+      throw new Error('KotoDocxReviewState module not loaded');
     }
-    if (!Array.isArray(tab.reviewState.comments)) tab.reviewState.comments = [];
-    if (!Array.isArray(tab.reviewState.proposals)) tab.reviewState.proposals = [];
-    if (!Array.isArray(tab.reviewState.items)) tab.reviewState.items = [];
-    if (typeof tab.reviewState.focusedId !== 'string') tab.reviewState.focusedId = '';
-    if (typeof tab.reviewState.expandedId !== 'string') tab.reviewState.expandedId = '';
-    return tab.reviewState;
+    _docxReviewStateRuntime = window.KotoDocxReviewState.create({
+      state,
+      cloneSerializable: _cloneSerializable,
+    });
+    return _docxReviewStateRuntime;
+  }
+
+  function _ensureTabReviewState(tab) {
+    return _getDocxReviewState().ensureTabReviewState(tab);
   }
 
   function _activeReviewTab() {
-    return state.openTabs.find((tab) => tab.path === state.activeTabPath) || null;
+    return _getDocxReviewState().activeReviewTab();
   }
 
   function _setStoredReviewMode(mode) {
-    const nextMode = mode === 'comments' || mode === 'proposals' ? mode : 'all';
-    state._reviewMode = nextMode;
-    localStorage.setItem('wa_review_mode', nextMode);
-    return nextMode;
+    return _getDocxReviewState().setStoredReviewMode(mode);
+  }
+
+  function _isReviewRailVisible() {
+    return _getDocxReviewState().isReviewRailVisible();
   }
 
   function _isReviewCommentModeEnabled() {
-    return state.fileType === 'docx' && state._reviewCenterOpen && state._reviewMode === 'comments';
+    return _getDocxReviewState().isReviewCommentModeEnabled();
+  }
+
+  function _shouldShowDocxReviewMarkers(reviewState) {
+    return _getDocxReviewState().shouldShowDocxReviewMarkers(reviewState);
+  }
+
+  function _isResolvedReviewProposal(proposal) {
+    return _getDocxReviewState().isResolvedReviewProposal(proposal);
+  }
+
+  function _visibleReviewProposals(reviewState) {
+    return _getDocxReviewState().visibleReviewProposals(reviewState);
   }
 
   function _focusFirstReviewEntry(reviewState, preferredKind = '') {
-    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
-    if (!currentState) return '';
-    if (String(currentState.focusedId || '').trim()) return currentState.focusedId;
-    const firstComment = currentState.comments[0] || null;
-    const firstProposal = currentState.proposals[0] || null;
-    const firstEntry = preferredKind === 'comment'
-      ? firstComment
-      : preferredKind === 'proposal'
-        ? firstProposal
-        : (firstComment || firstProposal);
-    if (!firstEntry) return '';
-    currentState.focusedId = String(firstEntry.review_id || firstEntry.id || '').trim();
-    return currentState.focusedId;
+    return _getDocxReviewState().focusFirstReviewEntry(reviewState, preferredKind);
   }
 
   function _reviewModeHasVisibleEntries(reviewState, mode = state._reviewMode) {
-    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
-    if (!currentState) return false;
-    const nextMode = mode === 'comments' || mode === 'proposals' ? mode : 'all';
-    const hasComments = Array.isArray(currentState.comments) && currentState.comments.length > 0;
-    const hasProposals = Array.isArray(currentState.proposals) && currentState.proposals.length > 0;
-    if (nextMode === 'comments') return hasComments;
-    if (nextMode === 'proposals') return hasProposals;
-    return hasComments || hasProposals;
+    return _getDocxReviewState().reviewModeHasVisibleEntries(reviewState, mode);
   }
 
   function _coerceReviewModeForVisibleContent(reviewState, preferredKind = '') {
-    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
-    if (!currentState) return state._reviewMode;
-    if (_reviewModeHasVisibleEntries(currentState, state._reviewMode)) {
-      return state._reviewMode;
-    }
-    const hasComments = Array.isArray(currentState.comments) && currentState.comments.length > 0;
-    const hasProposals = Array.isArray(currentState.proposals) && currentState.proposals.length > 0;
-    let nextMode = 'all';
-    if (preferredKind === 'comment' && hasComments) {
-      nextMode = 'comments';
-    } else if (preferredKind === 'proposal' && hasProposals) {
-      nextMode = 'proposals';
-    } else if (hasComments && hasProposals) {
-      nextMode = 'all';
-    } else if (hasComments) {
-      nextMode = 'comments';
-    } else if (hasProposals) {
-      nextMode = 'proposals';
-    }
-    return _setStoredReviewMode(nextMode);
-  }
-
-  function _coerceReviewBoolean(value) {
-    if (value === true || value === false) return value;
-    const normalized = String(value == null ? '' : value).trim().toLowerCase();
-    if (!normalized) return false;
-    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+    return _getDocxReviewState().coerceReviewModeForVisibleContent(reviewState, preferredKind);
   }
 
   function _normalizeReviewComment(comment, index) {
-    const raw = (comment && typeof comment === 'object') ? (_cloneSerializable(comment, {}) || {}) : {};
-    const rawId = String(raw.id || index + 1);
-    return Object.assign({}, raw, {
-      id: rawId,
-      review_id: 'comment:' + rawId,
-      kind: 'comment',
-      source: 'docx',
-      author: String(raw.author || '').trim() || '文档批注',
-      initials: String(raw.initials || '').trim(),
-      date: String(raw.date || '').trim(),
-      text: String(raw.text || '').trim(),
-      anchor_text: String(raw.anchor_text || '').trim(),
-      para_id: String(raw.para_id || raw.paraId || '').trim(),
-      parent_para_id: String(raw.parent_para_id || raw.parentParaId || '').trim(),
-      parent_id: String(raw.parent_id || raw.parentId || '').trim(),
-      durable_id: String(raw.durable_id || raw.durableId || '').trim(),
-      done: _coerceReviewBoolean(raw.done),
-      resolved: _coerceReviewBoolean(raw.resolved),
-    });
+    return _getDocxReviewState().normalizeReviewComment(comment, index);
   }
 
   function _normalizeReviewProposal(proposal, index) {
-    const raw = (proposal && typeof proposal === 'object') ? (_cloneSerializable(proposal, {}) || {}) : {};
-    const fallbackId = 'proposal-'
-      + String(index + 1)
-      + '-'
-      + String(raw.original_text || raw.proposed_text || 'item')
-        .toLowerCase()
-        .replace(/[^a-z0-9\u4e00-\u9fff]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 24);
-    const proposalId = String(raw.id || fallbackId || ('proposal-' + (index + 1)));
-    return Object.assign({}, raw, {
-      id: proposalId,
-      review_id: String(raw.review_id || ('proposal:' + proposalId)),
-      kind: 'proposal',
-      source: String(raw.source || '').trim() || 'ai',
-      _reviewStatus: String(raw._reviewStatus || raw.status || '').trim(),
-    });
+    return _getDocxReviewState().normalizeReviewProposal(proposal, index);
   }
 
   function _syncDocCommentStateForActiveFile(nextComments) {
-    const tab = _activeReviewTab();
-    if (!tab) return [];
-    const reviewState = _ensureTabReviewState(tab);
-    const sourceComments = Array.isArray(nextComments)
-      ? nextComments
-      : ((tab.serverData && Array.isArray(tab.serverData.comments)) ? tab.serverData.comments : []);
-    reviewState.comments = sourceComments
-      .map((comment, index) => _normalizeReviewComment(comment, index))
-      .filter((comment) => comment.text || comment.anchor_text);
-    if (tab.serverData && typeof tab.serverData === 'object') {
-      tab.serverData.comments = sourceComments.map((comment) => _cloneSerializable(comment, {}) || {});
-    }
-    return reviewState.comments;
+    return _getDocxReviewState().syncDocCommentStateForActiveFile(nextComments);
   }
 
   function _mergeReviewProposals(existing, incoming) {
-    const merged = new Map();
-    (Array.isArray(existing) ? existing : []).forEach((proposal, index) => {
-      const normalized = _normalizeReviewProposal(proposal, index);
-      merged.set(String(normalized.id), normalized);
-    });
-    (Array.isArray(incoming) ? incoming : []).forEach((proposal, index) => {
-      const normalized = _normalizeReviewProposal(proposal, index);
-      const key = String(normalized.id);
-      const previous = merged.get(key);
-      if (previous && previous._reviewStatus && !normalized._reviewStatus) {
-        normalized._reviewStatus = previous._reviewStatus;
-      }
-      merged.set(key, Object.assign({}, previous || {}, normalized));
-    });
-    return Array.from(merged.values());
+    return _getDocxReviewState().mergeReviewProposals(existing, incoming);
   }
 
   function _syncProposalStateForActiveFile(proposals, options = {}) {
-    const tab = _activeReviewTab();
-    if (!tab) return [];
-    const reviewState = _ensureTabReviewState(tab);
-    reviewState.proposals = _mergeReviewProposals(options.replace ? [] : reviewState.proposals, proposals);
-    if (tab.serverData && typeof tab.serverData === 'object' && Array.isArray(proposals)) {
-      tab.serverData.proposals = proposals.map((proposal) => _cloneSerializable(proposal, {}) || {});
-    }
-    return reviewState.proposals;
+    return _getDocxReviewState().syncProposalStateForActiveFile(proposals, options);
   }
 
   function _normalizeReviewProgressPath(path) {
@@ -1907,8 +2075,18 @@ window.WA.__contract = "1.0";
     )) {
       return normalizedPath.slice(workspacePath.length).replace(/^\//, '');
     }
+    if (looksAbsolute) {
+      const lowered = normalizedPath.toLowerCase();
+      const marker = '/workspace/';
+      const markerIndex = lowered.lastIndexOf(marker);
+      if (markerIndex >= 0) {
+        return normalizedPath.slice(markerIndex + marker.length).replace(/^\//, '');
+      }
+    }
     return normalizedPath.replace(/^\//, '');
   }
+
+  window.WA.normalizeWorkspaceFilePath = _normalizeReviewProgressPath;
 
   async function _applyStructuredReviewProgressProposals(payload, options = {}) {
     const proposals = Array.isArray(payload && payload.partial_proposals) ? payload.partial_proposals : [];
@@ -1962,7 +2140,7 @@ window.WA.__contract = "1.0";
     }
 
     if (options.notify !== false) {
-      showToast(options.toastText || `AI 已同步 ${proposals.length} 条处理中建议`, 'success');
+      showToast(options.toastText || `AI 已同步 ${proposals.length} 条处理中修订`, 'success');
     }
     return true;
   }
@@ -1970,9 +2148,7 @@ window.WA.__contract = "1.0";
   function _pendingInlineReviewProposals(tab) {
     const reviewState = _ensureTabReviewState(tab);
     if (!reviewState) return [];
-    return reviewState.proposals.filter((proposal) => {
-      if (!proposal) return false;
-      if (proposal._reviewStatus === 'accepted' || proposal._reviewStatus === 'rejected') return false;
+    return _visibleReviewProposals(reviewState).filter((proposal) => {
       if (_isImportedDocxRevisionProposal(proposal)) return false;
       if (!_proposalCanApply(proposal)) return false;
       return !!String(proposal.original_text || '').trim();
@@ -1982,8 +2158,9 @@ window.WA.__contract = "1.0";
   function _reviewSummaryCounts(tab) {
     const reviewState = _ensureTabReviewState(tab);
     if (!reviewState) return { proposalCount: 0, commentCount: 0 };
+    const visibleProposals = _visibleReviewProposals(reviewState);
     return {
-      proposalCount: reviewState.proposals.length,
+      proposalCount: visibleProposals.length,
       commentCount: reviewState.comments.length,
     };
   }
@@ -1991,30 +2168,24 @@ window.WA.__contract = "1.0";
   function _reviewPanelCounts(tab) {
     const reviewState = _ensureTabReviewState(tab);
     if (!reviewState) return { proposalCount: 0, pendingProposalCount: 0, commentCount: 0 };
+    const visibleProposals = _visibleReviewProposals(reviewState);
     return {
-      proposalCount: reviewState.proposals.length,
+      proposalCount: visibleProposals.length,
       pendingProposalCount: _pendingInlineReviewProposals(tab).length,
       commentCount: reviewState.comments.length,
     };
   }
 
-  function _shouldShowPassiveDocxReviewRail(reviewState) {
-    if (state.fileType !== 'docx') return false;
-    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
-    if (!currentState) return false;
-    return !!(
-      (Array.isArray(currentState.comments) && currentState.comments.length)
-      || (Array.isArray(currentState.proposals) && currentState.proposals.length)
-    );
-  }
-
   function _buildReviewNavItems(tab) {
     const reviewState = _ensureTabReviewState(tab);
     if (!reviewState) return [];
+    const visibleProposals = _visibleReviewProposals(reviewState);
+    const focusedId = String(reviewState.focusedId || '').trim();
 
     const items = [];
     reviewState.comments.forEach((comment, index) => {
       const reviewId = String((comment && (comment.review_id || comment.id)) || '').trim();
+      const commentId = String((comment && comment.id) || '').trim();
       if (!reviewId) return;
       const preview = _previewReviewText(comment && (comment.anchor_text || comment.text), 60) || '未找到正文锚点';
       const meta = _previewReviewText(comment && comment.text, 42) || '未填写批注内容';
@@ -2024,11 +2195,13 @@ window.WA.__contract = "1.0";
         label: `批注 ${index + 1}`,
         preview,
         meta,
+        isActive: !!focusedId && (focusedId === reviewId || focusedId === commentId),
       });
     });
 
-    reviewState.proposals.forEach((proposal, index) => {
+    visibleProposals.forEach((proposal, index) => {
       const reviewId = String((proposal && (proposal.review_id || proposal.id)) || '').trim();
+      const proposalId = String((proposal && proposal.id) || '').trim();
       if (!reviewId) return;
       const preview = _previewReviewText(proposal && (proposal.original_text || proposal.anchor_text || proposal.proposed_text), 60) || '未找到正文锚点';
       const rationale = _previewReviewText(_getProposalRationaleText(proposal), 38);
@@ -2038,9 +2211,10 @@ window.WA.__contract = "1.0";
       items.push({
         reviewId,
         kind: 'proposal',
-        label: `建议 ${index + 1}`,
+        label: `修订 ${index + 1}`,
         preview,
         meta,
+        isActive: !!focusedId && (focusedId === reviewId || focusedId === proposalId),
       });
     });
 
@@ -2049,15 +2223,15 @@ window.WA.__contract = "1.0";
 
   function _renderReviewNavMenuItems(items) {
     if (!Array.isArray(items) || !items.length) {
-      return '<div class="wa-docx-review-nav-empty">当前文档暂无批注或建议</div>';
+      return '<div class="wa-docx-review-nav-empty">当前文档暂无批注或修订</div>';
     }
 
     const parts = [
-      '<button type="button" class="wa-docx-review-nav-overview" data-review-nav-overview="1">打开审阅中心</button>',
+      '<button type="button" class="wa-docx-review-nav-overview" data-review-nav-overview="1">显示批注与修订</button>',
     ];
     items.forEach((item) => {
       parts.push(''
-        + `<button type="button" class="wa-docx-review-nav-item" data-review-nav-id="${_escapeHtml(item.reviewId)}">`
+        + `<button type="button" class="wa-docx-review-nav-item${item.isActive ? ' is-active' : ''}" data-review-nav-id="${_escapeHtml(item.reviewId)}" aria-current="${item.isActive ? 'true' : 'false'}">`
         + `  <span class="wa-docx-review-nav-item-badge${item.kind === 'proposal' ? ' is-proposal' : ''}">${_escapeHtml(item.label)}</span>`
         + `  <span class="wa-docx-review-nav-item-preview">${_escapeHtml(item.preview || '')}</span>`
         + `  <span class="wa-docx-review-nav-item-meta">${_escapeHtml(item.meta || '')}</span>`
@@ -2080,6 +2254,14 @@ window.WA.__contract = "1.0";
     return [];
   }
 
+  function _shouldShowInlineReviewPreview(reviewState) {
+    if (!_isReviewRailVisible()) return false;
+    if (state._reviewMode === 'comments') return false;
+    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
+    if (!currentState) return false;
+    return _reviewModeHasVisibleEntries(currentState, 'proposals');
+  }
+
   function _syncInlineReviewPreviewForActiveFile() {
     const editor = state.activeEditor;
     const tab = _activeReviewTab();
@@ -2087,6 +2269,10 @@ window.WA.__contract = "1.0";
       return _clearInlineReviewPreviewForActiveFile();
     }
     if (!tab) {
+      return _clearInlineReviewPreviewForActiveFile();
+    }
+    const reviewState = _ensureTabReviewState(tab);
+    if (!_shouldShowInlineReviewPreview(reviewState)) {
       return _clearInlineReviewPreviewForActiveFile();
     }
 
@@ -2106,6 +2292,236 @@ window.WA.__contract = "1.0";
       console.warn('[WA review preview] sync failed:', e);
     }
     return proposals;
+  }
+
+  const _DOCX_COMMENT_ANCHOR_HIGHLIGHT = 'wa-docx-comment-anchor';
+  const _DOCX_COMMENT_ANCHOR_FOCUS_HIGHLIGHT = 'wa-docx-comment-anchor-focus';
+
+  function _clearDocxCommentAnchorHighlights() {
+    if (!window.CSS || !CSS.highlights) return;
+    try { CSS.highlights.delete(_DOCX_COMMENT_ANCHOR_HIGHLIGHT); } catch (_) {}
+    try { CSS.highlights.delete(_DOCX_COMMENT_ANCHOR_FOCUS_HIGHLIGHT); } catch (_) {}
+  }
+
+  function _getDocxReviewAnchorRoot() {
+    return (state.activeEditor && state.activeEditor.editor && state.activeEditor.editor.view && state.activeEditor.editor.view.dom)
+      || document.querySelector('#wa-docx-editor .ProseMirror')
+      || $('wa-editor-content')
+      || null;
+  }
+
+  function _normalizeDocxReviewAnchorText(value) {
+    return String(value || '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  }
+
+  function _buildDocxReviewAnchorTextIndex(root) {
+    if (!root) return null;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+    const rawPositions = [];
+    const normalizedMap = [];
+    let normalizedText = '';
+    let lastWasSpace = false;
+    let node;
+
+    while ((node = walker.nextNode())) {
+      const value = String(node.nodeValue || '');
+      const parent = node.parentElement;
+      if (!value || !parent) continue;
+      if (typeof parent.getClientRects === 'function' && parent.getClientRects().length === 0) continue;
+      const style = window.getComputedStyle(parent);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+      for (let offset = 0; offset < value.length; offset += 1) {
+        rawPositions.push({ node, offset });
+        const rawChar = value[offset];
+        const normalizedChar = /\s/.test(rawChar) ? ' ' : rawChar.toLowerCase();
+        if (normalizedChar === ' ') {
+          if (!lastWasSpace) {
+            normalizedText += ' ';
+            normalizedMap.push(rawPositions.length - 1);
+          }
+          lastWasSpace = true;
+        } else {
+          normalizedText += normalizedChar;
+          normalizedMap.push(rawPositions.length - 1);
+          lastWasSpace = false;
+        }
+      }
+    }
+
+    return { normalizedText, normalizedMap, rawPositions };
+  }
+
+  function _createDocxReviewAnchorTextRange(index, start, end) {
+    if (!index || end <= start) return null;
+    const rawStartIndex = index.normalizedMap[start];
+    const rawEndIndex = index.normalizedMap[end - 1];
+    const startPos = index.rawPositions[rawStartIndex];
+    const endPos = index.rawPositions[rawEndIndex];
+    if (!startPos || !endPos) return null;
+    const range = document.createRange();
+    range.setStart(startPos.node, startPos.offset);
+    range.setEnd(endPos.node, endPos.offset + 1);
+    return range;
+  }
+
+  function _resolveDocxReviewAnchorTextMatch(item, reviewTextIndex) {
+    if (!item || !reviewTextIndex || !reviewTextIndex.normalizedText) return null;
+
+    const needle = _normalizeDocxReviewAnchorText(item.original_text || item.anchor_text || item.text || '');
+    if (!needle) return null;
+
+    const beforeContext = _normalizeDocxReviewAnchorText(item.anchor_context_before || item.anchorContextBefore || '');
+    const afterContext = _normalizeDocxReviewAnchorText(item.anchor_context_after || item.anchorContextAfter || '');
+    const rawOccurrence = Number(item.anchor_occurrence ?? item.anchorOccurrence);
+    const desiredOccurrence = Number.isFinite(rawOccurrence)
+      ? Math.max(0, Math.floor(rawOccurrence))
+      : null;
+
+    const matches = [];
+    let searchFrom = 0;
+    let occurrence = 0;
+    while (searchFrom < reviewTextIndex.normalizedText.length) {
+      const matchStart = reviewTextIndex.normalizedText.indexOf(needle, searchFrom);
+      if (matchStart === -1) break;
+      const matchEnd = matchStart + needle.length;
+      const beforeSlice = beforeContext
+        ? reviewTextIndex.normalizedText.slice(Math.max(0, matchStart - beforeContext.length), matchStart)
+        : '';
+      const afterSlice = afterContext
+        ? reviewTextIndex.normalizedText.slice(matchEnd, matchEnd + afterContext.length)
+        : '';
+      matches.push({
+        start: matchStart,
+        end: matchEnd,
+        occurrence,
+        beforeOk: !beforeContext || beforeSlice.endsWith(beforeContext),
+        afterOk: !afterContext || afterSlice.startsWith(afterContext),
+      });
+      occurrence += 1;
+      searchFrom = matchStart + Math.max(1, needle.length);
+    }
+
+    if (!matches.length) return null;
+    const contextual = matches.filter((match) => match.beforeOk && match.afterOk);
+    if (desiredOccurrence != null) {
+      const exactContextual = contextual.find((match) => match.occurrence === desiredOccurrence);
+      if (exactContextual) return exactContextual;
+      const exact = matches.find((match) => match.occurrence === desiredOccurrence);
+      if (exact) return exact;
+    }
+    if (contextual.length) return contextual[0];
+    return matches[0];
+  }
+
+  function _resolveDocxReviewAnchorRange(item, options = {}) {
+    if (state.fileType !== 'docx' || !item) return null;
+    const root = options.root || _getDocxReviewAnchorRoot();
+    if (!root) return null;
+
+    const reviewKey = String(item && (item.id || item.review_id || '') || '')
+      .replace(/^proposal:/, '')
+      .replace(/^comment:/, '')
+      .trim();
+
+    if (reviewKey && root.querySelectorAll) {
+      const markers = Array.from(root.querySelectorAll('[data-koto-review-id]')).filter((element) => {
+        return String(element.getAttribute('data-koto-review-id') || '').trim() === reviewKey;
+      });
+      for (let index = 0; index < markers.length; index += 1) {
+        const marker = markers[index];
+        const preferredNodes = Array.from(marker.querySelectorAll('.koto-docx-track-change-insert')).filter((element) => {
+          return window.getComputedStyle(element).display !== 'none';
+        });
+        const fallbackNodes = Array.from(marker.querySelectorAll('.koto-docx-track-change-delete')).filter((element) => {
+          return window.getComputedStyle(element).display !== 'none';
+        });
+        const candidate = preferredNodes[0] || fallbackNodes[0] || marker;
+        const range = document.createRange();
+        try {
+          range.selectNodeContents(candidate);
+          return { element: candidate, range };
+        } catch (_) {
+          // Continue trying other marker candidates.
+        }
+      }
+    }
+
+    const reviewTextIndex = options.reviewTextIndex || _buildDocxReviewAnchorTextIndex(root);
+    const match = _resolveDocxReviewAnchorTextMatch(item, reviewTextIndex);
+    if (!match) return null;
+    const range = _createDocxReviewAnchorTextRange(reviewTextIndex, match.start, match.end);
+    if (!range) return null;
+    const element = range.startContainer
+      ? (range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? range.startContainer
+        : range.startContainer.parentElement)
+      : null;
+    return { element: element || null, range };
+  }
+
+  function _syncDocxCommentAnchorHighlights(reviewState) {
+    if (!window.CSS || !CSS.highlights || typeof window.Highlight !== 'function') {
+      return 0;
+    }
+
+    if (state.fileType !== 'docx') {
+      _clearDocxCommentAnchorHighlights();
+      return 0;
+    }
+
+    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
+    const comments = currentState && Array.isArray(currentState.comments) ? currentState.comments : [];
+    if (!comments.length) {
+      _clearDocxCommentAnchorHighlights();
+      return 0;
+    }
+
+    const root = _getDocxReviewAnchorRoot();
+    if (!root) {
+      _clearDocxCommentAnchorHighlights();
+      return 0;
+    }
+
+    const reviewTextIndex = _buildDocxReviewAnchorTextIndex(root);
+    const focusedId = String((currentState && currentState.focusedId) || '').trim();
+    const anchorRanges = [];
+    const focusedRanges = [];
+
+    comments.forEach((comment) => {
+      const resolvedAnchor = _resolveDocxReviewAnchorRange(comment, { root, reviewTextIndex });
+      if (!resolvedAnchor || !resolvedAnchor.range) return;
+      anchorRanges.push(resolvedAnchor.range);
+      const reviewId = String((comment && (comment.review_id || comment.id)) || '').trim();
+      const commentId = String((comment && comment.id) || '').trim();
+      if (focusedId && (focusedId === reviewId || focusedId === commentId)) {
+        focusedRanges.push(resolvedAnchor.range);
+      }
+    });
+
+    try {
+      if (anchorRanges.length) {
+        CSS.highlights.set(_DOCX_COMMENT_ANCHOR_HIGHLIGHT, new Highlight(...anchorRanges));
+      } else {
+        CSS.highlights.delete(_DOCX_COMMENT_ANCHOR_HIGHLIGHT);
+      }
+
+      if (focusedRanges.length) {
+        CSS.highlights.set(_DOCX_COMMENT_ANCHOR_FOCUS_HIGHLIGHT, new Highlight(...focusedRanges));
+      } else {
+        CSS.highlights.delete(_DOCX_COMMENT_ANCHOR_FOCUS_HIGHLIGHT);
+      }
+    } catch (error) {
+      console.warn('[WA review comment highlight] sync failed:', error);
+      _clearDocxCommentAnchorHighlights();
+      return 0;
+    }
+
+    return anchorRanges.length;
   }
 
   function _findProposalEntry(proposalId) {
@@ -2166,20 +2582,24 @@ window.WA.__contract = "1.0";
     // No auto-dismiss: focused state is cleared only by click-outside or explicit deselect
   }
 
+  function _ensureReviewTargetMode(reviewState, kind = '') {
+    const currentState = reviewState || _ensureTabReviewState(_activeReviewTab());
+    if (!currentState) return state._reviewMode;
+    const hasComments = Array.isArray(currentState.comments) && currentState.comments.length > 0;
+    const hasProposals = _visibleReviewProposals(currentState).length > 0;
+    if (kind === 'comment') {
+      return _setStoredReviewMode(hasProposals ? 'all' : 'comments');
+    }
+    if (kind === 'proposal') {
+      return _setStoredReviewMode(hasComments ? 'all' : 'proposals');
+    }
+    return _coerceReviewModeForVisibleContent(currentState, kind);
+  }
+
   function _findDocxReviewAnchorElement(item) {
     if (state.fileType !== 'docx') return null;
-    const reviewKey = String(item && (item.id || item.review_id || '') || '').replace(/^proposal:/, '').replace(/^comment:/, '').trim();
-    const root = (state.activeEditor && state.activeEditor.editor && state.activeEditor.editor.view && state.activeEditor.editor.view.dom)
-      || document.querySelector('#wa-docx-editor .ProseMirror')
-      || $('wa-editor-content');
-    if (!root || !root.querySelectorAll) return null;
-    if (reviewKey) {
-      const exact = Array.from(root.querySelectorAll('[data-koto-review-id]')).find((element) => {
-        return String(element.getAttribute('data-koto-review-id') || '').trim() === reviewKey;
-      }) || null;
-      if (exact) return exact;
-    }
-    return null;
+    const resolvedAnchor = _resolveDocxReviewAnchorRange(item);
+    return (resolvedAnchor && resolvedAnchor.element) || null;
   }
 
   function _flashReviewAnchorElement(element) {
@@ -2204,6 +2624,20 @@ window.WA.__contract = "1.0";
     if (resolved && resolved.found) {
       if (resolved.element) _flashReviewAnchorElement(resolved.element);
       return true;
+    }
+    const resolvedAnchor = _resolveDocxReviewAnchorRange(item);
+    const viewport = $('wa-editor-content');
+    if (resolvedAnchor && resolvedAnchor.range && viewport && typeof resolvedAnchor.range.getBoundingClientRect === 'function') {
+      const rangeRect = resolvedAnchor.range.getBoundingClientRect();
+      const viewportRect = viewport.getBoundingClientRect();
+      if (rangeRect && rangeRect.height > 0 && viewportRect && viewportRect.height > 0) {
+        const viewportCenter = viewportRect.top + (viewportRect.height / 2);
+        const anchorCenter = rangeRect.top + (rangeRect.height / 2);
+        const top = viewport.scrollTop + (anchorCenter - viewportCenter);
+        viewport.scrollTo({ top: Math.max(0, Math.round(top)), behavior: 'smooth' });
+        if (resolvedAnchor.element) _flashReviewAnchorElement(resolvedAnchor.element);
+        return true;
+      }
     }
     const matched = _findDocxReviewAnchorElement(item);
     if (!matched) return false;
@@ -2251,9 +2685,42 @@ window.WA.__contract = "1.0";
     if (summaryBtn) summaryBtn.setAttribute('aria-expanded', 'false');
   }
 
+  function _activateToolbarReviewNavItem(reviewId) {
+    const resolvedReviewId = String(reviewId || '').trim();
+    if (!resolvedReviewId) return;
+    const entry = _findReviewEntry(resolvedReviewId);
+    if (entry.item && entry.kind === 'proposal') {
+      const proposalReviewId = String(entry.item.review_id || entry.item.id || resolvedReviewId).trim();
+      if (proposalReviewId) {
+        _expandReviewProposal(proposalReviewId, { scrollCard: false });
+      }
+    }
+    requestAnimationFrame(() => {
+      try {
+        const focusTask = window.WA.focusReviewThread(resolvedReviewId);
+        if (focusTask && typeof focusTask.catch === 'function') {
+          focusTask.catch((error) => {
+            console.warn('[WA review nav] focus failed:', error);
+          });
+        }
+      } catch (error) {
+        console.warn('[WA review nav] focus failed:', error);
+      }
+    });
+  }
+
   function _bindDocxReviewToolbarInteractions(group) {
     if (!group || group._waReviewToolbarBound) return;
     group._waReviewToolbarBound = true;
+
+    group.addEventListener('mousedown', (event) => {
+      const target = event && event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const navActionEl = target.closest('[data-review-nav-id], [data-review-nav-overview="1"]');
+      if (!navActionEl) return;
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+      if (typeof event.stopPropagation === 'function') event.stopPropagation();
+    });
 
     group.addEventListener('click', (event) => {
       const target = event && event.target;
@@ -2266,7 +2733,7 @@ window.WA.__contract = "1.0";
         if (typeof event.preventDefault === 'function') event.preventDefault();
         if (typeof event.stopPropagation === 'function') event.stopPropagation();
         _closeDocxReviewNavMenu();
-        window.WA.focusReviewThread(reviewId);
+        _activateToolbarReviewNavItem(reviewId);
         return;
       }
 
@@ -2300,6 +2767,10 @@ window.WA.__contract = "1.0";
 
   function _layoutReviewShellInDocx() {
     return _getDocxReviewLayout().layoutReviewShellInDocx();
+  }
+
+  function _getDocxReviewRailMetrics() {
+    return _getDocxReviewLayout().getDocxReviewRailMetrics();
   }
 
   function _scheduleReviewShellLayout() {
@@ -2448,11 +2919,77 @@ window.WA.__contract = "1.0";
     return nextComment;
   }
 
+  function _applyReviewAnchorMeta(target, selection) {
+    if (!target || !selection) return target;
+    const anchorStartOffset = Number(selection.anchor_start_offset ?? selection.anchorStartOffset);
+    const anchorEndOffset = Number(selection.anchor_end_offset ?? selection.anchorEndOffset);
+    const anchorOccurrence = Number(selection.anchor_occurrence ?? selection.anchorOccurrence);
+    const anchorContextBefore = String((selection.anchor_context_before ?? selection.anchorContextBefore) || '');
+    const anchorContextAfter = String((selection.anchor_context_after ?? selection.anchorContextAfter) || '');
+
+    if (Number.isFinite(anchorStartOffset)) target.anchor_start_offset = anchorStartOffset;
+    if (Number.isFinite(anchorEndOffset)) target.anchor_end_offset = anchorEndOffset;
+    if (Number.isFinite(anchorOccurrence) && anchorOccurrence >= 0) {
+      target.anchor_occurrence = Math.max(0, Math.floor(anchorOccurrence));
+    }
+    if (anchorContextBefore) target.anchor_context_before = anchorContextBefore;
+    if (anchorContextAfter) target.anchor_context_after = anchorContextAfter;
+    return target;
+  }
+
+  function _buildNewReviewProposal(selection) {
+    const now = new Date();
+    const uniqueId = `user-revision-${now.getTime().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const originalText = String((selection && selection.rawText) || '').trim();
+    return _applyReviewAnchorMeta({
+      id: uniqueId,
+      review_id: 'proposal:' + uniqueId,
+      source: 'user_revision',
+      author: '我',
+      date: now.toISOString(),
+      action: 'replace',
+      action_type: 'replace',
+      original_text: originalText,
+      anchor_text: originalText,
+      proposed_text: '',
+      rationale: '用户手动添加修订',
+      _draft: true,
+    }, selection);
+  }
+
+  function _serializeReviewProposal(proposal) {
+    const raw = _cloneSerializable(proposal, {}) || {};
+    delete raw.review_id;
+    delete raw.kind;
+    raw.id = String(raw.id || '').trim();
+    raw.source = String(raw.source || '').trim() || 'ai';
+    raw.action = String(raw.action || raw.action_type || 'replace').trim();
+    raw.action_type = String(raw.action_type || raw.action || 'replace').trim();
+    raw.original_text = String(raw.original_text || raw.anchor_text || '').trim();
+    raw.anchor_text = String(raw.anchor_text || raw.original_text || '').trim();
+    raw.proposed_text = String(raw.proposed_text || raw.value || '').trim();
+    raw.rationale = String(raw.rationale || '').trim();
+    raw._reviewStatus = String(raw._reviewStatus || raw.status || '').trim();
+    return raw;
+  }
+
+  function _syncReviewProposalServerData(tab, reviewState) {
+    if (!tab || !reviewState || !Array.isArray(reviewState.proposals)) return;
+    tab.serverData = (tab.serverData && typeof tab.serverData === 'object') ? tab.serverData : {};
+    tab.serverData.proposals = reviewState.proposals.map((proposal) => _serializeReviewProposal(proposal));
+  }
+
+  function _reviewProposalTextareaId(reviewId) {
+    return 'wa-review-proposal-input-' + String(reviewId || '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
   function _renderReviewCommentCard(comment, index, focusedId) {
     const reviewId = String((comment && (comment.review_id || comment.id)) || '').trim();
     const anchorPreview = _previewReviewText(comment && comment.anchor_text, 64);
     const bodyText = String((comment && comment.text) || '').trim();
-    const author = String((comment && comment.author) || '').trim() || '文档批注';
+    const author = String((comment && comment.author) || '').trim() || '批注';
     const initials = String((comment && comment.initials) || '').trim();
     const dateLabel = _formatReviewDateLabel(comment && comment.date);
     const isFocused = !!reviewId && (focusedId === reviewId || focusedId === String((comment && comment.id) || ''));
@@ -2461,22 +2998,23 @@ window.WA.__contract = "1.0";
     const isReply = !!String((comment && comment.parent_id) || '').trim();
     const isDone = !!(comment && (comment.done || comment.resolved));
     const badgeLabel = (initials || author || String(index + 1)).slice(0, 2);
+    const authorLabel = badgeLabel === author ? '' : author;
     const metaParts = [];
     if (isReply) metaParts.push('回复');
     if (isDone) metaParts.push('已处理');
     if (dateLabel) metaParts.push(dateLabel);
     const metaLabel = metaParts.join(' · ');
     const anchorLabel = anchorPreview ? `定位文本：${anchorPreview}` : '';
-    const bodyPreview = bodyText || '输入后保存，这条批注会随 DOCX 一起导出到 Word。';
+    const bodyPreview = bodyText || '未填写批注';
     const bodyTitle = anchorLabel ? `${anchorLabel} | ${bodyPreview}` : bodyPreview;
     const textareaId = _reviewCommentTextareaId(reviewId || ('comment-' + index));
     const reviewArg = JSON.stringify(reviewId);
     return `
-      <article class="koto-docx-comment-card${isFocused ? ' is-focused' : ''}${isDraft ? ' is-draft' : ''}${isReply ? ' is-thread-reply' : ''}${isDone ? ' is-done' : ''}" data-review-id="${_escapeHtml(reviewId)}" data-kind="comment"${isEditing ? '' : ' tabindex="0" role="button" aria-label="打开批注编辑" data-action="activate"'}>
+      <article class="koto-docx-comment-card${isFocused ? ' is-focused' : ''}${isDraft ? ' is-draft' : ''}${isReply ? ' is-thread-reply' : ''}${isDone ? ' is-done' : ''}" data-review-id="${_escapeHtml(reviewId)}" data-kind="comment"${isEditing ? '' : ' tabindex="0" role="button" aria-label="定位批注文本" data-action="activate"'}>
         <div class="koto-docx-comment-head">
           <div class="koto-docx-comment-title-group">
             <span class="koto-docx-comment-badge">${_escapeHtml(badgeLabel)}</span>
-            <span class="koto-docx-comment-author">${_escapeHtml(author)}</span>
+            ${authorLabel ? `<span class="koto-docx-comment-author">${_escapeHtml(authorLabel)}</span>` : ''}
           </div>
           <div class="koto-docx-comment-head-end">
             ${metaLabel ? `<span class="koto-docx-comment-meta">${_escapeHtml(metaLabel)}</span>` : ''}
@@ -2494,7 +3032,7 @@ window.WA.__contract = "1.0";
             ? `<textarea id="${textareaId}" class="koto-docx-comment-edit" rows="3" oninput="WA.onReviewCommentInput(event)" placeholder="输入批注内容">${_escapeHtml(bodyText)}</textarea>`
             : `<div class="koto-docx-comment-body" title="${_escapeHtml(bodyTitle)}">${_escapeHtml(bodyPreview)}</div>`
         }
-        ${isDraft ? '<div class="koto-docx-comment-draft-hint">这是一个未完成的批注草稿，保存后才会进入文档导出。</div>' : ''}
+        ${isDraft ? '<div class="koto-docx-comment-draft-hint">未保存</div>' : ''}
         ${
           isEditing
             ? `<div class="koto-docx-comment-actions">
@@ -2512,7 +3050,7 @@ window.WA.__contract = "1.0";
     const originalText = _previewReviewText(proposal?.original_text || proposal?.anchor_text || '', 34) || '未找到原文';
     const proposedText = _previewReviewText(proposal?.proposed_text || proposal?.value || '', 34)
       || (action === 'delete' ? '删除这段内容' : '未生成修改文本');
-    let label = '建议';
+    let label = '修订';
     let contentText = proposedText;
     if (action === 'delete') {
       label = '删除';
@@ -2521,6 +3059,7 @@ window.WA.__contract = "1.0";
       label = '插入';
     } else if (action === 'replace') {
       label = '改为';
+      contentText = `“${proposedText}”`;
     }
     return `
       <div class="wa-proposal-note">
@@ -2534,9 +3073,10 @@ window.WA.__contract = "1.0";
     const proposalId = String((proposal && proposal.id) || reviewId.replace(/^proposal:/, '')).trim();
     const isFocused = !!reviewId && (focusedId === reviewId || focusedId === proposalId);
     const isExpanded = !!reviewId && (expandedId === reviewId || expandedId === proposalId);
+    const isEditing = state._editingReviewProposalId === reviewId || state._editingReviewProposalId === proposalId;
     const status = String((proposal && proposal._reviewStatus) || '').trim();
     const canApply = _proposalCanApply(proposal);
-    const statusLabel = _reviewProposalStatusLabel(proposal);
+    const statusLabel = isEditing || proposal?._draft ? '编辑中' : _reviewProposalStatusLabel(proposal);
     const rationale = _getProposalRationaleText(proposal);
     const anchorPreview = _previewReviewText(proposal?.original_text || proposal?.anchor_text || '', 56);
     const anchorLabel = anchorPreview ? `定位文本：${anchorPreview}` : '';
@@ -2545,20 +3085,39 @@ window.WA.__contract = "1.0";
     if (status === 'rejected') classes.push('rejected');
     if (isFocused) classes.push('focused');
     if (isExpanded) classes.push('is-expanded');
+    if (isEditing) classes.push('is-editing');
+    if (proposal?._draft) classes.push('is-draft');
     const reviewArg = JSON.stringify(reviewId);
     const proposalArg = JSON.stringify(proposalId);
+    const textareaId = _reviewProposalTextareaId(reviewId || proposalId);
+    const proposedText = String((proposal && (proposal.proposed_text || proposal.value)) || '').trim();
     return `
-      <article class="${classes.join(' ')}" data-proposal-id="${_escapeHtml(proposalId)}" data-review-id="${_escapeHtml(reviewId)}" data-can-apply="${canApply ? '1' : '0'}" data-expanded="${isExpanded ? '1' : '0'}" tabindex="0" role="button" aria-expanded="${isExpanded ? 'true' : 'false'}" aria-label="定位修改建议 ${index + 1}" title="${_escapeHtml((anchorLabel ? `${anchorLabel} | ` : '') + (_previewReviewText(rationale, 56) || rationale || ''))}" data-action="activate">
+      <article class="${classes.join(' ')}" data-proposal-id="${_escapeHtml(proposalId)}" data-review-id="${_escapeHtml(reviewId)}" data-can-apply="${canApply ? '1' : '0'}" data-expanded="${isExpanded ? '1' : '0'}" tabindex="0" role="button" aria-expanded="${isExpanded ? 'true' : 'false'}" aria-label="定位修订 ${index + 1}" title="${_escapeHtml((anchorLabel ? `${anchorLabel} | ` : '') + (_previewReviewText(rationale, 56) || rationale || ''))}" data-action="activate">
         <div class="wa-proposal-header">
-          <span class="wa-proposal-badge">Koto AI</span>
+          <span class="wa-proposal-badge">修订</span>
           <span class="koto-docx-comment-meta">${_escapeHtml(statusLabel)}</span>
         </div>
-        <div class="wa-proposal-diff">${_renderCompactReviewProposalDiff(proposal)}</div>
+        ${
+          isEditing
+            ? `<div class="wa-proposal-edit">
+                 <div class="wa-proposal-edit-original"><span>原文：</span>${_escapeHtml(anchorPreview || proposal?.original_text || proposal?.anchor_text || '')}</div>
+                 <textarea id="${textareaId}" class="wa-proposal-edit-textarea" rows="3" oninput="WA.onReviewProposalInput(event)" placeholder="输入替换后的内容">${_escapeHtml(proposedText)}</textarea>
+               </div>`
+            : `<div class="wa-proposal-diff">${_renderCompactReviewProposalDiff(proposal)}</div>`
+        }
         <div class="wa-proposal-actions">
           ${
-            canApply && status !== 'accepted' && status !== 'rejected'
-              ? `<button type="button" class="wa-proposal-btn accept small" data-action="accept" data-review-id="${_escapeHtml(proposalId)}">接受</button>
-                 <button type="button" class="wa-proposal-btn reject small" data-action="reject" data-review-id="${_escapeHtml(proposalId)}">拒绝</button>`
+            isEditing
+              ? `<button type="button" class="wa-proposal-btn accept small" data-review-action="save-proposal" data-review-id="${_escapeHtml(reviewId)}">保存</button>
+                 <button type="button" class="wa-proposal-btn reject small" data-review-action="cancel-proposal" data-review-id="${_escapeHtml(reviewId)}">取消</button>
+                 <button type="button" class="wa-proposal-btn reject small" data-review-action="delete-proposal" data-review-id="${_escapeHtml(reviewId)}">删除</button>`
+              : canApply && status !== 'accepted' && status !== 'rejected'
+              ? `<button type="button" class="wa-proposal-btn accept small" data-action="accept" data-review-id="${_escapeHtml(proposalId)}" title="接受这条修订" aria-label="接受这条修订">接受</button>
+                 <button type="button" class="wa-proposal-btn reject small" data-action="reject" data-review-id="${_escapeHtml(proposalId)}" title="拒绝这条修订" aria-label="拒绝这条修订">拒绝</button>
+                 ${proposal?.source === 'user_revision' ? `<button type="button" class="wa-proposal-btn secondary small" data-review-action="edit-proposal" data-review-id="${_escapeHtml(reviewId)}">编辑</button>` : ''}`
+              : proposal?.source === 'user_revision' && status !== 'accepted' && status !== 'rejected'
+                ? `<button type="button" class="wa-proposal-btn secondary small" data-review-action="edit-proposal" data-review-id="${_escapeHtml(reviewId)}">编辑</button>
+                   <button type="button" class="wa-proposal-btn reject small" data-review-action="delete-proposal" data-review-id="${_escapeHtml(reviewId)}">删除</button>`
               : ''
           }
         </div>
@@ -2571,7 +3130,9 @@ window.WA.__contract = "1.0";
     const summaryEl = $('wa-review-summary');
     const activeTab = state.fileType === 'docx' ? _activeReviewTab() : null;
     const host = $('wa-docx-editor');
+    if (host) host.dataset.reviewMarkersVisible = '0';
     if (!shell || !listEl) {
+      _clearDocxCommentAnchorHighlights();
       return;
     }
     _bindReviewShellInteractions(listEl);
@@ -2581,7 +3142,8 @@ window.WA.__contract = "1.0";
       listEl.innerHTML = '';
       listEl.style.minHeight = '';
       if (host) host.classList.remove('has-review-shell');
-      if (summaryEl) summaryEl.textContent = '当前文档暂无批注或建议';
+      if (summaryEl) summaryEl.textContent = '当前文档暂无批注或修订';
+      _clearDocxCommentAnchorHighlights();
       _renderReviewSelectionLauncher();
       return;
     }
@@ -2589,24 +3151,27 @@ window.WA.__contract = "1.0";
     const total = counts.commentCount + counts.proposalCount;
     if (summaryEl) {
       summaryEl.textContent = total
-        ? `${counts.commentCount} 条批注 / ${counts.proposalCount} 条建议${counts.pendingProposalCount ? `（${counts.pendingProposalCount} 条待处理）` : ''}`
-        : '当前文档暂无批注或建议';
+        ? `${counts.commentCount} 条批注 / ${counts.proposalCount} 条修订${counts.pendingProposalCount ? `（${counts.pendingProposalCount} 条待处理）` : ''}`
+        : '当前文档暂无批注或修订';
     }
     document.querySelectorAll('#wa-review-mode-group .wa-review-mode-btn').forEach((button) => {
       button.classList.toggle('is-active', button.dataset.mode === state._reviewMode);
     });
     const reviewState = _ensureTabReviewState(activeTab);
-    const showPassiveRail = _shouldShowPassiveDocxReviewRail(reviewState);
-    const showRail = !!state._reviewCenterOpen || showPassiveRail;
+    if (host) host.dataset.reviewMarkersVisible = _shouldShowDocxReviewMarkers(reviewState) ? '1' : '0';
+    _syncDocxCommentAnchorHighlights(reviewState);
+    const showRail = !!state._reviewCenterOpen;
     shell.style.display = showRail ? '' : 'none';
     shell.classList.toggle('is-open', showRail);
+    shell.classList.toggle('wa-review-shell-docx', state.fileType === 'docx');
     shell.dataset.hasItems = total > 0 ? '1' : '0';
-    shell.dataset.passiveRail = (!state._reviewCenterOpen && showPassiveRail) ? '1' : '0';
+    shell.dataset.commentUi = state.fileType === 'docx' ? 'wps' : '';
     if (!showRail) {
       if (host) host.classList.remove('has-review-shell');
       _renderReviewSelectionLauncher();
       return;
     }
+    if (host) host.classList.toggle('has-review-shell', state.fileType === 'docx');
     _ensureReviewShellViewportSync();
     if (!reviewState) {
       listEl.innerHTML = '';
@@ -2614,11 +3179,18 @@ window.WA.__contract = "1.0";
       _renderReviewSelectionLauncher();
       return;
     }
+    const visibleProposals = _visibleReviewProposals(reviewState);
     if (
       state._editingReviewCommentId &&
       !reviewState.comments.some((item) => String((item && (item.review_id || item.id)) || '').trim() === state._editingReviewCommentId)
     ) {
       state._editingReviewCommentId = '';
+    }
+    if (
+      state._editingReviewProposalId &&
+      !reviewState.proposals.some((item) => String((item && (item.review_id || item.id)) || '').trim() === state._editingReviewProposalId)
+    ) {
+      state._editingReviewProposalId = '';
     }
     const focusedId = String(reviewState.focusedId || '').trim();
     const expandedId = String(reviewState.expandedId || '').trim();
@@ -2629,12 +3201,21 @@ window.WA.__contract = "1.0";
       sections.push(...reviewState.comments.map((comment, index) => _renderReviewCommentCard(comment, index, focusedId)));
     }
     if (includeProposals) {
-      sections.push(...reviewState.proposals.map((proposal, index) => _renderReviewProposalCard(proposal, index, focusedId, expandedId)));
+      sections.push(...visibleProposals.map((proposal, index) => _renderReviewProposalCard(proposal, index, focusedId, expandedId)));
     }
     if (!sections.length) {
-        const hasAnyVisibleReviewEntries = _reviewModeHasVisibleEntries(reviewState, 'all');
-        const preserveCommentModeEmptyState = _isReviewCommentModeEnabled() && !hasAnyVisibleReviewEntries;
-        if (!preserveCommentModeEmptyState) {
+      const hasAnyVisibleReviewEntries = _reviewModeHasVisibleEntries(reviewState, 'all');
+      const preserveCommentModeEmptyState = _isReviewCommentModeEnabled() && !hasAnyVisibleReviewEntries;
+      if (preserveCommentModeEmptyState) {
+        listEl.innerHTML = '';
+        listEl.style.minHeight = '';
+        shell.style.display = '';
+        shell.classList.add('is-open');
+        if (host) host.classList.remove('has-review-shell');
+        _renderReviewSelectionLauncher();
+        return;
+      }
+      if (!preserveCommentModeEmptyState) {
         _coerceReviewModeForVisibleContent(reviewState);
         if (_reviewModeHasVisibleEntries(reviewState, state._reviewMode)) {
           _renderReviewShell();
@@ -2658,7 +3239,9 @@ window.WA.__contract = "1.0";
   function _setReviewCenterOpen(open) {
     state._reviewCenterOpen = open !== false;
     localStorage.setItem('wa_review_center_open', state._reviewCenterOpen ? '1' : '0');
+    _syncInlineReviewPreviewForActiveFile();
     _renderReviewShell();
+    _syncDocxReviewToolbar();
     _renderReviewSelectionLauncher();
   }
 
@@ -2685,16 +3268,7 @@ window.WA.__contract = "1.0";
   }
 
   function _serializeReviewComment(comment) {
-    const raw = _cloneSerializable(comment, {}) || {};
-    delete raw.review_id;
-    delete raw.kind;
-    delete raw.source;
-    raw.id = String(raw.id || '');
-    raw.author = String(raw.author || '').trim();
-    raw.date = String(raw.date || '').trim();
-    raw.text = String(raw.text || '').trim();
-    raw.anchor_text = String(raw.anchor_text || '').trim();
-    return raw;
+    return _getDocxReviewState().serializeReviewComment(comment);
   }
 
   function _normalizeReviewPath(value) {
@@ -2922,17 +3496,12 @@ window.WA.__contract = "1.0";
   };
 
   window.WA.applyStructuredReviewChangePayload = (payload, options = {}) => {
-    try {
-      const operation = String((payload && (payload.operation || payload.change_type)) || '').trim().toLowerCase();
-      const annotationsAdded = Number((payload && payload.annotations_added) || 0);
-      if (!Array.isArray(payload && payload.changes) && operation !== 'annotate_file' && operation !== 'annotate' && !annotationsAdded) {
-        return false;
-      }
-      return _appendStructuredReviewComments(payload, options);
-    } catch (err) {
-      console.error('[WA applyStructuredReviewChangePayload] error:', err);
+    const operation = String((payload && (payload.operation || payload.change_type)) || '').trim().toLowerCase();
+    const annotationsAdded = Number((payload && payload.annotations_added) || 0);
+    if (!Array.isArray(payload && payload.changes) && operation !== 'annotate_file' && operation !== 'annotate' && !annotationsAdded) {
       return false;
     }
+    return _appendStructuredReviewComments(payload, options);
   };
 
   window.WA.applyStructuredReviewProgressPayload = async (payload, options = {}) => {
@@ -2948,9 +3517,10 @@ window.WA.__contract = "1.0";
       group = document.createElement('div');
       group.className = 'wa-docx-review-group';
       group.innerHTML = ''
-        + '<button type="button" class="tt-btn wa-docx-review-mode" onclick="WA.toggleReviewCommentMode()">批注模式</button>'
+        + '<button type="button" class="tt-btn wa-docx-review-mode wa-docx-review-comment-mode" onclick="WA.toggleReviewCommentMode()">批注</button>'
+        + '<button type="button" class="tt-btn wa-docx-review-revision-mode" onclick="WA.openRevisionReviewCenter()">修订</button>'
         + '<div class="wa-docx-review-nav">'
-        + '  <button type="button" class="tt-btn wa-docx-review-summary" onclick="WA.toggleReviewNavMenu(event)" aria-haspopup="menu" aria-expanded="false">无批注或建议</button>'
+        + '  <button type="button" class="tt-btn wa-docx-review-summary" onclick="WA.toggleReviewNavMenu(event)" aria-haspopup="menu" aria-expanded="false">无批注或修订</button>'
         + '  <div class="wa-docx-review-nav-menu" role="menu"></div>'
         + '</div>';
       ribbon.appendChild(group);
@@ -2958,7 +3528,8 @@ window.WA.__contract = "1.0";
     _bindDocxReviewToolbarInteractions(group);
 
     const activeTab = state.fileType === 'docx' ? _activeReviewTab() : null;
-    const commentModeBtn = group.querySelector('.wa-docx-review-mode');
+    const commentModeBtn = group.querySelector('.wa-docx-review-comment-mode');
+    const revisionModeBtn = group.querySelector('.wa-docx-review-revision-mode');
     const summaryBtn = group.querySelector('.wa-docx-review-summary');
     const nav = group.querySelector('.wa-docx-review-nav');
     const navMenu = group.querySelector('.wa-docx-review-nav-menu');
@@ -2972,6 +3543,7 @@ window.WA.__contract = "1.0";
     const counts = _reviewSummaryCounts(activeTab);
     const total = counts.commentCount + counts.proposalCount;
     const commentModeEnabled = _isReviewCommentModeEnabled();
+    const revisionModeEnabled = state._reviewMode === 'proposals' || (state._reviewMode === 'all' && counts.proposalCount > 0);
     const navOpen = !!(nav && nav.classList.contains('is-open'));
     const navItems = _buildReviewNavItems(activeTab);
     group.style.display = 'inline-flex';
@@ -2984,6 +3556,14 @@ window.WA.__contract = "1.0";
         ? '退出批注模式'
         : '开启批注模式后，选中文本会出现批注入口';
     }
+    if (revisionModeBtn) {
+      revisionModeBtn.disabled = false;
+      revisionModeBtn.classList.toggle('is-active', revisionModeEnabled);
+      revisionModeBtn.setAttribute('aria-pressed', revisionModeEnabled ? 'true' : 'false');
+      revisionModeBtn.title = counts.proposalCount
+        ? '显示修订建议，支持逐条接受或拒绝'
+        : '选中文本后可添加修订';
+    }
     if (nav) {
       nav.classList.toggle('has-items', total > 0);
       nav.classList.toggle('is-open', navOpen && total > 0);
@@ -2992,18 +3572,18 @@ window.WA.__contract = "1.0";
       summaryBtn.disabled = total === 0;
       summaryBtn.classList.toggle('is-active', navOpen && total > 0);
       if (counts.commentCount && counts.proposalCount) {
-        summaryBtn.textContent = `${counts.commentCount}条批注 · ${counts.proposalCount}条建议`;
+        summaryBtn.textContent = `${total}条审阅`;
       } else if (counts.commentCount) {
         summaryBtn.textContent = `${counts.commentCount}条批注`;
       } else if (counts.proposalCount) {
-        summaryBtn.textContent = `${counts.proposalCount}条建议`;
+        summaryBtn.textContent = `${counts.proposalCount}条修订`;
       } else {
-        summaryBtn.textContent = '无批注或建议';
+        summaryBtn.textContent = '无批注或修订';
       }
       summaryBtn.setAttribute('aria-expanded', navOpen && total > 0 ? 'true' : 'false');
       summaryBtn.title = total
-        ? '展开批注/建议导航并快速定位'
-        : '当前文档暂无批注或建议';
+        ? '展开全部批注/修订并定位到对应位置'
+        : '当前文档暂无批注或修订';
     }
     if (navMenu) {
       navMenu.innerHTML = _renderReviewNavMenuItems(navItems);
@@ -3031,9 +3611,9 @@ window.WA.__contract = "1.0";
       state._reviewSelectionSnapshot = null;
       state._activeProposals = [];
       _clearInlineReviewPreviewForActiveFile();
+      _clearDocxCommentAnchorHighlights();
       _syncDocxReviewToolbar();
       _renderReviewShell();
-      _syncWpsReviewRail(null);
       return null;
     }
     const reviewState = _ensureTabReviewState(tab);
@@ -3043,99 +3623,30 @@ window.WA.__contract = "1.0";
     } else {
       reviewState.proposals = _mergeReviewProposals([], reviewState.proposals);
     }
-    // Rebuild normalized items for the WPS rail
-    _rebuildNormalizedReviewItems(reviewState);
     _syncReviewSelectionSnapshot();
     state._activeProposals = reviewState.proposals.slice();
     _syncInlineReviewPreviewForActiveFile();
+    _syncDocxCommentAnchorHighlights(reviewState);
     _syncDocxReviewToolbar();
     _renderReviewShell();
-    _syncWpsReviewRail(reviewState);
     return reviewState;
   }
 
-  /** Rebuild reviewState.items from comments + proposals (+ optional revisions). */
-  function _rebuildNormalizedReviewItems(reviewState) {
-    if (!reviewState) return;
-    if (!window.KotoReviewRail) return;
-    try {
-      reviewState.items = window.KotoReviewRail.normalizeReviewItems(
-        reviewState.comments || [],
-        reviewState.proposals || [],
-        (reviewState.revisions || []),
-      );
-    } catch (_) {}
-  }
-
-  /** Sync the WPS rail controller with current review state. */
-  function _syncWpsReviewRail(reviewState) {
-    if (!state._useWpsReviewRail || !window.KotoReviewRail) return;
-    const host = $('wa-docx-editor');
-    if (!host || state.fileType !== 'docx') {
-      if (_wpsRailCtrl) { _wpsRailCtrl.destroy(); _wpsRailCtrl = null; }
-      return;
-    }
-    if (!_wpsRailCtrl) {
-      _wpsRailCtrl = window.KotoReviewRail.createController({
-        editorRoot: host,
-        getPreviewText: (s, n) => _previewReviewText(s, n),
-        onAction: (action, itemId) => _handleWpsRailAction(action, itemId),
-      });
-      if (_wpsRailCtrl) _wpsRailCtrl.mount();
-    }
-    if (!_wpsRailCtrl) return;
-    const items = reviewState ? (reviewState.items || []) : [];
-    _wpsRailCtrl.updateItems(items);
-    const focusedId = reviewState ? String(reviewState.focusedId || '') : '';
-    if (focusedId) _wpsRailCtrl.setFocused(focusedId);
-    // Wire up event bus → legacy WA actions
-    const bus = _wpsRailCtrl.getBus && _wpsRailCtrl.getBus();
-    if (bus && !bus._kotoWired) {
-      bus._kotoWired = true;
-      bus.on('review:accept',   (e) => { const { itemId } = e.detail; window.WA.acceptProposal(itemId, null); });
-      bus.on('review:reject',   (e) => { const { itemId } = e.detail; window.WA.rejectProposal(itemId, null); });
-      bus.on('review:delete',   (e) => { const { itemId } = e.detail; window.WA.deleteReviewComment(itemId); });
-      bus.on('review:scroll-into-view', (e) => {
-        const { itemId } = e.detail;
-        const entry = _findReviewEntry(itemId);
-        if (entry && entry.item) _scrollDocxReviewAnchorIntoView(entry.item);
-      });
-      bus.on('review:save-comment', (e) => {
-        const { itemId } = e.detail;
-        window.WA.editReviewComment(itemId, 'save');
-      });
-      bus.on('review:reply', (e) => {
-        const { parentId } = e.detail;
-        // Creating a new reply comment anchored to the same anchor as parent
-        const entry = _findReviewEntry(parentId);
-        if (entry && entry.item) window.WA.createReviewComment();
-      });
-    }
-  }
-
-  function _handleWpsRailAction(action, itemId) {
-    // Keeps the legacy rail in sync for actions that mutate state
-    switch (action) {
-      case 'activate':
-      case 'focus': {
-        const reviewState = _ensureTabReviewState(_activeReviewTab());
-        if (reviewState) reviewState.focusedId = itemId;
-        break;
-      }
-    }
-  }
-
-  function _focusReviewProposal(proposal, options = {}) {
+  async function _focusReviewProposal(proposal, options = {}) {
     const activeTab = _activeReviewTab();
     const reviewState = _ensureTabReviewState(activeTab);
     if (!proposal || !reviewState) return;
-    reviewState.focusedId = String(proposal.review_id || proposal.id || '').trim();
-    state._reviewCenterOpen = true;
-    localStorage.setItem('wa_review_center_open', '1');
-    if (_wpsRailCtrl) _wpsRailCtrl.setFocused(reviewState.focusedId);
-    _syncReviewStateForActiveFile().catch(() => {});
+    const reviewId = String(proposal.review_id || proposal.id || '').trim();
+    const proposalId = String(proposal.id || reviewId).replace(/^proposal:/, '').trim();
+    if (!reviewId) return;
+    reviewState.focusedId = reviewId;
+    reviewState.expandedId = reviewId;
+    _ensureReviewTargetMode(reviewState, 'proposal');
+    _setReviewCenterOpen(true);
+    await _syncReviewStateForActiveFile().catch(() => null);
+    _expandReviewProposal(reviewId, { scrollCard: false });
     if (options.scrollCard !== false) {
-      _scrollProposalCardIntoView(proposal.id);
+      requestAnimationFrame(() => _scrollProposalCardIntoView(proposalId));
     }
     if (options.scrollDoc !== false) {
       requestAnimationFrame(() => _scrollDocxReviewAnchorIntoView(proposal));
@@ -3156,12 +3667,10 @@ window.WA.__contract = "1.0";
     const reviewState = _ensureTabReviewState(activeTab);
     if (!comment || !reviewState) return;
     reviewState.focusedId = String(comment.review_id || comment.id || '').trim();
-    state._reviewCenterOpen = true;
-    localStorage.setItem('wa_review_center_open', '1');
-    if (_wpsRailCtrl) _wpsRailCtrl.setFocused(reviewState.focusedId);
-    _renderReviewShell();
+    _ensureReviewTargetMode(reviewState, 'comment');
+    _setReviewCenterOpen(true);
     if (options.scrollCard !== false) {
-      _scrollReviewCardIntoView(reviewState.focusedId);
+      requestAnimationFrame(() => _scrollReviewCardIntoView(reviewState.focusedId));
     }
     if (options.scrollDoc !== false) {
       _scrollDocxCommentAnchorIntoView(comment);
@@ -3178,6 +3687,49 @@ window.WA.__contract = "1.0";
   function _bindReviewShellInteractions(listEl) {
     if (!listEl || listEl._waReviewActionBound) return;
     listEl._waReviewActionBound = true;
+    const setExpandedCard = (cardEl) => {
+      const nextCard = cardEl && cardEl.classList && cardEl.matches('.koto-docx-comment-card, .wa-proposal-card')
+        ? cardEl
+        : null;
+      if (listEl._waExpandedReviewCard === nextCard) return;
+      if (listEl._waExpandedReviewCard && listEl._waExpandedReviewCard.classList) {
+        listEl._waExpandedReviewCard.classList.remove('is-hover-expanded');
+      }
+      listEl._waExpandedReviewCard = nextCard;
+      if (nextCard) nextCard.classList.add('is-hover-expanded');
+      _scheduleReviewShellLayout();
+    };
+    listEl.addEventListener('mouseover', (event) => {
+      const target = event && event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const cardEl = target.closest('.koto-docx-comment-card, .wa-proposal-card');
+      if (!cardEl || !listEl.contains(cardEl)) return;
+      setExpandedCard(cardEl);
+    });
+    listEl.addEventListener('mouseout', (event) => {
+      const target = event && event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const cardEl = target.closest('.koto-docx-comment-card, .wa-proposal-card');
+      if (!cardEl || !listEl.contains(cardEl)) return;
+      const related = event.relatedTarget;
+      if (related && cardEl.contains(related)) return;
+      if (listEl._waExpandedReviewCard === cardEl) setExpandedCard(null);
+    });
+    listEl.addEventListener('focusin', (event) => {
+      const target = event && event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const cardEl = target.closest('.koto-docx-comment-card, .wa-proposal-card');
+      if (cardEl && listEl.contains(cardEl)) setExpandedCard(cardEl);
+    });
+    listEl.addEventListener('focusout', (event) => {
+      const target = event && event.target;
+      if (!target || typeof target.closest !== 'function') return;
+      const cardEl = target.closest('.koto-docx-comment-card, .wa-proposal-card');
+      if (!cardEl || !listEl.contains(cardEl)) return;
+      const related = event.relatedTarget;
+      if (related && cardEl.contains(related)) return;
+      if (listEl._waExpandedReviewCard === cardEl) setExpandedCard(null);
+    });
     listEl.addEventListener('mousedown', (event) => {
       const target = event && event.target;
       if (!target || typeof target.closest !== 'function') return;
@@ -3209,43 +3761,48 @@ window.WA.__contract = "1.0";
         return;
       }
 
-      // --- card activate (data-action="activate" on article) ---
-      const cardEl = target.closest('[data-action="activate"]');
-      if (cardEl) {
+      // --- legacy data-review-action buttons (edit, delete, save, cancel, focus) ---
+      const actionEl = target.closest('[data-review-action][data-review-id]');
+      if (actionEl) {
+        const reviewId = String(actionEl.getAttribute('data-review-id') || '').trim();
+        const action = String(actionEl.getAttribute('data-review-action') || '').trim();
+        if (!reviewId || !action) return;
         if (typeof event.preventDefault === 'function') event.preventDefault();
         if (typeof event.stopPropagation === 'function') event.stopPropagation();
-        const reviewId = String(cardEl.getAttribute('data-review-id') || '').trim();
-        if (cardEl.classList.contains('wa-proposal-card')) {
-          _expandReviewProposal(reviewId, { scrollCard: false });
+        if (action === 'focus') {
           window.WA.focusReviewThread(reviewId);
-        } else if (cardEl.classList.contains('koto-docx-comment-card')) {
+          return;
+        }
+        if (action === 'edit') {
           window.WA.editReviewComment(reviewId, 'start');
+          return;
+        }
+        if (action === 'edit-proposal' || action === 'save-proposal' || action === 'cancel-proposal' || action === 'delete-proposal') {
+          const proposalAction = action.replace('-proposal', '');
+          window.WA.editReviewProposal(reviewId, proposalAction);
+          return;
+        }
+        if (action === 'delete') {
+          window.WA.deleteReviewComment(reviewId);
+          return;
+        }
+        if (action === 'save' || action === 'cancel') {
+          window.WA.editReviewComment(reviewId, action);
         }
         return;
       }
 
-      // --- legacy data-review-action buttons (edit, delete, save, cancel, focus) ---
-      const actionEl = target.closest('[data-review-action][data-review-id]');
-      if (!actionEl) return;
-      const reviewId = String(actionEl.getAttribute('data-review-id') || '').trim();
-      const action = String(actionEl.getAttribute('data-review-action') || '').trim();
-      if (!reviewId || !action) return;
+      // --- card activate (data-action="activate" on article) ---
+      const cardEl = target.closest('[data-action="activate"]');
+      if (!cardEl) return;
       if (typeof event.preventDefault === 'function') event.preventDefault();
       if (typeof event.stopPropagation === 'function') event.stopPropagation();
-      if (action === 'focus') {
+      const reviewId = String(cardEl.getAttribute('data-review-id') || '').trim();
+      if (cardEl.classList.contains('wa-proposal-card')) {
+        _expandReviewProposal(reviewId, { scrollCard: false });
         window.WA.focusReviewThread(reviewId);
-        return;
-      }
-      if (action === 'edit') {
-        window.WA.editReviewComment(reviewId, 'start');
-        return;
-      }
-      if (action === 'delete') {
-        window.WA.deleteReviewComment(reviewId);
-        return;
-      }
-      if (action === 'save' || action === 'cancel') {
-        window.WA.editReviewComment(reviewId, action);
+      } else if (cardEl.classList.contains('koto-docx-comment-card')) {
+        window.WA.focusReviewThread(reviewId);
       }
     });
   }
@@ -3263,6 +3820,13 @@ window.WA.__contract = "1.0";
     _scheduleReviewShellLayout();
   };
 
+  window.WA.onReviewProposalInput = (event) => {
+    const textarea = event && (event.currentTarget || event.target);
+    if (!textarea) return;
+    _resizeReviewCommentEditor(textarea);
+    _scheduleReviewShellLayout();
+  };
+
   window.WA.handleReviewCommentCardActivate = (event, reviewId) => {
     const evt = event || window.event;
     if (evt && evt.type === 'keydown') {
@@ -3271,7 +3835,7 @@ window.WA.__contract = "1.0";
       if (typeof evt.preventDefault === 'function') evt.preventDefault();
     }
     if (_isInteractiveReviewTarget(evt)) return;
-    window.WA.editReviewComment(reviewId, 'start');
+    window.WA.focusReviewThread(reviewId);
   };
 
   window.WA.handleReviewProposalCardActivate = (event, reviewId) => {
@@ -3297,14 +3861,30 @@ window.WA.__contract = "1.0";
     _syncReviewSelectionSnapshot({ preserveExisting: true });
     if (!nextState) {
       state._editingReviewCommentId = '';
-      _setReviewCenterOpen(false);
+      const activeTab = _activeReviewTab();
+      const reviewState = _ensureTabReviewState(activeTab);
+      if (_reviewModeHasVisibleEntries(reviewState, 'proposals')) {
+        _setStoredReviewMode('proposals');
+        _focusFirstReviewEntry(reviewState, 'proposal');
+        _setReviewCenterOpen(true);
+      } else {
+        _setStoredReviewMode('all');
+        _setReviewCenterOpen(false);
+      }
       _syncDocxReviewToolbar();
       return;
     }
-    _setStoredReviewMode('comments');
     const activeTab = _activeReviewTab();
     const reviewState = _ensureTabReviewState(activeTab);
-    _focusFirstReviewEntry(reviewState, 'comment');
+    _setStoredReviewMode('comments');
+    if (reviewState) {
+      if (reviewState.comments.length) {
+        _focusFirstReviewEntry(reviewState, 'comment');
+      } else {
+        reviewState.focusedId = '';
+        reviewState.expandedId = '';
+      }
+    }
     _setReviewCenterOpen(true);
     if (reviewState && reviewState.focusedId) {
       _scrollReviewCardIntoView(reviewState.focusedId);
@@ -3324,7 +3904,7 @@ window.WA.__contract = "1.0";
     const counts = _reviewPanelCounts(activeTab);
     const total = counts.commentCount + counts.proposalCount;
     if (!total) {
-      showToast('当前文档暂无批注或建议', 'info');
+      showToast('当前文档暂无批注或修订', 'info');
       return;
     }
     _syncDocxReviewToolbar();
@@ -3336,11 +3916,17 @@ window.WA.__contract = "1.0";
     nav.classList.add('is-open');
     const summaryBtn = nav.querySelector('.wa-docx-review-summary');
     if (summaryBtn) summaryBtn.setAttribute('aria-expanded', 'true');
+    const activeItem = nav.querySelector('.wa-docx-review-nav-item.is-active');
+    if (activeItem && typeof activeItem.scrollIntoView === 'function') {
+      requestAnimationFrame(() => {
+        activeItem.scrollIntoView({ block: 'nearest' });
+      });
+    }
   };
 
   window.WA.toggleReviewOverview = () => {
     if (state.fileType !== 'docx') {
-      showToast('审阅中心当前仅支持 DOCX 文档', 'info');
+      showToast('批注与修订栏当前仅支持 DOCX 文档', 'info');
       return;
     }
     _closeDocxReviewNavMenu();
@@ -3349,12 +3935,7 @@ window.WA.__contract = "1.0";
     const counts = _reviewPanelCounts(activeTab);
     const total = counts.commentCount + counts.proposalCount;
     if (!total) {
-      showToast('当前文档暂无批注或建议', 'info');
-      return;
-    }
-    if (state._reviewCenterOpen && state._reviewMode === 'all') {
-      window.WA.closeReviewCenter();
-      _syncDocxReviewToolbar();
+      showToast('当前文档暂无批注或修订', 'info');
       return;
     }
     _saveEditorRange();
@@ -3370,22 +3951,50 @@ window.WA.__contract = "1.0";
     _syncDocxReviewToolbar();
   };
 
-  window.WA.openReviewCenter = () => {
+  window.WA.openRevisionReviewCenter = () => {
     if (state.fileType !== 'docx') {
-      showToast('审阅中心当前仅支持 DOCX 文档', 'info');
+      showToast('修订栏当前仅支持 DOCX 文档', 'info');
       return;
     }
-    if (state._reviewCenterOpen) {
-      window.WA.closeReviewCenter();
+    _closeDocxReviewNavMenu();
+    const activeTab = _activeReviewTab();
+    if (!activeTab) return;
+    const reviewState = _ensureTabReviewState(activeTab);
+    const visibleProposals = _visibleReviewProposals(reviewState);
+    if (!visibleProposals.length) {
+      const selectionState = _getReviewCommentSelectionState({ includeAnchorMeta: true });
+      if (selectionState && selectionState.supported && selectionState.selection) {
+        window.WA.createReviewRevision();
+      } else {
+        showToast('当前文档暂无修订建议；选中文本后可添加修订', 'info');
+      }
       return;
     }
     _saveEditorRange();
     _syncReviewSelectionSnapshot({ preserveExisting: true });
+    state._editingReviewCommentId = '';
+    _setStoredReviewMode('proposals');
+    _focusFirstReviewEntry(reviewState, 'proposal');
     _setReviewCenterOpen(true);
+    if (reviewState && reviewState.focusedId) {
+      _scrollReviewCardIntoView(reviewState.focusedId);
+      _scrollProposalCardIntoView(reviewState.focusedId.replace(/^proposal:/, ''));
+    }
+    _syncDocxReviewToolbar();
+  };
+
+  window.WA.openReviewCenter = () => {
+    if (state.fileType !== 'docx') {
+      showToast('批注与修订栏当前仅支持 DOCX 文档', 'info');
+      return;
+    }
+    _saveEditorRange();
+    _syncReviewSelectionSnapshot({ preserveExisting: true });
     const activeTab = _activeReviewTab();
     const reviewState = _ensureTabReviewState(activeTab);
     if (!reviewState) return;
     _coerceReviewModeForVisibleContent(reviewState);
+    _setReviewCenterOpen(true);
     _focusFirstReviewEntry(reviewState);
     _renderReviewShell();
     if (reviewState.focusedId) {
@@ -3397,11 +4006,13 @@ window.WA.__contract = "1.0";
   window.WA.closeReviewCenter = () => {
     _closeDocxReviewNavMenu();
     state._editingReviewCommentId = '';
+    state._editingReviewProposalId = '';
     _setReviewCenterOpen(false);
   };
 
   window.WA.setReviewMode = (mode) => {
     _setStoredReviewMode(mode);
+    _syncInlineReviewPreviewForActiveFile();
     _renderReviewShell();
     _syncDocxReviewToolbar();
     _renderReviewSelectionLauncher();
@@ -3413,8 +4024,6 @@ window.WA.__contract = "1.0";
     if (shell && shell.style.display !== 'none') {
       _scheduleReviewShellLayout();
     }
-    // Also refresh the WPS-style per-page rail
-    if (_wpsRailCtrl) _wpsRailCtrl.refresh();
     _renderReviewSelectionLauncher();
   };
 
@@ -3456,6 +4065,7 @@ window.WA.__contract = "1.0";
       nextReviewState.focusedId = reviewId;
       _coerceReviewModeForVisibleContent(nextReviewState, 'comment');
     }
+    state._editingReviewProposalId = '';
     state._editingReviewCommentId = reviewId;
     _setReviewCenterOpen(true);
     _renderReviewShell();
@@ -3467,6 +4077,132 @@ window.WA.__contract = "1.0";
         if (typeof input.focus === 'function') input.focus();
       }
     });
+  };
+
+  window.WA.createReviewRevision = () => {
+    if (state.fileType !== 'docx') {
+      showToast('当前仅 DOCX 文档支持修订', 'info');
+      return;
+    }
+    _saveEditorRange();
+    _syncReviewSelectionSnapshot({ preserveExisting: true });
+    const selectionState = _getReviewCommentSelectionState({ includeAnchorMeta: true });
+    if (!selectionState.supported || !selectionState.selection) {
+      showToast(selectionState.message || '请先在文档中选中要修订的文字', 'info');
+      return;
+    }
+    const targetTab = _activeReviewTab();
+    const reviewState = _ensureTabReviewState(targetTab);
+    if (!targetTab || !reviewState) return;
+    const newProposal = _normalizeReviewProposal(_buildNewReviewProposal(selectionState.selection), reviewState.proposals.length);
+    reviewState.proposals = _mergeReviewProposals(reviewState.proposals, [newProposal]);
+    _syncReviewProposalServerData(targetTab, reviewState);
+    const reviewId = String(newProposal.review_id || ('proposal:' + newProposal.id));
+    reviewState.focusedId = reviewId;
+    reviewState.expandedId = reviewId;
+    state._editingReviewCommentId = '';
+    state._editingReviewProposalId = reviewId;
+    _setStoredReviewMode('proposals');
+    _setReviewCenterOpen(true);
+    _renderReviewShell();
+    requestAnimationFrame(() => {
+      _scrollReviewCardIntoView(reviewId);
+      _scrollProposalCardIntoView(String(newProposal.id || '').trim());
+      const input = $(_reviewProposalTextareaId(reviewId));
+      if (input) {
+        _resizeReviewCommentEditor(input);
+        if (typeof input.focus === 'function') input.focus();
+      }
+    });
+  };
+
+  window.WA.editReviewProposal = (reviewId, action = 'start') => {
+    const entry = _findReviewEntry(reviewId);
+    if (!entry.item || entry.kind !== 'proposal') return;
+    const targetTab = entry.tab || _activeReviewTab();
+    const reviewState = _ensureTabReviewState(targetTab);
+    if (!targetTab || !reviewState) return;
+    const resolvedReviewId = String(entry.item.review_id || entry.item.id || '').trim();
+    const proposalId = String(entry.item.id || resolvedReviewId.replace(/^proposal:/, '')).trim();
+    const proposalIndex = reviewState.proposals.findIndex((item) => {
+      const itemReviewId = String((item && (item.review_id || item.id)) || '').trim();
+      return itemReviewId === resolvedReviewId || String((item && item.id) || '').trim() === proposalId;
+    });
+    if (proposalIndex < 0) return;
+
+    if (action === 'start' || action === 'edit') {
+      state._editingReviewCommentId = '';
+      state._editingReviewProposalId = resolvedReviewId;
+      reviewState.focusedId = resolvedReviewId;
+      reviewState.expandedId = resolvedReviewId;
+      _setStoredReviewMode('proposals');
+      _setReviewCenterOpen(true);
+      _renderReviewShell();
+      requestAnimationFrame(() => {
+        _scrollProposalCardIntoView(proposalId);
+        const input = $(_reviewProposalTextareaId(resolvedReviewId));
+        if (input && typeof input.focus === 'function') {
+          _resizeReviewCommentEditor(input);
+          input.focus();
+          if (typeof input.setSelectionRange === 'function') {
+            const end = String(input.value || '').length;
+            input.setSelectionRange(end, end);
+          }
+        }
+      });
+      return;
+    }
+
+    if (action === 'delete') {
+      reviewState.proposals.splice(proposalIndex, 1);
+      state._editingReviewProposalId = '';
+      reviewState.focusedId = '';
+      reviewState.expandedId = '';
+      _syncReviewProposalServerData(targetTab, reviewState);
+      _renderReviewShell();
+      _syncDocxReviewToolbar();
+      WA.scheduleAutoSave();
+      showToast('已删除修订', 'success');
+      return;
+    }
+
+    if (action === 'cancel') {
+      state._editingReviewProposalId = '';
+      const current = reviewState.proposals[proposalIndex];
+      if (current && current._draft && !String(current.proposed_text || current.value || '').trim()) {
+        reviewState.proposals.splice(proposalIndex, 1);
+        _syncReviewProposalServerData(targetTab, reviewState);
+      }
+      _renderReviewShell();
+      _syncDocxReviewToolbar();
+      return;
+    }
+
+    const textarea = $(_reviewProposalTextareaId(resolvedReviewId));
+    const nextText = textarea ? String(textarea.value || '').trim() : String(entry.item.proposed_text || '').trim();
+    if (!nextText) {
+      showToast('修订内容不能为空', 'info');
+      if (textarea && typeof textarea.focus === 'function') textarea.focus();
+      return;
+    }
+    const nextProposal = Object.assign({}, reviewState.proposals[proposalIndex], {
+      proposed_text: nextText,
+      value: nextText,
+      _draft: false,
+      _reviewStatus: '',
+    });
+    reviewState.proposals[proposalIndex] = _normalizeReviewProposal(nextProposal, proposalIndex);
+    state._editingReviewProposalId = '';
+    reviewState.focusedId = resolvedReviewId;
+    reviewState.expandedId = resolvedReviewId;
+    _syncReviewProposalServerData(targetTab, reviewState);
+    _setStoredReviewMode('proposals');
+    _setReviewCenterOpen(true);
+    _renderReviewShell();
+    _scrollProposalCardIntoView(proposalId);
+    _syncDocxReviewToolbar();
+    WA.scheduleAutoSave();
+    showToast('已添加修订', 'success');
   };
 
   window.WA.deleteReviewComment = (reviewId) => {
@@ -3579,7 +4315,7 @@ window.WA.__contract = "1.0";
       await _switchToTab(entry.tab.path);
     }
     if (entry.kind === 'proposal') {
-      _focusReviewProposal(entry.item);
+      await _focusReviewProposal(entry.item);
       return;
     }
     _focusReviewComment(entry.item);
@@ -3764,6 +4500,14 @@ window.WA.__contract = "1.0";
 
     progressive.promise = (async () => {
       try {
+        if (meta.deferred_images) {
+          await new Promise((resolve) => setTimeout(resolve, 1200));
+          if (state.activeTabPath !== tab.path) {
+            progressive.loading = false;
+            progressive.promise = null;
+            return null;
+          }
+        }
         const res = await fetch('/api/v1/workspace/docx_full', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3815,6 +4559,7 @@ window.WA.__contract = "1.0";
     if (!tab || tab.fileType !== 'docx' || !payload || typeof payload !== 'object') return;
     const html = typeof payload.html === 'string' ? payload.html : '';
     const docxData = (tab.serverData && typeof tab.serverData === 'object') ? tab.serverData : {};
+    const reviewState = _ensureTabReviewState(tab);
     tab.cache = html;
     docxData.html = html;
     docxData.header_html = typeof payload.header_html === 'string' ? payload.header_html : '';
@@ -3828,6 +4573,12 @@ window.WA.__contract = "1.0";
     if (Object.prototype.hasOwnProperty.call(payload, 'margin_right_px')) docxData.margin_right_px = payload.margin_right_px;
     if (Array.isArray(payload.comments)) {
       docxData.comments = payload.comments.map((comment) => _cloneSerializable(comment, {}) || {});
+    }
+    const sourceProposals = Array.isArray(payload.proposals)
+      ? payload.proposals
+      : (Array.isArray(reviewState && reviewState.proposals) ? reviewState.proposals : docxData.proposals);
+    if (Array.isArray(sourceProposals)) {
+      docxData.proposals = sourceProposals.map((proposal) => _cloneSerializable(proposal, {}) || {});
     }
     tab.serverData = docxData;
   }
@@ -3978,10 +4729,11 @@ window.WA.__contract = "1.0";
         html += `<div class="wa-ctx-separator"></div>`;
       }
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserRename();_closeCtxMenu()">${SVG.rename} 重命名</div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCopyPath();_closeCtxMenu()">${SVG.copy} 复制路径</div>`;
       html += `<div class="wa-ctx-separator"></div>`;
       html += `<div class="wa-ctx-item danger" onclick="WA._fsBrowserDelete();_closeCtxMenu()">${SVG.del} 删除文件夹</div>`;
     } else {
-      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserOpen();_closeCtxMenu()">${SVG.open} ${supported ? '打开' : '本地打开'}</div>`;
+      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserOpen();_closeCtxMenu()">${SVG.open} 打开</div>`;
       html += `<div class="wa-ctx-separator"></div>`;
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAddToTempWorkspace();_closeCtxMenu()">${SVG.newf} 加入临时工作区</div>`;
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAddToWorkspace();_closeCtxMenu()">${SVG.newf} 加入我的工作区</div>`;
@@ -3989,8 +4741,7 @@ window.WA.__contract = "1.0";
       html += `<div class="wa-ctx-separator"></div>`;
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCopy();_closeCtxMenu()">${SVG.copy} 复制</div>`;
       html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCut();_closeCtxMenu()">${SVG.cut} 剪切</div>`;
-      if (clip && !isFolder) {
-        // paste next to file = paste into same dir
+      if (clip) {
         html += `<div class="wa-ctx-item" onclick="WA._fsBrowserPaste();_closeCtxMenu()">${SVG.paste} 粘贴到此处</div>`;
       }
       html += `<div class="wa-ctx-separator"></div>`;
@@ -4051,7 +4802,6 @@ window.WA.__contract = "1.0";
     const { path, name } = _fsBrowserCtxTarget;
     if (!path) return;
     state._fsClipboard = { path, name, mode: 'cut' };
-    // Dim the item to signal it's being moved
     const el = document.querySelector(`.wa-file-item[data-path="${CSS.escape(path)}"]`);
     if (el) el.style.opacity = '0.45';
     showToast('"' + name + '" 准备移动', 'info');
@@ -4061,7 +4811,6 @@ window.WA.__contract = "1.0";
     const clip = state._fsClipboard;
     if (!clip) return;
     const { path: target, isFolder } = _fsBrowserCtxTarget;
-    // dst_dir: if target is a folder, paste into it; otherwise paste into its parent
     const dstDir = isFolder ? target : target.replace(/[\\/][^\\/]+$/, '');
     try {
       const res = await fetch('/api/v1/workspace/fs_copy', {
@@ -4073,12 +4822,12 @@ window.WA.__contract = "1.0";
       if (!res.ok) throw new Error(json.error || '操作失败');
       if (clip.mode === 'cut') state._fsClipboard = null;
       showToast('已粘贴 "' + clip.name + '"', 'success');
-      // Invalidate cache for dst folder and re-expand it
       delete state._browserCache[dstDir];
-      if (state._browserExpanded.has(dstDir)) state._browserExpanded.delete(dstDir);
       state._browserExpanded.add(dstDir);
       await _softRefreshBrowser();
-    } catch (e) { showToast(e.message, 'error'); }
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
   };
 
   window.WA._fsBrowserCopyPath = () => {
@@ -4101,7 +4850,8 @@ window.WA.__contract = "1.0";
     input.className = 'wa-rename-input';
     input.value = stem;
     labelSpan.replaceWith(input);
-    input.focus(); input.select();
+    input.focus();
+    input.select();
     const commit = async () => {
       const newName = input.value.trim();
       if (!newName || newName === stem) { _softRefreshBrowser(); return; }
@@ -4114,8 +4864,9 @@ window.WA.__contract = "1.0";
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || '重命名失败');
         showToast('已重命名为 ' + json.name, 'success');
-      } catch (e) { showToast(e.message, 'error'); }
-      // Invalidate parent folder cache
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
       const parent = path.replace(/[\\/][^\\/]+$/, '');
       delete state._browserCache[parent];
       await _softRefreshBrowser();
@@ -4139,44 +4890,24 @@ window.WA.__contract = "1.0";
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || '删除失败');
       showToast('已删除 "' + name + '"', 'success');
-      // Remove from open tabs if it was open
-      const tabIdx = state.openTabs.findIndex(t => t.path === path);
-      if (tabIdx >= 0) {
-        const wasActive = state.openTabs[tabIdx].path === state.activeTabPath;
-        if (wasActive && state.activeEditor) {
-          try {
-            state.activeEditor.destroy();
-          } catch(e) {
-            console.error('Editor destroy failed:', e);
-            const canvas = document.getElementById('wa-canvas');
-            if (canvas) canvas.innerHTML = '';
-          }
-          state.activeEditor = null; state.activeTabPath = null;
-          state.fileId = null; state.fileType = null; state.fileName = null; state.filePath = null;
-          const canvas = document.getElementById('wa-canvas');
-          if (canvas) canvas.innerHTML = '';
-        }
-        state.openTabs.splice(tabIdx, 1);
-        WA._renderTabs();
-      }
-      // Invalidate parent cache
+      await _removeOpenTabAfterFileDeleted(path);
       const parent = path.replace(/[\\/][^\\/]+$/, '');
       delete state._browserCache[parent];
       if (state._browserExpanded.has(path)) state._browserExpanded.delete(path);
       await _softRefreshBrowser();
-    } catch (e) { showToast(e.message, 'error'); }
+    } catch (e) {
+      showToast(e.message, 'error');
+    }
   };
 
   window.WA._fsBrowserNewFile = () => {
     const { path } = _fsBrowserCtxTarget;
-    if (!path) return;
-    WA.startNewFile(path);
+    if (path) WA.startNewFile(path);
   };
 
   window.WA._fsBrowserNewFolder = () => {
     const { path } = _fsBrowserCtxTarget;
-    if (!path) return;
-    WA.startNewFolder(path);
+    if (path) WA.startNewFolder(path);
   };
 
   window.WA._fsBrowserAISummary = async () => {
@@ -4237,7 +4968,7 @@ window.WA.__contract = "1.0";
   };
 
   window.WA.deleteWorkspaceFile = async (filepath) => {
-    if (!confirm(`确定要删除 "${filepath.split('/').pop()}" 吗？`)) return;
+    if (!confirm(`确定要将 "${filepath.split('/').pop()}" 移入回收站吗？`)) return;
     try {
       const res = await fetch('/api/v1/workspace/file?path=' + encodeURIComponent(filepath), { method: 'DELETE' });
       const json = await res.json();
@@ -4250,41 +4981,8 @@ window.WA.__contract = "1.0";
         }
         return;
       }
-      // Remove from open tabs so auto-save can't recreate the file
-      const tabIdx = state.openTabs.findIndex(t => t.path === filepath);
-      if (tabIdx >= 0) {
-        const wasActive = state.openTabs[tabIdx].path === state.activeTabPath;
-        if (wasActive && state.activeEditor) {
-          try {
-            state.activeEditor.destroy();
-          } catch(e) {
-            console.error('Editor destroy failed:', e);
-            const canvas = document.getElementById('wa-canvas');
-            if (canvas) canvas.innerHTML = '';
-          }
-          state.activeEditor = null;
-          state.activeTabPath = null;
-          state.fileId = null;
-          state.fileType = null;
-          state.fileName = null;
-          state.filePath = null;
-          state.wsSourcePath = null;
-        }
-        state.openTabs.splice(tabIdx, 1);
-        clearTimeout(_autoSaveTimer);
-        _autoSaveTimer = null;
-        _renderTabs();
-        if (state.openTabs.length > 0) {
-          await _switchToTab(state.openTabs[Math.max(0, tabIdx - 1)].path);
-        } else {
-          toggleWorkspace(false);
-          const fileNameEl = $('wa-file-name');
-          if (fileNameEl) fileNameEl.textContent = '全格式 AI 工作区';
-          $('wa-save-btn').disabled = true;
-          const _saBtn2 = $('wa-saveas-btn'); if (_saBtn2) _saBtn2.disabled = true;
-        }
-      }
-      showToast('已删除 ' + filepath.split('/').pop(), 'success');
+      await _removeOpenTabAfterFileDeleted(filepath);
+      showToast('已移入回收站：' + filepath.split('/').pop(), 'success');
       loadWorkspaceFiles();
     } catch (e) {
       showToast(e.message, 'error');
@@ -4301,13 +4999,7 @@ window.WA.__contract = "1.0";
     } else if (supported) {
       WA.openWorkspaceFile(path);
     } else {
-      // Not directly editable — offer native open
-      showToast('此格式暂不支持在线编辑，已触发本地打开', 'info');
-      fetch('/api/v1/workspace/open-native', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      }).catch(() => {});
+      showToast('此格式暂不支持在线编辑：' + (path || '').split(/[\\/]/).pop(), 'info');
     }
   };
 
@@ -4362,21 +5054,25 @@ window.WA.__contract = "1.0";
     if (!paths.length) return;
     const openInPaths = paths.filter(p => state.wsSourcePath && (p === state.wsSourcePath || p.endsWith('/' + state.fileName)));
     if (openInPaths.length) {
-      if (!confirm(`所选文件中包含当前打开的文件，确定要删除吗？`)) return;
-    } else if (!confirm(`确定要删除选中的 ${paths.length} 个文件吗？`)) return;
+      if (!confirm(`所选文件中包含当前打开的文件，确定要移入回收站吗？`)) return;
+    } else if (!confirm(`确定要将选中的 ${paths.length} 个文件移入回收站吗？`)) return;
     let failed = 0;
+    let skippedExternal = 0;
     for (const p of paths) {
       try {
-        // Use fs_delete for absolute paths (browser), workspace delete for relative paths
         const isAbs = /^[A-Za-z]:[/\\]|\//.test(p);
-        const delUrl = isAbs
-          ? '/api/v1/workspace/fs_delete?path=' + encodeURIComponent(p)
-          : '/api/v1/workspace/file?path='       + encodeURIComponent(p);
-        const res = await fetch(delUrl, { method: 'DELETE' });
+        if (isAbs) {
+          skippedExternal++;
+          continue;
+        }
+        const res = await fetch('/api/v1/workspace/file?path=' + encodeURIComponent(p), { method: 'DELETE' });
         if (!res.ok) failed++;
+        else await _removeOpenTabAfterFileDeleted(p);
       } catch { failed++; }
     }
-    showToast(failed ? `已删除 ${paths.length - failed} 个，${failed} 个失败` : `已删除 ${paths.length} 个文件`, failed ? 'error' : 'success');
+    const deleted = paths.length - failed - skippedExternal;
+    const suffix = skippedExternal ? `，已跳过 ${skippedExternal} 个外部文件` : '';
+    showToast(failed ? `已移入回收站 ${deleted} 个，${failed} 个失败${suffix}` : `已将 ${deleted} 个文件移入回收站${suffix}`, failed ? 'error' : 'success');
     WA.toggleSelectMode();
     await loadWorkspaceFiles();
   };
@@ -4722,12 +5418,12 @@ window.WA.__contract = "1.0";
 
   window.WA.deleteFolderWorkspace = async (folderPath, folderName) => {
     const name = folderName || folderPath.split('/').pop();
-    if (!confirm(`确定要删除文件夹 "${name}" 及其所有内容吗？此操作不可撤销。`)) return;
+    if (!confirm(`确定要将文件夹 "${name}" 及其所有内容移入回收站吗？`)) return;
     try {
       const res = await fetch('/api/v1/workspace/folder?path=' + encodeURIComponent(folderPath), { method: 'DELETE' });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || '删除失败');
-      showToast(`已删除文件夹 "${name}"`, 'success');
+      showToast(`已将文件夹 "${name}" 移入回收站`, 'success');
       await loadWorkspaceFiles();
     } catch (e) {
       showToast(e.message, 'error');
@@ -4831,10 +5527,15 @@ window.WA.__contract = "1.0";
       const name = input.value.trim();
       if (!name) { row.remove(); return; }
       try {
-        const endpoint = kind === 'folder' ? '/api/v1/workspace/create_folder' : '/api/v1/workspace/create_file';
-        const body = kind === 'folder'
-          ? { parent: parentPath || '', name }
-          : { folder: parentPath || '', name };
+        const isBrowserPath = parentPath && _isAbsolutePath(parentPath);
+        const endpoint = isBrowserPath
+          ? (kind === 'folder' ? '/api/v1/fs/create_folder' : '/api/v1/fs/create_file')
+          : (kind === 'folder' ? '/api/v1/workspace/create_folder' : '/api/v1/workspace/create_file');
+        const body = isBrowserPath
+          ? { parent: parentPath, name }
+          : (kind === 'folder'
+            ? { parent: parentPath || '', name }
+            : { folder: parentPath || '', name });
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4847,7 +5548,13 @@ window.WA.__contract = "1.0";
         showToast(e.message, 'error');
       }
       row.remove();
-      await loadWorkspaceFiles();
+      if (parentPath && _isAbsolutePath(parentPath)) {
+        delete state._browserCache[parentPath];
+        state._browserExpanded.add(parentPath);
+        await _softRefreshBrowser();
+      } else {
+        await loadWorkspaceFiles();
+      }
     };
 
     let committed = false;
@@ -4937,104 +5644,16 @@ window.WA.__contract = "1.0";
   };
 
   window.WA.openWorkspaceFile = async (path) => {
-    // If already open in a tab, switch instantly (no server fetch)
-    if (state.openTabs.some(t => t.path === path)) {
-      _trackUserOpen(path);  // still track re-opens as user intent
-      await _switchToTab(path);
-      _maybeAutoOpenReviewCenterForImportedItems(_ensureTabReviewState(_activeReviewTab()));
-      return;
-    }
-    const baseName = path.split('/').pop();
-    _trackUserOpen(path);   // record before fetch so it's captured even if load fails
-    showToast('正在加载 ' + baseName, 'success');
-    if (state.isLoading) { showToast('文件正在加载中，请稍候...', 'error'); return; }
-    state.isLoading = true;
-    setLoading(true, `正在打开 ${baseName}…`);
-    $('upload-progress').style.width = '30%';
-    try {
-      const res = await fetch('/api/v1/workspace/open_file_by_path', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      });
-      $('upload-progress').style.width = '80%';
-      const json = await _safeJson(res);
-      if (!res.ok) throw new Error(json.error || '打开失败');
-      $('upload-progress').style.width = '100%';
-      await _applyFileJson(json, path, null);
-      loadRecentFiles();   // refresh recent list after successful open
-    } catch (e) {
-      console.error('[WA openWorkspaceFile]', e);
-      showToast('无法打开文件: ' + e.message, 'error', 8000);
-      $('upload-progress').style.width = '0%';
-    } finally {
-      state.isLoading = false;
-      setLoading(false);
-    }
+    return _requireWorkspaceFileLoader().openWorkspaceFile(path);
   };
 
   window.WA.reloadFileByPath = async (filePath, supported = true) => {
-    if (!filePath) return;
-    const rawPath = String(filePath);
-    const normalizedPath = rawPath.replace(/\\/g, '/');
-    const workspacePath = (state._workspacePath || '').replace(/\\/g, '/');
-    const looksAbsolute = /^(?:[a-zA-Z]:\/|\/|\/\/)/.test(normalizedPath);
-    let relativePath = '';
-    if (workspacePath && looksAbsolute && (
-      normalizedPath === workspacePath || normalizedPath.startsWith(workspacePath + '/')
-    )) {
-      relativePath = normalizedPath.slice(workspacePath.length).replace(/^\//, '');
-    } else if (!looksAbsolute) {
-      relativePath = normalizedPath.replace(/^\//, '');
-    }
-
-    try {
-      let res;
-      let json;
-      let wsPath = filePath;
-      if (relativePath) {
-        res = await fetch('/api/v1/workspace/open_file_by_path', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: relativePath }),
-        });
-        json = await _safeJson(res);
-        wsPath = relativePath;
-      } else {
-        if (!supported) return;
-        res = await fetch('/api/v1/workspace/open_abs_file', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: rawPath }),
-        });
-        json = await _safeJson(res);
-        wsPath = rawPath;
-      }
-
-      if (!res.ok) throw new Error(json.error || '刷新失败');
-      await _applyFileJson(json, wsPath, null);
-      loadRecentFiles();
-      _renderBrowserTree();
-    } catch (e) {
-      console.warn('[WA reloadFileByPath]', e);
-      throw e;
-    }
+    return _requireWorkspaceFileLoader().reloadFileByPath(filePath, supported);
   };
 
   // Expose a parsedFile handler so openRecentFile can mount responses directly.
   window.WA._openParsedFile = async (d, wsPath) => {
-    if (state.isLoading) { showToast('文件正在加载中，请稍候...', 'error'); return; }
-    state.isLoading = true;
-    setLoading(true, `正在打开 ${d.file_name || '文件'}…`);
-    try {
-      await _applyFileJson(d, wsPath || d.file_name, null);
-    } catch(e) {
-      console.error('[WA _openParsedFile]', e);
-      showToast(e.message, 'error');
-    } finally {
-      state.isLoading = false;
-      setLoading(false);
-    }
+    return _requireWorkspaceFileLoader().openParsedFile(d, wsPath);
   };
 
   window.WA.openRecentFile = async (filePath) => {
@@ -5322,6 +5941,7 @@ window.WA.__contract = "1.0";
 
   function _getDocxSelectionPayload({ includeOverlay = true, allowStaleFallback = true, includeAnchorMeta = false } = {}) {
     if (state.fileType !== 'docx') return null;
+    if (state._selectionDismissed) return null;
 
     const _makePayload = (kind, rawText, {
       previewText = '',
@@ -5483,31 +6103,13 @@ window.WA.__contract = "1.0";
 
   function _updateSubjectBar(fileName, fileType) {
     const footerChip = $('wa-footer-file-chip');
-    const footerLabel = $('wa-footer-file-label');
-    const footerIcon = $('wa-footer-file-icon');
     const footerAttachBtn = $('wa-footer-attach-current-btn');
-
-    if (!fileName) {
-      if (footerChip) footerChip.style.display = 'none';
-      if (footerAttachBtn) footerAttachBtn.style.display = 'none';
-      return;
+    const subjectBar = $('wa-subject-bar');
+    if (subjectBar) {
+      subjectBar.remove();
     }
-
-    if (footerChip && footerLabel) {
-      footerLabel.textContent = fileName;
-      if (footerIcon) {
-        const ext = (fileName.split('.').pop() || '').toLowerCase();
-        const EXT_COLORS = { docx: '#2563eb', doc: '#2563eb', xlsx: '#16a34a', xls: '#16a34a', pptx: '#dc2626', ppt: '#dc2626', pdf: '#7c3aed', txt: '#6b7280', md: '#6b7280' };
-        footerIcon.textContent = ext.toUpperCase().slice(0, 4);
-        footerIcon.style.background = EXT_COLORS[ext] || '#6b7280';
-      }
-      footerChip.style.display = 'flex';
-    }
-
-    if (footerAttachBtn) {
-      footerAttachBtn.style.display = 'none';
-    }
-
+    if (footerChip) footerChip.style.display = 'none';
+    if (footerAttachBtn) footerAttachBtn.style.display = 'none';
   }
 
   // ── Extract PPTX table shape data as tab-separated text (for AI actions) ──
@@ -5994,35 +6596,36 @@ window.WA.__contract = "1.0";
     }
   }, { passive: true, capture: true });
 
-  const _WA_QUICK_ACTION_LABELS = {
-    '润色': '润色优化',
-    '翻译': '翻译（中英互译）',
-    '总结': '总结要点',
-    '续写': '续写补全',
-    '改写': '改写',
-    '解释': '解释分析',
-    '检查': '检查建议',
-  };
-  const _WA_QUICK_ACTION_TO_EDITOR_ACTION = {
-    '润色': 'polish',
-    '翻译': 'translate',
-    '总结': 'summarize',
-    '续写': 'continue_writing',
-    '改写': 'rewrite',
-    '解释': 'explain',
-    '检查': 'check',
-  };
-  const _WA_READ_ONLY_QUICK_ACTIONS = new Set(['总结', '解释', '翻译']);
-  const _WA_FULL_DOC_QUICK_ACTIONS = new Set(['总结', '续写', '检查']);
-  let _waAiTransport = null;
+  const _WA_FULL_DOC_QUICK_ACTIONS = new Set(['润色', '翻译', '总结', '续写', '检查']);
   let _waAiResultsRuntime = null;
   let _waQuickActionRuntime = null;
   let _waConversationRuntime = null;
   let _waTaskDispatcher = null;
+  let _waQuickActionDispatcherAttached = false;
+
+  function _sanitizeRenderedHtml(html) {
+    const template = document.createElement('template');
+    template.innerHTML = String(html || '');
+    template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base').forEach((node) => node.remove());
+    template.content.querySelectorAll('*').forEach((node) => {
+      Array.from(node.attributes || []).forEach((attr) => {
+        const name = String(attr.name || '').toLowerCase();
+        const value = String(attr.value || '').trim().toLowerCase();
+        if (name.startsWith('on')) {
+          node.removeAttribute(attr.name);
+          return;
+        }
+        if ((name === 'href' || name === 'src') && value && !/^(https?:|mailto:|\/|#|data:image\/)/i.test(value)) {
+          node.removeAttribute(attr.name);
+        }
+      });
+    });
+    return template.innerHTML;
+  }
 
   function _waRenderMarkdown(text) {
     if (window.marked) {
-      try { return window.marked.parse(text || ''); } catch (e) {}
+      try { return _sanitizeRenderedHtml(window.marked.parse(text || '')); } catch (e) {}
     }
     return (text || '')
       .replace(/&/g, '&amp;')
@@ -6123,12 +6726,15 @@ window.WA.__contract = "1.0";
     state.lastPinnedSel = hasSelection ? state.pinnedSelection : null;
     state.pendingToolCall = null;
 
+    _initWorkspaceAiRuntimes();
     if (!_waTaskDispatcher || typeof _waTaskDispatcher.dispatchQuickAction !== 'function') {
       loadingEl.classList.remove('streaming');
       loadingEl.textContent = '快捷动作运行时未加载，请刷新后重试。';
       msgs.scrollTop = msgs.scrollHeight;
       return;
     }
+
+    _clearPendingTaskResultFollowupBinding();
 
     _waTaskDispatcher.dispatchQuickAction(action, {
       selectionText: sel,
@@ -6193,6 +6799,16 @@ window.WA.__contract = "1.0";
     state.lastPinnedSel = null;
     state._selectionDismissed = true;
     lastSelectionText = '';
+    try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+    try {
+      if (state.activeEditor) {
+        state.activeEditor._savedSel = null;
+        state.activeEditor._toolbarSelection = null;
+        state.activeEditor._lastTableText = null;
+        state.activeEditor._lastTableRows = 0;
+        state.activeEditor._lastTableCols = 0;
+      }
+    } catch (_) {}
     // Update context bar (selection cleared, may still show file count)
     _updateContextBar();
     _clearPinnedHighlight();
@@ -6207,6 +6823,7 @@ window.WA.__contract = "1.0";
     _waInput.addEventListener('input', () => autoResize(_waInput));
     window.addEventListener('resize', () => autoResize(_waInput));
     _waInput.addEventListener('mousedown', () => {
+      if (state._selectionDismissed) return;
       const liveSelection = _getLiveEditorSelectionForAI();
       if (liveSelection) {
         // Always update chip — reselecting new text replaces the old context
@@ -6551,7 +7168,8 @@ window.WA.__contract = "1.0";
       this._containerId = 'wa-xlsx-sheet';
       this._api = null;       // FUniver instance
       this._images = [];      // [{src, x, y, w, h}] overlay images for export
-      $(this.containerId).classList.add('active');
+      const wrapper = $(this.containerId);
+      if (wrapper) wrapper.classList.add('active');
     }
 
     render(workbookData) {
@@ -6562,6 +7180,7 @@ window.WA.__contract = "1.0";
       }
 
       const wrapper = $(this.containerId);
+      if (!wrapper) return;
       wrapper.innerHTML = '';
 
       // Univer Sheets container — fills entire wrapper (Univer renders its own toolbar inside)
@@ -6740,7 +7359,8 @@ window.WA.__contract = "1.0";
       this._nudgeTimer = null;      // debounce timer for arrow-key nudge
       this._tableSelection = null;
       this._tableSelectionCleanup = null;
-      $('wa-pptx-editor').classList.add('active');
+      const editor = $('wa-pptx-editor');
+      if (editor) editor.classList.add('active');
     }
 
     render(richData) {
@@ -6861,8 +7481,10 @@ window.WA.__contract = "1.0";
     }
 
     destroy() {
-      $('wa-pptx-editor').classList.remove('active');
-      $('wa-pptx-thumbstrip').innerHTML = '';
+      const editor = $('wa-pptx-editor');
+      if (editor) editor.classList.remove('active');
+      const thumbstrip = $('wa-pptx-thumbstrip');
+      if (thumbstrip) thumbstrip.innerHTML = '';
       const canvas = $('wa-pptx-slide-canvas');
       if (canvas) canvas.innerHTML = '';
       this._clearTableSelection({ restoreWholeTableSummary: false });
@@ -7023,7 +7645,8 @@ window.WA.__contract = "1.0";
     _initKeyHandler() {
       this._keyHandler = (e) => {
         // Only act when PPTX editor is active
-        if (!$('wa-pptx-editor').classList.contains('active')) return;
+        const editor = $('wa-pptx-editor');
+        if (!editor || !editor.classList.contains('active')) return;
         const active = document.activeElement;
         if (_shouldIgnorePptxGlobalKeydown(e.target) || _shouldIgnorePptxGlobalKeydown(active)) return;
 
@@ -10300,7 +10923,8 @@ window.WA.__contract = "1.0";
     constructor() {
       this.containerId = 'wa-image-viewer';
       this._scale = 1.0;
-      $(this.containerId).classList.add('active');
+      const container = $(this.containerId);
+      if (container) container.classList.add('active');
       this._wheelHandler = (e) => {
         if (!e.ctrlKey && !e.metaKey) return;
         e.preventDefault();
@@ -10309,10 +10933,11 @@ window.WA.__contract = "1.0";
         const img = $(this.containerId).querySelector('img');
         if (img) img.style.transform = `scale(${this._scale})`;
       };
-      $(this.containerId).addEventListener('wheel', this._wheelHandler, { passive: false });
+      if (container) container.addEventListener('wheel', this._wheelHandler, { passive: false });
     }
     render(rawUrl) {
       const c = $(this.containerId);
+      if (!c) return;
       this._scale = 1.0;
       c.innerHTML = `<div class="wa-image-wrap"><img src="${rawUrl}" alt="image" draggable="false" /></div>`;
     }
@@ -10320,9 +10945,11 @@ window.WA.__contract = "1.0";
     serialize() { return null; }
     applyToolCall() {}
     destroy() {
-      $(this.containerId).classList.remove('active');
-      $(this.containerId).innerHTML = '';
-      $(this.containerId).removeEventListener('wheel', this._wheelHandler);
+      const container = $(this.containerId);
+      if (!container) return;
+      container.classList.remove('active');
+      container.innerHTML = '';
+      container.removeEventListener('wheel', this._wheelHandler);
     }
   }
 
@@ -10332,13 +10959,15 @@ window.WA.__contract = "1.0";
       this._fileType = fileType; // 'text' | 'code'
       this._ta = $('wa-text-content');
       this._badge = $('wa-text-lang-badge');
-      $('wa-text-editor').classList.add('active');
-      this._ta.addEventListener('input', () => WA.scheduleAutoSave());
+      const editor = $('wa-text-editor');
+      if (editor) editor.classList.add('active');
+      if (this._ta) this._ta.addEventListener('input', () => WA.scheduleAutoSave());
     }
 
     render(data) {
       const content = (data && typeof data === 'object') ? (data.content || '') : (data || '');
       const lang    = (data && typeof data === 'object') ? (data.language || '') : '';
+      if (!this._ta) return;
       this._ta.value = content;
       if (this._badge) {
         this._badge.textContent = lang ? lang.toUpperCase() : 'TXT';
@@ -10347,19 +10976,20 @@ window.WA.__contract = "1.0";
       this._ta.focus();
     }
 
-    getContent() { return this._ta.value; }
+    getContent() { return this._ta ? this._ta.value : ''; }
 
-    serialize() { return this._ta.value; }
+    serialize() { return this._ta ? this._ta.value : ''; }
 
     applyToolCall(cmd) {
       if (cmd.type === 'set_html' || cmd.type === 'set_text') {
-        this._ta.value = cmd.value || '';
+        if (this._ta) this._ta.value = cmd.value || '';
         WA.scheduleAutoSave();
       }
     }
 
     destroy() {
-      $('wa-text-editor').classList.remove('active');
+      const editor = $('wa-text-editor');
+      if (editor) editor.classList.remove('active');
       if (this._badge) { this._badge.textContent = ''; this._badge.style.display = 'none'; }
     }
   }
@@ -10420,11 +11050,35 @@ window.WA.__contract = "1.0";
     });
   }
 
+  function _waitForRuntimeGlobal(check, label, timeout = 5000) {
+    return new Promise((resolve, reject) => {
+      const deadline = Date.now() + timeout;
+      const tick = () => {
+        try {
+          if (check()) {
+            resolve();
+            return;
+          }
+        } catch (_) {}
+        if (Date.now() > deadline) {
+          reject(new Error(`${label} 加载后未就绪`));
+          return;
+        }
+        setTimeout(tick, 30);
+      };
+      tick();
+    });
+  }
+
   async function _ensureTipTap() {
-    if (window.KotoDocxEditorLib || _libsLoaded.tiptap) return;
+    if (window.KotoDocxEditorLib && window.KotoDocxEditorLib.KotoTipTapEditor) return;
     if (_libLoadPromises.tiptap) return _libLoadPromises.tiptap;
     _libLoadPromises.tiptap = (async () => {
       await _loadScript('/static/js/tiptap-docx-bundle.js?v=' + _assetCacheBust);
+      await _waitForRuntimeGlobal(
+        () => window.KotoDocxEditorLib && window.KotoDocxEditorLib.KotoTipTapEditor,
+        'DOCX 编辑器'
+      );
       _libsLoaded.tiptap = true;
     })().finally(() => { _libLoadPromises.tiptap = null; });
     return _libLoadPromises.tiptap;
@@ -10895,7 +11549,7 @@ window.WA.__contract = "1.0";
     const ext = json.file_name.split('.').pop().toLowerCase();
     state.wsSourcePath = wsPath;
     state.activeTabPath = wsPath;
-    _hydrateAiConversation(true).catch((error) => console.warn('[WA] AI history hydrate failed:', error));
+    _hydrateAiConversation(false).catch((error) => console.warn('[WA] AI history hydrate failed:', error));
     const fileNameEl = $('wa-file-name');
     if (fileNameEl) fileNameEl.textContent = state.fileName;
     const _archBtn = $('wa-archive-btn'); if (_archBtn) _archBtn.disabled = false;
@@ -10969,40 +11623,8 @@ window.WA.__contract = "1.0";
 
   // ── Main Router (for external / drag-drop files that must be uploaded) ──
   const Router = {
-    load: async (file) => {
-      if (state.isLoading) {
-        showToast('文件正在加载中，请稍候...', 'error');
-        return;
-      }
-      state.isLoading = true;
-      setLoading(true, `正在打开 ${file.name}…`);
-      $('upload-progress').style.width = '30%';
-      const formData = new FormData();
-      formData.append('file', file);
-      // Tell server not to re-copy if this file already lives in the workspace
-      if (file._wsPath) formData.append('ws_path', file._wsPath);
-
-      try {
-         const res = await fetch('/api/v1/workspace/open_file', {
-            method: 'POST',
-            body: formData
-         });
-         const json = await _safeJson(res);
-         if (!res.ok) throw new Error(json.error || '上传失败');
-
-         $('upload-progress').style.width = '100%';
-         const wsPath = file._wsPath || json.ws_source_path || json.file_name;
-         await _applyFileJson(json, wsPath, file._fsHandle || null);
-
-      } catch (err) {
-         console.error('[WA Router.load]', err);
-         showToast(err.message, 'error');
-         $('upload-progress').style.width = '0%';
-      } finally {
-         state.isLoading = false;
-         setLoading(false);
-      }
-    }
+     fromParsed: async (json, wsPath, fsHandle = null) => _requireWorkspaceFileLoader().fromParsed(json, wsPath, fsHandle),
+     load: async (file) => _requireWorkspaceFileLoader().load(file),
   };
 
   // ── Shared AI stream controls ────────────────────────────────────────────
@@ -11022,7 +11644,14 @@ window.WA.__contract = "1.0";
   }
 
   /** Abort the currently active AI task stream (if any). */
-  window.WA.stopStream = () => {
+  window.WA.stopStream = async () => {
+    const activeTaskCard = document.querySelector('.wa-task-run.streaming[data-task-run-id]');
+    const runId = activeTaskCard && activeTaskCard.dataset ? String(activeTaskCard.dataset.taskRunId || '').trim() : '';
+    if (runId && window.WA && typeof window.WA.cancelFileTaskRun === 'function') {
+      await Promise.resolve(window.WA.cancelFileTaskRun(runId)).catch((error) => {
+        console.warn('[WA] backend task cancel failed:', error);
+      });
+    }
     if (state._streamAbortCtrl) state._streamAbortCtrl.abort();
   };
 
@@ -11030,11 +11659,186 @@ window.WA.__contract = "1.0";
     return _WA_RUNTIME_SESSION_ID;
   }
 
+  function _parseTaskMetadata(rawMetadata) {
+    if (!rawMetadata) return {};
+    if (typeof rawMetadata === 'object') return rawMetadata;
+    try {
+      return JSON.parse(String(rawMetadata || '{}'));
+    } catch (_) {
+      return {};
+    }
+  }
+
+  function _conversationTaskTurn(taskId) {
+    const targetId = String(taskId || '').trim();
+    if (!targetId || !Array.isArray(state.conversation)) return null;
+    for (let index = state.conversation.length - 1; index >= 0; index -= 1) {
+      const turn = state.conversation[index];
+      if (!turn || String(turn.role || '').trim() !== 'assistant') continue;
+      if (String(turn.task_kind || '').trim() !== 'file_task') continue;
+      if (String(turn.task_id || '').trim() === targetId) return turn;
+    }
+    return null;
+  }
+
+  function _findRenderedTaskCard(taskId) {
+    const targetId = String(taskId || '').trim();
+    if (!targetId) return null;
+    return Array.from(document.querySelectorAll('.wa-task-run')).find((node) => String(node.dataset && node.dataset.taskId || '').trim() === targetId) || null;
+  }
+
+  function _replaceActiveTaskReconnector(taskId, reconnector) {
+    const key = String(taskId || '').trim();
+    if (!key) return;
+    const previous = state._activeTaskReconnectors.get(key);
+    if (previous && typeof previous.close === 'function') {
+      try { previous.close(); } catch (_) {}
+    }
+    if (reconnector) state._activeTaskReconnectors.set(key, reconnector);
+    else state._activeTaskReconnectors.delete(key);
+  }
+
+  async function _listRecoverableFileTasks(status) {
+    const normalizedStatus = String(status || '').trim().toLowerCase();
+    if (!normalizedStatus) return [];
+    const sources = ['file_task'];
+    const batches = await Promise.all(sources.map(async (source) => {
+      const query = new URLSearchParams({
+        session_id: _waSession(),
+        source,
+        status: normalizedStatus,
+        limit: '20',
+      });
+      const resp = await fetch(`/api/tasks?${query.toString()}`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const payload = await resp.json();
+      return payload && Array.isArray(payload.data) ? payload.data : [];
+    }));
+    const seen = new Set();
+    const tasks = [];
+    batches.flat().forEach((task) => {
+      const taskId = String(task && task.task_id || '').trim();
+      if (!taskId || seen.has(taskId)) return;
+      seen.add(taskId);
+      tasks.push(task);
+    });
+    return tasks;
+  }
+
+  async function _restoreActiveFileTasks(force = false) {
+    _initWorkspaceAiRuntimes();
+    if (!_waConversationRuntime || typeof _waConversationRuntime.beginAssistantTaskTurn !== 'function') return [];
+    if (typeof _waConversationRuntime.syncAssistantTaskTurn !== 'function') return [];
+    if (!window.WA || typeof window.WA.resumePersistedFileTask !== 'function') return [];
+
+    const msgs = $('wa-ai-messages');
+    if (!msgs) return [];
+
+    const taskGroups = await Promise.all([
+      _listRecoverableFileTasks('running').catch(() => []),
+      _listRecoverableFileTasks('waiting').catch(() => []),
+    ]);
+    const candidates = [];
+    const seen = new Set();
+    taskGroups.flat().forEach((task) => {
+      const taskId = String(task && task.task_id || '').trim();
+      if (!taskId || seen.has(taskId)) return;
+      seen.add(taskId);
+      candidates.push(task);
+    });
+
+    const activeIds = new Set(candidates.map((task) => String(task && task.task_id || '').trim()).filter(Boolean));
+    Array.from(state._activeTaskReconnectors.entries()).forEach(([taskId, reconnector]) => {
+      if (activeIds.has(taskId)) return;
+      if (reconnector && typeof reconnector.close === 'function') {
+        try { reconnector.close(); } catch (_) {}
+      }
+      state._activeTaskReconnectors.delete(taskId);
+    });
+
+    const restored = [];
+    for (const task of candidates) {
+      const taskId = String(task && task.task_id || '').trim();
+      if (!taskId) continue;
+      if (!force && state._activeTaskReconnectors.has(taskId)) continue;
+
+      const metadata = _parseTaskMetadata(task.metadata);
+      const existingTurn = _conversationTaskTurn(taskId);
+      const turn = existingTurn || _waConversationRuntime.beginAssistantTaskTurn({
+        content: task.status === 'waiting' ? '已恢复等待确认的后台任务。' : '已恢复后台任务。',
+        task_kind: 'file_task',
+        status: task.status === 'waiting' ? 'pending' : 'streaming',
+        skip_model_context: true,
+        render: false,
+        task_id: taskId,
+        run_id: String(metadata.run_id || '').trim(),
+      });
+      const turnId = turn && turn.id ? turn.id : '';
+      if (!turnId) continue;
+
+      const renderedCard = _findRenderedTaskCard(taskId);
+      const reconnector = window.WA.resumePersistedFileTask({
+        taskId,
+        runId: String(metadata.run_id || '').trim(),
+        initialStatus: String(task.status || '').trim().toLowerCase(),
+        msgs,
+        loadingEl: renderedCard,
+        replay: true,
+        onTaskCardSnapshot: (card) => {
+          const terminalStatus = String(card && card.dataset && card.dataset.taskTerminalStatus || '').trim().toLowerCase();
+          _waConversationRuntime.syncAssistantTaskTurn(turnId, {
+            loadingEl: card,
+            task_kind: 'file_task',
+            status: terminalStatus === 'awaiting_confirmation' ? 'pending' : 'streaming',
+            skip_model_context: true,
+            task_id: taskId,
+            run_id: String(card && card.dataset && card.dataset.taskRunId || metadata.run_id || '').trim(),
+          });
+        },
+      });
+
+      _replaceActiveTaskReconnector(taskId, reconnector);
+      reconnector.then((result) => {
+        if (state._activeTaskReconnectors.get(taskId) === reconnector) {
+          state._activeTaskReconnectors.delete(taskId);
+        }
+        _waConversationRuntime.syncAssistantTaskTurn(turnId, {
+          content: String(result && result.summary || '文件任务流已完成。').trim() || '文件任务流已完成。',
+          loadingEl: result && result.loadingEl ? result.loadingEl : _findRenderedTaskCard(taskId),
+          task_kind: 'file_task',
+          status: String(result && result.status || 'done').trim() || 'done',
+          skip_model_context: true,
+          task_id: taskId,
+          run_id: String(result && result.run_id || metadata.run_id || '').trim(),
+        });
+      }).catch((error) => {
+        if (state._activeTaskReconnectors.get(taskId) === reconnector) {
+          state._activeTaskReconnectors.delete(taskId);
+        }
+        _waConversationRuntime.syncAssistantTaskTurn(turnId, {
+          content: `任务流失败：${error && error.message ? error.message : error}`,
+          loadingEl: _findRenderedTaskCard(taskId),
+          task_kind: 'file_task',
+          status: 'error',
+          skip_model_context: true,
+          task_id: taskId,
+          run_id: String(metadata.run_id || '').trim(),
+        });
+      });
+      restored.push(taskId);
+    }
+
+    return restored;
+  }
+
   function _hydrateAiConversation(force = false) {
     if (!_waConversationRuntime || typeof _waConversationRuntime.hydrate !== 'function') return Promise.resolve([]);
     return _waConversationRuntime.hydrate({
       force,
       sessionId: _waSession(),
+    }).then((turns) => {
+      if (!force || state.isLoading) return turns;
+      return _restoreActiveFileTasks(force).then(() => turns);
     });
   }
 
@@ -11073,7 +11877,7 @@ window.WA.__contract = "1.0";
       });
     };
 
-    (state._aiFileContext || []).forEach((file) => {
+    _readyAIFileContext().forEach((file) => {
       addFile({
         path: file.path || file.name || '',
         name: file.name || '',
@@ -11090,7 +11894,6 @@ window.WA.__contract = "1.0";
     const nameMap = {
       'run_python_code': '🐍 执行 Python',
       'run_r_code': '📊 执行 R',
-      'run_shell_command': '💻 执行命令',
       'list_workspace_files': '📂 浏览工作区文件',
       'parse_file_to_text': '📄 解析文件内容',
       'inspect_workbook_structure': '🧭 检查表格结构',
@@ -11359,143 +12162,6 @@ window.WA.__contract = "1.0";
         msgs.appendChild(okDiv);
      }
      msgs.scrollTop = msgs.scrollHeight;
-  }
-
-  // ── Legacy chart SSE fallback (R / compatibility) ──
-  async function _sendViaLegacyChartSSE(payload) {
-    let buffer = '';
-    const modelMode = payload.model_mode || _waQuickActionModelMode();
-    const modelId = payload.model_id || _selectedCloudModelId();
-    // Map old payload fields to new endpoint schema
-    const body = {
-      data_context: payload.csv_data || payload.prompt || '',
-      instruction: payload.prompt || '',
-      lang: payload.language || 'python',
-      model_mode: modelMode,
-      model_id: modelId,
-    };
-    const ctrl = new AbortController();
-    state._streamAbortCtrl = ctrl;
-    state.isLoading = true;
-    _setStreamBtn(true);
-    try {
-      const resp = await fetch('/api/editor/ai/chart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(line.slice(6));
-            const msgs = $('wa-ai-messages');
-            switch (evt.type) {
-              case 'status':
-              case 'info': {
-                let last = msgs.lastElementChild;
-                if (!last || !last.classList.contains('streaming')) {
-                  last = document.createElement('div');
-                  last.className = 'wa-msg ai streaming';
-                  msgs.appendChild(last);
-                }
-                last.textContent = evt.text || '';
-                msgs.scrollTop = msgs.scrollHeight;
-                break;
-              }
-              case 'code': {
-                const last = msgs.lastElementChild;
-                if (last && last.classList.contains('streaming')) last.classList.remove('streaming');
-                const codeEl = document.createElement('div');
-                codeEl.className = 'wa-msg ai';
-                codeEl.innerHTML = `<details><summary>${_DOC_SVG} 生成的代码</summary><pre style="white-space:pre-wrap;font-size:12px">${evt.text.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</pre></details>`;
-                msgs.appendChild(codeEl);
-                msgs.scrollTop = msgs.scrollHeight;
-                break;
-              }
-              case 'image': {
-                const _ext = (evt.name || 'chart.png').split('.').pop().toLowerCase();
-                const _mime = _ext === 'svg' ? 'image/svg+xml' : `image/${_ext}`;
-                const _imgSrc = `data:${_mime};base64,${evt.data}`;
-                msgs.appendChild(_makeWAChartImageWrap(_imgSrc, evt.name || 'chart.png'));
-                msgs.scrollTop = msgs.scrollHeight;
-                break;
-              }
-              case 'stdout':
-              case 'stderr': {
-                if (evt.text && evt.text.trim()) {
-                  const outEl = document.createElement('div');
-                  outEl.className = 'wa-msg ai';
-                  outEl.innerHTML = `<pre style="white-space:pre-wrap;font-size:11px;color:${evt.type==='stderr'?'#e57373':'#888'}">${evt.text.replace(/</g,'&lt;')}</pre>`;
-                  msgs.appendChild(outEl);
-                  msgs.scrollTop = msgs.scrollHeight;
-                }
-                break;
-              }
-              case 'done': {
-                const last = msgs.lastElementChild;
-                if (last && last.classList.contains('streaming')) last.classList.remove('streaming');
-                state.isLoading = false;
-                break;
-              }
-              case 'error': {
-                const last = msgs.lastElementChild;
-                if (last && last.classList.contains('streaming')) last.classList.remove('streaming');
-                const errEl = document.createElement('div');
-                errEl.className = 'wa-msg ai';
-                errEl.textContent = evt.text || evt.message || '图表生成失败';
-                msgs.appendChild(errEl);
-                msgs.scrollTop = msgs.scrollHeight;
-                state.isLoading = false;
-                break;
-              }
-            }
-          } catch(e) { /* ignore malformed SSE line */ }
-        }
-      }
-    } catch (err) {
-      const msgs = $('wa-ai-messages');
-      const last = msgs.lastElementChild;
-      if (last && last.classList.contains('streaming')) last.classList.remove('streaming');
-      if (err.name === 'AbortError') {
-        if (last && !last.textContent.trim()) {
-          last.textContent = '[已取消]';
-        } else {
-          const cancelEl = document.createElement('div');
-          cancelEl.className = 'wa-msg ai';
-          cancelEl.textContent = '[已取消]';
-          msgs.appendChild(cancelEl);
-        }
-      } else {
-        console.error('[WorkspaceAI] Chart exec error:', err);
-        const errEl = document.createElement('div');
-        errEl.className = 'wa-msg ai';
-        errEl.textContent = `网络错误：${err.message}`;
-        msgs.appendChild(errEl);
-      }
-      msgs.scrollTop = msgs.scrollHeight;
-    } finally {
-      state.isLoading = false;
-      state._streamAbortCtrl = null;
-      _setStreamBtn(false);
-    }
-  }
-
-  async function _sendViaSSEChart(payload) {
-    const language = String(payload && payload.language || 'python').trim().toLowerCase();
-    if (language === 'python' && _waQuickActionRuntime && typeof _waQuickActionRuntime.sendChartAction === 'function') {
-      return _waQuickActionRuntime.sendChartAction(payload);
-    }
-    return _sendViaLegacyChartSSE(payload);
   }
 
   // ── AI init ───────────────────────────────────────────────────────────────
@@ -12098,6 +12764,13 @@ window.WA.__contract = "1.0";
       selText = docxSelection ? docxSelection.rawText : ed.state.doc.textBetween(sel.from, sel.to, ' ').trim();
     }
     if (!selText) { _resetDocxSelection(); return; }
+
+    if (_isReviewCommentModeEnabled()) {
+      _hideDocxHoverBar();
+      const tt = $('wa-pdf-tooltip');
+      if (tt) tt.style.display = 'none';
+      return;
+    }
 
     if (window._docxHoverForceHiddenText === selText) {
       _hideDocxHoverBar();
@@ -13245,7 +13918,7 @@ window.WA.__contract = "1.0";
   // sendCustomMessage helper for AI explanations from annotation context menu
   if (!window.WA.sendCustomMessage) {
     window.WA.sendCustomMessage = (msg) => {
-      const inp = document.getElementById('wa-ai-input');
+      const inp = document.getElementById('wa-user-input');
       if (inp) { inp.value = msg; WA.sendMessage(); }
     };
   }
@@ -13510,14 +14183,14 @@ window.WA.__contract = "1.0";
    * Called from DocxReadView image toolbar buttons.
    */
   window.WA._sendImageToAI = (action, imgSrc) => {
-    const aiInput = document.getElementById('wa-ai-input');
+    const aiInput = document.getElementById('wa-user-input');
     if (!aiInput) return;
     const label = action === 'describe' ? '请描述这张图片的内容' : '请为这张图片生成替换方案';
     aiInput.value = label;
     aiInput.focus();
     // Store image reference for AI context
     window.WA._pendingImageSrc = imgSrc;
-    showToast('已将图片发送到 AI 输入，按回车发送', 'info', 3000);
+    WA.sendMessage();
   };
 
   window.WA.pptxDelShape = () => {
@@ -13615,7 +14288,7 @@ window.WA.__contract = "1.0";
      if (state.fileId) {
         WA.saveFile().then(() => {
            const a = document.createElement('a');
-           a.href = `/api/v1/workspace/download/${state.fileId}`;
+           a.href = `/api/v1/workspace/raw/${state.fileId}`;
            a.download = state.fileName || 'presentation.pptx';
            a.click();
         }).catch(() => {});
@@ -13629,68 +14302,6 @@ window.WA.__contract = "1.0";
     ta.style.height = Math.min(ta.scrollHeight, maxHeight) + 'px';
     ta.style.overflowY = ta.scrollHeight > maxHeight ? 'auto' : 'hidden';
   }
-
-  // ── Chart generation dialog ──
-  let _chartLang = 'python';
-
-  window.WA.openChartDialog = (lang) => {
-     _chartLang = lang;
-     $('wa-chart-dialog-title').innerHTML = lang === 'python' ? `${_CHART_SVG} Python 画图 (matplotlib)` : `${_CHART_SVG} R 画图 (ggplot2)`;
-     // Show data hint
-     const hasXlsx = state.fileType === 'xlsx';
-     $('wa-chart-data-hint').textContent = hasXlsx
-       ? `${_LIGHTBULB_SVG} 将自动附上当前表格的全量数据`
-       : `${_LIGHTBULB_SVG} 请在描述中说明数据或粘贴 CSV`;
-     $('wa-chart-prompt').value = '';
-     $('wa-chart-dialog').classList.add('open');
-     setTimeout(() => $('wa-chart-prompt').focus(), 50);
-  };
-
-  window.WA.closeChartDialog = () => {
-     $('wa-chart-dialog').classList.remove('open');
-  };
-
-  window.WA.submitChartRequest = () => {
-     const desc = $('wa-chart-prompt').value.trim();
-     if (!desc) { showToast('请输入图表描述', 'error'); return; }
-     WA.closeChartDialog();
-
-     // Get CSV data if xlsx
-     let csvData = '';
-     if (state.fileType === 'xlsx' && state.activeEditor && state.activeEditor.getCSV) {
-        csvData = state.activeEditor.getCSV();
-     }
-
-     const msgs = $('wa-ai-messages');
-     // User bubble
-     const uMsg = document.createElement('div');
-     uMsg.className = 'wa-msg user';
-     uMsg.textContent = `${_chartLang.toUpperCase()} 画图：${desc}`;
-     msgs.appendChild(uMsg);
-     // Loading bubble
-     const loadingMsg = document.createElement('div');
-     loadingMsg.className = 'wa-msg ai streaming';
-     loadingMsg.textContent = '';
-     msgs.appendChild(loadingMsg);
-     msgs.scrollTop = msgs.scrollHeight;
-
-     function doChartSend() {
-       _sendViaSSEChart({
-          prompt: desc,
-          file_type: state.fileType || 'xlsx',
-          file_id: state.fileId || '',
-          language: _chartLang,
-          csv_data: csvData,
-       });
-     }
-
-     doChartSend();
-  };
-
-  // Close dialog on backdrop click
-  $('wa-chart-dialog').addEventListener('click', (e) => {
-     if (e.target === $('wa-chart-dialog')) WA.closeChartDialog();
-  });
 
   // ── Proposal Diff Card System ──────────────────────────────────────────────
 
@@ -13984,16 +14595,25 @@ window.WA.__contract = "1.0";
   };
 
   window.WA.batchAcceptAll = () => {
-    document.querySelectorAll('.wa-proposal-card:not(.accepted):not(.rejected)').forEach(card => {
-      const btn = card.querySelector('.wa-proposal-btn.accept');
-      if (btn) btn.click();
+    const reviewState = _ensureTabReviewState(_activeReviewTab());
+    const proposalIds = _visibleReviewProposals(reviewState)
+      .filter(_proposalCanApply)
+      .map((proposal) => String((proposal && (proposal.id || proposal.review_id)) || '').replace(/^proposal:/, '').trim())
+      .filter(Boolean);
+    proposalIds.reduce((chain, proposalId) => {
+      return chain.then(() => window.WA.acceptProposal(proposalId));
+    }, Promise.resolve()).catch((error) => {
+      console.warn('batchAcceptAll failed:', error);
     });
   };
 
   window.WA.batchRejectAll = () => {
-    document.querySelectorAll('.wa-proposal-card:not(.accepted):not(.rejected)').forEach(card => {
-      const btn = card.querySelector('.wa-proposal-btn.reject');
-      if (btn) btn.click();
+    const reviewState = _ensureTabReviewState(_activeReviewTab());
+    const proposalIds = _visibleReviewProposals(reviewState)
+      .map((proposal) => String((proposal && (proposal.id || proposal.review_id)) || '').replace(/^proposal:/, '').trim())
+      .filter(Boolean);
+    proposalIds.forEach((proposalId) => {
+      window.WA.rejectProposal(proposalId);
     });
   };
 
@@ -14144,25 +14764,6 @@ window.WA.__contract = "1.0";
   function _escRegex(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
-
-  // ── Key Topic Extraction ──────────────────────────────────────────────────
-  window.WA.extractTopics = async () => {
-    showToast('文件助手 AI 对话任务流已移除；请使用快捷功能键。', 'warn');
-  };
-
-  window.WA._topicClick = (btn) => {
-    const topic = btn.textContent;
-    const input = $('wa-user-input');
-    if (input) {
-      input.value = `请详细介绍「${topic}」，并引用附加文件中的具体内容作为依据，标注来源文件名。`;
-      input.focus();
-    }
-  };
-
-  window.WA.closeTopicBar = () => {
-    const bar = $('wa-topic-chips-bar');
-    if (bar) bar.style.display = 'none';
-  };
 
   // Parse AI response text and replace [来源: xxx] with clickable citation chips
   function _parseCitations(html) {
@@ -14317,7 +14918,7 @@ window.WA.__contract = "1.0";
             }
             if (!LABELS[evt.section]) continue;
             const renderMd = (t) => {
-              if (window.marked) { try { return window.marked.parse(t || ''); } catch(e) {} }
+              if (window.marked) { try { return _sanitizeRenderedHtml(window.marked.parse(t || '')); } catch(e) {} }
               return `<pre>${_escHtml(t)}</pre>`;
             };
             const card = document.createElement('div');
@@ -14445,7 +15046,7 @@ window.WA.__contract = "1.0";
         // No selection and no tool call — full-doc replace or append
         if (mode === 'replace') {
           // Convert markdown AI text to HTML and replace entire document content
-          const htmlVal = window.marked ? window.marked.parse(rawText) : ('<p>' + rawText.replace(/\n/g, '</p><p>') + '</p>');
+          const htmlVal = window.marked ? _sanitizeRenderedHtml(window.marked.parse(rawText)) : ('<p>' + _escHtml(rawText).replace(/\n/g, '</p><p>') + '</p>');
           editor.applyToolCall({ type: 'replace_all', value: htmlVal });
         } else {
           editor.applyToolCall({ type: 'insert_text', value: '\n' + rawText });
@@ -14473,10 +15074,57 @@ window.WA.__contract = "1.0";
     }
   };
 
+  function _looksLikeTaskResultFollowupReference(text) {
+    const source = String(text || '').trim();
+    if (!source) return false;
+    return /(?:上一轮|上一版|上一次|上次|前一轮|刚才|这次|这个任务|这次任务|这个结果|这次结果|上一轮结果|上一轮建议|上一轮处理|当前结果|当前方案|这个方案|你的建议|前面的建议|刚才的结果|前一个结果)/i.test(source);
+  }
+
+  function _looksLikeShortTaskResultFollowup(text, action) {
+    const source = String(text || '').trim();
+    const followupAction = String(action || '').trim().toLowerCase();
+    if (!source || source.length > 240) return false;
+    if (_looksLikeTaskResultFollowupReference(source)) return true;
+    if (followupAction === 'apply') {
+      return /(?:直接应用|应用建议|按上一轮|按建议|按方案|apply)/i.test(source);
+    }
+    if (followupAction === 'improve') {
+      return /(?:继续分析|继续优化|继续修复|继续处理|继续改|细化|补充|完善|改进|优化)/i.test(source);
+    }
+    return /(?:为什么这次|为什么这个结果|解释一下|说明一下|追问结果|继续分析|继续处理)/i.test(source);
+  }
+
+  function _shouldKeepPendingTaskResultFollowup(text, followupContext, defaultPrompt) {
+    const source = String(text || '').trim();
+    if (!source) return false;
+    if (!followupContext || typeof followupContext !== 'object') return false;
+    const prompt = String(defaultPrompt || '').trim();
+    const action = String(followupContext.followup_action || '').trim().toLowerCase();
+    if (prompt && source === prompt) return true;
+    if (prompt && source.includes(prompt)) return true;
+    return _looksLikeShortTaskResultFollowup(source, action);
+  }
+
+  function _clearPendingTaskResultFollowupBinding(noticeText) {
+    state._pendingTaskFollowupPrompt = null;
+    state._pendingTaskFollowupContext = null;
+    state._pendingTaskPayload = null;
+    state._pendingTaskPayloadUsesFeedback = false;
+    if (noticeText) showToast(noticeText, 'info');
+  }
+
   window.WA.beginTaskResultFollowup = (details) => {
     const payload = details || {};
     const action = String(payload.action || '').trim().toLowerCase();
     const completedTask = payload.completed_task === true;
+    const rawTaskPayload = payload.taskPayload && typeof payload.taskPayload === 'object'
+      ? JSON.parse(JSON.stringify(payload.taskPayload))
+      : null;
+    const pendingTaskPayload = payload.pendingTaskPayload && typeof payload.pendingTaskPayload === 'object'
+      ? JSON.parse(JSON.stringify(payload.pendingTaskPayload))
+      : null;
+    const taskPayload = (!completedTask && pendingTaskPayload) ? pendingTaskPayload : rawTaskPayload;
+    const shouldUseFeedbackTask = !!(taskPayload && taskPayload !== pendingTaskPayload);
     let previousTaskFileChanges = [];
     if (Array.isArray(payload.file_changes) && payload.file_changes.length) {
       try {
@@ -14488,6 +15136,12 @@ window.WA.__contract = "1.0";
           .map((item) => Object.assign({}, item));
       }
     }
+    const previousTaskContract = window.WA && typeof window.WA.compactTaskContract === 'function'
+      ? window.WA.compactTaskContract(payload.task_contract)
+      : null;
+    const previousTaskContext = window.WA && typeof window.WA.compactTaskContext === 'function'
+      ? window.WA.compactTaskContext(payload.task_context)
+      : null;
     const followupContext = {
       kind: 'review_last_task',
       source: 'task_result_action',
@@ -14513,6 +15167,11 @@ window.WA.__contract = "1.0";
       previous_task_target_file_type: String(payload.target_file_type || '').trim(),
       previous_completed_task: completedTask ? 'true' : 'false',
     };
+    if (previousTaskContract && previousTaskContract.contract_id) {
+      followupContext.previous_task_contract_id = previousTaskContract.contract_id;
+    }
+    if (previousTaskContract) followupContext.previous_task_contract = previousTaskContract;
+    if (previousTaskContext) followupContext.previous_task_context = previousTaskContext;
     if (previousTaskFileChanges.length) followupContext.previous_task_file_changes = previousTaskFileChanges;
 
     const defaultPrompt = action === 'apply'
@@ -14527,6 +15186,9 @@ window.WA.__contract = "1.0";
 
     const input = $('wa-user-input');
     state._pendingTaskFollowupContext = followupContext;
+    state._pendingTaskFollowupPrompt = defaultPrompt;
+    state._pendingTaskPayload = taskPayload;
+    state._pendingTaskPayloadUsesFeedback = shouldUseFeedbackTask;
     _hideWelcome();
     if (input) {
       const existing = String(input.value || '').trim();
@@ -14565,13 +15227,60 @@ window.WA.__contract = "1.0";
     const actionLabel = String(payload.actionLabel || payload.title || taskPayload.task || '继续执行').trim() || '继续执行';
     const input = $('wa-user-input');
     state._pendingTaskFollowupContext = null;
+    state._pendingTaskFollowupPrompt = null;
     state._pendingTaskPayload = taskPayload;
+    state._pendingTaskPayloadUsesFeedback = false;
     _hideWelcome();
     if (input) {
       input.value = actionLabel;
       autoResize(input);
     }
     window.WA.sendMessage();
+    return true;
+  };
+
+  window.WA.resumePersistedTaskArtifact = async (details) => {
+    const payload = details || {};
+    const taskPayload = payload.taskPayload && typeof payload.taskPayload === 'object'
+      ? JSON.parse(JSON.stringify(payload.taskPayload))
+      : null;
+    const taskId = String(payload.taskId || (taskPayload && taskPayload.task_id) || '').trim();
+    if (!taskId) {
+      return window.WA.resumeTaskArtifact(payload);
+    }
+
+    let response = null;
+    let responsePayload = null;
+    try {
+      response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          approved: true,
+          comment: String(payload.comment || '').trim() || undefined,
+        }),
+      });
+      responsePayload = await response.json().catch(() => null);
+      if (!response.ok || !responsePayload || responsePayload.ok === false) {
+        throw new Error(responsePayload && responsePayload.error ? responsePayload.error : '恢复任务失败');
+      }
+    } catch (error) {
+      console.debug('[WA] persisted task resume request unavailable; falling back to local resume payload:', error);
+      return window.WA.resumeTaskArtifact(payload);
+    }
+
+    if (window.WA && typeof window.WA.resumePersistedFileTask === 'function') {
+      Promise.resolve(window.WA.resumePersistedFileTask({
+        taskId,
+        loadingEl: payload.loadingEl,
+        replay: false,
+        initialStatus: 'running',
+      })).catch((error) => {
+        console.warn('[WA] persisted task stream reattach failed:', error);
+        showToast('任务已在后台恢复，前端进度同步稍后重试', 'warning');
+      });
+    }
+
     return true;
   };
 
@@ -14588,19 +15297,34 @@ window.WA.__contract = "1.0";
         showToast(`请等待文件读取完成：${loadingNames}`, 'warning');
         return;
       }
+      if (state._aiFileContext && state._aiFileContext.some(f => f.error)) {
+        const failedNames = state._aiFileContext.filter(f => f.error).map(f => f.name).join(', ');
+        showToast(`请先重试或移除读取失败的文件：${failedNames}`, 'warning');
+        return;
+      }
 
       // Capture and clear pinned selection before rendering
       const pinnedSel = state.pinnedSelection;
-      const pinnedSelText = _selectionContextText(pinnedSel);
-      const pinnedSelSource = _selectionContextSourceLabel(pinnedSel);
-      state.lastPinnedSel = pinnedSel || null;
+      const liveSelection = (!pinnedSel && !state._selectionDismissed) ? _getLiveEditorSelectionForAI() : null;
+      const liveSelectionContext = !pinnedSel && liveSelection
+        ? _createPinnedSelectionContext(
+            typeof liveSelection === 'object'
+              ? Object.assign({}, _getPinnedSelectionSourceMeta(), liveSelection)
+              : liveSelection,
+            typeof liveSelection === 'string' ? _getPinnedSelectionSourceMeta() : undefined,
+          )
+        : null;
+      const explicitSelection = pinnedSel || liveSelectionContext;
+      const pinnedSelText = _selectionContextText(explicitSelection);
+      const pinnedSelSource = _selectionContextSourceLabel(explicitSelection);
+      state.lastPinnedSel = explicitSelection || null;
       state.pendingToolCall = null;
       if (pinnedSelText) WA.clearSelection();
 
       const turnUi = _waConversationRuntime && typeof _waConversationRuntime.appendUserMessageWithLoading === 'function'
         ? _waConversationRuntime.appendUserMessageWithLoading({
             content: text,
-            files: state._aiFileContext || [],
+            files: _readyAIFileContext(),
             quoteText: pinnedSelText,
             quoteSource: pinnedSelSource,
             task_kind: 'message',
@@ -14624,13 +15348,22 @@ window.WA.__contract = "1.0";
       autoResize(input);
 
       state.isLoading = true;
-      const pendingTaskPayload = state._pendingTaskPayload && typeof state._pendingTaskPayload === 'object'
+      let pendingTaskPayload = state._pendingTaskPayload && typeof state._pendingTaskPayload === 'object'
         ? JSON.parse(JSON.stringify(state._pendingTaskPayload))
         : null;
-      const pendingTaskFollowupContext = state._pendingTaskFollowupContext && typeof state._pendingTaskFollowupContext === 'object'
+      let pendingTaskFollowupContext = state._pendingTaskFollowupContext && typeof state._pendingTaskFollowupContext === 'object'
         ? Object.assign({}, state._pendingTaskFollowupContext, { user_feedback: text })
         : null;
+      if (pendingTaskFollowupContext && !_shouldKeepPendingTaskResultFollowup(text, pendingTaskFollowupContext, state._pendingTaskFollowupPrompt)) {
+        pendingTaskPayload = null;
+        pendingTaskFollowupContext = null;
+        _clearPendingTaskResultFollowupBinding('已清除上一任务绑定，当前消息将按新任务处理。');
+      }
+      if (pendingTaskPayload && pendingTaskFollowupContext && state._pendingTaskPayloadUsesFeedback) {
+        pendingTaskPayload.task = text;
+      }
 
+      _initWorkspaceAiRuntimes();
       if (!_waTaskDispatcher || typeof _waTaskDispatcher.dispatchMessage !== 'function') {
         loadingEl.classList.remove('streaming');
         loadingEl.textContent = '文件任务运行时未加载，请刷新后重试。';
@@ -14652,8 +15385,7 @@ window.WA.__contract = "1.0";
         state.isLoading = false;
         _setStreamBtn(false);
       });
-      state._pendingTaskFollowupContext = null;
-      state._pendingTaskPayload = null;
+      _clearPendingTaskResultFollowupBinding();
   };
 
   // ── Auto-save ──────────────────────────────────────────────────────────────
@@ -14802,10 +15534,10 @@ window.WA.__contract = "1.0";
           _hideWelcome();
           const input = $('wa-user-input');
           if (!input) return;
-          input.value = `请使用「${skill.name || skill.id}」处理当前文件任务：${skill.description || ''}`;
+          input.value = `请使用「${skill.name || skill.id}」处理我已附加的文件任务：${skill.description || ''}`;
           input.focus();
           autoResize(input);
-          if ((state._aiFileContext && state._aiFileContext.length) || state.fileName) {
+          if (state._aiFileContext && state._aiFileContext.length) {
             WA.sendMessage();
           }
         });
@@ -14863,11 +15595,13 @@ window.WA.__contract = "1.0";
   })();
 
   const _MODEL_LABELS = {
-    auto: '云端',
+    cloud: '云端',
     local: '本地',
     'gemini-3-flash-preview': 'Gemini 3 Flash Preview',
     'gemini-3-pro-preview': 'Gemini 3 Pro Preview',
     'gemini-3.1-pro-preview': 'Gemini 3.1 Pro Preview',
+    'gemini-3.1-flash-lite': 'Gemini 3.1 Flash Lite',
+    'gemini-3.1-flash-lite-preview': 'Gemini 3.1 Flash Lite Preview',
     'gemini-2.5-flash': 'Gemini 2.5 Flash',
     'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
     'gemini-2.5-pro': 'Gemini 2.5 Pro',
@@ -14882,115 +15616,127 @@ window.WA.__contract = "1.0";
   }
 
   function _initWorkspaceAiRuntimes() {
-    _waAiTransport = (window.WA && typeof window.WA.createWorkspaceAiTransport === 'function')
-      ? window.WA.createWorkspaceAiTransport({
-          state,
-          setStreamButton: _setStreamBtn,
-        })
-      : null;
+    if (!_waAiResultsRuntime && window.WA && typeof window.WA.createWorkspaceAiResultsRuntime === 'function') {
+      _waAiResultsRuntime = window.WA.createWorkspaceAiResultsRuntime({
+        state,
+        getMessagesElement: () => $('wa-ai-messages'),
+        selectionContextText: _selectionContextText,
+        createPinnedSelectionContext: _createPinnedSelectionContext,
+        showToast,
+        scheduleAutoSave: () => WA.scheduleAutoSave && WA.scheduleAutoSave(),
+        getUserInputElement: () => $('wa-user-input'),
+        sendMessage: () => window.WA.sendMessage && window.WA.sendMessage(),
+        lightbulbIcon: _LIGHTBULB_SVG,
+        pencilIcon: _PENCIL_SVG,
+        getProposalRationaleText: _getProposalRationaleText,
+        proposalCanApply: _proposalCanApply,
+        getActiveProposalBatch: () => state._activeProposalBatch,
+        acceptProposal: (...args) => window.WA.acceptProposal(...args),
+        rejectProposal: (...args) => window.WA.rejectProposal(...args),
+        modifyProposal: (...args) => window.WA.modifyProposal(...args),
+        submitModify: (...args) => window.WA._submitModify(...args),
+        batchAcceptAll: () => window.WA.batchAcceptAll(),
+        batchRejectAll: () => window.WA.batchRejectAll(),
+        computeInlineDiff: _computeInlineDiff,
+      });
+    }
 
-    _waAiResultsRuntime = (window.WA && typeof window.WA.createWorkspaceAiResultsRuntime === 'function')
-      ? window.WA.createWorkspaceAiResultsRuntime({
-          state,
-          getMessagesElement: () => $('wa-ai-messages'),
-          selectionContextText: _selectionContextText,
-          createPinnedSelectionContext: _createPinnedSelectionContext,
-          showToast,
-          scheduleAutoSave: () => WA.scheduleAutoSave && WA.scheduleAutoSave(),
-          getUserInputElement: () => $('wa-user-input'),
-          sendMessage: () => window.WA.sendMessage && window.WA.sendMessage(),
-          lightbulbIcon: _LIGHTBULB_SVG,
-          pencilIcon: _PENCIL_SVG,
-          computeInlineDiff: _computeInlineDiff,
-        })
-      : null;
+    if (!_waConversationRuntime && window.WA && typeof window.WA.createWorkspaceAiConversation === 'function') {
+      _waConversationRuntime = window.WA.createWorkspaceAiConversation({
+        state,
+        getMessagesElement: () => $('wa-ai-messages'),
+        getSessionId: _waSession,
+        hideWelcome: _hideWelcome,
+        renderMarkdown: _waRenderMarkdown,
+      });
+    }
 
-    _waConversationRuntime = (window.WA && typeof window.WA.createWorkspaceAiConversation === 'function')
-      ? window.WA.createWorkspaceAiConversation({
-          state,
-          getMessagesElement: () => $('wa-ai-messages'),
-          getSessionId: _waSession,
-          hideWelcome: _hideWelcome,
-          renderMarkdown: _waRenderMarkdown,
-        })
-      : null;
+    if (!_waTaskDispatcher && window.WA && typeof window.WA.createTaskDispatcher === 'function') {
+      _waTaskDispatcher = window.WA.createTaskDispatcher({
+        state,
+        openWorkspaceFile: (path) => window.WA.openWorkspaceFile(path),
+        getActiveEditorContent: () => (state.activeEditor && typeof state.activeEditor.getContent === 'function')
+          ? (state.activeEditor.getContent() || '')
+          : '',
+        sampleTaskContext: _waSampleTaskContext,
+        getSessionId: _waSession,
+        getModelMode: _waQuickActionModelMode,
+        getSelectedCloudModelId: _selectedCloudModelId,
+        getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'
+          ? _waConversationRuntime.getHistoryForModel(12)
+          : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []),
+        beginAssistantTaskTurn: (metadata) => _waConversationRuntime && typeof _waConversationRuntime.beginAssistantTaskTurn === 'function'
+          ? _waConversationRuntime.beginAssistantTaskTurn(metadata || {})
+          : null,
+        syncAssistantTaskTurn: (turnId, metadata) => _waConversationRuntime && typeof _waConversationRuntime.syncAssistantTaskTurn === 'function'
+          ? _waConversationRuntime.syncAssistantTaskTurn(turnId, metadata || {})
+          : null,
+        appendAssistantTurn: (text, metadata) => _waConversationRuntime && typeof _waConversationRuntime.appendAssistantTurn === 'function'
+          ? _waConversationRuntime.appendAssistantTurn(text, Object.assign({ render: false }, metadata || {}))
+          : null,
+        streamWhiteboxTask: (options) => (
+          window.WA && typeof window.WA.streamWhiteboxTask === 'function'
+            ? window.WA.streamWhiteboxTask(options)
+            : window.WA.streamFileTask(options)
+        ),
+        streamFileTask: (options) => window.WA.streamFileTask(options),
+        setStreamButton: _setStreamBtn,
+      });
+    }
 
-    _waTaskDispatcher = (window.WA && typeof window.WA.createTaskDispatcher === 'function')
-      ? window.WA.createTaskDispatcher({
-          state,
-          openWorkspaceFile: (path) => window.WA.openWorkspaceFile(path),
-          getCurrentAIContextPath: () => state.wsSourcePath || state.filePath || '',
-          getActiveEditorContent: () => (state.activeEditor && typeof state.activeEditor.getContent === 'function')
-            ? (state.activeEditor.getContent() || '')
-            : '',
-          sampleTaskContext: _waSampleTaskContext,
-          getSessionId: _waSession,
-          getModelMode: _waQuickActionModelMode,
-          getSelectedCloudModelId: _selectedCloudModelId,
-          getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'
-            ? _waConversationRuntime.getHistoryForModel(12)
-            : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []),
-          beginAssistantTaskTurn: (metadata) => _waConversationRuntime && typeof _waConversationRuntime.beginAssistantTaskTurn === 'function'
-            ? _waConversationRuntime.beginAssistantTaskTurn(metadata || {})
-            : null,
-          syncAssistantTaskTurn: (turnId, metadata) => _waConversationRuntime && typeof _waConversationRuntime.syncAssistantTaskTurn === 'function'
-            ? _waConversationRuntime.syncAssistantTaskTurn(turnId, metadata || {})
-            : null,
-          appendAssistantTurn: (text, metadata) => _waConversationRuntime && typeof _waConversationRuntime.appendAssistantTurn === 'function'
-            ? _waConversationRuntime.appendAssistantTurn(text, Object.assign({ render: false }, metadata || {}))
-            : null,
-          streamWhiteboxTask: (options) => window.WA.streamWhiteboxTask(options),
-          setStreamButton: _setStreamBtn,
-        })
-      : null;
+    if (!_waQuickActionRuntime && window.WA && typeof window.WA.createWorkspaceQuickActionRuntime === 'function') {
+      _waQuickActionRuntime = window.WA.createWorkspaceQuickActionRuntime({
+        state,
+        getMessagesElement: () => $('wa-ai-messages'),
+        getModelMode: _waQuickActionModelMode,
+        getSelectedCloudModelId: _selectedCloudModelId,
+        handleProposals: _handleProposals,
+        makeAIActionBar: _makeAIActionBar,
+        applyRouteEvent: _applyRouteEvent,
+        setPendingToolCall: (parsed) => { state.pendingToolCall = parsed; },
+        appendAssistantTurn: (text, metadata) => _waConversationRuntime && typeof _waConversationRuntime.appendAssistantTurn === 'function'
+          ? _waConversationRuntime.appendAssistantTurn(text, Object.assign({ render: false }, metadata || {}))
+          : null,
+        getSessionId: _waSession,
+        getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'
+          ? _waConversationRuntime.getHistoryForModel(12)
+          : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []),
+        slidesIcon: _SLIDES_SVG,
+      });
+      _waQuickActionDispatcherAttached = false;
+    }
 
-    _waQuickActionRuntime = (window.WA && typeof window.WA.createWorkspaceQuickActionRuntime === 'function' && _waAiTransport)
-      ? window.WA.createWorkspaceQuickActionRuntime({
-          state,
-          transport: _waAiTransport,
-          getMessagesElement: () => $('wa-ai-messages'),
-          getModelMode: _waQuickActionModelMode,
-          getSelectedCloudModelId: _selectedCloudModelId,
-          handleProposals: _handleProposals,
-          makeAIActionBar: _makeAIActionBar,
-          applyRouteEvent: _applyRouteEvent,
-          setPendingToolCall: (parsed) => { state.pendingToolCall = parsed; },
-          appendAssistantTurn: (text, metadata) => _waConversationRuntime && typeof _waConversationRuntime.appendAssistantTurn === 'function'
-            ? _waConversationRuntime.appendAssistantTurn(text, Object.assign({ render: false }, metadata || {}))
-            : null,
-          getSessionId: _waSession,
-          getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'
-            ? _waConversationRuntime.getHistoryForModel(12)
-            : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []),
-          slidesIcon: _SLIDES_SVG,
-        })
-      : null;
-
-    if (_waQuickActionRuntime && _waTaskDispatcher && typeof _waQuickActionRuntime.attachDispatcher === 'function') {
+    if (!_waQuickActionDispatcherAttached && _waQuickActionRuntime && _waTaskDispatcher && typeof _waQuickActionRuntime.attachDispatcher === 'function') {
       _waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);
+      _waQuickActionDispatcherAttached = true;
     }
   }
 
   _initWorkspaceAiRuntimes();
+  _hydrateAiConversation(true).catch((error) => console.warn('[WA] AI history hydrate failed:', error));
 
   window.WA.hydrateAiHistory = (force = true) => _hydrateAiConversation(force);
 
   window.WA.registerTaskQuickAction = (definition) => {
+    _initWorkspaceAiRuntimes();
     if (!_waQuickActionRuntime || typeof _waQuickActionRuntime.registerAction !== 'function') return null;
     return _waQuickActionRuntime.registerAction(definition);
   };
 
   window.WA.registerTaskEntryRoute = (route) => {
+    _initWorkspaceAiRuntimes();
     if (!_waTaskDispatcher || typeof _waTaskDispatcher.registerMessageRoute !== 'function') return null;
     return _waTaskDispatcher.registerMessageRoute(route);
   };
 
   window.WA.registerTaskActionHandler = (action, handler) => {
+    _initWorkspaceAiRuntimes();
     if (!_waTaskDispatcher || typeof _waTaskDispatcher.registerQuickActionHandler !== 'function') return null;
     return _waTaskDispatcher.registerQuickActionHandler(action, handler);
   };
 
   window.WA.registerTaskActionKeyword = (keyword, action) => {
+    _initWorkspaceAiRuntimes();
     if (!_waTaskDispatcher || typeof _waTaskDispatcher.registerQuickActionKeyword !== 'function') return null;
     return _waTaskDispatcher.registerQuickActionKeyword(keyword, action);
   };
@@ -15020,11 +15766,26 @@ window.WA.__contract = "1.0";
     return (typeof label === 'number' || typeof label === 'boolean') ? String(label) : (fallback || '');
   }
 
+  function _normalizeLocalRuntimeModelLabel(label) {
+    const value = _coerceModelLabel(label, '').trim();
+    if (!value) return '';
+    return value.replace(/（未启动）$/u, '').replace(/（未下载）$/u, '').trim();
+  }
+
+  function _formatLocalRuntimeModelLabel(label, options) {
+    const opts = options || {};
+    const normalized = _normalizeLocalRuntimeModelLabel(label);
+    if (!normalized) return opts.running === false ? '未启动' : 'Ollama';
+    if (opts.running === false) return `${normalized}（未启动）`;
+    if (opts.installed === false) return `${normalized}（未下载）`;
+    return normalized;
+  }
+
   function _modelDisplayName(modelId, fallback) {
-    if (!modelId) return fallback || '??';
+    if (!modelId) return fallback || '云端';
     if (modelId === 'gemini') return 'Gemini';
     if (modelId === 'deepseek') return 'DeepSeek';
-    if (modelId === 'local') return '??';
+    if (modelId === 'local') return '本地';
     const meta = _lookupModelMeta(modelId);
     const metaDisplay = _coerceModelLabel(meta && meta.display, '');
     if (metaDisplay) return metaDisplay;
@@ -15043,8 +15804,8 @@ window.WA.__contract = "1.0";
       return _coerceModelLabel(state._activeRoute.modelDisplay, '') || _modelDisplayName(state._activeRoute.modelId, state._activeRoute.modelId);
     }
 
-    const mappedChatModel = state._modelMap?.CHAT || state._modelMap?.DOC_ANNOTATE || state._modelMap?.FILE_GEN || '';
-    if (mappedChatModel) return _modelDisplayName(mappedChatModel, mappedChatModel);
+    const mappedFileTaskModel = state._modelMap?.FILE_TASK || state._modelMap?.DOC_ANNOTATE || state._modelMap?.FILE_GEN || state._modelMap?.AGENT || state._modelMap?.CHAT || '';
+    if (mappedFileTaskModel) return _modelDisplayName(mappedFileTaskModel, mappedFileTaskModel);
 
     return _modelDisplayName('gemini-2.5-flash', 'Gemini 2.5 Flash');
   }
@@ -15058,9 +15819,9 @@ window.WA.__contract = "1.0";
     const explicitCloudModel = _selectedCloudModelId();
     const activeRoute = state._activeRoute || null;
     const cloudModelHint = _currentCloudModelHint();
-    const geminiModelHint = state.lockedModel === 'gemini' ? cloudModelHint : '??';
+    const geminiModelHint = state.lockedModel === 'gemini' ? cloudModelHint : '自动';
     const deepseekModelHint = _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');
-    const localModelHint = state._localRuntimeModel || '???';
+    const localModelHint = state._localRuntimeModel || '未启动';
     const lockedMode = _normalizeWorkspaceModelMode(state.lockedModel, 'cloud');
     const activeMode = lockedMode === 'cloud'
       ? _normalizeWorkspaceModelMode(state._cloudProvider, 'gemini')
@@ -15069,12 +15830,12 @@ window.WA.__contract = "1.0";
 
     const modelLabel = _coerceModelLabel(activeRoute?.modelDisplay, '')
       || (state.lockedModel === 'local'
-        ? '??'
+        ? '本地'
         : state.lockedModel === 'deepseek'
           ? 'DeepSeek'
           : state.lockedModel === 'gemini'
             ? 'Gemini'
-            : (explicitCloudModel ? _modelDisplayName(explicitCloudModel, explicitCloudModel) : '??'));
+            : (explicitCloudModel ? _modelDisplayName(explicitCloudModel, explicitCloudModel) : '云端'));
 
     if (badge) {
       badge.textContent = modelLabel;
@@ -15082,12 +15843,12 @@ window.WA.__contract = "1.0";
     }
     if (geminiModelEl) {
       geminiModelEl.textContent = geminiModelHint;
-      geminiModelEl.title = `Gemini ???????${geminiModelHint}`;
+      geminiModelEl.title = `Gemini 文件任务模型：${geminiModelHint}`;
       geminiModelEl.hidden = !(shouldShowModelHint && activeMode === 'gemini');
     }
     if (deepseekModelEl) {
       deepseekModelEl.textContent = deepseekModelHint;
-      deepseekModelEl.title = `DeepSeek ???????${deepseekModelHint}`;
+      deepseekModelEl.title = `DeepSeek 文件任务模型：${deepseekModelHint}`;
       deepseekModelEl.hidden = !(shouldShowModelHint && activeMode === 'deepseek');
     }
     if (localModelEl) {
@@ -15099,10 +15860,10 @@ window.WA.__contract = "1.0";
       const isActive = button.dataset.modelMode === activeMode;
       button.classList.toggle('active', isActive);
       const buttonTitle = button.dataset.modelMode === 'local'
-        ? `?????${localModelHint}`
+        ? `本地模型：${localModelHint}`
         : button.dataset.modelMode === 'deepseek'
-          ? `DeepSeek ???????${deepseekModelHint}`
-          : `Gemini ???????${geminiModelHint}`;
+          ? `DeepSeek 文件任务模型：${deepseekModelHint}`
+          : `Gemini 文件任务模型：${geminiModelHint}`;
       button.title = buttonTitle;
     });
 
@@ -15110,8 +15871,8 @@ window.WA.__contract = "1.0";
 
     const routeBits = [];
     if (state.lockedModel === 'local') { /* mode already shown in header badge */ }
-    else if (state.lockedModel === 'gemini' || state.lockedModel === 'deepseek') routeBits.push('??????');
-    else if (explicitCloudModel) routeBits.push('?????');
+    else if (state.lockedModel === 'gemini' || state.lockedModel === 'deepseek') routeBits.push('已锁定供应商');
+    else if (explicitCloudModel) routeBits.push('已锁定模型');
     else if (activeRoute) routeBits.push('自动路由');
 
     if (activeRoute?.taskDisplay) routeBits.push(activeRoute.taskDisplay);
@@ -15190,12 +15951,19 @@ window.WA.__contract = "1.0";
       .then(data => {
         const localButton = document.getElementById('wa-model-mode-local-btn');
         if (!localButton) return;
+        const configuredModel = _normalizeLocalRuntimeModelLabel(
+          (data && (data.configured_model || data.model)) || state._localRuntimeModel
+        );
+        const configuredInstalled = !!(!data || data.configured_model_installed !== false);
         if (data && data.running) {
-          state._localRuntimeModel = data.model || 'Ollama';
+          state._localRuntimeModel = _formatLocalRuntimeModelLabel(
+            configuredModel || data.model || 'Ollama',
+            { running: true, installed: configuredInstalled }
+          );
           localButton.disabled = false;
         } else {
-          state._localRuntimeModel = state.lockedModel === 'local' ? '未启动' : '未启动';
-          localButton.disabled = state.lockedModel !== 'local';
+          state._localRuntimeModel = _formatLocalRuntimeModelLabel(configuredModel, { running: false });
+          localButton.disabled = false;
         }
         _syncModelStatusUi();
       })
@@ -15242,7 +16010,7 @@ window.WA.__contract = "1.0";
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode: newModel }),
-    }).catch(() => {/* silent ? localStorage state still works for chat/stream path */});
+    }).catch(() => {/* silent — localStorage state still works for chat/stream path */});
   }
 
   window.WA.setUseLocalModel = (useLocal) => {
@@ -15337,6 +16105,48 @@ window.WA.__contract = "1.0";
 
   // ── Close-warning API (called by app.js / pywebview close flow) ────────────
 
+  const _renderCloseWarnItem = (tab) => {
+    const fileName = _escHtml(tab && tab.name ? tab.name : '未命名文件');
+    const rawPath = tab && tab.path ? String(tab.path).replace(/\\/g, '/') : '工作区临时文件';
+    const filePath = _escHtml(rawPath);
+    return [
+      '<div class="wa-close-warn-item">',
+      '<span class="wa-close-warn-item-indicator" aria-hidden="true"></span>',
+      '<div class="wa-close-warn-item-body">',
+      `<div class="wa-close-warn-item-name">${fileName}</div>`,
+      `<div class="wa-close-warn-item-path">${filePath}</div>`,
+      '</div>',
+      '</div>',
+    ].join('');
+  };
+
+  const _settleCloseWarn = (decision) => {
+    const overlay = $('wa-close-warn-overlay');
+    if (overlay) overlay.style.display = 'none';
+    const resolver = overlay ? overlay._resolve : null;
+    if (overlay) overlay._resolve = null;
+    const lastFocus = overlay ? overlay._lastFocus : null;
+    if (overlay) overlay._lastFocus = null;
+    if (lastFocus && typeof lastFocus.focus === 'function') {
+      try { lastFocus.focus(); } catch (_) {}
+    }
+    if (resolver) resolver(decision);
+  };
+
+  const _setCloseWarnBusy = (busy) => {
+    const overlay = $('wa-close-warn-overlay');
+    if (!overlay) return;
+    overlay.dataset.busy = busy ? 'true' : 'false';
+    overlay.querySelectorAll('button').forEach((button) => {
+      button.disabled = !!busy;
+    });
+    const saveBtn = overlay.querySelector('.wa-close-warn-save');
+    if (saveBtn) {
+      if (!saveBtn.dataset.defaultText) saveBtn.dataset.defaultText = saveBtn.textContent || '保存全部并退出';
+      saveBtn.textContent = busy ? '保存中...' : saveBtn.dataset.defaultText;
+    }
+  };
+
   /**
    * Returns an array of {path, name} for every open tab that has unsaved changes.
    * Called by app.js closeWindow() before destroying the pywebview window.
@@ -15353,41 +16163,49 @@ window.WA.__contract = "1.0";
   window.WA.showCloseWarning = (unsavedTabs) => {
     return new Promise((resolve) => {
       const overlay = $('wa-close-warn-overlay');
+      const dialogEl = $('wa-close-warn-dialog');
       const listEl  = $('wa-close-warn-list');
-      if (!overlay || !listEl) { resolve('discard'); return; }
-      listEl.innerHTML = unsavedTabs.map(t => `<li>${_escHtml(t.name)}</li>`).join('');
+      const countEl = $('wa-close-warn-count');
+      if (!overlay || !dialogEl || !listEl) { resolve('discard'); return; }
+      if (overlay.parentElement !== document.body) {
+        document.body.appendChild(overlay);
+      }
+      if (!dialogEl.dataset.closeWarnBound) {
+        dialogEl.dataset.closeWarnBound = '1';
+        dialogEl.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            window.WA._closeWarnCancel();
+          }
+        });
+      }
+      if (countEl) countEl.textContent = `${unsavedTabs.length} 个未保存文件`;
+      listEl.innerHTML = unsavedTabs.map(_renderCloseWarnItem).join('');
+      overlay._lastFocus = document.activeElement || null;
       overlay.style.display = 'flex';
       // Store resolve so buttons can call it
       overlay._resolve = resolve;
+      requestAnimationFrame(() => dialogEl.focus());
     });
   };
 
   window.WA._closeWarnCancel = () => {
-    const overlay = $('wa-close-warn-overlay');
-    if (overlay) { overlay.style.display = 'none'; if (overlay._resolve) overlay._resolve('cancel'); }
+    _settleCloseWarn('cancel');
   };
 
   window.WA._closeWarnDiscard = () => {
-    const overlay = $('wa-close-warn-overlay');
-    if (overlay) {
-      overlay.style.display = 'none';
-      if (overlay._resolve) overlay._resolve('discard');
-    }
+    _settleCloseWarn('discard');
   };
 
   window.WA._closeWarnSaveAll = async () => {
-    const overlay = $('wa-close-warn-overlay');
-    if (overlay) overlay.style.display = 'none';
-    // Try to save the currently active tab (most common case)
-    // For a full save-all, iterate modified tabs
+    _setCloseWarnBusy(true);
     const modifiedTabs = state.openTabs.filter(t => t.modified);
-    for (const tab of modifiedTabs) {
-      try {
-        // Switch to the tab and trigger save
+    try {
+      for (const tab of modifiedTabs) {
         await _switchToTab(tab.path);
         if (state.activeEditor) {
           const data = _serializeEditorForTab(tab, state.activeEditor);
-          await fetch('/api/v1/workspace/auto_save', {
+          const res = await fetch('/api/v1/workspace/auto_save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -15398,14 +16216,19 @@ window.WA.__contract = "1.0";
               data,
             }),
           });
+          const json = await _safeJson(res);
+          if (!res.ok) throw new Error(json.error || `${tab.name || tab.path || '文件'} 保存失败`);
           tab.modified = false;
+          _notifyPyModified(tab, false);
         }
-      } catch (e) {
-        console.warn('[CloseWarn] Save failed for', tab.name, e);
       }
+      _renderTabs();
+      _settleCloseWarn('save');
+    } catch (e) {
+      console.warn('[CloseWarn] Save failed:', e);
+      showToast(e && e.message ? e.message : '保存失败，请重试', 'error');
+      _setCloseWarnBusy(false);
     }
-    _renderTabs();
-    if (overlay && overlay._resolve) overlay._resolve('save');
   };
 
 
@@ -15674,6 +16497,10 @@ window.WA.__contract = "1.0";
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
             'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
             'application/pdf': ['.pdf'],
+            'text/plain': ['.txt'],
+            'text/markdown': ['.md', '.markdown'],
+            'text/csv': ['.csv'],
+            'application/json': ['.json'],
           }}, { description: 'Images', accept: {
             'image/*': ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'],
           }}],
@@ -15915,8 +16742,23 @@ window.WA.__contract = "1.0";
     }
   });
 
-  function _isFileDrag(e) {
-    try { return e.dataTransfer.types.includes('application/wa-file-path'); } catch (_) { return false; }
+  function _isAIAttachmentDrag(e) {
+    try {
+      if (e.dataTransfer.types.includes('application/wa-file-path')) return true;
+      return !!(e.dataTransfer.files && e.dataTransfer.files.length);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function _getAIAttachmentDropPayload(e) {
+    try {
+      const filePath = e.dataTransfer.getData('application/wa-file-path');
+      if (filePath) return { kind: 'workspace', filePath };
+      const files = Array.from(e.dataTransfer.files || []).filter(Boolean);
+      if (files.length) return { kind: 'local', files };
+    } catch (_) {}
+    return { kind: null };
   }
 
   function _showAIOverlay() {
@@ -15934,35 +16776,38 @@ window.WA.__contract = "1.0";
     let _aiDragCounter = 0;
 
     aiPanel.addEventListener('dragenter', (e) => {
-      if (!_isFileDrag(e)) return;
+      if (!_isAIAttachmentDrag(e)) return;
       e.preventDefault();
       _aiDragCounter++;
       _showAIOverlay();
     });
     aiPanel.addEventListener('dragover', (e) => {
-      if (!_isFileDrag(e)) return;
+      if (!_isAIAttachmentDrag(e)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
     });
     aiPanel.addEventListener('dragleave', (e) => {
-      if (!_isFileDrag(e)) return;
+      if (!_isAIAttachmentDrag(e)) return;
       _aiDragCounter--;
       if (_aiDragCounter <= 0) {
         _aiDragCounter = 0;
         _hideAIOverlay();
       }
     });
-    aiPanel.addEventListener('drop', (e) => {
+    aiPanel.addEventListener('drop', async (e) => {
+      const payload = _getAIAttachmentDropPayload(e);
+      if (!payload.kind) return;
       _aiDragCounter = 0;
       _hideAIOverlay();
       document.body.classList.remove('wa-file-dragging');
-      const filePath = e.dataTransfer.getData('application/wa-file-path');
-      if (filePath) {
-        e.preventDefault();
-        e.stopPropagation();
-        _addFileToAIContext(filePath);
+      e.preventDefault();
+      e.stopPropagation();
+      if (payload.kind === 'workspace') {
+        _addFileToAIContext(payload.filePath);
         const input = $('wa-user-input');
         if (input) setTimeout(() => input.focus(), 150);
+      } else if (payload.kind === 'local') {
+        await _addLocalFilesToAIContext(payload.files);
       }
     });
   }
@@ -15971,23 +16816,40 @@ window.WA.__contract = "1.0";
   // providing a direct drop target that doesn't depend on bubbling
   if (aiDropOverlay) {
     aiDropOverlay.addEventListener('dragover', (e) => {
-      if (!_isFileDrag(e)) return;
+      if (!_isAIAttachmentDrag(e)) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'copy';
     });
-    aiDropOverlay.addEventListener('drop', (e) => {
+    aiDropOverlay.addEventListener('drop', async (e) => {
+      const payload = _getAIAttachmentDropPayload(e);
+      if (!payload.kind) return;
       _hideAIOverlay();
       document.body.classList.remove('wa-file-dragging');
-      const filePath = e.dataTransfer.getData('application/wa-file-path');
-      if (filePath) {
-        e.preventDefault();
-        e.stopPropagation();
-        _addFileToAIContext(filePath);
+      e.preventDefault();
+      e.stopPropagation();
+      if (payload.kind === 'workspace') {
+        _addFileToAIContext(payload.filePath);
         const input = $('wa-user-input');
         if (input) setTimeout(() => input.focus(), 150);
+      } else if (payload.kind === 'local') {
+        await _addLocalFilesToAIContext(payload.files);
       }
     });
   }
+
+  document.querySelectorAll('.wa-ctx-drop-hint').forEach((hintEl) => {
+    hintEl.setAttribute('role', 'button');
+    hintEl.setAttribute('tabindex', '0');
+    hintEl.addEventListener('click', () => {
+      WA.pickAIContextFiles();
+    });
+    hintEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        WA.pickAIContextFiles();
+      }
+    });
+  });
 
   // Canvas shield: pass dragover through so the drag stays alive while over the editor,
   // but the shield itself is not a drop target (drops just fall through after drag ends)
@@ -15998,16 +16860,24 @@ window.WA.__contract = "1.0";
   // ── Local file / folder pickers ──
   const localFileInput = $('wa-local-file-input');
   const localFolderInput = $('wa-local-folder-input');
+  const aiContextFileInput = $('wa-ai-context-file-input');
 
   localFileInput.addEventListener('change', (e) => {
     if (e.target.files.length) loadFiles(e.target.files);
     e.target.value = '';
   });
 
+  if (aiContextFileInput) {
+    aiContextFileInput.addEventListener('change', async (e) => {
+      if (e.target.files.length) await _addLocalFilesToAIContext(e.target.files);
+      e.target.value = '';
+    });
+  }
+
   localFolderInput.addEventListener('change', (e) => {
     const files = Array.from(e.target.files).filter(f => {
       const ext = f.name.split('.').pop().toLowerCase();
-      return ['docx', 'xlsx', 'pptx', 'pdf'].includes(ext);
+      return ['docx', 'xlsx', 'pptx', 'pdf', 'txt', 'md', 'markdown', 'csv', 'json'].includes(ext);
     });
     if (!files.length) { showToast('未找到支持的文件格式', 'error'); e.target.value = ''; return; }
     // Show folder contents in a picker-style list so user chooses which to open
@@ -16234,49 +17104,10 @@ window.WA.__contract = "1.0";
 
     const { path, isFolder, supported } = _fsBrowserCtxTarget;
 
-    // Ctrl+C — Copy
-    if ((e.ctrlKey || e.metaKey) && e.key === 'c' && path) {
-      e.preventDefault();
-      WA._fsBrowserCopy();
-      return;
-    }
-    // Ctrl+X — Cut
-    if ((e.ctrlKey || e.metaKey) && e.key === 'x' && path) {
-      e.preventDefault();
-      WA._fsBrowserCut();
-      return;
-    }
-    // Ctrl+V — Paste
-    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
-      if (!state._fsClipboard) return;
-      e.preventDefault();
-      WA._fsBrowserPaste();
-      return;
-    }
-    // F2 — Rename
-    if (e.key === 'F2' && path) {
-      e.preventDefault();
-      WA._fsBrowserRename();
-      return;
-    }
-    // Delete — Delete
-    if (e.key === 'Delete' && path) {
-      e.preventDefault();
-      WA._fsBrowserDelete();
-      return;
-    }
     // Enter — Open file (not folders)
     if (e.key === 'Enter' && path && !isFolder) {
       e.preventDefault();
       WA._fsBrowserOpen();
-      return;
-    }
-    // Ctrl+D — Duplicate (copy then paste into same folder)
-    if ((e.ctrlKey || e.metaKey) && e.key === 'd' && path) {
-      e.preventDefault();
-      WA._fsBrowserCopy();
-      // Paste into the same folder immediately
-      setTimeout(() => WA._fsBrowserPaste(), 50);
       return;
     }
     // Ctrl+Shift+C — Copy path to clipboard
@@ -16315,6 +17146,14 @@ window.WA.__contract = "1.0";
     requestAnimationFrame(() => {
       if (typeof window.WA?.openInMainView === 'function') {
         window.WA.openInMainView();
+      }
+    });
+  } else if (!document.getElementById('workspaceView')) {
+    requestAnimationFrame(() => {
+      if (typeof loadFileBrowser === 'function' && !window._WA_fileBrowserLoaded) {
+        window._WA_fileBrowserLoaded = true;
+        loadFileBrowser();
+        if (typeof loadRecentFiles === 'function') loadRecentFiles();
       }
     });
   }
