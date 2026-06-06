@@ -101,6 +101,9 @@ _CONFIG_EXCLUDED_DIRS = {
     'training_data',
 }
 _CONFIG_EXCLUDED_FILES = {
+    'DS_KEY',
+    'DS_KEY.txt',
+    'deepseek_config.env',
     'email_accounts.json',
     'gemini_config.env',
     'jwt_secret.txt',
@@ -203,6 +206,7 @@ hiddenimports = [
     'google.api_core', 'google.api_core.gapic_v1',
     'google.auth', 'google.auth.transport', 'google.auth.transport.requests',
     'google.protobuf',
+    'openai', 'jiter',
 
     # ── HTTP ──
     'httpx', 'httpx._client', 'httpcore', 'httpcore._async',
@@ -243,14 +247,9 @@ hiddenimports = [
     'win32api', 'win32con', 'win32gui', 'win32process', 'win32event',
     'pywintypes', 'pythoncom',
 
-    # ── 语音输入（可选，打包后优雅降级）──
-    'speech_recognition',
-    'pyaudio',
-    'vosk',
+    # ── 上传音频 STT（Whisper / Gemini）──
     'edge_tts',
-    'sounddevice', 'soundfile',
     'wave', 'audioop',
-    'comtypes', 'comtypes.client',
     'win32com', 'win32com.client',
 
     # ── LangChain / LangGraph ──
@@ -275,6 +274,9 @@ hiddenimports = [
     'app.core.agent.unified_agent',
     'app.core.agent.langgraph_agent',
     'app.core.agent.multi_agent',
+    'app.core.agent.koto_supervision',
+    'app.core.agent.mcp_adapter',
+    'app.core.agent.mcp_manager',
     'app.core.agent.tool_registry',
     'app.core.agent.checkpoint_manager',
     'app.core.agent.plugins',
@@ -285,7 +287,6 @@ hiddenimports = [
     'app.core.agent.plugins.data_process_plugin',
     'app.core.agent.plugins.image_process_plugin',
     'app.core.agent.plugins.network_plugin',
-    'app.core.agent.plugins.script_generation_plugin',
     'app.core.agent.plugins.performance_analysis_plugin',
     'app.core.agent.plugins.trend_analysis_plugin',
     'app.core.agent.plugins.configuration_plugin',
@@ -311,13 +312,16 @@ hiddenimports = [
     'app.core.learning.training_data_builder',
     'app.core.llm', 'app.core.llm.base',
     'app.core.llm.gemini', 'app.core.llm.langchain_adapter',
+    'app.core.llm.openai_provider',
+    'app.core.llm.deepseek_config',
+    'app.core.llm.deepseek_provider',
+    'app.core.llm.model_selection',
     'app.core.llm.ollama_provider',
     'app.core.monitoring',
     'app.core.monitoring.alert_manager',
     'app.core.monitoring.event_database',
     'app.core.monitoring.system_event_monitor',
     'app.core.remediation', 'app.core.remediation.remediation_manager',
-    'app.core.scripts', 'app.core.scripts.script_generator',
     'app.core.security',
     'app.core.security.output_validator',
     'app.core.security.pii_filter',
@@ -349,6 +353,7 @@ hiddenimports = [
     'app.api.ops_routes',
     'app.api.shadow_routes',
     'app.api.macro_routes',
+    'app.api.mcp_routes',
     'app.api.telegram_bot_routes',
     'app.api.distill_routes',
     'app.api.bg_agent_routes',
@@ -370,6 +375,8 @@ hiddenimports = [
     'web.blueprints.file_editor',
     'web.blueprints.file_organize',
     'web.blueprints.dev',
+    'web.blueprints.editor_ai',
+    'web.blueprints.ppt_legacy',
     'web.blueprints.pptx_editor',
     'web.blueprints.workflow_api',
     'web.blueprints.workspace_assistant',
@@ -393,7 +400,7 @@ hiddenimports = [
     'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
     'web.document_feedback', 'web.document_generator', 'web.document_reader',
     'web.document_validator', 'web.document_workflow_executor',
-    'web.docx_translator_module', 'web.email_manager', 'web.enhanced_memory_manager',
+    'web.docx_translator_module', 'web.enhanced_memory_manager',
     'web.feedback_loop', 'web.file_analyzer', 'web.file_converter',
     'web.file_editor', 'web.file_fields_extractor', 'web.file_indexer',
     'web.file_organizer', 'web.file_parser', 'web.file_processor',
@@ -410,15 +417,13 @@ hiddenimports = [
     'web.ppt_themes', 'web.proactive_dialogue', 'web.proactive_trigger',
     'web.processed_file_network', 'web.prompt_adapter', 'web.quality_evaluator',
     'web.reminder_manager', 'web.search_engine', 'web.settings',
-    'web.shared', 'web.smart_feedback', 'web.speech_transcriber',
-    'web.suggestion_annotator', 'web.suggestion_engine', 'web.system_info',
+    'web.shared', 'web.smart_feedback', 'web.suggestion_annotator',
+    'web.suggestion_engine', 'web.system_info',
     'web.task_dispatcher', 'web.task_scheduler', 'web.telegram_bot',
     'web.template_library', 'web.token_tracker', 'web.track_changes_editor',
-    'web.voice_api_enhanced', 'web.voice_engine', 'web.voice_fast',
-    'web.voice_input', 'web.voice_interaction', 'web.voice_recognition_enhanced',
     'web.web_searcher', 'web.windows_notifier', 'web.work_file_library',
     'web.workflow_manager',
-    'web.pdf_annotator', 'web.settings_backup',
+    'web.pdf_annotator',
 ]
 
 # ═══════════════════════════════════════════════
@@ -445,8 +450,6 @@ _collect_pkgs = [
     'langchain_core',
     'langchain_google_genai',
     'langgraph',
-    'speech_recognition',  # 语音识别（SpeechRecognition 包）
-    'pyaudio',             # 麦克风输入（需 portaudio.dll）
     'psutil',              # 系统/进程监控（C extension，必须 collect_all）
 ]
 

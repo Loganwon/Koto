@@ -24,6 +24,7 @@ import os
 from typing import Optional
 
 from .base import LLMProvider
+from .deepseek_config import get_deepseek_api_key, has_deepseek_api_key
 from .gemini_config import get_gemini_api_key, has_gemini_api_key
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,12 @@ def _load_openai() -> LLMProvider:
     return OpenAIProvider()
 
 
+def _load_deepseek() -> LLMProvider:
+    from .deepseek_provider import DeepSeekProvider
+
+    return DeepSeekProvider()
+
+
 def _load_anthropic() -> LLMProvider:
     from .anthropic_provider import AnthropicProvider
 
@@ -68,6 +75,7 @@ def _load_ollama() -> LLMProvider:
 _LOADERS = {
     "gemini": _load_gemini,
     "openai": _load_openai,
+    "deepseek": _load_deepseek,
     "anthropic": _load_anthropic,
     "ollama": _load_ollama,
 }
@@ -79,6 +87,7 @@ _MODEL_PREFIX_MAP = (
     ("o3", "openai"),
     ("o4", "openai"),
     ("claude-", "anthropic"),
+    ("deepseek-", "deepseek"),
     ("gemini-", "gemini"),
     ("deep-research", "gemini"),
     ("llama", "ollama"),
@@ -129,6 +138,15 @@ def get_llm_provider(
                 raise CloudProviderUnavailableError(
                     "Gemini cloud provider is not configured"
                 )
+            if name == "deepseek" and not has_deepseek_api_key():
+                if allow_local_fallback:
+                    logger.warning(
+                        "[ProviderFactory] DeepSeek unavailable, using explicit local fallback"
+                    )
+                    return _load_ollama()
+                raise CloudProviderUnavailableError(
+                    "DeepSeek cloud provider is not configured"
+                )
             return _LOADERS[name]()
         logger.warning(
             f"[ProviderFactory] Unknown provider '{provider}', falling back to auto-detect"
@@ -152,6 +170,15 @@ def get_llm_provider(
                     raise CloudProviderUnavailableError(
                         f"Gemini cloud provider is not configured for model '{model}'"
                     )
+                if pname == "deepseek" and not has_deepseek_api_key():
+                    if allow_local_fallback:
+                        logger.warning(
+                            "[ProviderFactory] DeepSeek model requested without cloud config; using local fallback"
+                        )
+                        return _load_ollama()
+                    raise CloudProviderUnavailableError(
+                        f"DeepSeek cloud provider is not configured for model '{model}'"
+                    )
                 return _LOADERS[pname]()
 
     # 3. Per-request key takes priority over global env var
@@ -163,6 +190,8 @@ def get_llm_provider(
         return _load_gemini()
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         return _load_openai()
+    if has_deepseek_api_key():
+        return _load_deepseek()
     if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
         return _load_anthropic()
 
@@ -181,6 +210,8 @@ def list_available_providers() -> list[str]:
         available.append("gemini")
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         available.append("openai")
+    if get_deepseek_api_key():
+        available.append("deepseek")
     if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
         available.append("anthropic")
     # Ollama is always potentially available (check runtime)

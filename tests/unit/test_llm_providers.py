@@ -147,6 +147,69 @@ class TestOpenAIProviderTracking:
             session_id="sess-b",
         )
 
+    def test_generate_content_passes_openai_compatible_extra_body(self):
+        from app.core.llm.openai_provider import OpenAIProvider
+
+        provider = OpenAIProvider.__new__(OpenAIProvider)
+        provider.client = MagicMock()
+        provider._build_messages = MagicMock(
+            return_value=[{"role": "user", "content": "hi"}]
+        )
+        provider._format_tools = MagicMock(return_value=None)
+        provider._format_response = MagicMock(
+            return_value={"content": "ok", "tool_calls": [], "usage": {}}
+        )
+        provider._track_usage = MagicMock()
+
+        provider.generate_content(
+            prompt="hi",
+            model="deepseek-v4-pro",
+            extra_body={"thinking": {"type": "enabled"}},
+        )
+
+        _, kwargs = provider.client.chat.completions.create.call_args
+        assert kwargs["extra_body"] == {"thinking": {"type": "enabled"}}
+
+
+class TestDeepSeekProvider:
+    def test_provider_factory_loads_deepseek_from_env(self, monkeypatch):
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-test-key")
+        from app.core.llm.provider_factory import get_llm_provider
+
+        with patch("app.core.llm.openai_provider._openai_available", True), patch(
+            "app.core.llm.openai_provider.OpenAI"
+        ) as mock_openai:
+            provider = get_llm_provider(provider="deepseek")
+
+        assert provider.api_key == "ds-test-key"
+        assert str(provider.base_url).rstrip("/") == "https://api.deepseek.com"
+        mock_openai.assert_called_once()
+
+    def test_cloud_provider_deepseek_resolves_v4_pro(self, monkeypatch):
+        monkeypatch.setenv("KOTO_CLOUD_PROVIDER", "deepseek")
+        from app.core.llm.model_selection import get_configured_cloud_model
+
+        assert (
+            get_configured_cloud_model("FILE_TASK", fallback_model="gemini-3.1-pro-preview")
+            == "deepseek-v4-pro"
+        )
+        assert (
+            get_configured_cloud_model("VISION", fallback_model="gemini-3-flash-preview")
+            == "gemini-3-flash-preview"
+        )
+
+    def test_deepseek_fallback_chain_does_not_mix_gemini(self):
+        from app.core.llm.model_fallback import ModelFallbackExecutor
+
+        executor = ModelFallbackExecutor()
+        candidates = executor._build_candidate_list("deepseek-v4-pro", "FILE_TASK")
+
+        assert "deepseek-v4-pro" in candidates
+        assert "deepseek-v4-flash" in candidates
+        assert "deepseek-chat" not in candidates
+        assert "deepseek-reasoner" not in candidates
+        assert all(not model.startswith("gemini-") for model in candidates)
+
 
 class TestAnthropicProviderTracking:
     def test_generate_content_tracks_usage(self):
