@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -123,9 +124,17 @@ class MCPStdioClient:
     实现 MCP 协议的 initialize / tools/list / tools/call 三个方法。
     """
 
-    def __init__(self, command: List[str], timeout: int = 10):
+    def __init__(
+        self,
+        command: List[str],
+        timeout: int = 10,
+        env: Optional[Dict[str, str]] = None,
+        cwd: Optional[str] = None,
+    ):
         self.command = command
         self.timeout = timeout
+        self.env = env or {}
+        self.cwd = cwd
         self._proc: Optional[subprocess.Popen] = None
         self._req_id = 0
         self._tools: List[Dict] = []
@@ -134,11 +143,15 @@ class MCPStdioClient:
     def connect(self) -> bool:
         """启动子进程并完成 MCP 握手（initialize）。"""
         try:
+            proc_env = os.environ.copy()
+            proc_env.update({str(k): str(v) for k, v in self.env.items()})
             self._proc = subprocess.Popen(
                 self.command,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=proc_env,
+                cwd=self.cwd or None,
             )
             # MCP initialize 握手
             resp = self._rpc(
@@ -195,8 +208,13 @@ class MCPStdioClient:
 
     def _rpc(self, method: str, params: Any = None) -> Dict:
         with self._lock:
+            if not self._proc or not self._proc.stdin or not self._proc.stdout:
+                return {"error": "MCP process is not running"}
+            if self._proc.poll() is not None:
+                return {"error": f"MCP process exited with code {self._proc.returncode}"}
             self._req_id += 1
-            req = _make_request(method, params, self._req_id)
+            req_id = self._req_id
+            req = _make_request(method, params, req_id)
             self._proc.stdin.write(req)
             self._proc.stdin.flush()
             # 读取响应行
@@ -205,7 +223,9 @@ class MCPStdioClient:
                 line = self._proc.stdout.readline()
                 if line:
                     try:
-                        return _parse_response(line)
+                        resp = _parse_response(line)
+                        if resp.get("id") == req_id or "error" in resp:
+                            return resp
                     except json.JSONDecodeError:
                         continue
             return {"error": "timeout"}
@@ -290,20 +310,30 @@ class MCPServerEntry:
         self.server_type = server_type  # "stdio" | "http"
         self.tools: List[Dict] = []
         self.connected = False
+        self.last_error = ""
 
     def connect(self) -> bool:
-        if self.server_type == "stdio":
-            ok = self.client.connect()
-        else:
-            ok = True  # HTTP 无需握手
-        if ok:
-            self.tools = self.client.list_tools()
-            self.connected = True
-            logger.info(
-                f"[MCPAdapter] [{self.name}] 已连接，{len(self.tools)} 个工具: "
-                f"{[t['name'] for t in self.tools]}"
-            )
-        return ok
+        try:
+            if self.server_type == "stdio":
+                ok = self.client.connect()
+            else:
+                ok = True  # HTTP 无需握手
+            if ok:
+                self.tools = self.client.list_tools()
+                self.connected = True
+                self.last_error = ""
+                logger.info(
+                    f"[MCPAdapter] [{self.name}] 已连接，{len(self.tools)} 个工具: "
+                    f"{[t['name'] for t in self.tools]}"
+                )
+            else:
+                self.last_error = "connect failed"
+            return ok
+        except Exception as exc:
+            self.connected = False
+            self.last_error = str(exc)
+            logger.warning(f"[MCPAdapter] [{self.name}] 连接失败: {exc}")
+            return False
 
     def disconnect(self):
         if self.server_type == "stdio":
@@ -342,9 +372,11 @@ class MCPRegistry:
         name: str,
         command: List[str],
         timeout: int = 10,
+        env: Optional[Dict[str, str]] = None,
+        cwd: Optional[str] = None,
     ) -> "MCPRegistry":
         """注册一个 stdio MCP server（本地子进程）。"""
-        client = MCPStdioClient(command=command, timeout=timeout)
+        client = MCPStdioClient(command=command, timeout=timeout, env=env, cwd=cwd)
         self._servers[name] = MCPServerEntry(name, client, "stdio")
         return self
 
@@ -368,7 +400,10 @@ class MCPRegistry:
           {
             "server_name": {
               "type": "stdio"|"http",
-              "command": [...],   # stdio 时
+              "command": "node",  # stdio 时；也兼容 ["node", "server.js"]
+              "args": ["server.js"],
+              "env": {"TOKEN": "..."},
+              "cwd": "C:/project",
               "url": "...",       # http 时
               "api_key": "...",   # http 可选
             }
@@ -377,9 +412,26 @@ class MCPRegistry:
         for name, cfg in config.items():
             stype = cfg.get("type", "stdio")
             if stype == "stdio":
-                self.add_stdio_server(name, cfg["command"])
+                command = cfg["command"]
+                if isinstance(command, str):
+                    command = [command]
+                args = cfg.get("args") or []
+                if isinstance(args, str):
+                    args = [args]
+                self.add_stdio_server(
+                    name,
+                    [*command, *args],
+                    timeout=int(cfg.get("timeout", 10)),
+                    env=cfg.get("env") or {},
+                    cwd=cfg.get("cwd"),
+                )
             elif stype == "http":
-                self.add_http_server(name, cfg["url"], api_key=cfg.get("api_key", ""))
+                self.add_http_server(
+                    name,
+                    cfg["url"],
+                    api_key=cfg.get("api_key", ""),
+                    timeout=int(cfg.get("timeout", 30)),
+                )
         return self
 
     def connect_all(self) -> Dict[str, bool]:
@@ -414,6 +466,26 @@ class MCPRegistry:
                 for t in entry.tools:
                     tools.append({**t, "_mcp_server": name})
         return tools
+
+    def status(self) -> Dict[str, Any]:
+        """返回当前 MCP server 连接状态，供 API / 诊断入口使用。"""
+        servers = {}
+        total_tools = 0
+        for name, entry in self._servers.items():
+            tool_names = [t.get("name", "") for t in entry.tools]
+            total_tools += len(tool_names)
+            servers[name] = {
+                "type": entry.server_type,
+                "connected": entry.connected,
+                "tool_count": len(tool_names),
+                "tools": tool_names,
+                "last_error": entry.last_error,
+            }
+        return {
+            "server_count": len(servers),
+            "tool_count": total_tools,
+            "servers": servers,
+        }
 
     def inject_into(self, tool_registry) -> int:
         """
@@ -494,7 +566,7 @@ class MCPRegistry:
         try:
             if settings_path.exists():
                 data = json.loads(settings_path.read_text(encoding="utf-8"))
-                mcp_cfg = data.get("mcp_servers", {})
+                mcp_cfg = data.get("mcp_servers") or data.get("mcpServers") or {}
                 if mcp_cfg:
                     reg.from_config(mcp_cfg)
                     logger.info(

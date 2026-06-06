@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════
-# hooks.py — Hook Registry (OpenClaw-inspired)
+# hooks.py — Hook Registry
 #
 # Provides a lightweight plugin system for the agent loop.
 # Hooks fire at well-defined points in the agent lifecycle:
