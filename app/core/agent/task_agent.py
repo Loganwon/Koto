@@ -10,7 +10,7 @@
 #   - retained for skill/tool workflows outside the whitebox file-task runtime
 #   - NOT the active workspace-assistant file-task runtime
 #
-# Inspired by OpenClaw's architecture:
+# Koto task-agent architecture:
 #   - LLM IS the planner (no separate planning module)
 #   - Skills = prompt injection, not hardcoded logic
 #   - Streaming execution with approval gates
@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
 from app.core.llm.model_mode import normalize_model_mode
+from app.core.llm.model_selection import get_configured_cloud_model, get_provider_for_model_mode
 from app.core.shared.tool_parser import parse_task_tool_calls, stringify_tool_result
 
 logger = logging.getLogger(__name__)
@@ -1290,19 +1291,19 @@ class TaskAgent:
                 return None
 
         try:
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            api_key = self._api_key
-            if not api_key:
-                api_key = (
-                    os.environ.get("GEMINI_API_KEY")
-                    or os.environ.get("API_KEY")
-                    or os.environ.get("GOOGLE_API_KEY")
-                )
-            if not api_key:
-                logger.error("[TaskAgent] No API key available")
-                return None
-            return GeminiProvider(api_key=api_key)
+            provider_name = get_provider_for_model_mode(model_mode)
+            self._model_id = get_configured_cloud_model(
+                task_type="FILE_TASK",
+                fallback_model=self._model_id,
+                provider=provider_name,
+            ) or self._model_id
+            return get_llm_provider(
+                provider=provider_name,
+                model=self._model_id,
+                allow_local_fallback=False,
+            )
         except Exception as e:
             logger.error("[TaskAgent] Failed to init LLM provider: %s", e)
             return None

@@ -1298,6 +1298,7 @@ def _fingerprint_changed(path: str, fingerprint: Dict[str, Any]) -> bool:
 def _unique_staged_name(name: str, used_names: set[str]) -> str:
     """Return a unique basename for files mirrored into the sandbox workdir."""
     candidate = os.path.basename(name or "") or "task_file"
+    candidate = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", candidate).strip(" .") or "task_file"
     stem, ext = os.path.splitext(candidate)
     normalized = candidate.lower()
     index = 2
@@ -1730,14 +1731,198 @@ def copy_file(source: str, destination: str) -> str:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
+def _plain_text_to_docx_paragraphs(content: str) -> List[Dict[str, str]]:
+    paragraphs: List[Dict[str, str]] = []
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line or re.fullmatch(r"[-*_]{3,}", line):
+            continue
+        style = "Normal"
+        text = line
+        heading_match = re.match(r"^(#{1,6})\s+(.+)$", line)
+        if heading_match:
+            level = min(len(heading_match.group(1)), 3)
+            style = f"Heading {level}"
+            text = heading_match.group(2).strip()
+        else:
+            bullet_match = re.match(r"^[-*•]\s+(.+)$", line)
+            if bullet_match:
+                style = "List Bullet"
+                text = bullet_match.group(1).strip()
+        text = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", text)
+        text = re.sub(r"__([^_\n]+)__", r"\1", text)
+        if text:
+            paragraphs.append({"text": text, "style": style})
+    if not paragraphs and str(content or "").strip():
+        paragraphs.append({"text": str(content).strip(), "style": "Normal"})
+    return paragraphs
+
+
+def _create_docx_file(path: str, resolved: str, content: str) -> str:
+    try:
+        paragraphs = _plain_text_to_docx_paragraphs(content)
+        if not paragraphs:
+            paragraphs = [{"text": "", "style": "Normal"}]
+        from docx import Document
+
+        doc = Document()
+        os.makedirs(os.path.dirname(resolved), exist_ok=True)
+        for item in paragraphs:
+            paragraph = doc.add_paragraph(str(item.get("text") or ""))
+            style = str(item.get("style") or "").strip()
+            if style:
+                try:
+                    paragraph.style = style
+                except Exception:
+                    pass
+        _save_docx_via_temp_file(doc, resolved)
+        preview = "\n".join(str(item.get("text") or "") for item in paragraphs[:3])
+        return _success_result(
+            _result_path(path, resolved),
+            operation="write_docx_content",
+            summary=f"已创建并写入 {len(paragraphs)} 个段落到 Word 文档",
+            file_type="docx",
+            change_type="create",
+            preview=preview,
+            focus=True,
+            paragraphs_written=len(paragraphs),
+        )
+    except ImportError:
+        return json.dumps({"error": "python-docx not installed"}, ensure_ascii=False)
+
+
+def _create_xlsx_file(path: str, resolved: str, content: str) -> str:
+    try:
+        import csv
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        rows_written = 0
+        columns_written = 0
+        text = str(content or "").strip()
+        rows = list(csv.reader(io.StringIO(text))) if text else []
+        if not rows:
+            rows = [[""]]
+        for row_index, row in enumerate(rows, start=1):
+            columns_written = max(columns_written, len(row))
+            for col_index, value in enumerate(row, start=1):
+                ws.cell(row=row_index, column=col_index, value=value)
+            rows_written += 1
+        os.makedirs(os.path.dirname(resolved), exist_ok=True)
+        _save_workbook_via_temp_file(wb, resolved)
+        wb.close()
+        cells_written = rows_written * max(columns_written, 1)
+        return _success_result(
+            _result_path(path, resolved),
+            operation="write_sheet_data",
+            summary=f"已创建工作簿并写入 {rows_written} 行、{columns_written} 列",
+            file_type="xlsx",
+            change_type="create",
+            preview=text,
+            focus=True,
+            rows_written=rows_written,
+            columns_written=columns_written,
+            cells_written=cells_written,
+        )
+    except ImportError:
+        return json.dumps({"error": "openpyxl not installed"}, ensure_ascii=False)
+
+
+def _plain_text_to_pptx_slides(content: str) -> List[Dict[str, Any]]:
+    slides: List[Dict[str, Any]] = []
+    current: Optional[Dict[str, Any]] = None
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        heading_match = re.match(r"^#{1,6}\s+(.+)$", line)
+        if heading_match:
+            if current:
+                slides.append(current)
+            current = {"title": heading_match.group(1).strip(), "content": []}
+            continue
+        bullet_match = re.match(r"^[-*•]\s+(.+)$", line)
+        text = bullet_match.group(1).strip() if bullet_match else line
+        if current is None:
+            current = {"title": text[:56] or "新幻灯片", "content": []}
+            if text:
+                continue
+        current.setdefault("content", []).append(text)
+    if current:
+        slides.append(current)
+    if not slides:
+        slides.append({"title": "新幻灯片", "content": []})
+    return slides
+
+
+def _create_pptx_file(path: str, resolved: str, content: str) -> str:
+    try:
+        from pptx import Presentation
+        from pptx.util import Inches, Pt
+
+        prs = Presentation()
+        slides = _plain_text_to_pptx_slides(content)
+        first_blank = len(prs.slides) == 0
+        for index, slide_data in enumerate(slides):
+            layout_index = 0 if index == 0 and first_blank else min(1, len(prs.slide_layouts) - 1)
+            slide = prs.slides.add_slide(prs.slide_layouts[layout_index])
+            title_text = str(slide_data.get("title") or "新幻灯片").strip()
+            content_lines = _pptx_text_lines(slide_data.get("content"))
+            if slide.shapes.title:
+                slide.shapes.title.text = title_text
+            else:
+                title_box = slide.shapes.add_textbox(Inches(0.6), Inches(0.4), Inches(8.4), Inches(0.7))
+                title_frame = title_box.text_frame
+                title_frame.clear()
+                title_frame.paragraphs[0].text = title_text
+                title_frame.paragraphs[0].font.size = Pt(30)
+            if content_lines:
+                body_box = slide.shapes.add_textbox(Inches(0.8), Inches(1.4), Inches(8.2), Inches(4.8))
+                body_frame = body_box.text_frame
+                body_frame.clear()
+                for line_index, line in enumerate(content_lines):
+                    paragraph = body_frame.paragraphs[0] if line_index == 0 else body_frame.add_paragraph()
+                    paragraph.text = line
+                    paragraph.font.size = Pt(18)
+        os.makedirs(os.path.dirname(resolved), exist_ok=True)
+        _save_pptx_via_temp_file(prs, resolved)
+        preview = "\n".join(str(slide.get("title") or "") for slide in slides[:3])
+        return _success_result(
+            _result_path(path, resolved),
+            operation="add_pptx_slides",
+            summary=f"已创建 PPT 并新增 {len(slides)} 张幻灯片",
+            file_type="pptx",
+            change_type="create",
+            preview=preview,
+            focus=True,
+            slides_added=len(slides),
+            total_slides=len(prs.slides),
+        )
+    except ImportError:
+        return json.dumps({"error": "python-pptx not installed"}, ensure_ascii=False)
+
+
 def create_file(path: str, content: str = "") -> str:
-    """Create a new file in the workspace."""
+    """Create a new file in the workspace.
+
+    Office targets are created as real package files and emit the same write
+    metrics as their specialized tools, so task quality gates can verify them.
+    """
     resolved = _safe_resolve(path)
     if not resolved:
         return json.dumps({"error": f"Invalid path: {path}"}, ensure_ascii=False)
     if os.path.exists(resolved):
         return json.dumps({"error": "File already exists"}, ensure_ascii=False)
     try:
+        suffix = Path(resolved).suffix.lower()
+        if suffix in {".docx", ".doc"}:
+            return _create_docx_file(path, resolved, content)
+        if suffix in {".xlsx", ".xlsm"}:
+            return _create_xlsx_file(path, resolved, content)
+        if suffix in {".pptx", ".ppt"}:
+            return _create_pptx_file(path, resolved, content)
         os.makedirs(os.path.dirname(resolved), exist_ok=True)
         with open(resolved, "w", encoding="utf-8") as f:
             f.write(content)
@@ -4256,14 +4441,18 @@ class TaskToolsPlugin(AgentPlugin):
                 "name": "design_pptx_theme_layout",
                 "func": design_pptx_theme_layout,
                 "description": (
-                    "Apply a conservative visual theme and layout pass to an existing PPTX file. "
-                    "Use for tasks asking to design, beautify, theme, format, or improve slide layout/style. "
-                    "It preserves existing slides and content, styles titles/body text, applies background/accent colors, "
-                    "and adjusts title/body placeholders to a safe grid. "
+                    "Apply a professional visual theme and layout pass to an existing PPTX file. "
+                    "Use for tasks asking to make a PPT beautiful, polished, professional, high-end, designed, themed, "
+                    "formatted, visually consistent, or better laid out. "
+                    "It preserves existing slide count and content unless the user explicitly asks otherwise, styles titles/body text, "
+                    "applies coherent background/accent colors, adds restrained visual furniture, and adjusts title/body placeholders "
+                    "to a safe grid so text remains readable. "
+                    "For presentation quality, call this after content edits/additions when the user asks for a good-looking deck. "
                     "Args: path (str), style_brief (str, optional), theme (object/json/string, optional), "
                     "palette (array/object/json, optional), typography (object/json/string, optional), "
                     "density (compact/balanced/spacious, optional), preserve_content (bool, default true). "
-                    "Returns: standard Koto file-change payload."
+                    "Returns: standard Koto file-change payload with slides_designed, text_shapes_styled, theme_name, "
+                    "layout_strategy, and any layout_warnings for verification."
                 ),
                 "parameters": {
                     "type": "OBJECT",
@@ -4285,6 +4474,8 @@ class TaskToolsPlugin(AgentPlugin):
                 "description": (
                     "Modify text content in an existing PPTX file. "
                     "Use to update slide text, titles, or bullet points in-place. "
+                    "For high-quality deck editing, first read the existing PPTX context, make targeted text edits, "
+                    "then call design_pptx_theme_layout if the user asks for polish, beauty, style, or professional layout. "
                     "Args: path (str — PPTX file path), "
                     "updates (JSON array of [{slide_index (0-based), shape_name or shape_index, text}]). "
                     "Returns: JSON with slides_updated count."
@@ -4303,6 +4494,8 @@ class TaskToolsPlugin(AgentPlugin):
                 "func": add_pptx_slides,
                 "description": (
                     "Add new slides to an existing PPTX file. "
+                    "Use concise titles and skimmable bullet lines; after adding slides, call design_pptx_theme_layout "
+                    "when the deck should look polished, beautiful, professional, or visually unified. "
                     "Args: path (str — PPTX file path), "
                     "slides (JSON array/list of [{title, content (string or bullet list), layout_index (optional, default 1)}]). "
                     "Returns: JSON with slides_added count and new total."

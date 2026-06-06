@@ -2,8 +2,8 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-DocAgent — OpenClaw-style Document AI Agent
-============================================
+DocAgent — Document AI Agent
+============================
 
 A unified agent for document processing tasks that follows the
 plan → execute → verify loop. Integrates TaskPlanner's DAG framework
@@ -158,7 +158,7 @@ MAX_CONSECUTIVE_ERRORS = 3
 
 class DocAgent:
     """
-    OpenClaw-style Document AI Agent.
+    Document AI Agent.
 
     Orchestrates document processing tasks through:
     1. Planning: LLM generates a step-by-step execution plan
@@ -729,15 +729,24 @@ class DocAgent:
                 self._provider_mode = "local"
                 return OllamaLLMProvider(model=self._local_model_id() or None)
 
-            from app.core.llm.gemini import GeminiProvider
-            self._provider_mode = "cloud"
+            from app.core.llm.model_selection import (
+                get_configured_cloud_model,
+                get_provider_for_model_mode,
+            )
+            from app.core.llm.provider_factory import get_llm_provider
 
-            api_key = self._api_key
-            provider = GeminiProvider(api_key=api_key)
-            if not provider.api_key:
-                logger.error("[DocAgent] No API key available")
-                return None
-            return provider
+            provider_name = get_provider_for_model_mode(model_mode)
+            self._provider_mode = provider_name
+            self._model_id = get_configured_cloud_model(
+                task_type="FILE_TASK",
+                fallback_model=self._model_id,
+                provider=provider_name,
+            ) or self._model_id
+            return get_llm_provider(
+                provider=provider_name,
+                model=self._model_id,
+                allow_local_fallback=False,
+            )
         except Exception as e:
             logger.error("[DocAgent] Failed to init LLM provider: %s", e)
             return None

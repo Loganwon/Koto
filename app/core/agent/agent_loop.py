@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════════════════════════
 # agent_loop.py — Koto Unified Agent Loop
 #
-# Inspired by OpenClaw's single-entry agent architecture.
+# Single-entry agent architecture for Koto editor AI requests.
 # This module provides the text/quick-action agent loop for editor AI requests:
 #
 #   KotoAgentLoop.run(request: AgentRequest) → Generator[AgentEvent]
@@ -392,7 +392,7 @@ class KotoAgentLoop:
         else:
             # Try online first, fall back to local
             try:
-                result_text = yield from self._try_online(full_prompt, system_instruction)
+                result_text = yield from self._try_online(full_prompt, system_instruction, request)
             except Exception as exc:
                 logger.warning("[AgentLoop] Online LLM failed: %s: %s", type(exc).__name__, exc)
                 if _is_online_failure(exc):
@@ -414,11 +414,11 @@ class KotoAgentLoop:
         return result_text
 
     def _try_online(
-        self, full_prompt: str, system_instruction: str
+        self, full_prompt: str, system_instruction: str, request: Optional[AgentRequest] = None
     ) -> Generator[AgentEvent, None, Optional[str]]:
         """Stream from online provider. Yields stream_chunk events."""
-        provider = _get_provider()
-        model = _pick_online_model()
+        model = self._pick_model(False, request)
+        provider = _get_provider(model=model, model_mode=request.model_mode if request else "")
         gen = provider.generate_content(
             prompt=full_prompt,
             model=model,
@@ -614,10 +614,18 @@ _get_local_provider = get_local_provider
 
 # ── LLM helpers (delegate to existing provider infrastructure) ─────────
 
-def _pick_online_model() -> str:
+def _pick_online_model(request: Optional[AgentRequest] = None) -> str:
+    preferred_model = ""
+    if request and isinstance(request.extra, dict):
+        preferred_model = str(request.extra.get("preferred_model") or "").strip()
+        if preferred_model.lower() in {"auto", "cloud", "local"}:
+            preferred_model = ""
+    if preferred_model:
+        return preferred_model
     try:
-        from web.app import MODEL_MAP
-        m = MODEL_MAP.get("CHAT", "")
+        from web.runtime_context import get_model_id
+
+        m = get_model_id("CHAT")
         if m:
             return m
     except Exception:
@@ -625,9 +633,12 @@ def _pick_online_model() -> str:
     return "gemini-2.5-flash"
 
 
-def _get_provider():
+def _get_provider(model: str = "", model_mode: str = ""):
     from app.core.llm.provider_factory import get_llm_provider
-    return get_llm_provider(provider="gemini", allow_local_fallback=False)
+    from app.core.llm.model_selection import get_provider_for_model_mode
+
+    provider_name = get_provider_for_model_mode(model_mode)
+    return get_llm_provider(provider=provider_name, model=model, allow_local_fallback=False)
 
 
 def _call_llm_sync(prompt: str, use_local_only: bool = False) -> Optional[str]:
@@ -645,8 +656,8 @@ def _call_llm_sync(prompt: str, use_local_only: bool = False) -> Optional[str]:
             return None
 
     try:
-        provider = _get_provider()
         model = _pick_online_model()
+        provider = _get_provider(model=model)
         gen = provider.generate_content(prompt=prompt, model=model, stream=False)
         if isinstance(gen, dict):
             return gen.get("content", "")

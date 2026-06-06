@@ -570,34 +570,6 @@ def copy_file():
     )
 
 
-@file_hub_bp.route("/open", methods=["POST"])
-def open_file():
-    """
-    用系统默认程序打开文件或文件夹。
-    Body JSON: { "path": "绝对路径" }
-    """
-    import os
-    import subprocess
-    import sys
-
-    data = request.get_json(silent=True) or {}
-    path = (data.get("path") or "").strip()
-    if not path:
-        return jsonify({"error": "缺少 path 字段"}), 400
-    if not os.path.exists(path):
-        return jsonify({"error": "文件不存在"}), 404
-    try:
-        if sys.platform == "win32":
-            os.startfile(path)  # noqa: S606
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
 @file_hub_bp.route("/disk", methods=["DELETE"])
 def delete_file_disk():
     """
@@ -1463,7 +1435,7 @@ def graph_data():
     )
 
 
-# ── 文件内容读取 / OS 默认程序打开 ────────────────────────────────────────────
+# ── 文件内容读取 ──────────────────────────────────────────────────────────────
 
 
 _TEXT_EXTS = {
@@ -1519,7 +1491,7 @@ def read_file_content():
         return jsonify({"error": "文件不存在"}), 404
 
     if p.suffix.lower() not in _TEXT_EXTS:
-        return jsonify({"error": "不支持预览该类型文件，请用默认程序打开"}), 415
+        return jsonify({"error": "不支持预览该类型文件"}), 415
 
     try:
         size = p.stat().st_size
@@ -1538,33 +1510,3 @@ def read_file_content():
         return jsonify({"error": "读取失败"}), 500
 
 
-@file_hub_bp.route("/open", methods=["POST"])
-def open_file_with_os():
-    """
-    用系统默认程序打开文件（适用于非代码类文件）。
-    Body JSON: { "path": "<绝对路径>" }
-    """
-    import platform
-    import subprocess as _sp
-
-    data = request.get_json(silent=True) or {}
-    path = (data.get("path") or "").strip()
-    if not path:
-        return jsonify({"error": "缺少 path 字段"}), 400
-
-    p = Path(path).resolve()
-    if not p.exists():
-        return jsonify({"error": "文件或目录不存在"}), 404
-
-    try:
-        sys_name = platform.system()
-        if sys_name == "Windows":
-            os.startfile(str(p))  # type: ignore[attr-defined]
-        elif sys_name == "Darwin":
-            _sp.Popen(["open", str(p)])
-        else:
-            _sp.Popen(["xdg-open", str(p)])
-        return jsonify({"status": "ok", "path": str(p)})
-    except Exception as exc:
-        logger.warning(f"[FileHub] open_file_with_os 失败: {exc}")
-        return jsonify({"error": f"打开失败: {exc}"}), 500
