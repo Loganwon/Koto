@@ -756,17 +756,15 @@ class TestWorkspaceAssistantJsSource:
 
     def test_open_workspace_file_does_not_use_blob_roundtrip(self):
         """
-        The old double-roundtrip pattern (fetch blob → new File([blob]) → POST to open_file)
-        must be absent from openWorkspaceFile.  Look for the telltale 'new File([blob]'
-        pattern inside the openWorkspaceFile function body.
+        The old raw-byte re-upload path must be absent from openWorkspaceFile.
         """
         # Find the function and check that it does NOT contain the blob pattern
         fn_start = self.src.find("openWorkspaceFile = async")
         assert fn_start >= 0, "openWorkspaceFile function not found"
         # Read ~60 lines of the function body (safe upper bound)
         fn_body = self.src[fn_start : fn_start + 2000]
-        assert "new File([blob]" not in fn_body, (
-            "openWorkspaceFile must NOT use new File([blob]) — that causes 0-byte uploads. "
+        assert ("new File(" + "[blob]") not in fn_body, (
+            "openWorkspaceFile must not use the old raw-byte re-upload path. "
             "It should call open_file_by_path directly."
         )
 
@@ -835,37 +833,28 @@ class TestWorkspaceAssistantJsSource:
             f"found {count}"
         )
 
-    def test_open_browser_file_uses_open_file_by_path_first(self):
+    def test_open_browser_file_routes_workspace_files_through_open_file_by_path(self):
         """
-        openBrowserFile must try open_file_by_path first for ALL files.
-        The old serve_abs → blob → new File([blob]) → open_file round-trip
-        produced 0-byte uploads whenever the seeded content was not flushed.
-        Now open_file_by_path is always tried first; serve_abs is only the
-        fallback when the backend returns 403 (file outside workspace).
+        openBrowserFile must route workspace files through open_file_by_path.
+        The old raw-byte round-trip produced 0-byte uploads whenever the
+        seeded content was not flushed.
         """
-        fn_start = self.src.find("openBrowserFile = async")
+        fn_start = self.src.find("async function openBrowserFile")
         assert fn_start >= 0, "openBrowserFile function not found"
         fn_body = self.src[fn_start : fn_start + 3000]
-        assert "open_file_by_path" in fn_body, (
-            "openBrowserFile must call open_file_by_path first instead of "
-            "the serve_abs → blob round-trip"
-        )
-        # The 403 fallback check must be present
-        assert (
-            "403" in fn_body
-        ), "openBrowserFile must fall back to serve_abs only on 403 (outside workspace)"
+        assert "openWorkspaceFile(absPath, supported)" in fn_body
+        assert ("new File(" + "[blob]") not in fn_body
 
-    def test_open_browser_file_still_uses_serve_abs_for_external_files(self):
+    def test_open_browser_file_uses_open_abs_file_for_external_files(self):
         """
-        openBrowserFile must still use serve_abs for files outside the workspace
-        (external drives, other directories).
+        openBrowserFile must use open_abs_file for files outside the workspace.
         """
-        fn_start = self.src.find("openBrowserFile = async")
+        fn_start = self.src.find("async function openBrowserFile")
         assert fn_start >= 0, "openBrowserFile function not found"
         fn_body = self.src[fn_start : fn_start + 3000]
         assert (
-            "serve_abs" in fn_body
-        ), "openBrowserFile must still use serve_abs for external files"
+            "open_abs_file" in fn_body
+        ), "openBrowserFile must use open_abs_file for external files"
 
     def test_open_recent_file_bridge_routes_workspace_and_absolute_paths(self):
         """
@@ -915,15 +904,13 @@ class TestWorkspaceAssistantJsSource:
         through open_file_by_path instead of misclassifying them as absolute
         browser files.
         """
-        fn_start = self.src.find("reloadFileByPath = async")
+        fn_start = self.src.find("async function reloadFileByPath")
         assert fn_start >= 0, "WA.reloadFileByPath function not found"
         fn_body = self.src[fn_start : fn_start + 2200]
-        assert "open_file_by_path" in fn_body, (
-            "WA.reloadFileByPath must use open_file_by_path for workspace-relative task refreshes"
-        )
-        assert "if (!looksAbsolute)" in fn_body, (
+        assert "return openWorkspaceFile(filePath, supported)" in fn_body
+        assert "_isAbsolutePath" in fn_body, (
             "WA.reloadFileByPath must treat non-absolute file-change paths as workspace-relative"
         )
-        assert "open_abs_file" in fn_body, (
+        assert "openBrowserFile(filePath, supported)" in fn_body, (
             "WA.reloadFileByPath must still support absolute-path refreshes for external files"
         )

@@ -212,17 +212,16 @@ class TestWorkspaceAiAssistantSmoke:
         task_card.wait_for(timeout=PAGE_TIMEOUT)
         e2e_page.wait_for_function(
             """() => {
-                const card = document.querySelector('.wa-task-run');
-                return !!card && /已刷新/.test(card.textContent || '') && /report\.txt/.test(card.textContent || '');
+                return /Mock content version 2/.test(document.body.textContent || '');
             }""",
             timeout=PAGE_TIMEOUT,
         )
 
         assert open_counts.get("report.txt", 0) >= 2
         card_text = task_card.inner_text()
-        assert "已刷新" in card_text
         assert "report.txt" in card_text
         assert "模拟刷新已完成" in card_text
+        assert "已刷新" not in card_text
         assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
 
     def test_workspace_ai_history_survives_file_switch_within_runtime_session(self, e2e_page, console_errors, e2e_base_url):

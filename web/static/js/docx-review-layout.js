@@ -16,6 +16,21 @@
     } = deps;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
+    const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 200;
+
+    function _reviewRailLeftShift(host) {
+      if (!host || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+        return DEFAULT_REVIEW_RAIL_LEFT_SHIFT;
+      }
+      const raw = window.getComputedStyle(host).getPropertyValue('--wa-review-rail-left-shift');
+      const parsed = parseFloat(raw);
+      return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : DEFAULT_REVIEW_RAIL_LEFT_SHIFT;
+    }
+
+    function _shiftReviewRailLeft(value, host) {
+      const left = Math.round(Number(value) || 0) - _reviewRailLeftShift(host);
+      return Math.max(0, left);
+    }
 
     function _normalizeReviewSearchText(value) {
       return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -211,6 +226,41 @@
       return Math.round(layoutState.viewportScrollTop + (screenY - layoutState.viewportRect.top));
     }
 
+    function _resolveReviewPageBoundsForScreenY(screenY, layoutState, root) {
+      if (!layoutState || !layoutState.viewportRect) return null;
+      const host = $('wa-docx-editor');
+      const scopedRoot = root && root.querySelectorAll ? root : host;
+      const pageCandidates = [];
+      if (scopedRoot && scopedRoot.matches && scopedRoot.matches('.koto-doc-page, .ProseMirror')) {
+        pageCandidates.push(scopedRoot);
+      }
+      if (scopedRoot && scopedRoot.querySelectorAll) {
+        pageCandidates.push(...Array.from(scopedRoot.querySelectorAll('.koto-doc-page')));
+      }
+      if (!pageCandidates.length && layoutState.pageEl) {
+        pageCandidates.push(layoutState.pageEl);
+      }
+      let bestPage = null;
+      let bestDistance = Infinity;
+      pageCandidates.forEach((pageEl) => {
+        if (!pageEl || typeof pageEl.getBoundingClientRect !== 'function') return;
+        const rect = pageEl.getBoundingClientRect();
+        if (!rect || rect.height <= 0) return;
+        const distance = screenY < rect.top
+          ? rect.top - screenY
+          : (screenY > rect.bottom ? screenY - rect.bottom : 0);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestPage = { rect, pageEl };
+        }
+      });
+      if (!bestPage || !bestPage.rect) return null;
+      const top = _screenYToReviewContentY(bestPage.rect.top, layoutState);
+      const bottom = _screenYToReviewContentY(bestPage.rect.bottom, layoutState);
+      if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= top) return null;
+      return { top, bottom, pageEl: bestPage.pageEl };
+    }
+
     function _resolveReviewAnchorGeometry(root, item, layoutState, textIndex) {
       if (!root || !layoutState || !layoutState.viewportRect) return null;
       const range = _findDocxReviewAnchorRange(root, item, textIndex);
@@ -218,21 +268,35 @@
       if (rangeRects.length) {
         const lastRect = rangeRects[rangeRects.length - 1];
         const firstRect = rangeRects[0];
+        const pageBounds = _resolveReviewPageBoundsForScreenY(
+          lastRect.top + (lastRect.height / 2),
+          layoutState,
+          root,
+        );
         return {
           pointX: _screenXToReviewContentX(lastRect.right, layoutState),
           pointY: _screenYToReviewContentY(lastRect.top + (lastRect.height / 2), layoutState),
           top: _screenYToReviewContentY(firstRect.top, layoutState),
           bottom: _screenYToReviewContentY(lastRect.bottom, layoutState),
+          pageTop: pageBounds ? pageBounds.top : null,
+          pageBottom: pageBounds ? pageBounds.bottom : null,
         };
       }
       const anchorEl = _findDocxReviewAnchorElement(item);
       const anchorRect = anchorEl ? anchorEl.getBoundingClientRect() : null;
       if (!anchorRect) return null;
+      const pageBounds = _resolveReviewPageBoundsForScreenY(
+        anchorRect.top + (anchorRect.height / 2),
+        layoutState,
+        root,
+      );
       return {
         pointX: _screenXToReviewContentX(anchorRect.right, layoutState),
         pointY: _screenYToReviewContentY(anchorRect.top + (anchorRect.height / 2), layoutState),
         top: _screenYToReviewContentY(anchorRect.top, layoutState),
         bottom: _screenYToReviewContentY(anchorRect.bottom, layoutState),
+        pageTop: pageBounds ? pageBounds.top : null,
+        pageBottom: pageBounds ? pageBounds.bottom : null,
       };
     }
 
@@ -341,8 +405,14 @@
       layer.appendChild(path);
     }
 
-    function _resolveNonOverlappingCardTop(layoutEntries, desiredTop, desiredLeft, cardWidth, cardHeight) {
-      let nextTop = Math.max(0, Math.round(desiredTop));
+    function _resolveNonOverlappingCardTop(layoutEntries, desiredTop, desiredLeft, cardWidth, cardHeight, bounds) {
+      const minTop = bounds && Number.isFinite(bounds.minTop)
+        ? Math.max(0, Math.round(bounds.minTop))
+        : 0;
+      const maxTop = bounds && Number.isFinite(bounds.maxTop)
+        ? Math.max(minTop, Math.round(bounds.maxTop) - Math.max(0, Math.round(cardHeight || 0)))
+        : Infinity;
+      let nextTop = Math.max(minTop, Math.round(desiredTop));
       let collided = true;
       while (collided) {
         collided = false;
@@ -354,11 +424,16 @@
             && nextTop + cardHeight + 10 > entry.top;
           if (horizontalOverlap && verticalOverlap) {
             nextTop = entry.top + entry.height + 10;
+            if (nextTop > maxTop) {
+              nextTop = maxTop;
+              collided = false;
+              break;
+            }
             collided = true;
           }
         }
       }
-      return nextTop;
+      return Math.max(minTop, Math.min(nextTop, maxTop));
     }
 
     function ensureReviewShellHost() {
@@ -528,10 +603,22 @@
       // This produces a clean WPS-style annotation rail where cards line up in a
       // column and each connector is a short line from the text-column edge to the card.
       // Use railGap + 10 to match the extra padding the CSS adds to #wa-editor-content.
-      const cardColLeft = railMetrics
+      const rawCardColLeft = railMetrics
         ? Math.max(12, Math.round(railMetrics.cardColLeft || (railMetrics.textColRight || 0) + Math.max(6, railMetrics.railGap) + 10))
         : 12;
       const cardColWidth = railMetrics ? railMetrics.railWidth : 148;
+      const shiftedCardColLeft = Math.max(12, _shiftReviewRailLeft(rawCardColLeft, host));
+      const shellLeft = railMetrics
+        ? Math.round(railMetrics.shellLeft || 0)
+        : Math.round(viewportRect.left - hostRect.left);
+      const viewportRightRelHost = railMetrics
+        ? Math.round((railMetrics.viewportScrollLeft || 0) + (viewportRect.width || 0))
+        : Math.round(viewportRect.right - hostRect.left);
+      const maxCardColLeft = Math.max(
+        12,
+        Math.round(viewportRightRelHost - shellLeft - cardColWidth - 12),
+      );
+      const cardColLeft = Math.max(12, Math.min(shiftedCardColLeft, maxCardColLeft));
       const connectorOriginX = railMetrics
         ? Math.round(railMetrics.textColRight || 0)
         : Math.max(0, cardColLeft - 20);
@@ -546,25 +633,45 @@
         // All cards in the same column — never vary left by anchor X.
         card.style.left = cardColLeft + 'px';
         card.style.right = 'auto';
-        const connectorOffsetY = Math.min(16, Math.max(11, Math.round((card.offsetHeight || 32) * 0.3)));
+        const cardHeight = card.offsetHeight || 32;
+        const cardWidth = Math.max(cardColWidth, card.offsetWidth || 148);
+        const connectorOffsetY = Math.min(16, Math.max(11, Math.round(cardHeight * 0.3)));
         const desiredTop = anchorGeometry
           ? Math.max(0, Math.round(anchorGeometry.pointY - connectorOffsetY))
           : layoutEntries.length
             ? layoutEntries[layoutEntries.length - 1].top + layoutEntries[layoutEntries.length - 1].height + 10
             : 0;
+        const pageBounds = anchorGeometry
+          && Number.isFinite(anchorGeometry.pageTop)
+          && Number.isFinite(anchorGeometry.pageBottom)
+          && anchorGeometry.pageBottom > anchorGeometry.pageTop
+          ? {
+              minTop: Math.max(0, Math.round(anchorGeometry.pageTop + 6)),
+              maxTop: Math.max(0, Math.round(anchorGeometry.pageBottom - 6)),
+            }
+          : null;
+        const peerEntries = pageBounds
+          ? layoutEntries.filter((entry) => (
+              entry.pageTop === pageBounds.minTop
+              && entry.pageBottom === pageBounds.maxTop
+            ))
+          : layoutEntries;
         const top = _resolveNonOverlappingCardTop(
-          layoutEntries,
+          peerEntries,
           desiredTop,
           cardColLeft,
-          Math.max(cardColWidth, card.offsetWidth || 148),
-          card.offsetHeight || 32,
+          cardWidth,
+          cardHeight,
+          pageBounds,
         );
         card.style.top = top + 'px';
         layoutEntries.push({
-          height: card.offsetHeight || 32,
+          height: cardHeight,
           left: cardColLeft,
+          pageBottom: pageBounds ? pageBounds.maxTop : null,
+          pageTop: pageBounds ? pageBounds.minTop : null,
           top,
-          width: Math.max(cardColWidth, card.offsetWidth || 148),
+          width: cardWidth,
         });
         if (connectorLayer && anchorGeometry) {
           // Connector always starts from the fixed text-column right edge (connectorOriginX),
@@ -638,7 +745,7 @@
           ? Math.round(bounds.right - hostRect.left + railMetrics.railGap)
           : Math.round(viewportRect.right - hostRect.left - railMetrics.railWidth - 12);
         const maxLauncherLeft = Math.max(0, Math.round(viewportRect.right - hostRect.left - railMetrics.railWidth - 14));
-        const launcherLeft = Math.max(0, Math.min(selectionRight, maxLauncherLeft));
+        const launcherLeft = _shiftReviewRailLeft(Math.min(selectionRight, maxLauncherLeft), host);
         launcher.style.left = launcherLeft + 'px';
         launcher.style.right = 'auto';
         launcher.style.width = railMetrics.railWidth + 'px';
@@ -650,6 +757,7 @@
         const label = String(selection.countLabel || '').trim() || `${String(selection.rawText || '').trim().length}字`;
         const preview = _previewReviewText(selection.previewText || selection.rawText || '', 28);
         subtitle.textContent = preview ? `${label} · ${preview}` : label;
+        subtitle.title = subtitle.textContent;
       }
       syncDocxReviewRailHostClass();
     }
@@ -696,16 +804,22 @@
       if (!launcher) {
         launcher = document.createElement('div');
         launcher.id = 'wa-review-selection-launcher';
+        launcher.setAttribute('aria-label', '为当前选区新建批注或修订');
         launcher.innerHTML = ''
-          + '<button type="button" class="wa-review-selection-add" title="像 Word 一样在当前选区添加批注">'
-          + '  <span class="wa-review-selection-plus" aria-hidden="true">+</span>'
-          + '  <span class="wa-review-selection-copy">'
-          + '    <span class="wa-review-selection-title">新建批注</span>'
-          + '    <span class="wa-review-selection-subtitle"></span>'
+          + '<div class="wa-review-selection-box">'
+          + '  <span class="wa-review-selection-title">新建批注</span>'
+          + '  <span class="wa-review-selection-subtitle"></span>'
+          + '  <span class="wa-review-selection-actions">'
+          + '    <button type="button" class="wa-review-selection-add" data-review-create="comment" title="像 Word 一样在当前选区添加批注">批注</button>'
+          + '    <button type="button" class="wa-review-selection-add wa-review-selection-revise" data-review-create="revision" title="把当前选区添加为修订建议">修订</button>'
           + '  </span>'
-          + '</button>';
-        const button = launcher.querySelector('.wa-review-selection-add');
-        if (button) {
+          + '</div>';
+        launcher.addEventListener('mousedown', (event) => {
+          if (event && typeof event.preventDefault === 'function') event.preventDefault();
+          if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+          window.WA.captureReviewSelection(event);
+        });
+        launcher.querySelectorAll('.wa-review-selection-add').forEach((button) => {
           button.addEventListener('mousedown', (event) => {
             if (event && typeof event.preventDefault === 'function') event.preventDefault();
             if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
@@ -714,9 +828,14 @@
           button.addEventListener('click', (event) => {
             if (event && typeof event.preventDefault === 'function') event.preventDefault();
             if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-            window.WA.createReviewComment();
+            const createMode = String(button.dataset.reviewCreate || '').trim();
+            if (createMode === 'revision' && window.WA && typeof window.WA.createReviewRevision === 'function') {
+              window.WA.createReviewRevision();
+            } else if (window.WA && typeof window.WA.createReviewComment === 'function') {
+              window.WA.createReviewComment();
+            }
           });
-        }
+        });
         host.appendChild(launcher);
       }
       return launcher;

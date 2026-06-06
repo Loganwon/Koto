@@ -45,27 +45,27 @@ file_organize_bp = Blueprint("file_organize", __name__)
 
 
 def _get_file_organizer():
-    from web.app import get_file_organizer
+    from web.runtime_context import call_app_factory
 
-    return get_file_organizer()
+    return call_app_factory("get_file_organizer")
 
 
 def _get_file_analyzer():
-    from web.app import get_file_analyzer
+    from web.runtime_context import call_app_factory
 
-    return get_file_analyzer()
+    return call_app_factory("get_file_analyzer")
 
 
 def _get_batch_ops_manager():
-    from web.app import get_batch_ops_manager
+    from web.runtime_context import call_app_factory
 
-    return get_batch_ops_manager()
+    return call_app_factory("get_batch_ops_manager")
 
 
 def _get_organize_root():
-    from web.app import get_organize_root
+    from web.runtime_context import call_app_factory
 
-    return get_organize_root()
+    return call_app_factory("get_organize_root")
 
 
 # ---------------------------------------------------------------------------
@@ -727,9 +727,10 @@ def compare_ai_stream() -> Response:
 
     def generate():
         try:
-            from web.app import client
             from web.document_comparator import DocumentComparator
+            from web.runtime_context import get_client_proxy
 
+            client = get_client_proxy()
             comparator = DocumentComparator()
             prompt = comparator.build_ai_prompt(file_paths, focus=focus)
             if not prompt:

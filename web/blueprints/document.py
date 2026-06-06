@@ -41,15 +41,15 @@ document_bp = Blueprint("document", __name__)
 
 
 def _get_client():
-    from web.app import client
+    from web.runtime_context import get_client_proxy
 
-    return client
+    return get_client_proxy()
 
 
 def _get_workspace_dir():
-    from web.app import WORKSPACE_DIR
+    from web.runtime_context import get_workspace_dir
 
-    return WORKSPACE_DIR
+    return get_workspace_dir()
 
 
 # ---------------------------------------------------------------------------

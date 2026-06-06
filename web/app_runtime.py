@@ -174,15 +174,6 @@ def start_background_runtime(logger: Logger, get_workspace_root) -> threading.Th
         return thread
 
 
-def preload_voice_engine(logger: Logger) -> None:
-    """Best-effort preload for the Vosk voice engine."""
-    enabled = os.environ.get("KOTO_PRELOAD_VOICE_ENGINE", "").strip().lower()
-    if enabled not in {"1", "true", "yes", "on"}:
-        logger.info("[startup] 语音引擎预加载已关闭，首次语音使用时再按需加载")
-        return
-    try:
-        from web.voice_engine import preload as voice_preload
-
-        voice_preload()
-    except Exception as exc:
-        logger.debug("[startup] Vosk 预加载跳过: %s", exc)
+def preload_audio_stt(logger: Logger) -> None:
+    """Deprecated no-op kept for startup compatibility."""
+    logger.debug("[startup] legacy microphone voice engine preload removed")
