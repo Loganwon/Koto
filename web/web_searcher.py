@@ -110,15 +110,10 @@ def search_with_grounding(query: str, skill_prompt: str = None) -> dict:
 
     返回格式: {"success": bool, "response": str, "message": str}
     """
-    try:
-        # 延迟导入，避免模块加载时的循环依赖
-        from google.genai import types
+    # 延迟导入，避免模块加载时拉起 web.app。
+    from google.genai import types
 
-        from app import get_client
-    except ImportError:
-        from google.genai import types
-
-        from web.app import get_client
+    from web.runtime_context import get_client
 
     # 1. 优先使用模型生成的 skill_prompt
     if skill_prompt and len(skill_prompt.strip()) > 5:

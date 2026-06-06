@@ -19,12 +19,12 @@ ToolRouter — 双层工具子集选择器 (v2)
   - 工具描述索引懒加载，工具集变化时自动重建（hash 对比）
 
 分类参考（可持续扩充）：
-  • communication  → 微信、邮件
+  • communication  → 微信、通知
   • calendar       → 日程、提醒
   • search         → 网络搜索、本地搜索、文件查找
   • browser        → 浏览器自动化
   • files          → 文件读写、文档、Excel、格式转换、压缩
-  • system         → 系统信息、应用打开、截图、剪贴板、shell 命令
+  • system         → 系统信息、剪贴板
   • code           → Python 执行、脚本生成
   • data           → 数据处理、分析
 """
@@ -93,7 +93,6 @@ TOOL_CATEGORIES: Dict[str, Set[str]] = {
     "communication": {
         "send_wechat_message",
         "read_wechat_message",
-        "send_email",
         "notify_user",
     },
     "calendar": {
@@ -127,11 +126,6 @@ TOOL_CATEGORIES: Dict[str, Set[str]] = {
         "analyze_excel_data",
         "convert_file",
         "list_directory",
-        "open_file_or_folder",
-        "move_file",
-        "delete_file",
-        "zip_files",
-        "unzip_file",
         # 精准编辑工具（优先于 write_file 全量覆盖）
         "replace_text",
         "patch_file",
@@ -142,15 +136,11 @@ TOOL_CATEGORIES: Dict[str, Set[str]] = {
         "restore_backup",
     },
     "system": {
-        "open_application",
-        "open_file_or_folder",
-        "take_screenshot",
         "notify_user",
         "get_clipboard_text",
         "set_clipboard_text",
         "read_clipboard",
         "search_clipboard",
-        "shell_command",
         "query_cpu_status",
         "query_memory_status",
         "query_disk_usage",
@@ -160,7 +150,6 @@ TOOL_CATEGORIES: Dict[str, Set[str]] = {
     },
     "code": {
         "run_python_code",
-        "shell_command",
         "generate_script",
         "run_script",
         # 代码文件精准编辑
@@ -184,7 +173,6 @@ TOOL_CATEGORIES: Dict[str, Set[str]] = {
 _INTENT_RULES: List[tuple] = [
     # communication
     (r"微信|wechat|发消息|发送消息|聊天记录", "communication"),
-    (r"邮件|email|mail|发邮件", "communication"),
     (r"通知|提醒我|remind me", "communication"),
     # calendar
     (
@@ -213,7 +201,7 @@ _INTENT_RULES: List[tuple] = [
     (r"插入行|删除行|追加内容|append to|insert line|delete line", "files"),
     # system
     (
-        r"截图|screenshot|剪贴板|clipboard|打开应用|open app|命令行|cmd|powershell|shell",
+        r"剪贴板|clipboard",
         "system",
     ),
     (r"cpu|内存|memory|磁盘|disk|进程|process|系统状态|系统信息|system info", "system"),
@@ -237,8 +225,6 @@ _CORE_TOOLS: Set[str] = {
     "replace_text",
     "patch_file",
     "list_directory",
-    "shell_command",
-    "take_screenshot",
 }
 
 

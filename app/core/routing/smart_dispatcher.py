@@ -463,57 +463,6 @@ class SmartDispatcher:
                 )
                 return "FILE_SEARCH", "📁 Path-Listing", context_info
 
-        # === 系统操作快速通道（打开/启动/关闭 + 应用名，不依赖 APP_ALIASES）===
-        # 命令语气、短输入、不含问句/文件/网页关键词
-        _sys_action_starters = (
-            "打开",
-            "启动",
-            "运行",
-            "开启",
-            "关闭",
-            "退出",
-            "关掉",
-            "杀掉",
-        )
-        _sys_exclude_kws = (
-            "怎么",
-            "如何",
-            "什么",
-            "为什么",
-            "能不能",
-            "可以吗",
-            "怎样",
-            "咋",
-            "文件",
-            "网页",
-            "网址",
-            "url",
-            "网站",
-            "链接",
-            "附件",
-            "思路",
-            "方式",
-            "方法",
-            "问题",
-            "功能",
-        )
-        _stripped = user_input.strip()
-        if (
-            len(_stripped) <= 18
-            and any(_stripped.startswith(s) for s in _sys_action_starters)
-            and not any(k in user_lower for k in _sys_exclude_kws)
-        ):
-            context_info = context_info or {}
-            context_info["routing_list"] = cls._build_routing_list(
-                similarity_scores,
-                boosts={"SYSTEM": 1.0},
-                reasons={"SYSTEM": ["rule:action_verb_direct"]},
-            )
-            logger.info(
-                f"[SmartDispatcher] 🖥️ 系统操作快速通道: '{_stripped}' → SYSTEM"
-            )
-            return "SYSTEM", "🖥️ Action-Direct", context_info
-
         # === 能力询问 / 方法咨询 → CHAT (在所有动作路由之前) ===
         # 识别非执行型查询：用户在问 Koto「能不能做X」或「怎么做X」，不应触发动作路由
         # 典型误触发：「你会做ppt么」「如何制作Word」「怎么生成图表」「你能画图吗」
@@ -1360,43 +1309,6 @@ class SmartDispatcher:
                 reasons={"SYSTEM": ["fallback:system"]},
             )
             return "SYSTEM", "🖥️ Fallback-System", context_info
-
-        # -- 系统命令兜底：命令动词 + 短输入（不依赖 APP_ALIASES）--
-        _fb_sys_starters = (
-            "打开",
-            "启动",
-            "运行",
-            "开启",
-            "关闭",
-            "退出",
-            "关掉",
-            "杀掉",
-        )
-        _fb_sys_exclude = (
-            "怎么",
-            "如何",
-            "什么",
-            "文件",
-            "网页",
-            "网站",
-            "思路",
-            "方法",
-            "功能",
-        )
-        _stripped_fb = user_input.strip()
-        if (
-            len(_stripped_fb) <= 18
-            and any(_stripped_fb.startswith(s) for s in _fb_sys_starters)
-            and not any(k in user_lower for k in _fb_sys_exclude)
-        ):
-            context_info = context_info or {}
-            context_info["routing_list"] = cls._build_routing_list(
-                similarity_scores,
-                boosts={"SYSTEM": 0.9},
-                reasons={"SYSTEM": ["fallback:action_verb"]},
-            )
-            logger.info(f"[SmartDispatcher] 🖥️ 系统命令兜底: '{_stripped_fb}' → SYSTEM")
-            return "SYSTEM", "🖥️ Fallback-ActionVerb", context_info
 
         # -- 多步任务规划 --
         _LocalPlanner = _get_local_planner()

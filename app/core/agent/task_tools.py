@@ -3013,9 +3013,16 @@ def _normalize_compare_path(path: Any) -> str:
     if not text:
         return ""
     if not os.path.isabs(text):
-        resolved = _safe_resolve(text)
-        if resolved:
-            text = resolved
+        workspace_resolved = _safe_resolve(text)
+        cwd_resolved = str(Path(text).resolve())
+        if workspace_resolved and os.path.exists(workspace_resolved):
+            text = workspace_resolved
+        elif os.path.exists(cwd_resolved):
+            text = cwd_resolved
+        elif workspace_resolved:
+            text = workspace_resolved
+        else:
+            text = cwd_resolved
     try:
         return os.path.normcase(os.path.normpath(text))
     except Exception:

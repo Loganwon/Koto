@@ -101,7 +101,7 @@ def _load() -> None:
                 _data = loaded
                 return
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
     _data = _empty_data()
 
 
@@ -118,7 +118,7 @@ def _save_if_dirty() -> None:
         os.replace(tmp, _DATA_FILE)
         _dirty = False
     except Exception as e:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 静默失败，不影响主流程
+            logger.debug("Non-fatal", exc_info=True)  # 静默失败，不影响主流程
 
 
 # ── 公开 API ──────────────────────────────────────────────────────────────────

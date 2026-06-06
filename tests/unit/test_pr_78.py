@@ -40,14 +40,11 @@ for _m in [
     "docx",
     "PIL",
     "PIL.Image",
-    "vosk",
     "pynput",
     "pynput.keyboard",
     "pynput.mouse",
     "scipy",
     "scipy.io",
-    "pyaudio",
-    "sounddevice",
 ]:
     _stub(_m)
 
