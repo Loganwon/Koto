@@ -12,6 +12,7 @@ def _read(rel_path: str) -> str:
 def test_workspace_templates_remove_top_settings_use_bottom_toggle_and_keep_files_above_input():
     embedded_html = _read("web/templates/index.html")
     standalone_html = _read("web/templates/workspace_assistant.html")
+    model_controls = _read("web/templates/_workspace_model_controls.html")
 
     for html in (embedded_html, standalone_html):
         assert 'id="wa-subject-bar"' not in html
@@ -20,20 +21,25 @@ def test_workspace_templates_remove_top_settings_use_bottom_toggle_and_keep_file
         assert 'AI 输出模式' not in html
         assert 'id="wa-footer-file-chip"' not in html
         assert 'id="wa-footer-attach-current-btn"' not in html
-        assert 'id="wa-model-mode-toggle"' in html
-        assert 'id="wa-model-mode-cloud-btn"' in html
-        assert 'id="wa-model-mode-local-btn"' in html
-        assert 'class="wa-model-mode-main">Gemini<' in html
-        assert 'id="wa-model-mode-cloud-model"' in html
-        assert 'id="wa-model-mode-local-model"' in html
+        assert "{% include '_workspace_model_controls.html' %}" in html
         assert '只有明确选中的文本和分析文档会进入当前任务上下文。' in html
         assert '快速读懂当前文件' not in html
         assert '当前文件、选区和附件会自动并入上下文。' not in html
         assert html.index('<div id="wa-ai-file-chips"') < html.index('<div id="wa-actions-bar">')
         assert html.index('<div id="wa-ai-file-chips"') < html.index('<div class="wa-input-box">')
-        assert html.index('<div class="wa-input-box-footer">') < html.index('id="wa-model-mode-toggle"')
-        assert html.index('id="wa-model-mode-toggle"') < html.index('<div class="wa-footer-actions">')
+        assert html.index('<div class="wa-input-box-footer">') < html.index("{% include '_workspace_model_controls.html' %}")
+        assert html.index("{% include '_workspace_model_controls.html' %}") < html.index('<div class="wa-footer-actions">')
         assert html.index('<div class="wa-footer-actions">') < html.index('id="wa-send-btn"')
+
+    assert 'id="wa-model-mode-toggle"' in model_controls
+    assert 'id="wa-model-mode-gemini-btn"' in model_controls
+    assert 'id="wa-model-mode-deepseek-btn"' in model_controls
+    assert 'id="wa-model-mode-local-btn"' in model_controls
+    assert 'class="wa-model-mode-main">Gemini<' in model_controls
+    assert 'class="wa-model-mode-main">DeepSeek<' in model_controls
+    assert 'id="wa-model-mode-gemini-model"' in model_controls
+    assert 'id="wa-model-mode-deepseek-model"' in model_controls
+    assert 'id="wa-model-mode-local-model"' in model_controls
 
 
 def test_workspace_subject_bar_and_action_row_styles_support_restored_layout():

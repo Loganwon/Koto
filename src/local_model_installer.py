@@ -68,6 +68,16 @@ MODEL_CATALOG: List[Dict] = [
         "desc": "6–8 GB 内存，流畅度与效果兼顾，日常任务优选",
     },
     {
+        "tag": "qwen3:1.7b",
+        "name": "Qwen 3 1.7B",
+        "badge": "轻量中文",
+        "vram": 2.0,
+        "ram": 6,
+        "size_gb": 1.4,
+        "tier": "light",
+        "desc": "轻量中文任务与路由表现更稳，适合 6–8 GB 内存",
+    },
+    {
         "tag": "gemma3:4b",
         "name": "Gemma 3 4B",
         "badge": "标准",
@@ -78,6 +88,16 @@ MODEL_CATALOG: List[Dict] = [
         "desc": "8 GB+ 内存，效果优秀，推荐大多数用户",
     },
     {
+        "tag": "qwen3:4b",
+        "name": "Qwen 3 4B",
+        "badge": "中文标准",
+        "vram": 4.0,
+        "ram": 8,
+        "size_gb": 2.6,
+        "tier": "standard",
+        "desc": "8 GB+ 内存，中文分类和日常对话更适配 Koto",
+    },
+    {
         "tag": "qwen2.5:7b",
         "name": "Qwen 2.5 7B",
         "badge": "中文强化",
@@ -86,6 +106,16 @@ MODEL_CATALOG: List[Dict] = [
         "size_gb": 4.7,
         "tier": "powerful",
         "desc": "12 GB+ 内存，中文理解出色，复杂任务首选",
+    },
+    {
+        "tag": "qwen3:8b",
+        "name": "Qwen 3 8B",
+        "badge": "中文高性能",
+        "vram": 7.0,
+        "ram": 16,
+        "size_gb": 5.2,
+        "tier": "highend",
+        "desc": "16 GB 内存 / NVIDIA 8 GB 显卡，Koto 本地回复优选",
     },
     {
         "tag": "llama3.1:8b",
@@ -465,6 +495,40 @@ def save_result(tag: str):
         }
         RESULT_FILE.write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        config_dir = APP_DIR / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "model_setup_done.json").write_text(
+            json.dumps(
+                {
+                    "done": True,
+                    "mode": "local",
+                    "model": tag,
+                    "timestamp": data["installed_at"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        settings_path = config_dir / "user_settings.json"
+        settings = {}
+        if settings_path.exists():
+            try:
+                settings = json.loads(settings_path.read_text(encoding="utf-8-sig"))
+            except Exception:
+                settings = {}
+        if not isinstance(settings, dict):
+            settings = {}
+        settings["model_mode"] = "local"
+        settings["local_model"] = tag
+        ai_settings = settings.setdefault("ai", {})
+        if isinstance(ai_settings, dict):
+            ai_settings["use_local_only"] = False
+        settings_path.write_text(
+            json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     except Exception:
         pass

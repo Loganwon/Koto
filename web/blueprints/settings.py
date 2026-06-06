@@ -15,51 +15,114 @@ import time
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from web.auth import require_auth
+from web.runtime_context import (
+    get_app_attr,
+    get_app_module,
+    get_client,
+    get_project_root,
+    get_settings_manager,
+    get_types,
+    get_workspace_dir,
+)
 
 _logger = logging.getLogger("koto.app")
 
 settings_bp = Blueprint("settings_routes", __name__)
 
 # ---------------------------------------------------------------------------
-# Lazy accessors – avoid circular imports by pulling from web.app at runtime
+# Lazy accessors for runtime services still owned by web.app.
 # ---------------------------------------------------------------------------
 
 
 def _app():
     """Return the web.app module (for mutable globals)."""
-    import web.app as _mod
-
-    return _mod
+    return get_app_module()
 
 
 def _get_settings_manager():
-    from web.app import settings_manager
-
-    return settings_manager
+    return get_settings_manager()
 
 
 def _get_client():
-    from web.app import client
-
-    return client
+    return get_client()
 
 
 def _get_types():
-    from web.app import types
-
-    return types
+    return get_types()
 
 
 def _get_create_client():
-    from web.app import create_client
-
-    return create_client
+    return get_app_attr("create_client")
 
 
 def _get_detected_proxy():
-    from web.app import get_detected_proxy
+    detector = get_app_attr("get_detected_proxy")
+    if callable(detector):
+        return detector()
+    return None
 
-    return get_detected_proxy()
+
+def _augment_models_for_cloud_provider(payload: dict) -> dict:
+    try:
+        from app.core.llm.deepseek_config import DEEPSEEK_DEFAULT_MODEL, has_deepseek_api_key
+        from app.core.llm.model_selection import get_configured_cloud_provider
+
+        provider = get_configured_cloud_provider()
+        if provider != "deepseek":
+            return payload
+
+        model_id = DEEPSEEK_DEFAULT_MODEL
+        sm = _get_settings_manager()
+        try:
+            model_id = str(sm.get("ai", "deepseek_model") or model_id).strip() or model_id
+        except Exception:
+            pass
+        model_entry = {
+            "id": model_id,
+            "display": "DeepSeek V4 Pro",
+            "tier": 10,
+            "provider": "deepseek",
+            "strengths": ["reasoning", "coding", "tool_calling", "file_task"],
+            "capabilities": {"tool_calling": True, "streaming": True},
+        }
+        text_tasks = [
+            "CHAT",
+            "CODER",
+            "WEB_SEARCH",
+            "RESEARCH",
+            "FILE_GEN",
+            "FILE_TASK",
+            "AGENT",
+            "FILE_SEARCH",
+            "DOC_ANNOTATE",
+            "MEETING_EXTRACT",
+            "COMPLEX",
+        ]
+        raw_map = payload.get("model_map")
+        if isinstance(raw_map, dict):
+            for task in text_tasks:
+                current = raw_map.get(task)
+                if isinstance(current, dict):
+                    current.update(
+                        {
+                            "model_id": model_id,
+                            "display": "DeepSeek V4 Pro",
+                            "provider": "deepseek",
+                            "tier": 10,
+                        }
+                    )
+                else:
+                    raw_map[task] = model_id
+        available = payload.setdefault("available", [])
+        if isinstance(available, list) and not any(
+            item.get("id") == model_id for item in available if isinstance(item, dict)
+        ):
+            available.insert(0, model_entry)
+        payload["cloud_provider"] = "deepseek"
+        payload["cloud_provider_ready"] = has_deepseek_api_key()
+    except Exception as exc:
+        _logger.debug("[Models] cloud provider augmentation skipped: %s", exc)
+    return payload
 
 
 # ---------------------------------------------------------------------------
@@ -81,11 +144,9 @@ def api_info() -> Response:
             deploy_mode: {type: string, enum: [local, cloud]}
             auth_enabled: {type: boolean}
     """
-    from web.app import APP_VERSION
-
     return jsonify(
         {
-            "version": APP_VERSION,
+            "version": get_app_attr("APP_VERSION", ""),
             "deploy_mode": os.environ.get("KOTO_DEPLOY_MODE", "local"),
             "auth_enabled": os.environ.get("KOTO_AUTH_ENABLED", "false").lower()
             == "true",
@@ -132,8 +193,14 @@ def local_model_status() -> Response:
     """
     try:
         from app.core.llm.ollama_provider import get_local_model_info
+        from app.core.llm.model_selection import get_configured_cloud_provider
 
         info = get_local_model_info()
+        if info.get("mode") in {"cloud", "gemini", "deepseek"}:
+            provider = get_configured_cloud_provider()
+            info["cloud_provider"] = provider
+            if info.get("mode") == "cloud":
+                info["mode"] = provider
         return jsonify({"success": True, **info})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -189,7 +256,8 @@ def local_model_switch() -> Response:
     try:
         mod = _app()
         data = request.json or {}
-        mode = data.get("mode", "cloud")  # "local" 或 "cloud"
+        raw_mode = str(data.get("mode") or "cloud").strip().lower()
+        mode = raw_mode if raw_mode in {"local", "cloud", "gemini", "deepseek"} else "cloud"
         model_tag = data.get("model_tag")  # 本地模式时可指定模型
 
         sm = _get_settings_manager()
@@ -198,6 +266,12 @@ def local_model_switch() -> Response:
         # the lock + _save_settings directly to ensure atomic write.
         with sm._lock:
             sm._settings["model_mode"] = mode
+            ai_settings = sm._settings.setdefault("ai", {})
+            if isinstance(ai_settings, dict):
+                if mode in {"gemini", "deepseek"}:
+                    ai_settings["cloud_provider"] = mode
+                elif mode == "cloud":
+                    ai_settings.setdefault("cloud_provider", "gemini")
             if model_tag:
                 sm._settings["local_model"] = model_tag
             save_ok = sm._save_settings()
@@ -224,6 +298,18 @@ def local_model_switch() -> Response:
 @require_auth
 def local_model_setup() -> Response:
     """触发本地模型安装向导（异步，不阻塞 API 响应）"""
+    try:
+        import subprocess as _subprocess
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        app_root = _Path(_sys.executable).parent if getattr(_sys, "frozen", False) else _Path(get_project_root())
+        installer = app_root / "LocalModelInstaller.exe"
+        if installer.exists():
+            _subprocess.Popen([str(installer)], cwd=str(app_root))
+            return jsonify({"success": True, "message": "独立本地模型安装器已启动"})
+    except Exception as e:
+        _logger.debug("[LocalModel] 独立安装器启动失败，回退内置向导: %s", e)
 
     def _run_gui():
         try:
@@ -413,7 +499,7 @@ def update_settings() -> Response:
         mod._user_settings_cache.clear()
         # 存储路径变更时立即更新模块级全局变量，让运行时路径即时生效
         if category == "storage" and key in ("workspace_dir", "chats_dir", "documents_dir", "images_dir"):
-            import web.app as _app_mod
+            _app_mod = _app()
             if key == "workspace_dir":
                 _app_mod.WORKSPACE_DIR = sm.workspace_dir
                 import os as _os
@@ -465,7 +551,7 @@ def switch_to_mini() -> Response:
         )
 
     try:
-        from web.app import PROJECT_ROOT
+        PROJECT_ROOT = get_project_root()
 
         # 启动迷你窗口
         mini_koto_path = os.path.join(PROJECT_ROOT, "web", "mini_koto.py")
@@ -497,7 +583,7 @@ def switch_to_main() -> Response:
         return jsonify({"success": True, "message": "已在主程序中运行"})
 
     try:
-        from web.app import PROJECT_ROOT
+        PROJECT_ROOT = get_project_root()
 
         # 启动主窗口
         main_app_path = os.path.join(PROJECT_ROOT, "koto_app.py")
@@ -549,11 +635,21 @@ def get_setup_status() -> Response:
               type: string
               description: Absolute path to the configuration file
     """
-    from web.app import API_KEY, PROJECT_ROOT, WORKSPACE_DIR
+    from app.core.llm.deepseek_config import find_deepseek_config_path, has_deepseek_api_key
+    from app.core.llm.model_selection import get_configured_cloud_provider
 
+    provider = get_configured_cloud_provider()
+    API_KEY = get_app_attr("API_KEY", "")
+    PROJECT_ROOT = get_project_root()
+    WORKSPACE_DIR = get_workspace_dir()
     config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
     _placeholders = {"your_api_key_here", "YOUR_API_KEY_HERE", ""}
-    has_api_key = bool(API_KEY and len(API_KEY) > 10 and API_KEY not in _placeholders)
+    if provider == "deepseek":
+        ds_path = find_deepseek_config_path()
+        config_path = str(ds_path or os.path.join(PROJECT_ROOT, "config", "deepseek_config.env"))
+        has_api_key = has_deepseek_api_key()
+    else:
+        has_api_key = bool(API_KEY and len(API_KEY) > 10 and API_KEY not in _placeholders)
     has_workspace = os.path.exists(WORKSPACE_DIR)
 
     return jsonify(
@@ -563,6 +659,7 @@ def get_setup_status() -> Response:
             "has_workspace": has_workspace,
             "workspace_path": os.path.abspath(WORKSPACE_DIR),
             "config_path": os.path.abspath(config_path),
+            "cloud_provider": provider,
         }
     )
 
@@ -571,23 +668,36 @@ def get_setup_status() -> Response:
 def setup_api_key() -> Response:
     """设置 API Key"""
     mod = _app()
-    from app.core.llm.gemini_config import (
-        set_runtime_gemini_api_key,
-        write_gemini_config_file,
-    )
-
     data = request.json
     api_key = data.get("api_key", "").strip()
+    provider = str(data.get("provider") or "").strip().lower() or "gemini"
 
     if not api_key or len(api_key) < 10:
         return jsonify({"success": False, "error": "Invalid API key"})
 
     try:
-        write_gemini_config_file(api_key)
-        mod.API_KEY = set_runtime_gemini_api_key(api_key)
-        # Reset cached client so get_client() rebuilds with the new key
-        mod._client = None
-        mod.client = mod.create_client()
+        if provider == "deepseek":
+            from app.core.llm.deepseek_config import (
+                set_runtime_deepseek_api_key,
+                write_deepseek_config_file,
+            )
+
+            write_deepseek_config_file(api_key)
+            set_runtime_deepseek_api_key(api_key)
+            sm = _get_settings_manager()
+            sm.set("ai", "cloud_provider", "deepseek")
+            sm.set("ai", "deepseek_model", "deepseek-v4-pro")
+        else:
+            from app.core.llm.gemini_config import (
+                set_runtime_gemini_api_key,
+                write_gemini_config_file,
+            )
+
+            write_gemini_config_file(api_key)
+            mod.API_KEY = set_runtime_gemini_api_key(api_key)
+            # Reset cached client so get_client() rebuilds with the new key
+            mod._client = None
+            mod.client = mod.create_client()
 
         return jsonify({"success": True})
     except Exception as e:
@@ -597,8 +707,7 @@ def setup_api_key() -> Response:
 @settings_bp.route("/api/setup/workspace", methods=["POST"])
 def setup_workspace() -> Response:
     """设置工作区目录"""
-    from web.app import PROJECT_ROOT
-
+    PROJECT_ROOT = get_project_root()
     sm = _get_settings_manager()
     data = request.json
     workspace_path = data.get("path", "").strip()
@@ -624,6 +733,26 @@ def setup_workspace() -> Response:
 def test_api_connection() -> Response:
     """测试 API 连接"""
     try:
+        from app.core.llm.model_selection import get_configured_cloud_model, get_configured_cloud_provider
+        from app.core.llm.provider_factory import get_llm_provider
+
+        provider_name = get_configured_cloud_provider()
+        if provider_name == "deepseek":
+            model = get_configured_cloud_model(provider="deepseek")
+            provider = get_llm_provider(provider="deepseek", model=model)
+            start = time.time()
+            result = provider.generate_content(
+                prompt="Say 'Koto is ready!' in one short sentence.",
+                model=model,
+                max_tokens=64,
+                stream=False,
+            )
+            latency = time.time() - start
+            message = result.get("content", "") if isinstance(result, dict) else str(result)
+            return jsonify(
+                {"success": True, "message": message, "latency": round(latency, 2)}
+            )
+
         c = _get_client()
         start = time.time()
         response = c.models.generate_content(
@@ -826,7 +955,7 @@ def setup_activate() -> Response:
         return jsonify({"success": False, "error": "激活服务暂不可用"})
     if not key:
         return jsonify({"success": False, "error": "激活码无效"})
-    from web.app import PROJECT_ROOT
+    PROJECT_ROOT = get_project_root()
     from app.core.llm.gemini_config import (
         set_runtime_gemini_api_key,
         write_gemini_config_file,
@@ -851,16 +980,16 @@ def api_list_models() -> Response:
     _a = _app()
     if _a._model_manager:
         return jsonify(
-            {
+            _augment_models_for_cloud_provider({
                 "ready": True,
                 "model_map": _a._model_manager.get_model_map_with_scores(),
                 "available": _a._model_manager.get_available_models(),
                 "fallback": _a._INTERACTIONS_FALLBACK_MODEL,
                 "interactions_only": list(_a._INTERACTIONS_ONLY_MODELS),
-            }
+            })
         )
     return jsonify(
-        {
+        _augment_models_for_cloud_provider({
             "ready": False,
             "model_map": {
                 task: {
@@ -886,7 +1015,7 @@ def api_list_models() -> Response:
             ],
             "fallback": _a._INTERACTIONS_FALLBACK_MODEL,
             "interactions_only": list(_a._INTERACTIONS_ONLY_MODELS),
-        }
+        })
     )
 
 
@@ -999,6 +1128,13 @@ def analyze_task() -> Response:
         if (locked_model and locked_model != "auto")
         else SmartDispatcher.get_model_for_task(task, has_image=has_file)
     )
+    try:
+        from app.core.llm.model_selection import get_configured_cloud_model
+
+        if str(model or "").strip().lower() in {"", "auto", "cloud"} or not str(model or "").strip().lower().startswith("local"):
+            model = get_configured_cloud_model(task_type=task, fallback_model=model) or model
+    except Exception:
+        pass
     model_info = _a.MODEL_INFO.get(model, {"name": model, "speed": ""})
     return jsonify(
         {

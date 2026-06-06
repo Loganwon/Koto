@@ -108,6 +108,9 @@ class OpenAIProvider(LLMProvider):
             "max_tokens": kwargs.get("max_tokens", 8192),
             "stream": stream,
         }
+        for passthrough_key in ("extra_body", "extra_headers", "response_format", "timeout"):
+            if kwargs.get(passthrough_key) is not None:
+                call_kwargs[passthrough_key] = kwargs[passthrough_key]
         if oai_tools:
             call_kwargs["tools"] = oai_tools
             call_kwargs["tool_choice"] = "auto"
@@ -227,13 +230,14 @@ class OpenAIProvider(LLMProvider):
                             },
                         }
                     )
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": content or None,
-                        "tool_calls": oai_tool_calls,
-                    }
-                )
+                assistant_message = {
+                    "role": "assistant",
+                    "content": content or None,
+                    "tool_calls": oai_tool_calls,
+                }
+                if turn.get("reasoning_content"):
+                    assistant_message["reasoning_content"] = str(turn.get("reasoning_content"))
+                messages.append(assistant_message)
             elif role == "tool":
                 # function result
                 name = turn.get("name", "tool")
@@ -246,7 +250,10 @@ class OpenAIProvider(LLMProvider):
                     }
                 )
             else:
-                messages.append({"role": role, "content": str(content)})
+                message = {"role": role, "content": str(content)}
+                if role == "assistant" and turn.get("reasoning_content"):
+                    message["reasoning_content"] = str(turn.get("reasoning_content"))
+                messages.append(message)
 
         return messages
 
@@ -257,27 +264,53 @@ class OpenAIProvider(LLMProvider):
         for t in tools:
             if not isinstance(t, dict) or not t.get("name"):
                 continue
+            parameters = self._normalize_json_schema(
+                t.get("parameters") or {"type": "object", "properties": {}}
+            )
             oai_tools.append(
                 {
                     "type": "function",
                     "function": {
                         "name": t["name"],
                         "description": t.get("description", ""),
-                        "parameters": t.get("parameters")
-                        or {"type": "object", "properties": {}},
+                        "parameters": parameters,
                     },
                 }
             )
         return oai_tools or None
 
+    def _normalize_json_schema(self, schema: Any) -> Any:
+        """Normalize Koto/Gemini-flavored schemas for OpenAI-compatible APIs."""
+        if isinstance(schema, list):
+            return [self._normalize_json_schema(item) for item in schema]
+        if not isinstance(schema, dict):
+            return schema
+
+        normalized: Dict[str, Any] = {}
+        for key, value in schema.items():
+            if key == "type" and isinstance(value, str):
+                normalized[key] = value.lower()
+            elif key == "anyOf" and isinstance(value, list):
+                normalized[key] = [self._normalize_json_schema(item) for item in value]
+            else:
+                normalized[key] = self._normalize_json_schema(value)
+
+        if normalized.get("type") == "object":
+            normalized.setdefault("properties", {})
+        if normalized.get("type") == "array":
+            normalized.setdefault("items", {})
+        return normalized
+
     def _format_response(self, resp: Any) -> Dict[str, Any]:
         choice = resp.choices[0] if resp.choices else None
         content = ""
+        reasoning_content = ""
         tool_calls: List[Dict[str, Any]] = []
 
         if choice:
             msg = choice.message
             content = msg.content or ""
+            reasoning_content = getattr(msg, "reasoning_content", None) or ""
             if msg.tool_calls:
                 for tc in msg.tool_calls:
                     try:
@@ -293,7 +326,10 @@ class OpenAIProvider(LLMProvider):
                 "completion_tokens": resp.usage.completion_tokens or 0,
             }
 
-        return {"content": content, "tool_calls": tool_calls, "usage": usage}
+        result = {"content": content, "tool_calls": tool_calls, "usage": usage}
+        if reasoning_content:
+            result["reasoning_content"] = reasoning_content
+        return result
 
     def _stream_generator(
         self,
