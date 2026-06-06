@@ -133,6 +133,11 @@ _DEFAULT_FALLBACK_CHAIN: List[str] = [
     "gemini-2.5-flash-lite",    # 轻量最终兜底
 ]
 
+_DEEPSEEK_FALLBACK_CHAIN: List[str] = [
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+]
+
 # ── 按任务类型的专属降级链 ──────────────────────────────────────────────────────
 # 原则：3.x 模型始终先于 2.x 模型；链长控制在 3-4 个（越短越快降级判断）。
 _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
@@ -480,6 +485,10 @@ class ModelFallbackExecutor:
 
         _add(preferred)
         _add(self._model_map.get(task_type))
+        if any(str(m or "").lower().startswith("deepseek") for m in result):
+            for m in _DEEPSEEK_FALLBACK_CHAIN:
+                _add(m)
+            return result
         for m in _TASK_FALLBACK_CHAINS.get(task_type, []):
             _add(m)
         for m in _DEFAULT_FALLBACK_CHAIN:
