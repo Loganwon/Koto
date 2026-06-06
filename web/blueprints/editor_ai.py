@@ -156,6 +156,73 @@ def _agent_event_payload(event) -> dict:
     return {"type": event_type, **data}
 
 
+def _legacy_agent_step_events(step) -> list[dict]:
+    step_type = getattr(getattr(step, "step_type", None), "value", None) or str(
+        getattr(step, "step_type", "")
+    )
+    content = str(getattr(step, "content", "") or "")
+    if "THOUGHT" in step_type or step_type == "thought":
+        return [
+            {"type": "thought", "content": content, "text": content},
+            {"type": "step_start", "step_id": "thought", "text": content or "开始分析"},
+        ]
+    if "ACTION" in step_type or step_type == "action":
+        action = getattr(step, "action", None)
+        tool_name = str(getattr(action, "tool_name", "") or "")
+        tool_args = getattr(action, "tool_args", {}) or {}
+        return [
+            {
+                "type": "tool_call",
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "content": content,
+                "text": content,
+            }
+        ]
+    if "OBSERVATION" in step_type or step_type == "observation":
+        observation = str(getattr(step, "observation", "") or content)
+        return [
+            {"type": "tool_result", "content": observation, "text": observation},
+            {"type": "step_done", "step_id": "action", "text": observation or "工具执行完成"},
+        ]
+    if "ANSWER" in step_type or step_type == "answer":
+        return [
+            {"type": "token", "content": content, "text": content},
+            {"type": "done", "result": content},
+        ]
+    return [{"type": "info", "text": content}]
+
+
+@editor_ai_bp.route("/api/editor/ai/history", methods=["GET"])
+def editor_ai_history():
+    """Runtime-only editor AI history compatibility endpoint."""
+    return jsonify({"history": [], "session_id": ""})
+
+
+@editor_ai_bp.route("/api/editor/ai/agent", methods=["POST"])
+def editor_ai_agent():
+    """Compatibility SSE wrapper for the legacy structured editor agent route."""
+    data = request.get_json(silent=True) or {}
+    query = str(data.get("query") or data.get("task") or data.get("prompt") or "").strip()
+    full_text = str(data.get("full_text") or data.get("context") or "").strip()
+    session_id = str(data.get("session_id") or "").strip()
+
+    def generate():
+      try:
+          from app.api.agent_routes import get_agent
+
+          agent = get_agent()
+          system_context = full_text if full_text else None
+          for step in agent.run(query, session_id=session_id or None, system_context=system_context):
+              for payload in _legacy_agent_step_events(step):
+                  yield _safe_sse(payload)
+      except Exception as exc:
+          _logger.exception("[editor-ai] legacy agent failed")
+          yield _safe_sse({"type": "error", "text": f"Agent 处理失败：{exc}"})
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+
+
 @editor_ai_bp.route("/api/editor/ai/stream", methods=["POST"])
 def editor_ai_stream():
     """Stream editor quick-action output through the unified AgentLoop."""
