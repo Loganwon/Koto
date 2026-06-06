@@ -22,8 +22,8 @@ _NATIVE_SUPPORTED_FILE_TYPES: Set[str] = {
 }
 
 _PPTX_DESIGN_TASK_PATTERNS = (
-    re.compile(r"(?:pptx?|幻灯片|演示文稿|slides?|presentation).{0,32}(?:风格|主题|主体|版式|母版|模板|美化|排版|配色|视觉|设计)", re.IGNORECASE),
-    re.compile(r"(?:风格|主题|主体|版式|母版|模板|美化|排版|配色|视觉|设计).{0,32}(?:pptx?|幻灯片|演示文稿|slides?|presentation)", re.IGNORECASE),
+    re.compile(r"(?:pptx?|幻灯片|演示文稿|slides?|presentation|deck).{0,32}(?:风格|主题|主体|版式|母版|模板|美化|排版|配色|视觉|设计|漂亮|好看|精美|高级|专业)", re.IGNORECASE),
+    re.compile(r"(?:风格|主题|主体|版式|母版|模板|美化|排版|配色|视觉|设计|漂亮|好看|精美|高级|专业).{0,32}(?:pptx?|幻灯片|演示文稿|slides?|presentation|deck)", re.IGNORECASE),
     re.compile(r"\b(?:theme|layout|template|slide master|master slide|visual style|deck design|presentation design)\b", re.IGNORECASE),
 )
 
@@ -174,9 +174,9 @@ _NATIVE_CAPABILITY_MATRIX: tuple[NativeCapabilitySpec, ...] = (
         name="design_pptx_theme_layout",
         tool_name="design_pptx_theme_layout",
         summary="当前缺少能够为 PPTX 应用整体主题、母版、配色和版式的 Koto 原生工具。",
-        why_missing="现有 PPTX 工具只覆盖读取文本、改写文本和新增幻灯片，不能稳定编辑主题、母版、版式、配色和整体视觉风格。",
-        description="为现有 PPTX 套用统一主题、字体、配色、版式密度和基础形状样式，并返回标准 file-change payload。",
-        rationale="用户要求的是整体视觉设计，不是文本内容编辑；需要一个格式感知的 PPTX 设计工具来真实写回文件。",
+        why_missing="没有 PPTX 设计工具时，模型容易只给美化建议，或只改文字，无法稳定完成真正好看、专业且可核验的演示文稿写回。",
+        description="为现有 PPTX 套用统一主题、字体、配色、版式密度和基础形状样式，保留原内容并返回标准 file-change payload。",
+        rationale="用户要求的是整体视觉设计和真实文件编辑，不是文本内容建议；需要一个格式感知的 PPTX 设计工具来写回文件。",
         parameters={
             "type": "object",
             "properties": {

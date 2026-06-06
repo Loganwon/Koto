@@ -264,6 +264,23 @@ class TestOpenFile:
 
 class TestAIContextPreview:
 
+    def test_unicode_docx_path_is_readable(self, wa_client):
+        client, _, workspace_dir = wa_client
+        target_name = "\u8bfb\u53d6\u6d4b\u8bd5.docx"
+        target = workspace_dir / target_name
+        target.write_bytes(_make_docx_bytes(["中文文件名读取测试", "第二段内容"]))
+
+        resp = client.post(
+            "/api/v1/workspace/ai_context_preview",
+            json={"path": target_name},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json()
+        assert body["file_name"] == target_name
+        assert body["file_type"] == "docx"
+        assert "中文文件名读取测试" in body["content_preview"]
+
     def test_docx_original_chars_uses_full_document_count(self, wa_client):
         client, _, workspace_dir = wa_client
         paragraphs = [
@@ -286,6 +303,53 @@ class TestAIContextPreview:
         assert body["file_type"] == "docx"
         assert body["original_chars"] == expected_chars
         assert body["original_chars"] > preview_chars
+
+    def test_parse_error_keeps_attachment_available(self, wa_client, monkeypatch):
+        client, _, workspace_dir = wa_client
+        target = workspace_dir / "parse-warning.pdf"
+        target.write_bytes(_fake_pdf_bytes())
+
+        from app.core.agent import task_tools
+
+        monkeypatch.setattr(
+            task_tools,
+            "parse_file_to_text",
+            lambda *args, **kwargs: "Error parsing file: simulated parser failure",
+        )
+
+        resp = client.post(
+            "/api/v1/workspace/ai_context_preview",
+            json={"path": "parse-warning.pdf"},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json()
+        assert body["file_type"] == "pdf"
+        assert body["content_preview"] == ""
+        assert "simulated parser failure" in body["preview_error"]
+
+    def test_unexpected_parse_exception_keeps_attachment_available(self, wa_client, monkeypatch):
+        client, _, workspace_dir = wa_client
+        target = workspace_dir / "parse-exception.docx"
+        target.write_bytes(_make_docx_bytes("body"))
+
+        from app.core.agent import task_tools
+
+        def _raise_parse_error(*args, **kwargs):
+            raise RuntimeError("unexpected parser boom")
+
+        monkeypatch.setattr(task_tools, "parse_file_to_text", _raise_parse_error)
+
+        resp = client.post(
+            "/api/v1/workspace/ai_context_preview",
+            json={"path": "parse-exception.docx"},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json()
+        assert body["file_type"] == "docx"
+        assert body["content_preview"] == ""
+        assert "unexpected parser boom" in body["preview_error"]
 
 
 # ── 2b. PDF-specific loading tests ───────────────────────────────────────────

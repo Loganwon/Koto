@@ -74,25 +74,6 @@ class FileTaskRequest:
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "FileTaskRequest":
         options = dict(data.get("options") or {}) if isinstance(data.get("options"), Mapping) else {}
-        for key in (
-            "planner_backend",
-            "planner_policy",
-            "planner_allow_native_fallback",
-            "planner_command",
-            "planner_timeout",
-            "hermes_planner_command",
-            "openclaw_planner_command",
-        ):
-            if key in data and key not in options:
-                options[key] = data.get(key)
-        raw_planner_options = data.get("planner_options")
-        if isinstance(raw_planner_options, Mapping):
-            merged_planner_options = {}
-            if isinstance(options.get("planner_options"), Mapping):
-                merged_planner_options.update(dict(options["planner_options"]))
-            merged_planner_options.update(dict(raw_planner_options))
-            options["planner_options"] = merged_planner_options
-
         files: List[FileTaskFile] = []
         for item in data.get("files") or []:
             if isinstance(item, Mapping):
@@ -137,7 +118,6 @@ class FileTaskExecutionBrief:
     read_targets: List[str] = field(default_factory=list)
     write_targets: List[str] = field(default_factory=list)
     verification: str = ""
-    delegated_planner: str = ""
     note: str = ""
     estimated: bool = True
 
@@ -178,7 +158,6 @@ class FileTaskExecutionBrief:
             read_targets=_clean_str_list(data.get("read_targets") or data.get("inputs"), item_limit=240),
             write_targets=_clean_str_list(data.get("write_targets") or data.get("targets"), item_limit=240),
             verification=_clean_str(data.get("verification") or data.get("verify") or data.get("success_check"), 400),
-            delegated_planner=_clean_str(data.get("delegated_planner") or data.get("planner") or data.get("delegate_to"), 120),
             note=_clean_str(data.get("note") or data.get("notes"), 400),
             estimated=bool(data.get("estimated", True)),
         )
@@ -201,8 +180,6 @@ class FileTaskExecutionBrief:
             payload["write_targets"] = list(self.write_targets)
         if self.verification:
             payload["verification"] = self.verification
-        if self.delegated_planner:
-            payload["delegated_planner"] = self.delegated_planner
         if self.note:
             payload["note"] = self.note
         return payload
@@ -226,6 +203,8 @@ class FileTaskClassification:
     file_types: List[str] = field(default_factory=list)
     matched_capabilities: List[str] = field(default_factory=list)
     reason_codes: List[str] = field(default_factory=list)
+    selected_recipe: str = ""
+    recipe_candidates: List[Dict[str, Any]] = field(default_factory=list)
     confidence: float = 1.0
 
     def public_dict(self) -> Dict[str, Any]:
@@ -233,6 +212,7 @@ class FileTaskClassification:
         data["file_types"] = [item for item in self.file_types if item]
         data["matched_capabilities"] = [item for item in self.matched_capabilities if item]
         data["reason_codes"] = [item for item in self.reason_codes if item]
+        data["recipe_candidates"] = [dict(item) for item in self.recipe_candidates if isinstance(item, dict)]
         return data
 
 

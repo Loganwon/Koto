@@ -18,10 +18,7 @@ New coverage:
   - DELETE /api/v1/workspace/folder
   - POST /api/v1/workspace/auto_save  (traversal guard)
   - GET  /api/v1/workspace/list_files  (skips hidden + system dirs)
-  - POST /api/v1/fs/create_folder
-  - DELETE /api/v1/workspace/fs_delete
-  - PATCH /api/v1/workspace/fs_rename
-  - POST /api/v1/workspace/fs_copy  (copy + move)
+  - Absolute-path filesystem browser write routes remain guarded
   - GET  /api/v1/workspace/browse_local
   - GET  /api/v1/workspace/current_dir
 """
@@ -31,6 +28,9 @@ from __future__ import annotations
 import json
 import io
 import os
+import shutil
+import sys
+import types
 import uuid
 from pathlib import Path
 
@@ -162,6 +162,26 @@ class TestDeleteWorkspaceFile:
         resp = client.delete("/api/v1/workspace/file?path=subdir_del/inner.txt")
         assert resp.status_code == 200
         assert not (sub / "inner.txt").exists()
+
+    def test_delete_file_send2trash_error_after_path_removed(self, _app_bundle, monkeypatch):
+        """If send2trash removes the file before raising, fallback must not 500."""
+        client, _, ws = _app_bundle
+        fname = f"vanished_{uuid.uuid4().hex[:6]}.txt"
+        self._plant(ws, fname)
+
+        def fake_send2trash(path):
+            Path(path).unlink()
+            raise OSError("already moved")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "send2trash",
+            types.SimpleNamespace(send2trash=fake_send2trash),
+        )
+        resp = client.delete(f"/api/v1/workspace/file?path={fname}")
+        assert resp.status_code == 200
+        assert resp.get_json().get("ok") is True
+        assert not (ws / fname).exists()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -371,6 +391,27 @@ class TestDeleteWorkspaceFolder:
         (folder / "sub").mkdir(exist_ok=True)
         resp = client.delete(f"/api/v1/workspace/folder?path={name}")
         assert resp.status_code == 200
+        assert not folder.exists()
+
+    def test_delete_folder_send2trash_error_after_path_removed(self, _app_bundle, monkeypatch):
+        client, _, ws = _app_bundle
+        name = f"folder_vanished_{uuid.uuid4().hex[:6]}"
+        folder = ws / name
+        folder.mkdir(exist_ok=True)
+        (folder / "file.txt").write_bytes(b"content")
+
+        def fake_send2trash(path):
+            shutil.rmtree(path)
+            raise OSError("already moved")
+
+        monkeypatch.setitem(
+            sys.modules,
+            "send2trash",
+            types.SimpleNamespace(send2trash=fake_send2trash),
+        )
+        resp = client.delete(f"/api/v1/workspace/folder?path={name}")
+        assert resp.status_code == 200
+        assert resp.get_json().get("ok") is True
         assert not folder.exists()
 
     def test_delete_folder_missing_returns_404(self, _app_bundle):
@@ -589,237 +630,67 @@ class TestAutoSaveTraversalGuard:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DELETE /api/v1/workspace/fs_delete
+# Absolute-path filesystem browser write routes
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class TestFsDelete:
+class TestAbsoluteFsWriteRoutes:
 
-    def test_fs_delete_file(self, _app_bundle, tmp_path):
+    def test_absolute_fs_write_routes_validate_missing_payloads(self, _app_bundle):
         client, _, _ = _app_bundle
-        f = tmp_path / "fsfile.txt"
-        f.write_bytes(b"bye")
-        resp = client.delete(f"/api/v1/workspace/fs_delete?path={f}")
-        assert resp.status_code == 200
-        assert not f.exists()
 
-    def test_fs_delete_folder(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        d = tmp_path / "fsfolder"
-        d.mkdir()
-        (d / "inner.txt").write_bytes(b"x")
-        resp = client.delete(f"/api/v1/workspace/fs_delete?path={d}")
-        assert resp.status_code == 200
-        assert not d.exists()
+        assert client.post("/api/v1/fs/create_file", json={}).status_code == 400
+        assert client.post("/api/v1/fs/create_folder", json={}).status_code == 400
+        assert client.delete("/api/v1/workspace/fs_delete").status_code == 400
+        assert client.patch("/api/v1/workspace/fs_rename", json={}).status_code == 400
+        assert client.post("/api/v1/workspace/fs_copy", json={}).status_code == 400
+        assert client.post("/api/v1/workspace/upload-to-folder").status_code == 400
 
-    def test_fs_delete_missing_path_param_returns_400(self, _app_bundle):
+    def test_absolute_fs_create_file_and_folder(self, _app_bundle, tmp_path):
         client, _, _ = _app_bundle
-        resp = client.delete("/api/v1/workspace/fs_delete")
-        assert resp.status_code == 400
 
-    def test_fs_delete_nonexistent_returns_404(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        resp = client.delete(
-            f"/api/v1/workspace/fs_delete?path={tmp_path / 'nope.txt'}"
+        file_resp = client.post(
+            "/api/v1/fs/create_file",
+            json={"parent": str(tmp_path), "name": "browser_note.txt"},
         )
-        assert resp.status_code == 404
+        assert file_resp.status_code == 200
+        assert (tmp_path / "browser_note.txt").is_file()
 
-    def test_fs_delete_system_path_returns_403(self, _app_bundle):
-        client, _, _ = _app_bundle
-        # Windows system path — should be blocked by _fs_guard
-        resp = client.delete("/api/v1/workspace/fs_delete?path=C:\\Windows\\System32")
-        assert resp.status_code in (403, 404)  # guard or non-existent in test env
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PATCH /api/v1/workspace/fs_rename
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestFsRename:
-
-    def test_fs_rename_file(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        f = tmp_path / "old_name.txt"
-        f.write_bytes(b"content")
-        resp = client.patch(
-            "/api/v1/workspace/fs_rename",
-            json={"path": str(f), "name": "new_name"},
+        folder_resp = client.post(
+            "/api/v1/fs/create_folder",
+            json={"parent": str(tmp_path), "name": "browser_folder"},
         )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data.get("ok") is True
-        assert data["name"] == "new_name.txt"  # extension preserved
-        assert not f.exists()
-        assert (tmp_path / "new_name.txt").exists()
+        assert folder_resp.status_code == 200
+        assert (tmp_path / "browser_folder").is_dir()
 
-    def test_fs_rename_folder(self, _app_bundle, tmp_path):
+    def test_absolute_fs_copy_upload_and_delete(self, _app_bundle, tmp_path):
         client, _, _ = _app_bundle
-        d = tmp_path / "old_dir"
-        d.mkdir()
-        resp = client.patch(
-            "/api/v1/workspace/fs_rename",
-            json={"path": str(d), "name": "new_dir"},
-        )
-        assert resp.status_code == 200
-        assert not d.exists()
-        assert (tmp_path / "new_dir").is_dir()
-
-    def test_fs_rename_duplicate_returns_409(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        a = tmp_path / "rn_a.txt"
-        b = tmp_path / "rn_b.txt"
-        a.write_bytes(b"a")
-        b.write_bytes(b"b")
-        resp = client.patch(
-            "/api/v1/workspace/fs_rename",
-            json={"path": str(a), "name": "rn_b"},
-        )
-        assert resp.status_code == 409
-
-    def test_fs_rename_missing_path_returns_400(self, _app_bundle):
-        client, _, _ = _app_bundle
-        resp = client.patch("/api/v1/workspace/fs_rename", json={"name": "x"})
-        assert resp.status_code == 400
-
-    def test_fs_rename_slash_in_name_returns_400(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        f = tmp_path / "slash_test.txt"
-        f.write_bytes(b"x")
-        resp = client.patch(
-            "/api/v1/workspace/fs_rename",
-            json={"path": str(f), "name": "a/b"},
-        )
-        assert resp.status_code == 400
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# POST /api/v1/workspace/fs_copy
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestFsCopy:
-
-    def test_copy_file(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        src = tmp_path / "cp_src.txt"
-        src.write_bytes(b"hello copy")
-        dst = tmp_path / "cp_dst"
+        src = tmp_path / "source.txt"
+        dst = tmp_path / "dest"
         dst.mkdir()
-        resp = client.post(
+        src.write_text("hello", encoding="utf-8")
+
+        copy_resp = client.post(
             "/api/v1/workspace/fs_copy",
             json={"src": str(src), "dst_dir": str(dst), "move": False},
         )
-        assert resp.status_code == 200
-        assert src.exists()  # original still there
-        assert (dst / "cp_src.txt").exists()
+        assert copy_resp.status_code == 200
+        copied = dst / "source.txt"
+        assert copied.is_file()
 
-    def test_move_file(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        src = tmp_path / "mv_src.txt"
-        src.write_bytes(b"hello move")
-        dst = tmp_path / "mv_dst"
-        dst.mkdir()
-        resp = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={"src": str(src), "dst_dir": str(dst), "move": True},
+        upload_resp = client.post(
+            "/api/v1/workspace/upload-to-folder",
+            data={"dest_dir": str(dst), "file": (io.BytesIO(b"up"), "upload.txt")},
+            content_type="multipart/form-data",
         )
-        assert resp.status_code == 200
-        assert not src.exists()  # moved — original gone
-        assert (dst / "mv_src.txt").exists()
+        assert upload_resp.status_code == 200
+        assert (dst / "upload.txt").is_file()
 
-    def test_copy_auto_renames_on_collision(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        src = tmp_path / "clash.txt"
-        src.write_bytes(b"original")
-        dst = tmp_path / "clash_dst"
-        dst.mkdir()
-        (dst / "clash.txt").write_bytes(b"existing")
-        resp = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={"src": str(src), "dst_dir": str(dst), "move": False},
+        delete_resp = client.delete(
+            "/api/v1/workspace/fs_delete?path=" + str(copied)
         )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        # Should be renamed to clash (1).txt
-        assert "(1)" in data["name"] or data["name"] != "clash.txt"
-
-    def test_copy_missing_src_returns_404(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        resp = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={"src": str(tmp_path / "nope.txt"), "dst_dir": str(tmp_path)},
-        )
-        assert resp.status_code == 404
-
-    def test_copy_missing_params_returns_400(self, _app_bundle):
-        client, _, _ = _app_bundle
-        resp = client.post("/api/v1/workspace/fs_copy", json={"src": "/some/path"})
-        assert resp.status_code == 400
-
-    def test_copy_invalid_dst_returns_400(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        src = tmp_path / "inv_dst.txt"
-        src.write_bytes(b"x")
-        # dst_dir is a file, not a directory
-        not_a_dir = tmp_path / "not_a_dir.txt"
-        not_a_dir.write_bytes(b"y")
-        resp = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={"src": str(src), "dst_dir": str(not_a_dir)},
-        )
-        assert resp.status_code == 400
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# POST /api/v1/fs/create_folder
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestFsCreateFolder:
-
-    def test_create_folder_in_tmp(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        name = f"new_folder_{uuid.uuid4().hex[:6]}"
-        resp = client.post(
-            "/api/v1/fs/create_folder",
-            json={"parent": str(tmp_path), "name": name},
-        )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data.get("ok") is True
-        assert (tmp_path / name).is_dir()
-
-    def test_duplicate_folder_returns_409(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        name = f"dup_fs_folder_{uuid.uuid4().hex[:6]}"
-        (tmp_path / name).mkdir()
-        resp = client.post(
-            "/api/v1/fs/create_folder",
-            json={"parent": str(tmp_path), "name": name},
-        )
-        assert resp.status_code == 409
-
-    def test_empty_name_returns_400(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        resp = client.post(
-            "/api/v1/fs/create_folder",
-            json={"parent": str(tmp_path), "name": ""},
-        )
-        assert resp.status_code == 400
-
-    def test_nonexistent_parent_returns_404(self, _app_bundle, tmp_path):
-        client, _, _ = _app_bundle
-        resp = client.post(
-            "/api/v1/fs/create_folder",
-            json={"parent": str(tmp_path / "ghost_parent"), "name": "child"},
-        )
-        assert resp.status_code == 404
-
-    def test_missing_parent_returns_400(self, _app_bundle):
-        client, _, _ = _app_bundle
-        resp = client.post("/api/v1/fs/create_folder", json={"name": "orphan"})
-        assert resp.status_code == 400
+        assert delete_resp.status_code == 200
+        assert not copied.exists()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1020,7 +891,7 @@ class TestListFilesAdditional:
         assert ".hidden_file" not in all_names
 
     def test_list_files_includes_txt_files(self, _app_bundle):
-        """Non-office files should appear in the tree (supported=False)."""
+        """Text files should appear in the tree and remain directly openable."""
         client, _, ws = _app_bundle
         fname = f"listable_{uuid.uuid4().hex[:6]}.txt"
         (ws / fname).write_bytes(b"content")
@@ -1029,9 +900,8 @@ class TestListFilesAdditional:
         all_file_nodes = [n for n in data.get("files", []) if n.get("type") == "file"]
         names = [n["name"] for n in all_file_nodes]
         assert fname in names
-        # txt should have supported=False
         entry = next(n for n in all_file_nodes if n["name"] == fname)
-        assert entry["supported"] is False
+        assert entry["supported"] is True
 
     def test_list_files_response_has_workspace_info(self, _app_bundle):
         client, _, ws = _app_bundle

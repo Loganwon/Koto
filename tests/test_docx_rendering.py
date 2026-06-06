@@ -1078,7 +1078,7 @@ class TestHeadingManifest:
 
         result = parse_docx(str(docx_path))
         assert result["headings"] == []
-    assert 'id="koto-heading-执行概要"' in result["html"]
+        assert 'id="koto-heading-执行概要"' in result["html"]
         assert 'data-koto-role="structural_heading"' in result["html"]
 
     def test_outline_level_prefixed_heading_is_emitted_in_parser_manifest(self, tmp_path) -> None:

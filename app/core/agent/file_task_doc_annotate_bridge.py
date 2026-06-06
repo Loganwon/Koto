@@ -85,6 +85,23 @@ _DOCX_CLEAR_REVIEW_REQUEST_PATTERNS = (
     ),
 )
 
+_DIRECT_DOCX_REWRITE_REVIEW_EXCLUSIONS = (
+    "批注",
+    "标注",
+    "评论",
+    "注释",
+    "评注",
+    "修改建议",
+    "指出问题",
+    "comment",
+    "annotate",
+)
+
+_DIRECT_DOCX_REWRITE_PATTERNS = (
+    re.compile(r"(?:润色|改写|重写|优化|修改|polish|rewrite).{0,24}(?:写回|保存|替换|更新|当前|原文|文档|docx|file)", re.IGNORECASE),
+    re.compile(r"(?:写回|保存|替换|更新|直接修改|save|replace|update).{0,24}(?:润色|改写|重写|优化|polish|rewrite)", re.IGNORECASE),
+)
+
 _BATCH_RESUME_ARTIFACT_TYPE = "koto_large_task_resume_v1"
 _BATCH_RESUME_ARTIFACT_CATEGORY = "batch_confirmation"
 
@@ -94,6 +111,16 @@ def looks_like_docx_review_clear_request(task_text: str) -> bool:
     if not text:
         return False
     return any(pattern.search(text) for pattern in _DOCX_CLEAR_REVIEW_REQUEST_PATTERNS)
+
+
+def looks_like_direct_docx_rewrite_request(task_text: str) -> bool:
+    text = str(task_text or "").strip()
+    if not text:
+        return False
+    lowered = text.lower()
+    if any(marker in lowered for marker in _DIRECT_DOCX_REWRITE_REVIEW_EXCLUSIONS):
+        return False
+    return any(pattern.search(text) for pattern in _DIRECT_DOCX_REWRITE_PATTERNS)
 
 
 def _coerce_progress_value(value: Any) -> int:
@@ -401,6 +428,8 @@ def should_route_request(request: FileTaskRequest) -> bool:
         return True
 
     if looks_like_docx_review_clear_request(task_text):
+        return False
+    if looks_like_direct_docx_rewrite_request(task_text):
         return False
 
     if not _find_pdf_file(request):

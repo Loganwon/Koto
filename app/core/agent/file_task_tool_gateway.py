@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
+import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol
 
 from app.core.agent.file_task_tool_catalog import file_task_tool_specs, is_file_task_tool
@@ -114,6 +116,7 @@ class FileTaskToolGateway:
             if isinstance(item, dict)
         }
         self._task_file_types.discard("")
+        self._task_file_types.update(self._request_context_file_types())
         provider_list = list(providers or [])
         if tool_executor is not None:
             provider_list.append(CallableFileTaskToolProvider(tool_executor))
@@ -170,3 +173,23 @@ class FileTaskToolGateway:
         if spec is None or not spec.file_types:
             return True
         return bool(self._task_file_types.intersection(spec.file_types))
+
+    def _request_context_file_types(self) -> set[str]:
+        request_context = self._context.request_context if isinstance(self._context.request_context, dict) else {}
+        inferred: set[str] = set()
+        target_path = str(request_context.get("target_path") or "").strip()
+        target_suffix = Path(target_path).suffix.lstrip(".").lower()
+        if target_suffix:
+            inferred.add(target_suffix)
+        options = request_context.get("options") if isinstance(request_context.get("options"), dict) else {}
+        option_type = str(options.get("inferred_target_file_type") or options.get("target_file_type") or "").strip().lower().lstrip(".")
+        if option_type:
+            inferred.add(option_type)
+        task_text = str(request_context.get("task") or "").strip().lower()
+        if re.search(r"(?:创建|新建|生成|输出|写入|加入|插入|整理成|create|generate|output|record|write).{0,24}(?:docx|word|文档)", task_text, re.IGNORECASE):
+            inferred.add("docx")
+        if re.search(r"(?:创建|新建|生成|输出|写入|加入|插入|整理成).{0,24}(?:pptx|ppt|幻灯片|演示文稿|slides?)", task_text, re.IGNORECASE):
+            inferred.add("pptx")
+        if re.search(r"(?:创建|新建|生成|输出|写入|加入|插入|整理成).{0,24}(?:xlsx|excel|工作簿|表格)", task_text, re.IGNORECASE):
+            inferred.add("xlsx")
+        return {item for item in inferred if item}

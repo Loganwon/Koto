@@ -537,7 +537,10 @@ class UnifiedAgent(Agent):
                         step_type=AgentStepType.THOUGHT, content=safe_thought_text
                     )
                     _pub("THOUGHT", safe_thought_text)
-                    current_history.append({"role": "model", "content": content_text})
+                    assistant_turn = {"role": "model", "content": content_text}
+                    if response.get("reasoning_content"):
+                        assistant_turn["reasoning_content"] = response.get("reasoning_content")
+                    current_history.append(assistant_turn)
 
                 if not tool_calls:
                     # ── 2. 输出质量验收 ──────────────────────────────
@@ -819,9 +822,10 @@ class UnifiedAgent(Agent):
                         tool_name=tool_name,
                         tool_args=tool_args,
                     )
-                    current_history.append(
-                        {"role": "model", "content": "", "tool_calls": [tool_call]}
-                    )
+                    tool_turn = {"role": "model", "content": "", "tool_calls": [tool_call]}
+                    if response.get("reasoning_content"):
+                        tool_turn["reasoning_content"] = response.get("reasoning_content")
+                    current_history.append(tool_turn)
 
                 # 2. 并行执行所有工具（多工具时可大幅减少等待时间）
                 def _exec_one(tc):

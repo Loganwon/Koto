@@ -11,6 +11,7 @@ from app.core.agent.file_task_contract import (
     FileTaskRequirementSet,
 )
 from app.core.agent.file_task_doc_annotate_bridge import looks_like_docx_review_clear_request
+from app.core.agent.file_task_recipes import select_task_recipe
 
 
 def _target_file_type(request: FileTaskRequest, classification: FileTaskClassification) -> str:
@@ -57,7 +58,18 @@ def build_file_task_requirements(
         acceptance_criteria.append("应在目标文件中新增批注或审校意见")
         reason_codes.append("annotation_request")
     elif write_required:
-        acceptance_criteria.append("必须产生真实文件变更")
+        recipe_match = select_task_recipe(request, request.files or [], write_intent=True)
+        if recipe_match:
+            requested_operation = recipe_match.recipe.write_operation_kind or requested_operation
+            required_capabilities.extend(
+                capability
+                for capability in recipe_match.recipe.matched_capabilities
+                if capability and capability not in required_capabilities
+            )
+            acceptance_criteria.extend(str(item) for item in recipe_match.recipe.success_criteria if str(item or "").strip())
+            reason_codes.append(f"recipe:{recipe_match.recipe.id}")
+        if not acceptance_criteria:
+            acceptance_criteria.append("必须产生真实文件变更")
         reason_codes.append("write_intent")
     else:
         acceptance_criteria.append("不应误触发写入工具")

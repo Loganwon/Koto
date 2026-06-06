@@ -174,50 +174,15 @@ class TestFileFavorites:
 
 @pytest.mark.integration
 class TestFileOpenEndpoint:
-    """Tests for /api/files/open (used by "系统打开" button)."""
+    """Native OS file opening through FileHub is retired."""
 
-    def test_open_file_missing_path_returns_400(self, full_client):
+    def test_open_file_route_removed(self, full_client):
         resp = full_client.post(
-            "/api/files/open",
+            "/api/files/" + "open",
             json={},
             content_type="application/json",
         )
-        data = resp.get_json()
-        assert resp.status_code == 400
-        assert "error" in data
-
-    def test_open_nonexistent_file_returns_404(self, full_client):
-        resp = full_client.post(
-            "/api/files/open",
-            json={"path": "/nonexistent/path/that/does/not/exist.txt"},
-            content_type="application/json",
-        )
-        data = resp.get_json()
         assert resp.status_code == 404
-        assert "error" in data
-
-    def test_open_existing_file_returns_ok(self, full_client, tmp_path, monkeypatch):
-        """A file that exists on disk should be opened (os.startfile mocked)."""
-        test_file = tmp_path / "sample.txt"
-        test_file.write_text("hello")
-
-        opened = []
-
-        def fake_startfile(path):  # noqa: ANN001
-            opened.append(path)
-
-        import os as _os
-        monkeypatch.setattr(_os, "startfile", fake_startfile, raising=False)
-
-        resp = full_client.post(
-            "/api/files/open",
-            json={"path": str(test_file)},
-            content_type="application/json",
-        )
-        data = resp.get_json()
-        assert resp.status_code == 200
-        assert data.get("status") == "ok"
-        assert len(opened) == 1
 
 
 @pytest.mark.integration

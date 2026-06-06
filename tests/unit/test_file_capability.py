@@ -2,7 +2,7 @@
 
 Tests for file_task_capability functions that drive the native-only runtime.
 All external-planner tests have been removed — Koto no longer supports external
-planner backends (hermes / openclaw).
+retired external planner backends.
 """
 from app.core.agent import file_task_capability
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest

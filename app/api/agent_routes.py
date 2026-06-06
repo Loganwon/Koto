@@ -42,9 +42,18 @@ def _make_eval_llm_fn():
 
         def _fn(prompt: str) -> str:
             try:
+                try:
+                    from app.core.llm.model_selection import get_configured_cloud_model
+
+                    judge_model = get_configured_cloud_model(
+                        task_type="CHAT",
+                        fallback_model=DEFAULT_MODEL,
+                    )
+                except Exception:
+                    judge_model = DEFAULT_MODEL
                 r = _a.llm_provider.generate_content(
                     prompt,
-                    model=DEFAULT_MODEL,
+                    model=judge_model,
                     max_tokens=512,
                     temperature=0.1,
                 )
@@ -1719,111 +1728,6 @@ def clear_monitoring_events():
             jsonify(
                 {"status": "error", "message": f"Failed to clear events: {str(e)}"}
             ),
-            500,
-        )
-
-
-# ------------------------------------------------------------------
-# Phase 4c: Script Generation Endpoints
-# ------------------------------------------------------------------
-
-
-@agent_bp.route("/generate-script", methods=["POST"])
-def generate_fix_script():
-    """Generate an executable script to fix a detected system issue."""
-    try:
-        from app.core.agent.plugins.script_generation_plugin import (
-            ScriptGenerationPlugin,
-        )
-
-        data = request.get_json() or {}
-        issue_type = data.get("issue_type")
-
-        if not issue_type:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "Missing required parameter: issue_type",
-                    }
-                ),
-                400,
-            )
-
-        plugin = ScriptGenerationPlugin()
-        result = plugin.generate_fix_script(
-            issue_type=issue_type,
-            process_name=data.get("process_name"),
-            service_name=data.get("service_name"),
-            min_gb=data.get("min_gb", 5),
-        )
-
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error generating script: {e}", exc_info=True)
-        return (
-            jsonify(
-                {"status": "error", "message": f"Failed to generate script: {str(e)}"}
-            ),
-            500,
-        )
-
-
-@agent_bp.route("/generate-script/list", methods=["GET"])
-def list_available_scripts():
-    """List available fix script templates."""
-    try:
-        from app.core.agent.plugins.script_generation_plugin import (
-            ScriptGenerationPlugin,
-        )
-
-        plugin = ScriptGenerationPlugin()
-        result = plugin.list_available_scripts()
-
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error listing scripts: {e}", exc_info=True)
-        return (
-            jsonify(
-                {"status": "error", "message": f"Failed to list scripts: {str(e)}"}
-            ),
-            500,
-        )
-
-
-@agent_bp.route("/generate-script/save", methods=["POST"])
-def save_generated_script():
-    """Save a generated script to workspace."""
-    try:
-        from app.core.agent.plugins.script_generation_plugin import (
-            ScriptGenerationPlugin,
-        )
-
-        data = request.get_json() or {}
-        script_content = data.get("script_content")
-        filename = data.get("filename")
-
-        if not script_content or not filename:
-            return (
-                jsonify(
-                    {
-                        "status": "error",
-                        "message": "Missing required parameters: script_content, filename",
-                    }
-                ),
-                400,
-            )
-
-        plugin = ScriptGenerationPlugin()
-        result = plugin.save_script_to_file(
-            script_content=script_content, filename=filename
-        )
-
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Error saving script: {e}", exc_info=True)
-        return (
-            jsonify({"status": "error", "message": f"Failed to save script: {str(e)}"}),
             500,
         )
 
