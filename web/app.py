@@ -7773,7 +7773,6 @@ def chat():
 # def agent_plan(): ...
 
 
-@app.route("/api/chat/stream", methods=["POST"])
 def chat_stream():
     """Stream a chat response via Server-Sent Events.
     ---

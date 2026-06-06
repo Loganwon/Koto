@@ -152,6 +152,14 @@ def chat() -> Response:
     return jsonify(result)
 
 
+@chat_bp.route("/api/chat/stream", methods=["POST"])
+def chat_stream() -> Response:
+    handler = get_app_attr("chat_stream")
+    if not callable(handler):
+        return jsonify({"error": "Chat stream service is unavailable"}), 503
+    return handler()
+
+
 @chat_bp.route("/api/chat/file", methods=["POST"])
 def chat_with_file() -> Response:
     """Handle file upload and chat requests."""
