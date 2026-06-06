@@ -41,16 +41,16 @@ DEFAULT_SETTINGS = {
     },
     "ai": {
         "default_model": "auto",
+        "cloud_provider": "gemini",
+        "deepseek_model": "deepseek-v4-pro",
         "auto_execute_scripts": True,
-        "voice_auto_send": False,  # 语音输入后自动发送
         "stream_response": True,
-        "use_agent_loop": True,  # OpenClaw unified loop is the default path
+        "use_agent_loop": True,  # Unified agent loop is the default path
         "use_doc_agent": False,  # DocAgent remains opt-in for heavy multi-file workflows
         "show_thinking": False,  # 显示思考过程（推理链）
         "show_task_type": False,  # 显示任务分类标签
         "auto_save_files": True,  # 自动保存回复中的文件（代码/文档/总结等）
         "enable_mini_game": True,  # 启用等待时的小游戏
-        "voice_auto_mode": True,  # 语音自动模式
         "use_local_only": False,  # 本地模型独占模式
     },
     "proxy": {

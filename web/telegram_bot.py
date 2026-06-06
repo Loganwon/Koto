@@ -179,7 +179,7 @@ class TelegramBot:
         try:
             self._call("sendChatAction", {"chat_id": chat_id, "action": "typing"})
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
 
     # ── 主动推送 ──────────────────────────────────────────────────────────────
 
@@ -236,7 +236,7 @@ class TelegramBot:
             try:
                 self.push_proactive_to_telegram()
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                logger.debug("Non-fatal", exc_info=True)
 
     # ── 消息路由 ──────────────────────────────────────────────────────────────
 
@@ -615,9 +615,18 @@ class TelegramBot:
                 .overwrite_output()
                 .run(quiet=True)
             )
-            from web.voice_engine import transcribe_file
+            from web.local_stt import transcribe
 
-            return transcribe_file(wav_path)
+            try:
+                with open(wav_path, "rb") as wav_file:
+                    ok, text, _engine = transcribe(wav_file.read(), "audio/wav")
+                return text if ok and text else None
+            finally:
+                try:
+                    os.unlink(wav_path)
+                    os.unlink(ogg_path)
+                except Exception:
+                    logger.debug("[Telegram] 临时语音文件清理失败", exc_info=True)
         except ImportError:
             # ffmpeg-python 未安装，尝试 Google STT via LLM
             pass

@@ -24,14 +24,11 @@ def _stub(name):
 
 
 for _m in [
-    "vosk",
     "pynput",
     "pynput.keyboard",
     "pynput.mouse",
     "scipy",
     "scipy.io",
-    "pyaudio",
-    "sounddevice",
     "google",
     "google.genai",
     "google.genai.types",
