@@ -1,4 +1,4 @@
-// ================= State =================
+﻿// ================= State =================
 // 🔥 VERSION: 2026-02-14-03 - 多文件累加上传修复版
 let currentSession = null;
 let selectedFiles = [];
@@ -314,7 +314,6 @@ const TASK_MODELS = {
     'CODER': 'gemini-3.1-pro-preview',
     'VISION': 'gemini-3-flash-preview',
     'PAINTER': 'nano-banana-pro-preview',
-    'VOICE': 'gemini-3-flash-preview',  // 语音模式使用快速模型
     'RESEARCH': 'deep-research-pro-preview-12-2025',
     'FILE_GEN': 'gemini-3-pro-preview'
 };
@@ -388,8 +387,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
     
-    // 7. 延迟初始化语音，等待 pywebview 就绪
-    setTimeout(initVoice, 500);
     initProactiveUI();
 
     // 9. 智能滚动 + 全局快捷键
@@ -1021,7 +1018,8 @@ function _relativeTime(ts) {
 
 function openRecentFile(path, name) {
     if (!path) return;
-    const ext = (name.split('.').pop() || '').toLowerCase();
+    const displayName = name || String(path).split(/[\\/]/).pop() || '文件';
+    const ext = (displayName.split('.').pop() || '').toLowerCase();
     const _codeExts = new Set([
         'py','js','ts','json','html','htm','css','md','txt','csv',
         'yaml','yml','xml','sql','sh','bash','ps1','java','cpp','c',
@@ -1030,17 +1028,44 @@ function openRecentFile(path, name) {
 
     if (_codeExts.has(ext)) {
         // 代码 / 文本文件 → 在 Artifacts 面板中预览
-        _openCodeFileInArtifact(path, name, ext);
+        _openCodeFileInArtifact(path, displayName, ext);
+    } else if (window.WA && typeof window.WA.openRecentFile === 'function') {
+        window.WA.openRecentFile(path);
     } else {
-        // 其他文件（PDF、Office、图片、视频等）→ 系统默认程序打开
-        fetch('/api/files/open', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ path }),
-        }).then(r => r.json()).then(d => {
-            if (d.error) showNotification(`打开失败：${d.error}`, 'error', 3000);
-            else showNotification(`已用默认程序打开：${name}`, 'info', 2500);
-        }).catch(() => showNotification('打开文件失败', 'error', 3000));
+        showNotification(`请在文件助手中打开：${displayName}`, 'info', 3000);
+    }
+}
+
+function _workspaceFileUrl(file) {
+    return '/api/workspace/' + String(file || '')
+        .split(/[\\/]/)
+        .filter(Boolean)
+        .map(encodeURIComponent)
+        .join('/');
+}
+
+function openSavedWorkspaceFile(file) {
+    if (!file) return;
+    if (window.WA && typeof window.WA.openWorkspaceFile === 'function') {
+        window.WA.openWorkspaceFile(file);
+        return;
+    }
+    if (window.WA && typeof window.WA.openRecentFile === 'function') {
+        window.WA.openRecentFile(file);
+        return;
+    }
+    window.open(_workspaceFileUrl(file), '_blank', 'noopener');
+}
+
+function copyPathToClipboard(path, label = '路径') {
+    if (!path) return;
+    const text = decodeURIComponent(String(path));
+    const done = () => showNotification(`${label}已复制`, 'success', 2000);
+    const fail = () => showNotification(text, 'info', 3000);
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(text).then(done).catch(fail);
+    } else {
+        fail();
     }
 }
 
@@ -1867,7 +1892,7 @@ function renderMessage(role, content, meta = {}) {
             <div class="saved-files">
                 <div class="saved-files-title">✓ Files saved to workspace:</div>
                 ${meta.saved_files.map(file => `
-                    <a href="javascript:void(0)" class="saved-file-link" title="点击打开 ${file}" onclick="fetch('/api/open-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filepath:'${file.replace(/'/g, "\\'")}'})}).then(r=>r.json()).then(d=>{if(!d.success)console.error(d.error)}).catch(e=>console.error(e));return false;">
+                    <a href="${_workspaceFileUrl(file)}" target="_blank" rel="noopener" class="saved-file-link" title="在 Koto 中打开 ${file}" onclick="openSavedWorkspaceFile('${file.replace(/'/g, "\\'")}');return false;">
                         <div class="saved-file">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -2688,11 +2713,7 @@ async function sendMessage(event) {
                                                 fileLink.title = `点击打开 ${file}`;
                                                 fileLink.addEventListener('click', (e) => {
                                                     e.preventDefault();
-                                                    fetch('/api/open-file', {
-                                                        method: 'POST',
-                                                        headers: {'Content-Type': 'application/json'},
-                                                        body: JSON.stringify({filepath: file})
-                                                    });
+                                                    openSavedWorkspaceFile(file);
                                                 });
                                                 const fileDiv = document.createElement('div');
                                                 fileDiv.className = 'saved-file';
@@ -3716,7 +3737,7 @@ async function sendMessage(event) {
                                                 <div class="fpi-meta">${escapeHtml(f.size_str || '')} · ${escapeHtml(f.mtime_str || '')} · <span class="fpi-path" title="${escapeAttr(f.path)}">${escapeHtml(f.path.length > 55 ? '...' + f.path.slice(-52) : f.path)}</span></div>
                                             </div>
                                             <div class="fpi-score-bar" style="width:${scoreBar}%" title="匹配度 ${scoreBar}%"></div>
-                                            <button class="fpi-open-btn">打开</button>
+                                            <button class="fpi-open-btn">复制路径</button>
                                         </div>`;
                                     }
                                     html += `</div>`;
@@ -3724,31 +3745,28 @@ async function sendMessage(event) {
                                     // 绑定点击事件
                                     pickerDiv.querySelectorAll('.file-picker-item').forEach(item => {
                                         const openBtn = item.querySelector('.fpi-open-btn');
-                                        const doOpen = async () => {
+                                        const doCopy = async () => {
                                             const path = item.dataset.path;
                                             openBtn.disabled = true;
-                                            openBtn.textContent = '打开中...';
+                                            openBtn.textContent = '复制中...';
                                             try {
-                                                const res = await fetch('/api/scan/open', {
-                                                    method: 'POST',
-                                                    headers: {'Content-Type': 'application/json'},
-                                                    body: JSON.stringify({path})
-                                                });
-                                                const r = await res.json();
-                                                if (r.success) {
-                                                    openBtn.textContent = '✅ 已打开';
-                                                    item.classList.add('fpi-opened');
-                                                } else {
-                                                    openBtn.textContent = '❌ 失败';
-                                                    openBtn.title = r.error || '';
-                                                }
+                                                await navigator.clipboard.writeText(path);
+                                                openBtn.textContent = '已复制';
+                                                item.classList.add('fpi-opened');
+                                                showNotification('文件路径已复制', 'success', 1600);
                                             } catch(e) {
-                                                openBtn.textContent = '❌ 错误';
-                                                console.error('[FilePicker] open error:', e);
+                                                openBtn.textContent = '复制失败';
+                                                showNotification(path, 'info', 5000);
+                                                console.error('[FilePicker] copy path error:', e);
+                                            } finally {
+                                                setTimeout(() => {
+                                                    openBtn.disabled = false;
+                                                    openBtn.textContent = '复制路径';
+                                                }, 1200);
                                             }
                                         };
-                                        openBtn.addEventListener('click', e => { e.stopPropagation(); doOpen(); });
-                                        item.addEventListener('dblclick', doOpen);
+                                        openBtn.addEventListener('click', e => { e.stopPropagation(); doCopy(); });
+                                        item.addEventListener('dblclick', doCopy);
                                     });
                                     scrollToBottom();
                                 } else if (data.type === 'done') {
@@ -3944,13 +3962,7 @@ async function sendMessage(event) {
                                             fileLink.title = `点击打开 ${file}`;
                                             fileLink.addEventListener('click', (e) => {
                                                 e.preventDefault();
-                                                fetch('/api/open-file', {
-                                                    method: 'POST',
-                                                    headers: {'Content-Type': 'application/json'},
-                                                    body: JSON.stringify({filepath: file})
-                                                }).then(r => r.json()).then(d => {
-                                                    if (!d.success) console.error('Open file failed:', d.error);
-                                                }).catch(err => console.error('Open file error:', err));
+                                                openSavedWorkspaceFile(file);
                                             });
                                             
                                             const fileDiv = document.createElement('div');
@@ -4298,14 +4310,8 @@ function handleDrop(event) {
 
 // ================= Workspace =================
 function openWorkspaceFolder() {
-    fetch('/api/open-workspace', { method: 'POST' })
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                showNotification('📂 已打开工作区文件夹', 'success');
-            }
-        })
-        .catch(err => console.error('Failed to open workspace:', err));
+    toggleWorkspace();
+    showNotification('已展开 Koto 工作区', 'info', 2000);
 }
 
 function toggleWorkspace() {
@@ -4404,7 +4410,7 @@ async function refreshBatchJobs() {
                     </div>
                     <div class="batch-job-meta" style="margin-top:6px;">
                         <span>${escapeHtml(outputDir)}</span>
-                        <button class="ghost-btn" style="padding:2px 8px;font-size:12px;" onclick="openPath('${encodedOutput}')">打开</button>
+                        <button class="ghost-btn" style="padding:2px 8px;font-size:12px;" onclick="openPath('${encodedOutput}')">复制路径</button>
                     </div>
                 </div>
             `;
@@ -4416,12 +4422,7 @@ async function refreshBatchJobs() {
 
 function openPath(path) {
     if (!path) return;
-    const decodedPath = decodeURIComponent(path);
-    fetch('/api/open-file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filepath: decodedPath })
-    });
+    copyPathToClipboard(path, '输出路径');
 }
 
 // ================= Status =================
@@ -5313,6 +5314,11 @@ function applySettingsToUI() {
     
     // AI settings
     // (model selector removed; selectedModel always 'auto' unless local-only)
+    const cloudProviderEl = document.getElementById('settingCloudProvider');
+    if (cloudProviderEl) {
+        cloudProviderEl.value = currentSettings.ai?.cloud_provider || 'gemini';
+        syncCloudProviderUi(cloudProviderEl.value);
+    }
 
     // 思考过程开关
     const showThinkingCheckbox = document.getElementById('settingShowThinking');
@@ -5332,14 +5338,6 @@ function applySettingsToUI() {
         autoSaveFilesCheckbox.checked = currentSettings.ai?.auto_save_files !== false; // 默认开启
     }
     
-    // 语音自动模式设置
-    const voiceAutoModeCheckbox = document.getElementById('settingVoiceAutoMode');
-    if (voiceAutoModeCheckbox) {
-        const isAutoMode = currentSettings.ai?.voice_auto_mode !== false; // 默认开启
-        voiceAutoModeCheckbox.checked = isAutoMode;
-        voiceAutoMode = isAutoMode; // 更新全局变量
-    }
-
     // 小游戏设置
     const miniGameCheckbox = document.getElementById('settingEnableMiniGame');
     if (miniGameCheckbox) {
@@ -5411,6 +5409,8 @@ function closeSettings() {
 async function saveSettingsApiKey() {
     const input = document.getElementById('settingsApiKeyInput');
     const status = document.getElementById('settingsApiKeyStatus');
+    const providerEl = document.getElementById('settingCloudProvider');
+    const provider = providerEl ? (providerEl.value || 'gemini') : 'gemini';
     const apiKey = input.value.trim();
     if (!apiKey || apiKey.length < 10) {
         status.textContent = '❌ 请输入有效的 API Key';
@@ -5423,7 +5423,7 @@ async function saveSettingsApiKey() {
         const res = await fetch('/api/setup/apikey', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: apiKey })
+            body: JSON.stringify({ api_key: apiKey, provider })
         });
         const data = await res.json();
         if (data.success) {
@@ -5440,6 +5440,39 @@ async function saveSettingsApiKey() {
     } catch (e) {
         status.textContent = '❌ 网络错误: ' + e.message;
         status.style.color = 'var(--accent-error, #ef4444)';
+    }
+}
+
+function syncCloudProviderUi(provider) {
+    const normalized = provider === 'deepseek' ? 'deepseek' : 'gemini';
+    const desc = document.getElementById('settingsApiKeyDesc');
+    const hint = document.getElementById('settingCloudProviderHint');
+    const input = document.getElementById('settingsApiKeyInput');
+    if (normalized === 'deepseek') {
+        if (desc) desc.innerHTML = '更新 DeepSeek API 密钥。选择 DeepSeek 后，云端任务流默认使用 DeepSeek V4 Pro。';
+        if (hint) hint.textContent = '云端模式下使用 DeepSeek V4 Pro，支持文字对话、代码和文件任务规划。';
+        if (input) input.placeholder = '粘贴 DeepSeek API Key…';
+    } else {
+        if (desc) desc.innerHTML = '更新 Gemini API 密钥。从 <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent-primary)">Google AI Studio</a> 获取。';
+        if (hint) hint.textContent = '云端模式下使用 Gemini。';
+        if (input) input.placeholder = '粘贴 Gemini API Key…';
+    }
+}
+
+async function onCloudProviderChange(provider) {
+    const normalized = provider === 'deepseek' ? 'deepseek' : 'gemini';
+    syncCloudProviderUi(normalized);
+    await updateSetting('ai', 'cloud_provider', normalized);
+    if (normalized === 'deepseek') {
+        await updateSetting('ai', 'deepseek_model', 'deepseek-v4-pro');
+    }
+    fetch('/api/local-model/switch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({mode: 'cloud'})
+    }).catch(err => console.warn('[CloudProvider] mode switch failed:', err));
+    if (window.WA && typeof window.WA.refreshModelCatalog === 'function') {
+        window.WA.refreshModelCatalog(true);
     }
 }
 
@@ -6251,12 +6284,6 @@ async function updateSetting(category, key, value) {
                 applyTheme(value);
             }
             
-            // 更新语音自动模式全局变量
-            if (category === 'ai' && key === 'voice_auto_mode') {
-                voiceAutoMode = value;
-                console.log('[设置] 语音模式:', voiceAutoMode ? '自动' : '手动');
-            }
-
             // 更新小游戏设置
             if (category === 'ai' && key === 'enable_mini_game') {
                 enableMiniGame = value;
@@ -6517,8 +6544,7 @@ function selectCapability(element) {
             '💻': 'CODER',
             '🖥️': 'SYSTEM',
             '👁️': 'VISION',
-            '🎨': 'PAINTER',
-            '🎤': 'VOICE'
+            '🎨': 'PAINTER'
         };
         taskType = iconToTask[icon];
     }
@@ -6552,8 +6578,7 @@ function updateTaskIndicator(taskType) {
         'CODER': '💻 编程模式',
         'SYSTEM': '🖥️ 系统模式',
         'VISION': '👁️ 视觉模式',
-        'PAINTER': '🎨 创作模式',
-        'VOICE': '🎤 语音模式'
+        'PAINTER': '🎨 创作模式'
     };
     
     if (taskType) {
@@ -6742,645 +6767,6 @@ function onLocalModelChange(modelTag) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({mode: 'local', model_tag: modelTag})
     }).catch(err => console.warn('[LocalModel] switch failed:', err));
-}
-
-// ================= 语音输入功能（全新实时方案 v2） =================
-// 架构: WebSpeech(实时) → SSE+Vosk(离线实时) → MediaRecorder+Gemini(后备)
-let voiceState = 'idle';   // idle | listening | processing | error
-let isVoiceSupported = true;
-let browserRecognition = null;
-
-// ── 内部状态 ──────────────────────────────────────────────────────────────────
-let _voiceMethod   = null;   // 'webspeech' | 'sse' | 'gemini'
-let _mediaRecorder = null;
-let _audioChunks   = [];
-let _mediaStream   = null;
-let _recStartTime  = 0;
-let _recTimerHandle = null;
-let _sseSource     = null;   // SSE EventSource
-// Web Audio API
-let _audioCtx  = null;
-let _analyser  = null;
-let _animHandle = null;
-// STT engine labels
-let _sttEngine = 'Gemini';
-let _sttLocal  = false;
-// settings
-let voiceAutoMode = true;
-// 实时文本（partial）
-let _voicePartialText = '';
-
-function isBrowserVoiceSupported() {
-    return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window;
-}
-
-async function initVoice() {
-    const voiceBtn = document.getElementById('voiceBtn');
-    if (!voiceBtn) return;
-    isVoiceSupported = true;
-    voiceBtn.style.display = 'flex';
-    voiceBtn.title = '语音输入（点击说话）';
-    _injectVoiceStyles();
-
-    // 检测 Web Speech API（最优方案：实时词级反馈）
-    if (isBrowserVoiceSupported()) {
-        _voiceMethod = 'webspeech';
-        console.log('[语音] ✓ Web Speech API 可用（实时识别模式）');
-    }
-
-    // 查询后端 STT 引擎状态
-    try {
-        const r = await fetch('/api/voice/stt_status');
-        if (r.ok) {
-            const s = await r.json();
-            if (s.fast && s.fast.available) {
-                if (!_voiceMethod) _voiceMethod = 'sse';
-                console.log('[语音] ✓ 后端 Vosk 流式识别可用 →', s.fast.label);
-            }
-            if (s.local && s.local.available) {
-                _sttLocal  = true;
-                _sttEngine = '本地 ' + s.local.engine;
-            } else {
-                _sttLocal  = false;
-                _sttEngine = 'Gemini';
-            }
-        }
-    } catch (_) { /* 静默 */ }
-
-    if (!_voiceMethod) _voiceMethod = 'gemini';
-    console.log('[语音] ✓ 语音输入已就绪  方案:', _voiceMethod, '  STT:', _sttEngine);
-}
-
-function initBrowserVoice() { /* no-op，已由 initVoice 统一管理 */ }
-
-// ── 注入语音动画 CSS（只注入一次）──────────────────────────────────────────
-function _injectVoiceStyles() {
-    if (document.getElementById('_voiceCss')) return;
-    const s = document.createElement('style');
-    s.id = '_voiceCss';
-    s.textContent = `
-        /* 录音悬浮气泡 */
-        #_voiceToast {
-            position: fixed;
-            bottom: 88px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: linear-gradient(135deg, #1a6fa8 0%, #1558a0 100%);
-            color: #cce8ff;
-            padding: 12px 20px 10px;
-            border-radius: 20px;
-            box-shadow: 0 6px 24px rgba(74,184,255,.35);
-            z-index: 10000;
-            min-width: 220px;
-            max-width: 480px;
-            text-align: center;
-            font-weight: 600;
-            font-size: 14px;
-            display: none;
-            user-select: none;
-            transition: background .3s, box-shadow .3s, color .3s;
-        }
-        #_voiceToast._show { display: block; animation: vt_in .15s ease; }
-        #_voiceToast._detecting { background: linear-gradient(135deg, #1e7d4a 0%, #166038 100%);
-            box-shadow: 0 6px 24px rgba(56,161,105,.45); color: #b7f5d0; }
-        @keyframes vt_in { from { opacity:0; transform:translateX(-50%) translateY(8px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
-
-        /* 实时识别文字区域 */
-        #_voicePartial {
-            font-size: 15px;
-            font-weight: 500;
-            margin: 6px 0 4px;
-            min-height: 22px;
-            word-break: break-all;
-            line-height: 1.4;
-            max-height: 80px;
-            overflow-y: auto;
-            padding: 0 4px;
-        }
-        #_voicePartial:not(:empty) { background: rgba(255,255,255,.15); border-radius: 8px; padding: 4px 8px; }
-
-        /* 声浪动画条 */
-        #_waveBars {
-            display: flex;
-            align-items: flex-end;
-            justify-content: center;
-            gap: 3px;
-            height: 24px;
-            margin: 6px auto 2px;
-        }
-        #_waveBars ._bar {
-            width: 4px;
-            border-radius: 2px;
-            background: rgba(255,255,255,.9);
-            height: 4px;
-            transition: height .08s;
-        }
-        #_waveBars._active ._bar:nth-child(1) { animation: wv .7s   .0s  ease-in-out infinite alternate; }
-        #_waveBars._active ._bar:nth-child(2) { animation: wv .65s  .08s ease-in-out infinite alternate; }
-        #_waveBars._active ._bar:nth-child(3) { animation: wv .55s  .16s ease-in-out infinite alternate; }
-        #_waveBars._active ._bar:nth-child(4) { animation: wv .7s   .04s ease-in-out infinite alternate; }
-        #_waveBars._active ._bar:nth-child(5) { animation: wv .6s   .12s ease-in-out infinite alternate; }
-        #_waveBars._active ._bar:nth-child(6) { animation: wv .75s  .02s ease-in-out infinite alternate; }
-        #_waveBars._active ._bar:nth-child(7) { animation: wv .5s   .18s ease-in-out infinite alternate; }
-        @keyframes wv { from { height: 3px; } to { height: 20px; } }
-
-        /* 麦克风按钮录音状态 */
-        #voiceBtn.listening  { background: #1a6fa8 !important; color: #cce8ff !important; animation: vbPulse .8s ease-in-out infinite; }
-        #voiceBtn.processing { background: #3182ce !important; color: #fff !important; }
-        @keyframes vbPulse { 0%,100%{box-shadow:0 0 0 0 rgba(74,184,255,.5);} 50%{box-shadow:0 0 0 8px rgba(74,184,255,0);} }
-    `;
-    document.head.appendChild(s);
-}
-
-// ── 旧版兼容 stubs ────────────────────────────────────────────────────────────
-function updateVoicePreview(text) { _updateVoiceToastPartial(text); }
-function hideVoicePreview()             { _hideVoiceToast(); }
-function showVoicePreview()             { /* handled by _showVoiceToast */ }
-function updateVoicePreviewForConfirm() { /* no-op */ }
-window.onVoiceStateChange = function(state) { setVoiceState(state); };
-
-function setVoiceState(state) {
-    voiceState = state;
-    const voiceBtn = document.getElementById('voiceBtn');
-    if (!voiceBtn) return;
-    voiceBtn.classList.remove('listening', 'processing', 'error');
-    switch (state) {
-        case 'listening':
-            voiceBtn.classList.add('listening');
-            voiceBtn.innerHTML = '<span class="voice-icon">🎙️</span><span class="voice-pulse"></span>';
-            voiceBtn.title = '正在录音，再次点击停止';
-            break;
-        case 'processing':
-            voiceBtn.classList.add('processing');
-            voiceBtn.innerHTML = '<span class="voice-icon">⏳</span>';
-            voiceBtn.title = '识别中...';
-            break;
-        case 'error':
-            voiceBtn.classList.add('error');
-            voiceBtn.innerHTML = '<span class="voice-icon">❌</span>';
-            voiceBtn.title = '识别失败';
-            setTimeout(() => setVoiceState('idle'), 2000);
-            break;
-        default:
-            voiceBtn.innerHTML = '<span class="voice-icon">🎙️</span>';
-            voiceBtn.title = '语音输入（点击说话）';
-    }
-}
-
-function handleVoiceResult(text) {
-    if (!text || !text.trim()) return;
-    const input = document.getElementById('messageInput');
-    if (input) {
-        const cur = input.value.trim();
-        input.value = cur ? cur + ' ' + text : text;
-        autoResize(input);
-        const autoSend = !currentSettings || !currentSettings.ai || currentSettings.ai.voice_auto_send !== false;
-        if (autoSend) {
-            showNotification(`🎤 ${text}`, 'success');
-            setTimeout(() => {
-                const form = document.querySelector('.chat-input-form');
-                if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
-            }, 100);
-        } else {
-            showNotification(`识别: ${text}`, 'success');
-            input.focus();
-        }
-    }
-}
-
-function getVoiceAutoMode() { return voiceAutoMode; }
-
-// ── 主入口：点击麦克风按钮 ───────────────────────────────────────────────────
-async function toggleVoice() {
-    // 如果正在录音，停止
-    if (voiceState === 'listening') {
-        _stopVoice();
-        return;
-    }
-    if (voiceState === 'processing') return;
-
-    _voicePartialText = '';
-
-    // 方案选择：WebSpeech → SSE+Vosk → Gemini
-    if (_voiceMethod === 'webspeech') {
-        // 尝试 Web Speech API（实时词级反馈，Chrome内置）
-        const started = _startWebSpeech();
-        if (started) return;
-        // 启动失败 → 降级 SSE
-        _voiceMethod = 'sse';
-    }
-    if (_voiceMethod === 'sse') {
-        // SSE + 后端 Vosk 流式（实时中间结果）
-        const started = await _startSSEVoice();
-        if (started) return;
-        // 降级 Gemini
-        _voiceMethod = 'gemini';
-    }
-    // 兜底：MediaRecorder → Gemini STT
-    await _startGeminiVoice();
-}
-
-// ── 停止所有录音模式 ─────────────────────────────────────────────────────────
-function _stopVoice() {
-    let mediaRecorderWillProcess = false;
-    // 1. Web Speech
-    if (browserRecognition) {
-        try { browserRecognition.stop(); } catch(_) {}
-        browserRecognition = null;
-        // onend fires async and will call setVoiceState('idle')
-    }
-    // 2. SSE — manually closed, so done() will never fire; reset state here
-    if (_sseSource) {
-        try { _sseSource.close(); } catch(_) {}
-        _sseSource = null;
-        // 告知后端停止录音
-        fetch('/api/voice/stop', { method: 'POST' }).catch(() => {});
-    }
-    // 3. MediaRecorder — onstop fires _processAudioWithGemini which manages state
-    if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
-        _mediaRecorder.stop();
-        mediaRecorderWillProcess = true;
-    }
-    if (_mediaStream) {
-        _mediaStream.getTracks().forEach(t => t.stop());
-        _mediaStream = null;
-    }
-    _stopWaveAnimation();
-    _hideVoiceToast();
-    // For SSE and any other stray state, reset immediately.
-    // MediaRecorder is handled by _processAudioWithGemini callback.
-    if (!mediaRecorderWillProcess) {
-        setVoiceState('idle');
-    }
-}
-
-// ── 方案一：Web Speech API（实时 interim 反馈）──────────────────────────────
-function _startWebSpeech() {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) return false;
-
-    try {
-        const lang = document.getElementById('voiceLanguage')?.value ||
-                     (currentSettings?.ai?.voice_language) || 'zh-CN';
-
-        browserRecognition = new SpeechRecognition();
-        browserRecognition.lang = lang;
-        browserRecognition.continuous = false;
-        browserRecognition.interimResults = true;   // ← 实时词级反馈
-        browserRecognition.maxAlternatives = 1;
-
-        browserRecognition.onstart = () => {
-            setVoiceState('listening');
-            _recStartTime = Date.now();
-            _showVoiceToast('🎤 WebSpeech 实时识别');
-        };
-
-        browserRecognition.onresult = (event) => {
-            let interim = '';
-            let final_  = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const t = event.results[i][0].transcript;
-                if (event.results[i].isFinal) final_ += t;
-                else                           interim += t;
-            }
-            // 实时显示中间文字
-            if (interim) _updateVoiceToastPartial(interim);
-            if (final_)  _updateVoiceToastPartial(final_);
-        };
-
-        browserRecognition.onerror = (e) => {
-            console.warn('[WebSpeech] 错误:', e.error);
-            browserRecognition = null;
-            _hideVoiceToast();
-            setVoiceState('idle');
-            if (e.error === 'no-speech') {
-                showNotification('未检测到语音，请重试', 'warning', 2000);
-            } else if (e.error === 'not-allowed' || e.error === 'audio-capture') {
-                showNotification('❌ 麦克风权限被拒绝', 'error', 3000);
-            } else if (e.error === 'network') {
-                // 网络错误 → 降级到 SSE/Vosk
-                console.log('[WebSpeech] 网络错误，降级到 SSE+Vosk');
-                _voiceMethod = 'sse';
-                setTimeout(() => toggleVoice(), 100);
-            }
-        };
-
-        browserRecognition.onend = () => {
-            const partial = _voicePartialText;
-            _voicePartialText = '';
-            browserRecognition = null;
-            _hideVoiceToast();
-            setVoiceState('idle');
-            if (partial && partial.trim()) {
-                handleVoiceResult(partial.trim());
-            }
-        };
-
-        browserRecognition.start();
-        return true;
-    } catch (err) {
-        console.warn('[WebSpeech] 启动失败:', err);
-        browserRecognition = null;
-        return false;
-    }
-}
-
-// ── 方案二：SSE + 后端 Vosk 流式（离线实时）────────────────────────────────
-async function _startSSEVoice() {
-    return new Promise((resolve) => {
-        try {
-            setVoiceState('listening');
-            _recStartTime = Date.now();
-            _showVoiceToast('🖥️ 本地实时识别');
-
-            _sseSource = new EventSource('/api/voice/stream');
-            let resolved = false;
-
-            const done = (text) => {
-                if (resolved) return;
-                resolved = true;
-                if (_sseSource) { try { _sseSource.close(); } catch(_) {} _sseSource = null; }
-                _hideVoiceToast();
-                _stopWaveAnimation();
-                setVoiceState('idle');
-                if (text && text.trim()) handleVoiceResult(text.trim());
-                resolve(true);
-            };
-
-            _sseSource.onmessage = (e) => {
-                let data;
-                try { data = JSON.parse(e.data); } catch(_) { return; }
-
-                if (data.type === 'start') {
-                    _startWaveAnimation(null);  // SSE 模式无 mediaStream
-                    return;
-                }
-                if (data.type === 'partial' && data.text) {
-                    _voicePartialText = data.text;
-                    _updateVoiceToastPartial(data.text);
-                    return;
-                }
-                if (data.type === 'final') {
-                    done(data.text || _voicePartialText);
-                    return;
-                }
-                if (data.type === 'error') {
-                    console.warn('[SSE Voice] 错误:', data.message);
-                    if (_sseSource) { try { _sseSource.close(); } catch(_) {} _sseSource = null; }
-                    _hideVoiceToast();
-                    setVoiceState('idle');
-                    if (!resolved) {
-                        resolved = true;
-                        resolve(false); // 降级
-                    }
-                }
-            };
-
-            _sseSource.onerror = () => {
-                if (!resolved) {
-                    console.warn('[SSE Voice] 连接错误，降级到 Gemini');
-                    if (_sseSource) { try { _sseSource.close(); } catch(_) {} _sseSource = null; }
-                    _hideVoiceToast();
-                    setVoiceState('idle');
-                    resolved = true;
-                    resolve(false);
-                }
-            };
-
-            // 60 秒超时保护
-            setTimeout(() => {
-                if (!resolved) {
-                    if (_voicePartialText) {
-                        done(_voicePartialText);
-                    } else {
-                        if (_sseSource) { try { _sseSource.close(); } catch(_) {} _sseSource = null; }
-                        _hideVoiceToast();
-                        setVoiceState('idle');
-                        resolved = true;
-                        resolve(false);
-                    }
-                }
-            }, 60000);
-
-        } catch (err) {
-            console.warn('[SSE Voice] 启动失败:', err);
-            _hideVoiceToast();
-            setVoiceState('idle');
-            resolve(false);
-        }
-    });
-}
-
-// ── 方案三：MediaRecorder + Gemini STT（后备）────────────────────────────────
-async function _startGeminiVoice() {
-    try {
-        _mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    } catch (err) {
-        const msg = err.name === 'NotAllowedError' ? '请在浏览器中允许麦克风权限' :
-                    err.name === 'NotFoundError'   ? '未检测到麦克风设备' :
-                    '无法访问麦克风：' + err.message;
-        showNotification('❌ ' + msg, 'error', 4000);
-        setVoiceState('error');
-        return;
-    }
-
-    _audioChunks = [];
-    const mimeType =
-        MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' :
-        MediaRecorder.isTypeSupported('audio/webm')             ? 'audio/webm'             :
-        MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')  ? 'audio/ogg;codecs=opus'  :
-        '';
-
-    _mediaRecorder = new MediaRecorder(_mediaStream, mimeType ? { mimeType } : {});
-    _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _audioChunks.push(e.data); };
-    _mediaRecorder.onstop = () => _processAudioWithGemini(mimeType || 'audio/webm');
-    _mediaRecorder.start(200);
-
-    setVoiceState('listening');
-    _recStartTime = Date.now();
-    _showVoiceToast(_sttLocal ? '🖥️ 本地识别' : '☁️ Gemini 识别');
-    _startWaveAnimation(_mediaStream);
-
-    // 60 秒自动停止
-    setTimeout(() => {
-        if (voiceState === 'listening') {
-            showNotification('⏱️ 已达最长录音时间，自动提交', 'info', 1500);
-            _stopVoice();
-        }
-    }, 60000);
-}
-
-// ── 发送录音到 Gemini / 本地 Whisper ─────────────────────────────────────────
-async function _processAudioWithGemini(mimeType) {
-    if (_audioChunks.length === 0) {
-        setVoiceState('idle');
-        showNotification('未录到音频', 'warning', 1500);
-        return;
-    }
-    const blob = new Blob(_audioChunks, { type: mimeType || 'audio/webm' });
-    if (blob.size < 300) {
-        setVoiceState('idle');
-        showNotification('录音太短，请重说', 'warning', 1500);
-        return;
-    }
-    setVoiceState('processing');  // 识别中，防止按钮卡在 listening 状态
-    _audioChunks = [];            // 释放内存
-    try {
-        const b64 = await _blobToBase64(blob);
-        const resp = await fetch('/api/voice/stt', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ audio: b64, mime: mimeType || 'audio/webm' })
-        });
-        if (!resp.ok) {
-            const raw = await resp.text();
-            console.error('[STT] 服务器错误:', resp.status, raw.slice(0, 200));
-            const msg = resp.status === 503 ? '请先配置 Gemini API Key 或安装 faster-whisper' :
-                        resp.status === 413 ? '录音文件太大，请缩短时长' :
-                        `服务器错误 ${resp.status}`;
-            showNotification('❌ ' + msg, 'error', 4000);
-            setVoiceState('error');
-            return;
-        }
-        let data;
-        try { data = await resp.json(); }
-        catch (parseErr) {
-            showNotification('❌ 识别服务返回格式错误', 'error', 3000);
-            setVoiceState('error');
-            return;
-        }
-        if (data.engine) {
-            _sttLocal  = !data.engine.toLowerCase().includes('gemini');
-            _sttEngine = _sttLocal ? ('本地 ' + data.engine) : 'Gemini';
-        }
-        setVoiceState('idle');
-        if (data.success && data.text) {
-            const tag = _sttLocal ? '🖥️' : '☁️';
-            console.log(`[STT ${tag}] ✅`, data.text, '←', data.engine);
-            handleVoiceResult(data.text);
-        } else {
-            showNotification(data.message || '未能识别语音', 'warning', 2000);
-        }
-    } catch (err) {
-        console.error('[STT] 网络错误:', err);
-        setVoiceState('error');
-        showNotification('❌ 网络错误：' + err.message, 'error', 3000);
-    }
-}
-
-function _blobToBase64(blob) {
-    return new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onloadend = () => resolve(r.result.split(',')[1]);
-        r.onerror   = reject;
-        r.readAsDataURL(blob);
-    });
-}
-
-// ── 录音气泡（仿微信样式，支持实时文字显示）──────────────────────────────────
-function _showVoiceToast(engineLabel) {
-    _injectVoiceStyles();
-    let el = document.getElementById('_voiceToast');
-    if (!el) {
-        el = document.createElement('div');
-        el.id = '_voiceToast';
-        document.body.appendChild(el);
-    }
-    const label = engineLabel || (_sttLocal ? '🖥️ 本地识别' : '☁️ Gemini 识别');
-    el.innerHTML = `
-        <div id="_waveBars" class="_active">
-            <div class="_bar"></div><div class="_bar"></div><div class="_bar"></div>
-            <div class="_bar"></div><div class="_bar"></div><div class="_bar"></div>
-            <div class="_bar"></div>
-        </div>
-        <div>● 录音中... <span id="_recSec">0s</span>
-            &nbsp;<span style="opacity:.7;font-size:11px;font-weight:400">${label}</span>
-        </div>
-        <div id="_voicePartial"></div>
-        <div style="font-size:12px;opacity:.75;font-weight:400;margin-top:3px;">再次点击麦克风停止</div>
-    `;
-    el.classList.add('_show');
-    _recTimerHandle = setInterval(() => {
-        const t = document.getElementById('_recSec');
-        if (t) t.textContent = Math.round((Date.now() - _recStartTime) / 1000) + 's';
-    }, 500);
-}
-
-// 实时更新气泡中的识别文字
-function _updateVoiceToastPartial(text) {
-    _voicePartialText = text;
-    const el = document.getElementById('_voicePartial');
-    if (el) {
-        el.textContent = text;
-        // 有识别内容时气泡变绿，表示"正在识别到内容"
-        const toast = document.getElementById('_voiceToast');
-        if (toast) toast.classList.toggle('_detecting', !!text);
-    }
-}
-
-function _hideVoiceToast() {
-    const el = document.getElementById('_voiceToast');
-    if (el) el.classList.remove('_show');
-    if (_recTimerHandle) { clearInterval(_recTimerHandle); _recTimerHandle = null; }
-    const partial = document.getElementById('_voicePartial');
-    if (partial) partial.textContent = '';
-    const toast = document.getElementById('_voiceToast');
-    if (toast) toast.classList.remove('_detecting');
-}
-
-// ── Web Audio 实时振幅 → 声浪条高度 ─────────────────────────────────────────
-function _startWaveAnimation(mediaStreamOrNull) {
-    // SSE模式没有 mediaStream，仅用 CSS 动画
-    if (!mediaStreamOrNull) return;
-    try {
-        _audioCtx  = new (window.AudioContext || window.webkitAudioContext)();
-        _analyser  = _audioCtx.createAnalyser();
-        _analyser.fftSize = 64;
-        _audioCtx.createMediaStreamSource(mediaStreamOrNull).connect(_analyser);
-        const buf  = new Uint8Array(_analyser.frequencyBinCount);
-        const bars = document.querySelectorAll('#_waveBars ._bar');
-        const tick = () => {
-            if (voiceState !== 'listening') return;
-            _analyser.getByteFrequencyData(buf);
-            const step = Math.floor(buf.length / 7);
-            bars.forEach((b, i) => {
-                const pct = buf[i * step] / 255;
-                b.style.height = Math.max(3, Math.round(pct * 22)) + 'px';
-            });
-            _animHandle = requestAnimationFrame(tick);
-        };
-        _animHandle = requestAnimationFrame(tick);
-    } catch (_) { /* 不可用时保持 CSS 动画 */ }
-}
-
-function _stopWaveAnimation() {
-    if (_animHandle) { cancelAnimationFrame(_animHandle); _animHandle = null; }
-    if (_audioCtx)   { try { _audioCtx.close(); } catch(_) {} _audioCtx = null; }
-    _analyser = null;
-    document.querySelectorAll('#_waveBars ._bar').forEach(b => { b.style.height = '3px'; });
-}
-
-// ── 外部兼容接口 ─────────────────────────────────────────────────────────────
-function stopVoiceRecognition() { if (voiceState === 'listening') _stopVoice(); }
-
-// 旧版降级入口（保留，可独立调用）
-async function toggleVoiceFallback() {
-    if (voiceState === 'listening' || voiceState === 'processing') return;
-    setVoiceState('listening');
-    showNotification('🎤 正在聆听（后端模式）', 'info', 1000);
-    try {
-        const resp = await fetch('/api/voice/listen', {
-            method:'POST', headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({timeout:8, language:'zh-CN'})
-        });
-        const data = await resp.json();
-        setVoiceState('idle');
-        if (data.success && data.text) handleVoiceResult(data.text);
-        else showNotification(data.message || '未能识别语音', 'warning', 2000);
-    } catch (err) {
-        setVoiceState('error');
-        showNotification('❌ ' + err.message, 'error', 2000);
-    }
 }
 
 // ==================== 文档建议系统 ====================
@@ -9644,8 +9030,8 @@ function _fhRenderFiles(files, container, showPath) {
         const path = _esc(f.path || '');
         const asst_exts = /\.(docx|xlsx|pptx|pdf)$/i;
         const canInAsst = asst_exts.test(f.name || f.path || '');
-        const openLabel = canInAsst ? '在助手中打开' : '系统打开';
-        const openFn    = canInAsst ? `_fhOpenInAssistant` : `_fhOpenFile`;
+        const openLabel = canInAsst ? '在助手中打开' : '复制路径';
+        const openFn    = canInAsst ? `_fhOpenInAssistant` : `_fhCopyPath`;
         const pathArg   = JSON.stringify(f.path || '').replace(/"/g, '&quot;');
         const copyArg   = JSON.stringify(f.path || '').replace(/"/g, '&quot;');
         const preview   = _esc(f.content_preview || '');
@@ -9689,23 +9075,11 @@ function _fhShowCount(n, label) {
     hdr.style.display = 'flex';
 }
 
-function _fhOpenFile(path) {
-    fetch('/api/files/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path })
-    }).then(r => r.json()).then(d => {
-        if (d.status === 'ok') _showToast('已打开');
-        else _showToast('打开失败：' + (d.error || '未知错误'));
-    }).catch(() => _showToast('请求失败'));
-}
-
 async function _fhOpenInAssistant(path) {
     if (!path) return;
     const asst_exts = /\.(docx|xlsx|pptx|pdf)$/i;
     if (!asst_exts.test(path)) {
-        // 不支持的格式，直接用系统打开
-        _fhOpenFile(path);
+        _fhCopyPath(path);
         return;
     }
     // 关闭文件管理弹窗
@@ -9718,8 +9092,8 @@ async function _fhOpenInAssistant(path) {
     if (window.WA && typeof window.WA.openRecentFile === 'function') {
         window.WA.openRecentFile(path);
     } else {
-        _showToast('文件助手不可用，改用系统打开');
-        _fhOpenFile(path);
+        _showToast('文件助手不可用，已复制路径');
+        _fhCopyPath(path);
     }
 }
 

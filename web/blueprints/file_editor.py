@@ -19,7 +19,6 @@ Routes:
   POST /api/scan/start                — Start full disk scan (background thread)
   GET  /api/scan/status               — Scan progress and statistics
   POST /api/scan/search               — Fuzzy filename search across disk
-  POST /api/scan/open                 — Open file with system default program
   GET  /api/scan/stats                — Index statistics
   POST /api/concepts/extract          — Extract key concepts from a file
   POST /api/concepts/related-files    — Find related files by concepts
@@ -46,27 +45,27 @@ file_editor_bp = Blueprint("file_editor", __name__)
 
 
 def _get_file_editor():
-    from web.app import get_file_editor
+    from web.runtime_context import call_app_factory
 
-    return get_file_editor()
+    return call_app_factory("get_file_editor")
 
 
 def _get_file_indexer():
-    from web.app import get_file_indexer
+    from web.runtime_context import call_app_factory
 
-    return get_file_indexer()
+    return call_app_factory("get_file_indexer")
 
 
 def _get_concept_extractor():
-    from web.app import get_concept_extractor
+    from web.runtime_context import call_app_factory
 
-    return get_concept_extractor()
+    return call_app_factory("get_concept_extractor")
 
 
 def _get_settings_manager():
-    from web.app import settings_manager
+    from web.runtime_context import get_settings_manager
 
-    return settings_manager
+    return get_settings_manager()
 
 
 # ═══════════════════════════════════════════════════
@@ -509,22 +508,6 @@ def scan_search() -> Response:
             query, limit=limit, ext_filter=ext_filter, category_filter=category_filter
         )
         return jsonify({"success": True, "results": results, "count": len(results)})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@file_editor_bp.route("/api/scan/open", methods=["POST"])
-def scan_open() -> Response:
-    """用系统默认程序打开指定绝对路径文件"""
-    try:
-        from web.file_scanner import FileScanner
-
-        data = request.json or {}
-        path = (data.get("path") or "").strip()
-        if not path:
-            return jsonify({"success": False, "error": "缺少 path 参数"}), 400
-        result = FileScanner.open_file(path)
-        return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

@@ -18,35 +18,39 @@ def test_workspace_templates_keep_file_tab_bar_before_canvas_body():
       assert html.index('<div id="wa-tab-bar"></div>') < html.index('<div id="wa-canvas-body">')
 
 
-def test_workspace_tab_bar_js_renders_document_badges_and_single_tab_mode():
+def test_workspace_tab_bar_js_renders_file_labels_without_capability_badges():
     js = _read("web/static/js/workspace-assistant.js")
 
     assert "function _tabDisplayInfo(tab)" in js
     assert "bar.classList.toggle('single-tab', state.openTabs.length <= 1);" in js
     assert 'data-ext="${extAttr}"' in js
     assert '<span class="tab-main">' in js
-    assert '<span class="tab-badge">${badgeEsc}</span>' in js
+    assert '<span class="tab-badge">${badgeEsc}</span>' not in js
+    assert "能力：" not in js
+    assert "支持：" not in js
 
 
-def test_workspace_frontend_tracks_capability_profile_in_tab_state_and_subject_bar():
+def test_workspace_frontend_tracks_capability_profile_in_tab_state_without_visible_badges():
     js = _read("web/static/js/workspace-assistant.js")
 
     assert "capabilityProfile: _normalizeCapabilityProfile(json.capability_profile, json.file_type, json.file_name)" in js
     assert "state.capabilityProfile = tab.capabilityProfile || null;" in js
-    assert "function _ensureSubjectBar()" in js
-    assert "wa-subject-capability-list" in js
-    assert "subject-capability-chip" in js
+    assert "function _ensureSubjectBar()" not in js
+    assert "_capabilityPrimaryBadge" not in js
+    assert "_capabilityActionList" not in js
+    assert "wa-subject-capability-list" not in js
+    assert "subject-capability-chip" not in js
 
 
-def test_workspace_subject_bar_exposes_capability_quick_actions_via_existing_ai_flow():
+def test_workspace_tab_capability_display_does_not_auto_attach_current_file_to_ai_flow():
     js = _read("web/static/js/workspace-assistant.js")
 
-    assert "function _subjectQuickActions(profile)" in js
-    assert "async function _ensureCurrentFileAttachedForQuickAction()" in js
-    assert "window.WA.runCapabilityQuickAction = async (action) =>" in js
-    assert "WA.sendMessage();" in js
-    assert "wa-subject-action-list" in js
-    assert "subject-action-btn wa-quick-btn wf-chip" in js
+    assert "function _subjectQuickActions(profile)" not in js
+    assert "async function _ensureCurrentFileAttachedForQuickAction()" not in js
+    assert "window.WA.runCapabilityQuickAction = async (action) =>" not in js
+    assert "window.WA.attachCurrentFileToAIContext" not in js
+    assert "wa-subject-action-list" not in js
+    assert "subject-action-btn wa-quick-btn wf-chip" not in js
 
 
 def test_workspace_tab_bar_css_has_document_chrome_and_file_type_accents():
@@ -55,7 +59,7 @@ def test_workspace_tab_bar_css_has_document_chrome_and_file_type_accents():
     assert "#wa-tab-bar.single-tab .wa-tab" in css
     assert '.wa-tab[data-ext="docx"]' in css
     assert ".wa-tab::before" in css
-    assert ".wa-tab .tab-badge" in css
-    assert ".subject-capability-chip" in css
-    assert ".subject-action-list" in css
-    assert ".subject-action-btn" in css
+    assert ".wa-tab .tab-badge" not in css
+    assert ".subject-capability-chip" not in css
+    assert ".subject-action-list" not in css
+    assert ".subject-action-btn" not in css

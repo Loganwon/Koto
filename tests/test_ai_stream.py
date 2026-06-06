@@ -237,6 +237,68 @@ class TestEditorAIStream:
         assert saved.tables[0].cell(1, 0).text == "杭州新汇鑫光电有限公司"
         assert saved.tables[0].cell(2, 0).text == "山东镭鸟激光设备有限公司"
 
+    def test_whitebox_task_stream_uses_native_docx_writer_for_stepwise_pdf_summary(
+        self,
+        app_client,
+        tmp_path,
+        monkeypatch,
+    ):
+        from app.core.agent.file_task_runtime import FileTaskRuntime
+        import app.core.agent.task_tools as task_tools
+
+        monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+        monkeypatch.setattr(
+            task_tools,
+            "parse_file_to_text",
+            lambda **kwargs: (
+                "[Page 4] The Global Rules of Art. Larissa Buchholz. Princeton University Press.\n"
+                "[Page 5] Contents: The Emergence of a Global Field in the Contemporary Visual Arts.\n"
+                "[Page 6] Chapter 1 introduces a global field approach to art and culture.\n"
+                "[Page 7] Chapter 2 discusses the genesis of a global art field.\n"
+                "[Page 8] Later chapters cover divisions and positions in a cultural world economy."
+            ),
+        )
+
+        def fake_call_model(self, **kwargs):
+            raise AssertionError("stepwise PDF DOCX summaries should use the native writer before model generation")
+
+        monkeypatch.setattr(FileTaskRuntime, "_call_model", fake_call_model)
+        target_path = tmp_path / "global-rules-summary.docx"
+
+        resp = app_client.post(
+            "/api/editor/ai/task-stream",
+            json={
+                "task": (
+                    "这是一篇非常长的pdf，里面有大量内容。我需要你做的是一个分步任务，将任务拆分成很多个小任务，"
+                    "一步一步完成，每完成一步和我汇报一下我来说继续。你将总结整篇文章的核心内容，你创建一个docx文件，"
+                    "记录你每一步发现的要点，然后每一步完成后更新docx"
+                ),
+                "session_id": "workspace_demo",
+                "target_path": str(target_path),
+                "files": [
+                    {
+                        "path": "global-rules.pdf",
+                        "name": "The Global Rules of Art.pdf",
+                        "type": "pdf",
+                        "content": "[Page 4] " + ("book metadata table of contents " * 300),
+                    }
+                ],
+            },
+        )
+        events = parse_sse_events(resp.get_data())
+
+        assert resp.status_code == 200
+        file_changed = next(event for event in events if event.get("type") == "file.changed")
+        check_finished = next(event for event in events if event.get("type") == "check.finished")
+        run_finished = events[-1]
+
+        assert file_changed["payload"]["operation"] == "write_docx_content"
+        assert file_changed["payload"]["paragraphs_written"] >= 4
+        assert check_finished["payload"]["status"] == "awaiting_confirmation"
+        assert check_finished["payload"]["next_action_artifact"]["route"] == "long_pdf_stepwise_docx_summary"
+        assert run_finished["payload"]["runtime"]["terminal_status"] == "awaiting_confirmation"
+        assert target_path.exists()
+
     def test_whitebox_task_stream_reports_no_write_when_docx_is_unchanged(self, app_client, tmp_path, monkeypatch):
         from docx import Document
 
@@ -414,7 +476,7 @@ class TestEditorAIStream:
         event_types = [event.get("type") for event in events]
 
         assert resp.status_code == 200
-        assert event_types[:3] == ["run.started", "plan.created", "step.started"]
+        assert event_types[:5] == ["run.started", "task.classified", "plan.checked", "plan.created", "step.started"]
         assert "check.started" in event_types
         assert "check.finished" in event_types
         assert event_types[-1] == "run.finished"
@@ -442,13 +504,6 @@ class TestEditorAIStream:
                         "parameters": {"type": "object"},
                     },
                 },
-                "_planner": {
-                    "backend": "hermes",
-                    "source": "external",
-                    "policy": "prefer_hermes",
-                    "transport": "embedded",
-                    "reason": "unsupported_file_types:dwg",
-                },
             },
         )
 
@@ -467,12 +522,12 @@ class TestEditorAIStream:
         run_finished = next(event for event in events if event.get("type") == "run.finished")
 
         assert resp.status_code == 200
-        assert tool_missing["payload"]["runtime"]["execution_path"] == "planner"
-        assert tool_missing["payload"]["runtime"]["planner"]["backend"] == "hermes"
-        assert tool_missing["payload"]["next_action_artifact"]["runtime_context"]["execution_path"] == "planner"
-        assert tool_missing["payload"]["followup_record"]["id"].startswith("ftf_")
+        assert tool_missing["payload"]["runtime"]["execution_path"] == "native"
+        assert tool_missing["payload"]["runtime"]["planner"]["backend"] == "native"
+        assert tool_missing["payload"]["next_action_artifact"]["runtime_context"]["execution_path"] == "native"
+        assert tool_missing["payload"]["next_action_artifact"]["missing_capability"] == "read_cad_file"
         assert check_finished["payload"]["runtime"]["terminal_status"] == "tool_gap"
-        assert run_finished["payload"]["runtime"]["execution_path"] == "planner"
+        assert run_finished["payload"]["runtime"]["execution_path"] == "native"
         assert run_finished["payload"]["runtime"]["terminal_status"] == "tool_gap"
 
     def test_whitebox_task_stream_requires_task(self, app_client):
@@ -576,7 +631,8 @@ class TestEditorAIStream:
 
         assert resp.status_code == 200
         assert captured["request"].target_path == str(docx_path)
-        assert events[0]["payload"]["mode"] == "doc_annotate_bridge"
+        run_started = next(event for event in events if event.get("type") == "run.started")
+        assert run_started["payload"]["mode"] == "doc_annotate_bridge"
         assert any(event["type"] == "plan.created" for event in events)
         assert any(event["type"] == "step_progress" and event["payload"].get("file_updated") for event in events)
         assert any(event["type"] == "file.changed" and event["payload"].get("path") == str(docx_path) for event in events)
@@ -665,7 +721,8 @@ class TestEditorAIStream:
 
         assert resp.status_code == 200
         assert captured["request"].target_path == str(docx_path)
-        assert events[0]["payload"]["mode"] == "doc_annotate_bridge"
+        run_started = next(event for event in events if event.get("type") == "run.started")
+        assert run_started["payload"]["mode"] == "doc_annotate_bridge"
         assert any(event["type"] == "step_progress" and event["payload"].get("file_updated") for event in events)
         assert any(event["type"] == "file.changed" and event["payload"].get("path") == str(docx_path) for event in events)
         assert events[-1]["payload"]["completed_task"] is True
@@ -735,7 +792,8 @@ class TestEditorAIStream:
 
         assert resp.status_code == 200
         assert captured["request"].model_mode == "local"
-        assert events[0]["payload"]["mode"] == "doc_annotate_bridge"
+        run_started = next(event for event in events if event.get("type") == "run.started")
+        assert run_started["payload"]["mode"] == "doc_annotate_bridge"
         assert events[-1]["payload"]["completed_task"] is True
 
     def test_whitebox_task_stream_followup_feedback_bypasses_doc_annotate_bridge(self, app_client, monkeypatch, tmp_path):
@@ -786,7 +844,8 @@ class TestEditorAIStream:
 
         assert resp.status_code == 200
         assert captured["request"].options["followup_context"]["kind"] == "review_last_task"
-        assert events[0]["payload"]["mode"] == "whitebox_v1"
+        run_started = next(event for event in events if event.get("type") == "run.started")
+        assert run_started["payload"]["mode"] == "whitebox_v1"
         assert events[-1]["payload"]["completed_task"] is True
 
     def test_whitebox_task_stream_followup_improve_routes_back_to_doc_annotate_bridge(self, app_client, monkeypatch, tmp_path):
@@ -873,7 +932,8 @@ class TestEditorAIStream:
 
         assert resp.status_code == 200
         assert captured["request"].options["followup_context"]["followup_action"] == "improve"
-        assert events[0]["payload"]["mode"] == "doc_annotate_bridge"
+        run_started = next(event for event in events if event.get("type") == "run.started")
+        assert run_started["payload"]["mode"] == "doc_annotate_bridge"
         assert events[-1]["payload"]["completed_task"] is True
 
     def test_doc_annotate_bridge_forwards_review_and_write_progress(self, monkeypatch, tmp_path):
@@ -1989,26 +2049,21 @@ class TestLocalModelMode:
         assert "Gemini" in token_texts
         assert "Ollama" not in token_texts
 
-    def test_workspace_quick_actions_use_whitebox_by_default_and_keep_opt_in_editor_fallback(self):
-        """Workspace quick actions should prefer whitebox routes and only keep editor SSE as an explicit compat path."""
+    def test_workspace_quick_actions_use_whitebox_only(self):
+        """Workspace quick actions should use whitebox routes without editor SSE fallback."""
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
         quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
         transport = Path("web/static/js/workspace-ai-transport.js").read_text(encoding="utf-8")
-        stream_idx = quick_actions.find("/api/editor/ai/stream")
-        assert stream_idx != -1
-        stream_fetch = quick_actions[stream_idx: stream_idx + 1200]
         assert "window.WA.sendQuickAction = (action) => {" in src
         assert "window.WA.createWorkspaceQuickActionRuntime" in quick_actions
         assert "attachDispatcher" in quick_actions
-        assert "function canUseLegacyEditorFallback(action)" in quick_actions
-        assert "if (canUseLegacyEditorFallback(action)) {" in quick_actions
         assert "return Promise.reject(new Error(`快捷动作 ${actionId} 未配置可用的执行路径`));" in quick_actions
         assert "if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {" in quick_actions
-        assert "if (canUseLegacyEditorFallback(action)) return sendEditorAction(payload, action);" in quick_actions
-        assert "streamEventBlocks({" in quick_actions
-        assert "model_mode" in stream_fetch
-        assert "model_id" in stream_fetch
-        assert "output_mode" in stream_fetch
+        assert "/api/editor/ai/stream" not in quick_actions
+        assert "legacyEditorFallback" not in quick_actions
+        assert "sendEditorAction" not in quick_actions
+        assert "editorAction" not in quick_actions
+        assert "streamEventBlocks({" not in quick_actions
         assert "typeof options.body === 'string'" in transport
         assert "async function streamEventBlocks(options)" in transport
 
@@ -2030,8 +2085,7 @@ class TestLocalModelMode:
         assert "function sendProposalWhiteboxAction(payload, providedAction) {" in quick_actions
         assert "quick_action_mode: 'proposal'" in quick_actions
         assert "options.handleProposals({" in quick_actions
-        assert "return sendEditorAction(payload, action);" in quick_actions
-        assert "sendEditorAction(payload) {" not in quick_actions
+        assert "sendEditorAction" not in quick_actions
 
     def test_workspace_model_state_uses_wa_keys_only(self):
         """Workspace assistant should use wa_* model state only and not write legacy editor_* keys."""
@@ -2051,13 +2105,10 @@ class TestLocalModelMode:
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
         quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
         dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
-        helper_start = src.find("async function _sendViaSSEChart(payload) {")
-        helper_end = src.find("function initSocket() {", helper_start)
-        assert helper_start != -1 and helper_end != -1
-        helper_section = src[helper_start:helper_end]
-        assert "_waQuickActionRuntime.sendChartAction(payload);" in helper_section
-        assert "return _sendViaLegacyChartSSE(payload);" in helper_section
-        assert "fetch('/api/editor/ai/chart'" not in helper_section
+        assert "async function _sendViaSSEChart(payload) {" not in src
+        assert "_sendViaLegacyChartSSE" not in src
+        assert "fetch('/api/editor/ai/chart'" not in src
+        assert "_waQuickActionRuntime.sendChartAction(payload);" not in src
         assert "attachedDispatcher.dispatchMessage({" in quick_actions
         assert "url: '/api/editor/ai/chart'" not in quick_actions
         assert "model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto'," in dispatcher
@@ -2080,32 +2131,42 @@ class TestLocalModelMode:
     def test_workspace_task_renderer_eagerly_refreshes_changed_files(self):
         """Segmented file tasks should try to refresh the edited document as soon as file.changed arrives."""
         renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
-        assert "card._fileRefreshPromise" in renderer
-        assert "void flushQueuedFileRefreshes(card).catch" in renderer
-        assert "if ((card._pendingFileRefreshes && card._pendingFileRefreshes.size) || card._fileRefreshPromise)" in renderer
-        assert "function upsertFileRefreshEntry(card, item)" in renderer
-        assert "status: supported ? 'pending' : 'unsupported'" in renderer
-        assert "status: 'refreshing'" in renderer
-        assert "status: 'reloaded'" in renderer
-        assert "status: 'failed'" in renderer
+        refresh = Path("web/static/js/workspace-ai-task-refresh.js").read_text(encoding="utf-8")
+        assert "window.WA.createFileTaskRefreshController" in refresh
+        assert "card._fileRefreshPromise" in refresh
+        assert "void flush(card).catch" in refresh
+        assert "if (!((card._pendingFileRefreshes && card._pendingFileRefreshes.size) || card._fileRefreshPromise))" in refresh
+        assert "function upsertEntry(card, item)" in refresh
+        assert "status: supported ? 'pending' : 'unsupported'" in refresh
+        assert "status: 'refreshing'" in refresh
+        assert "status: 'reloaded'" in refresh
+        assert "status: 'failed'" in refresh
+        assert "function queueFileRefresh(card, payload, options)" in renderer
+        assert "controller.queue(card, payload, options);" in renderer
+        assert "triggerQueuedFileRefresh(card, {" in renderer
 
     def test_workspace_task_renderer_keeps_write_tool_milestones_visible(self):
         """Successful file-writing tool events should remain visible instead of being fully suppressed."""
         renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
 
         assert "return isInternalTool(name) || isReadTool(name);" in renderer
+        assert "ALWAYS_SUPPRESS_TOOL_FINISHED_NAMES.has(name)" in renderer
+        assert "'repair_guard'" in renderer
+        assert "'readonly_answer_guard'" in renderer
         assert "return false;" in renderer
         assert "toolStepTitle(payload.tool_name)" in renderer
         assert "setStepTitle(step, blocked ? `${toolLabel(payload.tool_name)}已拦截`" in renderer
 
-    def test_workspace_task_renderer_summarizes_refresh_state_in_final_card(self):
-        """The final task summary should include per-file refresh state so stale documents are visible to the user."""
+    def test_workspace_task_renderer_refreshes_terminal_files_without_final_notice(self):
+        """Terminal refresh should reload files without adding a separate completion notice."""
         renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
+        refresh = Path("web/static/js/workspace-ai-task-refresh.js").read_text(encoding="utf-8")
 
-        assert "function fileRefreshSummaryHtml(card)" in renderer
-        assert "fileRefreshStatusLabel(entry.status)" in renderer
-        assert "const refreshHtml = fileRefreshSummaryHtml(card);" in renderer
-        assert "${refreshHtml}${runtimeHtml}" in renderer
+        assert "function finalizeTerminalRefresh(card, payload, options)" in renderer
+        assert "queueTerminalFileChanges(card, payload || {});" in renderer
+        assert "showRefreshingStatus: false" in renderer
+        assert "summaryHtml(card)" not in renderer
+        assert "function summaryHtml(card)" not in refresh
 
     def test_workspace_task_renderer_warns_when_whitebox_stream_seq_is_incomplete(self):
         """Dropped or out-of-order SSE events should be surfaced to users as whitebox visibility warnings."""
@@ -2114,8 +2175,8 @@ class TestLocalModelMode:
         assert "function noteStreamIssue(card, key, text)" in renderer
         assert "state.streamIssueKeys" in renderer
         assert "state.lastEventSeq" in renderer
-        assert "白盒事件流缺失了" in renderer
-        assert "白盒事件流顺序异常" in renderer
+        assert "检测到部分进度事件未按顺序抵达" in renderer
+        assert "检测到任务进度事件重放" in renderer
 
     def test_workspace_task_renderer_supports_step_result_rollups(self):
         """The renderer should display backend step.result rollups for major whitebox phases."""
@@ -2125,7 +2186,8 @@ class TestLocalModelMode:
         assert "function upsertStepResultRow(step, payload)" in renderer
         assert "type === 'step.result'" in renderer
         assert "payload.file_change_count" in renderer
-        assert "查看文件变更" in renderer
+        assert "涉及 ${esc(changeCount)} 个文件" in renderer
+        assert "appendToolArtifacts(row, payload);" in renderer
 
     def test_workspace_task_renderer_supports_step_progress_updates(self):
         """The whitebox task renderer should keep the current step alive with incremental progress updates."""
@@ -2134,7 +2196,7 @@ class TestLocalModelMode:
         assert "function upsertProgressRow(step, payload)" in renderer
         assert "type === 'step_progress' || type === 'step.progress'" in renderer
         assert "step._progressRow" in renderer
-        assert "if (payload.file_updated && (payload.path || payload.file_path))" in renderer
+        assert "if ((payload.file_updated || payload.fileUpdated) && (payload.path || payload.file_path || payload.output_path || payload.target_path))" in renderer
         assert "queueFileRefresh(card, payload, {" in renderer
 
     def test_workspace_task_renderer_preserves_structured_run_errors(self):
@@ -2143,7 +2205,8 @@ class TestLocalModelMode:
         dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
 
         assert "function makeTaskError(message) {" in renderer
-        assert "card._fatalErrorText = payload.text || payload.error || '任务失败';" in renderer
+        assert "const fatalText = payload.text || payload.error || '任务失败';" in renderer
+        assert "fatalText," in renderer
         assert "if (card._fatalErrorText) throw makeTaskError(card._fatalErrorText);" in renderer
         assert "error && error.waTaskError ? error.message" in dispatcher
 
@@ -2184,13 +2247,13 @@ class TestLocalModelMode:
         assert "function normalizedTaskLifecyclePayload(payload) {" in renderer
         assert "const classification = data.classification && typeof data.classification === 'object'" in renderer
         assert "if (type === 'task.classified') {" in renderer
-        assert "const rendered = renderTaskClassification(evt, card);" in renderer
         assert "function classificationMetaHtml(card) {" in renderer
         assert "function renderTaskClassification(evt, card) {" in renderer
         assert "const data = normalizedTaskLifecyclePayload(payload);" in renderer
         assert "card.dataset.taskRequestKind = String(data.request_kind || '').trim();" in renderer
         assert "card.dataset.taskFamily = String(data.task_family || '').trim();" in renderer
         assert "card.dataset.taskOutputMode = String(data.output_mode || '').trim();" in renderer
+        assert "card.dataset.taskSelectedRecipe = String(data.selected_recipe || '').trim();" in renderer
         assert "card.dataset.taskIntentStrategy = intentStrategy;" in renderer
         assert "card.dataset.taskIntentCanApply = intentPlan.can_apply ? 'true' : 'false';" in renderer
         assert "card.dataset.taskIntentRequiresConfirmation = intentPlan.requires_confirmation ? 'true' : 'false';" in renderer
@@ -2198,15 +2261,19 @@ class TestLocalModelMode:
         assert "if (type === 'run.finished') {" in renderer
         assert "产出：" in renderer
         assert "策略：" in renderer
-        assert "请求：" in renderer
-        assert "任务：" in renderer
-        assert "操作：" in renderer
-        assert "分类：" in renderer
-        assert "${classificationHtml}${refreshHtml}${runtimeHtml}" in renderer
+        assert "路线：" in renderer
+        assert "后续：" in renderer
+        assert "目标：" in renderer
+        assert "chips.push(`请求：" not in renderer
+        assert "chips.push(`任务：" not in renderer
+        assert "chips.push(`操作：" not in renderer
+        assert "chips.push(`分类：" not in renderer
+        assert "${classificationHtml}${pendingResumeHtml}${runtimeHtml}" in renderer
 
         assert "if (dataset.taskRequestKind) metadata.task_request_kind = String(dataset.taskRequestKind || '').trim();" in dispatcher
         assert "if (dataset.taskFamily) metadata.task_family = String(dataset.taskFamily || '').trim();" in dispatcher
         assert "if (dataset.taskExecutionMode) metadata.task_execution_mode = String(dataset.taskExecutionMode || '').trim();" in dispatcher
+        assert "if (dataset.taskSelectedRecipe) metadata.task_selected_recipe = String(dataset.taskSelectedRecipe || '').trim();" in dispatcher
         assert "if (dataset.taskOutputMode) metadata.task_output_mode = String(dataset.taskOutputMode || '').trim();" in dispatcher
         assert "if (dataset.taskIntentStrategy) metadata.task_intent_strategy = String(dataset.taskIntentStrategy || '').trim();" in dispatcher
         assert "metadata.task_intent_can_apply = String(dataset.taskIntentCanApply || '').trim().toLowerCase() === 'true';" in dispatcher
@@ -2220,12 +2287,12 @@ class TestLocalModelMode:
         assert "if (normalized === 'answer') return '只给答案';" in renderer
         assert "if (normalized === 'write') return '写入文件';" in renderer
         assert "if (normalized === 'hybrid') return '先分析后决定';" in renderer
-        assert "当前任务只返回分析结论，不会直接写入文件；可以继续追问依据，或要求继续深入。" in renderer
-        assert "当前任务先给出分析建议，确认后可以继续应用到文件；可以继续追问依据，或先细化方案。" in renderer
-        assert "当前任务先给出分析建议，未直接写入文件；可以继续追问依据，或要求继续细化。" in renderer
+        assert "本轮只做分析，未写入文件。" in renderer
+        assert "本轮先完成分析；确认后可写入文件。" in renderer
+        assert "本轮完成分析，未写入文件。" in renderer
         assert 'data-task-followup-action="apply"' in renderer
         assert "应用建议" in renderer
-        assert "if (outputMode === 'hybrid' && canApply) chips.push(`后续：${requiresConfirmation ? '确认后可应用' : '可应用'}`);" in renderer
+        assert "if (outputMode === 'hybrid' && canApply) chips.push(`后续：${requiresConfirmation ? '确认后可写入' : '可继续写入'}`);" in renderer
         assert "const previousTaskOutputMode = previewText(previousTaskTurn.task_output_mode || '', 120);" in dispatcher
         assert "if (previousTaskOutputMode) context.previous_task_output_mode = previousTaskOutputMode;" in dispatcher
 
@@ -2255,7 +2322,7 @@ class TestLocalModelMode:
         assert "if (kind === 'family') return normalized !== 'analyze';" in renderer
         assert "if (kind === 'operation') return normalized !== 'read';" in renderer
         assert "if (kind === 'execution') return normalized !== 'generic_tool_loop';" in renderer
-        assert "if (operationLabel && operationLabel !== familyLabel) chips.push(`操作：${operationLabel}`);" in renderer
+        assert "if (selectedRecipe) chips.push(`路线：${selectedRecipe}`);" in renderer
         assert "if (targetFileType && chips.length) chips.push(`目标：${targetFileType.toUpperCase()}`);" in renderer
         assert "if (!classificationHtml && !reasonHtml) return '';" in renderer
         assert "chips.push(`置信：${Math.round(confidence * 100)}%`);" not in renderer
@@ -2267,12 +2334,15 @@ class TestLocalModelMode:
         assert "setStatus(card, '已分析任务');" in renderer
         assert "const title = String(payload.title || '执行方案').trim() || '执行方案';" in renderer
 
-    def test_workspace_task_renderer_formats_deferred_planner_reason(self):
+    def test_workspace_task_renderer_surfaces_whitebox_plan_gate(self):
         renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
 
-        assert "function classificationReasonLabel(reasonCode) {" in renderer
-        assert "planner_deferred:model_first" in renderer
-        assert "规划延后：先分析任务，再决定是否委托外部 planner" in renderer
+        assert "function renderWhiteboxExecutionPlan(card, payload) {" in renderer
+        assert "if (type === 'plan.proposed') {" in renderer
+        assert "if (type === 'plan.gated') {" in renderer
+        assert "AI 执行计划" in renderer
+        assert "计划监管" in renderer
+        assert "renderPlanGateIssue(payload)" in renderer
 
     def test_workspace_task_renderer_supports_simple_quick_action_mode(self):
         renderer = Path("web/static/js/workspace-ai-task.js").read_text(encoding="utf-8")
@@ -3560,8 +3630,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
 
     def test_workspace_assistant_removes_old_task_stream_senders(self):
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
-        assert "async function _waSendToOpenClawTask" not in src
-        assert "function _waBuildOpenClawTaskMessage" not in src
+        retired_external_name = "Open" + "Claw"
+        assert f"async function _waSendTo{retired_external_name}Task" not in src
+        assert f"function _waBuild{retired_external_name}TaskMessage" not in src
         assert "async function _waSendToAgent" not in src
         assert "async function _waSendToChat" not in src
         assert "async function _waSendToInline" not in src
@@ -3576,13 +3647,14 @@ class TestWorkspaceAssistantTaskRemovalRegression:
 
     def test_workspace_send_message_keeps_open_file_and_uses_whitebox_stream(self):
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
+        retired_external_name = "Open" + "Claw"
         send_start = src.index("window.WA.sendMessage = () => {")
         send_end = src.index("// ── Auto-save", send_start)
         send_block = src[send_start:send_end]
         assert "appendUserMessageWithLoading" in send_block
         assert "_waTaskDispatcher.dispatchMessage({" in send_block
         assert "/api/editor/ai/task-stream" not in send_block
-        assert "_waSendToOpenClawTask(" not in send_block
+        assert f"_waSendTo{retired_external_name}Task(" not in send_block
         assert "_waSendToAgent(" not in send_block
         assert "_waSendToChat(" not in send_block
 
@@ -3599,14 +3671,14 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "_waTaskDispatcher.dispatchMessage({" in send_block
         assert "function buildWhiteboxTaskPayload(text, pinnedSelText, pinnedSelSource, overrides) {" in dispatcher
         assert "current_file:" not in dispatcher
-        assert "const currentPath = typeof options.getCurrentAIContextPath === 'function'" in dispatcher
-        assert "target_path: targetFile ? (targetFile.path || targetFile.name || '') : currentPath," in dispatcher
+        assert "getCurrentAIContextPath" not in dispatcher
+        assert "target_path: targetFile ? (targetFile.path || targetFile.name || '') : ''," in dispatcher
         assert "model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto'," in dispatcher
         assert "model_id: typeof options.getSelectedCloudModelId === 'function' ? options.getSelectedCloudModelId() : ''," in dispatcher
         assert "options: overrideOptions," in dispatcher
         assert "history: typeof options.getConversationHistory === 'function'" in dispatcher
         assert "const payload = buildWhiteboxTaskPayload(context.text, context.pinnedSelText, context.pinnedSelSource, context);" in dispatcher
-        assert "return Promise.resolve(options.streamWhiteboxTask({" in dispatcher
+        assert "return Promise.resolve(streamWhiteboxTask({" in dispatcher
         assert "payload," in dispatcher
         assert "taskTurnMetadataFromLoadingEl(loadingEl)" in dispatcher
 
@@ -3618,7 +3690,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "function looksLikeTaskCritique(text)" in dispatcher
         assert "function buildTaskFollowupContext(text)" in dispatcher
         assert "kind: 'review_last_task'" in dispatcher
-        assert "followup_action: 'question'" in dispatcher
+        assert "followup_action:" in dispatcher
         assert "overrideOptions.followup_context = followupContext;" in dispatcher
         assert "context.previous_run_id = previousRunId;" in dispatcher
         assert "context.previous_task_mode = previousTaskMode;" in dispatcher
@@ -3659,6 +3731,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(encoding="utf-8")
         standalone = Path("web/templates/workspace_assistant.html").read_text(encoding="utf-8")
         main = Path("web/templates/index.html").read_text(encoding="utf-8")
+        asset_scripts = Path("web/templates/_workspace_asset_scripts.html").read_text(encoding="utf-8")
 
         assert "window.WA.streamWhiteboxTask" in renderer
         assert "fetch('/api/editor/ai/task-stream'" in renderer
@@ -3668,26 +3741,21 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "window.WA.createWorkspaceAiConversation" in conversation
         assert "model' || value === 'ai'" in conversation
         assert "window.WA.createTaskDispatcher" in dispatcher
-        assert "_waAiTransport = (window.WA && typeof window.WA.createWorkspaceAiTransport === 'function')" in assistant
-        assert "_waAiResultsRuntime = (window.WA && typeof window.WA.createWorkspaceAiResultsRuntime === 'function')" in assistant
-        assert "_waConversationRuntime = (window.WA && typeof window.WA.createWorkspaceAiConversation === 'function')" in assistant
+        assert "typeof window.WA.createWorkspaceAiResultsRuntime === 'function'" in assistant
+        assert "typeof window.WA.createWorkspaceAiConversation === 'function'" in assistant
         assert "window.WA.hydrateAiHistory" in assistant
-        assert "_waQuickActionRuntime = (window.WA && typeof window.WA.createWorkspaceQuickActionRuntime === 'function' && _waAiTransport)" in assistant
+        assert "typeof window.WA.createWorkspaceQuickActionRuntime === 'function'" in assistant
         assert "_waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);" in assistant
-        assert "_waTaskDispatcher = (window.WA && typeof window.WA.createTaskDispatcher === 'function')" in assistant
+        assert "typeof window.WA.createTaskDispatcher === 'function'" in assistant
         assert "fetch('/api/editor/ai/task-stream'" not in assistant
-        assert "workspace-ai-task.js" in standalone
-        assert "workspace-ai-transport.js" in standalone
-        assert "workspace-ai-results.js" in standalone
-        assert "workspace-ai-quick-actions.js" in standalone
-        assert "workspace-ai-conversation.js" in standalone
-        assert "workspace-task-dispatcher.js" in standalone
-        assert "workspace-ai-task.js" in main
-        assert "workspace-ai-transport.js" in main
-        assert "workspace-ai-results.js" in main
-        assert "workspace-ai-quick-actions.js" in main
-        assert "workspace-ai-conversation.js" in main
-        assert "workspace-task-dispatcher.js" in main
+        assert "{% include '_workspace_asset_scripts.html' %}" in standalone
+        assert "{% include '_workspace_asset_scripts.html' %}" in main
+        assert "workspace-ai-task.js" in asset_scripts
+        assert "workspace-ai-transport.js" in asset_scripts
+        assert "workspace-ai-results.js" in asset_scripts
+        assert "workspace-ai-quick-actions.js" in asset_scripts
+        assert "workspace-ai-conversation.js" in asset_scripts
+        assert "workspace-task-dispatcher.js" in asset_scripts
         assert "doc-agent-ui.js" not in standalone
         assert "wa-doc-agent-phases" not in standalone
         assert "wa-inline-ai" not in main
@@ -3713,8 +3781,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "function appendAssistantConversationTurn(text, metadata)" in dispatcher
         assert "options.appendAssistantTurn(content" in dispatcher
         assert "options.getConversationHistory()" in dispatcher
-        assert ".then((summary) =>" in dispatcher
-        assert "appendAssistantConversationTurn(assistantText, Object.assign({" in dispatcher
+        assert ".then((streamResult) =>" in dispatcher
+        assert "function finalizeWhiteboxTaskTurn(taskTurnId, loadingEl, result, fallbackStatus, skipModelContext)" in dispatcher
+        assert "appendAssistantConversationTurn(assistantText, turnMetadata);" in dispatcher
 
     def test_workspace_conversation_runtime_uses_in_memory_session_store_and_model_context(self):
         conversation = Path("web/static/js/workspace-ai-conversation.js").read_text(encoding="utf-8")
@@ -3763,6 +3832,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "beginAssistantTaskTurn: (metadata) => _waConversationRuntime && typeof _waConversationRuntime.beginAssistantTaskTurn === 'function'" in assistant
         assert "syncAssistantTaskTurn: (turnId, metadata) => _waConversationRuntime && typeof _waConversationRuntime.syncAssistantTaskTurn === 'function'" in assistant
         assert "window.WA.restoreTaskRunCard = function restoreTaskRunCard(snapshot) {" in task_renderer
+        assert "function isTaskCardElement(value) {" in task_renderer
+        assert "if (!isTaskCardElement(card) || card._waRunCardBehaviorAttached) return card;" in task_renderer
+        assert "if (!isTaskCardElement(card)) return null;" in task_renderer
+        assert "const card = isTaskCardElement(loadingEl) ? loadingEl : document.createElement('div');" in task_renderer
         assert "if (typeof opts.onTaskCardSnapshot === 'function') {" in task_renderer
         assert "return attachRunCardBehavior(card);" in task_renderer
 
@@ -3784,19 +3857,21 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "已读取相关对话记忆" not in renderer
         assert 'wa-task-chip ok">记忆' not in renderer
 
-    def test_workspace_quick_actions_keep_editor_ai_stream_only_as_runtime_fallback(self):
+    def test_workspace_quick_actions_remove_editor_ai_stream_fallback(self):
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
         quick_actions = Path("web/static/js/workspace-ai-quick-actions.js").read_text(encoding="utf-8")
         assert "async function _sendViaEditorActionSSE(payload)" not in src
         assert "window.WA.sendQuickAction = (action) => {" in src
         assert "getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'" in src
-        assert "action: editorAction" in quick_actions
-        assert "history: typeof options.getConversationHistory === 'function'" in quick_actions
-        assert "options.appendAssistantTurn(trimmed" in quick_actions
-        assert "options.getSessionId()" in quick_actions
-        assert "streamEventBlocks({" in quick_actions
-        assert "return sendEditorAction(payload, action);" in quick_actions
-        assert "sendEditorAction(payload) {" not in quick_actions
+        assert "/api/editor/ai/stream" not in quick_actions
+        assert "action: editorAction" not in quick_actions
+        assert "history: typeof options.getConversationHistory === 'function'" not in quick_actions
+        assert "options.appendAssistantTurn(trimmed" not in quick_actions
+        assert "options.getSessionId()" not in quick_actions
+        assert "streamEventBlocks({" not in quick_actions
+        assert "legacyEditorFallback" not in quick_actions
+        assert "sendEditorAction" not in quick_actions
+        assert "console.count('[WA legacy-editor-fallback]');" not in quick_actions
         assert "window.WA.quickAction =" in src
 
     def test_workspace_transport_accepts_pre_serialized_json_bodies(self):
@@ -3841,6 +3916,51 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "const liveSelection = _getLiveEditorSelectionForAI();" in input_section
         assert "if (liveSelection) {" in input_section
         assert "_pinSelectionChip(liveSelection);" in input_section
+
+    def test_workspace_scripts_do_not_reference_retired_ai_input_id(self):
+        assistant = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
+        embedded_html = Path("web/templates/index.html").read_text(encoding="utf-8")
+
+        assert "wa-ai-input')" not in assistant
+        assert 'wa-ai-input")' not in assistant
+        assert "wa-ai-input')" not in embedded_html
+        assert 'wa-ai-input")' not in embedded_html
+
+    def test_workspace_pptx_save_routes_do_not_use_legacy_export_fallback(self):
+        bp = Path("web/blueprints/workspace_assistant.py").read_text(encoding="utf-8")
+
+        assert "def _export_workspace_pptx(file_id: str, data) -> bytes:" in bp
+        assert "from app.core.file.file_parser import export_docx, export_xlsx" in bp
+        assert ("export_" + "pptx") not in bp
+        assert ("Legacy simple format " + "fallback") not in bp
+
+    def test_retired_external_planner_names_are_not_in_runtime_code(self):
+        runtime_files = [
+            Path("app"),
+            Path("web"),
+        ]
+        retired_terms = (
+            "Open" + "Claw",
+            "open" + "claw",
+            "OPEN" + "CLAW",
+            "Her" + "mes",
+            "her" + "mes",
+        )
+        offenders = []
+        ignored_parts = {"node_modules", "vendor", "__pycache__"}
+        for root in runtime_files:
+            for path in root.rglob("*"):
+                if not path.is_file():
+                    continue
+                if ignored_parts.intersection(path.parts):
+                    continue
+                if path.suffix.lower() not in {".py", ".js", ".html", ".md"}:
+                    continue
+                text = path.read_text(encoding="utf-8", errors="ignore")
+                for term in retired_terms:
+                    if term in text:
+                        offenders.append(f"{path}:{term}")
+        assert offenders == []
 
     def test_workspace_proposal_card_filters_duplicate_rationale_text(self):
         """Proposal cards should hide rationale text when it just repeats original/proposed content."""

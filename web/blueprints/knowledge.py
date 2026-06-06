@@ -19,9 +19,9 @@ def _get_kb():
 
 
 def _get_knowledge_graph():
-    from web.app import get_knowledge_graph
+    from web.runtime_context import call_app_factory
 
-    return get_knowledge_graph()
+    return call_app_factory("get_knowledge_graph")
 
 
 # ======================== Knowledge-Base API ========================

@@ -29,27 +29,27 @@ analytics_bp = Blueprint("analytics", __name__)
 
 
 def _get_behavior_monitor():
-    from web.app import get_behavior_monitor
+    from web.runtime_context import call_app_factory
 
-    return get_behavior_monitor()
+    return call_app_factory("get_behavior_monitor")
 
 
 def _get_suggestion_engine():
-    from web.app import get_suggestion_engine
+    from web.runtime_context import call_app_factory
 
-    return get_suggestion_engine()
+    return call_app_factory("get_suggestion_engine")
 
 
 def _get_insight_reporter():
-    from web.app import get_insight_reporter
+    from web.runtime_context import call_app_factory
 
-    return get_insight_reporter()
+    return call_app_factory("get_insight_reporter")
 
 
 def _get_trigger_system():
-    from web.app import get_trigger_system
+    from web.runtime_context import call_app_factory
 
-    return get_trigger_system()
+    return call_app_factory("get_trigger_system")
 
 
 # ═══════════════════════════════════════════════════

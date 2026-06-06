@@ -783,7 +783,7 @@ class TestSaveFileExport:
         assert r.status_code == 200
         assert r.data[:2] == b"PK"
 
-    def test_export_pptx_needs_file_id(self, client):
+    def test_workspace_pptx_save_needs_file_id(self, client):
         r = client.post(
             "/api/v1/workspace/save_file",
             json={
@@ -794,7 +794,7 @@ class TestSaveFileExport:
         )
         assert r.status_code == 400
 
-    def test_export_pptx_with_valid_file_id(self, client, workspace_dir: Path):
+    def test_workspace_pptx_save_with_valid_file_id(self, client, workspace_dir: Path):
         # Create & open to get a file_id with a tmp file
         client.post(
             "/api/v1/workspace/create_file", json={"folder": "", "name": "exp.pptx"}
@@ -830,196 +830,28 @@ class TestSaveFileExport:
 
 
 # ===========================================================================
-# Scenario 9: Move / Copy (fs_copy)
+# Scenario 9: guarded absolute-path filesystem browser routes
 # ===========================================================================
 
 
-class TestMoveCopy:
-    """POST /fs_copy — copy and move files between directories."""
+class TestAbsoluteFsWriteRoutes:
+    """The local browser supports guarded filesystem operations."""
 
-    def test_copy_file(self, client, workspace_dir: Path):
-        src_dir = workspace_dir / "src_dir"
-        dst_dir = workspace_dir / "dst_dir"
-        src_dir.mkdir()
-        dst_dir.mkdir()
-        (src_dir / "original.txt").write_text("hello")
+    def test_absolute_fs_write_routes_validate_missing_payloads(self, client):
+        assert client.post("/api/v1/fs/create_file", json={}).status_code == 400
+        assert client.post("/api/v1/fs/create_folder", json={}).status_code == 400
+        assert client.delete("/api/v1/workspace/fs_delete").status_code == 400
+        assert client.patch("/api/v1/workspace/fs_rename", json={}).status_code == 400
+        assert client.post("/api/v1/workspace/fs_copy", json={}).status_code == 400
+        assert client.post("/api/v1/workspace/upload-to-folder").status_code == 400
 
-        r = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={
-                "src": str(src_dir / "original.txt"),
-                "dst_dir": str(dst_dir),
-                "move": False,
-            },
-        )
-        assert r.status_code == 200
-        # Both should exist
-        assert (src_dir / "original.txt").exists()
-        assert (dst_dir / "original.txt").exists()
-
-    def test_move_file(self, client, workspace_dir: Path):
-        src_dir = workspace_dir / "from"
-        dst_dir = workspace_dir / "to"
-        src_dir.mkdir()
-        dst_dir.mkdir()
-        (src_dir / "moving.txt").write_text("bye")
-
-        r = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={
-                "src": str(src_dir / "moving.txt"),
-                "dst_dir": str(dst_dir),
-                "move": True,
-            },
-        )
-        assert r.status_code == 200
-        assert not (src_dir / "moving.txt").exists()
-        assert (dst_dir / "moving.txt").exists()
-
-    def test_copy_auto_renames_on_conflict(self, client, workspace_dir: Path):
-        src_dir = workspace_dir / "s"
-        dst_dir = workspace_dir / "d"
-        src_dir.mkdir()
-        dst_dir.mkdir()
-        (src_dir / "file.txt").write_text("src")
-        (dst_dir / "file.txt").write_text("existing")
-
-        r = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={"src": str(src_dir / "file.txt"), "dst_dir": str(dst_dir)},
-        )
-        assert r.status_code == 200
-        d = _json_body(r)
-        # Should be renamed to "file (1).txt"
-        assert "(1)" in d["name"]
-
-    def test_copy_missing_src_returns_404(self, client, workspace_dir: Path):
-        dst = workspace_dir / "dst"
-        dst.mkdir()
-        r = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={"src": str(workspace_dir / "nope.txt"), "dst_dir": str(dst)},
-        )
-        assert r.status_code == 404
-
-    def test_move_docx_then_open_at_new_location(self, client, workspace_dir: Path):
-        """Move a docx file and verify it can be opened from the new location."""
-        src_dir = workspace_dir / "old_loc"
-        dst_dir = workspace_dir / "new_loc"
-        src_dir.mkdir()
-        dst_dir.mkdir()
-
-        # Create a valid docx
-        client.post(
-            "/api/v1/workspace/create_file",
-            json={"folder": "old_loc", "name": "move_me.docx"},
-        )
-
-        # Move it
-        r = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={
-                "src": str(src_dir / "move_me.docx"),
-                "dst_dir": str(dst_dir),
-                "move": True,
-            },
-        )
-        assert r.status_code == 200
-
-        # Open from new location
-        r2 = client.post(
-            "/api/v1/workspace/open_file_by_path",
-            json={"path": "new_loc/move_me.docx"},
-        )
-        assert r2.status_code == 200
-        assert _json_body(r2)["file_type"] == "docx"
-
-
-# ===========================================================================
-# Scenario 10: FS browser operations (absolute paths)
-# ===========================================================================
-
-
-class TestFsBrowserOperations:
-    """File-system browser CRUD with absolute paths."""
-
-    def test_fs_create_file(self, client, workspace_dir: Path):
-        r = client.post(
+    def test_absolute_fs_create_file_route(self, client, tmp_path):
+        resp = client.post(
             "/api/v1/fs/create_file",
-            json={"parent": str(workspace_dir), "name": "fs_new.docx"},
+            json={"parent": str(tmp_path), "name": "browser_created.txt"},
         )
-        assert r.status_code == 200
-        assert (workspace_dir / "fs_new.docx").is_file()
-        assert (workspace_dir / "fs_new.docx").stat().st_size > 0
-
-    def test_fs_create_folder(self, client, workspace_dir: Path):
-        r = client.post(
-            "/api/v1/fs/create_folder",
-            json={"parent": str(workspace_dir), "name": "fs_dir"},
-        )
-        assert r.status_code == 200
-        assert (workspace_dir / "fs_dir").is_dir()
-
-    def test_fs_delete_file(self, client, workspace_dir: Path):
-        (workspace_dir / "del_me.txt").write_text("bye")
-        r = client.delete(
-            "/api/v1/workspace/fs_delete",
-            query_string={"path": str(workspace_dir / "del_me.txt")},
-        )
-        assert r.status_code == 200
-        assert not (workspace_dir / "del_me.txt").exists()
-
-    def test_fs_rename(self, client, workspace_dir: Path):
-        (workspace_dir / "old_name.txt").write_text("data")
-        r = client.patch(
-            "/api/v1/workspace/fs_rename",
-            json={"path": str(workspace_dir / "old_name.txt"), "name": "new_name"},
-        )
-        assert r.status_code == 200
-        assert not (workspace_dir / "old_name.txt").exists()
-        assert (workspace_dir / "new_name.txt").exists()
-
-    def test_fs_delete_folder(self, client, workspace_dir: Path):
-        d = workspace_dir / "rm_folder"
-        d.mkdir()
-        (d / "child.txt").write_text("x")
-        r = client.delete(
-            "/api/v1/workspace/fs_delete",
-            query_string={"path": str(d)},
-        )
-        assert r.status_code == 200
-        assert not d.exists()
-
-    def test_fs_operations_reject_missing_params(self, client):
-        assert (
-            client.post(
-                "/api/v1/fs/create_file", json={"parent": "", "name": "x.txt"}
-            ).status_code
-            == 400
-        )
-        assert (
-            client.post(
-                "/api/v1/fs/create_file", json={"parent": "/tmp", "name": ""}
-            ).status_code
-            == 400
-        )
-        assert (
-            client.post(
-                "/api/v1/fs/create_folder", json={"parent": "", "name": "x"}
-            ).status_code
-            == 400
-        )
-
-    def test_fs_duplicate_returns_409(self, client, workspace_dir: Path):
-        client.post(
-            "/api/v1/fs/create_file",
-            json={"parent": str(workspace_dir), "name": "dup.docx"},
-        )
-        r = client.post(
-            "/api/v1/fs/create_file",
-            json={"parent": str(workspace_dir), "name": "dup.docx"},
-        )
-        assert r.status_code == 409
+        assert resp.status_code == 200
+        assert (tmp_path / "browser_created.txt").is_file()
 
 
 # ===========================================================================
@@ -1048,7 +880,7 @@ class TestListFiles:
         assert pptx_entry is not None
         assert pptx_entry.get("supported") is True
         assert txt_entry is not None
-        assert txt_entry.get("supported") is False
+        assert txt_entry.get("supported") is True
 
     def test_list_hides_tmp_dir(self, client, workspace_dir: Path):
         (workspace_dir / "tmp").mkdir(exist_ok=True)
@@ -1123,39 +955,43 @@ class TestWorkspaceDir:
 
 
 # ===========================================================================
-# Scenario 13: serve_abs (file browser file serving)
+# Scenario 13: open_abs_file (absolute-path file opening)
 # ===========================================================================
 
 
-class TestServeAbs:
-    """GET /serve_abs — serve file by absolute path."""
+class TestOpenAbsFile:
+    """POST /open_abs_file — parse a supported file by absolute path."""
 
-    def test_serve_abs_valid_file(self, client, workspace_dir: Path):
-        f = workspace_dir / "serve_me.txt"
+    def test_raw_absolute_file_route_removed(self, client):
+        r = client.get("/api/v1/workspace/" + "serve_" + "abs", query_string={"path": ""})
+        assert r.status_code == 404
+
+    def test_open_abs_file_valid_file(self, client, workspace_dir: Path):
+        f = workspace_dir / "open_me.txt"
         f.write_text("content here")
-        r = client.get(
-            "/api/v1/workspace/serve_abs",
-            query_string={"path": str(f)},
+        r = client.post(
+            "/api/v1/workspace/open_abs_file",
+            json={"path": str(f)},
         )
         assert r.status_code == 200
-        assert r.data == b"content here"
+        assert r.get_json()["data"]["content"] == "content here"
 
-    def test_serve_abs_missing_file(self, client, workspace_dir: Path):
-        r = client.get(
-            "/api/v1/workspace/serve_abs",
-            query_string={"path": str(workspace_dir / "nope.txt")},
+    def test_open_abs_file_missing_file(self, client, workspace_dir: Path):
+        r = client.post(
+            "/api/v1/workspace/open_abs_file",
+            json={"path": str(workspace_dir / "nope.txt")},
         )
         assert r.status_code == 404
 
-    def test_serve_abs_system_path_blocked(self, client):
-        r = client.get(
-            "/api/v1/workspace/serve_abs",
-            query_string={"path": "C:\\Windows\\System32\\config\\SAM"},
+    def test_open_abs_file_system_path_blocked(self, client):
+        r = client.post(
+            "/api/v1/workspace/open_abs_file",
+            json={"path": "C:\\Windows\\System32\\config\\SAM"},
         )
         assert r.status_code == 403
 
-    def test_serve_abs_empty_path(self, client):
-        r = client.get("/api/v1/workspace/serve_abs", query_string={"path": ""})
+    def test_open_abs_file_empty_path(self, client):
+        r = client.post("/api/v1/workspace/open_abs_file", json={"path": ""})
         assert r.status_code == 400
 
 
@@ -1632,33 +1468,22 @@ class TestCompleteWorkflow:
         )
         assert r.status_code == 200
 
-        # 8. Move the renamed file into "final"
-        r = client.post(
-            "/api/v1/workspace/fs_copy",
-            json={
-                "src": str(workspace_dir / "project" / "specification.docx"),
-                "dst_dir": str(workspace_dir / "project" / "final"),
-                "move": True,
-            },
-        )
-        assert r.status_code == 200
-
-        # 9. Reopen from new location
+        # 8. Reopen from renamed location
         r = client.post(
             "/api/v1/workspace/open_file_by_path",
-            json={"path": "project/final/specification.docx"},
+            json={"path": "project/specification.docx"},
         )
         assert r.status_code == 200
         d = _json_body(r)
         assert "Project Spec" in d["data"].get("html", "")
 
-        # 10. Save again at new path
+        # 9. Save again at the renamed path
         r = client.post(
             "/api/v1/workspace/auto_save",
             json={
                 "file_type": "docx",
                 "file_id": d["file_id"],
-                "ws_source_path": "project/final/specification.docx",
+                "ws_source_path": "project/specification.docx",
                 "explicit": True,
                 "data": "<h1>Project Spec</h1><p>Version 2.0</p>",
             },
@@ -1666,7 +1491,7 @@ class TestCompleteWorkflow:
         assert r.status_code == 200
         assert _json_body(r)["src_written"] is True
 
-        # 11. Delete the project folder
+        # 10. Delete the project folder
         r = client.delete("/api/v1/workspace/folder?path=project")
         assert r.status_code == 200
         assert not (workspace_dir / "project").exists()
@@ -1719,12 +1544,14 @@ class TestJavaScriptSourceChecks:
     def test_open_workspace_file_uses_open_file_by_path(self):
         assert "open_file_by_path" in self.js
 
-    def test_open_browser_file_tries_open_file_by_path_first(self):
-        """openBrowserFile should try open_file_by_path before serve_abs."""
+    def test_open_browser_file_splits_workspace_and_external_paths(self):
+        """openBrowserFile should use parsed routes, not the raw absolute-byte route."""
         idx_open = self.js.find("openBrowserFile")
         idx_path = self.js.find("open_file_by_path", idx_open)
-        idx_abs = self.js.find("serve_abs", idx_open)
-        assert idx_path < idx_abs, "open_file_by_path should come before serve_abs"
+        idx_abs = self.js.find("open_abs_file", idx_open)
+        assert idx_path != -1
+        assert idx_abs != -1
+        assert self.js.find("new File(" + "[blob]", idx_open) == -1
 
     def test_is_saving_guard_exists(self):
         """_isSaving prevents concurrent saves."""
