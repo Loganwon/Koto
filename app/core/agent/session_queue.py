@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════════════════════════
 # session_queue.py — Per-Session Request Serialization
 #
-# Inspired by OpenClaw's per-session queue serialization:
+# Koto per-session queue serialization:
 # Each session gets its own lock so concurrent requests within
 # the same session are serialized (no race on history/context),
 # but different sessions run in parallel.

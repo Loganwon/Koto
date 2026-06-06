@@ -66,8 +66,10 @@ def _resolve_provider_arg(model_mode: str) -> dict:
     if normalized_mode == "local":
         return {"provider": "ollama"}
     if normalized_mode == "cloud":
-        return {"provider": "gemini"}
-    if normalized_mode in ("gemini", "openai", "anthropic", "ollama"):
+        from app.core.llm.model_selection import get_configured_cloud_provider
+
+        return {"provider": get_configured_cloud_provider()}
+    if normalized_mode in ("gemini", "deepseek", "openai", "anthropic", "ollama"):
         return {"provider": normalized_mode}
     # "auto" 或其他 → 不指定，由 provider_factory 自动检测
     return {}
@@ -95,10 +97,21 @@ def call_llm(prompt: str, system: str = "", model_mode: str = "auto",
         **_resolve_provider_arg(model_mode),
         allow_local_fallback=False,
     )
+    try:
+        from app.core.llm.model_selection import get_configured_cloud_model
+
+        model = get_configured_cloud_model(
+            task_type="FILE_TASK",
+            fallback_model="",
+            provider=_resolve_provider_arg(model_mode).get("provider"),
+        )
+    except Exception:
+        model = ""
 
     try:
         result = provider.generate_content(
             prompt,
+            model=model,
             system_instruction=system or None,
             max_tokens=max_tokens,
             call_timeout=call_timeout,

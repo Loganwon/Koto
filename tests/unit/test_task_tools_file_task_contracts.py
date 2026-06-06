@@ -3,6 +3,100 @@ import json
 import pytest
 
 
+def test_create_file_docx_emits_docx_write_metrics_and_valid_package(tmp_path, monkeypatch):
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    result = json.loads(
+        task_tools.create_file(
+            "step-summary.docx",
+            "# 第 0 步：封面与目录信息摘要\n\n## 来源页码：Page 4-8\n\n- 书名：The Global Rules of Art\n- 作者：Larissa Buchholz",
+        )
+    )
+
+    assert result["success"] is True
+    assert result["operation"] == "write_docx_content"
+    assert result["file_type"] == "docx"
+    assert result["change_type"] == "create"
+    assert result["paragraphs_written"] >= 4
+
+    from docx import Document
+
+    doc = Document(tmp_path / "step-summary.docx")
+    text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    assert "第 0 步：封面与目录信息摘要" in text
+    assert "Larissa Buchholz" in text
+    assert "**" not in text
+
+
+def test_create_file_docx_cleans_markdown_rule_and_bold_markers(tmp_path, monkeypatch):
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    result = json.loads(
+        task_tools.create_file(
+            "clean-summary.docx",
+            "# 当前页窗摘要（第 4-6 页）\n---\n**文档识别：** 年报目录。\n- 来源页码：第 4-6 页",
+        )
+    )
+
+    assert result["success"] is True
+
+    from docx import Document
+
+    doc = Document(tmp_path / "clean-summary.docx")
+    paragraphs = [paragraph.text for paragraph in doc.paragraphs]
+    text = "\n".join(paragraphs)
+    assert "---" not in text
+    assert "**" not in text
+    assert "文档识别：" in text
+    assert paragraphs[0] == "当前页窗摘要（第 4-6 页）"
+
+
+def test_create_file_xlsx_emits_sheet_metrics_and_valid_workbook(tmp_path, monkeypatch):
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    result = json.loads(task_tools.create_file("analysis.xlsx", "指标,数值\n样本,42"))
+
+    assert result["success"] is True
+    assert result["operation"] == "write_sheet_data"
+    assert result["file_type"] == "xlsx"
+    assert result["rows_written"] == 2
+    assert result["columns_written"] == 2
+
+    import openpyxl
+
+    workbook = openpyxl.load_workbook(tmp_path / "analysis.xlsx")
+    try:
+        sheet = workbook.active
+        assert sheet.cell(row=1, column=1).value == "指标"
+        assert sheet.cell(row=2, column=2).value == "42"
+    finally:
+        workbook.close()
+
+
+def test_create_file_pptx_emits_slide_metrics_and_valid_deck(tmp_path, monkeypatch):
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    result = json.loads(task_tools.create_file("deck.pptx", "# 汇报标题\n- 关键发现\n- 后续行动"))
+
+    assert result["success"] is True
+    assert result["operation"] == "add_pptx_slides"
+    assert result["file_type"] == "pptx"
+    assert result["slides_added"] >= 1
+
+    from pptx import Presentation
+
+    presentation = Presentation(tmp_path / "deck.pptx")
+    assert len(presentation.slides) >= 1
+
+
 def test_verify_task_completion_uses_structured_docx_table_metadata():
     from app.core.agent.task_tools import verify_task_completion
 
@@ -181,6 +275,36 @@ def test_verify_task_completion_matches_workspace_relative_target_to_absolute_ch
 
     assert result["completed"] is True
     assert "文件已成功修改：notes.txt" in result["summary"]
+
+
+def test_task_file_sandbox_staging_sanitizes_invalid_display_names(tmp_path):
+    from app.core.agent.task_tools import (
+        _prepend_task_file_context,
+        _stage_task_files_for_sandbox,
+    )
+
+    source = tmp_path / "source.xlsx"
+    source.write_text("demo", encoding="utf-8")
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+
+    staged = _stage_task_files_for_sandbox(
+        [
+            {
+                "display_name": "????-financial model.xlsx",
+                "source_path": str(source),
+                "source_fingerprint_initial": {},
+            }
+        ],
+        str(sandbox),
+    )
+    preamble = _prepend_task_file_context("print('ok')", staged)
+
+    assert staged[0]["staged_name"] == "____-financial model.xlsx"
+    assert "?" not in staged[0]["staged_path"]
+    assert (sandbox / "____-financial model.xlsx").exists()
+    assert '"????-financial model.xlsx"' in preamble
+    assert "____-financial model.xlsx" in preamble
 
 
 def test_annotate_file_returns_standard_file_change_payload(tmp_path, monkeypatch):

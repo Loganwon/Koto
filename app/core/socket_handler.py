@@ -121,7 +121,7 @@ def register_socket_events(socketio):
         if not prompt:
             return
 
-        # ── Agent Loop path (OpenClaw-inspired unified agent) ─────────
+        # ── Agent Loop path (unified agent) ─────────
         _use_agent_loop = data.get("_use_agent_loop", True)
         if not _use_agent_loop:
             try:
@@ -338,11 +338,11 @@ _ONLINE_DOC_MODELS = [
 
 
 def _pick_online_model() -> str:
-    """直接使用 MODEL_MAP[CHAT]，保持与 Koto 主体一致；若取不到则用首选。"""
+    """Use the current CHAT model when available; otherwise use the preferred fallback."""
     try:
-        from web.app import MODEL_MAP  # type: ignore
+        from web.runtime_context import get_model_id
 
-        m = MODEL_MAP.get("CHAT", "")
+        m = get_model_id("CHAT")
         if m:
             return m
     except Exception:
@@ -353,8 +353,14 @@ def _pick_online_model() -> str:
 def _get_provider():
     """Return the configured online LLMProvider."""
     from app.core.llm.provider_factory import get_llm_provider
+    from app.core.llm.model_selection import get_provider_for_model_mode
 
-    return get_llm_provider(provider="gemini", allow_local_fallback=False)
+    model = _pick_online_model()
+    return get_llm_provider(
+        provider=get_provider_for_model_mode("cloud"),
+        model=model,
+        allow_local_fallback=False,
+    )
 
 
 # Delegate to shared implementations – kept as module-level aliases so any
@@ -777,7 +783,7 @@ def _get_session_queue():
 
 
 # ══════════════════════════════════════════════════════════════
-# DocAgent Integration — OpenClaw-style document processing
+# DocAgent Integration — document processing
 # ══════════════════════════════════════════════════════════════
 
 def _run_doc_agent(socketio, sid, data: dict) -> None:

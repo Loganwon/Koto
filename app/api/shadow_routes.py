@@ -273,8 +273,9 @@ def shadow_tick():
         llm_fn = None
         try:
             from google.genai import types as _types
+            from web.runtime_context import get_client_proxy
 
-            from web.app import client
+            client = get_client_proxy()
 
             def _llm(prompt: str) -> str:
                 resp = client.models.generate_content(
