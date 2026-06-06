@@ -197,6 +197,7 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
         content = (resp.json().get("message", {}) or {}).get("content", "") or ""
         # Strip <think>...</think> blocks (qwen3 thinking mode output)
         import re as _re
+
         content = _re.sub(r"<think>.*?</think>", "", content, flags=_re.DOTALL).strip()
         return (content if content else None), model_name
 
@@ -549,12 +550,16 @@ def chat():
     history = data.get("history") or _load_history(session_id)
     model_id = data.get("model", "gemini-2.5-flash")
     # 支持前端发送的 locked_model 或 model='local'，用于本地优先模式
-    locked_model = data.get("locked_model") or ("local" if model_id == "local" else "auto")
+    locked_model = data.get("locked_model") or (
+        "local" if model_id == "local" else "auto"
+    )
     _user_chose_local = locked_model == "local"
     skill_id = data.get("skill_id")  # v2: 关联的 Skill ID
     task_type = data.get("task_type")  # v2: 任务分类
     context_files = data.get("context_files") or []  # @文件 激活的上下文文件路径列表
-    file_context = data.get("file_context")  # P0: 文件助手上下文 {file_id, file_type, file_path, open_tabs[]}
+    file_context = data.get(
+        "file_context"
+    )  # P0: 文件助手上下文 {file_id, file_type, file_path, open_tabs[]}
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
@@ -634,7 +639,9 @@ def chat():
 
     # ── P2/Phase3: Bootstrap 文件注入 (KOTO.md + TOOLS_GUIDE.md) ──────────
     try:
-        _ws_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "workspace")
+        _ws_root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "workspace"
+        )
         _bootstrap_max = 4000  # 最大注入字符数（防 token 爆炸）
         _bootstrap_parts = []
         for _bfname in ("KOTO.md", "TOOLS_GUIDE.md"):
@@ -645,13 +652,19 @@ def chat():
                         _bcontent = _bf.read(_bootstrap_max)
                     if _bcontent.strip():
                         _bootstrap_parts.append(f"【{_bfname}】\n{_bcontent}")
-                        logger.debug("[chat] Bootstrap 注入: %s (%d chars)", _bfname, len(_bcontent))
+                        logger.debug(
+                            "[chat] Bootstrap 注入: %s (%d chars)",
+                            _bfname,
+                            len(_bcontent),
+                        )
                 except Exception as _be:
                     logger.debug("[chat] Bootstrap 读取失败 %s: %s", _bfname, _be)
         if _bootstrap_parts:
             _bootstrap_block = "\n\n---\n\n".join(_bootstrap_parts)
             _system_context = (
-                (_bootstrap_block + "\n\n" + _system_context) if _system_context else _bootstrap_block
+                (_bootstrap_block + "\n\n" + _system_context)
+                if _system_context
+                else _bootstrap_block
             )
     except Exception as _bs_err:
         logger.debug("[chat] Bootstrap 注入跳过: %s", _bs_err)
@@ -665,7 +678,9 @@ def chat():
             _fc_parts.append(f"当前打开文件: {_fc_file} (类型: {_fc_type})")
         _fc_tabs = file_context.get("open_tabs") or []
         if _fc_tabs:
-            _fc_parts.append(f"工作区打开的标签页: {', '.join(str(t) for t in _fc_tabs[:10])}")
+            _fc_parts.append(
+                f"工作区打开的标签页: {', '.join(str(t) for t in _fc_tabs[:10])}"
+            )
         _fc_selection = file_context.get("selection", "")
         if _fc_selection:
             _fc_parts.append(f"用户选中的文本:\n{str(_fc_selection)[:2000]}")
@@ -787,7 +802,9 @@ def chat():
                     validation_action = val.action
                     if val.is_blocked:
                         # Disabled — log only, pass through original text
-                        logger.warning(f"[chat] 🚫 输出检测到问题（已忽略拦截）: {val.reasons}")
+                        logger.warning(
+                            f"[chat] 🚫 输出检测到问题（已忽略拦截）: {val.reasons}"
+                        )
                         validated_answer = final_answer
                     elif val.needs_retry and not used_local_fallback:
                         # 本地备用回复不触发重试（本地模型重试无意义）
@@ -966,9 +983,13 @@ def chat():
                             logger.debug("[chat] PII 还原失败: %s", _pr_err)
                     _lm = _local_mod or "本地模型"
                     # Only show "cloud unavailable" prefix for auto-fallback, not user-chosen local
-                    _display = _local_ans if _user_chose_local else (
-                        f"🔄 **[本地模型回复]** 云端服务不可用，"
-                        f"以下由本地 AI（`{_lm}`）提供：\n\n{_local_ans}"
+                    _display = (
+                        _local_ans
+                        if _user_chose_local
+                        else (
+                            f"🔄 **[本地模型回复]** 云端服务不可用，"
+                            f"以下由本地 AI（`{_lm}`）提供：\n\n{_local_ans}"
+                        )
                     )
                     _lf_payload = {
                         "id": f"task_{int(time.time() * 1000)}",
@@ -1200,7 +1221,9 @@ def process_stream_compat():
                     validation_action = val_result.action
                     if validation_action == "BLOCK":
                         # Disabled — log only, pass through original text
-                        logger.warning(f"[process-stream] 🚫 输出检测到问题（已忽略拦截）: {val_result.reasons}")
+                        logger.warning(
+                            f"[process-stream] 🚫 输出检测到问题（已忽略拦截）: {val_result.reasons}"
+                        )
                     elif validation_action == "RETRY" and not used_local_fallback:
                         logger.warning(
                             f"[process-stream] ⟳ 输出质量不合格，触发重试: {val_result.reasons}"
@@ -1435,18 +1458,21 @@ def agent_resume():
 
     try:
         import json as _json
+
         state = _json.loads(resume_token)
         # Reconstruct the pipeline from executed + remaining steps
-        from app.core.skills.skill_pipeline import SkillPipeline, PipelineStep
+        from app.core.skills.skill_pipeline import PipelineStep, SkillPipeline
 
         # The token is self-contained — we re-run from resume_idx
         # For now, return success acknowledgement; full re-execution
         # requires the pipeline definition which the caller should cache.
-        return jsonify({
-            "success": True,
-            "result": f"Pipeline resumed from step {state.get('resume_idx', '?')}",
-            "status": "resumed",
-        })
+        return jsonify(
+            {
+                "success": True,
+                "result": f"Pipeline resumed from step {state.get('resume_idx', '?')}",
+                "status": "resumed",
+            }
+        )
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 

@@ -752,8 +752,7 @@ class ModelManager:
                 continue
             if caps.get("interactions_only", False) or is_interactions_only_model(preferred_id):
                 continue
-            if score_model_for_task(caps, task) >= 0:
-                return preferred_id
+            return preferred_id
 
         best_id = None
         best_score = -1.0

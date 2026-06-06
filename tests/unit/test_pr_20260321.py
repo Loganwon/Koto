@@ -101,9 +101,7 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         mock_inst = MagicMock()
         with patch(
             "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
-        ), patch(
-            "app.core.llm.provider_factory.has_gemini_api_key", return_value=True
-        ):
+        ), patch("app.core.llm.provider_factory.has_gemini_api_key", return_value=True):
             result = get_llm_provider(provider="gemini")
         self.assertIs(result, mock_inst)
 
@@ -143,9 +141,7 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         mock_inst = MagicMock()
         with patch(
             "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
-        ), patch(
-            "app.core.llm.provider_factory.has_gemini_api_key", return_value=True
-        ):
+        ), patch("app.core.llm.provider_factory.has_gemini_api_key", return_value=True):
             result = get_llm_provider(model="gemini-3-flash-preview")
         self.assertIs(result, mock_inst)
 
@@ -197,14 +193,15 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
             os.environ.pop(k, None)
         with patch(
             "app.core.llm.provider_factory.has_gemini_api_key", return_value=False
-        ), patch(
-            "app.core.llm.provider_factory._load_ollama", return_value=mock_inst
-        ):
+        ), patch("app.core.llm.provider_factory._load_ollama", return_value=mock_inst):
             result = get_llm_provider(allow_local_fallback=True)
         self.assertIs(result, mock_inst)
 
     def test_auto_detect_loads_gemini_config_when_env_empty(self):
-        from app.core.llm.provider_factory import get_llm_provider, list_available_providers
+        from app.core.llm.provider_factory import (
+            get_llm_provider,
+            list_available_providers,
+        )
 
         mock_inst = MagicMock()
         with tempfile.TemporaryDirectory() as tmpdir:

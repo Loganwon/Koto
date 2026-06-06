@@ -13,10 +13,10 @@ from typing import Any
 
 from app.core.workflow_engine import (
     WorkflowExecutor,
+    sse_error,
     sse_output,
     sse_step_done,
     sse_step_start,
-    sse_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,9 @@ class ActionItemExtractor(WorkflowExecutor):
                 if text.strip():
                     fname = fp.split("\\")[-1].split("/")[-1]
                     all_texts.append(f"[文件: {fname}]\n{text}")
-            yield sse_step_done("parse_files", f"📂 文件解析完成，累计 {len(all_texts)} 段文本")
+            yield sse_step_done(
+                "parse_files", f"📂 文件解析完成，累计 {len(all_texts)} 段文本"
+            )
 
         if not all_texts:
             yield sse_error("请提供至少一段文本（texts）或一个文件（files）")
@@ -101,11 +103,17 @@ class ActionItemExtractor(WorkflowExecutor):
 
         yield sse_step_done(
             "extract",
-            f"🤖 提取到 {len(items)} 条待办事项" if items else "🤖 未找到明确的待办事项"
+            (
+                f"🤖 提取到 {len(items)} 条待办事项"
+                if items
+                else "🤖 未找到明确的待办事项"
+            ),
         )
 
         if not items:
-            yield sse_output("markdown", "# 待办事项汇总\n\n暂未发现明确的待办事项。", "提取结果")
+            yield sse_output(
+                "markdown", "# 待办事项汇总\n\n暂未发现明确的待办事项。", "提取结果"
+            )
             return
 
         # ── Step 3: 生成报告/表格 ─────────────────────────────────────────────
@@ -146,7 +154,9 @@ class ActionItemExtractor(WorkflowExecutor):
         for seg in segments:
             prompt = f"请从以下沟通记录中提取所有待办事项：\n\n{seg}"
             try:
-                result = self.llm_json(prompt, system=_EXTRACT_SYSTEM, model_mode=model_mode)
+                result = self.llm_json(
+                    prompt, system=_EXTRACT_SYSTEM, model_mode=model_mode
+                )
                 if isinstance(result, list):
                     all_items.extend(result)
                 elif isinstance(result, dict) and "items" in result:

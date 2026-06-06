@@ -218,7 +218,8 @@ class TestTrackedModels:
         real.generate_content.return_value = Mock(
             text="sdk_result", usage_metadata=None
         )
-        resp = tm.generate_content(model="gemini-3-flash-preview", contents="hi")
+        with patch.object(app, "_is_interactions_only", return_value=False):
+            resp = tm.generate_content(model="gemini-3-flash-preview", contents="hi")
         assert resp.text == "sdk_result"
         real.generate_content.assert_called_once()
 

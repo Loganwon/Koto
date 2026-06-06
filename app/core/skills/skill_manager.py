@@ -1603,7 +1603,16 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "检测并修复文档格式问题：标题层级混乱、列表缩进不一致、段落间距异常",
         "intent_description": "用户需要整理文档格式、修复标题层级、统一列表缩进或段落间距时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["格式修复", "格式问题", "标题层级", "列表缩进", "段落间距", "格式整理", "排版问题", "格式不对"],
+        "trigger_keywords": [
+            "格式修复",
+            "格式问题",
+            "标题层级",
+            "列表缩进",
+            "段落间距",
+            "格式整理",
+            "排版问题",
+            "格式不对",
+        ],
         "prompt": (
             "\n\n## 🔧 文档专用：格式修复\n"
             "- 检查并修复标题层级问题（H1→H2→H3 的正确层次结构）\n"
@@ -1622,7 +1631,15 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "分析文档整体结构，建议章节重组、补充过渡段，提升逻辑流畅度",
         "intent_description": "用户需要改善文档的逻辑结构、章节顺序或寻找内容缺口时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["结构优化", "章节重组", "逻辑结构", "文档结构", "文章结构", "内容安排", "章节顺序"],
+        "trigger_keywords": [
+            "结构优化",
+            "章节重组",
+            "逻辑结构",
+            "文档结构",
+            "文章结构",
+            "内容安排",
+            "章节顺序",
+        ],
         "prompt": (
             "\n\n## 🏗️ 文档专用：结构优化\n"
             "- 先分析文档的整体逻辑流程（是否符合「问题→分析→结论」或「背景→内容→行动」等标准框架）\n"
@@ -1641,7 +1658,14 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "优化表格格式：补全表头、统一数据对齐、标记合并单元格建议",
         "intent_description": "用户需要整理表格、改善表格可读性或补充缺失的表头/列时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["表格优化", "表格格式", "补充表头", "表格整理", "表格美化", "数据对齐"],
+        "trigger_keywords": [
+            "表格优化",
+            "表格格式",
+            "补充表头",
+            "表格整理",
+            "表格美化",
+            "数据对齐",
+        ],
         "prompt": (
             "\n\n## 📋 文档专用：表格增强\n"
             "- 检查表格是否有清晰的表头行（第一行），没有则建议添加\n"
@@ -1661,7 +1685,15 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "根据目标场景匹配合适的语气：正式/轻松/学术/营销，并具体指出需要改写的句子",
         "intent_description": "用户需要调整文档语气、使内容更符合特定读者群体或使用场景时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["语气调整", "语气正式", "语气轻松", "学术语气", "营销语气", "改变语气", "调整风格"],
+        "trigger_keywords": [
+            "语气调整",
+            "语气正式",
+            "语气轻松",
+            "学术语气",
+            "营销语气",
+            "改变语气",
+            "调整风格",
+        ],
         "prompt": (
             "\n\n## 🎭 文档专用：语气调整\n"
             "- 识别当前文档语气（偏口语化、偏正式、偏学术等）\n"
@@ -1680,7 +1712,15 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "标记文档中的可疑数据、过时信息和未经引用的断言，提示用户核实",
         "intent_description": "用户需要校验文档中的数据准确性、检查引用是否完整或识别可能的错误信息时",
         "task_types": ["FILE_GEN", "RESEARCH"],
-        "trigger_keywords": ["事实核查", "数据准确", "验证数据", "检查引用", "核实信息", "数据核实", "信息校验"],
+        "trigger_keywords": [
+            "事实核查",
+            "数据准确",
+            "验证数据",
+            "检查引用",
+            "核实信息",
+            "数据核实",
+            "信息校验",
+        ],
         "prompt": (
             "\n\n## 🔍 文档专用：事实核查\n"
             "- 标注所有具体数字和百分比，提示用户自行核实来源\n"
@@ -1699,7 +1739,15 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "评估文章可读性，拆分过长句子，改被动语态为主动，消除冗词",
         "intent_description": "用户需要让文章更易读、改善阅读流畅度或简化复杂表述时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["可读性", "易读", "句子太长", "被动语态", "表达简洁", "语言简化", "表述清晰"],
+        "trigger_keywords": [
+            "可读性",
+            "易读",
+            "句子太长",
+            "被动语态",
+            "表达简洁",
+            "语言简化",
+            "表述清晰",
+        ],
         "prompt": (
             "\n\n## 👓 文档专用：可读性优化\n"
             "- 超过 35 个汉字的句子建议拆分为两句\n"
@@ -1718,7 +1766,15 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "检测文档中的重复段落和冗余表述，建议合并或删除",
         "intent_description": "用户需要精简文档、去除重复内容或将分散段落合并时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["内容去重", "重复内容", "冗余段落", "段落重复", "内容精简", "去除重复", "合并段落"],
+        "trigger_keywords": [
+            "内容去重",
+            "重复内容",
+            "冗余段落",
+            "段落重复",
+            "内容精简",
+            "去除重复",
+            "合并段落",
+        ],
         "prompt": (
             "\n\n## ✂️ 文档专用：内容去重\n"
             "- 识别语义相近的段落（意思重复、只是措辞不同），建议保留最完整的版本\n"
@@ -1738,7 +1794,16 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "检查合同和法律文书的条款完整性、高风险条款，并提示合规注意事项",
         "intent_description": "用户需要审阅合同、协议、法律文件，识别风险条款或缺失条款时",
         "task_types": ["FILE_GEN", "DOC_ANNOTATE"],
-        "trigger_keywords": ["法律审阅", "合同审阅", "法律文书", "条款审查", "风险条款", "法律风险", "合规检查", "合同条款"],
+        "trigger_keywords": [
+            "法律审阅",
+            "合同审阅",
+            "法律文书",
+            "条款审查",
+            "风险条款",
+            "法律风险",
+            "合规检查",
+            "合同条款",
+        ],
         "prompt": (
             "\n\n## ⚖️ 文档专用：法律文书审阅\n"
             "- 检查以下必要条款是否完整：主体信息、标的物/服务范围、金额与支付条款、"
@@ -1758,7 +1823,15 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "检查财务报告和表格的数据一致性、公式验证和注释完整性",
         "intent_description": "用户需要审核财务报告、会计表格、预算或财务模型时",
         "task_types": ["FILE_GEN", "DOC_ANNOTATE"],
-        "trigger_keywords": ["财务审阅", "财务报告", "数据一致性", "公式验证", "财务核查", "账目核对", "报表审查"],
+        "trigger_keywords": [
+            "财务审阅",
+            "财务报告",
+            "数据一致性",
+            "公式验证",
+            "财务核查",
+            "账目核对",
+            "报表审查",
+        ],
         "prompt": (
             "\n\n## 💰 文档专用：财务文档审阅\n"
             "- 检查各报表（利润表、资产负债表、现金流量表）内部数据是否一致\n"
@@ -1778,7 +1851,16 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "润色学术论文的摘要、引言、方法论章节，适配期刊投稿风格规范",
         "intent_description": "用户需要润色学术论文、优化论文结构或调整期刊投稿风格时",
         "task_types": ["FILE_GEN", "DOC_ANNOTATE"],
-        "trigger_keywords": ["学术论文", "论文精修", "期刊投稿", "论文润色", "学术规范", "论文结构", "摘要优化", "研究论文"],
+        "trigger_keywords": [
+            "学术论文",
+            "论文精修",
+            "期刊投稿",
+            "论文润色",
+            "学术规范",
+            "论文结构",
+            "摘要优化",
+            "研究论文",
+        ],
         "prompt": (
             "\n\n## 🎓 文档专用：学术论文精修\n"
             "- **摘要（Abstract）**：确保包含背景、目的、方法、结果、结论五要素，控制 150-250 词\n"
@@ -1798,7 +1880,16 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "使用 AIDA 框架优化营销文案，包括 CTA 按钮文字和受众语言匹配",
         "intent_description": "用户需要优化产品/服务的推广文案、广告语或销售页面内容时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["营销文案", "广告文案", "产品文案", "AIDA", "销售文案", "推广文案", "文案优化", "落地页"],
+        "trigger_keywords": [
+            "营销文案",
+            "广告文案",
+            "产品文案",
+            "AIDA",
+            "销售文案",
+            "推广文案",
+            "文案优化",
+            "落地页",
+        ],
         "prompt": (
             "\n\n## 📢 文档专用：营销文案\n"
             "- **AIDA 结构**：注意力(Attention)→兴趣(Interest)→欲望(Desire)→行动(Action)\n"
@@ -1819,7 +1910,16 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "诊断表格公式错误，推荐高效的 Excel/Python 公式替换方案（如 INDEX-MATCH）",
         "intent_description": "用户遇到 Excel 公式报错、需要推荐更好的公式写法或理解复杂公式时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["公式报错", "excel公式", "vlookup", "index match", "公式错误", "表格公式", "公式优化", "公式解释"],
+        "trigger_keywords": [
+            "公式报错",
+            "excel公式",
+            "vlookup",
+            "index match",
+            "公式错误",
+            "表格公式",
+            "公式优化",
+            "公式解释",
+        ],
         "prompt": (
             "\n\n## 🔢 文档专用：Excel 公式专家\n"
             "- 诊断公式错误：#REF!（引用失效）、#N/A（未找到）、#DIV/0!（除零）等\n"
@@ -1839,7 +1939,16 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "检测并处理表格中的空值、格式不统一、重复行和异常值",
         "intent_description": "用户需要清洗数据表格、处理空值或找出并标记异常值时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["数据清洗", "空值处理", "格式统一", "异常值", "重复行", "数据整理", "数据预处理", "清洗数据"],
+        "trigger_keywords": [
+            "数据清洗",
+            "空值处理",
+            "格式统一",
+            "异常值",
+            "重复行",
+            "数据整理",
+            "数据预处理",
+            "清洗数据",
+        ],
         "prompt": (
             "\n\n## 🧹 文档专用：数据清洗\n"
             "- **空值处理策略**：数值列建议中位数填充，类别列建议众数填充，时间列建议插值\n"
@@ -1859,7 +1968,15 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "根据数据维度和分析目标，建议最优的透视表（或 pandas groupby）结构",
         "intent_description": "用户需要对数据进行多维分析、建立透视表或理解数据聚合方式时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["透视表", "数据透视", "分维度分析", "groupby", "数据汇总", "多维分析", "pivot table"],
+        "trigger_keywords": [
+            "透视表",
+            "数据透视",
+            "分维度分析",
+            "groupby",
+            "数据汇总",
+            "多维分析",
+            "pivot table",
+        ],
         "prompt": (
             "\n\n## 🔄 文档专用：透视表顾问\n"
             "- 先分析数据维度：「谁（Who）/ 什么（What）/ 何时（When）/ 哪里（Where）」\n"
@@ -1879,7 +1996,16 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "优化 PPT 的故事线设计，确保每页只有一个核心观点，并建议视觉元素",
         "intent_description": "用户需要优化 PPT 逻辑、改善演示流程或让幻灯片更吸引人时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["ppt优化", "演示叙事", "幻灯片逻辑", "slide", "演讲稿", "ppt逻辑", "演示文稿", "幻灯片故事"],
+        "trigger_keywords": [
+            "ppt优化",
+            "演示叙事",
+            "幻灯片逻辑",
+            "slide",
+            "演讲稿",
+            "ppt逻辑",
+            "演示文稿",
+            "幻灯片故事",
+        ],
         "prompt": (
             "\n\n## 🎬 文档专用：演示叙事\n"
             "- **黄金法则**：每张幻灯片只传达一个核心观点，标题即结论\n"
@@ -1899,7 +2025,16 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "根据数据类型和分析目的，推荐最合适的图表类型和 PPT 布局",
         "intent_description": "用户需要将数据转换为幻灯片图表、选择合适的可视化形式时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["图表推荐", "可视化建议", "数据图表", "选图表", "chart type", "ppt图表", "幻灯片图表", "数据展示"],
+        "trigger_keywords": [
+            "图表推荐",
+            "可视化建议",
+            "数据图表",
+            "选图表",
+            "chart type",
+            "ppt图表",
+            "幻灯片图表",
+            "数据展示",
+        ],
         "prompt": (
             "\n\n## 📊 文档专用：数据可视化建议\n"
             "- **图表类型选择指南**：\n"
@@ -1924,14 +2059,37 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "从多个 PDF/Word/Excel 文件中批量提取字段，自动填入 Excel 模板，输出结构化汇总表",
         "intent_description": "用户需要把多份文件的关键信息提取到一张汇总表中时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["提取填报", "信息搬运", "批量提取", "字段提取", "填入模板", "抽取字段", "表单填写"],
+        "trigger_keywords": [
+            "提取填报",
+            "信息搬运",
+            "批量提取",
+            "字段提取",
+            "填入模板",
+            "抽取字段",
+            "表单填写",
+        ],
         "prompt": "",
         "enabled": False,
         "has_executor": True,
         "params_schema": {
-            "current_file": {"type": "file", "label": "主文件（模板）", "required": False, "accept": ".xlsx,.xls"},
-            "source_files": {"type": "file_list", "label": "数据源文件（PDF/Word/Excel）", "required": False, "accept": ".pdf,.doc,.docx,.xlsx,.xls"},
-            "instruction": {"type": "textarea", "label": "提取说明", "required": False, "placeholder": "例如：只提取金额、日期、公司名称字段"},
+            "current_file": {
+                "type": "file",
+                "label": "主文件（模板）",
+                "required": False,
+                "accept": ".xlsx,.xls",
+            },
+            "source_files": {
+                "type": "file_list",
+                "label": "数据源文件（PDF/Word/Excel）",
+                "required": False,
+                "accept": ".pdf,.doc,.docx,.xlsx,.xls",
+            },
+            "instruction": {
+                "type": "textarea",
+                "label": "提取说明",
+                "required": False,
+                "placeholder": "例如：只提取金额、日期、公司名称字段",
+            },
         },
     },
     {
@@ -1944,16 +2102,41 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户需要对比两份合同/协议/文档，识别差异、修订痕迹或防暗改时",
         "task_types": ["FILE_GEN"],
         "trigger_keywords": [
-            "合同比对", "防暗改", "扫描件对比", "条款比对", "文档对比", "比对审查",
-            "差异检测", "防篡改", "版本比对", "合同差异", "标红批注", "track changes"
+            "合同比对",
+            "防暗改",
+            "扫描件对比",
+            "条款比对",
+            "文档对比",
+            "比对审查",
+            "差异检测",
+            "防篡改",
+            "版本比对",
+            "合同差异",
+            "标红批注",
+            "track changes",
         ],
         "prompt": "",
         "enabled": False,
         "has_executor": True,
         "params_schema": {
-            "current_file": {"type": "file", "label": "基准文件（原始版本）", "required": False, "accept": ".doc,.docx,.pdf"},
-            "compare_file": {"type": "file", "label": "对比文件（修订版/扫描件）", "required": False, "accept": ".doc,.docx,.pdf"},
-            "instruction": {"type": "textarea", "label": "比对重点说明", "required": False, "placeholder": "例如：重点关注付款条款和违约责任部分"},
+            "current_file": {
+                "type": "file",
+                "label": "基准文件（原始版本）",
+                "required": False,
+                "accept": ".doc,.docx,.pdf",
+            },
+            "compare_file": {
+                "type": "file",
+                "label": "对比文件（修订版/扫描件）",
+                "required": False,
+                "accept": ".doc,.docx,.pdf",
+            },
+            "instruction": {
+                "type": "textarea",
+                "label": "比对重点说明",
+                "required": False,
+                "placeholder": "例如：重点关注付款条款和违约责任部分",
+            },
         },
     },
     {
@@ -1965,14 +2148,37 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "基于参考资料库，自动回答问卷/RFP/尽调表中的问题，标注信心度，支持批量导出",
         "intent_description": "用户需要根据已有资料自动填写问卷、RFP 或尽调问题时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["问卷填写", "rfp", "填问卷", "自动填答", "问题填写", "尽调问卷", "自动答题"],
+        "trigger_keywords": [
+            "问卷填写",
+            "rfp",
+            "填问卷",
+            "自动填答",
+            "问题填写",
+            "尽调问卷",
+            "自动答题",
+        ],
         "prompt": "",
         "enabled": False,
         "has_executor": True,
         "params_schema": {
-            "current_file": {"type": "file", "label": "问卷/RFP 文件", "required": False, "accept": ".doc,.docx,.pdf,.xlsx"},
-            "reference_files": {"type": "file_list", "label": "参考资料（公司介绍/过往资料等）", "required": False, "accept": ".doc,.docx,.pdf,.txt"},
-            "instruction": {"type": "textarea", "label": "补充背景信息", "required": False, "placeholder": "例如：公司成立于2010年，主营业务为…"},
+            "current_file": {
+                "type": "file",
+                "label": "问卷/RFP 文件",
+                "required": False,
+                "accept": ".doc,.docx,.pdf,.xlsx",
+            },
+            "reference_files": {
+                "type": "file_list",
+                "label": "参考资料（公司介绍/过往资料等）",
+                "required": False,
+                "accept": ".doc,.docx,.pdf,.txt",
+            },
+            "instruction": {
+                "type": "textarea",
+                "label": "补充背景信息",
+                "required": False,
+                "placeholder": "例如：公司成立于2010年，主营业务为…",
+            },
         },
     },
     {
@@ -1985,17 +2191,43 @@ BUILTIN_SKILLS: List[Dict] = [
         "intent_description": "用户需要从邮件、群聊或会议纪要中生成纪要、提炼决策或抽取待办时",
         "task_types": ["FILE_GEN"],
         "trigger_keywords": [
-            "待办提取", "行动项", "action item", "任务提取", "会议待办", "聊天记录待办",
-            "todo提取", "从聊天提取", "整理待办", "邮件摘要", "消息摘要", "沟通纪要",
-            "会议纪要", "邮件线程"
+            "待办提取",
+            "行动项",
+            "action item",
+            "任务提取",
+            "会议待办",
+            "聊天记录待办",
+            "todo提取",
+            "从聊天提取",
+            "整理待办",
+            "邮件摘要",
+            "消息摘要",
+            "沟通纪要",
+            "会议纪要",
+            "邮件线程",
         ],
         "prompt": "",
         "enabled": False,
         "has_executor": True,
         "params_schema": {
-            "current_file": {"type": "file", "label": "沟通记录主文件", "required": False, "accept": ".txt,.eml,.doc,.docx,.pdf,.md"},
-            "reference_files": {"type": "file_list", "label": "补充沟通文件（可选）", "required": False, "accept": ".txt,.eml,.doc,.docx,.pdf,.md"},
-            "instruction": {"type": "textarea", "label": "提取重点说明", "required": False, "placeholder": "例如：重点关注待办、负责人和关键决策"},
+            "current_file": {
+                "type": "file",
+                "label": "沟通记录主文件",
+                "required": False,
+                "accept": ".txt,.eml,.doc,.docx,.pdf,.md",
+            },
+            "reference_files": {
+                "type": "file_list",
+                "label": "补充沟通文件（可选）",
+                "required": False,
+                "accept": ".txt,.eml,.doc,.docx,.pdf,.md",
+            },
+            "instruction": {
+                "type": "textarea",
+                "label": "提取重点说明",
+                "required": False,
+                "placeholder": "例如：重点关注待办、负责人和关键决策",
+            },
         },
     },
     {
@@ -2007,22 +2239,40 @@ BUILTIN_SKILLS: List[Dict] = [
         "description": "用自然语言描述清洗规则，AI 自动生成 pandas 代码在沙箱中执行，输出清洗后数据及变更对比",
         "intent_description": "用户需要清洗 Excel/CSV 中的格式问题、日期统一、脏数据处理时",
         "task_types": ["FILE_GEN"],
-        "trigger_keywords": ["数据清洗", "格式清洗", "脏数据", "日期格式统一", "数据标准化", "清洗数据", "数据整理"],
+        "trigger_keywords": [
+            "数据清洗",
+            "格式清洗",
+            "脏数据",
+            "日期格式统一",
+            "数据标准化",
+            "清洗数据",
+            "数据整理",
+        ],
         "prompt": "",
         "enabled": False,
         "has_executor": True,
         "params_schema": {
-            "current_file": {"type": "file", "label": "待清洗数据文件（Excel/CSV）", "required": False, "accept": ".xlsx,.xls,.csv"},
-            "instruction": {"type": "textarea", "label": "清洗规则描述", "required": True, "placeholder": "例如：把日期列统一为 YYYY-MM-DD 格式，删除空行，手机号脱敏"},
+            "current_file": {
+                "type": "file",
+                "label": "待清洗数据文件（Excel/CSV）",
+                "required": False,
+                "accept": ".xlsx,.xls,.csv",
+            },
+            "instruction": {
+                "type": "textarea",
+                "label": "清洗规则描述",
+                "required": True,
+                "placeholder": "例如：把日期列统一为 YYYY-MM-DD 格式，删除空行，手机号脱敏",
+            },
         },
     },
 ]
 
 # Skill nature labels (for display/documentation only)
 SKILL_NATURE_LABELS = {
-    "model_hint": "💬 模型行为调整",    # 通过 prompt 激活模型原生能力
+    "model_hint": "💬 模型行为调整",  # 通过 prompt 激活模型原生能力
     "domain_skill": "🔧 领域专项技能",  # 注入领域知识/专有模板
-    "system": "⚙️ 系统功能",            # 记忆/工具等系统级功能
+    "system": "⚙️ 系统功能",  # 记忆/工具等系统级功能
 }
 
 ALL_TASK_TYPES = [
@@ -2446,7 +2696,9 @@ class SkillManager:
     _FILE_ASSISTANT_COVERS = {"CHAT", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH"}
 
     @classmethod
-    def _task_type_matches(cls, task_type: Optional[str], applicable_types: list) -> bool:
+    def _task_type_matches(
+        cls, task_type: Optional[str], applicable_types: list
+    ) -> bool:
         """Return True if the skill should fire for the given task_type."""
         if not applicable_types or not task_type:
             return True

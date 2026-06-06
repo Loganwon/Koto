@@ -207,6 +207,7 @@ class TestFileOpenEndpoint:
             opened.append(path)
 
         import os as _os
+
         monkeypatch.setattr(_os, "startfile", fake_startfile, raising=False)
 
         resp = full_client.post(
@@ -274,62 +275,67 @@ class TestFilehubJSSource:
     @pytest.fixture(scope="class")
     def app_js(self):
         from pathlib import Path
-        js_path = Path(__file__).resolve().parents[2] / "web" / "static" / "js" / "app.js"
+
+        js_path = (
+            Path(__file__).resolve().parents[2] / "web" / "static" / "js" / "app.js"
+        )
         return js_path.read_text(encoding="utf-8", errors="replace")
 
     def test_fh_render_uses_amp_quot_not_raw_json_stringify(self, app_js):
         """_fhRenderFiles must not embed raw JSON.stringify() inside onclick attrs."""
         # After the fix, onclick values use pathArg / copyArg variables (with &quot;)
-        assert 'replace(/"/g, \'&quot;\')' in app_js, (
-            "_fhRenderFiles: pathArg must apply .replace(/\"/g, '&quot;') encoding"
-        )
+        assert (
+            "replace(/\"/g, '&quot;')" in app_js
+        ), "_fhRenderFiles: pathArg must apply .replace(/\"/g, '&quot;') encoding"
 
     def test_fh_render_no_bare_json_stringify_in_onclick(self, app_js):
         """There must be no raw JSON.stringify inside an onclick template literal."""
         import re
+
         # Pattern: onclick="...${JSON.stringify(... which breaks HTML attr parsing
         bad = re.search(
             r'onclick="\$\{[^}]*JSON\.stringify',
             app_js,
         )
-        assert bad is None, (
-            f"Found unescaped JSON.stringify in onclick attribute at: {bad.group()}"
-        )
+        assert (
+            bad is None
+        ), f"Found unescaped JSON.stringify in onclick attribute at: {bad.group()}"
 
     def test_filehub_modal_id_lowercase(self, app_js):
         """_fhOpenInAssistant must reference 'filehubModal' (lowercase h), not 'fileHubModal'."""
-        assert "'filehubModal'" in app_js, (
-            "_fhOpenInAssistant must use getElementById('filehubModal')"
-        )
-        assert "'fileHubModal'" not in app_js, (
-            "Found wrong ID 'fileHubModal' — should be 'filehubModal'"
-        )
+        assert (
+            "'filehubModal'" in app_js
+        ), "_fhOpenInAssistant must use getElementById('filehubModal')"
+        assert (
+            "'fileHubModal'" not in app_js
+        ), "Found wrong ID 'fileHubModal' — should be 'filehubModal'"
 
     def test_open_in_assistant_uses_wa_open(self, app_js):
         """_fhOpenInAssistant must use WA.openInMainView / WA.openRecentFile, not the Univer editor API."""
-        assert "WA.openInMainView" in app_js, (
-            "_fhOpenInAssistant must call WA.openInMainView()"
-        )
-        assert "WA.openRecentFile" in app_js, (
-            "_fhOpenInAssistant must call WA.openRecentFile(path)"
-        )
+        assert (
+            "WA.openInMainView" in app_js
+        ), "_fhOpenInAssistant must call WA.openInMainView()"
+        assert (
+            "WA.openRecentFile" in app_js
+        ), "_fhOpenInAssistant must call WA.openRecentFile(path)"
 
     def test_open_in_assistant_no_univer_import(self, app_js):
         """_fhOpenInAssistant must NOT call the Univer editor import API."""
         # Check that the import_path fetch call is gone from _fhOpenInAssistant
         import re
+
         # Look for the old pattern: fetch('/api/editor/docs/import_path' inside _fhOpenInAssistant
         # We search the function body specifically
         fn_match = re.search(
-            r'async function _fhOpenInAssistant\(path\)\s*\{(.+?)\n\}',
+            r"async function _fhOpenInAssistant\(path\)\s*\{(.+?)\n\}",
             app_js,
             re.DOTALL,
         )
         assert fn_match, "_fhOpenInAssistant function not found in app.js"
         fn_body = fn_match.group(1)
-        assert "/api/editor/docs/import_path" not in fn_body, (
-            "_fhOpenInAssistant must not call Univer editor import API"
-        )
+        assert (
+            "/api/editor/docs/import_path" not in fn_body
+        ), "_fhOpenInAssistant must not call Univer editor import API"
 
 
 class TestFilehubHTMLSource:
@@ -338,20 +344,24 @@ class TestFilehubHTMLSource:
     @pytest.fixture(scope="class")
     def index_html(self):
         from pathlib import Path
-        html_path = Path(__file__).resolve().parents[2] / "web" / "templates" / "index.html"
+
+        html_path = (
+            Path(__file__).resolve().parents[2] / "web" / "templates" / "index.html"
+        )
         return html_path.read_text(encoding="utf-8", errors="replace")
 
     def test_modal_has_fixed_height(self, index_html):
         """fh-app must use height: to stay consistent between tabs."""
         import re
+
         # New v2 design uses .fh-app with height in CSS
         fh_app_rule = re.search(
-            r'\.fh-app\s*\{([^}]*)\}',
+            r"\.fh-app\s*\{([^}]*)\}",
             index_html,
         )
         assert fh_app_rule, "Could not find .fh-app CSS rule in index.html"
         fh_app_style = fh_app_rule.group(1)
-        assert 'height:' in fh_app_style or 'height: ' in fh_app_style, (
+        assert "height:" in fh_app_style or "height: " in fh_app_style, (
             ".fh-app must have an explicit 'height:' property to keep the panel "
             "a consistent size when switching tabs"
         )
@@ -359,20 +369,23 @@ class TestFilehubHTMLSource:
     def test_filelist_no_conflicting_max_height(self, index_html):
         """#fhFileList CSS must NOT have max-height (conflicts with flex:1 expansion)."""
         import re
+
         # Find the style block rule for #fhFileList
         fhlist_rule = re.search(
-            r'#fhFileList\s*\{([^}]*)\}',
+            r"#fhFileList\s*\{([^}]*)\}",
             index_html,
         )
-        assert fhlist_rule, "#fhFileList style rule not found in index.html <style> block"
+        assert (
+            fhlist_rule
+        ), "#fhFileList style rule not found in index.html <style> block"
         rule_body = fhlist_rule.group(1)
-        assert 'max-height' not in rule_body, (
+        assert "max-height" not in rule_body, (
             "#fhFileList must not set max-height — it conflicts with flex:1 and "
             "prevents the modal from filling its fixed height"
         )
 
     def test_modal_overlay_uses_flex_centering(self, index_html):
         """modal-overlay CSS must use flexbox centering (align-items + justify-content center)."""
-        assert 'align-items: center' in index_html or 'align-items:center' in index_html, (
-            "modal-overlay must have align-items:center for vertical centering"
-        )
+        assert (
+            "align-items: center" in index_html or "align-items:center" in index_html
+        ), "modal-overlay must have align-items:center for vertical centering"

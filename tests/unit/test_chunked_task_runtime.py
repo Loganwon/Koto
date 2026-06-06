@@ -12,7 +12,7 @@ def _parse_sse(events):
 
 
 def test_chunked_runtime_emits_phase_plan_progress_and_result(monkeypatch):
-    from app.core.agent.chunked_task_runtime import ChunkUnit, ChunkedTaskRuntime
+    from app.core.agent.chunked_task_runtime import ChunkedTaskRuntime, ChunkUnit
 
     runtime = ChunkedTaskRuntime(model_id="gemini-2.5-pro")
 
@@ -24,7 +24,9 @@ def test_chunked_runtime_emits_phase_plan_progress_and_result(monkeypatch):
             ChunkUnit("chunk_2", 2, "第 2/2 块", "第二块正文"),
         ],
     )
-    monkeypatch.setattr(runtime._task_agent, "_get_provider", lambda options=None: object())
+    monkeypatch.setattr(
+        runtime._task_agent, "_get_provider", lambda options=None: object()
+    )
     monkeypatch.setattr(
         runtime,
         "_process_chunk",

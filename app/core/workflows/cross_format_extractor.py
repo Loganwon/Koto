@@ -14,12 +14,12 @@ from typing import Any
 
 from app.core.workflow_engine import (
     WorkflowExecutor,
+    sse_error,
+    sse_output,
     sse_progress,
+    sse_status,
     sse_step_done,
     sse_step_start,
-    sse_output,
-    sse_status,
-    sse_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,13 +59,20 @@ class CrossFormatExtractor(WorkflowExecutor):
         if template_file and not fields:
             fields = self._extract_template_fields(template_file)
             if not fields:
-                yield sse_error("无法从模板 Excel 中识别到任何列标题，请手动指定 fields 参数")
+                yield sse_error(
+                    "无法从模板 Excel 中识别到任何列标题，请手动指定 fields 参数"
+                )
                 return
         if not fields:
-            yield sse_error("请提供要提取的字段列表（fields）或一个包含列标题的 Excel 模板")
+            yield sse_error(
+                "请提供要提取的字段列表（fields）或一个包含列标题的 Excel 模板"
+            )
             return
 
-        yield sse_step_done("parse_template", f"📋 识别到 {len(fields)} 个字段: {', '.join(fields[:8])}{'…' if len(fields)>8 else ''}")
+        yield sse_step_done(
+            "parse_template",
+            f"📋 识别到 {len(fields)} 个字段: {', '.join(fields[:8])}{'…' if len(fields)>8 else ''}",
+        )
 
         # ── Step 2: 逐文件解析 + LLM 提取 ────────────────────────────────────
         yield sse_step_start("extract_fields", f"🔍 处理 {len(source_files)} 个文档…")
@@ -104,6 +111,7 @@ class CrossFormatExtractor(WorkflowExecutor):
         """从 Excel 第一行提取列标题。"""
         try:
             from app.core.file.file_parser import parse_xlsx
+
             result = parse_xlsx(template_path, "")
             for sheet_id, sheet in result.get("sheets", {}).items():
                 cell_data = sheet.get("cellData", {})
@@ -117,7 +125,9 @@ class CrossFormatExtractor(WorkflowExecutor):
                     sorted_rows = sorted(cell_data.keys(), key=lambda x: int(x))
                     if sorted_rows:
                         row0 = cell_data.get(sorted_rows[0], {})
-                        logger.info(f"[CrossFormat] row0 为空，使用第 {sorted_rows[0]} 行作为表头")
+                        logger.info(
+                            f"[CrossFormat] row0 为空，使用第 {sorted_rows[0]} 行作为表头"
+                        )
                 if not row0:
                     continue
                 col_count = max((int(k) for k in row0.keys()), default=-1) + 1

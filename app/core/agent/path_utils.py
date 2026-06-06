@@ -99,5 +99,7 @@ def resolve_existing_path(
             matches.sort(key=lambda x: (len(Path(x).parts), len(x), x.lower()))
             return os.path.abspath(matches[0]), None
 
-    roots_desc = ", ".join(search_roots) if search_roots else os.path.abspath(os.getcwd())
+    roots_desc = (
+        ", ".join(search_roots) if search_roots else os.path.abspath(os.getcwd())
+    )
     return None, f"file not found: {user_path}; searched in: {roots_desc}"

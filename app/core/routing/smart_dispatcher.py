@@ -6,9 +6,9 @@ import time
 
 from app.core.routing.routing_config import (
     TASK_CORPUS,
+    TRIVIAL_EXCLUDE,
     TRIVIAL_GREETINGS,
     TRIVIAL_IDENTITY,
-    TRIVIAL_EXCLUDE,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,9 +49,9 @@ def _get_ai_router():
     return AIRouter
 
 
-from app.core.routing.rule_router import RuleRouter  # noqa: E402
-from app.core.routing.ml_router import MLRouter  # noqa: E402
 from app.core.routing.fallback_router import FallbackRouter  # noqa: E402
+from app.core.routing.ml_router import MLRouter  # noqa: E402
+from app.core.routing.rule_router import RuleRouter  # noqa: E402
 
 
 class SmartDispatcher:
@@ -1598,9 +1598,7 @@ class SmartDispatcher:
 
         # 多步复杂任务 → Pro 模型确保执行质量
         if task_type == "MULTI_STEP":
-            return MODEL_MAP.get(
-                "MULTI_STEP", MODEL_MAP.get("CODER", "gemini-2.5-pro")
-            )
+            return MODEL_MAP.get("MULTI_STEP", MODEL_MAP.get("CODER", "gemini-2.5-pro"))
 
         # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
         if task_type == "CHAT":

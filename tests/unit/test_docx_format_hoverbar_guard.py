@@ -1,5 +1,5 @@
-from pathlib import Path
 import re
+from pathlib import Path
 
 
 def _repo_root() -> Path:
@@ -50,24 +50,34 @@ def test_docx_paragraph_extension_preserves_block_font_weight_and_style():
 
 
 def test_docx_toggle_bold_and_italic_can_clear_block_level_text_styles():
-    editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
-        encoding="utf-8"
-    )
+    editor_js = (
+        _repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js"
+    ).read_text(encoding="utf-8")
 
     assert "function _isDocxBoldValue(value)" in editor_js
     assert "function _isDocxItalicValue(value)" in editor_js
-    assert "this._selectionHasBlockTextStyle('fontWeight', _isDocxBoldValue)" in editor_js
+    assert (
+        "this._selectionHasBlockTextStyle('fontWeight', _isDocxBoldValue)" in editor_js
+    )
     assert "this._setSelectionBlockTextStyle('fontWeight', null)" in editor_js
-    assert "this._selectionHasBlockTextStyle('fontStyle', _isDocxItalicValue)" in editor_js
+    assert (
+        "this._selectionHasBlockTextStyle('fontStyle', _isDocxItalicValue)" in editor_js
+    )
     assert "this._setSelectionBlockTextStyle('fontStyle', null)" in editor_js
-    assert "this._setCellSelectionBlockAttr('fontWeight', null, { defaultValue: null })" in editor_js
-    assert "this._setCellSelectionBlockAttr('fontStyle', null, { defaultValue: null })" in editor_js
+    assert (
+        "this._setCellSelectionBlockAttr('fontWeight', null, { defaultValue: null })"
+        in editor_js
+    )
+    assert (
+        "this._setCellSelectionBlockAttr('fontStyle', null, { defaultValue: null })"
+        in editor_js
+    )
 
 
 def test_docx_workspace_shell_uses_shared_tiptap_mount_and_no_slate_selection_fallback():
-    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    shell_js = (
+        _repo_root() / "web" / "static" / "js" / "workspace-assistant.js"
+    ).read_text(encoding="utf-8")
 
     assert "async function _mountDocxEditor(tab, html, docxData, headings)" in shell_js
     assert shell_js.count("new KotoDocxEditorLib.KotoTipTapEditor();") == 1
@@ -77,12 +87,12 @@ def test_docx_workspace_shell_uses_shared_tiptap_mount_and_no_slate_selection_fa
 
 
 def test_docx_font_size_toolbars_use_point_units_and_numeric_sync():
-    editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
-        encoding="utf-8"
-    )
-    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    editor_js = (
+        _repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js"
+    ).read_text(encoding="utf-8")
+    shell_js = (
+        _repo_root() / "web" / "static" / "js" / "workspace-assistant.js"
+    ).read_text(encoding="utf-8")
 
     assert '<option value="10pt">10</option>' in editor_js
     assert '<option value="72pt">72</option>' in editor_js
@@ -91,12 +101,12 @@ def test_docx_font_size_toolbars_use_point_units_and_numeric_sync():
 
 
 def test_docx_font_family_toolbars_normalize_aliases_and_heading_styles():
-    editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
-        encoding="utf-8"
-    )
-    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    editor_js = (
+        _repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js"
+    ).read_text(encoding="utf-8")
+    shell_js = (
+        _repo_root() / "web" / "static" / "js" / "workspace-assistant.js"
+    ).read_text(encoding="utf-8")
     index_html = (_repo_root() / "web" / "templates" / "index.html").read_text(
         encoding="utf-8"
     )
@@ -106,8 +116,14 @@ def test_docx_font_family_toolbars_normalize_aliases_and_heading_styles():
     assert '<option value="STZhongsong">华文中宋</option>' in editor_js
     assert "function _getDocxBlockTextStyleValue(ed, attrName)" in editor_js
     assert "_getDocxFontFamilyOptionValue(ff, fontFamilySel.options)" in editor_js
-    assert "const nextValue = cmd === 'setFontFamily' ? _resolveDocxFontFamily(value)" in shell_js
-    assert "const fontName  = attrs.fontFamily || _getDocxBlockTextStyleValue(ed, 'fontFamily') || '';" in shell_js
+    assert (
+        "const nextValue = cmd === 'setFontFamily' ? _resolveDocxFontFamily(value)"
+        in shell_js
+    )
+    assert (
+        "const fontName  = attrs.fontFamily || _getDocxBlockTextStyleValue(ed, 'fontFamily') || '';"
+        in shell_js
+    )
     assert "_getDocxFontDisplayName(fontNameValue)" in shell_js
     assert '<option value="SimSun">宋体</option>' in index_html
     assert '<option value="STKaiti">华文楷体</option>' in index_html
@@ -141,10 +157,10 @@ def test_docx_header_footer_overlay_footer_alignment_and_marker_hooks_exist():
         encoding="utf-8"
     )
     assert '.koto-hdrftr-overlay[data-slot-type="footer"]' in css
-    assert 'justify-content: flex-end' in css
-    assert '--koto-docx-marker-left' in css
-    assert '--koto-docx-marker-left' in ext_js
-    assert '_notifyHdrFtrSelectionChanged' in ext_js
+    assert "justify-content: flex-end" in css
+    assert "--koto-docx-marker-left" in css
+    assert "--koto-docx-marker-left" in ext_js
+    assert "_notifyHdrFtrSelectionChanged" in ext_js
 
 
 def test_docx_page_break_markers_track_content_edges_and_footer_stays_bottom_aligned():
@@ -197,9 +213,9 @@ def test_docx_first_page_header_markers_visible_and_header_overlay_has_no_outlin
     css = (_repo_root() / "web" / "static" / "css" / "workspace.css").read_text(
         encoding="utf-8"
     )
-    editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
-        encoding="utf-8"
-    )
+    editor_js = (
+        _repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js"
+    ).read_text(encoding="utf-8")
     ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
         encoding="utf-8"
     )
@@ -213,8 +229,14 @@ def test_docx_first_page_header_markers_visible_and_header_overlay_has_no_outlin
     assert header_markers and "bottom: 12px;" in header_markers.group(1)
     assert header_markers and "display: block" in header_markers.group(1)
     assert "background: #ffffff;" in css
-    assert "#wa-docx-editor .koto-page-header-first::before { left: var(--koto-docx-marker-left, 84px); border-right: 1px solid #c8ccd8; border-bottom: 1px solid #c8ccd8; }" in css
-    assert "#wa-docx-editor .koto-page-header-first::after  { right: var(--koto-docx-marker-right, 84px); border-left: 1px solid #c8ccd8; border-bottom: 1px solid #c8ccd8; }" in css
+    assert (
+        "#wa-docx-editor .koto-page-header-first::before { left: var(--koto-docx-marker-left, 84px); border-right: 1px solid #c8ccd8; border-bottom: 1px solid #c8ccd8; }"
+        in css
+    )
+    assert (
+        "#wa-docx-editor .koto-page-header-first::after  { right: var(--koto-docx-marker-right, 84px); border-left: 1px solid #c8ccd8; border-bottom: 1px solid #c8ccd8; }"
+        in css
+    )
     assert re.search(
         r"dataset\.slotType = 'header';.*?overlay\.style\.cssText = '.*?outline:none;outline-offset:0;",
         editor_js,
@@ -311,8 +333,12 @@ def test_docx_typography_css_keeps_font_fallbacks_non_forcing():
     assert toc_block, "DOCX TOC css block not found"
     assert "font-family:" in editable_block.group(1)
     assert "font-family:" in pm_block.group(1)
-    assert "font-family:" in editable_block.group(1) and "!important" not in re.search(r"font-family:[^;]+;", editable_block.group(1)).group(0)
-    assert "font-family:" in pm_block.group(1) and "!important" not in re.search(r"font-family:[^;]+;", pm_block.group(1)).group(0)
+    assert "font-family:" in editable_block.group(1) and "!important" not in re.search(
+        r"font-family:[^;]+;", editable_block.group(1)
+    ).group(0)
+    assert "font-family:" in pm_block.group(1) and "!important" not in re.search(
+        r"font-family:[^;]+;", pm_block.group(1)
+    ).group(0)
     assert "font-size: 12pt !important" not in toc_block.group(1)
     assert "font-weight: 400 !important" not in toc_block.group(1)
 
