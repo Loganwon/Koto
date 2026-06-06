@@ -3,1647 +3,987 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koto (言) — 本地优先 AI 文件工作台</title>
-    <meta name="description" content="Koto 是一款本地优先的 AI 文件工作台，支持 Word、PPT、Excel 文件内联 AI 编辑，内置 90+ AI 技能和工作流，支持文档代理、任务规划、代码沙箱、知识库 RAG、语音交互，本地 + 云端双模式，Gemini 或 Ollama 按需调用。">
+    <title>Koto AI 文件助手 - 下载与快速开始</title>
+    <meta name="description" content="Koto 是面向真实文件工作的 AI 文件助手，支持 Word、PPT、Excel、PDF、本地工作区、DeepSeek、Gemini、本地模型与模型下载器。">
     <style>
-            :root {
-            --bg-primary: #05080f;
-            --bg-secondary: #0b111d;
-            --bg-card: #0e1525;
-            --bg-tertiary: #111a2a;
-            --accent-primary: #10b981;
-            --accent-secondary: #34d399;
-            --accent-gradient: linear-gradient(135deg, #059669, #10b981);
-            --text-primary: #e8eefc;
-            --text-secondary: #8896b3;
-            --text-tertiary: #5a6a85;
-            --border-color: rgba(255,255,255,0.07);
-            --border-hover: rgba(16,185,129,0.3);
-            --radius-sm: 10px;
-            --radius-md: 14px;
-            --radius-lg: 18px;
-            --radius-xl: 24px;
-            --transition: all 0.25s ease;
-            --shadow-glow: 0 0 40px rgba(16,185,129,0.12);
-            --shadow-card: 0 4px 24px rgba(0,0,0,0.3);
+        :root {
+            --ink: #10141f;
+            --ink-soft: #30394a;
+            --muted: #667085;
+            --line: #d9dee7;
+            --line-strong: #c6ceda;
+            --paper: #f6f8fb;
+            --surface: #ffffff;
+            --surface-alt: #eef3f7;
+            --green: #0f9f73;
+            --green-dark: #087456;
+            --blue: #2563eb;
+            --yellow: #c78210;
+            --danger: #b42318;
+            --radius: 8px;
+            --shadow: 0 16px 44px rgba(18, 29, 48, 0.13);
+            --max: 1180px;
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            box-sizing: border-box;
+        }
 
-        html { scroll-behavior: smooth; }
+        html {
+            scroll-behavior: smooth;
+        }
 
         body {
-            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-            background: var(--bg-primary);
-            color: var(--text-primary);
-            min-height: 100vh;
-            overflow-x: hidden;
-            font-size: 17px;
+            margin: 0;
+            font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", "Microsoft YaHei", sans-serif;
+            color: var(--ink);
+            background: var(--paper);
             line-height: 1.6;
+            letter-spacing: 0;
             -webkit-font-smoothing: antialiased;
         }
 
-        /* ===== BACKGROUND ===== */
-        .bg-texture {
-            position: fixed; inset: 0; z-index: 0; pointer-events: none;
-            background:
-                radial-gradient(ellipse 70% 50% at 15% 15%, rgba(16,185,129,0.07) 0%, transparent 60%),
-                radial-gradient(ellipse 60% 50% at 85% 80%, rgba(52,211,153,0.05) 0%, transparent 60%);
-        }
-        .floating-orb {
-            position: fixed; border-radius: 50%; filter: blur(100px); pointer-events: none;
-            animation: float 22s ease-in-out infinite;
-        }
-        .floating-orb.orb-1 { width: 600px; height: 600px; top: -200px; left: -150px; background: rgba(16,185,129,0.09); opacity: 1; }
-        .floating-orb.orb-2 { width: 400px; height: 400px; bottom: -100px; right: -100px; background: rgba(52,211,153,0.07); opacity: 1; animation-delay: -11s; }
-        @keyframes float {
-            0%, 100% { transform: translate(0, 0); }
-            40% { transform: translate(40px, -40px); }
-            70% { transform: translate(-25px, 25px); }
+        a {
+            color: inherit;
         }
 
-        /* ===== NAV ===== */
-        .nav {
-            position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-            padding: 0 48px;
-            height: 68px;
-            display: flex; align-items: center; justify-content: space-between;
-            background: rgba(5,8,15,0.85); backdrop-filter: blur(24px);
-            border-bottom: 1px solid var(--border-color);
-        }
-        .nav-brand {
-            display: flex; align-items: center; gap: 12px;
-            font-size: 22px; font-weight: 700; letter-spacing: -0.3px;
-            text-decoration: none; color: var(--text-primary);
-        }
-        .nav-brand .logo {
-            width: 38px; height: 38px; border-radius: 10px;
-            background: var(--accent-gradient);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 18px; font-weight: 800; color: #05080f;
-            flex-shrink: 0;
-        }
-        .nav-links { display: flex; align-items: center; gap: 8px; }
-        .nav-links a {
-            color: var(--text-secondary); text-decoration: none;
-            font-size: 15px; padding: 6px 14px; border-radius: 8px;
-            transition: var(--transition);
-        }
-        .nav-links a:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
-
-        /* ===== BUTTONS ===== */
-        .btn {
-            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-            padding: 11px 26px; border-radius: var(--radius-sm);
-            font-size: 15px; font-weight: 600; cursor: pointer;
-            transition: var(--transition); border: none; text-decoration: none;
-            white-space: nowrap;
-        }
-        .btn-primary {
-            background: var(--accent-gradient); color: #05080f;
-            box-shadow: 0 4px 16px rgba(16,185,129,0.28);
-        }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(16,185,129,0.4); }
-        .btn-ghost {
-            background: transparent; color: var(--text-primary);
-            border: 1px solid var(--border-color);
-        }
-        .btn-ghost:hover { background: rgba(255,255,255,0.05); border-color: rgba(16,185,129,0.4); color: var(--accent-secondary); }
-        .btn-lg { padding: 15px 42px; font-size: 17px; border-radius: var(--radius-md); }
-
-        /* ===== SECTION STRUCTURE ===== */
-        .section-wrap {
-            position: relative; z-index: 1;
-            max-width: 1160px; margin: 0 auto;
-            padding: 110px 48px;
-        }
-        .section-label {
-            display: inline-flex; align-items: center; gap: 8px;
-            padding: 5px 14px; border-radius: 20px;
-            background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.18);
-            color: var(--accent-primary); font-size: 13px; font-weight: 600;
-            letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 22px;
-        }
-        .section-title {
-            font-size: clamp(32px, 3.5vw, 48px); font-weight: 800;
-            letter-spacing: -0.5px; line-height: 1.15; margin-bottom: 18px;
-        }
-        .section-desc {
-            font-size: 18px; line-height: 1.7;
-            color: var(--text-secondary); max-width: 540px;
-        }
-
-        /* ===== HERO ===== */
-        .hero {
-            position: relative; z-index: 1;
-            min-height: 100vh;
-            display: flex; align-items: center; justify-content: center;
-            padding: 140px 48px 80px;
-        }
-        .hero-inner {
-            max-width: 820px; text-align: center;
-        }
-        .hero-badge {
-            display: inline-flex; align-items: center; gap: 8px;
-            padding: 7px 18px; border-radius: 24px;
-            background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2);
-            color: var(--accent-secondary); font-size: 14px; font-weight: 500;
-            margin-bottom: 36px;
-        }
-        .hero-badge .dot {
-            width: 7px; height: 7px; border-radius: 50%;
-            background: var(--accent-primary);
-            box-shadow: 0 0 6px rgba(16,185,129,0.7);
-            animation: pulse 2s ease-in-out infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.6; transform: scale(0.8); }
-        }
-        .hero-title {
-            font-size: clamp(52px, 7vw, 88px);
-            font-weight: 900; line-height: 1.05;
-            letter-spacing: -2px; margin-bottom: 28px;
-            color: var(--text-primary);
-        }
-        .hero-title .accent {
-            color: var(--accent-primary);
-        }
-        .hero-desc {
-            font-size: clamp(17px, 2vw, 20px); line-height: 1.7;
-            color: var(--text-secondary);
-            max-width: 620px; margin: 0 auto 52px;
-        }
-        .hero-actions {
-            display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
-            margin-bottom: 60px;
-        }
-        .hero-meta {
-            display: flex; align-items: center; justify-content: center;
-            gap: 24px; flex-wrap: wrap;
-            color: var(--text-tertiary); font-size: 14px;
-        }
-        .hero-meta span { display: flex; align-items: center; gap: 6px; }
-
-        /* ===== TRUST BAND ===== */
-        .trust-band {
-            position: relative; z-index: 1;
-            border-top: 1px solid var(--border-color);
-            border-bottom: 1px solid var(--border-color);
-            background: linear-gradient(180deg, rgba(16,185,129,0.03) 0%, rgba(255,255,255,0.01) 100%);
-        }
-        .trust-inner {
-            max-width: 1160px;
-            margin: 0 auto;
-            padding: 30px 48px;
-            display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
-            gap: 14px;
-        }
-        .trust-item {
-            padding: 18px 18px 16px;
-            border-radius: var(--radius-md);
-            background: rgba(255,255,255,0.02);
-            border: 1px solid var(--border-color);
-        }
-        .trust-item strong {
+        img {
+            max-width: 100%;
             display: block;
-            font-size: 15px;
-            margin-bottom: 6px;
-            color: var(--text-primary);
-        }
-        .trust-item span {
-            color: var(--text-secondary);
-            font-size: 13px;
-            line-height: 1.6;
         }
 
-        /* ===== WORKFLOW STRIP ===== */
-        .workflow-strip {
-            position: relative; z-index: 1;
+        .nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 20;
+            height: 64px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+            background: rgba(12, 18, 29, 0.82);
+            backdrop-filter: blur(18px);
         }
-        .workflow-grid {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 18px;
-            margin-top: 52px;
-        }
-        .workflow-card {
-            padding: 28px;
-            border-radius: var(--radius-xl);
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            position: relative;
-            overflow: hidden;
-        }
-        .workflow-card::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(135deg, rgba(16,185,129,0.06) 0%, transparent 65%);
-            pointer-events: none;
-        }
-        .workflow-step {
-            width: 42px;
-            height: 42px;
-            border-radius: 50%;
+
+        .nav-inner {
+            max-width: var(--max);
+            height: 100%;
+            margin: 0 auto;
+            padding: 0 28px;
             display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 24px;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #fff;
+            text-decoration: none;
+            font-weight: 750;
+            font-size: 21px;
+        }
+
+        .brand-mark {
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
-            background: var(--accent-gradient);
-            color: #05080f;
-            font-weight: 800;
-            margin-bottom: 18px;
-            position: relative;
-            z-index: 1;
+            background: #fff;
+            color: var(--ink);
+            font-weight: 900;
+            flex: 0 0 auto;
         }
-        .workflow-card h3 {
-            font-size: 22px;
-            margin-bottom: 10px;
-            position: relative;
-            z-index: 1;
-        }
-        .workflow-card p {
-            color: var(--text-secondary);
-            font-size: 15px;
-            line-height: 1.8;
-            margin-bottom: 16px;
-            position: relative;
-            z-index: 1;
-        }
-        .workflow-mini {
+
+        .nav-links {
             display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            position: relative;
-            z-index: 1;
-        }
-        .workflow-mini span {
-            padding: 8px 12px;
-            border-radius: 999px;
-            font-size: 13px;
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-            background: rgba(255,255,255,0.03);
+            align-items: center;
+            gap: 4px;
         }
 
-        /* ===== BEFORE AFTER ===== */
-        .results-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 20px;
-            margin-top: 52px;
-        }
-        .result-card {
-            padding: 28px;
-            border-radius: var(--radius-xl);
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-        }
-        .result-card h3 {
-            font-size: 22px;
-            margin-bottom: 18px;
-        }
-        .before-after {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 14px;
-        }
-        .result-pane {
-            padding: 18px;
-            border-radius: var(--radius-md);
-            border: 1px solid var(--border-color);
-            background: rgba(255,255,255,0.02);
-        }
-        .result-pane .pane-label {
-            display: inline-flex;
-            margin-bottom: 12px;
-            padding: 5px 10px;
-            border-radius: 999px;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 0.3px;
-        }
-        .result-pane.before .pane-label {
-            background: rgba(255,255,255,0.06);
-            color: var(--text-secondary);
-        }
-        .result-pane.after .pane-label {
-            background: rgba(16,185,129,0.12);
-            color: var(--accent-secondary);
-        }
-        .result-pane p,
-        .result-note {
-            color: var(--text-secondary);
+        .nav-links a {
+            color: rgba(255, 255, 255, 0.78);
+            text-decoration: none;
             font-size: 14px;
-            line-height: 1.8;
-        }
-        .result-note {
-            margin-top: 14px;
-            padding-top: 14px;
-            border-top: 1px solid var(--border-color);
-        }
-
-        /* ===== SKILL MARKETPLACE ===== */
-        .marketplace-section { background: transparent; }
-        .marketplace-header {
-            display: flex; align-items: flex-end; justify-content: space-between;
-            margin-bottom: 56px; gap: 24px; flex-wrap: wrap;
-        }
-        .marketplace-cats {
-            display: flex; flex-wrap: wrap; gap: 10px;
-            margin-top: 24px;
-        }
-        .cat-pill {
-            padding: 7px 18px; border-radius: 24px; font-size: 14px; font-weight: 500;
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            color: var(--text-secondary); cursor: pointer; transition: var(--transition);
-        }
-        .cat-pill:hover, .cat-pill.active {
-            background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.35);
-            color: var(--accent-secondary);
-        }
-        .skill-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-            margin-bottom: 48px;
-        }
-        .skill-card {
-            padding: 28px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            transition: var(--transition); cursor: pointer; position: relative; overflow: hidden;
-        }
-        .skill-card::before {
-            content: ''; position: absolute; inset: 0;
-            background: linear-gradient(135deg, rgba(16,185,129,0.04) 0%, transparent 60%);
-            opacity: 0; transition: var(--transition);
-        }
-        .skill-card:hover { border-color: var(--border-hover); transform: translateY(-4px); box-shadow: var(--shadow-glow); }
-        .skill-card:hover::before { opacity: 1; }
-        .skill-card-head {
-            display: flex; align-items: flex-start; justify-content: space-between;
-            margin-bottom: 14px;
-        }
-        .skill-icon {
-            width: 52px; height: 52px; border-radius: 14px;
-            background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.12);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 26px; flex-shrink: 0;
-        }
-        .skill-badge {
-            font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px;
-            background: rgba(16,185,129,0.12); color: var(--accent-primary);
-            border: 1px solid rgba(16,185,129,0.2);
-        }
-        .skill-badge.new { background: rgba(251,191,36,0.1); color: #fbbf24; border-color: rgba(251,191,36,0.2); }
-        .skill-card h3 {
-            font-size: 18px; font-weight: 700; margin-bottom: 10px; letter-spacing: -0.2px;
-        }
-        .skill-card p {
-            color: var(--text-secondary); font-size: 15px; line-height: 1.6;
-        }
-        .skill-card-footer {
-            display: flex; align-items: center; gap: 14px; margin-top: 18px;
-            padding-top: 14px; border-top: 1px solid var(--border-color);
-            font-size: 13px; color: var(--text-tertiary);
-        }
-        .marketplace-cta {
-            text-align: center;
-            padding: 56px 40px;
-            background: var(--bg-card);
-            border-radius: var(--radius-xl);
-            border: 1px solid var(--border-color);
-        }
-        .marketplace-cta h3 { font-size: 28px; font-weight: 700; margin-bottom: 12px; }
-        .marketplace-cta p { color: var(--text-secondary); font-size: 17px; margin-bottom: 32px; max-width: 460px; margin-left: auto; margin-right: auto; }
-
-        /* ===== FEATURES GRID ===== */
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .feature-card {
-            padding: 32px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            transition: var(--transition);
-        }
-        .feature-card:hover { border-color: var(--border-hover); transform: translateY(-3px); box-shadow: var(--shadow-card); }
-        .feature-icon {
-            width: 52px; height: 52px; border-radius: 14px;
-            background: rgba(16,185,129,0.08);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 26px; margin-bottom: 22px;
-        }
-        .feature-card h3 { font-size: 19px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.2px; }
-        .feature-card p { color: var(--text-secondary); font-size: 15px; line-height: 1.65; }
-
-        /* ===== SAMPLE SCENARIOS ===== */
-        .samples-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 20px;
-            margin-top: 52px;
-        }
-        .sample-card {
-            padding: 30px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            transition: var(--transition);
-        }
-        .sample-card:hover { border-color: var(--border-hover); transform: translateY(-3px); box-shadow: var(--shadow-card); }
-        .sample-head {
-            display: flex; align-items: center; justify-content: space-between;
-            gap: 16px; margin-bottom: 18px;
-        }
-        .sample-head h3 { font-size: 20px; font-weight: 700; letter-spacing: -0.2px; }
-        .sample-tag {
-            padding: 6px 12px; border-radius: 999px;
-            background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.18);
-            color: var(--accent-secondary); font-size: 12px; font-weight: 600;
+            padding: 9px 12px;
+            border-radius: 6px;
             white-space: nowrap;
         }
-        .sample-card p {
-            color: var(--text-secondary); font-size: 15px; line-height: 1.7;
-            margin-bottom: 20px;
-        }
-        .sample-flow {
-            display: flex; flex-wrap: wrap; gap: 10px;
-            margin-bottom: 18px;
-        }
-        .sample-step {
-            padding: 8px 12px; border-radius: var(--radius-sm);
-            background: rgba(255,255,255,0.03); border: 1px solid var(--border-color);
-            color: var(--text-primary); font-size: 13px; font-weight: 500;
-        }
-        .sample-result {
-            padding-top: 16px; border-top: 1px solid var(--border-color);
-            color: var(--text-tertiary); font-size: 14px; line-height: 1.7;
-        }
-        .sample-result strong { color: var(--accent-primary); font-weight: 700; }
 
-        /* ===== PRODUCT STORY ===== */
-        .hero-preview {
-            margin-top: 42px;
-            border-radius: 24px;
-            overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.08);
-            background: linear-gradient(180deg, #101827 0%, #0b111d 100%);
-            box-shadow: 0 24px 60px rgba(0,0,0,0.32);
+        .nav-links a:hover {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.08);
         }
-        .hero-preview img {
-            width: 100%;
-            display: block;
-        }
-        .story-band {
-            margin-top: 36px;
-            display: grid;
-            grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
-            gap: 28px;
+
+        .hero {
+            min-height: 92vh;
+            position: relative;
+            display: flex;
             align-items: center;
-            padding: 28px;
-            border-radius: var(--radius-xl);
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
+            overflow: hidden;
+            color: #fff;
+            background: #111827;
         }
-        .story-band.reverse {
-            grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.05fr);
+
+        .hero::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            background: linear-gradient(90deg, rgba(10, 15, 25, 0.96) 0%, rgba(10, 15, 25, 0.82) 43%, rgba(10, 15, 25, 0.28) 74%, rgba(10, 15, 25, 0.06) 100%);
         }
-        .story-copy h3 {
-            font-size: 24px;
-            font-weight: 700;
-            margin-bottom: 12px;
-            letter-spacing: -0.3px;
+
+        .hero::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1;
+            height: 120px;
+            background: linear-gradient(180deg, rgba(246, 248, 251, 0), var(--paper));
         }
-        .story-copy p {
-            color: var(--text-secondary);
+
+        .hero-bg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center right;
+            opacity: 0.96;
+            filter: saturate(1.05) contrast(1.02);
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            max-width: var(--max);
+            margin: 0 auto;
+            padding: 132px 28px 120px;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 22px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.11);
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            color: rgba(255, 255, 255, 0.88);
+            font-size: 14px;
+            font-weight: 650;
+        }
+
+        .hero h1 {
+            max-width: 780px;
+            margin: 0;
+            font-size: 72px;
+            line-height: 1.04;
+            font-weight: 860;
+        }
+
+        .hero h1 span {
+            color: #7ef0c5;
+        }
+
+        .hero-copy {
+            max-width: 690px;
+            margin: 26px 0 0;
+            color: rgba(255, 255, 255, 0.82);
+            font-size: 21px;
+            line-height: 1.72;
+        }
+
+        .hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 34px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 48px;
+            padding: 12px 20px;
+            border-radius: 7px;
+            border: 1px solid transparent;
+            font-weight: 720;
             font-size: 15px;
-            line-height: 1.8;
-            margin-bottom: 18px;
+            text-decoration: none;
+            transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease;
         }
-        .story-points {
+
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: #19c28d;
+            color: #08121d;
+            box-shadow: 0 12px 28px rgba(25, 194, 141, 0.24);
+        }
+
+        .btn-primary:hover {
+            background: #35d5a0;
+        }
+
+        .btn-secondary {
+            color: #fff;
+            border-color: rgba(255, 255, 255, 0.28);
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .btn-light {
+            color: var(--ink);
+            border-color: var(--line);
+            background: var(--surface);
+        }
+
+        .hero-facts {
             display: flex;
             flex-wrap: wrap;
             gap: 10px;
-        }
-        .story-points span {
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--border-color);
-            color: var(--text-primary);
-            font-size: 13px;
-            font-weight: 500;
-        }
-        .story-media {
-            display: block;
-            border-radius: 18px;
-            overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.08);
-            background: linear-gradient(180deg, #101827 0%, #0b111d 100%);
-            box-shadow: 0 20px 44px rgba(0,0,0,0.28);
-        }
-        .story-media img {
-            width: 100%;
-            display: block;
-        }
-        .story-media-mobile {
-            max-width: 300px;
-            margin: 0 auto;
-        }
-        .story-media-mobile img {
-            border-radius: 24px;
-            box-shadow: 0 18px 40px rgba(0,0,0,0.32);
+            margin-top: 32px;
+            max-width: 760px;
         }
 
-        /* ===== COMPARISON ===== */
-        .compare-grid {
+        .hero-facts span {
+            padding: 7px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.17);
+            color: rgba(255, 255, 255, 0.76);
+            background: rgba(255, 255, 255, 0.06);
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        section {
+            position: relative;
+            z-index: 1;
+        }
+
+        .band {
+            padding: 84px 28px;
+        }
+
+        .band.white {
+            background: var(--surface);
+        }
+
+        .band.alt {
+            background: var(--surface-alt);
+        }
+
+        .inner {
+            max-width: var(--max);
+            margin: 0 auto;
+        }
+
+        .section-head {
             display: grid;
-            grid-template-columns: 1.2fr repeat(3, minmax(0, 1fr));
-            gap: 16px;
-            margin-top: 52px;
+            grid-template-columns: minmax(0, 0.95fr) minmax(260px, 0.65fr);
+            gap: 42px;
+            align-items: end;
+            margin-bottom: 38px;
         }
-        .compare-col {
-            padding: 24px 22px;
-            border-radius: var(--radius-lg);
-            border: 1px solid var(--border-color);
-            background: var(--bg-card);
-        }
-        .compare-col.feature-col {
-            background: transparent;
-            border-style: dashed;
-        }
-        .compare-col.koto-col {
-            border-color: rgba(16,185,129,0.35);
-            box-shadow: var(--shadow-glow);
-        }
-        .compare-head {
-            min-height: 92px;
-            margin-bottom: 18px;
-            padding-bottom: 18px;
-            border-bottom: 1px solid var(--border-color);
-        }
-        .compare-kicker {
-            color: var(--accent-primary);
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 0.4px;
+
+        .section-label {
+            margin-bottom: 10px;
+            color: var(--green-dark);
+            font-size: 13px;
+            font-weight: 800;
             text-transform: uppercase;
-            margin-bottom: 8px;
         }
-        .compare-head h3 {
-            font-size: 22px;
-            margin-bottom: 8px;
+
+        h2 {
+            margin: 0;
+            font-size: 42px;
+            line-height: 1.14;
+            font-weight: 820;
         }
-        .compare-head p {
-            color: var(--text-secondary);
+
+        .section-head p,
+        .lead {
+            margin: 0;
+            color: var(--muted);
+            font-size: 17px;
+            line-height: 1.75;
+        }
+
+        .grid {
+            display: grid;
+            gap: 18px;
+        }
+
+        .grid.cols-3 {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .grid.cols-4 {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 24px;
+        }
+
+        .card h3 {
+            margin: 0 0 10px;
+            font-size: 20px;
+            line-height: 1.3;
+        }
+
+        .card p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 15px;
+            line-height: 1.72;
+        }
+
+        .workflow {
+            display: grid;
+            grid-template-columns: 1.05fr 0.95fr;
+            gap: 24px;
+            align-items: center;
+        }
+
+        .workflow-copy {
+            display: grid;
+            gap: 14px;
+        }
+
+        .workflow-row {
+            display: grid;
+            grid-template-columns: 32px minmax(0, 1fr);
+            gap: 14px;
+            padding: 16px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--surface);
+        }
+
+        .num {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--ink);
+            color: #fff;
+            font-weight: 800;
             font-size: 14px;
-            line-height: 1.6;
         }
-        .compare-list {
+
+        .workflow-row strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .workflow-row span {
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .shot {
+            border-radius: var(--radius);
+            overflow: hidden;
+            border: 1px solid var(--line-strong);
+            background: #dfe5ed;
+            box-shadow: var(--shadow);
+        }
+
+        .model-table {
+            overflow: hidden;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--surface);
+        }
+
+        .model-row {
+            display: grid;
+            grid-template-columns: 0.8fr 1.25fr 1fr;
+            gap: 0;
+            border-top: 1px solid var(--line);
+        }
+
+        .model-row:first-child {
+            border-top: 0;
+            background: #f1f5f9;
+            font-weight: 760;
+            color: var(--ink);
+        }
+
+        .model-row div {
+            padding: 16px 18px;
+            border-left: 1px solid var(--line);
+            color: var(--ink-soft);
+            font-size: 15px;
+        }
+
+        .model-row div:first-child {
+            border-left: 0;
+            font-weight: 760;
+            color: var(--ink);
+        }
+
+        .download-panel {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(310px, 0.66fr);
+            gap: 24px;
+            align-items: stretch;
+        }
+
+        .download-main {
+            background: var(--ink);
+            color: #fff;
+            border-radius: var(--radius);
+            padding: 30px;
+        }
+
+        .download-main h2 {
+            color: #fff;
+        }
+
+        .download-main p {
+            color: rgba(255, 255, 255, 0.75);
+        }
+
+        .download-actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .download-card {
+            display: block;
+            min-height: 128px;
+            padding: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 7px;
+            color: #fff;
+            text-decoration: none;
+            background: rgba(255, 255, 255, 0.07);
+        }
+
+        .download-card.primary {
+            background: #19c28d;
+            color: #06131d;
+            border-color: transparent;
+        }
+
+        .download-card strong {
+            display: block;
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+
+        .download-card span {
+            display: block;
+            color: currentColor;
+            opacity: 0.76;
+            font-size: 14px;
+        }
+
+        .requirements {
             display: grid;
             gap: 12px;
         }
-        .compare-row {
-            min-height: 68px;
-            display: flex;
-            align-items: center;
-            color: var(--text-secondary);
+
+        .req {
+            padding: 18px;
+            border-radius: var(--radius);
+            background: var(--surface);
+            border: 1px solid var(--line);
+        }
+
+        .req strong {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+
+        .req ul {
+            padding-left: 18px;
+            margin: 0;
+            color: var(--muted);
             font-size: 14px;
-            line-height: 1.6;
         }
-        .compare-row strong {
-            color: var(--text-primary);
-        }
-        .compare-row.good { color: #baf7db; }
-        .compare-row.warn { color: #d5def0; }
 
-        /* ===== FAQ ===== */
-        .faq-grid {
+        .faq {
             display: grid;
-            grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-            gap: 28px;
-            align-items: start;
-            margin-top: 52px;
+            gap: 10px;
+            max-width: 880px;
         }
-        .faq-side {
-            padding: 28px;
-            border-radius: var(--radius-xl);
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            position: sticky;
-            top: 92px;
+
+        details {
+            background: var(--surface);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 18px 20px;
         }
-        .faq-side p {
-            color: var(--text-secondary);
-            font-size: 15px;
-            line-height: 1.8;
-            margin-bottom: 20px;
-        }
-        .faq-list {
-            display: grid;
-            gap: 14px;
-        }
-        .faq-item {
-            border-radius: var(--radius-lg);
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            overflow: hidden;
-        }
-        .faq-item summary {
-            list-style: none;
+
+        summary {
             cursor: pointer;
-            padding: 22px 24px;
-            font-size: 17px;
-            font-weight: 700;
-            color: var(--text-primary);
-            position: relative;
-        }
-        .faq-item summary::-webkit-details-marker { display: none; }
-        .faq-item summary::after {
-            content: '+';
-            position: absolute;
-            right: 24px;
-            top: 20px;
-            color: var(--accent-primary);
-            font-size: 22px;
-            font-weight: 400;
-        }
-        .faq-item[open] summary::after { content: '−'; }
-        .faq-item p {
-            padding: 0 24px 22px;
-            color: var(--text-secondary);
-            font-size: 15px;
-            line-height: 1.8;
+            font-weight: 760;
         }
 
-        /* ===== STATS ===== */
-        .stats-band {
-            position: relative; z-index: 1;
-            background: linear-gradient(180deg, rgba(16,185,129,0.04) 0%, transparent 100%);
-            border-top: 1px solid var(--border-color);
-            border-bottom: 1px solid var(--border-color);
+        details p {
+            margin: 12px 0 0;
+            color: var(--muted);
         }
-        .stats-inner {
-            max-width: 960px; margin: 0 auto;
-            display: flex; justify-content: center; gap: 0; flex-wrap: wrap;
-        }
-        .stat {
-            text-align: center; padding: 56px 48px;
-            border-right: 1px solid var(--border-color);
-        }
-        .stat:last-child { border-right: none; }
-        .stat-value {
-            font-size: clamp(32px, 4vw, 56px); font-weight: 900; letter-spacing: -2px; line-height: 1.15;
-            color: var(--accent-primary); margin-bottom: 10px;
-        }
-        .stat-label { color: var(--text-secondary); font-size: 15px; font-weight: 500; }
 
-        /* ===== ACTIVATION CODE ===== */
-        .activation-section {
-            position: relative; z-index: 1;
-            background: radial-gradient(ellipse 80% 60% at 50% 100%, rgba(16,185,129,0.06) 0%, transparent 70%);
-        }
-        .activation-inner {
-            max-width: 1160px; margin: 0 auto; padding: 110px 48px;
-        }
-        .steps-row {
-            display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
-            margin-top: 56px;
-        }
-        .step-card {
-            padding: 36px 32px; border-radius: var(--radius-xl);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            position: relative; transition: var(--transition);
-        }
-        .step-card:hover { border-color: var(--border-hover); box-shadow: var(--shadow-glow); }
-        .step-num {
-            width: 40px; height: 40px; border-radius: 50%;
-            background: var(--accent-gradient);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 16px; font-weight: 800; color: #05080f;
-            margin-bottom: 22px;
-        }
-        .step-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 12px; letter-spacing: -0.2px; }
-        .step-card p { color: var(--text-secondary); font-size: 15px; line-height: 1.7; }
-        .step-card .step-note {
-            margin-top: 18px; padding: 14px 16px;
-            background: rgba(16,185,129,0.06); border-radius: var(--radius-sm);
-            border-left: 3px solid var(--accent-primary);
-            font-size: 14px; color: var(--text-secondary); line-height: 1.6;
-        }
-        .step-card .step-note strong { color: var(--accent-secondary); }
-        .activation-contact {
-            margin-top: 56px; padding: 44px 48px;
-            background: var(--bg-card); border-radius: var(--radius-xl);
-            border: 1px solid var(--border-color);
-            display: flex; align-items: center; justify-content: space-between;
-            gap: 32px; flex-wrap: wrap;
-        }
-        .activation-contact .left h3 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
-        .activation-contact .left p { color: var(--text-secondary); font-size: 16px; max-width: 420px; line-height: 1.6; }
-        .wechat-chip {
-            display: flex; align-items: center; gap: 16px;
-            padding: 20px 28px; border-radius: var(--radius-lg);
-            background: rgba(16,185,129,0.06); border: 1.5px solid rgba(16,185,129,0.25);
-            flex-shrink: 0;
-        }
-        .wechat-chip .wc-icon { font-size: 32px; }
-        .wechat-chip .wc-label { font-size: 12px; color: var(--text-tertiary); font-weight: 500; margin-bottom: 4px; }
-        .wechat-chip .wc-id { font-size: 20px; font-weight: 700; letter-spacing: 1px; color: var(--text-primary); }
-
-        /* ===== DOWNLOAD ===== */
-        .download-section {
-            position: relative; z-index: 1;
-            background: var(--bg-secondary);
-            border-top: 1px solid var(--border-color);
-        }
-        .download-inner {
-            max-width: 1160px; margin: 0 auto; padding: 110px 48px;
-            display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center;
-        }
-        .download-left h2 { font-size: clamp(30px, 3.5vw, 44px); font-weight: 800; letter-spacing: -0.5px; margin-bottom: 18px; }
-        .download-left p { color: var(--text-secondary); font-size: 17px; line-height: 1.7; margin-bottom: 36px; }
-        .download-actions { display: flex; flex-direction: column; gap: 14px; }
-        .download-btn {
-            display: flex; align-items: center; gap: 18px;
-            padding: 20px 24px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            text-decoration: none; color: var(--text-primary);
-            transition: var(--transition); cursor: pointer;
-        }
-        .download-btn:hover { border-color: var(--border-hover); transform: translateX(4px); box-shadow: var(--shadow-card); }
-        .download-btn .dl-icon {
-            width: 48px; height: 48px; border-radius: 12px; flex-shrink: 0;
-            background: var(--accent-gradient);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 22px; color: #05080f;
-        }
-        .download-btn .dl-text { flex: 1; }
-        .download-btn .dl-text strong { display: block; font-size: 16px; font-weight: 700; margin-bottom: 4px; }
-        .download-btn .dl-text span { font-size: 13px; color: var(--text-secondary); }
-        .download-btn .dl-arrow { color: var(--text-tertiary); font-size: 18px; }
-        .download-right {
-            display: flex; flex-direction: column; gap: 20px;
-        }
-        .req-card {
-            padding: 28px; border-radius: var(--radius-lg);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-        }
-        .req-card h4 { font-size: 16px; font-weight: 700; margin-bottom: 14px; }
-        .req-item {
-            display: flex; align-items: center; gap: 10px;
-            font-size: 14px; color: var(--text-secondary); margin-bottom: 8px;
-        }
-        .req-item:last-child { margin-bottom: 0; }
-        .req-item .check { color: var(--accent-primary); font-size: 15px; }
-
-        /* ===== FOOTER ===== */
         .footer {
-            position: relative; z-index: 1;
-            padding: 64px 48px 36px;
-            border-top: 1px solid var(--border-color);
+            background: #0f1724;
+            color: rgba(255, 255, 255, 0.7);
+            padding: 32px 28px;
         }
+
         .footer-inner {
-            max-width: 1160px; margin: 0 auto;
-            display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 20px;
+            max-width: var(--max);
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            gap: 18px;
+            flex-wrap: wrap;
         }
-        .footer-brand {
-            display: flex; align-items: center; gap: 10px;
-            font-size: 20px; font-weight: 700; text-decoration: none; color: var(--text-primary);
-        }
-        .footer-brand .logo {
-            width: 32px; height: 32px; border-radius: 8px;
-            background: var(--accent-gradient);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 15px; font-weight: 800; color: #05080f;
-        }
-        .footer-links { display: flex; gap: 24px; flex-wrap: wrap; }
-        .footer-links a { color: var(--text-tertiary); text-decoration: none; font-size: 14px; transition: var(--transition); }
-        .footer-links a:hover { color: var(--text-primary); }
-        .footer-copy { color: var(--text-tertiary); font-size: 13px; }
 
-        /* ===== ANIMATIONS ===== */
-        .fade-up { opacity: 0; transform: translateY(28px); animation: fadeUp 0.75s ease forwards; }
-        .fade-up-1 { animation-delay: 0.08s; }
-        .fade-up-2 { animation-delay: 0.18s; }
-        .fade-up-3 { animation-delay: 0.28s; }
-        .fade-up-4 { animation-delay: 0.38s; }
-        @keyframes fadeUp { to { opacity: 1; transform: translateY(0); } }
-
-        /* ===== RESPONSIVE ===== */
-        @media (max-width: 900px) {
-            .trust-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            .workflow-grid { grid-template-columns: 1fr; }
-            .results-grid { grid-template-columns: 1fr; }
-            .before-after { grid-template-columns: 1fr; }
-            .compare-grid { grid-template-columns: 1fr; }
-            .faq-grid { grid-template-columns: 1fr; }
-            .faq-side { position: static; }
-            .download-inner { grid-template-columns: 1fr; gap: 40px; }
-            .steps-row { grid-template-columns: 1fr; }
-            .samples-grid { grid-template-columns: 1fr; }
-            .story-band,
-            .story-band.reverse { grid-template-columns: 1fr; }
-            .stat { border-right: none; border-bottom: 1px solid var(--border-color); padding: 40px 32px; }
-            .stat:last-child { border-bottom: none; }
+        .footer a {
+            color: rgba(255, 255, 255, 0.88);
+            text-decoration: none;
         }
-        @media (max-width: 680px) {
-            .nav { padding: 0 20px; }
-            .nav-links a { display: none; }
-            .hero { padding: 120px 24px 64px; }
-            .trust-inner { grid-template-columns: 1fr; }
-            .section-wrap, .activation-inner, .download-inner, .trust-inner { padding-left: 24px; padding-right: 24px; }
-            .activation-contact { flex-direction: column; }
-            .footer { padding: 48px 24px 28px; }
+
+        @media (max-width: 920px) {
+            .nav-links {
+                display: none;
+            }
+
+            .hero {
+                min-height: 90vh;
+            }
+
+            .hero::before {
+                background: linear-gradient(180deg, rgba(10, 15, 25, 0.98) 0%, rgba(10, 15, 25, 0.84) 56%, rgba(10, 15, 25, 0.58) 100%);
+            }
+
+            .hero-bg {
+                object-position: 58% center;
+                opacity: 0.34;
+            }
+
+            .hero-content {
+                padding: 118px 22px 86px;
+            }
+
+            .hero h1 {
+                font-size: 48px;
+            }
+
+            .hero-copy {
+                font-size: 18px;
+            }
+
+            .section-head,
+            .workflow,
+            .download-panel {
+                grid-template-columns: 1fr;
+            }
+
+            .grid.cols-3,
+            .grid.cols-4 {
+                grid-template-columns: 1fr;
+            }
+
+            .model-row {
+                grid-template-columns: 1fr;
+            }
+
+            .model-row div {
+                border-left: 0;
+                border-top: 1px solid var(--line);
+            }
+
+            .model-row div:first-child {
+                border-top: 0;
+            }
+
+            .download-actions {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 560px) {
+            .nav-inner {
+                padding: 0 18px;
+            }
+
+            .band {
+                padding: 64px 20px;
+            }
+
+            .hero h1 {
+                font-size: 39px;
+            }
+
+            h2 {
+                font-size: 31px;
+            }
+
+            .hero-actions .btn {
+                width: 100%;
+            }
+
+            .hero-facts span {
+                white-space: normal;
+            }
+
+            .download-main {
+                padding: 24px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="bg-texture"></div>
-    <div class="floating-orb orb-1"></div>
-    <div class="floating-orb orb-2"></div>
-
-    <!-- ===== NAV ===== -->
     <nav class="nav">
-        <a href="#" class="nav-brand">
-            <div class="logo">言</div>
-            Koto
-        </a>
-        <div class="nav-links">
-            <a href="#marketplace">技能系统</a>
-            <a href="#features">核心能力</a>
-            <a href="#samples">场景样例</a>
-            <a href="#activation">快速上手</a>
-            <a href="#download">下载</a>
-            <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
+        <div class="nav-inner">
+            <a class="brand" href="#">
+                <span class="brand-mark">言</span>
+                <span>Koto</span>
+            </a>
+            <div class="nav-links">
+                <a href="#workflow">工作流</a>
+                <a href="#models">模型选择</a>
+                <a href="#files">文件能力</a>
+                <a href="#download">下载</a>
+                <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
+            </div>
         </div>
     </nav>
 
-    <!-- ===== HERO ===== -->
-    <section class="hero">
-        <div class="hero-inner">
-            <div class="hero-badge fade-up" id="hero-version-badge">
-                <span class="dot"></span>
-                <span id="version-text">v1.7.2</span> · 开源 · Python · 本地优先
-            </div>
-            <h1 class="hero-title fade-up fade-up-1">
-                属于你的<br><span class="accent">AI 文件工作台</span>
-            </h1>
-            <p class="hero-desc fade-up fade-up-2">
-                直接在你的电脑上打开并 AI 编辑 Word、PPT、Excel。90+ 内置技能覆盖润色、翻译、摘要、对比、数据分析等高频办公任务；Doc Agent、工作流引擎与知识库 RAG 进一步把零散操作升级成可持续复用的工作流，而数据始终留在你的设备上。
+    <header class="hero">
+        <img class="hero-bg" src="https://loganwon.github.io/Koto/assets/screenshots/koto-workspace-assistant.png" alt="">
+        <div class="hero-content">
+            <div class="eyebrow"><span id="version-text">Latest Release</span> · Windows · 本地优先</div>
+            <h1>Koto AI 文件助手</h1>
+            <p class="hero-copy">
+                直接在工作区处理 Word、PPT、Excel、PDF 和多文件任务。你可以选择 DeepSeek、Gemini 或本地模型，让 AI 在真实文件流里规划、执行、检查并留下可追踪结果。
             </p>
-            <div class="hero-actions fade-up fade-up-3">
-                <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-hero" class="btn btn-primary btn-lg" target="_blank" rel="noopener">
-                    ⬇ 下载最新版本
-                </a>
-                <a href="https://github.com/Loganwon/Koto" class="btn btn-ghost btn-lg" target="_blank" rel="noopener">
-                    查看 GitHub
-                </a>
+            <div class="hero-actions">
+                <a class="btn btn-primary" id="btn-download-hero" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">下载最新版</a>
+                <a class="btn btn-secondary" href="#models">查看模型选择</a>
             </div>
-            <div class="hero-meta fade-up fade-up-4">
-                <span>🔒 数据本地存储</span>
-                <span>📄 DOCX · PPTX · XLSX</span>
-                <span>🤖 Gemini + Ollama</span>
-                <span>🧩 90+ AI 技能</span>
-                <span>⚙️ 工作流引擎</span>
-            </div>
-            <a class="hero-preview fade-up fade-up-4" href="assets/screenshots/koto-main-chat.png" target="_blank" rel="noopener">
-                <img src="assets/screenshots/koto-main-chat.png" alt="Koto 主界面对话与技能工作台截图">
-            </a>
-        </div>
-    </section>
-
-    <section class="trust-band" aria-label="Koto 产品信任信息">
-        <div class="trust-inner">
-            <div class="trust-item">
-                <strong>开源可审计</strong>
-                <span>GitHub 仓库公开，版本与更新路径清晰，适合长期评估与持续采用。</span>
-            </div>
-            <div class="trust-item">
-                <strong>本地优先</strong>
-                <span>文件、知识库与工作区优先留在本机，隐私与数据边界更容易掌控。</span>
-            </div>
-            <div class="trust-item">
-                <strong>文件原位处理</strong>
-                <span>围绕 DOCX、PPTX、XLSX 工作，减少复制粘贴和工具来回切换。</span>
-            </div>
-            <div class="trust-item">
-                <strong>90+ 技能体系</strong>
-                <span>从写作、翻译到数据处理与工作流自动化，覆盖高频办公任务。</span>
-            </div>
-            <div class="trust-item">
-                <strong>云端 + 本地模型</strong>
-                <span>Gemini 与 Ollama 按需切换，既能快速接入，也能离线运行。</span>
+            <div class="hero-facts">
+                <span>文件和工作区默认留在本机</span>
+                <span>DeepSeek / Gemini / 本地模型</span>
+                <span>内置本地模型下载器</span>
+                <span>文件助手任务进度可追踪</span>
             </div>
         </div>
-    </section>
+    </header>
 
-    <!-- ===== WORKFLOW STRIP ===== -->
-    <section id="workflow" class="workflow-strip">
-        <div class="section-wrap">
-            <div style="text-align:center;max-width:780px;margin:0 auto;">
-                <div class="section-label" style="display:inline-flex;">▶ 工作流演示</div>
-                <h2 class="section-title" style="text-align:center;">真正打动人的不是功能列表<br>而是任务怎么被接住并做完</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;max-width:760px;">下面这条 3 步流程，用最短路径说明 Koto 的核心体验：不是把内容贴给 AI，而是直接围绕文件、技能和结果持续推进任务。</p>
-            </div>
-
-            <div class="workflow-grid">
-                <div class="workflow-card">
-                    <div class="workflow-step">1</div>
-                    <h3>打开真实文件</h3>
-                    <p>从工作区直接打开合同、周报、PPT 或多份资料，保留上下文、结构和原始格式，不需要先把内容拆出来再丢进聊天框。</p>
-                    <div class="workflow-mini">
-                        <span>DOCX</span>
-                        <span>PPTX</span>
-                        <span>XLSX</span>
-                        <span>多文件协同</span>
-                    </div>
-                </div>
-                <div class="workflow-card">
-                    <div class="workflow-step">2</div>
-                    <h3>调用技能或工作流</h3>
-                    <p>选中文字即可触发内联技能，也可以让 Doc Agent 或工作流引擎接管更复杂的对比、提取、清洗、总结与生成任务。</p>
-                    <div class="workflow-mini">
-                        <span>内联 AI 编辑</span>
-                        <span>Doc Agent</span>
-                        <span>工作流编排</span>
-                    </div>
-                </div>
-                <div class="workflow-card">
-                    <div class="workflow-step">3</div>
-                    <h3>结果直接回到工作里</h3>
-                    <p>处理结果不是停留在对话里，而是回到文档、表格、报告或结构化结果中，方便继续审阅、交付、复用和自动化下一步。</p>
-                    <div class="workflow-mini">
-                        <span>写回文档</span>
-                        <span>结构化输出</span>
-                        <span>继续流转</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ===== SKILL MARKETPLACE ===== -->
-    <section id="marketplace">
-        <div class="section-wrap">
-            <div class="marketplace-header">
+    <section class="band white" id="workflow">
+        <div class="inner">
+            <div class="section-head">
                 <div>
-                    <div class="section-label">🧩 技能系统</div>
-                    <h2 class="section-title">文件内联 AI 技能<br>悬浮工具栏一键调用</h2>
-                    <p class="section-desc">在 Word、PPT、Excel 中选中文字，悬浮工具栏即时弹出。90+ 内置技能覆盖文档、数据、代码、办公全场景，也支持自定义提示词创建专属技能。</p>
-                    <div class="marketplace-cats">
-                        <span class="cat-pill active">全部</span>
-                        <span class="cat-pill">✍️ 写作润色</span>
-                        <span class="cat-pill">🌐 翻译</span>
-                        <span class="cat-pill">📝 文档处理</span>
-                        <span class="cat-pill">📊 数据分析</span>
-                        <span class="cat-pill">⚙️ 工作流</span>
-                        <span class="cat-pill">💻 代码</span>
-                        <span class="cat-pill">🔄 文件转换</span>
-                        <span class="cat-pill">🎯 自定义</span>
-                    </div>
+                    <div class="section-label">What changed</div>
+                    <h2>不是再开一个聊天框，而是让 AI 接住文件任务</h2>
                 </div>
+                <p>Koto 的核心体验已经从“对话 + 技能”推进到“文件助手任务流”：理解当前文件、拆解步骤、调用工具、写回结果，并把每一步反馈给用户。</p>
             </div>
-
-            <div class="skill-grid">
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">✍️</div>
-                        <span class="skill-badge">常用</span>
+            <div class="workflow">
+                <div class="workflow-copy">
+                    <div class="workflow-row">
+                        <div class="num">1</div>
+                        <div><strong>选择文件或工作区</strong><span>打开 Word、PPT、Excel、PDF，或把多个文件交给文件助手作为上下文。</span></div>
                     </div>
-                    <h3>写作润色 · 翻译 · 摘要</h3>
-                    <p>一键优化文章表达、中英互译、提炼关键要点。支持正式 / 轻松 / 专业多种语气，保留专业术语和文档格式。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>✍️ 写作</span>
+                    <div class="workflow-row">
+                        <div class="num">2</div>
+                        <div><strong>选择本地或云端模型</strong><span>云端可接入 DeepSeek、Gemini；本地可通过 Ollama 或下载器准备合适模型。</span></div>
                     </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">📋</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>文档深度对比</h3>
-                    <p>跨格式（DOCX/XLSX/PPTX/PDF）逐段对比两份文档，高亮新增、删除、修改内容，输出结构化差异报告。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>📋 文档</span>
+                    <div class="workflow-row">
+                        <div class="num">3</div>
+                        <div><strong>让 Koto 执行并检查</strong><span>任务流会展示计划、工具调用、文件变化和下一步确认，不再只给一段抽象回答。</span></div>
                     </div>
                 </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">📊</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>Excel 数据填充</h3>
-                    <p>AI 自动识别 Excel 表格结构，根据参考文档或对话指令批量填写数据，处理合并单元格、公式和格式。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>📊 数据</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">📝</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>问卷自动填写</h3>
-                    <p>上传问卷文件与参考资料，AI 自动匹配问题与答案，批量填写选择题、填空题，导出完成的表单。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>📝 表单</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">🔍</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>跨格式信息提取</h3>
-                    <p>从 DOCX、XLSX、PPTX 中同时提取关键字段，自动汇总到结构化报告，支持自定义提取规则。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>🔍 提取</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">⚙️</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>工作流自动化</h3>
-                    <p>可视化编排多步骤 AI 任务：文档生成、数据清洗、报告输出，串联多个技能，一次触发全流程。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>⚙️ 工作流</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">💻</div>
-                        <span class="skill-badge">精选</span>
-                    </div>
-                    <h3>代码沙箱执行</h3>
-                    <p>在安全沙箱中执行 AI 生成或用户编写的 Python 代码，支持图表输出，结果直接展示在对话界面。</p>
-                    <div class="skill-card-footer">
-                        <span>✅ 内置</span>
-                        <span>💻 代码</span>
-                    </div>
-                </div>
-                <div class="skill-card">
-                    <div class="skill-card-head">
-                        <div class="skill-icon">🎯</div>
-                        <span class="skill-badge new">New</span>
-                    </div>
-                    <h3>自定义技能 · 90+ 总计</h3>
-                    <p>用自然语言描述你的需求，AI 自动生成专属技能配置。内置 90+ 技能覆盖写作、数据、代码、办公全场景。</p>
-                    <div class="skill-card-footer">
-                        <span>🛠 DIY</span>
-                        <span>🧩 自定义</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="marketplace-cta">
-                <h3>探索更多用法</h3>
-                <p>90+ 内置技能覆盖写作、数据、代码、办公全场景，自定义技能随时扩展。Doc Agent 自主规划、工作流引擎串联多步骤任务，本地运行全程保护隐私。</p>
-                <div style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap;">
-                    <a href="#download" class="btn btn-primary">下载体验</a>
-                    <a href="https://github.com/Loganwon/Koto" class="btn btn-ghost" target="_blank" rel="noopener">查看源码</a>
-                </div>
-            </div>
-
-            <div class="story-band reverse">
-                <a class="story-media" href="assets/screenshots/koto-skill-marketplace.png" target="_blank" rel="noopener">
-                    <img src="assets/screenshots/koto-skill-marketplace.png" alt="Koto 技能市场截图" loading="lazy">
-                </a>
-                <div class="story-copy">
-                    <h3>一眼看懂：Koto 不只是几个功能点</h3>
-                    <p>把真实技能市场放在这里，访问者会立刻明白 Koto 提供的是一套可扩展的 AI 能力体系，而不是零散的小工具。分类清晰、入口完整、能力持续增长，更容易把“可长期使用”这件事讲明白。</p>
-                    <div class="story-points">
-                        <span>90+ 内置技能</span>
-                        <span>上手门槛低</span>
-                        <span>支持创作工坊</span>
-                        <span>能力持续扩展</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ===== STATS ===== -->
-    <div class="stats-band">
-        <div class="stats-inner">
-            <div class="stat"><div class="stat-value">90+</div><div class="stat-label">内置 AI 技能</div></div>
-            <div class="stat"><div class="stat-value">DOCX<br>PPTX<br>XLSX</div><div class="stat-label">全格式文档编辑</div></div>
-            <div class="stat"><div class="stat-value">Doc<br>Agent</div><div class="stat-label">自主文档代理</div></div>
-            <div class="stat"><div class="stat-value">Gemini<br>+Ollama</div><div class="stat-label">多模型支持</div></div>
-        </div>
-    </div>
-
-    <!-- ===== FEATURES ===== -->
-    <section id="features">
-        <div class="section-wrap">
-            <div style="text-align:center;margin-bottom:64px;">
-                <div class="section-label" style="display:inline-flex;">⚡ 核心能力</div>
-                <h2 class="section-title" style="text-align:center;">不止于对话</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;">文件内联编辑、知识库 RAG、语音交互、代码沙箱——本地处理确保隐私，Gemini 或 Ollama 按需调用</p>
-            </div>
-            <div class="features-grid">
-                <div class="feature-card">
-                    <div class="feature-icon">📄</div>
-                    <h3>文件内联 AI 编辑</h3>
-                    <p>打开 DOCX、PPTX、XLSX 文件，选中文字即弹出 AI 悬浮工具栏，一键润色、翻译、摘要，修改结果直接应用到文档，无需复制粘贴。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🤖</div>
-                    <h3>Doc Agent 文档代理</h3>
-                    <p>自主规划并执行多步骤文档任务：跨文件提取、批量改写、自动生成报告。基于 Tree-of-Thought 推理，任务进度实时流式展示。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">⚙️</div>
-                    <h3>工作流引擎</h3>
-                    <p>内置 12 种开箱即用工作流：文档对比、数据清洗、问卷填写、邮件摘要等。可视化编排，串联多技能，一次触发全流程自动化。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🗂️</div>
-                    <h3>本地工作区管理</h3>
-                    <p>内置文件浏览器，直接管理本地文件夹。创建、重命名、删除、移动，支持右键菜单，所有操作都在本地完成，文件不上传任何服务器。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">💬</div>
-                    <h3>多模型 AI 对话</h3>
-                    <p>Gemini 云端多模态 + Ollama 本地模型自由切换，多轮记忆，流式实时响应。支持上传图片、附件，结合知识库进行 RAG 问答。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🧠</div>
-                    <h3>知识库 RAG</h3>
-                    <p>上传 TXT、Markdown、PDF、DOCX 文件构建本地知识库，AI 对话时自动语义检索关联内容，让 AI 了解你的私有文档。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">🎙️</div>
-                    <h3>语音交互</h3>
-                    <p>语音输入提问，AI 回复支持 TTS 朗读，打造更自然的人机交互体验。完全本地语音处理，无需上传音频数据。</p>
-                </div>
-                <div class="feature-card">
-                    <div class="feature-icon">💻</div>
-                    <h3>代码沙箱 · 多文件协同</h3>
-                    <p>安全沙箱执行 Python 脚本，支持图表输出。多文件协同处理器可跨 DOCX/XLSX/PPTX 批量操作，定时任务全程自动化。</p>
-                </div>
-            </div>
-
-            <div class="story-band">
-                <div class="story-copy">
-                    <h3>真正的核心体验，是围绕文件持续工作</h3>
-                    <p>这张界面能把 Koto 和普通聊天产品迅速区分开：左侧是本地文件与工作区，中间是当前任务，右侧是 AI 助手。访问者会直接理解，Koto 的价值不是“问一下 AI”，而是让 AI 在真实文件流转里持续协作。</p>
-                    <div class="story-points">
-                        <span>本地文件浏览</span>
-                        <span>任务上下文连续</span>
-                        <span>AI 侧栏协作</span>
-                        <span>更像工作台而非聊天框</span>
-                    </div>
-                </div>
-                <a class="story-media" href="assets/screenshots/koto-workspace-assistant.png" target="_blank" rel="noopener">
-                    <img src="assets/screenshots/koto-workspace-assistant.png" alt="Koto 文件工作站截图" loading="lazy">
+                <a class="shot" href="https://loganwon.github.io/Koto/assets/screenshots/koto-workspace-assistant.png" target="_blank" rel="noopener">
+                    <img src="https://loganwon.github.io/Koto/assets/screenshots/koto-workspace-assistant.png" alt="Koto workspace assistant interface">
                 </a>
             </div>
         </div>
     </section>
 
-    <!-- ===== SAMPLE SCENARIOS ===== -->
-    <section id="samples">
-        <div class="section-wrap">
-            <div style="text-align:center;max-width:760px;margin:0 auto;">
-                <div class="section-label" style="display:inline-flex;">📚 场景样例</div>
-                <h2 class="section-title" style="text-align:center;">不只是能做什么<br>更能看见怎么做</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;max-width:720px;">给访问者更直观的预期：打开什么文件、触发什么能力、最后得到什么结果。下面这些样例覆盖文档、表格、PPT 和跨文件协同。</p>
+    <section class="band alt" id="models">
+        <div class="inner">
+            <div class="section-head">
+                <div>
+                    <div class="section-label">Model choice</div>
+                    <h2>云端、本地、DeepSeek，都可以由用户自己选择</h2>
+                </div>
+                <p>新版 Koto 不再把云端能力等同于 Gemini。用户可以根据隐私、速度、成本和任务类型，在设置页或文件助手入口选择合适的模型路线。</p>
             </div>
-
-            <div class="samples-grid">
-                <div class="sample-card">
-                    <div class="sample-head">
-                        <h3>合同审阅与修订建议</h3>
-                        <span class="sample-tag">Doc Agent</span>
-                    </div>
-                    <p>把新版合同和旧版模板放进工作区，Doc Agent 自动对比条款变化，识别付款、违约、交付等风险点，并生成可直接回传法务的修订建议。</p>
-                    <div class="sample-flow">
-                        <span class="sample-step">上传两份合同</span>
-                        <span class="sample-step">自动逐段比对</span>
-                        <span class="sample-step">提炼风险条款</span>
-                        <span class="sample-step">输出修订建议</span>
-                    </div>
-                    <div class="sample-result"><strong>结果：</strong>得到结构化差异清单、风险摘要，以及适合继续审阅的修订意见。</div>
+            <div class="model-table">
+                <div class="model-row">
+                    <div>模式</div>
+                    <div>适合场景</div>
+                    <div>准备方式</div>
                 </div>
-
-                <div class="sample-card">
-                    <div class="sample-head">
-                        <h3>Excel 周报自动生成</h3>
-                        <span class="sample-tag">数据分析</span>
-                    </div>
-                    <p>打开销售或运营 Excel 表格后，Koto 可补齐缺失字段、识别异常值、生成统计图表，并把关键结论整理成适合管理层查看的自然语言摘要。</p>
-                    <div class="sample-flow">
-                        <span class="sample-step">读取表格结构</span>
-                        <span class="sample-step">清洗数据</span>
-                        <span class="sample-step">生成图表</span>
-                        <span class="sample-step">汇总周报</span>
-                    </div>
-                    <div class="sample-result"><strong>结果：</strong>输出可落地的周报内容、图表结果和关键异常提醒，减少手工整理时间。</div>
+                <div class="model-row">
+                    <div>DeepSeek 云端</div>
+                    <div>长文本推理、文件任务规划、代码和结构化输出，适合希望快速获得高质量云端能力的用户。</div>
+                    <div>在设置中填入 DeepSeek API Key，文件助手和对话入口可选择使用。</div>
                 </div>
-
-                <div class="sample-card">
-                    <div class="sample-head">
-                        <h3>招投标资料跨文件提取</h3>
-                        <span class="sample-tag">多文件协同</span>
-                    </div>
-                    <p>从 DOCX、PPTX、PDF、XLSX 等多份资料中抽取公司名称、报价、交付周期、联系人等字段，自动汇总成统一表格，适合资料核对和信息建档。</p>
-                    <div class="sample-flow">
-                        <span class="sample-step">选择多个文件</span>
-                        <span class="sample-step">定义提取字段</span>
-                        <span class="sample-step">统一结构化</span>
-                        <span class="sample-step">导出结果表</span>
-                    </div>
-                    <div class="sample-result"><strong>结果：</strong>把零散附件变成结构化清单，方便复核、筛选和后续自动化流程接入。</div>
+                <div class="model-row">
+                    <div>Gemini 云端</div>
+                    <div>多模态、图片/文档理解、通用办公写作与摘要任务。</div>
+                    <div>在 Google AI Studio 获取 API Key 后填入 Koto。</div>
                 </div>
-
-                <div class="sample-card">
-                    <div class="sample-head">
-                        <h3>PPT 内容重写与统一风格</h3>
-                        <span class="sample-tag">文件内联编辑</span>
-                    </div>
-                    <p>在 PPT 页面里直接选中标题或正文，调用润色、压缩表达、翻译或风格统一技能，快速把零散页面调整成一套适合汇报的完整叙事。</p>
-                    <div class="sample-flow">
-                        <span class="sample-step">选中页面文本</span>
-                        <span class="sample-step">调用 AI 技能</span>
-                        <span class="sample-step">统一语气风格</span>
-                        <span class="sample-step">一键写回文档</span>
-                    </div>
-                    <div class="sample-result"><strong>结果：</strong>保留原文件结构，同时更快完成演示稿润色、翻译和多页语气统一。</div>
+                <div class="model-row">
+                    <div>本地模型</div>
+                    <div>隐私优先、离线处理、低成本重复任务和本地文件初筛。</div>
+                    <div>使用内置本地模型下载器或连接 Ollama；Koto 会帮助用户选择更合适的模型规格。</div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- ===== BEFORE AFTER ===== -->
-    <section id="results">
-        <div class="section-wrap">
-            <div style="text-align:center;max-width:780px;margin:0 auto;">
-                <div class="section-label" style="display:inline-flex;">✨ 结果示例</div>
-                <h2 class="section-title" style="text-align:center;">世界级产品页会直接展示结果<br>而不是只说“我们有很多能力”</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;max-width:760px;">下面用两个最容易理解的 before/after 场景，帮助访问者快速感受到 Koto 带来的效率提升和交付质量变化。</p>
-            </div>
-
-            <div class="results-grid">
-                <div class="result-card">
-                    <h3>合同审阅：从原始条款到可执行修订建议</h3>
-                    <div class="before-after">
-                        <div class="result-pane before">
-                            <div class="pane-label">Before</div>
-                            <p>两份合同版本散落在文件夹里，需要人工逐段比对付款、交付、违约责任等差异，再手工整理成法务可审阅的修改意见。</p>
-                        </div>
-                        <div class="result-pane after">
-                            <div class="pane-label">After</div>
-                            <p>Koto 自动比较条款变化，提炼风险点，输出结构化差异摘要和可直接回传的修订建议，让下一轮审阅更快进入决策。</p>
-                        </div>
-                    </div>
-                    <div class="result-note">结果更像一份可继续流转的工作产出，而不是一段“参考回答”。</div>
+    <section class="band white" id="files">
+        <div class="inner">
+            <div class="section-head">
+                <div>
+                    <div class="section-label">File work</div>
+                    <h2>把 AI 放进真实文件流程里</h2>
                 </div>
-
-                <div class="result-card">
-                    <h3>Excel 周报：从原始表格到管理层可读摘要</h3>
-                    <div class="before-after">
-                        <div class="result-pane before">
-                            <div class="pane-label">Before</div>
-                            <p>运营或销售表格字段不统一、存在缺失值和异常项，团队需要先清洗数据，再做图，再把结论翻译成自然语言周报。</p>
-                        </div>
-                        <div class="result-pane after">
-                            <div class="pane-label">After</div>
-                            <p>Koto 识别表格结构、补齐字段、生成图表并总结重点，最终得到更适合管理层阅读的周报内容和异常提醒。</p>
-                        </div>
-                    </div>
-                    <div class="result-note">重点不只是“生成图表”，而是把数据整理、表达和输出三件事接成同一条流程。</div>
+                <p>Koto 的文件能力围绕真实输出组织：先读懂材料，再生成、改写、检查或写回到对应文件。</p>
+            </div>
+            <div class="grid cols-3">
+                <div class="card">
+                    <h3>Word / DOCX</h3>
+                    <p>摘要、改写、批注、审校、结构化写回。文件助手会区分纯回答和真实写入任务。</p>
+                </div>
+                <div class="card">
+                    <h3>PPT / PPTX</h3>
+                    <p>补充页内容、统一风格、整理演讲结构，并保留面向 Office 文件的专用处理路径。</p>
+                </div>
+                <div class="card">
+                    <h3>Excel / XLSX</h3>
+                    <p>读取表格、提取数据、生成报告、写入 DOCX 或 PPT，避免把工作表名和字段结构猜错。</p>
+                </div>
+                <div class="card">
+                    <h3>PDF 长文任务</h3>
+                    <p>按页窗分步读取、总结、写入文档，适合论文、报告、资料包这类长文件。</p>
+                </div>
+                <div class="card">
+                    <h3>多文件协作</h3>
+                    <p>把当前文件、附件、选区和历史上下文一起传给任务流，减少重复描述。</p>
+                </div>
+                <div class="card">
+                    <h3>白盒进度</h3>
+                    <p>用户能看到计划、执行、检查、文件变化和下一步确认，知道 AI 到底做了什么。</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- ===== COMPARISON ===== -->
-    <section id="compare">
-        <div class="section-wrap">
-            <div style="text-align:center;max-width:780px;margin:0 auto;">
-                <div class="section-label" style="display:inline-flex;">🆚 对比优势</div>
-                <h2 class="section-title" style="text-align:center;">为什么不是再开一个聊天窗口<br>或再装一个传统插件</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;max-width:760px;">世界级产品页会把“为什么选你”讲得非常直接。这里用最关键的工作流差异，说明 Koto 和通用聊天工具、传统办公插件的不同。</p>
+    <section class="band alt">
+        <div class="inner">
+            <div class="section-head">
+                <div>
+                    <div class="section-label">Examples</div>
+                    <h2>更接近真实办公任务的结果</h2>
+                </div>
+                <p>这些任务可以直接用自己的文件验证效果，也能自然展示模型选择、文件写回和进度追踪能力。</p>
             </div>
-
-            <div class="compare-grid">
-                <div class="compare-col feature-col">
-                    <div class="compare-head">
-                        <div class="compare-kicker">比较维度</div>
-                        <h3>你真正关心的事</h3>
-                        <p>不是模型参数，而是能不能真正把文件工作接住、做完、复用起来。</p>
-                    </div>
-                    <div class="compare-list">
-                        <div class="compare-row"><strong>文件处理方式</strong></div>
-                        <div class="compare-row"><strong>跨文件任务</strong></div>
-                        <div class="compare-row"><strong>工作流复用</strong></div>
-                        <div class="compare-row"><strong>隐私与部署</strong></div>
-                        <div class="compare-row"><strong>适合的工作形态</strong></div>
-                    </div>
+            <div class="grid cols-4">
+                <div class="card">
+                    <h3>合同审阅</h3>
+                    <p>找出风险条款，生成修改建议，并可写回审阅文档。</p>
                 </div>
-
-                <div class="compare-col koto-col">
-                    <div class="compare-head">
-                        <div class="compare-kicker">Koto</div>
-                        <h3>AI 文件工作台</h3>
-                        <p>围绕真实文件、任务上下文与可复用流程设计。</p>
-                    </div>
-                    <div class="compare-list">
-                        <div class="compare-row good">直接面向 <strong>DOCX / PPTX / XLSX</strong>，减少复制粘贴。</div>
-                        <div class="compare-row good">支持 <strong>多文件提取、对比、汇总</strong> 与连续协作。</div>
-                        <div class="compare-row good">技能、提示词与工作流都可以 <strong>持续沉淀</strong>。</div>
-                        <div class="compare-row good">支持 <strong>本地优先</strong>，也可接入 Gemini / Ollama。</div>
-                        <div class="compare-row good">适合 <strong>长期、重复、复杂</strong> 的文件工作。</div>
-                    </div>
+                <div class="card">
+                    <h3>周报生成</h3>
+                    <p>从 Excel 数据汇总关键指标，生成管理层可读的 DOCX 报告。</p>
                 </div>
-
-                <div class="compare-col">
-                    <div class="compare-head">
-                        <div class="compare-kicker">通用聊天工具</div>
-                        <h3>强在问答</h3>
-                        <p>适合快速咨询，但通常不是围绕文件流程构建。</p>
-                    </div>
-                    <div class="compare-list">
-                        <div class="compare-row warn">往往需要 <strong>手动复制内容</strong> 再来回整理。</div>
-                        <div class="compare-row warn">跨文件处理更依赖 <strong>人为组织上下文</strong>。</div>
-                        <div class="compare-row warn">复用更多依赖聊天记录，<strong>流程沉淀较弱</strong>。</div>
-                        <div class="compare-row warn">部署方式取决于具体平台，<strong>本地控制力有限</strong>。</div>
-                        <div class="compare-row warn">更适合 <strong>一次性提问</strong> 和轻量创作。</div>
-                    </div>
+                <div class="card">
+                    <h3>资料包整理</h3>
+                    <p>跨 PDF、Word、Excel 提取事实、名单、金额、时间线和缺失项。</p>
                 </div>
-
-                <div class="compare-col">
-                    <div class="compare-head">
-                        <div class="compare-kicker">传统办公插件</div>
-                        <h3>强在单点功能</h3>
-                        <p>适合补一个按钮，但往往很难承接完整任务链路。</p>
-                    </div>
-                    <div class="compare-list">
-                        <div class="compare-row warn">通常只覆盖 <strong>单文档内</strong> 的局部动作。</div>
-                        <div class="compare-row warn">面对多文件和复杂任务，<strong>扩展性有限</strong>。</div>
-                        <div class="compare-row warn">可配置空间有限，<strong>难以形成工作台式体验</strong>。</div>
-                        <div class="compare-row warn">依赖宿主软件生态，<strong>灵活性较弱</strong>。</div>
-                        <div class="compare-row warn">更适合 <strong>局部增强</strong>，不适合作为长期 AI 工作台。</div>
-                    </div>
+                <div class="card">
+                    <h3>长文分步处理</h3>
+                    <p>一段一段处理长 PDF，用户确认后继续，避免一次性输出不可控。</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- ===== ACTIVATION CODE ===== -->
-    <section id="activation" class="activation-section">
-        <div class="activation-inner">
-            <div class="section-label">🚀 开始使用</div>
-            <h2 class="section-title">三步上手 Koto</h2>
-            <p class="section-desc">下载 Windows 便携包，填入 Gemini API Key 即可开始。或从源码运行（Python 3.11+）。数据留在本地，按需开启云端能力。</p>
-
-            <div class="steps-row">
-                <div class="step-card">
-                    <div class="step-num">1</div>
-                    <h3>下载并启动</h3>
-                    <p>前往 GitHub Releases 下载最新 Windows 便携包，解压后运行 <code>koto.exe</code>，或从源码用 <code>python server.py</code> 启动，浏览器访问 <code>localhost:5000</code>。</p>
-                    <div class="step-note">
-                        📦 Windows 便携版，解压即运行<br>
-                        <strong>也可从源码运行（Python 3.11+）</strong>
-                    </div>
-                </div>
-                <div class="step-card">
-                    <div class="step-num">2</div>
-                    <h3>填入 Gemini API Key</h3>
-                    <p>在设置页面填入你的 <strong>Google Gemini API Key</strong>，所有 AI 功能立即解锁。也可配置本地 Ollama 模型实现完全离线运行。</p>
-                    <div class="step-note">
-                        🔑 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent-primary);text-decoration:underline">免费获取 Gemini API Key</a><br>
-                        🤖 或安装 <a href="https://ollama.ai" target="_blank" rel="noopener" style="color:var(--accent-primary);text-decoration:underline">Ollama</a> 本地运行
-                    </div>
-                </div>
-                <div class="step-card">
-                    <div class="step-num">3</div>
-                    <h3>打开文件开始编辑</h3>
-                    <p>在工作区浏览器中打开 Word、PPT 或 Excel 文件，选中文字后 AI 悬浮工具栏自动出现。选择技能，AI 即时处理，一键应用到文档。</p>
-                    <div class="step-note">
-                        📄 支持 DOCX · PPTX · XLSX<br>
-                        <strong>数据始终留在你的设备上</strong>
-                    </div>
-                </div>
-            </div>
-
-            <div class="activation-contact">
-                <div class="left">
-                    <h3>两种运行模式，自由切换</h3>
-                    <p>
-                        <strong>云端模式</strong>：在 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="color:var(--accent-primary);text-decoration:underline">Google AI Studio</a> 免费申请 Gemini API Key，填入设置即可使用全部功能。<br>
-                        <strong>本地模式</strong>：安装 Ollama 并下载模型（如 llama3、qwen），Koto 自动检测并切换，完全离线运行。<br>
-                        有问题？加微信咨询或发送「Koto 使用帮助」。
-                    </p>
-                </div>
-                <div class="wechat-chip">
-                    <div class="wc-icon">💬</div>
-                    <div class="wc-info">
-                        <div class="wc-label">微信 WeChat</div>
-                        <div class="wc-id">18913921188</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="story-band" style="margin-top:28px;">
-                <div class="story-copy">
-                    <h3>不在电脑前，也能把任务接上继续做</h3>
-                    <p>这张移动端截图补足了使用场景：用户不仅能在桌面端做深度处理，也能在手机上快速查看上下文、继续对话、补一条指令或确认结果。它传达的是同一套工作流可以自然延伸到更多场景。</p>
-                    <div class="story-points">
-                        <span>窄屏适配</span>
-                        <span>碎片时间继续任务</span>
-                        <span>轻量访问</span>
-                        <span>多端一致体验</span>
-                    </div>
-                </div>
-                <a class="story-media story-media-mobile" href="assets/screenshots/koto-mobile.png" target="_blank" rel="noopener">
-                    <img src="assets/screenshots/koto-mobile.png" alt="Koto 移动端界面截图" loading="lazy">
-                </a>
-            </div>
-        </div>
-    </section>
-
-    <!-- ===== FAQ ===== -->
-    <section id="faq">
-        <div class="section-wrap">
-            <div style="text-align:center;max-width:760px;margin:0 auto;">
-                <div class="section-label" style="display:inline-flex;">❓ FAQ</div>
-                <h2 class="section-title" style="text-align:center;">第一次了解 Koto<br>最常见的几个问题</h2>
-                <p class="section-desc" style="margin:0 auto;text-align:center;max-width:740px;">把疑问提前回答清楚，能显著提升产品页的完成度与信任感。下面这些问题也是新用户最常问到的。</p>
-            </div>
-
-            <div class="faq-grid">
-                <div class="faq-side">
-                    <h3 style="font-size:24px;margin-bottom:12px;">如果你在评估是否值得下载</h3>
-                    <p>Koto 最适合那些已经在用 AI，但仍然被文件复制粘贴、跨文档整理、重复流程和隐私顾虑拖慢效率的人。它不是替代聊天，而是把 AI 带进真实文件工作流。</p>
-                    <a href="#download" class="btn btn-primary">立即下载体验</a>
-                </div>
-
-                <div class="faq-list">
-                    <details class="faq-item" open>
-                        <summary>文件和数据会上传到服务器吗？</summary>
-                        <p>Koto 的核心定位是本地优先。文件、工作区与知识库默认围绕本机使用；如果你配置 Gemini 等云端模型，请按对应模型服务的方式使用。若使用 Ollama，本地模式可进一步降低外部依赖。</p>
-                    </details>
-                    <details class="faq-item">
-                        <summary>必须配置 Gemini API Key 才能使用吗？</summary>
-                        <p>不是必须。你可以配置 Gemini 快速开始，也可以安装 Ollama 使用本地模型。产品页里保留两种模式，就是为了让不同隐私要求、网络条件和成本偏好的用户都能找到适合自己的方式。</p>
-                    </details>
-                    <details class="faq-item">
-                        <summary>Koto 更适合哪些类型的工作？</summary>
-                        <p>如果你的日常工作经常围绕 Word、PPT、Excel、PDF 或多份资料协同展开，例如合同审阅、周报整理、问卷填写、信息提取、文档改写、汇报材料统一风格，那么 Koto 的优势会非常明显。</p>
-                    </details>
-                    <details class="faq-item">
-                        <summary>它和普通 AI 聊天工具最大的区别是什么？</summary>
-                        <p>最大的区别是“工作对象”不同。普通聊天工具主要处理对话，而 Koto 主要处理真实文件、任务上下文和可反复复用的技能/工作流，所以更适合把 AI 变成长期生产力，而不是一次性问答。</p>
-                    </details>
-                    <details class="faq-item">
-                        <summary>现在能怎么开始体验？</summary>
-                        <p>最直接的方式是下载 Windows 便携版，解压即用；如果你希望从源码运行，页面下方也保留了 Python 方式。建议第一次体验时直接拿一份真实 Word、PPT 或 Excel 文件试一遍，最容易感受到差异。</p>
-                    </details>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- ===== DOWNLOAD ===== -->
-    <section id="download" class="download-section">
-        <div class="download-inner">
-            <div class="download-left">
-                <div class="section-label">⬇ 下载</div>
-                <h2>立即下载<br>开始体验</h2>
-                <p>下载最新 Release，解压即可运行。本地文件管理开箱即用，Gemini / Ollama 按需配置，无需额外安装运行环境。</p>
-                <div class="download-actions">
-                    <a href="https://github.com/Loganwon/Koto/releases/latest" id="btn-download-main" class="download-btn" target="_blank" rel="noopener">
-                        <div class="dl-icon">🪟</div>
-                        <div class="dl-text">
-                            <strong>Windows 便携版</strong>
-                            <span id="dl-subtitle">Latest Release · 64-bit · 免安装</span>
-                        </div>
-                        <div class="dl-arrow">↗</div>
-                    </a>
-                    <a href="https://github.com/Loganwon/Koto/releases" class="download-btn" target="_blank" rel="noopener">
-                        <div class="dl-icon" style="background:rgba(255,255,255,0.06);color:var(--text-primary);">📋</div>
-                        <div class="dl-text">
-                            <strong>查看所有版本</strong>
-                            <span>GitHub Releases · 更新日志</span>
-                        </div>
-                        <div class="dl-arrow">↗</div>
-                    </a>
-                </div>
-            </div>
-            <div class="download-right">
-                <div class="req-card">
-                    <h4>系统要求（便携版）</h4>
-                    <div class="req-item"><span class="check">✓</span> Windows 10 / 11 (64-bit)</div>
-                    <div class="req-item"><span class="check">✓</span> 内存 4GB+（推荐 8GB+）</div>
-                    <div class="req-item"><span class="check">✓</span> 磁盘空间 2GB+</div>
-                    <div class="req-item"><span class="check">✓</span> 网络连接（Gemini API 需要）</div>
-                </div>
-                <div class="req-card">
-                    <h4>从源码运行（跨平台）</h4>
-                    <div class="req-item"><span class="check">✓</span> Python 3.11+</div>
-                    <div class="req-item"><span class="check">✓</span> pip install -r config/requirements.txt</div>
-                    <div class="req-item"><span class="check">✓</span> python server.py → localhost:5000</div>
-                    <div class="req-item" style="margin-top:8px;">
-                        <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener"
-                           style="color:var(--accent-primary);text-decoration:none;font-size:14px;">
-                            → GitHub 仓库 · Docker 支持
+    <section class="band white" id="download">
+        <div class="inner">
+            <div class="download-panel">
+                <div class="download-main">
+                    <div class="section-label" style="color:#7ef0c5">Download</div>
+                    <h2>下载 Koto</h2>
+                    <p class="lead">推荐 Windows 用户优先下载安装包；需要解压即用时选择便携包。页面会自动读取 GitHub 最新 Release，并把按钮指向对应资产。</p>
+                    <div class="download-actions">
+                        <a class="download-card primary" id="download-setup" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">
+                            <strong>Windows 安装包</strong>
+                            <span id="setup-subtitle">Latest Release · Setup.exe</span>
+                        </a>
+                        <a class="download-card" id="download-zip" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">
+                            <strong>Windows 便携包</strong>
+                            <span id="zip-subtitle">Latest Release · .zip</span>
                         </a>
                     </div>
+                    <div style="margin-top:18px">
+                        <a class="btn btn-secondary" href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener">查看所有版本</a>
+                    </div>
+                </div>
+                <div class="requirements">
+                    <div class="req">
+                        <strong>Windows 用户</strong>
+                        <ul>
+                            <li>Windows 10 / 11，64-bit</li>
+                            <li>建议 8GB 内存以上</li>
+                            <li>本地模型会额外占用数 GB 空间</li>
+                        </ul>
+                    </div>
+                    <div class="req">
+                        <strong>从源码运行</strong>
+                        <ul>
+                            <li>Python 3.11+</li>
+                            <li><code>pip install -r config/requirements.txt</code></li>
+                            <li><code>python server.py</code> 后访问 localhost</li>
+                        </ul>
+                    </div>
+                    <div class="req">
+                        <strong>模型准备</strong>
+                        <ul>
+                            <li>云端：DeepSeek 或 Gemini API Key</li>
+                            <li>本地：使用下载器或连接 Ollama</li>
+                            <li>可以在本地和云端之间自由切换</li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- ===== FOOTER ===== -->
+    <section class="band alt" id="faq">
+        <div class="inner">
+            <div class="section-head">
+                <div>
+                    <div class="section-label">FAQ</div>
+                    <h2>下载前最常见的问题</h2>
+                </div>
+                <p>这些回答会随产品能力更新，避免让新用户误以为 Koto 只支持单一模型或单一运行方式。</p>
+            </div>
+            <div class="faq">
+                <details open>
+                    <summary>必须配置 Gemini 才能用吗？</summary>
+                    <p>不是。Koto 现在支持 DeepSeek、Gemini 和本地模型。你可以先用云端模型快速体验，也可以用本地模型下载器或 Ollama 准备离线模型。</p>
+                </details>
+                <details>
+                    <summary>文件会自动上传到云端吗？</summary>
+                    <p>Koto 是本地优先的文件工作台。文件和工作区默认在本机处理；当你选择云端模型时，请按对应模型服务的隐私和使用方式理解请求内容。</p>
+                </details>
+                <details>
+                    <summary>本地模型下载器会帮我选模型吗？</summary>
+                    <p>会。下载器会围绕设备资源和任务类型给出更适合的本地模型选择，避免用户只看到一串模型名却不知道该下载哪个。</p>
+                </details>
+                <details>
+                    <summary>Koto 最适合什么工作？</summary>
+                    <p>最适合围绕真实文件反复处理的任务：文档审校、报告生成、多文件提取、长 PDF 分步总结、PPT 内容补全和 Excel 数据整理。</p>
+                </details>
+            </div>
+        </div>
+    </section>
+
     <footer class="footer">
         <div class="footer-inner">
-            <a href="#" class="footer-brand">
-                <div class="logo">言</div>
-                Koto
-            </a>
-            <div class="footer-links">
+            <div id="footer-version">Koto · Latest Release</div>
+            <div>
                 <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a>
+                <span style="padding:0 10px;color:rgba(255,255,255,.35)">/</span>
                 <a href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">下载</a>
-                <a href="#workflow">工作流演示</a>
-                <a href="#results">结果示例</a>
-                <a href="#marketplace">技能市场</a>
-                <a href="#compare">对比优势</a>
-                <a href="#faq">FAQ</a>
-                <a href="#activation">使用指南</a>
             </div>
-            <div class="footer-copy" id="footer-version">© 2026 Koto · v1.7.2</div>
         </div>
     </footer>
 
     <script>
-        /* ── Auto-fetch latest release and update download URLs & version ── */
         (function () {
-            var REPO = 'Loganwon/Koto';
-            var BTN_IDS = ['btn-download-hero', 'btn-download-main'];
-            fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
-                cache: 'no-store',
-                headers: { 'Accept': 'application/vnd.github.v3+json' }
+            var repo = "Loganwon/Koto";
+            var latest = "https://github.com/" + repo + "/releases/latest";
+            var setupBtn = document.getElementById("download-setup");
+            var zipBtn = document.getElementById("download-zip");
+            var heroBtn = document.getElementById("btn-download-hero");
+            var versionText = document.getElementById("version-text");
+            var footerVersion = document.getElementById("footer-version");
+            var setupSubtitle = document.getElementById("setup-subtitle");
+            var zipSubtitle = document.getElementById("zip-subtitle");
+
+            function sizeLabel(bytes) {
+                if (!bytes) return "";
+                var mb = bytes / 1024 / 1024;
+                return Math.round(mb) + " MB";
+            }
+
+            fetch("https://api.github.com/repos/" + repo + "/releases/latest", {
+                cache: "no-store",
+                headers: { "Accept": "application/vnd.github+json" }
             })
-                .then(function(r) {
-                    if (!r.ok) throw new Error(r.status);
+                .then(function (r) {
+                    if (!r.ok) throw new Error(String(r.status));
                     return r.json();
                 })
-                .then(function(data) {
-                    if (!data || !data.tag_name) return;
-                    var ver = data.tag_name.replace(/^v/i, '');
-                    var displayVer = 'v' + ver;
-                    var assets = data.assets || [];
-
-                    /* Pick best download asset: prefer Setup.exe > any .exe > .zip */
-                    var asset = assets.find(function(a) {
-                        return /setup.*\.exe$/i.test(a.name);
-                    }) || assets.find(function(a) {
-                        return a.name.endsWith('.exe');
-                    }) || assets.find(function(a) {
-                        return a.name.endsWith('.zip');
+                .then(function (release) {
+                    var version = release.tag_name || "Latest Release";
+                    var assets = release.assets || [];
+                    var setup = assets.find(function (asset) {
+                        return /setup.*\.exe$/i.test(asset.name);
+                    }) || assets.find(function (asset) {
+                        return /\.exe$/i.test(asset.name);
+                    });
+                    var zip = assets.find(function (asset) {
+                        return /windows.*\.zip$/i.test(asset.name);
+                    }) || assets.find(function (asset) {
+                        return /\.zip$/i.test(asset.name);
                     });
 
-                    if (asset) {
-                        BTN_IDS.forEach(function(id) {
-                            var el = document.getElementById(id);
-                            if (el) el.href = asset.browser_download_url;
-                        });
-                        /* Update download subtitle with real version */
-                        var dlSub = document.getElementById('dl-subtitle');
-                        if (dlSub) dlSub.textContent = displayVer + ' \u00b7 64-bit \u00b7 \u514d\u5b89\u88c5';
+                    versionText.textContent = version;
+                    footerVersion.textContent = "Koto · " + version;
+
+                    if (setup) {
+                        setupBtn.href = setup.browser_download_url;
+                        heroBtn.href = setup.browser_download_url;
+                        setupSubtitle.textContent = version + " · " + setup.name + " · " + sizeLabel(setup.size);
+                    } else {
+                        setupBtn.href = latest;
+                        heroBtn.href = latest;
                     }
 
-                    /* Update hero badge version */
-                    var versionSpan = document.getElementById('version-text');
-                    if (versionSpan) {
-                        versionSpan.textContent = displayVer;
-                    }
-                    /* Update footer version */
-                    var footer = document.getElementById('footer-version');
-                    if (footer) {
-                        footer.textContent = '\u00a9 2026 Koto \u00b7 ' + displayVer;
+                    if (zip) {
+                        zipBtn.href = zip.browser_download_url;
+                        zipSubtitle.textContent = version + " · " + zip.name + " · " + sizeLabel(zip.size);
+                    } else {
+                        zipBtn.href = latest;
                     }
                 })
-                .catch(function() { /* fallback version already in HTML */ });
+                .catch(function () {
+                    setupBtn.href = latest;
+                    zipBtn.href = latest;
+                    heroBtn.href = latest;
+                });
         })();
-
-        document.querySelectorAll('.cat-pill').forEach(function(pill) {
-            pill.addEventListener('click', function() {
-                document.querySelectorAll('.cat-pill').forEach(function(p) { p.classList.remove('active'); });
-                this.classList.add('active');
-            });
-        });
     </script>
 </body>
 </html>
