@@ -97,12 +97,11 @@ class AnnotationPlugin(AgentPlugin):
         import os
 
         cwd = os.path.realpath(os.getcwd())
-        roots = [
+        return [
             os.path.join(cwd, "workspace"),
             os.path.join(cwd, "uploads"),
             os.path.join(cwd, "dist"),
         ]
-        return [os.path.abspath(r) for r in roots if os.path.isdir(r)]
 
     @classmethod
     def _resolve_docx_path(cls, file_path: str) -> tuple[str | None, str | None]:
