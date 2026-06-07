@@ -52,12 +52,8 @@ def _strip_unsafe_html_blocks(html: str) -> str:
             tag.decompose()
         return str(soup)
     except Exception:
-        return re.sub(
-            r"<(?:style|script)\b[^>]*>.*?</\s*(?:style|script)\s*>",
-            "",
-            html,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
+        logger.warning("[DocxParser] HTML parser unavailable for block sanitizing")
+        return html
 
 
 def _compress_image_bytes(
