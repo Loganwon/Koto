@@ -82,7 +82,7 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "const effectiveCardHeight = Math.max(" in layout_js
     assert "let resolvedByCollision = false;" in layout_js
     assert "resolvedByCollision = true;" in layout_js
-    assert "const driftMaxTop = !resolvedByCollision && Number.isFinite(maxAnchorDrift) && Number.isFinite(desiredTop)" in layout_js
+    assert "const driftMaxTop = Number.isFinite(maxAnchorDrift) && Number.isFinite(desiredTop)" in layout_js
     assert "const measuredCards = cards.map((card, index) =>" in layout_js
     assert "card.style.removeProperty('--wa-review-card-anchor-min-height');" in layout_js
     assert "const anchorHeight = _reviewAnchorHeight(anchorGeometry);" in layout_js
