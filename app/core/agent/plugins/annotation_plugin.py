@@ -141,9 +141,9 @@ class AnnotationPlugin(AgentPlugin):
 
         try:
             try:
-                from web.document_batch_annotator_v2 import annotate_large_document
-            except Exception:
                 from web.document_batch_annotator import annotate_large_document
+            except Exception:
+                from web.document_batch_annotator_v2 import annotate_large_document
 
             events = []
             output_file = None
