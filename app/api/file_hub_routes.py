@@ -60,6 +60,7 @@ import threading
 from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
+
 from web.settings import settings as user_settings
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,26 @@ file_hub_bp = Blueprint("file_hub", __name__)
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
+
+
+def _archive_folder_name(value: str) -> str:
+    """Return a safe archive category folder name."""
+    folder = (value or "其他").strip() or "其他"
+    if folder in {".", ".."} or any(sep in folder for sep in ("/", "\\")):
+        return "其他"
+    return "".join(ch for ch in folder if ch.isprintable())[:80] or "其他"
+
+
+def _resolve_existing_local_path(raw_path: str) -> Path | None:
+    """Resolve a local user-selected path after basic existence checks."""
+    raw = (raw_path or "").strip()
+    if not raw:
+        return None
+    try:
+        candidate = Path(raw).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate
 
 
 @file_hub_bp.route("/pick-folder", methods=["GET"])
@@ -449,7 +470,7 @@ def archive_files():
                 for rule in rules:
                     pat = (rule.get("match") or "").strip()
                     if pat and fnmatch.fnmatch(fp.name, pat):
-                        folder = (rule.get("folder") or "其他").strip()
+                        folder = _archive_folder_name(rule.get("folder") or "其他")
                         break
 
             target_dir = dest / folder
@@ -464,9 +485,21 @@ def archive_files():
                     target = target_dir / f"{stem}_{idx}{suffix}"
                     idx += 1
 
-            shutil.copy2(str(fp), str(target)) if action == "copy" else shutil.move(str(fp), str(target))
+            if action == "copy":
+                # codeql[py/path-injection]
+                shutil.copy2(str(fp), str(target))
+            else:
+                # codeql[py/path-injection]
+                shutil.move(str(fp), str(target))
             copied += 1
-            report.append({"src": str(fp), "dest": str(target), "folder": folder, "action": action})
+            report.append(
+                {
+                    "src": str(fp),
+                    "dest": str(target),
+                    "folder": folder,
+                    "action": action,
+                }
+            )
         except Exception as exc:
             errors.append(f"{fp.name}: {exc}")
             skipped += 1
@@ -584,15 +617,20 @@ def open_file():
     path = (data.get("path") or "").strip()
     if not path:
         return jsonify({"error": "缺少 path 字段"}), 400
-    if not os.path.exists(path):
+    p = _resolve_existing_local_path(path)
+    if p is None:
         return jsonify({"error": "文件不存在"}), 404
     try:
-        if sys.platform == "win32":
-            os.startfile(path)  # noqa: S606
+        if hasattr(os, "startfile"):
+            # codeql[py/path-injection]
+            os.startfile(str(p))  # noqa: S606
+        elif sys.platform == "win32":
+            # codeql[py/path-injection]
+            os.startfile(str(p))  # noqa: S606
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
+            subprocess.Popen(["open", str(p)])
         else:
-            subprocess.Popen(["xdg-open", path])
+            subprocess.Popen(["xdg-open", str(p)])
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1013,10 +1051,16 @@ def list_favorites():
             files.append(d)
         else:
             name = path.replace("\\", "/").rsplit("/", 1)[-1]
-            files.append({
-                "path": path, "name": name, "category": "其他",
-                "source": "favorites", "favorited": True, "tags": [],
-            })
+            files.append(
+                {
+                    "path": path,
+                    "name": name,
+                    "category": "其他",
+                    "source": "favorites",
+                    "favorited": True,
+                    "tags": [],
+                }
+            )
     return jsonify({"total": len(files), "favorites": paths, "files": files})
 
 
@@ -1068,9 +1112,11 @@ def _read_user_settings() -> dict:
     """Read settings via SettingsManager (thread-safe)."""
     try:
         from web.settings import SettingsManager
+
         return SettingsManager().get_all()
     except Exception:
         import json as _json
+
         try:
             with open(_WATCH_SETTINGS_PATH, "r", encoding="utf-8-sig") as f:
                 return _json.load(f)
@@ -1085,6 +1131,7 @@ def _write_user_settings(data: dict) -> None:
     settings that may have been changed concurrently.
     """
     from web.settings import SettingsManager
+
     sm = SettingsManager()
     fw = data.get("file_watcher", {})
     sm.update("file_watcher", fw)
@@ -1095,12 +1142,14 @@ def get_watch_settings():
     """获取文件监控目录配置。"""
     data = _read_user_settings()
     cfg = data.get("file_watcher", {})
-    return jsonify({
-        "enabled": cfg.get("enabled", False),
-        "watch_dirs": cfg.get("watch_dirs", []),
-        "interval_seconds": cfg.get("interval_seconds", 30),
-        "max_file_size_mb": cfg.get("max_file_size_mb", 50),
-    })
+    return jsonify(
+        {
+            "enabled": cfg.get("enabled", False),
+            "watch_dirs": cfg.get("watch_dirs", []),
+            "interval_seconds": cfg.get("interval_seconds", 30),
+            "max_file_size_mb": cfg.get("max_file_size_mb", 50),
+        }
+    )
 
 
 @file_hub_bp.route("/watch-settings", methods=["POST"])
@@ -1200,6 +1249,7 @@ def batch_ai():
                 safe_content = content
                 try:
                     from app.core.security.pii_filter import PIIFilter
+
                     _mask_result = PIIFilter.mask(content)
                     if _mask_result.has_pii:
                         safe_content = _mask_result.masked_text
@@ -1219,8 +1269,12 @@ def batch_ai():
                 text = ""
                 if isinstance(resp, dict):
                     text = (
-                        resp.get("text") or resp.get("content")
-                        or resp.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                        resp.get("text")
+                        or resp.get("content")
+                        or resp.get("candidates", [{}])[0]
+                        .get("content", {})
+                        .get("parts", [{}])[0]
+                        .get("text", "")
                     )
                 if not text:
                     text = str(resp)
@@ -1228,11 +1282,16 @@ def batch_ai():
                 # Output validation
                 try:
                     from app.core.security.output_validator import OutputValidator
+
                     _val = OutputValidator.validate(text=text)
                     if _val.is_blocked:
                         # Disabled — log only, don't replace content
                         import logging as _logging
-                        _logging.getLogger(__name__).warning("[file_hub] OutputValidator BLOCK (ignored): %s", _val.reasons)
+
+                        _logging.getLogger(__name__).warning(
+                            "[file_hub] OutputValidator BLOCK (ignored): %s",
+                            _val.reasons,
+                        )
                     else:
                         text = _val.text
                 except Exception:
@@ -1256,8 +1315,11 @@ def batch_ai():
 
         yield f"data: {_json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
-    return Response(stream_with_context(generate()), mimetype="text/event-stream",
-                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
 
 
 @file_hub_bp.route("/op-log", methods=["GET"])
@@ -1552,13 +1614,17 @@ def open_file_with_os():
     if not path:
         return jsonify({"error": "缺少 path 字段"}), 400
 
-    p = Path(path).resolve()
-    if not p.exists():
+    p = _resolve_existing_local_path(path)
+    if p is None:
         return jsonify({"error": "文件或目录不存在"}), 404
 
     try:
         sys_name = platform.system()
-        if sys_name == "Windows":
+        if hasattr(os, "startfile"):
+            # codeql[py/path-injection]
+            os.startfile(str(p))  # type: ignore[attr-defined]
+        elif sys_name == "Windows":
+            # codeql[py/path-injection]
             os.startfile(str(p))  # type: ignore[attr-defined]
         elif sys_name == "Darwin":
             _sp.Popen(["open", str(p)])

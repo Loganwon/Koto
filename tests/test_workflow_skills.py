@@ -5,14 +5,16 @@ Unit tests for the 5 workflow skill modules.
 
 from __future__ import annotations
 
-import json
 import csv
 import io
-import pytest
+import json
 from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import MagicMock, mock_open, patch
+
+import pytest
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
 
 def _make_workbook(rows: list[list]) -> dict:
     """Build a minimal IWorkbookData-like dict for assertion helpers."""
@@ -35,6 +37,7 @@ def _make_workbook(rows: list[list]) -> dict:
 
 
 # ── CrossFormatExtractor ─────────────────────────────────────────────────────
+
 
 class TestCrossFormatExtractor:
     def test_build_workbook_has_header_row(self):
@@ -70,13 +73,14 @@ class TestCrossFormatExtractor:
 
 # ── DataFormatCleaner ────────────────────────────────────────────────────────
 
+
 class TestDataFormatCleaner:
     def test_diff_csv_detects_changed_cells(self):
         from app.core.workflows.data_format_cleaner import DataFormatCleaner
 
         cleaner = DataFormatCleaner()
         original = "日期,金额\n2024/1/5,1000\n2024/2/10,2000"
-        cleaned  = "日期,金额\n2024-01-05,1000\n2024-02-10,2000"
+        cleaned = "日期,金额\n2024-01-05,1000\n2024-02-10,2000"
 
         diffs = cleaner._diff_csv(original, cleaned)
         # Both date cells should be in diffs
@@ -99,10 +103,12 @@ class TestDataFormatCleaner:
 
 # ── QuestionnaireFiller ──────────────────────────────────────────────────────
 
+
 class TestQuestionnaireFiller:
     def test_parse_questions_finds_question_column(self, tmp_path):
-        from app.core.workflows.questionnaire_filler import QuestionnaireFiller
         import openpyxl
+
+        from app.core.workflows.questionnaire_filler import QuestionnaireFiller
 
         # Build a simple xlsx with a "问题" column
         wb = openpyxl.Workbook()
@@ -119,8 +125,9 @@ class TestQuestionnaireFiller:
         assert questions[0]["question"] == "贵公司成立于哪年?"
 
     def test_parse_questions_with_explicit_col(self, tmp_path):
-        from app.core.workflows.questionnaire_filler import QuestionnaireFiller
         import openpyxl
+
+        from app.core.workflows.questionnaire_filler import QuestionnaireFiller
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -137,10 +144,12 @@ class TestQuestionnaireFiller:
 
 # ── CommDigest ───────────────────────────────────────────────────────────────
 
+
 class TestCommDigest:
     @patch("app.core.workflow_engine.call_llm_json")
     def test_extract_full_calls_llm(self, mock_clj):
         from app.core.workflows.comm_digest import CommDigest
+
         mock_clj.return_value = {
             "title": "项目纪要",
             "participants": ["王五"],
@@ -149,21 +158,36 @@ class TestCommDigest:
             "decisions": [],
             "open_questions": [],
             "action_items": [
-                {"task": "整理报告", "owner": "王五", "deadline": "2025-02-01",
-                 "status": "pending", "priority": "high"}
+                {
+                    "task": "整理报告",
+                    "owner": "王五",
+                    "deadline": "2025-02-01",
+                    "status": "pending",
+                    "priority": "high",
+                }
             ],
         }
 
         extractor = CommDigest()
-        result = extractor._extract_full("王五你负责整理报告，deadline 2月1号", "zh", "online")
+        result = extractor._extract_full(
+            "王五你负责整理报告，deadline 2月1号", "zh", "online"
+        )
         assert result["action_items"][0]["task"] == "整理报告"
 
     def test_build_workbook_headers(self):
         from app.core.workflows.comm_digest import CommDigest
 
         extractor = CommDigest()
-        items = [{"task": "T1", "owner": "A", "deadline": "2025-03-01",
-                  "status": "in_progress", "priority": "high", "source": "邮件"}]
+        items = [
+            {
+                "task": "T1",
+                "owner": "A",
+                "deadline": "2025-03-01",
+                "status": "in_progress",
+                "priority": "high",
+                "source": "邮件",
+            }
+        ]
         wb = extractor._build_workbook(items)
         sheet = list(wb["sheets"].values())[0]
         cd = sheet["cellData"]
@@ -177,6 +201,7 @@ class TestCommDigest:
 
 
 # ── DocSmartCompare ──────────────────────────────────────────────────────────
+
 
 class TestDocSmartCompare:
     def test_rule_split_numbered_clauses(self):
@@ -204,12 +229,22 @@ class TestDocSmartCompare:
 
         compare = DocSmartCompare()
         alignments = [
-            {"原文片段": "第一条: 甲方支付货款。", "修改建议": "第一条: 甲方支付货款。",
-             "diff_type": "unchanged", "severity": "none", "diff_detail": "", "risk_flag": False},
-            {"原文片段": "付款期限为10日", "修改建议": "付款期限为30日",
-             "修改原因": "付款期限从10日改为30日，风险较大",
-             "diff_type": "modified", "severity": "critical",
-             "risk_flag": True},
+            {
+                "原文片段": "第一条: 甲方支付货款。",
+                "修改建议": "第一条: 甲方支付货款。",
+                "diff_type": "unchanged",
+                "severity": "none",
+                "diff_detail": "",
+                "risk_flag": False,
+            },
+            {
+                "原文片段": "付款期限为10日",
+                "修改建议": "付款期限为30日",
+                "修改原因": "付款期限从10日改为30日，风险较大",
+                "diff_type": "modified",
+                "severity": "critical",
+                "risk_flag": True,
+            },
         ]
         html = compare._generate_diff_html(alignments)
         # unchanged entries should not appear; modified should
@@ -218,11 +253,13 @@ class TestDocSmartCompare:
 
 # ── Workflow API Blueprint ────────────────────────────────────────────────────
 
+
 class TestWorkflowApiBlueprint:
     @pytest.fixture
     def client(self):
         """Create a minimal Flask test client with the workflow blueprint."""
         from flask import Flask
+
         from web.blueprints.workflow_api import workflow_bp
 
         app = Flask(__name__)
@@ -243,8 +280,11 @@ class TestWorkflowApiBlueprint:
         ids = {w["id"] for w in resp.get_json()["workflows"]}
         # 核心工作流必须存在（不排除后续新增的工作流）
         expected_core = {
-            "cross_format_extractor", "data_format_cleaner",
-            "questionnaire_filler", "comm_digest", "doc_smart_compare",
+            "cross_format_extractor",
+            "data_format_cleaner",
+            "questionnaire_filler",
+            "comm_digest",
+            "doc_smart_compare",
         }
         assert expected_core.issubset(ids)
         assert {"contract_diff_markup", "email_thread_digest"}.isdisjoint(ids)

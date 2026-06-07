@@ -91,19 +91,23 @@ def _to_ollama_messages(
                 # Convert to Ollama OpenAI-compatible tool_calls format
                 ollama_tcs = []
                 for tc in tool_calls:
-                    ollama_tcs.append({
-                        "id": tc.get("id") or "",
-                        "type": "function",
-                        "function": {
-                            "name": tc.get("name", ""),
-                            "arguments": tc.get("args") or {},
-                        },
-                    })
-                messages.append({
-                    "role": "assistant",
-                    "content": content or "",
-                    "tool_calls": ollama_tcs,
-                })
+                    ollama_tcs.append(
+                        {
+                            "id": tc.get("id") or "",
+                            "type": "function",
+                            "function": {
+                                "name": tc.get("name", ""),
+                                "arguments": tc.get("args") or {},
+                            },
+                        }
+                    )
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": content or "",
+                        "tool_calls": ollama_tcs,
+                    }
+                )
             elif content:
                 messages.append({"role": "assistant", "content": str(content)})
 
@@ -123,17 +127,21 @@ def _to_ollama_messages(
                     if tool_call_id:
                         break
             if tool_call_id:
-                messages.append({
-                    "role": "tool",
-                    "content": str(content),
-                    "tool_call_id": tool_call_id,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "content": str(content),
+                        "tool_call_id": tool_call_id,
+                    }
+                )
             else:
                 # No id available — inject as user message so context isn't lost
-                messages.append({
-                    "role": "user",
-                    "content": f"[Tool result from {fn_name}]: {str(content)}",
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"[Tool result from {fn_name}]: {str(content)}",
+                    }
+                )
 
         elif role == "user":
             content = msg.get("content", "")
@@ -175,6 +183,7 @@ def _parse_ollama_response(resp_json: Dict) -> Dict[str, Any]:
     """Convert Ollama /api/chat response → UnifiedAgent {content, tool_calls, usage}."""
     import re as _re
     import uuid as _uuid
+
     msg = resp_json.get("message") or {}
     content = msg.get("content") or ""
     # Strip <think>...</think> blocks (qwen3 thinking mode)

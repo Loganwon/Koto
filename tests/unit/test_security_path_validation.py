@@ -35,6 +35,25 @@ class TestAnnotationPluginSandbox:
 
         return AnnotationPlugin()
 
+    def _run_valid_docx_case(self, safe_root: str, filename: str, total_edits: int = 1):
+        plugin = self._make_plugin()
+        valid_path = os.path.join(safe_root, filename)
+
+        with patch.object(
+            type(plugin), "_allowed_roots", return_value=[safe_root]
+        ), patch("os.path.exists", return_value=True), patch(
+            "web.document_batch_annotator.annotate_large_document"
+        ) as mock_ann:
+            mock_ann.return_value = iter(
+                [
+                    (
+                        'data:{"type":"complete","output_file":"out.docx",'
+                        f'"total_edits":{total_edits}}}'
+                    )
+                ]
+            )
+            return plugin.annotate_document(file_path=valid_path)
+
     # -- relative paths --------------------------------------------------------
 
     def test_relative_path_rejected(self):
@@ -92,49 +111,25 @@ class TestAnnotationPluginSandbox:
 
     def test_valid_workspace_path_accepted(self):
         """A .docx file under workspace/ should pass the sandbox check."""
-        plugin = self._make_plugin()
         workspace = os.path.realpath(os.path.join(os.getcwd(), "workspace"))
-        valid_path = os.path.join(workspace, "report.docx")
-
-        with patch("os.path.exists", return_value=True), patch(
-            "web.document_batch_annotator_v2.annotate_large_document"
-        ) as mock_ann:
-            mock_ann.return_value = iter(
-                ['data:{"type":"complete","output_file":"out.docx","total_edits":3}']
-            )
-            result = plugin.annotate_document(file_path=valid_path)
+        result = self._run_valid_docx_case(workspace, "report.docx", total_edits=3)
         assert "不在允许的目录范围内" not in result
         assert "绝对路径" not in result
+        assert "文档标注完成" in result
 
     def test_valid_uploads_path_accepted(self):
         """A .docx file under uploads/ should pass the sandbox check."""
-        plugin = self._make_plugin()
         uploads = os.path.realpath(os.path.join(os.getcwd(), "uploads"))
-        valid_path = os.path.join(uploads, "doc.docx")
-
-        with patch("os.path.exists", return_value=True), patch(
-            "web.document_batch_annotator_v2.annotate_large_document"
-        ) as mock_ann:
-            mock_ann.return_value = iter(
-                ['data:{"type":"complete","output_file":"out.docx","total_edits":1}']
-            )
-            result = plugin.annotate_document(file_path=valid_path)
+        result = self._run_valid_docx_case(uploads, "doc.docx")
         assert "不在允许的目录范围内" not in result
+        assert "文档标注完成" in result
 
     def test_valid_dist_path_accepted(self):
         """A .docx file under dist/ should pass the sandbox check."""
-        plugin = self._make_plugin()
         dist = os.path.realpath(os.path.join(os.getcwd(), "dist"))
-        valid_path = os.path.join(dist, "output.docx")
-
-        with patch("os.path.exists", return_value=True), patch(
-            "web.document_batch_annotator_v2.annotate_large_document"
-        ) as mock_ann:
-            mock_ann.return_value = iter(
-                ['data:{"type":"complete","output_file":"out.docx","total_edits":0}']
-            )
-            result = plugin.annotate_document(file_path=valid_path)
+        result = self._run_valid_docx_case(dist, "output.docx", total_edits=0)
         assert "不在允许的目录范围内" not in result
+        assert "文档标注完成" in result
 
     # -- non-.docx extension ---------------------------------------------------
 

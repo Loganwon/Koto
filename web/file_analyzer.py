@@ -44,7 +44,7 @@ class FileAnalyzer:
 
     # Ollama 连接配置
     OLLAMA_URL = "http://127.0.0.1:11434"
-    AI_MODEL = "qwen3.5:9b"
+    AI_MODEL = "qwen3:8b"
     _ai_available = None
     _ai_check_time = 0
 

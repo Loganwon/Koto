@@ -31,12 +31,13 @@ DOCX_PATH = os.path.join(_REPO_ROOT, "workspace", "雷鸟创新-邗投珒创-投
 WORD_PAGE_COUNT = 72
 
 # TipTap/Koto rendering constants (must match koto-docx-editor.js)
-_PAD_V = 176           # ProseMirror padding: top(96) + bottom(80)
+_PAD_V = 176  # ProseMirror padding: top(96) + bottom(80)
 _CONTENT_PAGE_H = 880  # usable content height per page (1056 - 176)
 
 # ---------------------------------------------------------------------------
 # Shared fixture — parse the DOCX once for the whole module
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def docx_html() -> str:
@@ -51,9 +52,9 @@ def docx_html() -> str:
     assert "html" in result, "parse_docx() result must contain 'html' key"
 
     html = result["html"]
-    assert isinstance(html, str) and len(html) > 1_000, (
-        f"HTML output suspiciously short ({len(html)} chars); parser likely failed"
-    )
+    assert (
+        isinstance(html, str) and len(html) > 1_000
+    ), f"HTML output suspiciously short ({len(html)} chars); parser likely failed"
     return html
 
 
@@ -147,6 +148,7 @@ def outline_heading_fallback_html(tmp_path) -> str:
 # Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestDocxHtmlStructure:
     """Structural checks on the HTML produced by parse_docx()."""
@@ -160,9 +162,9 @@ class TestDocxHtmlStructure:
 
     def test_has_block_elements(self, docx_html: str) -> None:
         """Output must contain paragraph or div elements."""
-        assert re.search(r'<(p|div)\b', docx_html, re.IGNORECASE), (
-            "No <p> or <div> elements found in HTML output"
-        )
+        assert re.search(
+            r"<(p|div)\b", docx_html, re.IGNORECASE
+        ), "No <p> or <div> elements found in HTML output"
 
 
 @pytest.mark.integration
@@ -202,8 +204,10 @@ class TestHeaderFooter:
             re.IGNORECASE | re.DOTALL,
         )
         if not match:
-            pytest.skip("koto-header class not found — covered by test_header_class_present")
-        text = re.sub(r'<[^>]+>', '', match.group(1)).strip()
+            pytest.skip(
+                "koto-header class not found — covered by test_header_class_present"
+            )
+        text = re.sub(r"<[^>]+>", "", match.group(1)).strip()
         assert text, "koto-header paragraph is empty (no visible text)"
 
 
@@ -219,34 +223,44 @@ class TestTypography:
         Normal style fallback when setting the block font size, and body text
         must not inherit a phantom bold weight at the paragraph level.
         """
-        blocks = re.findall(r'<p\b([^>]*)>(.*?)</p>', typography_html, re.IGNORECASE | re.DOTALL)
+        blocks = re.findall(
+            r"<p\b([^>]*)>(.*?)</p>", typography_html, re.IGNORECASE | re.DOTALL
+        )
         target_attrs = None
         for attrs, inner in blocks:
-            text = re.sub(r'<[^>]+>', '', inner).replace("\xa0", " ")
-            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r"<[^>]+>", "", inner).replace("\xa0", " ")
+            text = re.sub(r"\s+", " ", text).strip()
             if text == "企业介绍正文段落，用于验证段落默认字号与粗细继承。":
                 target_attrs = attrs
                 break
 
-        assert target_attrs is not None, "Target body paragraph not found in parsed HTML"
+        assert (
+            target_attrs is not None
+        ), "Target body paragraph not found in parsed HTML"
         style_match = re.search(r'style="([^"]*)"', target_attrs)
         assert style_match, "Target body paragraph missing inline style"
         style = style_match.group(1)
         assert "font-size:12.0pt" in style
         assert "font-weight:bold" not in style
 
-    def test_section_heading_keeps_larger_style_level_font_size(self, typography_html: str) -> None:
+    def test_section_heading_keeps_larger_style_level_font_size(
+        self, typography_html: str
+    ) -> None:
         """Section headings should retain their heading style font size."""
-        blocks = re.findall(r'<(h[1-6])\b([^>]*)>(.*?)</\1>', typography_html, re.IGNORECASE | re.DOTALL)
+        blocks = re.findall(
+            r"<(h[1-6])\b([^>]*)>(.*?)</\1>", typography_html, re.IGNORECASE | re.DOTALL
+        )
         target_attrs = None
         for _tag, attrs, inner in blocks:
-            text = re.sub(r'<[^>]+>', '', inner).replace("\xa0", " ")
-            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r"<[^>]+>", "", inner).replace("\xa0", " ")
+            text = re.sub(r"\s+", " ", text).strip()
             if text == "一、企业简介":
                 target_attrs = attrs
                 break
 
-        assert target_attrs is not None, "Target section heading not found in parsed HTML"
+        assert (
+            target_attrs is not None
+        ), "Target section heading not found in parsed HTML"
         style_match = re.search(r'style="([^"]*)"', target_attrs)
         assert style_match, "Target heading missing inline style"
         style = style_match.group(1)
@@ -256,12 +270,16 @@ class TestTypography:
         self, outline_heading_fallback_html: str
     ) -> None:
         """Outline-only headings should still render with a readable heading size/weight."""
-        blocks = re.findall(r'<(h[1-6])\b([^>]*)>(.*?)</\1>', outline_heading_fallback_html, re.IGNORECASE | re.DOTALL)
+        blocks = re.findall(
+            r"<(h[1-6])\b([^>]*)>(.*?)</\1>",
+            outline_heading_fallback_html,
+            re.IGNORECASE | re.DOTALL,
+        )
         target_tag = None
         target_attrs = None
         for tag, attrs, inner in blocks:
-            text = re.sub(r'<[^>]+>', '', inner).replace("\xa0", " ")
-            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r"<[^>]+>", "", inner).replace("\xa0", " ")
+            text = re.sub(r"\s+", " ", text).strip()
             if text == "执行概要":
                 target_tag = tag.lower()
                 target_attrs = attrs
@@ -286,13 +304,12 @@ class TestImages:
         the browser can display it at the correct size.  Without explicit height,
         CSS 'height:auto' stretches images to occupy the full container width.
         """
-        img_tags = re.findall(r'<img\b[^>]+>', docx_html, re.IGNORECASE)
+        img_tags = re.findall(r"<img\b[^>]+>", docx_html, re.IGNORECASE)
         if not img_tags:
             pytest.skip("No <img> tags in document")
 
         imgs_missing_height = [
-            tag for tag in img_tags
-            if not re.search(r'height\s*:\s*\d', tag)
+            tag for tag in img_tags if not re.search(r"height\s*:\s*\d", tag)
         ]
         assert not imgs_missing_height, (
             f"{len(imgs_missing_height)}/{len(img_tags)} <img> tags lack an "
@@ -302,17 +319,16 @@ class TestImages:
 
     def test_images_carry_width(self, docx_html: str) -> None:
         """Every <img> must also have an explicit width."""
-        img_tags = re.findall(r'<img\b[^>]+>', docx_html, re.IGNORECASE)
+        img_tags = re.findall(r"<img\b[^>]+>", docx_html, re.IGNORECASE)
         if not img_tags:
             pytest.skip("No <img> tags in document")
 
         imgs_missing_width = [
-            tag for tag in img_tags
-            if not re.search(r'width\s*:\s*\d', tag)
+            tag for tag in img_tags if not re.search(r"width\s*:\s*\d", tag)
         ]
-        assert not imgs_missing_width, (
-            f"{len(imgs_missing_width)}/{len(img_tags)} <img> tags lack explicit width"
-        )
+        assert (
+            not imgs_missing_width
+        ), f"{len(imgs_missing_width)}/{len(img_tags)} <img> tags lack explicit width"
 
 
 @pytest.mark.integration
@@ -321,16 +337,16 @@ class TestTableFormatting:
 
     def test_table_cells_exist(self, docx_html: str) -> None:
         """The document has tables — at least one <td> must be present."""
-        assert re.search(r'<td\b', docx_html, re.IGNORECASE), (
-            "No <td> elements found; table parsing may have failed"
-        )
+        assert re.search(
+            r"<td\b", docx_html, re.IGNORECASE
+        ), "No <td> elements found; table parsing may have failed"
 
     def test_table_cells_have_border_inline_styles(self, docx_html: str) -> None:
         """
         Every <td> must carry explicit border-top/bottom/left/right in inline styles
         so the CSS fallback (1px solid #a0a4b8) never fires.
         """
-        td_tags = re.findall(r'<td\b[^>]+>', docx_html, re.IGNORECASE)
+        td_tags = re.findall(r"<td\b[^>]+>", docx_html, re.IGNORECASE)
         if not td_tags:
             pytest.skip("No <td> tags — covered by test_table_cells_exist")
 
@@ -345,7 +361,7 @@ class TestTableFormatting:
         Tinted table cells must carry background-color in their inline style.
         The 投资建议书 document has a styled cover table with coloured cells.
         """
-        td_tags = re.findall(r'<td\b[^>]+>', docx_html, re.IGNORECASE)
+        td_tags = re.findall(r"<td\b[^>]+>", docx_html, re.IGNORECASE)
         assert td_tags, pytest.skip("No <td> tags — covered by test_table_cells_exist")
 
         tinted = [t for t in td_tags if "background-color" in t]
@@ -374,9 +390,9 @@ class TestPageCount:
 
     def test_page_count_estimate_in_range(self, docx_html: str) -> None:
         """Estimated page count should be within 50% of Word's 72 pages."""
-        text_only = re.sub(r'<[^>]+>', ' ', docx_html)
+        text_only = re.sub(r"<[^>]+>", " ", docx_html)
         # Count CJK + Latin printable chars (ignore whitespace)
-        char_count = len(re.sub(r'\s', '', text_only))
+        char_count = len(re.sub(r"\s", "", text_only))
 
         chars_per_line = 35
         px_per_line = 27.2  # 16px × 1.7
@@ -395,7 +411,7 @@ class TestPageCount:
 
     def test_paragraph_count_reasonable(self, docx_html: str) -> None:
         """A 72-page document must have many paragraphs."""
-        p_count = len(re.findall(r'<p\b', docx_html, re.IGNORECASE))
+        p_count = len(re.findall(r"<p\b", docx_html, re.IGNORECASE))
         assert p_count >= 50, (
             f"Only {p_count} <p> elements found; expected ≥50 for a "
             f"{WORD_PAGE_COUNT}-page document"

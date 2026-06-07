@@ -60,11 +60,15 @@ def _sse(payload: Dict[str, Any]) -> str:
 
 
 def sse_phase(current: str, status: str = "running") -> str:
-    return _sse({"type": "phase", "phases": _PHASES, "current": current, "status": status})
+    return _sse(
+        {"type": "phase", "phases": _PHASES, "current": current, "status": status}
+    )
 
 
 def sse_progress(current: int, total: int, detail: str = "") -> str:
-    return _sse({"type": "progress", "current": current, "total": total, "detail": detail})
+    return _sse(
+        {"type": "progress", "current": current, "total": total, "detail": detail}
+    )
 
 
 @dataclass
@@ -89,7 +93,11 @@ class ChunkedTaskRuntime:
         self._socketio = socketio
         self._model_id = model_id
         self._api_key = api_key
-        self._task_agent: Optional[TaskAgent] = None
+        self._task_agent: Optional[TaskAgent] = TaskAgent(
+            socketio=self._socketio,
+            model_id=self._model_id,
+            api_key=self._api_key,
+        )
 
     def _get_task_agent(self) -> TaskAgent:
         if self._task_agent is None:
@@ -130,11 +138,19 @@ class ChunkedTaskRuntime:
         files = files or []
         source_text = self._resolve_source_text(files, options)
         file_type = self._resolve_file_type(files, options)
-        file_path = str(options.get("current_file") or (files[0].get("path") if files else "") or "current_document")
+        file_path = str(
+            options.get("current_file")
+            or (files[0].get("path") if files else "")
+            or "current_document"
+        )
 
         if not source_text.strip():
-            logger.debug("[ChunkedTaskRuntime] Empty source text — delegating to TaskAgent")
-            yield from self._get_task_agent().execute(task=task, files=files, options=options)
+            logger.debug(
+                "[ChunkedTaskRuntime] Empty source text — delegating to TaskAgent"
+            )
+            yield from self._get_task_agent().execute(
+                task=task, files=files, options=options
+            )
             return
 
         chunks = self._build_chunks(source_text, options)
@@ -146,18 +162,21 @@ class ChunkedTaskRuntime:
                 "[ChunkedTaskRuntime] Only %d chunk(s) — delegating to TaskAgent",
                 len(chunks),
             )
-            yield from self._get_task_agent().execute(task=task, files=files, options=options)
+            yield from self._get_task_agent().execute(
+                task=task, files=files, options=options
+            )
             return
 
         yield sse_phase("detect", "running")
-        yield sse_step_progress("detect", f"已识别为长文档分块任务（{len(source_text)} 字）")
+        yield sse_step_progress(
+            "detect", f"已识别为长文档分块任务（{len(source_text)} 字）"
+        )
         yield sse_phase("detect", "done")
 
         yield sse_phase("chunk", "running")
-        yield sse_plan([
-            {"id": chunk.chunk_id, "description": chunk.label}
-            for chunk in chunks
-        ])
+        yield sse_plan(
+            [{"id": chunk.chunk_id, "description": chunk.label} for chunk in chunks]
+        )
         yield sse_progress(0, len(chunks), f"已切分为 {len(chunks)} 个连续分块")
         yield sse_phase("chunk", "done")
 
@@ -184,7 +203,9 @@ class ChunkedTaskRuntime:
                     options=options,
                 )
             except Exception as exc:
-                logger.warning("[ChunkedTaskRuntime] chunk failed: %s", exc, exc_info=True)
+                logger.warning(
+                    "[ChunkedTaskRuntime] chunk failed: %s", exc, exc_info=True
+                )
                 yield sse_step_error(chunk.chunk_id, str(exc))
                 yield sse_error(f"{chunk.label} 处理失败：{exc}")
                 yield sse_done("执行失败")
@@ -198,7 +219,9 @@ class ChunkedTaskRuntime:
                 return
 
             merged_parts.append(chunk_output)
-            previous_summary = str(result.get("chunk_summary") or "").strip() or previous_summary
+            previous_summary = (
+                str(result.get("chunk_summary") or "").strip() or previous_summary
+            )
 
             merged_text = self._merge_outputs(merged_parts)
             yield sse_progress(index, total, f"已完成 {chunk.label}")
@@ -266,9 +289,16 @@ class ChunkedTaskRuntime:
             return str(files[0].get("content_preview") or "")
         return ""
 
-    def _build_chunks(self, source_text: str, options: Dict[str, Any]) -> List[ChunkUnit]:
+    def _build_chunks(
+        self, source_text: str, options: Dict[str, Any]
+    ) -> List[ChunkUnit]:
         from app.core.llm.model_mode import normalize_model_mode
-        target_size = _TARGET_LOCAL_CHUNK_CHARS if normalize_model_mode(options.get("model_mode")) == "local" else _TARGET_CHUNK_CHARS
+
+        target_size = (
+            _TARGET_LOCAL_CHUNK_CHARS
+            if normalize_model_mode(options.get("model_mode")) == "local"
+            else _TARGET_CHUNK_CHARS
+        )
         paragraphs = self._split_paragraphs(source_text)
         chunks: List[ChunkUnit] = []
         buffer: List[str] = []
@@ -313,7 +343,11 @@ class ChunkedTaskRuntime:
 
     @staticmethod
     def _split_paragraphs(text: str) -> List[str]:
-        blocks = [block.strip() for block in re.split(r"\n\s*\n", str(text or "")) if block.strip()]
+        blocks = [
+            block.strip()
+            for block in re.split(r"\n\s*\n", str(text or ""))
+            if block.strip()
+        ]
         if blocks:
             return blocks
 
@@ -394,7 +428,9 @@ class ChunkedTaskRuntime:
 
     @staticmethod
     def _merge_outputs(parts: Iterable[str]) -> str:
-        merged = "\n\n".join(str(part or "").strip() for part in parts if str(part or "").strip())
+        merged = "\n\n".join(
+            str(part or "").strip() for part in parts if str(part or "").strip()
+        )
         return re.sub(r"\n{3,}", "\n\n", merged).strip()
 
     @staticmethod

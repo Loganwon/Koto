@@ -96,6 +96,7 @@ def _node_text(node):
             parts.append(child_text)
     return "".join(parts)
 
+
 # ── 1. _client cache reset on API key save ─────────────────────────────────
 
 
@@ -164,13 +165,17 @@ class TestGetClientLocalIsolation:
     def test_local_mode_without_explicit_model_uses_ollama(self):
         app_mod = self._load_app_module()
 
-        with patch.object(app_mod, "_get_local_model_config", return_value=("local", None)), patch(
+        with patch.object(
+            app_mod, "_get_local_model_config", return_value=("local", None)
+        ), patch(
             "app.core.llm.ollama_provider.OllamaClientProxy",
             return_value=MagicMock(name="ollama_client"),
         ) as mock_ollama, patch.object(
             app_mod,
             "create_client",
-            side_effect=AssertionError("create_client should not be called in local mode"),
+            side_effect=AssertionError(
+                "create_client should not be called in local mode"
+            ),
         ):
             client = app_mod.get_client()
 
@@ -180,15 +185,21 @@ class TestGetClientLocalIsolation:
     def test_local_mode_failure_does_not_reverse_fallback_to_cloud(self):
         app_mod = self._load_app_module()
 
-        with patch.object(app_mod, "_get_local_model_config", return_value=("local", None)), patch(
+        with patch.object(
+            app_mod, "_get_local_model_config", return_value=("local", None)
+        ), patch(
             "app.core.llm.ollama_provider.OllamaClientProxy",
             side_effect=RuntimeError("boom"),
         ), patch.object(
             app_mod,
             "create_client",
-            side_effect=AssertionError("create_client should not be called on local failure"),
+            side_effect=AssertionError(
+                "create_client should not be called on local failure"
+            ),
         ):
-            with pytest.raises(RuntimeError, match="本地模式已启用，但 Ollama 初始化失败"):
+            with pytest.raises(
+                RuntimeError, match="本地模式已启用，但 Ollama 初始化失败"
+            ):
                 app_mod.get_client()
 
 

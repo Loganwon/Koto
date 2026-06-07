@@ -77,7 +77,9 @@ class OpenClawTaskRuntime:
                 model_id=self._model_id,
                 api_key=self._api_key,
             )
-            for event in agent.execute(task=request.task, files=request.files, options=options):
+            for event in agent.execute(
+                task=request.task, files=request.files, options=options
+            ):
                 payload = self._parse_event_payload(event)
                 if isinstance(payload, dict):
                     event_type = str(payload.get("type") or "").strip().lower()
@@ -106,25 +108,52 @@ class OpenClawTaskRuntime:
 
             if not result_emitted and final_summary:
                 final_result = final_result or final_summary
-                yield _sse({
-                    "type": "result",
-                    "output_type": "markdown",
-                    "data": final_result,
-                    "summary": final_summary or final_result,
-                })
+                yield _sse(
+                    {
+                        "type": "result",
+                        "output_type": "markdown",
+                        "data": final_result,
+                        "summary": final_summary or final_result,
+                    }
+                )
 
             yield self._emit_phase("check", "running")
             status = "failed" if had_error else "completed"
-            summary = final_summary.strip() or final_result.strip() or ("执行失败" if had_error else "任务执行完成")
-            yield _sse({"type": "verification", "status": status, "summary": summary, "backend": "task_agent"})
+            summary = (
+                final_summary.strip()
+                or final_result.strip()
+                or ("执行失败" if had_error else "任务执行完成")
+            )
+            yield _sse(
+                {
+                    "type": "verification",
+                    "status": status,
+                    "summary": summary,
+                    "backend": "task_agent",
+                }
+            )
             yield self._emit_phase("check", "done")
-            yield _sse({"type": "done", "summary": final_summary or final_result or ("执行失败" if had_error else "任务完成")})
+            yield _sse(
+                {
+                    "type": "done",
+                    "summary": final_summary
+                    or final_result
+                    or ("执行失败" if had_error else "任务完成"),
+                }
+            )
         except Exception as exc:
             had_error = True
             final_summary = str(exc)
             logger.exception("[OpenClawTaskRuntime] execution failed")
             yield _sse({"type": "error", "text": str(exc)})
-            yield _sse({"type": "verification", "status": "failed", "summary": str(exc), "backend": "task_agent"})
+            yield _sse(
+                {
+                    "type": "verification",
+                    "status": "failed",
+                    "summary": str(exc),
+                    "backend": "task_agent",
+                }
+            )
             yield _sse({"type": "done", "summary": "执行失败"})
         finally:
             self._persist_model_turn(
@@ -134,10 +163,16 @@ class OpenClawTaskRuntime:
                 had_error=had_error,
             )
 
-
     @staticmethod
     def _emit_phase(current: str, status: str) -> str:
-        return _sse({"type": "phase", "phases": _RUNTIME_PHASES, "current": current, "status": status})
+        return _sse(
+            {
+                "type": "phase",
+                "phases": _RUNTIME_PHASES,
+                "current": current,
+                "status": status,
+            }
+        )
 
     @staticmethod
     def _emit_plan_summary(text: str) -> str:
@@ -280,4 +315,6 @@ class OpenClawTaskRuntime:
                 error=had_error,
             )
         except Exception as exc:
-            logger.debug("[OpenClawTaskRuntime] update_last_model_response skipped: %s", exc)
+            logger.debug(
+                "[OpenClawTaskRuntime] update_last_model_response skipped: %s", exc
+            )

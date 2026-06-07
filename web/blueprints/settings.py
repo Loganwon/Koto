@@ -20,6 +20,37 @@ _logger = logging.getLogger("koto.app")
 
 settings_bp = Blueprint("settings_routes", __name__)
 
+
+def _log_internal_error(context: str, exc: Exception) -> None:
+    _logger.warning("%s failed error_type=%s", context, type(exc).__name__)
+
+
+def _normalize_workspace_path(raw_path: str, default_path: str) -> str:
+    from werkzeug.security import safe_join
+
+    value = str(raw_path or "").strip() or default_path
+    if "\x00" in value:
+        raise ValueError("Invalid workspace path")
+
+    candidate = os.path.abspath(os.path.expanduser(value))
+    from web.app import PROJECT_ROOT
+
+    allowed_roots = [
+        os.path.abspath(PROJECT_ROOT),
+        os.path.abspath(os.path.expanduser("~")),
+    ]
+    for root in allowed_roots:
+        try:
+            if os.path.commonpath([candidate, root]) != root:
+                continue
+        except ValueError:
+            continue
+        safe_path = safe_join(root, os.path.relpath(candidate, root))
+        if safe_path:
+            return os.path.abspath(safe_path)
+    raise ValueError("Workspace path is outside the allowed roots")
+
+
 # ---------------------------------------------------------------------------
 # Lazy accessors – avoid circular imports by pulling from web.app at runtime
 # ---------------------------------------------------------------------------
@@ -136,7 +167,8 @@ def local_model_status() -> Response:
         info = get_local_model_info()
         return jsonify({"success": True, **info})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        _log_internal_error("local_model_status", e)
+        return jsonify({"success": False, "error": "本地模型状态读取失败"}), 500
 
 
 @settings_bp.route("/api/local-model/switch", methods=["POST"])
@@ -217,7 +249,8 @@ def local_model_switch() -> Response:
             }
         )
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        _log_internal_error("local_model_switch", e)
+        return jsonify({"success": False, "error": "模型模式切换失败"}), 500
 
 
 @settings_bp.route("/api/local-model/setup", methods=["POST"])
@@ -258,7 +291,8 @@ def list_skills() -> Response:
 
         return jsonify(SkillManager.list_skills())
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        _log_internal_error("list_skills", e)
+        return jsonify({"error": "技能列表读取失败"}), 500
 
 
 @settings_bp.route("/api/skills/<skill_id>/toggle", methods=["POST"])
@@ -310,7 +344,8 @@ def toggle_skill(skill_id: str) -> Response:
         success = SkillManager.set_enabled(skill_id, enabled)
         return jsonify({"success": success})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        _log_internal_error("toggle_skill", e)
+        return jsonify({"success": False, "error": "技能状态更新失败"}), 500
 
 
 @settings_bp.route("/api/skills/<skill_id>/prompt", methods=["POST"])
@@ -328,7 +363,8 @@ def update_skill_prompt(skill_id: str) -> Response:
         success = SkillManager.update_prompt(skill_id, prompt)
         return jsonify({"success": success})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        _log_internal_error("update_skill_prompt", e)
+        return jsonify({"success": False, "error": "技能 Prompt 更新失败"}), 500
 
 
 @settings_bp.route("/api/skills/<skill_id>/reset", methods=["POST"])
@@ -341,7 +377,8 @@ def reset_skill_prompt(skill_id: str) -> Response:
         success = SkillManager.reset_prompt(skill_id)
         return jsonify({"success": success})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        _log_internal_error("reset_skill_prompt", e)
+        return jsonify({"success": False, "error": "技能 Prompt 重置失败"}), 500
 
 
 # ---------------------------------------------------------------------------
@@ -412,15 +449,23 @@ def update_settings() -> Response:
         # 使 _load_user_settings 缓存失效，确保后续读取获得最新值
         mod._user_settings_cache.clear()
         # 存储路径变更时立即更新模块级全局变量，让运行时路径即时生效
-        if category == "storage" and key in ("workspace_dir", "chats_dir", "documents_dir", "images_dir"):
+        if category == "storage" and key in (
+            "workspace_dir",
+            "chats_dir",
+            "documents_dir",
+            "images_dir",
+        ):
             import web.app as _app_mod
+
             if key == "workspace_dir":
                 _app_mod.WORKSPACE_DIR = sm.workspace_dir
                 import os as _os
+
                 _os.makedirs(_app_mod.WORKSPACE_DIR, exist_ok=True)
             elif key == "chats_dir":
                 _app_mod.CHAT_DIR = sm.chats_dir
                 import os as _os
+
                 _os.makedirs(_app_mod.CHAT_DIR, exist_ok=True)
         # 代理设置变更时立即重新检测
         if category == "proxy":
@@ -482,7 +527,8 @@ def switch_to_mini() -> Response:
         else:
             return jsonify({"success": False, "error": "找不到迷你模式程序"})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        _log_internal_error("switch_to_mini", e)
+        return jsonify({"success": False, "error": "迷你模式启动失败"})
 
 
 @settings_bp.route("/api/switch-to-main", methods=["POST"])
@@ -513,7 +559,8 @@ def switch_to_main() -> Response:
         else:
             return jsonify({"success": False, "error": "找不到主程序"})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        _log_internal_error("switch_to_main", e)
+        return jsonify({"success": False, "error": "主程序启动失败"})
 
 
 # ---------------------------------------------------------------------------
@@ -591,7 +638,8 @@ def setup_api_key() -> Response:
 
         return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        _log_internal_error("save_api_key", e)
+        return jsonify({"success": False, "error": "API Key 保存失败"})
 
 
 @settings_bp.route("/api/setup/workspace", methods=["POST"])
@@ -600,11 +648,11 @@ def setup_workspace() -> Response:
     from web.app import PROJECT_ROOT
 
     sm = _get_settings_manager()
-    data = request.json
-    workspace_path = data.get("path", "").strip()
-
-    if not workspace_path:
-        workspace_path = os.path.join(PROJECT_ROOT, "workspace")
+    data = request.json or {}
+    workspace_path = _normalize_workspace_path(
+        data.get("path", ""),
+        os.path.join(PROJECT_ROOT, "workspace"),
+    )
 
     try:
         os.makedirs(workspace_path, exist_ok=True)
@@ -617,7 +665,8 @@ def setup_workspace() -> Response:
 
         return jsonify({"success": True, "path": workspace_path})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        _log_internal_error("setup_workspace", e)
+        return jsonify({"success": False, "error": "工作区目录设置失败"})
 
 
 @settings_bp.route("/api/setup/test", methods=["GET"])
@@ -635,7 +684,8 @@ def test_api_connection() -> Response:
             {"success": True, "message": response.text, "latency": round(latency, 2)}
         )
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        _log_internal_error("test_api_connection", e)
+        return jsonify({"success": False, "error": "API 连接测试失败"})
 
 
 # ---------------------------------------------------------------------------
@@ -702,7 +752,7 @@ def diagnose_models() -> Response:
                 status = "⚠️ 超时"
             else:
                 status = "❌ 错误"
-            return {"status": status, "error": error_msg[:150], "purpose": purpose}
+            return {"status": status, "error": type(e).__name__, "purpose": purpose}
 
     # 并行测试（带超时）
     threads = []
@@ -762,20 +812,31 @@ def local_model_list() -> Response:
         _host, _port = "127.0.0.1", 11434
 
     # 重试一次：Ollama 可能正在启动
-    port_ok = _port_open(_host, _port, timeout=1.5) or _port_open(_host, _port, timeout=2.0)
+    port_ok = _port_open(_host, _port, timeout=1.5) or _port_open(
+        _host, _port, timeout=2.0
+    )
     if not port_ok:
         import shutil
+
         installed = shutil.which("ollama") is not None
-        hint = "Ollama 正在启动，请稍候重试" if installed else "Ollama 未安装，请访问 ollama.com 下载"
+        hint = (
+            "Ollama 正在启动，请稍候重试"
+            if installed
+            else "Ollama 未安装，请访问 ollama.com 下载"
+        )
         return jsonify({"success": False, "models": [], "error": hint}), 200
 
     try:
         import requests as _requests
+
         r = _requests.get(
             f"{ollama_url}/api/tags",
             headers={"Accept": "application/json"},
             timeout=8,
-            proxies={"http": None, "https": None},  # 强制绕过系统代理，避免 VPN/代理导致 502
+            proxies={
+                "http": None,
+                "https": None,
+            },  # 强制绕过系统代理，避免 VPN/代理导致 502
         )
         r.raise_for_status()
         data = r.json()
@@ -786,7 +847,7 @@ def local_model_list() -> Response:
         if "502" in err_str:
             hint = "Ollama 服务异常 (502)，请在命令行运行 ollama serve 后重试"
         else:
-            hint = err_str
+            hint = "Ollama 服务请求失败"
         return jsonify({"success": False, "models": [], "error": hint}), 200
 
 
@@ -822,15 +883,17 @@ def setup_activate() -> Response:
 
         key = get_system_key(code)
     except Exception as e:
-        _logger.warning("[Activate] 无法加载 _license 模块: %s", e)
+        _logger.warning(
+            "[Activate] 无法加载 _license 模块 error_type=%s", type(e).__name__
+        )
         return jsonify({"success": False, "error": "激活服务暂不可用"})
     if not key:
         return jsonify({"success": False, "error": "激活码无效"})
-    from web.app import PROJECT_ROOT
     from app.core.llm.gemini_config import (
         set_runtime_gemini_api_key,
         write_gemini_config_file,
     )
+    from web.app import PROJECT_ROOT
 
     config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
     try:
@@ -841,7 +904,8 @@ def setup_activate() -> Response:
         _logger.info("[Activate] 激活码验证成功，系统 API Key 已写入配置")
         return jsonify({"success": True})
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)})
+        _log_internal_error("setup_activate", e)
+        return jsonify({"success": False, "error": "激活配置写入失败"})
 
 
 @settings_bp.route("/api/v1/models", methods=["GET"])
@@ -912,7 +976,10 @@ def api_refresh_models() -> Response:
 
             get_fallback_executor().update_model_map(_a.MODEL_MAP)
         except Exception as _fe:
-            _logger.warning("[ModelRefresh] FallbackExecutor sync failed: %s", _fe)
+            _logger.warning(
+                "[ModelRefresh] FallbackExecutor sync failed error_type=%s",
+                type(_fe).__name__,
+            )
         try:
             from app.core.routing.ai_router import AIRouter
 
@@ -931,7 +998,10 @@ def api_refresh_models() -> Response:
                 )[0]
                 AIRouter.set_router_model(_best)
         except Exception as _are:
-            _logger.warning("[ModelRefresh] AIRouter update failed: %s", _are)
+            _logger.warning(
+                "[ModelRefresh] AIRouter update failed error_type=%s",
+                type(_are).__name__,
+            )
         return jsonify(
             {
                 "status": "ok",
@@ -940,7 +1010,8 @@ def api_refresh_models() -> Response:
             }
         )
     except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 500
+        _log_internal_error("api_refresh_models", e)
+        return jsonify({"status": "error", "error": "模型列表刷新失败"}), 500
 
 
 @settings_bp.route("/api/analyze", methods=["POST"])

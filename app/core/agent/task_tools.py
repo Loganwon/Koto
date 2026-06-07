@@ -46,7 +46,7 @@ def _safe_resolve(relative_path: str) -> Optional[str]:
     # though paths are already relative to the workspace root.
     stripped = relative_path.replace("\\", "/")
     if stripped.startswith("workspace/"):
-        stripped = stripped[len("workspace/"):]
+        stripped = stripped[len("workspace/") :]
     try:
         resolved = os.path.normpath(os.path.join(root, stripped))
         if not resolved.startswith(os.path.normpath(root)):
@@ -122,7 +122,9 @@ def _read_pdf_excerpt(
                 try:
                     page_text = pdf.pages[index].extract_text() or ""
                 except Exception as exc:
-                    logger.debug("[TaskTools] pdfplumber page %s failed: %s", index + 1, exc)
+                    logger.debug(
+                        "[TaskTools] pdfplumber page %s failed: %s", index + 1, exc
+                    )
                 if not page_text.strip():
                     continue
                 block = f"[Page {index + 1}]\n{page_text.strip()}"
@@ -217,12 +219,15 @@ def read_sheet_data(path: str, sheet_name: str = "", max_rows: int = 500) -> str
 
     try:
         import openpyxl
+
         wb = openpyxl.load_workbook(resolved, read_only=True, data_only=True)
         target_sheet = sheet_name or wb.sheetnames[0]
         if target_sheet not in wb.sheetnames:
             wb.close()
             return json.dumps(
-                {"error": f"Sheet '{target_sheet}' not found. Available: {wb.sheetnames}"},
+                {
+                    "error": f"Sheet '{target_sheet}' not found. Available: {wb.sheetnames}"
+                },
                 ensure_ascii=False,
             )
         ws = wb[target_sheet]
@@ -236,8 +241,14 @@ def read_sheet_data(path: str, sheet_name: str = "", max_rows: int = 500) -> str
                 rows.append(cells)
         wb.close()
         return json.dumps(
-            {"sheet": target_sheet, "headers": headers, "rows": rows, "row_count": len(rows)},
-            ensure_ascii=False, default=str,
+            {
+                "sheet": target_sheet,
+                "headers": headers,
+                "rows": rows,
+                "row_count": len(rows),
+            },
+            ensure_ascii=False,
+            default=str,
         )
     except ImportError:
         return json.dumps({"error": "openpyxl not installed"}, ensure_ascii=False)
@@ -262,6 +273,7 @@ def write_sheet_data(path: str, sheet_name: str = "", updates: str = "[]") -> st
 
     try:
         import openpyxl
+
         # Backup before writing
         backup = resolved + ".bak"
         shutil.copy2(resolved, backup)
@@ -270,7 +282,9 @@ def write_sheet_data(path: str, sheet_name: str = "", updates: str = "[]") -> st
         target = sheet_name or wb.sheetnames[0]
         if target not in wb.sheetnames:
             wb.close()
-            return json.dumps({"error": f"Sheet '{target}' not found"}, ensure_ascii=False)
+            return json.dumps(
+                {"error": f"Sheet '{target}' not found"}, ensure_ascii=False
+            )
         ws = wb[target]
 
         count = 0
@@ -317,6 +331,7 @@ def read_docx_content(path: str, max_chars: int = _TEXT_LIMIT_DOCX_DEFAULT) -> s
 
     try:
         from docx import Document as DocxDocument
+
         doc = DocxDocument(resolved)
         paragraphs = []
         tables = []
@@ -324,10 +339,12 @@ def read_docx_content(path: str, max_chars: int = _TEXT_LIMIT_DOCX_DEFAULT) -> s
         for p in doc.paragraphs:
             if total >= max_chars:
                 break
-            paragraphs.append({
-                "text": p.text,
-                "style": p.style.name if p.style else "",
-            })
+            paragraphs.append(
+                {
+                    "text": p.text,
+                    "style": p.style.name if p.style else "",
+                }
+            )
             total += len(p.text)
 
         for table_index, table in enumerate(doc.tables):
@@ -340,12 +357,14 @@ def read_docx_content(path: str, max_chars: int = _TEXT_LIMIT_DOCX_DEFAULT) -> s
                 values = [cell.text for cell in row.cells]
                 table_rows.append(values)
                 total += sum(len(v) for v in values)
-            tables.append({
-                "index": table_index,
-                "rows": table_rows,
-                "row_count": len(table.rows),
-                "column_count": len(table.columns),
-            })
+            tables.append(
+                {
+                    "index": table_index,
+                    "rows": table_rows,
+                    "row_count": len(table.rows),
+                    "column_count": len(table.columns),
+                }
+            )
 
         return json.dumps(
             {
@@ -393,7 +412,9 @@ def parse_file_to_text(
         return f"Error parsing file: {e}"
 
 
-def _resolve_task_file_entries(task_files: Optional[List[Dict[str, str]]]) -> List[Dict[str, str]]:
+def _resolve_task_file_entries(
+    task_files: Optional[List[Dict[str, str]]],
+) -> List[Dict[str, str]]:
     """Resolve task file metadata into concrete files that can be staged."""
     resolved_entries: List[Dict[str, str]] = []
     seen: set[str] = set()
@@ -413,10 +434,12 @@ def _resolve_task_file_entries(task_files: Optional[List[Dict[str, str]]]) -> Li
             continue
         seen.add(key)
 
-        resolved_entries.append({
-            "display_name": raw_name or os.path.basename(resolved_path),
-            "source_path": resolved_path,
-        })
+        resolved_entries.append(
+            {
+                "display_name": raw_name or os.path.basename(resolved_path),
+                "source_path": resolved_path,
+            }
+        )
 
     return resolved_entries
 
@@ -435,7 +458,9 @@ def _unique_staged_name(name: str, used_names: set[str]) -> str:
     return candidate
 
 
-def _stage_task_files_for_sandbox(resolved_entries: List[Dict[str, str]], sandbox_dir: str) -> List[Dict[str, str]]:
+def _stage_task_files_for_sandbox(
+    resolved_entries: List[Dict[str, str]], sandbox_dir: str
+) -> List[Dict[str, str]]:
     """Copy resolved task files into the sandbox workdir for basename-based access."""
     staged_entries: List[Dict[str, str]] = []
     used_names: set[str] = set()
@@ -444,11 +469,13 @@ def _stage_task_files_for_sandbox(resolved_entries: List[Dict[str, str]], sandbo
         staged_name = _unique_staged_name(entry["display_name"], used_names)
         staged_path = os.path.join(sandbox_dir, staged_name)
         shutil.copy2(entry["source_path"], staged_path)
-        staged_entries.append({
-            **entry,
-            "staged_name": staged_name,
-            "staged_path": staged_path,
-        })
+        staged_entries.append(
+            {
+                **entry,
+                "staged_name": staged_name,
+                "staged_path": staged_path,
+            }
+        )
 
     return staged_entries
 
@@ -485,7 +512,7 @@ def _parse_koto_created_paths(stdout: str) -> List[str]:
     for line in (stdout or "").splitlines():
         line = line.strip()
         if line.startswith("KOTO_CREATED:"):
-            candidate = line[len("KOTO_CREATED:"):].strip()
+            candidate = line[len("KOTO_CREATED:") :].strip()
             if candidate and os.path.isabs(candidate) and os.path.isfile(candidate):
                 paths.append(candidate)
     return paths
@@ -506,7 +533,9 @@ def _format_sandbox_result(result: Dict[str, Any]) -> str:
     return "\n".join(parts) if parts else "(no output)"
 
 
-def run_python_in_sandbox(code: str, timeout: int = 30, task_files: Optional[List[Dict[str, str]]] = None) -> str:
+def run_python_in_sandbox(
+    code: str, timeout: int = 30, task_files: Optional[List[Dict[str, str]]] = None
+) -> str:
     """Execute Python code in the sandbox. Returns stdout + stderr + images.
 
     If the code prints ``KOTO_CREATED:<absolute_path>`` lines, those paths are
@@ -518,7 +547,9 @@ def run_python_in_sandbox(code: str, timeout: int = 30, task_files: Optional[Lis
         resolved_task_files = _resolve_task_file_entries(task_files)
         if resolved_task_files:
             with tempfile.TemporaryDirectory(prefix="koto-task-") as tmpdir:
-                staged_entries = _stage_task_files_for_sandbox(resolved_task_files, tmpdir)
+                staged_entries = _stage_task_files_for_sandbox(
+                    resolved_task_files, tmpdir
+                )
                 prepared_code = _prepend_task_file_context(code, staged_entries)
                 result = run_python(prepared_code, timeout=timeout, work_dir=tmpdir)
                 return _wrap_sandbox_result(result)
@@ -569,11 +600,13 @@ def list_workspace_files(path: str = "", recursive: bool = False) -> str:
                 fpath = os.path.join(target, item)
                 rel = os.path.relpath(fpath, root).replace("\\", "/")
                 is_dir = os.path.isdir(fpath)
-                entries.append({
-                    "name": rel,
-                    "type": "dir" if is_dir else "file",
-                    "size": 0 if is_dir else os.path.getsize(fpath),
-                })
+                entries.append(
+                    {
+                        "name": rel,
+                        "type": "dir" if is_dir else "file",
+                        "size": 0 if is_dir else os.path.getsize(fpath),
+                    }
+                )
     except PermissionError:
         return json.dumps({"error": "Permission denied"}, ensure_ascii=False)
 
@@ -608,7 +641,9 @@ def copy_file(source: str, destination: str) -> str:
         return json.dumps({"error": f"Source not found: {source}"}, ensure_ascii=False)
     dst = _safe_resolve(destination)
     if not dst:
-        return json.dumps({"error": f"Invalid destination: {destination}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"Invalid destination: {destination}"}, ensure_ascii=False
+        )
     try:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copy2(src, dst)
@@ -713,8 +748,9 @@ def compare_files(file_paths: str, aspect: str = "content") -> str:
     Returns: JSON with similarity scores and differences.
     """
     import asyncio
-    from app.core.file.multi_file_coordinator import get_file_coordinator
+
     from app.core.agent.doc_agent import FileHandle
+    from app.core.file.multi_file_coordinator import get_file_coordinator
 
     paths = [p.strip() for p in file_paths.split(",") if p.strip()]
     if len(paths) < 2:
@@ -734,7 +770,9 @@ def compare_files(file_paths: str, aspect: str = "content") -> str:
         # Run async comparison in sync context
         loop = asyncio.new_event_loop()
         try:
-            result = loop.run_until_complete(coordinator.compare_documents(files, aspect))
+            result = loop.run_until_complete(
+                coordinator.compare_documents(files, aspect)
+            )
         finally:
             loop.close()
 
@@ -760,8 +798,9 @@ def extract_to_file(
     Returns: JSON with operation result and change details.
     """
     import asyncio
-    from app.core.file.multi_file_coordinator import get_file_coordinator
+
     from app.core.agent.doc_agent import FileHandle
+    from app.core.file.multi_file_coordinator import get_file_coordinator
 
     src = _resolve_path(source_path)
     if not src:
@@ -772,7 +811,9 @@ def extract_to_file(
         # Target can be new file
         tgt = _safe_resolve(target_path)
         if not tgt:
-            return json.dumps({"error": f"目标路径无效: {target_path}"}, ensure_ascii=False)
+            return json.dumps(
+                {"error": f"目标路径无效: {target_path}"}, ensure_ascii=False
+            )
 
     try:
         source = FileHandle(path=src)
@@ -782,15 +823,20 @@ def extract_to_file(
         loop = asyncio.new_event_loop()
         try:
             change = loop.run_until_complete(
-                coordinator.extract_and_inject(source, target, extract_query, insert_position)
+                coordinator.extract_and_inject(
+                    source, target, extract_query, insert_position
+                )
             )
         finally:
             loop.close()
 
-        return json.dumps({
-            "success": change.change_type != "none",
-            "change": change.to_dict(),
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": change.change_type != "none",
+                "change": change.to_dict(),
+            },
+            ensure_ascii=False,
+        )
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -806,6 +852,7 @@ def annotate_file(path: str, annotations: str = "[]") -> str:
     Returns: JSON with annotation results.
     """
     import asyncio
+
     from app.core.file.multi_file_coordinator import get_file_coordinator
 
     resolved = _resolve_path(path)
@@ -813,24 +860,33 @@ def annotate_file(path: str, annotations: str = "[]") -> str:
         return json.dumps({"error": f"文件不存在: {path}"}, ensure_ascii=False)
 
     try:
-        ann_list = json.loads(annotations) if isinstance(annotations, str) else annotations
+        ann_list = (
+            json.loads(annotations) if isinstance(annotations, str) else annotations
+        )
     except json.JSONDecodeError as e:
-        return json.dumps({"error": f"无效的 annotations JSON: {e}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"无效的 annotations JSON: {e}"}, ensure_ascii=False
+        )
 
     try:
         coordinator = get_file_coordinator()
 
         loop = asyncio.new_event_loop()
         try:
-            changes = loop.run_until_complete(coordinator.annotate_file(resolved, ann_list))
+            changes = loop.run_until_complete(
+                coordinator.annotate_file(resolved, ann_list)
+            )
         finally:
             loop.close()
 
-        return json.dumps({
-            "success": True,
-            "annotations_added": len(changes),
-            "changes": [c.to_dict() for c in changes],
-        }, ensure_ascii=False)
+        return json.dumps(
+            {
+                "success": True,
+                "annotations_added": len(changes),
+                "changes": [c.to_dict() for c in changes],
+            },
+            ensure_ascii=False,
+        )
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -845,7 +901,9 @@ def insert_excel_as_docx_table(
     """Insert spreadsheet data into a DOCX file as a real Word table."""
     source_resolved = _resolve_path(source_path)
     if not source_resolved:
-        return json.dumps({"error": f"File not found: {source_path}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"File not found: {source_path}"}, ensure_ascii=False
+        )
 
     target_resolved = _resolve_path(target_path)
     if not target_resolved:
@@ -860,12 +918,16 @@ def insert_excel_as_docx_table(
         import openpyxl
         from docx import Document
 
-        workbook = openpyxl.load_workbook(source_resolved, read_only=True, data_only=True)
+        workbook = openpyxl.load_workbook(
+            source_resolved, read_only=True, data_only=True
+        )
         target_sheet = sheet_name or workbook.sheetnames[0]
         if target_sheet not in workbook.sheetnames:
             workbook.close()
             return json.dumps(
-                {"error": f"Sheet '{target_sheet}' not found. Available: {workbook.sheetnames}"},
+                {
+                    "error": f"Sheet '{target_sheet}' not found. Available: {workbook.sheetnames}"
+                },
                 ensure_ascii=False,
             )
 
@@ -880,7 +942,9 @@ def insert_excel_as_docx_table(
         workbook.close()
 
         if not raw_rows:
-            return json.dumps({"error": f"Sheet '{target_sheet}' has no data"}, ensure_ascii=False)
+            return json.dumps(
+                {"error": f"Sheet '{target_sheet}' has no data"}, ensure_ascii=False
+            )
 
         column_count = max(len(row) for row in raw_rows)
         normalized_rows = [row + [""] * (column_count - len(row)) for row in raw_rows]
@@ -957,7 +1021,9 @@ def insert_excel_as_docx_table(
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
-def verify_task_completion(task_description: str, file_states: str = "[]", model_mode: str = "auto") -> str:
+def verify_task_completion(
+    task_description: str, file_states: str = "[]", model_mode: str = "auto"
+) -> str:
     """Verify whether a task was completed successfully.
 
     Uses a heuristic: if all tracked files are marked as modified, the task is
@@ -975,12 +1041,16 @@ def verify_task_completion(task_description: str, file_states: str = "[]", model
     Returns: JSON with verification result.
     """
     try:
-        states = json.loads(file_states) if isinstance(file_states, str) else file_states
+        states = (
+            json.loads(file_states) if isinstance(file_states, str) else file_states
+        )
     except json.JSONDecodeError:
         states = []
 
     if not states:
-        return json.dumps({"completed": False, "summary": "无文件状态信息"}, ensure_ascii=False)
+        return json.dumps(
+            {"completed": False, "summary": "无文件状态信息"}, ensure_ascii=False
+        )
 
     all_modified = all(s.get("modified") for s in states if isinstance(s, dict))
     if not all_modified:
@@ -1007,7 +1077,12 @@ def verify_task_completion(task_description: str, file_states: str = "[]", model
     ]
     summary = "文件已成功修改：" + "、".join(n for n in modified_names if n)
     return json.dumps(
-        {"completed": True, "confidence": 1.0, "summary": summary, "remaining_steps": []},
+        {
+            "completed": True,
+            "confidence": 1.0,
+            "summary": summary,
+            "remaining_steps": [],
+        },
         ensure_ascii=False,
     )
 
@@ -1054,7 +1129,9 @@ def write_docx_content(path: str, paragraphs: str = "[]") -> str:
         return json.dumps({"error": f"无效路径: {path}"}, ensure_ascii=False)
 
     try:
-        para_list = json.loads(paragraphs) if isinstance(paragraphs, str) else paragraphs
+        para_list = (
+            json.loads(paragraphs) if isinstance(paragraphs, str) else paragraphs
+        )
     except json.JSONDecodeError as e:
         return json.dumps({"error": f"无效的 paragraphs JSON: {e}"}, ensure_ascii=False)
 
@@ -1118,9 +1195,10 @@ def write_pptx_slides(path: str, updates: str = "[]") -> str:
         return json.dumps({"error": f"Invalid updates JSON: {e}"}, ensure_ascii=False)
 
     try:
+        import shutil as _sh
+
         from pptx import Presentation
         from pptx.util import Pt
-        import shutil as _sh
 
         _sh.copy2(resolved, resolved + ".bak")
         prs = Presentation(resolved)
@@ -1169,7 +1247,12 @@ def write_pptx_slides(path: str, updates: str = "[]") -> str:
             slides_updated=slides_updated,
         )
     except ImportError:
-        return json.dumps({"error": "python-pptx not installed. Use run_python_code with python-pptx instead."}, ensure_ascii=False)
+        return json.dumps(
+            {
+                "error": "python-pptx not installed. Use run_python_code with python-pptx instead."
+            },
+            ensure_ascii=False,
+        )
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -1191,9 +1274,10 @@ def add_pptx_slides(path: str, slides: str = "[]") -> str:
         return json.dumps({"error": f"Invalid slides JSON: {e}"}, ensure_ascii=False)
 
     try:
+        import shutil as _sh
+
         from pptx import Presentation
         from pptx.util import Inches, Pt
-        import shutil as _sh
 
         _sh.copy2(resolved, resolved + ".bak")
         prs = Presentation(resolved)
@@ -1240,7 +1324,10 @@ def add_pptx_slides(path: str, slides: str = "[]") -> str:
             total_slides=total_slides,
         )
     except ImportError:
-        return json.dumps({"error": "python-pptx not installed. Use run_python_code instead."}, ensure_ascii=False)
+        return json.dumps(
+            {"error": "python-pptx not installed. Use run_python_code instead."},
+            ensure_ascii=False,
+        )
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
@@ -1253,7 +1340,9 @@ def add_pptx_slides(path: str, slides: str = "[]") -> str:
 class TaskToolsPlugin(AgentPlugin):
     """File-focused tools for the TaskAgent."""
 
-    def __init__(self, socketio=None, task_files: Optional[List[Dict[str, str]]] = None):
+    def __init__(
+        self, socketio=None, task_files: Optional[List[Dict[str, str]]] = None
+    ):
         self._socketio = socketio
         self._task_files = list(task_files or [])
 
@@ -1294,7 +1383,7 @@ class TaskToolsPlugin(AgentPlugin):
                 "description": (
                     "Write cells to a spreadsheet (xlsx). Creates a backup before writing. "
                     "Args: path (str), sheet_name (str, optional), "
-                    'updates (JSON string of [{row, col, value}, ...]). '
+                    "updates (JSON string of [{row, col, value}, ...]). "
                     "Row and col are 1-indexed."
                 ),
                 "parameters": {
@@ -1645,22 +1734,24 @@ class TaskToolsPlugin(AgentPlugin):
 
         # editor_live_update requires socketio — only register if available
         if self._socketio:
-            tools.append({
-                "name": "editor_live_update",
-                "func": self._editor_live_update,
-                "description": (
-                    "Push live cell/text updates to the frontend editor. "
-                    "Args: type (str — 'set_cell'|'set_cells'|'set_html'|'insert_text'), "
-                    "plus type-specific kwargs."
-                ),
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "type": {"type": "STRING"},
+            tools.append(
+                {
+                    "name": "editor_live_update",
+                    "func": self._editor_live_update,
+                    "description": (
+                        "Push live cell/text updates to the frontend editor. "
+                        "Args: type (str — 'set_cell'|'set_cells'|'set_html'|'insert_text'), "
+                        "plus type-specific kwargs."
+                    ),
+                    "parameters": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "type": {"type": "STRING"},
+                        },
+                        "required": ["type"],
                     },
-                    "required": ["type"],
-                },
-            })
+                }
+            )
 
         return tools
 

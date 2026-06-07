@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from web.model_manager import ModelManager, _INFER_RULES, infer_capabilities
 from app.core.llm.model_capabilities import is_interactions_only_model
+from web.model_manager import _INFER_RULES, ModelManager, infer_capabilities
 
 
 class _FakeModel:
@@ -61,7 +61,9 @@ def test_infer_capabilities_does_not_mutate_infer_rules():
 def test_select_best_chat_prefers_flash_over_heavier_pro_when_available():
     manager = ModelManager(client=None)
     manager._cached_caps = {
-        "gemini-2.5-pro": _caps(speed=10, quality=10, reasoning=10, context=10, tier=10),
+        "gemini-2.5-pro": _caps(
+            speed=10, quality=10, reasoning=10, context=10, tier=10
+        ),
         "gemini-2.5-flash": _caps(speed=3, quality=3, reasoning=3, context=3, tier=7),
     }
 
@@ -106,7 +108,9 @@ def test_fetch_available_model_ids_respects_env_blocklist(monkeypatch):
 def test_select_best_prefers_gemini3_flash_for_chat_when_available():
     manager = ModelManager(client=None)
     manager._cached_caps = {
-        "gemini-3-flash-preview": _caps(speed=10, quality=8, reasoning=8, context=8, tier=8),
+        "gemini-3-flash-preview": _caps(
+            speed=10, quality=8, reasoning=8, context=8, tier=8
+        ),
         "gemini-2.5-flash": _caps(speed=9, quality=7, reasoning=7, context=7, tier=7),
     }
 
@@ -117,7 +121,9 @@ def test_select_best_prefers_gemini3_flash_for_chat_when_available():
 def test_select_best_prefers_gemini31_pro_for_coder_when_available():
     manager = ModelManager(client=None)
     manager._cached_caps = {
-        "gemini-3.1-pro-preview": _caps(speed=9, quality=10, reasoning=10, context=10, tier=10),
+        "gemini-3.1-pro-preview": _caps(
+            speed=9, quality=10, reasoning=10, context=10, tier=10
+        ),
         "gemini-2.5-pro": _caps(speed=4, quality=10, reasoning=10, context=10, tier=9),
     }
 
@@ -128,15 +134,24 @@ def test_select_best_prefers_gemini31_pro_for_coder_when_available():
 def test_select_best_prefers_gemini31_pro_for_file_task_when_available():
     manager = ModelManager(client=None)
     manager._cached_caps = {
-        "gemini-3.1-pro-preview": _caps(speed=9, quality=10, reasoning=10, context=10, tier=10),
+        "gemini-3.1-pro-preview": _caps(
+            speed=9, quality=10, reasoning=10, context=10, tier=10
+        ),
         "gemini-2.5-flash": _caps(speed=9, quality=7, reasoning=7, context=7, tier=7),
         "gemini-2.5-pro": _caps(speed=4, quality=10, reasoning=10, context=10, tier=9),
-        "gemini-3-flash-preview": _caps(speed=10, quality=8, reasoning=8, context=8, tier=8),
+        "gemini-3-flash-preview": _caps(
+            speed=10, quality=8, reasoning=8, context=8, tier=8
+        ),
     }
 
     best = manager._select_best(
         "FILE_TASK",
-        ["gemini-3.1-pro-preview", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash-preview"],
+        [
+            "gemini-3.1-pro-preview",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-3-flash-preview",
+        ],
     )
     assert best == "gemini-3.1-pro-preview"
 

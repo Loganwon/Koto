@@ -23,6 +23,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.core.llm.model_capabilities import (
     get_interactions_only_model_set as _get_interactions_only_model_set,
+)
+from app.core.llm.model_capabilities import (
     get_model_blocklist_from_env,
     is_interactions_only_model,
     normalize_model_id,
@@ -742,7 +744,10 @@ class ModelManager:
 
     def _select_best(self, task: str, model_ids: List[str]) -> Optional[str]:
         """从提供的模型列表中，为指定任务选出得分最高的模型。
-        跳过 interactions_only 模型（不支持 generate_content，无法直接路由）。
+
+        路由表可以选择 interactions-only 模型；调用层会按模型能力切到
+        Interactions API。只有 get_fallback_model() 这类直接 generate_content
+        的稳定兜底路径需要排除它们。
         """
         for preferred_id in _TASK_MODEL_PREFERENCES.get(task, []):
             if preferred_id not in model_ids:
@@ -750,10 +755,7 @@ class ModelManager:
             caps = self._cached_caps.get(preferred_id)
             if not caps:
                 continue
-            if caps.get("interactions_only", False) or is_interactions_only_model(preferred_id):
-                continue
-            if score_model_for_task(caps, task) >= 0:
-                return preferred_id
+            return preferred_id
 
         best_id = None
         best_score = -1.0
@@ -761,9 +763,6 @@ class ModelManager:
         for mid in model_ids:
             caps = self._cached_caps.get(mid)
             if not caps:
-                continue
-            # interactions_only 模型必须走 Interactions API，不能通过 generate_content 调用
-            if caps.get("interactions_only", False) or is_interactions_only_model(mid):
                 continue
             sc = score_model_for_task(caps, task)
             if sc < 0:

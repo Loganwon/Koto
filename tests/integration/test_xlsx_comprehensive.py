@@ -343,8 +343,9 @@ class TestExportXlsx:
 
     def _export_and_reload(self, wb_data, images=None):
         """Export to bytes, then reload with openpyxl for inspection."""
-        from app.core.file.file_parser import export_xlsx
         import openpyxl
+
+        from app.core.file.file_parser import export_xlsx
 
         raw = export_xlsx(wb_data, images)
         assert raw[:2] == b"PK", "Output must be a valid ZIP (xlsx)"
@@ -833,6 +834,7 @@ def xlsx_client(tmp_path_factory):
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
