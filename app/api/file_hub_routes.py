@@ -599,7 +599,9 @@ def open_file():
     if not os.path.exists(path):
         return jsonify({"error": "文件不存在"}), 404
     try:
-        if sys.platform == "win32":
+        if hasattr(os, "startfile"):
+            os.startfile(path)  # noqa: S606
+        elif sys.platform == "win32":
             os.startfile(path)  # noqa: S606
         elif sys.platform == "darwin":
             subprocess.Popen(["open", path])
@@ -1594,7 +1596,9 @@ def open_file_with_os():
 
     try:
         sys_name = platform.system()
-        if sys_name == "Windows":
+        if hasattr(os, "startfile"):
+            os.startfile(str(p))  # type: ignore[attr-defined]
+        elif sys_name == "Windows":
             os.startfile(str(p))  # type: ignore[attr-defined]
         elif sys_name == "Darwin":
             _sp.Popen(["open", str(p)])

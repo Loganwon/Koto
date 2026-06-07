@@ -473,6 +473,8 @@ def open_file_by_path():
     rel_path = (body.get("path") or "").strip()
     if not rel_path:
         return jsonify({"error": "缺少 path 字段"}), 400
+    if _has_traversal_path_part(rel_path):
+        return jsonify({"error": "路径不合法"}), 403
 
     from web.shared import WORKSPACE_DIR
 
@@ -1582,6 +1584,8 @@ def delete_workspace_file():
     filepath = request.args.get("path", "").strip()
     if not filepath:
         return jsonify({"error": "缺少 path 参数"}), 400
+    if _has_traversal_path_part(filepath):
+        return jsonify({"error": "路径不合法"}), 403
 
     target = root.joinpath(filepath).resolve()
     try:
@@ -2547,6 +2551,8 @@ def browse_local():
 # Application config directory — must never be served over the API
 _APP_CONFIG_DIR = (Path(__file__).resolve().parents[2] / "config").resolve()
 _PROTECTED_PATH_PARTS = {
+    "etc",
+    "root",
     "windows",
     "program files",
     "program files (x86)",
@@ -2554,6 +2560,12 @@ _PROTECTED_PATH_PARTS = {
     "system volume information",
     "$recycle.bin",
 }
+
+
+def _has_traversal_path_part(raw_path: str) -> bool:
+    import re
+
+    return any(part == ".." for part in re.split(r"[\\/]+", str(raw_path or "")))
 
 
 def _has_protected_path_part(raw_path: str, resolved: Path | None = None) -> bool:
