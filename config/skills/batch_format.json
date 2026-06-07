@@ -1,0 +1,16 @@
+{
+  "id": "batch_format",
+  "name": "批量格式整理",
+  "icon": "🔧",
+  "category": "workflow",
+  "description": "批量处理工作区中的多个文件，统一格式或内容",
+  "intent_description": "用户想批量处理、格式化、整理多个文件",
+  "task_types": ["CHAT", "FILE_ASSISTANT"],
+  "priority": 50,
+  "enabled": true,
+  "trigger_keywords": ["批量", "格式化", "整理", "统一格式", "batch", "bulk", "批处理"],
+  "prompt": "\n\n## 🔧 任务：批量格式整理\n\n对工作区中的多个文件进行统一处理。\n\n### 执行步骤\n\n1. **列出文件**：使用 `workspace_list_files` 查看工作区内容\n2. **逐个读取**：使用 `workspace_read_file` 读取需要处理的文件\n3. **处理内容**：使用 `run_python_code` 批量处理（如统一编码、格式转换、内容清洗）\n4. **保存结果**：使用 `workspace_save_file` 保存修改后的文件\n\n### 安全要求\n- 处理前告知用户将要修改哪些文件\n- 每个文件修改前自动备份（workspace_save_file 会自动备份）\n- 如果文件数量超过 10 个，先处理前几个让用户确认效果\n\n### 输出要求\n- 汇总处理了多少个文件\n- 每个文件的变更概要\n- 如有失败项，单独列出",
+  "version": "1.0.0",
+  "author": "koto",
+  "tags": ["file-ops", "batch", "format"]
+}

@@ -1,12 +1,16 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-WebToolsBridgePlugin — 将 web/tool_registry.py 中的 25 个工具桥接进 UnifiedAgent。
+WebToolsBridgePlugin — legacy web/tool_registry 桥接器。
 
-原先 web 层（Flask 路由直调）与应用层（UnifiedAgent）各自有独立注册表，
-此插件消除碎片化：所有 web 工具统一通过 AgentPlugin 协议注入 ToolRegistry。
+历史上 web 层（Flask 路由直调）与应用层（UnifiedAgent）各自有独立注册表，
+此插件用于把 web.tool_registry 中的工具注入 ToolRegistry。
+
+当前仓库已不再提供 web.tool_registry；默认启动路径也不再加载该桥接器。
+保留此插件仅用于兼容旧环境，缺失 legacy 模块时应静默返回空工具列表。
 """
 
+import importlib
 import logging
 from typing import Any, Dict, List
 
@@ -31,9 +35,18 @@ class WebToolsBridgePlugin(AgentPlugin):
 
     def get_tools(self) -> List[Dict[str, Any]]:
         try:
-            from web.tool_registry import ToolRegistry as WebRegistry
-
+            mod = importlib.import_module("web.tool_registry")
+            WebRegistry = getattr(mod, "ToolRegistry")
             web_reg = WebRegistry()
+        except ModuleNotFoundError as exc:
+            missing_name = getattr(exc, "name", None)
+            if missing_name == "web.tool_registry" or "web.tool_registry" in str(exc):
+                logger.debug(
+                    "[WebToolsBridgePlugin] legacy web.tool_registry 不存在，跳过桥接"
+                )
+                return []
+            logger.warning(f"[WebToolsBridgePlugin] 无法加载 web/tool_registry: {exc}")
+            return []
         except Exception as exc:
             logger.warning(f"[WebToolsBridgePlugin] 无法加载 web/tool_registry: {exc}")
             return []

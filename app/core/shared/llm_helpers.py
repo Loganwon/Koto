@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 # ── Online-failure detection ──────────────────────────────────────────────────
 
-
 def is_online_failure(exc: Exception) -> bool:
     """Return True if *exc* is a recoverable online-availability failure.
 
@@ -73,7 +72,6 @@ def is_online_failure(exc: Exception) -> bool:
 
 # ── Ollama helpers ────────────────────────────────────────────────────────────
 
-
 def is_ollama_alive() -> bool:
     """Return True if local Ollama is reachable within 2 seconds.
 
@@ -82,7 +80,6 @@ def is_ollama_alive() -> bool:
     """
     try:
         import urllib.request as _ur
-
         _opener = _ur.build_opener(_ur.ProxyHandler({}))
         _opener.open("http://127.0.0.1:11434/api/tags", timeout=2).close()
         return True
@@ -90,14 +87,21 @@ def is_ollama_alive() -> bool:
         return False
 
 
-def get_local_provider():
+def get_local_provider(preferred_model: str = ""):
     """Return an :class:`OllamaLLMProvider` configured with the best available model.
 
-    Queries ``/api/tags`` directly to avoid depending on ``LocalModelRouter``.
+    Uses ``preferred_model`` when the caller already resolved a concrete Ollama
+    tag for the active request. Otherwise queries ``/api/tags`` directly to
+    avoid depending on ``LocalModelRouter``.
     Falls back to ``model=None`` (OllamaLLMProvider's own auto-selection) when
     the tags query fails.
     """
     from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
+    preferred = str(preferred_model or "").strip()
+    if preferred and preferred.lower() not in {"auto", "cloud", "local"} and not preferred.lower().startswith("gemini"):
+        logger.info("[llm_helpers] Using requested local model: %s", preferred)
+        return OllamaLLMProvider(model=preferred)
 
     try:
         import json as _json
@@ -113,9 +117,7 @@ def get_local_provider():
                 (
                     m
                     for m in models
-                    if any(
-                        k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b")
-                    )
+                    if any(k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b"))
                 ),
                 models[0],
             )

@@ -14,6 +14,7 @@ import os
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
+from app.core.agent.path_utils import resolve_existing_path
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ _EXT_MIME_MAP: dict = {
     ".bmp": "image/bmp",
 }
 # Use a fast vision-capable model; fallback order handled in _call_vision
-_VISION_MODEL = "gemini-2.0-flash"
+_VISION_MODEL = "gemini-2.5-flash"
 
 
 class ChartVisionPlugin(AgentPlugin):
@@ -153,10 +154,11 @@ class ChartVisionPlugin(AgentPlugin):
     def _call_vision(filepath: str, prompt: str) -> str:
         """Core: load image file → call Gemini Vision → return text result."""
         # ── validate file ──────────────────────────────────────────────
-        if not os.path.isfile(filepath):
-            return f"Error: 找不到图片文件：{filepath}"
+        resolved, err = resolve_existing_path(filepath)
+        if not resolved:
+            return f"Error: 找不到图片文件：{err}"
 
-        mime_type = ChartVisionPlugin._resolve_mime(filepath)
+        mime_type = ChartVisionPlugin._resolve_mime(resolved)
         if mime_type not in _SUPPORTED_MIME:
             return (
                 f"Error: 不支持的图片格式 '{mime_type}'。"
@@ -165,7 +167,7 @@ class ChartVisionPlugin(AgentPlugin):
 
         # ── read bytes ────────────────────────────────────────────────
         try:
-            with open(filepath, "rb") as fh:
+            with open(resolved, "rb") as fh:
                 image_bytes = fh.read()
         except OSError as exc:
             return f"Error: 读取图片失败：{exc}"

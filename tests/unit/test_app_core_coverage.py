@@ -29,16 +29,17 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _reset_file_registry_singleton():
-    """Reset the global FileRegistry singleton between tests to avoid lock conflicts."""
+    """Reset the global FileRegistry singleton between tests.
+
+    Do not force-close the underlying sqlite connection here: watchdog callbacks may
+    still be in flight on background threads, and closing from teardown can trigger
+    interpreter-level crashes on Windows.
+    """
     yield
     try:
         import app.core.file.file_registry as fr
 
         if fr._registry_instance is not None:
-            try:
-                fr._registry_instance._conn.close()
-            except Exception:
-                pass
             fr._registry_instance = None
     except Exception:
         pass
@@ -1186,7 +1187,7 @@ class TestOllamaLLMProvider:
 
         provider = OllamaLLMProvider(model="qwen3:8b")
         assert provider.model == "qwen3:8b"
-        assert "localhost" in provider.base_url
+        assert ("localhost" in provider.base_url) or ("127.0.0.1" in provider.base_url)
         assert provider._options["temperature"] == 0.7
 
     def test_init_custom_params(self):

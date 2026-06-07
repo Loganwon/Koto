@@ -59,8 +59,7 @@ import os
 import threading
 from pathlib import Path
 
-from flask import Blueprint, jsonify, request
-
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 from web.settings import settings as user_settings
 
 logger = logging.getLogger(__name__)
@@ -383,12 +382,13 @@ def scan_directory():
 @file_hub_bp.route("/archive", methods=["POST"])
 def archive_files():
     """
-    归档整理：将源目录文件按规则复制到目标目录（不删除源文件）。
+    归档整理：将源目录文件按规则复制或移动到目标目录。
 
     Body JSON:
       source_dir  str   必填，源目录绝对路径
       dest_dir    str   可选，默认在源目录同级创建 "<源目录名>_归档_YYYYMMDD"
       mode        str   "auto"（按文件类型自动分类）| "custom"（按自定义规则）
+      action      str   "copy"（默认，复制文件）| "move"（移动文件）
       recursive   bool  是否递归扫描子目录，默认 True
       rules       list  mode="custom" 时的规则列表，每项为 {"match": "*.pdf", "folder": "PDF文档"}
     """
@@ -400,6 +400,9 @@ def archive_files():
     source_dir = (data.get("source_dir") or "").strip()
     dest_dir = (data.get("dest_dir") or "").strip()
     mode = (data.get("mode") or "auto").strip()
+    action = (data.get("action") or "copy").strip().lower()
+    if action not in ("copy", "move"):
+        action = "copy"
     recursive = bool(data.get("recursive", True))
     rules = data.get("rules") or []
 
@@ -461,9 +464,9 @@ def archive_files():
                     target = target_dir / f"{stem}_{idx}{suffix}"
                     idx += 1
 
-            shutil.copy2(str(fp), str(target))
+            shutil.copy2(str(fp), str(target)) if action == "copy" else shutil.move(str(fp), str(target))
             copied += 1
-            report.append({"src": str(fp), "dest": str(target), "folder": folder})
+            report.append({"src": str(fp), "dest": str(target), "folder": folder, "action": action})
         except Exception as exc:
             errors.append(f"{fp.name}: {exc}")
             skipped += 1
@@ -471,6 +474,7 @@ def archive_files():
     return jsonify(
         {
             "status": "ok",
+            "action": action,
             "dest_dir": str(dest),
             "total": total,
             "copied": copied,
@@ -564,34 +568,6 @@ def copy_file():
     return jsonify({"status": "ok" if ok else "error", "message": result}), (
         200 if ok else 400
     )
-
-
-@file_hub_bp.route("/open", methods=["POST"])
-def open_file():
-    """
-    用系统默认程序打开文件或文件夹。
-    Body JSON: { "path": "绝对路径" }
-    """
-    import os
-    import subprocess
-    import sys
-
-    data = request.get_json(silent=True) or {}
-    path = (data.get("path") or "").strip()
-    if not path:
-        return jsonify({"error": "缺少 path 字段"}), 400
-    if not os.path.exists(path):
-        return jsonify({"error": "文件不存在"}), 404
-    try:
-        if sys.platform == "win32":
-            os.startfile(path)  # noqa: S606
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @file_hub_bp.route("/disk", methods=["DELETE"])
@@ -996,9 +972,24 @@ def remove_file_tag(file_id: str, tag: str):
 
 @file_hub_bp.route("/favorites", methods=["GET"])
 def list_favorites():
-    """列出所有收藏的文件路径。"""
-    paths = _reg().list_favorites()
-    return jsonify({"total": len(paths), "favorites": paths})
+    """列出所有收藏文件（返回完整元数据）。"""
+    reg = _reg()
+    paths = reg.list_favorites()
+    files = []
+    for path in paths:
+        entry = reg.get_by_path(path)
+        if entry:
+            d = entry.to_dict(include_preview=False)
+            d["tags"] = reg.get_tags(path)
+            d["favorited"] = True
+            files.append(d)
+        else:
+            name = path.replace("\\", "/").rsplit("/", 1)[-1]
+            files.append({
+                "path": path, "name": name, "category": "其他",
+                "source": "favorites", "favorited": True, "tags": [],
+            })
+    return jsonify({"total": len(files), "favorites": paths, "files": files})
 
 
 @file_hub_bp.route("/favorites", methods=["POST"])
@@ -1038,6 +1029,79 @@ def remove_favorite():
     return jsonify({"error": "该文件不在收藏夹中"}), 404
 
 
+# ── 监控目录设置端点 ──────────────────────────────────────────────────────────
+
+_WATCH_SETTINGS_PATH = str(
+    Path(__file__).parent.parent.parent / "config" / "user_settings.json"
+)
+
+
+def _read_user_settings() -> dict:
+    """Read settings via SettingsManager (thread-safe)."""
+    try:
+        from web.settings import SettingsManager
+        return SettingsManager().get_all()
+    except Exception:
+        import json as _json
+        try:
+            with open(_WATCH_SETTINGS_PATH, "r", encoding="utf-8-sig") as f:
+                return _json.load(f)
+        except Exception:
+            return {}
+
+
+def _write_user_settings(data: dict) -> None:
+    """Write settings via SettingsManager (atomic, thread-safe).
+
+    Only the 'file_watcher' sub-key is updated to avoid clobbering other
+    settings that may have been changed concurrently.
+    """
+    from web.settings import SettingsManager
+    sm = SettingsManager()
+    fw = data.get("file_watcher", {})
+    sm.update("file_watcher", fw)
+
+
+@file_hub_bp.route("/watch-settings", methods=["GET"])
+def get_watch_settings():
+    """获取文件监控目录配置。"""
+    data = _read_user_settings()
+    cfg = data.get("file_watcher", {})
+    return jsonify({
+        "enabled": cfg.get("enabled", False),
+        "watch_dirs": cfg.get("watch_dirs", []),
+        "interval_seconds": cfg.get("interval_seconds", 30),
+        "max_file_size_mb": cfg.get("max_file_size_mb", 50),
+    })
+
+
+@file_hub_bp.route("/watch-settings", methods=["POST"])
+def update_watch_settings():
+    """更新文件监控配置。Body JSON: {enabled, watch_dirs, interval_seconds}"""
+    body = request.get_json(silent=True) or {}
+    data = _read_user_settings()
+    cfg = data.get("file_watcher", {})
+    if "enabled" in body:
+        cfg["enabled"] = bool(body["enabled"])
+    if "watch_dirs" in body:
+        dirs = [str(d).strip() for d in body["watch_dirs"] if str(d).strip()]
+        cfg["watch_dirs"] = dirs
+    if "interval_seconds" in body:
+        cfg["interval_seconds"] = max(10, int(body.get("interval_seconds", 30)))
+    data["file_watcher"] = cfg
+    try:
+        _write_user_settings(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    # Notify running watcher of config change and apply immediately
+    try:
+        w = _watcher()
+        w.reload_and_apply()
+    except Exception:
+        pass
+    return jsonify({"status": "ok", "file_watcher": cfg})
+
+
 # ── 智能 / 日志端点 ───────────────────────────────────────────────────────────
 
 
@@ -1054,6 +1118,118 @@ def summarize_file():
     result = _tools().summarize_file(path, focus=data.get("focus") or "")
     ok = not result.startswith("错误") and not result.startswith("LLM 摘要失败")
     return jsonify({"status": "ok" if ok else "error", "summary": result})
+
+
+@file_hub_bp.route("/batch-ai", methods=["POST"])
+def batch_ai():
+    """
+    AI 批量文件任务 — SSE 流式端点。
+    Body JSON:
+      { "paths": ["/abs/path/a.docx", ...], "task": "提取关键信息" }
+    Events:
+      data: {"type": "start",    "total": n}
+      data: {"type": "file",     "index": i, "name": "..."}
+      data: {"type": "token",    "content": "..."}
+      data: {"type": "file_done","index": i}
+      data: {"type": "done"}
+      data: {"type": "error",    "message": "..."}
+    """
+    import json as _json
+
+    data = request.get_json(silent=True) or {}
+    paths = [str(p).strip() for p in (data.get("paths") or []) if str(p).strip()]
+    task = (data.get("task") or "").strip()
+    if not paths:
+        return jsonify({"error": "缺少 paths 字段"}), 400
+    if not task:
+        task = "请对以下文件内容进行摘要，提炼关键信息。"
+    # Cap to 10 files per batch to avoid runaway requests
+    paths = paths[:10]
+
+    def generate():
+        yield f"data: {_json.dumps({'type': 'start', 'total': len(paths)}, ensure_ascii=False)}\n\n"
+        try:
+            from app.core.file.file_registry import _extract_text_preview
+            from app.core.llm.gemini import GeminiProvider
+        except Exception as e:
+            yield f"data: {_json.dumps({'type': 'error', 'message': f'模块加载失败: {e}'}, ensure_ascii=False)}\n\n"
+            return
+
+        llm = GeminiProvider()
+        for i, path in enumerate(paths):
+            name = Path(path).name
+            yield f"data: {_json.dumps({'type': 'file', 'index': i, 'name': name}, ensure_ascii=False)}\n\n"
+            try:
+                content = _extract_text_preview(path, max_chars=5000)
+                if not content or not content.strip():
+                    _no_content_msg = f"⚠️ {name}：无法提取文本内容\n\n"
+                    yield f"data: {_json.dumps({'type': 'token', 'content': _no_content_msg}, ensure_ascii=False)}\n\n"
+                    yield f"data: {_json.dumps({'type': 'file_done', 'index': i}, ensure_ascii=False)}\n\n"
+                    continue
+
+                # PII masking
+                _mask_result = None
+                safe_content = content
+                try:
+                    from app.core.security.pii_filter import PIIFilter
+                    _mask_result = PIIFilter.mask(content)
+                    if _mask_result.has_pii:
+                        safe_content = _mask_result.masked_text
+                except Exception:
+                    pass
+
+                prompt = (
+                    f"任务：{task}\n\n"
+                    f"文件名：{name}\n\n"
+                    f"内容：\n{safe_content}\n"
+                )
+                resp = llm.generate_content(
+                    prompt=prompt,
+                    model="gemini-2.5-flash",
+                    system_instruction="你是一个专业的文件分析助手，用中文输出简洁精准的分析结果。",
+                )
+                text = ""
+                if isinstance(resp, dict):
+                    text = (
+                        resp.get("text") or resp.get("content")
+                        or resp.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                    )
+                if not text:
+                    text = str(resp)
+
+                # Output validation
+                try:
+                    from app.core.security.output_validator import OutputValidator
+                    _val = OutputValidator.validate(text=text)
+                    if _val.is_blocked:
+                        # Disabled — log only, don't replace content
+                        import logging as _logging
+                        _logging.getLogger(__name__).warning("[file_hub] OutputValidator BLOCK (ignored): %s", _val.reasons)
+                    else:
+                        text = _val.text
+                except Exception:
+                    pass
+
+                # PII restore
+                if _mask_result and _mask_result.has_pii:
+                    try:
+                        text = _mask_result.restore(text)
+                    except Exception:
+                        pass
+
+                header = f"\n### {name}\n\n"
+                body = text.strip() + "\n\n"
+                yield f"data: {_json.dumps({'type': 'token', 'content': header}, ensure_ascii=False)}\n\n"
+                yield f"data: {_json.dumps({'type': 'token', 'content': body}, ensure_ascii=False)}\n\n"
+            except Exception as e:
+                err_msg = f"\n### {name}\n\n⚠️ 处理失败: {e}\n\n"
+                yield f"data: {_json.dumps({'type': 'token', 'content': err_msg}, ensure_ascii=False)}\n\n"
+            yield f"data: {_json.dumps({'type': 'file_done', 'index': i}, ensure_ascii=False)}\n\n"
+
+        yield f"data: {_json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream",
+                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
 @file_hub_bp.route("/op-log", methods=["GET"])
@@ -1259,7 +1435,7 @@ def graph_data():
     )
 
 
-# ── 文件内容读取 / OS 默认程序打开 ────────────────────────────────────────────
+# ── 文件内容读取 ──────────────────────────────────────────────────────────────
 
 
 _TEXT_EXTS = {
@@ -1315,7 +1491,7 @@ def read_file_content():
         return jsonify({"error": "文件不存在"}), 404
 
     if p.suffix.lower() not in _TEXT_EXTS:
-        return jsonify({"error": "不支持预览该类型文件，请用默认程序打开"}), 415
+        return jsonify({"error": "不支持预览该类型文件"}), 415
 
     try:
         size = p.stat().st_size
@@ -1334,33 +1510,3 @@ def read_file_content():
         return jsonify({"error": "读取失败"}), 500
 
 
-@file_hub_bp.route("/open", methods=["POST"])
-def open_file_with_os():
-    """
-    用系统默认程序打开文件（适用于非代码类文件）。
-    Body JSON: { "path": "<绝对路径>" }
-    """
-    import platform
-    import subprocess as _sp
-
-    data = request.get_json(silent=True) or {}
-    path = (data.get("path") or "").strip()
-    if not path:
-        return jsonify({"error": "缺少 path 字段"}), 400
-
-    p = Path(path).resolve()
-    if not p.exists():
-        return jsonify({"error": "文件或目录不存在"}), 404
-
-    try:
-        sys_name = platform.system()
-        if sys_name == "Windows":
-            os.startfile(str(p))  # type: ignore[attr-defined]
-        elif sys_name == "Darwin":
-            _sp.Popen(["open", str(p)])
-        else:
-            _sp.Popen(["xdg-open", str(p)])
-        return jsonify({"status": "ok", "path": str(p)})
-    except Exception as exc:
-        logger.warning(f"[FileHub] open_file_with_os 失败: {exc}")
-        return jsonify({"error": f"打开失败: {exc}"}), 500

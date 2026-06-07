@@ -94,7 +94,7 @@ class FolderCatalogOrganizer:
                             file_path.name, _content_preview, file_path.suffix.lower()
                         )
                     except Exception:
-                        import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                        logger.debug("Non-fatal", exc_info=True)
 
                 if result.get("success"):
                     organized_count += 1
@@ -112,7 +112,7 @@ class FolderCatalogOrganizer:
                                 extract_content=False,
                             )
                         except Exception as _re:
-                            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 注册失败不影响归档流程
+                            logger.debug("Non-fatal", exc_info=True)  # 注册失败不影响归档流程
                 else:
                     failed_count += 1
 
@@ -219,7 +219,7 @@ class FolderCatalogOrganizer:
                 created.append(rid)
                 logger.info(f"[Catalog] ⏰ 已注册提醒: {file_name} {label} {value}")
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                logger.debug("Non-fatal", exc_info=True)
         return created
 
     @staticmethod

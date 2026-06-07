@@ -1,0 +1,42 @@
+{
+  "id": "action_item_extractor",
+  "name": "碎片沟通待办提取",
+  "icon": "✅",
+  "category": "workflow",
+  "skill_nature": "domain_skill",
+  "description": "从聊天记录/邮件/会议纪要中提取结构化待办事项，包含负责人、截止日期、优先级",
+  "version": "1.0.0",
+  "author": "koto",
+  "executor": "app.core.workflows.action_item_extractor.ActionItemExtractor",
+  "params_schema": [
+    {
+      "key": "source_files",
+      "label": "沟通记录文件（可多选）",
+      "type": "file_multi",
+      "accept": ".txt,.docx,.doc,.pdf,.xlsx,.xls",
+      "required": true
+    },
+    {
+      "key": "model_mode",
+      "label": "模型",
+      "type": "select",
+      "options": [
+        {
+          "value": "online",
+          "label": "在线模型"
+        },
+        {
+          "value": "local",
+          "label": "本地模型"
+        }
+      ],
+      "default": "online",
+      "required": false
+    }
+  ],
+  "output_types": [
+    "xlsx_data",
+    "markdown"
+  ],
+  "enabled": false
+}

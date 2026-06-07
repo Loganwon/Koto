@@ -10,9 +10,11 @@ FileConverterPlugin — 文件格式转换 Agent 工具
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
+from app.core.agent.path_utils import resolve_existing_path
 
 
 class FileConverterPlugin(AgentPlugin):
@@ -41,7 +43,7 @@ class FileConverterPlugin(AgentPlugin):
                     "properties": {
                         "file_path": {
                             "type": "STRING",
-                            "description": "Absolute path to the source file to convert.",
+                            "description": "Path to the source file to convert (absolute or relative).",
                         },
                         "target_format": {
                             "type": "STRING",
@@ -93,13 +95,20 @@ class FileConverterPlugin(AgentPlugin):
         """Convert file_path to target_format and return a human-readable result."""
         from web.file_converter import convert
 
+        resolved, err = resolve_existing_path(file_path)
+        source_path = resolved or file_path
+
+        normalized_output = os.path.abspath(output_path) if output_path else ""
+
         result = convert(
-            source_path=file_path,
+            source_path=source_path,
             target_format=target_format,
-            output_path=output_path or None,
+            output_path=normalized_output or None,
         )
 
         lines = [result["message"]]
+        if not resolved and err and not result.get("success"):
+            lines.insert(0, f"文件定位失败: {err}")
         if result.get("warning"):
             lines.append(result["warning"])
         if result.get("success"):

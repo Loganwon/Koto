@@ -464,3 +464,71 @@ class TestSemanticCoverage:
                 f"  trigger_keywords={data.get('trigger_keywords', [])}\n"
                 f"  → 没有任何关键词可以命中该输入，建议补充关键词"
             )
+
+
+class TestSkillStateSync:
+    """Regression checks for the SkillDefinition/legacy registry sync helpers."""
+
+    @pytest.fixture(autouse=True)
+    def init_skill_manager(self, monkeypatch):
+        from app.core.skills import skill_manager as sm
+
+        monkeypatch.setattr(sm.SkillManager, "_initialized", False)
+        monkeypatch.setattr(sm.SkillManager, "_registry", {})
+        monkeypatch.setattr(sm.SkillManager, "_def_registry", {})
+        monkeypatch.setattr(
+            sm.SkillManager,
+            "_load_states_from_settings",
+            classmethod(lambda cls: None),
+        )
+        monkeypatch.setattr(
+            sm.SkillManager,
+            "_load_custom_skills_dir",
+            classmethod(lambda cls: None),
+        )
+        monkeypatch.setattr(
+            sm.SkillManager,
+            "_save_states_to_settings",
+            classmethod(lambda cls: None),
+        )
+        sm.SkillManager._ensure_init()
+        yield
+
+    def test_instance_and_state_mutators_keep_registries_aligned(self):
+        from app.core.skills.skill_manager import SkillManager
+
+        skill_id = "debug_python"
+        assert SkillManager.instance() is SkillManager
+
+        assert SkillManager.set_enabled(skill_id, True) is True
+        assert SkillManager._registry[skill_id]["enabled"] is True
+        assert SkillManager.get_definition(skill_id).enabled is True
+
+        assert SkillManager.update_prompt(skill_id, "custom prompt") is True
+        assert SkillManager._registry[skill_id]["prompt"] == "custom prompt"
+        assert SkillManager.get_definition(skill_id).prompt == "custom prompt"
+
+        builtin_prompt = SkillManager._builtin_prompt_index[skill_id]
+        assert SkillManager.reset_prompt(skill_id) is True
+        assert SkillManager._registry[skill_id]["prompt"] == builtin_prompt
+        assert SkillManager.get_definition(skill_id).prompt == builtin_prompt
+
+    def test_runtime_field_updates_flow_through_public_helper(self):
+        from app.core.skills.skill_manager import SkillManager
+
+        skill_id = "debug_python"
+        assert SkillManager.update_runtime_fields(
+            skill_id,
+            template_path="config/skill_templates/debug_python/template.docx",
+            bound_tools=["fill_skill_template", "get_template_fields"],
+        ) is True
+
+        runtime_entry = SkillManager.get_runtime_entry(skill_id)
+        assert runtime_entry is not None
+        assert runtime_entry["template_path"] == "config/skill_templates/debug_python/template.docx"
+        assert runtime_entry["bound_tools"] == ["fill_skill_template", "get_template_fields"]
+
+        assert SkillManager.update_runtime_fields(skill_id, remove_fields=["template_path"]) is True
+        runtime_entry = SkillManager.get_runtime_entry(skill_id)
+        assert runtime_entry is not None
+        assert "template_path" not in runtime_entry

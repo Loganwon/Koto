@@ -1,0 +1,1605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Koto Minimal Tech Preview</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0a0f14;
+      --bg-elevated: #0f161e;
+      --panel: rgba(16, 25, 35, 0.82);
+      --panel-strong: rgba(17, 28, 39, 0.94);
+      --panel-soft: rgba(13, 22, 31, 0.72);
+      --canvas: #f7fafc;
+      --canvas-edge: #d4dde8;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-strong: rgba(121, 214, 255, 0.26);
+      --text: #e9f2fb;
+      --text-soft: #a8bacd;
+      --text-dim: #708398;
+      --ink: #172432;
+      --accent: #74dbff;
+      --accent-strong: #35c6ff;
+      --accent-soft: rgba(116, 219, 255, 0.14);
+      --success: #7df7bf;
+      --warning: #ffd978;
+      --danger: #ff8e8e;
+      --radius-xs: 10px;
+      --radius-sm: 14px;
+      --radius-md: 18px;
+      --radius-lg: 24px;
+      --shadow-soft: 0 20px 60px rgba(0, 0, 0, 0.34);
+      --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.24);
+      --mono: "IBM Plex Mono", "Cascadia Mono", "JetBrains Mono", monospace;
+      --sans: "Space Grotesk", "PingFang SC", "Microsoft YaHei UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 18% 20%, rgba(53, 198, 255, 0.18), transparent 26%),
+        radial-gradient(circle at 82% 8%, rgba(116, 219, 255, 0.12), transparent 24%),
+        linear-gradient(180deg, #081018 0%, #0a0f14 52%, #091119 100%);
+      color: var(--text);
+      font-family: var(--sans);
+      overflow: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.56), transparent 88%);
+      pointer-events: none;
+      opacity: 0.34;
+    }
+
+    .preview-shell {
+      position: relative;
+      display: grid;
+      grid-template-columns: 92px 1fr;
+      gap: 18px;
+      height: 100vh;
+      padding: 18px;
+    }
+
+    .rail {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 16px 12px;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: linear-gradient(180deg, rgba(18, 28, 39, 0.9), rgba(10, 16, 24, 0.82));
+      box-shadow: var(--shadow-soft);
+      backdrop-filter: blur(16px);
+    }
+
+    .rail-top,
+    .rail-bottom {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .brand-mark {
+      width: 52px;
+      height: 52px;
+      border-radius: 18px;
+      border: 1px solid var(--line-strong);
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      background: linear-gradient(180deg, rgba(116, 219, 255, 0.12), rgba(116, 219, 255, 0.04));
+      box-shadow: inset 0 0 0 1px rgba(116, 219, 255, 0.08);
+      font-family: var(--mono);
+      font-size: 18px;
+      letter-spacing: 0.12em;
+    }
+
+    .rail-label {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.34em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+
+    .rail-btn {
+      width: 52px;
+      height: 52px;
+      border: 1px solid transparent;
+      border-radius: 18px;
+      background: transparent;
+      color: var(--text-soft);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+      font-size: 18px;
+    }
+
+    .rail-btn:hover {
+      border-color: rgba(116, 219, 255, 0.18);
+      color: var(--text);
+      background: rgba(116, 219, 255, 0.08);
+      transform: translateY(-1px);
+    }
+
+    .rail-btn.active {
+      border-color: rgba(116, 219, 255, 0.28);
+      color: var(--accent);
+      background: linear-gradient(180deg, rgba(116, 219, 255, 0.14), rgba(116, 219, 255, 0.06));
+      box-shadow: inset 0 0 0 1px rgba(116, 219, 255, 0.12);
+    }
+
+    .main-frame {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-width: 0;
+      gap: 16px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px 22px;
+      border-radius: 28px;
+      border: 1px solid var(--line);
+      background: rgba(13, 20, 28, 0.72);
+      backdrop-filter: blur(20px);
+      box-shadow: var(--shadow-card);
+    }
+
+    .title-block {
+      min-width: 0;
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .topbar h1 {
+      margin: 0;
+      font-size: 28px;
+      letter-spacing: -0.04em;
+      font-weight: 600;
+    }
+
+    .topbar p {
+      margin: 6px 0 0;
+      font-size: 14px;
+      color: var(--text-soft);
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 320px;
+      padding: 0 14px;
+      height: 48px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-soft);
+    }
+
+    .search-bar input {
+      width: 100%;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+    }
+
+    .chip-group {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      height: 36px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-soft);
+    }
+
+    .chip strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    .chip.accent {
+      border-color: rgba(116, 219, 255, 0.22);
+      background: rgba(116, 219, 255, 0.1);
+      color: var(--accent);
+    }
+
+    .content-host {
+      position: relative;
+      min-height: 0;
+      border-radius: 30px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(10, 16, 23, 0.74), rgba(9, 15, 21, 0.88));
+      backdrop-filter: blur(20px);
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }
+
+    .mode-panel {
+      display: none;
+      position: absolute;
+      inset: 0;
+      padding: 20px;
+    }
+
+    .mode-panel.active {
+      display: block;
+    }
+
+    .chat-layout,
+    .automation-layout {
+      display: grid;
+      height: 100%;
+      gap: 16px;
+    }
+
+    .chat-layout {
+      grid-template-columns: 260px 1fr 300px;
+      grid-template-rows: 1fr auto;
+    }
+
+    .automation-layout {
+      grid-template-columns: 280px 1fr 320px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: var(--shadow-card);
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .panel-kicker {
+      margin: 0 0 6px;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .panel-body {
+      height: calc(100% - 78px);
+      padding: 16px 18px;
+      overflow: auto;
+    }
+
+    .session-list,
+    .stack-list,
+    .task-list,
+    .file-list,
+    .check-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .session-card,
+    .stack-card,
+    .task-card,
+    .file-card,
+    .check-card {
+      padding: 14px 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .session-card.active,
+    .task-card.active,
+    .file-card.active,
+    .check-card.active {
+      border-color: rgba(116, 219, 255, 0.26);
+      background: rgba(116, 219, 255, 0.08);
+    }
+
+    .session-card h3,
+    .task-card h3,
+    .file-card h3,
+    .check-card h3,
+    .stack-card h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .meta-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.02);
+      color: var(--text-soft);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .tag.accent {
+      border-color: rgba(116, 219, 255, 0.28);
+      background: rgba(116, 219, 255, 0.1);
+      color: var(--accent);
+    }
+
+    .message-board {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      gap: 14px;
+    }
+
+    .message-stream {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 18px;
+      overflow: auto;
+    }
+
+    .bubble {
+      max-width: 72%;
+      padding: 16px 18px;
+      border-radius: 20px;
+      border: 1px solid var(--line);
+      line-height: 1.7;
+      font-size: 14px;
+    }
+
+    .bubble.user {
+      align-self: flex-end;
+      background: rgba(116, 219, 255, 0.1);
+      border-color: rgba(116, 219, 255, 0.22);
+    }
+
+    .bubble.ai {
+      align-self: flex-start;
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .composer {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      padding: 14px;
+      border-top: 1px solid var(--line);
+      background: rgba(8, 13, 18, 0.72);
+    }
+
+    .composer-box {
+      flex: 1;
+      min-height: 92px;
+      padding: 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-soft);
+      line-height: 1.6;
+    }
+
+    .composer-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .action-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-width: 108px;
+      height: 44px;
+      padding: 0 16px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .action-btn.primary {
+      border-color: rgba(116, 219, 255, 0.26);
+      background: linear-gradient(180deg, rgba(116, 219, 255, 0.16), rgba(53, 198, 255, 0.08));
+      color: var(--accent);
+    }
+
+    .file-mode {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100%;
+      gap: 14px;
+    }
+
+    .doc-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 18px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: var(--shadow-card);
+    }
+
+    .doc-toolbar-left,
+    .doc-toolbar-right,
+    .doc-toolbar-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .doc-name {
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+    }
+
+    .doc-mode-grid {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr) 360px;
+      gap: 14px;
+      min-height: 0;
+    }
+
+    .file-nav {
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .section-block + .section-block {
+      margin-top: 18px;
+    }
+
+    .section-label {
+      margin: 0 0 10px;
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .editor-core {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 14px;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .canvas-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding: 12px 16px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .tool-pill {
+      height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-soft);
+    }
+
+    .doc-canvas-wrap {
+      position: relative;
+      min-height: 0;
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(13, 22, 31, 0.72), rgba(11, 17, 25, 0.92));
+      overflow: auto;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+
+    .doc-canvas-wrap::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(180deg, rgba(116, 219, 255, 0.04), transparent 22%),
+        radial-gradient(circle at top right, rgba(116, 219, 255, 0.08), transparent 24%);
+      pointer-events: none;
+    }
+
+    .document-page {
+      position: relative;
+      width: min(880px, calc(100% - 64px));
+      min-height: 980px;
+      margin: 34px auto;
+      padding: 84px 88px 72px;
+      border-radius: 18px;
+      background: linear-gradient(180deg, #ffffff, #f6f9fc);
+      border: 1px solid var(--canvas-edge);
+      color: var(--ink);
+      box-shadow: 0 30px 70px rgba(0, 0, 0, 0.18);
+      overflow: hidden;
+    }
+
+    .document-page::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 46px;
+      height: 1px;
+      background: rgba(23, 36, 50, 0.08);
+    }
+
+    .doc-ruler {
+      position: absolute;
+      top: 18px;
+      left: 32px;
+      right: 32px;
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: rgba(23, 36, 50, 0.4);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .doc-heading {
+      margin: 0 0 16px;
+      font-size: 30px;
+      letter-spacing: -0.05em;
+    }
+
+    .doc-subtitle {
+      margin: 0 0 24px;
+      font-size: 14px;
+      color: rgba(23, 36, 50, 0.64);
+    }
+
+    .doc-paragraph {
+      margin: 0 0 18px;
+      font-size: 15px;
+      line-height: 1.85;
+      color: rgba(23, 36, 50, 0.9);
+    }
+
+    .doc-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 18px;
+      margin-top: 28px;
+    }
+
+    .doc-card,
+    .doc-table {
+      border: 1px solid rgba(23, 36, 50, 0.12);
+      border-radius: 14px;
+      background: rgba(243, 248, 252, 0.86);
+      padding: 16px;
+    }
+
+    .doc-card h4,
+    .doc-table h4 {
+      margin: 0 0 12px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      font-family: var(--mono);
+      text-transform: uppercase;
+      color: rgba(23, 36, 50, 0.55);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      color: rgba(23, 36, 50, 0.82);
+    }
+
+    td,
+    th {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(23, 36, 50, 0.1);
+      text-align: left;
+    }
+
+    th {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(23, 36, 50, 0.52);
+    }
+
+    .assistant-drawer {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      min-height: 0;
+    }
+
+    .drawer-tabs {
+      display: inline-flex;
+      gap: 8px;
+      padding: 6px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .drawer-tab {
+      height: 34px;
+      padding: 0 12px;
+      border: none;
+      border-radius: 12px;
+      background: transparent;
+      color: var(--text-soft);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+
+    .drawer-tab.active {
+      background: rgba(116, 219, 255, 0.12);
+      color: var(--accent);
+    }
+
+    .quick-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .quick-card {
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .quick-card h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+
+    .quick-card p,
+    .panel-copy,
+    .session-card p,
+    .task-card p,
+    .file-card p,
+    .check-card p,
+    .stack-card p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--text-soft);
+    }
+
+    .drawer-stream {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 16px 0;
+      overflow: auto;
+    }
+
+    .drawer-bubble {
+      padding: 14px 16px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      line-height: 1.7;
+      font-size: 13px;
+    }
+
+    .drawer-bubble.system {
+      border-color: rgba(116, 219, 255, 0.18);
+      background: rgba(116, 219, 255, 0.08);
+    }
+
+    .drawer-input {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .drawer-input-box {
+      min-height: 86px;
+      padding: 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-soft);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .statusbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 18px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-soft);
+    }
+
+    .statusbar strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    .status-items {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      flex-wrap: wrap;
+    }
+
+    .kanban {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      min-height: 0;
+    }
+
+    .lane {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.03);
+      padding: 14px;
+      min-height: 0;
+    }
+
+    .lane h3 {
+      margin: 0 0 12px;
+      font-size: 14px;
+    }
+
+    .lane .task-card + .task-card {
+      margin-top: 10px;
+    }
+
+    .mode-hint {
+      position: absolute;
+      right: 20px;
+      bottom: 20px;
+      max-width: 420px;
+      padding: 16px 18px;
+      border-radius: 20px;
+      border: 1px solid rgba(116, 219, 255, 0.18);
+      background: rgba(10, 17, 24, 0.78);
+      backdrop-filter: blur(18px);
+      box-shadow: var(--shadow-card);
+    }
+
+    .mode-hint h2 {
+      margin: 0 0 10px;
+      font-size: 15px;
+    }
+
+    .mode-hint p {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--text-soft);
+    }
+
+    .list-dots {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 0;
+      margin: 12px 0 0;
+      list-style: none;
+    }
+
+    .list-dots li {
+      position: relative;
+      padding-left: 14px;
+      color: var(--text-soft);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .list-dots li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 9px;
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(116, 219, 255, 0.56);
+    }
+
+    .compare-strip {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .compare-item {
+      min-width: 0;
+      flex: 1 1 180px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .compare-item h4 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+
+    .micro-stat {
+      display: inline-flex;
+      align-items: center;
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--line);
+      font-family: var(--mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .ai-collapsed .drawer-stream,
+    .ai-collapsed .drawer-input,
+    .ai-collapsed .quick-grid {
+      display: none;
+    }
+
+    .ai-collapsed {
+      grid-template-rows: auto auto auto 1fr;
+    }
+
+    .ai-collapsed .drawer-input {
+      display: none;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    @media (max-width: 1560px) {
+      .chat-layout {
+        grid-template-columns: 220px 1fr 260px;
+      }
+
+      .doc-mode-grid {
+        grid-template-columns: 220px minmax(0, 1fr) 320px;
+      }
+    }
+
+    @media (max-width: 1320px) {
+      .preview-shell {
+        grid-template-columns: 72px 1fr;
+      }
+
+      .chat-layout,
+      .automation-layout,
+      .doc-mode-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .mode-panel {
+        overflow: auto;
+      }
+
+      .search-bar {
+        min-width: 220px;
+      }
+
+      .mode-hint {
+        position: static;
+        margin-top: 14px;
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-shell">
+    <aside class="rail">
+      <div class="rail-top">
+        <div class="brand-mark">KT</div>
+        <div class="rail-label">Preview</div>
+        <button class="rail-btn active" data-mode="chat" title="对话模式">◌</button>
+        <button class="rail-btn" data-mode="file" title="文件模式">▣</button>
+        <button class="rail-btn" data-mode="automation" title="自动化模式">△</button>
+      </div>
+      <div class="rail-bottom">
+        <button class="rail-btn" title="搜索">⌕</button>
+        <button class="rail-btn" title="通知">◎</button>
+        <button class="rail-btn" title="设置">⋯</button>
+      </div>
+    </aside>
+
+    <main class="main-frame">
+      <header class="topbar">
+        <div class="title-block">
+          <p class="eyebrow">Koto Minimal Tech Preview</p>
+          <h1 id="modeTitle">对话模式</h1>
+          <p id="modeSubtitle">一级导航只保留对话、文件、自动化，其余能力全部退到模式内部。</p>
+        </div>
+        <div class="topbar-actions">
+          <label class="search-bar" aria-label="Global Search">
+            <span>⌕</span>
+            <input value="搜索会话、文件、任务、技能" readonly>
+          </label>
+          <div class="chip-group">
+            <span class="chip accent">Safe Preview</span>
+            <span class="chip"><strong>Rollback</strong> 正式界面未改动</span>
+            <span class="chip"><strong>Style</strong> 极简科技感</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="content-host">
+        <section class="mode-panel active" data-panel="chat">
+          <div class="chat-layout">
+            <aside class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Conversation Index</p>
+                  <h2 class="panel-title">会话与上下文</h2>
+                </div>
+                <span class="micro-stat">24 sessions</span>
+              </div>
+              <div class="panel-body">
+                <div class="session-list">
+                  <div class="session-card active">
+                    <h3>季度汇报结构梳理</h3>
+                    <p>把本周素材合成高层汇报，保留数字可信度和结论层次。</p>
+                    <div class="meta-line">
+                      <span class="tag accent">active</span>
+                      <span>04:12 updated</span>
+                    </div>
+                  </div>
+                  <div class="session-card">
+                    <h3>项目复盘要点</h3>
+                    <p>从周报、需求单和客户反馈中提炼复盘结论与待办。</p>
+                    <div class="meta-line">
+                      <span class="tag">work</span>
+                      <span>yesterday</span>
+                    </div>
+                  </div>
+                  <div class="session-card">
+                    <h3>供应商合同修订</h3>
+                    <p>关注风险条款、交付节点和付款条件，输出可谈判版本。</p>
+                    <div class="meta-line">
+                      <span class="tag">legal</span>
+                      <span>9 files linked</span>
+                    </div>
+                  </div>
+                  <div class="session-card">
+                    <h3>技能设计草稿</h3>
+                    <p>把当前工作流拆成可复用的 Skills 与触发器。</p>
+                    <div class="meta-line">
+                      <span class="tag">automation</span>
+                      <span>review pending</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            <section class="panel message-board">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Dialogue Canvas</p>
+                  <h2 class="panel-title">欢迎页回到真正简洁</h2>
+                </div>
+                <div class="chip-group">
+                  <span class="tag accent">skills contextual</span>
+                  <span class="tag">files attached</span>
+                </div>
+              </div>
+              <div class="message-stream">
+                <div class="bubble ai">
+                  这里的目标不是把所有能力堆在主屏上，而是让用户先明确“我现在是在对话”。搜索、附件、Skills、产物都围绕当前会话展开，不再和文件库、设置、自动化抢一级入口。
+                </div>
+                <div class="bubble user">
+                  帮我把季度汇报的三份材料合并成一个高层摘要，突出收入结构变化、交付风险和下月优先级。
+                </div>
+                <div class="bubble ai">
+                  已读取当前会话关联的 3 份材料。下一步我建议先给你一个 5 段式摘要，再补一版适合管理层阅读的行动列表。右侧只保留与当前会话直接相关的产物、技能和背景，不再出现跨模式控制台。
+                </div>
+              </div>
+              <div class="composer">
+                <div class="composer-box">输入问题、拖入附件或 @ 文件。这里保留极简主输入区，次要能力全部弱化到上下文条和右侧结果面板。</div>
+                <div class="composer-actions">
+                  <div class="action-btn">Attach</div>
+                  <div class="action-btn primary">Send</div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Context Rail</p>
+                  <h2 class="panel-title">结果与上下文</h2>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div class="stack-list">
+                  <div class="stack-card">
+                    <h3>本轮已连接文件</h3>
+                    <p>Q1 经营简报.docx、客户反馈.xlsx、项目风险追踪表.xlsx</p>
+                  </div>
+                  <div class="stack-card">
+                    <h3>激活中的 Skills</h3>
+                    <p>财务审阅、报告摘要、行动项整理</p>
+                  </div>
+                  <div class="stack-card">
+                    <h3>输出产物</h3>
+                    <p>摘要草稿 v2、下月优先级列表、风险追踪清单</p>
+                  </div>
+                  <div class="stack-card">
+                    <h3>设计原则</h3>
+                    <ul class="list-dots">
+                      <li>会话模式不再承载文件库和全局设置。</li>
+                      <li>产物侧栏只显示当前会话相关内容。</li>
+                      <li>输入区保持一个明确主动作。</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+          <div class="mode-hint">
+            <h2>主程序目标</h2>
+            <p>左侧只保留 3 个一级模式。会话列表、消息流、附件上下文、结果面板都留在“对话”模式内部，避免首页变成功能总控台。</p>
+          </div>
+        </section>
+
+        <section class="mode-panel" data-panel="file">
+          <div class="file-mode">
+            <div class="doc-toolbar">
+              <div class="doc-toolbar-left">
+                <span class="tag accent">File Mode</span>
+                <span class="doc-name">2026 品牌升级方案.docx</span>
+                <span class="tag">docx</span>
+                <span class="tag">workset / active</span>
+              </div>
+              <div class="doc-toolbar-right">
+                <div class="action-btn">Versions</div>
+                <div class="action-btn">Export</div>
+                <div class="action-btn primary">Save</div>
+              </div>
+            </div>
+
+            <div class="doc-mode-grid">
+              <aside class="panel file-nav">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-kicker">Workset Navigator</p>
+                    <h2 class="panel-title">文件导航</h2>
+                  </div>
+                  <span class="micro-stat">18 items</span>
+                </div>
+                <div class="panel-body">
+                  <div class="section-block">
+                    <p class="section-label">Recent</p>
+                    <div class="file-list">
+                      <div class="file-card active">
+                        <h3>品牌升级方案.docx</h3>
+                        <p>当前编辑文件。进入文件模式后默认回到最近活动文档，而不是空白上传页。</p>
+                      </div>
+                      <div class="file-card">
+                        <h3>采访纪要.pdf</h3>
+                        <p>支撑资料，作为当前工作集的一部分保留在左栏。</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section-block">
+                    <p class="section-label">Workset</p>
+                    <div class="file-list">
+                      <div class="file-card">
+                        <h3>市场调研.xlsx</h3>
+                        <p>数据来源</p>
+                      </div>
+                      <div class="file-card">
+                        <h3>竞品截图.pptx</h3>
+                        <p>视觉参考</p>
+                      </div>
+                      <div class="file-card">
+                        <h3>修改建议.md</h3>
+                        <p>AI 总结与待办</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="section-block">
+                    <p class="section-label">Directory</p>
+                    <div class="file-list">
+                      <div class="file-card">
+                        <h3>全部文件</h3>
+                        <p>最近 / 收藏 / 工作集 / 文件夹都留在一个导航系统里，不再拆成多套入口。</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              <section class="editor-core">
+                <div class="canvas-toolbar">
+                  <span class="tool-pill">Outline</span>
+                  <span class="tool-pill">Comments</span>
+                  <span class="tool-pill">Track Changes</span>
+                  <span class="tool-pill">AI Selection</span>
+                  <span class="tool-pill">Compare</span>
+                  <span class="tool-pill">Focus View</span>
+                </div>
+
+                <div class="doc-canvas-wrap">
+                  <article class="document-page">
+                    <div class="doc-ruler">
+                      <span>page 02</span>
+                      <span>editor-first canvas</span>
+                      <span>safe AI preview</span>
+                    </div>
+                    <h1 class="doc-heading">品牌升级方向：从功能堆叠转向结构清晰的极简科技感</h1>
+                    <p class="doc-subtitle">目标是统一视觉语言，减少一级入口，把复杂性留给上下文而不是首页。</p>
+                    <p class="doc-paragraph">新版文件助手不再把上传、文件库、临时工作区、AI 聊天、版本操作、工作流入口都堆在同一层。进入文件模式后，用户首先看到的是最近活动文档与当前工作集，中央主画布获得最高优先级，AI 抽屉默认保持辅助地位，只在用户提问、选区操作或执行任务时主动展开。</p>
+                    <p class="doc-paragraph">文档区的职责是阅读、编辑和校对；AI 区的职责是生成、解释和建议；检查区的职责是批注、风险与结构反馈。三者不再互相抢占主视线，从而避免“像控制台不像编辑器”的割裂体验。</p>
+
+                    <div class="doc-grid">
+                      <section class="doc-card">
+                        <h4>Core Decisions</h4>
+                        <table>
+                          <tr><th>Area</th><th>Direction</th></tr>
+                          <tr><td>导航</td><td>最近、收藏、工作集、目录整合为一套文件导航</td></tr>
+                          <tr><td>画布</td><td>默认最大化，AI 不长期压缩文档主区</td></tr>
+                          <tr><td>AI</td><td>助手与检查合并为一个右侧抽屉，分标签切换</td></tr>
+                          <tr><td>状态</td><td>保存、模型、选择、页数下沉到底栏</td></tr>
+                        </table>
+                      </section>
+                      <section class="doc-table">
+                        <h4>Current Sprint</h4>
+                        <table>
+                          <tr><th>Priority</th><th>Scope</th></tr>
+                          <tr><td>P0</td><td>统一一级模式与入口</td></tr>
+                          <tr><td>P1</td><td>文件模式 editor-first 布局</td></tr>
+                          <tr><td>P1</td><td>AI 抽屉渐进披露</td></tr>
+                          <tr><td>P2</td><td>检查面板与版本系统收拢</td></tr>
+                        </table>
+                      </section>
+                    </div>
+                  </article>
+                </div>
+              </section>
+
+              <aside class="panel assistant-drawer" id="assistantDrawer">
+                <div class="panel-head">
+                  <div>
+                    <p class="panel-kicker">Adaptive Drawer</p>
+                    <h2 class="panel-title">AI 与检查</h2>
+                  </div>
+                  <button class="action-btn" id="collapseDrawerBtn">Collapse</button>
+                </div>
+
+                <div class="panel-body" style="height:auto;padding-bottom:0;overflow:visible;">
+                  <div class="drawer-tabs">
+                    <button class="drawer-tab active" data-drawer="assistant">助手</button>
+                    <button class="drawer-tab" data-drawer="review">检查</button>
+                  </div>
+
+                  <div class="quick-grid" data-drawer-panel="assistant">
+                    <div class="quick-card">
+                      <h3>读懂当前文档</h3>
+                      <p>先给结构、重点与下一步建议。</p>
+                    </div>
+                    <div class="quick-card">
+                      <h3>润色选区</h3>
+                      <p>只对当前选中段落做局部优化。</p>
+                    </div>
+                    <div class="quick-card">
+                      <h3>生成摘要</h3>
+                      <p>汇总文档结论与可执行待办。</p>
+                    </div>
+                    <div class="quick-card">
+                      <h3>附加文件对照</h3>
+                      <p>把工作集里的资料一并纳入上下文。</p>
+                    </div>
+                  </div>
+
+                  <div class="quick-grid hidden" data-drawer-panel="review">
+                    <div class="quick-card">
+                      <h3>表达风险</h3>
+                      <p>2 处结论缺少证据支撑，建议补来源。</p>
+                    </div>
+                    <div class="quick-card">
+                      <h3>结构建议</h3>
+                      <p>建议把“执行策略”前移到第三部分。</p>
+                    </div>
+                    <div class="quick-card">
+                      <h3>一致性</h3>
+                      <p>品牌术语“核心界面”与“主视图”需统一。</p>
+                    </div>
+                    <div class="quick-card">
+                      <h3>导出前检查</h3>
+                      <p>页眉、目录、图表说明还有 3 项待确认。</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="drawer-stream" data-drawer-panel="assistant">
+                  <div class="drawer-bubble system">建议把 AI 结果先预览在抽屉里，再决定替换选区、插入文末还是写入批注。这样不会让 AI 直接侵入主画布。</div>
+                  <div class="drawer-bubble">当前方案里，助手默认弱化成右侧抽屉。常用动作只保留 3 到 4 个，其他动作通过上下文触发，不再在首屏同时展示十几个入口。</div>
+                </div>
+
+                <div class="drawer-stream hidden" data-drawer-panel="review">
+                  <div class="drawer-bubble system">检查视图与聊天视图分开，让“建议”和“对话”不再混成一个滚动流。</div>
+                  <div class="check-list">
+                    <div class="check-card active">
+                      <h3>段落 2 逻辑跳跃</h3>
+                      <p>从调研结论直接跳到执行方案，中间缺少承接句。</p>
+                    </div>
+                    <div class="check-card">
+                      <h3>术语不一致</h3>
+                      <p>“文件工作站”和“文件助手”混用，建议统一为后者。</p>
+                    </div>
+                    <div class="check-card">
+                      <h3>导出风险</h3>
+                      <p>图表标题与正文标题层级还未同步。</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="drawer-input">
+                  <div class="drawer-input-box">问当前文件、选中内容或附加资料。AI 抽屉默认辅助，不再长期占据主视线。</div>
+                  <div class="composer-actions">
+                    <div class="action-btn">Attach</div>
+                    <div class="action-btn primary">Ask</div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+
+            <div class="statusbar">
+              <div class="status-items">
+                <span><strong>Mode</strong> edit / docx</span>
+                <span><strong>Selection</strong> 2 paragraphs</span>
+                <span><strong>Page</strong> 2 / 5</span>
+                <span><strong>Model</strong> auto</span>
+              </div>
+              <div class="status-items">
+                <span><strong>State</strong> saved</span>
+                <span><strong>Preview</strong> isolated / rollback-safe</span>
+              </div>
+            </div>
+          </div>
+          <div class="mode-hint">
+            <h2>文件助手目标</h2>
+            <p>进入文件模式后，界面首先是一台编辑器，而不是一块 AI 控制台。文档主画布居中放大，左侧统一文件导航，右侧改成可折叠的“助手 / 检查”抽屉，顶部只保留高频文档动作。</p>
+          </div>
+        </section>
+
+        <section class="mode-panel" data-panel="automation">
+          <div class="automation-layout">
+            <aside class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Task Center</p>
+                  <h2 class="panel-title">任务列表</h2>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div class="task-list">
+                  <div class="task-card active">
+                    <h3>下载目录自动整理</h3>
+                    <p>每天 09:00 扫描 Downloads，按文件类型与项目归类。</p>
+                    <div class="meta-line">
+                      <span class="tag accent">running</span>
+                      <span>cron / daily</span>
+                    </div>
+                  </div>
+                  <div class="task-card">
+                    <h3>合同风险预检</h3>
+                    <p>检测新进入工作集的合同文件并生成风险摘要。</p>
+                    <div class="meta-line">
+                      <span class="tag">pending approval</span>
+                    </div>
+                  </div>
+                  <div class="task-card">
+                    <h3>周报汇总</h3>
+                    <p>每周五聚合会话成果、文件修改与任务状态。</p>
+                    <div class="meta-line">
+                      <span class="tag">weekly</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Execution / Review</p>
+                  <h2 class="panel-title">任务详情与审批</h2>
+                </div>
+                <div class="chip-group">
+                  <span class="tag accent">human review</span>
+                  <span class="tag">3 steps</span>
+                </div>
+              </div>
+              <div class="panel-body" style="display:grid;grid-template-rows:auto 1fr;gap:16px;">
+                <div class="stack-card">
+                  <h3>目标</h3>
+                  <p>重构自动化区域，让任务、Skills、触发器回到同一模式，而不是散落在设置、侧栏和独立面板里。</p>
+                </div>
+                <div class="kanban">
+                  <div class="lane">
+                    <h3>计划</h3>
+                    <div class="task-card">
+                      <h3>扫描输入目录</h3>
+                      <p>识别新增文件与可能关联项目。</p>
+                    </div>
+                    <div class="task-card">
+                      <h3>生成分类建议</h3>
+                      <p>先给建议，再等你批准执行。</p>
+                    </div>
+                  </div>
+                  <div class="lane">
+                    <h3>执行</h3>
+                    <div class="task-card active">
+                      <h3>写入工作集</h3>
+                      <p>把确认后的文件加入当前项目工作集。</p>
+                    </div>
+                    <div class="task-card">
+                      <h3>触发后续 Skill</h3>
+                      <p>按文件类型调用对应分析流程。</p>
+                    </div>
+                  </div>
+                  <div class="lane">
+                    <h3>输出</h3>
+                    <div class="task-card">
+                      <h3>历史记录</h3>
+                      <p>保留执行日志、审批记录和生成产物。</p>
+                    </div>
+                    <div class="task-card">
+                      <h3>失败处理</h3>
+                      <p>展示可回放的步骤，而不是只给错误信息。</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="panel-kicker">Skills / Triggers</p>
+                  <h2 class="panel-title">能力组合</h2>
+                </div>
+              </div>
+              <div class="panel-body">
+                <div class="stack-list">
+                  <div class="stack-card">
+                    <h3>启用中的 Skills</h3>
+                    <p>文档摘要、合同审阅、数据清洗、导出整理</p>
+                  </div>
+                  <div class="stack-card">
+                    <h3>触发器</h3>
+                    <p>定时、文件进入工作集、会话结束、影子追踪提醒</p>
+                  </div>
+                  <div class="stack-card">
+                    <h3>设计原则</h3>
+                    <ul class="list-dots">
+                      <li>自动化是一级模式，不塞进设置面板。</li>
+                      <li>审批、执行、历史共享一个任务中心。</li>
+                      <li>Skills 与 Triggers 作为任务能力组合存在。</li>
+                    </ul>
+                  </div>
+                  <div class="compare-strip">
+                    <div class="compare-item">
+                      <h4>Before</h4>
+                      <p>入口散落、面板割裂、状态分散。</p>
+                    </div>
+                    <div class="compare-item">
+                      <h4>After</h4>
+                      <p>统一任务中心，能力编排清晰可追踪。</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+          <div class="mode-hint">
+            <h2>自动化目标</h2>
+            <p>自动化、Skills、触发器、影子追踪全部收拢到一个模式里，变成“任务中心”，而不是继续散落在设置、侧边栏和临时抽屉中。</p>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      const modeMeta = {
+        chat: {
+          title: "对话模式",
+          subtitle: "一级导航只保留对话、文件、自动化，其余能力全部退到模式内部。"
+        },
+        file: {
+          title: "文件模式 / 文件助手",
+          subtitle: "文件模式优先展示文档主画布，AI 和检查都退到右侧抽屉，形成 editor-first 的工作界面。"
+        },
+        automation: {
+          title: "自动化模式",
+          subtitle: "任务、Skills、触发器和影子追踪统一收拢到任务中心，不再散落在各处。"
+        }
+      };
+
+      const railButtons = document.querySelectorAll(".rail-btn[data-mode]");
+      const panels = document.querySelectorAll(".mode-panel[data-panel]");
+      const modeTitle = document.getElementById("modeTitle");
+      const modeSubtitle = document.getElementById("modeSubtitle");
+
+      function activateMode(mode) {
+        railButtons.forEach((button) => {
+          button.classList.toggle("active", button.dataset.mode === mode);
+        });
+        panels.forEach((panel) => {
+          panel.classList.toggle("active", panel.dataset.panel === mode);
+        });
+        modeTitle.textContent = modeMeta[mode].title;
+        modeSubtitle.textContent = modeMeta[mode].subtitle;
+      }
+
+      railButtons.forEach((button) => {
+        button.addEventListener("click", () => activateMode(button.dataset.mode));
+      });
+
+      const drawerTabs = document.querySelectorAll(".drawer-tab[data-drawer]");
+      const drawerPanels = document.querySelectorAll("[data-drawer-panel]");
+
+      function activateDrawer(name) {
+        drawerTabs.forEach((tab) => {
+          tab.classList.toggle("active", tab.dataset.drawer === name);
+        });
+        drawerPanels.forEach((panel) => {
+          const isMatch = panel.dataset.drawerPanel === name;
+          panel.classList.toggle("hidden", !isMatch);
+        });
+      }
+
+      drawerTabs.forEach((tab) => {
+        tab.addEventListener("click", () => activateDrawer(tab.dataset.drawer));
+      });
+
+      const drawer = document.getElementById("assistantDrawer");
+      const collapseDrawerBtn = document.getElementById("collapseDrawerBtn");
+
+      collapseDrawerBtn.addEventListener("click", () => {
+        const collapsed = drawer.classList.toggle("ai-collapsed");
+        collapseDrawerBtn.textContent = collapsed ? "Expand" : "Collapse";
+      });
+
+      activateMode("chat");
+      activateDrawer("assistant");
+    })();
+  </script>
+</body>
+</html>

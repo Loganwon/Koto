@@ -1,19 +1,19 @@
 ---
 name: ai-text-interaction
-description: 'Enhance AI-text interaction in Koto file assistant. Use when: modifying FloatingToolbar, AIPanel, SocketBridge, DocController; adding new AI actions; editing prompts in _build_editor_prompt or socket_handler PROMPTS; working on selection-to-AI pipeline; debugging streaming SSE or WebSocket flows.'
+description: 'Enhance AI-text interaction in Koto file assistant. Use when: modifying workspace-assistant.js or workspace assistant templates; adding new AI actions; editing prompts in _build_editor_prompt or socket_handler PROMPTS; working on selection-to-AI pipeline; debugging streaming SSE or WebSocket flows.'
 ---
 
 # AI Text Interaction Skill
 
 ## Architecture Overview
 
-The Koto file assistant has a 4-module frontend + 2-endpoint backend architecture for AI-text interaction:
+The current Koto file assistant uses a single workspace-assistant frontend surface plus shared backend AI endpoints.
 
-### Frontend Modules
-1. **FloatingToolbar.js** — Selection detection + action buttons
-2. **AIPanel.js** — Right panel: slash commands, streaming chat, proposals, chart rendering
-3. **SocketBridge.js** — WebSocket bridge to `/doc` namespace
-4. **DocController.js** — Univer document operations (read/write/replace)
+### Frontend Surface
+1. **`web/static/js/workspace-assistant.js`** — Main workspace assistant UI, selection actions, streaming chat, proposals, chart rendering
+2. **`web/templates/workspace_assistant.html`** — Standalone page shell for `/workspace-assistant`
+3. **`web/templates/index.html`** — Embedded workspace assistant host inside the main app
+4. **`web/univer-editor/sheets-main.js`** — Separate Sheets runtime bundle source that exports `window.KotoSheetsAPI`
 
 ### Backend Endpoints
 1. **`/api/editor/ai/stream`** (SSE) — Text actions (polish, translate, etc.)
@@ -22,11 +22,11 @@ The Koto file assistant has a 4-module frontend + 2-endpoint backend architectur
 4. **WebSocket `/doc` namespace** — Real-time streaming via `socket_handler.py`
 
 ### Source Files
-- `web/univer-editor/src/FloatingToolbar.js`
-- `web/univer-editor/src/AIPanel.js`
-- `web/univer-editor/src/SocketBridge.js`
-- `web/univer-editor/src/DocController.js`
-- `web/univer-editor/style.css`
+- `web/static/js/workspace-assistant.js`
+- `web/templates/workspace_assistant.html`
+- `web/templates/index.html`
+- `web/templates/_workspace_model_controls.html`
+- `web/univer-editor/sheets-main.js`
 - `web/app.py` (functions: `_build_editor_prompt`, `editor_ai_stream`, `editor_ai_chart`, `editor_ai_chart_rerun`)
 - `app/core/socket_handler.py` (PROMPTS dict, `on_doc_ai_request`)
 
@@ -40,25 +40,13 @@ The Koto file assistant has a 4-module frontend + 2-endpoint backend architectur
 ## Adding a New AI Action
 
 ### Step 1: Register the action
-Add to `SLASH_COMMANDS` array in AIPanel.js:
-```javascript
-{ cmd: '/命令', action: 'action_name', icon: '🔤', hint: '描述' },
-```
+Add the action to the current workspace assistant action registry and UI triggers in `web/static/js/workspace-assistant.js`.
 
 ### Step 2: Add handler in `_onAction()`
-In AIPanel.js `_onAction()`, add a new branch:
-```javascript
-if (actionType === 'action_name') {
-  // Get selection or full text as needed
-  const selection = this._doc.getSelection();
-  this.addMessage('Label', 'user');
-  this._sendViaMainAI('action_name', text, selection, '');
-  return;
-}
-```
+Update the current workspace assistant action dispatch path so the new action produces the expected SSE or task request payload.
 
-### Step 3: Add to FloatingToolbar (optional)
-Add to `PRIMARY_ACTIONS` or `SECONDARY_ACTIONS` array in FloatingToolbar.js.
+### Step 3: Add UI affordances (optional)
+If the action should appear in quick actions, selection menus, or slash-command style helpers, wire it into the current `workspace-assistant.js` UI flow.
 
 ### Step 4: Add backend prompt
 In `web/app.py`, add a branch to `_build_editor_prompt()`:
@@ -68,33 +56,36 @@ elif action == "action_name":
 ```
 
 ### Step 5: Add result buttons
-In AIPanel.js `_buildApplyButtons()`, add handling for the new action type.
+Update the workspace assistant result rendering path so the new action offers the right accept/apply affordances.
 
 ## Build Process
 
-After editing frontend files, rebuild with esbuild:
+After editing sheet-runtime files, rebuild with the runtime pipeline:
 ```powershell
 cd web/univer-editor
-.\node_modules\@esbuild\win32-x64\esbuild.exe main.js --bundle --outdir=../static/univer-dist/assets --format=esm --splitting --loader:.css=css --minify --sourcemap "--define:__VUE_OPTIONS_API__=true" "--define:__VUE_PROD_DEVTOOLS__=false" "--define:__VUE_PROD_HYDRATION_MISMATCH_DETAILS__=false"
+npm run build
 ```
+
+This command builds:
+- Sheets bundle (`sheets-main.js`, `sheets-main.css`)
+- stale asset cleanup (removes old legacy bundles)
 
 ## Data Flow
 
 ```
-User selects text → FloatingToolbar._checkSelection()
-  → Toolbar appears with action buttons
+User selects text → workspace-assistant selection handler
+  → Quick actions / assistant UI appears
   → User clicks action
-  → AIPanel._onAction(type)
-  → AIPanel._sendViaMainAI(type, text, ctx, instruction)
+  → workspace-assistant request dispatcher
   → POST /api/editor/ai/stream {action, selection, instruction, full_text}
-  → SSE: token events → appendStreamChunk()
-  → SSE: done event → finalizeStreamMessage() → action buttons
-  → User clicks "接受修改" → DocController.replaceRange()
+  → SSE: token events → stream renderer updates UI
+  → SSE: done event → finalize response and show action buttons
+  → User clicks "接受修改" → workspace-assistant applies the result into the active file view
 ```
 
 ## Common Pitfalls
 
-- **Univer 0.5.x limitation**: No `replaceText()` API. All edits go through `_replaceEntireDoc()` (dispose + recreate).
-- **Selection tracking**: `fullText.indexOf(selectedText)` may match wrong position if text appears multiple times.
-- **Token limits**: Truncate `full_text` to ~8000 chars in prompts to avoid Gemini token limits.
-- **esbuild Vue flags**: MUST include `--define` flags or Vue runtime crashes with ReferenceError.
+- **Legacy source split is gone**: `web/univer-editor/src/*` is no longer the live file assistant surface. Current behavior lives in `web/static/js/workspace-assistant.js`.
+- **Selection tracking**: `fullText.indexOf(selectedText)` style fallbacks can still match the wrong position if text repeats.
+- **Token limits**: Truncate `full_text` to a safe size in prompts to avoid model token blowups.
+- **Sheets assets are still live**: Do not remove `web/static/univer-dist/assets/sheets-main.js` or `sheets-main.css`; the workspace assistant still loads them.

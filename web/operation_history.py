@@ -274,13 +274,15 @@ def track_operation(operation_type: str):
             file_path = args[0] if args else kwargs.get("file_path")
 
             # 获取全局历史记录器
-            from web.app import operation_history
+            from web.runtime_context import get_app_attr
+
+            operation_history = get_app_attr("operation_history")
 
             # 执行操作
             result = func(*args, **kwargs)
 
             # 记录操作
-            if file_path:
+            if file_path and operation_history is not None:
                 operation_history.record_operation(operation_type, file_path)
 
             return result

@@ -9,7 +9,7 @@ FLAKE8 := flake8
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev test lint format build clean install pre-commit-install mutation-test
+.PHONY: help dev test lint format build clean install pre-commit-install mutation-test test-ai-assistant-smoke test-ai-assistant test-ai-assistant-browser test-ai-assistant-release
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -29,6 +29,18 @@ test-full:  ## Run all tests
 	$(PYTEST) tests/ -v --tb=short \
 		--cov=app --cov-report=term-missing \
 		--cov-fail-under=40
+
+test-ai-assistant-smoke:  ## Run AI assistant smoke regressions
+	$(PYTHON) scripts/run_ai_assistant_flow_tests.py smoke
+
+test-ai-assistant:  ## Run the full non-browser AI assistant regression suite
+	$(PYTHON) scripts/run_ai_assistant_flow_tests.py full
+
+test-ai-assistant-browser:  ## Run browser smoke tests for the AI assistant
+	$(PYTHON) scripts/run_ai_assistant_flow_tests.py browser
+
+test-ai-assistant-release:  ## Run the AI assistant release suite (includes browser smoke)
+	$(PYTHON) scripts/run_ai_assistant_flow_tests.py release
 
 lint:  ## Run linters (flake8 + bandit)
 	$(FLAKE8) src/ app/ tests/ --max-line-length=100 --extend-ignore=E203,E501,W503

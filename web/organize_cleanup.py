@@ -175,7 +175,7 @@ class OrganizeCleanup:
                 try:
                     total_size += fp.stat().st_size
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    logger.debug("Non-fatal", exc_info=True)
 
             folder_info[rel] = {
                 "files": real_files,
@@ -431,7 +431,7 @@ class OrganizeCleanup:
 
             try:
                 response = client.models.generate_content(
-                    model="gemini-2.0-flash-lite",
+                    model="gemini-2.5-flash-lite",
                     contents=prompt,
                 )
                 suggested_name = response.text.strip().strip('"').strip("'")

@@ -318,7 +318,7 @@ class TaskDecomposer:
             "  WEB_SEARCH: 搜索实时信息、价格、新闻\n"
             "  FILE_GEN: 生成文件（Word/Excel/PPT/PDF）\n"
             "  PAINTER: 生成图片\n"
-            "  SYSTEM: 控制系统、打开应用\n\n"
+            "  SYSTEM: 查询系统信息、时间、日期、CPU/内存/磁盘状态\n\n"
             '如果是单步任务，返回: {"is_compound": false}\n'
             "如果是多步任务（必须是真正需要先后执行的不同操作），返回:\n"
             "{\n"
@@ -345,7 +345,7 @@ class TaskDecomposer:
 
             resp = provider.generate_content(
                 prompt=_PROMPT,
-                model="gemini-2.0-flash",
+                model="gemini-2.5-flash",
                 stream=False,
                 max_tokens=400,
             )

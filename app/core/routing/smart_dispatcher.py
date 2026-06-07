@@ -4,11 +4,17 @@ import logging
 import re
 import time
 
+from app.core.routing.routing_config import (
+    TASK_CORPUS,
+    TRIVIAL_GREETINGS,
+    TRIVIAL_IDENTITY,
+    TRIVIAL_EXCLUDE,
+)
+
 logger = logging.getLogger(__name__)
 
 # 延迟导入 - 这些模块仅在运行时方法调用时加载，避免启动时加载 google.genai (~4.7s) 和 requests (~0.5s)
 # from app.core.routing.local_model_router import LocalModelRouter
-# from app.core.routing.ai_router import AIRouter
 # from app.core.routing.task_decomposer import TaskDecomposer
 # from app.core.routing.local_planner import LocalPlanner
 
@@ -17,12 +23,6 @@ def _get_local_model_router():
     from app.core.routing.local_model_router import LocalModelRouter
 
     return LocalModelRouter
-
-
-def _get_ai_router():
-    from app.core.routing.ai_router import AIRouter
-
-    return AIRouter
 
 
 def _get_task_decomposer():
@@ -41,6 +41,17 @@ def _get_task_classifier():
     from app.core.routing.task_classifier import TaskClassifier
 
     return TaskClassifier
+
+
+def _get_ai_router():
+    from app.core.routing.ai_router import AIRouter
+
+    return AIRouter
+
+
+from app.core.routing.rule_router import RuleRouter  # noqa: E402
+from app.core.routing.ml_router import MLRouter  # noqa: E402
+from app.core.routing.fallback_router import FallbackRouter  # noqa: E402
 
 
 class SmartDispatcher:
@@ -89,129 +100,8 @@ class SmartDispatcher:
         cls._dependencies["MODEL_MAP"] = model_map
         cls._dependencies["client"] = client
 
-    # 任务语料库 - 每个任务的锚定表达（精简版，作为余量兜底；主分类由 AI 模型完成）
-    TASK_CORPUS = {
-        "PAINTER": ["画一张图", "帮我画", "生成图片", "draw me", "generate image"],
-        "CODER": [
-            "写代码",
-            "帮我写个函数",
-            "python实现",
-            "write code",
-            "implement function",
-            "帮我作图",
-            "作一个折线图",
-            "画柱状图",
-            "画饼图",
-            "生成图表",
-            "数据可视化",
-            "用matplotlib画",
-            "画散点图",
-            "plot数据",
-            "chart数据",
-            "统计图",
-        ],
-        "FILE_GEN": [
-            "生成word文档",
-            "做ppt",
-            "做一个word",
-            "帮我做一份",
-            "创建pdf",
-            "写一个文档",
-            "export excel",
-            "生成报告模板",
-            "做一个介绍文档",
-            "制作幻灯片",
-        ],
-        "RESEARCH": [
-            "深入分析",
-            "全面调研",
-            "technical principle",
-            "in-depth study",
-            "对比分析",
-        ],
-        "WEB_SEARCH": [
-            "今天天气",
-            "股价多少",
-            "最新新闻",
-            "current price",
-            "比赛结果",
-            "目前价格",
-            "现在价格",
-            "价格多少",
-            "原油价格",
-            "黄金价格",
-            "布伦特原油",
-            "WTI原油",
-            "白银价格",
-            "铜价",
-            "期货价格",
-            "汇率",
-            "今日价",
-            "实时价格",
-            "加密货币",
-            "比特币价格",
-            "以太坊价格",
-            "黄金行情",
-            "原油行情",
-            "外汇行情",
-            "股市行情",
-            "基金净值",
-            "债券收益率",
-        ],
-        "FILE_OP": ["读取文件", "文件列表", "批量重命名", "list files", "整理文件夹"],
-        "FILE_EDIT": [
-            "修改文件",
-            "替换内容",
-            "删除第几行",
-            "edit file",
-            "replace in file",
-        ],
-        "FILE_SEARCH": ["找文件", "哪个文件", "文件在哪", "find file", "search for"],
-        "CHAT": ["你好", "是什么", "介绍一下", "tell me about", "help me understand"],
-        "SYSTEM": [
-            "打开微信",
-            "启动chrome",
-            "关闭qq",
-            "截图",
-            "系统时间",
-            "shutdown",
-            "关机",
-            "打开steam",
-            "打开edge",
-            "启动vscode",
-            "打开计算器",
-            "关掉任务管理器",
-            "打开加速器",
-            "启动游戏",
-            "打开软件",
-            "运行程序",
-        ],
-        "AGENT": [
-            "发微信",
-            "给他发消息",
-            "设提醒",
-            "设闹钟",
-            "帮我买票",
-            "订票",
-            "提醒我",
-            "日历安排",
-            "浏览器打开",
-            "自动发邮件",
-        ],
-        "MEETING_EXTRACT": [
-            "会议纪要",
-            "会议记录",
-            "提取会议",
-            "整理会议",
-            "总结会议",
-            "会议要点",
-            "提炼会议",
-            "会议行动项",
-            "会议决策",
-            "meeting minutes",
-            "extract action items",
-        ],
-    }
+    # 任务语料库 - 从 routing_config 导入，此处保留引用方便子类覆盖
+    TASK_CORPUS = TASK_CORPUS
 
     # 预计算特征 (字符级 n-gram)
     _features = None
@@ -277,151 +167,10 @@ class SmartDispatcher:
     # ──────────────────────────────────────────────────────────────
     # 极简快速通道：无需任何 AI 分类器即可确认的简单输入
     # ──────────────────────────────────────────────────────────────
-    _TRIVIAL_GREETINGS = {
-        "你好",
-        "你好呀",
-        "你好啊",
-        "hi",
-        "hello",
-        "哈喽",
-        "嗨",
-        "hey",
-        "早上好",
-        "早安",
-        "中午好",
-        "下午好",
-        "晚上好",
-        "晚安",
-        "谢谢",
-        "谢谢你",
-        "谢了",
-        "感谢",
-        "多谢",
-        "thanks",
-        "thank you",
-        "再见",
-        "拜拜",
-        "bye",
-        "goodbye",
-        "下次见",
-        "好的",
-        "好",
-        "嗯",
-        "嗯嗯",
-        "明白了",
-        "知道了",
-        "收到",
-        "ok",
-        "okay",
-    }
-    _TRIVIAL_IDENTITY = [
-        "你是谁",
-        "你叫什么",
-        "你叫啥",
-        "你是什么",
-        "介绍一下你自己",
-        "你是koto",
-        "koto是什么",
-    ]
-    # 若存在这些词，再短也不能走极简通道
-    _TRIVIAL_EXCLUDE = [
-        "画",
-        "图片",
-        "照片",
-        "图",
-        "代码",
-        "程序",
-        "脚本",
-        "文件",
-        "文档",
-        "报告",
-        "pdf",
-        "word",
-        "excel",
-        "ppt",
-        "天气",
-        "股价",
-        "新闻",
-        "汇率",
-        "打开",
-        "关闭",
-        "截图",
-        "启动",
-        "运行",
-        "搜索",
-        "微信",
-        "发送",
-        "发消息",
-        "发邮件",
-        "购票",
-        "研究",
-        "分析",
-        "深入",
-        "全面",
-        # 图表/数据可视化 — 防止「帮我作图」被误判为极简 CHAT
-        "作图",
-        "图表",
-        "折线图",
-        "柱状图",
-        "饼图",
-        "散点图",
-        "直方图",
-        "可视化",
-        "统计图",
-        "数据图",
-        "chart",
-        "plot",
-        "matplotlib",
-        "seaborn",
-        "plotly",
-        # 金融/商品资产词 — 防止「布伦特原油价格」被短句极简通道误判为 CHAT
-        "原油",
-        "布伦特",
-        "黄金",
-        "白银",
-        "铜价",
-        "期货",
-        "汇率",
-        "比特币",
-        "以太坊",
-        "价格",
-        "行情",
-        "走势",
-        "现价",
-        "涨跌",
-        # 金价/油价等简写形式
-        "金价",
-        "油价",
-        "银价",
-        "气价",
-        # 天气相关变体
-        "下雨",
-        "下雪",
-        "气温",
-        "天气",
-        # 编程/代码关键词 — 防止「帮我写个Python排序函数」被极简通道误判为 CHAT
-        "python",
-        "javascript",
-        "java",
-        "golang",
-        "rust",
-        "c++",
-        "sql",
-        "函数",
-        "算法",
-        "脚本",
-        "接口",
-        "api",
-        # 时效性信号词 — 防止「目前金价」「近期AI动态」被极简通道漏判
-        "目前",
-        "近期",
-        "局势",
-        "战况",
-        "动态",
-        "进展",
-        "现状",
-        "近况",
-    ]
+    # 从 routing_config 导入，此处保留引用以兼容外部测试和子类覆盖
+    _TRIVIAL_GREETINGS = TRIVIAL_GREETINGS
+    _TRIVIAL_IDENTITY = TRIVIAL_IDENTITY
+    _TRIVIAL_EXCLUDE = TRIVIAL_EXCLUDE
 
     @classmethod
     def _is_trivial_input(cls, user_input: str) -> bool:
@@ -431,49 +180,18 @@ class SmartDispatcher:
           1. 是已知问候/致谢/确认词，或
           2. 是简短身份询问（≤20字），或
           3. 长度 ≤15 字且不含复杂任务关键词
+        Delegates to RuleRouter.is_trivial().
         """
-        text = user_input.strip()
-        tl = text.lower()
-
-        if tl in cls._TRIVIAL_GREETINGS:
-            return True
-
-        if len(text) <= 20 and any(kw in tl for kw in cls._TRIVIAL_IDENTITY):
-            return True
-
-        if len(text) <= 15 and not any(k in tl for k in cls._TRIVIAL_EXCLUDE):
-            return True
-
-        return False
+        return RuleRouter.is_trivial(user_input)
 
     @classmethod
     def get_trivial_reply(cls, user_input: str) -> str:
         """
         为极简输入返回内置快速响应（本地模型不可用时使用，避免调用云端）。
         匹配顺序：精确问候词 > 感谢 > 告别 > 确认 > 通用兜底。
+        Delegates to RuleRouter.get_trivial_reply().
         """
-        tl = user_input.strip().lower()
-        if tl in {"你好", "你好呀", "你好啊", "hi", "hello", "哈喽", "嗨", "hey"}:
-            return "你好！😊 有什么我可以帮您？"
-        if tl in {"早上好", "早安"}:
-            return "早上好！☀️ 今天有什么需要帮忙？"
-        if tl in {"中午好"}:
-            return "中午好！🌤️ 需要帮忙吗？"
-        if tl in {"下午好"}:
-            return "下午好！有什么我可以帮您的？"
-        if tl in {"晚上好"}:
-            return "晚上好！🌙 今晚有什么需要帮忙？"
-        if tl in {"晚安"}:
-            return "晚安！🌙"
-        if tl in {"谢谢", "谢谢你", "谢了", "感谢", "多谢", "thanks", "thank you"}:
-            return "不客气！😊 有需要随时叫我。"
-        if tl in {"再见", "拜拜", "bye", "goodbye", "下次见"}:
-            return "再见！👋 有需要随时回来找我。"
-        if tl in {"好的", "好", "明白了", "知道了", "收到", "ok", "okay"}:
-            return "好的，有需要随时说。"
-        if tl in {"嗯", "嗯嗯"}:
-            return "嗯，有什么我可以帮到您？"
-        return "有什么需要帮忙的？😊"
+        return RuleRouter.get_trivial_reply(user_input)
 
     @staticmethod
     def _extract_ngrams(text, n=2):
@@ -490,123 +208,8 @@ class SmartDispatcher:
 
     @classmethod
     def _quick_task_hint(cls, user_input: str) -> str:
-        text_lower = user_input.lower()
-        # 数据图表/可视化 — 必须在通配"图"之前检查，否则折线图/柱状图/作图会被误送 PAINTER
-        if any(
-            k in text_lower
-            for k in [
-                "图表",
-                "折线图",
-                "柱状图",
-                "饼图",
-                "散点图",
-                "直方图",
-                "作图",
-                "可视化",
-                "统计图",
-                "数据图",
-                "chart",
-                "plot",
-                "matplotlib",
-                "seaborn",
-                "plotly",
-                "echarts",
-            ]
-        ):
-            return "CODER"
-        # AI 绘画/图片生成（通配"图"放在图表检查之后）
-        if any(
-            k in text_lower
-            for k in ["画", "图片", "照片", "生成图", "绘制", "绘图", "ai画", "图"]
-        ):
-            return "PAINTER"
-        if any(
-            k in text_lower for k in ["代码", "编程", "python", "javascript", "函数"]
-        ):
-            return "CODER"
-        if any(k in text_lower for k in ["查", "搜索", "价格", "天气", "新闻"]):
-            return "WEB_SEARCH"
-        # 系统操作：命令动词开头 + 短输入
-        _sys_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
-        _sys_exclude = ("怎么", "如何", "什么", "文件", "网页", "网站", "思路", "方法")
-        stripped = user_input.strip()
-        if (
-            len(stripped) <= 18
-            and any(stripped.startswith(s) for s in _sys_starters)
-            and not any(k in text_lower for k in _sys_exclude)
-        ):
-            return "SYSTEM"
-        # 提醒/消息 → AGENT
-        if any(
-            k in text_lower
-            for k in ["提醒我", "提醒一下", "设闹钟", "设提醒", "发微信"]
-        ):
-            return "AGENT"
-        # 当输入附带文件前缀 [FILE_ATTACHED:ext] 时，优先判断是编辑已有文件还是生成新文件
-        # 避免 "[FILE_ATTACHED:.docx]" 中的 "docx" 直接触发 FILE_GEN 误路由
-        if "[file_attached:" in text_lower:
-            _file_edit_hints = [
-                "修改",
-                "更改",
-                "标注",
-                "批注",
-                "润色",
-                "改写",
-                "校对",
-                "审校",
-                "修订",
-                "纠错",
-                "改善",
-                "优化",
-                "调整",
-                "精炼",
-                "通畅",
-                "整体修改",
-                "通顺",
-                "流畅",
-                "精简",
-                "凝练",
-                "简洁",
-                "整理",
-                "梳理",
-                "提炼",
-                "修一下",
-                "帮我改",
-                "改一改",
-                "改得",
-                "写得",
-                "改写",
-                "polish",
-                "refine",
-                "revise",
-            ]
-            if any(k in text_lower for k in _file_edit_hints):
-                return "DOC_ANNOTATE"
-        if any(
-            k in text_lower
-            for k in [
-                "word",
-                "pdf",
-                "docx",
-                "表格",
-                "文档",
-                "报告",
-                "生成",
-                "做成",
-                "标注",
-                "批注",
-                "润色",
-                "改写",
-                "校对",
-                "审校",
-                "修订",
-                "纠错",
-            ]
-        ):
-            return "FILE_GEN"
-        if any(k in text_lower for k in ["研究", "分析", "深入", "介绍"]):
-            return "RESEARCH"
-        return "CHAT"
+        """Delegates to RuleRouter.quick_task_hint()."""
+        return RuleRouter.quick_task_hint(user_input)
 
     @classmethod
     def _text_to_vector(cls, text):
@@ -632,32 +235,8 @@ class SmartDispatcher:
 
     @staticmethod
     def _should_use_annotation_system(user_input, has_file=False):
-        """Simplistic check if annotation system should be used"""
-        # This logic was previously inline or imported, implementing basic check here
-        keywords = [
-            "标注",
-            "批注",
-            "润色",
-            "改写",
-            "校对",
-            "审校",
-            "修订",
-            "纠错",
-            "改善",
-            "优化",
-            "修改",
-        ]
-        quality_words = ["不合适", "生硬", "翻译腔", "语序", "用词", "逻辑", "问题"]
-        target_words = ["翻译", "文章", "文档", "内容", "文本", "段落", "句子", "字词"]
-
-        if not has_file:
-            return False
-
-        has_kw = any(k in user_input for k in keywords)
-        has_qw = any(q in user_input for q in quality_words)
-        has_target = any(t in user_input for t in target_words)
-
-        return has_kw or (has_qw and has_target)
+        """Delegates to RuleRouter.should_use_annotation_system()."""
+        return RuleRouter.should_use_annotation_system(user_input, has_file)
 
     @classmethod
     def _apply_routing_safety(
@@ -669,36 +248,12 @@ class SmartDispatcher:
         LocalExecutor,
         WebSearcher,
     ) -> str:
-        """对模型输出应用强规则安全覆写，避免模型分类器误判边界情况。"""
-        if (
-            task_type == "CHAT"
-            and WebSearcher
-            and WebSearcher.needs_web_search(user_input)
-        ):
-            return "WEB_SEARCH"
-        if (
-            task_type not in ("SYSTEM", "AGENT")
-            and LocalExecutor
-            and LocalExecutor.is_system_command(user_input)
-        ):
-            return "SYSTEM"
-        _agent_pat = [
-            r"发微信",
-            r"回微信",
-            r"微信发",
-            r"微信回",
-            r"给.{1,6}发消息",
-            r"给.{1,6}发微信",
-            r"浏览器打开",
-            r"点击.{1,6}按键",
-        ]
-        if any(re.search(p, user_input) for p in _agent_pat):
-            return "AGENT"
-        if task_type == "DOC_ANNOTATE" and not (
-            file_context and file_context.get("has_file")
-        ):
-            return "CHAT"
-        return task_type
+        """对模型输出应用强规则安全覆写，避免模型分类器误判边界情况。
+        Delegates to RuleRouter.apply_safety().
+        """
+        return RuleRouter.apply_safety(
+            task_type, user_input, user_lower, file_context, LocalExecutor, WebSearcher
+        )
 
     @classmethod
     def analyze(cls, user_input: str, history=None, file_context=None):
@@ -907,57 +462,6 @@ class SmartDispatcher:
                     f"[SmartDispatcher] 📁 指定路径列举快速通道: '{user_input[:40]}' → FILE_SEARCH"
                 )
                 return "FILE_SEARCH", "📁 Path-Listing", context_info
-
-        # === 系统操作快速通道（打开/启动/关闭 + 应用名，不依赖 APP_ALIASES）===
-        # 命令语气、短输入、不含问句/文件/网页关键词
-        _sys_action_starters = (
-            "打开",
-            "启动",
-            "运行",
-            "开启",
-            "关闭",
-            "退出",
-            "关掉",
-            "杀掉",
-        )
-        _sys_exclude_kws = (
-            "怎么",
-            "如何",
-            "什么",
-            "为什么",
-            "能不能",
-            "可以吗",
-            "怎样",
-            "咋",
-            "文件",
-            "网页",
-            "网址",
-            "url",
-            "网站",
-            "链接",
-            "附件",
-            "思路",
-            "方式",
-            "方法",
-            "问题",
-            "功能",
-        )
-        _stripped = user_input.strip()
-        if (
-            len(_stripped) <= 18
-            and any(_stripped.startswith(s) for s in _sys_action_starters)
-            and not any(k in user_lower for k in _sys_exclude_kws)
-        ):
-            context_info = context_info or {}
-            context_info["routing_list"] = cls._build_routing_list(
-                similarity_scores,
-                boosts={"SYSTEM": 1.0},
-                reasons={"SYSTEM": ["rule:action_verb_direct"]},
-            )
-            logger.info(
-                f"[SmartDispatcher] 🖥️ 系统操作快速通道: '{_stripped}' → SYSTEM"
-            )
-            return "SYSTEM", "🖥️ Action-Direct", context_info
 
         # === 能力询问 / 方法咨询 → CHAT (在所有动作路由之前) ===
         # 识别非执行型查询：用户在问 Koto「能不能做X」或「怎么做X」，不应触发动作路由
@@ -1806,43 +1310,6 @@ class SmartDispatcher:
             )
             return "SYSTEM", "🖥️ Fallback-System", context_info
 
-        # -- 系统命令兜底：命令动词 + 短输入（不依赖 APP_ALIASES）--
-        _fb_sys_starters = (
-            "打开",
-            "启动",
-            "运行",
-            "开启",
-            "关闭",
-            "退出",
-            "关掉",
-            "杀掉",
-        )
-        _fb_sys_exclude = (
-            "怎么",
-            "如何",
-            "什么",
-            "文件",
-            "网页",
-            "网站",
-            "思路",
-            "方法",
-            "功能",
-        )
-        _stripped_fb = user_input.strip()
-        if (
-            len(_stripped_fb) <= 18
-            and any(_stripped_fb.startswith(s) for s in _fb_sys_starters)
-            and not any(k in user_lower for k in _fb_sys_exclude)
-        ):
-            context_info = context_info or {}
-            context_info["routing_list"] = cls._build_routing_list(
-                similarity_scores,
-                boosts={"SYSTEM": 0.9},
-                reasons={"SYSTEM": ["fallback:action_verb"]},
-            )
-            logger.info(f"[SmartDispatcher] 🖥️ 系统命令兜底: '{_stripped_fb}' → SYSTEM")
-            return "SYSTEM", "🖥️ Fallback-ActionVerb", context_info
-
         # -- 多步任务规划 --
         _LocalPlanner = _get_local_planner()
         if _LocalPlanner.can_plan(user_input):
@@ -2024,34 +1491,34 @@ class SmartDispatcher:
         if task_type == "FILE_GEN":
             if complexity == "complex":
                 return MODEL_MAP.get(
-                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-2.5-pro")
                 )
-            return MODEL_MAP.get("FILE_GEN", "gemini-3-flash-preview")
+            return MODEL_MAP.get("FILE_GEN", "gemini-2.5-flash")
 
         if task_type == "DOC_ANNOTATE":
             if complexity == "complex":
                 return MODEL_MAP.get(
-                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-2.5-pro")
                 )
-            return MODEL_MAP.get("DOC_ANNOTATE", "gemini-3-flash-preview")
+            return MODEL_MAP.get("DOC_ANNOTATE", "gemini-2.5-flash")
 
         if task_type == "RESEARCH":
-            return MODEL_MAP.get("RESEARCH", "gemini-3.1-pro-preview")
+            return MODEL_MAP.get("RESEARCH", "gemini-2.5-pro")
 
         if task_type == "CODER":
-            return MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+            return MODEL_MAP.get("CODER", "gemini-2.5-pro")
 
         # 多步复杂任务 → Pro 模型确保执行质量
         if task_type == "MULTI_STEP":
             return MODEL_MAP.get(
-                "MULTI_STEP", MODEL_MAP.get("CODER", "gemini-3.1-pro-preview")
+                "MULTI_STEP", MODEL_MAP.get("CODER", "gemini-2.5-pro")
             )
 
         # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
         if task_type == "CHAT":
-            _chat_candidate = MODEL_MAP.get("CHAT", "gemini-3-flash-preview")
+            _chat_candidate = MODEL_MAP.get("CHAT", "gemini-2.5-flash")
             # 安全网：如果 ModelManager 将 CHAT 路由到 Pro 模型（tier>7），强制回退到 Flash
-            _FLASH_FALLBACK = "gemini-3-flash-preview"
+            _FLASH_FALLBACK = "gemini-2.5-flash"
             try:
                 from web.model_manager import KNOWN_MODEL_REGISTRY
 
@@ -2078,7 +1545,7 @@ class SmartDispatcher:
 
         # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型
         if complexity == "complex":
-            return MODEL_MAP.get("COMPLEX", "gemini-3.1-pro-preview")
+            return MODEL_MAP.get("COMPLEX", "gemini-2.5-pro")
 
         if has_image and task_type != "PAINTER":
             return _avail(

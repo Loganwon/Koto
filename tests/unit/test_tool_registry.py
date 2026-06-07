@@ -98,6 +98,41 @@ class TestExecution:
         reg.register_tool("greet", lambda name: f"hello {name}")
         assert reg.execute("greet", {"name": "world"}) == "hello world"
 
+    def test_execute_maps_file_path_alias_to_path_parameter(self):
+        reg = _get_registry()
+        reg.register_tool("reader", lambda path: path)
+
+        result = reg.execute("reader", {"file_path": "report.docx"})
+
+        assert result == "report.docx"
+
+    def test_execute_maps_destination_alias_to_target_path_parameter(self):
+        reg = _get_registry()
+        reg.register_tool("writer", lambda source_path, target_path: [source_path, target_path])
+
+        result = reg.execute("writer", {"source": "sales.xlsx", "destination": "report.docx"})
+
+        assert result == ["sales.xlsx", "report.docx"]
+
+    def test_execute_maps_typed_file_path_aliases_and_drops_extra_kwargs(self):
+        reg = _get_registry()
+        reg.register_tool(
+            "insert",
+            lambda source_path, target_path, sheet_name="": [source_path, target_path, sheet_name],
+        )
+
+        result = reg.execute(
+            "insert",
+            {
+                "xlsx_path": "financial-model.xlsx",
+                "docx_path": "report.docx",
+                "sheet_name": "P&L",
+                "position": "end",
+            },
+        )
+
+        assert result == ["financial-model.xlsx", "report.docx", "P&L"]
+
 
 # ---------------------------------------------------------------------------
 # Timeout enforcement
@@ -129,6 +164,13 @@ class TestTimeout:
         )
         result = reg.execute("fast", {})
         assert result == 42
+
+    def test_office_write_tools_have_longer_timeout_overrides(self):
+        import app.core.agent.tool_registry as tr_mod
+
+        assert tr_mod._TOOL_TIMEOUT == 60
+        assert tr_mod._TOOL_TIMEOUT_OVERRIDES["insert_excel_as_docx_table"] > 60
+        assert tr_mod._TOOL_TIMEOUT_OVERRIDES["design_pptx_theme_layout"] > 60
 
 
 # ---------------------------------------------------------------------------

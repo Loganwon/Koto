@@ -1,0 +1,14 @@
+<div id="wa-model-mode-toggle" class="wa-model-mode-toggle wa-footer-model-mode-select" role="group" aria-label="AI 模型选择">
+  <button id="wa-model-mode-gemini-btn" type="button" class="wa-model-mode-toggle-btn active" data-model-mode="gemini" onclick="WA.setLockedModel('gemini')" title="Gemini 云端模型">
+    <span class="wa-model-mode-main">Gemini</span>
+    <span id="wa-model-mode-gemini-model" class="wa-model-mode-sub">自动</span>
+  </button>
+  <button id="wa-model-mode-deepseek-btn" type="button" class="wa-model-mode-toggle-btn" data-model-mode="deepseek" onclick="WA.setLockedModel('deepseek')" title="DeepSeek 云端模型">
+    <span class="wa-model-mode-main">DeepSeek</span>
+    <span id="wa-model-mode-deepseek-model" class="wa-model-mode-sub">V4 Pro</span>
+  </button>
+  <button id="wa-model-mode-local-btn" type="button" class="wa-model-mode-toggle-btn" data-model-mode="local" onclick="WA.setLockedModel('local')" title="本地模型">
+    <span class="wa-model-mode-main">本地</span>
+    <span id="wa-model-mode-local-model" class="wa-model-mode-sub">未启动</span>
+  </button>
+</div>

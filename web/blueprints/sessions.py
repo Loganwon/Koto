@@ -15,16 +15,23 @@ import time
 
 from flask import Blueprint, Response, jsonify, request
 
+from web.runtime_context import get_app_attr, get_model_map
+
 _logger = logging.getLogger("koto.routes.sessions")
 
 sessions_bp = Blueprint("sessions", __name__)
 
 
-def _get_session_manager():
-    """Lazy import to avoid circular dependency with app.py."""
-    from web.app import session_manager
+def _is_workspace_assistant_session(filename: str) -> bool:
+  normalized = str(filename or "").replace(".json", "").strip().lower()
+  return normalized.startswith("workspace_") or normalized.startswith("editor_")
 
-    return session_manager
+
+def _get_session_manager():
+    manager = get_app_attr("session_manager")
+    if manager is None:
+        raise RuntimeError("session manager is not initialized")
+    return manager
 
 
 @sessions_bp.route("/api/sessions", methods=["GET"])
@@ -44,7 +51,11 @@ def get_sessions() -> Response:
               items:
                 type: string
     """
-    sessions = _get_session_manager().list_sessions()
+    sessions = [
+      session
+      for session in _get_session_manager().list_sessions()
+      if not _is_workspace_assistant_session(session)
+    ]
     return jsonify({"sessions": [s.replace(".json", "") for s in sessions]})
 
 
@@ -137,15 +148,14 @@ def delete_session(session_name: str) -> Response:
 
 
 def _get_brain():
-    from web.app import brain
-
+    brain = get_app_attr("brain")
+    if brain is None:
+        raise RuntimeError("chat brain is not initialized")
     return brain
 
 
 def _get_model_map():
-    from web.app import MODEL_MAP
-
-    return MODEL_MAP
+    return get_model_map()
 
 
 @sessions_bp.route("/api/sessions/<session_name>/rename", methods=["PATCH"])

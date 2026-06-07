@@ -8,7 +8,7 @@ Targets:
   3. app.core.monitoring.event_database   (SQLite event storage)
   4. app.core.learning.lora_pipeline      (LoRA training pipeline)
   5. app.core.analytics.trend_analyzer    (trend analysis)
-  6. app.core.scripts.script_generator    (script generation)
+  6. app.core.scripts.script_generator    (retired guard)
   7. app.core.learning.distill_manager    (distillation manager)
   8. app.core.ops.remediation_policy      (remediation rules)
   9. app.core.services.search_service     (search service)
@@ -645,123 +645,17 @@ class TestTrendAnalyzer:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 6. ScriptGenerator
+# 6. Retired ScriptGenerator
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.unit
 class TestScriptGenerator:
-    """Tests for app.core.scripts.script_generator.ScriptGenerator."""
+    """Guard that system fix script generation remains retired."""
 
-    def test_kill_process_ps_with_pid(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
-        script = gen.generate_kill_process_script("notepad.exe", pid=1234)
-        assert "1234" in script
-        assert "Stop-Process" in script
-
-    def test_kill_process_ps_no_pid(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
-        script = gen.generate_kill_process_script("notepad.exe")
-        assert "notepad" in script
-
-    def test_kill_process_bash_with_pid(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.BASH)
-        script = gen.generate_kill_process_script("python", pid=5678)
-        assert "5678" in script
-        assert "kill" in script
-
-    def test_kill_process_bash_no_pid(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.BASH)
-        script = gen.generate_kill_process_script("python")
-        assert "pkill" in script
-
-    def test_clear_disk_space_ps(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
-        script = gen.generate_clear_disk_space_script(min_gb=10)
-        assert "10" in script
-        assert "Recycle Bin" in script
-
-    def test_clear_disk_space_bash(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.BASH)
-        script = gen.generate_clear_disk_space_script()
-        assert "apt-get" in script
-
-    def test_restart_service_ps(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
-        script = gen.generate_restart_service_script("wuauserv")
-        assert "wuauserv" in script
-
-    def test_restart_service_bash(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.BASH)
-        script = gen.generate_restart_service_script("nginx")
-        assert "systemctl restart nginx" in script
-
-    def test_memory_cleanup_ps(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
-        script = gen.generate_memory_cleanup_script()
-        assert "GC" in script
-
-    def test_memory_cleanup_bash(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.BASH)
-        script = gen.generate_memory_cleanup_script()
-        assert "drop_caches" in script
-
-    def test_generate_fix_script_cpu_high(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
-        result = gen.generate_fix_script("cpu_high", process_name="chrome.exe")
-        assert result["status"] == "success"
-        assert result["filename"].endswith(".ps1")
-        assert result["issue_type"] == "cpu_high"
-
-    def test_generate_fix_script_unknown_type(self):
-        from app.core.scripts.script_generator import ScriptGenerator
-
-        gen = ScriptGenerator()
-        result = gen.generate_fix_script("unknown_issue")
-        assert result["status"] == "error"
-
-    def test_requires_admin(self):
-        from app.core.scripts.script_generator import ScriptGenerator
-
-        gen = ScriptGenerator()
-        assert gen._requires_admin("disk_full") is True
-        assert gen._requires_admin("cpu_high") is False
-
-    def test_disk_health_ps(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.POWERSHELL)
-        script = gen.generate_check_disk_health_script()
-        assert "disk" in script.lower() or "Disk" in script
-
-    def test_disk_health_bash(self):
-        from app.core.scripts.script_generator import ScriptGenerator, ScriptType
-
-        gen = ScriptGenerator(script_type=ScriptType.BASH)
-        script = gen.generate_check_disk_health_script()
-        assert "df -h" in script
+    def test_script_generator_removed(self):
+        assert not Path("app/core/scripts/script_generator.py").exists()
+        assert not Path("app/core/scripts/__init__.py").exists()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

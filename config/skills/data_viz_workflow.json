@@ -1,0 +1,16 @@
+{
+  "id": "data_viz_workflow",
+  "name": "数据可视化工作流",
+  "icon": "📊",
+  "category": "workflow",
+  "description": "从数据生成图表和可视化分析",
+  "intent_description": "用户想画图、生成图表、可视化数据趋势",
+  "task_types": ["CHAT", "FILE_ASSISTANT"],
+  "priority": 60,
+  "enabled": true,
+  "trigger_keywords": ["画图", "图表", "可视化", "趋势", "chart", "plot", "柱状图", "折线图", "饼图", "散点图", "visualization", "数据图"],
+  "prompt": "\n\n## 📊 任务：数据可视化工作流\n\n你需要根据用户的数据生成图表。\n\n### 执行步骤\n\n1. **获取数据**：如果用户提到了文件，使用 `workspace_read_file` 读取；如果用户直接给了数据，直接使用\n2. **编写绘图代码**：使用 `run_python_code` 执行 matplotlib/pandas 代码生成图表\n3. **呈现结果**：说明图表含义和关键发现\n\n### 绘图代码要求\n- 使用 matplotlib + pandas\n- 设置中文字体：plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']\n- 使用 plt.savefig('chart.png', dpi=150, bbox_inches='tight') 保存\n- 加标题和轴标签\n- 配色美观\n\n### 输出要求\n- 展示生成的图表\n- 简要分析数据趋势和关键发现\n- 如果数据有异常值或规律，主动指出",
+  "version": "1.0.0",
+  "author": "koto",
+  "tags": ["file-ops", "visualization", "chart", "data"]
+}

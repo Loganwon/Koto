@@ -1,6 +1,5 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
-import concurrent.futures
 import logging
 import os
 import queue
@@ -9,6 +8,11 @@ import time
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from .base import LLMProvider
+from .gemini_config import get_gemini_api_key, load_gemini_config_env
+from .model_capabilities import (
+    DEFAULT_INTERACTIONS_ONLY_MODELS,
+    is_interactions_only_model,
+)
 
 try:
     from google import genai
@@ -19,17 +23,22 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Interactions-only models: cannot use client.models.generate_content()
-# Must be routed through rc.interactions.create(agent=...) instead.
-# NOTE: gemini-3-flash-preview and gemini-3-pro-preview are regular models
-# (use generate_content). Only deep-research-* are actual Interactions API agents.
-_INTERACTIONS_ONLY_MODELS: frozenset = frozenset(
-    {
-        "deep-research-pro-preview-12-2025",  # Research agent: Interactions API only
-    }
-)
-# No background=True restriction needed for current interactions models
-_NO_BACKGROUND_MODELS: frozenset = frozenset()
+
+def _ensure_gemini_env_loaded() -> None:
+    load_gemini_config_env(override=False)
+
+
+def _ensure_gemini_proxy_configured() -> Optional[str]:
+    from app.core.utils.proxy_utils import collect_proxy_candidates, detect_live_proxy, set_env_proxy
+
+    proxy = detect_live_proxy(collect_proxy_candidates(), timeout=0.1)
+    if proxy:
+        set_env_proxy(proxy)
+    return proxy
+
+# model_capabilities.is_interactions_only_model() is evaluated per-call (not baked
+# at import time), so env overrides (KOTO_INTERACTIONS_ONLY_MODELS) are always live.
+_INTERACTIONS_ONLY_MODELS = DEFAULT_INTERACTIONS_ONLY_MODELS
 
 
 class GeminiProvider(LLMProvider):
@@ -39,17 +48,15 @@ class GeminiProvider(LLMProvider):
     RETRY_BASE_DELAY = 2.0  # seconds
     RETRYABLE_STATUS_CODES = {429, 503}
     # 非流式调用整体超时（秒），超时后抛出 TimeoutError 触发本地模型兜底
-    CALL_TIMEOUT: int = int(os.getenv("GEMINI_CALL_TIMEOUT", "30"))
+    CALL_TIMEOUT: int = int(os.getenv("GEMINI_CALL_TIMEOUT", "15"))
     # 流式调用每个 chunk 之间的最长等待（秒）
     STREAM_CHUNK_TIMEOUT: int = int(os.getenv("GEMINI_STREAM_CHUNK_TIMEOUT", "15"))
 
     def __init__(self, api_key: str = None):
-        self.api_key = (
-            api_key
-            or os.getenv("GEMINI_API_KEY")
-            or os.getenv("API_KEY")
-            or os.getenv("GOOGLE_API_KEY")
-        )
+        if not api_key:
+            _ensure_gemini_env_loaded()
+
+        self.api_key = get_gemini_api_key(api_key, ensure_loaded=False)
         self._api_base = os.getenv("GEMINI_API_BASE", "").strip()
         self.client = None
 
@@ -67,24 +74,47 @@ class GeminiProvider(LLMProvider):
             logger.warning("No Google API KEY provided")
 
     def _make_client(self, api_key: str):
-        """Build a genai.Client, honoring GEMINI_API_BASE if configured."""
-        if self._api_base and genai:
+        """Build a genai.Client with bounded HTTP timeouts.
+
+        This avoids indefinite socket/connect hangs in upstream HTTP layers.
+        """
+        if not genai:
+            return None
+
+        opts_kwargs: Dict[str, Any] = {"api_version": "v1beta"}
+        if self._api_base:
+            opts_kwargs["base_url"] = self._api_base
+
+        # Keep connect timeout strict; read timeout should exceed both
+        # non-stream and stream-chunk guard rails.
+        _connect_timeout = float(os.getenv("GEMINI_CONNECT_TIMEOUT", "10"))
+        _read_timeout = float(
+            os.getenv(
+                "GEMINI_READ_TIMEOUT",
+                str(max(self.CALL_TIMEOUT + 5, self.STREAM_CHUNK_TIMEOUT + 5)),
+            )
+        )
+
+        try:
+            import httpx
+            from google.genai._api_client import HttpOptions as _HttpOptions
+
+            _ensure_gemini_proxy_configured()
+            _httpx_client = httpx.Client(
+                timeout=httpx.Timeout(_read_timeout, connect=_connect_timeout),
+                verify=True,
+            )
+            opts_kwargs["httpx_client"] = _httpx_client
+            return genai.Client(api_key=api_key, http_options=_HttpOptions(**opts_kwargs))
+        except Exception as exc:
+            logger.warning("[GeminiProvider] httpx timeout client init failed: %s", exc)
             try:
                 from google.genai._api_client import HttpOptions as _HttpOptions
 
-                return genai.Client(
-                    api_key=api_key,
-                    http_options=_HttpOptions(
-                        api_version="v1beta", base_url=self._api_base
-                    ),
-                )
+                return genai.Client(api_key=api_key, http_options=_HttpOptions(**opts_kwargs))
             except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
-        return genai.Client(api_key=api_key)
+                logger.warning("[GeminiProvider] HttpOptions init failed, using default client")
+                return genai.Client(api_key=api_key)
 
     def _get_client(self):
         """Return a genai.Client for the current request.
@@ -106,17 +136,13 @@ class GeminiProvider(LLMProvider):
             try:
                 return self._make_client(request_key)
             except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
+                logger.debug("Non-fatal", exc_info=True)
         return self.client
 
     def generate_content(
         self,
         prompt: Union[str, List[Dict[str, Any]]],
-        model: str = "gemini-3-flash-preview",
+        model: str = "gemini-2.5-flash",
         system_instruction: Optional[str] = None,
         tools: Optional[List[Any]] = None,
         stream: bool = False,
@@ -127,7 +153,7 @@ class GeminiProvider(LLMProvider):
             raise ImportError("google.genai client not initialized")
 
         # Route interactions-only models through Interactions API transparently
-        if model in _INTERACTIONS_ONLY_MODELS:
+        if is_interactions_only_model(model):
             result = self._call_via_interactions_api(
                 model, prompt, sys_instruction=system_instruction, stream=stream
             )
@@ -189,8 +215,14 @@ class GeminiProvider(LLMProvider):
                         time.sleep(_delay)
                 raise last_stream_exc  # unreachable but satisfies type checker
 
-            # Non-streaming with retry for transient errors
-            result = self._call_with_retry(model, contents, config, client)
+            # File-task style calls can override the hard timeout per request.
+            result = self._call_with_retry(
+                model,
+                contents,
+                config,
+                client,
+                timeout_seconds=kwargs.get("call_timeout"),
+            )
             self._track_usage(
                 model,
                 result.get("usage"),
@@ -203,39 +235,52 @@ class GeminiProvider(LLMProvider):
             logger.error(f"Gemini generation error: {exc}")
             raise
 
-    def _call_with_retry(self, model: str, contents, config, client=None):
+    def _call_with_retry(
+        self,
+        model: str,
+        contents,
+        config,
+        client=None,
+        timeout_seconds: Optional[float] = None,
+    ):
         """Call generate_content with exponential backoff retry on 429/503.
 
-        每次调用在独立线程中执行，若超过 CALL_TIMEOUT 秒无响应则抛出
-        TimeoutError（消息含 "timed out"），触发上层本地模型兜底逻辑。
+        Uses a hard wall-clock timeout wrapper (daemon thread) so Koto never
+        blocks indefinitely even if upstream SDK retries get stuck.
         """
         if client is None:
             client = self._get_client()
-        last_exc = None
+
+        effective_timeout = float(
+            timeout_seconds if timeout_seconds is not None else self.CALL_TIMEOUT
+        )
+
         for attempt in range(self.MAX_RETRIES):
             try:
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _pool:
-                    _future = _pool.submit(
-                        client.models.generate_content,
+                response = self._run_call_with_hard_timeout(
+                    lambda: client.models.generate_content(
                         model=model,
                         contents=contents,
                         config=config,
-                    )
-                    try:
-                        response = _future.result(timeout=self.CALL_TIMEOUT)
-                    except concurrent.futures.TimeoutError:
-                        raise TimeoutError(
-                            f"LLM call timed out after {self.CALL_TIMEOUT}s"
-                        )
+                    ),
+                    timeout_seconds=effective_timeout,
+                    timeout_message=(
+                        f"LLM call timed out after {effective_timeout:g}s "
+                        f"(model={model})"
+                    ),
+                )
                 return self._format_response(response)
-            except TimeoutError:
-                # 超时不重试，直接向上抛，由 UnifiedAgent 产生 ERROR step
-                raise
             except Exception as exc:
-                last_exc = exc
-                # Check if retryable
                 status_code = getattr(exc, "status_code", None)
                 exc_str = str(exc)
+                exc_lower = exc_str.lower()
+
+                # Timeout-like failures should fail fast to avoid perceived hangs.
+                if "timeout" in exc_lower or "timed out" in exc_lower:
+                    raise TimeoutError(
+                        f"LLM call timed out (model={model}, timeout={effective_timeout:g}s)"
+                    ) from exc
+
                 is_retryable = (
                     (status_code and status_code in self.RETRYABLE_STATUS_CODES)
                     or "429" in exc_str
@@ -256,6 +301,32 @@ class GeminiProvider(LLMProvider):
                     f"retrying in {delay:.1f}s: {exc}"
                 )
                 time.sleep(delay)
+
+    @staticmethod
+    def _run_call_with_hard_timeout(callable_fn, timeout_seconds: float, timeout_message: str):
+        """Run callable in a daemon thread and fail fast on timeout.
+
+        Daemon thread ensures timed-out SDK calls never block process shutdown.
+        """
+        _q: queue.Queue = queue.Queue(maxsize=1)
+
+        def _runner():
+            try:
+                _q.put(("ok", callable_fn()))
+            except Exception as exc:
+                _q.put(("err", exc))
+
+        _t = threading.Thread(target=_runner, daemon=True, name="gemini-hard-timeout")
+        _t.start()
+
+        try:
+            status, payload = _q.get(timeout=timeout_seconds)
+        except queue.Empty as exc:
+            raise TimeoutError(timeout_message) from exc
+
+        if status == "err":
+            raise payload
+        return payload
 
     def get_token_count(
         self, prompt: Union[str, List[Dict[str, Any]]], model: str
@@ -363,22 +434,28 @@ class GeminiProvider(LLMProvider):
                     }
                 )
             else:
-                text = msg.get("content")
-                if text:
-                    parts.append({"text": str(text)})
+                # For model messages that carry raw parts (e.g. thinking models with
+                # thought_signature), use those directly — they already contain text,
+                # function_call, and thought_signature fields.
+                if role == "model" and msg.get("parts"):
+                    parts = list(msg["parts"])
+                else:
+                    text = msg.get("content")
+                    if text:
+                        parts.append({"text": str(text)})
 
-            for tool_call in msg.get("tool_calls", []) or []:
-                parts.append(
-                    {
-                        "function_call": {
-                            "name": tool_call.get("name"),
-                            "args": tool_call.get("args", {}),
-                        }
-                    }
-                )
+                    for tool_call in msg.get("tool_calls", []) or []:
+                        parts.append(
+                            {
+                                "function_call": {
+                                    "name": tool_call.get("name"),
+                                    "args": tool_call.get("args", {}),
+                                }
+                            }
+                        )
 
-            if not parts and msg.get("parts"):
-                parts = msg["parts"]
+                    if not parts and msg.get("parts"):
+                        parts = list(msg["parts"])
 
             if parts:
                 contents.append({"role": role, "parts": parts})
@@ -415,7 +492,13 @@ class GeminiProvider(LLMProvider):
                         "args": dict(function_call.args or {}),
                     }
                     function_calls.append(fc_dict)
-                    raw_parts.append({"function_call": fc_dict})
+                    # Preserve thought_signature at the Part level — required for
+                    # thinking models in multi-turn tool-calling conversations.
+                    part_dict: Dict[str, Any] = {"function_call": fc_dict}
+                    part_thought_sig = getattr(part, "thought_signature", None) or ""
+                    if part_thought_sig:
+                        part_dict["thought_signature"] = part_thought_sig
+                    raw_parts.append(part_dict)
                 elif getattr(part, "text", None):
                     raw_parts.append({"text": part.text})
 
@@ -500,103 +583,120 @@ class GeminiProvider(LLMProvider):
         prompt,
         sys_instruction: str = None,
         stream: bool = False,
-        timeout: float = 90.0,
+        timeout: float = 45.0,
     ):
-        """Route interactions-only models (e.g. deep-research-pro-preview) via rc.interactions.create().
+        """Route gemini-3.x / deep-research models via rc.interactions.create().
 
-        Returns the same dict format as generate_content() so all callers work unchanged.
-        For stream=True, yields the full response as a single chunk (Interactions API has
-        no token-level streaming).
+        - gemini-3.x  → background=False (sync, hard daemon-thread timeout)
+        - deep-research-* → background=True (async create + status polling)
+
+        Returns the same dict format as generate_content() for transparent routing.
+        For stream=True, yields the full response as a single chunk (Interactions API
+        has no token-level streaming).
         """
-        flat = self._flatten_prompt_to_text(prompt)
-        full_input = flat
-        if sys_instruction:
-            full_input = f"[\u7cfb\u7edf\u6307\u4ee4]\n{sys_instruction}\n\n[\u7528\u6237\u8f93\u5165]\n{flat}"
+        normalized = model_id.lstrip("models/")
+        is_deep_research = normalized.startswith("deep-research-")
+        background = is_deep_research
 
-        # Build a client with extended timeout (interactions can take up to 5 min)
+        # Build plain-text input (Interactions API accepts text only)
+        flat = self._flatten_prompt_to_text(prompt)
+        if sys_instruction:
+            flat = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{flat}"
+        flat = flat[:80000]
+
+        rc = self._make_interactions_client(timeout=timeout, is_sync=not is_deep_research)
+
+        if background:
+            # Async: create() returns immediately, poll until done
+            interaction = rc.interactions.create(
+                agent=model_id, input=flat, background=True, stream=False,
+            )
+            start = time.time()
+            iid = getattr(interaction, "id", None)
+            status = getattr(interaction, "status", "")
+            while (
+                iid
+                and status not in ("completed", "failed", "cancelled")
+                and (time.time() - start) < timeout
+            ):
+                time.sleep(2)
+                interaction = rc.interactions.get(iid)
+                status = getattr(interaction, "status", "")
+            if status not in ("completed", "failed", "cancelled"):
+                try:
+                    rc.interactions.cancel(iid)
+                except Exception:
+                    pass
+                raise TimeoutError(
+                    f"Interactions API polling timeout ({timeout}s) model={model_id}"
+                )
+        else:
+            # Sync: create() blocks until model finishes. Wrap in daemon thread so the
+            # hard timeout fires even when httpx chunked-transfer keeps the socket open.
+            interaction = self._run_call_with_hard_timeout(
+                lambda: rc.interactions.create(
+                    model=model_id, input=flat, background=False, stream=False,
+                ),
+                timeout_seconds=timeout,
+                timeout_message=f"Interactions API sync timeout ({timeout}s) model={model_id}",
+            )
+
+        text = self._extract_interactions_text(interaction).strip()
+
+        if stream:
+            def _single_chunk():
+                yield {"content": text, "finish_reason": "stop"}
+            return _single_chunk()
+
+        return {"content": text, "tool_calls": [], "usage": self._normalize_usage(interaction)}
+
+    def _make_interactions_client(self, timeout: float, is_sync: bool):
+        """Build a genai.Client tuned for Interactions API calls.
+
+        For sync calls (is_sync=True) the HTTP read timeout equals `timeout` so the
+        connection is not kept alive longer than necessary.  For async poll calls the
+        per-request timeout can be much shorter.
+        """
         try:
             import httpx
             from google.genai._api_client import HttpOptions as _HttpOptions
 
-            http_client = httpx.Client(
-                timeout=httpx.Timeout(300.0, connect=30.0), verify=True
+            connect_t = float(os.getenv("GEMINI_CONNECT_TIMEOUT", "10"))
+            # Sync: daemon-thread enforces wall-clock timeout; httpx is a secondary
+            # guard.  Async: poll requests are tiny, 45 s is plenty.
+            read_t = timeout if is_sync else float(
+                os.getenv("GEMINI_INTERACTIONS_HTTP_TIMEOUT", "45")
             )
-            rc = genai.Client(
+            hc = httpx.Client(
+                timeout=httpx.Timeout(read_t, connect=connect_t), verify=True
+            )
+            return genai.Client(
                 api_key=self.api_key,
-                http_options=_HttpOptions(
-                    api_version="v1beta", httpx_client=http_client
-                ),
+                http_options=_HttpOptions(api_version="v1beta", httpx_client=hc),
             )
         except Exception:
-            rc = self.client
-
-        background = model_id not in _NO_BACKGROUND_MODELS
-        interaction = rc.interactions.create(
-            agent=model_id,
-            input=full_input[:80000],
-            background=background,
-            stream=False,
-        )
-
-        interaction_id = getattr(interaction, "id", None)
-        status = getattr(interaction, "status", "")
-        start_wait = time.time()
-
-        while (
-            interaction_id
-            and status not in ("completed", "failed", "cancelled")
-            and (time.time() - start_wait) < timeout
-        ):
-            time.sleep(2)
-            interaction = rc.interactions.get(interaction_id)
-            status = getattr(interaction, "status", "")
-
-        if status not in ("completed", "failed", "cancelled"):
-            try:
-                rc.interactions.cancel(interaction_id)
-            except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
-            raise TimeoutError(
-                f"Interactions API timeout ({timeout}s) model={model_id}"
-            )
-
-        text = (
-            self._get_interactions_text(getattr(interaction, "outputs", None))
-            or self._get_interactions_text(interaction)
-        ).strip()
-
-        if stream:
-            # Interactions API has no token-level streaming; emit as a single chunk
-            def _single_chunk():
-                yield {"content": text, "finish_reason": "stop"}
-
-            return _single_chunk()
-
-        usage = self._normalize_usage(interaction)
-        return {"content": text, "tool_calls": [], "usage": usage}
+            return self.client
 
     @staticmethod
-    def _get_interactions_text(obj) -> str:
-        """Recursively extract text from an Interactions API response object."""
+    def _extract_interactions_text(obj) -> str:
+        """Extract plain text from an Interactions API response object."""
         if obj is None:
             return ""
         if isinstance(obj, str):
             return obj
-        if hasattr(obj, "text") and obj.text:
-            return str(obj.text)
-        if hasattr(obj, "parts"):
-            return " ".join(
-                str(p.text) for p in (obj.parts or []) if hasattr(p, "text") and p.text
-            )
-        if hasattr(obj, "outputs"):
-            texts = [
-                GeminiProvider._get_interactions_text(o) for o in (obj.outputs or [])
-            ]
-            return "\n".join(t for t in texts if t)
+        # Direct .text attribute — most common path for sync responses
+        text = getattr(obj, "text", None)
+        if text:
+            return str(text)
+        # Parts list (content / message object)
+        parts = getattr(obj, "parts", None)
+        if parts:
+            return " ".join(str(p.text) for p in parts if getattr(p, "text", None))
+        # Outputs list — background=True responses
+        outputs = getattr(obj, "outputs", None)
+        if outputs:
+            chunks = [GeminiProvider._extract_interactions_text(o) for o in outputs]
+            return "\n".join(c for c in chunks if c)
         return ""
 
     @staticmethod

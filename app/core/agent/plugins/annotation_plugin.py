@@ -22,6 +22,7 @@ import logging
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
+from app.core.agent.path_utils import is_within_roots
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +44,17 @@ class AnnotationPlugin(AgentPlugin):
                 "name": "annotate_document",
                 "func": self.annotate_document,
                 "description": (
-                    "对本地 Word (.docx) 文档执行批量标注/修改，生成 _revised 副本。"
+                    "对本地 Word (.docx) 文档执行批量标注/修改，直接写回原始 DOCX。"
                     "适用于翻译润色、学术批注、商务文稿规范化等场景。"
-                    "file_path: 文档绝对路径；requirement: 用户标注需求描述。"
+                    "file_path: 文档路径（支持绝对路径/工作目录相对路径）；"
+                    "requirement: 用户标注需求描述。"
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "Word 文档的绝对路径（.docx）",
+                            "description": "Word 文档路径（.docx，支持绝对或相对路径）",
                         },
                         "requirement": {
                             "type": "string",
@@ -75,7 +77,7 @@ class AnnotationPlugin(AgentPlugin):
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "Word 文档的绝对路径（.docx）",
+                            "description": "Word 文档路径（.docx，支持绝对或相对路径）",
                         },
                         "max_paragraphs": {
                             "type": "integer",
@@ -90,6 +92,38 @@ class AnnotationPlugin(AgentPlugin):
 
     # ── Tool implementations ──────────────────────────────────────────────────
 
+    @staticmethod
+    def _allowed_roots() -> list[str]:
+        import os
+
+        cwd = os.path.realpath(os.getcwd())
+        roots = [
+            os.path.join(cwd, "workspace"),
+            os.path.join(cwd, "uploads"),
+            os.path.join(cwd, "dist"),
+        ]
+        return [os.path.abspath(r) for r in roots if os.path.isdir(r)]
+
+    @classmethod
+    def _resolve_docx_path(cls, file_path: str) -> tuple[str | None, str | None]:
+        import os
+
+        raw = (file_path or "").strip().strip('"').strip("'")
+        if not raw:
+            return None, "文件路径不能为空"
+        if not os.path.isabs(raw):
+            return None, f"文件路径必须为绝对路径: {file_path}"
+
+        candidate = os.path.abspath(os.path.expandvars(os.path.expanduser(raw)))
+        roots = cls._allowed_roots()
+        if roots and not is_within_roots(candidate, roots):
+            return None, f"不在允许的目录范围内: {file_path}"
+        if not os.path.exists(candidate):
+            return None, f"文件不存在: {candidate}"
+        if not candidate.lower().endswith(".docx"):
+            return None, f"当前只支持 .docx 格式，收到: {file_path}"
+        return candidate, None
+
     def annotate_document(
         self,
         file_path: str,
@@ -101,28 +135,15 @@ class AnnotationPlugin(AgentPlugin):
         """
         import os
 
-        if not os.path.isabs(file_path):
-            return f"错误：file_path 必须是绝对路径，当前值: {file_path!r}"
-
-        # sandbox: path must be inside workspace, uploads, or dist
-        _cwd = os.path.realpath(os.getcwd())
-        _safe = [
-            os.path.join(_cwd, "workspace"),
-            os.path.join(_cwd, "uploads"),
-            os.path.join(_cwd, "dist"),
-        ]
-        _real = os.path.realpath(os.path.abspath(file_path))
-        if not any(_real.startswith(s) for s in _safe):
-            return f"错误：不在允许的目录范围内: {file_path}"
-
-        if not os.path.exists(file_path):
-            return f"错误：文件不存在: {file_path}"
-
-        if not file_path.lower().endswith(".docx"):
-            return f"错误：当前只支持 .docx 格式，收到: {file_path}"
+        resolved_path, err = self._resolve_docx_path(file_path)
+        if not resolved_path:
+            return f"错误：{err}"
 
         try:
-            from web.document_batch_annotator_v2 import annotate_large_document
+            try:
+                from web.document_batch_annotator_v2 import annotate_large_document
+            except Exception:
+                from web.document_batch_annotator import annotate_large_document
 
             events = []
             output_file = None
@@ -130,7 +151,7 @@ class AnnotationPlugin(AgentPlugin):
 
             # 消费 SSE 生成器，收集关键事件
             for raw_sse in annotate_large_document(
-                file_path=file_path,
+                file_path=resolved_path,
                 user_requirement=requirement,
             ):
                 line = raw_sse.strip()
@@ -154,7 +175,7 @@ class AnnotationPlugin(AgentPlugin):
             if output_file:
                 return (
                     f"✅ 文档标注完成\n"
-                    f"- 原文件: {os.path.basename(file_path)}\n"
+                    f"- 原文件: {os.path.basename(resolved_path)}\n"
                     f"- 修订副本: {os.path.basename(output_file)}\n"
                     f"- 修改处数: {total_edits}\n"
                     f"- 副本路径: {output_file}"
@@ -175,14 +196,15 @@ class AnnotationPlugin(AgentPlugin):
         """读取 .docx 段落内容，返回格式化文本。"""
         import os
 
-        if not os.path.exists(file_path):
-            return f"错误：文件不存在: {file_path}"
+        resolved_path, err = self._resolve_docx_path(file_path)
+        if not resolved_path:
+            return f"错误：{err}"
 
         try:
             from web.document_reader import DocumentReader
 
             reader = DocumentReader()
-            result = reader.read_document(file_path)
+            result = reader.read_document(resolved_path)
 
             if not result.get("success"):
                 return f"读取失败: {result.get('error', '未知错误')}"
@@ -191,7 +213,7 @@ class AnnotationPlugin(AgentPlugin):
             total = result.get("total_paragraphs", len(paragraphs))
 
             lines = [
-                f"【文档：{os.path.basename(file_path)}，共 {total} 段，显示前 {len(paragraphs)} 段】\n"
+                f"【文档：{os.path.basename(resolved_path)}，共 {total} 段，显示前 {len(paragraphs)} 段】\n"
             ]
             for i, p in enumerate(paragraphs, 1):
                 text = p.get("text", "").strip()
@@ -205,11 +227,11 @@ class AnnotationPlugin(AgentPlugin):
             try:
                 from docx import Document  # type: ignore
 
-                doc = Document(file_path)
+                doc = Document(resolved_path)
                 paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()][
                     :max_paragraphs
                 ]
-                lines = [f"【{os.path.basename(file_path)}，显示 {len(paras)} 段】\n"]
+                lines = [f"【{os.path.basename(resolved_path)}，显示 {len(paras)} 段】\n"]
                 lines += [f"[{i}] {t}" for i, t in enumerate(paras, 1)]
                 return "\n".join(lines)
             except Exception as e2:

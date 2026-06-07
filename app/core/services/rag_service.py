@@ -102,8 +102,8 @@ def _get_embeddings(prefer_local: bool = False):
     """
     获取嵌入模型。
 
-    优先级：
-      1. Google text-embedding-004（需要 GEMINI_API_KEY，效果最佳）
+        优先级：
+            1. Google Gemini embedding（需要 GEMINI_API_KEY，自动选择当前可用模型）
       2. BAAI/bge-m3（本地，多语言 SOTA，1024 维，中文远优于 MiniLM）
       3. sentence-transformers all-MiniLM-L6-v2（兜底，英文优化，384 维）
 
@@ -118,13 +118,17 @@ def _get_embeddings(prefer_local: bool = False):
         )
         if api_key:
             try:
+                from app.core.llm.embedding_model_selector import (
+                    resolve_gemini_embedding_model,
+                )
                 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+                embedding_model = resolve_gemini_embedding_model(api_key)
                 emb = GoogleGenerativeAIEmbeddings(
-                    model="models/text-embedding-004",
+                    model=embedding_model,
                     google_api_key=api_key,
                 )
-                logger.info("[RAGService] 嵌入模型: Google text-embedding-004")
+                logger.info("[RAGService] 嵌入模型: Google %s", embedding_model)
                 return emb
             except Exception as exc:
                 logger.warning(
@@ -253,16 +257,30 @@ class RAGService:
     def _split_text(self, text: str, source: str = "text") -> List[Any]:
         """将文本分块，返回 LangChain Document 对象列表。"""
         from langchain_core.documents import Document
-        from langchain_text_splitters import RecursiveCharacterTextSplitter
+        try:
+            from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=self.CHUNK_SIZE,
-            chunk_overlap=self.CHUNK_OVERLAP,
-            # 中文兼容分隔符（优先段落 → 换行 → 句号 → 逗号 → 字符）
-            separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""],
-            length_function=len,
-        )
-        chunks = splitter.split_text(text)
+            splitter = RecursiveCharacterTextSplitter(
+                chunk_size=self.CHUNK_SIZE,
+                chunk_overlap=self.CHUNK_OVERLAP,
+                # 中文兼容分隔符（优先段落 → 换行 → 句号 → 逗号 → 字符）
+                separators=["\n\n", "\n", "。", "！", "？", "；", "，", " ", ""],
+                length_function=len,
+            )
+            chunks = splitter.split_text(text)
+        except Exception as exc:
+            logger.debug("[RAGService] fallback text splitter: %s", exc)
+            chunks = []
+            chunk_size = max(int(self.CHUNK_SIZE), 1)
+            overlap = max(min(int(self.CHUNK_OVERLAP), chunk_size - 1), 0)
+            step = chunk_size - overlap
+            pos = 0
+            while pos < len(text):
+                chunk = text[pos : pos + chunk_size]
+                if chunk:
+                    chunks.append(chunk)
+                pos += step
+
         return [
             Document(
                 page_content=chunk,

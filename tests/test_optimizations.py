@@ -39,8 +39,8 @@ class TestToolRouter:
             {"name": "read_file", "description": "读取文件内容"},
             {"name": "write_file", "description": "写入文件内容"},
             {"name": "get_current_time", "description": "获取当前时间"},
-            {"name": "take_screenshot", "description": "截图"},
-            {"name": "shell_command", "description": "命令行执行"},
+            {"name": "get_clipboard_text", "description": "读取剪贴板文本"},
+            {"name": "query_cpu_status", "description": "查询CPU状态"},
         ]
         return router, tools
 
@@ -345,7 +345,7 @@ class TestUnifiedAgentCompression:
         from app.core.agent.unified_agent import UnifiedAgent
 
         src = inspect.getsource(UnifiedAgent._compress_observation)
-        assert "gemini-2.0-flash-lite" in src
+        assert "gemini-2.5-flash-lite" in src
 
     def test_compress_integrated_in_exec_one(self):
         from app.core.agent.unified_agent import UnifiedAgent

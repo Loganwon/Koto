@@ -42,7 +42,7 @@ from app.core.llm.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
-_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
 
 # ── Koto Skill 元认知前言 ────────────────────────────────────────────────────
 # 注入在 system prompt 最前面，让本地模型理解 Koto Skills 框架。
@@ -81,15 +81,66 @@ def _to_ollama_messages(
         role = msg.get("role", "user")
         if role == "model":
             role = "assistant"
-        # Skip roles Ollama doesn't understand (system already added above)
-        if role not in ("user", "assistant"):
-            continue
-        content = msg.get("content", "")
-        # Handle Gemini-style parts
-        if not content and isinstance(msg.get("parts"), list):
-            content = " ".join(str(p) for p in msg["parts"] if p)
-        if content:
-            messages.append({"role": role, "content": str(content)})
+
+        if role == "assistant":
+            content = msg.get("content", "")
+            if not content and isinstance(msg.get("parts"), list):
+                content = " ".join(str(p) for p in msg["parts"] if p)
+            tool_calls = msg.get("tool_calls", [])
+            if tool_calls:
+                # Convert to Ollama OpenAI-compatible tool_calls format
+                ollama_tcs = []
+                for tc in tool_calls:
+                    ollama_tcs.append({
+                        "id": tc.get("id") or "",
+                        "type": "function",
+                        "function": {
+                            "name": tc.get("name", ""),
+                            "arguments": tc.get("args") or {},
+                        },
+                    })
+                messages.append({
+                    "role": "assistant",
+                    "content": content or "",
+                    "tool_calls": ollama_tcs,
+                })
+            elif content:
+                messages.append({"role": "assistant", "content": str(content)})
+
+        elif role == "function":
+            # Tool result — convert to Ollama "tool" role
+            fn_name = msg.get("name", "tool")
+            content = msg.get("content", "")
+            tool_call_id = msg.get("tool_call_id") or ""
+            if not tool_call_id:
+                # Fallback: search backward for matching tool_call id
+                for prev in reversed(messages):
+                    if prev.get("role") == "assistant":
+                        for tc in prev.get("tool_calls") or []:
+                            if (tc.get("function") or {}).get("name") == fn_name:
+                                tool_call_id = tc.get("id", "")
+                                break
+                    if tool_call_id:
+                        break
+            if tool_call_id:
+                messages.append({
+                    "role": "tool",
+                    "content": str(content),
+                    "tool_call_id": tool_call_id,
+                })
+            else:
+                # No id available — inject as user message so context isn't lost
+                messages.append({
+                    "role": "user",
+                    "content": f"[Tool result from {fn_name}]: {str(content)}",
+                })
+
+        elif role == "user":
+            content = msg.get("content", "")
+            if not content and isinstance(msg.get("parts"), list):
+                content = " ".join(str(p) for p in msg["parts"] if p)
+            if content:
+                messages.append({"role": "user", "content": str(content)})
 
     return messages
 
@@ -122,8 +173,12 @@ def _to_ollama_tools(tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
 
 def _parse_ollama_response(resp_json: Dict) -> Dict[str, Any]:
     """Convert Ollama /api/chat response → UnifiedAgent {content, tool_calls, usage}."""
+    import re as _re
+    import uuid as _uuid
     msg = resp_json.get("message") or {}
     content = msg.get("content") or ""
+    # Strip <think>...</think> blocks (qwen3 thinking mode)
+    content = _re.sub(r"<think>.*?</think>", "", content, flags=_re.DOTALL).strip()
 
     tool_calls: List[Dict] = []
     for tc in msg.get("tool_calls") or []:
@@ -136,7 +191,10 @@ def _parse_ollama_response(resp_json: Dict) -> Dict[str, Any]:
             except Exception:
                 args = {}
         if name:
-            tool_calls.append({"name": name, "args": args})
+            # Preserve id from Ollama if present; generate one otherwise so
+            # multi-turn tool result messages can reference it.
+            tc_id = tc.get("id") or _uuid.uuid4().hex[:8]
+            tool_calls.append({"id": tc_id, "name": name, "args": args})
 
     usage = {
         "prompt_tokens": resp_json.get("prompt_eval_count", 0),
@@ -149,6 +207,7 @@ def _raw_post(
     url: str,
     payload: Dict,
     stream: bool = False,
+    timeout_seconds: Optional[float] = None,
 ) -> Any:
     """Single HTTP POST.  Non-stream → dict.  Stream → generator of delta str."""
     data = json.dumps(payload).encode("utf-8")
@@ -159,11 +218,19 @@ def _raw_post(
         headers={"Content-Type": "application/json"},
     )
 
-    if stream:
-        return _stream_deltas(req)
+    timeout = 180.0
+    if timeout_seconds is not None:
+        try:
+            timeout = max(1.0, float(timeout_seconds))
+        except Exception:
+            timeout = 180.0
 
+    if stream:
+        return _stream_deltas(req, timeout_seconds=timeout)
+
+    _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with _opener.open(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
@@ -172,10 +239,22 @@ def _raw_post(
         raise RuntimeError(f"Ollama request failed: {e}") from e
 
 
-def _stream_deltas(req: urllib.request.Request) -> Generator[str, None, None]:
-    """Yield text delta strings from a streaming Ollama response."""
+def _stream_deltas(
+    req: urllib.request.Request,
+    timeout_seconds: Optional[float] = None,
+) -> Generator[str, None, None]:
+    """Yield text delta strings from a streaming Ollama response, stripping <think> blocks."""
+    _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    _in_think = False
+    _think_buf = ""
+    timeout = 180.0
+    if timeout_seconds is not None:
+        try:
+            timeout = max(1.0, float(timeout_seconds))
+        except Exception:
+            timeout = 180.0
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with _opener.open(req, timeout=timeout) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", errors="replace").strip()
                 if not line:
@@ -184,7 +263,31 @@ def _stream_deltas(req: urllib.request.Request) -> Generator[str, None, None]:
                     chunk = json.loads(line)
                     delta = (chunk.get("message") or {}).get("content", "")
                     if delta:
-                        yield delta
+                        if _in_think:
+                            # Accumulate until we find </think>
+                            _think_buf += delta
+                            if "</think>" in _think_buf:
+                                _in_think = False
+                                remainder = _think_buf.split("</think>", 1)[1]
+                                _think_buf = ""
+                                if remainder:
+                                    yield remainder
+                        else:
+                            if "<think>" in delta:
+                                parts = delta.split("<think>", 1)
+                                if parts[0]:
+                                    yield parts[0]
+                                _in_think = True
+                                _think_buf = parts[1] if len(parts) > 1 else ""
+                                # Check if </think> is already in this chunk
+                                if "</think>" in _think_buf:
+                                    _in_think = False
+                                    remainder = _think_buf.split("</think>", 1)[1]
+                                    _think_buf = ""
+                                    if remainder:
+                                        yield remainder
+                            else:
+                                yield delta
                     if chunk.get("done", False):
                         break
                 except json.JSONDecodeError:
@@ -266,7 +369,7 @@ class OllamaLLMProvider(LLMProvider):
             logging.getLogger(__name__).warning(
                 "Silenced exception caught", exc_info=True
             )
-        return "qwen3:8b"  # 绝对保底，实际运行时 Ollama 应已安装
+        return "qwen3.5:9b"  # 绝对保底，实际运行时 Ollama 应已安装
 
     def generate_content(
         self,
@@ -301,11 +404,12 @@ class OllamaLLMProvider(LLMProvider):
             payload["tools"] = ollama_tools
 
         url = f"{self.base_url}/api/chat"
+        timeout_seconds = kwargs.get("call_timeout")
 
         if stream:
-            return self._stream_chunks(url, payload)
+            return self._stream_chunks(url, payload, timeout_seconds=timeout_seconds)
 
-        resp_json = _raw_post(url, payload, stream=False)
+        resp_json = _raw_post(url, payload, stream=False, timeout_seconds=timeout_seconds)
         return _parse_ollama_response(resp_json)
 
     def get_token_count(
@@ -328,6 +432,7 @@ class OllamaLLMProvider(LLMProvider):
         self,
         url: str,
         payload: Dict,
+        timeout_seconds: Optional[float] = None,
     ) -> Generator[Dict[str, Any], None, None]:
         """Yield UnifiedAgent-format chunks from a streaming Ollama call."""
         payload = {**payload, "stream": True}
@@ -338,5 +443,5 @@ class OllamaLLMProvider(LLMProvider):
             method="POST",
             headers={"Content-Type": "application/json"},
         )
-        for delta in _stream_deltas(req):
+        for delta in _stream_deltas(req, timeout_seconds=timeout_seconds):
             yield {"content": delta, "tool_calls": [], "usage": {}}

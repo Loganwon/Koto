@@ -244,7 +244,7 @@ class DocumentWorkflowExecutor:
 
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash-exp",
+                model="gemini-2.5-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.3, response_mime_type="application/json"
@@ -397,7 +397,7 @@ class DocumentWorkflowExecutor:
         from google.genai import types
 
         response = self.client.models.generate_content(
-            model="gemini-2.0-flash-exp",
+            model="gemini-2.5-flash",
             contents=[
                 {
                     "mime_type": f"image/{'jpeg' if image_path.endswith('.jpg') else 'png'}",

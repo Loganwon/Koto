@@ -21,21 +21,34 @@ from pathlib import Path
 
 import psutil
 
+try:
+    from src.runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+except ImportError:
+    from runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+
 logger = logging.getLogger(__name__)
 
 KOTO_HOST = "127.0.0.1"
 KOTO_PORT = int(os.environ.get("KOTO_PORT", "5000"))
 FALLBACK_PORT = int(os.environ.get("KOTO_FALLBACK_PORT", "5001"))
 STARTUP_TIMEOUT_SEC = int(os.environ.get("KOTO_STARTUP_TIMEOUT_SEC", "10"))
+WINDOW_RECOVERY_COUNT_ENV = "KOTO_WINDOW_RECOVERY_COUNT"
+WINDOW_RECOVERY_MAX_ENV = "KOTO_MAX_UNEXPECTED_WINDOW_RECOVERY"
+BACKEND_RECOVERY_COUNT_ENV = "KOTO_BACKEND_RECOVERY_COUNT"
+BACKEND_RECOVERY_MAX_ENV = "KOTO_MAX_BACKEND_RECOVERY"
+BACKEND_WATCHDOG_ENABLED_ENV = "KOTO_ENABLE_BACKEND_WATCHDOG"
+BACKEND_WATCHDOG_INTERVAL_ENV = "KOTO_BACKEND_WATCHDOG_INTERVAL_SEC"
+BACKEND_WATCHDOG_MAX_FAILURES_ENV = "KOTO_BACKEND_WATCHDOG_MAX_FAILURES"
 
 # 获取应用根目录和资源目录
+ROOTS = resolve_runtime_roots(__file__)
+APP_ROOT = ROOTS.app_root
+BUNDLE_DIR = ROOTS.bundle_dir
+
 if getattr(sys, "frozen", False):
     # PyInstaller打包后：
     # - APP_ROOT: exe所在目录（用于持久化数据：chats/、config/、workspace/等）
     # - BUNDLE_DIR: 临时解压目录（用于bundled资源：web/、assets/等）
-    APP_ROOT = Path(sys.executable).parent
-    BUNDLE_DIR = Path(sys._MEIPASS)
-
     # Fix pythonnet runtime path for pywebview's EdgeChromium backend in frozen environment
     # pythonnet needs to know where the Python runtime is located
     _internal_py = APP_ROOT / "internal" / "py"
@@ -49,10 +62,6 @@ if getattr(sys, "frozen", False):
         )
     # Alternative: Force pywebview to use EdgeChromium without pythonnet initialization issues
     os.environ.setdefault("PYWEBVIEW_GUI", "edgechromium")
-else:
-    here = Path(__file__).resolve().parent
-    APP_ROOT = here.parent if here.name == "src" else here
-    BUNDLE_DIR = APP_ROOT
 
 
 # 图标资源目录：打包模式下在 _MEIPASS/assets/，源码模式下在 src/assets/
@@ -60,8 +69,11 @@ ASSETS_DIR = (
     BUNDLE_DIR if getattr(sys, "frozen", False) else APP_ROOT / "src"
 ) / "assets"
 
-os.chdir(str(APP_ROOT))
-sys.path.insert(0, str(BUNDLE_DIR))  # 确保能找到bundled的web模块
+configure_process_environment(
+    ROOTS,
+    prepend_paths=(BUNDLE_DIR,),
+    required_dirs=("logs", "chats", "workspace", "config"),
+)
 
 LOG_FILE = APP_ROOT / "logs" / "startup.log"
 RUNTIME_LOG_FILE = (
@@ -130,6 +142,8 @@ _redirect_output()
 # 持久化启动日志文件句柄，避免每次 _write_log 都 open/close（性能优化）
 _startup_log_file = None
 _startup_log_lock = threading.Lock()
+_shutdown_reason = None
+_shutdown_lock = threading.Lock()
 
 
 def _get_startup_log():
@@ -157,6 +171,166 @@ def _write_log(message: str):
     except Exception:
         # 日志失败不应阻塞启动
         pass
+
+
+def _request_app_shutdown(reason: str):
+    global _shutdown_reason
+    with _shutdown_lock:
+        _shutdown_reason = reason
+
+
+def _clear_app_shutdown_request():
+    global _shutdown_reason
+    with _shutdown_lock:
+        _shutdown_reason = None
+
+
+def _get_app_shutdown_reason():
+    with _shutdown_lock:
+        return _shutdown_reason
+
+
+def _handle_webview_exit():
+    shutdown_reason = _get_app_shutdown_reason()
+    if shutdown_reason:
+        _write_log(f"ℹ️ webview.start 结束（窗口已关闭，原因={shutdown_reason}）")
+        return os._exit(0)
+
+    _write_log("⚠️ webview.start 非显式结束，可能是窗口或渲染进程异常关闭")
+    _dump_threads("unexpected-webview-exit")
+
+    try:
+        max_recovery = max(0, int(os.environ.get(WINDOW_RECOVERY_MAX_ENV, "1")))
+    except Exception:
+        max_recovery = 1
+    try:
+        recovery_count = max(0, int(os.environ.get(WINDOW_RECOVERY_COUNT_ENV, "0")))
+    except Exception:
+        recovery_count = 0
+
+    if recovery_count < max_recovery:
+        env = os.environ.copy()
+        env[WINDOW_RECOVERY_COUNT_ENV] = str(recovery_count + 1)
+        env["KOTO_WINDOW_LAST_EXIT_REASON"] = "unexpected_webview_exit"
+        _write_log(
+            f"🔄 检测到窗口异常结束，尝试自动恢复 ({recovery_count + 1}/{max_recovery})"
+        )
+        os.execve(sys.executable, [sys.executable] + sys.argv, env)
+        return
+
+    _write_log("❌ 已达到窗口自动恢复上限，退出进程")
+    return os._exit(1)
+
+
+def _attempt_process_recovery(
+    reason: str,
+    *,
+    count_env: str,
+    max_env: str,
+    default_max: int = 1,
+) -> bool:
+    try:
+        max_recovery = max(0, int(os.environ.get(max_env, str(default_max))))
+    except Exception:
+        max_recovery = max(0, int(default_max))
+
+    try:
+        recovery_count = max(0, int(os.environ.get(count_env, "0")))
+    except Exception:
+        recovery_count = 0
+
+    if recovery_count >= max_recovery:
+        _write_log(f"❌ 已达到 {reason} 自动恢复上限，停止自动恢复")
+        return False
+
+    env = os.environ.copy()
+    env[count_env] = str(recovery_count + 1)
+    env["KOTO_LAST_RECOVERY_REASON"] = reason
+    _write_log(
+        f"🔄 检测到 {reason}，尝试自动恢复 ({recovery_count + 1}/{max_recovery})"
+    )
+    os.execve(sys.executable, [sys.executable] + sys.argv, env)
+    return True
+
+
+def _backend_watchdog_enabled() -> bool:
+    value = os.environ.get(BACKEND_WATCHDOG_ENABLED_ENV, "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _start_backend_health_watchdog(
+    health_url: str,
+    *,
+    server_thread=None,
+    expect_server_thread: bool = False,
+    interval_sec: float | None = None,
+    max_failures: int | None = None,
+):
+    if not health_url:
+        return None
+
+    try:
+        interval = float(
+            interval_sec
+            if interval_sec is not None
+            else os.environ.get(BACKEND_WATCHDOG_INTERVAL_ENV, "5")
+        )
+    except Exception:
+        interval = 5.0
+    interval = max(interval, 0.5)
+
+    try:
+        failures_limit = int(
+            max_failures
+            if max_failures is not None
+            else os.environ.get(BACKEND_WATCHDOG_MAX_FAILURES_ENV, "3")
+        )
+    except Exception:
+        failures_limit = 3
+    failures_limit = max(failures_limit, 1)
+
+    def _watch():
+        consecutive_failures = 0
+        while True:
+            if _get_app_shutdown_reason():
+                return
+
+            thread_alive = True
+            if expect_server_thread and server_thread is not None:
+                try:
+                    thread_alive = server_thread.is_alive()
+                except Exception:
+                    thread_alive = False
+
+            health_ok = _check_http_ok(health_url, timeout=min(interval, 0.5))
+            if health_ok and thread_alive:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                _write_log(
+                    "⚠️ 后端健康检查失败 "
+                    f"({consecutive_failures}/{failures_limit}) "
+                    f"health_ok={health_ok} thread_alive={thread_alive}"
+                )
+                if consecutive_failures >= failures_limit:
+                    _dump_threads("backend-health-watchdog")
+                    _attempt_process_recovery(
+                        "backend_unreachable",
+                        count_env=BACKEND_RECOVERY_COUNT_ENV,
+                        max_env=BACKEND_RECOVERY_MAX_ENV,
+                        default_max=1,
+                    )
+                    return
+
+            time.sleep(interval)
+
+    watchdog = threading.Thread(
+        target=_watch,
+        daemon=True,
+        name="koto-backend-health-watchdog",
+    )
+    watchdog.start()
+    return watchdog
 
 
 def _dump_threads(label: str = "thread-dump"):
@@ -226,16 +400,43 @@ def _wait_for_port(host: str, port: int, timeout_sec: int) -> bool:
     return False
 
 
-def _check_http_ok(url: str) -> bool:
+def _check_http_ok(url: str, timeout: float = 2.0) -> bool:
     """检查 HTTP 是否可访问"""
     try:
         from urllib.request import ProxyHandler, build_opener, urlopen
 
         opener = build_opener(ProxyHandler({}))  # 禁用系统代理，避免被本地代理劫持误判
-        with opener.open(url, timeout=2) as resp:
+        with opener.open(url, timeout=max(float(timeout or 0), 0.05)) as resp:
             return resp.status == 200
     except Exception:
         return False
+
+
+def _wait_for_http_ok(
+    url: str,
+    timeout_sec: float,
+    *,
+    request_timeout: float = 0.5,
+    poll_interval: float = 0.25,
+) -> bool:
+    """等待健康检查通过，并确保总等待时间不会被单次请求超时放大。"""
+    deadline = time.monotonic() + max(float(timeout_sec or 0), 0.0)
+    request_timeout = max(float(request_timeout or 0), 0.05)
+    poll_interval = max(float(poll_interval or 0), 0.05)
+
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+
+        timeout = min(request_timeout, remaining)
+        if _check_http_ok(url, timeout=timeout):
+            return True
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(poll_interval, remaining))
 
 
 def _find_available_port(host: str, start_port: int, max_tries: int = 20) -> int | None:
@@ -264,6 +465,38 @@ def ensure_directories():
     ]
     for d in dirs:
         (APP_ROOT / d).mkdir(exist_ok=True, parents=True)
+
+    bundled_config = BUNDLE_DIR / "config"
+    runtime_config = APP_ROOT / "config"
+    if bundled_config.exists() and bundled_config != runtime_config:
+        import shutil
+
+        copied_files = 0
+        created_dirs = 0
+        for src_dir, _, filenames in os.walk(bundled_config):
+            src_path = Path(src_dir)
+            rel_path = src_path.relative_to(bundled_config)
+            dst_path = runtime_config / rel_path
+            if not dst_path.exists():
+                dst_path.mkdir(parents=True, exist_ok=True)
+                created_dirs += 1
+
+            for filename in filenames:
+                src_file = src_path / filename
+                dst_file = dst_path / filename
+                if dst_file.exists():
+                    continue
+                try:
+                    shutil.copy2(src_file, dst_file)
+                    copied_files += 1
+                except Exception as exc:
+                    _write_log(f"⚠️ 同步默认配置失败: {src_file.name} -> {exc}")
+
+        if copied_files or created_dirs:
+            _write_log(
+                f"✔ 已同步默认配置到运行目录: {copied_files} 个文件, {created_dirs} 个目录"
+            )
+
     _write_log("✔ 目录检查完成")
 
 
@@ -312,24 +545,32 @@ def ensure_dependencies():
 
 
 class VoiceAPI:
-    """语音识别 API - 提供给前端调用
-    注意：实际通过 Flask REST API 实现
-    这个类仅作为占位符，保持兼容性
-    """
+    """Compatibility facade for the upload-based STT API."""
 
     def __init__(self):
         pass
 
     def get_available_engines(self):
-        """返回所有可用引擎（占位符）"""
+        """Return the supported upload-based STT engines."""
         try:
-            from web.voice_recognition import get_voice_recognizer
+            from web.local_stt import get_status
 
-            recognizer = get_voice_recognizer()
-            return recognizer.list_available_engines()
+            local = get_status()
         except Exception as e:
-            logger.debug("Failed to get voice recognition engines: %s", e)
-            return []
+            logger.debug("Failed to get local STT status: %s", e)
+            local = {"available": False, "engine": "unavailable"}
+
+        engines = [{"id": "gemini", "name": "Gemini upload STT", "available": True}]
+        if local.get("available"):
+            engines.insert(
+                0,
+                {
+                    "id": str(local.get("engine") or "local"),
+                    "name": "Local upload STT",
+                    "available": True,
+                },
+            )
+        return engines
 
 
 class WindowAPI:
@@ -342,6 +583,11 @@ class WindowAPI:
         self.full_size = (1200, 800)
         self.full_pos = None
         self.mini_size = (320, 480)  # 适合高分辨率屏幕的迷你尺寸
+        self._force_close_flag = False  # Set by force_close() to skip unsaved-check
+        # Python-side mirror of unsaved files: {path_or_key: display_name}
+        # JS updates this via mark_file_modified() so _on_closing never needs evaluate_js
+        # for the common "nothing dirty" path.
+        self._unsaved_files: dict = {}
 
     def _get_logical_screen_size(self):
         """返回逻辑像素下的屏幕尺寸（pywebview.move/resize 使用逻辑像素坐标）。
@@ -480,8 +726,34 @@ class WindowAPI:
             logger.debug("Failed to toggle fullscreen: %s", e)
 
     def close(self):
-        """关闭窗口"""
-        self.window.destroy()
+        """关闭窗口（来自JS调用）— 先在JS层检查未保存文件，再销毁"""
+        _request_app_shutdown("js_close")
+        try:
+            self.window.destroy()
+        except Exception:
+            _clear_app_shutdown_request()
+            raise
+
+    def force_close(self):
+        """强制关闭窗口 — 绕过未保存检查，由JS关闭确认对话框调用"""
+        self._force_close_flag = True
+        _request_app_shutdown("js_force_close")
+        try:
+            self.window.destroy()
+        except Exception:
+            _clear_app_shutdown_request()
+            raise
+
+    def mark_file_modified(self, path: str, name: str, modified: bool):
+        """JS 每次改变 tab.modified 时调用此方法，保持 Python 侧状态同步。
+        这样 _on_closing 在无未保存文件的普通关闭路径上无需调用 evaluate_js，
+        避免 EdgeChromium COM 线程与后台线程之间的死锁（"未响应"根本原因）。"""
+        key = path or name
+        if modified:
+            self._unsaved_files[key] = name
+        else:
+            self._unsaved_files.pop(key, None)
+        return True
 
     def open_url(self, url: str):
         """在系统默认浏览器中打开外部链接，防止 webview 导航离开 Koto"""
@@ -600,6 +872,7 @@ def start_flask_server():
     log.setLevel(logging.ERROR)
 
     health_url = f"http://{KOTO_HOST}:{KOTO_PORT}/api/health"
+    reuse_healthy_backend = os.environ.get("KOTO_REUSE_HEALTHY_BACKEND", "0") == "1"
 
     # 如果端口已被占用，先校验是否真的是可用的 Koto 服务
     try:
@@ -608,10 +881,24 @@ def start_flask_server():
         if sock.connect_ex((KOTO_HOST, KOTO_PORT)) == 0:
             sock.close()
             if _check_http_ok(health_url):
+                if reuse_healthy_backend:
+                    _write_log(
+                        f"ℹ️ 检测到 {KOTO_HOST}:{KOTO_PORT} 已在运行，健康检查通过，跳过内置服务启动"
+                    )
+                    return {"started": False, "already_running": True}
+
+                alt_port = _find_available_port(KOTO_HOST, FALLBACK_PORT)
+                if alt_port is None:
+                    _write_log(
+                        f"ℹ️ 检测到 {KOTO_HOST}:{KOTO_PORT} 已有健康 Koto 后端，但未找到可用备用端口，继续复用现有实例"
+                    )
+                    return {"started": False, "already_running": True}
+
                 _write_log(
-                    f"ℹ️ 检测到 {KOTO_HOST}:{KOTO_PORT} 已在运行，健康检查通过，跳过内置服务启动"
+                    f"ℹ️ 检测到 {KOTO_HOST}:{KOTO_PORT} 已有健康 Koto 后端；为避免复用旧实例，当前窗口改用端口 {alt_port}"
                 )
-                return {"started": False, "already_running": True}
+                KOTO_PORT = alt_port
+                health_url = f"http://{KOTO_HOST}:{KOTO_PORT}/api/health"
             else:
                 _write_log(
                     f"⚠️ {KOTO_HOST}:{KOTO_PORT} 被占用但健康检查失败，尝试清理占用进程"
@@ -946,7 +1233,14 @@ def create_system_tray(window_ref=None):
 
         def on_quit(icon, item):
             """退出应用"""
+            if window_ref:
+                try:
+                    window_ref[0].destroy()
+                    return
+                except Exception as e:
+                    logger.debug("Failed to destroy window from tray quit: %s", e)
             icon.stop()
+            _request_app_shutdown("tray_quit")
             os._exit(0)
 
         def on_show(icon, item):
@@ -1088,6 +1382,7 @@ def main():
 
     app_url = f"http://{KOTO_HOST}:{KOTO_PORT}"
     health_url = f"{app_url}/api/health"
+    backend_ready = False
     if server_info.get("error"):
         _write_log(f"⚠️ Flask 线程报错: {server_info['error']}")
     if server_info.get("already_running"):
@@ -1113,11 +1408,12 @@ def main():
             and server_info["thread"].is_alive()
         ):
             _write_log("⚠️ 后端启动较慢，延长等待健康检查（最多 15 秒）")
-            for _ in range(30):
-                if _check_http_ok(health_url):
-                    backend_ready = True
-                    break
-                time.sleep(0.5)
+            backend_ready = _wait_for_http_ok(
+                health_url,
+                15.0,
+                request_timeout=0.5,
+                poll_interval=0.25,
+            )
 
         if not backend_ready:
             err_msg = "后端服务启动超时，请检查依赖或端口占用情况。"
@@ -1232,6 +1528,16 @@ def main():
         _write_log(f"✔ 图标路径: {icon_path}")
     _write_log(f"✔ 创建窗口，加载 {app_url}")
 
+    if backend_ready and _backend_watchdog_enabled():
+        _start_backend_health_watchdog(
+            health_url,
+            server_thread=server_info.get("thread"),
+            expect_server_thread=bool(server_info.get("started")),
+        )
+        _write_log("✔ 后端健康守护已启动")
+    elif backend_ready:
+        _write_log("ℹ️ 后端健康守护默认关闭，避免任务流期间误判自恢复")
+
     # 绑定窗口控制API
     window_api = WindowAPI(window, app_url)
     window_api.full_size = (_win_w, _win_h)  # 同步实际初始窗口尺寸
@@ -1241,7 +1547,59 @@ def main():
     window.expose(window_api.minimize)
     window.expose(window_api.maximize)
     window.expose(window_api.close)
+    window.expose(window_api.force_close)
+    window.expose(window_api.mark_file_modified)
     window.expose(window_api.open_url)
+
+    # ── 原生窗口X按钮关闭拦截 ─────────────────────────────────────
+    # 当用户点击操作系统原生的关闭按钮时，先让JS检查未保存文件；
+    # 若有未保存文件，显示自定义对话框，取消本次关闭。
+    # 对话框确认后调用 pywebview.api.force_close() 直接销毁窗口。
+    import json as _json_mod
+    import threading as _threading
+
+    def _on_closing():
+        if window_api._force_close_flag:
+            # force_close() already set flag — allow
+            return True
+
+        # Fast path: Python-side mirror says no unsaved files → close immediately.
+        # This avoids calling evaluate_js() from any thread (source of "未响应"):
+        #   * Old approach: background thread → evaluate_js() → COM deadlock potential
+        #   * New approach: JS keeps _unsaved_files dict in sync via mark_file_modified()
+        if not window_api._unsaved_files:
+            _request_app_shutdown("native_close")
+            return True  # Allow close; no JS evaluation needed
+
+        # There are unsaved files — show the WA dialog via background thread.
+        # evaluate_js() is ONLY called when we actually need user confirmation.
+        def _show_warn():
+            try:
+                unsaved = [
+                    {"path": k, "name": v}
+                    for k, v in list(window_api._unsaved_files.items())
+                ]
+                js_unsaved = _json_mod.dumps(unsaved)
+                window.evaluate_js(
+                    f'window.WA && window.WA.showCloseWarning && '
+                    f'window.WA.showCloseWarning({js_unsaved}).then(function(d){{'
+                    f'  if(d!=="cancel") window.pywebview.api.force_close();'
+                    f'}})'
+                )
+            except Exception as _e:
+                _write_log(f"⚠️ close-warning JS error: {_e}")
+                # Fallback: force-close without saving
+                window_api._force_close_flag = True
+                _request_app_shutdown("close_warning_fallback")
+                window.destroy()
+
+        _threading.Thread(target=_show_warn, daemon=True).start()
+        return False  # Cancel native close; thread handles the rest
+
+    window.events.closing += _on_closing
+    # ──────────────────────────────────────────────────────────────
+
+
 
     # 将 window_api 注入到 Flask app，供 HTTP 路由降级使用
     try:
@@ -1302,10 +1660,7 @@ def main():
         _write_log(f"✔ 设置应用图标: {icon_path}")
 
     webview.start(**start_kwargs)
-    _write_log("ℹ️ webview.start 结束（窗口已关闭）")
-
-    # 窗口关闭后退出
-    os._exit(0)
+    _handle_webview_exit()
 
 
 if __name__ == "__main__":

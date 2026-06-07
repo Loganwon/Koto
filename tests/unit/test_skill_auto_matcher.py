@@ -149,9 +149,8 @@ class TestHasActiveSkillsForTask:
         mocker.patch.object(SkillManager, "_ensure_init")
         mocker.patch.object(
             SkillManager,
-            "_registry",
-            {"skill_a": {"enabled": False, "task_types": ["CHAT"]}},
-            create=True,
+            "list_skills",
+            return_value=[{"id": "skill_a", "enabled": False, "task_types": ["CHAT"]}],
         )
         matcher = _get_matcher()
         assert matcher._has_active_skills_for_task("CHAT") is False
@@ -162,15 +161,15 @@ class TestHasActiveSkillsForTask:
         mocker.patch.object(SkillManager, "_ensure_init")
         mocker.patch.object(
             SkillManager,
-            "_registry",
-            {
-                "skill_a": {
+            "list_skills",
+            return_value=[
+                {
+                    "id": "skill_a",
                     "enabled": True,
                     "task_types": ["CHAT"],
                     "category": "domain",
                 }
-            },
-            create=True,
+            ],
         )
         matcher = _get_matcher()
         assert matcher._has_active_skills_for_task("CHAT") is True

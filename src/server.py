@@ -29,18 +29,32 @@ import signal
 import sys
 from pathlib import Path
 
-# 设置环境
-here = Path(__file__).resolve().parent
-APP_ROOT = here.parent if here.name == "src" else here
-os.chdir(str(APP_ROOT))
-# 项目根目录放在最前面，确保 app/ 包优先于 web/app.py
-sys.path.insert(0, str(APP_ROOT))
-# web/ 放在后面，用于 web 内部的相对导入
-sys.path.append(str(APP_ROOT / "web"))
+try:
+    from src.runtime_bootstrap import (
+        configure_process_environment,
+        init_optional_langsmith,
+        load_optional_gemini_env,
+        resolve_runtime_roots,
+        validate_startup_config_or_raise,
+    )
+except ImportError:
+    from runtime_bootstrap import (
+        configure_process_environment,
+        init_optional_langsmith,
+        load_optional_gemini_env,
+        resolve_runtime_roots,
+        validate_startup_config_or_raise,
+    )
 
-# 确保必要目录存在
-for d in ["logs", "chats", "workspace", "config"]:
-    os.makedirs(APP_ROOT / d, exist_ok=True)
+# 设置环境
+ROOTS = resolve_runtime_roots(__file__)
+APP_ROOT = ROOTS.app_root
+configure_process_environment(
+    ROOTS,
+    prepend_paths=(APP_ROOT,),
+    append_paths=(APP_ROOT / "web",),
+    required_dirs=("logs", "chats", "workspace", "config"),
+)
 
 # 初始化集中式日志（在其他模块导入之前）
 from app.core.logging_setup import setup_logging  # noqa: E402
@@ -48,31 +62,17 @@ from app.core.logging_setup import setup_logging  # noqa: E402
 setup_logging(log_dir=str(APP_ROOT / "logs"))
 
 # 加载 .env 配置
-try:
-    from dotenv import load_dotenv
-
-    env_file = APP_ROOT / "config" / "gemini_config.env"
-    if env_file.exists():
-        load_dotenv(str(env_file))
-except ImportError:
-    pass
+load_optional_gemini_env()
 
 # 启动时配置验证
-from src.config_validator import validate_startup_config  # noqa: E402
-
 try:
-    validate_startup_config()
+    validate_startup_config_or_raise()
 except Exception as e:
     print(f"[FATAL] Configuration error: {e}")
     sys.exit(1)
 
 # LangSmith 可观测性初始化（可选，仅当环境变量已设置时激活）
-try:
-    from app.core.monitoring.langsmith_tracer import init_langsmith
-
-    init_langsmith()
-except Exception:
-    pass
+init_optional_langsmith()
 
 # 导入 Flask app
 from web.app import app

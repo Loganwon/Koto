@@ -109,6 +109,7 @@ def wa_client(tmp_path_factory):
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
+    app.secret_key = "test-secret"
     app.register_blueprint(workspace_assistant_bp)
     app.config["TESTING"] = True
 
@@ -157,9 +158,11 @@ class TestTmpDirIsAbsolute:
 
     def test_ensure_tmp_dir_returns_absolute(self, wa_client):
         """_ensure_tmp_dir() must always return an absolute path."""
+        client, _, _ = wa_client
         import web.blueprints.workspace_assistant as _wa
 
-        result = _wa._ensure_tmp_dir()
+        with client.application.test_request_context("/"):
+            result = _wa._ensure_tmp_dir()
         assert (
             result.is_absolute()
         ), f"_ensure_tmp_dir() returned a relative path: {result!r}"

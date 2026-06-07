@@ -4,22 +4,21 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>文件工作站 — Koto</title>
+  <!-- Restore theme before first paint to avoid flash -->
+  <script>(function(){var t=localStorage.getItem('koto_theme');if(t==='dark')document.documentElement.setAttribute('data-wa-theme','dark');})()</script>
 
   <!-- ── Split.js ── -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/split.js@1.6.5/dist/split.css">
 
-  <!-- ── WangEditor 5 (DOCX editor) ── -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/css/style.css">
-
   <!-- ── App styles ── -->
-  <link rel="stylesheet" href="/static/css/workspace.css?v=20260403a">
+  <link rel="stylesheet" href="/static/css/workspace-assistant.css?v={{ range(100000,999999)|random }}">
 </head>
 <body class="wa-standalone">
 
   <!-- ── Header ── -->
   <div id="wa-header">
     <a class="wa-logo" href="/">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" opacity="0.7">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" opacity="0.8">
         <path d="M3 7C3 5.9 3.9 5 5 5h6l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
       </svg>
       Koto
@@ -28,21 +27,50 @@
     <span class="wa-file-name" id="wa-file-name">文件工作站</span>
     <div class="wa-header-actions">
       <!-- Hidden file input used by _openFilePicker fallback -->
-      <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf" style="display:none">
-      <button class="wa-btn" id="wa-autosave-toggle" onclick="WA.toggleAutoSave()" title="开启后每次编辑都会自动保存到工作区">
-        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="margin-right:4px">
+      <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" style="display:none">
+      <button class="wa-btn" id="wa-autosave-toggle" onclick="WA.toggleAutoSave()" title="自动保存 — 开启后每次编辑都会自动保存到工作区">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
           <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
         </svg>
-        自动保存
       </button>
       <button class="wa-btn primary" id="wa-save-btn" disabled onclick="WA.saveAs()">
-        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
           <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
           <polyline points="17 21 17 13 7 13 7 21"/>
           <polyline points="7 3 7 8 15 8"/>
         </svg>
         另存为
       </button>
+      <!-- Archive current file -->
+      <div style="position:relative; display:inline-block;">
+        <button class="wa-btn" id="wa-archive-btn" disabled onclick="WA.toggleArchivePopover()" title="将当前文件归档到分类文件夹">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+            <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>
+          </svg>
+        </button>
+        <div id="wa-archive-popover" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9000;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:10px;padding:12px;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,0.15);font-size:13px;">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text-primary);">归档到分类文件夹</div>
+          <div id="wa-archive-cats" style="display:flex;flex-direction:column;gap:4px;">
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('文档')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.5h5.5L13 5v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z"/><path d="M9.5 1.5V5H13"/><path d="M5.5 8h5M5.5 10.5h3.5"/></svg> 文档</button>
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('表格')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="9" width="3" height="5" rx="0.5"/><rect x="6.5" y="5" width="3" height="9" rx="0.5"/><rect x="11" y="2" width="3" height="12" rx="0.5"/></svg> 表格</button>
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('演示文稿')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M5 7h6M5 9.5h4"/></svg> 演示文稿</button>
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('报告')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="2" width="10" height="12" rx="1.5"/><path d="M6 2V1h4v1"/><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3"/></svg> 报告</button>
+            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('合同')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.5h8a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1z"/><path d="M5.5 5h5M5.5 7.5h5M5.5 10h3"/><path d="M9 12.5c1-1 2.5-.5 2.5-.5"/></svg> 合同</button>
+          </div>
+        </div>
+      </div>
+      <!-- Version History button -->
+      <div style="position:relative; display:inline-block;">
+        <button class="wa-btn" id="wa-history-btn" disabled onclick="WA.toggleHistoryPopover()" title="查看历史版本快照">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/>
+          </svg>
+        </button>
+        <div id="wa-history-popover" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9000;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:10px;padding:12px;min-width:260px;max-height:320px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.15);font-size:13px;">
+          <div style="font-weight:600;margin-bottom:8px;color:var(--text-primary);">历史版本</div>
+          <div id="wa-history-list"><span style="color:var(--text-muted);">加载中…</span></div>
+        </div>
+      </div>
       <span id="wa-autosave-status"></span>
     </div>
   </div>
@@ -53,7 +81,7 @@
     <div id="wa-left">
       <!-- Header — VS Code style with hover-reveal actions -->
       <div id="wa-left-header">
-        <span class="wa-panel-title">文件管理</span>
+        <span class="wa-panel-title">文件</span>
         <div class="wa-header-actions">
           <!-- New File -->
           <button class="wa-icon-btn" onclick="WA.startNewFile('')" title="新建文件">
@@ -67,7 +95,7 @@
           <label class="wa-icon-btn" for="wa-file-input-left" title="上传文件到工作区">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           </label>
-          <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
+          <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" multiple style="display:none">
           <!-- Refresh -->
           <button class="wa-icon-btn" onclick="WA.refreshFiles()" title="刷新">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -94,7 +122,8 @@
       <div id="wa-select-bar" style="display:none">
         <span id="wa-select-count">0 已选</span>
         <button onclick="WA.selectAll()">全选</button>
-        <button class="danger" id="wa-delete-selected" onclick="WA.deleteSelected()" disabled>🗑 删除</button>
+        <button id="wa-send-selected-ai" onclick="WA.sendSelectedToAI()" disabled title="发送选中文件给AI助手同时分析"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z"/></svg> 发送给AI</button>
+        <button class="danger" id="wa-delete-selected" onclick="WA.deleteSelected()" disabled><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h10M6.5 4V2.5h3V4M5 4v9h6V4"/><path d="M7 7v3.5M9 7v3.5"/></svg> 删除</button>
         <button onclick="WA.toggleSelectMode()">取消</button>
       </div>
       <!-- Search -->
@@ -114,18 +143,47 @@
       </div>
       <!-- Local pickers -->
       <div id="wa-local-btns">
-        <button id="wa-pick-local-file-btn" title="打开本地文件（不上传到工作区）">📄 本地文件</button>
-        <button id="wa-pick-local-folder-btn" title="打开本地文件夹">📁 本地文件夹</button>
-        <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf" multiple style="display:none">
-        <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf" multiple webkitdirectory style="display:none">
+        <button id="wa-pick-local-file-btn" title="打开本地文件（不上传到工作区）"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.5h5.5L13 5v9.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1z"/><path d="M9.5 1.5V5H13"/><path d="M5.5 8h5M5.5 10.5h3.5"/></svg> 本地文件</button>
+        <button id="wa-pick-local-folder-btn" title="打开本地文件夹"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z"/></svg> 本地文件夹</button>
+        <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json" multiple style="display:none">
+        <input type="file" id="wa-ai-context-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" multiple style="display:none">
+        <input type="file" id="wa-local-folder-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json" multiple webkitdirectory style="display:none">
       </div>
+      <!-- Temp Workspace: in-memory session-only files for temporary processing -->
+      <div class="wa-section-label collapsible" id="wa-tmpws-label">
+        <span class="wa-section-arrow open" id="wa-tmpws-arrow" onclick="WA.toggleSection('tmpworkspace')">›</span>
+        <span onclick="WA.toggleSection('tmpworkspace')" style="flex:1">临时工作区</span>
+        <span class="wa-section-badge" id="wa-tmpws-badge"></span>
+        <div class="wa-section-actions">
+          <button class="wa-icon-btn" onclick="event.stopPropagation();WA.addToTempWorkspace()" title="将当前文件加入临时工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">＋</button>
+          <button class="wa-icon-btn" onclick="event.stopPropagation();WA.clearTempWorkspace()" title="清空临时工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px;margin-left:2px">✕</button>
+        </div>
+      </div>
+      <div id="wa-tmpws-list" class="wa-myws-list"></div>
+      <div id="wa-tmpws-empty" class="wa-myws-empty" style="display:none">
+        <span>右键文件选择"加入临时工作区"<br>仅在本次会话中保留</span>
+      </div>
+      <!-- My Workspace: pinned files the user is actively working on -->
+      <div class="wa-section-label collapsible" id="wa-myws-label">
+        <span class="wa-section-arrow open" id="wa-myws-arrow" onclick="WA.toggleSection('myworkspace')">›</span>
+        <span onclick="WA.toggleSection('myworkspace')" style="flex:1">我的工作区</span>
+        <span class="wa-section-badge" id="wa-myws-badge"></span>
+        <div class="wa-section-actions">
+          <button class="wa-icon-btn" onclick="event.stopPropagation();WA.addToMyWorkspace()" title="添加文件到工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">＋</button>
+        </div>
+      </div>
+      <div id="wa-myws-list" class="wa-myws-list"></div>
+      <div id="wa-myws-empty" class="wa-myws-empty" style="display:none">
+        <span>右键文件选择"加入工作区"<br>或拖拽文件到此处</span>
+      </div>
+
       <!-- File browser (VS Code-style local FS explorer) -->
       <div class="wa-section-label collapsible" id="wa-ws-label">
         <span class="wa-section-arrow open" id="wa-ws-arrow" onclick="WA.toggleSection('workspace')">›</span>
         <span id="wa-ws-root-label" onclick="WA.toggleSection('workspace')" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">文件浏览器</span>
         <span class="wa-section-badge" id="wa-ws-badge"></span>
         <div class="wa-section-actions">
-          <button class="wa-icon-btn" id="wa-browser-sort-btn" onclick="event.stopPropagation();WA.cycleBrowserSort()" title="切换排序" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">↕ 名称</button>
+          <button class="wa-icon-btn" id="wa-browser-sort-btn" onclick="event.stopPropagation();WA.cycleBrowserSort()" title="切换排序" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5l4-3 4 3M4 11l4 3 4-3"/></svg> 名称</button>
         </div>
       </div>
       <div id="wa-files-list"></div>
@@ -135,7 +193,7 @@
         <span class="wa-section-arrow open" id="wa-recent-arrow" onclick="WA.toggleRecentSection()">›</span>
         <span onclick="WA.toggleRecentSection()" style="flex:1">最近文件</span>
         <div class="wa-section-actions">
-          <button class="wa-icon-btn" onclick="event.stopPropagation();WA.refreshRecent()" title="刷新最近文件" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">↺</button>
+          <button class="wa-icon-btn" onclick="event.stopPropagation();WA.refreshRecent()" title="刷新最近文件" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.9-3.2M13.5 8a5.5 5.5 0 0 1-9.9 3.2"/><path d="M12.4 1.5v3.3h-3.3M3.6 14.5v-3.3h3.3"/></svg></button>
         </div>
       </div>
       <div class="wa-recent-hint">最近在 Koto 中打开过的文件</div>
@@ -149,6 +207,11 @@
 
     <!-- Right-click context menu -->
     <div id="wa-ctx-menu"></div>
+    <!-- DOCX right-click context menu -->
+    <div id="wa-docx-ctx"></div>
+
+    <!-- Close-warning dialog (shown when Koto closes with unsaved WA files) -->
+    {% include '_workspace_close_warn_dialog.html' %}
 
     <!-- Archive/Organize panel overlay -->
     <div id="wa-archive-overlay" class="wa-dlg-overlay" style="display:none" onclick="if(event.target===this)WA.hideArchivePanel()">
@@ -162,12 +225,12 @@
         <label style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:block">源文件夹路径</label>
         <div class="wa-dlg-input-row" style="margin-bottom:12px">
           <input id="wa-archive-src" class="wa-dlg-input" placeholder="输入或粘贴文件夹绝对路径…">
-          <button class="wa-btn" onclick="WA._archivePickFolder('wa-archive-src')">📂</button>
+          <button class="wa-btn" onclick="WA._archivePickFolder('wa-archive-src')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 4a1 1 0 0 1 1-1H5.6l1.2 1.5H13.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1V4z"/></svg></button>
         </div>
         <label style="font-size:12px;color:var(--text-muted);margin-bottom:6px;display:block">归档方式</label>
         <div style="display:flex;gap:6px;margin-bottom:14px">
-          <button id="wa-archive-mode-auto" class="wa-btn primary" onclick="WA._setArchiveMode('auto')">🤖 AI 自动分类</button>
-          <button id="wa-archive-mode-custom" class="wa-btn" onclick="WA._setArchiveMode('custom')">📋 按类型预设</button>
+          <button id="wa-archive-mode-auto" class="wa-btn primary" onclick="WA._setArchiveMode('auto')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="9" height="8" rx="2"/><circle cx="6" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="1" fill="currentColor" stroke="none"/><path d="M8 1.5v2.5"/><circle cx="8" cy="1.5" r="0.8" fill="currentColor" stroke="none"/><path d="M1.5 8h2M12.5 8h2"/></svg> AI 自动分类</button>
+          <button id="wa-archive-mode-custom" class="wa-btn" onclick="WA._setArchiveMode('custom')"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="2" width="10" height="12" rx="1.5"/><path d="M6 2V1h4v1"/><path d="M5.5 6h5M5.5 8.5h5M5.5 11h3"/></svg> 按类型预设</button>
         </div>
         <div id="wa-archive-result"></div>
         <div class="wa-dlg-footer">
@@ -179,12 +242,14 @@
 
     <!-- Center: polymorphic canvas -->
     <div id="wa-canvas">
+      <!-- Drag shield: covers the editor during file drags so rich editors can't swallow events -->
+      <div id="wa-drag-canvas-shield"></div>
       <!-- VS Code-style tab bar -->
       <div id="wa-tab-bar"></div>
       <!-- Canvas body: all editors positioned relative to this -->
       <div id="wa-canvas-body">
         <!-- AI-image drag-to-document overlay -->
-        <div id="wa-ai-img-drop-hint"><span>📥 释放即可插入图片</span></div>
+        <div id="wa-ai-img-drop-hint"><span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v8.5M4.5 8L8 11.5 11.5 8"/><path d="M2.5 12.5h11"/></svg> 释放即可插入图片</span></div>
         <!-- Loading overlay (shown during file switch) -->
         <div id="wa-canvas-loading">
           <div class="wa-loading-spinner"></div>
@@ -193,20 +258,42 @@
         <!-- ── Drop zone (no file loaded) ── -->
         <div id="wa-drop-zone">
           <div class="wa-drop-inner" id="wa-drop-inner">
-            <div class="wa-drop-icon">📂</div>
+            <div class="wa-drop-icon"><svg width="48" height="48" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.5"><path d="M8 10V2.5M4.5 5.5L8 2l3.5 3.5"/><path d="M2.5 11v2.5h11V11"/></svg></div>
             <div class="wa-drop-title">拖拽文件到此处，或点击"打开文件"</div>
             <div class="wa-drop-sub">支持所有常见办公文档格式</div>
             <div id="upload-progress"></div>
           </div>
           <div class="wa-format-chips">
-            <span class="wa-chip docx">📘 Word / DOCX</span>
-            <span class="wa-chip xlsx">📗 Excel / XLSX</span>
-            <span class="wa-chip pptx">📙 PowerPoint / PPTX</span>
-            <span class="wa-chip pdf">📕 PDF</span>
+            <span class="wa-chip docx"><svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#2b579a"/><path d="M11 1l3 3v10H11V1z" fill="#1a3f6f"/><rect x="4" y="5" width="5" height="1" rx="0.4" fill="white" opacity="0.85"/><rect x="4" y="7" width="5" height="1" rx="0.4" fill="white" opacity="0.85"/></svg> Word / DOCX</span>
+            <span class="wa-chip xlsx"><svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#217346"/><path d="M11 1l3 3v10H11V1z" fill="#165b32"/><path d="M4.5 5.5l1.5 2-1.5 2M7 5.5l1.5 2-1.5 2" stroke="white" stroke-width="0.9" fill="none" opacity="0.85"/></svg> Excel / XLSX</span>
+            <span class="wa-chip pptx"><svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#c43e1c"/><path d="M11 1l3 3v10H11V1z" fill="#8c2d13"/><rect x="3.5" y="4.5" width="6" height="3.5" rx="0.5" fill="white" opacity="0.7"/></svg> PowerPoint / PPTX</span>
+            <span class="wa-chip pdf"><svg width="14" height="14" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="1" width="9" height="13" rx="1" fill="#e74c3c"/><path d="M11 1l3 3v10H11V1z" fill="#a93226"/><text x="3.2" y="10.5" font-size="4.5" font-family="sans-serif" font-weight="bold" fill="white" opacity="0.9">PDF</text></svg> PDF</span>
           </div>
         </div>
-        <!-- DOCX: WangEditor -->
+        <!-- DOCX: TipTap Editor -->
         <div id="wa-docx-editor">
+          <!-- Find/Replace bar (Ctrl+F / Ctrl+H) -->
+          <div id="wa-docx-find-bar" style="display:none">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="wa-docx-find-input" placeholder="查找…" autocomplete="off"
+              oninput="WA.docxFindInput(this.value)" onkeydown="WA.docxFindKeydown(event)">
+            <span id="wa-docx-find-count" class="wa-find-count"></span>
+            <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.docxFindPrev()" title="上一处 (Shift+Enter)">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+            </button>
+            <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.docxFindNext()" title="下一处 (Enter)">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            <label class="wa-find-opt"><input type="checkbox" id="wa-docx-find-case" onchange="WA.docxFindInput(document.getElementById('wa-docx-find-input').value)"> 区分大小写</label>
+            <button class="wa-find-replace-toggle" id="wa-docx-replace-toggle" onmousedown="event.preventDefault()" onclick="WA.docxToggleReplace()" title="展开替换">替换</button>
+            <button class="wa-find-close" onmousedown="event.preventDefault()" onclick="WA.docxFindClose()" title="关闭 (Esc)">✕</button>
+            <div id="wa-docx-replace-row" style="display:none">
+              <input type="text" id="wa-docx-replace-input" placeholder="替换为…" autocomplete="off"
+                onkeydown="if(event.key==='Enter')WA.docxReplaceNext()">
+              <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.docxReplaceNext()">替换</button>
+              <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.docxReplaceAll()">全部替换</button>
+            </div>
+          </div>
           <div id="wa-editor-toolbar"></div>
           <div id="wa-editor-content"></div>
         </div>
@@ -221,25 +308,66 @@
 
           <!-- Right: Main editing pane -->
           <div id="wa-pptx-main">
+            <!-- Find/Replace bar (Ctrl+F / Ctrl+H) — inside main column so it spans full width -->
+            <div id="wa-pptx-find-bar" style="display:none">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="wa-pptx-find-input" placeholder="在幻灯片中查找…" autocomplete="off"
+                oninput="WA.pptxFindInput(this.value)" onkeydown="WA.pptxFindKeydown(event)">
+              <span id="wa-pptx-find-count" class="wa-find-count"></span>
+              <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.pptxFindPrev()" title="上一处 (Shift+Enter)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+              </button>
+              <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.pptxFindNext()" title="下一处 (Enter)">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <label class="wa-find-opt"><input type="checkbox" id="wa-pptx-find-case" onchange="WA.pptxFindInput(document.getElementById('wa-pptx-find-input').value)"> 区分大小写</label>
+              <button class="wa-find-replace-toggle" id="wa-pptx-replace-toggle" onmousedown="event.preventDefault()" onclick="WA.pptxToggleReplace()" title="展开替换">替换</button>
+              <button class="wa-find-close" onmousedown="event.preventDefault()" onclick="WA.pptxFindClose()" title="关闭 (Esc)">✕</button>
+              <div id="wa-pptx-replace-row" style="display:none">
+                <input type="text" id="wa-pptx-replace-input" placeholder="替换为…" autocomplete="off"
+                  onkeydown="if(event.key==='Enter')WA.pptxReplaceNext()">
+                <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.pptxReplaceNext()">替换</button>
+                <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.pptxReplaceAll()">全部替换</button>
+              </div>
+            </div>
 
             <!-- Ribbon tabs -->
             <div id="wa-pptx-ribbon-tabs">
               <button class="wa-pptx-rtab active" onclick="WA.pptxSwitchTab(this,'home')">开始</button>
               <button class="wa-pptx-rtab" onclick="WA.pptxSwitchTab(this,'insert')">插入</button>
+              <button class="wa-pptx-rtab" onclick="WA.pptxSwitchTab(this,'format')">格式</button>
             </div>
 
             <!-- Ribbon toolbar -->
             <div id="wa-pptx-toolbar">
 
+              <!-- Home tab: Undo/Redo group -->
+              <div class="wa-pptx-tb-grp" data-tab="home">
+                <div class="wa-pptx-tb-grp-btns">
+                  <button id="wa-pptx-undo" class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxUndo()" title="撤销 (Ctrl+Z)" disabled>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7v6h6"/><path d="M3 13A9 9 0 1 0 6 6l-3 4"/></svg>
+                  </button>
+                  <button id="wa-pptx-redo" class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxRedo()" title="重做 (Ctrl+Y)" disabled>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 7v6h-6"/><path d="M21 13A9 9 0 1 1 18 6l3 4"/></svg>
+                  </button>
+                </div>
+                <div class="wa-pptx-tb-grp-label">历史</div>
+              </div>
+
+              <div class="wa-pptx-tb-sep" data-tab="home"></div>
+
               <!-- Home tab: Slides group -->
               <div class="wa-pptx-tb-grp" data-tab="home">
                 <div class="wa-pptx-tb-grp-btns">
-                  <button class="wa-pptx-tb-btn wa-pptx-newslide-btn" onclick="WA.pptxAddSlide()" title="新建幻灯片">
+                  <button class="wa-pptx-tb-btn wa-pptx-newslide-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAddSlide()" title="新建幻灯片 (Ctrl+M)">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="9" y1="12" x2="15" y2="12"/></svg>
                     <span>新建幻灯片</span>
                   </button>
-                  <button class="wa-pptx-tb-btn" onclick="WA.pptxDelSlide()" title="删除当前幻灯片">
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxDelSlide()" title="删除当前幻灯片">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxDupSlide()" title="复制幻灯片 (Ctrl+Shift+D)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="2" width="13" height="10" rx="1"/><rect x="3" y="7" width="13" height="10" rx="1"/></svg>
                   </button>
                 </div>
                 <div class="wa-pptx-tb-grp-label">幻灯片</div>
@@ -250,22 +378,35 @@
               <!-- Home tab: Font group -->
               <div class="wa-pptx-tb-grp" data-tab="home">
                 <div class="wa-pptx-tb-grp-btns">
-                  <input id="wa-pptx-fontname" class="wa-pptx-tb-input-font" type="text" value="Calibri" title="字体" onchange="WA.pptxFontName(this.value)" onblur="WA.pptxFontName(this.value)" onkeydown="if(event.key==='Enter')WA.pptxFontName(this.value)">
-                  <select id="wa-pptx-fontsize" class="wa-pptx-tb-select" onchange="WA.pptxFontSize(this.value)" title="字号">
-                    <option>8</option><option>10</option><option>12</option><option>14</option>
-                    <option>16</option><option>18</option><option>20</option><option>24</option>
-                    <option>28</option><option>32</option><option>36</option><option>40</option><option>48</option><option>60</option><option>72</option>
-                  </select>
+                  <input id="wa-pptx-fontname" class="wa-pptx-tb-input-font" type="text" value="Calibri" title="字体" onmousedown="event.stopPropagation()" onchange="WA.pptxFontName(this.value)" onblur="WA.pptxFontName(this.value)" onkeydown="if(event.key==='Enter'){WA.pptxFontName(this.value);this.blur();}">
+                  <div style="display:flex;align-items:center;gap:1px;">
+                    <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxStepFont(-1)" title="减小字号 (Ctrl+Shift+&lt;)" style="font-size:11px;padding:0 4px;font-weight:bold;">A<sub style="font-size:7px">-</sub></button>
+                    <select id="wa-pptx-fontsize" class="wa-pptx-tb-select" onmousedown="event.stopPropagation()" onchange="WA.pptxFontSize(this.value)" title="字号 (Ctrl+Shift+&gt;/&lt;)">
+                      <option>8</option><option>10</option><option>12</option><option>14</option>
+                      <option>16</option><option>18</option><option>20</option><option>24</option>
+                      <option>28</option><option>32</option><option>36</option><option>40</option><option>48</option><option>60</option><option>72</option>
+                    </select>
+                    <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxStepFont(+1)" title="增大字号 (Ctrl+Shift+&gt;)" style="font-size:11px;padding:0 4px;font-weight:bold;">A<sup style="font-size:7px">+</sup></button>
+                  </div>
                   <div class="wa-pptx-tb-vsep"></div>
                   <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-bold" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('bold')" title="加粗 (Ctrl+B)"><b>B</b></button>
                   <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-italic" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('italic')" title="斜体 (Ctrl+I)"><i>I</i></button>
                   <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-underline" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('underline')" title="下划线 (Ctrl+U)" style="text-decoration:underline">U</button>
+                  <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-strike" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('strikethrough')" title="删除线" style="text-decoration:line-through">S</button>
+                  <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-super" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('superscript')" title="上标" style="font-size:10px;">x<sup style="font-size:7px">2</sup></button>
+                  <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-sub" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('subscript')" title="下标" style="font-size:10px;">x<sub style="font-size:7px">2</sub></button>
                   <div class="wa-pptx-tb-vsep"></div>
-                  <label class="wa-pptx-tb-btn wa-pptx-color-btn" title="字体颜色">
+                  <div class="wa-pptx-tb-btn wa-pptx-color-btn" id="wa-pptx-color-trigger" title="字体颜色" onmousedown="event.preventDefault()" onclick="WA.pptxColorPicker('font',this)">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><text x="2" y="18" font-size="18" font-weight="bold" font-family="Arial">A</text></svg>
-                    <input id="wa-pptx-fontcolor" type="color" value="#000000" style="width:0;height:0;opacity:0;position:absolute" onchange="WA.pptxFontColor(this.value)">
                     <div id="wa-pptx-fontcolor-swatch" class="wa-pptx-color-swatch" style="background:#000"></div>
-                  </label>
+                  </div>
+                  <div class="wa-pptx-tb-btn wa-pptx-color-btn" id="wa-pptx-highlight-trigger" title="文字高亮色" onmousedown="event.preventDefault()" onclick="WA.pptxColorPicker('highlight',this)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3L5 21h14L15 3z" fill="currentColor" opacity="0.6"/></svg>
+                    <div id="wa-pptx-highlight-swatch" class="wa-pptx-color-swatch" style="background:#ffff00"></div>
+                  </div>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxClearFormat()" title="清除格式" style="font-size:11px;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 4L8.12 15.88"/><path d="M15.37 15.37L12 19l-7-7 2.63-3.37"/><path d="M3.5 21h18"/></svg>
+                  </button>
                 </div>
                 <div class="wa-pptx-tb-grp-label">字体</div>
               </div>
@@ -275,23 +416,132 @@
               <!-- Home tab: Paragraph group -->
               <div class="wa-pptx-tb-grp" data-tab="home">
                 <div class="wa-pptx-tb-grp-btns">
-                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('left')" title="左对齐">
+                  <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-bullet" onmousedown="event.preventDefault()" onclick="WA.pptxToggleBullet()" title="项目符号">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="4" cy="6" r="1.5" fill="currentColor"/><circle cx="4" cy="12" r="1.5" fill="currentColor"/><circle cx="4" cy="18" r="1.5" fill="currentColor"/><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-pptx-numbered" onmousedown="event.preventDefault()" onclick="WA.pptxToggleNumbered()" title="编号列表">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><text x="1" y="8" font-size="7" fill="currentColor" stroke="none">1.</text><text x="1" y="14" font-size="7" fill="currentColor" stroke="none">2.</text><text x="1" y="20" font-size="7" fill="currentColor" stroke="none">3.</text><line x1="9" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/></svg>
+                  </button>
+                  <div class="wa-pptx-tb-vsep"></div>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxIndent(-1)" title="减少缩进">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="7 8 3 12 7 16"/><line x1="21" y1="12" x2="3" y2="12"/><line x1="21" y1="6" x2="11" y2="6"/><line x1="21" y1="18" x2="11" y2="18"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxIndent(+1)" title="增加缩进">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 8 21 12 17 16"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="13" y2="6"/><line x1="3" y1="18" x2="13" y2="18"/></svg>
+                  </button>
+                  <div class="wa-pptx-tb-vsep"></div>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('left')" title="左对齐 (Ctrl+Shift+L)">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="15" y2="12"/><line x1="3" y1="18" x2="18" y2="18"/></svg>
                   </button>
-                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('center')" title="居中">
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('center')" title="居中 (Ctrl+Shift+E)">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
                   </button>
-                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('right')" title="右对齐">
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('right')" title="右对齐 (Ctrl+Shift+R)">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="6" y1="18" x2="21" y2="18"/></svg>
                   </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxAlign('justify')" title="两端对齐 (Ctrl+Shift+J)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                  </button>
+                  <div class="wa-pptx-tb-vsep"></div>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxVertAlign('top')" title="顶端对齐文字">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="3" x2="21" y2="3"/><line x1="9" y1="8" x2="9" y2="21"/><line x1="15" y1="8" x2="15" y2="21"/><line x1="9" y1="8" x2="15" y2="8"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxVertAlign('ctr')" title="垂直居中文字">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="9" y1="5" x2="9" y2="19"/><line x1="15" y1="5" x2="15" y2="19"/><line x1="9" y1="5" x2="15" y2="5"/><line x1="9" y1="19" x2="15" y2="19"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxVertAlign('b')" title="底端对齐文字">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="21" x2="21" y2="21"/><line x1="9" y1="3" x2="9" y2="16"/><line x1="15" y1="3" x2="15" y2="16"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
+                  </button>
+                  <div class="wa-pptx-tb-vsep"></div>
+                  <select id="wa-pptx-linespacing" class="wa-pptx-tb-select" onmousedown="event.stopPropagation()" onchange="WA.pptxLineSpacing(this.value)" title="行距">
+                    <option value="">行距</option>
+                    <option value="1.0">1.0</option><option value="1.15">1.15</option>
+                    <option value="1.5">1.5</option><option value="2.0">2.0</option>
+                    <option value="2.5">2.5</option><option value="3.0">3.0</option>
+                  </select>
                 </div>
                 <div class="wa-pptx-tb-grp-label">段落</div>
+              </div>
+
+              <div class="wa-pptx-tb-sep" data-tab="home"></div>
+
+              <!-- Home tab: Shape format group -->
+              <div class="wa-pptx-tb-grp" data-tab="home">
+                <div class="wa-pptx-tb-grp-btns">
+                  <div class="wa-pptx-tb-btn wa-pptx-color-btn" id="wa-pptx-fill-trigger" title="形状填充色" onmousedown="event.preventDefault()" onclick="WA.pptxColorPicker('fill',this)">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" fill="currentColor" opacity="0.3"/></svg>
+                    <div id="wa-pptx-shapefill-swatch" class="wa-pptx-color-swatch" style="background:#fff;border:1px solid var(--border)"></div>
+                  </div>
+                  <div class="wa-pptx-tb-btn wa-pptx-color-btn" id="wa-pptx-border-trigger" title="形状边框色" onmousedown="event.preventDefault()" onclick="WA.pptxColorPicker('border',this)">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+                    <div id="wa-pptx-shapeborder-swatch" class="wa-pptx-color-swatch" style="background:#000"></div>
+                  </div>
+                  <select id="wa-pptx-borderwidth" class="wa-pptx-tb-select" onmousedown="event.stopPropagation()" onchange="WA.pptxBorderWidth(this.value)" title="边框粗细" style="width:48px">
+                    <option value="0">无</option>
+                    <option value="0.5">0.5pt</option><option value="1" selected>1pt</option>
+                    <option value="1.5">1.5pt</option><option value="2">2pt</option>
+                    <option value="3">3pt</option>
+                  </select>
+                  <div class="wa-pptx-tb-vsep"></div>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxZOrder('front')" title="置于顶层 (Ctrl+Shift+])">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="1"/><rect x="3" y="3" width="12" height="12" rx="1" fill="currentColor" opacity="0.25"/><polyline points="15 4 19 4 19 8"/><line x1="19" y1="4" x2="13" y2="10"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxZOrder('back')" title="置于底层 (Ctrl+Shift+[)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="12" height="12" rx="1"/><rect x="9" y="9" width="12" height="12" rx="1" fill="currentColor" opacity="0.25"/><polyline points="9 20 5 20 5 16"/><line x1="5" y1="20" x2="11" y2="14"/></svg>
+                  </button>
+                  <select id="wa-pptx-opacity" class="wa-pptx-tb-select" onmousedown="event.stopPropagation()" onchange="WA.pptxOpacity(this.value)" title="透明度" style="width:54px">
+                    <option value="100" selected>100%</option>
+                    <option value="90">90%</option><option value="80">80%</option>
+                    <option value="70">70%</option><option value="60">60%</option>
+                    <option value="50">50%</option><option value="40">40%</option>
+                    <option value="30">30%</option><option value="20">20%</option>
+                    <option value="10">10%</option>
+                  </select>
+                </div>
+                <div class="wa-pptx-tb-grp-label">形状</div>
+              </div>
+
+              <div class="wa-pptx-tb-sep" data-tab="home"></div>
+
+              <!-- Home tab: Slide Background group -->
+              <div class="wa-pptx-tb-grp" data-tab="home">
+                <div class="wa-pptx-tb-grp-btns">
+                  <!-- Slide background color picker -->
+                  <div class="wa-pptx-tb-btn wa-pptx-color-btn" id="wa-pptx-bg-trigger" title="幻灯片背景颜色" onmousedown="event.preventDefault()" onclick="WA.pptxColorPicker('bg',this)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect x="2" y="4" width="20" height="16" rx="2" fill="currentColor" opacity="0.15"/>
+                      <rect x="2" y="4" width="20" height="16" rx="2"/>
+                      <path d="M8 14 L12 8 L16 14" stroke="currentColor" stroke-width="1.5" fill="none"/>
+                      <line x1="9.5" y1="12" x2="14.5" y2="12" stroke="currentColor" stroke-width="1.5"/>
+                    </svg>
+                    <div id="wa-pptx-bg-swatch" class="wa-pptx-color-swatch" style="background:#ffffff;border:1px solid var(--border)"></div>
+                  </div>
+                  <!-- Slide background image upload -->
+                  <button class="wa-pptx-tb-btn" title="设置背景图片" onmousedown="event.preventDefault()" onclick="document.getElementById('wa-pptx-bg-img-input').click()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect x="2" y="4" width="20" height="16" rx="2"/>
+                      <circle cx="8.5" cy="9.5" r="1.5" fill="currentColor"/>
+                      <polyline points="21 17 16 12 11 17"/>
+                      <polyline points="11 17 8 14 2 20"/>
+                    </svg>
+                  </button>
+                  <input type="file" id="wa-pptx-bg-img-input" accept="image/*" style="display:none" onchange="WA.pptxSetBgImage(this)">
+                  <!-- Remove background -->
+                  <button class="wa-pptx-tb-btn" title="移除背景（设为白色）" onmousedown="event.preventDefault()" onclick="WA.pptxRemoveBg()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <rect x="2" y="4" width="20" height="16" rx="2"/>
+                      <line x1="6" y1="8" x2="18" y2="16" stroke="#e55" stroke-width="2"/>
+                      <line x1="18" y1="8" x2="6" y2="16" stroke="#e55" stroke-width="2"/>
+                    </svg>
+                  </button>
+                </div>
+                <div class="wa-pptx-tb-grp-label">背景</div>
               </div>
 
               <!-- Insert tab: Textbox group (hidden by default) -->
               <div class="wa-pptx-tb-grp" data-tab="insert" style="display:none">
                 <div class="wa-pptx-tb-grp-btns">
-                  <button id="wa-pptx-insert-tb" class="wa-pptx-tb-btn wa-pptx-newslide-btn" onclick="WA.pptxInsertMode()" title="点击激活，然后在幻灯片上拖拽绘制文本框">
+                  <button id="wa-pptx-insert-tb" class="wa-pptx-tb-btn wa-pptx-newslide-btn" onmousedown="event.preventDefault()" onclick="WA.pptxInsertMode()" title="点击激活，然后在幻灯片上拖拽绘制文本框">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="12" y1="8" x2="12" y2="16"/></svg>
                     <span>文本框</span>
                   </button>
@@ -299,10 +549,97 @@
                 <div class="wa-pptx-tb-grp-label">文本</div>
               </div>
 
+              <!-- Insert tab: Image group (hidden by default) -->
+              <div class="wa-pptx-tb-grp" data-tab="insert" style="display:none">
+                <div class="wa-pptx-tb-grp-btns">
+                  <button class="wa-pptx-tb-btn wa-pptx-newslide-btn" onmousedown="event.preventDefault()" onclick="WA.pptxInsertImageClick()" title="插入本地图片">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/><polyline points="21 15 16 10 5 21"/></svg>
+                    <span>图片</span>
+                  </button>
+                  <input type="file" id="wa-pptx-img-input" accept="image/*" style="display:none" onchange="WA.pptxInsertImageFile(this)">
+                </div>
+                <div class="wa-pptx-tb-grp-label">图片</div>
+              </div>
+
+              <!-- Insert tab: Shapes (hidden by default) -->
+              <div class="wa-pptx-tb-grp" data-tab="insert" style="display:none">
+                <div class="wa-pptx-tb-grp-btns">
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxInsertShape('rect')" title="矩形">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="1"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxInsertShape('roundRect')" title="圆角矩形">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="4"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxInsertShape('ellipse')" title="椭圆/圆形">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="9" ry="7"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxInsertShape('line')" title="直线">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="3" y1="21" x2="21" y2="3"/></svg>
+                  </button>
+                  <button class="wa-pptx-tb-btn" onmousedown="event.preventDefault()" onclick="WA.pptxInsertShape('rightArrow')" title="箭头">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="19" y2="12"/><polyline points="13 6 19 12 13 18"/></svg>
+                  </button>
+                </div>
+                <div class="wa-pptx-tb-grp-label">形状</div>
+              </div>
+
+              <!-- Format tab: Size & position (hidden by default) -->
+              <div class="wa-pptx-tb-grp" data-tab="format" style="display:none">
+                <div class="wa-pptx-tb-grp-btns" style="flex-wrap:wrap;max-width:200px;">
+                  <label style="font-size:10px;color:#aaa;display:flex;align-items:center;gap:3px;">
+                    W<input id="wa-pptx-shapeW" type="number" min="1" step="1" class="wa-pptx-tb-select" style="width:52px;" onmousedown="event.stopPropagation()" onchange="WA.pptxSetShapeSize('w',this.value)" title="宽度 (px 显示)">
+                  </label>
+                  <label style="font-size:10px;color:#aaa;display:flex;align-items:center;gap:3px;">
+                    H<input id="wa-pptx-shapeH" type="number" min="1" step="1" class="wa-pptx-tb-select" style="width:52px;" onmousedown="event.stopPropagation()" onchange="WA.pptxSetShapeSize('h',this.value)" title="高度 (px 显示)">
+                  </label>
+                  <label style="font-size:10px;color:#aaa;display:flex;align-items:center;gap:3px;">
+                    X<input id="wa-pptx-shapeX" type="number" min="0" step="1" class="wa-pptx-tb-select" style="width:52px;" onmousedown="event.stopPropagation()" onchange="WA.pptxSetShapePos('x',this.value)" title="X 位置">
+                  </label>
+                  <label style="font-size:10px;color:#aaa;display:flex;align-items:center;gap:3px;">
+                    Y<input id="wa-pptx-shapeY" type="number" min="0" step="1" class="wa-pptx-tb-select" style="width:52px;" onmousedown="event.stopPropagation()" onchange="WA.pptxSetShapePos('y',this.value)" title="Y 位置">
+                  </label>
+                  <label style="font-size:10px;color:#aaa;display:flex;align-items:center;gap:3px;">
+                    ↻<input id="wa-pptx-shapeRot" type="number" min="-360" max="360" step="1" class="wa-pptx-tb-select" style="width:52px;" value="0" onmousedown="event.stopPropagation()" onchange="WA.pptxSetShapeRot(this.value)" title="旋转角度 (°)">
+                  </label>
+                </div>
+                <div class="wa-pptx-tb-grp-label">大小与位置</div>
+              </div>
+
             </div>
 
             <!-- Context menu -->
-            <div id="wa-pptx-ctx" style="display:none;position:fixed;background:#2b2b2b;border:1px solid #444;border-radius:4px;padding:4px 0;z-index:9999;min-width:140px;box-shadow:0 4px 16px rgba(0,0,0,.5);font-size:13px;color:#eee;"></div>
+            <div id="wa-pptx-ctx" style="display:none;position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:4px 0;z-index:9999;min-width:140px;box-shadow:0 10px 28px rgba(0,0,0,.16);font-size:13px;color:var(--text);"></div>
+            <!-- PPTX floating format hover bar – appears near text selection (like TipTap's hoverbar in DOCX) -->
+            <div id="wa-pptx-hoverbar" onmousedown="event.preventDefault()" style="display:none;position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:2px 5px;z-index:9998;box-shadow:0 10px 28px rgba(0,0,0,.16);align-items:center;gap:2px;user-select:none;color:var(--text);">
+              <input id="wa-hb-fontname" type="text" value="Calibri" title="字体" class="wa-pptx-tb-input-font" style="width:72px;height:22px;font-size:11px;" onmousedown="event.stopPropagation()" onchange="WA.pptxFontName(this.value)" onblur="WA.pptxFontName(this.value)" onkeydown="if(event.key==='Enter'){WA.pptxFontName(this.value);this.blur();}">
+              <select id="wa-hb-fontsize" class="wa-pptx-tb-select" title="字号" style="width:44px;height:22px;font-size:11px;" onmousedown="event.stopPropagation()" onchange="WA.pptxFontSize(this.value)">
+                <option>8</option><option>10</option><option>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>32</option><option>36</option><option>40</option><option>48</option><option>60</option><option>72</option>
+              </select>
+              <div class="wa-pptx-tb-vsep" style="height:16px;margin:0 1px;"></div>
+              <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-hb-bold" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('bold')" title="加粗 (Ctrl+B)"><b>B</b></button>
+              <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-hb-italic" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('italic')" title="斜体 (Ctrl+I)"><i>I</i></button>
+              <button class="wa-pptx-tb-btn wa-pptx-fmt" id="wa-hb-underline" onmousedown="event.preventDefault()" onclick="WA.pptxFmt('underline')" title="下划线 (Ctrl+U)" style="text-decoration:underline">U</button>
+              <div class="wa-pptx-tb-vsep" style="height:16px;margin:0 1px;"></div>
+              <div class="wa-pptx-tb-btn wa-pptx-color-btn" id="wa-hb-color-trigger" title="字体颜色" onmousedown="event.preventDefault()" onclick="WA.pptxColorPicker('font',this)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><text x="2" y="18" font-size="18" font-weight="bold" font-family="Arial">A</text></svg>
+                <div id="wa-hb-color-swatch" class="wa-pptx-color-swatch" style="background:#000"></div>
+              </div>
+              <div class="wa-pptx-tb-vsep" style="height:16px;margin:0 1px;"></div>
+              <button class="wa-pptx-tb-btn" style="font-size:11px;padding:1px 6px;color:var(--active-text);" onmousedown="event.preventDefault()" onclick="WA.pptxHoverAI('polish')" title="AI 润色">润色</button>
+              <button class="wa-pptx-tb-btn" style="font-size:11px;padding:1px 6px;color:var(--active-text);" onmousedown="event.preventDefault()" onclick="WA.pptxHoverAI('translate')" title="AI 翻译">翻译</button>
+              <button class="wa-pptx-tb-btn" style="font-size:11px;padding:1px 6px;color:var(--active-text);" onmousedown="event.preventDefault()" onclick="WA.pptxHoverAI('explain')" title="AI 解释">解释</button>
+            </div>
+            <!-- DOCX hoverbar and colour picker moved to body level (outside #wa-pptx-editor) so they are never hidden by a display:none parent -->
+
+            <!-- In-page colour picker: no OS dialog, keeps contentEditable focus so selection highlight survives -->
+            <div id="wa-pptx-cp" onmousedown="event.preventDefault()" style="display:none;position:fixed;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px;z-index:10000;box-shadow:0 14px 32px rgba(0,0,0,.18);user-select:none;color:var(--text);">
+              <div id="wa-pptx-cp-grid" style="display:grid;grid-template-columns:repeat(8,18px);gap:3px;"></div>
+              <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);display:flex;align-items:center;gap:6px;">
+                <span style="color:var(--text-muted);font-size:11px;white-space:nowrap;">自定义:</span>
+                <input type="color" id="wa-pptx-cp-custom" value="#000000" style="width:32px;height:20px;padding:1px;border:1px solid var(--border);border-radius:3px;cursor:pointer;background:transparent" onmousedown="event.stopPropagation()" onchange="WA._pptxPickColor(this.value,true)">
+                <span id="wa-pptx-cp-hex" style="color:var(--text-muted);font-size:11px;font-family:monospace;min-width:54px;">#000000</span>
+              </div>
+            </div>
 
             <!-- Slide canvas -->
             <div id="wa-pptx-slide-area">
@@ -311,11 +648,11 @@
 
             <!-- Status bar: navigation + zoom (like PowerPoint's bottom bar) -->
             <div id="wa-pptx-statusbar">
-              <button class="wa-pptx-sb-nav" id="wa-pptx-prev" onclick="WA.pptxNav(-1)" title="上一张 (←)">
+              <button class="wa-pptx-sb-nav" id="wa-pptx-prev" onmousedown="event.preventDefault()" onclick="WA.pptxNav(-1)" title="上一张 (PageUp)">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
               </button>
               <span id="wa-pptx-slide-counter" class="wa-pptx-sb-counter">1 / 1</span>
-              <button class="wa-pptx-sb-nav" id="wa-pptx-next" onclick="WA.pptxNav(1)" title="下一张 (→)">
+              <button class="wa-pptx-sb-nav" id="wa-pptx-next" onmousedown="event.preventDefault()" onclick="WA.pptxNav(1)" title="下一张 (PageDown)">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
               </button>
               <span class="wa-pptx-sb-sep"></span>
@@ -332,8 +669,203 @@
           </div>
         </div>
 
-        <!-- PDF: PDF.js viewer -->
-        <div id="wa-pdf-viewer"></div>
+        <!-- PDF: Full-featured viewer (Adobe-style) -->
+        <div id="wa-pdf-editor">
+          <!-- Left: Sidebar (thumbnails + bookmarks) -->
+          <div id="wa-pdf-sidebar">
+            <div id="wa-pdf-sidebar-tabs">
+              <button class="wa-pdf-stab active" data-panel="thumbs" onmousedown="event.preventDefault()" onclick="WA.pdfSidebarTab(this)" title="页面缩略图">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </button>
+              <button class="wa-pdf-stab" data-panel="bookmarks" onmousedown="event.preventDefault()" onclick="WA.pdfSidebarTab(this)" title="书签 / 大纲">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20l-7-4-7 4V2z"/></svg>
+              </button>
+            </div>
+            <div id="wa-pdf-thumbstrip" class="wa-pdf-sidebar-panel"></div>
+            <div id="wa-pdf-bookmarks" class="wa-pdf-sidebar-panel" style="display:none"></div>
+          </div>
+          <!-- Main: Toolbar + Canvas + Status -->
+          <div id="wa-pdf-main">
+            <!-- Search bar (hidden by default) -->
+            <div id="wa-pdf-search-bar" style="display:none">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="wa-pdf-search-input" placeholder="在文档中搜索…" autocomplete="off"
+                oninput="WA.pdfSearchInput(this.value)" onkeydown="WA.pdfSearchKeydown(event)">
+              <span id="wa-pdf-search-count" class="wa-pdf-search-count"></span>
+              <button class="wa-pdf-search-nav" onmousedown="event.preventDefault()" onclick="WA.pdfSearchPrev()" title="上一处 (Shift+Enter)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+              </button>
+              <button class="wa-pdf-search-nav" onmousedown="event.preventDefault()" onclick="WA.pdfSearchNext()" title="下一处 (Enter)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <button class="wa-pdf-search-close" onmousedown="event.preventDefault()" onclick="WA.pdfSearchClose()" title="关闭 (Esc)">✕</button>
+            </div>
+            <!-- Annotation toolbar (visible when annot panel open) -->
+            <div id="wa-pdf-annot-bar" style="display:none">
+              <div class="wa-pdf-annot-group">
+                <button id="wa-pdf-abt-highlight" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('highlight')" title="高亮 (H)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/></svg>高亮
+                </button>
+                <button id="wa-pdf-abt-underline" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('underline')" title="下划线 (U)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v9a6 6 0 0 0 12 0V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg>下划线
+                </button>
+                <button id="wa-pdf-abt-strikethrough" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('strikethrough')" title="删除线">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><path d="M16 6C16 6 14.5 4 12 4s-4 1.5-4 4c0 .5.1 1 .3 1.4"/></svg>删除线
+                </button>
+                <button id="wa-pdf-abt-note" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('note')" title="便笺 (N)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>便笺
+                </button>
+                <button id="wa-pdf-abt-draw" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('draw')" title="画笔 (P)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><circle cx="11" cy="11" r="2"/></svg>画笔
+                </button>
+                <button id="wa-pdf-abt-rect" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('rect')" title="矩形 (R)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/></svg>矩形
+                </button>
+                <button id="wa-pdf-abt-ellipse" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('ellipse')" title="椭圆 (E)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="12" rx="10" ry="6"/></svg>椭圆
+                </button>
+                <button id="wa-pdf-abt-line" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('line')" title="直线 (L)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="20" x2="20" y2="4"/></svg>直线
+                </button>
+                <button id="wa-pdf-abt-arrow" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('arrow')" title="箭头">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M14 7l5 5-5 5"/></svg>箭头
+                </button>
+                <button id="wa-pdf-abt-textbox" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('textbox')" title="文本框 (T)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="1"/><path d="M9 10h6M12 10v5"/></svg>文本框
+                </button>
+                <button id="wa-pdf-abt-eraser" class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotMode('eraser')" title="橡皮擦 (X)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20H7L3 16l13-13 6 6-2 2"/><path d="M6.5 17.5l4-4"/></svg>橡皮擦
+                </button>
+              </div>
+              <div class="wa-pdf-annot-sep"></div>
+              <div class="wa-pdf-annot-group">
+                <label class="wa-pdf-abt wa-pdf-annot-color-btn" title="标注颜色">
+                  <input type="color" id="wa-pdf-annot-color" value="#FFFF00" onchange="WA.pdfAnnotColor(this.value)">
+                  <svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" id="wa-pdf-annot-color-circle" fill="#FFFF00" stroke="#888" stroke-width="1"/></svg>颜色
+                </label>
+              </div>
+              <div class="wa-pdf-annot-sep"></div>
+              <div class="wa-pdf-annot-group" title="线宽">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#bbc" stroke-width="2" style="flex-shrink:0"><line x1="4" y1="12" x2="20" y2="12" stroke-width="3"/></svg>
+                <input type="range" id="wa-pdf-linewidth" min="1" max="10" value="2" step="1" class="wa-pdf-lw-slider" title="线宽" oninput="WA.pdfLineWidth(this.value)">
+              </div>
+              <div class="wa-pdf-annot-sep"></div>
+              <div class="wa-pdf-annot-group">
+                <button class="wa-pdf-abt" onmousedown="event.preventDefault()" onclick="WA.pdfSaveAnnotations()" title="保存批注到 PDF">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>保存批注
+                </button>
+                <button class="wa-pdf-abt" disabled onmousedown="event.preventDefault()" title="AI 标注迁移中，暂不可用">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3-3.8-2.8-3.8 2.8 1.4-4.3-3.6-2.7h4.5Z" fill="currentColor"/></svg>AI 标注
+                </button>
+              </div>
+              <div style="flex:1"></div>
+              <button class="wa-pdf-abt wa-pdf-abt-close" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotClose()" title="关闭批注工具栏">✕</button>
+            </div>
+            <!-- PDF canvas scroll area -->
+            <div id="wa-pdf-viewer"></div>
+            <!-- Status bar -->
+            <div id="wa-pdf-statusbar">
+              <button class="wa-pdf-sb-btn" onmousedown="event.preventDefault()" onclick="WA.pdfToggleSidebar()" title="切换侧边栏">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+              </button>
+              <div class="wa-pdf-sb-sep"></div>
+              <button class="wa-pdf-sb-btn" onmousedown="event.preventDefault()" onclick="WA.pdfSearchOpen()" title="搜索文档 (Ctrl+F)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              </button>
+              <button class="wa-pdf-sb-btn" onmousedown="event.preventDefault()" onclick="WA.pdfAnnotOpen()" title="批注工具">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+              <div class="wa-pdf-sb-sep"></div>
+              <button class="wa-pdf-sb-btn" onmousedown="event.preventDefault()" onclick="WA.pdfPageMgrOpen()" title="页面管理（旋转/删除/重排/拆分）">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="8" height="10" rx="1"/><rect x="14" y="2" width="8" height="10" rx="1"/><rect x="2" y="15" width="8" height="7" rx="1"/><rect x="14" y="15" width="8" height="7" rx="1"/></svg>
+              </button>
+              <div class="wa-pdf-sb-sep"></div>
+              <div class="wa-pdf-convert-wrap">
+                <button class="wa-pdf-sb-btn" onmousedown="event.preventDefault()" onclick="WA.pdfConvertMenu(this)" title="格式转换">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 16V4m0 0L3 8m4-4 4 4"/><path d="M17 8v12m0 0 4-4m-4 4-4-4"/></svg>&nbsp;转换
+                </button>
+                <div class="wa-pdf-convert-menu" id="wa-pdf-convert-menu" style="display:none">
+                  <div class="wa-pcm-item" onmousedown="event.preventDefault()" onclick="WA.pdfConvert('docx')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="#4a9eff"><rect x="3" y="2" width="18" height="20" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 9h8M8 13h5" stroke="currentColor" stroke-width="1.5"/></svg>
+                    转为 Word (.docx)
+                  </div>
+                  <div class="wa-pcm-item" onmousedown="event.preventDefault()" onclick="WA.pdfConvert('xlsx')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="2" width="18" height="20" rx="2" fill="none" stroke="#5cb85c" stroke-width="1.5"/><path d="M8 8h8M8 12h8M8 16h5" stroke="#5cb85c" stroke-width="1.5"/></svg>
+                    转为 Excel (.xlsx)
+                  </div>
+                  <div class="wa-pcm-item" onmousedown="event.preventDefault()" onclick="WA.pdfConvert('pptx')">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><rect x="3" y="2" width="18" height="20" rx="2" fill="none" stroke="#ff8c42" stroke-width="1.5"/><path d="M8 9h4a3 3 0 0 1 0 6H8V9z" stroke="#ff8c42" stroke-width="1.5"/></svg>
+                    转为 PPT (.pptx)
+                  </div>
+                </div>
+              </div>
+              <button class="wa-pdf-sb-btn" onmousedown="event.preventDefault()" onclick="WA.pdfRemoveWatermark()" title="清理自有文档水印">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ff7070" stroke-width="2"/></svg>&nbsp;清理水印
+              </button>
+              <div class="wa-pdf-sb-sep"></div>
+              <span id="wa-pdf-page-counter" class="wa-pdf-sb-counter">第 1 页，共 1 页</span>
+              <span style="flex:1"></span>
+              <span id="wa-pdf-zoom-label" class="wa-pptx-sb-zoom-label">100%</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <input type="range" id="wa-pdf-zoom" min="50" max="300" value="100" step="10"
+                class="wa-pptx-sb-zoom-slider" oninput="WA.pdfZoom(this.value)">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#aaa" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </div>
+          </div>
+        </div>
+        <!-- PDF Page Manager Modal -->
+        <div id="wa-pdf-pagemgr" style="display:none" onclick="if(event.target===this)WA.pdfPageMgrClose()">
+          <div id="wa-pdf-pagemgr-dialog">
+            <div id="wa-pdf-pagemgr-header">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="8" height="10" rx="1"/><rect x="14" y="2" width="8" height="10" rx="1"/><rect x="2" y="15" width="8" height="7" rx="1"/><rect x="14" y="15" width="8" height="7" rx="1"/></svg>
+              <span>页面管理</span>
+              <span style="flex:1"></span>
+              <button class="wa-pmgr-btn wa-pmgr-btn-primary" onmousedown="event.preventDefault()" onclick="WA.pdfPageMgrExport()" title="将选中页面导出为新 PDF">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                导出选中
+              </button>
+              <button class="wa-pmgr-btn wa-pmgr-btn-primary" onmousedown="event.preventDefault()" onclick="WA.pdfPageMgrApply()" title="应用页面排列、旋转与删除">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+                应用更改
+              </button>
+              <button class="wa-pmgr-btn" onmousedown="event.preventDefault()" onclick="WA.pdfPageMgrClose()" title="关闭">✕</button>
+            </div>
+            <div id="wa-pdf-pagemgr-hint">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              拖拽重排 · 点击旋转 · 勾选后可导出选中页
+            </div>
+            <div id="wa-pdf-pagemgr-grid"></div>
+          </div>
+        </div>
+        <!-- PDF Watermark Removal Modal -->
+        <div id="wa-pdf-watermark-overlay" style="display:none;position:absolute;inset:0;background:rgba(0,0,0,.55);z-index:9998;display:none;align-items:center;justify-content:center" onclick="if(event.target===this)WA.pdfWatermarkClose()">
+          <div id="wa-pdf-watermark-dialog">
+            <div class="wa-pwm-header">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+              <span>清理自有文档水印</span>
+              <span style="flex:1"></span>
+              <button class="wa-pwm-close" onclick="WA.pdfWatermarkClose()">✕</button>
+            </div>
+            <div class="wa-pwm-body">
+              <p id="wa-pwm-status" style="margin:0 0 10px;font-size:13px;color:var(--text-muted)">正在检测自有文档水印…</p>
+              <div id="wa-pwm-progress" style="height:4px;background:#3a3d50;border-radius:2px;overflow:hidden;margin-bottom:12px">
+                <div id="wa-pwm-bar" style="height:100%;width:0%;background:var(--primary,#7c6af5);transition:width .3s"></div>
+              </div>
+              <div id="wa-pwm-result" style="font-size:12px;color:var(--text-muted)"></div>
+            </div>
+            <div class="wa-pwm-footer">
+              <a id="wa-pwm-download" href="#" download style="display:none" class="wa-pmgr-btn wa-pmgr-btn-primary">下载清理后 PDF</a>
+              <button onclick="WA.pdfWatermarkClose()" class="wa-pmgr-btn">关闭</button>
+            </div>
+          </div>
+        </div>
+        <div id="wa-image-viewer"></div>
+
+        <!-- Text / Code: plain text editor -->
+        <div id="wa-text-editor">
+          <div id="wa-text-lang-badge"></div>
+          <textarea id="wa-text-content" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea>
+        </div>
       </div>
     </div>
 
@@ -351,150 +883,209 @@
           <span id="wa-ai-model-badge">Koto AI</span>
         </div>
         <div class="wa-ai-header-btns">
-          <button id="wa-settings-btn" title="AI 输出设置" onclick="WA.toggleSettings()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="3"/>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-            </svg>
-          </button>
-          <button id="wa-clear-chat-btn" title="清空对话" onclick="WA.clearChat()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"/>
-              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
-              <path d="M10 11v6M14 11v6"/>
-              <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
-            </svg>
-          </button>
+          <button id="wa-theme-toggle-btn" title="切换明暗主题" onclick="WA.toggleTheme()"></button>
         </div>
+      </div>
+      <div id="wa-ai-route-info" style="display:none;padding:0 12px 8px;font-size:11px;color:var(--text-muted);"></div>
+
+      <div id="wa-review-shell" class="wa-review-shell" style="display:none">
+        <div class="wa-review-shell-header">
+          <div class="wa-review-shell-title-group">
+            <span class="wa-review-shell-title">批注与修订</span>
+            <span id="wa-review-summary" class="wa-review-summary">当前文档暂无批注或修订</span>
+          </div>
+          <button type="button" class="wa-review-shell-close" onclick="WA.closeReviewCenter()" title="关闭批注栏">关闭</button>
+        </div>
+        <div id="wa-review-mode-group" class="wa-review-mode-group">
+          <button type="button" class="wa-review-mode-btn is-active" data-mode="all" onclick="WA.setReviewMode('all')">全部</button>
+          <button type="button" class="wa-review-mode-btn" data-mode="comments" onclick="WA.setReviewMode('comments')">批注模式</button>
+          <button type="button" class="wa-review-mode-btn" data-mode="proposals" onclick="WA.setReviewMode('proposals')">修订</button>
+        </div>
+        <div id="wa-review-list" class="koto-docx-comment-layer"></div>
       </div>
 
-      <!-- Settings panel (collapsible) -->
-      <div id="wa-ai-settings-panel">
-        <div class="wa-setting-label">本地模型（Ollama）</div>
-        <div class="wa-output-mode-toggle" style="margin-bottom:4px">
-          <button data-local-mode="off" class="active" onclick="WA.setUseLocalModel(false)">☁️ 云端</button>
-          <button id="wa-local-on-btn" data-local-mode="on" onclick="WA.setUseLocalModel(true)">🦙 本地优先</button>
-        </div>
-        <div id="wa-ollama-status-row" style="font-size:10px;color:var(--text-muted);margin-bottom:10px;display:none">
-          <span id="wa-ollama-status-text"></span>
-        </div>
-        <div class="wa-setting-label">AI 模型</div>
-        <select id="wa-model-select" onchange="WA.setLockedModel(this.value)" style="width:100%;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--surface3,#222);color:var(--text);font-size:12px;margin-bottom:10px;cursor:pointer;">
-          <option value="auto">Auto（自动）</option>
-          <option value="gemini-3-flash-preview">Gemini Flash ⚡</option>
-          <option value="gemini-3-pro-preview">Gemini Pro</option>
-          <option value="gemini-3.1-pro-preview">Gemini Pro 3.1（代码）</option>
-        </select>
-        <div class="wa-setting-label">AI 输出模式</div>
-        <div class="wa-output-mode-toggle">
-          <button data-mode="inline" class="active" onclick="WA.setOutputMode('inline')">✏️ 写入文档</button>
-          <button data-mode="chat" onclick="WA.setOutputMode('chat')">💬 仅对话框</button>
-        </div>
-      </div>
-
-      <!-- Current analysis subject indicator -->
-      <div id="wa-subject-bar">
-        <span class="subject-tag" id="wa-subject-tag">文件</span>
-        <span class="subject-text" id="wa-subject-text"></span>
-      </div>
+      <!-- Skill Library overlay panel -->
+      <div id="wa-skill-library"></div>
 
       <!-- Messages -->
       <div id="wa-ai-messages">
-        <div class="wa-msg ai">你好！请从左侧打开一个文件，我可以帮你<strong>分析内容</strong>、<strong>润色文字</strong>、<strong>总结要点</strong>或<strong>翻译段落</strong>。<br><br>选中文档中的文字后，可快速将选区发送给我处理。AI 回复后可选择<b>替换选区</b>、<b>插入到后面</b>或<b>仅查看</b>。</div>
+        <!-- PEMO-style welcome card — hidden once any message is sent -->
+        <div class="wa-welcome" id="wa-ai-welcome">
+          <div class="wa-welcome-hero">
+            <div class="wa-welcome-avatar">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3l1.5 4.5h4.5l-3.6 2.7 1.4 4.3-3.8-2.8-3.8 2.8 1.4-4.3-3.6-2.7h4.5Z" fill="#fff" opacity="0.95"/>
+              </svg>
+            </div>
+            <h2 class="wa-welcome-title">欢迎使用 Koto AI</h2>
+            <p class="wa-welcome-sub">直接告诉我你想完成什么，只有明确选中的文本和分析文档会进入当前任务上下文。</p>
+          </div>
+        </div>
       </div>
 
-      <!-- Input area -->
+      <div id="wa-task-live-progress" class="wa-task-live-progress" hidden>
+        <div class="wa-task-live-top">
+          <span class="wa-task-live-title">文件任务</span>
+          <span class="wa-task-live-status" data-role="live-status">处理中</span>
+        </div>
+        <div class="wa-task-live-meta">
+          <span data-role="live-phase">执行任务</span>
+          <span data-role="live-plan">按计划 0/0</span>
+          <span data-role="live-progress-value">准备中</span>
+        </div>
+        <div class="wa-task-live-track"><i data-role="live-progress-fill"></i></div>
+      </div>
+
+      <!-- AI file drop overlay -->
+      <div id="wa-ai-file-drop" style="display:none">
+        <div class="wa-ai-file-drop-inner">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          <span>拖放补充文件到这里<br>AI 将一起分析</span>
+        </div>
+      </div>
+
+      <!-- Input area — simplified 3-layer structure -->
       <div id="wa-ai-input-area">
-        <!-- Selection chip -->
-        <div id="wa-selection-chip" style="display:none">
-          <span class="chip-quote-bar"></span>
-          <span id="wa-selection-preview"></span>
-          <button class="chip-clear" onclick="WA.clearSelection()" title="取消选区">×</button>
+        <!-- Layer 1: Context bar (selection preview + file context, single line) -->
+        <div id="wa-context-bar" style="display:none">
+          <!-- Dynamically filled by _updateContextBar() -->
         </div>
-        <div id="wa-context-indicator" style="display:none">
-          <div class="ctx-dot"></div>
-          <span id="wa-ctx-label">已附加上下文</span>
+
+        <!-- Attached analysis files -->
+        <div id="wa-ai-file-chips" style="display:none">
+          <div class="wa-ai-file-chips-header">
+            <!-- Header and rows are dynamically filled by _renderAIFileChips() -->
+          </div>
+          <div id="wa-ai-file-chip-list" class="wa-ctx-file-list"></div>
+          <div class="wa-ctx-drop-hint">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>继续添加补充文件</span>
+          </div>
         </div>
-        <!-- Quick action chips -->
-        <div class="wa-ai-quick-actions" id="wa-quick-actions">
-          <button class="wa-quick-btn" onclick="WA.quickAction('请帮我润色当前内容')">润色</button>
-          <button class="wa-quick-btn" onclick="WA.quickAction('请帮我总结文档要点')">总结</button>
-          <button class="wa-quick-btn" onclick="WA.quickAction('请检查语法和错别字')">检查</button>
-          <button class="wa-quick-btn" onclick="WA.quickAction('请翻译选中内容为英文')">翻译</button>
-          <button class="wa-quick-btn chart-btn" onclick="WA.sendQuickAction('可视化')" title="将选中数据用 Python 可视化为图表">可视化</button>
-        </div>
-        <!-- Input box -->
+
+        <!-- Layer 2: Input box -->
         <div class="wa-input-box">
           <div id="wa-input-row">
-            <textarea id="wa-user-input" placeholder="有什么需要帮忙的？"
-                      onkeydown="WA.handleInputKeydown(event)" rows="1"></textarea>
+            <textarea id="wa-user-input" placeholder="可以直接告诉我你想要的结果。比如：基于我选中的内容列出 3 个结论，或结合分析文档告诉我下一步该怎么改。"
+                      onkeydown="WA.handleInputKeydown(event)" rows="6"></textarea>
           </div>
           <div class="wa-input-box-footer">
-            <span class="wa-input-hint">Enter 发送 · Shift+Enter 换行</span>
-            <button id="wa-send-btn" onclick="WA.sendMessage()" title="发送">
-              <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                <line x1="22" y1="2" x2="11" y2="13"/>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-              </svg>
-            </button>
+            <div class="wa-footer-meta">
+              {% include '_workspace_model_controls.html' %}
+              <!-- Workflow active indicator -->
+              <div id="wa-wf-active-indicator" style="display:none" class="wa-wf-active-chip">
+                <span id="wa-wf-active-icon"></span>
+                <span id="wa-wf-active-label"></span>
+              </div>
+            </div>
+            <div class="wa-footer-actions">
+              <button id="wa-send-btn" type="button" onclick="WA.sendMessage()" title="发送" aria-label="发送">
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                  <line x1="22" y1="2" x2="11" y2="13"/>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
     </div>
   </div>
 
-  <!-- Floating Selection Toolbar — 3 core actions -->
-  <div id="wa-pdf-tooltip" class="wa-selection-toolbar">
-    <button onclick="WA.sendQuickAction('润色')">润色</button>
-    <button onclick="WA.sendQuickAction('解释')">解释</button>
-    <button onclick="WA.sendSelectionToAI()">问 AI</button>
-    <div class="wa-toolbar-divider"></div>
-    <button onclick="WA.sendQuickAction('翻译')">翻译</button>
-    <button onclick="WA.sendQuickAction('改写')">改写</button>
-    <button onclick="WA.sendQuickAction('总结')">总结</button>
+  <!-- DOCX floating format hover bar – outside any editor container so it's never hidden by a display:none ancestor -->
+  <div id="wa-docx-hoverbar" onmousedown="event.preventDefault()">
+    <div class="wa-dhb-row">
+      <button class="wa-dhb-btn wa-dhb-close" onmousedown="event.preventDefault(); WA.closeDocxHoverBar(); return false;" title="关闭工具栏">✕</button>
+      <div class="wa-dhb-sep"></div>
+      <input id="wa-dh-fontname" type="text" value="宋体" title="字体" class="wa-dhb-font-input" onmousedown="event.stopPropagation()" onchange="WA.docxHoverFontFamily(this.value)" onblur="WA.docxHoverFontFamily(this.value)" onkeydown="if(event.key==='Enter'){WA.docxHoverFontFamily(this.value);this.blur();}">
+      <select id="wa-dh-fontsize" class="wa-dhb-font-select" title="字号" onmousedown="event.stopPropagation()" onchange="WA.docxHoverFontSize(this.value)">
+        <option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>14</option><option>16</option><option>18</option><option>20</option><option>24</option><option>28</option><option>32</option><option>36</option><option>48</option><option>72</option>
+      </select>
+      <div class="wa-dhb-sep"></div>
+      <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-bold" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('bold')" title="加粗 (Ctrl+B)"><b>B</b></button>
+      <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-italic" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('italic')" title="斜体 (Ctrl+I)"><i>I</i></button>
+      <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-underline" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('underline')" title="下划线 (Ctrl+U)"><span style="text-decoration:underline">U</span></button>
+      <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-strike" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('strike')" title="删除线"><s>S</s></button>
+      <div class="wa-dhb-sep"></div>
+      <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-align-left" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('justifyLeft')" title="左对齐">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="2" y1="6.5" x2="10" y2="6.5"/><line x1="2" y1="10" x2="14" y2="10"/><line x1="2" y1="13.5" x2="10" y2="13.5"/></svg>
+      </button>
+      <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-align-center" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('justifyCenter')" title="居中">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="4" y1="6.5" x2="12" y2="6.5"/><line x1="2" y1="10" x2="14" y2="10"/><line x1="4" y1="13.5" x2="12" y2="13.5"/></svg>
+      </button>
+      <button class="wa-dhb-btn wa-dhb-fmt" id="wa-dh-align-right" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('justifyRight')" title="右对齐">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="2" y1="3" x2="14" y2="3"/><line x1="6" y1="6.5" x2="14" y2="6.5"/><line x1="2" y1="10" x2="14" y2="10"/><line x1="6" y1="13.5" x2="14" y2="13.5"/></svg>
+      </button>
+      <div class="wa-dhb-sep"></div>
+      <div class="wa-dhb-btn wa-dhb-color-wrap" id="wa-dh-color-trigger" title="字体颜色" onmousedown="event.preventDefault()" onclick="WA.docxColorPicker('font',this)">
+        <span class="wa-dhb-color-letter">A</span>
+        <div id="wa-dh-color-swatch" class="wa-dhb-color-swatch" style="background:#000"></div>
+      </div>
+      <div class="wa-dhb-btn wa-dhb-color-wrap" id="wa-dh-bg-trigger" title="文字背景色" onmousedown="event.preventDefault()" onclick="WA.docxColorPicker('bg',this)">
+        <span class="wa-dhb-color-letter wa-dhb-color-bg-icon">A</span>
+        <div id="wa-dh-bg-swatch" class="wa-dhb-color-swatch wa-dhb-color-swatch-bg"></div>
+      </div>
+      <button class="wa-dhb-btn" onmousedown="event.preventDefault()" onclick="WA.docxHoverFmt('clearMarks')" title="清除格式">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2" y1="2" x2="14" y2="14"/><line x1="14" y1="2" x2="2" y2="14"/></svg>
+      </button>
+      <div class="wa-dhb-sep"></div>
+      <button class="wa-dhb-btn wa-dhb-ai" onmousedown="event.preventDefault()" onclick="WA.docxHoverAI('polish')" title="AI 润色">润色</button>
+      <button class="wa-dhb-btn wa-dhb-ai" onmousedown="event.preventDefault()" onclick="WA.docxHoverAI('translate')" title="AI 翻译">翻译</button>
+      <button class="wa-dhb-btn wa-dhb-ai" onmousedown="event.preventDefault()" onclick="WA.docxHoverAI('explain')" title="AI 解释">解释</button>
+    </div>
   </div>
+  <!-- DOCX in-page colour picker – body level -->
+  {% include '_workspace_docx_color_picker.html' %}
+
+  <!-- Floating Selection Toolbar — AI quick actions on selected text -->
+  {% set wa_pdf_tooltip_root_onmousedown = None %}
+  {% set wa_pdf_tooltip_show_pdf_annotation_actions = true %}
+  {% include '_workspace_selection_toolbar.html' %}
 
   <!-- Chart Generation Dialog -->
-  <div id="wa-chart-dialog">
-    <div class="wa-dialog-box">
-      <h3 id="wa-chart-dialog-title">Python 画图</h3>
-      <textarea id="wa-chart-prompt" placeholder="描述你想要的图表，例如：&#10;用柱状图显示各季度的销售额对比&#10;画一个折线图显示时间趋势&#10;用饼图展示各类别占比"></textarea>
-      <div style="font-size:12px;color:var(--text-muted)">
-        <span id="wa-chart-data-hint">💡 将使用当前表格的全量数据</span>
+  {% include '_workspace_chart_dialog_and_toast.html' %}
+
+  <!-- Source Preview Drawer →── anchored to bottom of AI panel -->
+  <div id="wa-source-preview" style="display:none">
+    <div class="wa-source-preview-header">
+      <span id="wa-source-preview-label"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M5 2.5l6 0 0 4.5-1.5 1.5V11H6.5V8.5L5 7z"/><path d="M8 11v3.5"/></svg> 来源预览</span>
+      <button onclick="WA.closeSourcePreview()" title="关闭">×</button>
+    </div>
+    <div id="wa-source-preview-body"></div>
+  </div>
+
+  <!-- Audio Overview Modal -->
+  <div id="wa-audio-modal" style="display:none" class="wa-dlg-overlay" onclick="if(event.target===this)WA.closeAudioModal()">
+    <div class="wa-audio-modal-box">
+      <div class="wa-audio-modal-header">
+        <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="2" width="5" height="8" rx="2.5"/><path d="M3 9a5 5 0 0 0 10 0"/><path d="M8 14v1.5"/></svg> 有声概览</span>
+        <button class="wa-dlg-close" onclick="WA.closeAudioModal()" title="关闭">×</button>
       </div>
-      <div class="wa-dialog-actions">
-        <button class="wa-btn" onclick="WA.closeChartDialog()">取消</button>
-        <button class="wa-btn primary" onclick="WA.submitChartRequest()">生成图表</button>
+      <div id="wa-audio-modal-body">
+        <div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成脚本…</div>
       </div>
     </div>
   </div>
 
-  <!-- Toast -->
-  <div id="wa-toast"></div>
+  <!-- Notebook Guide Drawer -->
+  <div id="wa-notebook-guide" style="display:none">
+    <div class="wa-notebook-header">
+      <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h3v10H2zM5 3h3v10H5zM8.5 3.5l3-.8 2.6 9.8-3 .8z"/></svg> 学习包</span>
+      <button class="wa-nb-close" onclick="WA.closeNotebookGuide()" title="关闭">×</button>
+    </div>
+    <div id="wa-notebook-body"><div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成学习包…</div></div>
+  </div>
 
   <!-- ── CDN Scripts ── -->
   <!-- Split.js served locally so a CDN failure cannot crash the IIFE -->
   <script src="/static/vendor/split.min.js"></script>
 
-  <!-- WangEditor 5 -->
-  <script src="https://cdn.jsdelivr.net/npm/@wangeditor/editor@latest/dist/index.js"></script>
-
-  <!-- PDF.js -->
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-  <script>
-    if (typeof pdfjsLib !== 'undefined') {
-      pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-    }
-  </script>
-
-  <!-- Socket.IO: load from CDN (vendor file not bundled) -->
-  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4/dist/socket.io.min.js"></script>
   <!-- Markdown renderer -->
   <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
 
   <!-- ── App JS ── -->
-  <script src="/static/js/workspace-assistant.js?v={{ range(100000,999999)|random }}"></script>
+  {% include '_workspace_asset_scripts.html' %}
 
   <!-- ── Open Folder as Workspace overlay ── -->
   <div id="wa-open-folder-overlay" style="display:none" class="wa-dlg-overlay" onclick="if(event.target===this)WA.closeFolderOverlay()">

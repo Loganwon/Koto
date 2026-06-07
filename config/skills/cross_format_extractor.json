@@ -1,0 +1,37 @@
+{
+  "id": "cross_format_extractor",
+  "name": "跨格式信息提取填报",
+  "icon": "📋",
+  "category": "workflow",
+  "skill_nature": "domain_skill",
+  "description": "从多个 PDF/Word/Excel 文件中批量提取字段，自动填入 Excel 模板，输出结构化汇总表",
+  "version": "1.0.0",
+  "author": "koto",
+  "executor": "app.core.workflows.cross_format_extractor.CrossFormatExtractor",
+  "params_schema": [
+    {
+      "key": "source_files",
+      "label": "来源文件（支持多选）",
+      "type": "file_multi",
+      "accept": ".pdf,.docx,.doc,.xlsx,.xls,.txt",
+      "required": true
+    },
+    {
+      "key": "template_file",
+      "label": "Excel 模板（第一行为字段名）",
+      "type": "file",
+      "accept": ".xlsx,.xls",
+      "required": true
+    },
+    {
+      "key": "model_mode",
+      "label": "模型",
+      "type": "select",
+      "options": [{"value": "online", "label": "在线模型"}, {"value": "local", "label": "本地模型"}],
+      "default": "online",
+      "required": false
+    }
+  ],
+  "output_types": ["xlsx_data"],
+  "enabled": false
+}

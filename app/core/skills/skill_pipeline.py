@@ -43,6 +43,8 @@ SkillChain（快捷方式）
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -78,6 +80,16 @@ class PipelineStep:
     skip_on_error: bool = True
     """True: 本步骤抛异常时记录日志并继续下一步，而非中止整个 pipeline。"""
 
+    condition: Optional[str] = None
+    """可选条件表达式。支持 ``$step_id.success``、``$step_id.output`` 等。
+    若求值为 False，则跳过本步骤。None = 无条件执行。"""
+
+    approval: Optional[str] = None
+    """若为 ``"required"``，pipeline 到达此步骤时暂停，等待用户审批后继续。"""
+
+    timeout_ms: int = 0
+    """本步骤的超时毫秒数。0 = 不限时（使用全局默认）。"""
+
     @property
     def effective_output_key(self) -> str:
         return self.output_key or self.skill_id
@@ -101,6 +113,13 @@ class PipelineResult:
 
     elapsed_ms: float
     """总耗时（毫秒）"""
+
+    status: str = "ok"
+    """Pipeline 结束状态: ``ok`` | ``needs_approval`` | ``error``。"""
+
+    resume_token: Optional[str] = None
+    """当 status='needs_approval' 时，包含序列化的 pipeline 状态，
+    前端持有此 token 可调用 resume() 继续执行。"""
 
     @property
     def success(self) -> bool:
@@ -137,14 +156,17 @@ class SkillPipeline:
         self,
         user_input: str,
         context: Optional[Dict[str, Any]] = None,
+        *,
+        _resume_from: int = 0,
     ) -> PipelineResult:
         """
         顺序执行所有步骤。
 
         Parameters
         ----------
-        user_input : 传递给每个步骤的用户原始输入（不可变，各步骤共享）
-        context    : 初始共享上下文 dict，会被各步骤的输出不断扩充
+        user_input    : 传递给每个步骤的用户原始输入（不可变，各步骤共享）
+        context       : 初始共享上下文 dict，会被各步骤的输出不断扩充
+        _resume_from  : 内部参数 — 从第 N 步恢复执行（用于审批续执）
 
         Returns
         -------
@@ -158,7 +180,31 @@ class SkillPipeline:
         last_output: Any = None
         t0 = time.perf_counter()
 
-        for step in self.steps:
+        for idx, step in enumerate(self.steps):
+            if idx < _resume_from:
+                continue
+
+            # ── Condition gate ──────────────────────────────────────
+            if step.condition and not self._eval_condition(step.condition, ctx, steps_executed):
+                logger.info("[KotoFlow] ⏭ condition not met, skipping: %s", step.skill_id)
+                steps_skipped.append(step.skill_id)
+                continue
+
+            # ── Approval gate ───────────────────────────────────────
+            if step.approval == "required":
+                elapsed = (time.perf_counter() - t0) * 1000
+                token = self._make_resume_token(user_input, ctx, steps_executed, steps_skipped, idx)
+                logger.info("[KotoFlow] ⏸ approval required before: %s", step.skill_id)
+                return PipelineResult(
+                    final_output=last_output,
+                    context=ctx,
+                    steps_executed=steps_executed,
+                    steps_skipped=steps_skipped,
+                    elapsed_ms=elapsed,
+                    status="needs_approval",
+                    resume_token=token,
+                )
+
             # 构建本步骤的调用参数
             call_ctx: Dict[str, Any] = {"skill_id": step.skill_id, **ctx}
 
@@ -170,7 +216,7 @@ class SkillPipeline:
                         call_ctx[param_name] = ctx[ctx_key]
 
             logger.debug(
-                "[SkillPipeline] ▶ step: %s | ctx_keys=%s",
+                "[KotoFlow] ▶ step: %s | ctx_keys=%s",
                 step.skill_id,
                 list(call_ctx.keys()),
             )
@@ -185,11 +231,11 @@ class SkillPipeline:
                     ctx[step.effective_output_key] = output
                     last_output = output
                 steps_executed.append(step.skill_id)
-                logger.info("[SkillPipeline] ✅ step done: %s", step.skill_id)
+                logger.info("[KotoFlow] ✅ step done: %s", step.skill_id)
 
             except Exception as exc:
                 logger.warning(
-                    "[SkillPipeline] ⚠️ step failed: %s — %s", step.skill_id, exc
+                    "[KotoFlow] ⚠️ step failed: %s — %s", step.skill_id, exc
                 )
                 if step.skip_on_error:
                     steps_skipped.append(step.skill_id)
@@ -201,11 +247,12 @@ class SkillPipeline:
                         steps_executed=steps_executed,
                         steps_skipped=steps_skipped,
                         elapsed_ms=elapsed,
+                        status="error",
                     )
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         logger.info(
-            "[SkillPipeline] 完成 | steps=%d skipped=%d elapsed=%.1fms",
+            "[KotoFlow] 完成 | steps=%d skipped=%d elapsed=%.1fms",
             len(steps_executed),
             len(steps_skipped),
             elapsed_ms,
@@ -216,6 +263,91 @@ class SkillPipeline:
             steps_executed=steps_executed,
             steps_skipped=steps_skipped,
             elapsed_ms=elapsed_ms,
+        )
+
+    # ── Resume from approval gate ────────────────────────────────────
+
+    def resume(self, token: str) -> PipelineResult:
+        """Resume a pipeline that was paused at an approval gate.
+
+        Parameters
+        ----------
+        token : The ``resume_token`` from a ``needs_approval`` PipelineResult.
+
+        Returns
+        -------
+        PipelineResult — continues from the step after the approval gate.
+        """
+        try:
+            state = json.loads(token)
+        except (json.JSONDecodeError, TypeError) as e:
+            raise ValueError(f"Invalid resume token: {e}") from e
+
+        user_input = state.get("user_input", "")
+        ctx = state.get("context", {})
+        resume_idx = state.get("resume_idx", 0)
+
+        return self.run(user_input, context=ctx, _resume_from=resume_idx)
+
+    # ── Condition evaluator ──────────────────────────────────────────
+
+    @staticmethod
+    def _eval_condition(
+        expr: str, ctx: Dict[str, Any], executed: List[str]
+    ) -> bool:
+        """Evaluate a simple condition expression against pipeline context.
+
+        Supported forms:
+        - ``$step_id.success``  → True if step_id is in executed list
+        - ``$step_id.output``   → truthy check on ctx[step_id]
+        - literal ``true``/``false``
+        """
+        expr = expr.strip()
+        if expr.lower() == "true":
+            return True
+        if expr.lower() == "false":
+            return False
+        if expr.startswith("$"):
+            parts = expr[1:].split(".", 1)
+            step_id = parts[0]
+            attr = parts[1] if len(parts) > 1 else "success"
+            if attr == "success":
+                return step_id in executed
+            if attr == "output":
+                return bool(ctx.get(step_id))
+        # Unknown expressions default to True (permissive)
+        logger.warning("[KotoFlow] Unknown condition '%s', defaulting to True", expr)
+        return True
+
+    # ── Resume token builder ─────────────────────────────────────────
+
+    @staticmethod
+    def _make_resume_token(
+        user_input: str,
+        ctx: Dict[str, Any],
+        executed: List[str],
+        skipped: List[str],
+        resume_idx: int,
+    ) -> str:
+        """Serialize pipeline state into a JSON resume token."""
+        # Only include serializable context values
+        safe_ctx = {}
+        for k, v in ctx.items():
+            try:
+                json.dumps(v)
+                safe_ctx[k] = v
+            except (TypeError, ValueError):
+                safe_ctx[k] = str(v)
+
+        return json.dumps(
+            {
+                "user_input": user_input,
+                "context": safe_ctx,
+                "executed": executed,
+                "skipped": skipped,
+                "resume_idx": resume_idx,
+            },
+            ensure_ascii=False,
         )
 
 

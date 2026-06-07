@@ -40,20 +40,20 @@ _PRICING: Dict[str, Dict[str, float]] = {
     "gemini-3": {"input": 0.075, "output": 0.30},  # 其他 3.x fallback
     # ── Gemini 2.5 ────────────────────────────────────────────────
     "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
-    "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
-    # ── Gemini 2.0 ────────────────────────────────────────────────
-    "gemini-2.0-flash-lite": {
+    "gemini-2.5-flash-lite": {
         "input": 0.075,
         "output": 0.30,
-    },  # Lite 版更便宜（须在 flash 前）
-    "gemini-2.0-flash": {"input": 0.10, "output": 0.40},  # 标准 Flash / Exp / Preview
+    },  # Lite 版（保持在 flash 之前）
+    "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
+    # ── Gemini 2.0 ────────────────────────────────────────────────
     "gemini-2.0-pro": {"input": 1.25, "output": 5.00},
     # ── Gemini 1.5 ────────────────────────────────────────────────
-    "gemini-1.5-pro": {"input": 1.25, "output": 5.00},
-    "gemini-1.5-flash": {"input": 0.075, "output": 0.30},
     # ── 深度研究 ────────────────────────────────────────────
     "deep-research": {"input": 2.00, "output": 8.00},  # 按 Pro 估算（官方未公布）
     # ── Embedding ────────────────────────────────────────────
+    "gemini-embedding-2": {"input": 0.025, "output": 0.0},
+    "gemini-embedding-001": {"input": 0.025, "output": 0.0},
+    "gemini-embedding": {"input": 0.025, "output": 0.0},
     "text-embedding-004": {"input": 0.025, "output": 0.0},  # $0.025/M tokens
     "text-embedding": {"input": 0.025, "output": 0.0},  # embedding fallback
     # ── 图像生成 ────────────────────────────────────────────
@@ -101,7 +101,7 @@ def _load() -> None:
                 _data = loaded
                 return
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
     _data = _empty_data()
 
 
@@ -118,7 +118,7 @@ def _save_if_dirty() -> None:
         os.replace(tmp, _DATA_FILE)
         _dirty = False
     except Exception as e:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 静默失败，不影响主流程
+            logger.debug("Non-fatal", exc_info=True)  # 静默失败，不影响主流程
 
 
 # ── 公开 API ──────────────────────────────────────────────────────────────────

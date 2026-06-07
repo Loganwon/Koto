@@ -38,11 +38,23 @@ class TestProductivityPlugin:
     def test_get_tools_returns_list_of_dicts(self):
         tools = self._make().get_tools()
         assert isinstance(tools, list)
-        assert len(tools) >= 10
         names = {t["name"] for t in tools}
-        assert "list_directory" in names
-        assert "shell_command" in names
-        assert "zip_files" in names
+        assert names == {
+            "list_directory",
+            "get_clipboard_text",
+            "set_clipboard_text",
+        }
+        retired_tools = {
+            "send_email",
+            "move_file",
+            "delete_file",
+            "zip_files",
+            "unzip_file",
+            "open_file_or_folder",
+            "shell_command",
+            "take_screenshot",
+        }
+        assert names.isdisjoint(retired_tools)
         for t in tools:
             assert "func" in t
             assert "description" in t
@@ -60,26 +72,6 @@ class TestProductivityPlugin:
             result = p.list_directory(path=td)
             assert "hello.txt" in result
 
-    def test_shell_command_blocked(self):
-        p = self._make()
-        result = p.shell_command(command="rm -rf /")
-        assert "安全限制" in result or "白名单" in result
-
-    def test_shell_command_allowed(self):
-        p = self._make()
-        result = p.shell_command(command="echo hello_test_42")
-        assert "hello_test_42" in result
-
-    def test_move_file_src_not_exist(self):
-        p = self._make()
-        result = p.move_file("/nonexistent_xyz_12345.tmp", "/tmp/dest")
-        assert "不存在" in result or "错误" in result
-
-    def test_delete_file_no_confirm(self):
-        p = self._make()
-        result = p.delete_file("/some/file", confirm=False)
-        assert "取消" in result
-
     def test_get_clipboard_text_no_pyperclip(self):
         p = self._make()
         with patch.dict("sys.modules", {"pyperclip": None}):
@@ -92,11 +84,6 @@ class TestProductivityPlugin:
         with patch.dict("sys.modules", {"pyperclip": None}):
             result = p.set_clipboard_text("test")
             assert isinstance(result, str)
-
-    def test_unzip_file_not_found(self):
-        p = self._make()
-        result = p.unzip_file("/nonexistent_xyz.zip")
-        assert "不存在" in result or "错误" in result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -126,41 +113,11 @@ class TestAlertingPlugin:
     def test_get_tools(self):
         tools = self._make().get_tools()
         assert isinstance(tools, list)
-        assert len(tools) >= 7
         names = {t["name"] for t in tools}
-        assert "configure_email_alerts" in names
+        assert "configure_email_alerts" not in names
+        assert "add_webhook_alert" not in names
         assert "create_alert_rule" in names
         assert "get_alert_history" in names
-
-    def test_configure_email_alerts_success(self):
-        p = self._make()
-        p._mock_mgr.configure_email.return_value = True
-        result = p.configure_email_alerts(
-            smtp_server="smtp.test.com",
-            smtp_port=587,
-            sender_email="a@b.com",
-            sender_password="pw",
-            recipients=["c@d.com"],
-        )
-        assert "successfully" in result.lower()
-
-    def test_configure_email_alerts_failure(self):
-        p = self._make()
-        p._mock_mgr.configure_email.return_value = False
-        result = p.configure_email_alerts(
-            smtp_server="s",
-            smtp_port=587,
-            sender_email="a@b.com",
-            sender_password="pw",
-            recipients=["c@d.com"],
-        )
-        assert "Failed" in result or "failed" in result.lower()
-
-    def test_add_webhook_alert_success(self):
-        p = self._make()
-        p._mock_mgr.add_webhook.return_value = True
-        result = p.add_webhook_alert("slack", "https://hooks.example.com")
-        assert "registered" in result.lower()
 
     def test_create_alert_rule_success(self):
         p = self._make()
@@ -169,7 +126,7 @@ class TestAlertingPlugin:
             rule_name="test_rule",
             event_types=["cpu_high"],
             min_severity="high",
-            alert_channels=["email", "log"],
+            alert_channels=["log"],
         )
         assert "created" in result.lower()
 
@@ -876,14 +833,15 @@ class TestSystemToolsPlugin:
     def test_description(self):
         assert (
             "python" in self._make().description.lower()
-            or "pip" in self._make().description.lower()
+            or "check" in self._make().description.lower()
         )
 
     def test_get_tools(self):
         tools = self._make().get_tools()
-        assert len(tools) == 3
+        assert len(tools) == 2
         names = {t["name"] for t in tools}
-        assert names == {"python_exec", "pip_install", "pip_check"}
+        assert names == {"python_exec", "pip_check"}
+        assert "pip_install" not in names
 
     def test_python_exec_success(self):
         from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
@@ -915,15 +873,78 @@ class TestSystemToolsPlugin:
         result = SystemToolsPlugin.pip_check("nonexistent_pkg_xyz_42")
         assert "Missing" in result
 
-    def test_pip_install_empty(self):
-        from app.core.agent.plugins.system_tools_plugin import SystemToolsPlugin
+# ═══════════════════════════════════════════════════════════════════════════════
+# 12. SkillToolsPlugin
+# ═══════════════════════════════════════════════════════════════════════════════
+@pytest.mark.unit
+class TestSkillToolsPlugin:
+    def _make(self):
+        from app.core.agent.plugins.skill_tools_plugin import SkillToolsPlugin
 
-        result = SystemToolsPlugin.pip_install("")
-        assert "no packages" in result.lower()
+        return SkillToolsPlugin()
+
+    def test_list_skills_uses_public_api(self):
+        p = self._make()
+        skills = [
+            {
+                "id": "debug_python",
+                "name": "Debug Python",
+                "enabled": True,
+                "category": "domain",
+                "description": "Python debugging helper",
+            },
+            {
+                "id": "concise_mode",
+                "name": "Concise Mode",
+                "enabled": False,
+                "category": "style",
+                "description": "Short answers",
+            },
+        ]
+
+        with patch("app.core.skills.skill_manager.SkillManager._ensure_init"):
+            with patch(
+                "app.core.skills.skill_manager.SkillManager.list_skills",
+                return_value=skills,
+            ):
+                result = p.list_skills(category="domain", enabled_only=True)
+
+        assert "debug_python" in result
+        assert "concise_mode" not in result
+
+    def test_enable_skill_uses_state_mutator(self):
+        p = self._make()
+
+        with patch("app.core.skills.skill_manager.SkillManager._ensure_init"):
+            with patch(
+                "app.core.skills.skill_manager.SkillManager.get_runtime_entry",
+                return_value={"name": "Debug Python"},
+            ):
+                with patch(
+                    "app.core.skills.skill_manager.SkillManager.set_enabled",
+                    return_value=True,
+                ) as mock_set_enabled:
+                    result = p.enable_skill("debug_python")
+
+        mock_set_enabled.assert_called_once_with("debug_python", True)
+        assert "已启用 Skill" in result
+        assert "Debug Python" in result
+
+    def test_disable_skill_missing_returns_not_found(self):
+        p = self._make()
+
+        with patch("app.core.skills.skill_manager.SkillManager._ensure_init"):
+            with patch(
+                "app.core.skills.skill_manager.SkillManager.get_runtime_entry",
+                return_value=None,
+            ):
+                result = p.disable_skill("missing_skill")
+
+        assert "未找到 Skill ID" in result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 12. TemplateFillPlugin
+# 13. TemplateFillPlugin
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestTemplateFillPlugin:
@@ -973,6 +994,23 @@ class TestTemplateFillPlugin:
             data = json.loads(result)
             assert data["success"] is False
 
+    def test_get_template_path_uses_runtime_entry(self, tmp_path):
+        p = self._make()
+        template_rel = Path("config/skill_templates/my_skill/template.docx")
+        template_path = tmp_path / template_rel
+        template_path.parent.mkdir(parents=True, exist_ok=True)
+        template_path.write_text("placeholder", encoding="utf-8")
+
+        with patch("app.core.agent.plugins.template_fill_plugin._BASE_DIR", tmp_path):
+            with patch("app.core.skills.skill_manager.SkillManager._ensure_init"):
+                with patch(
+                    "app.core.skills.skill_manager.SkillManager.get_runtime_entry",
+                    return_value={"template_path": str(template_rel)},
+                ):
+                    resolved = p._get_template_path("my_skill")
+
+        assert resolved == template_path
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 13. NetworkPlugin
@@ -995,9 +1033,10 @@ class TestNetworkPlugin:
 
     def test_get_tools(self):
         tools = self._make().get_tools()
-        assert len(tools) == 3
+        assert len(tools) == 2
         names = {t["name"] for t in tools}
-        assert names == {"http_get", "http_post", "parse_html"}
+        assert names == {"http_get", "parse_html"}
+        assert "http_post" not in names
 
     @patch("requests.get")
     def test_http_get_success(self, mock_get):
@@ -1018,25 +1057,6 @@ class TestNetworkPlugin:
         from app.core.agent.plugins.network_plugin import NetworkPlugin
 
         result = NetworkPlugin.http_get("https://bad.url")
-        assert "error" in result.lower()
-
-    @patch("requests.post")
-    def test_http_post_success(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 201
-        mock_resp.text = '{"ok": true}'
-        mock_post.return_value = mock_resp
-
-        from app.core.agent.plugins.network_plugin import NetworkPlugin
-
-        result = NetworkPlugin.http_post("https://api.example.com", '{"key": "val"}')
-        assert "201" in result
-
-    @patch("requests.post")
-    def test_http_post_bad_json(self, mock_post):
-        from app.core.agent.plugins.network_plugin import NetworkPlugin
-
-        result = NetworkPlugin.http_post("https://api.example.com", "not-json{{{")
         assert "error" in result.lower()
 
 
@@ -1129,6 +1149,22 @@ class TestWebToolsBridgePlugin:
         # Even if web.tool_registry is not available, should return list
         tools = p.get_tools()
         assert isinstance(tools, list)
+
+    def test_get_tools_silently_skips_missing_legacy_registry(self):
+        from app.core.agent.plugins import web_tools_bridge_plugin as mod
+
+        p = mod.WebToolsBridgePlugin()
+
+        with patch.object(mod, "logger") as mock_logger, patch.object(
+            mod.importlib,
+            "import_module",
+            side_effect=ModuleNotFoundError("No module named 'web.tool_registry'"),
+        ):
+            tools = p.get_tools()
+
+        assert tools == []
+        mock_logger.warning.assert_not_called()
+        mock_logger.debug.assert_called_once()
 
     def test_convert_schema(self):
         from app.core.agent.plugins.web_tools_bridge_plugin import _convert_schema
@@ -1301,6 +1337,7 @@ class TestAnnotationPlugin:
     def test_annotate_document_relative_path(self):
         p = self._make()
         result = p.annotate_document(file_path="relative/path.docx")
+        assert "错误" in result
         assert "绝对路径" in result
 
     def test_annotate_document_file_not_found(self):
@@ -1325,84 +1362,13 @@ class TestAnnotationPlugin:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 18. ScriptGenerationPlugin
+# 18. Retired ScriptGenerationPlugin
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestScriptGenerationPlugin:
-    def _make(self):
-        with patch(
-            "app.core.agent.plugins.script_generation_plugin.ScriptGenerator"
-        ) as MockGen, patch(
-            "app.core.agent.plugins.script_generation_plugin.AgentPlugin.__init__",
-            return_value=None,
-        ):
-            from app.core.agent.plugins.script_generation_plugin import (
-                ScriptGenerationPlugin,
-            )
-
-            mock_gen = MagicMock()
-            MockGen.return_value = mock_gen
-            p = ScriptGenerationPlugin()
-            p._mock_gen = mock_gen
-            return p
-
-    def test_name(self):
-        assert self._make().name == "ScriptGenerationPlugin"
-
-    def test_description(self):
-        assert "script" in self._make().description.lower()
-
-    def test_get_tools(self):
-        tools = self._make().get_tools()
-        assert len(tools) == 4
-        names = {t["name"] for t in tools}
-        assert "generate_fix_script" in names
-        assert "save_script_to_file" in names
-        assert "list_available_scripts" in names
-        assert "get_script_type" in names
-
-    def test_generate_fix_script_success(self):
-        p = self._make()
-        p._mock_gen.generate_fix_script.return_value = {
-            "status": "success",
-            "script": "echo fix",
-        }
-        result = p.generate_fix_script(issue_type="cpu_high")
-        assert result["status"] == "success"
-
-    def test_generate_fix_script_error(self):
-        p = self._make()
-        p._mock_gen.generate_fix_script.side_effect = RuntimeError("generation failed")
-        result = p.generate_fix_script(issue_type="bad_type")
-        assert result["status"] == "error"
-
-    def test_list_available_scripts(self):
-        p = self._make()
-        result = p.list_available_scripts()
-        assert result["status"] == "success"
-        assert "cpu_high" in result["available_scripts"]
-        assert "disk_full" in result["available_scripts"]
-
-    def test_get_script_type(self):
-        p = self._make()
-        result = p.get_script_type()
-        assert result["status"] == "success"
-        assert "os" in result
-        assert "script_type" in result
-
-    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
-    def test_save_script_to_file(self):
-        p = self._make()
-        with tempfile.TemporaryDirectory() as td:
-            with patch("os.path.dirname", return_value=td), patch(
-                "os.path.join", side_effect=os.path.join
-            ), patch("os.makedirs"):
-                with patch("builtins.open", MagicMock()):
-                    p._mock_gen._get_run_command.return_value = "powershell ./fix.ps1"
-                    result = p.save_script_to_file("echo hi", "fix.ps1")
-                    assert result["status"] == "success" or "error" not in str(
-                        result.get("status", "")
-                    )
+    def test_script_generation_plugin_removed(self):
+        assert not Path("app/core/agent/plugins/script_generation_plugin.py").exists()
+        assert not Path("app/core/scripts/script_generator.py").exists()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -30,7 +30,7 @@ class LocalPlanner:
 - FILE_GEN   : 生成文档/PPT/Word/PDF/Excel
 - PAINTER    : 生成配图（AI绘画）
 - CODER      : 编写/运行代码、数据可视化图表
-- SYSTEM     : 系统操作（打开应用、截图等）
+- SYSTEM     : 查询系统信息（时间、日期、CPU/内存/磁盘状态）
 - AGENT      : 复杂自动化（微信发消息、浏览器操作等）
 
 字段说明:
@@ -175,7 +175,7 @@ class LocalPlanner:
         返回规划结果: {use_planner: bool, steps: list} 或 None
 
         架构：云端 Orchestrator 优先规划，Ollama 仅作离线兜底。
-        最强可用云端模型（gemini-3.1-pro-preview → gemini-2.5-pro → gemini-2.5-flash → gemini-2.0-flash）
+        最强可用云端模型（gemini-2.5-pro → gemini-2.5-pro → gemini-2.5-flash → gemini-2.5-flash-lite）
         负责多步任务拆解，保证规划质量。
         """
         # ── 1. 云端 Orchestrator（主路径）────────────────────────────────────
@@ -298,11 +298,10 @@ class LocalPlanner:
             # 规划质量直接影响多步任务成功率，优先最强 generate_content 兼容模型
             # 只从明确支持 generate_content 的模型里选，不选 Interactions-only
             _safe_plan_models = [
-                "gemini-3.1-pro-preview",  # 目前最强 generate_content 兼容模型
+                "gemini-2.5-pro",  # 目前最强 generate_content 兼容模型
                 "gemini-2.5-pro",  # 次选：强推理
                 "gemini-2.5-flash",  # 高质量快速模型
-                "gemini-2.0-flash",  # 备选
-                "gemini-1.5-flash",  # 降级兜底
+                "gemini-2.5-flash-lite",  # 降级兜底
             ]
             # 默认 gemini-2.5-flash（index=2）；gemini-2.5-pro（index=1）更贵不应作默认
             _PLAN_DEFAULT_IDX = 2
@@ -460,12 +459,11 @@ class LocalPlanner:
             if _client is None:
                 return None
 
-            # 验证使用强模型保证准确性，gemini-3.1-pro-preview 为首选
+            # 验证使用强模型保证准确性，gemini-2.5-pro 为首选
             _check_models = [
-                "gemini-3.1-pro-preview",
+                "gemini-2.5-pro",
                 "gemini-2.5-flash",
-                "gemini-2.0-flash",
-                "gemini-2.0-flash-lite",
+                "gemini-2.5-flash-lite",
             ]
             _check_model = _check_models[0]
             try:

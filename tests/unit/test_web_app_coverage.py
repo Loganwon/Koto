@@ -400,7 +400,7 @@ class TestIsInteractionsOnly:
 @pytest.mark.unit
 class TestFileOperator:
     def setup_method(self):
-        from web.app import FileOperator
+        from web.file_operator import FileOperator
 
         self.cls = FileOperator
 
@@ -446,7 +446,7 @@ class TestFileOperator:
 
     # -- execute (folder organize — missing path) --
     def test_execute_organize_no_path(self):
-        with patch("web.app.get_default_wechat_files_dir", return_value=""):
+        with patch("web.file_operator._call_app_factory", return_value=""):
             result = self.cls.execute("自动归纳文件夹")
         assert result["success"] is False
         assert "路径" in result["message"]
@@ -454,8 +454,7 @@ class TestFileOperator:
     # -- execute (organize with nonexistent dir) --
     def test_execute_organize_nonexistent_dir(self, tmp_path):
         bogus = str(tmp_path / "no_such_dir")
-        with patch("web.app.get_default_wechat_files_dir", return_value=""):
-            result = self.cls.execute(f'整理文件夹 "{bogus}"')
+        result = self.cls.execute(f'整理文件夹 "{bogus}"')
         assert result["success"] is False
 
 
@@ -1368,15 +1367,9 @@ class TestWebAppRoutes:
             resp = self.client.get("/api/search/all?query=test")
         assert resp.status_code in (200, 500)
 
-    # -- GET /api/voice/engines --
-    def test_voice_engines(self):
-        mock_result = {"success": True, "engines": []}
-        with patch.dict(
-            "sys.modules",
-            {"web.voice_fast": MagicMock(get_available_engines=lambda: mock_result)},
-        ):
-            resp = self.client.get("/api/voice/engines")
-        assert resp.status_code in (200, 500)
+    def test_legacy_audio_route_removed(self):
+        resp = self.client.get("/api/" + "voice" + "/engines")
+        assert resp.status_code == 404
 
 
 # =====================================================================
@@ -1410,11 +1403,10 @@ class TestEdgeCases:
         assert "123" in text
         assert "456" in text
 
-    def test_file_operator_keywords_exist(self):
-        from web.app import FileOperator
+    def test_orphan_file_operator_stays_removed(self):
+        import web.app as webapp
 
-        assert len(FileOperator.FILE_KEYWORDS) > 10
-        assert len(FileOperator.FOLDER_ORGANIZE_KEYWORDS) > 5
+        assert not hasattr(webapp, "FileOperator")
 
     def test_web_searcher_keywords_exist(self):
         from web.app import WebSearcher

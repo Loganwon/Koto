@@ -26,7 +26,7 @@ def test_agent():
     provider = GeminiProvider(api_key=api_key)
 
     # Create Agent
-    agent = UnifiedAgent(llm_provider=provider, model_id="gemini-1.5-flash")
+    agent = UnifiedAgent(llm_provider=provider, model_id="gemini-2.5-flash")
 
     # Register Plugin
     plugin = BasicToolsPlugin()

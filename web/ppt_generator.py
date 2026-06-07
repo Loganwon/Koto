@@ -367,7 +367,7 @@ class PPTGenerator:
         try:
             slide.shapes.add_picture(image_path, left, top, height=height)
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # Image load fail
+            logger.debug("Non-fatal", exc_info=True)  # Image load fail
 
         # 3. Content (Left Half)
         body_shape = slide.placeholders[1]
@@ -1555,7 +1555,7 @@ class EnhancedPPTGenerator:
         if ai_client:
             try:
                 response = ai_client.models.generate_content(
-                    model="gemini-3-flash-preview",
+                    model="gemini-2.5-flash",
                     contents=outline_prompt,
                     config=types.GenerateContentConfig(
                         system_instruction="你是专业的PPT内容策划师，擅长结构化内容组织。",

@@ -11,38 +11,25 @@
 # ══════════════════════════════════════════════════════════════
 
 import logging
-import re
+
+from app.core.llm.model_mode import is_explicit_model_mode, normalize_model_mode
+from app.core.security.output_validator import sanitize_user_visible_text
+from app.core.shared.tool_parser import parse_tool_calls, stringify_tool_result  # noqa: F401
+from app.core.shared.llm_helpers import (  # noqa: F401
+    is_online_failure as _is_online_failure_shared,
+    is_ollama_alive as _is_ollama_alive_shared,
+    get_local_provider as _get_local_provider_shared,
+)
 
 logger = logging.getLogger(__name__)
 
-# ── Prompts ────────────────────────────────────────────────────
-PROMPTS = {
-    "polish": (
-        "你是一名专业编辑。请对以下文本进行润色，使其更加流畅、优雅，保持原意不变。"
-        "只输出润色后的文本，不要添加任何解释或额外内容："
-    ),
-    "translate": (
-        "请将以下文本翻译（中文→英文，英文→中文）。"
-        "只输出翻译结果，不要添加原文或任何解释："
-    ),
-    "summarize": (
-        "请对以下文档内容生成一份简洁的中文摘要，包含关键论点和要点，"
-        "摘要控制在 200 字以内："
-    ),
-    "continue_writing": (
-        "你是一名优秀的写作助手。请根据以下已有文本，自然地继续写下去（100-200字），"
-        "保持语气和风格一致，衔接流畅。直接输出续写内容，不要重复原文："
-    ),
-    "rewrite": (
-        "请对以下文本进行改写，保留核心意思，但用不同的措辞和句式重新表达，"
-        "使语言更加多样化。只输出改写后的文本，不要添加任何说明："
-    ),
-    "annotate": (
-        "请为以下文本添加简洁的注释，解释关键概念、术语或难点，"
-        "注释用【】标注，插入相应位置。只输出带注释的文本："
-    ),
-}
 
+def _safe_user_error_text(text, fallback: str) -> str:
+    return sanitize_user_visible_text(text, fallback=fallback, treat_as_error=True)
+
+
+def _safe_user_preview_text(text, fallback: str) -> str:
+    return sanitize_user_visible_text(text, fallback=fallback)
 
 def register_socket_events(socketio):
     """Register all /doc namespace WebSocket event handlers."""
@@ -69,13 +56,22 @@ def register_socket_events(socketio):
         payload = data.get("payload", {})
         logger.info("[DocAssistant] request: %s", action_type)
 
+        requested_mode_raw = payload.get("model_mode", data.get("model_mode", ""))
+        requested_mode = normalize_model_mode(requested_mode_raw, default="auto")
+
+        # Explicit request mode wins; legacy settings only apply to auto/omitted requests.
+        _req_local = requested_mode == "local"
+        if not _req_local and not is_explicit_model_mode(requested_mode_raw):
+            try:
+                _req_local = bool(_SM().get("ai", "use_local_only"))
+            except Exception:
+                pass
+
         try:
-            if action_type in ("polish", "translate", "summarize", "continue_writing"):
-                _handle_text_action(emit, action_type, payload)
-            elif action_type == "custom_instruction":
-                _handle_custom(emit, payload)
+            if action_type == "custom_instruction":
+                _handle_custom(emit, payload, use_local_only=_req_local)
             elif action_type == "code_exec":
-                _handle_code_exec(emit, payload)
+                _handle_code_exec(emit, payload, use_local_only=_req_local)
             else:
                 emit(
                     "agent_execute_command",
@@ -92,7 +88,10 @@ def register_socket_events(socketio):
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": f"服务端处理失败: {exc}",
+                    "text": _safe_user_error_text(
+                        f"服务端处理失败: {exc}",
+                        "服务端处理失败，请稍后重试。",
+                    ),
                     "is_error": True,
                 },
                 namespace="/doc",
@@ -116,426 +115,58 @@ def register_socket_events(socketio):
         language = data.get("language", "")  # "python" | "r" | "" → text mode
         csv_data = data.get("csv_data", "")  # table CSV for chart context
         output_mode = data.get("output_mode", "inline")  # 'inline' | 'chat'
+        model_mode = normalize_model_mode(data.get("model_mode"), default="auto")  # 'local' | 'cloud' | 'auto'
+        # FloatingToolbar actions pass a pre-built system prompt via this field
+        action_system_prompt = data.get("_action_system_prompt", "")  # overrides system_instruction
         if not prompt:
             return
-        # Combine document context with prompt
-        if context:
-            prompt = f"{context}\n[用户请求]: {prompt}"
 
-        # ── Chart / code-exec mode ─────────────────────────────────────────
-        if language in ("python", "r"):
-
-            def _code_task():
-                try:
-                    from app.core.sandbox import run_python, run_r
-                except ImportError as e:
-                    socketio.emit(
-                        "code_result",
-                        {
-                            "error": f"Sandbox 模块加载失败: {e}",
-                            "stdout": "",
-                            "stderr": "",
-                            "files": {},
-                        },
-                        namespace="/doc",
-                    )
-                    return
-
-                # Ask AI to write the code
-                lang_label = (
-                    "Python (matplotlib/pandas)"
-                    if language == "python"
-                    else "R (ggplot2)"
-                )
-                gen_prompt = (
-                    f"请根据以下任务，编写一段可以直接运行的 {lang_label} 代码。\n"
-                    "要求：\n"
-                    "1. 使用 matplotlib 或 pandas 绘图（Python）/ ggplot2（R）\n"
-                    "2. 将生成的图表保存为当前目录下的 chart.png 文件\n"
-                    "3. 对于 Python：使用 plt.savefig('chart.png', dpi=150, bbox_inches='tight')\n"
-                    "4. 对于 R：使用 ggsave('chart.png', dpi=150)\n"
-                    "5. 不要用 plt.show() 或任何 GUI 调用\n"
-                    "6. 只输出代码，不要任何 markdown 代码块标记（不要 ```）\n\n"
-                    f"任务描述：{prompt}\n"
-                )
-                if csv_data:
-                    gen_prompt += f"\n表格数据（CSV 格式）：\n{csv_data}\n"
-
-                # Emit "正在生成代码..." hint
-                socketio.emit(
-                    "agent_stream_chunk",
-                    {"chunk": f"🤖 正在为你生成 {language.upper()} 代码…\n"},
-                    namespace="/doc",
-                )
-
-                code = _call_llm_sync(gen_prompt)
-                if not code:
-                    socketio.emit(
-                        "code_result",
-                        {
-                            "error": "AI 代码生成失败，请检查 API Key 配置。",
-                            "stdout": "",
-                            "stderr": "",
-                            "files": {},
-                        },
-                        namespace="/doc",
-                    )
-                    return
-
-                # Strip markdown fences if model added them despite instructions
-                import re as _re
-
-                code = _re.sub(r"^```[a-z]*\n?", "", code.strip(), flags=_re.MULTILINE)
-                code = code.strip().strip("`")
-
-                # Echo generated code
-                socketio.emit(
-                    "agent_stream_chunk",
-                    {"chunk": f"\n```{language}\n{code}\n```\n\n▶ 正在执行…\n"},
-                    namespace="/doc",
-                )
-
-                # Execute
-                if language == "python":
-                    result = run_python(code)
-                else:
-                    result = run_r(code)
-
-                socketio.emit("code_result", result, namespace="/doc")
-
-            socketio.start_background_task(_code_task)
-            return
-
-        # ── Normal text chat mode ──────────────────────────────────────────
-        def _task():
-            import sys as _sys
-
-            try:
-                _task_body()
-            except Exception as _task_exc:
-                print(
-                    f"[DocAI] _task EXCEPTION: {_task_exc!r}",
-                    file=_sys.stderr,
-                    flush=True,
-                )
-                socketio.emit(
-                    "agent_task_complete",
-                    {"result": f"❌ 内部错误：{_task_exc}"},
-                    namespace="/doc",
-                )
-
-        def _task_body():
-            import time as _time
-
-            # ── Progress helper ───────────────────────────────────────────────
-            def _emit_progress(step, detail=""):
-                socketio.emit(
-                    "agent_progress",
-                    {"step": step, "detail": detail, "ts": _time.time()},
-                    namespace="/doc",
-                    to=sid,
-                )
-
-            _emit_progress("analyzing", "正在分析上下文…")
-
-            # ── Build system instruction ──────────────────────────────────────
-            file_ctx = f"文件名：{file_name}，" if file_name else ""
-
-            if output_mode == "chat":
-                # Chat-only mode: plain conversation, no tool calls
-                system_instruction = (
-                    f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n"
-                    "用户当前处于【仅对话模式】，你的回复只会显示在聊天栏，不会修改文档。\n"
-                    "请直接用自然语言回答用户的问题或提供建议，支持 Markdown 格式。\n"
-                    "不要输出任何 <TOOL> 标签或 JSON 指令。"
-                )
-            elif file_type == "pptx":
-                # PPTX-specific: use set_pptx_text exclusively — never set_html
-                if has_selection:
-                    action_hint = (
-                        "用户选中了某个文本框的文字（见[用户选中的文字]）。"
-                        "修改时必须使用 set_pptx_text 指令，"
-                        "slide_index 和 shape_id 从[PPT幻灯片内容]中读取，禁止使用 set_html。"
-                    )
-                else:
-                    action_hint = (
-                        "修改幻灯片文字必须使用 set_pptx_text 指令，"
-                        "slide_index 和 shape_id 从[PPT幻灯片内容]中读取，禁止使用 set_html。"
-                    )
-                system_instruction = (
-                    f"你是 Koto PPT AI 助手。当前文件：{file_ctx}类型 pptx。\n\n"
-                    "【重要规则】\n"
-                    "当用户要求修改、翻译、润色幻灯片文字时，必须在回复末尾输出修改指令。\n"
-                    "不要只描述——直接输出指令让程序执行。\n\n"
-                    "指令格式（必须一行完整输出）：\n"
-                    '<TOOL>{"type":"set_pptx_text","slide_index":N,"shape_id":M,"value":"新内容"}</TOOL>\n\n'
-                    "示例 — 修改标题：\n"
-                    "上下文：[PPT幻灯片1内容, slide_index=0]\n"
-                    '[shape_id=2 name="标题"]: 原标题\n'
-                    "用户：把标题改成「季度总结」\n"
-                    'AI：好的。<TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":2,"value":"季度总结"}</TOOL>\n\n'
-                    f"{action_hint}\n"
-                )
-            else:
-                if has_selection:
-                    action_hint = "用户当前有选中文字。修改时用 set_html 替换选区内容。"
-                else:
-                    action_hint = "用户当前无选区。修改时用 set_html 在光标处插入内容。"
-                # Concise, example-driven prompt that small local models can follow reliably
-                system_instruction = (
-                    f"你是 Koto 文档 AI 助手。当前文件：{file_ctx}类型 {file_type}。\n\n"
-                    "【重要规则】\n"
-                    "当用户要求插入、修改、翻译、润色等文档操作时，你必须在回复末尾输出修改指令。\n"
-                    "不要只描述你会做什么——直接输出指令，让程序执行。\n\n"
-                    "修改指令格式（必须完整、一行输出）：\n"
-                    '<TOOL>{"type": "set_html", "value": "<p>内容</p>"}</TOOL>\n\n'
-                    "示例 1 — 用户让你插入内容：\n"
-                    "用户：写一行「你好世界」插入文档\n"
-                    'AI：已插入。<TOOL>{"type": "set_html", "value": "<p>你好世界</p>"}</TOOL>\n\n'
-                    "示例 2 — 用户让你翻译并插入：\n"
-                    "用户：翻译成英文插入文档\n"
-                    'AI：<TOOL>{"type": "set_html", "value": "<p>Hello world</p>"}</TOOL>\n\n'
-                    "示例 3 — 用户说「在光标处插入」（明确插入指令）：\n"
-                    "用户：请在光标处插入\n"
-                    'AI：已插入。<TOOL>{"type": "set_html", "value": "<p>上一步生成的内容</p>"}</TOOL>\n\n'
-                    f"{action_hint}\n"
-                    "其他文件类型指令：\n"
-                    '  XLSX → <TOOL>{"type":"set_cell","r":0,"c":0,"value":"值"}</TOOL>\n'
-                    '  PPTX → <TOOL>{"type":"set_pptx_text","slide_index":0,"shape_id":1,"value":"新文字"}</TOOL>'
-                )
-
-            # ── Build prompt with multi-turn history ──────────────────────
-            # Assemble history (最多保留最近 10 轮，防止 token 超限)
-            MAX_HISTORY_TURNS = 10
-            recent_history = history[-MAX_HISTORY_TURNS * 2 :] if history else []
-            history_text = ""
-            if recent_history:
-                parts = []
-                for turn in recent_history:
-                    role = turn.get("role", "")
-                    content = turn.get("content", "")
-                    if role == "user":
-                        parts.append(f"用户：{content}")
-                    elif role == "assistant":
-                        parts.append(f"Koto AI：{content}")
-                history_text = "\n".join(parts) + "\n\n"
-
-            # Build full prompt: optional selection context first, then history, then user message
-            if selection:
-                full_prompt = (
-                    f'[用户选中的文字]\n"{selection}"\n\n'
-                    f"{history_text}用户：{prompt}"
-                )
-            else:
-                full_prompt = f"{history_text}用户：{prompt}"
-            online_model = _pick_online_model()
-            logger.warning(
-                "[DocAI] model=%s prompt_len=%d history_turns=%d sid=%s",
-                online_model,
-                len(full_prompt),
-                len(recent_history) // 2,
-                sid,
-            )
-
-            _emit_progress("generating", "正在生成回复…")
-
-            def _try_online():
-                provider = _get_provider()
-                gen = provider.generate_content(
-                    prompt=full_prompt,
-                    model=online_model,
-                    system_instruction=system_instruction,
-                    stream=True,
-                )
-                full = []
-                for chunk in gen:
-                    part = chunk.get("content", "")
-                    if part:
-                        full.append(part)
-                        socketio.emit(
-                            "agent_stream_chunk",
-                            {"chunk": part},
-                            namespace="/doc",
-                        )
-                return "".join(full)
-
-            def _try_local():
-                if not _is_ollama_alive():
-                    return None
-                local = _get_local_provider()
-                # Local Ollama: fold system_instruction into the prompt
-                local_prompt = f"[系统指令]\n{system_instruction}\n\n{full_prompt}"
-                gen = local.generate_content(prompt=local_prompt, stream=True)
-                full = []
-                for chunk in gen:
-                    part = (
-                        chunk.get("content", "")
-                        if isinstance(chunk, dict)
-                        else str(chunk)
-                    )
-                    if part:
-                        full.append(part)
-                        socketio.emit(
-                            "agent_stream_chunk",
-                            {"chunk": part},
-                            namespace="/doc",
-                        )
-                return "".join(full)
-
-            result_text = None
-            # Respect "use local only" setting — skip online entirely
-            use_local_only = False
+        # ── Agent Loop path (unified agent) ─────────
+        _use_agent_loop = data.get("_use_agent_loop", True)
+        if not _use_agent_loop:
             try:
                 from web.settings import SettingsManager as _SM
-
-                use_local_only = bool(_SM().get("ai", "use_local_only"))
+                _use_agent_loop = bool(_SM().get("ai", "use_agent_loop"))
             except Exception:
                 pass
 
-            if use_local_only:
+        # ── DocAgent path (new multi-file document processor) ─────────
+        _use_doc_agent = data.get("_use_doc_agent", False)
+        if not _use_doc_agent:
+            try:
+                from web.settings import SettingsManager as _SM
+                _use_doc_agent = bool(_SM().get("ai", "use_doc_agent"))
+            except Exception:
+                pass
+
+        # DocAgent takes priority if enabled
+        if _use_doc_agent:
+            def _doc_agent_task():
                 try:
-                    result_text = _try_local()
-                except Exception as exc2:
-                    logger.error(
-                        "[WorkspaceAssistant] Local-only mode, local failed: %s", exc2
-                    )
-                if not result_text:
+                    _run_doc_agent(socketio, sid, data)
+                except Exception as _da_exc:
+                    logger.exception("[DocAI] DocAgent error: %s", _da_exc)
                     socketio.emit(
                         "agent_task_complete",
-                        {
-                            "result": "❌ 本地模型不可用，请确认 Ollama 已启动并加载了模型。"
-                        },
-                        namespace="/doc",
+                        {"full_text": "", "error": f"DocAgent 错误：{_da_exc}"},
+                        namespace="/doc", to=sid,
                     )
-                    return
-            else:
-                try:
-                    result_text = _try_online()
-                except Exception as exc:
-                    logger.warning(
-                        "[DocAI] online failed: %s: %s", type(exc).__name__, exc
-                    )
-                    if _is_online_failure(exc):
-                        result_text = None  # will fall through to local below
-                    else:
-                        logger.error(
-                            "[WorkspaceAssistant] AI task failed: %s",
-                            exc,
-                            exc_info=True,
-                        )
-                        socketio.emit(
-                            "agent_task_complete",
-                            {"result": f"❌ AI 处理失败：{exc}"},
-                            namespace="/doc",
-                        )
-                        return
+            socketio.start_background_task(_doc_agent_task)
+            return
 
-                # Fall back to local if online returned nothing (silent error) or failed
-                if not result_text:
-                    logger.warning(
-                        "[WorkspaceAssistant] Online AI returned empty, trying local…"
-                    )
-                    try:
-                        result_text = _try_local()
-                    except Exception as exc2:
-                        logger.error(
-                            "[WorkspaceAssistant] Local fallback failed: %s", exc2
-                        )
-                        result_text = None
-                    if not result_text:
-                        socketio.emit(
-                            "agent_task_complete",
-                            {
-                                "result": "❌ AI 暂时不可用（在线模型不可用，本地模型也未运行）。请启动 Ollama 或配置有效的 API 密钥。"
-                            },
-                            namespace="/doc",
-                        )
-                        return
-
-            # ── Parse and emit any embedded tool calls ────────────────────
-            clean_text, tool_calls = _parse_tool_calls(result_text or "")
-
-            # ── Fallback: user said "insert at cursor" but AI produced no tool call ──
-            # Synthesise a set_html from the last assistant turn in history so the
-            # content actually lands in the document instead of just being echoed.
-            _INSERT_TRIGGERS = (
-                "在光标处插入",
-                "插入文档",
-                "插入到文档",
-                "请插入",
-                "插入内容",
-            )
-            if (
-                not tool_calls
-                and file_type in ("docx", "pptx")
-                and any(t in prompt for t in _INSERT_TRIGGERS)
-            ):
-                # Find the last assistant message that has substantive content
-                last_ai_content = ""
-                for turn in reversed(history or []):
-                    if turn.get("role") == "assistant":
-                        c = turn.get("content", "").strip()
-                        # Strip any existing TOOL tags and short ack messages
-                        c_clean = re.sub(
-                            r"<TOOL>.*?</TOOL>", "", c, flags=re.DOTALL
-                        ).strip()
-                        if len(c_clean) > 10:
-                            last_ai_content = c_clean
-                            break
-                if last_ai_content:
-                    import html as _html
-
-                    # Convert plain markdown-ish text to minimal HTML paragraphs
-                    paragraphs = [
-                        p.strip() for p in last_ai_content.split("\n") if p.strip()
-                    ]
-                    html_val = "".join(f"<p>{_html.escape(p)}</p>" for p in paragraphs)
-                    tool_calls = [{"type": "set_html", "value": html_val}]
-                    logger.info(
-                        "[DocAI] Synthesised set_html from last assistant turn (insert fallback)"
-                    )
-
-            # Emit tool calls BEFORE task_complete so the browser has
-            # pendingToolCall set when agent_task_complete fires.
-            has_proposals = False
-            if output_mode != "chat":
-                # ── Construct proposals when user had a pinned selection ───────
-                if selection and tool_calls:
-                    proposals = []
-                    for idx, tc in enumerate(tool_calls):
-                        proposed = tc.get("value", "")
-                        if proposed:
-                            proposals.append(
-                                {
-                                    "id": f"p_{idx}",
-                                    "original_text": selection,
-                                    "proposed_text": proposed,
-                                    "rationale": clean_text or "",
-                                    "tool_call": tc,
-                                }
-                            )
-                    if proposals:
-                        has_proposals = True
-                        _emit_progress("formatting", "正在准备修改建议…")
-                        socketio.emit(
-                            "agent_proposals",
-                            {"proposals": proposals, "summary": clean_text},
-                            namespace="/doc",
-                            to=sid,
-                        )
-                else:
-                    for tc in tool_calls:
-                        socketio.emit("doc_tool_call", tc, namespace="/doc", to=sid)
-
-            _emit_progress("complete", "")
-            socketio.emit(
-                "agent_task_complete",
-                {"result": clean_text, "has_proposals": has_proposals},
-                namespace="/doc",
-                to=sid,
-            )
-
-        socketio.start_background_task(_task)
+        # agent_loop is the standard path; always active unless DocAgent took over
+        def _agent_loop_task():
+            try:
+                _run_agent_loop(socketio, sid, data)
+            except Exception as _al_exc:
+                logger.exception("[DocAI] Agent loop error: %s", _al_exc)
+                socketio.emit(
+                    "agent_task_complete",
+                    {"full_text": "", "error": f"Agent loop 错误：{_al_exc}"},
+                    namespace="/doc", to=sid,
+                )
+        socketio.start_background_task(_agent_loop_task)
+        return
 
     # ── /files namespace (智能文件库 watchdog real-time updates) ──────────────────
     @socketio.on("connect", namespace="/files")
@@ -547,42 +178,13 @@ def register_socket_events(socketio):
         logger.info("[FileLib] /files client disconnected")
 
 
-# ── Core text handler (streaming) ─────────────────────────────
+# ── Handlers (custom_instruction / code_exec) ─────────────────────
+# Note: polish/translate/rewrite/etc. are now handled by the on_doc_ai_request
+# path (SocketBridge maps them to doc_ai_request for full streaming + history).
+# Only custom_instruction and code_exec still use the client_request fallback.
 
 
-def _handle_text_action(emit, action_type, payload):
-    """Stream a text transformation result back to the client."""
-    text = payload.get("text", "").strip()
-    if not text:
-        emit(
-            "agent_execute_command",
-            {
-                "action": "show_message",
-                "text": "输入文本为空。",
-                "is_error": True,
-            },
-            namespace="/doc",
-        )
-        return
-
-    prompt = PROMPTS[action_type]
-    full_result = _stream_llm(emit, prompt, text)
-
-    if full_result is None:
-        # Error already emitted inside _stream_llm
-        return
-
-    emit(
-        "agent_task_complete",
-        {
-            "full_text": full_result,
-            "message": None,
-        },
-        namespace="/doc",
-    )
-
-
-def _handle_custom(emit, payload):
+def _handle_custom(emit, payload, use_local_only: bool = False):
     """Stream result for an arbitrary user instruction."""
     instruction = payload.get("instruction", "").strip()
     context = payload.get("context") or {}
@@ -605,7 +207,7 @@ def _handle_custom(emit, payload):
         combined += f"\n\n当前选中的上下文内容：\n{context_text}"
 
     prompt = "你是 Koto 文件助手。请根据用户的指令处理，直接输出结果："
-    full_result = _stream_llm(emit, prompt, combined)
+    full_result = _stream_llm(emit, prompt, combined, use_local_only=use_local_only)
     if full_result is None:
         return
 
@@ -622,7 +224,7 @@ def _handle_custom(emit, payload):
 # ── Code execution handler ────────────────────────────────────
 
 
-def _handle_code_exec(emit, payload):
+def _handle_code_exec(emit, payload, use_local_only: bool = False):
     """
     Execute user/AI-supplied Python or R code in the sandbox.
     The AI may also generate code via LLM before executing it.
@@ -657,7 +259,7 @@ def _handle_code_exec(emit, payload):
         if data_context:
             gen_prompt += f"\n\n数据上下文：\n{data_context}"
 
-        code = _call_llm_sync(gen_prompt)
+        code = _call_llm_sync(gen_prompt, use_local_only=use_local_only)
         if code is None:
             emit(
                 "agent_execute_command",
@@ -711,7 +313,12 @@ def _handle_code_exec(emit, payload):
         logger.exception("[DocAssistant] sandbox error: %s", exc)
         emit(
             "code_result",
-            {"error": str(exc), "stdout": "", "stderr": "", "files": {}},
+            {
+                "error": _safe_user_error_text(str(exc), "代码执行失败，请稍后重试。"),
+                "stdout": "",
+                "stderr": "",
+                "files": {},
+            },
             namespace="/doc",
         )
 
@@ -719,84 +326,23 @@ def _handle_code_exec(emit, payload):
 # ── LLM helpers — 使用 Koto 统一 LLM Provider 体系 ────────────
 
 
-def _parse_tool_calls(text: str):
-    """
-    Parse embedded <TOOL>JSON</TOOL> blocks from AI response text.
-    Also catches bare JSON and code-fenced JSON emitted by smaller local models
-    that don't reliably wrap with <TOOL> tags.
-    Returns (clean_text, list_of_tool_call_dicts).
-    Tool calls are stripped from the visible text before display.
-    """
-    import json as _json
-    import re
-
-    tool_calls = []
-    _KNOWN_TYPES = {"set_html", "set_cell", "set_cells", "set_pptx_text"}
-
-    def _try_parse(raw: str):
-        raw = raw.strip()
-        try:
-            tc = _json.loads(raw)
-            if isinstance(tc, dict) and tc.get("type") in _KNOWN_TYPES:
-                tool_calls.append(tc)
-                return True
-        except Exception:
-            pass
-        return False
-
-    # Pass 1: explicit <TOOL>…</TOOL> wrapper (preferred format)
-    # Accept closing tag variants: </TOOL>, </ TOOL>, </tool>
-    pattern = re.compile(r"<TOOL>(.*?)<\s*/\s*TOOL>", re.DOTALL | re.IGNORECASE)
-
-    def _replace(m):
-        _try_parse(m.group(1))
-        return ""
-
-    text = pattern.sub(_replace, text).strip()
-
-    # Strip any orphaned opening/closing TOOL tags that didn't pair (model error)
-    text = re.sub(r"<\s*/?\s*TOOL\s*>", "", text, flags=re.IGNORECASE).strip()
-
-    # Pass 2: code-fenced JSON block  ```json {...} ```  or  ``` {...} ```
-    fence_pat = re.compile(r"```(?:json)?\s*(\{[^`]+\})\s*```", re.DOTALL)
-
-    def _replace_fence(m):
-        if _try_parse(m.group(1)):
-            return ""
-        return m.group(0)
-
-    text = fence_pat.sub(_replace_fence, text).strip()
-
-    # Pass 3: bare JSON on its own line that looks like a tool call
-    # Match lines starting with {"type": "set_html" ...} (greedy to closing brace)
-    line_pat = re.compile(
-        r'(?:^|\n)\s*(\{"type":\s*"(?:set_html|set_cell|set_cells|set_pptx_text)".*?\})\s*(?=\n|$)',
-        re.DOTALL,
-    )
-
-    def _replace_line(m):
-        if _try_parse(m.group(1)):
-            return ""
-        return m.group(0)
-
-    text = line_pat.sub(_replace_line, text).strip()
-
-    return text, tool_calls
+# Delegate to the shared implementation
+_parse_tool_calls = parse_tool_calls
 
 
 _ONLINE_DOC_MODELS = [
-    "gemini-3-flash-preview",  # 首选：最新快速模型
-    "gemini-2.5-flash",  # 备用稳定模型
-    "gemini-2.0-flash-lite",  # 轻量兜底
+    "gemini-3-flash-preview",  # 首选：当前主聊天模型
+    "gemini-2.5-flash",        # 稳定快速回退
+    "gemini-2.5-flash-lite",   # 轻量兜底
 ]
 
 
 def _pick_online_model() -> str:
-    """直接使用 MODEL_MAP[CHAT]，保持与 Koto 主体一致；若取不到则用首选。"""
+    """Use the current CHAT model when available; otherwise use the preferred fallback."""
     try:
-        from web.app import MODEL_MAP  # type: ignore
+        from web.runtime_context import get_model_id
 
-        m = MODEL_MAP.get("CHAT", "")
+        m = get_model_id("CHAT")
         if m:
             return m
     except Exception:
@@ -807,85 +353,25 @@ def _pick_online_model() -> str:
 def _get_provider():
     """Return the configured online LLMProvider."""
     from app.core.llm.provider_factory import get_llm_provider
+    from app.core.llm.model_selection import get_provider_for_model_mode
 
-    return get_llm_provider()
-
-
-def _is_ollama_alive() -> bool:
-    """True if local Ollama is reachable within 2 seconds."""
-    try:
-        import urllib.request as _ur
-
-        _ur.urlopen("http://localhost:11434/api/tags", timeout=2).close()
-        return True
-    except Exception:
-        return False
-
-
-def _get_local_provider():
-    """Return OllamaLLMProvider with the best available local model.
-
-    Queries /api/tags directly to avoid depending on LocalModelRouter which
-    may not have a pick_best_chat_model() method.  Falls back to model=None
-    (which uses OllamaLLMProvider's own auto-selection) if the query fails.
-    """
-    from app.core.llm.ollama_llm_provider import OllamaLLMProvider
-
-    try:
-        import json as _json
-        import urllib.request as _ur
-
-        with _ur.urlopen("http://localhost:11434/api/tags", timeout=3) as r:
-            tags = _json.loads(r.read())
-        models = [m["name"] for m in tags.get("models", [])]
-        if models:
-            # Prefer larger/better models by simple heuristic
-            preferred = next(
-                (
-                    m
-                    for m in models
-                    if any(
-                        k in m.lower() for k in ("7b", "8b", "13b", "14b", "32b", "70b")
-                    )
-                ),
-                models[0],
-            )
-            logger.info("[DocAI] Using local model: %s", preferred)
-            return OllamaLLMProvider(model=preferred)
-    except Exception as e:
-        logger.warning("[DocAI] Could not query Ollama model list: %s", e)
-    return OllamaLLMProvider(model=None)
-
-
-def _is_online_failure(exc: Exception) -> bool:
-    """Return True if the exception is a recoverable online-availability failure.
-
-    Includes hard API-key failures (400 INVALID_ARGUMENT / expired) so the
-    handler automatically falls back to local Ollama instead of showing a raw
-    error to the user.
-    """
-    s = str(exc).lower()
-    return (
-        "timed out" in s
-        or "stream stalled" in s
-        or "503" in s
-        or "unavailable" in s
-        or "timeout" in s
-        or "resourceexhausted" in s
-        or "resource_exhausted" in s
-        or "429" in s
-        or "overloaded" in s
-        or "quota" in s
-        # API key issues — treat as "online unavailable" so local Ollama takes over
-        or "invalid_argument" in s
-        or "api key" in s
-        or "api_key" in s
-        or "expired" in s
-        or "400" in s
+    model = _pick_online_model()
+    return get_llm_provider(
+        provider=get_provider_for_model_mode("cloud"),
+        model=model,
+        allow_local_fallback=False,
     )
 
 
-def _stream_llm(emit, prompt, text):
+# Delegate to shared implementations – kept as module-level aliases so any
+# existing code inside this file (and monkeypatch-based tests) can still
+# reference the bare names.
+_is_ollama_alive = _is_ollama_alive_shared
+_get_local_provider = _get_local_provider_shared
+_is_online_failure = _is_online_failure_shared
+
+
+def _stream_llm(emit, prompt, text, use_local_only: bool = False):
     """
     Stream LLM output with dual-mode fallback:
       1. Try the best available online Gemini model.
@@ -894,6 +380,41 @@ def _stream_llm(emit, prompt, text):
     """
     full_prompt = f"{prompt}\n\n{text}"
     online_model = _pick_online_model()
+
+    # ── Local-only mode: skip cloud entirely ─────────────────────────────────
+    if use_local_only:
+        if not _is_ollama_alive():
+            emit(
+                "agent_execute_command",
+                {"action": "show_message", "text": "❌ 本地模式下 Ollama 未运行，请启动 Ollama。", "is_error": True},
+                namespace="/doc",
+            )
+            emit("agent_task_complete", {"full_text": "", "error": "ollama not running"}, namespace="/doc")
+            return None
+        try:
+            local = _get_local_provider()
+            gen = local.generate_content(prompt=full_prompt, stream=True)
+            full = []
+            for chunk in gen:
+                part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
+                if part:
+                    full.append(part)
+                    emit("agent_stream_chunk", {"chunk": part}, namespace="/doc")
+            return "".join(full) if full else ""
+        except Exception as exc_lo:
+            logger.error("[DocAssistant] Local-only stream failed: %s", exc_lo)
+            emit(
+                "agent_task_complete",
+                {
+                    "full_text": "",
+                    "error": _safe_user_error_text(
+                        str(exc_lo),
+                        "本地 AI 调用失败，请检查 Ollama 后重试。",
+                    ),
+                },
+                namespace="/doc",
+            )
+            return None
 
     # ── Attempt 1: Online ────────────────────────────────────────────────────
     try:
@@ -919,14 +440,20 @@ def _stream_llm(emit, prompt, text):
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": f"❌ AI 调用失败：{exc}",
+                    "text": _safe_user_error_text(
+                        f"❌ AI 调用失败：{exc}",
+                        "❌ AI 调用失败，请稍后重试。",
+                    ),
                     "is_error": True,
                 },
                 namespace="/doc",
             )
             emit(
                 "agent_task_complete",
-                {"full_text": "", "error": str(exc)},
+                {
+                    "full_text": "",
+                    "error": _safe_user_error_text(str(exc), "AI 调用失败，请稍后重试。"),
+                },
                 namespace="/doc",
             )
             return None
@@ -952,6 +479,16 @@ def _stream_llm(emit, prompt, text):
 
     try:
         local = _get_local_provider()
+        # Notify user the system is falling back to local model
+        emit(
+            "agent_execute_command",
+            {
+                "action": "show_message",
+                "text": "⚠️ 云端 AI 暂时不可用，已自动切换到本地模型 (Ollama)，响应速度可能较慢。",
+                "is_error": False,
+            },
+            namespace="/doc",
+        )
         gen = local.generate_content(prompt=full_prompt, stream=True)
         full = []
         for chunk in gen:
@@ -973,15 +510,33 @@ def _stream_llm(emit, prompt, text):
         )
         emit(
             "agent_task_complete",
-            {"full_text": "", "error": str(exc2)},
+            {
+                "full_text": "",
+                "error": _safe_user_error_text(
+                    str(exc2),
+                    "本地 AI 调用失败，请检查 Ollama 后重试。",
+                ),
+            },
             namespace="/doc",
         )
         return None
 
 
-def _call_llm_sync(prompt: str) -> str | None:
+def _call_llm_sync(prompt: str, use_local_only: bool = False) -> str | None:
     """Non-streaming LLM call (e.g. code generation). Falls back to Ollama on failure."""
     online_model = _pick_online_model()
+    # ── Local-only mode ───────────────────────────────────────────────────────
+    if use_local_only:
+        if not _is_ollama_alive():
+            logger.error("[DocAssistant] Local-only sync: Ollama not running")
+            return None
+        try:
+            local = _get_local_provider()
+            result = local.generate_content(prompt=prompt, stream=False)
+            return result.get("content", "") if isinstance(result, dict) else str(result)
+        except Exception as exc_lo:
+            logger.error("[DocAssistant] Local-only sync failed: %s", exc_lo)
+            return None
     # ── Attempt 1: Online ────────────────────────────────────────────────────
     try:
         provider = _get_provider()
@@ -1008,3 +563,416 @@ def _call_llm_sync(prompt: str) -> str | None:
     except Exception as exc2:
         logger.error("[DocAssistant] Local sync fallback failed: %s", exc2)
         return None
+
+
+# ══════════════════════════════════════════════════════════════
+# Agent Loop Bridge — maps AgentEvent → WebSocket emit()
+# ══════════════════════════════════════════════════════════════
+
+def _run_agent_loop(socketio, sid, data: dict) -> None:
+    """
+    Run a doc_ai_request through the unified KotoAgentLoop.
+    Maps AgentEvent objects to existing WebSocket events for
+    backward-compatible frontend consumption.
+    """
+    from app.core.agent.agent_loop import KotoAgentLoop
+    from app.core.agent.hooks import HookRegistry
+    from app.core.agent.lifecycle import AgentRequest, EventType
+    from app.core.agent.pipeline_hooks import register_pipeline_hooks
+    from app.core.agent.session_queue import SessionQueue
+
+    # Build AgentRequest from raw WS data
+    request = AgentRequest(
+        prompt=data.get("prompt", ""),
+        session_id=sid or "",
+        file_type=data.get("file_type", "unknown"),
+        file_name=data.get("file_name", ""),
+        context=data.get("context", ""),
+        selection=data.get("selection", ""),
+        has_selection=data.get("has_selection", False),
+        history=data.get("history", []),
+        output_mode=data.get("output_mode", "inline"),
+        model_mode=normalize_model_mode(data.get("model_mode"), default="auto"),
+        language=data.get("language", ""),
+        csv_data=data.get("csv_data", ""),
+        action_type=data.get("_action_type", ""),
+        action_system_prompt=data.get("_action_system_prompt", ""),
+        live_doc=data.get("live_doc", False),
+        live_mode=data.get("live_mode", "replace"),
+    )
+
+    # Set up hooks
+    registry = HookRegistry()
+    register_pipeline_hooks(registry)
+
+    # Create loop
+    loop = KotoAgentLoop(hook_registry=registry)
+
+    # Per-session serialization
+    _sq = _get_session_queue()
+    with _sq.acquire(request.session_id):
+        for event in loop.run(request):
+            _emit_agent_event(socketio, sid, event)
+
+
+def _emit_agent_event(socketio, sid, event) -> None:
+    """Map a single AgentEvent to one or more WebSocket emit calls."""
+    from app.core.agent.lifecycle import EventType
+
+    etype = event.type
+    d = event.data
+    ns = "/doc"
+
+    if etype == EventType.STREAM_CHUNK:
+        chunk = d.get("chunk", "")
+        socketio.emit("agent_stream_chunk", {"chunk": chunk}, namespace=ns, to=sid)
+        # Parallel live-doc channel: only when caller opted in
+        if d.get("live_doc"):
+            socketio.emit("doc_live_chunk", {
+                "chunk": chunk,
+                "mode": d.get("live_mode", "replace"),
+                "request_id": d.get("request_id", ""),
+            }, namespace=ns, to=sid)
+
+    elif etype == EventType.LIVE_DOC_COMMIT:
+        socketio.emit("doc_live_commit", {
+            "full_text": d.get("full_text", ""),
+            "mode": d.get("live_mode", "replace"),
+            "original_selection": d.get("original_selection", ""),
+            "request_id": d.get("request_id", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.TASK_COMPLETE:
+        socketio.emit("agent_task_complete", {
+            "result": d.get("result", ""),
+            "has_proposals": d.get("has_proposals", False),
+            "error": d.get("error", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.PHASE:
+        socketio.emit("agent_phase", {
+            "phases": d.get("phases", []),
+            "current": d.get("current", ""),
+            "status": d.get("status", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.THOUGHT:
+        socketio.emit("agent_event", {
+            "type": "thought",
+            "text": d.get("text", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.PLAN:
+        socketio.emit("agent_event", {
+            "type": "plan",
+            "steps": d.get("steps", []),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STEP_START:
+        socketio.emit("agent_event", {
+            "type": "step_start",
+            "step_id": d.get("step_id", ""),
+            "text": d.get("text", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STEP_PROGRESS:
+        socketio.emit("agent_event", {
+            "type": "step_progress",
+            "step_id": d.get("step_id", ""),
+            "detail": d.get("detail", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STEP_DONE:
+        socketio.emit("agent_event", {
+            "type": "step_done",
+            "step_id": d.get("step_id", ""),
+            "text": d.get("text", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STEP_ERROR:
+        socketio.emit("agent_event", {
+            "type": "step_error",
+            "step_id": d.get("step_id", ""),
+            "error": _safe_user_error_text(
+                d.get("error", ""),
+                "处理失败，请稍后重试。",
+            ),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.TOOL_CALL:
+        tool_call = d.get("tool_call", {}) or {}
+        socketio.emit("agent_event", {
+            "type": "tool_call",
+            "tool_name": tool_call.get("name", ""),
+            "tool_args": tool_call.get("args", {}),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.TOOL_RESULT:
+        socketio.emit("agent_event", {
+            "type": "tool_result",
+            "tool_name": d.get("tool_name", ""),
+            "result_preview": _safe_user_preview_text(
+                d.get("result_preview", ""),
+                "工具已执行。",
+            ),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.STATUS_MESSAGE:
+        text = d.get("text", "")
+        is_error = d.get("is_error", False)
+        if is_error:
+            socketio.emit("agent_execute_command", {
+                "action": "show_message",
+                "text": _safe_user_error_text(text, "AI 调用失败，请稍后重试。"),
+                "is_error": True,
+            }, namespace=ns, to=sid)
+        else:
+            socketio.emit("agent_progress", {
+                "step": "status",
+                "detail": _safe_user_preview_text(text, "处理中…"),
+            }, namespace=ns, to=sid)
+
+    elif etype == EventType.PROPOSAL:
+        socketio.emit("agent_proposals", {
+            "proposals": d.get("proposals", []),
+            "summary": d.get("summary", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.DOC_TOOL_CALL:
+        socketio.emit("doc_tool_call", d, namespace=ns, to=sid)
+
+    elif etype == EventType.SKILL_SUGGESTIONS:
+        socketio.emit("skill_suggestions", {
+            "suggestions": d.get("suggestions", []),
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.RAG_INFO:
+        socketio.emit("rag_info", d, namespace=ns, to=sid)
+        socketio.emit("agent_event", {
+            "type": "rag_info",
+            **d,
+        }, namespace=ns, to=sid)
+
+    elif etype == EventType.CODE_RESULT:
+        socketio.emit("code_result", d, namespace=ns, to=sid)
+
+    elif etype == EventType.ERROR:
+        socketio.emit("agent_task_complete", {
+            "full_text": "", "error": d.get("text", "未知错误"),
+        }, namespace=ns, to=sid)
+
+    elif etype in (EventType.LIFECYCLE_START, EventType.LIFECYCLE_END):
+        # New lifecycle events — emit for frontend observability
+        socketio.emit("agent_lifecycle", {
+            "type": etype.value, **d,
+        }, namespace=ns, to=sid)
+
+    # Other event types (THOUGHT, PLAN, etc.) are logged but not emitted yet
+    # to maintain backward compatibility with the existing frontend.
+
+
+# Singleton session queue
+_session_queue = None
+
+def _get_session_queue():
+    global _session_queue
+    if _session_queue is None:
+        from app.core.agent.session_queue import SessionQueue
+        _session_queue = SessionQueue(global_concurrency=4)
+    return _session_queue
+
+
+# ══════════════════════════════════════════════════════════════
+# DocAgent Integration — document processing
+# ══════════════════════════════════════════════════════════════
+
+def _run_doc_agent(socketio, sid, data: dict) -> None:
+    """
+    Run a doc_ai_request through the new DocAgent.
+
+    DocAgent provides:
+    - LLM-driven task planning with multi-file context
+    - Step-by-step execution with progress streaming
+    - File change tracking for frontend highlighting
+    - Task completion verification
+    """
+    from app.core.agent.doc_agent import DocAgent, DocTask, FileHandle, DocEventType
+    from app.core.agent.doc_event_emitter import DocEventEmitter
+
+    # Build FileHandle objects from data
+    files = []
+
+    # Add main file context
+    file_path = data.get("file_path", "")
+    file_type = data.get("file_type", "unknown")
+    file_name = data.get("file_name", "")
+    context = data.get("context", "")
+    selection = data.get("selection", "")
+
+    if file_path or context:
+        files.append(FileHandle(
+            path=file_path or file_name or "document",
+            file_type=file_type,
+            content_snapshot=context[:5000] if context else "",
+            selection=selection if selection else None,
+        ))
+
+    # Add additional files from open_tabs
+    open_tabs = data.get("open_tabs", [])
+    for tab in open_tabs[:5]:  # Limit to 5 files
+        tab_path = tab.get("path", tab.get("name", ""))
+        if tab_path and tab_path != file_path:
+            files.append(FileHandle(
+                path=tab_path,
+                file_type=tab.get("type", ""),
+                content_snapshot=tab.get("content", "")[:2000] if tab.get("content") else "",
+            ))
+
+    # Build DocTask
+    task = DocTask(
+        id=data.get("task_id", ""),
+        prompt=data.get("prompt", ""),
+        files=files,
+        permissions={"read", "write", "annotate"},
+        session_id=sid,
+        history=data.get("history", []),
+        options={
+            "model_mode": normalize_model_mode(data.get("model_mode"), default="auto"),
+            "output_mode": data.get("output_mode", "inline"),
+        },
+    )
+
+    # Create emitter and agent
+    emitter = DocEventEmitter(socketio, sid, namespace="/doc")
+    emitter.set_task_id(task.id)
+
+    agent = DocAgent(emitter=emitter)
+
+    # Run and emit events
+    for event in agent.run(task):
+        _emit_doc_agent_event(socketio, sid, event, emitter)
+
+
+def _emit_doc_agent_event(socketio, sid, event, emitter) -> None:
+    """Map DocAgent events to WebSocket emit calls."""
+    from app.core.agent.doc_agent import DocEventType
+
+    etype = event.event_type
+    data = event.data
+    ns = "/doc"
+
+    if etype == DocEventType.PLAN_START:
+        socketio.emit("doc_plan_start", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.PLAN_CREATED:
+        socketio.emit("doc_plan_created", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STEP_START:
+        socketio.emit("doc_step_start", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STEP_PROGRESS:
+        socketio.emit("doc_step_progress", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STEP_DONE:
+        socketio.emit("doc_step_done", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STEP_ERROR:
+        socketio.emit("doc_step_error", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.TOOL_CALL:
+        socketio.emit("doc_tool_call", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.TOOL_RESULT:
+        socketio.emit("doc_tool_result", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.FILE_CHANGE:
+        socketio.emit("doc_file_change", {
+            "task_id": event.task_id,
+            "step_id": event.step_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.HIGHLIGHT:
+        socketio.emit("doc_highlight", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.USER_CONFIRM:
+        socketio.emit("doc_user_confirm", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.REPLAN:
+        socketio.emit("doc_replan", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.THOUGHT:
+        # Stream to chat area
+        text = data.get("text", "")
+        if text:
+            socketio.emit("agent_stream_chunk", {
+                "chunk": text,
+            }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.STREAM_CHUNK:
+        socketio.emit("agent_stream_chunk", {
+            "chunk": data.get("chunk", ""),
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.VERIFICATION:
+        socketio.emit("doc_verification", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.TASK_COMPLETE:
+        socketio.emit("agent_task_complete", {
+            "task_id": event.task_id,
+            "full_text": data.get("summary", ""),
+            **data,
+        }, namespace=ns, to=sid)
+
+    elif etype == DocEventType.ERROR:
+        socketio.emit("doc_error", {
+            "task_id": event.task_id,
+            **data,
+        }, namespace=ns, to=sid)
+        # Also emit task_complete with error for frontend compatibility
+        socketio.emit("agent_task_complete", {
+            "full_text": "",
+            "error": data.get("message", "未知错误"),
+        }, namespace=ns, to=sid)

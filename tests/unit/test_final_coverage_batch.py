@@ -556,6 +556,33 @@ class TestTrackChangesEditorDeep:
             result = editor.apply_tracked_changes("/fake.docx", annotations)
         assert result.get("failed", 0) >= 1 or result.get("applied", 0) == 0
 
+    def test_apply_tracked_changes_emits_saved_progress_when_callback_present(self):
+        editor = self._make_editor()
+        mock_doc = MagicMock()
+        mock_para = MagicMock()
+        mock_para.text = "旧文本"
+        mock_doc.paragraphs = [mock_para]
+        mock_doc.tables = []
+        events = []
+
+        with patch("web.track_changes_editor.Document", return_value=mock_doc), patch.object(
+            editor, "_apply_change_to_paragraph", return_value=True
+        ):
+            result = editor.apply_tracked_changes(
+                "/fake.docx",
+                [{"原文片段": "旧文本", "修改后文本": "新文本"}],
+                progress_callback=lambda current, total, status, detail, **meta: events.append((status, detail, meta)),
+            )
+
+        assert result["success"] is True
+        assert any(
+            status == "saved"
+            and meta.get("file_updated") is True
+            and meta.get("file_path") == "/fake.docx"
+            and meta.get("updated_in_place") is True
+            for status, _detail, meta in events
+        )
+
     # -- apply_hybrid_changes classification --------------------------------
     def test_apply_hybrid_changes_classifies_suggestion_as_comment(self):
         editor = self._make_editor()
@@ -692,334 +719,18 @@ class TestTrackChangesEditorDeep:
 
 
 # ---------------------------------------------------------------------------
-# 4. FastVoiceRecognizer – deeper coverage
+# 4. Removed microphone STT modules
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
-class TestVoiceFastDeep:
-    """Cover engine detection, recognize fallback chain, streaming,
-    singleton, status reporting, and Chinese text cleaning."""
-
-    # -- _clean_chinese_text ------------------------------------------------
-    def test_clean_chinese_text_removes_spaces(self):
-        from web.voice_fast import _clean_chinese_text
-
-        result = _clean_chinese_text("你 好 世 界")
-        assert "你好" in result
-
-    def test_clean_chinese_text_preserves_english_spaces(self):
-        from web.voice_fast import _clean_chinese_text
-
-        result = _clean_chinese_text("hello world")
-        assert result == "hello world"
-
-    def test_clean_chinese_text_empty(self):
-        from web.voice_fast import _clean_chinese_text
-
-        assert _clean_chinese_text("") == ""
-
-    def test_clean_chinese_text_mixed(self):
-        from web.voice_fast import _clean_chinese_text
-
-        result = _clean_chinese_text("Hello 你 好 World")
-        assert isinstance(result, str)
-        assert "你好" in result
-
-    # -- VoiceResult --------------------------------------------------------
-    def test_voice_result_to_dict(self):
-        from web.voice_fast import VoiceResult
-
-        vr = VoiceResult(
-            success=True, text="hello", engine="vosk", message="ok", confidence=0.9
-        )
-        d = vr.to_dict()
-        assert d["success"] is True
-        assert d["text"] == "hello"
-        assert d["engine"] == "vosk"
-
-    def test_voice_result_to_dict_keys(self):
-        from web.voice_fast import VoiceResult
-
-        vr = VoiceResult(success=False)
-        d = vr.to_dict()
-        assert set(d.keys()) == {"success", "text", "engine", "message", "confidence"}
-
-    def test_voice_result_defaults(self):
-        from web.voice_fast import VoiceResult
-
-        vr = VoiceResult(success=False)
-        assert vr.text == ""
-        assert vr.confidence == 0.0
-
-    # -- get_fast_status singleton ------------------------------------------
-    def test_get_fast_status_returns_dict(self):
-        with patch("web.voice_fast._recognizer_instance", None), patch(
-            "web.voice_fast.FastVoiceRecognizer"
-        ) as MockRec:
-            mock_inst = MagicMock()
-            mock_inst.available_engines = []
-            mock_inst.primary_engine = None
-            MockRec.return_value = mock_inst
-            from web.voice_fast import get_fast_status
-
-            status = get_fast_status()
-        assert isinstance(status, dict)
-
-    # -- recognize_voice wrapper --------------------------------------------
-    def test_recognize_voice_delegates(self):
-        with patch("web.voice_fast.get_recognizer") as mock_get:
-            mock_rec = MagicMock()
-            mock_rec.recognize.return_value = MagicMock(
-                success=True,
-                text="hi",
-                engine="vosk",
-                message="",
-                confidence=0.9,
-                to_dict=lambda: {"success": True, "text": "hi"},
-            )
-            mock_get.return_value = mock_rec
-            from web.voice_fast import recognize_voice
-
-            result = recognize_voice(timeout=3)
-        assert isinstance(result, dict)
-
-    # -- get_available_engines wrapper ---------------------------------------
-    def test_get_available_engines_returns_dict(self):
-        with patch("web.voice_fast.get_recognizer") as mock_get:
-            mock_rec = MagicMock()
-            mock_rec.get_available_engines.return_value = {
-                "engines": [],
-                "primary": None,
-            }
-            mock_get.return_value = mock_rec
-            from web.voice_fast import get_available_engines
-
-            result = get_available_engines()
-        assert isinstance(result, dict)
-
-    # -- FastVoiceRecognizer._detect_engines --------------------------------
-    def test_detect_engines_no_engines_available(self):
-        with patch(
-            "web.voice_fast.FastVoiceRecognizer._check_vosk", return_value=False
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._check_win32_sapi", return_value=False
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._check_windows_sapi", return_value=False
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._check_speech_recognition",
-            return_value=False,
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._start_background_init"
-        ):
-            from web.voice_fast import FastVoiceRecognizer
-
-            rec = FastVoiceRecognizer()
-        # When no engines found, falls back to 'offline'
-        assert rec.primary_engine == "offline"
-
-    def test_detect_engines_vosk_available(self):
-        with patch(
-            "web.voice_fast.FastVoiceRecognizer._check_vosk", return_value=True
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._check_win32_sapi", return_value=False
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._check_windows_sapi", return_value=False
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._check_speech_recognition",
-            return_value=False,
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._start_background_init"
-        ):
-            from web.voice_fast import FastVoiceRecognizer
-
-            rec = FastVoiceRecognizer()
-        assert "vosk" in rec.available_engines
-
-    def test_detect_engines_speech_recognition_available(self):
-        with patch(
-            "web.voice_fast.FastVoiceRecognizer._check_vosk", return_value=False
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._check_win32_sapi", return_value=False
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._check_windows_sapi", return_value=False
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._check_speech_recognition",
-            return_value=True,
-        ), patch(
-            "web.voice_fast.FastVoiceRecognizer._start_background_init"
-        ):
-            from web.voice_fast import FastVoiceRecognizer
-
-            rec = FastVoiceRecognizer()
-        assert "speech_recognition" in rec.available_engines
-
-    # -- request_stop_streaming ---------------------------------------------
-    def test_request_stop_streaming_sets_event(self):
-        from web.voice_fast import _stream_stop_event, request_stop_streaming
-
-        request_stop_streaming()
-        assert _stream_stop_event.is_set()
-        _stream_stop_event.clear()  # cleanup
-
-
-# ---------------------------------------------------------------------------
-# 5. VoiceInputEngine – deeper coverage
-# ---------------------------------------------------------------------------
-@pytest.mark.unit
-class TestVoiceInputDeep:
-    """Cover engine detection, recognition methods, audio recording,
-    streaming, and RecognitionResult."""
-
-    # -- RecognitionResult --------------------------------------------------
-    def test_recognition_result_to_dict(self):
-        from web.voice_input import RecognitionResult
-
-        rr = RecognitionResult(
-            success=True, text="test", engine="google", confidence=0.8
-        )
-        d = rr.to_dict()
-        assert d["success"] is True
-        assert d["text"] == "test"
-
-    def test_recognition_result_defaults(self):
-        from web.voice_input import RecognitionResult
-
-        rr = RecognitionResult(success=False)
-        assert rr.audio_file is None
-        assert rr.confidence == 0.0
-
-    def test_recognition_result_to_dict_keys(self):
-        from web.voice_input import RecognitionResult
-
-        rr = RecognitionResult(success=True, text="hello", engine="vosk")
-        d = rr.to_dict()
-        assert "success" in d
-        assert "text" in d
-        assert "engine" in d
-
-    # -- EngineType enum ----------------------------------------------------
-    def test_engine_type_values(self):
-        from web.voice_input import EngineType
-
-        assert EngineType.VOSK_LOCAL is not None
-        assert EngineType.GOOGLE_WEB is not None
-        assert EngineType.GEMINI_API is not None
-        assert EngineType.OFFLINE is not None
-        assert EngineType.WINDOWS_SPEECH is not None
-
-    # -- VoiceInputEngine detection -----------------------------------------
-    def test_voice_engine_init_no_engines(self):
-        with patch("web.voice_input.VoiceInputEngine._detect_engines") as mock_detect:
-            mock_detect.return_value = None
-            from web.voice_input import VoiceInputEngine
-
-            engine = VoiceInputEngine()
-        assert isinstance(engine.available_engines, list)
-
-    # -- _clean_chinese_text ------------------------------------------------
-    def test_voice_input_clean_chinese_text(self):
-        with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import VoiceInputEngine
-
-            engine = VoiceInputEngine()
-        result = engine._clean_chinese_text("你 好")
-        assert isinstance(result, str)
-
-    def test_voice_input_clean_chinese_empty(self):
-        with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import VoiceInputEngine
-
-            engine = VoiceInputEngine()
-        result = engine._clean_chinese_text("")
-        assert result == ""
-
-    # -- _get_engine_name / _get_engine_description -------------------------
-    def test_get_engine_name_all_types(self):
-        with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import EngineType, VoiceInputEngine
-
-            engine = VoiceInputEngine()
-        for et in EngineType:
-            name = engine._get_engine_name(et)
-            assert isinstance(name, str)
-            assert len(name) > 0
-
-    def test_get_engine_description_all_types(self):
-        with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import EngineType, VoiceInputEngine
-
-            engine = VoiceInputEngine()
-        for et in EngineType:
-            desc = engine._get_engine_description(et)
-            assert isinstance(desc, str)
-
-    # -- _parse_engine ------------------------------------------------------
-    def test_parse_engine_vosk(self):
-        with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import EngineType, VoiceInputEngine
-
-            engine = VoiceInputEngine()
-        result = engine._parse_engine("vosk")
-        assert result == EngineType.VOSK_LOCAL
-
-    def test_parse_engine_google(self):
-        with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import EngineType, VoiceInputEngine
-
-            engine = VoiceInputEngine()
-        result = engine._parse_engine("google")
-        assert result == EngineType.GOOGLE_WEB
-
-    def test_parse_engine_gemini(self):
-        with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import EngineType, VoiceInputEngine
-
-            engine = VoiceInputEngine()
-        result = engine._parse_engine("gemini")
-        assert result == EngineType.GEMINI_API
-
-    def test_parse_engine_unknown_defaults(self):
-        with patch("web.voice_input.VoiceInputEngine._detect_engines"):
-            from web.voice_input import EngineType, VoiceInputEngine
-
-            engine = VoiceInputEngine()
-        result = engine._parse_engine("unknown_engine_xyz")
-        # Unknown engine returns None
-        assert result is None or isinstance(result, EngineType)
-
-    # -- module-level convenience wrappers ----------------------------------
-    def test_module_get_available_engines(self):
-        with patch("web.voice_input.get_voice_engine") as mock_get:
-            mock_eng = MagicMock()
-            mock_eng.get_available_engines.return_value = {"engines": []}
-            mock_get.return_value = mock_eng
-            from web.voice_input import get_available_engines
-
-            result = get_available_engines()
-        assert isinstance(result, dict)
-
-    def test_module_recognize_microphone(self):
-        with patch("web.voice_input.get_voice_engine") as mock_get:
-            mock_eng = MagicMock()
-            mock_result = MagicMock()
-            mock_result.to_dict.return_value = {"success": True, "text": "hi"}
-            mock_eng.recognize_microphone.return_value = mock_result
-            mock_get.return_value = mock_eng
-            from web.voice_input import recognize_microphone
-
-            result = recognize_microphone()
-        assert isinstance(result, dict)
-
-    def test_module_recognize_audio(self):
-        with patch("web.voice_input.get_voice_engine") as mock_get:
-            mock_eng = MagicMock()
-            mock_result = MagicMock()
-            mock_result.to_dict.return_value = {"success": True, "text": "test"}
-            mock_eng.recognize_audio_file.return_value = mock_result
-            mock_get.return_value = mock_eng
-            from web.voice_input import recognize_audio
-
-            result = recognize_audio("/fake/audio.wav")
-        assert isinstance(result, dict)
+class TestRemovedMicrophoneSttModules:
+    def test_modules_stay_absent(self):
+        removed = [
+            "voice_" + "fast.py",
+            "voice_" + "input.py",
+            "voice_" + "engine.py",
+        ]
+        for filename in removed:
+            assert not Path("web", filename).exists()
 
 
 # ---------------------------------------------------------------------------

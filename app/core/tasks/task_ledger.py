@@ -25,6 +25,7 @@ import logging
 import os
 import sqlite3
 import threading
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -248,10 +249,11 @@ class TaskLedger:
     # ── 底层 DB ──────────────────────────────────────────────────────────────
 
     def _open_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        conn = sqlite3.connect(self._db_path, check_same_thread=False, timeout=30.0)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=30000")
         return conn
 
     def _init_schema(self):
@@ -291,31 +293,44 @@ class TaskLedger:
             priority=int(priority),
             metadata=json.dumps(metadata or {}, ensure_ascii=False),
         )
-        with self._lock:
-            self._conn.execute(
-                """
-                INSERT INTO koto_tasks
-                  (task_id, session_id, user_input, status, task_type, skill_id,
-                   source, created_at, step_count, tool_calls, retry_count,
-                   interrupt_requested, cancel_requested, priority, metadata)
-                VALUES
-                  (:task_id, :session_id, :user_input, :status, :task_type, :skill_id,
-                   :source, :created_at, 0, 0, 0, 0, 0, :priority, :metadata)
-                """,
-                {
-                    "task_id": task.task_id,
-                    "session_id": task.session_id,
-                    "user_input": task.user_input,
-                    "status": task.status.value,
-                    "task_type": task.task_type,
-                    "skill_id": task.skill_id,
-                    "source": task.source,
-                    "created_at": task.created_at,
-                    "priority": task.priority,
-                    "metadata": task.metadata,
-                },
-            )
-            self._conn.commit()
+        payload = {
+            "task_id": task.task_id,
+            "session_id": task.session_id,
+            "user_input": task.user_input,
+            "status": task.status.value,
+            "task_type": task.task_type,
+            "skill_id": task.skill_id,
+            "source": task.source,
+            "created_at": task.created_at,
+            "priority": task.priority,
+            "metadata": task.metadata,
+        }
+        for attempt in range(5):
+            try:
+                with self._lock:
+                    self._conn.execute(
+                        """
+                        INSERT INTO koto_tasks
+                          (task_id, session_id, user_input, status, task_type, skill_id,
+                           source, created_at, step_count, tool_calls, retry_count,
+                           interrupt_requested, cancel_requested, priority, metadata)
+                        VALUES
+                          (:task_id, :session_id, :user_input, :status, :task_type, :skill_id,
+                           :source, :created_at, 0, 0, 0, 0, 0, :priority, :metadata)
+                        """,
+                        payload,
+                    )
+                    self._conn.commit()
+                break
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == 4:
+                    raise
+                try:
+                    with self._lock:
+                        self._conn.rollback()
+                except Exception:
+                    pass
+                time.sleep(0.1 * (attempt + 1))
         logger.debug(
             f"[TaskLedger] 创建任务 {task.task_id[:8]} session={session_id[:8]}"
         )
@@ -620,26 +635,37 @@ class TaskLedger:
         """删除超过 keep_days 天的已完成/已取消任务及其步骤。"""
         cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         cutoff_iso = cutoff.isoformat()
-        with self._lock:
-            self._conn.execute(
-                """
-                DELETE FROM koto_task_steps WHERE task_id IN (
-                    SELECT task_id FROM koto_tasks
+        try:
+            with self._lock:
+                self._conn.execute(
+                    """
+                    DELETE FROM koto_task_steps WHERE task_id IN (
+                        SELECT task_id FROM koto_tasks
+                        WHERE status IN ('completed', 'cancelled', 'failed')
+                          AND created_at < ?
+                    )
+                    """,
+                    (cutoff_iso,),
+                )
+                deleted = self._conn.execute(
+                    """
+                    DELETE FROM koto_tasks
                     WHERE status IN ('completed', 'cancelled', 'failed')
                       AND created_at < ?
-                )
-                """,
-                (cutoff_iso,),
-            )
-            deleted = self._conn.execute(
-                """
-                DELETE FROM koto_tasks
-                WHERE status IN ('completed', 'cancelled', 'failed')
-                  AND created_at < ?
-                """,
-                (cutoff_iso,),
-            ).rowcount
-            self._conn.commit()
+                    """,
+                    (cutoff_iso,),
+                ).rowcount
+                self._conn.commit()
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower():
+                raise
+            logger.warning("[TaskLedger] purge_old skipped due to db lock")
+            try:
+                with self._lock:
+                    self._conn.rollback()
+            except Exception:
+                pass
+            return 0
         logger.info(f"[TaskLedger] 清理 {deleted} 条历史任务（>{keep_days}天）")
         return deleted
 

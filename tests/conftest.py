@@ -15,8 +15,67 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from unittest import mock
 
 import pytest
+
+
+_CURRENT_PYTEST_TMP: Path | None = None
+
+
+try:
+    import pytest_mock  # noqa: F401
+except ImportError:
+
+    class _PatchProxy:
+        def __init__(self, patchers):
+            self._patchers = patchers
+
+        def __call__(self, target, *args, **kwargs):
+            patcher = mock.patch(target, *args, **kwargs)
+            started = patcher.start()
+            self._patchers.append(patcher)
+            return started
+
+        def object(self, target, attribute, *args, **kwargs):
+            patcher = mock.patch.object(target, attribute, *args, **kwargs)
+            started = patcher.start()
+            self._patchers.append(patcher)
+            return started
+
+
+    class _MiniMocker:
+        Mock = mock.Mock
+        MagicMock = mock.MagicMock
+        mock_open = staticmethod(mock.mock_open)
+
+        def __init__(self):
+            self._patchers = []
+            self.patch = _PatchProxy(self._patchers)
+
+        def stopall(self):
+            while self._patchers:
+                self._patchers.pop().stop()
+
+
+    @pytest.fixture
+    def mocker():
+        helper = _MiniMocker()
+        try:
+            yield helper
+        finally:
+            helper.stopall()
+
+
+def _load_project_api_keys() -> None:
+    """Load API keys from project config when env vars are not already set."""
+    try:
+        from app.core.llm.gemini_config import load_gemini_config_env
+
+        load_gemini_config_env(override=False)
+    except Exception:
+        # Key loading should never break the test run.
+        pass
 
 
 def _root() -> Path:
@@ -25,18 +84,29 @@ def _root() -> Path:
 
 def _cleanup_test_artifacts() -> None:
     root = _root()
-    for rel in (".hypothesis", ".pytest_tmp", ".pytest_cache_local"):
+    for rel in (".hypothesis", ".pytest_cache_local"):
         target = root / rel
         if target.exists():
             shutil.rmtree(target, ignore_errors=True)
+    if _CURRENT_PYTEST_TMP is not None and _CURRENT_PYTEST_TMP.exists():
+        shutil.rmtree(_CURRENT_PYTEST_TMP, ignore_errors=True)
 
 
 def pytest_configure(config):
-    """Remove stale .pytest_tmp before each session and pre-load real packages
-    that module-level stubs in test files must not override."""
+    """Use an isolated temp dir per pytest process and pre-load real packages.
+
+    pytest.ini sets --basetemp=.pytest_tmp. Without isolation, concurrent test
+    sessions can delete each other's tmp_path roots during startup.
+    """
+    global _CURRENT_PYTEST_TMP
+
     pytest_tmp = _root() / ".pytest_tmp"
-    if pytest_tmp.exists():
-        shutil.rmtree(pytest_tmp, ignore_errors=True)
+    pytest_tmp.mkdir(exist_ok=True)
+    run_tmp = pytest_tmp / f"run-{os.getpid()}"
+    if run_tmp.exists():
+        shutil.rmtree(run_tmp, ignore_errors=True)
+    _CURRENT_PYTEST_TMP = run_tmp
+    config.option.basetemp = str(run_tmp)
 
     # Pre-import packages so that module-level _stub() calls in test files
     # (which only stub when 'name not in sys.modules') won't replace the real
@@ -49,12 +119,10 @@ def pytest_configure(config):
         except ImportError:
             pass
 
-    # Prevent Google/Gemini API calls in tests — avoids tenacity retry hangs
-    # when GEMINI_API_KEY is set but invalid (e.g. in CI without secrets).
-    import os as _os
+    # Use project/user-provided API keys in tests by default.
+    _load_project_api_keys()
 
-    for _key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
-        _os.environ.pop(_key, None)
+    import os as _os
 
     # Prevent HuggingFace model downloads in background threads (the fallback
     # embedding path when no Google key is set).  Without these flags the
@@ -75,16 +143,11 @@ def _reset_model_fallback_executor():
     timestamps and circuit-breaker counters across tests.  Left uncleaned,
     tests that mock failing LLM calls poison later tests whose LLM calls are
     expected to succeed (e.g. TestDatetimeInjection).
-
-    Also re-clears Google API keys here to counteract module-level
-    ``os.environ.setdefault("GEMINI_API_KEY", ...)`` calls in test files that
-    run during pytest's collection phase (after pytest_configure already cleared
-    them), permanently re-injecting an invalid key for the whole session.
     """
-    import os as _os
 
-    for _key in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
-        _os.environ.pop(_key, None)
+    # Ensure keys remain available even if other modules mutate env during collection.
+    _load_project_api_keys()
+
     try:
         import app.core.llm.model_fallback as _mf  # noqa: PLC0415
 
@@ -156,6 +219,7 @@ def full_app(_koto_tmp_db):
     from app.api.goal_routes import goal_bp
     from app.api.job_routes import job_bp
     from app.api.macro_routes import macro_bp
+    from app.api.mcp_routes import mcp_bp
     from app.api.ops_routes import ops_bp
     from app.api.shadow_routes import shadow_bp
     from app.api.skill_marketplace_routes import marketplace_bp
@@ -168,6 +232,7 @@ def full_app(_koto_tmp_db):
     application.register_blueprint(ops_bp)
     application.register_blueprint(marketplace_bp)
     application.register_blueprint(macro_bp)
+    application.register_blueprint(mcp_bp)
     application.register_blueprint(shadow_bp)
     # Blueprints without built-in url_prefix need it provided here
     application.register_blueprint(task_bp, url_prefix="/api/tasks")
@@ -218,30 +283,14 @@ def pytest_sessionfinish(session, exitstatus):
     # Coverage.xml is written by pytest-cov before this hook runs.
     import os as _os
 
-    _os._exit(int(exitstatus))
+    if os.getenv("KOTO_PYTEST_HARD_EXIT", "1") == "1":
+        _os._exit(int(exitstatus))
 
 
 def pytest_unconfigure(config):
     if os.getenv("KOTO_KEEP_TEST_ARTIFACTS", "0") == "1":
         return
     _cleanup_test_artifacts()
-
-
-@pytest.fixture(autouse=True)
-def _mock_vosk_teardown(monkeypatch):
-    """Prevents vosk segfaults in pytest by mocking out vosk Model if not strictly needed."""
-    try:
-        import vosk
-
-        def dummy_del(self):
-            pass
-
-        if hasattr(vosk.Model, "__del__"):
-            monkeypatch.setattr(vosk.Model, "__del__", dummy_del, raising=False)
-        if hasattr(vosk.Recognizer, "__del__"):
-            monkeypatch.setattr(vosk.Recognizer, "__del__", dummy_del, raising=False)
-    except Exception:
-        pass
 
 
 @pytest.fixture(autouse=True)

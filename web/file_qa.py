@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 _OLLAMA_HOST = "127.0.0.1"
 _OLLAMA_PORT = 11434
 _OLLAMA_URL = f"http://{_OLLAMA_HOST}:{_OLLAMA_PORT}"
-_AI_MODEL = "qwen3:8b"
+_AI_MODEL = "qwen3.5:9b"
 
 _QA_SYSTEM = """\
 你是文件管家助手，已获得若干文件的摘要内容。
@@ -70,6 +70,18 @@ def _search_files_in_dirs(
 ) -> List[str]:
     """在给定目录中按关键词找文件（先 FTS 索引，无结果则 glob 扫目录）。"""
     found: List[str] = []
+    valid_dirs = [str(Path(d).resolve()) for d in search_dirs if Path(d).is_dir()]
+    if search_dirs and not valid_dirs:
+        return []
+
+    def _in_scope(path_str: str) -> bool:
+        if not valid_dirs:
+            return True
+        try:
+            p = str(Path(path_str).resolve())
+        except Exception:
+            return False
+        return any(p.startswith(d + "\\") or p == d for d in valid_dirs)
 
     # 1. FileIndexer FTS
     try:
@@ -82,12 +94,12 @@ def _search_files_in_dirs(
             hits = _idx.search(kw, limit=top_k)
             for h in hits:
                 fp = h.get("file_path", "")
-                if fp and fp not in found:
+                if fp and _in_scope(fp) and fp not in found:
                     found.append(fp)
         if found:
             return found[:top_k]
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
 
     # 2. Fallback: glob scan
     _SUPPORTED = {
@@ -104,7 +116,7 @@ def _search_files_in_dirs(
     }
     _exts = set(ext_filters) if ext_filters else _SUPPORTED
     seen: set = set()
-    for d in search_dirs:
+    for d in valid_dirs or search_dirs:
         dp = Path(d)
         if not dp.is_dir():
             continue
@@ -123,7 +135,7 @@ def _search_files_in_dirs(
                     found.append(str(p))
     if not found:
         # last fallback: return everything in dirs if no keyword match
-        for d in search_dirs:
+        for d in valid_dirs or search_dirs:
             dp = Path(d)
             if not dp.is_dir():
                 continue
@@ -192,16 +204,21 @@ def answer_file_question(
     # ── 提取各文件内容 ────────────────────────────────────────────────────
     contexts: List[str] = []
     sources: List[Dict] = []
+    readable_count = 0
     for fp in all_paths:
         p = Path(fp)
         if not p.exists():
             continue
         content = _extract_content_local(fp)
         snippet = content[:400].strip() if content else "(无法提取内容)"
-        contexts.append(f"【{p.name}】\n{snippet}")
         sources.append({"file_name": p.name, "snippet": snippet[:200]})
 
-    if not contexts:
+        # 仅将可读内容加入问答上下文；全为空时应直接报错而非继续问答。
+        if content and content.strip():
+            contexts.append(f"【{p.name}】\n{snippet}")
+            readable_count += 1
+
+    if readable_count == 0:
         return {
             "success": False,
             "error": "所有文件均无法提取内容",

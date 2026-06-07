@@ -6,7 +6,6 @@ RuleRouter — deterministic keyword/pattern based routing rules.
 All pure-logic helpers that do NOT depend on ML models, external I/O, or
 mutable class state live here.  SmartDispatcher delegates to these methods.
 """
-
 from __future__ import annotations
 
 import re
@@ -131,16 +130,6 @@ class RuleRouter:
             return "CODER"
         if any(k in text_lower for k in ["查", "搜索", "价格", "天气", "新闻"]):
             return "WEB_SEARCH"
-        # System operations: command verb at start + short input
-        _sys_starters = ("打开", "启动", "运行", "开启", "关闭", "退出", "关掉", "杀掉")
-        _sys_exclude = ("怎么", "如何", "什么", "文件", "网页", "网站", "思路", "方法")
-        stripped = user_input.strip()
-        if (
-            len(stripped) <= 18
-            and any(stripped.startswith(s) for s in _sys_starters)
-            and not any(k in text_lower for k in _sys_exclude)
-        ):
-            return "SYSTEM"
         # Reminder / message → AGENT
         if any(
             k in text_lower

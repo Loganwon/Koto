@@ -413,7 +413,7 @@ def register_memory_routes(app, get_memory_manager):
                     "last_seen": obs.get("last_seen"),
                 }
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                logger.debug("Non-fatal", exc_info=True)
 
             return jsonify(
                 {
@@ -624,7 +624,7 @@ def register_memory_routes(app, get_memory_manager):
                             p, temperature=0.15, max_tokens=600
                         )
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    logger.debug("Non-fatal", exc_info=True)
 
                 if llm_fn is None:
                     logger.warning("[BatchExtract] 没有可用的 LLM 函数，无法提取记忆")

@@ -89,14 +89,75 @@ _add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.png'), os.path.join('assets'
 _add(os.path.join(ROOT, 'src', 'assets', 'koto_icon.svg'), os.path.join('assets', 'koto_icon.svg'))
 
 # ── 默认配置模板 ──
-_add(os.path.join(ROOT, 'config', 'gemini_config.env.example'),
-     os.path.join('config', 'gemini_config.env.example'))
-# user_settings.json 不打包：含开发者本机绝对路径，且运行时由 web/settings.py
-# 自动按 DEFAULT_SETTINGS 在 exe 同级 config/ 目录创建，无需预置。
-# skill_packs 目录目前为空，保留 _add 调用确保目录未来有内容时自动打包
-_add(os.path.join(ROOT, 'config', 'skill_packs'),   os.path.join('config', 'skill_packs'))
-_add(os.path.join(ROOT, 'config', 'skills'),        os.path.join('config', 'skills'))
-_add(os.path.join(ROOT, 'config', 'workflows'),     os.path.join('config', 'workflows'))
+_CONFIG_EXCLUDED_DIRS = {
+    '__pycache__',
+    'deploy',
+    'file_rag_index',
+    'memory_rag_index',
+    'rag_index',
+    'skill_cache',
+    'task_skills',
+    'tests',
+    'training_data',
+}
+_CONFIG_EXCLUDED_FILES = {
+    'DS_KEY',
+    'DS_KEY.txt',
+    'deepseek_config.env',
+    'email_accounts.json',
+    'gemini_config.env',
+    'jwt_secret.txt',
+    'memory.json',
+    'memory_summaries.json',
+    'memory_vectors.json',
+    'model_setup_done.json',
+    'proactive_queue.json',
+    'requirements.lock',
+    'requirements.txt',
+    'requirements_training.txt',
+    'shadow_observations.json',
+    'token_usage.json',
+    'user_profile.json',
+    'user_settings.json',
+}
+_CONFIG_EXCLUDED_SUFFIXES = (
+    '.db',
+    '.sqlite',
+    '.sqlite-shm',
+    '.sqlite-wal',
+)
+
+
+def _add_runtime_config(src_dir):
+    """Include shipped config defaults while excluding local state and caches."""
+    if not os.path.isdir(src_dir):
+        return
+
+    for dirpath, dirnames, filenames in os.walk(src_dir):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _CONFIG_EXCLUDED_DIRS
+        ]
+
+        rel_dir = os.path.relpath(dirpath, src_dir)
+        dst_dir = 'config' if rel_dir == '.' else os.path.join('config', rel_dir)
+
+        # PyInstaller does not infer empty config directories from file-based walks.
+        # Include them explicitly so runtime-created defaults still have a packaged home.
+        if rel_dir != '.' and not dirnames and not filenames:
+            _add(dirpath, dst_dir)
+
+        for filename in filenames:
+            if filename in _CONFIG_EXCLUDED_FILES:
+                continue
+            if filename.startswith('test_'):
+                continue
+            if filename.endswith(_CONFIG_EXCLUDED_SUFFIXES):
+                continue
+            _add(os.path.join(dirpath, filename), dst_dir)
+
+
+_add_runtime_config(os.path.join(ROOT, 'config'))
 
 # ── src/ 入口脚本（作为数据一同打包，供 runpy 兜底使用）──
 for _script in ['koto_app.py', 'model_downloader.py', 'koto_setup.py', 'server.py']:
@@ -144,6 +205,7 @@ hiddenimports = [
     'google.api_core', 'google.api_core.gapic_v1',
     'google.auth', 'google.auth.transport', 'google.auth.transport.requests',
     'google.protobuf',
+    'openai', 'jiter',
 
     # ── HTTP ──
     'httpx', 'httpx._client', 'httpcore', 'httpcore._async',
@@ -184,14 +246,9 @@ hiddenimports = [
     'win32api', 'win32con', 'win32gui', 'win32process', 'win32event',
     'pywintypes', 'pythoncom',
 
-    # ── 语音输入（可选，打包后优雅降级）──
-    'speech_recognition',
-    'pyaudio',
-    'vosk',
+    # ── 上传音频 STT（Whisper / Gemini）──
     'edge_tts',
-    'sounddevice', 'soundfile',
     'wave', 'audioop',
-    'comtypes', 'comtypes.client',
     'win32com', 'win32com.client',
 
     # ── LangChain / LangGraph ──
@@ -216,6 +273,9 @@ hiddenimports = [
     'app.core.agent.unified_agent',
     'app.core.agent.langgraph_agent',
     'app.core.agent.multi_agent',
+    'app.core.agent.koto_supervision',
+    'app.core.agent.mcp_adapter',
+    'app.core.agent.mcp_manager',
     'app.core.agent.tool_registry',
     'app.core.agent.checkpoint_manager',
     'app.core.agent.plugins',
@@ -226,7 +286,6 @@ hiddenimports = [
     'app.core.agent.plugins.data_process_plugin',
     'app.core.agent.plugins.image_process_plugin',
     'app.core.agent.plugins.network_plugin',
-    'app.core.agent.plugins.script_generation_plugin',
     'app.core.agent.plugins.performance_analysis_plugin',
     'app.core.agent.plugins.trend_analysis_plugin',
     'app.core.agent.plugins.configuration_plugin',
@@ -234,6 +293,16 @@ hiddenimports = [
     'app.core.agent.plugins.auto_remediation_plugin',
     'app.core.agent.plugins.system_event_monitoring_plugin',
     'app.core.agent.plugins.system_info_plugin',
+    'app.core.agent.plugins.annotation_plugin',
+    'app.core.agent.plugins.chart_vision_plugin',
+    'app.core.agent.plugins.doc_gen_plugin',
+    'app.core.agent.plugins.file_converter_plugin',
+    'app.core.agent.plugins.memory_tools_plugin',
+    'app.core.agent.plugins.ppt_plugin',
+    'app.core.agent.plugins.productivity_plugin',
+    'app.core.agent.plugins.skill_tools_plugin',
+    'app.core.agent.plugins.template_fill_plugin',
+    'app.core.agent.plugins.web_tools_bridge_plugin',
     'app.core.analytics', 'app.core.analytics.trend_analyzer',
     'app.core.config', 'app.core.config.configuration_manager',
     'app.core.learning', 'app.core.learning.distill_manager',
@@ -242,13 +311,16 @@ hiddenimports = [
     'app.core.learning.training_data_builder',
     'app.core.llm', 'app.core.llm.base',
     'app.core.llm.gemini', 'app.core.llm.langchain_adapter',
+    'app.core.llm.openai_provider',
+    'app.core.llm.deepseek_config',
+    'app.core.llm.deepseek_provider',
+    'app.core.llm.model_selection',
     'app.core.llm.ollama_provider',
     'app.core.monitoring',
     'app.core.monitoring.alert_manager',
     'app.core.monitoring.event_database',
     'app.core.monitoring.system_event_monitor',
     'app.core.remediation', 'app.core.remediation.remediation_manager',
-    'app.core.scripts', 'app.core.scripts.script_generator',
     'app.core.security',
     'app.core.security.output_validator',
     'app.core.security.pii_filter',
@@ -264,6 +336,12 @@ hiddenimports = [
     'app.core.workflow',
     'app.core.workflow.interactive_planner',
     'app.core.workflow.langgraph_workflow',
+    'app.core.workflows',
+    'app.core.workflows.action_item_extractor',
+    'app.core.workflows.cross_format_extractor',
+    'app.core.workflows.data_format_cleaner',
+    'app.core.workflows.doc_deep_compare',
+    'app.core.workflows.questionnaire_filler',
     'app.api.agent_routes',
     'app.api.skill_routes',
     'app.api.skill_marketplace_routes',
@@ -274,8 +352,10 @@ hiddenimports = [
     'app.api.ops_routes',
     'app.api.shadow_routes',
     'app.api.macro_routes',
+    'app.api.mcp_routes',
     'app.api.telegram_bot_routes',
     'app.api.distill_routes',
+    'app.api.bg_agent_routes',
 
     # ── web/blueprints/ 分层蓝图（动态 import_module，PyInstaller 不自动发现）──
     'web.blueprints',
@@ -294,6 +374,11 @@ hiddenimports = [
     'web.blueprints.file_editor',
     'web.blueprints.file_organize',
     'web.blueprints.dev',
+    'web.blueprints.editor_ai',
+    'web.blueprints.ppt_legacy',
+    'web.blueprints.pptx_editor',
+    'web.blueprints.workflow_api',
+    'web.blueprints.workspace_assistant',
 
     # ── web/routes/ ──
     'web.routes',
@@ -306,15 +391,15 @@ hiddenimports = [
     'web', 'web.app', 'web.audio_overview', 'web.audit_logger',
     'web.auth', 'web.auth_manager', 'web.auto_catalog_scheduler',
     'web.auto_execution', 'web.batch_file_ops', 'web.batch_processor',
-    'web.behavior_monitor', 'web.browser_automation', 'web.calendar_manager',
+    'web.behavior_monitor', 'web.calendar_manager',
     'web.clipboard_manager', 'web.clipboard_ocr_assistant', 'web.code_generator',
     'web.concept_extractor', 'web.consistency_checker', 'web.context_awareness',
     'web.context_injector', 'web.data_pipeline', 'web.doc_converter',
-    'web.doc_planner', 'web.document_annotator', 'web.document_batch_annotator_v2',
+    'web.doc_planner', 'web.document_annotator', 'web.document_batch_annotator',
     'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
     'web.document_feedback', 'web.document_generator', 'web.document_reader',
     'web.document_validator', 'web.document_workflow_executor',
-    'web.docx_translator_module', 'web.email_manager', 'web.enhanced_memory_manager',
+    'web.docx_translator_module', 'web.enhanced_memory_manager',
     'web.feedback_loop', 'web.file_analyzer', 'web.file_converter',
     'web.file_editor', 'web.file_fields_extractor', 'web.file_indexer',
     'web.file_organizer', 'web.file_parser', 'web.file_processor',
@@ -331,14 +416,13 @@ hiddenimports = [
     'web.ppt_themes', 'web.proactive_dialogue', 'web.proactive_trigger',
     'web.processed_file_network', 'web.prompt_adapter', 'web.quality_evaluator',
     'web.reminder_manager', 'web.search_engine', 'web.settings',
-    'web.shared', 'web.smart_feedback', 'web.speech_transcriber',
-    'web.suggestion_annotator', 'web.suggestion_engine', 'web.system_info',
+    'web.shared', 'web.smart_feedback', 'web.suggestion_annotator',
+    'web.suggestion_engine', 'web.system_info',
     'web.task_dispatcher', 'web.task_scheduler', 'web.telegram_bot',
     'web.template_library', 'web.token_tracker', 'web.track_changes_editor',
-    'web.voice_api_enhanced', 'web.voice_engine', 'web.voice_fast',
-    'web.voice_input', 'web.voice_interaction', 'web.voice_recognition_enhanced',
     'web.web_searcher', 'web.windows_notifier', 'web.work_file_library',
     'web.workflow_manager',
+    'web.pdf_annotator',
 ]
 
 # ═══════════════════════════════════════════════
@@ -365,8 +449,6 @@ _collect_pkgs = [
     'langchain_core',
     'langchain_google_genai',
     'langgraph',
-    'speech_recognition',  # 语音识别（SpeechRecognition 包）
-    'pyaudio',             # 麦克风输入（需 portaudio.dll）
     'psutil',              # 系统/进程监控（C extension，必须 collect_all）
 ]
 

@@ -57,7 +57,10 @@ class TestProviderFactoryListProviders(unittest.TestCase):
     def test_empty_when_no_keys(self):
         from app.core.llm.provider_factory import list_available_providers
 
-        providers = list_available_providers()
+        with patch(
+            "app.core.llm.provider_factory.get_gemini_api_key", return_value=None
+        ):
+            providers = list_available_providers()
         # ollama may appear if port 11434 is open — filter it out
         cloud = [p for p in providers if p != "ollama"]
         self.assertEqual(cloud, [])
@@ -96,8 +99,10 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         from app.core.llm.provider_factory import get_llm_provider
 
         mock_inst = MagicMock()
-        with patch.dict(
-            "app.core.llm.provider_factory._LOADERS", {"gemini": lambda: mock_inst}
+        with patch(
+            "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
+        ), patch(
+            "app.core.llm.provider_factory.has_gemini_api_key", return_value=True
         ):
             result = get_llm_provider(provider="gemini")
         self.assertIs(result, mock_inst)
@@ -136,8 +141,10 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         from app.core.llm.provider_factory import get_llm_provider
 
         mock_inst = MagicMock()
-        with patch.dict(
-            "app.core.llm.provider_factory._LOADERS", {"gemini": lambda: mock_inst}
+        with patch(
+            "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
+        ), patch(
+            "app.core.llm.provider_factory.has_gemini_api_key", return_value=True
         ):
             result = get_llm_provider(model="gemini-3-flash-preview")
         self.assertIs(result, mock_inst)
@@ -153,7 +160,28 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         self.assertIs(result, mock_inst)
 
     def test_unknown_provider_falls_back_to_autodetect(self):
-        """Unknown provider name logs warning and falls through to auto-detect."""
+        """Unknown provider name falls through to auto-detect, which stays cloud-only by default."""
+        from app.core.llm.provider_factory import (
+            CloudProviderUnavailableError,
+            get_llm_provider,
+        )
+
+        for k in (
+            "GEMINI_API_KEY",
+            "API_KEY",
+            "GOOGLE_API_KEY",
+            "OPENAI_API_KEY",
+            "OPENAI_KEY",
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_API_KEY",
+        ):
+            os.environ.pop(k, None)
+        with patch(
+            "app.core.llm.provider_factory.has_gemini_api_key", return_value=False
+        ), self.assertRaises(CloudProviderUnavailableError):
+            get_llm_provider(provider="nonexistent_provider")
+
+    def test_allow_local_fallback_returns_ollama_when_cloud_missing(self):
         from app.core.llm.provider_factory import get_llm_provider
 
         mock_inst = MagicMock()
@@ -167,12 +195,45 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
             "CLAUDE_API_KEY",
         ):
             os.environ.pop(k, None)
-        # The fallback (no keys) calls _load_ollama() directly, not via _LOADERS
         with patch(
+            "app.core.llm.provider_factory.has_gemini_api_key", return_value=False
+        ), patch(
             "app.core.llm.provider_factory._load_ollama", return_value=mock_inst
         ):
-            result = get_llm_provider(provider="nonexistent_provider")
+            result = get_llm_provider(allow_local_fallback=True)
         self.assertIs(result, mock_inst)
+
+    def test_auto_detect_loads_gemini_config_when_env_empty(self):
+        from app.core.llm.provider_factory import get_llm_provider, list_available_providers
+
+        mock_inst = MagicMock()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_dir = root / "config"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (config_dir / "gemini_config.env").write_text(
+                "GEMINI_API_KEY=config-key-123\n",
+                encoding="utf-8",
+            )
+
+            for k in (
+                "GEMINI_API_KEY",
+                "API_KEY",
+                "GOOGLE_API_KEY",
+                "GOOGLE_GENAI_API_KEY",
+            ):
+                os.environ.pop(k, None)
+
+            with patch(
+                "app.core.llm.gemini_config.project_root", return_value=root
+            ), patch(
+                "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
+            ):
+                result = get_llm_provider()
+                providers = list_available_providers()
+
+        self.assertIs(result, mock_inst)
+        self.assertIn("gemini", providers)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -161,7 +161,7 @@ class InteractivePlanner:
         user_input: str,
         llm_provider: Any,
         task_id: Optional[str] = None,
-        model_id: str = "gemini-3-flash-preview",
+        model_id: str = "gemini-2.5-flash",
     ):
         """
         使用 LLM 动态拆解用户需求为步骤 DAG。
@@ -186,7 +186,7 @@ class InteractivePlanner:
         user_input: str,
         llm_provider: Any,
         task_id: Optional[str] = None,
-        model_id: str = "gemini-3-flash-preview",
+        model_id: str = "gemini-2.5-flash",
         tool_registry: Any = None,
         history: Optional[list] = None,
     ):
@@ -218,7 +218,7 @@ class InteractivePlanner:
         approval_fn=None,
         cancel_check=None,
         llm_provider: Any = None,
-        replan_model_id: str = "gemini-3-flash-preview",
+        replan_model_id: str = "gemini-2.5-flash",
     ) -> Generator[Dict[str, Any], None, None]:
         """
         执行 Plan（新引擎格式）。
@@ -270,28 +270,3 @@ class InteractivePlanner:
             )
             prev_name = name
         return new_plan
-
-    @staticmethod
-    def to_old_plan(new_plan) -> TaskPlan:
-        """将新 Plan 对象转换为旧 TaskPlan（向后兼容）。"""
-        steps = []
-        for idx, s in enumerate(new_plan.steps, start=1):
-            steps.append(
-                TaskPlanStep(
-                    step_id=idx,
-                    step_type=s.step_type,
-                    description=s.description,
-                    input_data=s.input_data,
-                    expected_output=s.expected_output,
-                    status=(
-                        s.status.value if hasattr(s.status, "value") else str(s.status)
-                    ),
-                    result=s.result,
-                )
-            )
-        return TaskPlan(
-            task_id=new_plan.task_id,
-            original_request=new_plan.original_request,
-            steps=steps,
-            status=new_plan.status,
-        )

@@ -9,21 +9,18 @@
 - 追踪文件处理历史（标注、编辑、转换等）
 - 文本反向索引（找出包含特定文本的所有文件）
 - 文件关系网络（源文件→处理后文件、相关文档）
-- 快速打开文件
 - 多维查询（时间、类型、标签、关键词）
 
 使用场景：
-  用户: "打开昨天处理过的关于'黄金价格'的所有word文档"
-  → 1. 时间过滤 → 2. 文本搜索 → 3. 类型过滤 → 4. 返回文件列表 + 快速打开
+  用户: "查找昨天处理过的关于'黄金价格'的所有word文档"
+  → 1. 时间过滤 → 2. 文本搜索 → 3. 类型过滤 → 4. 返回文件列表
 """
 
 import hashlib
 import json
 import logging
 import os
-import platform
 import sqlite3
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -569,44 +566,6 @@ class ProcessedFileNetwork:
                 "node_count": len(network["nodes"]),
                 "edge_count": len(network["edges"]),
             }
-
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def open_file(self, file_id: str) -> Dict[str, Any]:
-        """
-        快速打开文件
-
-        Args:
-            file_id: 文件ID
-        """
-        try:
-            conn = sqlite3.connect(self.db_path)
-            cursor = conn.cursor()
-
-            cursor.execute(
-                "SELECT path FROM file_records WHERE file_id = ?", (file_id,)
-            )
-            row = cursor.fetchone()
-            conn.close()
-
-            if not row:
-                return {"success": False, "error": "文件不存在"}
-
-            file_path = row[0]
-            if not os.path.exists(file_path):
-                return {"success": False, "error": "文件路径无效"}
-
-            # 根据操作系统打开文件
-            system = platform.system()
-            if system == "Windows":
-                os.startfile(file_path)
-            elif system == "Darwin":  # macOS
-                subprocess.run(["open", file_path])
-            else:  # Linux
-                subprocess.run(["xdg-open", file_path])
-
-            return {"success": True, "path": file_path, "message": "文件已打开"}
 
         except Exception as e:
             return {"success": False, "error": str(e)}

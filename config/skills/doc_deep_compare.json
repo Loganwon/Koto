@@ -1,0 +1,37 @@
+{
+  "id": "doc_deep_compare",
+  "name": "非标文档深度比对",
+  "icon": "🔍",
+  "category": "workflow",
+  "skill_nature": "domain_skill",
+  "description": "将原始 Word 与扫描件 PDF 进行语义级条款比对，标出增删改及风险点，防范合同暗改",
+  "version": "1.0.0",
+  "author": "koto",
+  "executor": "app.core.workflows.doc_deep_compare.DocDeepCompare",
+  "params_schema": [
+    {
+      "key": "original_file",
+      "label": "原始文件（Word/PDF）",
+      "type": "file",
+      "accept": ".docx,.doc,.pdf,.txt",
+      "required": true
+    },
+    {
+      "key": "revised_file",
+      "label": "对比文件（扫描件 PDF 或修订版）",
+      "type": "file",
+      "accept": ".pdf,.docx,.doc,.txt",
+      "required": true
+    },
+    {
+      "key": "model_mode",
+      "label": "模型",
+      "type": "select",
+      "options": [{"value": "online", "label": "在线模型"}, {"value": "local", "label": "本地模型"}],
+      "default": "online",
+      "required": false
+    }
+  ],
+  "output_types": ["html", "markdown"],
+  "enabled": false
+}

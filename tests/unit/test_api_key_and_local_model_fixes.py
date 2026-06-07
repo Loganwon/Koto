@@ -9,7 +9,92 @@ Unit tests for:
 import importlib
 import sys
 import types
+from html.parser import HTMLParser
+from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
+
+import pytest
+
+
+class _HtmlNode:
+    def __init__(self, tag, attrs, parent=None):
+        self.tag = tag
+        self.attrs = dict(attrs)
+        self.parent = parent
+        self.children = []
+        self.text = ""
+
+
+class _TemplateTreeParser(HTMLParser):
+    _VOID_TAGS = {
+        "area",
+        "base",
+        "br",
+        "circle",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "line",
+        "link",
+        "meta",
+        "param",
+        "path",
+        "polyline",
+        "rect",
+        "source",
+        "track",
+        "wbr",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.root = _HtmlNode("root", [])
+        self._stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        node = _HtmlNode(tag, attrs, parent=self._stack[-1])
+        self._stack[-1].children.append(node)
+        if tag not in self._VOID_TAGS:
+            self._stack.append(node)
+
+    def handle_startendtag(self, tag, attrs):
+        node = _HtmlNode(tag, attrs, parent=self._stack[-1])
+        self._stack[-1].children.append(node)
+
+    def handle_endtag(self, tag):
+        for idx in range(len(self._stack) - 1, 0, -1):
+            if self._stack[idx].tag == tag:
+                del self._stack[idx:]
+                break
+
+    def handle_data(self, data):
+        text = data.strip()
+        if text:
+            self._stack[-1].text += text
+
+
+def _iter_nodes(node):
+    yield node
+    for child in node.children:
+        yield from _iter_nodes(child)
+
+
+def _find_node_by_id(root, node_id):
+    for node in _iter_nodes(root):
+        if node.attrs.get("id") == node_id:
+            return node
+    return None
+
+
+def _node_text(node):
+    parts = [node.text] if node.text else []
+    for child in node.children:
+        child_text = _node_text(child)
+        if child_text:
+            parts.append(child_text)
+    return "".join(parts)
 
 # ── 1. _client cache reset on API key save ─────────────────────────────────
 
@@ -64,6 +149,47 @@ class TestClientCacheReset:
         os.environ["API_KEY"] = new_key
         assert os.environ["GEMINI_API_KEY"] == new_key
         assert os.environ["API_KEY"] == new_key
+
+
+class TestGetClientLocalIsolation:
+    """Local-mode get_client must stay on the local system and never reverse-fallback to cloud."""
+
+    def _load_app_module(self):
+        import web.app as app_mod
+
+        app_mod._client = None
+        app_mod._client_mode_key = (None, None)
+        return app_mod
+
+    def test_local_mode_without_explicit_model_uses_ollama(self):
+        app_mod = self._load_app_module()
+
+        with patch.object(app_mod, "_get_local_model_config", return_value=("local", None)), patch(
+            "app.core.llm.ollama_provider.OllamaClientProxy",
+            return_value=MagicMock(name="ollama_client"),
+        ) as mock_ollama, patch.object(
+            app_mod,
+            "create_client",
+            side_effect=AssertionError("create_client should not be called in local mode"),
+        ):
+            client = app_mod.get_client()
+
+        assert client is mock_ollama.return_value
+        mock_ollama.assert_called_once_with(model_tag=None)
+
+    def test_local_mode_failure_does_not_reverse_fallback_to_cloud(self):
+        app_mod = self._load_app_module()
+
+        with patch.object(app_mod, "_get_local_model_config", return_value=("local", None)), patch(
+            "app.core.llm.ollama_provider.OllamaClientProxy",
+            side_effect=RuntimeError("boom"),
+        ), patch.object(
+            app_mod,
+            "create_client",
+            side_effect=AssertionError("create_client should not be called on local failure"),
+        ):
+            with pytest.raises(RuntimeError, match="本地模式已启用，但 Ollama 初始化失败"):
+                app_mod.get_client()
 
 
 # ── 2. Windows stdout encoding fix ─────────────────────────────────────────
@@ -121,6 +247,28 @@ class TestApiKeySettingsPanelHtml:
 
     def test_ai_studio_link(self):
         assert "aistudio.google.com/apikey" in self.html
+
+    def test_ui_zoom_controls_stay_inside_appearance_section(self):
+        parser = _TemplateTreeParser()
+        parser.feed(self.html)
+
+        slider = _find_node_by_id(parser.root, "uiZoomSlider")
+        assert slider is not None, "Settings panel must define uiZoomSlider"
+
+        current = slider.parent
+        appearance_section = None
+        while current is not None:
+            classes = current.attrs.get("class", "").split()
+            if "settings-section" in classes and "外观" in _node_text(current):
+                appearance_section = current
+                break
+            current = current.parent
+
+        assert appearance_section is not None, (
+            "UI zoom controls must remain inside the 外观 settings section; "
+            "if they fall outside, malformed closing tags break the settings "
+            "layout and later sections overlay the storage/API controls."
+        )
 
 
 # ── 4. saveSettingsApiKey JS function ──────────────────────────────────────

@@ -79,9 +79,9 @@ class TestPageRoutes:
         resp = client.get("/m")
         assert resp.status_code in (200, 302, 404, 500)
 
-    def test_test_upload(self, client):
+    def test_test_upload_page_stays_removed(self, client):
         resp = client.get("/test_upload")
-        assert resp.status_code in (200, 302, 404, 500)
+        assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -402,45 +402,23 @@ class TestClipboardRoutes:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 11. Email routes
+# 11. Retired email routes
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestEmailRoutes:
-    def test_list_accounts(self, client):
-        resp = client.get("/api/email/accounts")
-        assert resp.status_code in (200, 500)
-
-    def test_add_account(self, client):
-        resp = _json_post(
-            client,
-            "/api/email/accounts/add",
-            {
-                "email": "test@example.com",
-                "password": "fake",
-                "smtp_server": "smtp.example.com",
-            },
-        )
-        assert resp.status_code in (200, 400, 500)
-
-    def test_send_email(self, client):
-        resp = _json_post(
-            client,
-            "/api/email/send",
-            {
-                "to": ["test@example.com"],
-                "subject": "Test",
-                "body": "Hello",
-            },
-        )
-        assert resp.status_code in (200, 400, 500)
-
-    def test_fetch_emails(self, client):
-        resp = client.get("/api/email/fetch")
-        assert resp.status_code in (200, 500)
-
-    def test_search_emails(self, client):
-        resp = client.get("/api/email/search?query=test")
-        assert resp.status_code in (200, 500)
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            ("GET", "/api/email/accounts"),
+            ("POST", "/api/email/accounts/add"),
+            ("POST", "/api/email/send"),
+            ("GET", "/api/email/fetch"),
+            ("GET", "/api/email/search?query=test"),
+        ],
+    )
+    def test_email_routes_are_retired(self, client, method, path):
+        resp = client.open(path, method=method, json={})
+        assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -448,17 +426,17 @@ class TestEmailRoutes:
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestBrowserRoutes:
-    def test_browser_open(self, client):
-        resp = _json_post(client, "/api/browser/open", {"url": "https://example.com"})
-        assert resp.status_code in (200, 400, 500)
-
-    def test_browser_search(self, client):
-        resp = _json_post(client, "/api/browser/search", {"query": "flask testing"})
-        assert resp.status_code in (200, 400, 500)
-
-    def test_browser_screenshot(self, client):
-        resp = _json_post(client, "/api/browser/screenshot", {"filename": "test.png"})
-        assert resp.status_code in (200, 400, 500)
+    @pytest.mark.parametrize(
+        ("path", "payload"),
+        [
+            ("/api/browser/open", {"url": "https://example.com"}),
+            ("/api/browser/search", {"query": "flask testing"}),
+            ("/api/browser/screenshot", {"filename": "test.png"}),
+        ],
+    )
+    def test_browser_automation_routes_are_retired(self, client, path, payload):
+        resp = _json_post(client, path, payload)
+        assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -488,24 +466,20 @@ class TestSearchRoutes:
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestVoiceRoutes:
-    def test_voice_engines(self, client):
-        resp = client.get("/api/voice/engines")
-        assert resp.status_code in (200, 500)
-
     def test_voice_stt_status(self, client):
         resp = client.get("/api/voice/stt_status")
         assert resp.status_code in (200, 500)
 
-    def test_voice_commands(self, client):
-        resp = client.get("/api/voice/commands")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["success"] is True
-        assert len(data["commands"]) > 0
-
-    def test_voice_stop(self, client):
-        resp = _json_post(client, "/api/voice/stop")
-        assert resp.status_code in (200, 500)
+    def test_legacy_voice_routes_are_removed(self, client):
+        prefix = "/api/" + "voice"
+        for path in (
+            f"{prefix}/engines",
+            f"{prefix}/listen",
+            f"{prefix}/stream",
+            f"{prefix}/commands",
+            f"{prefix}/stop",
+        ):
+            assert client.get(path).status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -535,18 +509,17 @@ class TestWorkspaceRoutes:
         resp = client.get("/api/workspace")
         assert resp.status_code in (200, 500)
 
-    def test_open_workspace(self, client):
-        with patch("subprocess.Popen"):
-            resp = _json_post(client, "/api/open-workspace")
-        assert resp.status_code in (200, 500)
+    def test_open_workspace_route_removed(self, client):
+        resp = _json_post(client, "/api/" + "open-" + "workspace")
+        assert resp.status_code == 404
 
     def test_workspace_file_nonexistent(self, client):
         resp = client.get("/api/workspace/nonexistent_file.txt")
         assert resp.status_code in (200, 403, 404, 500)
 
     def test_open_file_missing_path(self, client):
-        resp = _json_post(client, "/api/open-file", {})
-        assert resp.status_code in (200, 400, 500)
+        resp = _json_post(client, "/api/" + "open-" + "file", {})
+        assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -700,12 +673,10 @@ class TestSkillsRoutes:
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestModeSwitchRoutes:
-    def test_switch_to_mini(self, client):
-        with patch("subprocess.Popen"):
-            resp = _json_post(client, "/api/switch-to-mini")
-        assert resp.status_code in (200, 500)
+    def test_legacy_switch_to_mini_stays_removed(self, client):
+        resp = _json_post(client, "/api/switch-to-mini")
+        assert resp.status_code == 404
 
-    def test_switch_to_main(self, client):
-        with patch("subprocess.Popen"):
-            resp = _json_post(client, "/api/switch-to-main")
-        assert resp.status_code in (200, 500)
+    def test_legacy_switch_to_main_stays_removed(self, client):
+        resp = _json_post(client, "/api/switch-to-main")
+        assert resp.status_code == 404

@@ -49,6 +49,39 @@ class TestDocumentFeedback:
         obj = self._make(client=mock_client)
         assert obj.client is mock_client
 
+    def test_annotate_document_uses_tracked_changes_in_place(self):
+        obj = self._make()
+        annotations = [{"原文片段": "旧文本", "修改建议": "新文本"}]
+
+        with patch("web.track_changes_editor.TrackChangesEditor") as editor_cls:
+            editor = editor_cls.return_value
+            editor.apply_tracked_changes.return_value = {
+                "success": True,
+                "applied": 1,
+                "failed": 0,
+                "total": 1,
+            }
+
+            result = obj.annotate_document("/fake.docx", annotations)
+
+        editor_cls.assert_called_once_with(author="Koto AI")
+        editor.apply_tracked_changes.assert_called_once_with(
+            "/fake.docx",
+            annotations,
+            progress_callback=None,
+        )
+        assert result["success"] is True
+        assert result["revised_file"] == "/fake.docx"
+        assert result["updated_in_place"] is True
+
+    def test_build_annotation_prompt_disallows_comment_style_suggestions(self):
+        obj = self._make()
+        prompt = obj._build_annotation_prompt("docx", "当前片段", "请审校这份文稿")
+
+        assert "结构性批注" not in prompt
+        assert "禁止批注式输出" in prompt
+        assert "建议：..." in prompt
+
     # -- _extract_summary ---------------------------------------------------
     def test_extract_summary_from_json(self):
         obj = self._make()
@@ -875,7 +908,7 @@ class TestFileAnalyzer:
     def test_class_constants(self):
         from web.file_analyzer import FileAnalyzer
 
-        assert FileAnalyzer.OLLAMA_URL == "http://localhost:11434"
+        assert FileAnalyzer.OLLAMA_URL == "http://127.0.0.1:11434"
         assert FileAnalyzer.AI_MODEL == "qwen3:8b"
 
     # -- _load_classification_rules -----------------------------------------

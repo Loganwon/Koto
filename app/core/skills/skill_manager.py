@@ -722,8 +722,8 @@ BUILTIN_SKILLS: List[Dict] = [
         "category": "workflow",
         "skill_nature": "domain_skill",
         "description": "为谈判/商务沟通提供话术框架：立场锚定、利益对齐、异议化解、条件交换技巧",
-        "intent_description": "用户需要进行薪资谈判、合同谈判、砍价、资源申请、利益协调等场景的沟通准备",
-        "task_types": ["CHAT"],
+        "intent_description": "用户需要进行薪资谈判、合同谈判、砍价、资源申请、利益协调等场景的沟通准备，或撰写谈判备忘录、沟通方案文档",
+        "task_types": ["CHAT", "FILE_GEN"],
         "priority": 60,
         "prompt": (
             "\n\n## 🤝 工作流要求：谈判话术\n"
@@ -970,7 +970,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "skill_nature": "domain_skill",
         "description": "为技能/领域制定个人学习路线图：阶段划分、核心资源推荐、里程碑检验点",
         "intent_description": "用户想学一门技术/技能、转行、系统学习某个领域，需要路线规划",
-        "task_types": ["CHAT", "RESEARCH"],
+        "task_types": ["CHAT", "RESEARCH", "FILE_GEN"],
         "priority": 55,
         "prompt": (
             "\n\n## 🗺️ 工作流要求：学习路线图\n"
@@ -994,7 +994,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "skill_nature": "domain_skill",
         "description": "为特定岗位准备面试：高频问题模拟、STAR 法则答题框架、技术考点梳理、公司研究要点",
         "intent_description": "用户即将参加面试，需要准备回答问题、模拟面试、了解面试套路",
-        "task_types": ["CHAT"],
+        "task_types": ["CHAT", "FILE_GEN"],
         "priority": 55,
         "prompt": (
             "\n\n## 🎙️ 工作流要求：面试准备\n"
@@ -1016,7 +1016,7 @@ BUILTIN_SKILLS: List[Dict] = [
         "skill_nature": "model_hint",
         "description": "快速发散生成大量创意，使用 SCAMPER / 随机刺激 / 逆向思维等技巧，不过早批判想法",
         "intent_description": "用户需要想点子、产品创意、营销方案、命名灵感、任何创意发散场景",
-        "task_types": ["CHAT"],
+        "task_types": ["CHAT", "FILE_GEN", "RESEARCH"],
         "priority": 55,
         "conflict_with": ["strict_mode", "concise_mode"],
         "prompt": (
@@ -1592,23 +1592,437 @@ BUILTIN_SKILLS: List[Dict] = [
         ),
         "enabled": False,
     },
+    # ── 文档专用技能（Document-specific skills，文件助手适用）────────────────
+    # 格式与结构类
+    {
+        "id": "doc_format_fixer",
+        "name": "格式修复",
+        "icon": "🔧",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "检测并修复文档格式问题：标题层级混乱、列表缩进不一致、段落间距异常",
+        "intent_description": "用户需要整理文档格式、修复标题层级、统一列表缩进或段落间距时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["格式修复", "格式问题", "标题层级", "列表缩进", "段落间距", "格式整理", "排版问题", "格式不对"],
+        "prompt": (
+            "\n\n## 🔧 文档专用：格式修复\n"
+            "- 检查并修复标题层级问题（H1→H2→H3 的正确层次结构）\n"
+            "- 统一列表缩进（有序列表用数字+点，无序列表用破折号或圆点）\n"
+            "- 标注段落间距异常（双空行替换为单空行）\n"
+            "- 输出修复后的内容，附简短说明哪些地方做了改动"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "doc_structure_optimizer",
+        "name": "结构优化",
+        "icon": "🏗️",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "分析文档整体结构，建议章节重组、补充过渡段，提升逻辑流畅度",
+        "intent_description": "用户需要改善文档的逻辑结构、章节顺序或寻找内容缺口时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["结构优化", "章节重组", "逻辑结构", "文档结构", "文章结构", "内容安排", "章节顺序"],
+        "prompt": (
+            "\n\n## 🏗️ 文档专用：结构优化\n"
+            "- 先分析文档的整体逻辑流程（是否符合「问题→分析→结论」或「背景→内容→行动」等标准框架）\n"
+            "- 指出逻辑跳跃处，建议插入过渡段落\n"
+            "- 识别内容缺口（哪些必要信息尚未覆盖）\n"
+            "- 给出具体的章节重组建议（而非泛泛「可以更好地组织」）"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "table_enhancer",
+        "name": "表格增强",
+        "icon": "📋",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "优化表格格式：补全表头、统一数据对齐、标记合并单元格建议",
+        "intent_description": "用户需要整理表格、改善表格可读性或补充缺失的表头/列时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["表格优化", "表格格式", "补充表头", "表格整理", "表格美化", "数据对齐"],
+        "prompt": (
+            "\n\n## 📋 文档专用：表格增强\n"
+            "- 检查表格是否有清晰的表头行（第一行），没有则建议添加\n"
+            "- 数字列建议右对齐，文字列左对齐\n"
+            "- 识别可以合并的相邻单元格（相同值的连续单元格）\n"
+            "- 建议适当的列宽分配，避免某列内容截断"
+        ),
+        "enabled": False,
+    },
+    # 内容增强类
+    {
+        "id": "doc_tone_adjuster",
+        "name": "语气调整",
+        "icon": "🎭",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "根据目标场景匹配合适的语气：正式/轻松/学术/营销，并具体指出需要改写的句子",
+        "intent_description": "用户需要调整文档语气、使内容更符合特定读者群体或使用场景时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["语气调整", "语气正式", "语气轻松", "学术语气", "营销语气", "改变语气", "调整风格"],
+        "prompt": (
+            "\n\n## 🎭 文档专用：语气调整\n"
+            "- 识别当前文档语气（偏口语化、偏正式、偏学术等）\n"
+            "- 根据目标用途调整：合同/报告→正式；产品文案→营销；内部沟通→轻松\n"
+            "- 逐一列出需要调整的句子，并给出改写建议\n"
+            "- 保持核心意思不变，只改语气和措辞"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "doc_fact_checker",
+        "name": "事实核查",
+        "icon": "🔍",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "标记文档中的可疑数据、过时信息和未经引用的断言，提示用户核实",
+        "intent_description": "用户需要校验文档中的数据准确性、检查引用是否完整或识别可能的错误信息时",
+        "task_types": ["FILE_GEN", "RESEARCH"],
+        "trigger_keywords": ["事实核查", "数据准确", "验证数据", "检查引用", "核实信息", "数据核实", "信息校验"],
+        "prompt": (
+            "\n\n## 🔍 文档专用：事实核查\n"
+            "- 标注所有具体数字和百分比，提示用户自行核实来源\n"
+            "- 识别绝对化表述（「最…」「唯一…」「所有…」），提示是否需要限定语\n"
+            "- 标注时效性强的内容（法规、市场数据、技术版本），提示可能已过时\n"
+            "- 对缺乏引用的重要断言，建议添加来源注释"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "doc_readability",
+        "name": "可读性优化",
+        "icon": "👓",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "评估文章可读性，拆分过长句子，改被动语态为主动，消除冗词",
+        "intent_description": "用户需要让文章更易读、改善阅读流畅度或简化复杂表述时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["可读性", "易读", "句子太长", "被动语态", "表达简洁", "语言简化", "表述清晰"],
+        "prompt": (
+            "\n\n## 👓 文档专用：可读性优化\n"
+            "- 超过 35 个汉字的句子建议拆分为两句\n"
+            "- 将被动语态改为主动语态（「被用户使用」→「用户使用」）\n"
+            "- 识别并消除冗词（「进行了…的操作」→「已…」、「非常地」→「很」）\n"
+            "- 技术文档中避免连续超过 3 层的嵌套修饰语"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "doc_dedup",
+        "name": "内容去重",
+        "icon": "✂️",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "检测文档中的重复段落和冗余表述，建议合并或删除",
+        "intent_description": "用户需要精简文档、去除重复内容或将分散段落合并时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["内容去重", "重复内容", "冗余段落", "段落重复", "内容精简", "去除重复", "合并段落"],
+        "prompt": (
+            "\n\n## ✂️ 文档专用：内容去重\n"
+            "- 识别语义相近的段落（意思重复、只是措辞不同），建议保留最完整的版本\n"
+            "- 标出重复的事实陈述或数据引用\n"
+            "- 建议将分散在不同位置的相关内容合并到同一章节\n"
+            "- 输出「重复内容清单」：对每处重复说明位置和合并建议"
+        ),
+        "enabled": False,
+    },
+    # 领域专用类
+    {
+        "id": "legal_doc_review",
+        "name": "法律文书审阅",
+        "icon": "⚖️",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "检查合同和法律文书的条款完整性、高风险条款，并提示合规注意事项",
+        "intent_description": "用户需要审阅合同、协议、法律文件，识别风险条款或缺失条款时",
+        "task_types": ["FILE_GEN", "DOC_ANNOTATE"],
+        "trigger_keywords": ["法律审阅", "合同审阅", "法律文书", "条款审查", "风险条款", "法律风险", "合规检查", "合同条款"],
+        "prompt": (
+            "\n\n## ⚖️ 文档专用：法律文书审阅\n"
+            "- 检查以下必要条款是否完整：主体信息、标的物/服务范围、金额与支付条款、"
+            "履约期限、违约责任、争议解决方式\n"
+            "- 标注高风险条款：不公平的免责条款、单方面解除权、无限连带责任\n"
+            "- 识别模糊术语（「合理的」「适当的」「尽快」），建议量化或明确定义\n"
+            "- 注意：Koto 仅作信息整理辅助，不构成法律建议，敏感问题请咨询执业律师"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "financial_doc_review",
+        "name": "财务文档审阅",
+        "icon": "💰",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "检查财务报告和表格的数据一致性、公式验证和注释完整性",
+        "intent_description": "用户需要审核财务报告、会计表格、预算或财务模型时",
+        "task_types": ["FILE_GEN", "DOC_ANNOTATE"],
+        "trigger_keywords": ["财务审阅", "财务报告", "数据一致性", "公式验证", "财务核查", "账目核对", "报表审查"],
+        "prompt": (
+            "\n\n## 💰 文档专用：财务文档审阅\n"
+            "- 检查各报表（利润表、资产负债表、现金流量表）内部数据是否一致\n"
+            "- 核实明细加总是否与汇总行匹配\n"
+            "- 标注引用外部数据（市场数据、汇率）的单元格，提示核实来源和时效\n"
+            "- 检查关键假设是否有说明注释（如：增长率来源、折现率依据）\n"
+            "- 注意：Koto 仅作辅助核对，不代替专业会计师审计意见"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "academic_paper_polish",
+        "name": "学术论文精修",
+        "icon": "🎓",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "润色学术论文的摘要、引言、方法论章节，适配期刊投稿风格规范",
+        "intent_description": "用户需要润色学术论文、优化论文结构或调整期刊投稿风格时",
+        "task_types": ["FILE_GEN", "DOC_ANNOTATE"],
+        "trigger_keywords": ["学术论文", "论文精修", "期刊投稿", "论文润色", "学术规范", "论文结构", "摘要优化", "研究论文"],
+        "prompt": (
+            "\n\n## 🎓 文档专用：学术论文精修\n"
+            "- **摘要（Abstract）**：确保包含背景、目的、方法、结果、结论五要素，控制 150-250 词\n"
+            "- **引言（Introduction）**：问题陈述→研究现状→研究空白→本文贡献，逻辑清晰\n"
+            "- **方法论（Methodology）**：可重复性为核心，所有参数和工具需精确说明\n"
+            "- 使用第三人称被动语态（学术规范）；避免非正式表达和主观评价\n"
+            "- 中文论文注意标点使用（顿号「、」不能替代逗号「，」分隔并列句）"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "marketing_copy",
+        "name": "营销文案",
+        "icon": "📢",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "使用 AIDA 框架优化营销文案，包括 CTA 按钮文字和受众语言匹配",
+        "intent_description": "用户需要优化产品/服务的推广文案、广告语或销售页面内容时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["营销文案", "广告文案", "产品文案", "AIDA", "销售文案", "推广文案", "文案优化", "落地页"],
+        "prompt": (
+            "\n\n## 📢 文档专用：营销文案\n"
+            "- **AIDA 结构**：注意力(Attention)→兴趣(Interest)→欲望(Desire)→行动(Action)\n"
+            "- 开头需有强力吸引句（痛点描述、惊人数据或反直觉结论）\n"
+            "- 使用「您/你」直接与读者对话，而非泛泛描述产品功能\n"
+            "- CTA（行动号召）动词要明确具体：「立即获取试用」而非「了解更多」\n"
+            "- 避免夸大宣传，提示核查合规性（广告法等）"
+        ),
+        "enabled": False,
+    },
+    # Excel/表格专用类
+    {
+        "id": "excel_formula_expert",
+        "name": "公式专家",
+        "icon": "🔢",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "诊断表格公式错误，推荐高效的 Excel/Python 公式替换方案（如 INDEX-MATCH）",
+        "intent_description": "用户遇到 Excel 公式报错、需要推荐更好的公式写法或理解复杂公式时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["公式报错", "excel公式", "vlookup", "index match", "公式错误", "表格公式", "公式优化", "公式解释"],
+        "prompt": (
+            "\n\n## 🔢 文档专用：Excel 公式专家\n"
+            "- 诊断公式错误：#REF!（引用失效）、#N/A（未找到）、#DIV/0!（除零）等\n"
+            "- 推荐 INDEX-MATCH 替换 VLOOKUP（更稳定、支持双向查找）\n"
+            "- 对数组公式（SUMIF、COUNTIFS等）给出等效的 pandas 代码（如用户有 Python 环境）\n"
+            "- 给出公式的步骤级拆解（将嵌套函数逐层展开说明）\n"
+            "- 提示公式效率问题（整列引用 A:A 替换为具体范围 A2:A1000）"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "excel_data_cleaner",
+        "name": "数据清洗",
+        "icon": "🧹",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "检测并处理表格中的空值、格式不统一、重复行和异常值",
+        "intent_description": "用户需要清洗数据表格、处理空值或找出并标记异常值时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["数据清洗", "空值处理", "格式统一", "异常值", "重复行", "数据整理", "数据预处理", "清洗数据"],
+        "prompt": (
+            "\n\n## 🧹 文档专用：数据清洗\n"
+            "- **空值处理策略**：数值列建议中位数填充，类别列建议众数填充，时间列建议插值\n"
+            "- **格式统一**：日期（统一为 YYYY-MM-DD）、电话（去除空格/括号）、金额（加千分位）\n"
+            "- **重复行检测**：基于主键列（ID/日期+名称）识别精确重复和近似重复\n"
+            "- **异常值标记**：数值列用 3σ 法则或 IQR 方法标记离群点，给出 pandas 代码\n"
+            "- 输出「清洗报告」：问题类型、影响行数、处理建议"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "pivot_advisor",
+        "name": "透视表顾问",
+        "icon": "🔄",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "根据数据维度和分析目标，建议最优的透视表（或 pandas groupby）结构",
+        "intent_description": "用户需要对数据进行多维分析、建立透视表或理解数据聚合方式时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["透视表", "数据透视", "分维度分析", "groupby", "数据汇总", "多维分析", "pivot table"],
+        "prompt": (
+            "\n\n## 🔄 文档专用：透视表顾问\n"
+            "- 先分析数据维度：「谁（Who）/ 什么（What）/ 何时（When）/ 哪里（Where）」\n"
+            "- 推荐行字段（维度）、列字段（分类变量）、值字段（数值指标）和汇总方式\n"
+            "- 提供 Excel 透视表操作步骤 AND 等效的 pandas groupby 代码\n"
+            "- 建议配套图表类型（透视表→柱状图，时间序列透视→折线图）"
+        ),
+        "enabled": False,
+    },
+    # 演示文稿专用类
+    {
+        "id": "slide_storyteller",
+        "name": "演示叙事",
+        "icon": "🎬",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "优化 PPT 的故事线设计，确保每页只有一个核心观点，并建议视觉元素",
+        "intent_description": "用户需要优化 PPT 逻辑、改善演示流程或让幻灯片更吸引人时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["ppt优化", "演示叙事", "幻灯片逻辑", "slide", "演讲稿", "ppt逻辑", "演示文稿", "幻灯片故事"],
+        "prompt": (
+            "\n\n## 🎬 文档专用：演示叙事\n"
+            "- **黄金法则**：每张幻灯片只传达一个核心观点，标题即结论\n"
+            "- **故事线结构**：问题（现状痛点）→洞察（分析根因）→解决方案→收益（行动价值）\n"
+            "- 检查每张幻灯片的标题是否为「结论句」（「销售额下降」→「Q1 销售额下降 23%，主因是渠道收缩」）\n"
+            "- 识别文字过多的幻灯片（>50 字），建议拆分或转为图表\n"
+            "- 结尾幻灯片必须包含明确的「下一步行动」或「Call-to-Action」"
+        ),
+        "enabled": False,
+    },
+    {
+        "id": "slide_data_viz",
+        "name": "数据可视化建议",
+        "icon": "📊",
+        "category": "domain",
+        "skill_nature": "domain_skill",
+        "description": "根据数据类型和分析目的，推荐最合适的图表类型和 PPT 布局",
+        "intent_description": "用户需要将数据转换为幻灯片图表、选择合适的可视化形式时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["图表推荐", "可视化建议", "数据图表", "选图表", "chart type", "ppt图表", "幻灯片图表", "数据展示"],
+        "prompt": (
+            "\n\n## 📊 文档专用：数据可视化建议\n"
+            "- **图表类型选择指南**：\n"
+            "  • 比较大小 → 柱状图\n"
+            "  • 时间趋势 → 折线图\n"
+            "  • 占比构成 → 饼图（≤5类）或堆积柱状图（>5类）\n"
+            "  • 相关关系 → 散点图\n"
+            "  • 地理分布 → 地图\n"
+            "  • 流程/层次 → 桑基图/树形图\n"
+            "- 每张图表建议只展示 1-2 个关键指标，不要堆砌\n"
+            "- 给出颜色建议：强调色用于最重要数据点，其余用灰色衬托"
+        ),
+        "enabled": False,
+    },
+    # ── 工作流技能 ──────────────────────────────────────────────────────────────
+    {
+        "id": "cross_format_extractor",
+        "name": "跨格式信息提取填报",
+        "icon": "📋",
+        "category": "workflow",
+        "skill_nature": "domain_skill",
+        "description": "从多个 PDF/Word/Excel 文件中批量提取字段，自动填入 Excel 模板，输出结构化汇总表",
+        "intent_description": "用户需要把多份文件的关键信息提取到一张汇总表中时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["提取填报", "信息搬运", "批量提取", "字段提取", "填入模板", "抽取字段", "表单填写"],
+        "prompt": "",
+        "enabled": False,
+        "has_executor": True,
+        "params_schema": {
+            "current_file": {"type": "file", "label": "主文件（模板）", "required": False, "accept": ".xlsx,.xls"},
+            "source_files": {"type": "file_list", "label": "数据源文件（PDF/Word/Excel）", "required": False, "accept": ".pdf,.doc,.docx,.xlsx,.xls"},
+            "instruction": {"type": "textarea", "label": "提取说明", "required": False, "placeholder": "例如：只提取金额、日期、公司名称字段"},
+        },
+    },
+    {
+        "id": "doc_smart_compare",
+        "name": "文档智能对比",
+        "icon": "🔍",
+        "category": "workflow",
+        "skill_nature": "domain_skill",
+        "description": "合并深度语义比对与合同差异标注，自动输出 Word 修订标注或 HTML 比对报告",
+        "intent_description": "用户需要对比两份合同/协议/文档，识别差异、修订痕迹或防暗改时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": [
+            "合同比对", "防暗改", "扫描件对比", "条款比对", "文档对比", "比对审查",
+            "差异检测", "防篡改", "版本比对", "合同差异", "标红批注", "track changes"
+        ],
+        "prompt": "",
+        "enabled": False,
+        "has_executor": True,
+        "params_schema": {
+            "current_file": {"type": "file", "label": "基准文件（原始版本）", "required": False, "accept": ".doc,.docx,.pdf"},
+            "compare_file": {"type": "file", "label": "对比文件（修订版/扫描件）", "required": False, "accept": ".doc,.docx,.pdf"},
+            "instruction": {"type": "textarea", "label": "比对重点说明", "required": False, "placeholder": "例如：重点关注付款条款和违约责任部分"},
+        },
+    },
+    {
+        "id": "questionnaire_filler",
+        "name": "问卷/RFP 自动填写",
+        "icon": "📝",
+        "category": "workflow",
+        "skill_nature": "domain_skill",
+        "description": "基于参考资料库，自动回答问卷/RFP/尽调表中的问题，标注信心度，支持批量导出",
+        "intent_description": "用户需要根据已有资料自动填写问卷、RFP 或尽调问题时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["问卷填写", "rfp", "填问卷", "自动填答", "问题填写", "尽调问卷", "自动答题"],
+        "prompt": "",
+        "enabled": False,
+        "has_executor": True,
+        "params_schema": {
+            "current_file": {"type": "file", "label": "问卷/RFP 文件", "required": False, "accept": ".doc,.docx,.pdf,.xlsx"},
+            "reference_files": {"type": "file_list", "label": "参考资料（公司介绍/过往资料等）", "required": False, "accept": ".doc,.docx,.pdf,.txt"},
+            "instruction": {"type": "textarea", "label": "补充背景信息", "required": False, "placeholder": "例如：公司成立于2010年，主营业务为…"},
+        },
+    },
+    {
+        "id": "comm_digest",
+        "name": "沟通纪要生成",
+        "icon": "📧",
+        "category": "workflow",
+        "skill_nature": "domain_skill",
+        "description": "合并邮件摘要与待办提取，从聊天记录、邮件和会议纪要中整理时间线、决策与待办事项",
+        "intent_description": "用户需要从邮件、群聊或会议纪要中生成纪要、提炼决策或抽取待办时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": [
+            "待办提取", "行动项", "action item", "任务提取", "会议待办", "聊天记录待办",
+            "todo提取", "从聊天提取", "整理待办", "邮件摘要", "消息摘要", "沟通纪要",
+            "会议纪要", "邮件线程"
+        ],
+        "prompt": "",
+        "enabled": False,
+        "has_executor": True,
+        "params_schema": {
+            "current_file": {"type": "file", "label": "沟通记录主文件", "required": False, "accept": ".txt,.eml,.doc,.docx,.pdf,.md"},
+            "reference_files": {"type": "file_list", "label": "补充沟通文件（可选）", "required": False, "accept": ".txt,.eml,.doc,.docx,.pdf,.md"},
+            "instruction": {"type": "textarea", "label": "提取重点说明", "required": False, "placeholder": "例如：重点关注待办、负责人和关键决策"},
+        },
+    },
+    {
+        "id": "data_format_cleaner",
+        "name": "脏数据格式清洗",
+        "icon": "🧹",
+        "category": "workflow",
+        "skill_nature": "domain_skill",
+        "description": "用自然语言描述清洗规则，AI 自动生成 pandas 代码在沙箱中执行，输出清洗后数据及变更对比",
+        "intent_description": "用户需要清洗 Excel/CSV 中的格式问题、日期统一、脏数据处理时",
+        "task_types": ["FILE_GEN"],
+        "trigger_keywords": ["数据清洗", "格式清洗", "脏数据", "日期格式统一", "数据标准化", "清洗数据", "数据整理"],
+        "prompt": "",
+        "enabled": False,
+        "has_executor": True,
+        "params_schema": {
+            "current_file": {"type": "file", "label": "待清洗数据文件（Excel/CSV）", "required": False, "accept": ".xlsx,.xls,.csv"},
+            "instruction": {"type": "textarea", "label": "清洗规则描述", "required": True, "placeholder": "例如：把日期列统一为 YYYY-MM-DD 格式，删除空行，手机号脱敏"},
+        },
+    },
 ]
 
-# 所有合法的 category 和 task_type
-SKILL_CATEGORIES = {
-    "behavior": "⚙️ 行为",
-    "style": "🎨 风格",
-    "domain": "🔬 领域",
-    "workflow": "🔄 工作流",
-    "memory": "🧠 记忆",
-    "custom": "🛠️ 自定义",
-}
-
-# skill_nature 枚举及其 UI 说明
+# Skill nature labels (for display/documentation only)
 SKILL_NATURE_LABELS = {
-    "model_hint": "💬 模型行为调整",  # 通过 prompt 激活模型原生能力
+    "model_hint": "💬 模型行为调整",    # 通过 prompt 激活模型原生能力
     "domain_skill": "🔧 领域专项技能",  # 注入领域知识/专有模板
-    "system": "⚙️ 系统功能",  # 记忆/工具等系统级功能
+    "system": "⚙️ 系统功能",            # 记忆/工具等系统级功能
 }
 
 ALL_TASK_TYPES = [
@@ -1622,6 +2036,8 @@ ALL_TASK_TYPES = [
     "PAINTER",
     "DOC_ANNOTATE",
 ]
+
+_SKILL_STATE_UNSET = object()
 
 
 class SkillManager:
@@ -1641,6 +2057,149 @@ class SkillManager:
     _initialized: bool = False
     # 单轮注入的用户启用 Skill 数上限（系统 Skill 不计入），防止 token 膨胀
     _MAX_ACTIVE_INJECT: int = 20
+
+    @classmethod
+    def instance(cls):
+        """Compatibility helper for call sites that expect a singleton accessor."""
+        cls._ensure_init()
+        return cls
+
+    @classmethod
+    def _skill_enabled(
+        cls, skill_id: str, skill_def: Optional[SkillDefinition] = None
+    ) -> bool:
+        legacy = cls._registry.get(skill_id)
+        if legacy is not None and "enabled" in legacy:
+            return bool(legacy.get("enabled", False))
+        if skill_def is None:
+            skill_def = cls._def_registry.get(skill_id)
+        return bool(getattr(skill_def, "enabled", False))
+
+    @classmethod
+    def _skill_prompt(
+        cls, skill_id: str, skill_def: Optional[SkillDefinition] = None
+    ) -> str:
+        legacy = cls._registry.get(skill_id)
+        if legacy is not None and "prompt" in legacy:
+            return legacy.get("prompt", "") or ""
+        if skill_def is None:
+            skill_def = cls._def_registry.get(skill_id)
+        return str(getattr(skill_def, "prompt", "") or "")
+
+    @classmethod
+    def _legacy_entry_from_definition(
+        cls,
+        skill_def: SkillDefinition,
+        existing: Optional[Dict] = None,
+        *,
+        enabled: object = _SKILL_STATE_UNSET,
+        prompt: object = _SKILL_STATE_UNSET,
+    ) -> Dict:
+        """Build the legacy registry view from the canonical SkillDefinition."""
+        entry = dict(existing or {})
+        entry.update(
+            {
+                "id": skill_def.id,
+                "name": skill_def.name,
+                "icon": skill_def.icon,
+                "category": (
+                    skill_def.category.value
+                    if hasattr(skill_def.category, "value")
+                    else skill_def.category
+                ),
+                "skill_nature": (
+                    skill_def.skill_nature.value
+                    if hasattr(skill_def.skill_nature, "value")
+                    else skill_def.skill_nature
+                ),
+                "description": skill_def.description,
+                "task_types": list(skill_def.task_types or []),
+                "author": getattr(skill_def, "author", entry.get("author", "")),
+            }
+        )
+
+        prompt_value = entry.get("prompt", getattr(skill_def, "prompt", "") or "")
+        if prompt is not _SKILL_STATE_UNSET:
+            prompt_value = str(prompt or "")
+        entry["prompt"] = prompt_value
+
+        enabled_value = entry.get("enabled", getattr(skill_def, "enabled", False))
+        if enabled is not _SKILL_STATE_UNSET:
+            enabled_value = bool(enabled)
+        entry["enabled"] = bool(enabled_value)
+
+        optional_list_fields = (
+            "executor_tools",
+            "plan_template",
+            "permissions",
+            "bound_tools",
+            "trigger_keywords",
+        )
+        for field in optional_list_fields:
+            value = getattr(skill_def, field, None)
+            if value:
+                entry[field] = list(value)
+
+        optional_passthrough_fields = (
+            "priority",
+            "ui_config",
+            "ui_extensions",
+            "template_path",
+            "entry_point",
+        )
+        for field in optional_passthrough_fields:
+            value = getattr(skill_def, field, None)
+            if value not in (None, "", {}, []):
+                entry[field] = value
+
+        return entry
+
+    @classmethod
+    def _sync_legacy_entry(
+        cls,
+        skill_id: str,
+        *,
+        enabled: object = _SKILL_STATE_UNSET,
+        prompt: object = _SKILL_STATE_UNSET,
+    ) -> Optional[Dict]:
+        skill_def = cls._def_registry.get(skill_id)
+        if skill_def is None:
+            return cls._registry.get(skill_id)
+        entry = cls._legacy_entry_from_definition(
+            skill_def,
+            existing=cls._registry.get(skill_id),
+            enabled=enabled,
+            prompt=prompt,
+        )
+        cls._registry[skill_id] = entry
+        return entry
+
+    @classmethod
+    def _apply_skill_state(
+        cls,
+        skill_id: str,
+        *,
+        enabled: object = _SKILL_STATE_UNSET,
+        prompt: object = _SKILL_STATE_UNSET,
+    ) -> bool:
+        skill_def = cls._def_registry.get(skill_id)
+        legacy = cls._registry.get(skill_id)
+        if skill_def is None and legacy is None:
+            return False
+
+        if skill_def is not None:
+            if enabled is not _SKILL_STATE_UNSET:
+                skill_def.enabled = bool(enabled)
+            if prompt is not _SKILL_STATE_UNSET:
+                skill_def.prompt = str(prompt or "")
+            cls._sync_legacy_entry(skill_id, enabled=enabled, prompt=prompt)
+            return True
+
+        if enabled is not _SKILL_STATE_UNSET:
+            legacy["enabled"] = bool(enabled)
+        if prompt is not _SKILL_STATE_UNSET:
+            legacy["prompt"] = str(prompt or "")
+        return True
 
     # ── 初始化 ─────────────────────────────────────────────────────────────────
     @classmethod
@@ -1687,11 +2246,15 @@ class SkillManager:
                 data = json.load(f)
             skills_state = data.get("skills", {})
             for skill_id, state in skills_state.items():
-                if skill_id in cls._registry and isinstance(state, dict):
-                    if "enabled" in state:
-                        cls._registry[skill_id]["enabled"] = bool(state["enabled"])
-                    if "prompt_override" in state and state["prompt_override"]:
-                        cls._registry[skill_id]["prompt"] = state["prompt_override"]
+                if not isinstance(state, dict):
+                    continue
+                enabled = state["enabled"] if "enabled" in state else _SKILL_STATE_UNSET
+                prompt = (
+                    state["prompt_override"]
+                    if state.get("prompt_override")
+                    else _SKILL_STATE_UNSET
+                )
+                cls._apply_skill_state(skill_id, enabled=enabled, prompt=prompt)
         except Exception as e:
             print(f"[SkillManager] 加载设置失败: {e}")
 
@@ -1706,12 +2269,15 @@ class SkillManager:
                 with open(p, "r", encoding="utf-8") as f:
                     data = json.load(f)
             skills_state = {}
-            for skill_id, skill in cls._registry.items():
-                state: Dict = {"enabled": skill["enabled"]}
+            all_skill_ids = set(cls._registry) | set(cls._def_registry)
+            for skill_id in all_skill_ids:
+                skill_def = cls._def_registry.get(skill_id)
+                prompt = cls._skill_prompt(skill_id, skill_def)
+                state: Dict = {"enabled": cls._skill_enabled(skill_id, skill_def)}
                 # 如果有自定义 prompt，也保存
                 builtin_prompt = cls._builtin_prompt_index.get(skill_id)
-                if skill["prompt"] != builtin_prompt:
-                    state["prompt_override"] = skill["prompt"]
+                if prompt != builtin_prompt:
+                    state["prompt_override"] = prompt
                 skills_state[skill_id] = state
             data["skills"] = skills_state
             with open(p, "w", encoding="utf-8") as f:
@@ -1733,40 +2299,51 @@ class SkillManager:
         for skill in BUILTIN_SKILLS:
             sid = skill["id"]
             seen_ids.add(sid)
+            skill_def = cls._def_registry.get(sid)
             s = cls._registry.get(sid, skill)
             builtin_prompt = skill["prompt"]
+            prompt = cls._skill_prompt(sid, skill_def)
             result.append(
                 {
-                    "id": s["id"],
-                    "name": s["name"],
-                    "icon": s["icon"],
-                    "category": s["category"],
-                    "skill_nature": s.get("skill_nature", "domain_skill"),
-                    "description": s["description"],
-                    "task_types": s["task_types"],
-                    "enabled": s["enabled"],
-                    "has_custom_prompt": s.get("prompt") != builtin_prompt,
-                    "prompt": s["prompt"],
+                    "id": sid,
+                    "name": getattr(skill_def, "name", s["name"]),
+                    "icon": getattr(skill_def, "icon", s["icon"]),
+                    "category": getattr(
+                        getattr(skill_def, "category", None), "value", s["category"]
+                    ),
+                    "skill_nature": getattr(
+                        getattr(skill_def, "skill_nature", None),
+                        "value",
+                        s.get("skill_nature", "domain_skill"),
+                    ),
+                    "description": getattr(skill_def, "description", s["description"]),
+                    "task_types": list(getattr(skill_def, "task_types", s["task_types"])),
+                    "enabled": cls._skill_enabled(sid, skill_def),
+                    "has_custom_prompt": prompt != builtin_prompt,
+                    "prompt": prompt,
                     "is_builtin": True,
                 }
             )
 
         # 自定义 Skill（不在内置列表中的）
-        for skill_id, s in cls._registry.items():
+        for skill_id, skill_def in cls._def_registry.items():
             if skill_id in seen_ids:
                 continue
+            s = cls._registry.get(skill_id, {})
             result.append(
                 {
-                    "id": s["id"],
-                    "name": s["name"],
-                    "icon": s["icon"],
-                    "category": s["category"],
-                    "description": s["description"],
-                    "task_types": s["task_types"],
-                    "enabled": s["enabled"],
-                    "skill_nature": s.get("skill_nature", "domain_skill"),
+                    "id": skill_id,
+                    "name": skill_def.name,
+                    "icon": skill_def.icon,
+                    "category": getattr(skill_def.category, "value", skill_def.category),
+                    "description": skill_def.description,
+                    "task_types": list(skill_def.task_types or []),
+                    "enabled": cls._skill_enabled(skill_id, skill_def),
+                    "skill_nature": getattr(
+                        skill_def.skill_nature, "value", s.get("skill_nature", "domain_skill")
+                    ),
                     "has_custom_prompt": False,
-                    "prompt": s.get("prompt", ""),
+                    "prompt": cls._skill_prompt(skill_id, skill_def),
                     "is_builtin": False,
                 }
             )
@@ -1798,23 +2375,26 @@ class SkillManager:
         except Exception:
             _perm_mgr = None
 
-        enabled_with_ui = [
-            (sid, s)
-            for sid, s in cls._registry.items()
-            if s.get("enabled") and (s.get("ui_config") or s.get("ui_extensions"))
-        ]
+        enabled_with_ui = []
+        for sid, skill_def in cls._def_registry.items():
+            legacy = cls._registry.get(sid, {})
+            if not cls._skill_enabled(sid, skill_def):
+                continue
+            cfg = legacy.get("ui_config") or getattr(skill_def, "ui_config", None)
+            ext = legacy.get("ui_extensions") or getattr(skill_def, "ui_extensions", None)
+            if cfg or ext:
+                enabled_with_ui.append((sid, skill_def, legacy, cfg or {}, ext or {}))
 
         if not enabled_with_ui:
             return {"has_ui": False, "config": {}, "extensions": {}, "sources": []}
 
         # 低优先级先合并，高优先级后覆盖
-        enabled_with_ui.sort(key=lambda x: x[1].get("priority", 50))
+        enabled_with_ui.sort(key=lambda x: x[2].get("priority", getattr(x[1], "priority", 50)))
 
         merged: dict = {}
         merged_ext: dict = {}
         sources: list = []
-        for sid, s in enabled_with_ui:
-            cfg = s.get("ui_config", {})
+        for sid, skill_def, legacy, cfg, ext in enabled_with_ui:
             if isinstance(cfg, dict) and cfg:
                 css = cfg.get("css_vars")
                 if css and isinstance(css, dict):
@@ -1824,11 +2404,9 @@ class SkillManager:
                         merged[k] = v
 
             # ui_extensions 合并（需要 ui_interactive 权限已授权，或 skill 未声明该权限要求）
-            ext = s.get("ui_extensions", {})
             if ext and isinstance(ext, dict):
-                skill_def = cls._def_registry.get(sid)
                 required_perms = list(
-                    getattr(skill_def, "permissions", None) or s.get("permissions", [])
+                    getattr(skill_def, "permissions", None) or legacy.get("permissions", [])
                 )
                 needs_interactive = "ui_interactive" in required_perms
                 interactive_granted = (
@@ -1865,9 +2443,8 @@ class SkillManager:
     def set_enabled(cls, skill_id: str, enabled: bool) -> bool:
         """启用或禁用一个技能，立即持久化"""
         cls._ensure_init()
-        if skill_id not in cls._registry:
+        if not cls._apply_skill_state(skill_id, enabled=enabled):
             return False
-        cls._registry[skill_id]["enabled"] = enabled
         cls._save_states_to_settings()
         print(f"[SkillManager] {'✅ 启用' if enabled else '⏸️ 禁用'} skill: {skill_id}")
         return True
@@ -1876,9 +2453,8 @@ class SkillManager:
     def update_prompt(cls, skill_id: str, prompt: str) -> bool:
         """更新某个技能的自定义 Prompt 内容（用户可自定义后保存）"""
         cls._ensure_init()
-        if skill_id not in cls._registry:
+        if not cls._apply_skill_state(skill_id, prompt=prompt):
             return False
-        cls._registry[skill_id]["prompt"] = prompt
         cls._save_states_to_settings()
         return True
 
@@ -1886,11 +2462,11 @@ class SkillManager:
     def reset_prompt(cls, skill_id: str) -> bool:
         """将某个技能的 Prompt 恢复为内置默认值"""
         cls._ensure_init()
-        if skill_id not in cls._registry:
+        if skill_id not in cls._registry and skill_id not in cls._def_registry:
             return False
         builtin_prompt = cls._builtin_prompt_index.get(skill_id)
         if builtin_prompt is not None:
-            cls._registry[skill_id]["prompt"] = builtin_prompt
+            cls._apply_skill_state(skill_id, prompt=builtin_prompt)
             cls._save_states_to_settings()
         return True
 
@@ -2028,6 +2604,19 @@ class SkillManager:
 
         return ""
 
+    # FILE_ASSISTANT is a composite context: skills for any of these types are applicable
+    _FILE_ASSISTANT_COVERS = {"CHAT", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH"}
+
+    @classmethod
+    def _task_type_matches(cls, task_type: Optional[str], applicable_types: list) -> bool:
+        """Return True if the skill should fire for the given task_type."""
+        if not applicable_types or not task_type:
+            return True
+        tt = task_type.upper()
+        if tt == "FILE_ASSISTANT":
+            return bool(cls._FILE_ASSISTANT_COVERS.intersection(applicable_types))
+        return tt in applicable_types
+
     @classmethod
     def inject_into_prompt(
         cls,
@@ -2107,11 +2696,7 @@ class SkillManager:
                 continue
 
             applicable_types = s.get("task_types", [])
-            if (
-                applicable_types
-                and task_type
-                and task_type.upper() not in applicable_types
-            ):
+            if not cls._task_type_matches(task_type, applicable_types):
                 continue
 
             # ── 长期记忆 skill：优先从 ShadowWatcher 检索记忆并注入 ────────────
@@ -2315,11 +2900,7 @@ class SkillManager:
             if not s.get("enabled", False):
                 continue
             applicable_types = s.get("task_types", [])
-            if (
-                applicable_types
-                and task_type
-                and task_type.upper() not in applicable_types
-            ):
+            if not cls._task_type_matches(task_type, applicable_types):
                 continue
             names.append(s["name"])
         return names
@@ -2344,6 +2925,36 @@ class SkillManager:
         return cls._def_registry.get(skill_id)
 
     @classmethod
+    def is_enabled(cls, skill_id: str) -> bool:
+        """Return the effective enabled state across the v2 definition and legacy runtime view."""
+        cls._ensure_init()
+        return cls._skill_enabled(skill_id, cls._def_registry.get(skill_id))
+
+    @classmethod
+    def get_runtime_entry(cls, skill_id: str) -> Optional[Dict]:
+        """Return the merged runtime view used by legacy call sites while migration is in progress."""
+        cls._ensure_init()
+        entry = cls._sync_legacy_entry(skill_id)
+        if entry is None:
+            return None
+        return dict(entry)
+
+    @classmethod
+    def update_runtime_fields(
+        cls, skill_id: str, *, remove_fields: Optional[List[str]] = None, **changes
+    ) -> bool:
+        """Update legacy runtime metadata through one sync point while external callers migrate off _registry."""
+        cls._ensure_init()
+        entry = cls._sync_legacy_entry(skill_id)
+        if entry is None:
+            return False
+        for field in remove_fields or []:
+            entry.pop(field, None)
+        entry.update(changes)
+        cls._save_states_to_settings()
+        return True
+
+    @classmethod
     def list_mcp_tools(cls) -> List[Dict]:
         """
         将所有 **已启用** 的 Skill 导出为 MCP (Model Context Protocol) 兼容的
@@ -2352,11 +2963,7 @@ class SkillManager:
         cls._ensure_init()
         tools = []
         for skill_id, skill_def in cls._def_registry.items():
-            # 同步最新启用状态
-            legacy = cls._registry.get(skill_id)
-            if legacy:
-                skill_def.enabled = legacy.get("enabled", False)
-            if skill_def.enabled:
+            if cls._skill_enabled(skill_id, skill_def):
                 tools.append(skill_def.to_mcp_tool())
         return tools
 
@@ -2392,31 +2999,11 @@ class SkillManager:
 
         skill_def.author = skill_def.author or "user"
         cls._def_registry[skill_def.id] = skill_def
-
-        # 同步到旧版 _registry（保证 inject_into_prompt 等方法正常工作）
-        reg_entry: dict = {
-            "id": skill_def.id,
-            "name": skill_def.name,
-            "icon": skill_def.icon,
-            "category": (
-                skill_def.category.value
-                if hasattr(skill_def.category, "value")
-                else skill_def.category
-            ),
-            "description": skill_def.description,
-            "task_types": skill_def.task_types,
-            "prompt": skill_def.render_prompt(),
-            "enabled": skill_def.enabled,
-            # 执行层增强字段（供 inject_into_prompt auto-skill 路径使用）
-            "executor_tools": list(getattr(skill_def, "executor_tools", None) or []),
-            "plan_template": list(getattr(skill_def, "plan_template", None) or []),
-            "permissions": list(getattr(skill_def, "permissions", None) or []),
-        }
-        if getattr(skill_def, "ui_config", None):
-            reg_entry["ui_config"] = skill_def.ui_config
-        if getattr(skill_def, "ui_extensions", None):
-            reg_entry["ui_extensions"] = skill_def.ui_extensions
-        cls._registry[skill_def.id] = reg_entry
+        cls._sync_legacy_entry(
+            skill_def.id,
+            enabled=skill_def.enabled,
+            prompt=skill_def.render_prompt(),
+        )
 
         cls._apply_default_triggers(skill_def)
 
@@ -2691,11 +3278,7 @@ class SkillManager:
         cls._ensure_init()
         result = {}
         for skill_id, skill_def in cls._def_registry.items():
-            legacy = cls._registry.get(skill_id, {})
-            if (
-                legacy.get("enabled", skill_def.enabled)
-                and skill_def.intent_description
-            ):
+            if cls._skill_enabled(skill_id, skill_def) and skill_def.intent_description:
                 result[skill_id] = skill_def.intent_description
         return result
 
@@ -2735,15 +3318,13 @@ class SkillManager:
         scores: List[Dict] = []
 
         for skill_id, skill_def in cls._def_registry.items():
-            s = cls._registry.get(skill_id, {})
-
             # 排除已启用的（可选）
-            if exclude_enabled and s.get("enabled", skill_def.enabled):
+            if exclude_enabled and cls._skill_enabled(skill_id, skill_def):
                 continue
 
             # 检查 task_type 适配性
             applicable = skill_def.task_types or []
-            if applicable and task_type and task_type.upper() not in applicable:
+            if not cls._task_type_matches(task_type, applicable):
                 continue
 
             score = 0.0
@@ -2846,8 +3427,8 @@ class SkillManager:
         # 当前已启用集合
         enabled_ids = {
             sid
-            for sid, s in cls._registry.items()
-            if s.get("enabled", False) and sid != skill_id
+            for sid, skill_def in cls._def_registry.items()
+            if sid != skill_id and cls._skill_enabled(sid, skill_def)
         }
 
         this_def = cls._def_registry.get(skill_id)
@@ -2933,11 +3514,10 @@ class SkillManager:
         all_passed = True
 
         for skill_id, skill_def in cls._def_registry.items():
-            s = cls._registry.get(skill_id, {})
-            if not s.get("enabled", skill_def.enabled):
+            if not cls._skill_enabled(skill_id, skill_def):
                 continue
             applicable = skill_def.task_types or []
-            if applicable and task_type and task_type.upper() not in applicable:
+            if not cls._task_type_matches(task_type, applicable):
                 continue
             # 若 OutputSpec 约束为空（默认），跳过
             spec = skill_def.output_spec

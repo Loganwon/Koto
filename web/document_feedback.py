@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
 文档智能反馈系统 - 完整闭环
-1. 读取文档 → 2. AI分析 → 3. 应用修改 或 自动标注
+1. 读取文档 → 2. AI分析 → 3. 写回原生修订
 """
 
 import json
@@ -14,6 +14,12 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
+from app.core.llm.model_capabilities import (
+    get_interactions_only_model_set,
+    is_interactions_only_model,
+    normalize_model_id,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,7 +27,7 @@ class DocumentFeedbackSystem:
     """文档智能反馈系统"""
 
     def __init__(
-        self, gemini_client=None, default_model_id: str = "gemini-3.1-pro-preview"
+        self, gemini_client=None, default_model_id: str = "gemini-2.5-pro"
     ):
         """
         Args:
@@ -30,23 +36,54 @@ class DocumentFeedbackSystem:
         """
         self.client = gemini_client
         self.default_model_id = default_model_id
-        from web.document_annotator import DocumentAnnotator
         from web.document_editor import DocumentEditor
         from web.document_reader import DocumentReader
 
         self.reader = DocumentReader()
         self.editor = DocumentEditor()
-        self.annotator = DocumentAnnotator(
-            annotation_mode="comment"
-        )  # 默认使用气泡批注
 
         self._model_cache = None
+
+    @staticmethod
+    def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+        try:
+            return max(minimum, int(os.getenv(name, str(default))))
+        except (TypeError, ValueError):
+            return default
+
+    def _local_client_model_id(self) -> str:
+        direct_model = str(getattr(self.client, "_model_tag", "") or "").strip()
+        if direct_model:
+            return direct_model
+        model_proxy = getattr(self.client, "models", None)
+        proxy_model = str(getattr(model_proxy, "_model_tag", "") or "").strip()
+        if proxy_model:
+            return proxy_model
+        return ""
+
+    def _is_local_client(self) -> bool:
+        if not self.client:
+            return False
+        if self._local_client_model_id():
+            return True
+        return self.client.__class__.__name__ == "OllamaClientProxy"
+
+    def _resolve_runtime_model_id(self, model_id: Optional[str]) -> str:
+        preferred = str(model_id or self.default_model_id or "").strip()
+        if not self._is_local_client():
+            return preferred
+
+        lowered = preferred.lower()
+        if lowered and lowered not in {"auto", "cloud", "local"} and not lowered.startswith("gemini"):
+            return preferred
+
+        return self._local_client_model_id() or preferred or "local"
 
     def analyze_and_suggest(
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-3-flash-preview",
+        model_id: str = "gemini-2.5-flash",
     ) -> Dict[str, Any]:
         """
         分析文档并给出AI修改建议
@@ -178,7 +215,7 @@ class DocumentFeedbackSystem:
         self, file_path: str, user_requirement: str = "", auto_apply: bool = True
     ) -> Dict[str, Any]:
         """
-        完整反馈闭环：读取 → 分析 → 修改
+        完整反馈闭环（同步兼容包装）：读取 → 分析 → 修改
 
         Args:
             file_path: 文档路径
@@ -189,7 +226,7 @@ class DocumentFeedbackSystem:
             完整的处理结果
         """
         logger.info("=" * 60)
-        logger.info("🔄 启动文档智能反馈系统")
+        logger.info("🔄 启动文档智能反馈系统（同步兼容包装）")
         logger.info("=" * 60)
 
         # 第1步：分析并获取建议
@@ -399,7 +436,7 @@ class DocumentFeedbackSystem:
 
     # 仅支持 Interactions API 的模型：所有 generate_content 调用必须排除这些模型
     # 注意：gemini-3-flash/pro-preview 是普通 generate_content 模型，不应列在此
-    _INTERACTIONS_ONLY_MODELS = {"deep-research-pro-preview-12-2025"}
+    _INTERACTIONS_ONLY_MODELS = frozenset(get_interactions_only_model_set())
 
     def _list_available_models(self) -> List[Dict[str, str]]:
         """列出当前 API 可用模型（仅包含支持 generateContent 的模型，排除 Interactions-only）"""
@@ -407,6 +444,14 @@ class DocumentFeedbackSystem:
             return self._model_cache
         if not self.client:
             self._model_cache = []
+            return self._model_cache
+        if self._is_local_client():
+            local_model = self._resolve_runtime_model_id(None)
+            self._model_cache = (
+                [{"name": local_model, "display_name": local_model}]
+                if local_model
+                else []
+            )
             return self._model_cache
         try:
             import threading
@@ -419,7 +464,7 @@ class DocumentFeedbackSystem:
                     for m in self.client.models.list():
                         name = getattr(m, "name", "")
                         display_name = getattr(m, "display_name", "")
-                        base_name = name.split("/")[-1] if name else ""
+                        base_name = normalize_model_id(name)
                         if not base_name:
                             continue
                         # 新版 google-genai SDK 中 supported_generation_methods 不再作为属性暴露
@@ -430,7 +475,9 @@ class DocumentFeedbackSystem:
                             if "generateContent" not in supported:
                                 continue
                         # 跳过 Interactions-only 模型（仅支持 Interactions API，不能用于 generate_content）
-                        if base_name not in self._INTERACTIONS_ONLY_MODELS:
+                        if not is_interactions_only_model(
+                            base_name, self._INTERACTIONS_ONLY_MODELS
+                        ):
                             models.append(
                                 {
                                     "name": base_name,
@@ -464,7 +511,7 @@ class DocumentFeedbackSystem:
         # 若 preferred 本身是 Interactions-only，直接替换为稳定备选
         safe_preferred = (
             preferred
-            if preferred not in self._INTERACTIONS_ONLY_MODELS
+            if not is_interactions_only_model(preferred, self._INTERACTIONS_ONLY_MODELS)
             else "gemini-2.5-flash"
         )
 
@@ -473,12 +520,12 @@ class DocumentFeedbackSystem:
 
         priority = [
             safe_preferred,
-            # gemini-3-flash-preview / gemini-3-pro-preview 是 generate_content 模型，可正常使用
-            "gemini-3-flash-preview",
-            "gemini-3-pro-preview",
-            # gemini-3.1-pro-preview 是目前最强的可用模型
-            "gemini-3.1-pro-preview",
-            "gemini-3.1-pro-preview-customtools",
+            # gemini-2.5-flash / gemini-2.5-pro 是 generate_content 模型，可正常使用
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            # gemini-2.5-pro 是目前最强的可用模型
+            "gemini-2.5-pro",
+            "gemini-2.5-pro-customtools",
             "gemini-3-flash",
             "gemini-3-pro",
             "gemini-2.5-pro",
@@ -516,23 +563,28 @@ class DocumentFeedbackSystem:
         - 所有候选均失败时返回 None
         返回第一个成功响应的模型名，若全部失败返回 None。
         """
+        resolved_preferred = self._resolve_runtime_model_id(preferred)
         if not self.client:
-            return preferred
+            return resolved_preferred
+        if self._is_local_client():
+            return resolved_preferred
         from google.genai import types as _gt
 
         probe_order = list(
             dict.fromkeys(
                 [
-                    preferred,
-                    "gemini-3.1-pro-preview",
+                    resolved_preferred,
+                    "gemini-2.5-pro",
                     "gemini-2.5-pro",
                     "gemini-2.5-flash",
-                    "gemini-3-flash-preview",
+                    "gemini-2.5-flash",
                 ]
             )
         )
         probe_order = [
-            m for m in probe_order if m not in self._INTERACTIONS_ONLY_MODELS
+            m
+            for m in probe_order
+            if not is_interactions_only_model(m, self._INTERACTIONS_ONLY_MODELS)
         ]
 
         for candidate in probe_order:
@@ -594,45 +646,78 @@ class DocumentFeedbackSystem:
         chunk_index: int,
         total_chunks: int,
         full_doc_context: str = "",
+        reference_context: Any = "",
         max_retries: int = 3,
+        status_callback: Optional[Callable[[str], None]] = None,
     ) -> Optional[List[Dict[str, str]]]:
         """
         分析单个分段并返回标注列表（严格顺序执行，上一段完成后再处理下一段）
         """
+        runtime_model_id = self._resolve_runtime_model_id(model_id)
+        is_local_client = self._is_local_client()
         base_context = (
             user_requirement
             + f"\n(注：这是文档的第{chunk_index}部分，共{total_chunks}部分)"
         )
+
+        def _emit_status(detail: str) -> None:
+            if not status_callback:
+                return
+            try:
+                status_callback(str(detail or "").strip())
+            except Exception as exc:
+                logger.debug("[DocumentFeedback] status_callback 调用失败: %s", exc)
 
         def _call_model(contents: str):
             from google.genai import types
 
             # gemini-2.5-pro 是思维链模型：thinking tokens 计入 max_output_tokens 预算
             # 设置 thinking_budget=4096 防止思考链耗尽 token 预算；max_output_tokens 提升至 16000
-            _is_thinking_model = "2.5" in model_id or "gemini-3" in model_id
+            _is_thinking_model = (not is_local_client) and (
+                "2.5" in runtime_model_id or "gemini-3" in runtime_model_id
+            )
             _thinking_cfg = (
                 types.ThinkingConfig(thinking_budget=4096)
                 if _is_thinking_model
                 else None
             )
-            _cfg_kwargs = dict(temperature=0.2, max_output_tokens=16000)
+            _cfg_kwargs = dict(
+                temperature=0.2,
+                max_output_tokens=(
+                    self._env_int("KOTO_DOC_REVIEW_LOCAL_MAX_OUTPUT_TOKENS", 6000, minimum=1024)
+                    if is_local_client
+                    else 16000
+                ),
+            )
             if _thinking_cfg is not None:
                 _cfg_kwargs["thinking_config"] = _thinking_cfg
             return self.client.models.generate_content(
-                model=model_id,
+                model=runtime_model_id,
                 contents=contents,
                 config=types.GenerateContentConfig(**_cfg_kwargs),
             )
 
-        def _call_with_timeout(contents: str, timeout_seconds: int = 240):
+        chunk_timeout_seconds = (
+            self._env_int("KOTO_DOC_REVIEW_LOCAL_CHUNK_TIMEOUT", 90, minimum=30)
+            if is_local_client
+            else 240
+        )
+        retry_limit = (
+            self._env_int("KOTO_DOC_REVIEW_LOCAL_CHUNK_RETRIES", 1, minimum=1)
+            if is_local_client
+            else max_retries
+        )
+
+        def _call_with_timeout(contents: str, timeout_seconds: Optional[int] = None):
             import threading
 
+            effective_timeout = timeout_seconds or chunk_timeout_seconds
             result_holder = {"response": None, "error": None}
 
             def _runner():
                 try:
                     logger.info(
-                        f"[DocumentFeedback] 🌐 调用AI API (超时: {timeout_seconds}s)..."
+                        f"[DocumentFeedback] 🌐 调用AI API (超时: {effective_timeout}s)..."
                     )
                     result_holder["response"] = _call_model(contents)
                     logger.info(f"[DocumentFeedback] ✅ AI响应成功")
@@ -642,10 +727,10 @@ class DocumentFeedbackSystem:
 
             t = threading.Thread(target=_runner, daemon=True)
             t.start()
-            t.join(timeout_seconds)
+            t.join(effective_timeout)
             if t.is_alive():
-                logger.info(f"[DocumentFeedback] ⏱️ AI调用超时 ({timeout_seconds}s)")
-                return None, TimeoutError(f"Chunk timeout after {timeout_seconds}s")
+                logger.info(f"[DocumentFeedback] ⏱️ AI调用超时 ({effective_timeout}s)")
+                return None, TimeoutError(f"Chunk timeout after {effective_timeout}s")
             if result_holder["error"]:
                 return None, result_holder["error"]
             return result_holder["response"], None
@@ -653,7 +738,9 @@ class DocumentFeedbackSystem:
         all_annotations: List[Dict[str, str]] = []
         seen_texts = set()
         # 质量优先：确保多轮审阅，避免“只跑一轮”导致遗漏
-        if len(chunk) <= 1800:
+        if is_local_client:
+            max_rounds = 1 if len(chunk) <= 2600 else 2
+        elif len(chunk) <= 1800:
             max_rounds = 2
         else:
             max_rounds = 3
@@ -663,6 +750,14 @@ class DocumentFeedbackSystem:
         for round_idx in range(1, max_rounds + 1):
             logger.info(
                 f"[DocumentFeedback] 🔁 第{chunk_index}段进入第{round_idx}/{max_rounds}轮审阅"
+            )
+            _emit_status(
+                f"第{chunk_index}/{total_chunks}段，第{round_idx}/{max_rounds}轮：正在整理提示词"
+            )
+            chunk_reference_context = self._select_reference_context(
+                reference_context,
+                chunk_index=chunk_index,
+                total_chunks=total_chunks,
             )
             # 第一轮注重全面扫描，如果只有一轮，则直接要求全面
             current_focus_prompt = ""
@@ -679,25 +774,33 @@ class DocumentFeedbackSystem:
                 + f"\n\n这是第{round_idx}/{max_rounds}轮审阅。请找出真正需要修改的问题，本轮目标约{target_count if round_idx == 1 else 10}处修改。"
                 + current_focus_prompt,
                 full_doc_context=full_doc_context,
+                reference_context=chunk_reference_context,
             )
             strict_prompt = self._build_annotation_prompt(
                 doc_type,
                 chunk,
                 base_context
                 + f"\n\n请务必仅输出JSON数组，本轮最多15条；若确实没有问题再返回空数组。",
+                reference_context=chunk_reference_context,
             )
 
-            for retry in range(max_retries):
+            for retry in range(retry_limit):
                 try:
                     # 断线重试：首次立即，后续等待 3s / 6s 再试
                     if retry > 0:
                         _wait = 3 * retry
+                        _emit_status(
+                            f"第{chunk_index}/{total_chunks}段，第{round_idx}/{max_rounds}轮：第{retry + 1}/{retry_limit}次请求前等待 {_wait}s"
+                        )
                         logger.info(
-                            f"[DocumentFeedback] ⏳ 等待{_wait}s后重试 (第{retry+1}/{max_retries}次)..."
+                            f"[DocumentFeedback] ⏳ 等待{_wait}s后重试 (第{retry+1}/{retry_limit}次)..."
                         )
                         import time as _time_mod
 
                         _time_mod.sleep(_wait)
+                    _emit_status(
+                        f"第{chunk_index}/{total_chunks}段，第{round_idx}/{max_rounds}轮：等待 AI({runtime_model_id}) 返回（第{retry + 1}/{retry_limit}次请求）"
+                    )
                     response, err = _call_with_timeout(prompt)  # 默认180秒超时
                     if err:
                         raise err
@@ -745,21 +848,34 @@ class DocumentFeedbackSystem:
                             all_annotations.extend(new_items)
                             if len(new_items) < min_new_per_round:
                                 if round_idx < max_rounds:
+                                    _emit_status(
+                                        f"第{chunk_index}/{total_chunks}段，第{round_idx}/{max_rounds}轮完成：新增{len(new_items)}条，继续查漏"
+                                    )
                                     logger.info(
                                         f"[DocumentFeedback] ℹ️ 第{chunk_index}段第{round_idx}轮新增较少({len(new_items)}条)，继续下一轮查漏"
                                     )
                                     break
                                 return all_annotations
                             break
-                        if retry < max_retries - 1:
+                        if retry < retry_limit - 1:
+                            _emit_status(
+                                f"第{chunk_index}/{total_chunks}段，第{round_idx}/{max_rounds}轮：AI 输出为空或格式不符，改用严格 JSON 提示重试"
+                            )
                             prompt = strict_prompt
                             continue
                         return all_annotations
-                    if retry < max_retries - 1:
+                    if retry < retry_limit - 1:
+                        _emit_status(
+                            f"第{chunk_index}/{total_chunks}段，第{round_idx}/{max_rounds}轮：AI 未返回可解析内容，改用严格 JSON 提示重试"
+                        )
                         prompt = strict_prompt
                         continue
                 except Exception as e:
                     error_msg = str(e)[:120]
+                    if retry < retry_limit - 1:
+                        _emit_status(
+                            f"第{chunk_index}/{total_chunks}段，第{round_idx}/{max_rounds}轮：请求失败，准备重试（{error_msg}）"
+                        )
                     # 503/UNAVAILABLE：模型过载，立即返回兜底（不重试，外层负责切换模型）
                     _is_503 = (
                         "503" in error_msg
@@ -785,18 +901,18 @@ class DocumentFeedbackSystem:
                         or "RemoteDisconnected" in error_msg
                         or "without sending a response" in error_msg
                     )
-                    if _is_disconnect and retry < max_retries - 1:
+                    if _is_disconnect and retry < retry_limit - 1:
                         logger.info(
                             f"[DocumentFeedback] 🔌 第{chunk_index}段连接断开，将重试: {error_msg[:80]}"
                         )
                         continue
-                    if retry < max_retries - 1:
+                    if retry < retry_limit - 1:
                         logger.warning(
                             f"[DocumentFeedback] ⚠️ 第{chunk_index}段第{round_idx}轮失败，准备重试: {error_msg}"
                         )
                         continue
                     logger.error(
-                        f"[DocumentFeedback] ❌ 第{chunk_index}段第{round_idx}轮失败（已重试{max_retries}次）: {error_msg}"
+                        f"[DocumentFeedback] ❌ 第{chunk_index}段第{round_idx}轮失败（已重试{retry_limit}次）: {error_msg}"
                     )
                     fallback = self._fallback_annotations_from_chunk(chunk)
                     # 给每条标注打上兜底标记，供调用层感知（内部键，最终不暴露给用户）
@@ -1282,6 +1398,62 @@ class DocumentFeedbackSystem:
                     if isinstance(anno, dict):
                         annotations.append(anno)
 
+        # ==================== 优化策略12：常见 AI 套话 ====================
+        ai_style_patterns = [
+            (
+                r"值得注意的是[，,]?",
+                lambda m, t: {
+                    "原文片段": m.group(0),
+                    "修改建议": "删除空泛的套话开场",
+                    "修改后文本": "",
+                    "理由": "这类开场没有新增信息，容易显得像 AI 表达",
+                },
+            ),
+            (
+                r"综上所述[，,]?",
+                lambda m, t: {
+                    "原文片段": m.group(0),
+                    "修改建议": "删除总结套话",
+                    "修改后文本": "",
+                    "理由": "结论性套话信息密度低，容易显得生硬",
+                },
+            ),
+            (
+                r"为(\w{2,8})提供了有力支撑",
+                lambda m, t: {
+                    "原文片段": m.group(0),
+                    "修改建议": "改成更实的表达",
+                    "修改后文本": f"对{m.group(1)}有参考价值",
+                    "理由": "避免空泛的结论套话",
+                },
+            ),
+            (
+                r"具有重要意义",
+                lambda m, t: {
+                    "原文片段": m.group(0),
+                    "修改建议": "改成更自然的评价",
+                    "修改后文本": "很有价值",
+                    "理由": "避免空泛评价，降低 AI 味",
+                },
+            ),
+            (
+                r"从(\w{2,6})角度来看",
+                lambda m, t: {
+                    "原文片段": m.group(0),
+                    "修改建议": "简化视角引导语",
+                    "修改后文本": f"从{m.group(1)}看",
+                    "理由": "减少书面腔和 AI 高频句式",
+                },
+            ),
+        ]
+        for pattern, suggest_func in ai_style_patterns:
+            for m in re.finditer(pattern, chunk):
+                text = m.group(0)
+                if 3 <= len(text) <= 20:
+                    anno = suggest_func(m, text)
+                    if isinstance(anno, dict):
+                        annotations.append(anno)
+
         # ==================== 去重+均匀分布 ====================
         # 注：策略12（图标符号）、策略13（中英文混排空格）、策略14（格式标记）
         # 已移除——这些属于纯排版格式问题，不应通过内容批注处理。
@@ -1333,6 +1505,8 @@ class DocumentFeedbackSystem:
         model_id: Optional[str] = None,
         chunk_size: int = 5000,  # 增大分块大小，减少API调用次数 (原: 3000)
         progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        reference_context: Any = "",
+        chunk_range: Optional[tuple[int, int]] = None,
     ) -> Dict[str, Any]:
         """
         分段处理大文档标注（适用于超大文档）
@@ -1347,7 +1521,51 @@ class DocumentFeedbackSystem:
         Returns:
             合并后的标注结果
         """
-        effective_model_id = model_id or self.default_model_id
+        def _emit_progress(current_value, total_value, message_text, **extra):
+            if not progress_callback:
+                return
+            try:
+                progress_callback(current_value, total_value, message_text, **extra)
+            except TypeError:
+                progress_callback(current_value, total_value, message_text)
+
+        def _build_partial_proposal(item: Dict[str, Any], *, chunk_index: int, global_chunk_index: int) -> Optional[Dict[str, Any]]:
+            original_text = str(
+                item.get("原文片段")
+                or item.get("原文")
+                or item.get("original")
+                or ""
+            ).strip()
+            proposed_text = str(
+                item.get("修改建议")
+                or item.get("改为")
+                or item.get("修改后文本")
+                or item.get("modified")
+                or ""
+            ).strip()
+            reason = str(
+                item.get("修改原因")
+                or item.get("原因")
+                or item.get("reason")
+                or ""
+            ).strip()
+            if not original_text or not proposed_text:
+                return None
+            preview = {
+                "original_text": original_text,
+                "proposed_text": proposed_text,
+                "anchor_text": original_text,
+                "chunk_index": chunk_index,
+                "global_chunk_index": global_chunk_index,
+                "source": "doc_review_stream",
+                "preview_only": True,
+            }
+            if reason:
+                preview["rationale"] = reason
+                preview["reason"] = reason
+            return preview
+
+        effective_model_id = self._resolve_runtime_model_id(model_id)
         logger.info(f"[DocumentFeedback] 📖 读取大文档: {os.path.basename(file_path)}")
 
         # 读取文档
@@ -1357,6 +1575,23 @@ class DocumentFeedbackSystem:
 
         formatted_content = self.reader.format_for_ai(doc_data)
         total_length = len(formatted_content)
+
+        def _invoke_chunk_analyzer(**kwargs):
+            import inspect
+
+            analyzer = self._analyze_chunk_for_annotations
+            try:
+                sig = inspect.signature(analyzer)
+            except (TypeError, ValueError):
+                return analyzer(**kwargs)
+
+            if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in sig.parameters.values()):
+                return analyzer(**kwargs)
+
+            filtered_kwargs = {
+                key: value for key, value in kwargs.items() if key in sig.parameters
+            }
+            return analyzer(**filtered_kwargs)
 
         # 剥离文档元数据头（# 文档分析 ... ## 文档内容...）避免头部占据第一个chunk导致AI无法集中标注正文
         _content_marker = "## 文档内容"
@@ -1373,7 +1608,12 @@ class DocumentFeedbackSystem:
                 f"[DocumentFeedback] 📄 文档较小({total_length}字符)，单段AI标注"
             )
             selected_model, _ = self._select_best_model(effective_model_id)
-            raw_annotations = self._analyze_chunk_for_annotations(
+
+            def _single_chunk_status(detail: str) -> None:
+                if detail:
+                    _emit_progress(0.05, 1, detail)
+
+            raw_annotations = _invoke_chunk_analyzer(
                 chunk=formatted_content,  # 用完整格式化文本（含元数据头），与老多段路径 chunk1 行为一致
                 doc_type=doc_data.get("type"),
                 user_requirement=user_requirement,
@@ -1381,7 +1621,9 @@ class DocumentFeedbackSystem:
                 chunk_index=1,
                 total_chunks=1,
                 full_doc_context=formatted_content,
+                reference_context=reference_context,
                 max_retries=2,  # 单段只重试一次（总计2次），配合240s超时保证成功率
+                status_callback=_single_chunk_status,
             )
             _all_raw = raw_annotations or []
             _fb_items = [a for a in _all_raw if a.get("_koto_fallback_error")]
@@ -1415,14 +1657,14 @@ class DocumentFeedbackSystem:
                 "summary": f"单段AI标注，生成{len(anno_list)}条修改建议",
                 "annotation_count": len(anno_list),
                 "chunks_processed": 1,
-                "fallback_used": (_local_fallback_triggered and not _fb_items)
-                or (len(_fb_items) > 0 and len(anno_list) == 0),
+                "fallback_used": len(_fb_items) > 0 and len(anno_list) == 0,
                 "partial_fallback": len(_fb_items) > 0 and len(anno_list) > 0,
-                "fallback_chunk_count": (
-                    1 if (_fb_items or _local_fallback_triggered) else 0
-                ),
+                "fallback_chunk_count": 1 if _fb_items else 0,
                 "ai_chunk_count": (
                     0 if _local_fallback_triggered else (1 if anno_list else 0)
+                ),
+                "empty_result_fallback_chunk_count": (
+                    1 if _local_fallback_triggered else 0
                 ),
                 "last_api_error": _single_last_err,
             }
@@ -1430,11 +1672,34 @@ class DocumentFeedbackSystem:
         # 分段处理（按段落切分，保证不打断句子）
         logger.info(f"[DocumentFeedback] 📚 文档较大({total_length}字符)，分段处理")
         chunks = self._split_into_chunks_by_paragraphs(content_for_chunking, chunk_size)
+        total_chunk_count = len(chunks)
+        selected_chunk_start = 1
+        selected_chunk_end = total_chunk_count
+        if chunk_range:
+            try:
+                selected_chunk_start = max(1, int(chunk_range[0]))
+                selected_chunk_end = min(total_chunk_count, int(chunk_range[1]))
+            except (TypeError, ValueError, IndexError):
+                selected_chunk_start = 1
+                selected_chunk_end = total_chunk_count
+        selected_chunk_items = [
+            (index, chunks[index - 1])
+            for index in range(selected_chunk_start, selected_chunk_end + 1)
+            if 1 <= index <= total_chunk_count
+        ]
+        selected_chunk_count = len(selected_chunk_items)
+        selected_content_chars = sum(len(chunk) for _, chunk in selected_chunk_items)
+        if total_chunk_count > 0 and selected_chunk_count <= 0:
+            return {
+                "success": False,
+                "error": "未找到可处理的文档分段",
+                "file_path": file_path,
+            }
 
         # AI禁用时，对每个chunk应用本地兜底
         if os.getenv("KOTO_DISABLE_AI") == "1":
             logger.warning(
-                f"[DocumentFeedback] ⚠️ KOTO_DISABLE_AI=1，使用本地兜底标注（{len(chunks)}段）"
+                f"[DocumentFeedback] ⚠️ KOTO_DISABLE_AI=1，使用本地兜底标注（{selected_chunk_count or len(chunks)}段）"
             )
 
             # 第一轮：收集所有候选标注，同时统计每段的信息密度
@@ -1442,7 +1707,7 @@ class DocumentFeedbackSystem:
             chunk_densities = []  # 记录每段的词汇密度
 
             logger.info(f"\n[DocumentFeedback] 📋 第一阶段：收集标注候选...\n")
-            for i, chunk in enumerate(chunks):
+            for i, (_, chunk) in enumerate(selected_chunk_items or list(enumerate(chunks, start=1))):
                 chunk_fallback = self._fallback_annotations_from_chunk(chunk)
                 density = len(chunk_fallback) / max(
                     1, len(chunk) / 1000
@@ -1461,18 +1726,18 @@ class DocumentFeedbackSystem:
                         }
                     )
 
-                progress = ((i + 1) / len(chunks)) * 100
-                bar_filled = int(10 * (i + 1) / len(chunks))
+                progress = ((i + 1) / max(1, selected_chunk_count or len(chunks))) * 100
+                bar_filled = int(10 * (i + 1) / max(1, selected_chunk_count or len(chunks)))
                 bar = "█" * bar_filled + "░" * (10 - bar_filled)
                 logger.info(
-                    f"[DocumentFeedback] 🔍 [{bar}] {i+1}/{len(chunks)} | 密度: {density:.1f}/千字"
+                    f"[DocumentFeedback] 🔍 [{bar}] {i+1}/{selected_chunk_count or len(chunks)} | 密度: {density:.1f}/千字"
                 )
 
             # 计算平均密度和目标标注数
             avg_density = (
                 sum(chunk_densities) / len(chunk_densities) if chunk_densities else 0
             )
-            target_count = len(formatted_content) // 1000 * 10
+            target_count = max(1, (selected_content_chars or total_length) // 1000 * 10)
 
             # 第二轮：按密度均衡选择标注
             logger.info(
@@ -1480,11 +1745,11 @@ class DocumentFeedbackSystem:
             )
 
             # 分chunk选择，确保每段都有适当数量
-            target_per_chunk = max(1, target_count // len(chunks))
+            target_per_chunk = max(1, target_count // max(1, selected_chunk_count or len(chunks)))
             selected_annotations = []
             seen_texts = set()
 
-            for chunk_idx in range(len(chunks)):
+            for chunk_idx in range(selected_chunk_count or len(chunks)):
                 chunk_candidates = [
                     c for c in all_candidates if c["chunk_idx"] == chunk_idx
                 ]
@@ -1527,11 +1792,11 @@ class DocumentFeedbackSystem:
                             }
                         )
 
-                progress = ((chunk_idx + 1) / len(chunks)) * 100
-                bar_filled = int(20 * (chunk_idx + 1) / len(chunks))
+                progress = ((chunk_idx + 1) / max(1, selected_chunk_count or len(chunks))) * 100
+                bar_filled = int(20 * (chunk_idx + 1) / max(1, selected_chunk_count or len(chunks)))
                 bar = "█" * bar_filled + "░" * (20 - bar_filled)
                 logger.info(
-                    f"[DocumentFeedback] 📊 [{bar}] {chunk_idx+1}/{len(chunks)} ({progress:.0f}%) | "
+                    f"[DocumentFeedback] 📊 [{bar}] {chunk_idx+1}/{selected_chunk_count or len(chunks)} ({progress:.0f}%) | "
                     + f"本段{len(chunk_selection)}条 | 累计{len(selected_annotations)}条"
                 )
 
@@ -1558,14 +1823,18 @@ class DocumentFeedbackSystem:
                 "success": True,
                 "file_path": file_path,
                 "annotations": selected_annotations[:target_count],
-                "summary": f"本地兜底分{len(chunks)}段生成{len(selected_annotations)}条标注（目标：{target_count}条）",
+                "summary": f"本地兜底分{selected_chunk_count or len(chunks)}段生成{len(selected_annotations)}条标注（目标：{target_count}条）",
                 "annotation_count": len(selected_annotations),
-                "chunks_processed": len(chunks),
+                "chunks_processed": selected_chunk_count or len(chunks),
                 "chunk_densities": chunk_densities,
+                "total_chunk_count": total_chunk_count or len(chunks),
+                "selected_chunk_count": selected_chunk_count or len(chunks),
+                "selected_chunk_start": selected_chunk_start,
+                "selected_chunk_end": selected_chunk_end,
                 # 兜底标记
                 "fallback_used": True,
                 "partial_fallback": False,
-                "fallback_chunk_count": len(chunks),
+                "fallback_chunk_count": selected_chunk_count or len(chunks),
                 "ai_chunk_count": 0,
                 "last_api_error": "KOTO_DISABLE_AI=1（手动禁用AI）",
             }
@@ -1591,10 +1860,10 @@ class DocumentFeedbackSystem:
                 model_note = f"模型: {selected_model}（首选 {effective_model_id} 不可用，已自动降级）"
 
         logger.info(
-            f"[DocumentFeedback] 📦 文档较大({total_length}字符)，分{len(chunks)}段处理"
+            f"[DocumentFeedback] 📦 文档较大({total_length}字符)，本次处理 {selected_chunk_count or len(chunks)} 段"
         )
         logger.info(
-            f"[DocumentFeedback] 🎯 目标标注数: 约{total_length//1000*10}条（每1000字10条）\n"
+            f"[DocumentFeedback] 🎯 目标标注数: 约{max(1, (selected_content_chars or total_length)//1000*10)}条（每1000字10条）\n"
         )
 
         # 处理每一段（严格顺序执行，失败自动拆分重试）
@@ -1605,16 +1874,17 @@ class DocumentFeedbackSystem:
         processed = 0
         min_chunk_size = 800
         start_time = time.time()
-        queue = deque(chunks)
-        total_chunks_initial = len(chunks)
+        queue = deque(selected_chunk_items or list(enumerate(chunks, start=1)))
+        total_chunks_initial = len(queue)
         # ── 兜底追踪 ──────────────────────────────────────────────────
         fallback_chunk_count = 0  # 完全使用本地正则兜底的分段数
         ai_chunk_count = 0  # 成功调用 AI 的分段数
+        empty_result_fallback_chunk_count = 0  # AI 正常返回空结果时，本地规则补充的分段数
         last_api_error = ""  # 最近一次 API 失败错误信息
         _model_switched = False  # 是否已因 503 切换过模型（避免反复探测）
 
         while queue:
-            chunk = queue.popleft()
+            global_chunk_index, chunk = queue.popleft()
             processed += 1
             current_total = processed + len(queue)
 
@@ -1631,15 +1901,26 @@ class DocumentFeedbackSystem:
                 f"[DocumentFeedback] ⏱️ 已用时: {elapsed:.1f}s | 累计{len(all_annotations)}条标注 | 剩余{len(queue)}段"
             )
 
-            annotations = self._analyze_chunk_for_annotations(
+            def _chunk_status(detail: str) -> None:
+                if not detail:
+                    return
+                _emit_progress(
+                    max(0.05, processed - 0.95),
+                    total_chunks_initial,
+                    detail,
+                )
+
+            annotations = _invoke_chunk_analyzer(
                 chunk=chunk,
                 doc_type=doc_data.get("type"),
                 user_requirement=user_requirement,
                 model_id=selected_model,
-                chunk_index=processed,
-                total_chunks=current_total,
+                chunk_index=global_chunk_index,
+                total_chunks=total_chunk_count or current_total,
                 full_doc_context=formatted_content,
+                reference_context=reference_context,
                 max_retries=2,
+                status_callback=_chunk_status,
             )
 
             if annotations is None:
@@ -1659,13 +1940,25 @@ class DocumentFeedbackSystem:
                         "file_path": file_path,
                     }
                 for sc in reversed(sub_chunks):
-                    queue.appendleft(sc)
+                    queue.appendleft((global_chunk_index, sc))
                 logger.info(
                     f"[DocumentFeedback] 🔁 分段失败，已拆分为{len(sub_chunks)}段重试"
                 )
                 continue
 
+            empty_result_fallback_applied = False
+            if not annotations:
+                local_annotations = self._fallback_annotations_from_chunk(chunk)
+                if local_annotations:
+                    annotations = local_annotations
+                    empty_result_fallback_applied = True
+                    empty_result_fallback_chunk_count += 1
+                    logger.info(
+                        f"[DocumentFeedback] ℹ️ 第{processed}段 AI 未给出修改，已补充本地规则 {len(local_annotations)} 条"
+                    )
+
             new_count = 0
+            chunk_preview_items = []
             # ── 检测本段是否全部来自兜底（_koto_fallback_error 标记） ──
             fb_items = [a for a in annotations if a.get("_koto_fallback_error")]
             if fb_items:
@@ -1693,14 +1986,14 @@ class DocumentFeedbackSystem:
                             f"模型: {selected_model}（运行中自动从503过载模型切换）"
                         )
                         # 把当前段重新推回队列头，用新模型再跑一次
-                        queue.appendleft(chunk)
+                        queue.appendleft((global_chunk_index, chunk))
                         processed -= 1  # 抵消本次 processed+=1，保持计数准确
                         fallback_chunk_count -= 1  # 本段还没真正兜底，撤回计数
                         _model_switched = True
                         continue
                     _model_switched = True  # 探测失败或模型未变，不再重试
             else:
-                if annotations:
+                if annotations and not empty_result_fallback_applied:
                     ai_chunk_count += 1
             # 清除内部标记键，兜底标注直接丢弃（避免低质量regex内容污染输出）
             for ann in annotations:
@@ -1714,13 +2007,38 @@ class DocumentFeedbackSystem:
                     seen_texts.add(text)
                     all_annotations.append(item)
                     new_count += 1
+                    preview_item = _build_partial_proposal(
+                        item,
+                        chunk_index=processed,
+                        global_chunk_index=global_chunk_index,
+                    )
+                    if preview_item:
+                        chunk_preview_items.append(preview_item)
 
-            msg = f"已完成 {processed}/{current_total} 段 (本段+{new_count}条，累计{len(all_annotations)}条)"
+            if total_chunks_initial != (total_chunk_count or total_chunks_initial):
+                msg = (
+                    f"已完成本批 {processed}/{total_chunks_initial} 段"
+                    f"（全局 {global_chunk_index}/{total_chunk_count}，本段+{new_count}条，累计{len(all_annotations)}条）"
+                )
+            else:
+                msg = f"已完成 {processed}/{current_total} 段 (本段+{new_count}条，累计{len(all_annotations)}条)"
             logger.info(
-                f"[DocumentFeedback] ✅ 第 {processed} 段完成: 新增 {new_count} 条标注"
+                f"[DocumentFeedback] ✅ 第 {processed} 段完成（全局 {global_chunk_index}/{total_chunk_count or current_total}）: 新增 {new_count} 条标注"
             )
-            if progress_callback:
-                progress_callback(processed, current_total, msg)
+            _emit_progress(
+                processed,
+                total_chunks_initial,
+                msg,
+                chunk_status="completed",
+                chunk_index=processed,
+                chunk_total=total_chunks_initial,
+                global_chunk_index=global_chunk_index,
+                global_chunk_total=total_chunk_count or current_total,
+                added_count=new_count,
+                total_annotations=len(all_annotations),
+                partial_proposals=chunk_preview_items[:3],
+                target_path=file_path,
+            )
 
         elapsed_total = time.time() - start_time
 
@@ -1735,17 +2053,23 @@ class DocumentFeedbackSystem:
             "file_path": file_path,
             "annotations": all_annotations,
             "summary": (
-                f"分段顺序处理（初始{total_chunks_initial}段），共生成{len(all_annotations)}条标注（耗时{elapsed_total:.1f}s）。"
+                f"分段顺序处理（本批 {total_chunks_initial} 段，全局 {total_chunk_count or total_chunks_initial} 段），共生成{len(all_annotations)}条标注（耗时{elapsed_total:.1f}s）。"
+                f"{' 其中 ' + str(empty_result_fallback_chunk_count) + ' 段在 AI 未给出修改时由本地规则补充。' if empty_result_fallback_chunk_count else ''}"
                 f"{model_note}\n\n可用模型：\n{model_table}"
             ),
             "annotation_count": len(all_annotations),
             "chunks_processed": processed,
-            "target_count": total_length // 1000 * 10,
+            "target_count": max(1, (selected_content_chars or total_length) // 1000 * 10),
+            "total_chunk_count": total_chunk_count or total_chunks_initial,
+            "selected_chunk_count": total_chunks_initial,
+            "selected_chunk_start": selected_chunk_start,
+            "selected_chunk_end": selected_chunk_end,
             # ── 兜底状态（供上层展示警告） ──────────────────────────
             "fallback_chunk_count": fallback_chunk_count,
             "ai_chunk_count": ai_chunk_count,
             "fallback_used": fallback_chunk_count > 0 and ai_chunk_count == 0,
             "partial_fallback": fallback_chunk_count > 0 and ai_chunk_count > 0,
+            "empty_result_fallback_chunk_count": empty_result_fallback_chunk_count,
             "last_api_error": last_api_error,
         }
 
@@ -1753,7 +2077,7 @@ class DocumentFeedbackSystem:
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-3.1-pro-preview",
+        model_id: str = "gemini-2.5-pro",
     ) -> Dict[str, Any]:
         """
         分析文档，生成标注格式的建议
@@ -1884,36 +2208,54 @@ class DocumentFeedbackSystem:
             "last_api_error": _para_last_err,
         }
 
+    def _apply_docx_revisions(
+        self,
+        file_path: str,
+        annotations: List[Dict[str, str]],
+        *,
+        progress_callback=None,
+    ) -> Dict[str, Any]:
+        """Write AI review results back as native Word tracked revisions in place."""
+        from web.track_changes_editor import TrackChangesEditor
+
+        editor = TrackChangesEditor(author="Koto AI")
+        result = editor.apply_tracked_changes(
+            file_path,
+            annotations,
+            progress_callback=progress_callback,
+        )
+        if isinstance(result, dict):
+            result.setdefault("original_file", file_path)
+            result.setdefault("revised_file", file_path)
+            result.setdefault("updated_in_place", True)
+        return result
+
     def annotate_document(
         self, file_path: str, annotations: List[Dict[str, str]]
     ) -> Dict[str, Any]:
         """
-        应用标注到文档副本
+        将审阅建议直接写回原 DOCX，生成原生修订。
 
         Args:
             file_path: 原Word文档路径
-            annotations: 标注列表
-                [
-                    {"原文片段": "需要修改的文本", "修改建议": "建议修改为..."},
-                    ...
-                ]
+            annotations: 修订列表
 
         Returns:
             {
                 "success": True,
                 "original_file": "原文件路径",
-                "revised_file": "标注后的文件路径",
+                "revised_file": "写回后的文件路径",
                 "applied": 成功应用数,
                 "failed": 失败数
             }
         """
-        logger.info(f"[DocumentFeedback] ✏️ 应用标注...")
+        logger.info("[DocumentFeedback] ✏️ 应用修订...")
 
-        result = self.annotator.annotate_document(file_path, annotations)
+        result = self._apply_docx_revisions(file_path, annotations)
 
         if result.get("success"):
             logger.info(
-                f"[DocumentFeedback] ✅ 标注完成: {os.path.basename(result.get('revised_file', ''))}"
+                f"[DocumentFeedback] ✅ 修订完成: {os.path.basename(result.get('revised_file', ''))}"
             )
 
         return result
@@ -1926,15 +2268,19 @@ class DocumentFeedbackSystem:
         model_id: Optional[str] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         skill_prompt: str = "",
+        reference_context: Any = "",
+        chunk_range: Optional[tuple[int, int]] = None,
+        batch_index: int = 0,
+        total_batches: int = 0,
     ):
         """
-        完整标注闭环（流式版本，支持进度反馈和任务取消）
+        完整修订闭环（流式版本，支持进度反馈和任务取消）
 
         Args:
             file_path: Word文档路径
             user_requirement: 用户需求
             task_id: 任务ID（用于检查是否被取消）
-            skill_prompt: 匹配到的批注类Skill专项要求（如商务批注、翻译质检等）
+            skill_prompt: 匹配到的审校类 Skill 专项要求（如商务审校、翻译质检等）
 
         Yields:
             {'stage': 'xxx', 'progress': 0-100, 'message': '...'}
@@ -1948,12 +2294,9 @@ class DocumentFeedbackSystem:
                 )
             else:
                 user_requirement = _skill_block
-        import shutil
-        from datetime import datetime
-
         from web.task_scheduler import check_task_cancelled
 
-        effective_model_id = model_id or self.default_model_id
+        effective_model_id = self._resolve_runtime_model_id(model_id)
 
         def _is_cancelled() -> bool:
             try:
@@ -1964,7 +2307,7 @@ class DocumentFeedbackSystem:
             return bool(task_id and check_task_cancelled(task_id))
 
         logger.info("=" * 60)
-        logger.info("🔄 启动文档自动标注系统（完整闭环-流式）")
+        logger.info("🔄 启动文档自动修订系统（完整闭环-流式）")
         logger.info("=" * 60)
 
         # ===== Stage 1: 读取文档 =====
@@ -2015,7 +2358,7 @@ class DocumentFeedbackSystem:
             }
             return
 
-        # ===== Stage 2: 分析生成标注建议 =====
+        # ===== Stage 2: 分析生成修订建议 =====
         if _is_cancelled():
             yield {
                 "stage": "cancelled",
@@ -2029,12 +2372,21 @@ class DocumentFeedbackSystem:
             "stage": "analyzing",
             "progress": 15,
             "message": f"🤖 正在分析文档...",
-            "detail": f"使用 AI({effective_model_id}) 检查 {total_paras} 段文本",
+            "detail": (
+                f"使用 AI({effective_model_id}) 检查第 {chunk_range[0]}-{chunk_range[1]} 段（共 {total_paras} 段，第 {batch_index}/{total_batches} 批）"
+                if chunk_range and batch_index > 0 and total_batches > 0
+                else f"使用 AI({effective_model_id}) 检查 {total_paras} 段文本"
+            ),
         }
 
-        chunk_size = (
-            4000 if (self.client and os.getenv("KOTO_DISABLE_AI") != "1") else 10000
-        )
+        if self.client and os.getenv("KOTO_DISABLE_AI") != "1":
+            chunk_size = (
+                self._env_int("KOTO_DOC_REVIEW_LOCAL_CHUNK_SIZE", 2400, minimum=1200)
+                if self._is_local_client()
+                else 4000
+            )
+        else:
+            chunk_size = 10000
 
         # ===== 🔌 AI 连通性预检 —— 在开始分段之前快速验证 API 可用，503时自动切模型 =====
         _preflight_error = ""
@@ -2073,30 +2425,42 @@ class DocumentFeedbackSystem:
 
         progress_q = queue_module.Queue()
         result_holder = {"result": None, "error": None}
-        last_yield_time = [time.time()]
+        last_yield_time = [0.0]
 
         _SENTINEL = object()  # 线程完成的标记
 
-        def on_analysis_progress(current, total, message):
+        def on_analysis_progress(current, total, message, **meta):
             """进度回调 — 在分析线程中调用，通过 Queue 发送到主线程"""
-            progress = 15 + int((current / total) * 35)
+            progress = 15 + int((current / max(1, total)) * 35)
             current_time = time.time()
-            if current_time - last_yield_time[0] >= 0.3:
+            force_emit = str(meta.get("chunk_status") or "").strip().lower() == "completed"
+            if force_emit or current_time - last_yield_time[0] >= 0.3:
                 last_yield_time[0] = current_time
-                # 将详细进度拼接到 message 中，确保前端看到
-                detail_msg = message
-                if "已完成" in message:
-                    # 简化一下以免过长
-                    detail_msg = message.split("(")[0].strip() + "..."
-
-                progress_q.put(
-                    {
-                        "stage": "analyzing",
-                        "progress": progress,
-                        "message": f"🤖 {message}",  # 直接显示具体进度
-                        "detail": message,
-                    }
-                )
+                event = {
+                    "stage": "analyzing",
+                    "progress": progress,
+                    "message": f"🤖 {message}",
+                    "detail": message,
+                }
+                for key in (
+                    "chunk_status",
+                    "chunk_index",
+                    "chunk_total",
+                    "global_chunk_index",
+                    "global_chunk_total",
+                    "added_count",
+                    "total_annotations",
+                    "target_path",
+                ):
+                    value = meta.get(key)
+                    if value not in (None, "", [], {}):
+                        event[key] = value
+                partial_proposals = meta.get("partial_proposals")
+                if isinstance(partial_proposals, list) and partial_proposals:
+                    event["partial_proposals"] = [
+                        dict(item) for item in partial_proposals if isinstance(item, dict)
+                    ]
+                progress_q.put(event)
 
         def run_analysis():
             """在后台线程中运行分析"""
@@ -2107,6 +2471,8 @@ class DocumentFeedbackSystem:
                     model_id=effective_model_id,
                     chunk_size=chunk_size,
                     progress_callback=on_analysis_progress,
+                    reference_context=reference_context,
+                    chunk_range=chunk_range,
                 )
             except Exception as e:
                 result_holder["error"] = e
@@ -2120,6 +2486,13 @@ class DocumentFeedbackSystem:
         heartbeat_interval = 3.0  # 每3秒发一次心跳防止 SSE 超时
         last_heartbeat = time.time()
         current_progress = [15]  # 跟踪当前进度，防止心跳数字回退
+        current_detail = [
+            (
+                f"使用 AI({effective_model_id}) 检查第 {chunk_range[0]}-{chunk_range[1]} 段（共 {total_paras} 段，第 {batch_index}/{total_batches} 批）"
+                if chunk_range and batch_index > 0 and total_batches > 0
+                else f"使用 AI({effective_model_id}) 检查 {total_paras} 段文本"
+            )
+        ]
 
         try:
             while True:
@@ -2138,6 +2511,9 @@ class DocumentFeedbackSystem:
                     current_progress[0] = max(
                         current_progress[0], evt.get("progress", 15)
                     )
+                    evt_detail = str(evt.get("detail") or evt.get("message") or "").strip()
+                    if evt_detail:
+                        current_detail[0] = evt_detail
                     yield evt
                     last_heartbeat = time.time()
                 except queue_module.Empty:
@@ -2151,7 +2527,7 @@ class DocumentFeedbackSystem:
                             "stage": "analyzing",
                             "progress": current_progress[0],
                             "message": "🤖 正在分析文档...",
-                            "detail": "等待 AI 响应中...",
+                            "detail": f"{current_detail[0]}；等待 AI 响应中..." if current_detail[0] else "等待 AI 响应中...",
                         }
 
             analysis_thread.join(timeout=10)
@@ -2180,6 +2556,7 @@ class DocumentFeedbackSystem:
             _last_api_error = analysis_result.get("last_api_error", "")
             _fb_chunks = analysis_result.get("fallback_chunk_count", 0)
             _ai_chunks = analysis_result.get("ai_chunk_count", 0)
+            _empty_ai_fb_chunks = analysis_result.get("empty_result_fallback_chunk_count", 0)
 
             if _fallback_used or _partial_fallback:
                 _fb_label = (
@@ -2201,6 +2578,14 @@ class DocumentFeedbackSystem:
                 logger.error(
                     f"[DocumentFeedback] ⚠️ 兜底警告已推送: {_fb_label}分段，最近错误: {_last_api_error[:60]}"
                 )
+
+            if _empty_ai_fb_chunks:
+                yield {
+                    "stage": "info",
+                    "progress": 52,
+                    "message": f"ℹ️ {_empty_ai_fb_chunks} 个分段未返回修改，已补充规则建议",
+                    "detail": "当 AI 未返回可直接写回的修改时，系统会补充固定表达问题的规则建议。",
+                }
 
             yield {
                 "stage": "analysis_complete",
@@ -2233,7 +2618,7 @@ class DocumentFeedbackSystem:
             }
             return
 
-        # ===== Stage 3: 应用标注到文档 =====
+        # ===== Stage 3: 应用修订到文档 =====
         if _is_cancelled():
             yield {
                 "stage": "cancelled",
@@ -2246,36 +2631,12 @@ class DocumentFeedbackSystem:
         yield {
             "stage": "applying",
             "progress": 55,
-            "message": "📝 正在应用修改到文档...",
-            "detail": f"将使用 Track Changes 标注 {len(annotations)} 处",
+            "message": "📝 正在写回原 DOCX...",
+            "detail": f"将直接写回原文，共 {len(annotations)} 处",
         }
 
         try:
-            from web.track_changes_editor import TrackChangesEditor
-
-            editor = TrackChangesEditor(author="Koto AI")
-
-            # 创建副本
-            base_name = os.path.splitext(file_path)[0]
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            simple_revised = f"{base_name}_revised.docx"
-
-            # 检查文件是否被占用
-            try:
-                if os.path.exists(simple_revised):
-                    with open(simple_revised, "a"):
-                        pass
-                    revised_file = simple_revised
-                else:
-                    revised_file = simple_revised
-            except (PermissionError, IOError):
-                revised_file = f"{base_name}_revised_{timestamp}.docx"
-                logger.warning(
-                    f"[DocumentFeedback] ⚠️ 原修改版被占用，创建新版本: {os.path.basename(revised_file)}"
-                )
-
-            # 复制文件
-            shutil.copy2(file_path, revised_file)
+            revised_file = file_path
 
             # 再次检查取消
             if _is_cancelled():
@@ -2290,31 +2651,48 @@ class DocumentFeedbackSystem:
             yield {
                 "stage": "applying",
                 "progress": 60,
-                "message": "📝 正在应用混合标注...",
-                "detail": f"精确修改+方向建议 共{len(annotations)}项",
+                "message": "📝 正在将修订写回原文...",
+                "detail": f"共 {len(annotations)} 项修订",
             }
 
-            # 应用混合标注 — 自动区分精确修改和方向建议
-            # ✏️ 短文本（<=30字）且有替换文本 → Track Changes（修订标记）
-            # 💬 长文本（>30字）或只有建议 → Comment（批注气泡）
+            # 文件助手主链路统一写回原生修订，不再混入批注气泡。
             apply_q = queue_module.Queue()
             apply_result_holder = {"result": None, "error": None}
 
-            def on_apply_progress(current, total, status, detail):
+            def on_apply_progress(current, total, status, detail, **meta):
                 pct = 60 + int((current / total) * 25) if total > 0 else 60
-                apply_q.put(
-                    {
-                        "stage": "applying",
-                        "progress": pct,
-                        "message": f"📝 {status}...",
-                        "detail": detail,
-                    }
-                )
+                status_text = {
+                    "start": "准备写入修订",
+                    "processing": "正在写入修订",
+                    "success": "已完成当前修订",
+                    "saved": "已写回原文",
+                    "failed": "写回失败",
+                }.get(str(status or "").strip().lower(), str(status or "正在写回").strip() or "正在写回")
+                event = {
+                    "stage": "applying",
+                    "progress": pct,
+                    "message": f"📝 {status_text}",
+                    "detail": detail,
+                }
+                if meta.get("file_updated"):
+                    event.update(
+                        {
+                            "file_updated": True,
+                            "path": str(meta.get("file_path") or revised_file),
+                            "file_path": str(meta.get("file_path") or revised_file),
+                            "supported": True,
+                            "applied": int(meta.get("applied") or current or 0),
+                            "updated_in_place": bool(meta.get("updated_in_place", True)),
+                        }
+                    )
+                apply_q.put(event)
 
             def run_apply():
                 try:
-                    apply_result_holder["result"] = editor.apply_hybrid_changes(
-                        revised_file, annotations, progress_callback=on_apply_progress
+                    apply_result_holder["result"] = self._apply_docx_revisions(
+                        revised_file,
+                        annotations,
+                        progress_callback=on_apply_progress,
                     )
                 except Exception as e:
                     apply_result_holder["error"] = e
@@ -2355,7 +2733,7 @@ class DocumentFeedbackSystem:
             yield {
                 "stage": "applying_complete",
                 "progress": 85,
-                "message": f"✅ 修改应用完成",
+                "message": f"✅ 原文写回完成",
                 "detail": f"成功: {applied}, 失败: {failed}",
             }
 
@@ -2402,6 +2780,7 @@ class DocumentFeedbackSystem:
                 "success": edit_result.get("success", False),
                 "original_file": file_path,
                 "revised_file": revised_file,
+                "updated_in_place": True,
                 "applied": applied,
                 "failed": failed,
                 "total": len(annotations),
@@ -2412,14 +2791,19 @@ class DocumentFeedbackSystem:
                 "last_api_error": analysis_result.get("last_api_error", ""),
                 "fallback_chunk_count": analysis_result.get("fallback_chunk_count", 0),
                 "ai_chunk_count": analysis_result.get("ai_chunk_count", 0),
+                "empty_result_fallback_chunk_count": analysis_result.get("empty_result_fallback_chunk_count", 0),
             },
         }
 
     def full_annotation_loop(
-        self, file_path: str, user_requirement: str = "", model_id: Optional[str] = None
+        self,
+        file_path: str,
+        user_requirement: str = "",
+        model_id: Optional[str] = None,
+        reference_context: Any = "",
     ) -> Dict[str, Any]:
         """
-        完整标注闭环：读取 -> 分析 -> 定位 -> 注入
+        完整修订闭环：读取 -> 分析 -> 写回
 
         Args:
             file_path: Word文档路径
@@ -2435,103 +2819,44 @@ class DocumentFeedbackSystem:
             }
         """
         logger.info("=" * 60)
-        logger.info("🔄 启动文档自动标注系统（完整闭环）")
+        logger.info("🔄 启动文档自动修订系统（同步兼容包装）")
         logger.info("=" * 60)
-
-        effective_model_id = model_id or self.default_model_id
-
-        # 第1步：分析生成标注建议（使用分段方法处理大文档）
-        # chunk_size 设为 5100：利用合并单元格去重后文档通常 <5000 字符，使其整体送AI处理（避免多段分析时的随机失败）
-        chunk_size = (
-            5100 if (self.client and os.getenv("KOTO_DISABLE_AI") != "1") else 10000
-        )
-        analysis_result = self.analyze_for_annotation_chunked(
+        final_error = ""
+        for progress_event in self.full_annotation_loop_streaming(
             file_path,
             user_requirement,
-            model_id=effective_model_id,
-            chunk_size=chunk_size,
-        )
-
-        if not analysis_result.get("success"):
-            return analysis_result
-
-        annotations = analysis_result.get("annotations", [])
-        logger.info(f"\n📊 分析结果: 生成 {len(annotations)} 个标注建议")
-
-        if len(annotations) == 0:
-            return {
-                "success": True,
-                "message": "AI分析完成，但未找到需要修改的地方",
-                "original_file": file_path,
-            }
-
-        # 第2步：应用标注到文档（使用Track Changes修订模式）
-        logger.info(f"\n[DocumentFeedback] � 以右侧批注气泡添加修改建议...")
-
-        # 使用批注方式 — 原文不变，修改建议以右侧气泡显示
-        import shutil
-        from datetime import datetime
-
-        from web.track_changes_editor import TrackChangesEditor
-
-        editor = TrackChangesEditor(author="Koto AI")
-
-        # 创建副本（带时间戳避免冲突）
-        base_name = os.path.splitext(file_path)[0]
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        simple_revised = f"{base_name}_revised.docx"
-
-        # 检查文件是否被占用
-        try:
-            if os.path.exists(simple_revised):
-                # 尝试打开检测是否被占用
-                with open(simple_revised, "a"):
-                    pass
-                revised_file = simple_revised
-            else:
-                revised_file = simple_revised
-        except (PermissionError, IOError):
-            # 文件被占用，使用时间戳版本
-            revised_file = f"{base_name}_revised_{timestamp}.docx"
-            logger.warning(
-                f"[DocumentFeedback] ⚠️ 原修改版被占用，创建新版本: {os.path.basename(revised_file)}"
-            )
-
-        # 复制文件
-        shutil.copy2(file_path, revised_file)
-
-        # 应用混合标注（精确修改+方向建议）
-        edit_result = editor.apply_hybrid_changes(revised_file, annotations)
-
-        # 添加到文件网络索引
-        try:
-            from web.processed_file_network import get_file_network
-
-            file_network = get_file_network()
-            file_network.record_processing(
-                file_path=file_path,
-                operation="annotate",
-                changes_count=edit_result.get("applied", 0),
-                output_file=revised_file,
-                status="success" if edit_result.get("applied", 0) > 0 else "partial",
-                details={
-                    "requirement": user_requirement,
-                    "total_annotations": len(annotations),
-                    "applied": edit_result.get("applied"),
-                    "failed": edit_result.get("failed"),
-                },
-            )
-        except Exception as e:
-            logger.info(f"[DocumentFeedback] 文件网络索引记录失败: {e}")
+            model_id=model_id,
+            reference_context=reference_context,
+        ):
+            stage = str(progress_event.get("stage") or "").strip().lower()
+            if stage == "complete":
+                result = progress_event.get("result")
+                if isinstance(result, dict):
+                    return result
+                return {
+                    "success": False,
+                    "error": "文档修订完成但未返回结果。",
+                    "original_file": file_path,
+                }
+            if stage == "cancelled":
+                return {
+                    "success": False,
+                    "cancelled": True,
+                    "message": str(progress_event.get("message") or progress_event.get("detail") or "文档修订任务已取消").strip() or "文档修订任务已取消",
+                    "original_file": file_path,
+                }
+            if stage == "error":
+                final_error = str(progress_event.get("message") or progress_event.get("detail") or "文档修订失败").strip()
+                return {
+                    "success": False,
+                    "error": final_error or "文档修订失败",
+                    "original_file": file_path,
+                }
 
         return {
-            "success": edit_result.get("success", False),
+            "success": False,
+            "error": final_error or "文档修订失败",
             "original_file": file_path,
-            "revised_file": revised_file,
-            "applied": edit_result.get("applied"),
-            "failed": edit_result.get("failed"),
-            "total": edit_result.get("total"),
-            "analysis_summary": analysis_result.get("summary"),
         }
 
     @staticmethod
@@ -2567,6 +2892,7 @@ class DocumentFeedbackSystem:
         formatted_content: str,
         user_requirement: str,
         full_doc_context: str = "",
+        reference_context: Any = "",
     ) -> str:
         """构建用于标注的AI Prompt - 精准修改版，生成可直接替换的文本修订"""
 
@@ -2640,9 +2966,21 @@ class DocumentFeedbackSystem:
 {plain_ctx}
 """
 
+        reference_prompt = ""
+        reference_text = self._select_reference_context(reference_context)
+        if reference_text:
+            if len(reference_text) > 16000:
+                reference_text = reference_text[:15997] + "..."
+            reference_prompt = f"""
+## 参考原文（按 PDF 页窗口抽取，仅供忠实对照，不要直接改写原文）
+{reference_text}
+"""
+
         base_prompt = f"""{persona}。{task_intro}
 
 {global_ctx_prompt}
+
+{reference_prompt}
 
 ## 当前待审阅文档片段（共{para_count}段，纯文本，标题/粗体等格式已剥离）
 {plain_content}
@@ -2670,6 +3008,7 @@ class DocumentFeedbackSystem:
    - **严禁把整段文字都放进 `原文`**（超过40字的 `原文` 几乎都是错误用法）
    - 正常标注中，80%应该是片段级别（≤15字），20%是句子级别（≤35字）
 5. **适度修改**：只修改真正有语病、翻译腔、逻辑不通顺或生硬的地方。不要为了修改而修改。
+6. **禁止批注式输出**：`改为` 必须是可以直接替换原文的最终文本，不要写“建议：”“批注：”“可改为：”等前缀。
 
 ## ⚠️ 去AI味 — 必须严格遵守的语言风格：
 你改写后的文本**绝对不能有AI味**。以下是具体禁令：
@@ -2686,7 +3025,7 @@ class DocumentFeedbackSystem:
 - ❌ "值得注意的是，这一发现为后续研究提供了有力支撑"
 - ✅ "这一发现对后续研究有参考价值"
 
-## 标注类型
+## 修订类型
 
 ### 类型A：术语与用词修正（直接替换）
 纠正不地道的表达、口语化词汇、翻译腔。
@@ -2698,9 +3037,9 @@ class DocumentFeedbackSystem:
 *   原文="[选中拗口的整句]" -> 改为="[重写后的简洁句子]"
 *   ⚠️ **注意**：选中文本不要超过一段，最好以句为单位。
 
-### 类型C：结构性批注（仅限必要时）
-只有当确实通过修改无法解决（如完全跑题、段落缺失）时，才使用建议。
-*   改为="建议：..."
+### 类型C：无法安全直改的问题（直接跳过）
+如果某处问题必须依赖大段重组、补充上下文或结构调整，且无法对当前原文做安全替换，请直接跳过。
+*   禁止输出 `建议：...`、`批注：...`、`可考虑...` 这类无法直接写回原文的内容。
 
 ## 输出格式
 只返回JSON数组，禁止其他文字：
@@ -2716,6 +3055,40 @@ class DocumentFeedbackSystem:
 ✅ 应拆分为多条短标注，每条只针对一个问题词组。
 """
         return base_prompt
+
+    def _select_reference_context(
+        self,
+        reference_context: Any,
+        *,
+        chunk_index: int = 1,
+        total_chunks: int = 1,
+    ) -> str:
+        """Select the most relevant PDF reference window(s) for the current DOCX chunk."""
+        if not reference_context:
+            return ""
+
+        if isinstance(reference_context, str):
+            return reference_context.strip()
+
+        if not isinstance(reference_context, list):
+            return str(reference_context).strip()
+
+        blocks = [str(item or "").strip() for item in reference_context if str(item or "").strip()]
+        if not blocks:
+            return ""
+        if len(blocks) <= 3:
+            return "\n\n".join(blocks)
+
+        normalized_index = max(1, int(chunk_index or 1))
+        normalized_total = max(1, int(total_chunks or 1))
+        if normalized_total <= 1:
+            return "\n\n".join(blocks[:3])
+
+        ratio = (normalized_index - 1) / max(1, normalized_total - 1)
+        center = int(round(ratio * max(0, len(blocks) - 1)))
+        start = max(0, center - 1)
+        end = min(len(blocks), center + 2)
+        return "\n\n".join(blocks[start:end])
 
     def _parse_annotation_response(self, ai_response: str) -> List[Dict[str, str]]:
         """解析AI响应为标注格式"""

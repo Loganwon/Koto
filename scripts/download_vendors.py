@@ -118,31 +118,16 @@ for font_name in ["fa-brands-400", "fa-regular-400", "fa-solid-900", "fa-v4compa
 print("\n== Tailwind CSS ==")
 dl(f"{JSDELIVR}/tailwindcss@3/dist/tailwind.min.css", "tailwindcss/tailwind.min.css")
 
-# ── React 18.3.1 (required by Univer) ───────────────────────────────────────
+# ── React 18.3.1 (required by dependencies) ───────────────────────────────────────
 print("\n== React 18 ==")
 REACT_CDN = "https://unpkg.com"
 dl(f"{REACT_CDN}/react@18.3.1/umd/react.production.min.js",     "react/react.production.min.js")
 dl(f"{REACT_CDN}/react-dom@18.3.1/umd/react-dom.production.min.js", "react/react-dom.production.min.js")
 
-# ── RxJS 7 (required by Univer) ─────────────────────────────────────────────
+# ── RxJS 7 (required by dependencies) ─────────────────────────────────────────────
 print("\n== RxJS ==")
 dl(f"{REACT_CDN}/rxjs/dist/bundles/rxjs.umd.min.js", "rxjs/rxjs.umd.min.js")
 
-# ── Univer (Canvas document + spreadsheet editor) ────────────────────────────
-# NOTE: Univer packages are on unpkg; jsDelivr does not carry all of them.
-print("\n== Univer ==")
-UNIVER_VER = "0.5.4"  # latest stable UMD-compatible release
-UNIVER = f"{REACT_CDN}/@univerjs"
-# Core presets bundle
-dl(f"{UNIVER}/presets@{UNIVER_VER}/lib/umd/index.js",                       "univer/presets.umd.js")
-# Docs preset + locale + CSS
-dl(f"{UNIVER}/preset-docs-core@{UNIVER_VER}/lib/umd/index.js",              "univer/preset-docs-core.umd.js")
-dl(f"{UNIVER}/preset-docs-core@{UNIVER_VER}/lib/umd/locales/zh-CN.js",       "univer/preset-docs-core-zh-CN.js")
-dl(f"{UNIVER}/preset-docs-core@{UNIVER_VER}/lib/index.css",                  "univer/preset-docs-core.css")
-# Sheets preset + locale + CSS
-dl(f"{UNIVER}/preset-sheets-core@{UNIVER_VER}/lib/umd/index.js",            "univer/preset-sheets-core.umd.js")
-dl(f"{UNIVER}/preset-sheets-core@{UNIVER_VER}/lib/umd/locales/zh-CN.js",     "univer/preset-sheets-core-zh-CN.js")
-dl(f"{UNIVER}/preset-sheets-core@{UNIVER_VER}/lib/index.css",                "univer/preset-sheets-core.css")
 
 # ── PDF.js 4.x (in-browser PDF rendering) ───────────────────────────────────
 print("\n== PDF.js ==")

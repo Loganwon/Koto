@@ -40,14 +40,11 @@ for _m in [
     "docx",
     "PIL",
     "PIL.Image",
-    "vosk",
     "pynput",
     "pynput.keyboard",
     "pynput.mouse",
     "scipy",
     "scipy.io",
-    "pyaudio",
-    "sounddevice",
 ]:
     _stub(_m)
 
@@ -184,10 +181,10 @@ class TestIsInteractionsOnlyModel(unittest.TestCase):
         self.assertTrue(self.check("deep-research-anything"))
 
     def test_gemini_3_dash_prefix(self):
-        self.assertTrue(self.check("gemini-3-flash-preview"))
+        self.assertFalse(self.check("gemini-3-flash-preview"))
 
     def test_gemini_3_dot_prefix(self):
-        self.assertTrue(self.check("gemini-3.1-pro-preview"))
+        self.assertFalse(self.check("gemini-3.1-pro-preview"))
 
     def test_regular_gemini_not_interactions_only(self):
         self.assertFalse(self.check("gemini-2.0-flash"))

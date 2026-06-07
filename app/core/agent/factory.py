@@ -61,9 +61,10 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
         )
 
     # ── 可选生产力插件（两种模式均尝试加载，失败则跳过） ─────────────
+    # WebToolsBridgePlugin 依赖已移除的 legacy web.tool_registry，
+    # 其历史能力已由 Search/Productivity 等核心插件覆盖，不再默认加载。
     for plugin_path, name in [
         ("app.core.agent.plugins.productivity_plugin", "ProductivityPlugin"),
-        ("app.core.agent.plugins.web_tools_bridge_plugin", "WebToolsBridgePlugin"),
     ]:
         try:
             import importlib
@@ -73,6 +74,18 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
             registry.register_plugin(cls())
         except Exception as _e:
             logger.debug(f"[_build_registry] {name} 跳过: {_e}")
+
+    # ── MCP servers（config/user_settings.json: mcp_servers / mcpServers）────
+    # External MCP tools are loaded early so both lightweight LangGraph agents
+    # and the full UnifiedAgent can use them.
+    try:
+        from app.core.agent.mcp_manager import inject_configured_mcp_tools
+
+        mcp_count = inject_configured_mcp_tools(registry)
+        if mcp_count:
+            logger.info("[_build_registry] MCP tools 已注入: %s", mcp_count)
+    except Exception as _e:
+        logger.debug(f"[_build_registry] MCP tools 跳过: {_e}")
 
     if not full:
         return registry
@@ -87,7 +100,6 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     from app.core.agent.plugins.performance_analysis_plugin import (
         PerformanceAnalysisPlugin,
     )
-    from app.core.agent.plugins.script_generation_plugin import ScriptGenerationPlugin
     from app.core.agent.plugins.system_event_monitoring_plugin import (
         SystemEventMonitoringPlugin,
     )
@@ -106,7 +118,6 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
         logger.debug(f"[_build_registry] ChartVisionPlugin 跳过: {_e}")
     registry.register_plugin(PerformanceAnalysisPlugin())
     registry.register_plugin(SystemEventMonitoringPlugin())
-    registry.register_plugin(ScriptGenerationPlugin())
     registry.register_plugin(AlertingPlugin())
     registry.register_plugin(AutoRemediationPlugin())
     registry.register_plugin(TrendAnalysisPlugin())
@@ -145,6 +156,25 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     except Exception as _e:
         logger.debug(f"[_build_registry] PPTPlugin 跳过: {_e}")
 
+    # ── P0: 沙盒代码执行工具（Python/R/Shell）──────────────────────────
+    try:
+        from app.core.agent.plugins.sandbox_plugin import SandboxPlugin
+
+        registry.register_plugin(SandboxPlugin())
+        logger.debug("[_build_registry] SandboxPlugin 已注册")
+    except Exception as _e:
+        logger.debug(f"[_build_registry] SandboxPlugin 跳过: {_e}")
+
+    # ── P0: 工作区编辑器桥梁（Agent ↔ 前端编辑器）───────────────────────
+    try:
+        from app.core.agent.plugins.workspace_editor_plugin import WorkspaceEditorPlugin
+
+        # socketio instance will be injected later via set_workspace_socketio()
+        registry.register_plugin(WorkspaceEditorPlugin())
+        logger.debug("[_build_registry] WorkspaceEditorPlugin 已注册")
+    except Exception as _e:
+        logger.debug(f"[_build_registry] WorkspaceEditorPlugin 跳过: {_e}")
+
     # ── P0: Skills → 原生函数调用（SkillToolAdapter）────────────────────
     # 将所有 Skill 注册为 ToolRegistry 工具，让 LLM 通过原生 function calling
     # 自行决定何时激活哪个技能，取代 SkillAutoMatcher 的猜测式激活。
@@ -174,7 +204,7 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
 
 def create_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-2.5-flash",
+    model_id: str = "gemini-3.1-pro-preview",
     use_langgraph: Optional[bool] = None,
 ):
     """
@@ -189,16 +219,28 @@ def create_agent(
         use_langgraph : True → 强制 LangGraph；False → 强制 UnifiedAgent；
                         None（默认）→ 优先 LangGraph，不可用时自动回退
     """
-    from app.core.llm.gemini import GeminiProvider
+    from app.core.llm.model_selection import (
+        get_configured_cloud_model,
+        get_configured_cloud_provider,
+    )
+    from app.core.llm.provider_factory import get_llm_provider
 
     usage_api_key = _resolve_api_key(api_key)
-    if not usage_api_key:
+    provider_name = get_configured_cloud_provider()
+    active_model_id = get_configured_cloud_model(
+        task_type="AGENT",
+        fallback_model=model_id,
+        provider=provider_name,
+    )
+    if provider_name == "gemini" and not usage_api_key:
         logger.warning("No API Key provided for Agent. Agent will fail at generation.")
 
     registry = _build_registry(api_key=usage_api_key, full=True)
 
     # ── 尝试 LangGraph 路径 ──────────────────────────────────────────────────
-    _want_lg = use_langgraph if use_langgraph is not None else True
+    # LangGraph adapter is currently Gemini-oriented. OpenAI-compatible cloud
+    # providers use UnifiedAgent so the shared provider_factory path is honored.
+    _want_lg = use_langgraph if use_langgraph is not None else (provider_name == "gemini")
     if _want_lg:
         try:
             from app.core.agent.langgraph_agent import _LG_AVAILABLE, LangGraphAgent
@@ -207,7 +249,7 @@ def create_agent(
                 raise ImportError("langgraph not installed")
             lg_agent = LangGraphAgent(
                 registry=registry,
-                model_id=model_id,
+                model_id=active_model_id,
                 enable_pii_filter=True,
                 enable_output_validation=True,
                 restore_pii_in_output=True,
@@ -225,7 +267,11 @@ def create_agent(
     # ── 回退：UnifiedAgent ───────────────────────────────────────────────────
     from app.core.agent.unified_agent import UnifiedAgent
 
-    llm_provider = GeminiProvider(api_key=usage_api_key)
+    llm_provider = get_llm_provider(
+        provider=provider_name,
+        model=active_model_id,
+        allow_local_fallback=False,
+    )
 
     # 配置 OutputValidator 的 LLM 质量判断器（复用同一个 provider，避免重复建连接）
     try:
@@ -233,7 +279,11 @@ def create_agent(
 
         OutputValidator.configure_llm_judge(
             client=llm_provider,
-            model_id="gemini-2.5-flash",
+            model_id=get_configured_cloud_model(
+                task_type="CHAT",
+                fallback_model="gemini-2.5-flash",
+                provider=provider_name,
+            ),
             timeout=15.0,
         )
     except Exception as _oj_err:
@@ -241,11 +291,15 @@ def create_agent(
             "[create_agent] OutputValidator LLM judge 配置失败（跳过）: %s", _oj_err
         )
 
-    logger.info("[create_agent] ⚙️  使用 UnifiedAgent（ReAct while 循环路径）")
+    logger.info(
+        "[create_agent] ⚙️  使用 UnifiedAgent（provider=%s, model=%s）",
+        provider_name,
+        active_model_id,
+    )
     return UnifiedAgent(
         llm_provider=llm_provider,
         tool_registry=registry,
-        model_id=model_id,
+        model_id=active_model_id,
         use_tool_router=True,
         tool_router_max=20,
     )
@@ -295,7 +349,7 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
 
 def create_langgraph_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-3-flash-preview",
+    model_id: str = "gemini-3.1-pro-preview",
     enable_pii_filter: bool = True,
     enable_output_validation: bool = True,
 ) -> "LangGraphAgent":
@@ -333,7 +387,7 @@ def create_langgraph_agent(
 
 def create_multi_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-3-flash-preview",
+    model_id: str = "gemini-3.1-pro-preview",
     max_revisions: int = 1,
 ) -> "MultiAgentOrchestrator":
     """

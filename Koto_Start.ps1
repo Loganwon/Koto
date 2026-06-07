@@ -31,6 +31,7 @@ $candidateRoots = @(
 
 $KOTO_ROOT = $candidateRoots |
     Where-Object {
+        (Test-Path (Join-Path $_ "web\app.py")) -or
         (Test-Path (Join-Path $_ "koto_setup.py")) -or
         (Test-Path (Join-Path $_ "koto_app.py")) -or
         (Test-Path (Join-Path $_ "server.py")) -or
@@ -57,16 +58,18 @@ function Resolve-EntryScript {
     $candidates = switch ($RunMode) {
         "server" {
             @(
+                (Join-Path $KOTO_ROOT "web\app.py")
                 (Join-Path $KOTO_ROOT "server.py")
                 (Join-Path $KOTO_ROOT "src\server.py")
             )
         }
         default {
             @(
-                (Join-Path $KOTO_ROOT "koto_setup.py")
-                (Join-Path $KOTO_ROOT "src\koto_setup.py")
+                (Join-Path $KOTO_ROOT "src\koto_app.py")   # pywebview 独立窗口（优先）
                 (Join-Path $KOTO_ROOT "koto_app.py")
-                (Join-Path $KOTO_ROOT "src\koto_app.py")
+                (Join-Path $KOTO_ROOT "src\koto_setup.py")
+                (Join-Path $KOTO_ROOT "koto_setup.py")
+                (Join-Path $KOTO_ROOT "web\app.py")        # 纯 Flask 兜底
             )
         }
     }
@@ -116,7 +119,7 @@ function Test-PortFree {
 
 function Get-KotoProcesses {
     return Get-Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.CommandLine -match "koto_app\.py" }
+        Where-Object { $_.CommandLine -and ($_.CommandLine -match "koto_app\.py" -or $_.CommandLine -match "web[/\\\\]app\.py") }
 }
 
 # ─────────────────────────────────────────────
@@ -129,8 +132,16 @@ function Invoke-LockCheck {
             $proc = Get-Process -Id ([int]$lockedPid) -ErrorAction SilentlyContinue
             if ($null -ne $proc -and $proc.Name -match "python") {
                 Write-Log "WARN" "已检测到运行中的 Koto 实例 (PID $lockedPid)。"
-                Write-Log "WARN" "若需强制重启，请先运行 Stop_Koto.bat 或删除 .koto.lock"
-                exit 1
+                # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
+                $runningCmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$lockedPid" -ErrorAction SilentlyContinue).CommandLine
+                if ($runningCmd -match "web[/\\\\]app\.py" -or $runningCmd -notmatch "koto_app\.py") {
+                    Write-Log "INFO" "Koto 已在运行（Flask模式），正在打开浏览器..."
+                    $openPort = if ($env:KOTO_PORT) { [int]$env:KOTO_PORT } else { 5000 }
+                    Start-Process "http://127.0.0.1:$openPort"
+                } else {
+                    Write-Log "INFO" "Koto 已在运行（桌面窗口模式），无需打开浏览器"
+                }
+                exit 0
             }
         }
         # 锁文件残留（上次崩溃）→ 清除
@@ -156,6 +167,53 @@ function Clear-OrphanProcesses {
             Start-Sleep -Milliseconds 800
         }
     } catch { }
+}
+
+function Clear-RetiredExternalProcesses {
+    <#
+    清理已经从 Koto 代码中退休的外部自动化残留。
+    只匹配明确的 WebDriver Chrome 和 Windows 旧语音识别进程；
+    普通用户浏览器、Koto WebView2、Office COM 转换流程不受影响。
+    #>
+    try {
+        $targets = @()
+
+        $drivers = Get-CimInstance Win32_Process `
+            -Filter "Name='chromedriver.exe'" `
+            -ErrorAction SilentlyContinue
+        if ($drivers) { $targets += @($drivers) }
+
+        $autoChrome = Get-CimInstance Win32_Process `
+            -Filter "Name='chrome.exe'" `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.CommandLine -and (
+                    $_.CommandLine -match "--enable-automation" -or
+                    $_.CommandLine -match "--test-type=webdriver" -or
+                    $_.CommandLine -match "\\Temp\\scoped_dir\d+_"
+                )
+            }
+        if ($autoChrome) { $targets += @($autoChrome) }
+
+        $legacySpeech = Get-CimInstance Win32_Process `
+            -Filter "Name='sapisvr.exe'" `
+            -ErrorAction SilentlyContinue
+        if ($legacySpeech) { $targets += @($legacySpeech) }
+
+        $targets = @($targets | Sort-Object ProcessId -Unique)
+        if (-not $targets -or $targets.Count -eq 0) {
+            return
+        }
+
+        $pids = @($targets | ForEach-Object { $_.ProcessId })
+        Write-Log "WARN" "清理退休外部自动化/旧语音残留进程: $($pids -join ', ')..."
+        foreach ($target in $targets) {
+            Stop-Process -Id ([int]$target.ProcessId) -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 500
+    } catch {
+        Write-Log "WARN" "清理退休外部进程时遇到非致命错误: $($_.Exception.Message)"
+    }
 }
 
 # ─────────────────────────────────────────────
@@ -325,6 +383,8 @@ function Start-KotoApp {
 
         # 环境变量透传
         $env:KOTO_PORT = "$Port"
+        $env:KOTO_DISABLE_LEGACY_VOICE = "1"
+        $env:KOTO_DISABLE_BROWSER_AUTOMATION = "1"
         if ($Mode -eq "server") { $env:KOTO_DEPLOY_MODE = "local" }
 
         # 日志文件（每次重试追加）
@@ -378,6 +438,12 @@ function Start-KotoApp {
                     Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
                     Set-Content -Path $LOCK_FILE -Value "$($proc.Id)" -Encoding ASCII
                     Write-Log "OK" "Koto 正在后台运行 (PID=$($proc.Id))。关闭本窗口不会停止 Koto。"
+                    # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
+                    $entryForCheck = Resolve-EntryScript -RunMode $Mode
+                    if ($entryForCheck -match "web[/\\]app\.py") {
+                        Write-Log "INFO" "正在打开浏览器: http://127.0.0.1:$Port"
+                        Start-Process "http://127.0.0.1:$Port"
+                    }
                     exit 0
                 }
                 $exitCode = $proc.ExitCode
@@ -432,13 +498,16 @@ Write-Log "INFO" "启动模式: $Mode | 根目录: $KOTO_ROOT"
 # Step 1: 防重复
 Invoke-LockCheck
 
-# Step 2: 清孤进程
+# Step 2: 清理退休外部自动化/旧语音残留
+Clear-RetiredExternalProcesses
+
+# Step 3: 清孤进程
 Clear-OrphanProcesses
 
-# Step 3: 文件检查
+# Step 4: 文件检查
 Assert-RequiredFiles -RunMode $Mode
 
-# Step 4: 检测 Python
+# Step 5: 检测 Python
 $pyInfo = Find-Python
 if ($null -eq $pyInfo) {
     Write-Log "ERROR" "未找到 Python 环境！"
@@ -454,8 +523,8 @@ if (-not (Assert-PythonVersion -PythonExe $pyConsole)) {
     exit 5
 }
 
-# Step 5: 端口检查
+# Step 6: 端口检查
 $resolvedPort = Resolve-PortConflict -Port $KOTO_PORT
 
-# Step 6: 启动（含重试）
+# Step 7: 启动（含重试）
 Start-KotoApp -PythonInfo $pyInfo -Port $resolvedPort -Mode $Mode

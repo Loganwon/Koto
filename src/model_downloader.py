@@ -22,12 +22,15 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+try:
+    from src.runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+except ImportError:
+    from runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+
 # ───────── 路径解析 ─────────
-if getattr(sys, "frozen", False):
-    APP_ROOT = Path(sys.executable).parent
-else:
-    here = Path(__file__).resolve().parent
-    APP_ROOT = here.parent if here.name == "src" else here
+ROOTS = resolve_runtime_roots(__file__)
+APP_ROOT = ROOTS.app_root
+configure_process_environment(ROOTS, required_dirs=("config",))
 
 SETUP_FLAG = APP_ROOT / "config" / "model_setup_done.json"
 
@@ -53,12 +56,30 @@ MODEL_CATALOG: List[Dict] = [
         "tier": "light",
     },
     {
+        "tag": "qwen3:1.7b",
+        "name": "Qwen 3 1.7B（轻量中文）",
+        "vram": 2.0,
+        "ram": 6,
+        "size_gb": 1.4,
+        "desc": "适合 6-8GB 内存，中文任务与路由表现更稳",
+        "tier": "light",
+    },
+    {
         "tag": "gemma3:4b",
         "name": "Gemma 3 4B（标准）",
         "vram": 3.5,
         "ram": 8,
         "size_gb": 3.3,
         "desc": "8GB+ 内存，效果更佳，推荐大多数用户选择",
+        "tier": "standard",
+    },
+    {
+        "tag": "qwen3:4b",
+        "name": "Qwen 3 4B（中文标准）",
+        "vram": 4,
+        "ram": 8,
+        "size_gb": 2.6,
+        "desc": "8GB+ 内存，中文分类和日常对话更适配 Koto",
         "tier": "standard",
     },
     {
@@ -69,6 +90,15 @@ MODEL_CATALOG: List[Dict] = [
         "size_gb": 4.7,
         "desc": "12GB+ 内存，中文效果极佳，复杂任务首选",
         "tier": "powerful",
+    },
+    {
+        "tag": "qwen3:8b",
+        "name": "Qwen 3 8B（中文高性能）",
+        "vram": 7,
+        "ram": 16,
+        "size_gb": 5.2,
+        "desc": "16GB+ 内存或 NVIDIA 8GB 显卡，Koto 本地回复优选",
+        "tier": "highend",
     },
     {
         "tag": "llama3.1:8b",

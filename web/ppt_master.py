@@ -164,7 +164,7 @@ class PPTContentPlanner:
         self.ai_client = ai_client
         # 使用 gemini-2.5-flash 为默认，但优先使用能用的模型
         self.model_name = model_name
-        self._fallback_models = ["gemini-2.5-flash", "gemini-3-flash-preview"]
+        self._fallback_models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
     async def plan_content_structure(
         self, user_request: str, search_results: Optional[List[Dict]] = None

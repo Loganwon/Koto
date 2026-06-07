@@ -33,7 +33,7 @@ if proxy:
 # Create agent
 from app.core.agent.factory import create_agent
 
-agent = create_agent(model_id="gemini-2.0-flash")
+agent = create_agent(model_id="gemini-2.5-flash")
 print(f"Agent created, model={agent.model_id}")
 print(f"LLM client initialized: {agent.llm.client is not None}")
 print(f"Tools registered: {len(agent.registry.get_definitions())}")

@@ -8,7 +8,6 @@ Routes:
   GET /app                     — app_main
   GET /file-network            — file_network
   GET /knowledge-graph         — knowledge_graph_page
-  GET /test_upload             — test_upload
   GET /skills                  — skill_marketplace
   GET /skill-marketplace       — skill_marketplace
   GET /monitoring-dashboard    — monitoring_dashboard
@@ -17,6 +16,7 @@ Routes:
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
+    GET /workspace-assistant     — workspace_assistant_page
 """
 
 import os
@@ -29,7 +29,11 @@ pages_bp = Blueprint("pages", __name__)
 def _get_initial_theme() -> str:
     """从已保存的用户设置读取初始主题，默认 light。"""
     try:
-        from web.app import settings_manager
+        from web.runtime_context import get_settings_manager
+
+        settings_manager = get_settings_manager()
+        if settings_manager is None:
+            return "light"
         theme = settings_manager.get("appearance", "theme")
         return theme if theme else "light"
     except Exception:
@@ -37,19 +41,25 @@ def _get_initial_theme() -> str:
 
 
 @pages_bp.route("/")
-def index() -> str:
+def index() -> Response:
     # 云模式：未认证用户看到落地页
     deploy_mode = os.environ.get("KOTO_DEPLOY_MODE", "local")
     auth_enabled = os.environ.get("KOTO_AUTH_ENABLED", "false").lower() == "true"
     if deploy_mode == "cloud" and auth_enabled:
-        return render_template("landing.html")
-    return render_template("index.html", initial_theme=_get_initial_theme())
+        return make_response(render_template("landing.html"))
+    resp = make_response(render_template("index.html", initial_theme=_get_initial_theme()))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @pages_bp.route("/app")
-def app_main() -> str:
+def app_main() -> Response:
     """主应用页面（SaaS 模式下需认证后访问）"""
-    return render_template("index.html", initial_theme=_get_initial_theme())
+    resp = make_response(render_template("index.html", initial_theme=_get_initial_theme()))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @pages_bp.route("/file-network")
@@ -62,11 +72,6 @@ def file_network() -> str:
 def knowledge_graph_page() -> str:
     """知识图谱可视化界面"""
     return render_template("knowledge_graph.html")
-
-
-@pages_bp.route("/test_upload")
-def test_upload() -> str:
-    return render_template("test_upload.html")
 
 
 @pages_bp.route("/edit-ppt/<session_id>")
@@ -123,32 +128,16 @@ def notebook_ui() -> str:
 
 
 @pages_bp.route("/workspace-assistant")
-def workspace_assistant_page() -> str:
+def workspace_assistant_page() -> Response:
     """全格式 AI 原生工作区"""
-    return render_template("workspace_assistant.html")
+    resp = make_response(render_template("workspace_assistant.html"))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 @pages_bp.route("/doc-compare")
 def doc_compare_ui() -> str:
     """多文档对比界面"""
     return render_template("doc_compare.html")
-
-
-@pages_bp.route("/editor")
-def editor_page() -> Response:
-    """Univer Canvas 文件助手主页"""
-    return send_from_directory(
-        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist"),
-        "index.html",
-    )
-
-
-@pages_bp.route("/editor/assets/<path:filename>")
-def editor_assets(filename: str) -> Response:
-    """Serve Univer editor static assets (JS/CSS/chunks)."""
-    return send_from_directory(
-        os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist", "assets"),
-        filename,
-    )
-
 
