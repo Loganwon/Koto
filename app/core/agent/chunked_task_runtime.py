@@ -93,7 +93,11 @@ class ChunkedTaskRuntime:
         self._socketio = socketio
         self._model_id = model_id
         self._api_key = api_key
-        self._task_agent: Optional[TaskAgent] = None
+        self._task_agent: Optional[TaskAgent] = TaskAgent(
+            socketio=self._socketio,
+            model_id=self._model_id,
+            api_key=self._api_key,
+        )
 
     def _get_task_agent(self) -> TaskAgent:
         if self._task_agent is None:

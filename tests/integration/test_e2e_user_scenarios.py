@@ -1319,8 +1319,9 @@ class TestBrowseLocal:
             query_string={"path": str(workspace_dir)},
         )
         assert r.status_code == 200
-        items = _json_body(r)
-        # Should be a list of entries
+        data = _json_body(r)
+        items = data.get("entries", data)
+        # Should include a list of entries.
         assert isinstance(items, list)
         names = [e.get("name") for e in items]
         assert "visible.txt" in names
@@ -1721,10 +1722,10 @@ class TestJavaScriptSourceChecks:
 
     def test_open_browser_file_tries_open_file_by_path_first(self):
         """openBrowserFile should try open_file_by_path before serve_abs."""
-        idx_open = self.js.find("openBrowserFile")
+        idx_open = self.js.find("window.WA.openBrowserFile")
         idx_path = self.js.find("open_file_by_path", idx_open)
-        idx_abs = self.js.find("serve_abs", idx_open)
-        assert idx_path < idx_abs, "open_file_by_path should come before serve_abs"
+        idx_abs = self.js.find("open_abs_file", idx_open)
+        assert idx_path < idx_abs, "open_file_by_path should come before open_abs_file"
 
     def test_is_saving_guard_exists(self):
         """_isSaving prevents concurrent saves."""

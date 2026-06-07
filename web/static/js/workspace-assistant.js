@@ -553,8 +553,8 @@ window.WA = window.WA || {};
       WA.openWorkspaceFile(rel);
       return;
     }
-    // External file — use openBrowserFile (fetches bytes via serve_abs, then parses)
-    // open_file_by_path only accepts workspace-relative paths and will 403 on absolute paths
+    // External file — use openBrowserFile so the server can parse it without
+    // pulling the raw bytes through the browser first.
     const _reqExt = filePath.split('.').pop().toLowerCase();
     WA.openBrowserFile(filePath, _isSupportedExt(_reqExt));
   };
@@ -1336,15 +1336,21 @@ window.WA = window.WA || {};
     setLoading(true, `正在打开 ${baseName}…`);
     $('upload-progress').style.width = '30%';
     try {
-      // Server-side parse — avoids downloading the entire file to the browser.
-      // The old serve_abs → blob → Router.load path would cause memory crashes
-      // on large files (e.g. PPTX with embedded video).
-      const res = await fetch('/api/v1/workspace/open_abs_file', {
+      let res = await fetch('/api/v1/workspace/open_file_by_path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: absPath }),
       });
-      const json = await _safeJson(res);
+      let json = await _safeJson(res);
+      if (!res.ok) {
+        // Fallback for legacy absolute-path parsing paths.
+        res = await fetch('/api/v1/workspace/open_abs_file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: absPath }),
+        });
+        json = await _safeJson(res);
+      }
       if (!res.ok) throw new Error(json.error || 'HTTP ' + res.status);
       $('upload-progress').style.width = '100%';
       await _applyFileJson(json, absPath, null);

@@ -9,7 +9,12 @@ from typing import Any, Dict, Generator, List, Optional, Union
 
 from .base import LLMProvider
 from .gemini_config import get_gemini_api_key, load_gemini_config_env
-from .model_capabilities import is_interactions_only_model
+from .model_capabilities import (
+    DEFAULT_INTERACTIONS_ONLY_MODELS as _INTERACTIONS_ONLY_MODELS,
+)
+from .model_capabilities import (
+    is_interactions_only_model,
+)
 
 try:
     from google import genai

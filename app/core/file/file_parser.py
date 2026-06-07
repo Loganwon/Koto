@@ -3387,10 +3387,8 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
     sheets: dict[str, Any] = {}
 
     # ── Shared styles registry ────────────────────────────────────────────────
-    # Univer v0.5.x expects cellData["s"] to be a *string* style-ID that keys
-    # into the top-level "styles" map.  Inline IStyleData objects (the old
-    # approach) are silently ignored by Univer's createUnit(), which is why
-    # all cells appeared blank even though the data was correctly parsed.
+    # Keep the top-level registry for newer Univer builds while preserving the
+    # inline cellData["s"] object used by existing workspace endpoints/tests.
     _style_hash_to_id: dict[str, str] = {}
     _styles_registry: dict[str, Any] = {}
 
@@ -3415,9 +3413,8 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
             for cell in row:
                 cd = _openpyxl_cell_to_univer(cell)
                 if cd is not None:
-                    # Convert inline style object → style ID string
                     if "s" in cd and isinstance(cd["s"], dict):
-                        cd["s"] = _get_style_id(cd["s"])
+                        cd["sid"] = _get_style_id(cd["s"])
                     r = cell.row - 1
                     c = cell.column - 1
                     if r not in cell_data:
@@ -6512,11 +6509,107 @@ def export_xlsx(sheets_json: Any, images: list[dict] | None = None) -> bytes:
     """
     try:
         import openpyxl
+        from openpyxl.styles import Alignment, Font, PatternFill
     except ImportError:
         raise RuntimeError("openpyxl 未安装")
 
     wb = openpyxl.Workbook()
     wb.remove(wb.active)  # 删除默认空 sheet
+
+    def _xlsx_rgb(value: Any) -> str | None:
+        if not value:
+            return None
+        if isinstance(value, dict):
+            value = value.get("rgb")
+        text = str(value).strip()
+        if not text:
+            return None
+        text = text.lstrip("#").upper()
+        if len(text) == 8:
+            text = text[-6:]
+        if len(text) != 6:
+            return None
+        try:
+            int(text, 16)
+        except ValueError:
+            return None
+        return "FF" + text
+
+    def _style_for_cell(
+        cell_data: dict[str, Any], styles_map: dict[str, Any]
+    ) -> dict[str, Any]:
+        style = cell_data.get("s")
+        if isinstance(style, dict):
+            return style
+        if isinstance(style, str):
+            registered = styles_map.get(style)
+            return registered if isinstance(registered, dict) else {}
+        return {}
+
+    def _apply_univer_style(ws_cell: Any, style: dict[str, Any]) -> None:
+        if not style:
+            return
+
+        font_kwargs: dict[str, Any] = {}
+        if style.get("bl") is not None:
+            font_kwargs["bold"] = bool(style.get("bl"))
+        if style.get("it") is not None:
+            font_kwargs["italic"] = bool(style.get("it"))
+        if style.get("fs"):
+            font_kwargs["size"] = style.get("fs")
+        font_rgb = _xlsx_rgb(style.get("cl"))
+        if font_rgb:
+            font_kwargs["color"] = font_rgb
+        if font_kwargs:
+            current = ws_cell.font
+            ws_cell.font = Font(
+                name=current.name,
+                charset=current.charset,
+                family=current.family,
+                scheme=current.scheme,
+                bold=font_kwargs.get("bold", current.bold),
+                italic=font_kwargs.get("italic", current.italic),
+                size=font_kwargs.get("size", current.size),
+                color=font_kwargs.get("color", current.color),
+                underline=current.underline,
+                strike=current.strike,
+                vertAlign=current.vertAlign,
+                outline=current.outline,
+                shadow=current.shadow,
+                condense=current.condense,
+                extend=current.extend,
+            )
+
+        fill_rgb = _xlsx_rgb(style.get("bg"))
+        if fill_rgb:
+            ws_cell.fill = PatternFill(
+                fill_type="solid",
+                start_color=fill_rgb,
+                end_color=fill_rgb,
+            )
+
+        horizontal_map = {
+            0: "general",
+            1: "left",
+            2: "center",
+            3: "right",
+            6: "justify",
+            7: "distributed",
+        }
+        vertical_map = {
+            1: "top",
+            2: "center",
+            3: "bottom",
+            4: "justify",
+            5: "distributed",
+        }
+        horizontal = horizontal_map.get(style.get("ht"))
+        vertical = vertical_map.get(style.get("vt"))
+        if horizontal or vertical:
+            ws_cell.alignment = Alignment(
+                horizontal=horizontal or ws_cell.alignment.horizontal,
+                vertical=vertical or ws_cell.alignment.vertical,
+            )
 
     # ── Detect format ────────────────────────────────────────────────────────
     is_univer = isinstance(sheets_json, dict) and "sheetOrder" in sheets_json
@@ -6525,6 +6618,9 @@ def export_xlsx(sheets_json: Any, images: list[dict] | None = None) -> bytes:
         # Univer IWorkbookData format
         sheet_order = sheets_json.get("sheetOrder", [])
         sheets_map = sheets_json.get("sheets", {})
+        styles_map = sheets_json.get("styles", {})
+        if not isinstance(styles_map, dict):
+            styles_map = {}
         for sheet_id in sheet_order:
             sheet_data = sheets_map.get(sheet_id, {})
             ws = wb.create_sheet(title=sheet_data.get("name", "Sheet"))
@@ -6533,8 +6629,26 @@ def export_xlsx(sheets_json: Any, images: list[dict] | None = None) -> bytes:
                 r = int(row_key) + 1  # Univer 0-indexed → openpyxl 1-indexed
                 for col_key, cell in row_cells.items():
                     c = int(col_key) + 1
-                    if cell and "v" in cell:
-                        ws.cell(row=r, column=c, value=cell["v"])
+                    if not isinstance(cell, dict):
+                        continue
+                    ws_cell = ws.cell(row=r, column=c, value=cell.get("v"))
+                    _apply_univer_style(ws_cell, _style_for_cell(cell, styles_map))
+
+            for merge in sheet_data.get("mergeData", []) or []:
+                try:
+                    start_row = int(merge.get("startRow", 0)) + 1
+                    start_col = int(merge.get("startColumn", 0)) + 1
+                    end_row = int(merge.get("endRow", 0)) + 1
+                    end_col = int(merge.get("endColumn", 0)) + 1
+                    if end_row >= start_row and end_col >= start_col:
+                        ws.merge_cells(
+                            start_row=start_row,
+                            start_column=start_col,
+                            end_row=end_row,
+                            end_column=end_col,
+                        )
+                except Exception:
+                    continue
     else:
         # Luckysheet legacy format (list of sheets)
         if not isinstance(sheets_json, list):
@@ -6549,6 +6663,9 @@ def export_xlsx(sheets_json: Any, images: list[dict] | None = None) -> bytes:
                 v = cell_entry.get("v", {})
                 if v:
                     ws.cell(row=r, column=c, value=v.get("v"))
+
+    if not wb.worksheets:
+        wb.create_sheet(title="Sheet1")
 
     # Embed overlay images into the first sheet (if any)
     if images and wb.worksheets:

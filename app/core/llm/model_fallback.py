@@ -173,7 +173,9 @@ _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
     ],
     "FILE_TASK": [
         "gemini-3.1-pro-preview",  # 文件任务首选：工具调用能力强
+        "gemini-3-pro-preview",  # 兼容旧路由配置
         "gemini-3-flash-preview",  # 快速备选（工具调用支持良好）
+        "gemini-2.5-pro",  # 稳定 Pro 兜底
         "gemini-2.5-flash",  # 稳定兜底
         "gemini-2.5-flash-lite",  # 轻量最终兜底
     ],

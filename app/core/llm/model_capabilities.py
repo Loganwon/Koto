@@ -13,7 +13,11 @@ DEFAULT_INTERACTIONS_ONLY_MODELS: frozenset[str] = frozenset(
     }
 )
 
-INTERACTIONS_ONLY_PREFIXES: tuple[str, ...] = ("deep-research-",)
+INTERACTIONS_ONLY_PREFIXES: tuple[str, ...] = (
+    "deep-research-",
+    "gemini-3-",
+    "gemini-3.",
+)
 
 
 def normalize_model_id(model_id: str | None) -> str:
