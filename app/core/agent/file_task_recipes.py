@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
+from app.core.agent.file_task_review_intent import (
+    COMPARE_MARKERS,
+    has_any_marker,
+    has_explicit_docx_review_intent,
+)
 
 
 @dataclass(frozen=True)
@@ -60,6 +65,7 @@ _PPT_DESIGN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _REPORT_PATTERN = re.compile(r"(?:报告|结论|清单|analysis|\breport\b(?!\s*\.))", re.IGNORECASE)
+_CONTRACT_PATTERN = re.compile(r"(?:合同|协议|条款|contract|agreement|msa|sow|terms?)", re.IGNORECASE)
 _DOCX_WRITE_PATTERN = re.compile(r"(?:加入|写入|插入|添加|放入|append|insert|write).{0,16}(?:docx|word|文档)", re.IGNORECASE)
 _DOCX_CREATE_PATTERN = re.compile(r"(?:创建|新建|生成|产出|输出|记录到|整理成|create|generate|output|record|write).{0,20}(?:docx|word|文档)", re.IGNORECASE)
 _STEPWISE_PATTERN = re.compile(
@@ -120,6 +126,7 @@ def semantic_markers(task: str, *, file_types: set[str] | None = None, target_fi
         "docx_create_phrase": docx_create_phrase,
         "stepwise_confirmation_request": bool(_STEPWISE_PATTERN.search(text)),
         "long_document_request": bool(_LONG_DOCUMENT_PATTERN.search(text)),
+        "contract_request": bool(_CONTRACT_PATTERN.search(text)),
         "pdf_source": "pdf" in known_file_types or "pdf" in lowered,
         "mentions_docx": mentions_docx,
     }
@@ -128,6 +135,22 @@ def semantic_markers(task: str, *, file_types: set[str] | None = None, target_fi
         or markers["problem_analysis_request"]
         or markers["chart_request"]
         or bool(_REPORT_PATTERN.search(text))
+    )
+    markers["docx_compare_request"] = has_any_marker(text, COMPARE_MARKERS)
+    markers["docx_compare_annotate_request"] = (
+        has_docx_target
+        and markers["docx_compare_request"]
+        and has_explicit_docx_review_intent(text)
+    )
+    markers["docx_review_request"] = (
+        has_docx_target
+        and has_explicit_docx_review_intent(text)
+        and not markers["docx_compare_request"]
+    )
+    markers["pdf_docx_review_request"] = (
+        "pdf" in known_file_types
+        and has_docx_target
+        and bool(markers["docx_review_request"])
     )
     markers["financial_xlsx_docx_chart_report"] = (
         "xlsx" in known_file_types
@@ -140,6 +163,173 @@ def semantic_markers(task: str, *, file_types: set[str] | None = None, target_fi
 
 
 TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
+    FileTaskRecipe(
+        id="docx_contract_compare_review",
+        task_family="contract_review",
+        write_operation_kind="compare_annotate",
+        read_operation_kind="compare",
+        execution_mode="generic_tool_loop",
+        priority=150,
+        required_file_types=("docx",),
+        target_file_types=("docx",),
+        required_markers=(
+            "docx_compare_annotate_request",
+            "contract_request",
+            "docx_target",
+        ),
+        requires_write=True,
+        matched_capabilities=(
+            "plan_docx_compare_annotations",
+            "write_docx_comments",
+            "compare_docx_and_annotate",
+        ),
+        plan_steps=(
+            {
+                "id": "compare",
+                "title": "对比两版合同",
+                "description": "比较两份合同 DOCX 的条款变化，定位可写回目标合同原文的新增、删除和修改处。",
+            },
+            {
+                "id": "annotate",
+                "title": "写入合同差异批注",
+                "description": "由 AI 生成差异、风险和建议措辞，再作为 Word 原生批注写入目标合同原文。",
+            },
+            {
+                "id": "risk_summary",
+                "title": "总结风险关注点",
+                "description": "在对话框中汇总付款、违约、终止、责任等高关注变化。",
+            },
+            {
+                "id": "check",
+                "title": "核验结果",
+                "description": "确认目标合同已产生真实差异批注和风险摘要。",
+            },
+        ),
+        success_criteria=(
+            "必须比较两份合同 DOCX，而不是审校单个合同",
+            "差异批注必须写入用户指定或默认目标合同原文，不得创建独立对比文档",
+            "对话框总结必须说明关键风险关注点",
+            "目标 DOCX 必须产生 annotations_added > 0 的 file.changed",
+        ),
+        quality_gates=(
+            {
+                "criterion": "docx_contract_compare_has_annotations",
+                "any_operation": (
+                    "write_docx_comments",
+                    "compare_docx_and_annotate",
+                ),
+                "metric": "annotations_added",
+                "minimum": 1,
+                "priority": "critical",
+                "detail": "合同对比审阅必须写入真实差异批注；当前批注数：{actual}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="docx_compare_annotation",
+        task_family="compare",
+        write_operation_kind="compare_annotate",
+        read_operation_kind="compare",
+        execution_mode="generic_tool_loop",
+        priority=140,
+        required_file_types=("docx",),
+        target_file_types=("docx",),
+        required_markers=("docx_compare_annotate_request", "docx_target"),
+        requires_write=True,
+        matched_capabilities=(
+            "plan_docx_compare_annotations",
+            "write_docx_comments",
+            "compare_docx_and_annotate",
+        ),
+        plan_steps=(
+            {
+                "id": "compare",
+                "title": "对比两份 DOCX",
+                "description": "比较两份 Word 文档正文差异，确定可写回目标文档原文的差异片段。",
+            },
+            {
+                "id": "annotate",
+                "title": "写入差异批注",
+                "description": "由 AI 生成差异说明，再作为 Word 原生批注写入用户指定的目标 DOCX 原文。",
+            },
+            {
+                "id": "check",
+                "title": "核验批注",
+                "description": "确认目标 DOCX 已产生真实差异批注。",
+            },
+        ),
+        success_criteria=(
+            "必须比较两份 DOCX，而不是审校单个文档",
+            "批注必须写入用户指定或默认目标 DOCX 原文，不得创建独立对比文档",
+            "目标 DOCX 必须产生 annotations_added > 0 的 file.changed",
+        ),
+        quality_gates=(
+            {
+                "criterion": "docx_compare_has_difference_annotations",
+                "any_operation": (
+                    "write_docx_comments",
+                    "compare_docx_and_annotate",
+                ),
+                "metric": "annotations_added",
+                "minimum": 1,
+                "priority": "critical",
+                "detail": "DOCX 对比标注任务必须写入真实差异批注；当前批注数：{actual}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="pdf_docx_review_bridge",
+        task_family="annotate",
+        write_operation_kind="annotate",
+        read_operation_kind="read",
+        execution_mode="doc_annotate_bridge",
+        priority=132,
+        required_file_types=("pdf", "docx"),
+        target_file_types=("docx",),
+        required_markers=("pdf_docx_review_request", "docx_target"),
+        requires_write=True,
+        matched_capabilities=("read_docx_content", "annotate_file"),
+        plan_steps=(
+            {"id": "review", "title": "生成对照审校建议", "description": "读取 PDF 对照来源和 DOCX 文稿，生成可定位的 Word 审校建议。"},
+            {"id": "write", "title": "写回 Word 修订", "description": "将可定位的审校建议写回目标 DOCX。"},
+            {"id": "check", "title": "核验输出", "description": "确认目标 DOCX 已产生真实审校标记。"},
+        ),
+        success_criteria=("目标 DOCX 必须产生真实审校标记", "审校建议必须锚定到目标 DOCX 中存在的原文片段"),
+        quality_gates=(
+            {
+                "criterion": "docx_review_bridge_has_annotations",
+                "operation": "annotate_file",
+                "metric": "annotations_added",
+                "minimum": 1,
+                "priority": "critical",
+                "detail": "DOCX 审校桥接必须至少写回 1 条可核验审校标记；当前写回数：{actual}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="single_docx_review_bridge",
+        task_family="annotate",
+        write_operation_kind="annotate",
+        read_operation_kind="read",
+        execution_mode="doc_annotate_bridge",
+        priority=88,
+        any_file_types=("docx", "doc"),
+        target_file_types=("docx",),
+        required_markers=("docx_review_request", "docx_target"),
+        requires_write=True,
+        matched_capabilities=("read_docx_content", "annotate_file"),
+        success_criteria=("目标 DOCX 必须产生真实审校标记", "不得把普通润色写回误判为批注审校"),
+        quality_gates=(
+            {
+                "criterion": "single_docx_review_has_annotations",
+                "operation": "annotate_file",
+                "metric": "annotations_added",
+                "minimum": 1,
+                "priority": "critical",
+                "detail": "单 DOCX 审校任务必须至少写回 1 条可核验审校标记；当前写回数：{actual}。",
+            },
+        ),
+    ),
     FileTaskRecipe(
         id="long_pdf_stepwise_docx_summary",
         task_family="summarize",
@@ -259,6 +449,7 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
         priority=70,
         target_file_types=("docx", "doc"),
         required_markers=("docx_report_request", "docx_target"),
+        forbidden_markers=("table_request",),
         requires_write=True,
         matched_capabilities=("parse_file_to_text", "write_docx_content"),
         success_criteria=("DOCX 报告/分析任务必须写入可读文本结构", "目标 DOCX 产生 file.changed 事件"),
@@ -329,6 +520,36 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
                 "any_operation": ("add_pptx_slides", "write_pptx_slides", "design_pptx_theme_layout"),
                 "priority": "critical",
                 "detail": "PPT 任务应产生幻灯片写入/更新操作；当前操作：{operations}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="long_docx_stepwise_polish_writeback",
+        task_family="polish",
+        write_operation_kind="stepwise_polish_write",
+        read_operation_kind="stepwise_read",
+        execution_mode="long_docx_stepwise_polish_writeback",
+        priority=126,
+        any_file_types=("docx", "doc"),
+        target_file_types=("docx", "doc"),
+        required_markers=("polish_request", "stepwise_confirmation_request", "docx_target"),
+        requires_write=True,
+        matched_capabilities=("read_docx_content", "rewrite_docx_paragraph_window"),
+        plan_steps=(
+            {"id": "context", "title": "读取当前段落窗口", "description": "按段落窗口读取 DOCX 当前步骤内容，不一次性润色全文。"},
+            {"id": "polish", "title": "润色并写回 DOCX", "description": "只润色当前段落窗口，保留文档其余内容。"},
+            {"id": "pause", "title": "等待确认", "description": "写回成功后暂停，等待用户说继续再处理下一段。"},
+            {"id": "check", "title": "核验结果", "description": "确认当前段落窗口已写回，并给出下一步入口。"},
+        ),
+        success_criteria=("每一步只处理当前段落窗口", "目标 DOCX 产生真实文本写回", "写回后进入等待确认状态", "续跑必须沿用同一 DOCX 和下一段落窗口"),
+        quality_gates=(
+            {
+                "criterion": "stepwise_docx_polish_has_writeback",
+                "operation": "rewrite_docx_paragraph_window",
+                "metric": "paragraphs_rewritten",
+                "minimum": 1,
+                "priority": "critical",
+                "detail": "分步 DOCX 润色每一步都必须写回段落；当前写回段落数：{actual}。",
             },
         ),
     ),

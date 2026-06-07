@@ -274,6 +274,7 @@ def test_file_task_runtime_strips_external_planner_options_before_model_call():
                     "summary": "已写入 1 个段落到 Word 文档",
                     "file_type": "docx",
                     "change_type": "modify",
+                    "paragraphs_written": 1,
                     "focus": True,
                 },
                 ensure_ascii=False,

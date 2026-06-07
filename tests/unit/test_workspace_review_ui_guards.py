@@ -30,6 +30,7 @@ def test_review_shell_entry_is_present_without_ai_comment_entrypoints():
 def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_entry():
     js = _read("web/static/js/workspace-assistant.js")
     layout_js = _read("web/static/js/docx-review-layout.js")
+    css = _read("web/static/css/workspace.css")
 
     assert "function _syncReviewStateForActiveFile" in js
     assert "function _syncDocCommentStateForActiveFile" in js
@@ -67,11 +68,37 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "const maxCardColLeft = Math.max(" in layout_js
     assert "const cardColLeft = Math.max(12, Math.min(shiftedCardColLeft, maxCardColLeft));" in layout_js
     assert "function _resolveReviewPageBoundsForScreenY" in layout_js
+    assert "function _collectReviewVisualPageBounds" in layout_js
+    assert "pageRoot.querySelectorAll('.koto-page-break')" in layout_js
+    assert "upperBottom: _screenYToReviewContentY(endRect.bottom, layoutState)" in layout_js
+    assert "nextTop: _screenYToReviewContentY(startRect.top, layoutState)" in layout_js
     assert "pageTop: pageBounds ? pageBounds.top : null" in layout_js
     assert "pageBottom: pageBounds ? pageBounds.bottom : null" in layout_js
-    assert "function _resolveNonOverlappingCardTop(layoutEntries, desiredTop, desiredLeft, cardWidth, cardHeight, bounds)" in layout_js
-    assert "const peerEntries = pageBounds" in layout_js
-    assert "entry.pageTop === pageBounds.minTop" in layout_js
+    assert "function _reviewAnchorHeight(anchorGeometry)" in layout_js
+    assert "function _clampReviewConnectorOffsetY(anchorGeometry, cardHeight)" in layout_js
+    assert "function _reviewLayoutEntryBottom(entry)" in layout_js
+    assert "entry.collisionHeight || 0" in layout_js
+    assert "function _resolveNonOverlappingCardTop(layoutEntries, desiredTop, desiredLeft, cardWidth, cardHeight, bounds, cardCollisionHeight)" in layout_js
+    assert "const effectiveCardHeight = Math.max(" in layout_js
+    assert "let resolvedByCollision = false;" in layout_js
+    assert "resolvedByCollision = true;" in layout_js
+    assert "const driftMaxTop = !resolvedByCollision && Number.isFinite(maxAnchorDrift) && Number.isFinite(desiredTop)" in layout_js
+    assert "const measuredCards = cards.map((card, index) =>" in layout_js
+    assert "card.style.removeProperty('--wa-review-card-anchor-min-height');" in layout_js
+    assert "const anchorHeight = _reviewAnchorHeight(anchorGeometry);" in layout_js
+    assert "card.style.setProperty('--wa-review-card-anchor-min-height'" in layout_js
+    assert "const cardCollisionHeight = Math.max(cardHeight, anchorHeight);" in layout_js
+    assert "Math.round(anchorGeometry.top - 2)" in layout_js
+    assert "}).sort((a, b) =>" in layout_js
+    assert "const peerEntries = item.pageBounds" in layout_js
+    assert "entry.pageTop === item.pageBounds.minTop" in layout_js
+    assert "item.cardCollisionHeight," in layout_js
+    assert "collisionHeight: item.cardCollisionHeight" in layout_js
+    assert "Math.max(...layoutEntries.map((entry) => _reviewLayoutEntryBottom(entry))) + 24" in layout_js
+    assert "card.classList.add('is-page-bounded');" in layout_js
+    assert "card.style.setProperty('--wa-review-card-page-max-height'" in layout_js
+    assert "min-height: var(--wa-review-card-anchor-min-height, 20px);" in css
+    assert "min-height: var(--wa-review-card-anchor-min-height, 42px);" in css
     assert "function _layoutReviewShellInDocx" in js
     assert "function _ensureReviewSelectionLauncher" in js
     assert "const selectionRight = Number.isFinite(bounds.right)" in layout_js
@@ -132,7 +159,10 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "wa-docx-review-toggle" not in js
     assert "AI 批注当前仅支持 DOCX 文档视图" not in js
     assert ">添加到选区<" not in layout_js
-    assert ">新建批注<" in layout_js
+    assert ">添加批注或修订<" in layout_js
+    assert "wa-review-selection-kicker" in layout_js
+    assert "wa-review-selection-copy" in layout_js
+    assert "wa-review-btn-icon" in js
 
 
 def test_workspace_review_css_keeps_native_comment_surfaces():
@@ -151,6 +181,8 @@ def test_workspace_review_css_keeps_native_comment_surfaces():
     assert "--wa-review-rail-left-shift: 200px;" in css
     assert ".wa-review-composer-card" in css
     assert ".wa-review-selection-box" in css
+    assert ".wa-review-selection-kicker" in css
+    assert ".wa-review-selection-copy" in css
     assert "#wa-docx-editor.has-review-shell #wa-editor-content" in css
     assert "#wa-docx-editor > #wa-review-shell.wa-review-shell-docx" in css
     assert "#wa-review-selection-launcher" in css
@@ -159,12 +191,18 @@ def test_workspace_review_css_keeps_native_comment_surfaces():
     assert "font-size: 12px;" in css
     assert "text-overflow: ellipsis;" in css
     assert "writing-mode: horizontal-tb;" in css
+    assert "border-radius: 8px;" in css
+    assert "border-left: 3px solid var(--accent);" in css
+    assert "border-left: 3px solid #0f766e;" in css
     assert "max-width: calc(var(--wa-review-rail-width, 220px) - 52px);" in css
     assert ".wa-review-anchor-link" in css
     assert ".wa-docx-review-mode" in css
     assert ".wa-docx-review-summary" in css
     assert ".wa-docx-review-nav" in css
     assert ".wa-docx-review-nav-menu" in css
+    assert ".is-page-bounded" in css
+    assert "--wa-review-card-page-max-height" in css
+    assert "overflow: auto !important;" in css
     assert "overflow: visible; /* keep review nav menu dropdown from being clipped */" in css
     assert "overflow-y: auto;" in css
     assert ".koto-docx-track-change" in css

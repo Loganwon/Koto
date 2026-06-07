@@ -79,9 +79,9 @@ class TestPageRoutes:
         resp = client.get("/m")
         assert resp.status_code in (200, 302, 404, 500)
 
-    def test_test_upload(self, client):
+    def test_test_upload_page_stays_removed(self, client):
         resp = client.get("/test_upload")
-        assert resp.status_code in (200, 302, 404, 500)
+        assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -426,17 +426,17 @@ class TestEmailRoutes:
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestBrowserRoutes:
-    def test_browser_open(self, client):
-        resp = _json_post(client, "/api/browser/open", {"url": "https://example.com"})
-        assert resp.status_code in (200, 400, 500)
-
-    def test_browser_search(self, client):
-        resp = _json_post(client, "/api/browser/search", {"query": "flask testing"})
-        assert resp.status_code in (200, 400, 500)
-
-    def test_browser_screenshot(self, client):
-        resp = _json_post(client, "/api/browser/screenshot", {"filename": "test.png"})
-        assert resp.status_code in (200, 400, 500)
+    @pytest.mark.parametrize(
+        ("path", "payload"),
+        [
+            ("/api/browser/open", {"url": "https://example.com"}),
+            ("/api/browser/search", {"query": "flask testing"}),
+            ("/api/browser/screenshot", {"filename": "test.png"}),
+        ],
+    )
+    def test_browser_automation_routes_are_retired(self, client, path, payload):
+        resp = _json_post(client, path, payload)
+        assert resp.status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -673,12 +673,10 @@ class TestSkillsRoutes:
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestModeSwitchRoutes:
-    def test_switch_to_mini(self, client):
-        with patch("subprocess.Popen"):
-            resp = _json_post(client, "/api/switch-to-mini")
-        assert resp.status_code in (200, 500)
+    def test_legacy_switch_to_mini_stays_removed(self, client):
+        resp = _json_post(client, "/api/switch-to-mini")
+        assert resp.status_code == 404
 
-    def test_switch_to_main(self, client):
-        with patch("subprocess.Popen"):
-            resp = _json_post(client, "/api/switch-to-main")
-        assert resp.status_code in (200, 500)
+    def test_legacy_switch_to_main_stays_removed(self, client):
+        resp = _json_post(client, "/api/switch-to-main")
+        assert resp.status_code == 404

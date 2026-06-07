@@ -38,6 +38,25 @@ def test_recipe_selects_excel_table_transfer_when_no_analysis_or_chart_requested
     assert match.recipe.quality_gates[0]["criterion"] == "docx_table_request_has_table"
 
 
+def test_excel_table_transfer_does_not_pick_generic_docx_report_gate():
+    request = FileTaskRequest(
+        task="Create a DOCX report from this Excel table. Keep the real table in Word and write a short summary before the table.",
+        target_path="report.docx",
+        files=[
+            FileTaskFile(path="sales.xlsx", name="sales.xlsx", type="xlsx"),
+            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+        ],
+    )
+
+    ids = [
+        match.recipe.id
+        for match in recipe_matches(request, request.files, write_intent=True)
+    ]
+
+    assert "xlsx_table_to_docx" in ids
+    assert "docx_report_write" not in ids
+
+
 def test_semantic_markers_understand_docx_report_without_target_path():
     markers = semantic_markers(
         "总结这个 PDF 并写入 Word 文档",
@@ -64,6 +83,62 @@ def test_recipe_guides_long_pdf_stepwise_docx_summary_without_hard_route():
     assert match.recipe.quality_gates[0]["operation"] == "write_docx_content"
 
 
+def test_recipe_selects_docx_compare_annotation_over_single_docx_review():
+    request = FileTaskRequest(
+        task="对比这两份文件，找出他们有区别的地方标注出来",
+        target_path="new.docx",
+        files=[
+            FileTaskFile(path="old.docx", name="old.docx", type="docx"),
+            FileTaskFile(path="new.docx", name="new.docx", type="docx", target=True),
+        ],
+    )
+
+    markers = semantic_markers(
+        request.task,
+        file_types={"docx"},
+        target_file_type="docx",
+    )
+    candidates = recipe_matches(request, request.files, write_intent=True)
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["docx_compare_annotate_request"] is True
+    assert markers["docx_review_request"] is False
+    assert match is not None
+    assert match.recipe.id == "docx_compare_annotation"
+    assert candidates[0].recipe.id == "docx_compare_annotation"
+    assert all(item.recipe.id != "single_docx_review_bridge" for item in candidates)
+
+
+def test_recipe_selects_contract_compare_review_over_plain_docx_compare():
+    request = FileTaskRequest(
+        task="对比这两份合同，找出变化并标注出来，同时总结风险点",
+        target_path="new_contract.docx",
+        files=[
+            FileTaskFile(path="old_contract.docx", name="old_contract.docx", type="docx"),
+            FileTaskFile(
+                path="new_contract.docx",
+                name="new_contract.docx",
+                type="docx",
+                target=True,
+            ),
+        ],
+    )
+
+    markers = semantic_markers(
+        request.task,
+        file_types={"docx"},
+        target_file_type="docx",
+    )
+    candidates = recipe_matches(request, request.files, write_intent=True)
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["contract_request"] is True
+    assert markers["docx_compare_annotate_request"] is True
+    assert match is not None
+    assert match.recipe.id == "docx_contract_compare_review"
+    assert candidates[0].recipe.id == "docx_contract_compare_review"
+
+
 def test_recipe_selects_high_quality_pptx_design_for_beautify_request():
     request = FileTaskRequest(
         task="把这个 PPT 编辑得好看一点，做成专业高级的汇报风格",
@@ -85,6 +160,8 @@ def test_recipe_selects_high_quality_pptx_design_for_beautify_request():
 def test_quality_gated_file_task_recipes_cover_common_working_file_outputs():
     recipes = {recipe.id: recipe for recipe in TASK_RECIPES}
     expected_gates = {
+        "docx_contract_compare_review": {"docx_contract_compare_has_annotations"},
+        "docx_compare_annotation": {"docx_compare_has_difference_annotations"},
         "long_pdf_stepwise_docx_summary": {"stepwise_docx_has_step_notes"},
         "financial_xlsx_docx_report": {"financial_report_has_narrative", "financial_report_has_real_chart_image"},
         "xlsx_table_to_docx": {"docx_table_request_has_table"},

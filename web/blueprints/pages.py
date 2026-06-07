@@ -8,7 +8,6 @@ Routes:
   GET /app                     — app_main
   GET /file-network            — file_network
   GET /knowledge-graph         — knowledge_graph_page
-  GET /test_upload             — test_upload
   GET /skills                  — skill_marketplace
   GET /skill-marketplace       — skill_marketplace
   GET /monitoring-dashboard    — monitoring_dashboard
@@ -73,11 +72,6 @@ def file_network() -> str:
 def knowledge_graph_page() -> str:
     """知识图谱可视化界面"""
     return render_template("knowledge_graph.html")
-
-
-@pages_bp.route("/test_upload")
-def test_upload() -> str:
-    return render_template("test_upload.html")
 
 
 @pages_bp.route("/edit-ppt/<session_id>")

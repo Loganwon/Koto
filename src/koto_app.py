@@ -545,24 +545,32 @@ def ensure_dependencies():
 
 
 class VoiceAPI:
-    """语音识别 API - 提供给前端调用
-    注意：实际通过 Flask REST API 实现
-    这个类仅作为占位符，保持兼容性
-    """
+    """Compatibility facade for the upload-based STT API."""
 
     def __init__(self):
         pass
 
     def get_available_engines(self):
-        """返回所有可用引擎（占位符）"""
+        """Return the supported upload-based STT engines."""
         try:
-            from web.voice_recognition import get_voice_recognizer
+            from web.local_stt import get_status
 
-            recognizer = get_voice_recognizer()
-            return recognizer.list_available_engines()
+            local = get_status()
         except Exception as e:
-            logger.debug("Failed to get voice recognition engines: %s", e)
-            return []
+            logger.debug("Failed to get local STT status: %s", e)
+            local = {"available": False, "engine": "unavailable"}
+
+        engines = [{"id": "gemini", "name": "Gemini upload STT", "available": True}]
+        if local.get("available"):
+            engines.insert(
+                0,
+                {
+                    "id": str(local.get("engine") or "local"),
+                    "name": "Local upload STT",
+                    "available": True,
+                },
+            )
+        return engines
 
 
 class WindowAPI:

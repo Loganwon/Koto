@@ -178,10 +178,10 @@
         "model_unavailable": false,
         "readonly_fallback_used": false,
         "planner": {
-          "backend": "hermes",
-          "source": "external",
-          "policy": "prefer_hermes",
-          "transport": "embedded",
+          "backend": "native",
+          "source": "internal",
+          "policy": "native_only",
+          "transport": "in_process",
           "reason": "unsupported_file_types:text",
           "round": 1
         }
@@ -251,10 +251,10 @@
         "model_unavailable": false,
         "readonly_fallback_used": false,
         "planner": {
-          "backend": "hermes",
-          "source": "external",
-          "policy": "prefer_hermes",
-          "transport": "embedded",
+          "backend": "native",
+          "source": "internal",
+          "policy": "native_only",
+          "transport": "in_process",
           "reason": "unsupported_file_types:text",
           "round": 1
         }

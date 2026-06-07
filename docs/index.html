@@ -539,7 +539,8 @@
 
         .promise-grid,
         .compare-wrap,
-        .download-grid {
+        .download-grid,
+        .scenario-grid {
             display: grid;
             gap: 16px;
         }
@@ -551,7 +552,8 @@
         .promise-card,
         .compare-card,
         .download-shell,
-        .download-card {
+        .download-card,
+        .scenario-card {
             background: var(--paper-soft);
             border: 1px solid var(--line);
             box-shadow: var(--shadow-md);
@@ -560,6 +562,74 @@
         .promise-card {
             border-radius: 24px;
             padding: 24px;
+        }
+
+        .scenario-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-top: 24px;
+        }
+
+        .scenario-card {
+            border-radius: 24px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            min-height: 100%;
+        }
+
+        .scenario-card.featured {
+            background: linear-gradient(180deg, rgba(223, 243, 238, 0.78) 0%, rgba(255, 251, 244, 0.9) 100%);
+            border-color: rgba(15, 118, 110, 0.2);
+        }
+
+        .scenario-kicker {
+            color: var(--accent);
+            font-family: var(--mono);
+            font-size: 0.74rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+
+        .scenario-card h3 {
+            font-family: var(--title);
+            font-size: 1.24rem;
+            letter-spacing: -0.04em;
+        }
+
+        .scenario-card ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .scenario-card li {
+            position: relative;
+            padding-left: 18px;
+            color: var(--ink-soft);
+            line-height: 1.68;
+        }
+
+        .scenario-card li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 0.74em;
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: var(--accent);
+        }
+
+        .scenario-note {
+            margin-top: 18px;
+            border: 1px solid rgba(201, 121, 62, 0.2);
+            border-radius: 22px;
+            padding: 18px 20px;
+            background: rgba(246, 229, 216, 0.58);
+            color: #6d5646;
+            line-height: 1.72;
         }
 
         .promise-card .index,
@@ -841,6 +911,7 @@
 
             .stage-grid,
             .promise-grid,
+            .scenario-grid,
             .download-grid {
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
@@ -867,7 +938,7 @@
             .nav-links {
                 width: 100%;
                 display: grid;
-                grid-template-columns: repeat(3, minmax(0, 1fr));
+                grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 8px;
             }
 
@@ -889,6 +960,7 @@
 
             .stage-grid,
             .promise-grid,
+            .scenario-grid,
             .download-grid {
                 grid-template-columns: 1fr;
             }
@@ -916,6 +988,7 @@
                 </a>
                 <nav class="nav-links">
                     <a href="#core">核心卖点</a>
+                    <a href="#scenarios">场景覆盖</a>
                     <a href="#whitebox">白盒交互</a>
                     <a href="#download">下载</a>
                 </nav>
@@ -928,7 +1001,7 @@
                     <div class="eyebrow">
                         <span class="eyebrow-dot"></span>
                         <span>Local File Assistant</span>
-                        <span id="version-text">v1.7.2</span>
+                        <span id="version-text">v1.7.3</span>
                     </div>
                     <h1 class="hero-title">Koto 让 AI 直接住进你的文件里。</h1>
                     <p class="hero-sub">
@@ -1016,6 +1089,85 @@
                         <h3>本地优先，按需上云</h3>
                         <p>默认走本地工作流，需要时再切云端模型。</p>
                     </article>
+                </div>
+            </section>
+
+            <section class="section" id="scenarios">
+                <div class="section-head reveal">
+                    <div>
+                        <div class="eyebrow">
+                            <span class="eyebrow-dot"></span>
+                            <span>Real Workflows</span>
+                        </div>
+                        <h2 class="section-title">先覆盖每天真的会发生的文件任务。</h2>
+                    </div>
+                    <p class="section-copy">Koto 把成熟能力集中在 Office 文件真实写回、长文分步处理和可核验的工作流上；弱项不硬包装成卖点。</p>
+                </div>
+
+                <div class="scenario-grid reveal">
+                    <article class="scenario-card featured">
+                        <div class="scenario-kicker">Word / DOCX</div>
+                        <h3>审校、批注和版本对比</h3>
+                        <ul>
+                            <li>合同、报告、论文草稿可以读取段落并写回内容。</li>
+                            <li>支持 Word 原生批注、清除审阅标记和两版 DOCX 差异标注。</li>
+                            <li>PDF 原文 + DOCX 译稿可分批对照审校，适合长书稿和翻译稿。</li>
+                        </ul>
+                    </article>
+
+                    <article class="scenario-card">
+                        <div class="scenario-kicker">Excel / Data</div>
+                        <h3>表格分析进入报告</h3>
+                        <ul>
+                            <li>读取 Excel/CSV，检查工作簿结构、公式和外部链接。</li>
+                            <li>用 Python 沙箱做统计、图表和数据清洗，再把结果写入文件。</li>
+                            <li>Excel 表格和图表可以作为真实 Word 表格/图片落到 DOCX。</li>
+                        </ul>
+                    </article>
+
+                    <article class="scenario-card">
+                        <div class="scenario-kicker">PPT / Slides</div>
+                        <h3>汇报材料快速整理</h3>
+                        <ul>
+                            <li>解析 PPTX 文本，更新现有页文字或追加总结页。</li>
+                            <li>统一主题、字体、配色和安全版式，默认保留原页数和核心内容。</li>
+                            <li>适合工作汇报、项目复盘、答辩和课程展示草稿。</li>
+                        </ul>
+                    </article>
+
+                    <article class="scenario-card">
+                        <div class="scenario-kicker">Research</div>
+                        <h3>科研学习材料分步处理</h3>
+                        <ul>
+                            <li>长 PDF 按页窗读取，逐步写成读书笔记或章节摘要。</li>
+                            <li>论文、课堂资料、实验表格可以组成可追踪的本地资料工作区。</li>
+                            <li>适合先读、再提炼、最后写入 Word 的学习闭环。</li>
+                        </ul>
+                    </article>
+
+                    <article class="scenario-card">
+                        <div class="scenario-kicker">Text / Code</div>
+                        <h3>选区改写直接写回</h3>
+                        <ul>
+                            <li>TXT、Markdown、CSV、JSON 和代码片段可读取指定行。</li>
+                            <li>选中内容润色、改写或替换时，精准替换原选区并自动备份。</li>
+                            <li>适合会议纪要、README、研究笔记和轻量配置文件。</li>
+                        </ul>
+                    </article>
+
+                    <article class="scenario-card">
+                        <div class="scenario-kicker">Local-first</div>
+                        <h3>过程透明，不做黑盒交付</h3>
+                        <ul>
+                            <li>执行步骤、工具调用、目标文件和写回结果都可见。</li>
+                            <li>关键任务会核验 file.changed，而不是只给一段“已完成”。</li>
+                            <li>本地优先，必要时再切换云端模型处理复杂语言任务。</li>
+                        </ul>
+                    </article>
+                </div>
+
+                <div class="scenario-note reveal">
+                    现阶段不把 OCR、复杂 PDF 原文编辑、参考文献管理、LaTeX 编译和高级 PPT 动画当作主能力；这些可以辅助处理，但不作为稳定交付承诺。
                 </div>
             </section>
 
@@ -1122,7 +1274,7 @@
                     <a href="https://github.com/Loganwon/Koto/releases" target="_blank" rel="noopener">Releases</a>
                     <a href="https://github.com/Loganwon/Koto/issues" target="_blank" rel="noopener">Issues</a>
                 </div>
-                <div id="footer-version">© 2026 Koto · v1.7.2</div>
+                <div id="footer-version">© 2026 Koto · v1.7.3</div>
             </div>
         </footer>
     </div>

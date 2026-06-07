@@ -278,11 +278,17 @@
     let current = null;
     for (const ref of refs) {
       if (!current || ref.midY - current.midY > tolerancePx) {
-        current = { itemIds: [ref.itemId], midY: ref.midY, lineRight: ref.lineRight };
+        current = {
+          itemIds: [ref.itemId],
+          midY: ref.midY,
+          lineTopY: ref.lineTopY,
+          lineRight: ref.lineRight,
+        };
         clusters.push(current);
       } else {
         current.itemIds.push(ref.itemId);
         // Take rightmost lineRight and average midY
+        current.lineTopY = Math.min(current.lineTopY, ref.lineTopY);
         current.lineRight = Math.max(current.lineRight, ref.lineRight);
         current.midY = Math.round((current.midY + ref.midY) / 2);
       }
@@ -320,7 +326,8 @@
     for (const cluster of clusters) {
       for (const itemId of cluster.itemIds) {
         const h = cardHeights.get(itemId) || defaultCardHeight;
-        const desiredTop = Math.max(0, cluster.midY - Math.round(h / 2));
+        const anchorTop = Number.isFinite(cluster.lineTopY) ? cluster.lineTopY : cluster.midY;
+        const desiredTop = Math.max(0, Math.round(anchorTop - 2));
         entries.push({
           itemId,
           top: desiredTop,
@@ -355,6 +362,16 @@
       for (const e of entries) {
         e.top = y;
         y += e.height + CARD_GAP;
+      }
+    } else if (entries.length) {
+      const last = entries[entries.length - 1];
+      const overflow = (last.top + last.height) - railHeight;
+      if (overflow > 0) {
+        entries.forEach((e) => { e.top -= overflow; });
+        const underflow = Math.min(0, entries[0].top);
+        if (underflow < 0) {
+          entries.forEach((e) => { e.top -= underflow; });
+        }
       }
     }
 

@@ -54,6 +54,21 @@ _ANNOTATE_TASK_PATTERNS = (
     re.compile(r"(?:批注|注释|评论|审阅意见|标注)", re.IGNORECASE),
 )
 
+_DOCX_COMPARE_ANNOTATE_TASK_PATTERNS = (
+    re.compile(
+        r"(?:对比|比较|比对|差异|区别|不同点).{0,36}(?:标注|批注|标出来|标记|comment|annotate|markup)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:标注|批注|标出来|标记|comment|annotate|markup).{0,36}(?:对比|比较|比对|差异|区别|不同点)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:compare|diff|difference).{0,36}\b(?:annotate|comment|markup)\b",
+        re.IGNORECASE,
+    ),
+)
+
 _CLEAR_DOCX_REVIEW_TASK_PATTERNS = (
     re.compile(
         r"(?:删除|移除|去掉|清除|清空|取消|消除|remove|delete|clear).{0,12}(?:所有|全部|整篇|整个|全部的)?(?:.{0,8})?(?:批注|标注|评论|注释|评注|修订|审阅标记|修改痕迹|comments?|review marks?|tracked changes?)",
@@ -225,6 +240,27 @@ _NATIVE_CAPABILITY_MATRIX: tuple[NativeCapabilitySpec, ...] = (
         },
         all_file_types=("pptx",),
         task_patterns=_PPTX_UPDATE_SLIDES_TASK_PATTERNS,
+    ),
+    NativeCapabilitySpec(
+        name="compare_docx_and_annotate",
+        tool_name="compare_docx_and_annotate",
+        summary="当前缺少把两份 DOCX 的差异真实标注到 Word 的 Koto 原生工具。",
+        why_missing="任务要求先比较两份 DOCX，再把差异标注出来；如果只走单文档批注，会把目标误判成审校润色，无法反映两份文件之间的差异。",
+        description="比较两份 DOCX 的段落差异，并把差异说明作为 Word 原生批注写入用户指定的目标 DOCX。",
+        rationale="用户要的是跨文件差异标注，不是对其中一份文档做写作审校。",
+        parameters={
+            "type": "object",
+            "properties": {
+                "original_path": {"type": "string", "description": "基准 DOCX 文件路径"},
+                "revised_path": {"type": "string", "description": "待标注文档 DOCX 文件路径"},
+                "target_path": {"type": "string", "description": "实际写入批注的 DOCX；用户说原文/当前文档时必须传该文件"},
+                "max_differences": {"type": "integer", "description": "最多标注多少处差异"},
+            },
+            "required": ["original_path", "revised_path"],
+        },
+        all_file_types=("docx",),
+        task_patterns=_DOCX_COMPARE_ANNOTATE_TASK_PATTERNS,
+        min_files=2,
     ),
     NativeCapabilitySpec(
         name="compare_files",

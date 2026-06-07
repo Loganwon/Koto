@@ -165,6 +165,13 @@ class TestTimeout:
         result = reg.execute("fast", {})
         assert result == 42
 
+    def test_office_write_tools_have_longer_timeout_overrides(self):
+        import app.core.agent.tool_registry as tr_mod
+
+        assert tr_mod._TOOL_TIMEOUT == 60
+        assert tr_mod._TOOL_TIMEOUT_OVERRIDES["insert_excel_as_docx_table"] > 60
+        assert tr_mod._TOOL_TIMEOUT_OVERRIDES["design_pptx_theme_layout"] > 60
+
 
 # ---------------------------------------------------------------------------
 # Schema generation

@@ -10,7 +10,6 @@ remaining globals are migrated into narrower services.
 from __future__ import annotations
 
 import importlib
-import json
 import sys
 from typing import Any, Iterable
 
@@ -91,10 +90,9 @@ def call_app_factory(name: str, *args: Any, **kwargs: Any) -> Any:
 
 
 def safe_editor_sse(payload: dict) -> str:
-    safe_sse = getattr(_app_module(), "_editor_ai_safe_sse", None)
-    if callable(safe_sse):
-        return safe_sse(payload)
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    from web.file_task_stream import safe_editor_sse as _safe_editor_sse
+
+    return _safe_editor_sse(payload)
 
 
 def normalize_model_mode(value: Any, default: str = "cloud") -> str:
@@ -151,8 +149,6 @@ def get_configured_local_model_id() -> str:
 
 
 def stream_file_task_request(data: dict) -> Iterable[str]:
-    streamer = getattr(_app_module(), "_stream_file_task_request", None)
-    if not callable(streamer):
-        yield safe_editor_sse({"type": "error", "text": "文件任务运行时不可用"})
-        return
-    yield from streamer(data)
+    from web.file_task_stream import stream_file_task_request as _stream_file_task_request
+
+    yield from _stream_file_task_request(data)

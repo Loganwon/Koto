@@ -119,15 +119,3 @@ def test_initialize_background_runtime_skips_disabled_workspace_watcher(monkeypa
     fake_file_watcher.add_dir.assert_not_called()
     fake_file_watcher.start.assert_not_called()
     fake_work_file_library.scan_locations.assert_not_called()
-
-
-@pytest.mark.unit
-def test_preload_audio_stt_is_noop():
-    import web.app_runtime as mod
-
-    logger = MagicMock()
-
-    mod.preload_audio_stt(logger)
-
-    assert "web.voice_" + "engine" not in sys.modules
-    logger.debug.assert_called_once()

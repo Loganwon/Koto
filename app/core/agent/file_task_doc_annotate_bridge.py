@@ -17,62 +17,20 @@ from app.core.agent.file_task_contract import (
     FileTaskToolStreamChunk,
     FileTaskToolStreamResult,
 )
+from app.core.agent.file_task_review_intent import (
+    COMPARE_MARKERS as _COMPARE_MARKERS,
+    DOCX_REVIEW_INTENT_MARKERS as _DOCX_ONLY_REVIEW_MARKERS,
+    REVIEW_MARKERS as _REVIEW_MARKERS,
+    SOURCE_MARKERS as _SOURCE_MARKERS,
+    TRANSLATION_MARKERS as _TRANSLATION_MARKERS,
+    has_explicit_docx_review_intent,
+    looks_like_multi_docx_compare_request,
+    looks_like_pdf_docx_review_request,
+)
 from app.core.llm.model_mode import normalize_model_mode
 
 logger = logging.getLogger(__name__)
 
-
-_TRANSLATION_MARKERS = (
-    "翻译",
-    "译稿",
-    "译文",
-    "translation",
-    "translated",
-)
-
-_SOURCE_MARKERS = (
-    "原文",
-    "原著",
-    "source",
-    "对照",
-    "参照",
-    "参考",
-    "pdf",
-)
-
-_REVIEW_MARKERS = (
-    "润色",
-    "审校",
-    "校对",
-    "批注",
-    "标注",
-    "comment",
-    "annotate",
-    "术语",
-    "用词",
-    "翻译腔",
-    "学界",
-    "忠实",
-    "删减",
-    "添加",
-)
-
-_DOCX_ONLY_REVIEW_MARKERS = (
-    "批注",
-    "标注",
-    "审校",
-    "校对",
-    "润色",
-    "批改",
-    "修改建议",
-    "写得不好的地方",
-    "不通顺",
-    "不自然",
-    "comment",
-    "annotate",
-    "proofread",
-    "polish",
-)
 
 _DOCX_CLEAR_REVIEW_REQUEST_PATTERNS = (
     re.compile(
@@ -100,6 +58,7 @@ _DIRECT_DOCX_REWRITE_REVIEW_EXCLUSIONS = (
 _DIRECT_DOCX_REWRITE_PATTERNS = (
     re.compile(r"(?:润色|改写|重写|优化|修改|polish|rewrite).{0,24}(?:写回|保存|替换|更新|当前|原文|文档|docx|file)", re.IGNORECASE),
     re.compile(r"(?:写回|保存|替换|更新|直接修改|save|replace|update).{0,24}(?:润色|改写|重写|优化|polish|rewrite)", re.IGNORECASE),
+    re.compile(r"(?:润色|改写|重写|优化|polish|rewrite).{0,12}(?:这篇|这份|这个|当前|整篇|全文|文章|稿件|文稿)", re.IGNORECASE),
 )
 
 _BATCH_RESUME_ARTIFACT_TYPE = "koto_large_task_resume_v1"
@@ -121,6 +80,32 @@ def looks_like_direct_docx_rewrite_request(task_text: str) -> bool:
     if any(marker in lowered for marker in _DIRECT_DOCX_REWRITE_REVIEW_EXCLUSIONS):
         return False
     return any(pattern.search(text) for pattern in _DIRECT_DOCX_REWRITE_PATTERNS)
+
+
+def _has_explicit_docx_review_intent(*texts: Any) -> bool:
+    return has_explicit_docx_review_intent(*texts)
+
+
+def _should_continue_same_bridge(
+    task_text: str,
+    followup_context: dict[str, Any],
+) -> bool:
+    followup_action = str(
+        followup_context.get("followup_action") or ""
+    ).strip().lower()
+    previous_mode = str(
+        followup_context.get("previous_task_mode") or ""
+    ).strip().lower()
+    if followup_action != "improve" or previous_mode != "doc_annotate_bridge":
+        return False
+    return _has_explicit_docx_review_intent(
+        task_text,
+        followup_context.get("previous_task_request"),
+    )
+
+
+def looks_like_multi_file_compare_request(request: FileTaskRequest) -> bool:
+    return looks_like_multi_docx_compare_request(request)
 
 
 def _coerce_progress_value(value: Any) -> int:
@@ -402,22 +387,28 @@ def _batch_state_from_plan(request: FileTaskRequest, large_file_plan: Optional[d
     }
 
 
-def should_route_request(request: FileTaskRequest) -> bool:
+def should_use_doc_annotate_bridge_execution(request: FileTaskRequest) -> bool:
     options = request.options if isinstance(request.options, dict) else {}
     if bool(options.get("skip_doc_annotate_bridge")):
+        return False
+    if str(options.get("output_mode") or "").strip().lower() == "answer":
         return False
 
     continue_same_bridge = False
     followup_context = request.options.get("followup_context") if isinstance(request.options, dict) else None
     if isinstance(followup_context, dict) and str(followup_context.get("kind") or "").strip() == "review_last_task":
-        followup_action = str(followup_context.get("followup_action") or "").strip().lower()
-        previous_mode = str(followup_context.get("previous_task_mode") or "").strip().lower()
-        continue_same_bridge = followup_action == "improve" and previous_mode == "doc_annotate_bridge"
+        continue_same_bridge = _should_continue_same_bridge(
+            str(request.task or ""),
+            followup_context,
+        )
         if not continue_same_bridge:
             return False
 
     task_text = str(request.task or "").strip().lower()
     if not task_text:
+        return False
+
+    if looks_like_multi_file_compare_request(request):
         return False
 
     target_docx = _find_target_docx_path(request)
@@ -433,12 +424,19 @@ def should_route_request(request: FileTaskRequest) -> bool:
         return False
 
     if not _find_pdf_file(request):
-        return any(marker in task_text for marker in _DOCX_ONLY_REVIEW_MARKERS)
+        return _has_explicit_docx_review_intent(task_text)
+
+    if looks_like_pdf_docx_review_request(request):
+        return True
 
     has_translation = any(marker in task_text for marker in _TRANSLATION_MARKERS)
     has_source = any(marker in task_text for marker in _SOURCE_MARKERS)
     has_review = any(marker in task_text for marker in _REVIEW_MARKERS)
     return has_translation and has_source and has_review
+
+
+def should_route_request(request: FileTaskRequest) -> bool:
+    return should_use_doc_annotate_bridge_execution(request)
 
 
 def _stream_single_docx_request(
@@ -617,13 +615,16 @@ def _stream_single_docx_request(
 
     revised_file = str(final_result.get("revised_file") or "").strip()
     applied = int(final_result.get("applied") or 0)
-    passed = bool(final_result.get("success") and revised_file)
+    passed = bool(final_result.get("success") and revised_file and applied > 0)
 
     if write_started:
         write_summary = (
             f"已将 {applied} 条修订写回 {os.path.basename(revised_file)}。"
             if passed
-            else (str(final_result.get("message") or "") or "未写回原始 DOCX 文件。")
+            else (
+                str(final_result.get("message") or "")
+                or "未写回任何 Word 修订，请改用普通 DOCX 润色写回流程或重新生成可定位的修订。"
+            )
         )
         yield ledger.event(
             "step.finished",
@@ -660,7 +661,10 @@ def _stream_single_docx_request(
             "summary": (
                 f"已更新可打开的 DOCX 原文 {os.path.basename(revised_file)}。"
                 if passed
-                else (str(final_result.get("message") or "") or "未写回原始 DOCX 文件。")
+                else (
+                    str(final_result.get("message") or "")
+                    or "未写回任何 Word 修订，请改用普通 DOCX 润色写回流程或重新生成可定位的修订。"
+                )
             ),
         },
         step_id="check",
@@ -669,7 +673,10 @@ def _stream_single_docx_request(
     summary = (
         f"已将 {applied} 条修订写回 {os.path.basename(revised_file)}。"
         if passed
-        else (str(final_result.get("message") or "") or "DOCX 文稿修订未完成。")
+        else (
+            str(final_result.get("message") or "")
+            or "DOCX 文稿修订未完成：未写回任何 Word 修订。"
+        )
     )
     yield ledger.event(
         "run.finished",
@@ -1000,13 +1007,16 @@ def stream_request(
 
     revised_file = str(final_result.get("revised_file") or "").strip()
     applied = int(final_result.get("applied") or 0)
-    passed = bool(final_result.get("success") and revised_file)
+    passed = bool(final_result.get("success") and revised_file and applied > 0)
 
     if write_started:
         write_summary = (
             f"已将 {applied} 条修订写回 {os.path.basename(revised_file)}。"
             if passed
-            else (str(final_result.get("message") or "") or "未写回原始 DOCX 文件。")
+            else (
+                str(final_result.get("message") or "")
+                or "未写回任何 Word 修订，请重新生成可定位的审校建议。"
+            )
         )
         yield ledger.event(
             "step.finished",
@@ -1043,7 +1053,10 @@ def stream_request(
             "summary": (
                 f"已更新可打开的 DOCX 原文 {os.path.basename(revised_file)}。"
                 if passed
-                else (str(final_result.get("message") or "") or "未写回原始 DOCX 文件。")
+                else (
+                    str(final_result.get("message") or "")
+                    or "未写回任何 Word 修订，请重新生成可定位的审校建议。"
+                )
             ),
         },
         step_id="check",
@@ -1081,7 +1094,10 @@ def stream_request(
     summary = (
         f"已将 {applied} 条修订写回 {os.path.basename(revised_file)}。"
         if passed
-        else (str(final_result.get("message") or "") or "PDF 原文对照审校未完成。")
+        else (
+            str(final_result.get("message") or "")
+            or "PDF 原文对照审校未完成：未写回任何 Word 修订。"
+        )
     )
     yield ledger.event(
         "run.finished",

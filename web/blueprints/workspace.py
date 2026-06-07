@@ -1,22 +1,17 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-Workspace and browser automation blueprint.
+Workspace file and folder browsing blueprint.
 
 Routes:
   GET    /api/workspace/<path:filepath>  — Serve a file from the workspace
   GET    /api/workspace                  — List files in the workspace root
   GET    /api/browse                     — Browse folders on the local filesystem
-  POST   /api/browser/open               — Open a URL via browser automation
-  POST   /api/browser/search             — Google search via browser automation
-  POST   /api/browser/screenshot         — Take a browser screenshot
 """
 
 import logging
 import os
 import sys
-import time
-
 from flask import Blueprint, Response, jsonify, request, send_from_directory
 
 from web.shared import WORKSPACE_DIR
@@ -159,44 +154,3 @@ def browse_folders() -> Response:
         return jsonify({"folders": folders, "parent": parent, "current": path})
     except Exception as e:
         return jsonify({"error": str(e), "folders": [], "parent": None})
-
-
-# ─── Browser automation ──────────────────────────────────────────────────────
-
-
-@workspace_bp.route("/api/browser/open", methods=["POST"])
-def browser_open() -> Response:
-    """打开 URL"""
-    from browser_automation import get_browser_automation
-
-    url = request.json.get("url", "")
-    browser = get_browser_automation()
-    success = browser.open_url(url)
-
-    return jsonify({"success": success})
-
-
-@workspace_bp.route("/api/browser/search", methods=["POST"])
-def browser_search() -> Response:
-    """Google 搜索"""
-    from browser_automation import get_browser_automation
-
-    query = request.json.get("query", "")
-    browser = get_browser_automation()
-    results = browser.search_google(query)
-
-    return jsonify({"results": results})
-
-
-@workspace_bp.route("/api/browser/screenshot", methods=["POST"])
-def browser_screenshot() -> Response:
-    """截图"""
-    from browser_automation import get_browser_automation
-
-    filename = request.json.get("filename", f"screenshot_{int(time.time())}.png")
-    file_path = os.path.join(WORKSPACE_DIR, "images", filename)
-
-    browser = get_browser_automation()
-    success = browser.take_screenshot(file_path)
-
-    return jsonify({"success": success, "path": file_path})

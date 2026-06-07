@@ -12,6 +12,14 @@ logger = logging.getLogger(__name__)
 
 # 单个工具调用的最大允许执行秒数（超时后返回错误，不挂死 agent 循环）
 _TOOL_TIMEOUT: int = 60
+_TOOL_TIMEOUT_OVERRIDES: Dict[str, int] = {
+    # Office writes can legitimately take longer on large files. If the generic
+    # 60s timeout fires while python-docx is still saving, the background worker
+    # may finish anyway and a model retry can duplicate the write.
+    "insert_excel_as_docx_table": 180,
+    "insert_image_into_docx": 120,
+    "design_pptx_theme_layout": 120,
+}
 
 _ARG_ALIASES = {
     "path": ("file_path", "filepath", "xlsx_path", "docx_path", "pptx_path", "pdf_path"),
@@ -152,13 +160,14 @@ class ToolRegistry:
 
         try:
             normalized_args = _normalize_tool_args(func, tool_args)
+            timeout_seconds = _TOOL_TIMEOUT_OVERRIDES.get(tool_name, _TOOL_TIMEOUT)
             with ThreadPoolExecutor(max_workers=1) as _pool:
                 _future = _pool.submit(func, **normalized_args)
                 try:
-                    return _future.result(timeout=_TOOL_TIMEOUT)
+                    return _future.result(timeout=timeout_seconds)
                 except _FuturesTimeout:
                     raise RuntimeError(
-                        f"Tool '{tool_name}' timed out after {_TOOL_TIMEOUT}s"
+                        f"Tool '{tool_name}' timed out after {timeout_seconds}s"
                     )
         except (ValueError, RuntimeError):
             raise

@@ -1381,41 +1381,6 @@ def process_stream_compat():
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
 
-# ======================================================================
-# Legacy compatibility routes — proxy confirm / choice to old
-# agent_loop module when available, otherwise return a stub response.
-# These were originally defined directly in web/app.py.
-# ======================================================================
-
-
-@agent_bp.route("/confirm", methods=["POST"])
-def agent_confirm():
-    """Retired legacy confirmation callback for the removed agent-loop protocol."""
-    return (
-        jsonify(
-            {
-                "success": False,
-                "error": "旧版 Agent 确认回调已下线，请改用当前主聊天流或文档助手交互。",
-            }
-        ),
-        410,
-    )
-
-
-@agent_bp.route("/choice", methods=["POST"])
-def agent_choice():
-    """Retired legacy choice callback for the removed agent-loop protocol."""
-    return (
-        jsonify(
-            {
-                "success": False,
-                "error": "旧版 Agent 选项回调已下线，请改用当前主聊天流或文档助手交互。",
-            }
-        ),
-        410,
-    )
-
-
 @agent_bp.route("/resume", methods=["POST"])
 def agent_resume():
     """Resume a KotoFlow pipeline paused at an approval gate."""

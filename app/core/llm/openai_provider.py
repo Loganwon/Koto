@@ -218,9 +218,10 @@ class OpenAIProvider(LLMProvider):
                 # model turn with tool calls
                 oai_tool_calls = []
                 for i, tc in enumerate(tool_calls_raw):
+                    tool_call_id = str(tc.get("id") or f"call_{i}").strip() or f"call_{i}"
                     oai_tool_calls.append(
                         {
-                            "id": f"call_{i}",
+                            "id": tool_call_id,
                             "type": "function",
                             "function": {
                                 "name": tc.get("name", ""),
@@ -241,10 +242,13 @@ class OpenAIProvider(LLMProvider):
             elif role == "tool":
                 # function result
                 name = turn.get("name", "tool")
+                tool_call_id = str(turn.get("tool_call_id") or "").strip()
+                if not tool_call_id:
+                    tool_call_id = str(turn.get("id") or "call_0").strip() or "call_0"
                 messages.append(
                     {
                         "role": "tool",
-                        "tool_call_id": f"call_0",
+                        "tool_call_id": tool_call_id,
                         "name": name,
                         "content": str(content),
                     }
@@ -317,7 +321,9 @@ class OpenAIProvider(LLMProvider):
                         args = json.loads(tc.function.arguments or "{}")
                     except json.JSONDecodeError:
                         args = {}
-                    tool_calls.append({"name": tc.function.name, "args": args})
+                    tool_calls.append(
+                        {"id": str(getattr(tc, "id", "") or ""), "name": tc.function.name, "args": args}
+                    )
 
         usage = {}
         if resp.usage:

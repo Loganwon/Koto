@@ -36,6 +36,36 @@ def test_workspace_static_js_only_task_renderer_calls_file_task_stream():
     assert offenders == []
 
 
+def test_workspace_notebook_tools_are_split_from_assistant_shell():
+    assistant_js = _read("web/static/js/workspace-assistant.js")
+    notebook_js = _read("web/static/js/workspace-notebook.js")
+    asset_scripts = _read("web/templates/_workspace_asset_scripts.html")
+
+    assert "window.WA.installWorkspaceNotebookTools" in notebook_js
+    assert "window.WA.openAudioOverview" in notebook_js
+    assert "window.WA.openNotebookGuide" in notebook_js
+    assert "window.WA.doSourceSearch" in notebook_js
+    assert "installWorkspaceNotebookTools({" in assistant_js
+    assert "window.WA.openAudioOverview = async" not in assistant_js
+    assert "window.WA.openNotebookGuide = async" not in assistant_js
+    assert "window.WA.doSourceSearch = " not in assistant_js
+    assert asset_scripts.index("workspace-notebook.js") < asset_scripts.index("workspace-assistant.js")
+
+
+def test_workspace_find_replace_tools_are_split_from_assistant_shell():
+    assistant_js = _read("web/static/js/workspace-assistant.js")
+    find_replace_js = _read("web/static/js/workspace-find-replace.js")
+    asset_scripts = _read("web/templates/_workspace_asset_scripts.html")
+
+    assert "window.WA.installWorkspaceFindReplace" in find_replace_js
+    assert "window.WA.docxFindInput" in find_replace_js
+    assert "window.WA.pptxFindInput" in find_replace_js
+    assert "installWorkspaceFindReplace({" in assistant_js
+    assert "window.WA.docxFindInput = " not in assistant_js
+    assert "window.WA.pptxFindInput = " not in assistant_js
+    assert asset_scripts.index("workspace-find-replace.js") < asset_scripts.index("workspace-assistant.js")
+
+
 def test_workspace_file_assistant_never_calls_retired_ai_task_routes():
     checked_paths = [
         "web/static/js/workspace-assistant.js",

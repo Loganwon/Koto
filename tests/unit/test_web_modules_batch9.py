@@ -369,58 +369,6 @@ class TestAuthManager:
 
 
 # ---------------------------------------------------------------------------
-# 8. BrowserAutomation
-# ---------------------------------------------------------------------------
-@pytest.mark.unit
-class TestBrowserAutomation:
-    """Tests for web.browser_automation.BrowserAutomation (all selenium mocked)"""
-
-    def _make(self):
-        with patch("web.browser_automation.BrowserAutomation._init_driver"):
-            from web.browser_automation import BrowserAutomation
-
-            ba = BrowserAutomation(headless=True)
-            ba.driver = None  # start with no driver
-            return ba
-
-    def test_init_headless(self):
-        ba = self._make()
-        assert ba.headless is True
-
-    def test_open_url_no_driver(self):
-        ba = self._make()
-        assert ba.open_url("https://example.com") is False
-
-    def test_find_element_no_driver(self):
-        ba = self._make()
-        assert ba.find_element("#test") is None
-
-    def test_find_elements_no_driver(self):
-        ba = self._make()
-        assert ba.find_elements(".items") == []
-
-    def test_click_no_driver(self):
-        ba = self._make()
-        assert ba.click("#btn") is False
-
-    def test_get_page_source_no_driver(self):
-        ba = self._make()
-        assert ba.get_page_source() is None
-
-    def test_get_current_url_no_driver(self):
-        ba = self._make()
-        assert ba.get_current_url() is None
-
-    def test_take_screenshot_no_driver(self):
-        ba = self._make()
-        assert ba.take_screenshot("out.png") is False
-
-    def test_quit_no_driver(self):
-        ba = self._make()
-        ba.quit()  # should not raise
-
-
-# ---------------------------------------------------------------------------
 # 9. ImageManager
 # ---------------------------------------------------------------------------
 @pytest.mark.unit

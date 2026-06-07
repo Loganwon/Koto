@@ -361,6 +361,61 @@ class TestGeminiFormatPromptRoles:
         assert roles <= {"user", "model"}, f"unexpected roles: {roles}"
 
 
+class TestOpenAIProviderMessageFormatting:
+    @staticmethod
+    def _provider():
+        from app.core.llm.openai_provider import OpenAIProvider
+
+        return OpenAIProvider.__new__(OpenAIProvider)
+
+    def test_tool_call_ids_are_preserved_across_turns(self):
+        prov = self._provider()
+        messages = prov._build_messages(
+            [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "call_first", "name": "read", "args": {"path": "a"}}
+                    ],
+                    "reasoning_content": "thinking",
+                },
+                {
+                    "role": "function",
+                    "name": "read",
+                    "tool_call_id": "call_first",
+                    "content": "done",
+                },
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "call_second", "name": "write", "args": {"path": "b"}}
+                    ],
+                },
+                {
+                    "role": "function",
+                    "name": "write",
+                    "tool_call_id": "call_second",
+                    "content": "done",
+                },
+            ],
+            system_instruction=None,
+        )
+
+        assistant_calls = [
+            msg["tool_calls"][0]["id"]
+            for msg in messages
+            if msg["role"] == "assistant" and msg.get("tool_calls")
+        ]
+        tool_ids = [
+            msg["tool_call_id"] for msg in messages if msg["role"] == "tool"
+        ]
+        assert assistant_calls == ["call_first", "call_second"]
+        assert tool_ids == ["call_first", "call_second"]
+        assert messages[0]["reasoning_content"] == "thinking"
+
+
 # ---------------------------------------------------------------------------
 # TestOllamaAutoDetect (continued) — expired cache + fallback
 # ---------------------------------------------------------------------------

@@ -172,8 +172,3 @@ def start_background_runtime(logger: Logger, get_workspace_root) -> threading.Th
         _runtime_thread = thread
         thread.start()
         return thread
-
-
-def preload_audio_stt(logger: Logger) -> None:
-    """Deprecated no-op kept for startup compatibility."""
-    logger.debug("[startup] legacy microphone voice engine preload removed")

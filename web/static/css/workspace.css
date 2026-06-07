@@ -2685,11 +2685,13 @@
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      padding-left: 10px;
-      padding-right: 2px;
+      padding: 2px;
       min-height: 28px;
-      border-left: 1px solid var(--border);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--surface, #ffffff) 88%, var(--bg-secondary, #f7f8fb) 12%);
       white-space: nowrap;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
     }
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-group.has-items {
       color: var(--text);
@@ -2705,15 +2707,32 @@
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-revision-mode,
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-summary {
       min-width: 0;
+      height: 24px;
       padding: 0 8px;
       font-size: 11px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      border-color: transparent;
+      background: transparent;
+    }
+    #wa-docx-editor .koto-tt-toolbar .wa-docx-review-mode:hover,
+    #wa-docx-editor .koto-tt-toolbar .wa-docx-review-revision-mode:hover,
+    #wa-docx-editor .koto-tt-toolbar .wa-docx-review-summary:hover {
+      background: var(--hover);
+      color: var(--text);
+    }
+    #wa-docx-editor .koto-tt-toolbar .wa-review-btn-icon {
+      flex-shrink: 0;
     }
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-mode.is-active,
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-revision-mode.is-active,
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-summary.is-active {
       color: var(--accent);
-      border-color: color-mix(in srgb, var(--accent) 42%, var(--ai-border));
-      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border-color: transparent;
+      background: color-mix(in srgb, var(--accent) 12%, #ffffff);
     }
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-summary {
       max-width: 136px;
@@ -5420,12 +5439,12 @@
     .koto-docx-comment-layer::-webkit-scrollbar-track { background: transparent; }
     .koto-docx-comment-layer::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 3px; }
     .koto-docx-comment-card {
-      border: 1px solid rgba(215, 185, 92, 0.58);
-      border-left: 3px solid #d9a21b;
-      border-radius: 6px;
-      background: #fffdf6;
-      box-shadow: none;
-      padding: 7px 8px;
+      border: 1px solid var(--ai-border);
+      border-left: 3px solid var(--accent);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--surface, #ffffff) 96%, var(--accent) 4%);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+      padding: 8px 9px;
       display: flex;
       flex-direction: column;
       gap: 6px;
@@ -5435,9 +5454,9 @@
       overflow-wrap: anywhere;
     }
     .koto-docx-comment-card.is-focused {
-      border-color: rgba(217, 162, 27, 0.78);
-      border-left-color: #c98910;
-      box-shadow: 0 0 0 2px rgba(217, 162, 27, 0.14);
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--ai-border));
+      border-left-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), 0 12px 24px rgba(15, 23, 42, 0.08);
     }
     .koto-docx-comment-card.is-done {
       opacity: 0.74;
@@ -5472,8 +5491,8 @@
       justify-content: center;
       padding: 2px 6px;
       border-radius: 50%;
-      background: #f2c94c;
-      color: #4a3a14;
+      background: color-mix(in srgb, var(--accent) 12%, #ffffff);
+      color: var(--accent);
       font-size: 9px;
       font-weight: 700;
       letter-spacing: 0.05em;
@@ -5503,6 +5522,8 @@
       font-size: 11px;
       color: var(--text-muted);
       line-height: 1.45;
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--accent) 5%, transparent);
     }
     .koto-docx-comment-body {
       color: var(--text);
@@ -5526,9 +5547,9 @@
     .koto-docx-comment-inline-action,
     .wa-review-anchor-inline {
       border: 1px solid color-mix(in srgb, var(--ai-border) 76%, transparent);
-      background: color-mix(in srgb, var(--surface, #ffffff) 90%, var(--hover, #f4f6fb) 10%);
+      background: color-mix(in srgb, var(--surface, #ffffff) 92%, var(--hover, #f4f6fb) 8%);
       color: var(--text-muted);
-      border-radius: 999px;
+      border-radius: 6px;
       padding: 2px 7px;
       cursor: pointer;
       font-size: 9.5px;
@@ -5548,7 +5569,7 @@
       color: var(--text-muted);
       padding: 8px 10px;
       border-radius: 6px;
-      background: color-mix(in srgb, #f59e0b 10%, transparent);
+      background: color-mix(in srgb, var(--accent) 8%, transparent);
     }
     .koto-docx-comment-edit {
       width: 100%;
@@ -5658,19 +5679,38 @@
       display: flex;
       flex-wrap: nowrap;
       align-items: center;
-      gap: 6px;
-      padding: 6px 8px;
-      border: 1px solid rgba(226, 191, 102, 0.42);
+      gap: 8px;
+      padding: 7px 8px;
+      border: 1px solid color-mix(in srgb, var(--ai-border) 84%, transparent);
       border-radius: 8px;
-      background: rgba(255, 253, 247, 0.98);
-      box-shadow: 0 8px 18px rgba(54, 42, 11, 0.08);
+      background: color-mix(in srgb, var(--surface, #ffffff) 96%, var(--bg-secondary, #f7f8fb) 4%);
+      box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
       pointer-events: auto;
     }
     .wa-review-selection-box {
       width: 100%;
-      max-width: min(360px, calc(100vw - 20px));
-      min-height: 34px;
+      max-width: min(420px, calc(100vw - 20px));
+      min-height: 42px;
       box-sizing: border-box;
+    }
+    .wa-review-selection-kicker {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 10%, #ffffff);
+      border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+      flex: 0 0 auto;
+    }
+    .wa-review-selection-copy {
+      min-width: 0;
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
     }
     .wa-review-selection-actions {
       display: inline-flex;
@@ -5679,63 +5719,71 @@
       flex-shrink: 0;
     }
     .wa-review-selection-title {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      margin: -1px;
-      padding: 0;
-      border: 0;
-      clip: rect(0 0 0 0);
-      clip-path: inset(50%);
-      overflow: hidden;
+      color: var(--text);
+      font-size: 11.5px;
+      font-weight: 700;
+      line-height: 1.2;
       white-space: nowrap;
     }
     .wa-review-selection-subtitle {
       min-width: 0;
-      flex: 1 1 auto;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-      color: #374151;
-      font-size: 12px;
+      color: var(--text-muted);
+      font-size: 10.5px;
       font-weight: 500;
-      line-height: 20px;
+      line-height: 1.35;
     }
     .wa-review-selection-add {
-      border: 1px solid rgba(206, 156, 38, 0.35);
-      background: rgba(245, 158, 11, 0.12);
-      color: #8a5a0e;
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      background: var(--accent);
+      color: #ffffff;
       border-radius: 6px;
-      min-width: 36px;
-      height: 22px;
-      padding: 0 8px;
-      font-size: 12px;
-      font-weight: 700;
+      min-width: 58px;
+      height: 28px;
+      padding: 0 9px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      font-size: 11.5px;
+      font-weight: 650;
       cursor: pointer;
       pointer-events: auto;
       flex-shrink: 0;
-      line-height: 20px;
+      line-height: 1;
       white-space: nowrap;
       writing-mode: horizontal-tb;
       text-orientation: mixed;
+      box-shadow: 0 5px 12px color-mix(in srgb, var(--accent) 20%, transparent);
+      transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease;
+    }
+    .wa-review-selection-add svg {
+      flex-shrink: 0;
     }
     .wa-review-selection-add:hover {
-      background: rgba(245, 158, 11, 0.2);
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+      transform: translateY(-1px);
     }
     .wa-review-selection-add:focus-visible {
       outline: none;
-      box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
     }
     .wa-review-selection-revise {
-      border-color: rgba(37, 99, 235, 0.24);
-      background: rgba(37, 99, 235, 0.08);
-      color: #1d4ed8;
+      border-color: rgba(15, 118, 110, 0.20);
+      background: rgba(15, 118, 110, 0.08);
+      color: #0f766e;
+      box-shadow: none;
     }
     .wa-review-selection-revise:hover {
-      background: rgba(37, 99, 235, 0.14);
+      background: rgba(15, 118, 110, 0.14);
+      border-color: rgba(15, 118, 110, 0.28);
+      color: #0f766e;
     }
     .wa-review-selection-revise:focus-visible {
-      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
     }
 
     /* Focused: solid bold connector */
@@ -5808,21 +5856,21 @@
     [data-comment-ui="wps"] .koto-docx-comment-card {
       width: var(--wa-review-rail-width, 240px);
       max-width: var(--wa-review-rail-width, 240px);
-      border-color: rgba(215, 185, 92, 0.58);
-      border-left-color: #d9a21b;
-      background: #fffdf6;
-      box-shadow: none;
+      border-color: var(--ai-border);
+      border-left-color: var(--accent);
+      background: color-mix(in srgb, var(--surface, #ffffff) 96%, var(--accent) 4%);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
     }
     [data-comment-ui="wps"] .koto-docx-comment-badge {
-      background: #f2c94c;
-      color: #4a3a14;
+      background: color-mix(in srgb, var(--accent) 12%, #ffffff);
+      color: var(--accent);
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card,
     #wa-review-shell.wa-review-shell-docx .wa-proposal-card {
-      min-height: 20px;
-      padding: 1px 4px;
-      gap: 2px;
-      border-radius: 6px;
+      min-height: var(--wa-review-card-anchor-min-height, 20px);
+      padding: 4px 6px;
+      gap: 3px;
+      border-radius: 8px;
       display: flex;
       align-items: center;
       overflow: hidden;
@@ -5836,10 +5884,10 @@
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card {
       position: absolute;
-      min-height: 42px;
-      padding: 7px 8px 8px;
+      min-height: var(--wa-review-card-anchor-min-height, 42px);
+      padding: 8px 9px;
       gap: 5px;
-      border-radius: 6px;
+      border-radius: 8px;
       display: flex;
       flex-direction: column;
       align-items: stretch;
@@ -5872,10 +5920,10 @@
       min-height: 18px;
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-badge {
-      width: 18px;
-      height: 18px;
+      width: 20px;
+      height: 20px;
       padding: 0;
-      font-size: 10px;
+      font-size: 9.5px;
       font-weight: 700;
       letter-spacing: 0.03em;
     }
@@ -5915,11 +5963,11 @@
       visibility: hidden;
       opacity: 0;
       pointer-events: none;
-      padding: 2px 8px;
-      border: 1px solid rgba(59, 130, 246, 0.12);
-      border-radius: 999px;
-      background: rgba(217, 162, 27, 0.08);
-      color: #475569;
+      padding: 2px 6px;
+      border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--accent) 7%, #ffffff);
+      color: var(--accent);
       font-size: 9px;
       font-weight: 600;
       transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
@@ -5929,13 +5977,14 @@
       visibility: hidden;
       opacity: 0;
       pointer-events: none;
-      padding: 2px 0;
-      border: 0;
+      padding: 2px 5px;
+      border: 1px solid transparent;
+      border-radius: 5px;
       background: transparent;
       color: #64748b;
       font-size: 9px;
       font-weight: 600;
-      transition: opacity 0.12s ease, color 0.12s ease;
+      transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card:hover .wa-review-anchor-inline,
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-focused .wa-review-anchor-inline,
@@ -5952,14 +6001,16 @@
       pointer-events: auto;
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-inline-action:hover {
-      color: #1d4ed8;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 7%, #ffffff);
+      border-color: color-mix(in srgb, var(--accent) 14%, transparent);
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-card {
-      border-color: rgba(148, 163, 184, 0.32);
-      border-left: 3px solid #3b82f6;
-      border-radius: 6px;
-      background: #ffffff;
-      box-shadow: none;
+      border-color: var(--ai-border);
+      border-left: 3px solid #0f766e;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--surface, #ffffff) 96%, #0f766e 4%);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-header {
       flex: 0 0 auto;
@@ -5972,12 +6023,12 @@
       white-space: nowrap;
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-badge {
-      padding: 1px 4px;
-      font-size: 7.5px;
+      padding: 2px 6px;
+      font-size: 8px;
       border-radius: 999px;
       letter-spacing: 0.04em;
-      background: rgba(59, 130, 246, 0.10);
-      color: #2563eb;
+      background: rgba(15, 118, 110, 0.10);
+      color: #0f766e;
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-diff {
       flex: 1 1 auto;
@@ -6043,17 +6094,17 @@
       min-width: 0;
       width: auto;
       min-height: 0;
-      padding: 0;
-      border: 0;
-      border-radius: 0;
-      background: transparent;
+      padding: 2px 5px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: color-mix(in srgb, var(--surface, #ffffff) 84%, transparent);
       box-shadow: none;
       opacity: 0.84;
       font-size: 0;
       line-height: 1;
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-actions .wa-proposal-btn:hover {
-      background: transparent;
+      background: color-mix(in srgb, var(--hover) 80%, #ffffff);
       opacity: 1;
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-actions .wa-proposal-btn.accept.small {
@@ -6084,7 +6135,7 @@
       min-height: 24px;
       padding: 3px 9px;
       border: 1px solid rgba(148, 163, 184, 0.28);
-      border-radius: 999px;
+      border-radius: 6px;
       background: #ffffff;
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-actions .wa-proposal-btn::before {
@@ -6098,27 +6149,33 @@
       padding: 7px 8px;
       align-items: flex-start;
       overflow: visible;
-      border-color: rgba(59, 130, 246, 0.32);
-      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.10);
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--ai-border));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent), 0 12px 24px rgba(15, 23, 42, 0.08);
       z-index: 3;
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card:hover,
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-focused {
       padding: 7px 8px 8px;
       align-items: stretch;
-      border-color: rgba(217, 162, 27, 0.78);
-      border-left-color: #c98910;
-      box-shadow: 0 0 0 2px rgba(217, 162, 27, 0.14);
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--ai-border));
+      border-left-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), 0 12px 24px rgba(15, 23, 42, 0.08);
       transform: none;
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded {
       padding: 8px 9px;
       align-items: stretch;
       overflow: visible;
-      border-color: rgba(217, 162, 27, 0.78);
-      border-left-color: #c98910;
-      box-shadow: 0 0 0 2px rgba(217, 162, 27, 0.14);
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--ai-border));
+      border-left-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), 0 12px 24px rgba(15, 23, 42, 0.08);
       z-index: 4;
+    }
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card:hover,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.focused {
+      border-color: rgba(15, 118, 110, 0.34);
+      border-left-color: #0f766e;
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.10), 0 12px 24px rgba(15, 23, 42, 0.08);
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .koto-docx-comment-head {
       align-items: flex-start;
@@ -6163,6 +6220,20 @@
     #wa-review-shell.wa-review-shell-docx .wa-proposal-card:hover .wa-proposal-note,
     #wa-review-shell.wa-review-shell-docx .wa-proposal-card.focused .wa-proposal-note {
       align-items: flex-start;
+    }
+
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-page-bounded,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-page-bounded {
+      max-height: var(--wa-review-card-page-max-height, none);
+      overflow: hidden;
+    }
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-page-bounded:hover,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-page-bounded.is-focused,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-page-bounded.is-hover-expanded,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-page-bounded:hover,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-page-bounded.focused,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-page-bounded.is-editing {
+      overflow: auto !important;
     }
 
     /* ── PEMO-style Welcome Card ── */
@@ -8686,10 +8757,12 @@
   margin: 8px 0;
   padding: 0;
   border: 1px solid var(--ai-border);
-  border-radius: 12px;
-  background: var(--surface);
+  border-left: 3px solid #0f766e;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface, #ffffff) 96%, #0f766e 4%);
   overflow: hidden;
-  transition: opacity 0.3s, border-color 0.3s;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  transition: opacity 0.3s, border-color 0.3s, box-shadow 0.2s;
 }
 .wa-proposal-card.accepted {
   border-color: rgba(22,163,74,0.3);
@@ -8707,8 +8780,8 @@
   opacity: 0.4;
 }
 .wa-proposal-card.focused {
-  border-color: rgba(65,145,255,0.35);
-  box-shadow: 0 0 0 2px rgba(65,145,255,0.18), 0 14px 28px rgba(30,62,120,0.16);
+  border-color: color-mix(in srgb, #0f766e 42%, var(--ai-border));
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12), 0 12px 24px rgba(15, 23, 42, 0.08);
 }
 .wa-proposal-card.rejected .wa-proposal-actions { display: none; }
 .wa-proposal-card.rejected .wa-proposal-header::after {
@@ -8722,17 +8795,17 @@
   display: flex;
   align-items: center;
   padding: 8px 14px;
-  background: var(--accent-subtle);
+  background: transparent;
   border-bottom: 1px solid var(--hover);
   font-size: 12px;
 }
 .wa-proposal-badge {
-  background: var(--accent);
-  color: #fff;
+  background: rgba(15, 118, 110, 0.10);
+  color: #0f766e;
   font-size: 10.5px;
   font-weight: 700;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 999px;
   letter-spacing: 0.03em;
 }
 

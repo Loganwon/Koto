@@ -1,9 +1,12 @@
 import json
+import zipfile
 
 import pytest
 
 
-def test_create_file_docx_emits_docx_write_metrics_and_valid_package(tmp_path, monkeypatch):
+def test_create_file_docx_emits_docx_write_metrics_and_valid_package(
+    tmp_path, monkeypatch
+):
     import app.core.agent.task_tools as task_tools
 
     monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
@@ -55,6 +58,28 @@ def test_create_file_docx_cleans_markdown_rule_and_bold_markers(tmp_path, monkey
     assert paragraphs[0] == "当前页窗摘要（第 4-6 页）"
 
 
+def test_write_docx_content_parses_loose_paragraph_objects_with_inner_quotes(
+    tmp_path, monkeypatch
+):
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    loose = (
+        '[{"text": "Section 1", "style": "Normal"}, '
+        '{"text": "关于"身体"的讨论", "style": "Normal"}]'
+    )
+
+    result = json.loads(task_tools.write_docx_content("loose.docx", loose))
+
+    from docx import Document
+
+    doc = Document(tmp_path / "loose.docx")
+    paragraphs = [paragraph.text for paragraph in doc.paragraphs if paragraph.text]
+    assert result["success"] is True
+    assert result["paragraphs_written"] == 2
+    assert paragraphs == ["Section 1", '关于"身体"的讨论']
+
+
 def test_create_file_xlsx_emits_sheet_metrics_and_valid_workbook(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
 
@@ -103,18 +128,29 @@ def test_verify_task_completion_uses_structured_docx_table_metadata():
     result = json.loads(
         verify_task_completion(
             task_description="把 xlsx 表格加入 docx",
-            file_states=json.dumps([
-                {"path": "report.docx", "exists": True, "modified": True, "preview": "..."}
-            ], ensure_ascii=False),
-            file_changes=json.dumps([
-                {
-                    "path": "report.docx",
-                    "operation": "insert_excel_as_docx_table",
-                    "sheet": "汇总表",
-                    "rows_written": 200,
-                    "columns_written": 4,
-                }
-            ], ensure_ascii=False),
+            file_states=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "exists": True,
+                        "modified": True,
+                        "preview": "...",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "operation": "insert_excel_as_docx_table",
+                        "sheet": "汇总表",
+                        "rows_written": 200,
+                        "columns_written": 4,
+                    }
+                ],
+                ensure_ascii=False,
+            ),
             target_path="report.docx",
         )
     )
@@ -123,8 +159,14 @@ def test_verify_task_completion_uses_structured_docx_table_metadata():
     assert "文件已成功修改：report.docx" in result["summary"]
     assert "工作表“汇总表”" in result["summary"]
     assert "200 行 × 4 列" in result["summary"]
-    assert any(item["criterion"] == "all_tracked_files_modified" and item["passed"] is True for item in result["criteria_results"])
-    assert any(item["criterion"] == "target_file_hit" and item["passed"] is True for item in result["criteria_results"])
+    assert any(
+        item["criterion"] == "all_tracked_files_modified" and item["passed"] is True
+        for item in result["criteria_results"]
+    )
+    assert any(
+        item["criterion"] == "target_file_hit" and item["passed"] is True
+        for item in result["criteria_results"]
+    )
 
 
 def test_verify_task_completion_uses_structured_docx_image_metadata():
@@ -133,18 +175,29 @@ def test_verify_task_completion_uses_structured_docx_image_metadata():
     result = json.loads(
         verify_task_completion(
             task_description="把图表加入 docx",
-            file_states=json.dumps([
-                {"path": "report.docx", "exists": True, "modified": True, "preview": "..."}
-            ], ensure_ascii=False),
-            file_changes=json.dumps([
-                {
-                    "path": "report.docx",
-                    "operation": "insert_image_into_docx",
-                    "image_name": "chart.png",
-                    "images_inserted": 1,
-                    "caption": "收入与利润趋势",
-                }
-            ], ensure_ascii=False),
+            file_states=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "exists": True,
+                        "modified": True,
+                        "preview": "...",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "operation": "insert_image_into_docx",
+                        "image_name": "chart.png",
+                        "images_inserted": 1,
+                        "caption": "收入与利润趋势",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
             target_path="report.docx",
         )
     )
@@ -161,26 +214,42 @@ def test_verify_task_completion_rejects_table_only_result_when_task_requires_sum
     result = json.loads(
         verify_task_completion(
             task_description="整理 xlsx 中的财务预测，并加入 docx",
-            file_states=json.dumps([
-                {"path": "report.docx", "exists": True, "modified": True, "preview": "..."}
-            ], ensure_ascii=False),
-            file_changes=json.dumps([
-                {
-                    "path": "report.docx",
-                    "operation": "insert_excel_as_docx_table",
-                    "sheet": "P&L",
-                    "rows_written": 50,
-                    "columns_written": 13,
-                }
-            ], ensure_ascii=False),
+            file_states=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "exists": True,
+                        "modified": True,
+                        "preview": "...",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "operation": "insert_excel_as_docx_table",
+                        "sheet": "P&L",
+                        "rows_written": 50,
+                        "columns_written": 13,
+                    }
+                ],
+                ensure_ascii=False,
+            ),
             target_path="report.docx",
         )
     )
 
     assert result["completed"] is False
     assert "当前只写入了表格" in result["summary"]
-    assert result["remaining_steps"] == ["先提炼关键结论，再用 write_docx_content 把摘要/说明写入目标 DOCX"]
-    assert any(item["criterion"] == "docx_narrative_write_present" and item["passed"] is False for item in result["criteria_results"])
+    assert result["remaining_steps"] == [
+        "先提炼关键结论，再用 write_docx_content 把摘要/说明写入目标 DOCX"
+    ]
+    assert any(
+        item["criterion"] == "docx_narrative_write_present" and item["passed"] is False
+        for item in result["criteria_results"]
+    )
 
 
 def test_verify_task_completion_detects_target_mismatch_from_structured_changes():
@@ -189,16 +258,27 @@ def test_verify_task_completion_detects_target_mismatch_from_structured_changes(
     result = json.loads(
         verify_task_completion(
             task_description="修改目标报告",
-            file_states=json.dumps([
-                {"path": "other.docx", "exists": True, "modified": True, "preview": "..."}
-            ], ensure_ascii=False),
-            file_changes=json.dumps([
-                {
-                    "path": "other.docx",
-                    "operation": "write_docx_content",
-                    "paragraphs_written": 1,
-                }
-            ], ensure_ascii=False),
+            file_states=json.dumps(
+                [
+                    {
+                        "path": "other.docx",
+                        "exists": True,
+                        "modified": True,
+                        "preview": "...",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": "other.docx",
+                        "operation": "write_docx_content",
+                        "paragraphs_written": 1,
+                    }
+                ],
+                ensure_ascii=False,
+            ),
             target_path="report.docx",
         )
     )
@@ -222,21 +302,32 @@ def test_verify_task_completion_rejects_locked_target_fallback_copy_as_original_
     result = json.loads(
         verify_task_completion(
             task_description="把 xlsx 表格加入 docx",
-            file_states=json.dumps([
-                {"path": "report.koto-copy.docx", "exists": True, "modified": True, "preview": "..."}
-            ], ensure_ascii=False),
-            file_changes=json.dumps([
-                {
-                    "path": "report.koto-copy.docx",
-                    "operation": "insert_excel_as_docx_table",
-                    "sheet": "汇总表",
-                    "rows_written": 200,
-                    "columns_written": 4,
-                    "original_target_path": "report.docx",
-                    "fallback_copy": True,
-                    "blocked_target": True,
-                }
-            ], ensure_ascii=False),
+            file_states=json.dumps(
+                [
+                    {
+                        "path": "report.koto-copy.docx",
+                        "exists": True,
+                        "modified": True,
+                        "preview": "...",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": "report.koto-copy.docx",
+                        "operation": "insert_excel_as_docx_table",
+                        "sheet": "汇总表",
+                        "rows_written": 200,
+                        "columns_written": 4,
+                        "original_target_path": "report.docx",
+                        "fallback_copy": True,
+                        "blocked_target": True,
+                    }
+                ],
+                ensure_ascii=False,
+            ),
             target_path="report.docx",
         )
     )
@@ -244,10 +335,14 @@ def test_verify_task_completion_rejects_locked_target_fallback_copy_as_original_
     assert result["completed"] is False
     assert "目标文件尚未完成修改：report.docx" in result["summary"]
     assert "report.koto-copy.docx" in result["summary"]
-    assert result["remaining_steps"] == ["检查 report.docx 的文件权限；如果文件正在被占用，关闭相关程序后重新写回原文件"]
+    assert result["remaining_steps"] == [
+        "检查 report.docx 的文件权限；如果文件正在被占用，关闭相关程序后重新写回原文件"
+    ]
 
 
-def test_verify_task_completion_matches_workspace_relative_target_to_absolute_change(tmp_path, monkeypatch):
+def test_verify_task_completion_matches_workspace_relative_target_to_absolute_change(
+    tmp_path, monkeypatch
+):
     import app.core.agent.task_tools as task_tools
 
     monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
@@ -259,16 +354,27 @@ def test_verify_task_completion_matches_workspace_relative_target_to_absolute_ch
     result = json.loads(
         verify_task_completion(
             task_description="润色当前文本并写回原文件",
-            file_states=json.dumps([
-                {"path": str(target_path), "exists": True, "modified": True, "preview": "updated"}
-            ], ensure_ascii=False),
-            file_changes=json.dumps([
-                {
-                    "path": str(target_path),
-                    "operation": "run_python_code",
-                    "summary": "Python 代码更新了 notes.txt",
-                }
-            ], ensure_ascii=False),
+            file_states=json.dumps(
+                [
+                    {
+                        "path": str(target_path),
+                        "exists": True,
+                        "modified": True,
+                        "preview": "updated",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": str(target_path),
+                        "operation": "run_python_code",
+                        "summary": "Python 代码更新了 notes.txt",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
             target_path="notes.txt",
         )
     )
@@ -332,11 +438,81 @@ def test_annotate_file_returns_standard_file_change_payload(tmp_path, monkeypatc
     assert change["annotations_added"] == 1
 
 
-def test_annotate_file_docx_requirement_returns_streaming_native_tool_result(tmp_path, monkeypatch):
+def test_replace_file_selection_writes_text_selection_and_registers_change(
+    tmp_path, monkeypatch
+):
+    import app.core.agent.task_tools as task_tools
+    from app.core.agent.file_task_tool_catalog import parse_file_change
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    notes_path = tmp_path / "notes.md"
+    notes_path.write_text("开场很啰嗦，需要改短。\n下一段保留。", encoding="utf-8")
+
+    result = task_tools.replace_file_selection(
+        "notes.md",
+        original_selection="开场很啰嗦，需要改短。",
+        new_content="开场应更短、更直接。",
+    )
+    payload = json.loads(result)
+    change = parse_file_change(
+        "replace_file_selection",
+        {
+            "path": "notes.md",
+            "original_selection": "开场很啰嗦，需要改短。",
+            "new_content": "开场应更短、更直接。",
+        },
+        result,
+    )
+
+    assert payload["success"] is True
+    assert payload["path"] == "notes.md"
+    assert payload["operation"] == "replace_file_selection"
+    assert payload["replacements_made"] == 1
+    assert change["operation"] == "replace_file_selection"
+    assert change["replacements_made"] == 1
+    assert "开场应更短、更直接。" in notes_path.read_text(encoding="utf-8")
+    assert (tmp_path / "notes.md.bak").exists()
+
+
+def test_replace_file_selection_requires_existing_selection(tmp_path, monkeypatch):
+    import app.core.agent.task_tools as task_tools
+    from app.core.agent.file_task_tool_catalog import parse_file_change
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    notes_path = tmp_path / "notes.txt"
+    notes_path.write_text("alpha beta", encoding="utf-8")
+
+    result = task_tools.replace_file_selection(
+        "notes.txt",
+        original_selection="gamma",
+        new_content="delta",
+    )
+    payload = json.loads(result)
+    change = parse_file_change(
+        "replace_file_selection",
+        {"path": "notes.txt", "original_selection": "gamma", "new_content": "delta"},
+        result,
+    )
+
+    assert payload["changed"] is False
+    assert payload["error"] == "original_selection_not_found"
+    assert change is None
+    assert notes_path.read_text(encoding="utf-8") == "alpha beta"
+
+
+def test_annotate_file_docx_requirement_returns_streaming_native_tool_result(
+    tmp_path, monkeypatch
+):
     import app.core.agent.file_task_doc_annotate_bridge as bridge
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_contract import FileTaskToolStreamChunk, FileTaskToolStreamResult
-    from app.core.agent.file_task_tool_gateway import FileTaskToolContext, FileTaskToolGateway
+    from app.core.agent.file_task_contract import (
+        FileTaskToolStreamChunk,
+        FileTaskToolStreamResult,
+    )
+    from app.core.agent.file_task_tool_gateway import (
+        FileTaskToolContext,
+        FileTaskToolGateway,
+    )
 
     monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
     docx_path = tmp_path / "draft.docx"
@@ -399,7 +575,11 @@ def test_annotate_file_docx_requirement_returns_streaming_native_tool_result(tmp
 
     chunks = list(result.chunks)
     progress_chunk = next(
-        chunk for chunk in chunks if chunk.kind == "event" and chunk.event_type == "step_progress" and chunk.payload.get("file_updated")
+        chunk
+        for chunk in chunks
+        if chunk.kind == "event"
+        and chunk.event_type == "step_progress"
+        and chunk.payload.get("file_updated")
     )
     final_chunk = chunks[-1]
 
@@ -408,7 +588,10 @@ def test_annotate_file_docx_requirement_returns_streaming_native_tool_result(tmp
     assert captured["request"].target_path == "draft.docx"
     assert captured["request"].task == "请批注不通顺的地方"
     assert captured["request"].model_id == "gemini-2.5-pro"
-    assert any(file_info.type == "docx" and file_info.target for file_info in captured["request"].files)
+    assert any(
+        file_info.type == "docx" and file_info.target
+        for file_info in captured["request"].files
+    )
     assert progress_chunk.payload["path"] == "draft.docx"
     assert final_chunk.kind == "result"
     assert final_chunk.payload["path"] == "draft.docx"
@@ -416,7 +599,9 @@ def test_annotate_file_docx_requirement_returns_streaming_native_tool_result(tmp
     assert final_chunk.payload["updated_in_place"] is True
 
 
-def test_clear_docx_review_marks_removes_docx_comments_and_registers_file_change(tmp_path, monkeypatch):
+def test_clear_docx_review_marks_removes_docx_comments_and_registers_file_change(
+    tmp_path, monkeypatch
+):
     docx_module = pytest.importorskip("docx")
 
     import app.core.agent.task_tools as task_tools
@@ -442,11 +627,15 @@ def test_clear_docx_review_marks_removes_docx_comments_and_registers_file_change
 
     with zipfile.ZipFile(docx_path) as archive:
         assert "word/comments.xml" in archive.namelist()
-        assert "commentReference" in archive.read("word/document.xml").decode("utf-8", errors="ignore")
+        assert "commentReference" in archive.read("word/document.xml").decode(
+            "utf-8", errors="ignore"
+        )
 
     result = task_tools.clear_docx_review_marks("draft.docx", scope="comments")
     payload = json.loads(result)
-    change = parse_file_change("clear_docx_review_marks", {"path": "draft.docx", "scope": "comments"}, result)
+    change = parse_file_change(
+        "clear_docx_review_marks", {"path": "draft.docx", "scope": "comments"}, result
+    )
 
     assert payload["success"] is True
     assert payload["path"] == "draft.docx"
@@ -459,7 +648,9 @@ def test_clear_docx_review_marks_removes_docx_comments_and_registers_file_change
 
     with zipfile.ZipFile(docx_path) as archive:
         names = archive.namelist()
-        document_xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
+        document_xml = archive.read("word/document.xml").decode(
+            "utf-8", errors="ignore"
+        )
     assert "word/comments.xml" not in names
     assert "commentRangeStart" not in document_xml
     assert "commentRangeEnd" not in document_xml
@@ -469,9 +660,293 @@ def test_clear_docx_review_marks_removes_docx_comments_and_registers_file_change
 def test_task_tools_plugin_exposes_clear_docx_review_marks_tool():
     from app.core.agent.task_tools import TaskToolsPlugin
 
-    tool_names = {tool["name"] for tool in TaskToolsPlugin(task_files=[{"path": "draft.docx", "type": "docx"}]).get_tools()}
+    tool_names = {
+        tool["name"]
+        for tool in TaskToolsPlugin(
+            task_files=[{"path": "draft.docx", "type": "docx"}]
+        ).get_tools()
+    }
 
     assert "clear_docx_review_marks" in tool_names
+    assert "compare_docx_and_annotate" in tool_names
+    assert "plan_docx_compare_annotations" in tool_names
+    assert "write_docx_comments" in tool_names
+    assert "replace_file_selection" in tool_names
+
+
+def test_contract_risk_summary_groups_common_clause_changes():
+    import app.core.agent.task_tools as task_tools
+
+    risks = task_tools._contract_risk_summary_from_annotations(
+        [
+            {
+                "原文片段": "付款期限调整为十五日。",
+                "批注内容": "另一份为：付款期限为三十日。本文件为：付款期限为十五日。",
+            },
+            {
+                "原文片段": "任一方可提前终止合同。",
+                "批注内容": "另一份为：提前三十日通知。本文件为：提前七日通知。",
+            },
+            {
+                "原文片段": "违约金按合同金额百分之二十计算。",
+                "批注内容": "本文件提高违约金比例。",
+            },
+        ]
+    )
+
+    assert any(item.startswith("付款/费用") for item in risks)
+    assert any(item.startswith("终止/解除") for item in risks)
+    assert any(item.startswith("违约责任") for item in risks)
+
+
+def test_compare_docx_and_annotate_writes_word_comments(tmp_path, monkeypatch):
+    docx_module = pytest.importorskip("docx")
+
+    import app.core.agent.task_tools as task_tools
+    from app.core.agent.file_task_tool_catalog import parse_file_change
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    original_path = tmp_path / "humanise!.docx"
+    revised_path = tmp_path / "humanise!_revised.docx"
+
+    original = docx_module.Document()
+    original.add_paragraph("AI 助手应该保持稳定的任务执行。")
+    original.add_paragraph("旧版本只给出建议，没有写回文件。")
+    original.save(original_path)
+
+    revised = docx_module.Document()
+    revised.add_paragraph("AI 助手应该保持稳定且可核验的任务执行。")
+    revised.add_paragraph("新版本必须写回文件，并展示真实差异。")
+    revised.save(revised_path)
+
+    annotations, detected = task_tools._build_docx_compare_annotations(
+        ["AI 助手应该保持稳定的任务执行。"],
+        ["AI 助手应该保持稳定且可核验的任务执行。"],
+        max_differences=5,
+    )
+    assert detected == 1
+    assert annotations[0]["原文片段"] != "AI 助手应该保持稳定且可核验的任务执行。"
+    assert "可核验" in annotations[0]["原文片段"]
+    assert "批注内容" in annotations[0]
+    assert "修改后文本" not in annotations[0]
+
+    result = task_tools.compare_docx_and_annotate(
+        "humanise!.docx",
+        "humanise!_revised.docx",
+    )
+    payload = json.loads(result)
+    change = parse_file_change(
+        "compare_docx_and_annotate",
+        {
+            "original_path": "humanise!.docx",
+            "revised_path": "humanise!_revised.docx",
+        },
+        result,
+    )
+
+    assert payload["success"] is True
+    assert payload["operation"] == "compare_docx_and_annotate"
+    assert payload["annotations_added"] >= 1
+    assert payload["differences_detected"] >= 1
+    assert change["operation"] == "compare_docx_and_annotate"
+    assert change["annotations_added"] >= 1
+
+    with zipfile.ZipFile(revised_path, "r") as archive:
+        names = archive.namelist()
+        document_xml = archive.read("word/document.xml").decode(
+            "utf-8", errors="ignore"
+        )
+        comments_xml = archive.read("word/comments.xml").decode(
+            "utf-8", errors="ignore"
+        )
+    assert "word/comments.xml" in names
+    assert "commentRangeStart" in document_xml
+    assert "差异" in comments_xml
+    assert "另一份为" in comments_xml
+    assert "本文件为" in comments_xml
+    assert "差异类型" not in comments_xml
+    assert "建议改为" not in comments_xml
+
+
+def test_compare_docx_and_annotate_can_mark_original_document(tmp_path, monkeypatch):
+    docx_module = pytest.importorskip("docx")
+
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    original_path = tmp_path / "humanise!.docx"
+    revised_path = tmp_path / "humanise!_revised.docx"
+
+    original = docx_module.Document()
+    original.add_paragraph("文件助手需要理解用户真正想要的结果，而不是只看关键词。")
+    original.save(original_path)
+
+    revised = docx_module.Document()
+    revised.add_paragraph("文件助手需要理解用户真正想要的结果，而不是只看触发词。")
+    revised.save(revised_path)
+
+    result = task_tools.compare_docx_and_annotate(
+        "humanise!.docx",
+        "humanise!_revised.docx",
+        target_path="humanise!.docx",
+    )
+    payload = json.loads(result)
+
+    assert payload["success"] is True
+    assert payload["path"] == "humanise!.docx"
+    assert payload["annotations_added"] == 1
+
+    with zipfile.ZipFile(original_path, "r") as archive:
+        names = archive.namelist()
+        original_document_xml = archive.read("word/document.xml").decode(
+            "utf-8", errors="ignore"
+        )
+        original_comments_xml = archive.read("word/comments.xml").decode(
+            "utf-8", errors="ignore"
+        )
+    with zipfile.ZipFile(revised_path, "r") as archive:
+        revised_names = archive.namelist()
+
+    assert "word/comments.xml" in names
+    assert "word/comments.xml" not in revised_names
+    assert "commentRangeStart" in original_document_xml
+    assert "关键词" in original_document_xml
+    assert "被标注原文" in original_comments_xml
+    assert "触发词" in original_comments_xml
+    assert "建议改为" not in original_comments_xml
+
+
+def test_plan_then_write_docx_comments_marks_original_document(tmp_path, monkeypatch):
+    docx_module = pytest.importorskip("docx")
+
+    import app.core.agent.task_tools as task_tools
+    from app.core.agent.file_task_tool_catalog import parse_file_change
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    original_path = tmp_path / "contract_old.docx"
+    revised_path = tmp_path / "contract_new.docx"
+
+    original = docx_module.Document()
+    original.add_paragraph("付款期限为30日。")
+    original.add_paragraph("任一方提前30日通知可终止合同。")
+    original.save(original_path)
+
+    revised = docx_module.Document()
+    revised.add_paragraph("付款期限为15日。")
+    revised.add_paragraph("甲方提前7日通知可终止合同。")
+    revised.save(revised_path)
+
+    plan_payload = json.loads(
+        task_tools.plan_docx_compare_annotations(
+            "contract_old.docx",
+            "contract_new.docx",
+            target_path="contract_old.docx",
+        )
+    )
+    assert plan_payload["success"] is True
+    assert plan_payload["target_path"] == "contract_old.docx"
+    assert plan_payload["annotation_candidates"]
+
+    first_candidate = plan_payload["annotation_candidates"][0]
+    comments = [
+        {
+            "原文片段": first_candidate["原文片段"],
+            "批注内容": (
+                "另一版为：付款期限为15日。\n"
+                "本版为：付款期限为30日。\n"
+                "风险：付款周期缩短，可能增加现金流压力。\n"
+                "建议：确认是否接受该付款安排。"
+            ),
+        }
+    ]
+    result = task_tools.write_docx_comments(
+        "contract_old.docx",
+        comments_json=json.dumps(comments, ensure_ascii=False),
+        source_path="contract_old.docx",
+        compare_path="contract_new.docx",
+        differences_detected=plan_payload["differences_detected"],
+    )
+    payload = json.loads(result)
+    change = parse_file_change(
+        "write_docx_comments",
+        {
+            "path": "contract_old.docx",
+            "comments_json": json.dumps(comments, ensure_ascii=False),
+        },
+        result,
+    )
+
+    assert payload["success"] is True
+    assert payload["operation"] == "write_docx_comments"
+    assert payload["path"] == "contract_old.docx"
+    assert payload["annotations_added"] == 1
+    assert change["operation"] == "write_docx_comments"
+    assert change["path"] == "contract_old.docx"
+
+    with zipfile.ZipFile(original_path, "r") as archive:
+        original_names = archive.namelist()
+        original_comments_xml = archive.read("word/comments.xml").decode(
+            "utf-8", errors="ignore"
+        )
+    with zipfile.ZipFile(revised_path, "r") as archive:
+        revised_names = archive.namelist()
+
+    assert "word/comments.xml" in original_names
+    assert "word/comments.xml" not in revised_names
+    assert "风险" in original_comments_xml
+    assert "建议" in original_comments_xml
+
+
+def test_write_docx_comments_appends_after_existing_comments(tmp_path, monkeypatch):
+    docx_module = pytest.importorskip("docx")
+
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    docx_path = tmp_path / "contract_comments.docx"
+    doc = docx_module.Document()
+    doc.add_paragraph("付款期限为30日。")
+    doc.add_paragraph("终止通知期为30日。")
+    doc.save(docx_path)
+
+    first = json.loads(
+        task_tools.write_docx_comments(
+            "contract_comments.docx",
+            comments_json=[
+                {"原文片段": "付款期限为30日", "批注内容": "旧批注"}
+            ],
+        )
+    )
+    second = json.loads(
+        task_tools.write_docx_comments(
+            "contract_comments.docx",
+            comments_json=[
+                {"原文片段": "终止通知期为30日", "批注内容": "新批注：风险与建议"}
+            ],
+        )
+    )
+
+    with zipfile.ZipFile(docx_path, "r") as archive:
+        names = archive.namelist()
+        comments_xml = archive.read("word/comments.xml").decode(
+            "utf-8", errors="ignore"
+        )
+        document_xml = archive.read("word/document.xml").decode(
+            "utf-8", errors="ignore"
+        )
+
+    assert first["annotations_added"] == 1
+    assert second["annotations_added"] == 1
+    assert names.count("word/comments.xml") == 1
+    assert comments_xml.count("<w:comment ") == 2
+    assert 'w:id="1"' in comments_xml
+    assert 'w:id="2"' in comments_xml
+    assert "新批注" in comments_xml
+    assert document_xml.count("commentRangeStart") == 2
 
 
 def test_normalize_docx_review_clear_scope_accepts_annotation_synonyms():
@@ -481,10 +956,18 @@ def test_normalize_docx_review_clear_scope_accepts_annotation_synonyms():
     assert task_tools._normalize_docx_review_clear_scope("annotation") == "comments"
 
 
-def test_annotate_file_pdf_docx_requirement_uses_bridge_streaming_tool_result(tmp_path, monkeypatch):
+def test_annotate_file_pdf_docx_requirement_uses_bridge_streaming_tool_result(
+    tmp_path, monkeypatch
+):
     import app.core.agent.file_task_doc_annotate_bridge as bridge
-    from app.core.agent.file_task_contract import FileTaskToolStreamChunk, FileTaskToolStreamResult
-    from app.core.agent.file_task_tool_gateway import FileTaskToolContext, FileTaskToolGateway
+    from app.core.agent.file_task_contract import (
+        FileTaskToolStreamChunk,
+        FileTaskToolStreamResult,
+    )
+    from app.core.agent.file_task_tool_gateway import (
+        FileTaskToolContext,
+        FileTaskToolGateway,
+    )
 
     pdf_path = tmp_path / "source.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -499,7 +982,11 @@ def test_annotate_file_pdf_docx_requirement_uses_bridge_streaming_tool_result(tm
         captured["gemini_client"] = gemini_client
         return FileTaskToolStreamResult(
             chunks=[
-                FileTaskToolStreamChunk(kind="event", event_type="plan.confirmed", payload={"summary": "按 3 批执行"}),
+                FileTaskToolStreamChunk(
+                    kind="event",
+                    event_type="plan.confirmed",
+                    payload={"summary": "按 3 批执行"},
+                ),
                 FileTaskToolStreamChunk(
                     kind="result",
                     payload={
@@ -541,7 +1028,10 @@ def test_annotate_file_pdf_docx_requirement_uses_bridge_streaming_tool_result(tm
     assert captured["gemini_client"] == "gemini-client"
     assert captured["request"].target_path == str(docx_path)
     assert any(file_info.type == "pdf" for file_info in captured["request"].files)
-    assert any(file_info.type == "docx" and file_info.target for file_info in captured["request"].files)
+    assert any(
+        file_info.type == "docx" and file_info.target
+        for file_info in captured["request"].files
+    )
 
 
 def test_file_snapshot_treats_missing_new_target_as_empty_snapshot(tmp_path):

@@ -199,7 +199,7 @@ def normalize_tool_gap(
         include_empty_contract_fields=include_empty_contract_fields,
     )
 
-    if not any([summary, missing_capability, why_missing, suggested_next_step, proposed_tool]):
+    if not any([missing_capability, why_missing, suggested_next_step, proposed_tool]):
         return None
 
     payload: Dict[str, Any] = {

@@ -46,6 +46,24 @@ def test_extract_tool_gap_from_response_parses_textual_protocol_payload():
     }
 
 
+def test_extract_tool_gap_ignores_summary_only_completion_payload():
+    response = {
+        "content": json.dumps(
+            {
+                "tool_gap": {
+                    "summary": "已完成PPT风格调整任务",
+                    "missing_capability": "",
+                    "why_missing": "",
+                    "suggested_next_step": "",
+                }
+            },
+            ensure_ascii=False,
+        )
+    }
+
+    assert extract_tool_gap_from_response(response) is None
+
+
 def test_merge_tool_gaps_preserves_known_contract_and_model_details():
     known_gap = {
         "summary": "当前缺少读取 CAD 文件的 Koto 原生工具。",

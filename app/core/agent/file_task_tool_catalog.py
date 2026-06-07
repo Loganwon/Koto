@@ -16,27 +16,80 @@ class FileTaskToolSpec:
 
 
 _ALLOWLIST: tuple[FileTaskToolSpec, ...] = (
-    FileTaskToolSpec("parse_file_to_text", "office_read", ("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"), True),
+    FileTaskToolSpec(
+        "parse_file_to_text",
+        "office_read",
+        ("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"),
+        True,
+    ),
     FileTaskToolSpec("read_docx_content", "docx", ("docx",), True),
     FileTaskToolSpec("write_docx_content", "docx", ("docx",), False, True),
     FileTaskToolSpec("clear_docx_review_marks", "docx", ("docx",), False, True),
     FileTaskToolSpec("insert_image_into_docx", "docx", ("docx",), False, True),
-    FileTaskToolSpec("insert_excel_as_docx_table", "docx_xlsx", ("docx", "xlsx"), False, True),
+    FileTaskToolSpec(
+        "insert_excel_as_docx_table", "docx_xlsx", ("docx", "xlsx"), False, True
+    ),
     FileTaskToolSpec("read_sheet_data", "xlsx", ("xlsx", "xlsm", "csv"), True),
-    FileTaskToolSpec("inspect_workbook_structure", "xlsx_audit", ("xlsx", "xlsm"), True),
+    FileTaskToolSpec(
+        "inspect_workbook_structure", "xlsx_audit", ("xlsx", "xlsm"), True
+    ),
     FileTaskToolSpec("audit_financial_workbook", "xlsx_audit", ("xlsx", "xlsm"), True),
     FileTaskToolSpec("write_sheet_data", "xlsx", ("xlsx", "xlsm"), False, True),
     FileTaskToolSpec("design_pptx_theme_layout", "pptx", ("pptx",), False, True),
     FileTaskToolSpec("write_pptx_slides", "pptx", ("pptx",), False, True),
     FileTaskToolSpec("add_pptx_slides", "pptx", ("pptx",), False, True),
-    FileTaskToolSpec("read_file_range", "text", ("txt", "md", "text", "csv", "json", "py", "js", "html", "css"), True),
-    FileTaskToolSpec("create_file", "workspace", ("txt", "md", "csv", "json", "html", "docx", "xlsx", "pptx"), False, True),
-    FileTaskToolSpec("copy_file", "workspace", ("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"), False, True),
+    FileTaskToolSpec(
+        "read_file_range",
+        "text",
+        ("txt", "md", "text", "csv", "json", "py", "js", "html", "css"),
+        True,
+    ),
+    FileTaskToolSpec(
+        "replace_file_selection",
+        "text",
+        ("txt", "md", "text", "csv", "json", "py", "js", "html", "css"),
+        False,
+        True,
+    ),
+    FileTaskToolSpec(
+        "create_file",
+        "workspace",
+        ("txt", "md", "csv", "json", "html", "docx", "xlsx", "pptx"),
+        False,
+        True,
+    ),
+    FileTaskToolSpec(
+        "copy_file",
+        "workspace",
+        ("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"),
+        False,
+        True,
+    ),
     FileTaskToolSpec("list_workspace_files", "workspace", tuple(), True),
     FileTaskToolSpec("open_file_in_editor", "workspace", tuple(), True),
-    FileTaskToolSpec("compare_files", "analysis", ("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"), True),
-    FileTaskToolSpec("extract_to_file", "cross_file", ("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"), False, True),
-    FileTaskToolSpec("annotate_file", "review", ("docx", "pdf", "txt", "md"), False, True),
+    FileTaskToolSpec(
+        "compare_files",
+        "analysis",
+        ("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"),
+        True,
+    ),
+    FileTaskToolSpec(
+        "compare_docx_and_annotate", "docx_compare", ("docx",), False, True
+    ),
+    FileTaskToolSpec(
+        "plan_docx_compare_annotations", "docx_compare", ("docx",), True, False
+    ),
+    FileTaskToolSpec("write_docx_comments", "docx", ("docx",), False, True),
+    FileTaskToolSpec(
+        "extract_to_file",
+        "cross_file",
+        ("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"),
+        False,
+        True,
+    ),
+    FileTaskToolSpec(
+        "annotate_file", "review", ("docx", "pdf", "txt", "md"), False, True
+    ),
     FileTaskToolSpec("run_python_code", "sandbox", tuple(), False, True),
     FileTaskToolSpec("verify_task_completion", "check", tuple(), True),
 )
@@ -46,12 +99,44 @@ _SPEC_BY_NAME: Dict[str, FileTaskToolSpec] = {spec.name: spec for spec in _ALLOW
 
 def supported_file_workflows() -> Dict[str, List[str]]:
     return {
-        "docx": ["read paragraphs/tables", "write paragraphs", "clear review comments/tracked changes", "append images/charts as real Word pictures", "append Excel data as a real Word table", "compare/extract/annotate"],
-        "xlsx": ["read sheets", "inspect workbook structure/formulas/external links", "audit financial models before drawing conclusions", "write cells", "copy data into DOCX", "sandbox analysis/charts"],
-        "pptx": ["extract text", "apply safe theme/layout/font styling", "update existing slide text", "append simple title/content slides"],
-        "pdf": ["extract text by page window", "compare/extract", "annotation is best-effort when supported by the tool layer"],
-        "text": ["read ranges", "create/update derived TXT/MD/CSV/JSON files", "sandbox processing"],
-        "sandbox": ["Python data processing", "chart/image/file creation with KOTO_CREATED/KOTO_MODIFIED markers"],
+        "docx": [
+            "read paragraphs/tables",
+            "write paragraphs",
+            "clear review comments/tracked changes",
+            "append images/charts as real Word pictures",
+            "append Excel data as a real Word table",
+            "compare two DOCX files, let AI draft comments, and write Word comments in place",
+            "compare/extract/annotate",
+        ],
+        "xlsx": [
+            "read sheets",
+            "inspect workbook structure/formulas/external links",
+            "audit financial models before drawing conclusions",
+            "write cells",
+            "copy data into DOCX",
+            "sandbox analysis/charts",
+        ],
+        "pptx": [
+            "extract text",
+            "apply safe theme/layout/font styling",
+            "update existing slide text",
+            "append simple title/content slides",
+        ],
+        "pdf": [
+            "extract text by page window",
+            "compare/extract",
+            "annotation is best-effort when supported by the tool layer",
+        ],
+        "text": [
+            "read ranges",
+            "replace exact selections in TXT/MD/CSV/JSON/code files",
+            "create/update derived TXT/MD/CSV/JSON files",
+            "sandbox processing",
+        ],
+        "sandbox": [
+            "Python data processing",
+            "chart/image/file creation with KOTO_CREATED/KOTO_MODIFIED markers",
+        ],
     }
 
 
@@ -79,14 +164,21 @@ def write_target_for_tool(tool_name: str, tool_args: Dict[str, Any]) -> str:
         return str(args.get("destination") or "").strip()
     if tool_name in {"insert_excel_as_docx_table", "extract_to_file"}:
         return str(args.get("target_path") or "").strip()
-    return str(args.get("path") or args.get("target_path") or args.get("destination") or "").strip()
+    return str(
+        args.get("path") or args.get("target_path") or args.get("destination") or ""
+    ).strip()
 
 
 class FileTaskToolCatalog:
     def __init__(self, *, task_files: Optional[List[Dict[str, str]]] = None):
-        from app.core.agent.file_task_tool_gateway import FileTaskToolContext, FileTaskToolGateway
+        from app.core.agent.file_task_tool_gateway import (
+            FileTaskToolContext,
+            FileTaskToolGateway,
+        )
 
-        self._gateway = FileTaskToolGateway(context=FileTaskToolContext(task_files=task_files or []))
+        self._gateway = FileTaskToolGateway(
+            context=FileTaskToolContext(task_files=task_files or [])
+        )
 
     def definitions(self) -> List[Dict[str, Any]]:
         return self._gateway.definitions()
@@ -116,7 +208,11 @@ def tool_result_preview(tool_name: str, result: Any, limit: int = 900) -> str:
             return summary[:limit]
         if tool_name == "read_sheet_data":
             sheet = str(payload.get("sheet") or "").strip()
-            summary = f"已读取工作表“{sheet}”的 {payload.get('row_count', 0)} 行表格数据" if sheet else f"已读取 {payload.get('row_count', 0)} 行表格数据"
+            summary = (
+                f"已读取工作表“{sheet}”的 {payload.get('row_count', 0)} 行表格数据"
+                if sheet
+                else f"已读取 {payload.get('row_count', 0)} 行表格数据"
+            )
             if warning:
                 summary = f"{summary}；警告：{warning}"
             return summary[:limit]
@@ -128,9 +224,20 @@ def tool_result_preview(tool_name: str, result: Any, limit: int = 900) -> str:
                 summary += f"，共 {payload.get('total_formula_cells')} 个公式单元格"
             return summary[:limit]
         if tool_name == "audit_financial_workbook":
-            high = sum(1 for item in (payload.get("findings") or []) if isinstance(item, dict) and item.get("severity") == "high")
-            medium = sum(1 for item in (payload.get("findings") or []) if isinstance(item, dict) and item.get("severity") == "medium")
-            summary = payload.get("summary") or f"已完成财务工作簿审计，高优先级问题 {high} 个，中优先级问题 {medium} 个。"
+            high = sum(
+                1
+                for item in (payload.get("findings") or [])
+                if isinstance(item, dict) and item.get("severity") == "high"
+            )
+            medium = sum(
+                1
+                for item in (payload.get("findings") or [])
+                if isinstance(item, dict) and item.get("severity") == "medium"
+            )
+            summary = (
+                payload.get("summary")
+                or f"已完成财务工作簿审计，高优先级问题 {high} 个，中优先级问题 {medium} 个。"
+            )
             return str(summary)[:limit]
         if tool_name == "read_docx_content":
             return f"已读取 {payload.get('total_paragraphs', 0)} 段文本，{payload.get('total_tables', 0)} 个表格"
@@ -151,7 +258,9 @@ def stringify_result(result: Any) -> str:
         return str(result)
 
 
-def parse_file_change(tool_name: str, tool_args: Dict[str, Any], result: Any) -> Optional[Dict[str, Any]]:
+def parse_file_change(
+    tool_name: str, tool_args: Dict[str, Any], result: Any
+) -> Optional[Dict[str, Any]]:
     if not produces_file_change(tool_name):
         return None
 
@@ -170,7 +279,11 @@ def parse_file_change(tool_name: str, tool_args: Dict[str, Any], result: Any) ->
     blocked_recovery = (
         str(payload.get("status") or "").strip().lower() in {"blocked", "write_blocked"}
         and bool(payload.get("fallback_copy"))
-        and bool(payload.get("path") or payload.get("file_path") or write_target_for_tool(tool_name, tool_args))
+        and bool(
+            payload.get("path")
+            or payload.get("file_path")
+            or write_target_for_tool(tool_name, tool_args)
+        )
     )
     if payload.get("error") and not blocked_recovery:
         return None
@@ -186,7 +299,11 @@ def parse_file_change(tool_name: str, tool_args: Dict[str, Any], result: Any) ->
         return None
 
     file_type = payload.get("file_type") or Path(str(path)).suffix.lstrip(".").lower()
-    change_type = payload.get("change_type") or change.get("change_type") or ("create" if tool_name in {"create_file", "copy_file"} else "modify")
+    change_type = (
+        payload.get("change_type")
+        or change.get("change_type")
+        or ("create" if tool_name in {"create_file", "copy_file"} else "modify")
+    )
     summary = payload.get("summary") or f"{Path(str(path)).name} 已更新"
     preview = payload.get("preview") or change.get("modified") or ""
     event_payload = {
@@ -230,10 +347,18 @@ def parse_file_change(tool_name: str, tool_args: Dict[str, Any], result: Any) ->
         "body_placeholders_adjusted",
         "layout_warnings",
         "annotations_added",
+        "differences_detected",
+        "comments_failed",
+        "compare_path",
+        "contract_risk_summary",
         "scope",
         "comments_removed",
         "comment_markup_removed",
         "revisions_accepted",
+        "replacements_made",
+        "matches_found",
+        "occurrence",
+        "original_selection",
     ):
         if key in payload and payload.get(key) not in (None, ""):
             event_payload[key] = payload.get(key)
@@ -251,7 +376,7 @@ def extract_koto_paths(result: Any, marker: str) -> List[str]:
     if idx == -1:
         return []
     try:
-        parsed = json.loads(result_text[idx + len(marker):])
+        parsed = json.loads(result_text[idx + len(marker) :])
     except Exception:
         return []
     return [str(item) for item in parsed] if isinstance(parsed, list) else []
@@ -270,12 +395,14 @@ def extract_sandbox_artifacts(result: Any) -> List[Dict[str, Any]]:
         filename = str(name or "artifact").strip() or "artifact"
         ext = Path(filename).suffix.lstrip(".").lower()
         mime = "image/svg+xml" if ext == "svg" else f"image/{ext or 'png'}"
-        artifacts.append({
-            "kind": "image",
-            "name": filename,
-            "mime_type": mime,
-            "data": str(data or ""),
-        })
+        artifacts.append(
+            {
+                "kind": "image",
+                "name": filename,
+                "mime_type": mime,
+                "data": str(data or ""),
+            }
+        )
     return artifacts
 
 
@@ -287,10 +414,14 @@ def file_states_for_changes(changes: Iterable[Dict[str, Any]]) -> List[Dict[str,
         if not path or path in seen:
             continue
         seen.add(path)
-        states.append({
-            "path": path,
-            "exists": True,
-            "modified": True,
-            "preview": str(change.get("preview") or change.get("summary") or "")[:1000],
-        })
+        states.append(
+            {
+                "path": path,
+                "exists": True,
+                "modified": True,
+                "preview": str(change.get("preview") or change.get("summary") or "")[
+                    :1000
+                ],
+            }
+        )
     return states

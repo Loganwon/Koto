@@ -129,23 +129,41 @@ class TrackChangesEditor:
             failed_count = 0
 
             logger.info(f"[Comments] 💬 开始添加批注...")
-            logger.info(f"[Comments] 📊 共 {len(annotations)} 条修改建议")
+            logger.info(f"[Comments] 📊 共 {len(annotations)} 条批注")
 
             # 预处理标注
             normalized = []
             for anno in annotations:
                 original = anno.get("原文片段", anno.get("原文", "")).strip()
+                comment_text = anno.get(
+                    "批注内容", anno.get("批注", anno.get("comment", ""))
+                ).strip()
                 modified = anno.get(
                     "修改后文本", anno.get("修改建议", anno.get("改为", ""))
                 ).strip()
                 reason = anno.get("修改原因", anno.get("原因", "")).strip()
 
-                if original and modified and original != modified:
+                if original and comment_text:
                     normalized.append(
-                        {"original": original, "modified": modified, "reason": reason}
+                        {
+                            "original": original,
+                            "modified": comment_text,
+                            "reason": reason,
+                            "label": str(anno.get("批注标签") or "差异说明：").strip()
+                            or "差异说明：",
+                        }
+                    )
+                elif original and modified and original != modified:
+                    normalized.append(
+                        {
+                            "original": original,
+                            "modified": modified,
+                            "reason": reason,
+                            "label": "建议改为：",
+                        }
                     )
 
-            logger.info(f"[Comments] ✅ 有效修改: {len(normalized)} 条")
+            logger.info(f"[Comments] ✅ 有效批注: {len(normalized)} 条")
 
             if not normalized:
                 doc.save(file_path)
@@ -153,6 +171,8 @@ class TrackChangesEditor:
 
             # 获取或创建 comments part
             comments_el, comments_part_ref = self._get_or_create_comments_part(doc)
+            self.change_id = max(self.change_id, self._max_comment_id(comments_el))
+            initial_comment_count = self._comment_count(comments_el)
 
             # 通知开始应用
             if progress_callback:
@@ -164,6 +184,7 @@ class TrackChangesEditor:
                 original = anno["original"]
                 modified = anno["modified"]
                 reason = anno["reason"]
+                label = anno.get("label") or "建议改为："
 
                 # 通知当前进度
                 if progress_callback:
@@ -182,14 +203,15 @@ class TrackChangesEditor:
                         self.change_id += 1
                         cid = self.change_id
 
-                        # 1) 在 comments.xml 里添加批注内容
-                        self._add_comment_element(comments_el, cid, modified, reason)
-
-                        # 2) 在段落中标记批注范围
+                        # 先在正文里插入批注范围；成功后再追加 comments.xml，
+                        # 避免出现没有锚点的孤儿批注。
                         success = self._add_comment_markers_to_paragraph(
                             para, original, cid
                         )
                         if success:
+                            self._add_comment_element(
+                                comments_el, cid, modified, reason, label=label
+                            )
                             applied_count += 1
                             found = True
                             detail_msg = (
@@ -215,15 +237,19 @@ class TrackChangesEditor:
                                     if original in para.text:
                                         self.change_id += 1
                                         cid = self.change_id
-                                        self._add_comment_element(
-                                            comments_el, cid, modified, reason
-                                        )
                                         success = (
                                             self._add_comment_markers_to_paragraph(
                                                 para, original, cid
                                             )
                                         )
                                         if success:
+                                            self._add_comment_element(
+                                                comments_el,
+                                                cid,
+                                                modified,
+                                                reason,
+                                                label=label,
+                                            )
                                             applied_count += 1
                                             found = True
                                             detail_msg = f"✅ (表格) #{idx}/{len(normalized)}: '{original[:20]}...'"
@@ -270,6 +296,24 @@ class TrackChangesEditor:
 
             # 保存文档
             doc.save(file_path)
+            # python-docx 对已有 comments part 的持久化并不总是可靠；
+            # 直接注入 zip 包，确保 Word 与前端预览都能读取到新批注正文。
+            if applied_count > 0:
+                self._inject_comments_to_docx(file_path, comments_el)
+
+            persisted_comment_count = self._docx_comment_count(file_path)
+            expected_comment_count = initial_comment_count + applied_count
+            if persisted_comment_count < expected_comment_count:
+                return {
+                    "success": False,
+                    "error": (
+                        "DOCX 批注正文未可靠写入："
+                        f"预期至少 {expected_comment_count} 条，实际 {persisted_comment_count} 条。"
+                    ),
+                    "applied": 0,
+                    "failed": len(normalized),
+                    "total": len(normalized),
+                }
 
             success_rate = (applied_count / len(normalized) * 100) if normalized else 0
             logger.info(f"\n[Comments] 💾 文档已保存")
@@ -306,6 +350,49 @@ class TrackChangesEditor:
         )
         return el, None
 
+    def _comment_count(self, comments_el) -> int:
+        try:
+            return len(
+                comments_el.xpath(
+                    ".//w:comment",
+                    namespaces={
+                        "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                    },
+                )
+            )
+        except Exception:
+            return 0
+
+    def _max_comment_id(self, comments_el) -> int:
+        max_id = 0
+        try:
+            for comment in comments_el.xpath(
+                ".//w:comment",
+                namespaces={
+                    "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                },
+            ):
+                raw = comment.get(qn("w:id")) or comment.get("w:id") or ""
+                try:
+                    max_id = max(max_id, int(str(raw)))
+                except Exception:
+                    continue
+        except Exception:
+            return 0
+        return max_id
+
+    def _docx_comment_count(self, file_path: str) -> int:
+        try:
+            import zipfile
+
+            with zipfile.ZipFile(file_path, "r") as archive:
+                if "word/comments.xml" not in archive.namelist():
+                    return 0
+                root = etree.fromstring(archive.read("word/comments.xml"))
+            return self._comment_count(root)
+        except Exception:
+            return 0
+
     def _sync_comments_part(self, doc, comments_el, comments_part_ref):
         """将 comments XML 同步到文档 part，并返回当前 part 引用。"""
         comments_bytes = etree.tostring(
@@ -331,7 +418,9 @@ class TrackChangesEditor:
         doc.part.relate_to(new_part, comments_rel_type)
         return new_part
 
-    def _add_comment_element(self, comments_el, comment_id, modified, reason=""):
+    def _add_comment_element(
+        self, comments_el, comment_id, modified, reason="", label="建议改为："
+    ):
         """在 comments XML 里添加一条批注"""
         WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -341,17 +430,19 @@ class TrackChangesEditor:
         comment.set(qn("w:date"), datetime.now().isoformat() + "Z")
         comment.set(qn("w:initials"), "K")
 
-        # 第1段：建议改为
+        label_text = str(label or "建议改为：").strip() or "建议改为："
+
+        # 第1段：批注主内容
         p1 = etree.SubElement(comment, qn("w:p"))
         r1 = etree.SubElement(p1, qn("w:r"))
-        # 加粗 "建议改为："
+        # 加粗标签
         rpr1 = etree.SubElement(r1, qn("w:rPr"))
         etree.SubElement(rpr1, qn("w:b"))
         t1 = etree.SubElement(r1, qn("w:t"))
         t1.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-        t1.text = "建议改为："
+        t1.text = label_text
 
-        # 修改内容（不加粗）
+        # 批注内容（不加粗）
         r1b = etree.SubElement(p1, qn("w:r"))
         t1b = etree.SubElement(r1b, qn("w:t"))
         t1b.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
@@ -1487,6 +1578,8 @@ class TrackChangesEditor:
             with zipfile.ZipFile(file_path, "r") as zin:
                 with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout:
                     for item in zin.infolist():
+                        if item.filename == "word/comments.xml":
+                            continue
                         data = zin.read(item.filename)
 
                         if item.filename == "[Content_Types].xml":

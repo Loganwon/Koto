@@ -276,6 +276,7 @@ class FileTaskExecutionContext:
     requirements: FileTaskRequirementSet = field(default_factory=FileTaskRequirementSet)
     plan_check: FileTaskPlanCheck = field(default_factory=FileTaskPlanCheck)
     known_tool_gap: Optional[Dict[str, Any]] = None
+    intent_adjudication: Dict[str, Any] = field(default_factory=dict)
     effective_planner_policy: str = ""
     effective_planner_reason: str = ""
     effective_planner_backend: str = ""
@@ -298,6 +299,8 @@ class FileTaskExecutionContext:
         }
         if isinstance(self.known_tool_gap, dict) and self.known_tool_gap:
             data["known_tool_gap"] = dict(self.known_tool_gap)
+        if isinstance(self.intent_adjudication, dict) and self.intent_adjudication:
+            data["intent_adjudication"] = dict(self.intent_adjudication)
         if any((self.effective_planner_policy, self.effective_planner_reason, self.effective_planner_backend)):
             data["effective_planner"] = {
                 "policy": self.effective_planner_policy,

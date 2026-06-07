@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Koto Workspace Assistant - Frontend Controllers & Adapters
  * Includes Phase 3 (Polymorphic Adapters) & Phase 4 (Human-AI Link)
  */
@@ -3517,8 +3517,12 @@ window.WA = window.WA || {};
       group = document.createElement('div');
       group.className = 'wa-docx-review-group';
       group.innerHTML = ''
-        + '<button type="button" class="tt-btn wa-docx-review-mode wa-docx-review-comment-mode" onclick="WA.toggleReviewCommentMode()">批注</button>'
-        + '<button type="button" class="tt-btn wa-docx-review-revision-mode" onclick="WA.openRevisionReviewCenter()">修订</button>'
+        + '<button type="button" class="tt-btn wa-docx-review-mode wa-docx-review-comment-mode" onclick="WA.toggleReviewCommentMode()" title="为选中文本添加批注">'
+        + '  <svg class="wa-review-btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg><span>批注</span>'
+        + '</button>'
+        + '<button type="button" class="tt-btn wa-docx-review-revision-mode" onclick="WA.openRevisionReviewCenter()" title="查看或创建修订建议">'
+        + '  <svg class="wa-review-btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg><span>修订</span>'
+        + '</button>'
         + '<div class="wa-docx-review-nav">'
         + '  <button type="button" class="tt-btn wa-docx-review-summary" onclick="WA.toggleReviewNavMenu(event)" aria-haspopup="menu" aria-expanded="false">无批注或修订</button>'
         + '  <div class="wa-docx-review-nav-menu" role="menu"></div>'
@@ -11902,6 +11906,7 @@ window.WA = window.WA || {};
       'write_docx_content': '📝 写入 Word 内容',
       'insert_excel_as_docx_table': '📄 插入 Word 表格',
       'write_sheet_data': '📊 写入表格数据',
+      'replace_file_selection': '✏️ 替换文本选区',
       'create_file': '📝 创建文件',
       'copy_file': '📄 复制文件',
       'llm_extract': '🧠 提取结构化信息',
@@ -13630,278 +13635,18 @@ window.WA = window.WA || {};
     if (state.activeEditor && state.activeEditor.searchPrev) state.activeEditor.searchPrev();
   };
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // ── DOCX find / replace (TipTap / ProseMirror) ───────────────────────────
-  // ══════════════════════════════════════════════════════════════════════════
-  const _docxFind = {
-    matches: [],   // [{from, to}]  — ProseMirror document positions
-    idx: 0,        // current match index
-    marks: [],     // span elements injected for visual highlight (fallback)
-    replaceOpen: false,
-  };
-
-  // Walk the ProseMirror document, collect all matches of `query`
-  function _docxFindAll(query, caseSensitive) {
-    const editor = state.activeEditor && state.activeEditor.editor;
-    if (!editor || !query) return [];
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
-    const results = [];
-    editor.state.doc.descendants((node, pos) => {
-      if (!node.isText || !node.text) return;
-      regex.lastIndex = 0;
-      let m;
-      while ((m = regex.exec(node.text)) !== null) {
-        results.push({ from: pos + m.index, to: pos + m.index + m[0].length });
-      }
+  if (window.WA && typeof window.WA.installWorkspaceFindReplace === 'function') {
+    window.WA.installWorkspaceFindReplace({
+      getActiveEditor: () => state.activeEditor,
+      showToast,
+      pptxNav: (delta) => {
+        if (window.WA && typeof window.WA.pptxNav === 'function') window.WA.pptxNav(delta);
+      },
+      scheduleAutoSave: () => {
+        if (window.WA && typeof window.WA.scheduleAutoSave === 'function') window.WA.scheduleAutoSave();
+      },
     });
-    return results;
   }
-
-  // Navigate to a match: set ProseMirror selection + scroll into view
-  function _docxFindGo(matches, idx) {
-    const editor = state.activeEditor && state.activeEditor.editor;
-    if (!editor || !matches.length) return;
-    const { from, to } = matches[idx];
-    editor.commands.setTextSelection({ from, to });
-    editor.commands.scrollIntoView();
-    // Highlight via a wrapper span on the selected text (CSS handles colour)
-    // ProseMirror selection already renders with .ProseMirror-selectednode or
-    // the ::selection pseudo; we additionally scroll to ensure the element is visible.
-  }
-
-  function _docxFindUpdateCount(query) {
-    const caseSensitive = (document.getElementById('wa-docx-find-case') || {}).checked;
-    _docxFind.matches = _docxFindAll(query, caseSensitive);
-    _docxFind.idx = _docxFind.matches.length ? 0 : -1;
-    const countEl = document.getElementById('wa-docx-find-count');
-    const inp     = document.getElementById('wa-docx-find-input');
-    if (countEl) countEl.textContent = _docxFind.matches.length ? `1 / ${_docxFind.matches.length}` : (query ? '无匹配' : '');
-    if (inp) inp.classList.toggle('no-match', !!query && !_docxFind.matches.length);
-    if (_docxFind.matches.length) _docxFindGo(_docxFind.matches, 0);
-  }
-
-  window.WA.docxFindInput = (val) => _docxFindUpdateCount(val.trim());
-
-  window.WA.docxFindNext = () => {
-    if (!_docxFind.matches.length) return;
-    _docxFind.idx = (_docxFind.idx + 1) % _docxFind.matches.length;
-    _docxFindGo(_docxFind.matches, _docxFind.idx);
-    const countEl = document.getElementById('wa-docx-find-count');
-    if (countEl) countEl.textContent = `${_docxFind.idx + 1} / ${_docxFind.matches.length}`;
-  };
-
-  window.WA.docxFindPrev = () => {
-    if (!_docxFind.matches.length) return;
-    _docxFind.idx = (_docxFind.idx - 1 + _docxFind.matches.length) % _docxFind.matches.length;
-    _docxFindGo(_docxFind.matches, _docxFind.idx);
-    const countEl = document.getElementById('wa-docx-find-count');
-    if (countEl) countEl.textContent = `${_docxFind.idx + 1} / ${_docxFind.matches.length}`;
-  };
-
-  window.WA.docxFindKeydown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); WA.docxFindNext(); }
-    if (e.key === 'Enter' &&  e.shiftKey) { e.preventDefault(); WA.docxFindPrev(); }
-    if (e.key === 'Escape') WA.docxFindClose();
-  };
-
-  window.WA.docxFindClose = () => {
-    const bar = document.getElementById('wa-docx-find-bar');
-    if (bar) bar.style.display = 'none';
-    _docxFind.matches = []; _docxFind.idx = -1;
-    const inp = document.getElementById('wa-docx-find-input');
-    if (inp) { inp.value = ''; inp.classList.remove('no-match'); }
-    const countEl = document.getElementById('wa-docx-find-count');
-    if (countEl) countEl.textContent = '';
-    // Return focus to editor
-    const pm = document.querySelector('#wa-docx-editor .ProseMirror');
-    if (pm) pm.focus();
-  };
-
-  window.WA.docxToggleReplace = (forceOpen) => {
-    const row  = document.getElementById('wa-docx-replace-row');
-    const btn  = document.getElementById('wa-docx-replace-toggle');
-    if (!row) return;
-    _docxFind.replaceOpen = (forceOpen === true) ? true : !_docxFind.replaceOpen;
-    row.style.display = _docxFind.replaceOpen ? '' : 'none';
-    if (btn) btn.classList.toggle('active', _docxFind.replaceOpen);
-    if (_docxFind.replaceOpen) {
-      const ri = document.getElementById('wa-docx-replace-input');
-      if (ri) ri.focus();
-    }
-  };
-
-  window.WA.docxReplaceNext = () => {
-    const editor = state.activeEditor && state.activeEditor.editor;
-    if (!editor || !_docxFind.matches.length || _docxFind.idx < 0) return;
-    const replaceVal = (document.getElementById('wa-docx-replace-input') || {}).value || '';
-    const { from, to } = _docxFind.matches[_docxFind.idx];
-    editor.chain().setTextSelection({ from, to }).insertContent(replaceVal).run();
-    // Re-run search after replacement
-    const query = (document.getElementById('wa-docx-find-input') || {}).value || '';
-    _docxFindUpdateCount(query.trim());
-  };
-
-  window.WA.docxReplaceAll = () => {
-    const editor = state.activeEditor && state.activeEditor.editor;
-    if (!editor || !_docxFind.matches.length) return;
-    const replaceVal = (document.getElementById('wa-docx-replace-input') || {}).value || '';
-    const n = _docxFind.matches.length;
-    // Replace from last to first to preserve position offsets
-    const sorted = [..._docxFind.matches].sort((a, b) => b.from - a.from);
-    editor.chain().focus().run();
-    for (const { from, to } of sorted) {
-      editor.chain().setTextSelection({ from, to }).insertContent(replaceVal).run();
-    }
-    showToast(`已替换 ${n} 处`, 'success');
-    const query = (document.getElementById('wa-docx-find-input') || {}).value || '';
-    _docxFindUpdateCount(query.trim());
-  };
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // ── PPTX find / replace (slide data search) ──────────────────────────────
-  // ══════════════════════════════════════════════════════════════════════════
-  const _pptxFind = {
-    matches: [],   // [{slideIdx, shapeId, paraIdx, runIdx, charIdx, text, len}]
-    idx: 0,
-    replaceOpen: false,
-  };
-
-  function _pptxFindAll(query, caseSensitive) {
-    const ed = state.activeEditor;
-    if (!ed || !ed.data || !query) return [];
-    const q = caseSensitive ? query : query.toLowerCase();
-    const results = [];
-    ed.data.slides.forEach((slide, slideIdx) => {
-      (slide.shapes || []).forEach(shape => {
-        if (!shape.has_text) return;
-        (shape.paragraphs || []).forEach((para, paraIdx) => {
-          (para.runs || []).forEach((run, runIdx) => {
-            const text = run.text || '';
-            const t = caseSensitive ? text : text.toLowerCase();
-            let ci = 0;
-            while ((ci = t.indexOf(q, ci)) !== -1) {
-              results.push({ slideIdx, shapeId: shape.id, paraIdx, runIdx, charIdx: ci, len: q.length, displayText: text.substring(ci, ci + q.length) });
-              ci++;
-            }
-          });
-        });
-      });
-    });
-    return results;
-  }
-
-  function _pptxFindGo(matches, idx) {
-    const ed = state.activeEditor;
-    if (!ed || !matches.length) return;
-    const { slideIdx } = matches[idx];
-    if (typeof ed._curIdx !== 'undefined' && ed._curIdx !== slideIdx) {
-      // Navigate to the matching slide
-      if (typeof WA.pptxNav === 'function') {
-        // Use internal navigation
-        const delta = slideIdx - ed._curIdx;
-        WA.pptxNav(delta);
-      }
-    }
-  }
-
-  function _pptxFindUpdateCount(query) {
-    const caseSensitive = (document.getElementById('wa-pptx-find-case') || {}).checked;
-    _pptxFind.matches = _pptxFindAll(query, caseSensitive);
-    _pptxFind.idx = _pptxFind.matches.length ? 0 : -1;
-    const countEl = document.getElementById('wa-pptx-find-count');
-    const inp     = document.getElementById('wa-pptx-find-input');
-    if (countEl) countEl.textContent = _pptxFind.matches.length ? `1 / ${_pptxFind.matches.length}` : (query ? '无匹配' : '');
-    if (inp) inp.classList.toggle('no-match', !!query && !_pptxFind.matches.length);
-    if (_pptxFind.matches.length) _pptxFindGo(_pptxFind.matches, 0);
-  }
-
-  window.WA.pptxFindInput = (val) => _pptxFindUpdateCount(val.trim());
-
-  window.WA.pptxFindNext = () => {
-    if (!_pptxFind.matches.length) return;
-    _pptxFind.idx = (_pptxFind.idx + 1) % _pptxFind.matches.length;
-    _pptxFindGo(_pptxFind.matches, _pptxFind.idx);
-    const countEl = document.getElementById('wa-pptx-find-count');
-    if (countEl) countEl.textContent = `${_pptxFind.idx + 1} / ${_pptxFind.matches.length}`;
-  };
-
-  window.WA.pptxFindPrev = () => {
-    if (!_pptxFind.matches.length) return;
-    _pptxFind.idx = (_pptxFind.idx - 1 + _pptxFind.matches.length) % _pptxFind.matches.length;
-    _pptxFindGo(_pptxFind.matches, _pptxFind.idx);
-    const countEl = document.getElementById('wa-pptx-find-count');
-    if (countEl) countEl.textContent = `${_pptxFind.idx + 1} / ${_pptxFind.matches.length}`;
-  };
-
-  window.WA.pptxFindKeydown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); WA.pptxFindNext(); }
-    if (e.key === 'Enter' &&  e.shiftKey) { e.preventDefault(); WA.pptxFindPrev(); }
-    if (e.key === 'Escape') WA.pptxFindClose();
-  };
-
-  window.WA.pptxFindClose = () => {
-    const bar = document.getElementById('wa-pptx-find-bar');
-    if (bar) bar.style.display = 'none';
-    _pptxFind.matches = []; _pptxFind.idx = -1;
-    const inp = document.getElementById('wa-pptx-find-input');
-    if (inp) { inp.value = ''; inp.classList.remove('no-match'); }
-    const countEl = document.getElementById('wa-pptx-find-count');
-    if (countEl) countEl.textContent = '';
-  };
-
-  window.WA.pptxToggleReplace = (forceOpen) => {
-    const row = document.getElementById('wa-pptx-replace-row');
-    const btn = document.getElementById('wa-pptx-replace-toggle');
-    if (!row) return;
-    _pptxFind.replaceOpen = (forceOpen === true) ? true : !_pptxFind.replaceOpen;
-    row.style.display = _pptxFind.replaceOpen ? '' : 'none';
-    if (btn) btn.classList.toggle('active', _pptxFind.replaceOpen);
-    if (_pptxFind.replaceOpen) {
-      const ri = document.getElementById('wa-pptx-replace-input');
-      if (ri) ri.focus();
-    }
-  };
-
-  // PPTX replace: update the run text directly in slide data
-  function _pptxApplyReplace(match, replaceVal) {
-    const ed = state.activeEditor;
-    if (!ed || !ed.data) return false;
-    const slide = ed.data.slides[match.slideIdx];
-    if (!slide) return false;
-    const shape = (slide.shapes || []).find(s => s.id === match.shapeId);
-    if (!shape) return false;
-    const para = (shape.paragraphs || [])[match.paraIdx];
-    if (!para) return false;
-    const run = (para.runs || [])[match.runIdx];
-    if (!run) return false;
-    // Replace at exact char position
-    run.text = run.text.substring(0, match.charIdx) + replaceVal + run.text.substring(match.charIdx + match.len);
-    // Re-render the slide and schedule auto-save
-    if (ed._curIdx === match.slideIdx && typeof ed._renderSlide === 'function') ed._renderSlide(match.slideIdx);
-    if (typeof ed._redrawThumb === 'function') ed._redrawThumb(match.slideIdx);
-    WA.scheduleAutoSave();
-    return true;
-  }
-
-  window.WA.pptxReplaceNext = () => {
-    if (!_pptxFind.matches.length || _pptxFind.idx < 0) return;
-    const replaceVal = (document.getElementById('wa-pptx-replace-input') || {}).value || '';
-    _pptxApplyReplace(_pptxFind.matches[_pptxFind.idx], replaceVal);
-    const query = (document.getElementById('wa-pptx-find-input') || {}).value || '';
-    _pptxFindUpdateCount(query.trim());
-  };
-
-  window.WA.pptxReplaceAll = () => {
-    if (!_pptxFind.matches.length) return;
-    const replaceVal = (document.getElementById('wa-pptx-replace-input') || {}).value || '';
-    const n = _pptxFind.matches.length;
-    // Replace in reverse order to keep indices valid
-    [..._pptxFind.matches].reverse().forEach(m => _pptxApplyReplace(m, replaceVal));
-    showToast(`已替换 ${n} 处`, 'success');
-    const query = (document.getElementById('wa-pptx-find-input') || {}).value || '';
-    _pptxFindUpdateCount(query.trim());
-  };
   // Draggable sticky note helper
   window.WA._pdfDragNote = (e, popup) => {
     e.preventDefault();
@@ -14677,294 +14422,20 @@ window.WA = window.WA || {};
     }
   };
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // ── NotebookLM-style features ─────────────────────────────────────────────
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  // ── Cross-source keyword search ───────────────────────────────────────────
-  let _sourceSearchTimer = null;
-  window.WA.doSourceSearch = (query) => {
-    const clearBtn = $('wa-source-clear-btn');
-    if (clearBtn) clearBtn.style.display = query ? '' : 'none';
-    clearTimeout(_sourceSearchTimer);
-    if (!query || query.length < 2) {
-      const r = $('wa-source-search-results');
-      if (r) { r.innerHTML = ''; r.style.display = 'none'; }
-      return;
-    }
-    _sourceSearchTimer = setTimeout(() => _runSourceSearch(query), 280);
-  };
-
-  function _runSourceSearch(query) {
-    const results = $('wa-source-search-results');
-    if (!results) return;
-    const files = state._aiFileContext || [];
-    const qLower = query.toLowerCase();
-    const matches = [];
-
-    files.forEach(f => {
-      const content = f.content || '';
-      let pos = 0;
-      while (matches.length < 20) {
-        const idx = content.toLowerCase().indexOf(qLower, pos);
-        if (idx === -1) break;
-        const start = Math.max(0, idx - 50);
-        const end = Math.min(content.length, idx + query.length + 80);
-        const excerpt = content.slice(start, end);
-        const highlighted = excerpt.replace(
-          new RegExp(_escRegex(query), 'gi'),
-          m => `<mark>${_escHtml(m)}</mark>`
-        );
-        matches.push({ name: f.name, excerpt: highlighted, charOffset: idx, file: f });
-        pos = idx + 1;
-      }
+  if (window.WA && typeof window.WA.installWorkspaceNotebookTools === 'function') {
+    window.WA.installWorkspaceNotebookTools({
+      $,
+      getFiles: () => state._aiFileContext || [],
+      getSessionId: () => _waSession(),
+      escHtml: _escHtml,
+      sanitizeRenderedHtml: _sanitizeRenderedHtml,
+      fileIcon: _fileIcon,
+      showToast,
+      chatSvg: _CHAT_SVG,
+      pinSvg: _PIN_SVG,
+      clipboardSvg: _CLIPBOARD_SVG,
     });
-
-    if (!matches.length) {
-      results.innerHTML = `<div class="wa-source-no-result">未找到"${_escHtml(query)}"相关内容</div>`;
-      results.style.display = '';
-      return;
-    }
-
-    results.innerHTML = matches.slice(0, 12).map((m, i) =>
-      `<div class="wa-source-result-item" data-idx="${i}" onclick="WA._sourceResultClick(this)">` +
-      `<span class="wa-src-result-file">${_fileIcon(m.name.split('.').pop())} ${_escHtml(m.name)}</span>` +
-      `<span class="wa-src-result-text">…${m.excerpt}…</span>` +
-      `</div>`
-    ).join('');
-    // Store hit data for click handler
-    results._hitData = matches.slice(0, 12);
-    results.style.display = '';
   }
-
-  window.WA._sourceResultClick = (el) => {
-    const results = $('wa-source-search-results');
-    const idx = parseInt(el.dataset.idx || '0', 10);
-    const hit = results && results._hitData && results._hitData[idx];
-    if (!hit) return;
-    const query = ($('wa-source-search-input') || {}).value || '';
-    // Pre-fill the chat input with a grounded query
-    const input = $('wa-user-input');
-    if (input) {
-      input.value = `关于"${query}"，${hit.name}中提到了什么？请引用原文并分析。`;
-      input.focus();
-    }
-    window.WA.clearSourceSearch();
-  };
-
-  window.WA.clearSourceSearch = () => {
-    const inp = $('wa-source-search-input');
-    if (inp) inp.value = '';
-    const r = $('wa-source-search-results');
-    if (r) { r.innerHTML = ''; r.style.display = 'none'; }
-    const cb = $('wa-source-clear-btn');
-    if (cb) cb.style.display = 'none';
-  };
-
-  function _escRegex(s) {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  // Parse AI response text and replace [来源: xxx] with clickable citation chips
-  function _parseCitations(html) {
-    return html.replace(
-      /\[来源[:：]\s*([^\]]{1,60})\]/g,
-      (_, srcName) =>
-        `<span class="wa-citation-chip" onclick="WA._citationClick('${_escHtml(srcName.trim())}')" title="点击查看来源">${_PIN_SVG} ${_escHtml(srcName.trim())}</span>`
-    );
-  }
-
-  window.WA._citationClick = (fileName) => {
-    const file = state._aiFileContext.find(
-      f => f.name === fileName || f.name.toLowerCase() === fileName.toLowerCase()
-    );
-    if (!file) { showToast(`未找到文件 "${fileName}"`, 'warn'); return; }
-    // Show the source in the preview drawer
-    const preview = $('wa-source-preview');
-    const label = $('wa-source-preview-label');
-    const body = $('wa-source-preview-body');
-    if (!preview || !body) return;
-    label.textContent = file.name;
-    body.innerHTML = `<pre class="wa-source-pre">${_escHtml((file.content || '').slice(0, 3000))}${file.content && file.content.length > 3000 ? '…' : ''}</pre>`;
-    preview.style.display = '';
-    preview.scrollTop = 0;
-  };
-
-  window.WA.closeSourcePreview = () => {
-    const el = $('wa-source-preview');
-    if (el) el.style.display = 'none';
-  };
-
-  // ── Audio Overview ────────────────────────────────────────────────────────
-  window.WA.openAudioOverview = async () => {
-    const files = state._aiFileContext;
-    if (!files.length) { showToast('请先附加文件', 'warn'); return; }
-    const modal = $('wa-audio-modal');
-    const body = $('wa-audio-modal-body');
-    if (!modal || !body) return;
-    body.innerHTML = '<div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成脚本…</div>';
-    modal.style.display = '';
-
-    try {
-      const res = await fetch('/api/v1/workspace/audio_overview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          files: files.map(f => ({ name: f.name, content: (f.content || '').slice(0, 8000) })),
-          session_id: _waSession(),
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      let script = null;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const ln of lines) {
-          if (!ln.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(ln.slice(6));
-            if (evt.event === 'script') {
-              script = evt.data;
-              body.innerHTML = _renderAudioScript(script, null);
-            } else if (evt.event === 'audio_url') {
-              if (evt.data) {
-                body.innerHTML = _renderAudioScript(script, evt.data);
-              }
-            } else if (evt.event === 'error') {
-              body.innerHTML = `<div style="color:var(--error,red);padding:16px">${_escHtml(evt.data)}</div>`;
-            }
-          } catch(e) {}
-        }
-      }
-      if (!script) body.innerHTML = '<div class="wa-audio-loading">未收到脚本</div>';
-    } catch(e) {
-      if (body) body.innerHTML = `<div style="color:var(--error,red);padding:16px">${_escHtml(e.message)}</div>`;
-    }
-  };
-
-  function _renderAudioScript(lines, audioUrl) {
-    const scriptHtml = (lines || []).map(l => {
-      const isA = l.speaker === 'Host A';
-      return `<div class="wa-audio-line ${isA ? 'host-a' : 'host-b'}">` +
-        `<span class="wa-audio-name">${isA ? '主播 A' : '主播 B'}</span>` +
-        `<span class="wa-audio-text">${_escHtml(l.text)}</span>` +
-        `</div>`;
-    }).join('');
-
-    const playerHtml = audioUrl
-      ? `<div class="wa-audio-player-wrap"><audio controls src="${_escHtml(audioUrl)}" class="wa-audio-player"></audio></div>`
-      : `<div class="wa-audio-no-tts">${_CHAT_SVG} 脚本已生成，音频合成需要 edge-tts 库（<code>pip install edge-tts</code>）</div>`;
-
-    return `${playerHtml}<div class="wa-audio-script">${scriptHtml}</div>`;
-  }
-
-  window.WA.closeAudioModal = () => {
-    const el = $('wa-audio-modal');
-    if (el) el.style.display = 'none';
-  };
-
-  // ── Notebook Guide ────────────────────────────────────────────────────────
-  window.WA.openNotebookGuide = async () => {
-    const files = state._aiFileContext;
-    if (!files.length) { showToast('请先附加文件', 'warn'); return; }
-    const drawer = $('wa-notebook-guide');
-    const body = $('wa-notebook-body');
-    if (!drawer || !body) return;
-    body.innerHTML = '<div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成学习包…</div>';
-    drawer.style.display = '';
-
-    try {
-      const res = await fetch('/api/v1/workspace/notebook_guide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          files: files.map(f => ({ name: f.name, content: (f.content || '').slice(0, 8000) })),
-        }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      // Clear loading, prepare cards container
-      body.innerHTML = '';
-
-      const LABELS = {
-        summary: '执行摘要', points: '关键要点',
-        faq: '常见问答', glossary: '核心词汇',
-      };
-
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        for (const ln of lines) {
-          if (!ln.startsWith('data: ')) continue;
-          try {
-            const evt = JSON.parse(ln.slice(6));
-            if (evt.section === 'done') break;
-            if (evt.section === 'error') {
-              body.innerHTML += `<div style="color:var(--error,red);padding:10px">${_escHtml(evt.content)}</div>`;
-              break;
-            }
-            if (!LABELS[evt.section]) continue;
-            const renderMd = (t) => {
-              if (window.marked) { try { return _sanitizeRenderedHtml(window.marked.parse(t || '')); } catch(e) {} }
-              return `<pre>${_escHtml(t)}</pre>`;
-            };
-            const card = document.createElement('div');
-            card.className = 'wa-nb-card';
-            card.innerHTML =
-              `<div class="wa-nb-card-header" onclick="this.parentElement.classList.toggle('collapsed')">` +
-              `<span>${LABELS[evt.section]}</span>` +
-              `<div class="wa-nb-card-btns">` +
-              `<button class="wa-nb-copy-btn" onclick="event.stopPropagation();WA._copyNbSection(this)" title="复制">${_CLIPBOARD_SVG}</button>` +
-              `<button class="wa-nb-send-btn" onclick="event.stopPropagation();WA._sendNbSection(this)" title="发送到AI">${_CHAT_SVG}</button>` +
-              `<span class="wa-nb-chevron">▾</span></div></div>` +
-              `<div class="wa-nb-card-body" data-raw="${_escHtml(evt.content)}">${renderMd(evt.content)}</div>`;
-            body.appendChild(card);
-          } catch(e) {}
-        }
-      }
-      if (!body.children.length) {
-        body.innerHTML = '<div class="wa-audio-loading">未收到内容</div>';
-      }
-    } catch(e) {
-      if (body) body.innerHTML = `<div style="color:var(--error,red);padding:16px">${_escHtml(e.message)}</div>`;
-    }
-  };
-
-  window.WA._copyNbSection = async (btn) => {
-    const body = btn.closest('.wa-nb-card').querySelector('.wa-nb-card-body');
-    if (!body) return;
-    try {
-      await navigator.clipboard.writeText(body.dataset.raw || body.textContent);
-      showToast('已复制', 'success');
-    } catch(e) { showToast('复制失败', 'warn'); }
-  };
-
-  window.WA._sendNbSection = (btn) => {
-    const body = btn.closest('.wa-nb-card').querySelector('.wa-nb-card-body');
-    if (!body) return;
-    const input = $('wa-user-input');
-    if (input) { input.value = (body.dataset.raw || body.textContent).slice(0, 500); input.focus(); }
-    WA.closeNotebookGuide();
-  };
-
-  window.WA.closeNotebookGuide = () => {
-    const el = $('wa-notebook-guide');
-    if (el) el.style.display = 'none';
-  };
-
   // ── AI Response Action Bar ─────────────────────────────────────────────────
   // snapshot = { pinnedSel, toolCall, outputMode } — captured at response-complete
   // time so UI buttons are isolated from subsequent state changes.
