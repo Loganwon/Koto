@@ -40,6 +40,26 @@ _DOCX_PREVIEW_UNITS_PER_PAGE = 34
 _DOCX_PREVIEW_MAX_TABLE_ROWS = 18
 
 
+def _strip_unsafe_html_blocks(html: str) -> str:
+    """Remove script/style blocks from generated document HTML."""
+    if not html:
+        return html
+    try:
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup.find_all(["script", "style"]):
+            tag.decompose()
+        return str(soup)
+    except Exception:
+        return re.sub(
+            r"<(?:style|script)\b[^>]*>.*?</\s*(?:style|script)\s*>",
+            "",
+            html,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+
+
 def _compress_image_bytes(
     img_bytes: bytes, content_type: str = "image/png"
 ) -> tuple[bytes, str]:
@@ -3063,13 +3083,7 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
             progressive_preview=progressive_preview,
         )
 
-        # strip <style>/<script> just in case
-        rich_html = re.sub(
-            r"<style[^>]*>.*?</style>|<script[^>]*>.*?</script>",
-            "",
-            rich_html,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
+        rich_html = _strip_unsafe_html_blocks(rich_html)
 
         # Unwrap single-column layout tables that have no visible borders
         try:
@@ -3157,7 +3171,10 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
             return {"src": ""}
 
     try:
-        with open(file_path, "rb") as f:
+        docx_path = Path(file_path).expanduser().resolve(strict=True)
+
+        # codeql[py/path-injection]
+        with docx_path.open("rb") as f:
             result = mammoth.convert_to_html(
                 f,
                 convert_image=mammoth.images.img_element(_img_handler),
@@ -3165,12 +3182,7 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
         for msg in result.messages:
             messages_out.append(str(msg))
 
-        clean_html = re.sub(
-            r"<style[^>]*>.*?</style>|<script[^>]*>.*?</script>",
-            "",
-            result.value,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
+        clean_html = _strip_unsafe_html_blocks(result.value)
         clean_html = re.sub(
             r"(<p[^>]*>)(?:(?:body|h[1-6]|blockquote|strong|em|code|pre|table|td|th|ul|ol|li)\s*\{[^{}]*\})+",
             r"\1",

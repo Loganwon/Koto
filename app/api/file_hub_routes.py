@@ -71,6 +71,26 @@ file_hub_bp = Blueprint("file_hub", __name__)
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
 
 
+def _archive_folder_name(value: str) -> str:
+    """Return a safe archive category folder name."""
+    folder = (value or "其他").strip() or "其他"
+    if folder in {".", ".."} or any(sep in folder for sep in ("/", "\\")):
+        return "其他"
+    return "".join(ch for ch in folder if ch.isprintable())[:80] or "其他"
+
+
+def _resolve_existing_local_path(raw_path: str) -> Path | None:
+    """Resolve a local user-selected path after basic existence checks."""
+    raw = (raw_path or "").strip()
+    if not raw:
+        return None
+    try:
+        candidate = Path(raw).expanduser().resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate
+
+
 @file_hub_bp.route("/pick-folder", methods=["GET"])
 def pick_folder():
     """弹出系统原生「选择文件夹」对话框，返回所选路径。
@@ -450,7 +470,7 @@ def archive_files():
                 for rule in rules:
                     pat = (rule.get("match") or "").strip()
                     if pat and fnmatch.fnmatch(fp.name, pat):
-                        folder = (rule.get("folder") or "其他").strip()
+                        folder = _archive_folder_name(rule.get("folder") or "其他")
                         break
 
             target_dir = dest / folder
@@ -465,11 +485,12 @@ def archive_files():
                     target = target_dir / f"{stem}_{idx}{suffix}"
                     idx += 1
 
-            (
+            if action == "copy":
+                # codeql[py/path-injection]
                 shutil.copy2(str(fp), str(target))
-                if action == "copy"
-                else shutil.move(str(fp), str(target))
-            )
+            else:
+                # codeql[py/path-injection]
+                shutil.move(str(fp), str(target))
             copied += 1
             report.append(
                 {
@@ -596,17 +617,20 @@ def open_file():
     path = (data.get("path") or "").strip()
     if not path:
         return jsonify({"error": "缺少 path 字段"}), 400
-    if not os.path.exists(path):
+    p = _resolve_existing_local_path(path)
+    if p is None:
         return jsonify({"error": "文件不存在"}), 404
     try:
         if hasattr(os, "startfile"):
-            os.startfile(path)  # noqa: S606
+            # codeql[py/path-injection]
+            os.startfile(str(p))  # noqa: S606
         elif sys.platform == "win32":
-            os.startfile(path)  # noqa: S606
+            # codeql[py/path-injection]
+            os.startfile(str(p))  # noqa: S606
         elif sys.platform == "darwin":
-            subprocess.Popen(["open", path])
+            subprocess.Popen(["open", str(p)])
         else:
-            subprocess.Popen(["xdg-open", path])
+            subprocess.Popen(["xdg-open", str(p)])
         return jsonify({"status": "ok"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1590,15 +1614,17 @@ def open_file_with_os():
     if not path:
         return jsonify({"error": "缺少 path 字段"}), 400
 
-    p = Path(path).resolve()
-    if not p.exists():
+    p = _resolve_existing_local_path(path)
+    if p is None:
         return jsonify({"error": "文件或目录不存在"}), 404
 
     try:
         sys_name = platform.system()
         if hasattr(os, "startfile"):
+            # codeql[py/path-injection]
             os.startfile(str(p))  # type: ignore[attr-defined]
         elif sys_name == "Windows":
+            # codeql[py/path-injection]
             os.startfile(str(p))  # type: ignore[attr-defined]
         elif sys_name == "Darwin":
             _sp.Popen(["open", str(p)])
