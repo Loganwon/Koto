@@ -527,7 +527,7 @@
           }
         }
       }
-      const driftMaxTop = !resolvedByCollision && Number.isFinite(maxAnchorDrift) && Number.isFinite(desiredTop)
+      const driftMaxTop = Number.isFinite(maxAnchorDrift) && Number.isFinite(desiredTop)
         ? Math.max(minTop, Math.round(desiredTop) + maxAnchorDrift)
         : Infinity;
       return Math.max(minTop, Math.min(nextTop, maxTop, driftMaxTop));
@@ -754,9 +754,11 @@
           : Infinity;
         if (anchorHeight > 0) {
           const baseMinHeight = card.classList.contains('koto-docx-comment-card') ? 42 : 20;
+          const cs = window.getComputedStyle(card);
+          const padV = Math.round((parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0));
           const anchorMinHeight = Number.isFinite(pageAvailableHeight)
-            ? Math.min(anchorHeight, pageAvailableHeight)
-            : anchorHeight;
+            ? Math.min(Math.max(0, anchorHeight - padV), pageAvailableHeight)
+            : Math.max(0, anchorHeight - padV);
           card.style.setProperty('--wa-review-card-anchor-min-height', `${Math.max(baseMinHeight, anchorMinHeight)}px`);
         }
         let cardHeight = card.offsetHeight || 32;
