@@ -1622,7 +1622,7 @@
             <header class="topbar">
                 <div class="title-stack">
                     <p class="eyebrow">Koto Studio · Gemini + 本地</p>
-                    <h1 id="chatTitle">选择或创建对话</h1>
+                    <h1 id="chatTitle">Koto</h1>
                     <p class="subtitle">对话、写作、调试、浏览、文件编辑一体化</p>
                 </div>
                 <div class="top-actions">
@@ -1703,55 +1703,17 @@
                                 </div>
                                 <div class="welcome-copy">
                                     <h2 id="welcomeGreeting">欢迎使用 Koto</h2>
-                                    <p>更轻、更快、更专注的本地 + 云端双引擎助手</p>
+                                    <p>直接开始：先说目标，再补充文件或上下文。</p>
                                 </div>
                             </div>
-                            <div class="suggestion-section">
-                                <div class="suggestion-label">快速开始 — 点击任意卡片填入示例</div>
-                                <div class="suggestion-grid">
-                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('帮我写一篇关于', ['email_writer', 'track_changes_writer'])">
-                                        <div class="sc-icon">✍️</div>
-                                        <div class="sc-body">
-                                            <div class="sc-title">写作与润色</div>
-                                            <div class="sc-sub">邮件、报告、文案、文章...</div>
-                                        </div>
-                                    </button>
-                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('帮我用 Python 写一个', ['debug_python', 'code_explainer'])">
-                                        <div class="sc-icon">💻</div>
-                                        <div class="sc-body">
-                                            <div class="sc-title">代码助手</div>
-                                            <div class="sc-sub">生成、调试、解释代码...</div>
-                                        </div>
-                                    </button>
-                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('请将以下内容翻译成英文：\n\n', ['annotate_translation'])">
-                                        <div class="sc-icon">🌐</div>
-                                        <div class="sc-body">
-                                            <div class="sc-title">翻译与语言</div>
-                                            <div class="sc-sub">中英互译、语言润色...</div>
-                                        </div>
-                                    </button>
-                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('帮我解释一下', ['deep_thinking'])">
-                                        <div class="sc-icon">🔍</div>
-                                        <div class="sc-body">
-                                            <div class="sc-title">信息查询</div>
-                                            <div class="sc-sub">解释概念、了解背景...</div>
-                                        </div>
-                                    </button>
-                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('请帮我分析这组数据：\n\n', ['excel_analyst', 'chart_analyst'])">
-                                        <div class="sc-icon">📊</div>
-                                        <div class="sc-body">
-                                            <div class="sc-title">数据处理</div>
-                                            <div class="sc-sub">表格、Excel、数据分析...</div>
-                                        </div>
-                                    </button>
-                                    <button class="suggestion-card" onclick="insertSuggestionWithSkill('请帮我总结以下内容：\n\n', ['doc_summarizer', 'long_doc_parser'])">
-                                        <div class="sc-icon">📄</div>
-                                        <div class="sc-body">
-                                            <div class="sc-title">文件分析</div>
-                                            <div class="sc-sub">上传 PDF、Word、图片...</div>
-                                        </div>
-                                    </button>
-                                </div>
+                            <div class="welcome-capability-row">
+                                <span>直接告诉 Koto 你想完成什么</span>
+                                <span>不必先选固定任务</span>
+                                <span>可以拖入文件后再细化要求</span>
+                            </div>
+                            <div class="welcome-prompt-actions">
+                                <button type="button" class="welcome-prompt-btn" onclick="insertSuggestion('先帮我判断怎么做：')">先帮我判断怎么做</button>
+                                <button type="button" class="welcome-prompt-btn" onclick="insertSuggestion('先给我一个结果，然后说明你做了哪些假设：')">先给我一个结果</button>
                             </div>
                         </div>
                     </div>
@@ -1796,9 +1758,9 @@
                             <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
                         </svg>
                     </label>
-                    <textarea 
-                        id="messageInput" 
-                        placeholder="问我任何问题，或拖入文件开始分析…" 
+                    <textarea
+                        id="messageInput"
+                        placeholder="直接告诉我你想完成什么，或拖入文件开始分析…"
                         rows="1"
                         onkeydown="handleKeyDown(event)"
                         oninput="autoResize(this); handleAtMention(this); handleSlashCommand(this); updateInputMeta(this)"
@@ -3264,8 +3226,12 @@
                 <div class="setup-step" id="setupStep1">
                     <div class="step-number">1</div>
                     <div class="step-content">
-                        <h4>设置 Gemini API Key</h4>
-                        <p>从 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> 获取免费的 API Key</p>
+                        <h4>设置云端模型 API Key</h4>
+                        <p id="setupApiProviderDesc">从 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> 获取 Gemini API Key</p>
+                        <div class="setup-provider-toggle" role="group" aria-label="选择云端模型供应商">
+                            <button type="button" class="setup-provider-option active" id="setupProviderGemini" onclick="selectSetupProvider('gemini')">Gemini</button>
+                            <button type="button" class="setup-provider-option" id="setupProviderDeepSeek" onclick="selectSetupProvider('deepseek')">DeepSeek</button>
+                        </div>
                         <input type="password" id="setupApiKey" placeholder="粘贴您的 API Key...">
                         <button class="btn-primary" onclick="saveApiKey()">验证并保存</button>
                         <div style="text-align:center; margin:14px 0 10px; color:var(--text-secondary); font-size:13px;">或使用激活码</div>
@@ -6072,47 +6038,6 @@
         el.focus();
         el.setSelectionRange(text.length, text.length);
         el.dispatchEvent(new Event('input'));
-    }
-
-    // All skill sets owned by the quick-start cards.
-    // When one card is selected, every skill from OTHER cards is deactivated first.
-    const _CARD_SKILL_SETS = [
-        ['email_writer', 'track_changes_writer'],
-        ['debug_python', 'code_explainer'],
-        ['annotate_translation'],
-        ['deep_thinking'],
-        ['excel_analyst', 'chart_analyst'],
-        ['doc_summarizer', 'long_doc_parser'],
-    ];
-
-    // Fill prompt, deactivate other cards' skills, then activate this card's skills.
-    // skillIds can be a string or an array of strings.
-    async function insertSuggestionWithSkill(text, skillIds) {
-        insertSuggestion(text);
-        const ids = Array.isArray(skillIds) ? skillIds : [skillIds];
-        const toDisable = _CARD_SKILL_SETS.flat().filter(id => !ids.includes(id));
-        try {
-            await Promise.all([
-                ...toDisable.map(id =>
-                    fetch('/api/skillmarket/toggle/' + id, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({enabled: false})
-                    })
-                ),
-                ...ids.map(id =>
-                    fetch('/api/skillmarket/toggle/' + id, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({enabled: true})
-                    })
-                ),
-            ]);
-            if (typeof window.refreshActiveSkills === 'function') window.refreshActiveSkills();
-            if (typeof window.spLoadSkills === 'function') window.spLoadSkills();
-        } catch (e) {
-            console.warn('[Koto] insertSuggestionWithSkill skill activation failed', e);
-        }
     }
     </script>
 

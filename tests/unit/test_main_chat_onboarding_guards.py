@@ -34,3 +34,15 @@ def test_main_chat_onboarding_placeholder_and_greeting_logic_match_prompt_first_
     assert "选择或创建对话" not in app_js
     assert "夜深了，还在呢🌙" in app_js
     assert "早上好，有什么需要帮忙？☀️" in app_js
+
+
+def test_setup_wizard_supports_gemini_and_deepseek_api_keys():
+    html = _read("web/templates/index.html")
+    app_js = _read("web/static/js/app.js")
+
+    assert "设置云端模型 API Key" in html
+    assert 'id="setupProviderGemini"' in html
+    assert 'id="setupProviderDeepSeek"' in html
+    assert "platform.deepseek.com/api_keys" in app_js
+    assert "function selectSetupProvider(provider)" in app_js
+    assert "body: JSON.stringify({ api_key: apiKey, provider })" in app_js

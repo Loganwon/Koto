@@ -10,7 +10,9 @@ from app.core.agent.file_task_contract import (
     FileTaskRequest,
     FileTaskRequirementSet,
 )
-from app.core.agent.file_task_doc_annotate_bridge import looks_like_docx_review_clear_request
+from app.core.agent.file_task_doc_annotate_boundary import (
+    looks_like_docx_review_clear_request,
+)
 from app.core.agent.file_task_recipes import select_task_recipe
 
 

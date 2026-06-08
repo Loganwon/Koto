@@ -29,7 +29,7 @@ class TestDocumentFeedback:
     def _make(self, **kw):
         with patch("web.document_reader.DocumentReader"), patch(
             "web.document_editor.DocumentEditor"
-        ), patch("web.document_annotator.DocumentAnnotator"):
+        ):
             from web.document_feedback import DocumentFeedbackSystem
 
             client = kw.get("client")
@@ -909,7 +909,7 @@ class TestFileAnalyzer:
         from web.file_analyzer import FileAnalyzer
 
         assert FileAnalyzer.OLLAMA_URL == "http://127.0.0.1:11434"
-        assert FileAnalyzer.AI_MODEL == "qwen3:8b"
+        assert FileAnalyzer.AI_MODEL == "qwen3.5:9b"
 
     # -- _load_classification_rules -----------------------------------------
     def test_load_classification_rules(self):

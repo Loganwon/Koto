@@ -527,6 +527,9 @@
           }
         }
       }
+      if (resolvedByCollision) {
+        return Math.max(minTop, Math.min(nextTop, maxTop));
+      }
       const driftMaxTop = Number.isFinite(maxAnchorDrift) && Number.isFinite(desiredTop)
         ? Math.max(minTop, Math.round(desiredTop) + maxAnchorDrift)
         : Infinity;
@@ -745,7 +748,7 @@
           ? {
               minTop: Math.max(0, Math.round(anchorGeometry.pageTop + 6)),
               maxTop: Math.max(0, Math.round(anchorGeometry.pageBottom - 6)),
-              maxAnchorDrift: 24,
+              maxAnchorDrift: 48,
             }
           : null;
         const anchorHeight = _reviewAnchorHeight(anchorGeometry);
@@ -895,14 +898,28 @@
       const maxTop = Math.max(shellTop, Math.round(viewportRect.bottom - hostRect.top - 54));
       const top = Math.max(shellTop, Math.min(Math.round(bounds.top - hostRect.top - 8), maxTop));
       if (railMetrics) {
-        const selectionRight = Number.isFinite(bounds.right)
-          ? Math.round(bounds.right - hostRect.left + railMetrics.railGap)
+        // Use the selection end rect (cursor position) instead of the rightmost
+        // bounding edge across all line fragments — this places the launcher
+        // where the mouse was released, not at the widest line.
+        let cursorRight = bounds.right;
+        const _ws = window.getSelection();
+        if (_ws && !_ws.isCollapsed && _ws.rangeCount > 0) {
+          const _rects = _ws.getRangeAt(0).getClientRects();
+          for (let _i = _rects.length - 1; _i >= 0; _i--) {
+            const _r = _rects[_i];
+            if (_r && _r.width > 0 && _r.height > 0) {
+              cursorRight = _r.right;
+              break;
+            }
+          }
+        }
+        const selectionRight = Number.isFinite(cursorRight)
+          ? Math.round(cursorRight - hostRect.left + railMetrics.railGap)
           : Math.round(viewportRect.right - hostRect.left - railMetrics.railWidth - 12);
         const maxLauncherLeft = Math.max(0, Math.round(viewportRect.right - hostRect.left - railMetrics.railWidth - 14));
-        const launcherLeft = _shiftReviewRailLeft(Math.min(selectionRight, maxLauncherLeft), host);
+        const launcherLeft = Math.min(selectionRight, maxLauncherLeft);
         launcher.style.left = launcherLeft + 'px';
         launcher.style.right = 'auto';
-        launcher.style.width = railMetrics.railWidth + 'px';
       }
       launcher.style.top = top + 'px';
       launcher.style.display = 'flex';

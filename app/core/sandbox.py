@@ -61,6 +61,7 @@ def _build_sandbox_env(tmpdir: str) -> dict:
             "TMPDIR": tmpdir,
             "TEMP": tmpdir,
             "TMP": tmpdir,
+            "MPLCONFIGDIR": tmpdir,
             "R_USER": tmpdir,
             "USERPROFILE": tmpdir,  # Windows
         }
@@ -92,6 +93,7 @@ def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None =
         import os as _os
         import sys as _sys
         _sys.path.insert(0, _os.getcwd())
+        _os.environ.setdefault('MPLCONFIGDIR', _os.getcwd())
 
         try:
             import matplotlib

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -742,8 +742,13 @@ class FileTaskRuntime:
             return
 
         context_files = self._context_files(request)
-        if self._should_route_financial_xlsx_docx_report(request, context_files):
-            yield from self._stream_financial_xlsx_docx_report(request, context_files)
+        from app.core.agent.file_task_financial_report_runner import (
+            FileTaskFinancialReportRunner,
+        )
+
+        financial_report_runner = FileTaskFinancialReportRunner(self)
+        if financial_report_runner.should_route(request, context_files):
+            yield from financial_report_runner.stream(request, context_files)
             return
 
         base_classification = self._classify_request(request, context_files)
@@ -769,11 +774,9 @@ class FileTaskRuntime:
         simple_quick_action = execution_context.simple_quick_action
         write_intent = execution_context.write_intent
         if classification.execution_mode != "doc_annotate_bridge":
-            from app.core.agent import file_task_doc_annotate_bridge
+            from app.core.agent import file_task_doc_annotate_boundary
 
-            if file_task_doc_annotate_bridge.should_use_doc_annotate_bridge_execution(
-                request
-            ):
+            if file_task_doc_annotate_boundary.should_use_bridge_execution(request):
                 classification.execution_mode = "doc_annotate_bridge"
                 classification.task_family = "annotate"
                 classification.operation_kind = "annotate"
@@ -786,9 +789,7 @@ class FileTaskRuntime:
                     classification.matched_capabilities.append("read_docx_content")
                 if not classification.selected_recipe:
                     classification.selected_recipe = (
-                        "pdf_docx_review_bridge"
-                        if self._request_has_file_type(request, "pdf")
-                        else "single_docx_review_bridge"
+                        file_task_doc_annotate_boundary.bridge_recipe_id(request)
                     )
                 classification.reason_codes.append(
                     "doc_annotate_bridge_execution_fallback"
@@ -800,7 +801,10 @@ class FileTaskRuntime:
             executor = None
         else:
             gateway = self._build_tool_gateway(request, context_files)
-            tool_defs = gateway.definitions()
+            tool_defs = self._tool_defs_for_classification(
+                gateway.definitions(),
+                classification,
+            )
             executor = gateway.execute
         recipe_skeleton = build_recipe_skeleton(
             request,
@@ -1920,6 +1924,43 @@ class FileTaskRuntime:
                     )
                     continue
 
+                exposed_tool_names = {
+                    str(definition.get("name") or "").strip()
+                    for definition in tool_defs
+                    if str(definition.get("name") or "").strip()
+                }
+                if exposed_tool_names and tool_name not in exposed_tool_names:
+                    error_text = self._recipe_tool_block_message(
+                        tool_name,
+                        classification,
+                        exposed_tool_names,
+                    )
+                    yield ledger.event(
+                        "tool.finished",
+                        {
+                            "tool_name": tool_name,
+                            "success": False,
+                            "blocked": True,
+                            "result_preview": error_text,
+                        },
+                        step_id=current_step_id,
+                    )
+                    messages.append(
+                        {
+                            "role": "function",
+                            "name": tool_name,
+                            "tool_call_id": tool_call_id,
+                            "content": self._tool_feedback_for_model(
+                                tool_name,
+                                tool_args,
+                                {"error": error_text},
+                                success=False,
+                                blocked=True,
+                            ),
+                        }
+                    )
+                    continue
+
                 if (
                     is_write_tool(tool_name)
                     and tool_name != "run_python_code"
@@ -2754,6 +2795,58 @@ class FileTaskRuntime:
             tool_executor=self._tool_executor,
         )
 
+    def _tool_defs_for_classification(
+        self,
+        tool_defs: List[Dict[str, Any]],
+        classification: FileTaskClassification,
+    ) -> List[Dict[str, Any]]:
+        selected_recipe = str(classification.selected_recipe or "").strip()
+        if selected_recipe not in {
+            "docx_compare_annotation",
+            "docx_contract_compare_review",
+        }:
+            return tool_defs
+        allowed = {
+            "parse_file_to_text",
+            "verify_task_completion",
+            *[
+                str(name or "").strip()
+                for name in classification.matched_capabilities
+                if str(name or "").strip()
+            ],
+        }
+        forbidden = {"annotate_file"}
+        return [
+            definition
+            for definition in tool_defs
+            if str(definition.get("name") or "").strip() in allowed
+            and str(definition.get("name") or "").strip() not in forbidden
+        ]
+
+    def _recipe_tool_block_message(
+        self,
+        tool_name: str,
+        classification: FileTaskClassification,
+        exposed_tool_names: set[str],
+    ) -> str:
+        selected_recipe = str(classification.selected_recipe or "").strip()
+        allowed_text = ", ".join(sorted(exposed_tool_names)) or "当前路线工具集"
+        if selected_recipe in {
+            "docx_compare_annotation",
+            "docx_contract_compare_review",
+        }:
+            return (
+                f"工具 {tool_name} 不属于当前 DOCX 对比批注路线。"
+                "这是两份 DOCX 的差异比较任务，不是单文档审校；"
+                "请使用 plan_docx_compare_annotations 定位差异，"
+                "再使用 write_docx_comments 写入目标 DOCX 原文批注。"
+                f" 当前允许工具：{allowed_text}。"
+            )
+        return (
+            f"工具 {tool_name} 不属于当前任务路线 {selected_recipe or '未命名路线'}。"
+            f" 当前允许工具：{allowed_text}。"
+        )
+
     def _stream_doc_annotate_bridge_execution(
         self,
         ledger: FileTaskLedger,
@@ -2767,62 +2860,21 @@ class FileTaskRuntime:
         constraint_audit: Dict[str, Any],
         quick_action_mode: str,
     ) -> Iterable[FileTaskEvent]:
-        from app.core.agent import file_task_doc_annotate_bridge
+        from app.core.agent.file_task_doc_annotate_runner import (
+            FileTaskDocAnnotateRunner,
+        )
 
-        terminal_event: Optional[FileTaskEvent] = None
-        for bridge_event in file_task_doc_annotate_bridge.stream_request(
+        yield from FileTaskDocAnnotateRunner(self).stream_bridge_execution(
+            ledger,
             request,
-            workspace_root=self._workspace_root,
-            gemini_client=self._gemini_client,
-        ):
-            if self._is_cancelled(request):
-                yield self._cancelled_event(ledger, request)
-                return
-
-            payload = (
-                dict(bridge_event.payload)
-                if isinstance(bridge_event.payload, dict)
-                else {}
-            )
-            if bridge_event.type in {"run.started", "plan.created"}:
-                continue
-            if bridge_event.type == "run.finished":
-                payload.update(
-                    {
-                        "mode": "whitebox_v1",
-                        "execution_mode": "doc_annotate_bridge",
-                        "task": request.task,
-                        "quick_action_mode": quick_action_mode,
-                        "intent_plan": intent_plan_payload,
-                        "requirements": requirements_payload,
-                        "plan_check": plan_check_payload,
-                        "recipe_skeleton": recipe_skeleton,
-                        "constraint_audit": constraint_audit,
-                        **classification_payload,
-                    }
-                )
-                terminal_event = ledger.event(
-                    "run.finished",
-                    payload,
-                    step_id=bridge_event.step_id,
-                )
-                continue
-            if bridge_event.type == "run.error":
-                payload.setdefault("execution_mode", "doc_annotate_bridge")
-                terminal_event = ledger.event(
-                    "run.error",
-                    payload,
-                    step_id=bridge_event.step_id,
-                )
-                continue
-            yield ledger.event(
-                bridge_event.type,
-                payload,
-                step_id=bridge_event.step_id,
-            )
-
-        if terminal_event is not None:
-            yield terminal_event
+            classification_payload=classification_payload,
+            intent_plan_payload=intent_plan_payload,
+            requirements_payload=requirements_payload,
+            plan_check_payload=plan_check_payload,
+            recipe_skeleton=recipe_skeleton,
+            constraint_audit=constraint_audit,
+            quick_action_mode=quick_action_mode,
+        )
 
     def _stream_long_docx_stepwise_polish_writeback(
         self,
@@ -3326,490 +3378,22 @@ class FileTaskRuntime:
     def _should_route_financial_xlsx_docx_report(
         self, request: FileTaskRequest, files: List[FileTaskFile]
     ) -> bool:
-        recipe_match = select_task_recipe(
-            request, files, write_intent=self._has_write_intent(request.task)
+        from app.core.agent.file_task_financial_report_runner import (
+            FileTaskFinancialReportRunner,
         )
-        return bool(
-            recipe_match and recipe_match.recipe.id == "financial_xlsx_docx_report"
-        )
+
+        return FileTaskFinancialReportRunner(self).should_route(request, files)
 
     def _stream_financial_xlsx_docx_report(
         self,
         request: FileTaskRequest,
         context_files: List[FileTaskFile],
     ) -> Iterable[FileTaskEvent]:
-        ledger = FileTaskLedger(request.run_id)
-        gateway = self._build_tool_gateway(request, context_files)
-        executor = gateway.execute
-        xlsx_file = self._first_context_file(context_files, {"xlsx", "xlsm"})
-        target_docx_file = self._first_context_file(
-            context_files, {"docx"}, target=True
-        )
-        single_docx_file = self._single_context_file(context_files, {"docx"})
-        ambiguous_docx_target = (
-            target_docx_file is None
-            and single_docx_file is None
-            and len(self._context_files_by_type(context_files, {"docx"})) > 1
-        )
-        docx_file = target_docx_file or single_docx_file
-        xlsx_path = (
-            str(xlsx_file.path or xlsx_file.name or "").strip() if xlsx_file else ""
-        )
-        docx_path = str(
-            request.target_path
-            or (docx_file.path if docx_file else "")
-            or (docx_file.name if docx_file else "")
-        ).strip()
-        if xlsx_path:
-            xlsx_path = str(Path(xlsx_path).resolve())
-        if docx_path:
-            docx_path = str(Path(docx_path).resolve())
-        classification = FileTaskClassification(
-            request_kind="new_task",
-            task_family="financial_report",
-            operation_kind="analyze_visualize_write",
-            execution_mode="financial_xlsx_docx_report",
-            output_mode="write",
-            write_intent=True,
-            target_file_type="docx",
-            file_types=sorted(self._file_types(context_files)),
-            matched_capabilities=[
-                "inspect_workbook_structure",
-                "audit_financial_workbook",
-                "run_python_code",
-                "write_docx_content",
-                "insert_image_into_docx",
-            ],
-            reason_codes=["native_financial_xlsx_docx_report", "write_intent"],
-            selected_recipe="financial_xlsx_docx_report",
-            recipe_candidates=[
-                {
-                    "recipe_id": "financial_xlsx_docx_report",
-                    "score": 1,
-                    "task_family": "financial_report",
-                    "operation_kind": "analyze_visualize_write",
-                    "reason_codes": ["recipe:financial_xlsx_docx_report"],
-                }
-            ],
-            confidence=1.0,
-        )
-        classification_payload = classification.public_dict()
-        financial_constraint_audit = self._financial_constraint_audit(
-            request,
-            context_files,
-            ambiguous_docx_target=ambiguous_docx_target,
-        )
-        plan_runtime = self._build_runtime_metadata(
-            terminal_status="plan_checked",
-            readonly_fallback_used=False,
-            model_failed=False,
-            planner_payload={
-                "backend": "native",
-                "source": "native",
-                "policy": "native_only",
-                "transport": "internal",
-                "reason": "financial_xlsx_docx_report",
-                "round": 1,
-            },
-            planner_fallback_payload={},
+        from app.core.agent.file_task_financial_report_runner import (
+            FileTaskFinancialReportRunner,
         )
 
-        yield ledger.event(
-            "run.started",
-            {
-                "task": request.task,
-                "mode": "whitebox_v1",
-                "file_count": len(context_files),
-                "target_path": docx_path,
-                "model_mode": request.model_mode,
-                "model_id": request.model_id,
-                "constraint_audit": financial_constraint_audit,
-                **classification_payload,
-            },
-        )
-        yield ledger.event(
-            "task.classified",
-            {
-                **classification_payload,
-                "summary": "已识别为 Excel 财务分析、图表生成与 Word 写回的原生白盒工作流。",
-            },
-            step_id="plan",
-        )
-        yield ledger.event(
-            "plan.checked",
-            {
-                "passed": bool(xlsx_path and docx_path),
-                "status": "pass" if xlsx_path and docx_path else "failed",
-                "summary": (
-                    "已匹配 Excel 财务分析、图表生成和 DOCX 写回工作流。"
-                    if xlsx_path and docx_path
-                    else (
-                        "存在多个 DOCX，需明确目标 Word 文件。"
-                        if ambiguous_docx_target
-                        else "缺少 Excel 或 DOCX 目标文件。"
-                    )
-                ),
-                "requirements": {"write_required": True, "target_file_type": "docx"},
-                "violations": (
-                    []
-                    if xlsx_path and docx_path
-                    else (
-                        ["ambiguous_docx_target"]
-                        if ambiguous_docx_target
-                        else ["missing_xlsx_or_docx_target"]
-                    )
-                ),
-                "runtime": plan_runtime,
-                "constraint_audit": financial_constraint_audit,
-            },
-            step_id="plan",
-        )
-
-        if not xlsx_path or not docx_path:
-            terminal_runtime = self._build_runtime_metadata(
-                terminal_status="failed",
-                readonly_fallback_used=False,
-                model_failed=False,
-                planner_payload=plan_runtime.get("planner", {}),
-                planner_fallback_payload={},
-            )
-            summary = (
-                "存在多个 DOCX，需明确目标 Word 文件，无法自动写入财务图表。"
-                if ambiguous_docx_target
-                else "缺少 Excel 或 DOCX 目标文件，无法生成并写入财务图表。"
-            )
-            yield ledger.event(
-                "run.finished",
-                {
-                    "task": request.task,
-                    "mode": "whitebox_v1",
-                    "summary": summary,
-                    "completed_task": False,
-                    "context": [],
-                    "file_changes": [],
-                    "runtime": terminal_runtime,
-                    "constraint_audit": financial_constraint_audit,
-                    **classification_payload,
-                },
-            )
-            return
-
-        yield ledger.event(
-            "plan.created",
-            {
-                "summary": f"准备分析 {self._display_path(xlsx_path)}，生成图表和问题清单，并写入 {self._display_path(docx_path)}。",
-                "steps": [
-                    {
-                        "id": "context",
-                        "title": "读取财务模型",
-                        "description": "检查工作簿结构、外部链接、公式和关键工作表。",
-                    },
-                    {
-                        "id": "execute",
-                        "title": "生成图表和问题清单",
-                        "description": "抽取关键年份指标，生成 PNG 图表，并结合审计结果整理问题清单。",
-                    },
-                    {
-                        "id": "write_docx",
-                        "title": "写入 Word",
-                        "description": "先写入问题清单，再插入真实图表图片。",
-                    },
-                    {
-                        "id": "check",
-                        "title": "核验结果",
-                        "description": "确认目标 DOCX 已产生文件变更。",
-                    },
-                ],
-                "success_criteria": [
-                    "目标 DOCX 产生 file.changed 事件",
-                    "图表作为真实图片插入 DOCX",
-                    "问题清单作为可读段落写入 DOCX",
-                ],
-                "constraint_audit": financial_constraint_audit,
-            },
-        )
-
-        file_changes: List[Dict[str, Any]] = []
-        snippets: List[Dict[str, Any]] = []
-        model_failed = False
-        readonly_fallback_used = False
-        tool_runtime_outcome: Optional[Dict[str, Any]] = None
-
-        yield ledger.event(
-            "step.started",
-            {
-                "title": "读取财务模型",
-                "detail": "使用专用 Excel 审计工具读取结构和问题线索。",
-            },
-            step_id="context",
-        )
-        inspect_payload, inspect_events = self._run_builtin_tool(
-            ledger,
-            executor,
-            step_id="context",
-            tool_name="inspect_workbook_structure",
-            tool_args={
-                "path": xlsx_path,
-                "sample_rows_per_sheet": 8,
-                "max_formula_examples_per_sheet": 8,
-            },
-            file_changes=file_changes,
-        )
-        for event in inspect_events:
-            yield event
-        audit_payload, audit_events = self._run_builtin_tool(
-            ledger,
-            executor,
-            step_id="context",
-            tool_name="audit_financial_workbook",
-            tool_args={
-                "path": xlsx_path,
-                "sample_rows_per_sheet": 6,
-                "max_formula_examples_per_sheet": 8,
-                "max_findings": 12,
-            },
-            file_changes=file_changes,
-        )
-        for event in audit_events:
-            yield event
-        snippets.append(
-            {
-                "source": self._display_path(xlsx_path),
-                "path": xlsx_path,
-                "preview": _preview(
-                    (audit_payload or {}).get("summary")
-                    or (inspect_payload or {}).get("summary")
-                    or "已读取财务模型",
-                    500,
-                ),
-                "chars": 0,
-            }
-        )
-        yield ledger.event(
-            "step.finished", {"summary": "已完成财务模型结构检查。"}, step_id="context"
-        )
-        yield ledger.event(
-            "step.result",
-            self._build_step_result_payload(
-                title="读取财务模型",
-                summary="已完成财务模型结构检查，并收集审计问题线索。",
-                status="completed",
-                snippet_count=len(snippets),
-                snippets=snippets,
-            ),
-            step_id="context",
-        )
-
-        yield ledger.event(
-            "step.started",
-            {
-                "title": "生成图表和问题清单",
-                "detail": "从 Excel 抽取关键指标，生成可插入 Word 的 PNG 图表。",
-            },
-            step_id="execute",
-        )
-        chart_result = self._generate_financial_workbook_chart(
-            xlsx_path, inspect_payload, audit_payload
-        )
-        yield ledger.event(
-            "code.started",
-            {
-                "code": "internal_financial_workbook_chart_pipeline",
-            },
-            step_id="execute",
-        )
-        yield ledger.event(
-            "code.output",
-            {
-                "text": chart_result.get("summary") or "已生成财务图表。",
-                "stream": "stdout" if chart_result.get("success") else "stderr",
-            },
-            step_id="execute",
-        )
-        yield ledger.event(
-            "code.finished",
-            {
-                "success": bool(chart_result.get("success")),
-            },
-            step_id="execute",
-        )
-        yield ledger.event(
-            "tool.finished",
-            {
-                "tool_name": "run_python_code",
-                "success": bool(chart_result.get("success")),
-                "result_preview": chart_result.get("summary")
-                or chart_result.get("error")
-                or "图表生成完成。",
-            },
-            step_id="execute",
-        )
-
-        problems = self._financial_report_problem_paragraphs(
-            audit_payload, inspect_payload, chart_result
-        )
-        model_synthesis = self._financial_report_model_synthesis(
-            request, audit_payload, inspect_payload, chart_result
-        )
-        if model_synthesis:
-            yield ledger.event(
-                "tool.finished",
-                {
-                    "tool_name": "model_message",
-                    "success": True,
-                    "result_preview": _preview(model_synthesis, 900),
-                },
-                step_id="execute",
-            )
-            problems = self._merge_financial_model_synthesis(problems, model_synthesis)
-        yield ledger.event(
-            "step.finished",
-            {"summary": "已生成图表并整理问题清单。"},
-            step_id="execute",
-        )
-        yield ledger.event(
-            "step.result",
-            self._build_step_result_payload(
-                title="生成图表和问题清单",
-                summary=(
-                    "已生成图表并整理问题清单。"
-                    if chart_result.get("success")
-                    else "已整理问题清单，但图表生成失败。"
-                ),
-                status=(
-                    "completed" if chart_result.get("success") else "needs_attention"
-                ),
-                file_changes=file_changes,
-            ),
-            step_id="execute",
-        )
-
-        yield ledger.event(
-            "step.started",
-            {
-                "title": "写入 Word",
-                "detail": "把问题清单和图表写入目标 DOCX。",
-            },
-            step_id="write_docx",
-        )
-        write_payload, write_events = self._run_builtin_tool(
-            ledger,
-            executor,
-            step_id="write_docx",
-            tool_name="write_docx_content",
-            tool_args={
-                "path": docx_path,
-                "paragraphs": json.dumps(problems, ensure_ascii=False),
-            },
-            file_changes=file_changes,
-        )
-        for event in write_events:
-            yield event
-        if chart_result.get("success") and chart_result.get("path"):
-            _, image_events = self._run_builtin_tool(
-                ledger,
-                executor,
-                step_id="write_docx",
-                tool_name="insert_image_into_docx",
-                tool_args={
-                    "path": docx_path,
-                    "image_path": str(chart_result.get("path") or ""),
-                    "title": "关键财务指标趋势图",
-                    "caption": chart_result.get("caption")
-                    or "根据 Excel 财务模型关键年份数据自动生成。",
-                    "width_inches": 6.5,
-                },
-                file_changes=file_changes,
-            )
-            for event in image_events:
-                yield event
-        yield ledger.event(
-            "step.finished",
-            {
-                "title": "写入 Word 完成",
-                "summary": f"已记录 {len(file_changes)} 次文件变更。",
-            },
-            step_id="write_docx",
-        )
-        yield ledger.event(
-            "step.result",
-            self._build_step_result_payload(
-                title="写入 Word",
-                summary=("已将问题清单和图表写入 Word。" if file_changes else "未检测到 Word 文件变更。"),
-                status="completed" if file_changes else "failed",
-                file_changes=file_changes,
-            ),
-            step_id="write_docx",
-        )
-
-        yield ledger.event(
-            "check.started",
-            {
-                "title": "检查执行状态",
-                "criteria": self._success_criteria(request, True, "write"),
-            },
-            step_id="check",
-        )
-        check_payload = self._verify_task(
-            request,
-            executor,
-            file_changes,
-            True,
-            "write",
-            model_failed,
-            readonly_fallback_used,
-            tool_runtime_outcome,
-            None,
-            None,
-        )
-        terminal_runtime = self._build_runtime_metadata(
-            terminal_status=str(check_payload.get("status") or "").strip(),
-            readonly_fallback_used=readonly_fallback_used,
-            model_failed=model_failed,
-            planner_payload={
-                "backend": "native",
-                "source": "native",
-                "policy": "native_only",
-                "transport": "internal",
-                "reason": "financial_xlsx_docx_report",
-                "round": 1,
-            },
-            planner_fallback_payload={},
-        )
-        check_payload["runtime"] = terminal_runtime
-        yield ledger.event("check.finished", check_payload, step_id="check")
-        yield ledger.event(
-            "step.result",
-            self._build_step_result_payload(
-                title="检查执行状态",
-                summary=str(check_payload.get("summary") or "检查完成。"),
-                status=self._check_step_result_status(check_payload),
-                runtime=terminal_runtime,
-                passed=check_payload.get("passed"),
-                file_changes=file_changes,
-            ),
-            step_id="check",
-        )
-        summary = (
-            "已分析 Excel 财务模型，生成图表并把问题清单写入 Word。"
-            if check_payload.get("passed")
-            else str(check_payload.get("summary") or "未能确认目标 DOCX 已更新。")
-        )
-        yield ledger.event(
-            "run.finished",
-            {
-                "task": request.task,
-                "mode": "whitebox_v1",
-                "summary": summary,
-                "completed_task": bool(check_payload.get("passed")),
-                "context": snippets[:8],
-                "file_changes": file_changes,
-                "runtime": terminal_runtime,
-                "constraint_audit": financial_constraint_audit,
-                **classification_payload,
-            },
-        )
-
+        yield from FileTaskFinancialReportRunner(self).stream(request, context_files)
     def _run_builtin_tool(
         self,
         ledger: FileTaskLedger,
@@ -3878,17 +3462,19 @@ class FileTaskRuntime:
         options = request.options if isinstance(request.options, dict) else {}
         if bool(options.get("skip_doc_annotate_bridge")):
             return False
-        from app.core.agent import file_task_doc_annotate_bridge
+        from app.core.agent import file_task_doc_annotate_boundary
 
-        if file_task_doc_annotate_bridge.looks_like_docx_review_clear_request(
+        if file_task_doc_annotate_boundary.looks_like_docx_review_clear_request(
             request.task
         ):
             return False
-        if file_task_doc_annotate_bridge.looks_like_direct_docx_rewrite_request(
+        if file_task_doc_annotate_boundary.looks_like_direct_docx_rewrite_request(
             request.task
         ):
             return False
-        if file_task_doc_annotate_bridge.looks_like_multi_file_compare_request(request):
+        if file_task_doc_annotate_boundary.looks_like_multi_file_compare_request(
+            request
+        ):
             return False
         task_lower = str(request.task or "").strip().lower()
         if not task_lower:
@@ -3905,9 +3491,9 @@ class FileTaskRuntime:
     def _is_docx_clear_review_request(self, request: FileTaskRequest) -> bool:
         if not self._request_has_file_type(request, "docx"):
             return False
-        from app.core.agent import file_task_doc_annotate_bridge
+        from app.core.agent import file_task_doc_annotate_boundary
 
-        return file_task_doc_annotate_bridge.looks_like_docx_review_clear_request(
+        return file_task_doc_annotate_boundary.looks_like_docx_review_clear_request(
             request.task
         )
 
@@ -4056,6 +3642,8 @@ class FileTaskRuntime:
     ) -> str:
         explicit_mode = self._explicit_output_mode(request)
         if explicit_mode:
+            if explicit_mode == "answer" and not diagnostic_request and write_intent:
+                return "write"
             return explicit_mode
         if diagnostic_request:
             return "answer"
@@ -4227,7 +3815,9 @@ class FileTaskRuntime:
                 reason_codes.append("readonly_overrode_docx_annotation")
 
         if self._explicit_output_mode(request) == "answer" and not diagnostic_request:
-            if write_intent or raw_write_intent:
+            if (write_intent or raw_write_intent) and not self._has_strong_write_intent(
+                classification_task
+            ):
                 write_intent = False
                 reason_codes.append("answer_mode_overrode_write_intent")
             if docx_annotation_request or raw_docx_annotation_request:
@@ -4272,6 +3862,7 @@ class FileTaskRuntime:
                 str(options.get("output_mode") or "").strip().lower() == "answer"
                 and not diagnostic_request
             ):
+                output_mode = "write"
                 reason_codes.append("answer_mode_overridden_by_write_intent")
 
         recipe_match_request = classification_request
@@ -4341,6 +3932,14 @@ class FileTaskRuntime:
         if diagnostic_request:
             task_family = "analyze"
             operation_kind = "read"
+        elif clear_docx_review_request:
+            task_family = "transform"
+            operation_kind = "write"
+            docx_annotation_request = False
+            if "annotate_file" in matched_capabilities:
+                matched_capabilities = [
+                    name for name in matched_capabilities if name != "annotate_file"
+                ]
         elif (
             selected_recipe_match
             and selected_recipe_match.recipe.execution_mode == "doc_annotate_bridge"
@@ -4354,6 +3953,16 @@ class FileTaskRuntime:
         ):
             task_family = selected_recipe_match.recipe.task_family
             operation_kind = selected_recipe_match.recipe.write_operation_kind
+        elif (
+            selected_recipe_match
+            and selected_recipe_match.recipe.id == "docx_compare_annotation"
+        ):
+            task_family = selected_recipe_match.recipe.task_family
+            operation_kind = selected_recipe_match.recipe.write_operation_kind
+            if "annotate_file" in matched_capabilities:
+                matched_capabilities = [
+                    name for name in matched_capabilities if name != "annotate_file"
+                ]
         elif docx_compare_annotate_request:
             task_family = "compare"
             operation_kind = "compare_annotate"
@@ -5941,681 +5550,6 @@ class FileTaskRuntime:
             pass
         return ""
 
-    def _financial_cell_number(self, value: Any) -> Optional[float]:
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
-            number = float(value)
-            return number if number == number else None
-        text = str(value or "").strip().replace(",", "")
-        if not text:
-            return None
-        is_percent = text.endswith("%")
-        text = text.rstrip("%")
-        try:
-            number = float(text)
-        except Exception:
-            return None
-        if is_percent:
-            number = number / 100.0
-        return number if number == number else None
-
-    def _financial_year_label(self, value: Any) -> str:
-        text = str(value or "").strip()
-        if not text:
-            return ""
-        match = re.search(r"(20\d{2}\s*[AE]?)", text, re.IGNORECASE)
-        return match.group(1).replace(" ", "").upper() if match else ""
-
-    def _find_financial_sheet_rows(
-        self, workbook: Any
-    ) -> tuple[str, List[tuple[Any, ...]], List[tuple[int, str]]]:
-        preferred = [
-            name
-            for name in workbook.sheetnames
-            if re.search(r"(?:p&l|profit|income|利润|损益)", name, re.IGNORECASE)
-        ]
-        candidates = preferred or list(workbook.sheetnames)
-        for sheet_name in candidates:
-            worksheet = workbook[sheet_name]
-            rows = [tuple(row) for row in worksheet.iter_rows(values_only=True)]
-            for row in rows[:20]:
-                year_columns = [
-                    (idx, label)
-                    for idx, cell in enumerate(row)
-                    if (label := self._financial_year_label(cell))
-                ]
-                if len(year_columns) >= 2:
-                    return sheet_name, rows, year_columns
-        first = workbook.sheetnames[0] if workbook.sheetnames else ""
-        return (
-            first,
-            (
-                [tuple(row) for row in workbook[first].iter_rows(values_only=True)]
-                if first
-                else []
-            ),
-            [],
-        )
-
-    def _financial_row_label(
-        self, row: tuple[Any, ...], year_columns: List[tuple[int, str]]
-    ) -> str:
-        first_year_index = min([idx for idx, _ in year_columns] or [3])
-        labels = [
-            str(cell or "").strip()
-            for cell in row[:first_year_index]
-            if str(cell or "").strip()
-        ]
-        return labels[-1] if labels else ""
-
-    def _financial_row_values(
-        self, row: tuple[Any, ...], year_columns: List[tuple[int, str]]
-    ) -> List[Optional[float]]:
-        return [
-            self._financial_cell_number(row[idx] if idx < len(row) else None)
-            for idx, _ in year_columns
-        ]
-
-    def _extract_financial_series_groups(
-        self,
-        rows: List[tuple[Any, ...]],
-        year_columns: List[tuple[int, str]],
-    ) -> Dict[str, Dict[str, List[Optional[float]]]]:
-        groups: Dict[str, Dict[str, List[Optional[float]]]] = {
-            "money": {},
-            "rates": {},
-            "volume": {},
-            "expenses": {},
-            "product_revenue": {},
-            "costs": {},
-        }
-        exact_map = {
-            "收入合计": ("money", "收入合计"),
-            "硬件收入": ("money", "硬件收入"),
-            "配件收入": ("money", "配件收入"),
-            "互联网业务收入": ("money", "互联网业务收入"),
-            "成本合计": ("costs", "成本合计"),
-            "硬件成本": ("costs", "硬件成本"),
-            "配件成本": ("costs", "配件成本"),
-            "互联网业务成本": ("costs", "互联网业务成本"),
-            "毛利合计": ("money", "毛利合计"),
-            "费用合计": ("expenses", "费用合计"),
-            "研发费用": ("expenses", "研发费用"),
-            "销售费用": ("expenses", "销售费用"),
-            "管理费用": ("expenses", "管理费用"),
-            "财务费用": ("expenses", "财务费用"),
-            "利润总额": ("money", "利润总额"),
-            "净利润": ("money", "净利润"),
-            "增速%": ("rates", "收入增速"),
-            "综合毛利率%": ("rates", "综合毛利率"),
-            "硬件整体毛利率%": ("rates", "硬件毛利率"),
-            "净利率%": ("rates", "净利率"),
-            "研发费用%": ("rates", "研发费用率"),
-            "销售费用%": ("rates", "销售费用率"),
-            "管理费用%": ("rates", "管理费用率"),
-            "销量": ("volume", "总销量"),
-        }
-        section = ""
-        for row in rows:
-            label = self._financial_row_label(row, year_columns)
-            if not label:
-                continue
-            values = self._financial_row_values(row, year_columns)
-            if sum(value is not None for value in values) < 2:
-                if label in {"销量", "销量%", "硬件收入", "硬件成本"}:
-                    section = label
-                continue
-            if label in {"销量", "销量%", "硬件收入", "硬件成本"}:
-                section = label
-            mapped = exact_map.get(label)
-            if mapped:
-                group, display = mapped
-                groups[group].setdefault(display, values)
-                continue
-            if label in {"XR系列", "AI系列", "AR系列"}:
-                product = label.replace("系列", "")
-                if section == "销量":
-                    groups["volume"].setdefault(f"{product}销量", values)
-                elif section == "硬件收入":
-                    groups["product_revenue"].setdefault(f"{product}收入", values)
-                elif section == "硬件成本":
-                    groups["costs"].setdefault(f"{product}成本", values)
-        if not any(groups.values()):
-            fallback: Dict[str, List[Optional[float]]] = {}
-            for row in rows:
-                label = self._financial_row_label(row, year_columns)
-                values = self._financial_row_values(row, year_columns)
-                if label and sum(value is not None for value in values) >= 2:
-                    fallback[label[:20]] = values
-                if len(fallback) >= 4:
-                    break
-            groups["money"] = fallback
-        return {key: value for key, value in groups.items() if value}
-
-    def _flatten_financial_series(
-        self, groups: Dict[str, Dict[str, List[Optional[float]]]]
-    ) -> Dict[str, List[Optional[float]]]:
-        flat: Dict[str, List[Optional[float]]] = {}
-        for group in (
-            "money",
-            "rates",
-            "volume",
-            "expenses",
-            "product_revenue",
-            "costs",
-        ):
-            for name, values in (groups.get(group) or {}).items():
-                flat.setdefault(name, values)
-        return flat
-
-    def _generate_financial_workbook_chart(
-        self,
-        xlsx_path: str,
-        inspect_payload: Optional[Dict[str, Any]],
-        audit_payload: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        resolved = self._resolve_task_file_path(xlsx_path)
-        if not resolved:
-            return {"success": False, "error": f"无法定位 Excel 文件：{xlsx_path}"}
-        try:
-            import openpyxl
-            import matplotlib
-
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-            from matplotlib import font_manager
-
-            workbook = openpyxl.load_workbook(resolved, read_only=True, data_only=True)
-            sheet_name, rows, year_columns = self._find_financial_sheet_rows(workbook)
-            workbook.close()
-            if not year_columns:
-                return {"success": False, "error": "未识别到可用于作图的年份列。"}
-            years = [label for _, label in year_columns]
-            series_groups = self._extract_financial_series_groups(rows, year_columns)
-            series = self._flatten_financial_series(series_groups)
-            if not series:
-                return {
-                    "success": False,
-                    "error": "未识别到可用于作图的关键财务指标行。",
-                }
-
-            available_fonts = {font.name for font in font_manager.fontManager.ttflist}
-            for font_name in (
-                "Microsoft YaHei",
-                "SimHei",
-                "Noto Sans CJK SC",
-                "WenQuanYi Micro Hei",
-                "DejaVu Sans",
-            ):
-                if font_name in available_fonts:
-                    plt.rcParams["font.sans-serif"] = [font_name]
-                    break
-            plt.rcParams["axes.unicode_minus"] = False
-
-            fig, axes = plt.subplots(2, 2, figsize=(12.5, 8.4))
-            fig.suptitle(f"{sheet_name} 财务预测质量检查", fontsize=15, fontweight="bold")
-
-            def plot_lines(
-                ax: Any,
-                data: Dict[str, List[Optional[float]]],
-                title: str,
-                ylabel: str,
-                *,
-                as_percent: bool = False,
-            ) -> int:
-                plotted_count = 0
-                for name, values in data.items():
-                    numeric_values = [
-                        float(value) if value is not None else None for value in values
-                    ]
-                    if sum(value is not None for value in numeric_values) < 2:
-                        continue
-                    y_values = [
-                        value * 100 if (as_percent and value is not None) else value
-                        for value in numeric_values
-                    ]
-                    ax.plot(years, y_values, marker="o", linewidth=2, label=name)
-                    plotted_count += 1
-                ax.set_title(title)
-                ax.set_xlabel("年份")
-                ax.set_ylabel(ylabel)
-                ax.grid(True, alpha=0.25)
-                if plotted_count:
-                    ax.legend(loc="best", fontsize=8)
-                else:
-                    ax.text(
-                        0.5,
-                        0.5,
-                        "未识别到足够数据",
-                        ha="center",
-                        va="center",
-                        transform=ax.transAxes,
-                        color="#666",
-                    )
-                return plotted_count
-
-            monetary = {
-                key: value
-                for key, value in (series_groups.get("money") or {}).items()
-                if key in {"收入合计", "毛利合计", "净利润", "利润总额"}
-            } or (series_groups.get("money") or {})
-            expenses = series_groups.get("expenses") or {}
-            rates = series_groups.get("rates") or {}
-            volume = series_groups.get("volume") or {}
-
-            plotted = 0
-            plotted += plot_lines(axes[0][0], monetary, "收入、毛利与利润", "人民币万元")
-            plotted += plot_lines(axes[0][1], rates, "增长率与利润率", "百分比", as_percent=True)
-            plotted += plot_lines(axes[1][0], volume, "销量与产品结构", "台/套")
-            plotted += plot_lines(axes[1][1], expenses, "费用结构", "人民币万元")
-            if not plotted:
-                plt.close(fig)
-                return {
-                    "success": False,
-                    "error": "关键财务指标有效数值不足，无法生成趋势图。",
-                }
-            fig.tight_layout(rect=(0, 0, 1, 0.96))
-            artifact_root = (
-                Path(self._workspace_root or tempfile.gettempdir())
-                / ".koto_artifacts"
-                / "financial_charts"
-            )
-            artifact_root.mkdir(parents=True, exist_ok=True)
-            chart_path = artifact_root / f"financial_chart_{uuid.uuid4().hex[:10]}.png"
-            fig.savefig(chart_path, dpi=240, bbox_inches="tight")
-            plt.close(fig)
-            chart_issues = self._financial_series_issues(series, years)
-            return {
-                "success": True,
-                "path": str(chart_path),
-                "sheet": sheet_name,
-                "years": years,
-                "series": series,
-                "series_groups": series_groups,
-                "issues": chart_issues,
-                "summary": f"已从“{sheet_name}”生成 {plotted} 条指标线、4 个分析面板的财务图表：{chart_path.name}",
-                "caption": f"数据来源：{self._display_path(xlsx_path)} / {sheet_name}；年份：{', '.join(years)}；图表按金额、比率、销量、费用分面展示。",
-            }
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
-
-    def _financial_series_issues(
-        self, series: Dict[str, List[Optional[float]]], years: List[str]
-    ) -> List[str]:
-        issues: List[str] = []
-        for name, values in series.items():
-            missing = [
-                years[idx]
-                for idx, value in enumerate(values)
-                if value is None and idx < len(years)
-            ]
-            if missing:
-                issues.append(
-                    f"{name} 在 {', '.join(missing[:4])} 缺少有效数据，图表和结论需要回到底稿核对。"
-                )
-            previous: Optional[float] = None
-            for idx, value in enumerate(values):
-                if value is None:
-                    continue
-                if previous not in (None, 0):
-                    growth = (value - previous) / abs(previous)
-                    if growth > 1.0:
-                        issues.append(
-                            f"{name} 在 {years[idx] if idx < len(years) else '后续年份'} 同比增长超过 100%，假设偏激进，需要补充驱动解释。"
-                        )
-                    elif growth < -0.5:
-                        issues.append(
-                            f"{name} 在 {years[idx] if idx < len(years) else '后续年份'} 同比下滑超过 50%，需要确认是否为模型口径变化或录入问题。"
-                        )
-                previous = value
-        deduped: List[str] = []
-        seen: set[str] = set()
-        for issue in issues:
-            if issue in seen:
-                continue
-            seen.add(issue)
-            deduped.append(issue)
-        return deduped[:8]
-
-    def _financial_series_movements(
-        self, series: Dict[str, List[Optional[float]]], years: List[str]
-    ) -> List[str]:
-        movements: List[str] = []
-        for name, values in series.items():
-            valid = [
-                (idx, value)
-                for idx, value in enumerate(values)
-                if value is not None and idx < len(years)
-            ]
-            if len(valid) < 2:
-                continue
-            first_idx, first_value = valid[0]
-            last_idx, last_value = valid[-1]
-            is_rate = bool(re.search(r"(?:率|增速|%|margin)", name, re.IGNORECASE))
-            first_number = float(first_value)
-            last_number = float(last_value)
-            if is_rate:
-                first_text = f"{first_number:.1%}"
-                last_text = f"{last_number:.1%}"
-                change_text = f"变化 {((last_number - first_number) * 100):.1f} 个百分点"
-            elif first_number < 0 < last_number:
-                first_text = f"{first_number:,.2f}"
-                last_text = f"{last_number:,.2f}"
-                change_text = "由负转正，累计增幅口径不适用"
-            elif first_number == 0:
-                first_text = f"{first_number:,.2f}"
-                last_text = f"{last_number:,.2f}"
-                change_text = "期初值为 0，无法计算累计增幅"
-            else:
-                first_text = f"{first_number:,.2f}"
-                last_text = f"{last_number:,.2f}"
-                growth = (last_number - first_number) / abs(first_number)
-                change_text = f"累计变化 {growth:.1%}"
-            movements.append(
-                f"{name}：{years[first_idx]} 为 {first_text}，"
-                f"{years[last_idx]} 为 {last_text}，{change_text}。"
-            )
-            if len(movements) >= 8:
-                break
-        return movements
-
-    def _financial_report_model_synthesis(
-        self,
-        request: FileTaskRequest,
-        audit_payload: Optional[Dict[str, Any]],
-        inspect_payload: Optional[Dict[str, Any]],
-        chart_result: Dict[str, Any],
-    ) -> str:
-        options = request.options if isinstance(request.options, dict) else {}
-        if options.get("disable_financial_model_synthesis") is True:
-            return ""
-        facts = {
-            "task": request.task,
-            "workbook_summary": (
-                (inspect_payload or {}).get("summary")
-                if isinstance(inspect_payload, dict)
-                else ""
-            ),
-            "audit_summary": (
-                (audit_payload or {}).get("summary")
-                if isinstance(audit_payload, dict)
-                else ""
-            ),
-            "audit_findings": (
-                (audit_payload or {}).get("findings", [])[:12]
-                if isinstance(audit_payload, dict)
-                else []
-            ),
-            "external_link_count": (
-                (inspect_payload or {}).get("external_link_count")
-                if isinstance(inspect_payload, dict)
-                else None
-            ),
-            "total_formula_cells": (
-                (inspect_payload or {}).get("total_formula_cells")
-                if isinstance(inspect_payload, dict)
-                else None
-            ),
-            "chart_sheet": chart_result.get("sheet"),
-            "chart_years": chart_result.get("years"),
-            "chart_series": chart_result.get("series"),
-            "chart_series_groups": chart_result.get("series_groups"),
-            "chart_issues": chart_result.get("issues"),
-        }
-        prompt = (
-            "请基于以下 Excel 财务模型审计事实，输出可直接写入 Word 的中文问题分析。"
-            "要求：不要编造未给出的事实；优先指出模型可靠性、假设激进性、公式/外链/口径风险；"
-            "用 4-8 条短要点，每条一句话。\n\n"
-            f"{json.dumps(facts, ensure_ascii=False, default=str)[:6000]}"
-        )
-        try:
-            response = self._call_model(
-                request=request,
-                messages=[{"role": "user", "content": prompt}],
-                system="你是严谨的财务模型审阅助手。只输出分析要点，不调用工具，不声称已修改文件。",
-                tools=[],
-            )
-            content, _ = self._normalize_model_response(response, [])
-        except Exception as exc:
-            logger.info("[FileTaskRuntime] financial model synthesis skipped: %s", exc)
-            return ""
-        return _preview(content, 1800)
-
-    def _merge_financial_model_synthesis(
-        self, paragraphs: List[Dict[str, str]], model_synthesis: str
-    ) -> List[Dict[str, str]]:
-        clean_lines: List[str] = []
-        for raw_line in str(model_synthesis or "").splitlines():
-            line = re.sub(r"^\s*(?:[-*•]|\d+[.)、])\s*", "", raw_line).strip()
-            line = re.sub(r"^#+\s*", "", line).strip()
-            if not line or line in clean_lines:
-                continue
-            clean_lines.append(line)
-            if len(clean_lines) >= 8:
-                break
-        if not clean_lines:
-            return paragraphs
-        insert_at = len(paragraphs)
-        for idx, item in enumerate(paragraphs):
-            if str(item.get("text") or "").strip() == "图表说明":
-                insert_at = idx
-                break
-        supplement: List[Dict[str, str]] = [{"text": "AI 综合分析", "style": "Heading 2"}]
-        supplement.extend(
-            {"text": line, "style": "List Bullet"} for line in clean_lines
-        )
-        return paragraphs[:insert_at] + supplement + paragraphs[insert_at:]
-
-    def _financial_latest_ratio(
-        self, numerator: List[Optional[float]], denominator: List[Optional[float]]
-    ) -> Optional[float]:
-        for num, den in zip(reversed(numerator), reversed(denominator)):
-            if num is None or den in (None, 0):
-                continue
-            return float(num) / abs(float(den))
-        return None
-
-    def _financial_format_metric(
-        self, value: Optional[float], *, percent: bool = False
-    ) -> str:
-        if value is None:
-            return "缺失"
-        if percent:
-            return f"{float(value):.1%}"
-        return f"{float(value):,.2f}"
-
-    def _financial_growth_between(
-        self, values: List[Optional[float]]
-    ) -> Optional[float]:
-        valid = [float(value) for value in values if value is not None]
-        if len(valid) < 2 or valid[0] == 0:
-            return None
-        return (valid[-1] - valid[0]) / abs(valid[0])
-
-    def _financial_report_executive_summary(
-        self, chart_result: Dict[str, Any]
-    ) -> List[str]:
-        groups = (
-            chart_result.get("series_groups")
-            if isinstance(chart_result.get("series_groups"), dict)
-            else {}
-        )
-        money = groups.get("money") if isinstance(groups.get("money"), dict) else {}
-        rates = groups.get("rates") if isinstance(groups.get("rates"), dict) else {}
-        expenses = (
-            groups.get("expenses") if isinstance(groups.get("expenses"), dict) else {}
-        )
-        volume = groups.get("volume") if isinstance(groups.get("volume"), dict) else {}
-        lines: List[str] = []
-        revenue = money.get("收入合计") or []
-        net_profit = money.get("净利润") or []
-        gross_profit = money.get("毛利合计") or []
-        if revenue:
-            lines.append(
-                f"收入预测期累计变化为 {self._financial_format_metric(self._financial_growth_between(revenue), percent=True)}，属于本模型最核心的增长假设。"
-            )
-        if net_profit and revenue:
-            lines.append(
-                f"末期净利率约 {self._financial_format_metric(self._financial_latest_ratio(net_profit, revenue), percent=True)}，需与费用率、毛利率假设联动核对。"
-            )
-        if gross_profit and revenue:
-            lines.append(
-                f"末期毛利率约 {self._financial_format_metric(self._financial_latest_ratio(gross_profit, revenue), percent=True)}，需确认硬件、配件和互联网业务口径是否一致。"
-            )
-        if volume.get("总销量"):
-            lines.append(
-                f"销量预测期累计变化为 {self._financial_format_metric(self._financial_growth_between(volume.get('总销量') or []), percent=True)}，需要拆解到产品线、渠道和产能约束。"
-            )
-        if expenses.get("费用合计") and revenue:
-            lines.append(
-                f"末期费用率约 {self._financial_format_metric(self._financial_latest_ratio(expenses.get('费用合计') or [], revenue), percent=True)}，需要和市场投放、研发团队扩张节奏匹配。"
-            )
-        return lines[:6] or ["已识别关键财务预测指标，但仍需补充底层假设说明后才能形成投资判断。"]
-
-    def _financial_assumption_risks(self, chart_result: Dict[str, Any]) -> List[str]:
-        groups = (
-            chart_result.get("series_groups")
-            if isinstance(chart_result.get("series_groups"), dict)
-            else {}
-        )
-        money = groups.get("money") if isinstance(groups.get("money"), dict) else {}
-        rates = groups.get("rates") if isinstance(groups.get("rates"), dict) else {}
-        volume = groups.get("volume") if isinstance(groups.get("volume"), dict) else {}
-        risks: List[str] = []
-        revenue_growth = self._financial_growth_between(money.get("收入合计") or [])
-        volume_growth = self._financial_growth_between(volume.get("总销量") or [])
-        net_margin = rates.get("净利率") or []
-        gross_margin = rates.get("综合毛利率") or []
-        if revenue_growth is not None and revenue_growth > 3:
-            risks.append("收入预测期累计增长超过 300%，需要把增长拆到销量、ASP、产品结构和区域扩张，不能只停留在结果行。")
-        if volume_growth is not None and volume_growth > 3:
-            risks.append("销量预测期放量幅度很大，需要补充产能、渠道、价格带和竞品压力的约束条件。")
-        if net_margin and any(
-            value is not None and value > 0.1 for value in net_margin
-        ):
-            risks.append("净利率在预测期进入较高区间，需要核查销售费用率和研发费用率是否被过早摊薄。")
-        if (
-            gross_margin
-            and len(
-                {round(float(value), 4) for value in gross_margin if value is not None}
-            )
-            <= 2
-        ):
-            risks.append("毛利率曲线变化较少，可能存在硬编码或未充分反映产品结构变化。")
-        risks.extend(
-            str(item)
-            for item in chart_result.get("issues") or []
-            if str(item or "").strip()
-        )
-        deduped: List[str] = []
-        for item in risks:
-            if item not in deduped:
-                deduped.append(item)
-        return deduped[:8]
-
-    def _financial_followup_questions(self, chart_result: Dict[str, Any]) -> List[str]:
-        return [
-            "收入增长的核心驱动是销量、ASP、产品结构还是海外市场扩张？每一项分别贡献多少？",
-            "XR、AI、AR 各产品线的销量假设对应哪些渠道、价格带和竞品对标？",
-            "毛利率改善来自规模效应、供应链降本、产品组合变化，还是互联网业务占比提升？",
-            "销售费用率是否充分反映新品上市、达人投放、海外渠道建设和退换货成本？",
-            "研发费用率下降是否和团队招聘、芯片/光学/算法投入计划一致？",
-            "外部链接对应哪些底稿？如果缺失，哪些关键输出无法复算？",
-        ]
-
-    def _financial_report_problem_paragraphs(
-        self,
-        audit_payload: Optional[Dict[str, Any]],
-        inspect_payload: Optional[Dict[str, Any]],
-        chart_result: Dict[str, Any],
-    ) -> List[Dict[str, str]]:
-        paragraphs: List[Dict[str, str]] = [
-            {"text": "财务模型分析图表与问题", "style": "Heading 1"},
-            {"text": str(chart_result.get("caption") or "已基于附件 Excel 财务模型生成图表和问题清单。")},
-            {"text": "核心结论", "style": "Heading 2"},
-        ]
-        paragraphs.extend(
-            {"text": item, "style": "List Bullet"}
-            for item in self._financial_report_executive_summary(chart_result)
-        )
-        paragraphs.extend(
-            [
-                {"text": "数据口径", "style": "Heading 2"},
-                {
-                    "text": f"图表取数工作表：{chart_result.get('sheet') or '未识别'}；年份列：{', '.join(chart_result.get('years') or []) or '未识别'}。"
-                },
-            ]
-        )
-        series = (
-            chart_result.get("series")
-            if isinstance(chart_result.get("series"), dict)
-            else {}
-        )
-        movements = self._financial_series_movements(
-            series, chart_result.get("years") or []
-        )
-        if movements:
-            paragraphs.append({"text": "关键指标变化", "style": "Heading 2"})
-            paragraphs.extend(
-                {"text": item, "style": "List Bullet"} for item in movements
-            )
-        assumption_risks = self._financial_assumption_risks(chart_result)
-        if assumption_risks:
-            paragraphs.append({"text": "经营假设风险", "style": "Heading 2"})
-            paragraphs.extend(
-                {"text": item, "style": "List Bullet"} for item in assumption_risks
-            )
-        paragraphs.extend(
-            [
-                {"text": "模型质量问题", "style": "Heading 2"},
-            ]
-        )
-        issues: List[str] = []
-        audit = audit_payload if isinstance(audit_payload, dict) else {}
-        inspect_data = inspect_payload if isinstance(inspect_payload, dict) else {}
-        for finding in audit.get("findings") or []:
-            if isinstance(finding, dict):
-                severity = str(finding.get("severity") or "").strip()
-                message = str(finding.get("message") or "").strip()
-                location = str(
-                    finding.get("location") or finding.get("sheet") or ""
-                ).strip()
-                if message:
-                    suffix = f"（位置：{location}）" if location else ""
-                    issues.append(f"[{severity or 'info'}] {message}{suffix}")
-        external_count = inspect_data.get("external_link_count")
-        if external_count:
-            issues.append(f"工作簿检测到 {external_count} 个外部链接，模型复算依赖外部文件，需补齐底稿或解除外链。")
-        formula_count = inspect_data.get("total_formula_cells")
-        if formula_count:
-            issues.append(f"工作簿共检测到 {formula_count} 个公式单元格，建议重点核查关键输出行的公式连续性。")
-        issues.extend(
-            str(item)
-            for item in chart_result.get("issues") or []
-            if str(item or "").strip()
-        )
-        if not chart_result.get("success"):
-            issues.append(f"图表生成未完全成功：{chart_result.get('error') or '缺少可作图数据'}。")
-        if not issues:
-            issues.append("未发现明显结构性红旗；仍建议核对关键假设、外部链接和历史口径。")
-
-        seen: set[str] = set()
-        for issue in issues:
-            text = str(issue or "").strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            paragraphs.append({"text": text, "style": "List Bullet"})
-            if len(paragraphs) >= 34:
-                break
-        paragraphs.append({"text": "建议追问", "style": "Heading 2"})
-        paragraphs.extend(
-            {"text": item, "style": "List Bullet"}
-            for item in self._financial_followup_questions(chart_result)
-        )
-        paragraphs.append({"text": "图表说明", "style": "Heading 2"})
-        paragraphs.append({"text": chart_result.get("summary") or "图表已按模型中的关键指标生成。"})
-        return paragraphs
-
     def _plan_summary(
         self, request: FileTaskRequest, files: List[FileTaskFile], write_intent: bool
     ) -> str:
@@ -8130,6 +7064,7 @@ class FileTaskRuntime:
             "previous_task_family",
             "previous_task_operation_kind",
             "previous_task_execution_mode",
+            "previous_task_selected_recipe",
             "previous_task_output_mode",
             "previous_task_intent_strategy",
             "previous_task_intent_can_apply",
@@ -8704,7 +7639,9 @@ class FileTaskRuntime:
                 )
             )
 
-        if target_type in {"docx", "doc"} and "compare_docx_and_annotate" in operations:
+        if target_type in {"docx", "doc"} and operations.intersection(
+            {"compare_docx_and_annotate", "write_docx_comments"}
+        ):
             criteria.append(
                 self._quality_gate_result(
                     criterion="docx_compare_has_difference_annotations",

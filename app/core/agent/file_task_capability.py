@@ -466,9 +466,11 @@ def _capability_matches_request(
     file_count: int,
 ) -> bool:
     if capability.name == "annotate_file":
-        from app.core.agent import file_task_doc_annotate_bridge
+        from app.core.agent import file_task_doc_annotate_boundary
 
-        if file_task_doc_annotate_bridge.looks_like_docx_review_clear_request(task_text):
+        if file_task_doc_annotate_boundary.looks_like_docx_review_clear_request(
+            task_text
+        ):
             return False
     if capability.task_patterns and not any(pattern.search(task_text) for pattern in capability.task_patterns):
         return False

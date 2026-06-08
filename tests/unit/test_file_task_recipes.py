@@ -21,6 +21,23 @@ def test_recipe_selects_financial_xlsx_docx_report_over_generic_docx_chart():
     assert any(item.recipe.id == "docx_chart_report" for item in candidates)
 
 
+def test_recipe_selects_financial_report_for_sales_ledger_followup():
+    request = FileTaskRequest(
+        task="将新的销售台账也加入分析，并且做成图，内容也加入docx",
+        target_path="report.docx",
+        files=[
+            FileTaskFile(path="financial.xlsx", name="雷鸟创新-financial model.xlsx", type="xlsx"),
+            FileTaskFile(path="sales.xlsx", name="销售台账.xlsx", type="xlsx"),
+            FileTaskFile(path="report.docx", name="雷鸟访谈问题.docx", type="docx", target=True),
+        ],
+    )
+
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert match is not None
+    assert match.recipe.id == "financial_xlsx_docx_report"
+
+
 def test_recipe_selects_excel_table_transfer_when_no_analysis_or_chart_requested():
     request = FileTaskRequest(
         task="把 xlsx 表格加入 docx",

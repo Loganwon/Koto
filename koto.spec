@@ -225,6 +225,8 @@ hiddenimports = [
     # ── 数据分析 ──
     'pandas', 'pandas.io.formats.format',
     'numpy', 'numpy.core', 'numpy.lib',
+    'matplotlib', 'matplotlib.pyplot', 'matplotlib.font_manager',
+    'matplotlib.backends', 'matplotlib.backends.backend_agg',
     'PIL', 'PIL.Image', 'PIL.ImageDraw', 'PIL.ImageFont', 'PIL.ImageFilter',
 
     # ── 调度 ──
@@ -442,7 +444,7 @@ _collect_pkgs = [
     'google.genai', 'google.api_core', 'google.auth',
     'httpx', 'httpcore', 'anyio', 'certifi',
     'PIL', 'lxml', 'bs4',
-    'pandas', 'numpy',
+    'pandas', 'numpy', 'matplotlib',
     'webview',
     'pystray',
     'cryptography',
@@ -540,7 +542,7 @@ a = Analysis(
     excludes=[
         'tkinter.test', 'unittest', 'test', 'tests',
         'setuptools', 'pip',
-        'matplotlib', 'scipy', 'IPython', 'notebook',
+        'scipy', 'IPython', 'notebook',
         'pytest', 'pylint', 'black', 'mypy', 'flake8',
         'jupyter', 'nbconvert', 'nbformat',
         'PyQt5', 'PyQt6', 'PySide2', 'PySide6', 'wx',

@@ -14,6 +14,8 @@ import importlib
 import json
 import io
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -163,6 +165,72 @@ def app_client():
 
 class TestEditorAIStream:
     """Tests for POST /api/editor/ai/stream"""
+
+    def test_task_stream_preserves_file_assistant_payload_for_docx_compare(
+        self, app_client, monkeypatch
+    ):
+        from app.core.agent.file_task_runtime import FileTaskRuntime
+
+        captured = {}
+
+        def fake_run(self, request):
+            captured["request"] = request
+            yield {
+                "type": "run.started",
+                "run_id": request.run_id or "ui_compare_route",
+                "seq": 1,
+                "step_id": "run",
+                "payload": {
+                    "mode": "whitebox_v1",
+                    "target_path": request.target_path,
+                    "model_mode": request.model_mode,
+                    "execution_mode": "generic_tool_loop",
+                },
+            }
+            yield {
+                "type": "run.finished",
+                "run_id": request.run_id or "ui_compare_route",
+                "seq": 2,
+                "step_id": "run",
+                "payload": {"completed_task": True, "summary": "ok"},
+            }
+
+        monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
+
+        resp = app_client.post(
+            "/api/editor/ai/task-stream",
+            json={
+                "task": "对比这两份docx，并在原文上标注出两者不同的地方",
+                "session_id": "workspace_demo",
+                "model_mode": "local",
+                "target_path": "workspace/humanise!.docx",
+                "files": [
+                    {
+                        "path": "workspace/humanise!.docx",
+                        "name": "humanise!.docx",
+                        "type": "docx",
+                        "target": True,
+                    },
+                    {
+                        "path": "workspace/humanise!_revised.docx",
+                        "name": "humanise!_revised.docx",
+                        "type": "docx",
+                    },
+                ],
+            },
+        )
+
+        events = parse_sse_events(resp.get_data())
+
+        assert resp.status_code == 200
+        assert captured["request"].task == "对比这两份docx，并在原文上标注出两者不同的地方"
+        assert captured["request"].model_mode == "local"
+        assert captured["request"].target_path == "workspace/humanise!.docx"
+        assert captured["request"].files[0].target is True
+        assert captured["request"].files[0].path == "workspace/humanise!.docx"
+        assert captured["request"].files[1].path == "workspace/humanise!_revised.docx"
+        assert events[0]["type"] == "run.started"
+        assert events[0]["payload"]["target_path"] == "workspace/humanise!.docx"
 
     def test_whitebox_task_stream_executes_xlsx_to_docx_write_loop(
         self, app_client, tmp_path, monkeypatch
@@ -3267,13 +3335,12 @@ class TestRemovedLegacyTaskRoutes:
 class TestLegacyDocumentCompatRoutes:
     """Legacy document APIs should reuse the current DocumentFeedbackSystem paths instead of old batch annotators."""
 
-    def test_web_app_doc_annotate_paths_use_compat_helper(self):
+    def test_web_app_doc_annotate_paths_use_feedback_system(self):
         src = Path("web/app.py").read_text(encoding="utf-8")
 
-        assert "from web.document_annotation_compat import (" in src
+        assert "from web.document_feedback import (" in src
         assert "iter_annotation_progress_events(" in src
         assert "collect_annotation_result(" in src
-        assert "DocumentFeedbackSystem" not in src
 
     @staticmethod
     def _make_document_client(monkeypatch, workspace_root):
@@ -4686,6 +4753,61 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "payload," in dispatcher
         assert "taskTurnMetadataFromLoadingEl(loadingEl)" in dispatcher
 
+    def test_workspace_dispatcher_infers_docx_compare_target_from_user_target_phrase(
+        self,
+    ):
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node is not available")
+        script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const code = fs.readFileSync('web/static/js/workspace-task-dispatcher.js', 'utf8');
+const sandbox = { window: { WA: {} }, console };
+vm.createContext(sandbox);
+vm.runInContext(code, sandbox, { filename: 'workspace-task-dispatcher.js' });
+const state = {
+  _aiTargetFileIdx: -1,
+  _aiFileContext: [
+    { path: 'workspace/humanise!.docx', name: 'humanise!.docx', type: 'docx', content: 'old' },
+    { path: 'workspace/humanise!_revised.docx', name: 'humanise!_revised.docx', type: 'docx', content: 'new' },
+  ],
+  conversation: [],
+};
+const dispatcher = sandbox.window.WA.createTaskDispatcher({
+  state,
+  sampleTaskContext: (text) => text,
+  getSessionId: () => 'sid-test',
+  getModelMode: () => 'local',
+  getSelectedCloudModelId: () => '',
+  getConversationHistory: () => [],
+  streamWhiteboxTask: () => Promise.resolve({ summary: 'ok' }),
+});
+const cases = [
+  dispatcher.buildWhiteboxTaskPayload('对比这两份docx，并在原文上标注出两者不同的地方', '', '', {}),
+  dispatcher.buildWhiteboxTaskPayload('对比 humanise!.docx 和 humanise!_revised.docx，并在 humanise!.docx 上标注不同之处', '', '', {}),
+];
+console.log(JSON.stringify(cases.map((payload) => ({
+  target_path: payload.target_path,
+  model_mode: payload.model_mode,
+  targets: payload.files.map((file) => [file.name, !!file.target]),
+}))));
+"""
+        result = subprocess.run(
+            [node, "-e", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        payloads = json.loads(result.stdout)
+        assert [item["target_path"] for item in payloads] == [
+            "workspace/humanise!.docx",
+            "workspace/humanise!.docx",
+        ]
+        assert all(item["model_mode"] == "local" for item in payloads)
+        assert all(item["targets"][0][1] is True for item in payloads)
+
     def test_workspace_dispatcher_marks_short_task_critiques_as_followup_context(self):
         dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
             encoding="utf-8"
@@ -4702,6 +4824,14 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "context.previous_task_mode = previousTaskMode;" in dispatcher
         assert (
             "context.previous_task_file_changes = previousTaskFileChanges;"
+            in dispatcher
+        )
+        assert (
+            "const previousTaskSelectedRecipe = previewText(previousTaskTurn.task_selected_recipe || '', 160);"
+            in dispatcher
+        )
+        assert (
+            "if (previousTaskSelectedRecipe) context.previous_task_selected_recipe = previousTaskSelectedRecipe;"
             in dispatcher
         )
 
@@ -4725,6 +4855,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         )
         assert (
             "previous_task_output_mode: String(payload.output_mode || '').trim(),"
+            in assistant
+        )
+        assert (
+            "previous_task_selected_recipe: String(payload.selected_recipe || payload.task_selected_recipe || '').trim(),"
             in assistant
         )
         assert (

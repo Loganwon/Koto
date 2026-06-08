@@ -317,6 +317,65 @@ def recommend_models(info: Dict) -> List[Dict]:
     return out or [MODEL_CATALOG[0]]
 
 
+def choose_best_model(info: Dict, candidates: Optional[List[Dict]] = None) -> Dict:
+    """Pick the default model for Koto's local file-assistant workflow."""
+    usable = candidates or recommend_models(info)
+    if not usable:
+        return MODEL_CATALOG[0]
+
+    ram = float(info.get("ram_gb") or 0)
+    vram = float(info.get("gpu_vram_gb") or 0)
+    cpu_cores = int(info.get("cpu_cores") or 0)
+
+    def score(model: Dict) -> float:
+        tier_score = {
+            "ultralight": 10,
+            "light": 30,
+            "standard": 55,
+            "powerful": 72,
+            "highend": 82,
+            "flagship": 88,
+        }.get(model.get("tier"), 40)
+        text = f"{model.get('tag', '')} {model.get('name', '')}".lower()
+        if "qwen" in text:
+            tier_score += 12
+        if "qwen3" in text:
+            tier_score += 4
+
+        ram_margin = ram - float(model.get("ram") or 0)
+        vram_margin = vram - float(model.get("vram") or 0)
+        if ram_margin < 2 and vram_margin < 1:
+            tier_score -= 18
+        elif ram_margin >= 6 or vram_margin >= 2:
+            tier_score += 6
+
+        size_gb = float(model.get("size_gb") or 0)
+        if ram < 12 and size_gb > 4:
+            tier_score -= 12
+        if cpu_cores and cpu_cores <= 4 and size_gb > 3:
+            tier_score -= 8
+
+        # 24 GB+ machines can use larger models, but avoid making a huge model
+        # the default unless there is enough headroom for repeated office tasks.
+        if model.get("tier") == "flagship" and not (ram >= 28 or vram >= 12):
+            tier_score -= 10
+
+        return tier_score
+
+    return max(usable, key=score)
+
+
+def describe_model_recommendation(info: Dict, model: Dict) -> str:
+    ram = float(info.get("ram_gb") or 0)
+    vram = float(info.get("gpu_vram_gb") or 0)
+    gpu_name = str(info.get("gpu_name") or "").strip()
+    gpu_part = f"，显卡 {gpu_name} / {vram:g} GB 显存" if vram else ""
+    return (
+        f"推荐 {model['name']}：基于 {ram:g} GB 内存{gpu_part}，"
+        "优先兼顾中文文件任务、响应速度和本机余量。"
+    )
+
+
 # ─────────────────────────────────────────────────────────────
 #  Ollama 操作
 # ─────────────────────────────────────────────────────────────
@@ -761,9 +820,20 @@ def run_gui():
         side="left"
     )
     rec_hint = tk.Label(
-        p2_top, text="✦ 标记为根据您的硬件自动推荐", font=F_SMALL, bg=BG, fg=MUTED
+        p2_top, text="✦ 已按当前配置选出默认推荐", font=F_SMALL, bg=BG, fg=MUTED
     )
     rec_hint.pack(side="right")
+    rec_detail = tk.Label(
+        p2,
+        text="",
+        font=F_SMALL,
+        bg=BG,
+        fg=MUTED,
+        anchor="w",
+        justify="left",
+        wraplength=820,
+    )
+    rec_detail.pack(fill="x", padx=24, pady=(0, 8))
 
     # 模型列表区
     p2_list_frame = tk.Frame(p2, bg=BG)
@@ -777,8 +847,11 @@ def run_gui():
             w.destroy()
         _model_radio.clear()
 
-        # 按 tier 排列（旗舰到轻量）
-        ordered = list(reversed(candidates))
+        best = choose_best_model(_sys_info, candidates)
+        best_tag = best.get("tag")
+        ordered = [m for m in candidates if m.get("tag") == best_tag]
+        ordered.extend(reversed([m for m in candidates if m.get("tag") != best_tag]))
+        rec_detail.config(text=describe_model_recommendation(_sys_info, best))
 
         canvas = tk.Canvas(p2_list_frame, bg=BG, highlightthickness=0)
         scrollbar = tk.Scrollbar(
@@ -793,15 +866,15 @@ def run_gui():
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # 设置默认选中最高推荐（候选列表最后一个）
-        if ordered and not selected_model.get():
+        # 设置默认选中最适合 Koto 当前配置的模型
+        if ordered:
             selected_model.set(ordered[0]["tag"])
-        elif not ordered:
+        else:
             selected_model.set("")
 
         for m in ordered:
             is_installed = m["tag"] in installed_tags
-            is_rec = m == ordered[0]  # 最高规格推荐
+            is_rec = m["tag"] == best_tag
             color = TIER_COLOR.get(m["tier"], MUTED)
 
             card = tk.Frame(scroll_frame, bg=PANEL, pady=0)

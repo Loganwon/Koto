@@ -528,6 +528,8 @@ def setup_api_key() -> Response:
             # Reset cached client so get_client() rebuilds with the new key
             mod._client = None
             mod.client = mod.create_client()
+            sm = _get_settings_manager()
+            sm.set("ai", "cloud_provider", "gemini")
 
         return jsonify({"success": True})
     except Exception as e:
