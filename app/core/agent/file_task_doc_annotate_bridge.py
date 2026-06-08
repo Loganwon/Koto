@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import math
 import os
-import re
 import uuid
 import inspect
 from pathlib import Path
@@ -17,172 +16,25 @@ from app.core.agent.file_task_contract import (
     FileTaskToolStreamChunk,
     FileTaskToolStreamResult,
 )
-from app.core.agent.file_task_review_intent import (
-    COMPARE_MARKERS as _COMPARE_MARKERS,
-    DOCX_REVIEW_INTENT_MARKERS as _DOCX_ONLY_REVIEW_MARKERS,
-    REVIEW_MARKERS as _REVIEW_MARKERS,
-    SOURCE_MARKERS as _SOURCE_MARKERS,
-    TRANSLATION_MARKERS as _TRANSLATION_MARKERS,
-    has_explicit_docx_review_intent,
-    looks_like_multi_docx_compare_request,
-    looks_like_pdf_docx_review_request,
+from app.core.agent.file_task_doc_annotate_intent import (
+    looks_like_direct_docx_rewrite_request,
+    looks_like_docx_review_clear_request,
+    looks_like_multi_file_compare_request,
+    should_route_request,
+    should_use_doc_annotate_bridge_execution,
+)
+from app.core.agent.file_task_doc_annotate_events import (
+    build_live_write_progress_payload as _build_live_write_progress_payload,
+    build_review_progress_payload as _build_review_progress_payload,
+    runtime_payload as _runtime_payload,
+    tool_result_from_bridge_payload as _tool_result_from_bridge_payload,
 )
 from app.core.llm.model_mode import normalize_model_mode
 
 logger = logging.getLogger(__name__)
 
-
-_DOCX_CLEAR_REVIEW_REQUEST_PATTERNS = (
-    re.compile(
-        r"(?:删除|移除|去掉|清除|清空|取消|消除|remove|delete|clear).{0,12}(?:所有|全部|整篇|整个|全部的)?(?:.{0,8})?(?:批注|标注|评论|注释|评注|修订|审阅标记|修改痕迹|comments?|review marks?|tracked changes?)",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:所有|全部|整篇|整个)?(?:.{0,8})?(?:批注|标注|评论|注释|评注|修订|审阅标记|修改痕迹|comments?|review marks?|tracked changes?).{0,12}(?:删除|移除|去掉|清除|清空|取消|消除|remove|delete|clear)",
-        re.IGNORECASE,
-    ),
-)
-
-_DIRECT_DOCX_REWRITE_REVIEW_EXCLUSIONS = (
-    "批注",
-    "标注",
-    "评论",
-    "注释",
-    "评注",
-    "修改建议",
-    "指出问题",
-    "comment",
-    "annotate",
-)
-
-_DIRECT_DOCX_REWRITE_PATTERNS = (
-    re.compile(r"(?:润色|改写|重写|优化|修改|polish|rewrite).{0,24}(?:写回|保存|替换|更新|当前|原文|文档|docx|file)", re.IGNORECASE),
-    re.compile(r"(?:写回|保存|替换|更新|直接修改|save|replace|update).{0,24}(?:润色|改写|重写|优化|polish|rewrite)", re.IGNORECASE),
-    re.compile(r"(?:润色|改写|重写|优化|polish|rewrite).{0,12}(?:这篇|这份|这个|当前|整篇|全文|文章|稿件|文稿)", re.IGNORECASE),
-)
-
 _BATCH_RESUME_ARTIFACT_TYPE = "koto_large_task_resume_v1"
 _BATCH_RESUME_ARTIFACT_CATEGORY = "batch_confirmation"
-
-
-def looks_like_docx_review_clear_request(task_text: str) -> bool:
-    text = str(task_text or "").strip()
-    if not text:
-        return False
-    return any(pattern.search(text) for pattern in _DOCX_CLEAR_REVIEW_REQUEST_PATTERNS)
-
-
-def looks_like_direct_docx_rewrite_request(task_text: str) -> bool:
-    text = str(task_text or "").strip()
-    if not text:
-        return False
-    lowered = text.lower()
-    if any(marker in lowered for marker in _DIRECT_DOCX_REWRITE_REVIEW_EXCLUSIONS):
-        return False
-    return any(pattern.search(text) for pattern in _DIRECT_DOCX_REWRITE_PATTERNS)
-
-
-def _has_explicit_docx_review_intent(*texts: Any) -> bool:
-    return has_explicit_docx_review_intent(*texts)
-
-
-def _should_continue_same_bridge(
-    task_text: str,
-    followup_context: dict[str, Any],
-) -> bool:
-    followup_action = str(
-        followup_context.get("followup_action") or ""
-    ).strip().lower()
-    previous_mode = str(
-        followup_context.get("previous_task_mode") or ""
-    ).strip().lower()
-    if followup_action != "improve" or previous_mode != "doc_annotate_bridge":
-        return False
-    return _has_explicit_docx_review_intent(
-        task_text,
-        followup_context.get("previous_task_request"),
-    )
-
-
-def looks_like_multi_file_compare_request(request: FileTaskRequest) -> bool:
-    return looks_like_multi_docx_compare_request(request)
-
-
-def _coerce_progress_value(value: Any) -> int:
-    try:
-        return max(0, int(float(value or 0)))
-    except (TypeError, ValueError):
-        return 0
-
-
-def _runtime_payload(terminal_status: str) -> dict[str, Any]:
-    return {
-        "execution_path": "native",
-        "terminal_status": terminal_status,
-    }
-
-
-def _build_live_write_progress_payload(progress_event: dict[str, Any], *, default_path: str) -> dict[str, Any]:
-    payload = {
-        "detail": str(progress_event.get("detail") or progress_event.get("message") or "正在写回 Word 修订。").strip(),
-        "message": str(progress_event.get("message") or "").strip(),
-        "progress": _coerce_progress_value(progress_event.get("progress")),
-        "level": "progress",
-    }
-    if progress_event.get("file_updated"):
-        live_path = str(
-            progress_event.get("path") or progress_event.get("file_path") or default_path or ""
-        ).strip()
-        if live_path:
-            payload.update(
-                {
-                    "file_updated": True,
-                    "path": live_path,
-                    "file_path": live_path,
-                    "supported": bool(progress_event.get("supported", True)),
-                }
-            )
-        applied = progress_event.get("applied")
-        if applied is not None:
-            payload["applied"] = applied
-    return payload
-
-
-def _build_review_progress_payload(progress_event: dict[str, Any], *, default_path: str) -> dict[str, Any]:
-    stage = str(progress_event.get("stage") or "").strip().lower()
-    payload = {
-        "detail": str(progress_event.get("detail") or progress_event.get("message") or "").strip(),
-        "message": str(progress_event.get("message") or "").strip(),
-        "progress": _coerce_progress_value(progress_event.get("progress")),
-        "level": "warning" if stage == "warning" else ("info" if stage == "info" else "progress"),
-    }
-    for key in (
-        "chunk_status",
-        "chunk_index",
-        "chunk_total",
-        "global_chunk_index",
-        "global_chunk_total",
-        "added_count",
-        "total_annotations",
-    ):
-        value = progress_event.get(key)
-        if value not in (None, "", [], {}):
-            payload[key] = value
-
-    partial_proposals = progress_event.get("partial_proposals")
-    if isinstance(partial_proposals, list) and partial_proposals:
-        payload["partial_proposals"] = [
-            dict(item) for item in partial_proposals if isinstance(item, dict)
-        ]
-
-    target_path = str(progress_event.get("target_path") or default_path or "").strip()
-    if target_path and (
-        payload.get("chunk_status")
-        or payload.get("partial_proposals")
-        or progress_event.get("target_path")
-    ):
-        payload["target_path"] = target_path
-    return payload
 
 
 def _request_options(request: FileTaskRequest) -> dict[str, Any]:
@@ -385,58 +237,6 @@ def _batch_state_from_plan(request: FileTaskRequest, large_file_plan: Optional[d
         "has_next_batch": batch_index < total_batches,
         "next_batch_index": batch_index + 1,
     }
-
-
-def should_use_doc_annotate_bridge_execution(request: FileTaskRequest) -> bool:
-    options = request.options if isinstance(request.options, dict) else {}
-    if bool(options.get("skip_doc_annotate_bridge")):
-        return False
-    if str(options.get("output_mode") or "").strip().lower() == "answer":
-        return False
-
-    continue_same_bridge = False
-    followup_context = request.options.get("followup_context") if isinstance(request.options, dict) else None
-    if isinstance(followup_context, dict) and str(followup_context.get("kind") or "").strip() == "review_last_task":
-        continue_same_bridge = _should_continue_same_bridge(
-            str(request.task or ""),
-            followup_context,
-        )
-        if not continue_same_bridge:
-            return False
-
-    task_text = str(request.task or "").strip().lower()
-    if not task_text:
-        return False
-
-    if looks_like_multi_file_compare_request(request):
-        return False
-
-    target_docx = _find_target_docx_path(request)
-    if not target_docx:
-        return False
-
-    if continue_same_bridge:
-        return True
-
-    if looks_like_docx_review_clear_request(task_text):
-        return False
-    if looks_like_direct_docx_rewrite_request(task_text):
-        return False
-
-    if not _find_pdf_file(request):
-        return _has_explicit_docx_review_intent(task_text)
-
-    if looks_like_pdf_docx_review_request(request):
-        return True
-
-    has_translation = any(marker in task_text for marker in _TRANSLATION_MARKERS)
-    has_source = any(marker in task_text for marker in _SOURCE_MARKERS)
-    has_review = any(marker in task_text for marker in _REVIEW_MARKERS)
-    return has_translation and has_source and has_review
-
-
-def should_route_request(request: FileTaskRequest) -> bool:
-    return should_use_doc_annotate_bridge_execution(request)
 
 
 def _stream_single_docx_request(
@@ -1115,57 +915,6 @@ def stream_request(
         },
         step_id="run",
     )
-
-
-def _tool_result_from_bridge_payload(
-    run_payload: dict[str, Any],
-    *,
-    last_change: Optional[dict[str, Any]] = None,
-) -> dict[str, Any]:
-    summary = str(run_payload.get("summary") or "").strip()
-    awaiting_confirmation = bool(run_payload.get("awaiting_confirmation"))
-    next_action_artifact = run_payload.get("next_action_artifact") if isinstance(run_payload.get("next_action_artifact"), dict) else None
-
-    if awaiting_confirmation:
-        payload = dict(last_change or {})
-        if summary:
-            payload["summary"] = summary
-        payload["awaiting_confirmation"] = True
-        payload.setdefault("operation", "annotate_file")
-        payload.setdefault("change_type", "annotate")
-        payload.setdefault("focus", True)
-        payload.setdefault("supported", True)
-        payload.setdefault("updated_in_place", True)
-        if next_action_artifact is not None:
-            payload["next_action_artifact"] = next_action_artifact
-        for key in ("batch_index", "total_batches", "target_path", "source_path", "revised_file", "annotations_added"):
-            value = run_payload.get(key)
-            if value not in (None, ""):
-                payload[key] = value
-        return payload
-
-    if bool(run_payload.get("completed_task")) or last_change:
-        payload = dict(last_change or {})
-        revised_file = str(run_payload.get("revised_file") or payload.get("path") or payload.get("file_path") or "").strip()
-        if revised_file and "path" not in payload:
-            payload["path"] = revised_file
-            payload["file_path"] = revised_file
-            payload["operation"] = "annotate_file"
-            payload["supported"] = True
-        payload.setdefault("operation", "annotate_file")
-        payload.setdefault("change_type", "annotate")
-        payload.setdefault("focus", True)
-        payload.setdefault("supported", True)
-        payload.setdefault("updated_in_place", True)
-        if summary:
-            payload["summary"] = summary
-        for key in ("target_path", "source_path", "annotations_added", "revised_file"):
-            value = run_payload.get(key)
-            if value not in (None, ""):
-                payload[key] = value
-        return payload
-
-    return {"error": summary or "文档审校未完成。"}
 
 
 def _normalized_path_key(path: Any) -> str:

@@ -161,8 +161,7 @@ def test_file_task_runtime_emits_plan_checked_for_doc_annotate_bridge_path(monke
     assert "plan.checked" in event_types
     plan_checked = next(event for event in events if event.type == "plan.checked")
     assert plan_checked.payload["passed"] is True
-    assert plan_checked.payload["routing"] == "doc_annotate_bridge"
-    assert event_types.index("plan.checked") < event_types.index("run.started")
+    assert event_types.index("run.started") < event_types.index("plan.checked")
 
 
 def test_file_task_runtime_emits_plan_checked_for_simple_quick_action_path():

@@ -5628,19 +5628,6 @@
       width: 100%;
       min-width: 0;
     }
-    .wa-proposal-edit-original {
-      padding: 6px 8px;
-      border-radius: 6px;
-      background: rgba(239, 246, 255, 0.82);
-      color: #475569;
-      font-size: 11px;
-      line-height: 1.42;
-      word-break: break-word;
-    }
-    .wa-proposal-edit-original span {
-      color: #2563eb;
-      font-weight: 700;
-    }
     .wa-proposal-edit-textarea {
       width: 100%;
       min-height: 74px;
@@ -6059,6 +6046,7 @@
       display: block;
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing {
+      flex-direction: column;
       align-items: stretch;
       overflow: visible;
       z-index: 4;
@@ -6069,12 +6057,6 @@
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-edit {
       width: 100%;
-    }
-    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-edit-original {
-      font-size: 11px;
-      line-height: 1.36;
-      max-height: 72px;
-      overflow: auto;
     }
     #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-edit-textarea {
       min-height: 80px;

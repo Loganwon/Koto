@@ -3100,7 +3100,6 @@ window.WA = window.WA || {};
         ${
           isEditing
             ? `<div class="wa-proposal-edit">
-                 <div class="wa-proposal-edit-original"><span>原文：</span>${_escapeHtml(anchorPreview || proposal?.original_text || proposal?.anchor_text || '')}</div>
                  <textarea id="${textareaId}" class="wa-proposal-edit-textarea" rows="3" oninput="WA.onReviewProposalInput(event)" placeholder="输入替换后的内容">${_escapeHtml(proposedText)}</textarea>
                </div>`
             : `<div class="wa-proposal-diff">${_renderCompactReviewProposalDiff(proposal)}</div>`
@@ -14627,6 +14626,7 @@ window.WA = window.WA || {};
       previous_task_family: String(payload.task_family || '').trim(),
       previous_task_operation_kind: String(payload.operation_kind || '').trim(),
       previous_task_execution_mode: String(payload.execution_mode || '').trim(),
+      previous_task_selected_recipe: String(payload.selected_recipe || payload.task_selected_recipe || '').trim(),
       previous_task_output_mode: String(payload.output_mode || '').trim(),
       previous_task_intent_strategy: String(payload.intent_strategy || '').trim(),
       previous_task_intent_can_apply: Object.prototype.hasOwnProperty.call(payload, 'intent_can_apply')

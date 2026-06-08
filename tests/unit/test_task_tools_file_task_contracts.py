@@ -813,7 +813,7 @@ def test_compare_docx_and_annotate_can_mark_original_document(tmp_path, monkeypa
     assert "word/comments.xml" not in revised_names
     assert "commentRangeStart" in original_document_xml
     assert "关键词" in original_document_xml
-    assert "被标注原文" in original_comments_xml
+    assert "本文件为" in original_comments_xml
     assert "触发词" in original_comments_xml
     assert "建议改为" not in original_comments_xml
 
@@ -898,6 +898,36 @@ def test_plan_then_write_docx_comments_marks_original_document(tmp_path, monkeyp
     assert "word/comments.xml" not in revised_names
     assert "风险" in original_comments_xml
     assert "建议" in original_comments_xml
+
+
+def test_write_docx_comments_accepts_anchor_text_alias(tmp_path, monkeypatch):
+    docx_module = pytest.importorskip("docx")
+
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    target_path = tmp_path / "contract_old.docx"
+    document = docx_module.Document()
+    document.add_paragraph("Payment is due within 30 days.")
+    document.save(target_path)
+
+    result = task_tools.write_docx_comments(
+        "contract_old.docx",
+        comments_json=[
+            {
+                "anchor_text": "30 days",
+                "comment": "Other version: 15 days. Current version: 30 days.",
+            }
+        ],
+        differences_detected=1,
+    )
+    payload = json.loads(result)
+
+    assert payload["success"] is True
+    assert payload["annotations_added"] == 1
+    with zipfile.ZipFile(target_path, "r") as archive:
+        assert "word/comments.xml" in archive.namelist()
 
 
 def test_write_docx_comments_appends_after_existing_comments(tmp_path, monkeypatch):

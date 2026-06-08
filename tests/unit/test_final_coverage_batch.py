@@ -26,7 +26,7 @@ class TestDocumentFeedbackDeep:
     def _make(self, **kw):
         with patch("web.document_reader.DocumentReader"), patch(
             "web.document_editor.DocumentEditor"
-        ), patch("web.document_annotator.DocumentAnnotator"):
+        ):
             from web.document_feedback import DocumentFeedbackSystem
 
             client = kw.get("client")
@@ -138,18 +138,21 @@ class TestDocumentFeedbackDeep:
         assert "analysis" in result
 
     # -- annotate_document --------------------------------------------------
-    def test_annotate_document_delegates_to_annotator(self):
+    def test_annotate_document_delegates_to_track_changes_editor(self):
         obj = self._make()
-        obj.annotator.annotate_document.return_value = {
-            "success": True,
-            "original_file": "/a",
-            "revised_file": "/b",
-            "applied": 2,
-            "failed": 0,
-        }
-        result = obj.annotate_document(
-            "/fake.docx", [{"原文片段": "x", "修改建议": "y"}]
-        )
+        with patch(
+            "web.track_changes_editor.TrackChangesEditor"
+        ) as mock_editor_cls:
+            mock_editor_cls.return_value.apply_tracked_changes.return_value = {
+                "success": True,
+                "original_file": "/a",
+                "revised_file": "/b",
+                "applied": 2,
+                "failed": 0,
+            }
+            result = obj.annotate_document(
+                "/fake.docx", [{"原文片段": "x", "修改建议": "y"}]
+            )
         assert result["success"] is True
 
     # -- _probe_working_model -----------------------------------------------

@@ -472,6 +472,7 @@
       const previousTaskFamily = previewText(previousTaskTurn.task_family || '', 120);
       const previousTaskOperationKind = previewText(previousTaskTurn.task_operation_kind || '', 120);
       const previousTaskExecutionMode = previewText(previousTaskTurn.task_execution_mode || '', 120);
+      const previousTaskSelectedRecipe = previewText(previousTaskTurn.task_selected_recipe || '', 160);
       const previousTaskOutputMode = previewText(previousTaskTurn.task_output_mode || '', 120);
       const previousTaskIntentStrategy = previewText(previousTaskTurn.task_intent_strategy || '', 120);
       const previousTaskIntentCanApply = Object.prototype.hasOwnProperty.call(previousTaskTurn, 'task_intent_can_apply')
@@ -496,6 +497,7 @@
       if (previousTaskFamily) context.previous_task_family = previousTaskFamily;
       if (previousTaskOperationKind) context.previous_task_operation_kind = previousTaskOperationKind;
       if (previousTaskExecutionMode) context.previous_task_execution_mode = previousTaskExecutionMode;
+      if (previousTaskSelectedRecipe) context.previous_task_selected_recipe = previousTaskSelectedRecipe;
       if (previousTaskOutputMode) context.previous_task_output_mode = previousTaskOutputMode;
       if (previousTaskIntentStrategy) context.previous_task_intent_strategy = previousTaskIntentStrategy;
       if (previousTaskIntentCanApply) context.previous_task_intent_can_apply = previousTaskIntentCanApply;
@@ -670,6 +672,67 @@
       return REVISED_TARGET_NAME_HINTS.reduce((score, marker) => score + (baseName.includes(marker) ? 1 : 0), 0);
     }
 
+    function taskFileNameAliases(file) {
+      const values = [
+        file && file.name,
+        file && file.path,
+        String(file && file.path || '').split(/[\\/]/).pop(),
+      ];
+      return Array.from(new Set(values
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter(Boolean)));
+    }
+
+    function targetMentionScore(text, file) {
+      const lowered = String(text || '').trim().toLowerCase();
+      if (!lowered || !file) return 0;
+      let score = 0;
+      taskFileNameAliases(file).forEach((alias) => {
+        let index = lowered.indexOf(alias);
+        while (index >= 0) {
+          const before = lowered.slice(Math.max(0, index - 18), index);
+          const after = lowered.slice(index + alias.length, index + alias.length + 24);
+          if (/(?:在|到|给|向|于|目标|target|into|in|on)\s*$/i.test(before)) score += 4;
+          if (/^\s*(?:上|里|中|内|旁|文件|文档)?\s*(?:标注|批注|写入|写回|添加|加上|comment|annotate|mark|write)/i.test(after)) score += 5;
+          if (/^\s*(?:作为|为)?\s*(?:目标|被标注|被批注|被修改|target)/i.test(after)) score += 3;
+          index = lowered.indexOf(alias, index + alias.length);
+        }
+      });
+      return score;
+    }
+
+    function inferCompareTargetFromRoleHint(text, files) {
+      if (!Array.isArray(files) || files.length !== 2 || !looksLikeCompareAnnotationTask(text)) return null;
+      const docxFiles = files.filter((file) => ['docx', 'doc'].includes(canonicalTaskFileType(file)));
+      if (docxFiles.length !== 2) return null;
+      const lowered = String(text || '').trim().toLowerCase();
+      if (!lowered) return null;
+      const firstDocx = docxFiles[0];
+      const secondDocx = docxFiles[1];
+      if (/(?:原文|原文件|原稿|旧版|第一份|第一版|source|original)/i.test(lowered)) {
+        const originalScored = docxFiles
+          .map((file, idx) => ({
+            file,
+            score: (idx === 0 ? 1 : 0)
+              + (/(?:original|source|原文|原稿|旧|old)/i.test(taskFileNameAliases(file).join(' ')) ? 2 : 0)
+              - compareTargetNameScore(file),
+          }))
+          .sort((left, right) => right.score - left.score);
+        return originalScored[0] && originalScored[0].score !== originalScored[1].score
+          ? originalScored[0].file
+          : firstDocx;
+      }
+      if (/(?:修订稿|修改稿|新版|第二份|第二版|revised|reviewed|commented)/i.test(lowered)) {
+        const revisedScored = docxFiles
+          .map((file, idx) => ({ file, score: compareTargetNameScore(file) + (idx === 1 ? 1 : 0) }))
+          .sort((left, right) => right.score - left.score);
+        return revisedScored[0] && revisedScored[0].score !== revisedScored[1].score
+          ? revisedScored[0].file
+          : secondDocx;
+      }
+      return null;
+    }
+
     function inferCompareAnnotatedTargetFile(text, files) {
       if (!Array.isArray(files) || files.length !== 2 || !looksLikeCompareAnnotationTask(text)) return null;
       const docxFiles = files.filter((file) => ['docx', 'doc'].includes(canonicalTaskFileType(file)));
@@ -683,6 +746,17 @@
     function inferAttachedWriteTargetFile(text, files) {
       if (!Array.isArray(files) || !files.length) return null;
       const lowered = String(text || '').toLowerCase();
+
+      const targetMentionMatches = files
+        .map((file) => ({ file, score: targetMentionScore(lowered, file) }))
+        .filter((entry) => entry.score > 0)
+        .sort((left, right) => right.score - left.score);
+      if (targetMentionMatches.length && targetMentionMatches[0].score !== (targetMentionMatches[1] && targetMentionMatches[1].score || 0)) {
+        return targetMentionMatches[0].file;
+      }
+
+      const roleHintTarget = inferCompareTargetFromRoleHint(text, files);
+      if (roleHintTarget) return roleHintTarget;
 
       const explicitNameMatches = files.filter((file) => {
         const baseName = String(file && (file.name || file.path) || '').trim().toLowerCase();

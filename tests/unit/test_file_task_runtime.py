@@ -392,11 +392,13 @@ def test_file_task_runtime_does_not_external_fallback_after_doc_annotate_bridge_
     )
 
     assert any(
-        event.payload.get("mode") == "doc_annotate_bridge"
+        event.payload.get("mode") == "whitebox_v1"
+        and event.payload.get("execution_mode") == "doc_annotate_bridge"
         for event in events
         if event.type == "run.started"
     )
-    assert run_finished.payload.get("mode") == "doc_annotate_bridge"
+    assert run_finished.payload.get("mode") == "whitebox_v1"
+    assert run_finished.payload.get("execution_mode") == "doc_annotate_bridge"
     assert run_finished.payload["completed_task"] is False
     assert not any(event.type == "planner.selected" for event in events)
     assert not any(event.type == "planner.fallback" for event in events)
@@ -670,6 +672,74 @@ def test_file_task_runtime_classifies_two_docx_compare_annotation_as_compare_wri
     assert classification.selected_recipe == "docx_compare_annotation"
     assert "compare_docx_and_annotate" in classification.matched_capabilities
     assert "annotate_file" not in classification.matched_capabilities
+
+
+def test_file_task_runtime_keeps_named_docx_compare_annotation_in_compare_mode():
+    runtime = FileTaskRuntime()
+    request = FileTaskRequest(
+        task=(
+            "对比 humanise!.docx 和 humanise!_revised.docx，"
+            "并在 humanise!.docx 上标注不同之处"
+        ),
+        run_id="docx_compare_annotation_named_target",
+        files=[
+            FileTaskFile(path="humanise!.docx", name="humanise!.docx", type="docx"),
+            FileTaskFile(
+                path="humanise!_revised.docx",
+                name="humanise!_revised.docx",
+                type="docx",
+            ),
+        ],
+        target_path="humanise!.docx",
+    )
+
+    classification = runtime._classify_request(request, request.files)
+
+    assert classification.task_family == "compare"
+    assert classification.operation_kind == "compare_annotate"
+    assert classification.execution_mode == "generic_tool_loop"
+    assert classification.output_mode == "write"
+    assert classification.selected_recipe == "docx_compare_annotation"
+    assert "write_docx_comments" in classification.matched_capabilities
+    assert "annotate_file" not in classification.matched_capabilities
+
+
+def test_file_task_runtime_limits_docx_compare_route_tools():
+    runtime = FileTaskRuntime()
+    request = FileTaskRequest(
+        task="对比两份 DOCX，并在原文上标注不同之处",
+        files=[
+            FileTaskFile(path="old.docx", name="old.docx", type="docx", target=True),
+            FileTaskFile(path="new.docx", name="new.docx", type="docx"),
+        ],
+        target_path="old.docx",
+    )
+    classification = runtime._classify_request(request, request.files)
+
+    tool_defs = runtime._tool_defs_for_classification(
+        [
+            {"name": "parse_file_to_text"},
+            {"name": "plan_docx_compare_annotations"},
+            {"name": "write_docx_comments"},
+            {"name": "compare_docx_and_annotate"},
+            {"name": "verify_task_completion"},
+            {"name": "annotate_file"},
+            {"name": "write_docx_content"},
+        ],
+        classification,
+    )
+    tool_names = {str(item.get("name") or "") for item in tool_defs}
+
+    assert classification.selected_recipe == "docx_compare_annotation"
+    assert {
+        "parse_file_to_text",
+        "plan_docx_compare_annotations",
+        "write_docx_comments",
+        "compare_docx_and_annotate",
+        "verify_task_completion",
+    }.issubset(tool_names)
+    assert "annotate_file" not in tool_names
+    assert "write_docx_content" not in tool_names
 
 
 def test_file_task_runtime_executes_two_docx_compare_annotation_through_model_loop():
@@ -5586,6 +5656,183 @@ def test_file_task_runtime_routes_financial_xlsx_chart_report_to_docx_via_native
     assert "模型质量问题" in saved_text
     assert "建议追问" in saved_text
     assert len(saved.inline_shapes) >= 1
+
+
+def test_file_task_runtime_financial_report_links_supplemental_sales_ledger(tmp_path):
+    import openpyxl
+    from docx import Document
+
+    financial_path = tmp_path / "financial.xlsx"
+    sales_path = tmp_path / "sales.xlsx"
+    target_path = tmp_path / "target.docx"
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "P&L"
+    sheet.append(["", "", "2026E", "2027E", "2028E"])
+    sheet.append(["", "收入合计", 1000, 2200, 3800])
+    sheet.append(["", "毛利合计", 350, 860, 1500])
+    sheet.append(["", "净利润", 80, 210, 420])
+    workbook.save(financial_path)
+
+    sales_workbook = openpyxl.Workbook()
+    sales_sheet = sales_workbook.active
+    sales_sheet.title = "汇总表"
+    sales_sheet.append(["月份", "产品", "客户", "销售额", "销量"])
+    sales_sheet.append(["2026-01", "AI Glasses", "A客户", 120, 3])
+    sales_sheet.append(["2026-02", "AI Glasses", "B客户", 180, 4])
+    sales_sheet.append(["2026-02", "XR", "A客户", 90, 2])
+    sales_sheet.append(["2026-03", "AR", "C客户", 240, 5])
+    sales_workbook.save(sales_path)
+
+    document = Document()
+    document.add_paragraph("雷鸟访谈问题")
+    document.save(target_path)
+
+    request = FileTaskRequest(
+        task="将新的销售台账也加入分析，并且做成图，内容也加入docx",
+        run_id="financial_sales_followup",
+        target_path=str(target_path),
+        options={
+            "disable_financial_model_synthesis": True,
+            "followup_context": {
+                "previous_task_selected_recipe": "financial_xlsx_docx_report"
+            },
+        },
+        files=[
+            FileTaskFile(
+                path=str(target_path),
+                name="雷鸟访谈问题.docx",
+                type="docx",
+                target=True,
+            ),
+            FileTaskFile(
+                path=str(financial_path),
+                name="雷鸟创新-financial model.xlsx",
+                type="xlsx",
+            ),
+            FileTaskFile(path=str(sales_path), name="销售台账.xlsx", type="xlsx"),
+        ],
+    )
+
+    def forbidden_model(**kwargs):
+        raise AssertionError(
+            "native financial multi-file report should not need model-controlled tools"
+        )
+
+    events = list(
+        FileTaskRuntime(model_client=forbidden_model, workspace_root=str(tmp_path)).run(
+            request
+        )
+    )
+    tool_names = [
+        event.payload.get("tool_name")
+        for event in events
+        if event.type == "tool.finished"
+    ]
+    file_changes = [event.payload for event in events if event.type == "file.changed"]
+    run_started = next(event for event in events if event.type == "run.started")
+    run_finished = events[-1]
+
+    assert run_started.payload["selected_recipe"] == "financial_xlsx_docx_report"
+    assert tool_names.count("inspect_workbook_structure") >= 2
+    assert tool_names.count("run_python_code") >= 2
+    assert any(
+        change.get("operation") == "write_docx_content" for change in file_changes
+    )
+    assert (
+        sum(
+            1
+            for change in file_changes
+            if change.get("operation") == "insert_image_into_docx"
+        )
+        >= 2
+    )
+    assert run_finished.payload["completed_task"] is True
+    assert "联动 1 份补充 Excel" in run_finished.payload["summary"]
+
+    saved = Document(str(target_path))
+    saved_text = "\n".join(paragraph.text for paragraph in saved.paragraphs)
+    assert "销售台账.xlsx补充分析" in saved_text
+    assert "核心数值列为“销售额”" in saved_text
+    assert len(saved.inline_shapes) >= 2
+
+
+def test_file_task_runtime_routes_financial_reports_through_runner():
+    runtime_source = Path("app/core/agent/file_task_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    runner_source = Path(
+        "app/core/agent/file_task_financial_report_runner.py"
+    ).read_text(encoding="utf-8")
+
+    assert "FileTaskFinancialReportRunner" in runtime_source
+    assert "financial_report_runner.should_route(request, context_files)" in runtime_source
+    assert "financial_report_runner.stream(request, context_files)" in runtime_source
+    assert "class FileTaskFinancialReportRunner" in runner_source
+    assert "def should_route(" in runner_source
+    assert "def stream(" in runner_source
+
+
+def test_doc_annotate_bridge_is_hidden_behind_boundary():
+    agent_files = Path("app/core/agent").glob("*.py")
+    direct_refs = []
+    for path in agent_files:
+        if path.name == "file_task_doc_annotate_bridge.py":
+            continue
+        source = path.read_text(encoding="utf-8")
+        if "file_task_doc_annotate_bridge" in source:
+            direct_refs.append(path.name)
+
+    assert direct_refs == ["file_task_doc_annotate_boundary.py"]
+
+
+def test_file_task_runtime_routes_doc_annotate_bridge_through_runner():
+    runtime_source = Path("app/core/agent/file_task_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    runner_source = Path(
+        "app/core/agent/file_task_doc_annotate_runner.py"
+    ).read_text(encoding="utf-8")
+
+    assert "FileTaskDocAnnotateRunner(self).stream_bridge_execution" in runtime_source
+    assert "file_task_doc_annotate_boundary.stream_bridge_request" in runner_source
+    assert "execution_mode\": \"doc_annotate_bridge\"" in runner_source
+    assert "file_task_doc_annotate_boundary.stream_bridge_request" not in runtime_source
+
+
+def test_doc_annotate_intent_rules_are_outside_legacy_bridge():
+    bridge_source = Path(
+        "app/core/agent/file_task_doc_annotate_bridge.py"
+    ).read_text(encoding="utf-8")
+    boundary_source = Path(
+        "app/core/agent/file_task_doc_annotate_boundary.py"
+    ).read_text(encoding="utf-8")
+    intent_source = Path(
+        "app/core/agent/file_task_doc_annotate_intent.py"
+    ).read_text(encoding="utf-8")
+
+    assert "file_task_doc_annotate_intent" in bridge_source
+    assert "file_task_doc_annotate_intent" in boundary_source
+    assert "def should_use_doc_annotate_bridge_execution" not in bridge_source
+    assert "_DOCX_CLEAR_REVIEW_REQUEST_PATTERNS" not in bridge_source
+    assert "def should_use_doc_annotate_bridge_execution" in intent_source
+    assert "_DOCX_CLEAR_REVIEW_REQUEST_PATTERNS" in intent_source
+
+
+def test_doc_annotate_event_formatters_are_outside_legacy_bridge():
+    bridge_source = Path(
+        "app/core/agent/file_task_doc_annotate_bridge.py"
+    ).read_text(encoding="utf-8")
+    event_source = Path(
+        "app/core/agent/file_task_doc_annotate_events.py"
+    ).read_text(encoding="utf-8")
+
+    assert "file_task_doc_annotate_events" in bridge_source
+    assert "def _build_review_progress_payload" not in bridge_source
+    assert "def _tool_result_from_bridge_payload" not in bridge_source
+    assert "def build_review_progress_payload" in event_source
+    assert "def tool_result_from_bridge_payload" in event_source
 
 
 def test_file_task_runtime_ignores_legacy_financial_route_opt_out_flags(tmp_path):

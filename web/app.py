@@ -9903,7 +9903,7 @@ def chat_stream():
                 yield f"data: {json.dumps({'type': 'info', 'message': task_info_msg})}\n\n"
 
                 try:
-                    from web.document_annotation_compat import (
+                    from web.document_feedback import (
                         collect_annotation_result,
                         iter_annotation_progress_events,
                     )

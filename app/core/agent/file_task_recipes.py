@@ -113,7 +113,7 @@ def semantic_markers(task: str, *, file_types: set[str] | None = None, target_fi
     markers = {
         "chart_request": bool(_CHART_PATTERN.search(text)),
         "problem_analysis_request": bool(_PROBLEM_PATTERN.search(text)),
-        "financial_request": any(marker in lowered for marker in ("财务", "预测", "financial", "模型", "报表", "收入", "利润", "p&l", "pl")),
+        "financial_request": any(marker in lowered for marker in ("财务", "预测", "financial", "模型", "报表", "收入", "利润", "销售", "台账", "流水", "sales", "revenue", "p&l", "pl")),
         "table_request": bool(_TABLE_PATTERN.search(text)),
         "summary_request": bool(_SUMMARY_PATTERN.search(text)),
         "translation_request": bool(_TRANSLATION_PATTERN.search(text)),

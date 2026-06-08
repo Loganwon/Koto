@@ -12,7 +12,7 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from app.core.llm.model_capabilities import (
     get_interactions_only_model_set,
@@ -3227,6 +3227,165 @@ class DocumentFeedbackSystem:
         except Exception as e:
             logger.info(f"[DocumentFeedback] 解析标注失败: {e}")
             return []
+
+
+# ---------------------------------------------------------------------------
+# Convenience wrappers (moved from document_annotation_compat.py)
+# ---------------------------------------------------------------------------
+
+
+def resolve_document_path(file_path: str, workspace_dir: str) -> str:
+    text = str(file_path or "").strip()
+    if not text:
+        return ""
+    if os.path.isabs(text):
+        return text
+    return os.path.join(workspace_dir, "documents", text)
+
+
+def collect_annotation_result(
+    *,
+    file_path: str,
+    user_requirement: str,
+    gemini_client: Any,
+    model_id: str = "gemini-2.5-pro",
+    task_id: Optional[str] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    skill_prompt: str = "",
+) -> Dict[str, Any]:
+    feedback_system = DocumentFeedbackSystem(
+        gemini_client=gemini_client, default_model_id=model_id
+    )
+    last_error = ""
+
+    for progress_event in feedback_system.full_annotation_loop_streaming(
+        file_path,
+        user_requirement,
+        task_id=task_id,
+        model_id=model_id,
+        cancel_check=cancel_check,
+        skill_prompt=skill_prompt,
+    ):
+        stage = str(progress_event.get("stage") or "").strip().lower()
+        if stage == "complete":
+            result = progress_event.get("result")
+            if isinstance(result, dict):
+                return result
+            return {"success": False, "error": "兼容标注路径未返回结果"}
+        if stage == "cancelled":
+            return {
+                "success": False,
+                "cancelled": True,
+                "message": str(
+                    progress_event.get("message") or "文档标注任务已取消"
+                ).strip()
+                or "文档标注任务已取消",
+            }
+        if stage == "error":
+            last_error = str(
+                progress_event.get("message")
+                or progress_event.get("detail")
+                or "文档标注失败"
+            ).strip()
+
+    return {"success": False, "error": last_error or "文档标注失败"}
+
+
+def iter_annotation_progress_events(
+    *,
+    file_path: str,
+    user_requirement: str,
+    gemini_client: Any,
+    model_id: str = "gemini-2.5-pro",
+    task_id: Optional[str] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    skill_prompt: str = "",
+) -> Iterable[Dict[str, Any]]:
+    feedback_system = DocumentFeedbackSystem(
+        gemini_client=gemini_client, default_model_id=model_id
+    )
+    yield from feedback_system.full_annotation_loop_streaming(
+        file_path,
+        user_requirement,
+        task_id=task_id,
+        model_id=model_id,
+        cancel_check=cancel_check,
+        skill_prompt=skill_prompt,
+    )
+
+
+def analyze_annotations_only(
+    *,
+    file_path: str,
+    user_requirement: str,
+    gemini_client: Any,
+    model_id: str = "gemini-2.5-pro",
+) -> Dict[str, Any]:
+    feedback_system = DocumentFeedbackSystem(
+        gemini_client=gemini_client, default_model_id=model_id
+    )
+    return feedback_system.analyze_for_annotation_chunked(
+        file_path,
+        user_requirement,
+        model_id=model_id,
+    )
+
+
+def stream_annotation_events(
+    *,
+    file_path: str,
+    user_requirement: str,
+    gemini_client: Any,
+    model_id: str = "gemini-2.5-pro",
+    task_id: Optional[str] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
+    skill_prompt: str = "",
+) -> Iterable[str]:
+    feedback_system = DocumentFeedbackSystem(
+        gemini_client=gemini_client, default_model_id=model_id
+    )
+
+    for progress_event in iter_annotation_progress_events(
+        file_path=file_path,
+        user_requirement=user_requirement,
+        gemini_client=gemini_client,
+        model_id=model_id,
+        task_id=task_id,
+        cancel_check=cancel_check,
+        skill_prompt=skill_prompt,
+    ):
+        stage = str(progress_event.get("stage") or "").strip().lower()
+
+        if stage == "complete":
+            result = (
+                progress_event.get("result")
+                if isinstance(progress_event.get("result"), dict)
+                else {}
+            )
+            yield f"event: complete\ndata: {json.dumps({'success': bool(result.get('success')), **result}, ensure_ascii=False)}\n\n"
+            return
+
+        if stage in {"error", "cancelled"}:
+            payload = {
+                "success": False,
+                "stage": stage,
+                "message": str(
+                    progress_event.get("message")
+                    or progress_event.get("detail")
+                    or "文档标注失败"
+                ).strip()
+                or "文档标注失败",
+            }
+            yield f"event: error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+            return
+
+        payload = {
+            "stage": stage,
+            "progress": progress_event.get("progress", 0),
+            "message": progress_event.get("message", ""),
+            "detail": progress_event.get("detail", ""),
+        }
+        yield f"event: progress\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 if __name__ == "__main__":

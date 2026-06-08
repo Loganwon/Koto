@@ -23,12 +23,20 @@ import re
 
 from flask import Blueprint, Response, jsonify, request
 
-from web.document_annotation_compat import (
+from web.document_feedback import (
     analyze_annotations_only,
     collect_annotation_result,
-    resolve_document_path,
     stream_annotation_events,
 )
+
+
+def _resolve_document_path(file_path: str, workspace_dir: str) -> str:
+    text = str(file_path or "").strip()
+    if not text:
+        return ""
+    if os.path.isabs(text):
+        return text
+    return os.path.join(workspace_dir, "documents", text)
 
 _logger = logging.getLogger("koto.routes.document")
 
@@ -119,7 +127,7 @@ def _call_document_annotate(file_path: str, requirement: str):
     """调用文档标注系统"""
     try:
         workspace_dir = _get_workspace_dir()
-        file_path = resolve_document_path(file_path, workspace_dir)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
@@ -269,7 +277,7 @@ def document_feedback() -> Response:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
 
         workspace_dir = _get_workspace_dir()
-        file_path = resolve_document_path(file_path, workspace_dir)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
@@ -419,7 +427,7 @@ def document_annotate() -> Response:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
 
         workspace_dir = _get_workspace_dir()
-        file_path = resolve_document_path(file_path, workspace_dir)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
@@ -452,7 +460,7 @@ def document_analyze_annotations() -> Response:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
 
         workspace_dir = _get_workspace_dir()
-        file_path = resolve_document_path(file_path, workspace_dir)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
@@ -496,7 +504,7 @@ def document_batch_annotate_stream() -> Response:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
 
         workspace_dir = _get_workspace_dir()
-        file_path = resolve_document_path(file_path, workspace_dir)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404

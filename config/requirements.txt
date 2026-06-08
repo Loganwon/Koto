@@ -38,6 +38,7 @@ EbookLib>=0.18             # .epub 文本提取
 # ── Data ──
 pandas>=2.0.0
 numpy>=1.24.0
+matplotlib>=3.8.0
 
 # ── Image ──
 Pillow>=10.0.0

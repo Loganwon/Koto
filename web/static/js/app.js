@@ -438,6 +438,9 @@ async function checkSetupStatus() {
     try {
         const response = await fetch('/api/setup/status');
         const data = await response.json();
+        if (data.cloud_provider) {
+            selectSetupProvider(data.cloud_provider);
+        }
         
         if (!data.initialized || !data.has_api_key) {
             showSetupWizard();
@@ -458,9 +461,39 @@ function hideSetupWizard() {
     document.getElementById('setupWizard').classList.remove('active');
 }
 
+let setupCloudProvider = 'gemini';
+
+function selectSetupProvider(provider) {
+    const normalized = provider === 'deepseek' ? 'deepseek' : 'gemini';
+    setupCloudProvider = normalized;
+
+    const geminiBtn = document.getElementById('setupProviderGemini');
+    const deepseekBtn = document.getElementById('setupProviderDeepSeek');
+    const desc = document.getElementById('setupApiProviderDesc');
+    const input = document.getElementById('setupApiKey');
+    const status = document.getElementById('step1Status');
+
+    if (geminiBtn) geminiBtn.classList.toggle('active', normalized === 'gemini');
+    if (deepseekBtn) deepseekBtn.classList.toggle('active', normalized === 'deepseek');
+
+    if (normalized === 'deepseek') {
+        if (desc) desc.innerHTML = '从 <a href="https://platform.deepseek.com/api_keys" target="_blank">DeepSeek 开放平台</a> 获取 API Key';
+        if (input) input.placeholder = '粘贴 DeepSeek API Key...';
+    } else {
+        if (desc) desc.innerHTML = '从 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> 获取 Gemini API Key';
+        if (input) input.placeholder = '粘贴 Gemini API Key...';
+    }
+
+    if (status) {
+        status.textContent = '';
+        status.className = 'step-status';
+    }
+}
+
 async function saveApiKey() {
     const apiKey = document.getElementById('setupApiKey').value.trim();
     const status = document.getElementById('step1Status');
+    const provider = setupCloudProvider === 'deepseek' ? 'deepseek' : 'gemini';
     
     if (!apiKey || apiKey.length < 10) {
         status.textContent = '❌ 请输入有效的 API Key';
@@ -475,12 +508,12 @@ async function saveApiKey() {
         const response = await fetch('/api/setup/apikey', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ api_key: apiKey })
+            body: JSON.stringify({ api_key: apiKey, provider })
         });
         const data = await response.json();
         
         if (data.success) {
-            status.textContent = '✅ API Key 已保存';
+            status.textContent = `✅ ${provider === 'deepseek' ? 'DeepSeek' : 'Gemini'} API Key 已保存`;
             status.className = 'step-status success';
             document.getElementById('setupStep1').classList.remove('active');
             document.getElementById('setupStep1').classList.add('completed');
@@ -1288,7 +1321,7 @@ function goToWelcome() {
     
     currentSession = null;
     isScrollLocked = false;
-    document.getElementById('chatTitle').textContent = '选择或创建对话';
+    document.getElementById('chatTitle').textContent = 'Koto';
     
     // 取消所有会话的选中状态
     document.querySelectorAll('.session-item').forEach(item => {
@@ -1618,7 +1651,7 @@ async function deleteSession(sessionName, event) {
             // 只有删除的是当前打开的会话时才重置聊天区
             if (currentSession === sessionName) {
                 currentSession = null;
-                document.getElementById('chatTitle').textContent = '选择或创建对话';
+                document.getElementById('chatTitle').textContent = 'Koto';
                 const container = document.getElementById('chatMessages');
                 container.querySelectorAll('.message, .chat-date-sep').forEach(el => el.remove());
                 const ws = document.getElementById('welcomeScreen');

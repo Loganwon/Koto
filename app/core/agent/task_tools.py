@@ -2895,6 +2895,7 @@ def write_docx_comments(
             continue
         anchor = str(
             item.get("原文片段")
+            or item.get("anchor_text")
             or item.get("anchor")
             or item.get("text")
             or item.get("target_text")
@@ -3271,7 +3272,7 @@ def _stream_docx_annotation_tool_result(
     task_files: Optional[List[Dict[str, Any]]] = None,
     request_context: Optional[Dict[str, Any]] = None,
 ) -> FileTaskToolStreamResult:
-    from app.core.agent import file_task_doc_annotate_bridge
+    from app.core.agent import file_task_doc_annotate_boundary
 
     annotation_request = _build_docx_annotation_request(
         path,
@@ -3280,7 +3281,7 @@ def _stream_docx_annotation_tool_result(
         task_files=task_files,
         request_context=request_context,
     )
-    return file_task_doc_annotate_bridge.stream_request_as_tool(
+    return file_task_doc_annotate_boundary.stream_bridge_request_as_tool(
         annotation_request,
         workspace_root=workspace_root,
         gemini_client=gemini_client,

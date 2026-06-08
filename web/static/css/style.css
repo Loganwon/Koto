@@ -1597,6 +1597,41 @@ a { color: var(--accent-primary); }
 .welcome-logo img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 .welcome-copy h2 { font-size: 22px; margin-bottom: 4px; }
 .welcome-copy p { color: var(--text-secondary); font-size: 14px; }
+.welcome-capability-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.welcome-capability-row span {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+.welcome-prompt-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.welcome-prompt-btn {
+    padding: 10px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.welcome-prompt-btn:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+    transform: translateY(-1px);
+}
 
 /* \u6700\u8fd1\u5bf9\u8bdd\u5feb\u6377\u5165\u53e3 */
 .welcome-recent {
@@ -2506,6 +2541,10 @@ body.skills-panel-open .main-content {
 .step-content h4 { margin-bottom: 6px; font-size: 15px; color: var(--text-primary); }
 .step-content p { margin-bottom: 10px; color: var(--text-secondary); font-size: 13px; }
 .step-content input { width: 100%; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary); margin-bottom: 8px; }
+.setup-provider-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; margin: 2px 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-tertiary); }
+.setup-provider-option { border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); padding: 8px 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: var(--transition); }
+.setup-provider-option:hover { color: var(--text-primary); background: var(--bg-hover); }
+.setup-provider-option.active { background: var(--accent-primary); color: #03131f; box-shadow: 0 8px 18px rgba(91, 157, 245, 0.22); }
 .step-status { margin-top: 6px; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; display: none; }
 .step-status.success { display: block; background: rgba(42, 212, 137, 0.12); color: var(--accent-success); }
 .step-status.error { display: block; background: rgba(239, 107, 107, 0.15); color: var(--accent-danger); }

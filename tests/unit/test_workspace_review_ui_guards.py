@@ -101,8 +101,8 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "min-height: var(--wa-review-card-anchor-min-height, 42px);" in css
     assert "function _layoutReviewShellInDocx" in js
     assert "function _ensureReviewSelectionLauncher" in js
-    assert "const selectionRight = Number.isFinite(bounds.right)" in layout_js
-    assert "const launcherLeft = _shiftReviewRailLeft(Math.min(selectionRight, maxLauncherLeft), host);" in layout_js
+    assert "const selectionRight = Number.isFinite(cursorRight)" in layout_js
+    assert "const launcherLeft = Math.min(selectionRight, maxLauncherLeft);" in layout_js
     assert "function _bindReviewShellInteractions" in js
     assert "if (tab.serverData && Array.isArray(tab.serverData.proposals)) {" in js
     assert "window.WA.openReviewCenter" in js
