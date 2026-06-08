@@ -139,9 +139,8 @@
             inset: 68px 0 0;
             z-index: -2;
             background:
-                linear-gradient(90deg, rgba(8,11,16,0.94) 0%, rgba(8,11,16,0.76) 48%, rgba(8,11,16,0.94) 100%),
-                linear-gradient(180deg, rgba(8,11,16,0.18) 0%, rgba(8,11,16,0.96) 100%),
-                url('assets/screenshots/koto-workspace-assistant.png') center 24% / min(1280px, 92vw) auto no-repeat;
+                linear-gradient(90deg, rgba(18,185,129,0.08), transparent 32%, rgba(79,182,255,0.08)),
+                linear-gradient(180deg, rgba(8,11,16,0.12) 0%, rgba(8,11,16,0.96) 100%);
         }
         .hero::after {
             content: '';
@@ -495,17 +494,33 @@
         .sample-result strong { color: var(--accent-primary); font-weight: 700; }
 
         /* ===== PRODUCT STORY ===== */
-        .hero-preview {
-            margin-top: 42px;
-            border-radius: 24px;
-            overflow: hidden;
-            border: 1px solid rgba(255,255,255,0.08);
-            background: linear-gradient(180deg, #101827 0%, #0b111d 100%);
-            box-shadow: 0 24px 60px rgba(0,0,0,0.32);
+        .hero-task-panel {
+            margin: 42px auto 0;
+            max-width: 860px;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
         }
-        .hero-preview img {
-            width: 100%;
+        .hero-task {
+            min-height: 116px;
+            padding: 18px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
+            background: rgba(17,24,33,0.72);
+            text-align: left;
+            backdrop-filter: blur(14px);
+        }
+        .hero-task strong {
             display: block;
+            color: var(--text-primary);
+            font-size: 15px;
+            margin-bottom: 8px;
+        }
+        .hero-task span {
+            display: block;
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.55;
         }
         .story-band {
             margin-top: 36px;
@@ -851,6 +866,7 @@
             .download-left h2 { font-size: 34px; }
             .trust-inner { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .workflow-grid { grid-template-columns: 1fr; }
+            .hero-task-panel { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .results-grid { grid-template-columns: 1fr; }
             .before-after { grid-template-columns: 1fr; }
             .compare-grid { grid-template-columns: 1fr; }
@@ -868,7 +884,7 @@
             .nav { padding: 0 20px; }
             .nav-links a { display: none; }
             .hero { padding: 104px 24px 52px; min-height: 88vh; }
-            .hero::before { background-size: 980px auto; background-position: center 22%; }
+            .hero-task-panel { grid-template-columns: 1fr; margin-top: 28px; }
             .hero-title { font-size: 42px; line-height: 1.12; }
             .hero-desc { font-size: 16px; margin-bottom: 34px; }
             .hero-actions { margin-bottom: 34px; }
@@ -931,9 +947,24 @@
                 <span>🧠 资料问答 / RAG</span>
                 <span>⚙️ 可复用工作流</span>
             </div>
-            <a class="hero-preview fade-up fade-up-4" href="assets/screenshots/koto-main-chat.png" target="_blank" rel="noopener">
-                <img src="assets/screenshots/koto-main-chat.png" alt="Koto 主界面对话与技能工作台截图">
-            </a>
+            <div class="hero-task-panel fade-up fade-up-4" aria-label="Koto 文件助手真实任务覆盖">
+                <div class="hero-task">
+                    <strong>DOCX 审阅</strong>
+                    <span>批注、修订建议、条款对比、论文反馈。</span>
+                </div>
+                <div class="hero-task">
+                    <strong>Excel 处理</strong>
+                    <span>字段补齐、异常识别、统计摘要、周报整理。</span>
+                </div>
+                <div class="hero-task">
+                    <strong>PPT / 报告</strong>
+                    <span>提纲重写、风格统一、汇报材料生成。</span>
+                </div>
+                <div class="hero-task">
+                    <strong>资料问答</strong>
+                    <span>多文件提取、知识库 RAG、科研学习整理。</span>
+                </div>
+            </div>
         </div>
     </section>
 
