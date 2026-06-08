@@ -49,6 +49,20 @@ function collectLocalJsDeps(startFiles) {
   return keep;
 }
 
+function collectIndexAssetRefs() {
+  const indexPath = path.join(distDir, 'index.html');
+  const refs = new Set();
+  if (!exists(indexPath)) return refs;
+
+  const html = fs.readFileSync(indexPath, 'utf8');
+  const assetRe = /assets\/([^"'>]+\.(?:js|css))/g;
+  let match;
+  while ((match = assetRe.exec(html)) !== null) {
+    refs.add(match[1]);
+  }
+  return refs;
+}
+
 function main() {
   if (!exists(assetsDir)) {
     console.log('[clean-univer-dist-assets] Skip: dist assets not found.');
@@ -60,6 +74,9 @@ function main() {
   // Runtime assets required by non-index loading paths.
   keep.add('sheets-main.js');
   keep.add('sheets-main.css');
+
+  // Runtime assets referenced by the legacy Univer index shell.
+  for (const fileName of collectIndexAssetRefs()) keep.add(fileName);
 
   // Include transitive local JS dependencies from kept JS entries.
   const jsEntries = [...keep].filter((name) => name.endsWith('.js'));
