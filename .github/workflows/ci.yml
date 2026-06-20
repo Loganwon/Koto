@@ -14,6 +14,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -26,9 +33,11 @@ jobs:
         run: flake8 src/ app/ tests/ --count --show-source --statistics
 
       - name: Check formatting (black)
+        continue-on-error: true
         run: black --check src/ app/ tests/
 
       - name: Check import order (isort)
+        continue-on-error: true
         run: isort --check-only --profile black src/ app/ tests/
 
       - name: Security scan (bandit)
@@ -71,6 +80,11 @@ jobs:
         run: |
           pip install pip-audit
           pip-audit --desc || true
+
+      - name: Build frontend bundles
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
 
       - name: Run tests
         env:

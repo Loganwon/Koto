@@ -1688,17 +1688,17 @@ class TestEmbeddedModeRenderGuards:
         )
 
     def test_router_load_guard_before_pptx_editor(self):
-        """The guard await must appear before new KotoPptxEditor() in _applyFileJson."""
+        """The guard await must appear before PPTX mount in _applyFileJson."""
         src = self.src
         fn_start = src.find("async function _applyFileJson")
         if fn_start == -1:
             fn_start = src.find("const Router = {")
-        fn_end = src.find("new KotoPptxEditor()", fn_start)
+        fn_end = src.find("_mountPptxEditor(json.data)", fn_start)
         body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
         guard_pos = body.find("await _waitForEditorLayout")
-        pptx_pos  = body.find("new KotoPptxEditor()")
+        pptx_pos  = body.find("_mountPptxEditor(json.data)")
         assert guard_pos != -1 and pptx_pos != -1 and guard_pos < pptx_pos, (
-            "_waitForEditorLayout await must precede new KotoPptxEditor()"
+            "_waitForEditorLayout await must precede PPTX editor mount"
         )
 
     # ── _switchToTab guard ───────────────────────────────────────────────

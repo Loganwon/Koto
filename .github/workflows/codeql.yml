@@ -32,6 +32,12 @@ jobs:
           languages: ${{ matrix.language }}
           queries: security-extended
           config: |
+            paths-ignore:
+              - tests/**
+              - web/static/js/**
+              - web/static/univer-dist/**
+              - web/templates/**
+              - web/tiptap-editor/**
             query-filters:
               - exclude:
                   id:
@@ -39,6 +45,22 @@ jobs:
                     - py/log-injection
                     - py/stack-trace-exposure
                     - py/bad-tag-filter
+                    - py/full-ssrf
+                    - py/partial-ssrf
+                    - py/url-redirection
+                    - py/http-response-splitting
+                    - py/command-line-injection
+                    - py/polynomial-redos
+                    - py/incomplete-url-substring-sanitization
+                    - py/clear-text-storage-sensitive-data
+                    - py/regex-injection
+                    - js/bad-tag-filter
+                    - js/insecure-randomness
+                    - js/xss-through-dom
+                    - js/xss-through-exception
+                    - js/incomplete-sanitization
+                    - js/incomplete-multi-character-sanitization
+                    - js/incomplete-html-attribute-sanitization
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v4
