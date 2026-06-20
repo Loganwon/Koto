@@ -89,7 +89,9 @@ class PptxDataRefresh(WorkflowExecutor):
             yield sse_error("PPT 内容为空或无法解析")
             return
         total_shapes = sum(len(s["texts"]) for s in slide_texts)
-        yield sse_step_done("scan", f"📑 {len(slide_texts)} 页，{total_shapes} 个文本块")
+        yield sse_step_done(
+            "scan", f"📑 {len(slide_texts)} 页，{total_shapes} 个文本块"
+        )
 
         # ── Step 3: LLM 匹配映射 ───────────────────────────────────
         yield sse_step_start("mapping", "🤖 AI 数据匹配…")
@@ -106,7 +108,9 @@ class PptxDataRefresh(WorkflowExecutor):
         yield sse_step_done("mapping", f"🤖 找到 {len(replacements)} 处需更新")
 
         if not replacements:
-            yield sse_output("markdown", "# 数据刷新结果\n\n未发现需要更新的数据。", "无需更新")
+            yield sse_output(
+                "markdown", "# 数据刷新结果\n\n未发现需要更新的数据。", "无需更新"
+            )
             return
 
         # ── Step 4: 执行替换 ────────────────────────────────────────
@@ -132,6 +136,7 @@ class PptxDataRefresh(WorkflowExecutor):
         try:
             if ext in (".xlsx", ".xls"):
                 import openpyxl
+
                 wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
                 ws = wb.active
                 all_rows = []
@@ -143,6 +148,7 @@ class PptxDataRefresh(WorkflowExecutor):
                 return all_rows[0], all_rows[1:]
             elif ext == ".csv":
                 import csv
+
                 with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
                     reader = csv.reader(f)
                     all_rows = list(reader)
@@ -156,6 +162,7 @@ class PptxDataRefresh(WorkflowExecutor):
     def _extract_pptx_texts(self, path: str) -> list[dict]:
         """提取每页 slide 的文本内容。"""
         from pptx import Presentation
+
         prs = Presentation(path)
         slides = []
         for si, slide in enumerate(prs.slides):
@@ -186,8 +193,13 @@ class PptxDataRefresh(WorkflowExecutor):
         try:
             result = self.llm_json(prompt, system=system, model_mode=model_mode)
             if isinstance(result, list):
-                return [r for r in result if r.get("old_value") and r.get("new_value")
-                        and r["old_value"] != r["new_value"]]
+                return [
+                    r
+                    for r in result
+                    if r.get("old_value")
+                    and r.get("new_value")
+                    and r["old_value"] != r["new_value"]
+                ]
         except Exception as e:
             logger.warning("[PptxRefresh] LLM 匹配失败: %s", e)
         return []
@@ -195,6 +207,7 @@ class PptxDataRefresh(WorkflowExecutor):
     def _apply_replacements(self, path: str, replacements: list[dict]) -> int:
         """在 PPTX 中执行替换。"""
         from pptx import Presentation
+
         prs = Presentation(path)
         count = 0
 
@@ -227,7 +240,9 @@ class PptxDataRefresh(WorkflowExecutor):
                                         old_val = r["old_value"]
                                         new_val = r["new_value"]
                                         if old_val in run.text:
-                                            run.text = run.text.replace(old_val, new_val)
+                                            run.text = run.text.replace(
+                                                old_val, new_val
+                                            )
                                             count += 1
 
         prs.save(path)

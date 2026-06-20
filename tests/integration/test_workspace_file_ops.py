@@ -70,6 +70,7 @@ def _app_bundle(tmp_path_factory):
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)

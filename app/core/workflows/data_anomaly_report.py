@@ -69,7 +69,9 @@ class DataAnomalyReport(WorkflowExecutor):
         missing = self._detect_missing(headers, rows)
         anomalies.extend(missing["anomalies"])
         cell_marks.update(missing["marks"])
-        yield sse_step_done("missing", f"🔍 缺失值: {len(missing['anomalies'])} 个问题列")
+        yield sse_step_done(
+            "missing", f"🔍 缺失值: {len(missing['anomalies'])} 个问题列"
+        )
 
         # ── Step 3: 重复行检测 ──────────────────────────────────────
         yield sse_step_start("duplicates", "🔍 检测重复行…")
@@ -106,7 +108,9 @@ class DataAnomalyReport(WorkflowExecutor):
         yield sse_step_done("build", "📊 报告生成完成")
 
         # ── 输出 ─────────────────────────────────────────────────────
-        yield sse_output("xlsx_data", workbook, f"数据检测结果（{len(anomalies)} 个异常）")
+        yield sse_output(
+            "xlsx_data", workbook, f"数据检测结果（{len(anomalies)} 个异常）"
+        )
         yield sse_output("markdown", summary, "检测摘要")
 
     # ── 数据加载 ──────────────────────────────────────────────────────
@@ -127,6 +131,7 @@ class DataAnomalyReport(WorkflowExecutor):
 
     def _load_xlsx(self, path: str) -> tuple[list[str], list[list[str]]]:
         import openpyxl
+
         wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
         ws = wb.active
         if ws is None:
@@ -161,12 +166,14 @@ class DataAnomalyReport(WorkflowExecutor):
             empty_count = sum(1 for r in rows if c >= len(r) or not str(r[c]).strip())
             rate = empty_count / total
             if rate > 0.05:
-                anomalies.append({
-                    "type": "缺失值",
-                    "location": f"列 [{h}]",
-                    "description": f"空值率 {rate:.1%}（{empty_count}/{total}）",
-                    "severity": "high" if rate > 0.3 else "medium",
-                })
+                anomalies.append(
+                    {
+                        "type": "缺失值",
+                        "location": f"列 [{h}]",
+                        "description": f"空值率 {rate:.1%}（{empty_count}/{total}）",
+                        "severity": "high" if rate > 0.3 else "medium",
+                    }
+                )
                 for ri, r in enumerate(rows):
                     if c >= len(r) or not str(r[c]).strip():
                         marks[(ri, c)] = "#ffcdd2"  # 红
@@ -184,12 +191,14 @@ class DataAnomalyReport(WorkflowExecutor):
 
         dup_groups = {h: idxs for h, idxs in hashes.items() if len(idxs) > 1}
         for _, idxs in dup_groups.items():
-            anomalies.append({
-                "type": "重复行",
-                "location": f"行 {', '.join(str(i+2) for i in idxs)}",
-                "description": f"{len(idxs)} 行完全相同",
-                "severity": "medium",
-            })
+            anomalies.append(
+                {
+                    "type": "重复行",
+                    "location": f"行 {', '.join(str(i+2) for i in idxs)}",
+                    "description": f"{len(idxs)} 行完全相同",
+                    "severity": "medium",
+                }
+            )
             for ri in idxs[1:]:  # 标记除第一行外的重复行
                 for c in range(len(headers)):
                     marks[(ri, c)] = "#ffe0b2"  # 橙
@@ -223,12 +232,14 @@ class DataAnomalyReport(WorkflowExecutor):
 
             if len(format_counts) > 1:
                 desc = "、".join(f"{k}({v}个)" for k, v in format_counts.most_common())
-                anomalies.append({
-                    "type": "格式混用",
-                    "location": f"列 [{h}]",
-                    "description": f"日期格式混用: {desc}",
-                    "severity": "medium",
-                })
+                anomalies.append(
+                    {
+                        "type": "格式混用",
+                        "location": f"列 [{h}]",
+                        "description": f"日期格式混用: {desc}",
+                        "severity": "medium",
+                    }
+                )
                 # 标记非主流格式的单元格
                 main_fmt = format_counts.most_common(1)[0][0]
                 for ri, v in enumerate(col_vals):
@@ -272,20 +283,25 @@ class DataAnomalyReport(WorkflowExecutor):
                     marks[(ri, c)] = "#e1bee7"  # 紫
 
             if outlier_rows:
-                anomalies.append({
-                    "type": "数值异常",
-                    "location": f"列 [{h}]",
-                    "description": f"{len(outlier_rows)} 个离群值（均值={mean:.2f}, σ={std:.2f}）",
-                    "severity": "high" if len(outlier_rows) > 3 else "medium",
-                })
+                anomalies.append(
+                    {
+                        "type": "数值异常",
+                        "location": f"列 [{h}]",
+                        "description": f"{len(outlier_rows)} 个离群值（均值={mean:.2f}, σ={std:.2f}）",
+                        "severity": "high" if len(outlier_rows) > 3 else "medium",
+                    }
+                )
 
         return {"anomalies": anomalies, "marks": marks}
 
     # ── LLM 解读 ──────────────────────────────────────────────────────
 
-    def _llm_interpret(self, anomalies: list[dict], headers: list[str], model_mode: str) -> str:
+    def _llm_interpret(
+        self, anomalies: list[dict], headers: list[str], model_mode: str
+    ) -> str:
         """调用 LLM 解释异常的业务影响和修复建议。"""
         import json
+
         summary = json.dumps(anomalies, ensure_ascii=False, indent=2)
         cols = json.dumps(headers, ensure_ascii=False)
         prompt = (
@@ -342,7 +358,12 @@ class DataAnomalyReport(WorkflowExecutor):
             row0_2[str(c)] = {"v": h, "t": 1, "s": header_style}
         cell_data_2["0"] = row0_2
 
-        sev_colors = {"high": "#ffcdd2", "critical": "#ffcdd2", "medium": "#fff9c4", "low": "#c8e6c9"}
+        sev_colors = {
+            "high": "#ffcdd2",
+            "critical": "#ffcdd2",
+            "medium": "#fff9c4",
+            "low": "#c8e6c9",
+        }
         for ri, a in enumerate(anomalies):
             sev = a.get("severity", "low")
             bg = sev_colors.get(sev, "#f5f5f5")
@@ -353,7 +374,9 @@ class DataAnomalyReport(WorkflowExecutor):
                 "3": {"v": sev, "t": 1, "s": {"bg": {"rgb": bg}, "bl": 1}},
             }
 
-        col_widths_1 = {str(c): max(80, min(160, len(h) * 14)) for c, h in enumerate(headers)}
+        col_widths_1 = {
+            str(c): max(80, min(160, len(h) * 14)) for c, h in enumerate(headers)
+        }
         col_widths_2 = {"0": 80, "1": 100, "2": 250, "3": 80}
 
         return {
@@ -384,7 +407,9 @@ class DataAnomalyReport(WorkflowExecutor):
             "styles": {},
         }
 
-    def _build_summary(self, anomalies: list[dict], total_rows: int, total_cols: int, llm_insights: str) -> str:
+    def _build_summary(
+        self, anomalies: list[dict], total_rows: int, total_cols: int, llm_insights: str
+    ) -> str:
         """Markdown 摘要。"""
         type_counts: Counter = Counter()
         for a in anomalies:

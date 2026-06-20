@@ -138,6 +138,7 @@ def env(tmp_path_factory):
     _shared.WORKSPACE_DIR = str(ws_dir)
 
     from flask import Flask
+
     from web.blueprints.pptx_editor import pptx_editor_bp
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
@@ -852,6 +853,7 @@ class TestDataFormatContract:
         # Re-parse the saved file
         raw = client.get(f"/api/v1/workspace/raw/{fid}").data
         import tempfile
+
         from app.core.file.file_parser import parse_pptx_geometry
 
         with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as tf:

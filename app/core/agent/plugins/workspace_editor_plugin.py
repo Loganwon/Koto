@@ -12,6 +12,7 @@ The plugin talks to the frontend by emitting WebSocket events on the
 ``/doc`` namespace.  The frontend SocketBridge listens for these events
 and routes them to the appropriate DocController.
 """
+
 import json
 import logging
 import os
@@ -255,6 +256,7 @@ class WorkspaceEditorPlugin(AgentPlugin):
         # Create backup
         try:
             import shutil
+
             backup_path = resolved + ".bak"
             shutil.copy2(resolved, backup_path)
         except Exception:
@@ -277,7 +279,13 @@ class WorkspaceEditorPlugin(AgentPlugin):
         payload = {"type": type, **kwargs}
 
         # Validate known operation types
-        valid_types = {"set_html", "set_cell", "set_cells", "insert_text", "set_pptx_text"}
+        valid_types = {
+            "set_html",
+            "set_cell",
+            "set_cells",
+            "insert_text",
+            "set_pptx_text",
+        }
         if type not in valid_types:
             return f"Error: unknown editor_apply type '{type}'. Valid: {', '.join(sorted(valid_types))}"
 
@@ -383,4 +391,6 @@ class WorkspaceEditorPlugin(AgentPlugin):
         name = os.path.basename(fpath)
         if len(text) > max_chars:
             text = text[:max_chars] + "\n...(truncated)"
-        return f"[{name}] ({ext})\n{text}" if text else f"[{name}] (empty or unreadable)"
+        return (
+            f"[{name}] ({ext})\n{text}" if text else f"[{name}] (empty or unreadable)"
+        )

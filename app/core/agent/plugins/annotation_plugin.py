@@ -97,12 +97,11 @@ class AnnotationPlugin(AgentPlugin):
         import os
 
         cwd = os.path.realpath(os.getcwd())
-        roots = [
+        return [
             os.path.join(cwd, "workspace"),
             os.path.join(cwd, "uploads"),
             os.path.join(cwd, "dist"),
         ]
-        return [os.path.abspath(r) for r in roots if os.path.isdir(r)]
 
     @classmethod
     def _resolve_docx_path(cls, file_path: str) -> tuple[str | None, str | None]:
@@ -141,9 +140,9 @@ class AnnotationPlugin(AgentPlugin):
 
         try:
             try:
-                from web.document_batch_annotator_v2 import annotate_large_document
-            except Exception:
                 from web.document_batch_annotator import annotate_large_document
+            except Exception:
+                from web.document_batch_annotator_v2 import annotate_large_document
 
             events = []
             output_file = None
@@ -231,7 +230,9 @@ class AnnotationPlugin(AgentPlugin):
                 paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()][
                     :max_paragraphs
                 ]
-                lines = [f"【{os.path.basename(resolved_path)}，显示 {len(paras)} 段】\n"]
+                lines = [
+                    f"【{os.path.basename(resolved_path)}，显示 {len(paras)} 段】\n"
+                ]
                 lines += [f"[{i}] {t}" for i, t in enumerate(paras, 1)]
                 return "\n".join(lines)
             except Exception as e2:

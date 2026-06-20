@@ -37,6 +37,7 @@ def _get_agent(session_id: str = "default"):
     with _agents_lock:
         if session_id not in _agents:
             from app.core.agent.background_agent import BackgroundAgent
+
             _agents[session_id] = BackgroundAgent(session_id=session_id)
         return _agents[session_id]
 
@@ -70,7 +71,9 @@ def _serialize_status(status) -> dict:
                     "tool_hint": s.tool_hint,
                     "depends_on": s.depends_on,
                     "can_parallel": s.can_parallel,
-                    "status": s.status.value if hasattr(s.status, "value") else s.status,
+                    "status": (
+                        s.status.value if hasattr(s.status, "value") else s.status
+                    ),
                     "result": s.result,
                     "error": s.error,
                     "started_at": s.started_at,
@@ -205,11 +208,13 @@ def stream_task(task_id: str):
     """
     try:
         from app.core.tasks.progress_bus import get_progress_bus
+
         bus = get_progress_bus()
     except Exception:
         # ProgressBus 不可用时，返回空流
         def _empty():
             yield "data: {}\n\n"
+
         return Response(stream_with_context(_empty()), mimetype="text/event-stream")
 
     def gen():

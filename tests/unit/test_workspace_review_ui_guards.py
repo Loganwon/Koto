@@ -32,7 +32,8 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     js = _read("web/static/js/workspace-assistant.js")
     layout_js = _read("web/static/js/docx-review-layout.js")
     geometry_js = _read("web/static/js/docx-review-geometry.js")
-    review_bundle = _read("web/static/js/build/review-bundle.js")
+    layout_position_ts = _read("web/src/review/layout-position.ts")
+    layout_svg_ts = _read("web/src/review/layout-svg.ts")
     css = _read("web/static/css/workspace.css")
 
     assert "function _syncReviewStateForActiveFile" in js
@@ -79,11 +80,11 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "host.style.setProperty('--wa-review-rail-width', `${Math.round(railWidth)}px`);" not in layout_js
     assert "_setDocxReviewRailWidth(host, railWidth);" in layout_js
     assert "if (!textIndex) textIndex = _buildReviewTextIndex(contentRoot);" in layout_js
-    assert "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot);" in review_bundle
+    assert "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot as HTMLElement);" in layout_position_ts
     assert "function _ensureReviewAnchorHighlightLayer" in layout_js
     assert "function _drawReviewAnchorHighlight" in layout_js
-    assert "wa-review-anchor-highlight-layer" in review_bundle
-    assert "wa-review-anchor-highlight-rect" in review_bundle
+    assert "wa-review-anchor-highlight-layer" in layout_svg_ts
+    assert "wa-review-anchor-highlight-rect" in layout_svg_ts
     assert "const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);" in layout_js
     assert "const textColRight     = Math.round(pageContentRight - (pagePaddingRight * (transformScale.x || 1)));" in layout_js
     assert "const laneLeft         = Math.round(textColRight + anchorGap);" in layout_js

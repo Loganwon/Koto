@@ -593,6 +593,7 @@ class WorkflowEngine:
         # TODO: 当 LangGraph 文件感知工作流就绪后，将此环境变量设为 "1" 以解除限制。
         #       export KOTO_LANGGRAPH_FILE_ENABLED=1
         import os as _os
+
         if has_file and not _os.environ.get("KOTO_LANGGRAPH_FILE_ENABLED"):
             return "standard"
 

@@ -33,7 +33,9 @@ def test_xlsx_mount_no_longer_requires_unconditional_double_raf():
     assert "const mountSheets = () => {" in js
     assert "if (wrapper.offsetWidth > 0 && wrapper.offsetHeight > 0) {" in js
     assert "requestAnimationFrame(() => {" in js
-    assert "requestAnimationFrame(() => {\n        requestAnimationFrame(() => {" not in js
+    assert (
+        "requestAnimationFrame(() => {\n        requestAnimationFrame(() => {" not in js
+    )
 
 
 def test_pptx_initial_render_uses_short_retry_window_without_timeout_poll():
@@ -53,7 +55,10 @@ def test_xlsx_formula_warning_uses_fast_zip_scan_instead_of_second_workbook_load
 
     assert "def xlsx_contains_formula_fast(path: str) -> bool:" in py
     assert 'zipfile.ZipFile(path, "r") as zf' in py
-    assert "_wb_check = openpyxl.load_workbook(file_path, data_only=False, read_only=True)" not in py
+    assert (
+        "_wb_check = openpyxl.load_workbook(file_path, data_only=False, read_only=True)"
+        not in py
+    )
 
 
 def test_docx_progressive_hydration_is_wired_in_workspace_assistant():
