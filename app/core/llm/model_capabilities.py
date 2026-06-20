@@ -15,8 +15,6 @@ DEFAULT_INTERACTIONS_ONLY_MODELS: frozenset[str] = frozenset(
 
 INTERACTIONS_ONLY_PREFIXES: tuple[str, ...] = (
     "deep-research-",
-    "gemini-3-",
-    "gemini-3.",
 )
 
 
