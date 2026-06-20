@@ -74,8 +74,8 @@ The runner passes extra arguments through to `pytest`, so `-k`, `-x`, `-vv`, or 
 
 - Workspace send-message entry and payload wiring: [tests/test_ai_stream.py](tests/test_ai_stream.py)
 - Whitebox task-stream SSE contract and persistence: [tests/test_ai_stream.py](tests/test_ai_stream.py)
-- File-task runtime and planner routing: [tests/unit/test_file_task_runtime.py](tests/unit/test_file_task_runtime.py) and [tests/unit/test_file_task_planner.py](tests/unit/test_file_task_planner.py)
-- Provider timeout and local fallback behavior: [tests/unit/test_llm_providers.py](tests/unit/test_llm_providers.py) and [tests/unit/test_file_task_planner.py](tests/unit/test_file_task_planner.py)
+- File-task runtime and native routing: [tests/unit/test_file_task_runtime.py](tests/unit/test_file_task_runtime.py)
+- Provider timeout and local routing behavior: [tests/unit/test_llm_providers.py](tests/unit/test_llm_providers.py) and [tests/unit/test_file_task_runtime.py](tests/unit/test_file_task_runtime.py)
 - Browser-level assistant shell and task-card rendering: [tests/e2e/test_workspace_ai_assistant.py](tests/e2e/test_workspace_ai_assistant.py)
 
 ## Update Rule
